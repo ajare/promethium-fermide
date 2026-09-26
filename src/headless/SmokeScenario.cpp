@@ -1888,6 +1888,74 @@ namespace
 		return false;
 	}
 
+	bool overflowingQueueAlwaysHasWalkableTailTargets(std::vector<uint32_t>& trace)
+	{
+		core::World world("Overflow tail", 8, 2);
+		auto fore = world.addRoom("Approach", 0, 0, 0, 7, 1);
+		world.addRoom("Destination", 1, 0, 0, 7, 1);
+		auto created = world.addSectorDoor(0, 0, 3);
+		auto policy = world.getTraversalGeometryPolicy();
+		policy.overflowTailSeparation = 0.6f;
+		world.setTraversalGeometryPolicy(policy);
+		world.finishBuild();
+
+		auto initialEdge = *std::find_if(world.getGraph()->getEdges().begin(), world.getGraph()->getEdges().end(),
+			[](auto const& candidate) { return candidate->getType() == core::EdgeType::Door; });
+		auto initialSource = initialEdge->getVertex(0)->getSector()->getIndex() == fore
+			? initialEdge->getVertex(0) : initialEdge->getVertex(1);
+		world.pauseSimulation();
+		if (!world.configureDoorQueueLane(created.traversalResource,
+			core::SectorId{ (uint64_t)fore + 1 }, initialSource->getPosition(),
+			core::Vector2::NEGATIVE_UNIT_X, 0.0f)
+			|| !world.rebuildTraversalTopology() || !world.resumeSimulation()) return false;
+
+		auto edge = *std::find_if(world.getGraph()->getEdges().begin(), world.getGraph()->getEdges().end(),
+			[](auto const& candidate) { return candidate->getType() == core::EdgeType::Door; });
+		auto source = edge->getVertex(0)->getSector()->getIndex() == fore
+			? edge->getVertex(0) : edge->getVertex(1);
+		auto destination = edge->getOtherVertex(source);
+		std::vector<core::AgentId> ids;
+		for (uint32_t i = 0; i < 8; ++i)
+		{
+			auto id = world.createAgent("Overflow waiter", fore, 0, source->getSectorOffset().x);
+			ids.push_back(id);
+			world.lookupAgent(id).entity->setPath(twoNodePath(source, destination, edge), true);
+		}
+
+		world.advanceTicks(2);
+		auto const floorBoundary = CORE_AGENT_MAX_WIDTH * 0.5f;
+		bool sawClampedTail = false;
+		for (uint32_t tick = 0; tick < 8; ++tick)
+		{
+			world.advanceTick();
+			auto snapshot = world.getSimulationSnapshot();
+			if (snapshot.traversalRequests.size() != ids.size()) return false;
+			std::vector<core::TraversalRequestSnapshot const*> requests;
+			for (auto const& request : snapshot.traversalRequests)
+				if (request.queueTicket) requests.push_back(&request);
+			if (requests.size() != ids.size()) return false;
+			std::sort(requests.begin(), requests.end(), [](auto lhs, auto rhs)
+				{ return lhs->queueTicket < rhs->queueTicket; });
+			if (std::count_if(requests.begin(), requests.end(), [](auto request)
+				{ return request->hasQueuePosition; }) != 1) return false;
+			float previousTarget = source->getPosition().x + 0.001f;
+			for (auto request : requests)
+			{
+				if (!request->hasQueueStandingTarget
+					|| request->queueStandingTarget.x > previousTarget + 0.001f
+					|| request->queueStandingTarget.x < floorBoundary - 0.001f) return false;
+				if (!request->hasQueuePosition && (request->positionRetryCount != 0
+					|| request->state != core::TraversalRequestState::Pending)) return false;
+				previousTarget = request->queueStandingTarget.x;
+				sawClampedTail = sawClampedTail
+					|| std::abs(previousTarget - floorBoundary) <= 0.001f;
+				trace.push_back(std::bit_cast<uint32_t>(request->queueStandingTarget.x));
+				trace.push_back(request->hasQueuePosition ? 1u : 0u);
+			}
+		}
+		return sawClampedTail;
+	}
+
 	bool queuePositionsPreferObjectProximityThenAgentProximity()
 	{
 		core::World world("Nearest queue position", 8, 2);
@@ -5974,6 +6042,17 @@ int main(int argc, char** argv)
 				std::cout << "QUEUE: separation=" << separation << ", direction=" << direction
 					<< ", trace digest=" << digest << '\n';
 			}
+		std::vector<uint32_t> overflowTrace, repeatedOverflowTrace;
+		if (!overflowingQueueAlwaysHasWalkableTailTargets(overflowTrace)
+			|| !overflowingQueueAlwaysHasWalkableTailTargets(repeatedOverflowTrace)
+			|| overflowTrace != repeatedOverflowTrace)
+		{
+			std::cerr << "FAIL: overflowing queue lacked deterministic walkable tail targets\n";
+			return 1;
+		}
+		uint64_t overflowDigest = 1469598103934665603ull;
+		for (auto value : overflowTrace) digestValue(overflowDigest, value);
+		std::cout << "QUEUE OVERFLOW: trace digest=" << overflowDigest << '\n';
 		if (!queuePositionsPreferObjectProximityThenAgentProximity())
 		{
 			std::cerr << "FAIL: queue positions were not selected by object then agent proximity\n";

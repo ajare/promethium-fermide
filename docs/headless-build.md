@@ -38,9 +38,26 @@ Agents walk to these targets; no positions are assigned directly. Approaching
 Agents join behind the physical tail rather than its already-compacted reservation.
 Waiting at a chain target does not count as a local-goal timeout.
 
-Request snapshots distinguish `queuePositionTarget` (reservation) from
-`queueStandingTarget` (physical walk target). Unreserved overflow remains outside
-this ticket. Arbitrarily overlapping initial spawns still need time to walk apart.
+Request snapshots distinguish `queuePositionTarget` (reservation) from the
+optional `queueStandingTarget` (physical walk target).
+
+## Overflow tail targets (#175)
+
+Every pending queue ticket has an observable standing target, even after all
+reserved queue positions are occupied. Unreserved Agents extend the physical tail
+by `overflowTailSeparation`; this changes neither ticket order nor admission.
+Targets are clamped to the contiguous walkable floor behind the queue. Once that
+floor is full, an Agent already farther from the Threshold keeps its current
+position as its target rather than being drawn forward. Overflow does not run the
+reserved-position timeout and cannot itself cause denial. Operators, missed
+boarders, and positioned Agents in a retry delay expose their current position as
+a target without receiving a competing walking goal.
+
+`overflowingQueueAlwaysHasWalkableTailTargets` forces eight Agents through a lane
+with one reserved position and checks every target on every observed tick, floor
+clamping, order behind the reserved position, no overflow retries, and repeat-run
+determinism. Its Linux/GCC trace digest is `6611208500844518019`.
+Arbitrarily overlapping initial spawns still need time to walk apart.
 
 `queueChainsFollowWithoutCompressing` checks actual and target separation every
 tick of a complete two-sided Door service, delayed advancement after serving the

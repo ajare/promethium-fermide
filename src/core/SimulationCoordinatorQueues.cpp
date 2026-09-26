@@ -12,6 +12,8 @@
 #include "core/ExtensibleObject.h"
 #include "core/ForceBridge.h"
 #include "core/Ladder.h"
+#include "core/Layer.h"
+#include "core/Sector.h"
 #include "core/Simulation.h"
 #include "core/Vertex.h"
 
@@ -337,22 +339,101 @@ namespace core
 			{
 				Agent* left = nullptr;
 				Agent* right = nullptr;
+				auto walkableBoundary = [&](int side)
+				{
+					auto sector = lane.sector && lane.sector.value <= mWorld.mSectors.size()
+						? mWorld.mSectors[(size_t)lane.sector.value - 1].get() : nullptr;
+					if (!sector || side == 0) return lane.origin.x;
+					auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+					auto const y = lane.origin.y;
+					auto const cellY = (uint32_t)floor(y);
+					int cellX = (int)floor(lane.origin.x - (side < 0 ? 0.001f : 0.0f));
+					int const first = (int)sector->getCellX0();
+					int const last = (int)sector->getCellX1();
+					int furthest = cellX;
+					for (; cellX >= first && cellX <= last; cellX += side)
+					{
+						if (cellY < sector->getCellY0() || cellY > sector->getCellY1()
+							|| !mWorld.mLayers[sector->getLayerIndex()]
+								->getCellDefinition((uint32_t)cellX, cellY).isTraversableOnFoot()) break;
+						furthest = cellX;
+					}
+					return side < 0 ? max((float)furthest + halfWidth,
+						(float)sector->getCellX0() + halfWidth)
+						: min((float)furthest + 1.0f - halfWidth,
+							(float)sector->getCellX1() + 1.0f - halfWidth);
+				};
+				auto assignTarget = [&](TraversalRequest& request, Agent& agent,
+					Vector2 target, bool moveToTarget)
+				{
+					auto const changed = !request.mHasQueueStandingTarget
+						|| request.mQueueStandingTarget.distanceTo(target) > 0.001f;
+					if (changed)
+					{
+						request.mQueueStandingTarget = target;
+						request.mHasQueueStandingTarget = true;
+						request.mPositionAssignedAtTick = mWorld.mSimulationTick;
+						request.mLastPositionProgressTick = mWorld.mSimulationTick;
+						request.mBestPositionDistance = agent.getGlobalPosition().distanceTo(target);
+					}
+					if (moveToTarget && (!agent.mTraversalLocalGoal
+						|| agent.mTraversalLocalGoal->distanceTo(request.mQueueStandingTarget) > 0.001f))
+						agent.mTraversalLocalGoal = request.mQueueStandingTarget;
+				};
+
 				for (auto requestId : lane.queue)
 				{
 					auto request = mWorld.mTraversalRequests.find(requestId);
 					if (!request || request->mState != TraversalRequestState::Pending) continue;
-					if (request->mQueuePosition >= lane.positions.size())
+					auto agent = mWorld.mAgents.find(request->mOwner);
+					if (!agent) continue;
+
+					// An operator, a missed boarder, or a positioned Agent in its retry
+					// delay still has an observable target, but queue geometry must not
+					// fight the interaction/retry state by issuing a walking goal.
+					auto const suspended = resource->mPreparationOperator == requestId
+						|| resource->mOpenPlatformMissedBoarding.contains(requestId)
+						|| mWorld.mSimulationTick < request->mPositionRetryAtTick;
+					if (suspended)
 					{
-						request->mHasQueueStandingTarget = false;
+						assignTarget(*request, *agent, agent->getGlobalPosition(), false);
 						continue;
 					}
-					auto agent = mWorld.mAgents.find(request->mOwner);
-					if (!agent || resource->mOpenPlatformMissedBoarding.contains(requestId)) continue;
-					auto target = lane.positions[request->mQueuePosition];
-					int const side = target.x < lane.origin.x - 0.001f ? -1
-						: target.x > lane.origin.x + 0.001f ? 1 : 0;
+
+					bool const overflow = request->mQueuePosition >= lane.positions.size();
+					Vector2 target;
+					int side = 0;
+					if (!overflow)
+					{
+						target = lane.positions[request->mQueuePosition];
+						side = target.x < lane.origin.x - 0.001f ? -1
+							: target.x > lane.origin.x + 0.001f ? 1 : 0;
+					}
+					else
+					{
+						// Preferred approach direction points toward the Threshold, hence
+						// its opposite points down the queue. Fall back deterministically
+						// for a waiter created exactly at the Threshold.
+						side = request->mPreferredQueueSide ? -request->mPreferredQueueSide
+							: request->mQueueSelectionPosition.x < lane.origin.x - 0.001f ? -1
+							: request->mQueueSelectionPosition.x > lane.origin.x + 0.001f ? 1
+							: lane.direction.x < 0.0f ? -1 : 1;
+						auto predecessor = side < 0 ? left : right;
+						auto boundary = predecessor ? predecessor->getGlobalPosition().x : lane.origin.x;
+						if (predecessor && predecessor->mTraversalLocalGoal)
+							boundary = side < 0 ? min(boundary, predecessor->mTraversalLocalGoal->x)
+								: max(boundary, predecessor->mTraversalLocalGoal->x);
+						target = { boundary + side * policy.overflowTailSeparation, lane.origin.y };
+						auto const floorBoundary = walkableBoundary(side);
+						target.x = side < 0 ? max(target.x, floorBoundary) : min(target.x, floorBoundary);
+						// If the walkable tail is already full, do not pull an Agent that
+						// arrived farther back toward the Threshold.
+						if (side * (agent->getGlobalPosition().x - target.x) > 0.001f)
+							target = agent->getGlobalPosition();
+					}
+
 					auto predecessor = side < 0 ? left : side > 0 ? right : nullptr;
-					if (predecessor)
+					if (!overflow && predecessor)
 					{
 						// Also respect a predecessor walking outwards to form its
 						// line: its target may be farther back than its current body.
@@ -369,24 +450,10 @@ namespace core
 								target = request->mQueueStandingTarget;
 						}
 					}
-					// The head always aims at the exact reservation, including the
-					// final sub-threshold step required by Lift boarding predicates.
-					// For followers, preserve the existing target until cumulative
-					// forward motion clears the hysteresis threshold. Merely observing
-					// the same target is not a new position assignment.
-					auto const targetChanged = !request->mHasQueueStandingTarget
-						|| request->mQueueStandingTarget.distanceTo(target) > 0.001f;
-					if (targetChanged)
-					{
-						request->mQueueStandingTarget = target;
-						request->mHasQueueStandingTarget = true;
-						request->mPositionAssignedAtTick = mWorld.mSimulationTick;
-						request->mLastPositionProgressTick = mWorld.mSimulationTick;
-						request->mBestPositionDistance = agent->getGlobalPosition().distanceTo(target);
-					}
-					if (!agent->mTraversalLocalGoal
-						|| agent->mTraversalLocalGoal->distanceTo(request->mQueueStandingTarget) > 0.001f)
-						agent->mTraversalLocalGoal = request->mQueueStandingTarget;
+					// The reserved head still aims at its exact reservation. Overflow
+					// participates only in physical geometry and cannot time out or be
+					// denied until it later receives a reservation.
+					assignTarget(*request, *agent, target, true);
 					if (side <= 0) left = agent;
 					if (side >= 0) right = agent;
 				}

@@ -461,6 +461,9 @@ namespace core
 			else if (request.mQueuePosition != ~0u)
 				result.diagnostic = format("Waiting: moving to reserved queue position {}",
 					request.mQueuePosition);
+			else if (request.mQueueTicket && request.mHasQueueStandingTarget)
+				result.diagnostic = format("Waiting: queue ticket {} is holding an overflow tail target",
+					request.mQueueTicket.value);
 			else if (request.mQueueTicket)
 				result.diagnostic = format("Waiting: queue ticket {} is awaiting a position or admission",
 					request.mQueueTicket.value);
@@ -474,6 +477,9 @@ namespace core
 			break;
 		}
 		}
+		result.hasQueueStandingTarget = request.mHasQueueStandingTarget;
+		if (request.mHasQueueStandingTarget)
+			result.queueStandingTarget = request.mQueueStandingTarget;
 		if (result.hasQueuePosition)
 		{
 			if (auto resource = mWorld.mTraversalResources.find(request.mResource);
@@ -481,8 +487,8 @@ namespace core
 				&& request.mQueuePosition < resource->mQueueLanes[request.mQueueApproach].positions.size())
 			{
 				result.queuePositionTarget = resource->mQueueLanes[request.mQueueApproach].positions[request.mQueuePosition];
-				result.queueStandingTarget = request.mHasQueueStandingTarget
-					? request.mQueueStandingTarget : result.queuePositionTarget;
+				if (!result.hasQueueStandingTarget)
+					result.queueStandingTarget = result.queuePositionTarget;
 			}
 		}
 		return result;
