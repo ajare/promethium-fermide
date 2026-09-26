@@ -32,6 +32,12 @@ namespace core
 		}
 	};
 
+	struct EffectiveAgentEscalatorWalkingChance
+	{
+		float value{ 0.0f };
+		AgentTagId sourceTag{};
+	};
+
 	struct EffectiveAgentColour
 	{
 		AgentColour value{ EditorDefaultAgentColour };
@@ -104,11 +110,16 @@ namespace core
 			std::shared_ptr<const Vertex> destinationVertex;
 			uint32_t pathNodesConsumed{ 1 };
 			uint64_t traversalTicksRemaining{ 0 };
+			std::optional<bool> escalatorWalking;
+
 		};
 
 	private:
 
 		std::string mName;
+		// Counter-based simulation stream, separate from authored samples and Lua.
+		// Only entry into a moving Escalator consumes a draw; never serialized.
+		uint64_t mEscalatorTraversalSequence{ 0 };
 
 		// The Agent group this Agent is assigned to (ADR 0006). An empty
 		// AgentGroupId means no Agent group, which is the default for every
@@ -338,6 +349,12 @@ namespace core
 		Shape getBounds() const;
 
 		float getWalkSpeed() const;
+		EffectiveAgentEscalatorWalkingChance getEffectiveEscalatorWalkingChance() const;
+		std::optional<bool> getActiveEscalatorWalking() const
+		{ return mTraversalTask ? mTraversalTask->escalatorWalking : std::nullopt; }
+		bool isWalkingOnEscalator(Edge const* edge) const
+		{ return mTraversalTask && mTraversalTask->edge.get() == edge
+			&& mTraversalTask->escalatorWalking.value_or(false); }
 
 		float getClimbSpeed() const;
 

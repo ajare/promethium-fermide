@@ -2,6 +2,7 @@
 #include <format>
 #include <limits>
 
+#include "core/Agent.h"
 #include "core/Defines.h"
 #include "core/StaircaseEdge.h"
 #include "core/Vertex.h"
@@ -53,8 +54,10 @@ namespace core
 		return getLength() / abs(mStaircase->getSpeed());
 	}
 
-	float StaircaseEdge::getTraversalSpeed(Agent const*) const
+	float StaircaseEdge::getTraversalSpeed(Agent const* agent) const
 	{
-		return abs(mStaircase->getSpeed());
+		return abs(mStaircase->getSpeed())
+			+ (mStaircase->isEscalator() && agent && agent->isWalkingOnEscalator(this)
+				? agent->getWalkSpeed() : 0.0f);
 	}
 }

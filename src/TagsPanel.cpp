@@ -67,6 +67,14 @@ namespace
 		string diagnostic;
 	};
 
+	struct TagEscalatorWalkingChanceEdit
+	{
+		float value{ 0.0f };
+		uint64_t loadedRevision{ 0 };
+		bool pending{ false };
+		string diagnostic;
+	};
+
 	struct TagHeightEdit
 	{
 		core::AgentModifierRange range{};
@@ -127,6 +135,7 @@ namespace
 	map<uint64_t, TagDisplayColourEdit> gTagDisplayColourEdits;
 	map<uint64_t, TagColourEdit> gTagColourEdits;
 	map<uint64_t, TagWalkSpeedEdit> gTagWalkSpeedEdits;
+	map<uint64_t, TagEscalatorWalkingChanceEdit> gTagEscalatorWalkingChanceEdits;
 	map<uint64_t, TagHeightEdit> gTagHeightEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
@@ -507,6 +516,70 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
+		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
+		if (chance)
+		{
+			auto& edit = gTagEscalatorWalkingChanceEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != chance->revision)
+			{
+				edit.value = chance->value;
+				edit.loadedRevision = chance->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloat("Escalator walking chance", &edit.value,
+				0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
+				edit.pending = true;
+			auto const finished = ImGui::IsItemDeactivatedAfterEdit();
+			auto const cancelled = ImGui::IsItemDeactivated() && !finished;
+			if (edit.pending && finished)
+			{
+				string diagnostic;
+				if (!commitAgentTagEscalatorWalkingChanceEdit(
+					registry, id, edit.value, diagnostic)
+					&& diagnostic != "The Agent Escalator walking chance is unchanged")
+				{
+					edit.diagnostic = diagnostic;
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				}
+				else edit.diagnostic.clear();
+				edit.pending = false;
+				chance = registry->getAgentTagEscalatorWalkingChance(id);
+				if (chance)
+				{
+					edit.value = chance->value;
+					edit.loadedRevision = chance->revision;
+				}
+			}
+			else if (edit.pending && cancelled)
+			{
+				edit.value = chance->value;
+				edit.pending = false;
+				edit.diagnostic.clear();
+			}
+			ImGui::SameLine();
+			bool removed{ false };
+			if (ImGui::Button(ICON_FA_TIMES "##removeEscalatorWalkingChance"))
+			{
+				string diagnostic;
+				if (!commitAgentTagEscalatorWalkingChanceRemove(registry, id, diagnostic))
+				{
+					edit.diagnostic = diagnostic;
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				}
+				else
+				{
+					gTagEscalatorWalkingChanceEdits.erase(id.value);
+					chance = nullptr;
+					removed = true;
+				}
+			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove Escalator walking chance");
+			if (!removed && !edit.diagnostic.empty())
+				ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s",
+					edit.diagnostic.c_str());
+		}
+
 		auto const* height = registry->getAgentTagHeightModifier(id);
 		if (height)
 		{
@@ -580,11 +653,20 @@ namespace
 		auto const* colour = registry->getAgentTagColour(id);
 		auto const* walkSpeed = registry->getAgentTagWalkSpeedModifier(id);
 		auto const* height = registry->getAgentTagHeightModifier(id);
-		auto const anyMissing = !colour || !walkSpeed || !height;
+		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
+		auto const anyMissing = !colour || !walkSpeed || !height || !chance;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(-1.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
 		{
+			if (!chance && ImGui::Selectable("Escalator walking chance"))
+			{
+				string diagnostic;
+				if (!commitAgentTagEscalatorWalkingChanceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagEscalatorWalkingChanceEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
 			if (!colour && ImGui::Selectable("Colour"))
 			{
 				string diagnostic;
@@ -1379,6 +1461,66 @@ bool commitAgentTagColourRemove(shared_ptr<core::AgentTagRegistry> const& regist
 		return false;
 	}
 	if (!registry->removeAgentTagColour(id, &diagnostic)) return false;
+	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+	return true;
+}
+
+bool commitAgentTagEscalatorWalkingChanceAdd(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!registry)
+	{
+		diagnostic = "There is no Agent tag registry in which to add Escalator walking chance";
+		return false;
+	}
+	auto undo = captureRegistrySnapshot(registry);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the Agent tag registry before adding Escalator walking chance";
+		return false;
+	}
+	if (!registry->addAgentTagEscalatorWalkingChance(id, &diagnostic)) return false;
+	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+	return true;
+}
+
+bool commitAgentTagEscalatorWalkingChanceEdit(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, float value, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!registry)
+	{
+		diagnostic = "There is no Agent tag registry in which to edit Escalator walking chance";
+		return false;
+	}
+	auto undo = captureRegistrySnapshot(registry);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the Agent tag registry before editing Escalator walking chance";
+		return false;
+	}
+	if (!registry->setAgentTagEscalatorWalkingChance(id, value, &diagnostic)) return false;
+	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+	return true;
+}
+
+bool commitAgentTagEscalatorWalkingChanceRemove(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!registry)
+	{
+		diagnostic = "There is no Agent tag registry from which to remove Escalator walking chance";
+		return false;
+	}
+	auto undo = captureRegistrySnapshot(registry);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the Agent tag registry before removing Escalator walking chance";
+		return false;
+	}
+	if (!registry->removeAgentTagEscalatorWalkingChance(id, &diagnostic)) return false;
 	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
 	return true;
 }
@@ -2251,6 +2393,7 @@ void resetTagsPanelState()
 	gTagDisplayColourEdits.clear();
 	gTagColourEdits.clear();
 	gTagWalkSpeedEdits.clear();
+	gTagEscalatorWalkingChanceEdits.clear();
 	gTagHeightEdits.clear();
 	gTagSearch.fill('\0');
 	cancelPendingAgentTagDelete();

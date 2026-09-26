@@ -8,6 +8,17 @@
 
 namespace core
 {
+	bool agentEscalatorWalkingChanceIsValid(float value, std::string* diagnostic)
+	{
+		if (!std::isfinite(value) || value < 0.0f || value > 1.0f)
+		{
+			if (diagnostic) *diagnostic = "Escalator walking chance must be finite and in [0, 1]";
+			return false;
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	void agentColourToFloats(AgentColour const& colour, float out[3])
 	{
 		out[0] = static_cast<float>(colour.r) / 255.0f;

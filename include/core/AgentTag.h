@@ -46,6 +46,16 @@ namespace core
 		AgentColour{ 205, 218, 205 }, // pastel sage
 	};
 
+	struct AgentEscalatorWalkingChanceProperty
+	{
+		float value{ 0.0f };
+		uint64_t revision{ 0 };
+		bool operator==(AgentEscalatorWalkingChanceProperty const&) const = default;
+	};
+
+	bool agentEscalatorWalkingChanceIsValid(float value,
+		std::string* diagnostic = nullptr);
+
 	struct AgentColourProperty
 	{
 		AgentColour value{};
@@ -110,6 +120,10 @@ namespace core
 		// the optional Agent Colour property below, which Agents inherit.
 		AgentColour mDisplayColour{};
 		std::optional<AgentColourProperty> mColour;
+		std::optional<AgentEscalatorWalkingChanceProperty> mEscalatorWalkingChance;
+		void setEscalatorWalkingChance(AgentEscalatorWalkingChanceProperty property)
+		{ mEscalatorWalkingChance = property; }
+		void removeEscalatorWalkingChance() { mEscalatorWalkingChance.reset(); }
 		std::optional<AgentWalkSpeedModifierProperty> mWalkSpeedModifier;
 		std::optional<AgentHeightModifierProperty> mHeightModifier;
 
@@ -141,6 +155,8 @@ namespace core
 
 		std::string const& getName() const { return mName; }
 		AgentColour getDisplayColour() const { return mDisplayColour; }
+		AgentEscalatorWalkingChanceProperty const* getEscalatorWalkingChance() const
+		{ return mEscalatorWalkingChance ? &*mEscalatorWalkingChance : nullptr; }
 		AgentColourProperty const* getColour() const
 		{
 			return mColour ? &*mColour : nullptr;

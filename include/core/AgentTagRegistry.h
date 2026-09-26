@@ -51,6 +51,7 @@ namespace core
 		explicit AgentTagRegistry(std::string uuid);
 		bool nameIsUnique(std::string const& name, AgentTagId except = {}) const;
 		uint64_t allocatePropertyRevision();
+		bool escalatorWalkingChanceAdditionIsValid(AgentTagId id, std::string* diagnostic) const;
 		bool colourAdditionIsValid(AgentTagId id, std::string* diagnostic) const;
 		bool walkSpeedModifierAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
@@ -131,6 +132,11 @@ namespace core
 		bool setAgentTagColour(AgentTagId id, AgentColour colour,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagColour(AgentTagId id, std::string* diagnostic = nullptr);
+
+		AgentEscalatorWalkingChanceProperty const* getAgentTagEscalatorWalkingChance(AgentTagId id) const;
+		bool addAgentTagEscalatorWalkingChance(AgentTagId id, std::string* diagnostic = nullptr);
+		bool setAgentTagEscalatorWalkingChance(AgentTagId id, float value, std::string* diagnostic = nullptr);
+		bool removeAgentTagEscalatorWalkingChance(AgentTagId id, std::string* diagnostic = nullptr);
 
 		bool addAgentTagWalkSpeedModifier(AgentTagId id,
 			std::string* diagnostic = nullptr);

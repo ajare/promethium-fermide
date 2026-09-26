@@ -112,6 +112,12 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		return;
 	}
 
+	auto const chance = lookup.entity->getEffectiveEscalatorWalkingChance();
+	if (chance.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Escalator walking chance: %.3f from #%s", chance.value,
+			world->getAgentTagRegistry()->getAgentTagName(chance.sourceTag).c_str());
+	else ImGui::TextUnformatted("Escalator walking chance: 0.000 (standing default)");
+
 	auto const effective = lookup.entity->getEffectiveColour();
 	if (effective.sourceTag && world->hasAttachedAgentTagRegistry())
 	{

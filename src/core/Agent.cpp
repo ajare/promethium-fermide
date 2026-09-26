@@ -308,6 +308,7 @@ namespace core
 		mResetPosition = {};
 		mResetPath.reset();
 		mResetPathActive = false;
+		mEscalatorTraversalSequence = 0;
 		mTraversalTask.reset();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
@@ -317,6 +318,19 @@ namespace core
 	string const& Agent::getName() const
 	{
 		return mName;
+	}
+
+	EffectiveAgentEscalatorWalkingChance Agent::getEffectiveEscalatorWalkingChance() const
+	{
+		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
+			for (auto const tag : mAgentTags)
+			{
+				auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag);
+				if (definition)
+					if (auto const* property = definition->getEscalatorWalkingChance())
+						return { property->value, tag };
+			}
+		return {};
 	}
 
 	EffectiveAgentColour Agent::getEffectiveColour() const
@@ -894,6 +908,20 @@ namespace core
 			// never a movement target.
 			mTraversalTask->traversalTicksRemaining =
 				requestLookup.entity->getEdgeType() == EdgeType::Door ? 6 : 0;
+			if (mTraversalTask->edge->getType() == EdgeType::Staircase
+				&& mTraversalTask->edge->getTraversalSpeed(nullptr) > 0.0f)
+			{
+				// SplitMix64: stable integer arithmetic, with a stream keyed by Agent ID.
+				// Admission is complete: this is the sole decision point for this task.
+				uint64_t draw = (mWorld->getAgentId(this).value
+					^ (mWorld->getRandomSeed() * 0xd1b54a32d192ed03ULL))
+					+ 0x9e3779b97f4a7c15ULL * (++mEscalatorTraversalSequence);
+				draw = (draw ^ (draw >> 30)) * 0xbf58476d1ce4e5b9ULL;
+				draw = (draw ^ (draw >> 27)) * 0x94d049bb133111ebULL;
+				draw ^= draw >> 31;
+				auto const unit = static_cast<double>(draw >> 11) * 0x1.0p-53;
+				mTraversalTask->escalatorWalking = unit < getEffectiveEscalatorWalkingChance().value;
+			}
 			mState = State::TraversingEdge;
 		}
 	}

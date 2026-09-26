@@ -49,6 +49,7 @@ namespace core
 		result.targetPathNode = agent->getPathTargetNodeIndex();
 		result.pathNodeCount = result.hasPath ? (uint32_t)agent->getPath()->nodes.size() : 0;
 		result.hasLocomotionTask = agent->hasActiveLocomotionTask();
+		result.escalatorWalking = agent->getActiveEscalatorWalking();
 		result.traversalRequest = agent->getTraversalRequestId();
 		result.traversalPermit = agent->getTraversalPermitId();
 		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())

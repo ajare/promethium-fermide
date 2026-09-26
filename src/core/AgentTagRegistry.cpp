@@ -101,6 +101,8 @@ namespace core
 		{
 			auto tag = AgentTag::create(sourceTag->getName());
 			tag->setDisplayColour(sourceTag->getDisplayColour());
+			if (auto const* chance = sourceTag->getEscalatorWalkingChance())
+				tag->setEscalatorWalkingChance(*chance);
 			if (auto const* colour = sourceTag->getColour()) tag->setColour(*colour);
 			if (auto const* walkSpeed = sourceTag->getWalkSpeedModifier())
 				tag->setWalkSpeedModifier(*walkSpeed);
@@ -129,7 +131,8 @@ namespace core
 			{
 				return (!left && !right) || (left && right && *left == *right);
 			};
-			if (!optionalPropertyMatches(tag->getColour(), candidate->getColour())
+			if (!optionalPropertyMatches(tag->getEscalatorWalkingChance(), candidate->getEscalatorWalkingChance())
+				|| !optionalPropertyMatches(tag->getColour(), candidate->getColour())
 				|| !optionalPropertyMatches(tag->getWalkSpeedModifier(),
 					candidate->getWalkSpeedModifier())
 				|| !optionalPropertyMatches(tag->getHeightModifier(),
@@ -247,6 +250,15 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getColour();
+	}
+
+	AgentEscalatorWalkingChanceProperty const* AgentTagRegistry::getAgentTagEscalatorWalkingChance(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getEscalatorWalkingChance();
 	}
 
 	AgentWalkSpeedModifierProperty const*
@@ -452,6 +464,42 @@ namespace core
 					if (!source || !source->getColour()) continue;
 					return reject(std::format(
 						"Cannot add Colour to Agent tag #{}: Agent '{}' in World '{}' already inherits Colour from #{}",
+						target->getName(), agent->getName(), world->getName(),
+						source->getName()));
+				}
+			}
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::escalatorWalkingChanceAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto const* target = mTags.find(id);
+		if (!target)
+			return reject(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+
+		for (auto const* world : mLoadedWorlds)
+		{
+			if (!world) continue;
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (!source || !source->getEscalatorWalkingChance()) continue;
+					return reject(std::format(
+						"Cannot add Escalator walking chance to Agent tag #{}: Agent '{}' in World '{}' already inherits Escalator walking chance from #{}",
 						target->getName(), agent->getName(), world->getName(),
 						source->getName()));
 				}
@@ -684,6 +732,89 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagEscalatorWalkingChance(AgentTagId id, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto* tag = mTags.find(id);
+		if (!tag)
+			return reject(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		if (tag->getEscalatorWalkingChance())
+			return reject(std::format("Agent tag #{} already has Escalator walking chance", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!escalatorWalkingChanceAdditionIsValid(id, diagnostic)) return false;
+
+		try
+		{
+			tag->setEscalatorWalkingChance({ 0.0f, allocatePropertyRevision() });
+		}
+		catch (std::exception const& error)
+		{
+			return reject(error.what());
+		}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::setAgentTagEscalatorWalkingChance(AgentTagId id, float value,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto* tag = mTags.find(id);
+		if (!tag)
+			return reject(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getEscalatorWalkingChance();
+		if (!current)
+			return reject(std::format("Agent tag #{} has no Escalator walking chance", tag->getName()));
+		if (!agentEscalatorWalkingChanceIsValid(value, diagnostic)) return false;
+		if (current->value == value)
+			return reject("The Agent Escalator walking chance is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+
+		try
+		{
+			tag->setEscalatorWalkingChance({ value, allocatePropertyRevision() });
+		}
+		catch (std::exception const& error)
+		{
+			return reject(error.what());
+		}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagEscalatorWalkingChance(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto* tag = mTags.find(id);
+		if (!tag)
+			return reject(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getEscalatorWalkingChance())
+			return reject(std::format("Agent tag #{} has no Escalator walking chance", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		tag->removeEscalatorWalkingChance();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagWalkSpeedModifier(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -908,9 +1039,18 @@ namespace core
 			auto const* colour = tag->getColour();
 			auto const* walkSpeed = tag->getWalkSpeedModifier();
 			auto const* height = tag->getHeightModifier();
-			if (colour || walkSpeed || height)
+			auto const* chance = tag->getEscalatorWalkingChance();
+			if (colour || walkSpeed || height || chance)
 			{
 				serializer.beginArray("properties");
+				if (chance)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "escalatorWalkingChance");
+					serializer.writeUint64("revision", chance->revision);
+					serializer.writeFloat("value", chance->value);
+					serializer.endMap();
+				}
 				if (colour)
 				{
 					serializer.beginMap("");
@@ -998,7 +1138,7 @@ namespace core
 					serializer.beginMap("");
 					auto const type = serializer.readString("type");
 					if (type != "colour" && type != "walkSpeedModifier"
-						&& type != "heightModifier")
+						&& type != "heightModifier" && type != "escalatorWalkingChance")
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -1019,7 +1159,14 @@ namespace core
 						throw SerializationException(
 							"Serialized Agent property revision cannot be zero");
 
-					if (type == "colour")
+					if (type == "escalatorWalkingChance")
+					{
+						auto const value = serializer.readFloat("value");
+						if (tag->getEscalatorWalkingChance() || !agentEscalatorWalkingChanceIsValid(value))
+							throw SerializationException("Duplicate or invalid Escalator walking chance");
+						tag->setEscalatorWalkingChance({ value, revision });
+					}
+					else if (type == "colour")
 					{
 						AgentColour const colour{
 							serializer.readUint8("r"), serializer.readUint8("g"),

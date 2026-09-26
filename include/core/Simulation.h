@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,8 @@ namespace core
 		uint32_t targetPathNode{ 0 };
 		uint32_t pathNodeCount{ 0 };
 		bool hasLocomotionTask{ false };
+		// nullopt: no active Escalator traversal; false: standing; true: walking.
+		std::optional<bool> escalatorWalking;
 		TraversalRequestId traversalRequest;
 		TraversalPermitId traversalPermit;
 		InteractionRequestId interactionRequest;

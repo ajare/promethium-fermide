@@ -1037,6 +1037,7 @@ namespace core
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
 			if (!agent) continue;
+			AgentTagId escalatorWalkingChanceSource{};
 			AgentTagId colourSource{};
 			AgentTagId walkSpeedSource{};
 			AgentTagId heightSource{};
@@ -1061,6 +1062,17 @@ namespace core
 							definition->getName()));
 					}
 					colourSource = tag;
+				}
+				if (definition->getEscalatorWalkingChance())
+				{
+					if (escalatorWalkingChanceSource)
+					{
+						return reject(format(
+							"Agent '{}' inherits Escalator walking chance from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(escalatorWalkingChanceSource),
+							definition->getName()));
+					}
+					escalatorWalkingChanceSource = tag;
 				}
 				if (auto const* property = definition->getWalkSpeedModifier())
 				{
@@ -7333,6 +7345,13 @@ namespace core
 					agentLookup.entity->getName(), assignedDefinition->getName(),
 					source->getName()));
 			}
+			if (assignedDefinition->getEscalatorWalkingChance() && source->getEscalatorWalkingChance())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Escalator walking chance is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(),
+					source->getName()));
+			}
 			if (assignedDefinition->getWalkSpeedModifier()
 				&& source->getWalkSpeedModifier())
 			{
@@ -7440,6 +7459,7 @@ namespace core
 		if (!mAgentTagRegistry)
 			return reject("This World has no attached Agent tag registry");
 
+		AgentTagId escalatorWalkingChanceSource{};
 		AgentTagId colourSource{};
 		AgentTagId walkSpeedSource{};
 		AgentTagId heightSource{};
@@ -7457,6 +7477,13 @@ namespace core
 					return reject(format("Colour is inherited from both #{} and #{}",
 						mAgentTagRegistry->getAgentTagName(colourSource), definition->getName()));
 				colourSource = tag;
+			}
+			if (definition->getEscalatorWalkingChance())
+			{
+				if (escalatorWalkingChanceSource)
+					return reject(format("Escalator walking chance is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(escalatorWalkingChanceSource), definition->getName()));
+				escalatorWalkingChanceSource = tag;
 			}
 			if (auto const* property = definition->getWalkSpeedModifier())
 			{
