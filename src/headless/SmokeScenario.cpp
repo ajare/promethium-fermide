@@ -5477,7 +5477,8 @@ namespace
 	struct ScaleObservation
 	{
 		bool valid{ false };
-		uint64_t deterministicDigest{ 1469598103934665603ull };
+		uint64_t eventDigest{ 1469598103934665603ull };
+		uint64_t snapshotDigest{ 1469598103934665603ull };
 		double elapsedMilliseconds{ 0.0 };
 		size_t workingSetBytes{ 0 };
 	};
@@ -5542,13 +5543,13 @@ namespace
 		{
 			for (auto const& event : events)
 			{
-				digestValue(result.deterministicDigest, event.sequence);
-				digestValue(result.deterministicDigest, event.tick);
-				digestValue(result.deterministicDigest, (uint64_t)event.type);
-				digestValue(result.deterministicDigest, (uint64_t)event.phase);
-				digestValue(result.deterministicDigest, event.agent.id.value);
-				digestValue(result.deterministicDigest, event.traversalRequest.id.value);
-				digestValue(result.deterministicDigest, event.traversalPermit.id.value);
+				digestValue(result.eventDigest, event.sequence);
+				digestValue(result.eventDigest, event.tick);
+				digestValue(result.eventDigest, (uint64_t)event.type);
+				digestValue(result.eventDigest, (uint64_t)event.phase);
+				digestValue(result.eventDigest, event.agent.id.value);
+				digestValue(result.eventDigest, event.traversalRequest.id.value);
+				digestValue(result.eventDigest, event.traversalPermit.id.value);
 			}
 		};
 		digestEvents(world.consumeSimulationEvents());
@@ -5568,13 +5569,20 @@ namespace
 		std::set<uint64_t> requestOwners;
 		result.valid = snapshot.tick == ticks && snapshot.agents.size() == agentCount
 			&& snapshot.traversalResources.size() == ResourceCount;
+		digestValue(result.snapshotDigest, snapshot.tick);
+		digestValue(result.snapshotDigest, snapshot.agents.size());
+		digestValue(result.snapshotDigest, snapshot.traversalResources.size());
 		for (auto const& agent : snapshot.agents)
 		{
 			result.valid = result.valid && agent.hasPath && agent.globalPosition.x > 0.5f;
-			digestValue(result.deterministicDigest, agent.id.value);
-			digestValue(result.deterministicDigest, std::bit_cast<uint32_t>(agent.globalPosition.x));
-			digestValue(result.deterministicDigest, std::bit_cast<uint32_t>(agent.globalPosition.y));
-			digestValue(result.deterministicDigest, (uint64_t)agent.state);
+			digestValue(result.snapshotDigest, agent.id.value);
+			digestValue(result.snapshotDigest, agent.sectorId.value);
+			digestValue(result.snapshotDigest, std::bit_cast<uint32_t>(agent.globalPosition.x));
+			digestValue(result.snapshotDigest, std::bit_cast<uint32_t>(agent.globalPosition.y));
+			digestValue(result.snapshotDigest, (uint64_t)agent.state);
+			digestValue(result.snapshotDigest, agent.hasPath);
+			digestValue(result.snapshotDigest, agent.targetPathNode);
+			digestValue(result.snapshotDigest, agent.pathNodeCount);
 		}
 		for (auto const& request : snapshot.traversalRequests)
 		{
@@ -6645,7 +6653,8 @@ int main(int argc, char** argv)
 		auto representative = runScaledWorld(500, 60);
 		auto repeatedRepresentative = runScaledWorld(500, 60, true);
 		if (!representative.valid || !repeatedRepresentative.valid
-			|| representative.deterministicDigest != repeatedRepresentative.deterministicDigest)
+			|| representative.eventDigest != repeatedRepresentative.eventDigest
+			|| representative.snapshotDigest != repeatedRepresentative.snapshotDigest)
 		{
 			std::cerr << "FAIL: representative scale run violated ownership, capacity, or determinism\n";
 			return 1;
@@ -6664,8 +6673,9 @@ int main(int argc, char** argv)
 		std::cout << "STRETCH: 1000 agents, 32 resources, 60 ticks in "
 			<< stretch.elapsedMilliseconds << " ms; working set "
 			<< stretch.workingSetBytes / (1024.0 * 1024.0) << " MiB\n";
-		std::cout << "PASS: deterministic snapshot and events matched after "
-			<< first.snapshot.tick << " fixed ticks; final position=("
+		std::cout << "PASS: deterministic event digest " << representative.eventDigest
+			<< " and snapshot digest " << representative.snapshotDigest
+			<< " matched for seed 0 after 60 fixed ticks; smoke final position=("
 			<< agent.globalPosition.x << ", " << agent.globalPosition.y << ")\n";
 		return 0;
 	}

@@ -123,6 +123,62 @@ reaches its destination, and requires the Lift to depart within the normal stop
 phases. The paired-run simulation digest was deliberately rerun in Debug and
 Release; both runs matched. The recorded queue digests above are unaffected.
 
+## Shuttle door-aware placement (#180)
+
+A Shuttle occupant selects an alighting Door while boarding and retains that Door
+for the transport journey. Occupant packing divides each Carriage into buffered
+Door-owned sub-ranges, preserving capacity and stable boarding order while keeping
+an occupant near the Door it will use.
+
+`shuttlePassengerUsesBoardingSelectedAlightingDoor` checks the retained Door,
+Door-consistent grouping and the distance walked while alighting. The existing
+Carriage spreading, capacity, access-zone and transport-journey checks remain
+active. This changed only Shuttle geometry, so the queue trace digests above are
+unchanged.
+
+## Geometry close-out (#181)
+
+The complete Release smoke suite records the following Linux/GCC digests. Paired
+runs construct the same World with random seed 0 and advance the same 60 ticks;
+the second 500-Agent run also enables metrics to prove that observation does not
+change simulation output.
+
+| Digest | Final value |
+| --- | ---: |
+| 500-Agent event stream | 13886706955275287569 |
+| 500-Agent final snapshot | 7023572238893341247 |
+| Queue, separation 0.5, direction -1 | 12044598890430814109 |
+| Queue, separation 0.5, direction +1 | 6254148168206110256 |
+| Queue, separation 0.8, direction -1 | 16720789843228646775 |
+| Queue, separation 0.8, direction +1 | 14720704966384623342 |
+| Overflow queue | 6611208500844518019 |
+
+The queue values deliberately changed in #172 and #175. The Lift and Shuttle work
+has separate observable assertions and does not execute in those queue traces, so
+it has no reason to alter their values. The event and snapshot digests belong to
+the scale World, whose ordinary Corridor movement is likewise independent of the
+new queue and vehicle geometry. Repeating the complete binary produced the same
+seven digest values.
+
+The scale fixture was measured before the geometry series at `01dff23` and after
+it at `e5ad994`. Each value below is the median of three alternating Release runs
+on Linux 7.0, GCC 15.2, and an AMD Ryzen AI MAX+ 395. Working set is sampled by the
+process after each timed run. These are observations rather than portable limits.
+
+| Active Agents | Measurement | Before geometry | After geometry | Change |
+| ---: | --- | ---: | ---: | ---: |
+| 500 | 60-tick elapsed time | 14.3396 ms | 14.2571 ms | -0.6% |
+| 500 | working set | 131.469 MiB | 132.961 MiB | +1.1% |
+| 1000 | 60-tick elapsed time | 47.4967 ms | 46.9249 ms | -1.2% |
+| 1000 | working set | 149.906 MiB | 151.598 MiB | +1.1% |
+
+There is no material time or memory regression. Geometry updates assign walking
+targets; the queue checks and Lift/Shuttle checks bound stopped-Agent movement by
+walk speed. Direct position updates remain confined to a moving transport vehicle
+carrying its occupants. Queue state is not consulted by pathfinding and introduces
+no general collision avoidance, so an unrelated Agent's Path is not displaced by
+waiting Agents.
+
 ## Prerequisites
 
 - Windows x64
