@@ -1,7 +1,6 @@
 #include <array>
 #include <cassert>
 #include <cfloat>
-#include <set>
 #include <algorithm>
 
 #include "imgui/imgui.h"
@@ -150,7 +149,7 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 	// Lift-owned landing Doors have their own threshold resource containing the
 	// physical queue geometry. World::getTraversalResourceId() deliberately
 	// resolves them to the Lift coordinator for scheduling, so select the landing
-	// resource directly when rendering that Door's queue spots.
+	// resource directly when rendering that Door's queue lane.
 	core::TraversalResourceId resourceId;
 	auto schedulingResourceId = world->getTraversalResourceId(selectedObject.get());
 	if (gSelectedSectorObject
@@ -165,10 +164,6 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& candidate) { return candidate.id == resourceId; });
 	if (resource == snapshot.traversalResources.end()) return;
-	auto coordinator = schedulingResourceId != resourceId
-		? find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
-			[schedulingResourceId](auto const& candidate) { return candidate.id == schedulingResourceId; })
-		: snapshot.traversalResources.end();
 
 	const ImColor laneColour(0, 210, 255, 210);
 	const ImColor occupiedColour(255, 170, 0, 230);
@@ -178,61 +173,17 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 	// side. A selected Ladder is different: its two approach lanes are its lower
 	// and upper ends, and both must remain visible even when the Ladder itself is
 	// represented by a Back-layer transit.
-	vector<core::QueuePositionSnapshot> visiblePositions;
-	set<uint32_t> occupiedCapacityPositions;
-	bool capacityPositionsVisible = false;
 	for (auto const& lane : resource->queueLanes)
 	{
 		if (!lane.sector) continue;
 		auto sector = world->getSector((uint32_t)lane.sector.value - 1);
 		if (!sector || (!resource->isLadder
 			&& sector->getLayerIndex() != (uint32_t)layer)) continue;
-		if (sector->getType() == core::SectorType::Lift
-			&& coordinator != snapshot.traversalResources.end())
-		{
-			// A selected landing Door owns queue geometry at that landing. Use the
-			// lane's authored Y rather than the car's current position, which may be
-			// aligned with a different stop.
-			capacityPositionsVisible = true;
-			for (auto const& capacity : coordinator->capacityPositions)
-				if (capacity.occupant || capacity.admissionReservation)
-					occupiedCapacityPositions.insert(capacity.index);
-		}
 		auto start = lane.origin;
 		auto end = lane.origin + lane.direction * lane.extent;
 		transformPosition(start);
 		transformPosition(end);
 		drawList->AddLine({ start.x, start.y }, { end.x, end.y }, laneColour, 3.0f);
-		visiblePositions.insert(visiblePositions.end(), lane.positions.begin(), lane.positions.end());
-	}
-	core::Vector2 objectBounds0, objectBounds1;
-	selectedObject->getCurrentShape(objectBounds0, objectBounds1);
-	auto distanceToObject = [&](core::Vector2 const& point)
-	{
-		auto dx = max(max(objectBounds0.x - point.x, 0.0f), point.x - objectBounds1.x);
-		auto dy = max(max(objectBounds0.y - point.y, 0.0f), point.y - objectBounds1.y);
-		return sqrt(dx * dx + dy * dy);
-	};
-	sort(visiblePositions.begin(), visiblePositions.end(), [&](auto const& left, auto const& right)
-	{
-		auto leftDistance = distanceToObject(left.position);
-		auto rightDistance = distanceToObject(right.position);
-		if (abs(leftDistance - rightDistance) > 0.001f) return leftDistance < rightDistance;
-		return left.position.x < right.position.x;
-	});
-	for (uint32_t index = 0; index < visiblePositions.size(); ++index)
-	{
-		auto point = visiblePositions[index].position;
-		transformPosition(point);
-		bool const occupied = visiblePositions[index].owner
-			|| (capacityPositionsVisible
-				&& occupiedCapacityPositions.contains(visiblePositions[index].index));
-		auto colour = occupied ? occupiedColour : laneColour;
-		if (occupied)
-			drawList->AddCircleFilled({ point.x, point.y }, slotRadius, ImColor(255, 170, 0, 64));
-		drawList->AddCircle({ point.x, point.y }, slotRadius, colour, 0, 2.0f);
-		auto label = to_string(index + 1);
-		drawList->AddText({ point.x + slotRadius + 2.0f, point.y - 7.0f }, colour, label.c_str());
 	}
 
 	// Capacity and transport queues do not necessarily have external physical
