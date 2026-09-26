@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "core/OccupantPacking.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/AgentTagRegistry.h"
@@ -3390,14 +3391,19 @@ namespace core
 		liftResource->mLiftCurrentStop = options.initialStop;
 		liftResource->mLiftPosition = liftStops[options.initialStop].globalPosition;
 		lift->setCoordinatedPosition(liftResource->mLiftPosition);
-		// Standing positions are deterministic and local to the moving car.  Validation
-		// above guarantees agent-safe horizontal separation for every declared slot.
+		// Pack the full capacity range, including empty slots, with zero clearance
+		// to retain the car's abutting positions. These targets are authoritative for
+		// both recorded occupancy and the car-side boarding lanes below.
+		// Validation above guarantees agent-safe separation for every declared slot.
 		auto standingWidth = CORE_AGENT_MAX_WIDTH * options.capacity;
 		auto standingStart = x + (options.cellsWide - standingWidth) * 0.5f
 			+ CORE_AGENT_MAX_WIDTH * 0.5f - liftTransit->getPosition().x;
+		auto const occupantTargets = packOccupants(options.capacity, 0,
+			{ standingStart, standingStart + CORE_AGENT_MAX_WIDTH * (options.capacity - 1) },
+			CORE_AGENT_MAX_WIDTH, 0.0f, OccupantPackingOrder::Forward,
+			OccupantPackingLayout::Abutting);
 		for (uint32_t i = 0; i < options.capacity; ++i)
-			liftResource->mCapacityPositions[i] = {
-				standingStart + CORE_AGENT_MAX_WIDTH * i, 0.0f };
+			liftResource->mCapacityPositions[i] = { occupantTargets[i], 0.0f };
 		for (uint32_t i = 0; i < liftRes.doors.size(); ++i)
 		{
 			auto landing = mTraversalResources.find(liftRes.doors[i].traversalResource);
@@ -8163,8 +8169,12 @@ namespace core
 		vector<Vector2> positions(capacity);
 		auto start = (usableWidth - capacity * CORE_AGENT_MAX_WIDTH) * 0.5f
 			+ CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const occupantTargets = packOccupants(capacity, 0,
+			{ start, start + CORE_AGENT_MAX_WIDTH * (capacity - 1) },
+			CORE_AGENT_MAX_WIDTH, 0.0f, OccupantPackingOrder::Forward,
+			OccupantPackingLayout::Abutting);
 		for (uint32_t i = 0; i < capacity; ++i)
-			positions[i] = { start + i * CORE_AGENT_MAX_WIDTH, 0.0f };
+			positions[i] = { occupantTargets[i], 0.0f };
 		auto minimumDwellTicks = (uint64_t)ceil(minimumDwellSeconds / getFixedTimestep());
 		auto maximumBoardingTicks = (uint64_t)ceil(maximumBoardingSeconds / getFixedTimestep());
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(

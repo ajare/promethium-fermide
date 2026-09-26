@@ -9,6 +9,7 @@
 #include "core/Coordination.h"
 #include "core/Edge.h"
 #include "core/Shuttle.h"
+#include "core/OccupantPacking.h"
 #include "core/Vertex.h"
 
 
@@ -132,25 +133,20 @@ namespace core
 			}
 
 			auto const carriageStart = carriage.index * (carriageWidth + 1.0f);
-			auto const leftmost = carriageStart + halfAgentWidth
-				+ CORE_SHUTTLE_AGENT_BUFFER;
-			auto const rightmost = carriageStart + carriageWidth - halfAgentWidth
-				- CORE_SHUTTLE_AGENT_BUFFER;
-			auto const leading = carriage.packingDirection == TraversalDirection::Descending
-				? leftmost : rightmost;
-			auto const trailing = carriage.packingDirection == TraversalDirection::Descending
-				? rightmost : leftmost;
 			auto const passengerCount = carriage.passengerOrder.size();
-			auto const projectedCount = passengerCount + reservationCount;
+			auto const targets = packOccupants(passengerCount, reservationCount,
+				{ carriageStart + halfAgentWidth, carriageStart + carriageWidth - halfAgentWidth },
+				CORE_AGENT_MAX_WIDTH, CORE_SHUTTLE_AGENT_BUFFER,
+				carriage.packingDirection == TraversalDirection::Descending
+					? OccupantPackingOrder::Forward : OccupantPackingOrder::Reverse,
+				OccupantPackingLayout::Buffered);
 			for (size_t rank = 0; rank < passengerCount; ++rank)
 			{
-				auto const progress = projectedCount == 1 ? 0.0f
-					: (float)rank / (float)(projectedCount - 1);
 				auto const slot = activeSlots.at(carriage.passengerOrder[rank]);
 				auto const y = slot < resource.mCapacityPositions.size()
 					? resource.mCapacityPositions[slot].y : 0.0f;
 				carriage.passengerTargets[carriage.passengerOrder[rank]] = {
-					leading + (trailing - leading) * progress, y };
+					targets[rank], y };
 			}
 		}
 	}

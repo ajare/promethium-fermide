@@ -461,6 +461,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
+    target_compile_features(pf-occupant-packing-checks PRIVATE cxx_std_20)
+    target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
+    pf_apply_high_analysis(pf-occupant-packing-checks)
+    add_test(NAME occupant-packing COMMAND pf-occupant-packing-checks)
+
     add_executable(pf-world-render-slot-checks src/headless/WorldRenderSlotChecks.cpp)
     target_compile_features(pf-world-render-slot-checks PRIVATE cxx_std_20)
     target_include_directories(pf-world-render-slot-checks PRIVATE "${PF_INCLUDE_DIR}")
