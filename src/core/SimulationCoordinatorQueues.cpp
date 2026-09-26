@@ -335,8 +335,21 @@ namespace core
 		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
 		{
 			(void)id;
+			auto journey = resource->mLiftCoordinator
+				? mWorld.mTraversalResources.find(resource->mLiftCoordinator) : nullptr;
+			bool const stopIsDisembarking = journey
+				&& journey->mLiftStopPhase == LiftStopPhase::Disembarking
+				&& journey->mLiftCurrentStop == resource->mLiftStopIndex;
 			for (auto const& lane : resource->mQueueLanes)
 			{
+				// Landing queues inside the vehicle are not waiting boarders. At the
+				// aligned Location, however, keep every waiting boarder's target at
+				// least as far from the Threshold as both its previous target and its
+				// current body while occupants disembark. This only suppresses physical
+				// advance; tickets, reservations, arrival predicates, and grants remain
+				// unchanged.
+				bool const holdBoarders = stopIsDisembarking
+					&& lane.sector != journey->mLiftSector;
 				Agent* left = nullptr;
 				Agent* right = nullptr;
 				auto walkableBoundary = [&](int side)
@@ -450,9 +463,22 @@ namespace core
 								target = request->mQueueStandingTarget;
 						}
 					}
-					// The reserved head still aims at its exact reservation. Overflow
-					// participates only in physical geometry and cannot time out or be
-					// denied until it later receives a reservation.
+					if (holdBoarders && side != 0)
+					{
+						// `side` points away from the Threshold. Clamp the new target to
+						// the farther of the Agent's body and its previous target. An Agent
+						// already stepping forward therefore stops where it is; an outward
+						// spacing correction may still finish without obstructing an exit.
+						auto hold = agent->getGlobalPosition().x;
+						if (request->mHasQueueStandingTarget)
+							hold = side < 0 ? min(hold, request->mQueueStandingTarget.x)
+								: max(hold, request->mQueueStandingTarget.x);
+						target.x = side < 0 ? min(target.x, hold) : max(target.x, hold);
+					}
+					// The reserved head still aims at its exact reservation outside an
+					// active disembark window. Overflow participates only in physical
+					// geometry and cannot time out or be denied until it later receives
+					// a reservation.
 					assignTarget(*request, *agent, target, true);
 					if (side <= 0) left = agent;
 					if (side >= 0) right = agent;

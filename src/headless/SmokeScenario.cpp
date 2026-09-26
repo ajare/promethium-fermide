@@ -4047,6 +4047,8 @@ namespace
 			agent->setPath(path, true);
 		}
 		bool sawBothWaiting = false;
+		bool sawHeldWaitersWhileDisembarking = false;
+		std::map<core::AgentId, float> previousDisembarkTargets;
 		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 5; ++tick)
 		{
 			world.advanceTick();
@@ -4059,9 +4061,30 @@ namespace
 				{ return request.resource == created.doors.front().traversalResource
 					&& request.state == core::TraversalRequestState::Pending; });
 			sawBothWaiting = sawBothWaiting || waiting == 2;
+			if (lift->liftStopPhase == core::LiftStopPhase::Disembarking
+				&& lift->liftCurrentStop == 0)
+			{
+				uint32_t held = 0;
+				for (auto const& request : snapshot.traversalRequests)
+				{
+					if (request.sourceSector.value != lower + 1 || !request.queueTicket
+						|| request.state != core::TraversalRequestState::Pending
+						|| !request.hasQueueStandingTarget) continue;
+					++held;
+					auto const distance = std::abs(
+						request.queueStandingTarget.x - request.sourceEndpoint.x);
+					if (auto previous = previousDisembarkTargets.find(request.owner);
+						previous != previousDisembarkTargets.end()
+						&& distance + 0.001f < previous->second) return false;
+					previousDisembarkTargets[request.owner] = distance;
+					if (request.permit || request.hasCapacityPosition) return false;
+				}
+				sawHeldWaitersWhileDisembarking = sawHeldWaitersWhileDisembarking || held >= 2;
+			}
 			if (lift->liftMoving && lift->liftDirection == core::TraversalDirection::Ascending
 				&& lift->liftCurrentStop == 0)
-				return sawBothWaiting && lift->occupantCount == options.capacity;
+				return sawBothWaiting && sawHeldWaitersWhileDisembarking
+					&& lift->occupantCount == options.capacity;
 		}
 		return false;
 	}
@@ -4590,8 +4613,11 @@ namespace
 		bool sawPlatformQueuePosition = false;
 		bool sawAttachedMotion = false;
 		bool sawDisembarkBeforeBoard = false;
+		bool sawHeldReturnBoarder = false;
+		core::AgentId returnBoarderId;
+		std::map<core::AgentId, float> previousDisembarkTargets;
 		std::map<core::AgentId, float> previousCarriageX;
-		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 14; ++tick)
+		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 24; ++tick)
 		{
 			world.advanceTick();
 			auto snapshot = world.getSimulationSnapshot();
@@ -4600,6 +4626,19 @@ namespace
 			if (shuttle == snapshot.traversalResources.end() || !shuttle->isShuttle
 				|| shuttle->occupantCount + shuttle->admissionReservationCount > options.capacity)
 				return false;
+			if (!returnBoarderId && shuttle->liftMoving
+				&& shuttle->liftDirection == core::TraversalDirection::Ascending)
+			{
+				auto returnTarget = world.getGraph()->getClosestVertexInSector(
+					world.getSector(left).get(), { 1.5f, 0.0f });
+				if (!returnTarget) return false;
+				returnBoarderId = world.createAgent(
+					"Waiting return passenger", right, 0, 0.5f);
+				auto returnBoarder = world.lookupAgent(returnBoarderId).entity;
+				auto returnPath = world.getGraph()->calculatePath(returnBoarder, returnTarget);
+				if (!returnPath) return false;
+				returnBoarder->setPath(std::move(returnPath), true);
+			}
 			for (auto const& operation : snapshot.deviceOperations)
 				if (operation.command.type == core::DeviceCommandType::CallShuttle
 					&& operation.state == core::DeviceOperationState::Succeeded) sawPhysicalCall = true;
@@ -4631,6 +4670,20 @@ namespace
 			{
 				if (shuttle->admissionReservationCount != 0) return false;
 				sawDisembarkBeforeBoard = true;
+				for (auto const& request : snapshot.traversalRequests)
+				{
+					if (request.owner != returnBoarderId || !request.queueTicket
+						|| request.state != core::TraversalRequestState::Pending
+						|| !request.hasQueueStandingTarget) continue;
+					auto const distance = std::abs(
+						request.queueStandingTarget.x - request.sourceEndpoint.x);
+					if (auto previous = previousDisembarkTargets.find(request.owner);
+						previous != previousDisembarkTargets.end()
+						&& distance + 0.001f < previous->second) return false;
+					previousDisembarkTargets[request.owner] = distance;
+					if (request.permit || request.hasCapacityPosition) return false;
+					sawHeldReturnBoarder = true;
+				}
 			}
 			for (auto const& passenger : passengers)
 			{
@@ -4648,13 +4701,18 @@ namespace
 				}
 			if (std::all_of(passengers.begin(), passengers.end(), [&](auto id)
 				{ auto agent = world.lookupAgent(id).entity; return agent->getState() == core::Agent::State::Idle
-					&& agent->getSector() == world.getSector(right).get(); })) break;
+					&& agent->getSector() == world.getSector(right).get(); }) && returnBoarderId)
+			{
+				auto returnBoarder = world.lookupAgent(returnBoarderId).entity;
+				if (returnBoarder->getState() == core::Agent::State::Idle
+					&& returnBoarder->getSector() == world.getSector(left).get()) break;
+			}
 		}
 		auto final = world.getSimulationSnapshot();
 		auto shuttle = std::find_if(final.traversalResources.begin(), final.traversalResources.end(),
 			[&](auto const& resource) { return resource.id == created.traversalResource; });
 		return sawPhysicalCall && sawFullWithWaiter && sawPlatformQueuePosition
-			&& sawAttachedMotion && sawDisembarkBeforeBoard
+			&& sawAttachedMotion && sawDisembarkBeforeBoard && sawHeldReturnBoarder
 			&& shuttle != final.traversalResources.end() && shuttle->occupantCount == 0
 			&& shuttle->admissionReservationCount == 0;
 	}
