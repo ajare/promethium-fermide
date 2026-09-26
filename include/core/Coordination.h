@@ -358,6 +358,10 @@ namespace core
 		uint32_t mCapacity{ 0 };
 		std::vector<Vector2> mCapacityPositions;
 		std::vector<AgentId> mOccupants;
+		// Enclosed Lift occupants normally use their capacity position. While an
+		// occupant alights, the remaining passengers receive compact walking targets
+		// keyed by stable identity; capacity-slot ownership remains unchanged.
+		std::map<AgentId, Vector2> mLiftPassengerTargets;
 		std::vector<TraversalRequestId> mAdmissionReservations;
 		std::vector<TraversalRequestId> mAdmissionQueue;
 		// Request leases cover preparation, admission, and active crossings;

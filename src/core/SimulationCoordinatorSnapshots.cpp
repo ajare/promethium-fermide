@@ -244,6 +244,8 @@ namespace core
 		auto capacityPosition = [&](uint32_t position)
 		{
 			auto target = resource.mCapacityPositions[position];
+			if (auto found = resource.mLiftPassengerTargets.find(resource.mOccupants[position]);
+				found != resource.mLiftPassengerTargets.end()) target = found->second;
 			if (resource.mShuttle && resource.mOccupants[position]
 				&& resource.mShuttleCapacityPerCarriage)
 			{

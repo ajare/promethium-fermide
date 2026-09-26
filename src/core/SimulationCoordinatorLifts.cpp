@@ -8,7 +8,9 @@
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/Coordination.h"
+#include "core/Defines.h"
 #include "core/Edge.h"
+#include "core/OccupantPacking.h"
 #include "core/Path.h"
 #include "core/Vertex.h"
 
@@ -117,6 +119,37 @@ namespace core
 		});
 		for (size_t rank = 0; rank < passengers.size(); ++rank)
 			resource.mOccupants[occupiedPositions[rank]] = passengers[rank];
+	}
+
+	void SimulationCoordinator::respaceLiftOccupantsAfterAlighting(TraversalResource& resource)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		resource.mLiftPassengerTargets.clear();
+		if (!resource.mLift || resource.mOpenPlatformLift || resource.mLiftMoving
+			|| resource.mCapacityPositions.empty()) return;
+
+		vector<AgentId> passengers;
+		for (auto occupant : resource.mOccupants)
+		{
+			if (!occupant) continue;
+			auto destination = resource.mLiftPassengerDestinations.find(occupant);
+			auto const alightingHere = destination != resource.mLiftPassengerDestinations.end()
+				&& destination->second == resource.mLiftCurrentStop;
+			if (!alightingHere && !resource.mLiftExitAtSafeStop.contains(occupant))
+				passengers.push_back(occupant);
+		}
+		if (passengers.empty()) return;
+
+		// Capacity positions describe the complete body-safe car extent. Packing the
+		// smaller remaining group in that same extent changes targets without changing
+		// capacity ownership, leaving room for the passenger walking to the Doors.
+		auto const targets = packOccupants(passengers.size(), 0,
+			{ resource.mCapacityPositions.front().x, resource.mCapacityPositions.back().x },
+			CORE_AGENT_MAX_WIDTH, mWorld.mTraversalGeometryPolicy.occupantClearance,
+			OccupantPackingOrder::Forward, OccupantPackingLayout::Compact);
+		for (size_t rank = 0; rank < passengers.size(); ++rank)
+			resource.mLiftPassengerTargets[passengers[rank]] = {
+				targets[rank], resource.mCapacityPositions.front().y };
 	}
 
 	bool SimulationCoordinator::liftHasDisembarkDemand(TraversalResource const& resource, uint32_t stop) const
@@ -957,6 +990,8 @@ namespace core
 			actor->mTraversalLocalGoal.reset();
 		}
 		coordinator.mLiftStopPhase = LiftStopPhase::Disembarking;
+		if (coordinator.mLift)
+			respaceLiftOccupantsAfterAlighting(coordinator);
 		if (!request->mPreparationLease)
 			request->mPreparationLease = acquireDoorOpenLease(*disembarkLanding,
 				DoorOpenLeaseKind::Preparation, requestId);

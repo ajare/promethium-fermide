@@ -2281,6 +2281,100 @@ namespace
 		return true;
 	}
 
+	bool liftOccupantsRespaceWhileAnOccupantAlights()
+	{
+		core::World world("Lift alighting re-spacing", 9, 6);
+		auto lower = world.addCorridor(0, 0, 8);
+		auto middle = world.addCorridor(2, 0, 8);
+		auto upper = world.addCorridor(5, 0, 8);
+		core::World::CreateLiftOptions options;
+		options.cellsWide = 2;
+		options.stopOffsets = { 0, 2, 5 };
+		options.capacity = 3;
+		options.minimumDwellSeconds = 0.1f;
+		options.maximumBoardingSeconds = 3.0f;
+		auto created = world.addLift(1, 0, 3, options);
+		world.finishBuild();
+
+		auto middleTarget = world.getGraph()->getClosestVertexInSector(
+			world.getSector(middle).get(), { 4.0f, 2.0f });
+		auto upperTarget = world.getGraph()->getClosestVertexInSector(
+			world.getSector(upper).get(), { 4.0f, 5.0f });
+		if (!middleTarget || !upperTarget) return false;
+		auto alighting = world.createAgent("Alighting passenger", lower, 0, 3.5f);
+		std::vector<core::AgentId> remaining = {
+			world.createAgent("Remaining passenger 1", lower, 0, 3.8f),
+			world.createAgent("Remaining passenger 2", lower, 0, 4.1f) };
+		for (auto const& [passenger, target] : {
+			std::pair{ alighting, middleTarget },
+			std::pair{ remaining[0], upperTarget },
+			std::pair{ remaining[1], upperTarget } })
+		{
+			auto agent = world.lookupAgent(passenger).entity;
+			auto path = world.getGraph()->calculatePath(agent, target);
+			if (!path) return false;
+			agent->setPath(path, true);
+		}
+
+		std::map<core::AgentId, core::Vector2> fullCarTargets;
+		std::map<core::AgentId, core::Vector2> previousPositions;
+		bool sawAlightingWindow = false, sawChangedTargets = false;
+		bool sawChangedTargetsDuringAlighting = false, sawOrdinaryWalking = false;
+		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 6; ++tick)
+		{
+			world.advanceTick();
+			auto snapshot = world.getSimulationSnapshot();
+			auto lift = std::find_if(snapshot.traversalResources.begin(),
+				snapshot.traversalResources.end(), [&](auto const& resource)
+				{ return resource.id == created.traversalResource; });
+			if (lift == snapshot.traversalResources.end()) return false;
+
+			std::map<core::AgentId, core::Vector2> targets;
+			for (auto const& position : lift->capacityPositions)
+				if (position.occupant) targets[position.occupant] = position.position;
+			if (lift->liftMoving && lift->occupantCount == options.capacity
+				&& fullCarTargets.empty()) fullCarTargets = targets;
+			if (!lift->liftMoving && lift->liftCurrentStop == 1
+				&& lift->liftStopPhase == core::LiftStopPhase::Disembarking)
+				sawAlightingWindow = true;
+
+			for (auto passenger : remaining)
+			{
+				auto agent = world.lookupAgent(passenger).entity;
+				if (!agent) return false;
+				auto position = agent->getGlobalPosition();
+				if (!lift->liftMoving)
+					if (auto previous = previousPositions.find(passenger);
+						previous != previousPositions.end())
+					{
+						auto distance = position.distanceTo(previous->second);
+						if (distance > agent->getWalkSpeed() * world.getFixedTimestep() + 0.001f)
+							return false;
+						sawOrdinaryWalking = sawOrdinaryWalking || distance > 0.0001f;
+					}
+				previousPositions[passenger] = position;
+				if (fullCarTargets.contains(passenger) && targets.contains(passenger)
+					&& targets[passenger].distanceTo(fullCarTargets[passenger]) > 0.001f)
+				{
+					if (lift->occupantCount == remaining.size()) sawChangedTargets = true;
+					if (lift->occupantCount == options.capacity
+						&& lift->liftStopPhase == core::LiftStopPhase::Disembarking)
+						sawChangedTargetsDuringAlighting = true;
+				}
+			}
+
+			if (lift->liftMoving && lift->liftCurrentStop == 1
+				&& lift->liftDirection == core::TraversalDirection::Ascending)
+			{
+				auto exited = world.lookupAgent(alighting).entity;
+				return sawAlightingWindow && sawChangedTargets
+					&& sawChangedTargetsDuringAlighting && sawOrdinaryWalking
+					&& exited && exited->getSector() == world.getSector(middle).get();
+			}
+		}
+		return false;
+	}
+
 	bool resilientWaitingRetainsPriorityAndExpiresPermits()
 	{
 		core::World world("Resilient door waiting", 8, 2);
@@ -6324,6 +6418,11 @@ int main(int argc, char** argv)
 		if (!liftOccupantsAreOrderedByBoardingAndDestination())
 		{
 			std::cerr << "FAIL: Lift occupants were not ordered by boarding and destination\n";
+			return 1;
+		}
+		if (!liftOccupantsRespaceWhileAnOccupantAlights())
+		{
+			std::cerr << "FAIL: Lift occupants did not walk to new targets while an occupant alighted\n";
 			return 1;
 		}
 		if (!resilientWaitingRetainsPriorityAndExpiresPermits())

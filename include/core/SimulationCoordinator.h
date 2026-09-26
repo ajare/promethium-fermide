@@ -352,6 +352,11 @@ namespace core
 		// the doors. This changes manifest targets only and never moves an Agent.
 		void orderLiftOccupants(TraversalResource& resource);
 
+		// Give the occupants left behind by an alighting passenger compact targets
+		// across the car. Slot ownership is unchanged and locomotion, not this
+		// computation, moves each Agent to its target.
+		void respaceLiftOccupantsAfterAlighting(TraversalResource& resource);
+
 		// ------------------------------------------------------------------
 		// Lift disembarking branch (ADR 0004 stage 3)
 		//

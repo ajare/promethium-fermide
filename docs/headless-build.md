@@ -106,6 +106,23 @@ cover boarding reservations, exact queue-position arrival, filling, and departur
 The paired-run simulation digest was deliberately regenerated in Debug and Release;
 both runs matched. The recorded queue digests above are unaffected.
 
+## Lift occupant re-spacing (#179)
+
+While an enclosed Lift occupant alights, the occupants staying in the car receive
+compact targets across the body-safe car extent. Capacity-slot ownership and
+logical ordering do not change, and Agent locomotion reaches the new targets at
+ordinary walk speed. The per-Agent targets remain attached to the car while it
+moves, so moving occupants have no walking goal and are carried without a
+horizontal snap. A later boarder restores the destination-ordered capacity layout
+before entering.
+
+`liftOccupantsRespaceWhileAnOccupantAlights` observes the complete alighting
+window, verifies that the remaining occupants' snapshot targets change, bounds
+each stopped-car position change by walk speed, confirms that the alighting Agent
+reaches its destination, and requires the Lift to depart within the normal stop
+phases. The paired-run simulation digest was deliberately rerun in Debug and
+Release; both runs matched. The recorded queue digests above are unaffected.
+
 ## Prerequisites
 
 - Windows x64

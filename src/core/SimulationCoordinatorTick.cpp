@@ -261,6 +261,8 @@ namespace core
 					if (auto passenger = mWorld.mAgents.find(resource.mOccupants[i]))
 					{
 						auto local = resource.mCapacityPositions[i];
+						if (auto target = resource.mLiftPassengerTargets.find(resource.mOccupants[i]);
+							target != resource.mLiftPassengerTargets.end()) local = target->second;
 						local.y += resource.mLiftPosition - transit->getPosition().y;
 						if (passenger->getGlobalPosition().distanceTo(
 							transit->getPosition() + local) > 0.001f)
@@ -337,6 +339,8 @@ namespace core
 				{
 					auto transit = mWorld.mSectors[(size_t)resource.mLiftSector.value - 1].get();
 					auto local = resource.mCapacityPositions[i];
+					if (auto target = resource.mLiftPassengerTargets.find(resource.mOccupants[i]);
+						target != resource.mLiftPassengerTargets.end()) local = target->second;
 					if (resource.mShuttle)
 					{
 						// Carry the passenger by the vehicle's translation without changing

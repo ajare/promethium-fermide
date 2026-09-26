@@ -390,7 +390,13 @@ namespace core
 				lift->mAdmissionReservations[position] = {};
 				lift->mOccupants[position] = owner;
 				lift->mLiftAdmissionReservation = {};
-				if (lift->mLift) orderLiftOccupants(*lift);
+				if (lift->mLift)
+				{
+					// The alighting layout has done its job. Boarding restores the
+					// destination-ordered capacity layout before adding this passenger.
+					lift->mLiftPassengerTargets.clear();
+					orderLiftOccupants(*lift);
+				}
 				lift->mLiftPassenger = {};
 				for (auto occupant : lift->mOccupants)
 					if (occupant) { lift->mLiftPassenger = occupant; break; }
@@ -441,7 +447,11 @@ namespace core
 					removeLiftStopRequest(*lift, stop, owner);
 				lift->mLiftExitAtSafeStop.erase(owner);
 				lift->mLiftExitFailures.erase(owner);
-				if (lift->mLift) orderLiftOccupants(*lift);
+				if (lift->mLift)
+				{
+					orderLiftOccupants(*lift);
+					respaceLiftOccupantsAfterAlighting(*lift);
+				}
 				lift->mLiftPassenger = {};
 				for (auto occupant : lift->mOccupants) if (occupant) { lift->mLiftPassenger = occupant; break; }
 				if (lift->mShuttle) refreshShuttlePassengerTargets(*lift);
