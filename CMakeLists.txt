@@ -324,6 +324,7 @@ add_executable(prometheum-fermide-headless
     src/headless/MovementCommandSmokeChecks.cpp
     src/headless/OnboardAgentDeletionSmokeChecks.cpp
     src/headless/PaletteTraySmokeChecks.cpp
+    src/headless/PathfindingWorkspaceSmokeChecks.cpp
     src/headless/RenderGuiStubs.cpp
     src/headless/RenderOrderSmokeChecks.cpp
     src/headless/SerializationSmokeChecks.cpp

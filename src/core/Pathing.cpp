@@ -1,210 +1,278 @@
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
 #include "core/Defines.h"
 #include "core/Pathing.h"
+#include "core/Graph.h"
+#include "core/Agent.h"
+#include "core/Edge.h"
 #include "core/Exceptions.h"
-
-
-namespace std 
-{
-    template<> 
-    struct hash<shared_ptr<const core::Vertex>>
-    {
-        std::size_t operator()(const shared_ptr<const core::Vertex>& vertex) const noexcept
-        {
-            return vertex->getId();
-        }
-    };
-}
+#include "core/Vertex.h"
 
 namespace core
 {
-    namespace pathing
-    {
+	bool PathfindingWorkspace::precedes(FrontierNode const& left, FrontierNode const& right)
+	{
+		if (left.priority < right.priority) return true;
+		if (right.priority < left.priority) return false;
+		return left.slot < right.slot;
+	}
 
-        using namespace std;
+	void PathfindingWorkspace::swapFrontierNodes(uint32_t left, uint32_t right)
+	{
+		std::swap(mFrontier[left], mFrontier[right]);
+		mFrontierPositions[mFrontier[left].slot] = left;
+		mFrontierPositions[mFrontier[right].slot] = right;
+	}
 
-        typedef shared_ptr<const Vertex> node_type;
+	void PathfindingWorkspace::siftUp(uint32_t position)
+	{
+		while (position != 0)
+		{
+			auto const parent = (position - 1) / 2;
+			if (!precedes(mFrontier[position], mFrontier[parent])) break;
+			swapFrontierNodes(position, parent);
+			position = parent;
+		}
+	}
 
-        float vertexHeuristic(Agent const* agent, node_type source, node_type target)
-        {
-            // Returning zero is equivalent to Dijkstra
-            //return 0.0f;
+	void PathfindingWorkspace::siftDown(uint32_t position)
+	{
+		auto const count = static_cast<uint32_t>(mFrontier.size());
+		for (;;)
+		{
+			auto const left = position * 2 + 1;
+			if (left >= count) break;
+			auto const right = left + 1;
+			auto best = left;
+			if (right < count && precedes(mFrontier[right], mFrontier[left])) best = right;
+			if (!precedes(mFrontier[best], mFrontier[position])) break;
+			swapFrontierNodes(position, best);
+			position = best;
+		}
+	}
 
-            auto const& pos0 = source->getPosition();
-            auto const& pos1 = target->getPosition();
+	void PathfindingWorkspace::beginSearch(size_t vertexCount)
+	{
+		auto resizeTracked = [this, vertexCount](auto& storage)
+		{
+			auto const oldCapacity = storage.capacity();
+			storage.resize(vertexCount);
+			if (storage.capacity() != oldCapacity) ++mScratchAllocationCount;
+		};
 
-            auto dist = (fabs(pos1.x - pos0.x) + fabs(pos1.y - pos0.y));
-            return dist / agent->getWalkSpeed();
-        }
+		resizeTracked(scores);
+		resizeTracked(cameFrom);
+		resizeTracked(visitGenerations);
+		resizeTracked(edges);
+		resizeTracked(mFrontierPositions);
+		resizeTracked(mFrontierGenerations);
 
-        void addVertexToPath(
-            Agent const* /* agent */,
-            Graph const* /* graph */,
-            node_type vertex,
-            vector<PathNode>& nodes,
-            unordered_map<node_type, node_type> const& /* cameFrom */,
-            unordered_map<node_type, float> const& costSoFar,
-            unordered_map<node_type, shared_ptr<const Edge>> const& edgeMap)
-        {
-            // We are moving in reverse from the last point in the Path, so things get a bit confusing.
-            // vertex: the current Vertex we are processing.  From the perspective
-            //     of this function, it is the "source" Vertex of "edge".
-            // nextVertex: the other Vertex in "edge", in reality the source Vertex when moving along the
-            //     Edge the correct way.
-            auto edge = edgeMap.at(vertex);
-            auto cost = costSoFar.at(vertex);
-            auto nextVertex = edge->getOtherVertex(vertex);
+		auto const oldFrontierCapacity = mFrontier.capacity();
+		mFrontier.reserve(vertexCount);
+		if (mFrontier.capacity() != oldFrontierCapacity) ++mScratchAllocationCount;
+		mFrontier.clear();
 
-            // As we are moving through the route in reverse, add the Vertex first, before
-            // seeing if anything needs to go before it.
-            nodes.push_back({ edge, vertex, cost });
+		++mGeneration;
+		if (mGeneration == 0)
+		{
+			// Generation zero means "never visited". This once-per-2^32-searches
+			// reset prevents old stamps becoming live after wraparound.
+			std::fill(visitGenerations.begin(), visitGenerations.end(), 0);
+			std::fill(mFrontierGenerations.begin(), mFrontierGenerations.end(), 0);
+			mGeneration = 1;
+		}
+	}
 
-        }
+	uint32_t PathfindingWorkspace::getGeneration() const
+	{
+		return mGeneration;
+	}
 
-        shared_ptr<Path> reconstructPath(
-            Agent const* agent,
-            Graph const* graph,
-            node_type source,
-            node_type target,
-            unordered_map<node_type, node_type> const& cameFrom,
-            unordered_map<node_type, float> const& costSoFar,
-            unordered_map<node_type, shared_ptr<const Edge>> const& edgeMap)
-        {
-            vector<PathNode> nodes;
+	bool PathfindingWorkspace::frontierEmpty() const
+	{
+		return mFrontier.empty();
+	}
 
-            auto curVertex = target;
+	void PathfindingWorkspace::put(uint32_t slot, float priority)
+	{
+		if (mFrontierGenerations[slot] == mGeneration
+			&& mFrontierPositions[slot] != NoPosition)
+		{
+			auto const position = mFrontierPositions[slot];
+			if (priority >= mFrontier[position].priority) return;
+			mFrontier[position].priority = priority;
+			siftUp(position);
+			return;
+		}
 
-            if (cameFrom.find(target) == cameFrom.end())
-            {
-                // No path can be found
-                return nullptr;
-            }
+		mFrontierGenerations[slot] = mGeneration;
+		mFrontierPositions[slot] = static_cast<uint32_t>(mFrontier.size());
+		mFrontier.push_back({ priority, slot });
+		siftUp(static_cast<uint32_t>(mFrontier.size() - 1));
+	}
 
-            while (!curVertex->sameAs(source))
-            {
-                addVertexToPath(agent, graph, curVertex, nodes, cameFrom, costSoFar, edgeMap);
+	uint32_t PathfindingWorkspace::get()
+	{
+		auto const result = mFrontier.front().slot;
+		mFrontierPositions[result] = NoPosition;
+		if (mFrontier.size() == 1)
+		{
+			mFrontier.pop_back();
+			return result;
+		}
 
-                curVertex = cameFrom.at(curVertex);
-            }
+		mFrontier.front() = mFrontier.back();
+		mFrontier.pop_back();
+		mFrontierPositions[mFrontier.front().slot] = 0;
+		siftDown(0);
+		return result;
+	}
 
-            // Add source node last
-            nodes.push_back({ nullptr, source, 0.0f });
+	uint64_t PathfindingWorkspace::getScratchAllocationCount() const
+	{
+		return mScratchAllocationCount;
+	}
 
-            reverse(nodes.begin(), nodes.end());
+	namespace pathing
+	{
+		using node_type = std::shared_ptr<const Vertex>;
 
-            return make_shared<Path>(nodes);
-        }
+		namespace
+		{
+			float vertexHeuristic(Agent const* agent, node_type const& source, node_type const& target)
+			{
+				auto const& pos0 = source->getPosition();
+				auto const& pos1 = target->getPosition();
+				auto const distance = std::fabs(pos1.x - pos0.x) + std::fabs(pos1.y - pos0.y);
+				return distance / agent->getWalkSpeed();
+			}
 
-        shared_ptr<Path> findPath(Agent const* agent, Graph const* graph, node_type source, node_type target)
-        {
-            unordered_map<node_type, node_type> cameFrom;
-            unordered_map<node_type, shared_ptr<const Edge>> edgeMap;
-            unordered_map<node_type, float> costSoFar;
-            PriorityQueue<node_type, float> frontier;
+			bool graphSlot(Graph const* graph, node_type const& vertex, uint32_t& slot)
+			{
+				if (!vertex) return false;
+				slot = vertex->getSearchIndex();
+				auto const& vertices = graph->getVertices();
+				return slot < vertices.size() && vertices[slot].get() == vertex.get();
+			}
 
-            // Look for first vertex if we need to
-            auto const inferredSource = !source;
-            if (inferredSource)
-            {
-                // A Sector the Graph serves no vertices for - an isolated
-                // Location with no traversable threshold - offers no route at
-                // all. That is an ordinary "no path" outcome, not a
-                // pathfinding error, so report it the same way as any other
-                // unreachable target: no Path.
-                try
-                {
-                    source = graph->getPathSourceVertex(agent->getSector(), agent->getGlobalPosition());
-                }
-                catch (GraphException const&)
-                {
-                    return nullptr;
-                }
-            }
+			std::shared_ptr<Path> reconstructPath(Graph const* graph, uint32_t sourceSlot,
+				uint32_t targetSlot, PathfindingWorkspace const& workspace)
+			{
+				auto const generation = workspace.getGeneration();
+				if (workspace.visitGenerations[targetSlot] != generation) return nullptr;
 
-            if (!source) return nullptr;
-            frontier.put(source, 0.0f);
+				std::vector<PathNode> nodes;
+				auto const& vertices = graph->getVertices();
+				auto slot = targetSlot;
+				while (slot != sourceSlot)
+				{
+					nodes.push_back({ workspace.edges[slot], vertices[slot], workspace.scores[slot] });
+					slot = workspace.cameFrom[slot];
+				}
+				nodes.push_back({ nullptr, vertices[sourceSlot], 0.0f });
+				std::reverse(nodes.begin(), nodes.end());
+				return std::make_shared<Path>(std::move(nodes));
+			}
+		}
 
-            cameFrom[source] = source;
-            costSoFar[source] = 0.0f;
+		std::shared_ptr<Path> findPath(Agent const* agent, Graph const* graph,
+			node_type source, node_type target)
+		{
+			auto const inferredSource = !source;
+			if (inferredSource)
+			{
+				try
+				{
+					source = graph->getPathSourceVertex(agent->getSector(), agent->getGlobalPosition());
+				}
+				catch (GraphException const&)
+				{
+					return nullptr;
+				}
+			}
 
-            while (!frontier.empty())
-            {
-                auto curVertex = frontier.get();
+			uint32_t sourceSlot = 0;
+			uint32_t targetSlot = 0;
+			if (!graphSlot(graph, source, sourceSlot) || !graphSlot(graph, target, targetSlot))
+				return nullptr;
 
-                if (curVertex->sameAs(target))
-                {
-                    break;
-                }
+			auto& workspace = graph->getPathfindingWorkspace();
+			auto const& vertices = graph->getVertices();
+			workspace.beginSearch(vertices.size());
+			auto const generation = workspace.getGeneration();
+			workspace.visitGenerations[sourceSlot] = generation;
+			workspace.cameFrom[sourceSlot] = sourceSlot;
+			workspace.scores[sourceSlot] = 0.0f;
+			workspace.edges[sourceSlot].reset();
+			workspace.put(sourceSlot, 0.0f);
 
-                auto const& edges = curVertex->getEdges();
+			while (!workspace.frontierEmpty())
+			{
+				auto const currentSlot = workspace.get();
+				if (currentSlot == targetSlot) break;
+				auto const& current = vertices[currentSlot];
 
-                for (auto const& edge : edges)
-                {
-                    auto nextVertex = edge->getOtherVertex(curVertex);
+				for (auto const& edge : current->getEdges())
+				{
+					auto const next = edge->getOtherVertex(current);
+					auto const nextSlot = next->getSearchIndex();
+					auto const edgeCost = edge->getWeight(next, agent, true);
+					if (!std::isfinite(edgeCost) || edgeCost >= CORE_GRAPH_EDGE_UNTRAVERSABLE) continue;
+					auto const newCost = workspace.scores[currentSlot] + edgeCost;
 
-                    auto edgeCost = edge->getWeight(nextVertex, agent, true);
-                    if (!isfinite(edgeCost) || edgeCost >= CORE_GRAPH_EDGE_UNTRAVERSABLE)
-                    {
-                        continue; // Gaps and resources without reachable preparation are not routes.
-                    }
-                    auto newCost = costSoFar[curVertex] + edgeCost;
+					if (workspace.visitGenerations[nextSlot] != generation
+						|| newCost < workspace.scores[nextSlot])
+					{
+						workspace.visitGenerations[nextSlot] = generation;
+						workspace.scores[nextSlot] = newCost;
+						workspace.cameFrom[nextSlot] = currentSlot;
+						workspace.edges[nextSlot] = edge;
+						workspace.put(nextSlot,
+							newCost + vertexHeuristic(agent, next, target));
+					}
+				}
+			}
 
-                    if (costSoFar.find(nextVertex) == costSoFar.end() || newCost < costSoFar[nextVertex])
-                    {
-                        costSoFar[nextVertex] = newCost;
-                        auto priority = newCost + vertexHeuristic(agent, nextVertex, target);
-                        frontier.put(nextVertex, priority);
-                        cameFrom[nextVertex] = curVertex;
-                        edgeMap[nextVertex] = edge;
-                    }
-                }
-            }
+			auto path = reconstructPath(graph, sourceSlot, targetSlot, workspace);
 
-            auto path = reconstructPath(agent, graph, source, target, cameFrom, costSoFar, edgeMap);
+			// Skip a backwards approach only along ordinary horizontal floor.
+			if (inferredSource && path && path->nodes.size() >= 2)
+			{
+				auto const& agentPosition = agent->getGlobalPosition();
+				auto const& firstVertex = path->nodes[0].targetVertex;
+				auto const& secondVertex = path->nodes[1].targetVertex;
+				auto const firstDirection = firstVertex->getPosition() - agentPosition;
+				auto const secondDirection = secondVertex->getPosition() - agentPosition;
+				auto const directionsAreOpposite =
+					firstDirection.x * secondDirection.x + firstDirection.y * secondDirection.y < 0.0f;
 
-            // Skip a backwards approach only along ordinary horizontal floor.
-            // Sharing a Sector does not imply free movement between its levels.
-            if (inferredSource && path && path->nodes.size() >= 2)
-            {
-                auto const& agentPosition = agent->getGlobalPosition();
-                auto const& firstVertex = path->nodes[0].targetVertex;
-                auto const& secondVertex = path->nodes[1].targetVertex;
-                auto const firstDirection = firstVertex->getPosition() - agentPosition;
-                auto const secondDirection = secondVertex->getPosition() - agentPosition;
-                auto const directionsAreOpposite =
-                    firstDirection.x * secondDirection.x + firstDirection.y * secondDirection.y < 0.0f;
+				if (firstVertex->getSector() == secondVertex->getSector() && directionsAreOpposite
+					&& std::abs(firstDirection.y) < 0.001f && std::abs(secondDirection.y) < 0.001f
+					&& firstVertex->getSubType() != VertexSubType::Interactable
+					&& path->nodes[1].edge && path->nodes[1].edge->getType() == EdgeType::Location)
+				{
+					auto const skippedCost = path->nodes[1].edgeWeight;
+					path->nodes.erase(path->nodes.begin());
+					path->nodes[0].edge = nullptr;
+					for (auto& node : path->nodes) node.edgeWeight -= skippedCost;
+				}
+			}
 
-                if (firstVertex->getSector() == secondVertex->getSector() && directionsAreOpposite
-                    && abs(firstDirection.y) < 0.001f && abs(secondDirection.y) < 0.001f
-                    && firstVertex->getSubType() != VertexSubType::Interactable
-                    && path->nodes[1].edge && path->nodes[1].edge->getType() == EdgeType::Location)
-                {
-                    auto const skippedCost = path->nodes[1].edgeWeight;
-                    path->nodes.erase(path->nodes.begin());
-                    path->nodes[0].edge = nullptr;
-                    for (auto& node : path->nodes)
-                    {
-                        node.edgeWeight -= skippedCost;
-                    }
-                }
-            }
+			return path;
+		}
 
-            return path;
-        }
-
-        shared_ptr<const Vertex> findNextVertexForVertexInPath(shared_ptr<Path> path, Vertex const* vertex, uint32_t index)
-        {
-            for (; index < (uint32_t)path->nodes.size(); index++)
-            {
-                auto const& node = path->nodes[index];
-
-                if (vertex->getId() == node.edge->getOtherVertex(node.targetVertex)->getId())
-                {
-                    return node.targetVertex;
-                }
-            }
-
-            return nullptr;
-        }
-
-    } // pathing
-} // core
+		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(
+			std::shared_ptr<Path> path, Vertex const* vertex, uint32_t index)
+		{
+			for (; index < static_cast<uint32_t>(path->nodes.size()); ++index)
+			{
+				auto const& node = path->nodes[index];
+				if (vertex->getId() == node.edge->getOtherVertex(node.targetVertex)->getId())
+					return node.targetVertex;
+			}
+			return nullptr;
+		}
+	}
+}

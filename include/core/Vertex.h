@@ -18,11 +18,16 @@ namespace core
 
 	class Vertex
 	{
+		friend class Graph;
+
 		static uint32_t IdGenerator;
 
 	private:
 
 		uint32_t mId;
+
+		// Dense, deterministic slot assigned by the owning Graph after build.
+		uint32_t mSearchIndex{ ~uint32_t{ 0 } };
 
 		VertexType mType;
 
@@ -55,6 +60,8 @@ namespace core
 		bool sameAs(std::shared_ptr<const Vertex> other) const;
 
 		uint32_t getId() const;
+
+		uint32_t getSearchIndex() const;
 
 		VertexType getType() const;
 

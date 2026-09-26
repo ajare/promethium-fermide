@@ -82,6 +82,11 @@ namespace core
 		return mId;
 	}
 
+	uint32_t Vertex::getSearchIndex() const
+	{
+		return mSearchIndex;
+	}
+
 	/***
 
 	getType()

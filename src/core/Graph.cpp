@@ -221,6 +221,16 @@ namespace core
 		return mBuildLog;
 	}
 
+	uint64_t Graph::getScratchAllocationCount() const
+	{
+		return mPathfindingWorkspace.getScratchAllocationCount();
+	}
+
+	PathfindingWorkspace& Graph::getPathfindingWorkspace() const
+	{
+		return mPathfindingWorkspace;
+	}
+
 	void Graph::addSectorObjectVertexLookup(shared_ptr<SectorObject> sectorObject, shared_ptr<Vertex> vertex)
 	{
 		auto it = mSectorObjectVertexLookup.insert(make_pair(sectorObject, vector<shared_ptr<Vertex>>()));
@@ -691,7 +701,10 @@ namespace core
 		auto connectZ = true;
 
 		addEdge(ladderMountEdge, locationVertex, ladderVertex, connectZ);
-	
+		// Internal traversal Vertices do not join the Location row, but they still
+		// belong to the Graph and therefore need a deterministic search slot.
+		appendStandaloneRowVertex(row, obj.x, SlotTransit, ladderVertex);
+
 		// Add LadderVertex to a post-processing list, to join up its vertices with a Ladder edge, later
 		addCrossLevelVertex(ladderObject, ladderVertex, crossLevelVertices);
 	}
@@ -724,6 +737,7 @@ namespace core
 		auto connectZ = true;
 
 		addEdge(liftMountEdge, sectorVertex, liftVertex, connectZ);
+		appendStandaloneRowVertex(row, obj.x, SlotTransit, liftVertex);
 
 		// Add LiftVertex to a post-processing list, to join up its vertices with a Ladder edge, later
 		addCrossLevelVertex(liftObject, liftVertex, crossLevelVertices);
@@ -1540,6 +1554,7 @@ namespace core
 		mVertices.clear();
 		mEdges.clear();
 		mSectorVertexLookup.clear();
+		mIdentifierVertexLookup.clear();
 		mSectorObjectVertexLookup.clear();
 
 		auto const layerCount = mwWorld->getLayerCount();
@@ -1589,6 +1604,13 @@ namespace core
 
 		// Connect Layers
 		processCrossLevelVertices(crossLevelVertexLists);
+
+		// Graph order is deterministic and remains fixed for this Graph's lifetime.
+		// Publish it directly on each Vertex so searches need no ID hash lookup.
+		for (size_t slot = 0; slot < mVertices.size(); ++slot)
+		{
+			const_cast<Vertex*>(mVertices[slot].get())->mSearchIndex = static_cast<uint32_t>(slot);
+		}
 	}
 	void Graph::validate()
 	{

@@ -13,6 +13,7 @@
 #include "core/ShuttleTransit.h"
 #include "core/StaircaseTransit.h"
 #include "core/Path.h"
+#include "core/Pathing.h"
 #include "core/Log.h"
 
 
@@ -31,6 +32,9 @@ namespace core
 
 	class Graph
 	{
+		friend std::shared_ptr<Path> pathing::findPath(Agent const*, Graph const*,
+			std::shared_ptr<const Vertex>, std::shared_ptr<const Vertex>);
+
 		struct ObjectData
 		{
 			uint32_t index;
@@ -100,6 +104,7 @@ namespace core
 
 		std::map<std::shared_ptr<SectorObject>, std::vector<std::shared_ptr<Vertex>>> mSectorObjectVertexLookup;
 
+		mutable PathfindingWorkspace mPathfindingWorkspace;
 
 		Log mBuildLog;
 
@@ -191,6 +196,8 @@ namespace core
 			PositionVertexMap& interLayerVertexLookup, LayerRows& rows,
 			CrossLevelVertexMap& crossLevelVertices);
 
+		PathfindingWorkspace& getPathfindingWorkspace() const;
+
 	public:
 
 		explicit Graph(World* world);
@@ -212,6 +219,9 @@ namespace core
 		std::shared_ptr<const Vertex> getVertexForObject(std::shared_ptr<SectorObject> const& object) const;
 
 		Log const& getBuildLog() const;
+
+		// Read-only diagnostic: counts capacity growth in Graph-owned search scratch.
+		uint64_t getScratchAllocationCount() const;
 
 		std::shared_ptr<Path> calculatePath(Agent const* agent, std::shared_ptr<const Vertex> source, std::shared_ptr<const Vertex> target) const;
 
