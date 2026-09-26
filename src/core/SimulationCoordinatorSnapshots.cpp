@@ -214,6 +214,13 @@ namespace core
 						? destination->second : findAgentLiftDestination(*agent, resource);
 				if (passenger.targetStop < resource.mLiftStops.size())
 					passenger.targetLevel = resource.mLiftStops[passenger.targetStop].globalPosition;
+				if (resource.mShuttle)
+					for (auto const& carriage : resource.mShuttleCarriages)
+						if (auto door = carriage.alightingDoors.find(agentId);
+							door != carriage.alightingDoors.end())
+						{ passenger.shuttleAlightingDoor = door->second; break; }
+				if (!passenger.shuttleAlightingDoor && request)
+					passenger.shuttleAlightingDoor = request->mShuttleAlightingDoor;
 				result.liftAgents.push_back(passenger);
 			}
 		}
@@ -412,6 +419,7 @@ namespace core
 		result.shuttleCarriage = request.mShuttleCarriage;
 		result.shuttleAccessZone = request.mShuttleAccessZone;
 		result.shuttleDoor = request.mShuttleDoor;
+		result.shuttleAlightingDoor = request.mShuttleAlightingDoor;
 		result.direction = request.mDirection;
 		result.positionAssignedAtTick = request.mPositionAssignedAtTick;
 		result.lastPositionProgressTick = request.mLastPositionProgressTick;

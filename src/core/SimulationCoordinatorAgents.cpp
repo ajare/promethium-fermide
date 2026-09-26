@@ -224,6 +224,8 @@ namespace core
 		for (auto& occupant : resource.mOccupants)
 			if (occupant == id) occupant = {};
 		resource.mLiftPassengerTargets.erase(id);
+		for (auto& carriage : resource.mShuttleCarriages)
+			carriage.alightingDoors.erase(id);
 
 		// An occupant lease keeps an extensible resource extended on the Agent's
 		// behalf; surrendering the slot must surrender the lease with it.

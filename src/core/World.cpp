@@ -3640,7 +3640,8 @@ namespace core
 				landing->mLiftCoordinator = coordinator;
 				landing->mLiftStopIndex = stop;
 				shuttleResource->mShuttleDoors.push_back({ stop, carriage, zone->second,
-					locationId, doorResult.traversalResource });
+					locationId, doorResult.traversalResource,
+					carriage * (options.carWidth + 1.0f) + doorOffsets[door] + 0.5f });
 				auto& carriageState = shuttleResource->mShuttleCarriages[carriage];
 				carriageState.stopDoors[stop].push_back(doorResult.traversalResource);
 				// Car-side Door spots mirror this carriage's declared capacity. They
@@ -8272,7 +8273,7 @@ namespace core
 		resource->mShuttleCarriages.reserve(shuttlePtr->getNumCars());
 		for (uint32_t carriage = 0; carriage < shuttlePtr->getNumCars(); ++carriage)
 			resource->mShuttleCarriages.push_back({ carriage, carriage * capacity, capacity,
-				std::vector<std::vector<TraversalResourceId>>(stopCount), {}, {},
+				std::vector<std::vector<TraversalResourceId>>(stopCount), {}, {}, {},
 				TraversalDirection::None });
 		SimulationEvent event;
 		event.sequence = mNextEventSequence++;

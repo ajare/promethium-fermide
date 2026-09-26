@@ -4721,6 +4721,7 @@ namespace
 			passengers.push_back(id);
 		}
 		bool sawGrant = false;
+		bool sawDoorGroupedPlacement = false;
 		for (unsigned tick = 0; tick < 12000; ++tick)
 		{
 			std::map<core::AgentId, float> approaching;
@@ -4737,7 +4738,32 @@ namespace
 				if (std::abs(agent->getGlobalPosition().x - previousX)
 					> agent->getWalkSpeed() * world.getFixedTimestep() + 0.001f) return false;
 			}
-			for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+			auto const snapshot = world.getSimulationSnapshot();
+			auto shuttle = std::find_if(snapshot.traversalResources.begin(),
+				snapshot.traversalResources.end(), [&](auto const& resource)
+					{ return resource.id == created.traversalResource; });
+			if (shuttle == snapshot.traversalResources.end()) return false;
+			if (shuttle->occupantCount == passengers.size())
+			{
+				std::map<core::AgentId, core::TraversalResourceId> alightingDoors;
+				for (auto const& rider : shuttle->liftAgents)
+					alightingDoors[rider.agent] = rider.shuttleAlightingDoor;
+				bool consistent = true;
+				for (auto const& position : shuttle->shuttleCarriages.front().positions)
+				{
+					if (!position.occupant) { consistent = false; break; }
+					auto passenger = world.lookupAgent(position.occupant).entity;
+					auto door = alightingDoors[position.occupant];
+					auto const relativeX = passenger->getGlobalPosition().x - shuttle->liftPosition;
+					consistent = consistent && std::abs(relativeX - position.position.x) < 0.02f
+						&& ((door == created.doors[2].traversalResource
+							&& relativeX < options.carWidth * 0.5f)
+							|| (door == created.doors[3].traversalResource
+								&& relativeX > options.carWidth * 0.5f));
+				}
+				sawDoorGroupedPlacement = sawDoorGroupedPlacement || consistent;
+			}
+			for (auto const& request : snapshot.traversalRequests)
 			{
 				if (request.edgeType != core::EdgeType::Door
 					|| request.sourceSector != core::SectorId{ (uint64_t)left + 1 }
@@ -4749,12 +4775,12 @@ namespace
 			}
 			if (std::all_of(passengers.begin(), passengers.end(), [&](auto id)
 				{ return world.lookupAgent(id).entity->getSector() == world.getSector(right).get(); }))
-				return sawGrant;
+				return sawGrant && sawDoorGroupedPlacement;
 		}
 		return false;
 	}
 
-	bool shuttlePassengerUsesNearestDisembarkDoor()
+	bool shuttlePassengerUsesBoardingSelectedAlightingDoor()
 	{
 		core::World world("Nearest Shuttle exit", 16, 2);
 		auto left = world.addRoom("Left platform", 0, 0, 0, 4, 1);
@@ -4783,18 +4809,35 @@ namespace
 
 		auto const shuttleSector = core::SectorId{
 			(uint64_t)created.shuttle.sector->getIndex() + 1 };
+		bool selectedWhileOnboard = false;
+		bool stoodInSelectedDoorRange = false;
 		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 8; ++tick)
 		{
 			world.advanceTick();
 			auto snapshot = world.getSimulationSnapshot();
+			auto shuttle = std::find_if(snapshot.traversalResources.begin(),
+				snapshot.traversalResources.end(), [&](auto const& resource)
+					{ return resource.id == created.traversalResource; });
+			if (shuttle == snapshot.traversalResources.end()) return false;
+			for (auto const& rider : shuttle->liftAgents)
+				if (rider.agent == passengerId
+					&& rider.state == core::LiftAgentState::InLift)
+					selectedWhileOnboard = selectedWhileOnboard
+						|| rider.shuttleAlightingDoor == nearestDoor;
+			if (!shuttle->shuttleCarriages.empty())
+				for (auto const& position : shuttle->shuttleCarriages.front().positions)
+					if (position.occupant == passengerId)
+						stoodInSelectedDoorRange = stoodInSelectedDoorRange
+							|| position.position.x > options.carWidth * 0.5f;
 			for (auto const& request : snapshot.traversalRequests)
 				if (request.owner == passengerId && request.edgeType == core::EdgeType::Door
 					&& request.sourceSector == shuttleSector && request.shuttleDoor)
 				{
 					auto const x = passenger->getGlobalPosition().x;
-					auto const nearestDoorIsPhysicallyNearest = std::abs(x - 13.5f)
+					auto const selectedDoorIsPhysicallyNearest = std::abs(x - 13.5f)
 						< std::abs(x - 10.5f);
-					return nearestDoorIsPhysicallyNearest && request.shuttleDoor == nearestDoor;
+					return selectedWhileOnboard && stoodInSelectedDoorRange
+						&& selectedDoorIsPhysicallyNearest && request.shuttleDoor == nearestDoor;
 				}
 		}
 		return false;
@@ -6505,9 +6548,9 @@ int main(int argc, char** argv)
 			std::cerr << "FAIL: Shuttle boarding granted outside the Door crossing band\n";
 			return 1;
 		}
-		if (!shuttlePassengerUsesNearestDisembarkDoor())
+		if (!shuttlePassengerUsesBoardingSelectedAlightingDoor())
 		{
-			std::cerr << "FAIL: Shuttle passenger did not select the nearest carriage Door to exit\n";
+			std::cerr << "FAIL: Shuttle passenger was not placed by its boarding-selected alighting Door\n";
 			return 1;
 		}
 		if (!singleCarriageShuttleUsesTransportJourneyProtocol())

@@ -418,8 +418,8 @@ namespace core
 			AgentId passenger) const;
 
 		// Rebuild each carriage's stable boarding order and walking targets from
-		// its occupants and pending admission reservations. Targets span the usable
-		// carriage width with buffers; assigning them never moves an Agent directly.
+		// its occupants and pending admission reservations. Each alighting Door owns
+		// a sub-range of the carriage; assigning targets never moves an Agent directly.
 		void refreshShuttlePassengerTargets(TraversalResource& resource);
 
 		// Pick and apply the door a waiting passenger boards at `stop`: nearest to
@@ -428,9 +428,13 @@ namespace core
 		bool assignShuttleBoardingDoor(TraversalRequestId requestId,
 			TraversalResource& coordinator, uint32_t stop);
 
-		// Pick and apply the Door nearest an occupant's current position at `stop`,
-		// restricted to Doors serving the passenger's assigned carriage and
-		// destination access sector.
+		// Choose the destination Door after carriage capacity has been reserved.
+		// The choice remains fixed for the occupant's journey.
+		bool assignShuttleAlightingDoor(TraversalRequestId requestId,
+			TraversalResource& coordinator);
+
+		// Apply the Door selected when the occupant boarded, restricted to Doors
+		// serving the passenger's assigned carriage and destination access sector.
 		bool assignShuttleDisembarkDoor(TraversalRequestId requestId,
 			TraversalResource& coordinator, uint32_t stop);
 

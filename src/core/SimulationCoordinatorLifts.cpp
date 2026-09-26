@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -342,7 +343,11 @@ namespace core
 			}
 			refreshQueuePositions(resource);
 		}
-		if (auto request = mWorld.mTraversalRequests.find(requestId)) request->mCapacityPosition = ~0u;
+		if (auto request = mWorld.mTraversalRequests.find(requestId))
+		{
+			request->mCapacityPosition = ~0u;
+			request->mShuttleAlightingDoor = {};
+		}
 	}
 
 	void SimulationCoordinator::requestLiftPassengerSafeExit(AgentId passenger, TraversalFailureReason reason)
@@ -411,10 +416,24 @@ namespace core
 			if (resource.mShuttle)
 			{
 				auto carriage = findShuttlePassengerCarriage(resource, passenger);
+				auto selectedPosition = numeric_limits<float>::quiet_NaN();
+				if (carriage < resource.mShuttleCarriages.size())
+					if (auto selected = resource.mShuttleCarriages[carriage].alightingDoors.find(passenger);
+						selected != resource.mShuttleCarriages[carriage].alightingDoors.end())
+						if (auto original = find_if(resource.mShuttleDoors.begin(), resource.mShuttleDoors.end(),
+							[&](auto const& value) { return value.landingResource == selected->second; });
+							original != resource.mShuttleDoors.end())
+							selectedPosition = original->carriagePosition;
 				auto door = find_if(resource.mShuttleDoors.begin(), resource.mShuttleDoors.end(),
 					[&](auto const& value) { return value.stopIndex == resource.mLiftCurrentStop
-						&& value.carriageIndex == carriage; });
-				if (door != resource.mShuttleDoors.end()) landingId = door->landingResource;
+						&& value.carriageIndex == carriage
+						&& (isnan(selectedPosition)
+							|| abs(value.carriagePosition - selectedPosition) < 0.001f); });
+				if (door != resource.mShuttleDoors.end())
+				{
+					landingId = door->landingResource;
+					resource.mShuttleCarriages[carriage].alightingDoors[passenger] = landingId;
+				}
 			}
 			shared_ptr<const Edge> landingEdge;
 			shared_ptr<const Vertex> source;
@@ -709,8 +728,14 @@ namespace core
 				if (!coordinator.mOccupants[i] && !coordinator.mAdmissionReservations[i])
 				{ position = i; break; }
 			if (position == ~0u) return;
-			coordinator.mAdmissionReservations[position] = requestId;
 			request->mCapacityPosition = position;
+			if (coordinator.mShuttle
+				&& !assignShuttleAlightingDoor(requestId, coordinator))
+			{
+				request->mCapacityPosition = ~0u;
+				return;
+			}
+			coordinator.mAdmissionReservations[position] = requestId;
 			coordinator.mAdmissionQueue.erase(selected);
 			if (coordinator.mShuttle) refreshShuttlePassengerTargets(coordinator);
 		}
@@ -946,8 +971,8 @@ namespace core
 	}
 
 	// Disembarking allocation. The Agent occupies the car and asks to leave it at
-	// the stop the car is standing at. A shuttle passenger is first assigned the
-	// disembark door which serves its assigned carriage, then walks within the
+	// the stop the car is standing at. A shuttle passenger uses the alighting Door
+	// chosen when it boarded, then walks within the
 	// carriage to the shuttle-side node the remaining path selected before the
 	// Door crossing is granted. A lift passenger preserves its standing position
 	// when the ride completes, reserves a crossing lane, and walks at ordinary

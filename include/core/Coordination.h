@@ -258,6 +258,9 @@ namespace core
 		// is redistributed across the carriage.
 		std::vector<AgentId> passengerOrder;
 		std::map<AgentId, Vector2> passengerTargets;
+		// Chosen when boarding commits and retained for the whole journey. Packing
+		// groups passengers by this Door instead of spreading them across the carriage.
+		std::map<AgentId, TraversalResourceId> alightingDoors;
 		TraversalDirection packingDirection{ TraversalDirection::None };
 	};
 
@@ -268,6 +271,8 @@ namespace core
 		uint32_t accessZoneIndex{ ~0u };
 		SectorId locationSector;
 		TraversalResourceId landingResource;
+		// Threshold-centre x coordinate in the coupled Shuttle's local frame.
+		float carriagePosition{ 0.0f };
 	};
 
 	struct QueueLane
@@ -543,6 +548,7 @@ namespace core
 		uint32_t mShuttleCarriage{ ~0u };
 		uint32_t mShuttleAccessZone{ ~0u };
 		TraversalResourceId mShuttleDoor;
+		TraversalResourceId mShuttleAlightingDoor;
 		TraversalDirection mDirection{ TraversalDirection::None };
 		DoorOpenLeaseId mPreparationLease;
 		DoorOpenLeaseId mCrossingLease;

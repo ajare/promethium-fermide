@@ -19,28 +19,21 @@ namespace core
 	using namespace std;
 
 	// Shuttle door assignment moved out of World (ADR 0004 stage 3). The
-	// behaviour is unchanged: the coordinator works on World's traversal-
-	// resource, traversal-request, agent and graph registries through friendship,
-	// calls its own shuttle helpers directly, and calls back through the World
-	// facade (design pattern, not the Facade sector type) for the machinery which
-	// has not moved out of World yet - door queue ownership release and queue
-	// position refresh.
+	// coordinator works on World's traversal-resource, traversal-request, Agent
+	// and graph registries through friendship and calls its own Shuttle helpers.
 	//
-	// A shuttle's passengers are assigned to a specific carriage door at each stop.
-	// Boarding picks the nearest door that can still take the passenger: the door
+	// Boarding picks the nearest Door that can still take the passenger: the Door
 	// must serve the boarding sector, the carriage must have capacity, and - when
-	// the journey leaves the shuttle into a specific access sector - the same
-	// carriage must own a door at the destination stop as well. Disembark chooses
-	// the reachable Door nearest the passenger's current carriage position, using
-	// crossing load and stable resource identity only as distance ties. Either way
-	// the request and the Agent's traversal task are retargeted onto the selected
-	// landing Door resource.
+	// the journey leaves the Shuttle into a specific access sector - the same
+	// carriage must own a Door at the destination stop as well. Once capacity is
+	// reserved, the alighting Door nearest that slot is retained for the journey;
+	// disembarking applies that choice rather than selecting a Door after the ride.
 	//
-	// Each carriage also retains passenger boarding order. Occupants and pending
-	// reservations define a projected count whose walking targets span the usable
-	// width from the leading to trailing buffered bounds. Existing passengers reach
-	// those targets before another Door crossing is granted; no spacing update sets
-	// an Agent position directly.
+	// Each carriage retains passenger boarding order. Occupants and pending
+	// reservations define projected counts per alighting Door. Each group spans its
+	// Door's buffered sub-range of the carriage. Existing passengers reach those
+	// targets before another Door crossing is granted; no spacing update sets an
+	// Agent position directly.
 	//
 	// The static shuttleDoorOffsets() helper which expands a carriage's door mask
 	// into the cells its doors occupy travels with this family: it is the origin of
@@ -76,14 +69,11 @@ namespace core
 		for (auto& carriage : resource.mShuttleCarriages)
 		{
 			map<AgentId, uint32_t> activeSlots;
-			uint32_t reservationCount = 0;
 			for (uint32_t i = 0; i < carriage.capacity; ++i)
 			{
 				auto const slot = carriage.firstCapacityPosition + i;
 				if (slot < resource.mOccupants.size() && resource.mOccupants[slot])
 					activeSlots.emplace(resource.mOccupants[slot], slot);
-				if (slot < resource.mAdmissionReservations.size()
-					&& resource.mAdmissionReservations[slot]) ++reservationCount;
 			}
 
 			carriage.passengerOrder.erase(remove_if(carriage.passengerOrder.begin(),
@@ -133,20 +123,64 @@ namespace core
 			}
 
 			auto const carriageStart = carriage.index * (carriageWidth + 1.0f);
-			auto const passengerCount = carriage.passengerOrder.size();
-			auto const targets = packOccupants(passengerCount, reservationCount,
-				{ carriageStart + halfAgentWidth, carriageStart + carriageWidth - halfAgentWidth },
-				CORE_AGENT_MAX_WIDTH, CORE_SHUTTLE_AGENT_BUFFER,
-				carriage.packingDirection == TraversalDirection::Descending
-					? OccupantPackingOrder::Forward : OccupantPackingOrder::Reverse,
-				OccupantPackingLayout::Buffered);
-			for (size_t rank = 0; rank < passengerCount; ++rank)
+			for (auto door = carriage.alightingDoors.begin(); door != carriage.alightingDoors.end();)
+				if (!activeSlots.contains(door->first)) door = carriage.alightingDoors.erase(door);
+				else ++door;
+
+			// Pending boarders already have an alighting Door, so their space is
+			// projected in that Door's group before they enter. Committed occupants
+			// retain the choice made by their boarding request.
+			map<TraversalResourceId, uint32_t> groupReservations;
+			for (uint32_t i = 0; i < carriage.capacity; ++i)
 			{
-				auto const slot = activeSlots.at(carriage.passengerOrder[rank]);
-				auto const y = slot < resource.mCapacityPositions.size()
-					? resource.mCapacityPositions[slot].y : 0.0f;
-				carriage.passengerTargets[carriage.passengerOrder[rank]] = {
-					targets[rank], y };
+				auto const slot = carriage.firstCapacityPosition + i;
+				if (slot >= resource.mAdmissionReservations.size()) continue;
+				auto request = mWorld.mTraversalRequests.find(resource.mAdmissionReservations[slot]);
+				if (request && request->mShuttleAlightingDoor)
+					++groupReservations[request->mShuttleAlightingDoor];
+			}
+
+			map<TraversalResourceId, vector<AgentId>> groups;
+			for (auto passenger : carriage.passengerOrder)
+				if (auto door = carriage.alightingDoors.find(passenger);
+					door != carriage.alightingDoors.end()) groups[door->second].push_back(passenger);
+
+			for (auto const& [doorId, passengers] : groups)
+			{
+				auto selectedDoor = find_if(resource.mShuttleDoors.begin(), resource.mShuttleDoors.end(),
+					[&](auto const& door) { return door.landingResource == doorId; });
+				if (selectedDoor == resource.mShuttleDoors.end()) continue;
+				vector<float> doorPositions;
+				for (auto const& door : resource.mShuttleDoors)
+					if (door.carriageIndex == carriage.index
+						&& door.stopIndex == selectedDoor->stopIndex)
+						doorPositions.push_back(door.carriagePosition);
+				sort(doorPositions.begin(), doorPositions.end());
+				doorPositions.erase(unique(doorPositions.begin(), doorPositions.end()), doorPositions.end());
+				auto physicalDoor = lower_bound(doorPositions.begin(), doorPositions.end(),
+					selectedDoor->carriagePosition);
+				if (physicalDoor == doorPositions.end()) continue;
+
+				auto first = carriageStart + halfAgentWidth;
+				auto last = carriageStart + carriageWidth - halfAgentWidth;
+				if (physicalDoor != doorPositions.begin())
+					first = (*prev(physicalDoor) + *physicalDoor) * 0.5f + halfAgentWidth;
+				if (next(physicalDoor) != doorPositions.end())
+					last = (*physicalDoor + *next(physicalDoor)) * 0.5f - halfAgentWidth;
+				if (last < first) first = last = selectedDoor->carriagePosition;
+
+				auto const targets = packOccupants(passengers.size(), groupReservations[doorId],
+					{ first, last }, CORE_AGENT_MAX_WIDTH, CORE_SHUTTLE_AGENT_BUFFER,
+					carriage.packingDirection == TraversalDirection::Descending
+						? OccupantPackingOrder::Forward : OccupantPackingOrder::Reverse,
+					OccupantPackingLayout::Buffered);
+				for (size_t rank = 0; rank < passengers.size(); ++rank)
+				{
+					auto const slot = activeSlots.at(passengers[rank]);
+					auto const y = slot < resource.mCapacityPositions.size()
+						? resource.mCapacityPositions[slot].y : 0.0f;
+					carriage.passengerTargets[passengers[rank]] = { targets[rank], y };
+				}
 			}
 		}
 	}
@@ -300,6 +334,57 @@ namespace core
 		return true;
 	}
 
+	bool SimulationCoordinator::assignShuttleAlightingDoor(TraversalRequestId requestId,
+		TraversalResource& coordinator)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		auto request = mWorld.mTraversalRequests.find(requestId);
+		auto agent = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
+		if (!request || !agent || request->mShuttleCarriage >= coordinator.mShuttleCarriages.size()
+			|| request->mCapacityPosition >= coordinator.mCapacityPositions.size()) return false;
+		if (request->mShuttleAlightingDoor) return true;
+		auto intent = coordinator.mLiftTripIntents.find(request->mOwner);
+		if (intent == coordinator.mLiftTripIntents.end()) return false;
+
+		SectorId destinationSector;
+		bool passedRide = false;
+		if (agent->mPath.path)
+			for (uint32_t i = agent->mPath.targetNode + 1; i < agent->mPath.path->nodes.size(); ++i)
+			{
+				auto const& node = agent->mPath.path->nodes[i];
+				if (!node.edge || !node.targetVertex) continue;
+				if (node.edge->getType() == EdgeType::Shuttle) { passedRide = true; continue; }
+				if (passedRide && node.edge->getType() == EdgeType::Door)
+				{
+					destinationSector = SectorId{
+						(uint64_t)node.targetVertex->getSector()->getIndex() + 1 };
+					break;
+				}
+			}
+
+		auto const slotX = coordinator.mCapacityPositions[request->mCapacityPosition].x;
+		ShuttleDoor const* selected = nullptr;
+		float selectedDistance = 0.0f;
+		for (auto const& door : coordinator.mShuttleDoors)
+		{
+			if (door.stopIndex != intent->second.destinationStop
+				|| door.carriageIndex != request->mShuttleCarriage
+				|| (destinationSector && door.locationSector != destinationSector)) continue;
+			auto const distance = abs(slotX - door.carriagePosition);
+			if (!selected || distance < selectedDistance - 0.001f
+				|| (abs(distance - selectedDistance) <= 0.001f
+					&& (coordinator.mLiftDirection == TraversalDirection::Ascending
+						? door.carriagePosition > selected->carriagePosition
+						: coordinator.mLiftDirection == TraversalDirection::Descending
+							? door.carriagePosition < selected->carriagePosition
+							: door.landingResource < selected->landingResource)))
+			{ selected = &door; selectedDistance = distance; }
+		}
+		if (!selected) return false;
+		request->mShuttleAlightingDoor = selected->landingResource;
+		return true;
+	}
+
 	bool SimulationCoordinator::assignShuttleDisembarkDoor(TraversalRequestId requestId,
 		TraversalResource& coordinator, uint32_t stop)
 	{
@@ -307,41 +392,22 @@ namespace core
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request) return false;
 		auto carriage = findShuttlePassengerCarriage(coordinator, request->mOwner);
-		if (carriage == ~0u) return false;
-
-		ShuttleDoor const* selected = nullptr;
-		float selectedDistance = 0.0f;
-		uint32_t selectedLoad = 0;
-		auto passenger = mWorld.mAgents.find(request->mOwner);
-		if (!passenger) return false;
-		for (auto const& door : coordinator.mShuttleDoors)
-		{
-			if (door.stopIndex != stop || door.carriageIndex != carriage
-				|| door.locationSector != request->mDestinationSector) continue;
-			auto landing = mWorld.mTraversalResources.find(door.landingResource);
-			if (!landing) continue;
-			auto load = (uint32_t)count_if(landing->mCrossingOwners.begin(),
-				landing->mCrossingOwners.end(), [](auto owner) { return (bool)owner; });
-			Vector2 interior;
-			bool foundInterior = false;
-			for (auto const& edge : mWorld.mGraph->getEdges())
+		if (carriage == ~0u || carriage >= coordinator.mShuttleCarriages.size()) return false;
+		auto selectedId = coordinator.mShuttleCarriages[carriage].alightingDoors.find(request->mOwner);
+		if (selectedId == coordinator.mShuttleCarriages[carriage].alightingDoors.end()) return false;
+		auto original = find_if(coordinator.mShuttleDoors.begin(), coordinator.mShuttleDoors.end(),
+			[&](auto const& door) { return door.landingResource == selectedId->second; });
+		if (original == coordinator.mShuttleDoors.end()) return false;
+		auto selected = find_if(coordinator.mShuttleDoors.begin(), coordinator.mShuttleDoors.end(),
+			[&](auto const& door)
 			{
-				if (edge->getTraversalResourceId() != door.landingResource) continue;
-				for (uint32_t vertex = 0; vertex < 2; ++vertex)
-					if (SectorId{ (uint64_t)edge->getVertex(vertex)->getSector()->getIndex() + 1 }
-						== coordinator.mLiftSector)
-					{ interior = edge->getVertex(vertex)->getPosition(); foundInterior = true; break; }
-				if (foundInterior) break;
-			}
-			if (!foundInterior) continue;
-			auto distance = passenger->getGlobalPosition().distanceTo(interior);
-			if (!selected || distance < selectedDistance - 0.001f
-				|| (abs(distance - selectedDistance) <= 0.001f
-					&& (load < selectedLoad || (load == selectedLoad
-						&& door.landingResource < selected->landingResource))))
-			{ selected = &door; selectedDistance = distance; selectedLoad = load; }
-		}
-		return selected && retargetShuttleDoorTraversal(requestId, coordinator, *selected);
+				return door.stopIndex == stop && door.carriageIndex == carriage
+					&& door.locationSector == request->mDestinationSector
+					&& abs(door.carriagePosition - original->carriagePosition) < 0.001f;
+			});
+		if (selected == coordinator.mShuttleDoors.end()) return false;
+		selectedId->second = selected->landingResource;
+		return retargetShuttleDoorTraversal(requestId, coordinator, *selected);
 	}
 
 } // core

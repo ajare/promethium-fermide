@@ -115,6 +115,7 @@ namespace core
 		LiftAgentState state{ LiftAgentState::QueuingAtDoor };
 		uint32_t targetStop{ ~0u };
 		float targetLevel{ 0.0f };
+		TraversalResourceId shuttleAlightingDoor;
 	};
 
 	struct ShuttleCarriageSnapshot
@@ -248,6 +249,7 @@ namespace core
 		uint32_t shuttleCarriage{ ~0u };
 		uint32_t shuttleAccessZone{ ~0u };
 		TraversalResourceId shuttleDoor{};
+		TraversalResourceId shuttleAlightingDoor{};
 		TraversalDirection direction{ TraversalDirection::None };
 		uint64_t positionAssignedAtTick{ 0 };
 		uint64_t lastPositionProgressTick{ 0 };

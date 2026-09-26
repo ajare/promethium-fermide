@@ -389,6 +389,10 @@ namespace core
 					|| lift->mOccupants[position]) return false;
 				lift->mAdmissionReservations[position] = {};
 				lift->mOccupants[position] = owner;
+				if (lift->mShuttle && request->mShuttleCarriage < lift->mShuttleCarriages.size()
+					&& request->mShuttleAlightingDoor)
+					lift->mShuttleCarriages[request->mShuttleCarriage].alightingDoors[owner]
+						= request->mShuttleAlightingDoor;
 				lift->mLiftAdmissionReservation = {};
 				if (lift->mLift)
 				{
@@ -437,6 +441,9 @@ namespace core
 				&& request->mDestinationSector != lift->mLiftSector)
 			{
 				for (auto& occupant : lift->mOccupants) if (occupant == owner) occupant = {};
+				if (lift->mShuttle)
+					for (auto& carriage : lift->mShuttleCarriages)
+						carriage.alightingDoors.erase(owner);
 				auto destinationIt = lift->mLiftPassengerDestinations.find(owner);
 				if (destinationIt != lift->mLiftPassengerDestinations.end())
 				{
