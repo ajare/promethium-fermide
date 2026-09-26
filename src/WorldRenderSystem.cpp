@@ -1,4 +1,5 @@
 #include "WorldRenderSystem.h"
+#include "WorldRenderSlotAllocator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -297,7 +298,7 @@ namespace
 				{
 					if (segment.kind == Segment::Kind::Lines)
 						setNativeLineWidth(*mRenderSystem, segment.lineWidth);
-					mSlots[index].sceneModel->render({});
+					mSlots[mSegmentSlots[index]].sceneModel->render({});
 					mRenderSystem->flushVertexBuffers();
 				}
 				mRenderSystem->popClipRectangle();
@@ -434,24 +435,30 @@ namespace
 
 		void prepareSlots(std::vector<Segment> const& segments, ImVec2 origin)
 		{
+			mSlotAllocator.beginFrame();
+			mSegmentSlots.resize(segments.size());
+			for (auto& slot : mSlots)
+				if (slot.sceneModel) slot.sceneModel->setVisible(false);
 			for (std::size_t index = 0; index < segments.size(); ++index)
 			{
-				if (index >= mSlots.size()) mSlots.emplace_back();
-				auto& slot = mSlots[index];
 				auto const& segment = segments[index];
-				if (segment.kind == Segment::Kind::Text)
+				if (segment.kind == Segment::Kind::Text) continue;
+				using Kind = WorldRenderSlotAllocator::Kind;
+				auto kind = Kind::SolidTriangles;
+				if (segment.kind == Segment::Kind::Lines) kind = Kind::Lines;
+				else if (segment.texture == WorldDrawList::Texture::SectorAtlas)
+					kind = Kind::SectorTriangles;
+				else if (segment.texture == WorldDrawList::Texture::ObjectAtlas)
+					kind = Kind::ObjectTriangles;
+				auto const slotIndex = mSlotAllocator.acquire(kind);
+				mSegmentSlots[index] = slotIndex;
+				if (slotIndex >= mSlots.size()) mSlots.emplace_back();
+				auto& slot = mSlots[slotIndex];
+				if (!slot.triangleRenderer && !slot.lineRenderer)
 				{
-					remove(slot);
-					slot.kind = Segment::Kind::Text;
-					continue;
-				}
-				if ((!slot.triangleRenderer && !slot.lineRenderer)
-					|| slot.kind != segment.kind || slot.texture != segment.texture)
-				{
-					remove(slot);
 					slot.kind = segment.kind;
 					slot.texture = segment.texture;
-					create(slot, index);
+					create(slot, slotIndex);
 				}
 				if (slot.triangles)
 				{
@@ -465,10 +472,6 @@ namespace
 					slot.lineRenderer->update();
 					slot.sceneModel->setVisible(true);
 				}
-			}
-			for (std::size_t index = segments.size(); index < mSlots.size(); ++index)
-			{
-				if (mSlots[index].sceneModel) mSlots[index].sceneModel->setVisible(false);
 			}
 		}
 
@@ -552,6 +555,9 @@ namespace
 		mpp::ScenePtr mScene;
 		mpp::RenderTargetPtr mTarget;
 		std::vector<Slot> mSlots;
+		WorldRenderSlotAllocator mSlotAllocator;
+		// Draw in command-stream order, independently of pooled batch identity.
+		std::vector<std::size_t> mSegmentSlots;
 	};
 
 	std::unique_ptr<WorldRenderSystem> gSystem;
