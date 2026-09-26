@@ -48,6 +48,7 @@
 
 void runSerializationSmokeChecks();
 void runSimulationObservationSmokeChecks();
+void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
 void runPausePositionSmokeChecks();
 void runAgentGroupSmokeChecks();
@@ -6093,6 +6094,11 @@ int main(int argc, char** argv)
 		{
 			if (std::string(argv[2]) == "minimal") runPausePositionSmokeChecks();
 			else runPausePositionRepro(argv[2]);
+			return 0;
+		}
+		if (argc == 3 && std::string(argv[1]) == "--lift-stall-repro")
+		{
+			runLiftBoardingRepro(argv[2]);
 			return 0;
 		}
 		if (graphicsStartupOnly)

@@ -282,6 +282,10 @@ namespace core
 			resource.mLiftDirection = desired;
 			return true;
 		}
+		// An admitted boarder commits this run's direction before its destination
+		// becomes an onboard stop request. Reversing now strands its reservation.
+		if (any_of(resource.mAdmissionReservations.begin(), resource.mAdmissionReservations.end(),
+			[](auto reservation) { return (bool)reservation; })) return false;
 		// Reverse at this stop only after LOOK has exhausted demand ahead.
 		for (uint32_t stop = 0; stop < resource.mLiftStops.size(); ++stop)
 		{

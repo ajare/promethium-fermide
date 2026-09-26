@@ -446,7 +446,22 @@ namespace core
 					}
 
 					auto predecessor = side < 0 ? left : side > 0 ? right : nullptr;
-					if (!overflow && predecessor)
+					// A Lift boarder with reserved car capacity has already passed
+					// directional FIFO admission. Let it reach its exact queue position:
+					// an earlier waiter for the opposite direction must not hold it
+					// back forever while its capacity reservation prevents departure.
+					bool admittedLiftBoarder = false;
+					if (journey && journey->mLift && predecessor && request->mCapacityPosition != ~0u)
+					{
+						auto intent = journey->mLiftTripIntents.find(getAgentId(predecessor));
+						if (intent != journey->mLiftTripIntents.end())
+						{
+							auto const direction = intent->second.destinationStop > intent->second.originStop
+								? TraversalDirection::Ascending : TraversalDirection::Descending;
+							admittedLiftBoarder = direction != journey->mLiftDirection;
+						}
+					}
+					if (!overflow && predecessor && !admittedLiftBoarder)
 					{
 						// Also respect a predecessor walking outwards to form its
 						// line: its target may be farther back than its current body.

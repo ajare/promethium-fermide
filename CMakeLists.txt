@@ -361,6 +361,7 @@ add_executable(prometheum-fermide-headless
     src/headless/SerializationSmokeChecks.cpp
     src/headless/SimulationObservationSmokeChecks.cpp
     src/headless/PausePositionSmokeChecks.cpp
+    src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/ShuttleDoorQuerySmokeChecks.cpp
     src/headless/ShuttleDoorRenderSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
@@ -490,6 +491,8 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
+    add_test(NAME lift-boarding-regression COMMAND prometheum-fermide-headless
+        --lift-stall-repro "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
     add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 
     if(PF_BUILD_GUI)
