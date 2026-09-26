@@ -481,6 +481,8 @@ namespace core
 				&& request.mQueuePosition < resource->mQueueLanes[request.mQueueApproach].positions.size())
 			{
 				result.queuePositionTarget = resource->mQueueLanes[request.mQueueApproach].positions[request.mQueuePosition];
+				result.queueStandingTarget = request.mHasQueueStandingTarget
+					? request.mQueueStandingTarget : result.queuePositionTarget;
 			}
 		}
 		return result;

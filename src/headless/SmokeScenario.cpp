@@ -1754,6 +1754,101 @@ namespace
 			&& world.getSimulationSnapshot().traversalResources.front().crossingOwner == core::TraversalRequestId{};
 	}
 
+	// #172: start with separated Agents (arbitrary overlapping spawn positions
+	// cannot be repaired instantaneously without teleporting). Check every tick,
+	// not just the settled reservation geometry, through the complete service.
+	bool queueChainsFollowWithoutCompressing(float separation, int direction,
+		std::vector<uint32_t>& trace)
+	{
+		core::World world("Following queue", 16, 2);
+		auto fore = world.addRoom("Fore", 0, 0, 0, 15, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 15, 1);
+		core::World::CreateDoorOptions options;
+		options.activationMode = core::DoorActivationMode::Automatic;
+		world.addSectorDoor(0, 0, 7, options);
+		auto policy = world.getTraversalGeometryPolicy();
+		policy.minimumQueueSeparation = separation;
+		world.setTraversalGeometryPolicy(policy);
+		world.finishBuild();
+		auto edge = *std::find_if(world.getGraph()->getEdges().begin(), world.getGraph()->getEdges().end(),
+			[](auto const& candidate) { return candidate->getType() == core::EdgeType::Door; });
+		auto source = edge->getVertex(0)->getSector()->getIndex() == fore ? edge->getVertex(0) : edge->getVertex(1);
+		auto destination = edge->getOtherVertex(source);
+		std::vector<core::AgentId> ids;
+		for (auto sector : { fore, back })
+			for (int i = 0; i < 4; ++i)
+			{
+				auto id = world.createAgent("Waiter", sector, 0, 7.5f + direction * i * (separation + 0.1f));
+				ids.push_back(id);
+				world.lookupAgent(id).entity->setPath(sector == fore
+					? twoNodePath(source, destination, edge) : twoNodePath(destination, source, edge), true);
+			}
+		bool sawChain = false;
+		bool sawDelayedAdvance = false;
+		std::map<core::AgentId, core::Vector2> previousPositions;
+		for (auto id : ids) previousPositions[id] = world.lookupAgent(id).entity->getGlobalPosition();
+		std::map<core::AgentId, core::Vector2> previousTargets;
+		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 3; ++tick)
+		{
+			world.advanceTick();
+			auto snapshot = world.getSimulationSnapshot();
+			std::map<core::AgentId, core::Vector2> targets;
+			for (auto const& lane : snapshot.traversalResources.front().queueLanes)
+			{
+				std::vector<core::TraversalRequestSnapshot const*> waiters;
+				for (auto const& request : snapshot.traversalRequests)
+					if (request.hasQueuePosition && request.sourceSector == lane.sector)
+						waiters.push_back(&request);
+				std::sort(waiters.begin(), waiters.end(), [](auto a, auto b) { return a->queueTicket < b->queueTicket; });
+				sawChain = sawChain || waiters.size() >= 3;
+				for (size_t i = 0; i < waiters.size(); ++i)
+				{
+					auto const& request = *waiters[i];
+					targets[request.owner] = request.queueStandingTarget;
+					if (i == 0) continue;
+					auto const& ahead = *waiters[i - 1];
+					if (direction * (request.queueStandingTarget.x - ahead.queueStandingTarget.x)
+						< separation - 0.001f) return false;
+					auto agent = world.lookupAgent(request.owner).entity;
+					auto leader = world.lookupAgent(ahead.owner).entity;
+					if (direction * (agent->getGlobalPosition().x - leader->getGlobalPosition().x)
+						< separation - 0.001f)
+					{
+						std::cerr << "Queue gap at tick " << tick << ", separation " << separation
+							<< ", direction " << direction << ", Agent " << request.owner.value
+							<< " x=" << agent->getGlobalPosition().x << ", leader x="
+							<< leader->getGlobalPosition().x << '\n';
+						return false;
+					}
+					if (i == 1 && ahead.owner != ids[0] && ahead.owner != ids[4]
+						&& previousTargets.contains(ahead.owner) && previousTargets.contains(request.owner)
+						&& ahead.queueStandingTarget.distanceTo(previousTargets[ahead.owner]) > 0.001f
+						&& request.queueStandingTarget.distanceTo(previousTargets[request.owner]) <= 0.001f)
+						sawDelayedAdvance = true;
+				}
+			}
+			previousTargets = std::move(targets);
+			bool finished = true;
+			for (auto id : ids)
+			{
+				auto agent = world.lookupAgent(id).entity;
+				if (agent->getGlobalPosition().distanceTo(previousPositions[id])
+					> agent->getWalkSpeed() * core::World::getFixedTimestep() + 0.001f) return false;
+				previousPositions[id] = agent->getGlobalPosition();
+				trace.push_back(std::bit_cast<uint32_t>(agent->getGlobalPosition().x));
+				trace.push_back((uint32_t)agent->getState());
+				finished = finished && agent->getState() == core::Agent::State::Idle;
+			}
+			if (finished)
+			{
+				if (!sawChain || !sawDelayedAdvance)
+					std::cerr << "Queue observations: chain=" << sawChain << ", delayed=" << sawDelayedAdvance << '\n';
+				return sawChain && sawDelayedAdvance;
+			}
+		}
+		return false;
+	}
+
 	bool queuePositionsPreferObjectProximityThenAgentProximity()
 	{
 		core::World world("Nearest queue position", 8, 2);
@@ -5824,6 +5919,22 @@ int main(int argc, char** argv)
 			std::cerr << "FAIL: two-sided door queues were not separated, FIFO, or fair\n";
 			return 1;
 		}
+		for (float separation : { (float)CORE_DOOR_QUEUE_STOP_WIDTH, 0.8f })
+			for (int direction : { -1, 1 })
+			{
+				std::vector<uint32_t> first, repeated;
+				if (!queueChainsFollowWithoutCompressing(separation, direction, first)
+					|| !queueChainsFollowWithoutCompressing(separation, direction, repeated)
+					|| first != repeated)
+				{
+					std::cerr << "FAIL: queue chain spacing, staggered advancement or determinism\n";
+					return false;
+				}
+				uint64_t digest = 1469598103934665603ull;
+				for (auto value : first) digestValue(digest, value);
+				std::cout << "QUEUE: separation=" << separation << ", direction=" << direction
+					<< ", trace digest=" << digest << '\n';
+			}
 		if (!queuePositionsPreferObjectProximityThenAgentProximity())
 		{
 			std::cerr << "FAIL: queue positions were not selected by object then agent proximity\n";

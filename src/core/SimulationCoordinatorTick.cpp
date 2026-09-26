@@ -491,6 +491,8 @@ namespace core
 			break;
 
 		case SimulationPhase::Movement:
+			// Sample every predecessor before any Agent moves this tick.
+			updateQueueStandingTargets();
 			for (auto const& [id, agent] : mWorld.mAgents.entries())
 			{
 				(void)id;

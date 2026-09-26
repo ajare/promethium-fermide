@@ -474,6 +474,7 @@ namespace core
 		// which is preparing, or whose last position timed out, keeps its logical
 		// place while releasing the scarce physical one.
 		void refreshQueuePositions(TraversalResource& resource);
+		void updateQueueStandingTargets();
 
 		// The per-tick progress pass. A permit whose Agent stops closing on its
 		// destination expires; a waiting Agent which stops reaching its assigned

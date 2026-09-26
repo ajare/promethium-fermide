@@ -526,6 +526,9 @@ namespace core
 		Vector2 mQueueSelectionPosition;
 		int mPreferredQueueSide{ 0 };
 		bool mHasHeldQueuePosition{ false };
+		// Physical following target; never used for ticket order or admission.
+		Vector2 mQueueStandingTarget;
+		bool mHasQueueStandingTarget{ false };
 		uint64_t mPositionAssignedAtTick{ 0 };
 		uint64_t mLastPositionProgressTick{ 0 };
 		float mBestPositionDistance{ 0.0f };

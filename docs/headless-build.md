@@ -23,6 +23,38 @@ The graphical application continues to call `World::update(elapsedSeconds)`. Tha
 
 Runtime structural changes use `pauseSimulation()`, the existing construction/configuration APIs, `rebuildTraversalTopology()`, and `resumeSimulation()`. Pausing freezes tick advancement, cancels active edge transactions at a safe source boundary, releases their queues, positions, permits, leases, and admission reservations, and retains destination intent. Graph construction and traversal-resource validation happen against a candidate graph; only a successful candidate replaces the active graph. A failed candidate leaves the simulation paused, keeps the previous graph installed, and exposes its diagnostic through the snapshot and `getTopologyDiagnostic()`. Successful rebuilds replan retained destinations against the replacement graph. Structural APIs reject edits outside this paused protocol after the initial build.
 
+## Follow-the-leader queues (#172)
+
+Reserved queue positions and ticket/admission order are unchanged. Before the
+Movement phase, each reserved waiter receives a physical standing target behind
+its predecessor's pre-movement position. Left and right approaches are separate;
+a waiter at the Threshold anchors both. Separation is at least
+`CORE_DOOR_QUEUE_STOP_WIDTH`, or `minimumQueueSeparation` when larger. Forward
+retargeting uses `advanceStepThreshold`; a promoted head always targets its exact
+reservation so Lift landing arrival remains possible. Agents walk to these
+targets; no positions are assigned directly. Approaching Agents join behind the
+physical tail rather than its already-compacted reservation. Waiting at a chain
+target does not count as a local-goal timeout.
+
+Request snapshots distinguish `queuePositionTarget` (reservation) from
+`queueStandingTarget` (physical walk target). Unreserved overflow remains outside
+this ticket. Arbitrarily overlapping initial spawns still need time to walk apart.
+
+`queueChainsFollowWithoutCompressing` checks actual and target separation every
+tick of a complete two-sided Door service, delayed advancement after serving the
+head, walk-speed bounds, and identical repeated traces. The existing fairness,
+cancellation, timeout, Lift boarding and Shuttle checks also remain enabled.
+The suite's existing determinism digests are generated from paired runs, not
+stored golden files; they were deliberately rerun with the new geometry. New
+queue trace digests (positions and states every tick, Linux/GCC) are recorded here:
+
+| Separation | Approach direction | Trace digest |
+| --- | --- | --- |
+| 0.5 | -1 | 14189215762838587989 |
+| 0.5 | +1 | 3620784974342482884 |
+| 0.8 | -1 | 14905572694293987727 |
+| 0.8 | +1 | 18193442453073740958 |
+
 ## Prerequisites
 
 - Windows x64

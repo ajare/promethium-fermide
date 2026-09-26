@@ -173,6 +173,30 @@ namespace core
 			else availablePosition = min(availablePosition, queuePosition.x);
 		}
 
+		// The physical tail can lag behind compact reservations. Join behind
+		// its body/standing target, not inside the gap it has yet to close.
+		if (hasOccupiedPosition)
+		{
+			auto const separation = max((float)CORE_DOOR_QUEUE_STOP_WIDTH,
+				mWorld.mTraversalGeometryPolicy.minimumQueueSeparation);
+			for (auto requestId : lane->queue)
+			{
+				auto request = mWorld.mTraversalRequests.find(requestId);
+				if (!request || request->mQueuePosition >= lane->positions.size()) continue;
+				auto const reserved = lane->positions[request->mQueuePosition];
+				if (direction * (reserved.x - lane->origin.x) > 0.001f) continue;
+				auto waiter = mWorld.mAgents.find(request->mOwner);
+				if (!waiter) continue;
+				auto tail = waiter->getGlobalPosition().x;
+				if (request->mHasQueueStandingTarget)
+					tail = direction > 0 ? min(tail, request->mQueueStandingTarget.x)
+						: max(tail, request->mQueueStandingTarget.x);
+				auto const boundary = tail - direction * separation;
+				availablePosition = direction > 0 ? min(availablePosition, boundary)
+					: max(availablePosition, boundary);
+			}
+		}
+
 		bool ladderCannotAdmitImmediately = false;
 		if (resource->mLadder)
 		{
@@ -298,6 +322,65 @@ namespace core
 		}
 	}
 
+	void SimulationCoordinator::updateQueueStandingTargets()
+	{
+		// Reservations and tickets remain the allocator's concern. Only the walk
+		// target follows the predecessor, using a pre-movement sample so Agent
+		// iteration order cannot make an advance ripple through the whole line.
+		auto const& policy = mWorld.mTraversalGeometryPolicy;
+		auto const separation = max((float)CORE_DOOR_QUEUE_STOP_WIDTH,
+			policy.minimumQueueSeparation);
+		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)id;
+			for (auto const& lane : resource->mQueueLanes)
+			{
+				Agent* left = nullptr;
+				Agent* right = nullptr;
+				for (auto requestId : lane.queue)
+				{
+					auto request = mWorld.mTraversalRequests.find(requestId);
+					if (!request || request->mState != TraversalRequestState::Pending) continue;
+					if (request->mQueuePosition >= lane.positions.size())
+					{
+						request->mHasQueueStandingTarget = false;
+						continue;
+					}
+					auto agent = mWorld.mAgents.find(request->mOwner);
+					if (!agent || resource->mOpenPlatformMissedBoarding.contains(requestId)) continue;
+					auto target = lane.positions[request->mQueuePosition];
+					int const side = target.x < lane.origin.x - 0.001f ? -1
+						: target.x > lane.origin.x + 0.001f ? 1 : 0;
+					auto predecessor = side < 0 ? left : side > 0 ? right : nullptr;
+					if (predecessor)
+					{
+						// Also respect a predecessor walking outwards to form its
+						// line: its target may be farther back than its current body.
+						auto boundary = predecessor->getGlobalPosition().x;
+						if (predecessor->mTraversalLocalGoal)
+							boundary = side < 0 ? min(boundary, predecessor->mTraversalLocalGoal->x)
+								: max(boundary, predecessor->mTraversalLocalGoal->x);
+						boundary += side * separation;
+						target.x = side < 0 ? min(target.x, boundary) : max(target.x, boundary);
+						if (request->mHasQueueStandingTarget)
+						{
+							auto const advance = side * (request->mQueueStandingTarget.x - target.x);
+							if (advance > 0.0f && advance <= policy.advanceStepThreshold)
+								target = request->mQueueStandingTarget;
+						}
+					}
+					// The head always aims at the exact reservation, including the
+					// final sub-threshold step required by Lift boarding predicates.
+					request->mQueueStandingTarget = target;
+					request->mHasQueueStandingTarget = true;
+					agent->mTraversalLocalGoal = target;
+					if (side <= 0) left = agent;
+					if (side >= 0) right = agent;
+				}
+			}
+		}
+	}
+
 	void SimulationCoordinator::updateTraversalProgressAndTimeouts()
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -347,8 +430,16 @@ namespace core
 					}
 					auto agent = mWorld.mAgents.find(request->mOwner);
 					if (!agent || request->mQueuePosition >= lane.positions.size()) continue;
-					auto distance = agent->getGlobalPosition().distanceTo(lane.positions[request->mQueuePosition]);
-					if (distance + 0.001f < request->mBestPositionDistance)
+					auto distance = agent->getGlobalPosition().distanceTo(request->mHasQueueStandingTarget
+						? request->mQueueStandingTarget : lane.positions[request->mQueuePosition]);
+					// Standing behind a predecessor is progress, not an unreachable
+					// reservation. A later advance starts a fresh progress window.
+					if (distance <= 0.001f)
+					{
+						request->mLastPositionProgressTick = mWorld.mSimulationTick;
+						request->mBestPositionDistance = numeric_limits<float>::max();
+					}
+					else if (distance + 0.001f < request->mBestPositionDistance)
 					{
 						request->mBestPositionDistance = distance;
 						request->mLastPositionProgressTick = mWorld.mSimulationTick;

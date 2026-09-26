@@ -238,6 +238,8 @@ namespace core
 		bool hasQueuePosition{ false };
 		uint32_t queuePosition{ ~0u };
 		Vector2 queuePositionTarget{};
+		// Physical walk target, distinct from the admission reservation above.
+		Vector2 queueStandingTarget{};
 		bool hasCrossingLane{ false };
 		uint32_t crossingLane{ ~0u };
 		bool hasCapacityPosition{ false };
