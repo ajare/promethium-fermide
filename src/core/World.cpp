@@ -3391,17 +3391,14 @@ namespace core
 		liftResource->mLiftCurrentStop = options.initialStop;
 		liftResource->mLiftPosition = liftStops[options.initialStop].globalPosition;
 		lift->setCoordinatedPosition(liftResource->mLiftPosition);
-		// Pack the full capacity range, including empty slots, with zero clearance
-		// to retain the car's abutting positions. These targets are authoritative for
-		// both recorded occupancy and the car-side boarding lanes below.
-		// Validation above guarantees agent-safe separation for every declared slot.
-		auto standingWidth = CORE_AGENT_MAX_WIDTH * options.capacity;
-		auto standingStart = x + (options.cellsWide - standingWidth) * 0.5f
-			+ CORE_AGENT_MAX_WIDTH * 0.5f - liftTransit->getPosition().x;
+		// Pack every authored capacity slot inside the car. The World's desired
+		// clearance is used where it fits; compact packing reduces only the gap when
+		// the authored width is tighter, without reducing capacity or leaving the car.
+		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
 		auto const occupantTargets = packOccupants(options.capacity, 0,
-			{ standingStart, standingStart + CORE_AGENT_MAX_WIDTH * (options.capacity - 1) },
-			CORE_AGENT_MAX_WIDTH, 0.0f, OccupantPackingOrder::Forward,
-			OccupantPackingLayout::Abutting);
+			{ halfAgentWidth, lift->getSize().x - halfAgentWidth }, CORE_AGENT_MAX_WIDTH,
+			mTraversalGeometryPolicy.occupantClearance, OccupantPackingOrder::Forward,
+			OccupantPackingLayout::Compact);
 		for (uint32_t i = 0; i < options.capacity; ++i)
 			liftResource->mCapacityPositions[i] = { occupantTargets[i], 0.0f };
 		for (uint32_t i = 0; i < liftRes.doors.size(); ++i)
@@ -8167,12 +8164,11 @@ namespace core
 		if (capacity > (uint32_t)floor(usableWidth / CORE_AGENT_MAX_WIDTH))
 			throw invalid_argument("Declared lift capacity cannot be represented by separated interior positions");
 		vector<Vector2> positions(capacity);
-		auto start = (usableWidth - capacity * CORE_AGENT_MAX_WIDTH) * 0.5f
-			+ CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
 		auto const occupantTargets = packOccupants(capacity, 0,
-			{ start, start + CORE_AGENT_MAX_WIDTH * (capacity - 1) },
-			CORE_AGENT_MAX_WIDTH, 0.0f, OccupantPackingOrder::Forward,
-			OccupantPackingLayout::Abutting);
+			{ halfAgentWidth, usableWidth - halfAgentWidth }, CORE_AGENT_MAX_WIDTH,
+			mTraversalGeometryPolicy.occupantClearance, OccupantPackingOrder::Forward,
+			OccupantPackingLayout::Compact);
 		for (uint32_t i = 0; i < capacity; ++i)
 			positions[i] = { occupantTargets[i], 0.0f };
 		auto minimumDwellTicks = (uint64_t)ceil(minimumDwellSeconds / getFixedTimestep());
@@ -8745,6 +8741,45 @@ namespace core
 		}
 		invalidateSimulationSnapshot();
 		mTraversalGeometryPolicy = policy;
+
+		// Lift slots are authored when the traversal resource is built, while the
+		// geometry policy remains configurable afterwards. Keep existing enclosed
+		// cars and their car-side boarding lanes in sync with the World policy.
+		for (auto const& entry : mTraversalResources.entries())
+		{
+			auto& resource = *entry.second;
+			if (!resource.mLift || resource.mOpenPlatformLift || resource.mShuttle
+				|| resource.mCapacityPositions.empty()) continue;
+			auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+			auto const usableWidth = resource.mLift->getSize().x;
+			auto const targets = packOccupants(resource.mCapacityPositions.size(), 0,
+				{ halfAgentWidth, usableWidth - halfAgentWidth }, CORE_AGENT_MAX_WIDTH,
+				policy.occupantClearance, OccupantPackingOrder::Forward,
+				OccupantPackingLayout::Compact);
+			for (size_t i = 0; i < targets.size(); ++i)
+				resource.mCapacityPositions[i].x = targets[i];
+
+			for (auto const& stop : resource.mLiftStops)
+			{
+				auto landing = mTraversalResources.find(stop.landingResource);
+				if (!landing) continue;
+				for (auto& lane : landing->mQueueLanes)
+				{
+					if (lane.sector != resource.mLiftSector) continue;
+					lane.positions.clear();
+					for (auto const& position : resource.mCapacityPositions)
+						lane.positions.push_back({ resource.mLift->getPosition().x + position.x,
+							stop.globalPosition + position.y });
+					lane.positionOwners.resize(lane.positions.size());
+					if (!lane.positions.empty())
+					{
+						lane.origin = lane.positions.front();
+						lane.direction = Vector2::UNIT_X;
+						lane.extent = lane.positions.back().x - lane.positions.front().x;
+					}
+				}
+			}
+		}
 	}
 
 	float World::estimateTraversalDelay(TraversalResourceId resourceId, SectorId sourceSector) const

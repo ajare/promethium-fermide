@@ -2136,6 +2136,49 @@ namespace
 			&& stillDefault.occupantClearance == CORE_SHUTTLE_AGENT_BUFFER;
 	}
 
+	bool liftOccupantsUseWorldClearance()
+	{
+		core::World world("Lift occupant clearance", 8, 4);
+		world.addCorridor(0, 0, 7);
+		world.addCorridor(2, 0, 7);
+		core::World::CreateLiftOptions options;
+		options.cellsWide = 2;
+		options.stopOffsets = { 0, 2 };
+		options.capacity = 3;
+		auto created = world.addLift(1, 0, 3, options);
+
+		auto policy = world.getTraversalGeometryPolicy();
+		policy.occupantClearance = 0.3f;
+		world.setTraversalGeometryPolicy(policy);
+		world.finishBuild();
+		auto snapshot = world.getSimulationSnapshot();
+		auto lift = std::find_if(snapshot.traversalResources.begin(),
+			snapshot.traversalResources.end(), [&](auto const& resource)
+			{ return resource.id == created.traversalResource; });
+		if (lift == snapshot.traversalResources.end() || lift->capacity != options.capacity
+			|| lift->capacityPositions.size() != options.capacity) return false;
+		for (size_t i = 1; i < lift->capacityPositions.size(); ++i)
+			if (std::abs(lift->capacityPositions[i].position.x
+				- lift->capacityPositions[i - 1].position.x
+				- CORE_AGENT_MAX_WIDTH - policy.occupantClearance) > 0.000001f) return false;
+
+		// More requested clearance than the car can provide uses its full body-safe
+		// extent without changing the authored capacity.
+		policy.occupantClearance = 0.5f;
+		world.setTraversalGeometryPolicy(policy);
+		snapshot = world.getSimulationSnapshot();
+		lift = std::find_if(snapshot.traversalResources.begin(),
+			snapshot.traversalResources.end(), [&](auto const& resource)
+			{ return resource.id == created.traversalResource; });
+		return lift != snapshot.traversalResources.end()
+			&& lift->capacity == options.capacity
+			&& std::abs(lift->capacityPositions.front().position.x
+				- CORE_AGENT_MAX_WIDTH * 0.5f) < 0.000001f
+			&& std::abs(lift->capacityPositions.back().position.x
+				- (options.cellsWide - 2.0f * CORE_LIFT_CAR_BORDER
+					- CORE_AGENT_MAX_WIDTH * 0.5f)) < 0.000001f;
+	}
+
 	bool resilientWaitingRetainsPriorityAndExpiresPermits()
 	{
 		core::World world("Resilient door waiting", 8, 2);
@@ -6169,6 +6212,11 @@ int main(int argc, char** argv)
 		if (!traversalGeometryPolicyIsWorldOwned())
 		{
 			std::cerr << "FAIL: traversal geometry policy defaults, round trip, or World ownership failed\n";
+			return 1;
+		}
+		if (!liftOccupantsUseWorldClearance())
+		{
+			std::cerr << "FAIL: Lift occupants ignored configured clearance or authored capacity\n";
 			return 1;
 		}
 		if (!resilientWaitingRetainsPriorityAndExpiresPermits())

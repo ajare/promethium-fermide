@@ -1,3 +1,4 @@
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 
@@ -28,11 +29,40 @@ int main()
 					auto targets = packOccupants(count, 0,
 						{ start, start + CORE_AGENT_MAX_WIDTH * (count - 1) },
 						CORE_AGENT_MAX_WIDTH, 0.0f, OccupantPackingOrder::Forward,
-						OccupantPackingLayout::Abutting);
+						OccupantPackingLayout::Compact);
 					require(targets.size() == count);
 					for (unsigned rank = 0; rank < count; ++rank)
 						require(targets[rank] == start + CORE_AGENT_MAX_WIDTH * rank);
 				}
+
+		// Lift compact packing uses the configured adjacent-occupant clearance when
+		// the authored car is wide enough, while remaining centred in the car.
+		{
+			auto targets = packOccupants(3, 0, { 0.2f, 1.8f },
+				CORE_AGENT_MAX_WIDTH, 0.1f, OccupantPackingOrder::Forward,
+				OccupantPackingLayout::Compact);
+			require(targets.size() == 3);
+			require(std::abs(targets[0] - 0.5f) < 0.000001f);
+			require(std::abs(targets[1] - targets[0] - 0.5f) < 0.000001f);
+			require(std::abs(targets[2] - targets[1] - 0.5f) < 0.000001f);
+			require(std::abs(targets[2] - 1.5f) < 0.000001f);
+		}
+
+		// A tight car keeps every authored slot and abuts occupants. If only part
+		// of the desired clearance fits, the complete available span is shared.
+		for (auto const width : { 1.2f, 1.35f })
+		{
+			auto targets = packOccupants(3, 0,
+				{ CORE_AGENT_MAX_WIDTH * 0.5f, width - CORE_AGENT_MAX_WIDTH * 0.5f },
+				CORE_AGENT_MAX_WIDTH, 0.1f, OccupantPackingOrder::Forward,
+				OccupantPackingLayout::Compact);
+			require(targets.size() == 3);
+			require(std::abs(targets.front() - CORE_AGENT_MAX_WIDTH * 0.5f) < 0.000001f);
+			require(std::abs(targets.back() - (width - CORE_AGENT_MAX_WIDTH * 0.5f)) < 0.000001f);
+			auto const expectedGap = (width - 3.0f * CORE_AGENT_MAX_WIDTH) * 0.5f;
+			require(std::abs(targets[1] - targets[0]
+				- CORE_AGENT_MAX_WIDTH - expectedGap) < 0.000001f);
+		}
 
 		// Shuttle boarding order is retained externally; targets follow its ranks.
 		// Pending reservations re-space existing occupants before boarding commits.

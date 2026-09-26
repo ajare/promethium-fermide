@@ -5,10 +5,11 @@
 
 namespace core
 {
-	// Extents are body-safe centre coordinates, before clearance is applied.
-	// Abutting layouts start at first; callers centre that fixed-capacity range.
-	// Buffered layouts span both ends, including space for pending reservations.
-	enum class OccupantPackingLayout { Abutting, Buffered };
+	// Extents are body-safe centre coordinates. Compact layouts centre occupants
+	// in the available extent at the requested clearance, reducing that clearance
+	// only when the extent cannot provide it. Buffered layouts reserve clearance
+	// at both ends and span the remaining range, including pending reservations.
+	enum class OccupantPackingLayout { Compact, Buffered };
 	enum class OccupantPackingOrder { Forward, Reverse };
 
 	struct OccupantPackingExtent
@@ -32,20 +33,35 @@ namespace core
 		auto const last = extent.last - clearance;
 		auto const leading = order == OccupantPackingOrder::Forward ? first : last;
 		auto const trailing = order == OccupantPackingOrder::Forward ? last : first;
-		for (std::size_t rank = 0; rank < occupantCount; ++rank)
+		if (layout == OccupantPackingLayout::Compact)
 		{
-			if (layout == OccupantPackingLayout::Abutting)
+			if (occupantCount == 0) return targets;
+			auto const availableSpan = extent.last - extent.first;
+			auto const desiredPitch = occupantWidth + clearance;
+			auto const desiredSpan = (float)(occupantCount - 1) * desiredPitch;
+			// Treat float-rounding differences at a mathematically tight bound as a
+			// fit so zero-clearance layouts retain their established coordinates.
+			auto const fitsDesiredClearance = desiredSpan <= availableSpan
+				|| desiredSpan - availableSpan < 0.000001f;
+			auto const occupiedSpan = fitsDesiredClearance ? desiredSpan : availableSpan;
+			auto const pitch = occupantCount == 1 ? 0.0f : fitsDesiredClearance
+				? desiredPitch : availableSpan / (float)(occupantCount - 1);
+			auto const spareSpan = availableSpan - occupiedSpan;
+			auto const compactFirst = extent.first
+				+ (spareSpan > 0.000001f ? spareSpan * 0.5f : 0.0f);
+			auto const compactLast = compactFirst + occupiedSpan;
+			for (std::size_t rank = 0; rank < occupantCount; ++rank)
 			{
-				auto const offset = (float)rank * (occupantWidth + clearance);
+				auto const offset = (float)rank * pitch;
 				targets.push_back(order == OccupantPackingOrder::Forward
-					? leading + offset : leading - offset);
+					? compactFirst + offset : compactLast - offset);
 			}
-			else
-			{
-				auto const progress = projectedCount == 1 ? 0.0f
-					: (float)rank / (float)(projectedCount - 1);
-				targets.push_back(leading + (trailing - leading) * progress);
-			}
+		}
+		else for (std::size_t rank = 0; rank < occupantCount; ++rank)
+		{
+			auto const progress = projectedCount == 1 ? 0.0f
+				: (float)rank / (float)(projectedCount - 1);
+			targets.push_back(leading + (trailing - leading) * progress);
 		}
 		return targets;
 	}

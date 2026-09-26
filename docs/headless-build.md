@@ -76,6 +76,21 @@ queue trace digests (positions and states every tick, Linux/GCC) are recorded he
 | 0.8 | -1 | 16720789843228646775 |
 | 0.8 | +1 | 14720704966384623342 |
 
+## Lift occupant clearance (#177)
+
+Enclosed Lift capacity positions use the World's `occupantClearance`. Compact
+packing centres the full authored capacity in the physical car, uses the requested
+adjacent-occupant gap where it fits, and otherwise shares the complete body-safe
+span without dropping slots. Changing the World geometry policy also updates an
+already-authored Lift and its car-side boarding lanes.
+
+`occupant-packing` checks exact zero-clearance compatibility, full configured
+clearance in a wide car, and maximum possible spacing in tight and partially tight
+cars. `liftOccupantsUseWorldClearance` checks the resulting Lift resource snapshot
+and verifies that authored capacity is unchanged. The paired-run simulation digest
+was deliberately regenerated in Debug and Release; both runs matched. The recorded
+queue digests above are unaffected.
+
 ## Prerequisites
 
 - Windows x64
