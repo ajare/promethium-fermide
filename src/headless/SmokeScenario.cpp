@@ -47,6 +47,8 @@
 
 void runSerializationSmokeChecks();
 void runSimulationObservationSmokeChecks();
+void runPausePositionRepro(char const* filename);
+void runPausePositionSmokeChecks();
 void runAgentGroupSmokeChecks();
 void runAgentGroupAssignmentSmokeChecks();
 void runAgentGroupCountSmokeChecks();
@@ -5491,6 +5493,12 @@ int main(int argc, char** argv)
 
 	try
 	{
+		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")
+		{
+			if (std::string(argv[2]) == "minimal") runPausePositionSmokeChecks();
+			else runPausePositionRepro(argv[2]);
+			return 0;
+		}
 		if (graphicsStartupOnly)
 		{
 			runGraphicsStartupSmokeChecks();
@@ -5499,6 +5507,7 @@ int main(int argc, char** argv)
 
 		runSerializationSmokeChecks();
 		runSimulationObservationSmokeChecks();
+		runPausePositionSmokeChecks();
 		runAgentGroupSmokeChecks();
 		runAgentGroupAssignmentSmokeChecks();
 		runAgentGroupCountSmokeChecks();

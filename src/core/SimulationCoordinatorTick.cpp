@@ -708,9 +708,15 @@ namespace core
 		{
 			// A threshold crossing which has not committed still belongs to its source
 			// sector. Put it back on that safe boundary before releasing its permit.
-			if ((agent.mState == Agent::State::TraversingEdge
+			// A Location edge within one sector is ordinary walking, not a crossing:
+			// its current position is already safe and must survive pause unchanged.
+			auto const& task = *agent.mTraversalTask;
+			auto const localWalk = task.edge && task.edge->getType() == EdgeType::Location
+				&& task.sourceVertex && task.destinationVertex
+				&& task.sourceVertex->getSector() == task.destinationVertex->getSector();
+			if (!localWalk && (agent.mState == Agent::State::TraversingEdge
 				|| agent.mState == Agent::State::AwaitingTraversalCommit)
-				&& agent.mTraversalTask->sourceVertex && agent.getSector())
+				&& task.sourceVertex && agent.getSector())
 			{
 				auto source = agent.mTraversalTask->sourceVertex->getPosition();
 				agent.setPosition({ const_cast<Sector*>(agent.getSector()),
