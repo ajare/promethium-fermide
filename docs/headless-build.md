@@ -31,10 +31,12 @@ its predecessor's pre-movement position. Left and right approaches are separate;
 a waiter at the Threshold anchors both. Separation is at least
 `CORE_DOOR_QUEUE_STOP_WIDTH`, or `minimumQueueSeparation` when larger. Forward
 retargeting uses `advanceStepThreshold`; a promoted head always targets its exact
-reservation so Lift landing arrival remains possible. Agents walk to these
-targets; no positions are assigned directly. Approaching Agents join behind the
-physical tail rather than its already-compacted reservation. Waiting at a chain
-target does not count as a local-goal timeout.
+reservation so Lift landing arrival remains possible. A follower keeps its existing
+walk target while the cumulative forward advance is at or below that threshold,
+and observing an unchanged target does not update `positionAssignedAtTick`.
+Agents walk to these targets; no positions are assigned directly. Approaching
+Agents join behind the physical tail rather than its already-compacted reservation.
+Waiting at a chain target does not count as a local-goal timeout.
 
 Request snapshots distinguish `queuePositionTarget` (reservation) from
 `queueStandingTarget` (physical walk target). Unreserved overflow remains outside
@@ -42,18 +44,20 @@ this ticket. Arbitrarily overlapping initial spawns still need time to walk apar
 
 `queueChainsFollowWithoutCompressing` checks actual and target separation every
 tick of a complete two-sided Door service, delayed advancement after serving the
-head, walk-speed bounds, and identical repeated traces. The existing fairness,
-cancellation, timeout, Lift boarding and Shuttle checks also remain enabled.
+head, the explicitly configured 0.2-unit advance hysteresis boundary, stable
+assignment ticks during a calm multi-Agent queue, walk-speed bounds, and identical
+repeated traces. The existing fairness, cancellation, timeout, Lift boarding and
+Shuttle checks also remain enabled.
 The suite's existing determinism digests are generated from paired runs, not
 stored golden files; they were deliberately rerun with the new geometry. New
 queue trace digests (positions and states every tick, Linux/GCC) are recorded here:
 
 | Separation | Approach direction | Trace digest |
 | --- | --- | --- |
-| 0.5 | -1 | 14189215762838587989 |
-| 0.5 | +1 | 3620784974342482884 |
-| 0.8 | -1 | 14905572694293987727 |
-| 0.8 | +1 | 18193442453073740958 |
+| 0.5 | -1 | 12044598890430814109 |
+| 0.5 | +1 | 6254148168206110256 |
+| 0.8 | -1 | 16720789843228646775 |
+| 0.8 | +1 | 14720704966384623342 |
 
 ## Prerequisites
 

@@ -371,9 +371,22 @@ namespace core
 					}
 					// The head always aims at the exact reservation, including the
 					// final sub-threshold step required by Lift boarding predicates.
-					request->mQueueStandingTarget = target;
-					request->mHasQueueStandingTarget = true;
-					agent->mTraversalLocalGoal = target;
+					// For followers, preserve the existing target until cumulative
+					// forward motion clears the hysteresis threshold. Merely observing
+					// the same target is not a new position assignment.
+					auto const targetChanged = !request->mHasQueueStandingTarget
+						|| request->mQueueStandingTarget.distanceTo(target) > 0.001f;
+					if (targetChanged)
+					{
+						request->mQueueStandingTarget = target;
+						request->mHasQueueStandingTarget = true;
+						request->mPositionAssignedAtTick = mWorld.mSimulationTick;
+						request->mLastPositionProgressTick = mWorld.mSimulationTick;
+						request->mBestPositionDistance = agent->getGlobalPosition().distanceTo(target);
+					}
+					if (!agent->mTraversalLocalGoal
+						|| agent->mTraversalLocalGoal->distanceTo(request->mQueueStandingTarget) > 0.001f)
+						agent->mTraversalLocalGoal = request->mQueueStandingTarget;
 					if (side <= 0) left = agent;
 					if (side >= 0) right = agent;
 				}

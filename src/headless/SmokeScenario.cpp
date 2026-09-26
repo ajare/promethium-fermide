@@ -1768,6 +1768,7 @@ namespace
 		world.addSectorDoor(0, 0, 7, options);
 		auto policy = world.getTraversalGeometryPolicy();
 		policy.minimumQueueSeparation = separation;
+		policy.advanceStepThreshold = 0.2f;
 		world.setTraversalGeometryPolicy(policy);
 		world.finishBuild();
 		auto edge = *std::find_if(world.getGraph()->getEdges().begin(), world.getGraph()->getEdges().end(),
@@ -1785,14 +1786,21 @@ namespace
 			}
 		bool sawChain = false;
 		bool sawDelayedAdvance = false;
+		uint32_t calmQueueTicks = 0;
+		uint32_t longestCalmQueueRun = 0;
 		std::map<core::AgentId, core::Vector2> previousPositions;
 		for (auto id : ids) previousPositions[id] = world.lookupAgent(id).entity->getGlobalPosition();
 		std::map<core::AgentId, core::Vector2> previousTargets;
+		std::map<core::AgentId, uint64_t> previousAssignmentTicks;
+		std::map<core::AgentId, uint32_t> previousQueuePositions;
 		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 3; ++tick)
 		{
 			world.advanceTick();
 			auto snapshot = world.getSimulationSnapshot();
 			std::map<core::AgentId, core::Vector2> targets;
+			std::map<core::AgentId, uint64_t> assignmentTicks;
+			std::map<core::AgentId, uint32_t> queuePositions;
+			bool calmQueueThisTick = false;
 			for (auto const& lane : snapshot.traversalResources.front().queueLanes)
 			{
 				std::vector<core::TraversalRequestSnapshot const*> waiters;
@@ -1801,14 +1809,39 @@ namespace
 						waiters.push_back(&request);
 				std::sort(waiters.begin(), waiters.end(), [](auto a, auto b) { return a->queueTicket < b->queueTicket; });
 				sawChain = sawChain || waiters.size() >= 3;
+				bool laneIsCalm = waiters.size() >= 3;
 				for (size_t i = 0; i < waiters.size(); ++i)
 				{
 					auto const& request = *waiters[i];
 					targets[request.owner] = request.queueStandingTarget;
+					assignmentTicks[request.owner] = request.positionAssignedAtTick;
+					queuePositions[request.owner] = request.queuePosition;
+					auto previousTarget = previousTargets.find(request.owner);
+					auto previousAssignment = previousAssignmentTicks.find(request.owner);
+					auto previousPosition = previousQueuePositions.find(request.owner);
+					if (previousTarget == previousTargets.end()
+						|| previousAssignment == previousAssignmentTicks.end()
+						|| previousPosition == previousQueuePositions.end()
+						|| previousTarget->second.distanceTo(request.queueStandingTarget) > 0.001f
+						|| previousPosition->second != request.queuePosition)
+						laneIsCalm = false;
+					else if (previousAssignment->second != request.positionAssignedAtTick)
+						return false; // an unchanged standing position was reassigned
+					if (previousTarget != previousTargets.end()
+						&& previousTarget->second.distanceTo(request.queueStandingTarget) > 0.001f
+						&& request.positionAssignedAtTick != snapshot.tick)
+						return false;
 					if (i == 0) continue;
 					auto const& ahead = *waiters[i - 1];
 					if (direction * (request.queueStandingTarget.x - ahead.queueStandingTarget.x)
 						< separation - 0.001f) return false;
+					if (previousTarget != previousTargets.end())
+					{
+						auto const advance = direction
+							* (previousTarget->second.x - request.queueStandingTarget.x);
+						if (advance > 0.001f
+							&& advance <= policy.advanceStepThreshold + 0.001f) return false;
+					}
 					auto agent = world.lookupAgent(request.owner).entity;
 					auto leader = world.lookupAgent(ahead.owner).entity;
 					if (direction * (agent->getGlobalPosition().x - leader->getGlobalPosition().x)
@@ -1826,8 +1859,13 @@ namespace
 						&& request.queueStandingTarget.distanceTo(previousTargets[request.owner]) <= 0.001f)
 						sawDelayedAdvance = true;
 				}
+				calmQueueThisTick = calmQueueThisTick || laneIsCalm;
 			}
+			calmQueueTicks = calmQueueThisTick ? calmQueueTicks + 1 : 0;
+			longestCalmQueueRun = std::max(longestCalmQueueRun, calmQueueTicks);
 			previousTargets = std::move(targets);
+			previousAssignmentTicks = std::move(assignmentTicks);
+			previousQueuePositions = std::move(queuePositions);
 			bool finished = true;
 			for (auto id : ids)
 			{
@@ -1841,9 +1879,10 @@ namespace
 			}
 			if (finished)
 			{
-				if (!sawChain || !sawDelayedAdvance)
-					std::cerr << "Queue observations: chain=" << sawChain << ", delayed=" << sawDelayedAdvance << '\n';
-				return sawChain && sawDelayedAdvance;
+				if (!sawChain || !sawDelayedAdvance || longestCalmQueueRun < 2)
+					std::cerr << "Queue observations: chain=" << sawChain << ", delayed="
+						<< sawDelayedAdvance << ", calm ticks=" << longestCalmQueueRun << '\n';
+				return sawChain && sawDelayedAdvance && longestCalmQueueRun >= 2;
 			}
 		}
 		return false;
