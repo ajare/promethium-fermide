@@ -63,6 +63,7 @@ namespace core
 	void SimulationCoordinator::attachLadderAdmissionRequest(TraversalRequestId requestId,
 		TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request) return;
 		if (request->mDirection == TraversalDirection::None)
@@ -144,6 +145,7 @@ namespace core
 
 	void SimulationCoordinator::tryGrantLadderAdmissions(TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		// Disabled or moving/retracted equipment cannot safely accept a new climber.
 		// Existing occupants retain their ownership while the admission gate is closed.
 		if (!resource.mEnabled || (!resource.mLadder && !resource.mStairwell)
@@ -261,6 +263,7 @@ namespace core
 	void SimulationCoordinator::releaseLadderAdmission(TraversalRequestId requestId,
 		TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		// Cancellation, denial, or completion must surrender every form of waiting
 		// ownership so neither a queue place nor a capacity reservation leaks.
 		resource.mAdmissionQueue.erase(remove(resource.mAdmissionQueue.begin(),
@@ -282,6 +285,7 @@ namespace core
 
 	void SimulationCoordinator::releaseLadderOccupancy(AgentId agentId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		// Occupancy lasts until the Agent leaves the climbing span, not merely until
 		// its entry permit commits. Releasing it is what makes room for the next Agent.
 		for (auto& occupant : resource.mOccupants)

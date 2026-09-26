@@ -32,6 +32,7 @@ namespace core
 
 	InteractionPointId SimulationCoordinator::createInteractionPoint(string const& name)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto id = mWorld.mInteractionPoints.add(unique_ptr<InteractionPoint>(new InteractionPoint(name)));
 		SimulationEvent event;
 		event.sequence = mWorld.mNextEventSequence++;
@@ -45,6 +46,7 @@ namespace core
 	InteractionPointId SimulationCoordinator::createInteractionPoint(string const& name, SectorId sector,
 		Vector2 position, float reach, float durationSeconds, vector<InteractionBinding> bindings)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!sector || sector.value > mWorld.mSectors.size())
 		{
 			throw invalid_argument("An interaction point requires a valid sector");
@@ -100,6 +102,7 @@ namespace core
 
 	EntityRemovalResult SimulationCoordinator::removeInteractionPoint(InteractionPointId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto found = lookupInteractionPoint(id);
 		if (!found)
 		{
@@ -173,6 +176,7 @@ namespace core
 
 	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
 		if (!point || !actor || !point->mSector
@@ -209,6 +213,7 @@ namespace core
 
 	InteractionRequestId SimulationCoordinator::requestInteractionForTraversal(InteractionPointId point, AgentId actor)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto agent = mWorld.mAgents.find(actor);
 		if (agent && agent->mEarlyDoorPressInteraction)
 		{
@@ -223,6 +228,7 @@ namespace core
 	InteractionRequestId SimulationCoordinator::requestInteractionWhilePassing(
 		InteractionPointId pointId, AgentId actorId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
 		if (!point || !actor
@@ -267,6 +273,7 @@ namespace core
 
 	void SimulationCoordinator::detachInteractionRequester(InteractionRequest& request)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [operationId, requirement] : request.mOperations)
 		{
 			(void)requirement;
@@ -276,6 +283,7 @@ namespace core
 				if (operation->mRequesters.empty() && (operation->mState == DeviceOperationState::Pending
 					|| operation->mState == DeviceOperationState::Running))
 				{
+					touchDeviceOperation(operationId, *operation);
 					operation->mState = DeviceOperationState::Cancelled;
 				}
 			}
@@ -315,6 +323,7 @@ namespace core
 
 	DeviceOperationId SimulationCoordinator::createDeviceOperation(string const& name, AgentId requester)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto agent = lookupAgent(requester);
 		if (!agent)
 		{
@@ -372,6 +381,7 @@ namespace core
 		if (operation->mRequesters.empty() && (operation->mState == DeviceOperationState::Pending
 			|| operation->mState == DeviceOperationState::Running))
 		{
+			touchDeviceOperation(id, *operation);
 			operation->mState = DeviceOperationState::Cancelled;
 		}
 		return true;
@@ -379,6 +389,7 @@ namespace core
 
 	EntityRemovalResult SimulationCoordinator::removeDeviceOperation(DeviceOperationId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto found = lookupDeviceOperation(id);
 		if (!found)
 		{
@@ -398,6 +409,7 @@ namespace core
 
 	void SimulationCoordinator::advanceDeviceOperations()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			(void)id;
@@ -405,6 +417,7 @@ namespace core
 			{
 				continue;
 			}
+			touchDeviceOperation(id, *operation);
 			if (operation->mState == DeviceOperationState::Pending)
 			{
 				operation->mState = DeviceOperationState::Running;
@@ -533,6 +546,7 @@ namespace core
 
 	void SimulationCoordinator::pressPhysicalControl(InteractionPointId pointId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& sector : mWorld.mSectors)
 		{
 			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
@@ -552,6 +566,7 @@ namespace core
 	void SimulationCoordinator::tryPressUpcomingDoorButton(Agent& agent,
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto const& path = agent.mPath.path;
 		auto const target = agent.mPath.targetNode;
 		if (!path || target + 1 >= path->nodes.size())
@@ -669,6 +684,7 @@ namespace core
 
 	void SimulationCoordinator::allocateInteractions()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
 		{
 			(void)pointId;
@@ -715,6 +731,7 @@ namespace core
 
 	void SimulationCoordinator::moveInteractions(float frameTime)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
 		{
 			(void)pointId;
@@ -760,6 +777,7 @@ namespace core
 
 	void SimulationCoordinator::updateInteractionResults()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
 			if (request->mResult != InteractionResult::Pending)

@@ -1,4 +1,5 @@
 #include <cassert>
+#include "core/ObservationRevision.h"
 
 #include "core/Defines.h"
 #include "core/OpenableObject.h"
@@ -62,6 +63,7 @@ namespace core
 
 	bool OpenableObject::open()
 	{
+		++observationRevision;
 		if (mState != State::Open)
 		{
 			mState = State::Opening;
@@ -72,6 +74,7 @@ namespace core
 
 	bool OpenableObject::close()
 	{
+		++observationRevision;
 		if (mState != State::Closed)
 		{
 			mState = State::Closing;

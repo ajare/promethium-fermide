@@ -67,6 +67,7 @@ namespace core
 
 	void SimulationCoordinator::refreshShuttlePassengerTargets(TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!resource.mShuttle) return;
 		auto const carriageWidth = (float)resource.mShuttle->getCarWidth();
 		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
@@ -157,6 +158,7 @@ namespace core
 	bool SimulationCoordinator::retargetShuttleDoorTraversal(TraversalRequestId requestId,
 		TraversalResource& coordinator, ShuttleDoor const& door)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		auto landing = mWorld.mTraversalResources.find(door.landingResource);
 		if (!request || !landing || landing->mLiftCoordinator != coordinator.mShuttle->getTraversalResourceId())
@@ -201,6 +203,7 @@ namespace core
 	bool SimulationCoordinator::assignShuttleBoardingDoor(TraversalRequestId requestId,
 		TraversalResource& coordinator, uint32_t stop)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		auto agent = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
 		if (!request || !agent) return false;
@@ -304,6 +307,7 @@ namespace core
 	bool SimulationCoordinator::assignShuttleDisembarkDoor(TraversalRequestId requestId,
 		TraversalResource& coordinator, uint32_t stop)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request) return false;
 		auto carriage = findShuttlePassengerCarriage(coordinator, request->mOwner);

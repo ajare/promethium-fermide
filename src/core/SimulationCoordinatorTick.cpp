@@ -50,6 +50,7 @@ namespace core
 
 	void SimulationCoordinator::advanceLiftResources()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [resourceId, resourcePtr] : mWorld.mTraversalResources.entries())
 		{
 			(void)resourceId;
@@ -386,6 +387,7 @@ namespace core
 
 	void SimulationCoordinator::advanceDoorResources()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [resourceId, resourcePtr] : mWorld.mTraversalResources.entries())
 		{
 			auto& resource = *resourcePtr;
@@ -452,6 +454,7 @@ namespace core
 
 	void SimulationCoordinator::runSimulationPhase(SimulationPhase phase)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		mWorld.mCurrentPhase = phase;
 		auto const timestep = World::getFixedTimestep();
 
@@ -532,8 +535,16 @@ namespace core
 		}
 	}
 
-	void SimulationCoordinator::publishTickEvents(SimulationSnapshot const& before)
+	void SimulationCoordinator::touchDeviceOperation(DeviceOperationId id, DeviceOperation const& operation)
 	{
+		if (mWorld.mRecordingTickChanges
+			&& (!mWorld.mTickOperationLimit || id.value < mWorld.mTickOperationLimit))
+			mWorld.mTickOperations.try_emplace(id, operation.getState());
+	}
+
+	void SimulationCoordinator::publishTickEvents()
+	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto phase : { SimulationPhase::ResourceAdvancement, SimulationPhase::IntentCollection,
 			SimulationPhase::Allocation, SimulationPhase::Movement, SimulationPhase::Commit,
 			SimulationPhase::CleanupAndEventPublication })
@@ -546,24 +557,11 @@ namespace core
 			mWorld.mEvents.push_back(std::move(event));
 		}
 
-		auto after = getSimulationSnapshot();
-		// Registry snapshots are in stable ID order. Merge them linearly rather than
-		// searching the entire previous snapshot for every active agent.
-		size_t previousAgentIndex = 0;
-		for (auto const& current : after.agents)
+		for (auto const& [id, previous] : mWorld.mTickAgents)
 		{
-			while (previousAgentIndex < before.agents.size()
-				&& before.agents[previousAgentIndex].id < current.id)
-			{
-				++previousAgentIndex;
-			}
-			if (previousAgentIndex == before.agents.size()
-				|| before.agents[previousAgentIndex].id != current.id)
-			{
-				continue;
-			}
-
-			auto const& previous = before.agents[previousAgentIndex];
+			auto agent = mWorld.mAgents.find(id);
+			if (!agent) continue;
+			auto current = makeAgentSnapshot(agent);
 			auto changed = current.sectorId != previous.sectorId
 				|| current.localPosition != previous.localPosition
 				|| current.globalPosition != previous.globalPosition
@@ -591,24 +589,17 @@ namespace core
 			}
 		}
 
-		size_t previousOperationIndex = 0;
-		for (auto const& current : after.deviceOperations)
+		for (auto const& [id, previous] : mWorld.mTickOperations)
 		{
-			while (previousOperationIndex < before.deviceOperations.size()
-				&& before.deviceOperations[previousOperationIndex].id < current.id)
-			{
-				++previousOperationIndex;
-			}
-			if (previousOperationIndex < before.deviceOperations.size()
-				&& before.deviceOperations[previousOperationIndex].id == current.id
-				&& before.deviceOperations[previousOperationIndex].state != current.state)
+			auto operation = mWorld.mDeviceOperations.find(id);
+			if (operation && operation->getState() != previous)
 			{
 				SimulationEvent event;
 				event.sequence = mWorld.mNextEventSequence++;
 				event.tick = mWorld.mSimulationTick;
 				event.type = SimulationEventType::DeviceOperationChanged;
 				event.phase = SimulationPhase::CleanupAndEventPublication;
-				event.deviceOperation = current;
+				event.deviceOperation = makeDeviceOperationSnapshot(id, *operation);
 				mWorld.mEvents.push_back(std::move(event));
 			}
 		}
@@ -617,11 +608,20 @@ namespace core
 	bool SimulationCoordinator::advanceTick()
 	{
 		if (mWorld.mSimulationPaused) return false;
+		mWorld.invalidateSimulationSnapshot();
 		// The boundary runs with no active phase. Instances are synchronized before
 		// deterministic startup/outcome callbacks enqueue commands; those commands
 		// are applied here before this tick can collect traversal intent.
 		if (!mWorld.mAgentBehaviourRuntime->runBoundary(mWorld)) return false;
-		auto before = getSimulationSnapshot();
+		mWorld.invalidateSimulationSnapshot();
+		mWorld.mTickAgents.clear();
+		// Every active Agent participates in the phases, including stationary ones.
+		// Capture after behaviour commands, matching the historical tick boundary.
+		for (auto const& [id, agent] : mWorld.mAgents.entries())
+			if (agent->isActive()) mWorld.mTickAgents.emplace(id, makeAgentSnapshot(agent.get()));
+		mWorld.mTickOperations.clear();
+		mWorld.mTickOperationLimit = mWorld.mDeviceOperations.nextId();
+		mWorld.mRecordingTickChanges = true;
 		++mWorld.mSimulationTick;
 		updateMovementGoals();
 
@@ -631,7 +631,9 @@ namespace core
 		runSimulationPhase(SimulationPhase::Movement);
 		runSimulationPhase(SimulationPhase::Commit);
 		runSimulationPhase(SimulationPhase::CleanupAndEventPublication);
-		publishTickEvents(before);
+		mWorld.invalidateSimulationSnapshot();
+		publishTickEvents();
+		mWorld.mRecordingTickChanges = false;
 		mWorld.mCurrentPhase = SimulationPhase::None;
 		return true;
 	}
@@ -646,17 +648,23 @@ namespace core
 	void SimulationCoordinator::update(float elapsedSeconds)
 	{
 		if (mWorld.mSimulationPaused) return;
-		if (elapsedSeconds <= 0.0f)
+		if (!std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0f)
 		{
 			return;
 		}
 
-		mWorld.mAccumulatedTime += elapsedSeconds;
+		mWorld.mAccumulatedTime += static_cast<double>(elapsedSeconds) * mWorld.mTimeScale;
 		auto const timestep = (double)World::getFixedTimestep();
-		while (mWorld.mAccumulatedTime + timestep * 1e-9 >= timestep)
+		uint32_t executed = 0;
+		// The fixed timestep is a float. Allow its accumulated representation
+		// error across the bounded batch (e.g. 60 ticks for exactly one second),
+		// then retain the existing correction of a tiny negative remainder.
+		while (executed < World::getMaxTicksPerUpdate()
+			&& mWorld.mAccumulatedTime + timestep * 1e-4 >= timestep)
 		{
 			if (!advanceTick()) break;
 			mWorld.mAccumulatedTime -= timestep;
+			++executed;
 		}
 
 		if (mWorld.mAccumulatedTime < 0.0)
@@ -684,6 +692,7 @@ namespace core
 
 	void SimulationCoordinator::publishTopologyEvent(SimulationEventType type, string diagnostic)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		SimulationEvent event;
 		event.sequence = mWorld.mNextEventSequence++;
 		event.tick = mWorld.mSimulationTick;
@@ -727,6 +736,7 @@ namespace core
 
 	void SimulationCoordinator::restorePausedPathIntents()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [id, intent] : mWorld.mPausedPathIntents)
 		{
 			auto agent = mWorld.mAgents.find(id);

@@ -39,6 +39,7 @@ namespace core
 
 	void SimulationCoordinator::allocateOpenPlatformLiftTraversal(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
 		// Legacy platform topology contains co-located mount edges around each

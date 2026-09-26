@@ -37,6 +37,7 @@ namespace core
 
 	AgentId SimulationCoordinator::addOwnedAgentToSector(unique_ptr<Agent> agent, uint32_t sectorId, uint32_t levelOffset, float xOffset)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!agent)
 		{
 			throw invalid_argument("World cannot own a null Agent");
@@ -69,6 +70,7 @@ namespace core
 
 	AgentId SimulationCoordinator::addOwnedAgentToSector(unique_ptr<Agent> agent, uint32_t sectorId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!agent)
 		{
 			throw invalid_argument("World cannot own a null Agent");
@@ -101,16 +103,19 @@ namespace core
 
 	AgentId SimulationCoordinator::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		return addOwnedAgentToSector(make_unique<Agent>(name), sectorId, levelOffset, xOffset);
 	}
 
 	AgentId SimulationCoordinator::createAgent(string const& name, uint32_t sectorId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		return addOwnedAgentToSector(make_unique<Agent>(name), sectorId);
 	}
 
 	void SimulationCoordinator::wakeAllAgents()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [id, agent] : mWorld.mAgents.entries())
 		{
 			(void)id;
@@ -140,6 +145,7 @@ namespace core
 
 	bool SimulationCoordinator::setAgentActive(AgentId id, bool active, string* diagnostic)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!canSetAgentActive(id, active, diagnostic)) return false;
 		auto* agent = mWorld.mAgents.find(id);
 		if (agent->isActive() == active) return true;
@@ -212,6 +218,7 @@ namespace core
 
 	void SimulationCoordinator::releaseAgentFromResource(TraversalResource& resource, AgentId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!id) return;
 
 		for (auto& occupant : resource.mOccupants)
@@ -242,6 +249,7 @@ namespace core
 
 	void SimulationCoordinator::releaseTraversalOwnership(AgentId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!id) return;
 
 		// Requests and permits go first. Most of a resource's claims on an Agent are
@@ -304,6 +312,7 @@ namespace core
 	MovementCommandResult SimulationCoordinator::moveAgentToMarker(
 		AgentId id, MarkerId marker, bool behaviourCommand)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto const inspected = inspectMoveAgentToMarker(id, marker, behaviourCommand);
 		if (inspected.status != MovementCommandStatus::Accepted) return inspected;
 		auto agent = mWorld.mAgents.find(id);
@@ -350,6 +359,7 @@ namespace core
 
 	void SimulationCoordinator::clearAgentMovementForBehaviourEdit(AgentId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto agent = mWorld.mAgents.find(id);
 		if (!agent) return;
 		mWorld.mMovementGoals.erase(id);
@@ -371,6 +381,7 @@ namespace core
 
 	void SimulationCoordinator::updateMovementGoals()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto it = mWorld.mMovementGoals.begin(); it != mWorld.mMovementGoals.end();)
 		{
 			auto id = it->first;
@@ -434,6 +445,7 @@ namespace core
 
 	EntityRemovalResult SimulationCoordinator::removeAgent(AgentId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto found = lookupAgent(id);
 		if (!found)
 		{

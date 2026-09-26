@@ -602,6 +602,19 @@ namespace core
 		uint64_t mNextDoorOpenLeaseValue{ 1 };
 
 		double mAccumulatedTime{ 0.0 };
+		double mTimeScale{ 1.0 };
+
+		mutable SimulationSnapshot mSnapshotCache;
+		mutable bool mSnapshotValid{ false };
+		mutable uint64_t mSnapshotBuildCount{ 0 };
+		mutable uint64_t mSnapshotMutationRevision{ 0 };
+		mutable std::map<AgentId, InteractionRequestId> mPendingInteractionIndex;
+		mutable bool mPendingInteractionIndexValid{ false };
+		mutable uint64_t mPendingInteractionIndexRevision{ 0 };
+		std::map<AgentId, AgentSnapshot> mTickAgents;
+		std::map<DeviceOperationId, DeviceOperationState> mTickOperations;
+		uint64_t mTickOperationLimit{ 0 };
+		bool mRecordingTickChanges{ false };
 
 		SimulationPhase mCurrentPhase{ SimulationPhase::None };
 
@@ -2167,6 +2180,20 @@ namespace core
 		AgentId getAgentId(Agent const* agent) const;
 
 		SimulationSnapshot getSimulationSnapshot() const;
+		// Valid until the next tick or mutation; callers retaining data must copy it.
+		SimulationSnapshot const& getSimulationSnapshotView() const;
+		void invalidateSimulationSnapshot() const
+		{
+			mSnapshotValid = false;
+			mPendingInteractionIndexValid = false;
+		}
+		uint64_t getSimulationSnapshotBuildCount() const { return mSnapshotBuildCount; }
+
+		// Host/session state, deliberately excluded from authored serialization.
+		void setSimulationTimeScale(double scale);
+		double getSimulationTimeScale() const { return mTimeScale; }
+		double getDeferredSimulationTime() const { return mAccumulatedTime; }
+		static constexpr uint32_t getMaxTicksPerUpdate() { return 600; }
 
 		std::vector<SimulationEvent> consumeSimulationEvents();
 	};

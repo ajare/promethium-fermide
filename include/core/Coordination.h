@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/ObservationRevision.h"
+
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -200,7 +202,7 @@ namespace core
 		DeviceCommand const& getCommand() const { return mCommand; }
 		bool hasCommand() const { return mHasCommand; }
 		DeviceOperationState getState() const { return mState; }
-		void setState(DeviceOperationState state) { mState = state; }
+		void setState(DeviceOperationState state) { ++observationRevision; mState = state; }
 	};
 
 	class InteractionRequest

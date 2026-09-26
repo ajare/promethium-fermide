@@ -1,4 +1,5 @@
 #include "core/Serializable.h"
+#include "core/ObservationRevision.h"
 
 #include <utility>
 
@@ -25,6 +26,7 @@ namespace core
 
 	void Serializable::copyFrom(Serializable const& other)
 	{
+		++observationRevision;
 		mDeserializationWarnings = other.mDeserializationWarnings;
 		mDeserializationErrors = other.mDeserializationErrors;
 		mModified = other.mModified;
@@ -32,6 +34,7 @@ namespace core
 
 	void Serializable::swapState(Serializable& other) noexcept
 	{
+		++observationRevision;
 		mDeserializationWarnings.swap(other.mDeserializationWarnings);
 		mDeserializationErrors.swap(other.mDeserializationErrors);
 		std::swap(mModified, other.mModified);
@@ -59,6 +62,7 @@ namespace core
 
 	void Serializable::modify()
 	{
+		++observationRevision;
 		mModified = true;
 	}
 
@@ -128,6 +132,7 @@ namespace core
 
 	bool Serializable::deserialize(Serializer& serializer, SerializationWorkData& workData)
 	{
+		++observationRevision;
 		preDeserialization(workData);
 		mDeserializationWarnings.clear();
 		mDeserializationErrors.clear();

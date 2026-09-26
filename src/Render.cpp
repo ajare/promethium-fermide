@@ -161,7 +161,7 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 	}
 	else resourceId = schedulingResourceId;
 	if (!resourceId) return;
-	auto snapshot = world->getSimulationSnapshot();
+	auto const& snapshot = world->getSimulationSnapshotView();
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& candidate) { return candidate.id == resourceId; });
 	if (resource == snapshot.traversalResources.end()) return;

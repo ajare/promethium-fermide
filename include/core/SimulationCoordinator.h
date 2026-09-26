@@ -615,10 +615,11 @@ namespace core
 
 		void advanceDoorResources();
 
-		// Tick event publication. Every completed phase is reported, then the
-		// before-tick snapshot is merged against the after-tick one to publish
-		// the Agents and device operations which changed.
-		void publishTickEvents(SimulationSnapshot const& before);
+		// Tick event publication. Report the six phases, then compare the Agents
+		// participating in the tick and touched Device operations in stable-ID
+		// order. Boundary baselines live in World; no full projection is built.
+		void publishTickEvents();
+		void touchDeviceOperation(DeviceOperationId id, DeviceOperation const& operation);
 
 		// Simulation clock and event consumption.
 		uint64_t getSimulationTick() const;
@@ -628,8 +629,8 @@ namespace core
 		std::vector<SimulationEvent> consumeSimulationEvents();
 
 		// Snapshot builders. Each is a read-only projection of one registry
-		// entry; getSimulationSnapshot is the whole-world projection the tick
-		// pipeline diffs against and the editor and tests read.
+		// entry; getSimulationSnapshot builds World's cached whole-world projection.
+		// Tick publication uses only the per-entity builders.
 		AgentSnapshot makeAgentSnapshot(Agent const* agent) const;
 
 		InteractionPointSnapshot makeInteractionPointSnapshot(InteractionPointId id,

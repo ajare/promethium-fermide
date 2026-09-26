@@ -32,6 +32,7 @@ namespace core
 
 	TraversalPermitId SimulationCoordinator::grantTraversalRequest(TraversalRequestId requestId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending)
 		{
@@ -80,6 +81,7 @@ namespace core
 	void SimulationCoordinator::allocateTraversalRequest(TraversalRequestId requestId,
 		shared_ptr<const Edge> const& edge, shared_ptr<const Vertex> const& destination)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending || !edge || !destination)
 		{
@@ -242,6 +244,7 @@ namespace core
 
 	void SimulationCoordinator::denyTraversalRequest(TraversalRequestId requestId, TraversalFailureReason reason)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending)
 		{
@@ -285,6 +288,7 @@ namespace core
 	bool SimulationCoordinator::commitTraversal(Agent& agent, TraversalRequestId requestId, TraversalPermitId permitId,
 		shared_ptr<const Vertex> const& destination)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		auto permit = mWorld.mTraversalPermits.find(permitId);
 		auto owner = getAgentId(&agent);
@@ -598,6 +602,7 @@ namespace core
 
 	void SimulationCoordinator::releaseTraversal(TraversalRequestId requestId, TraversalPermitId permitId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (auto request = mWorld.mTraversalRequests.find(requestId))
 		{
 			if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource)

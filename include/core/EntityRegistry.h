@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "core/ObservationRevision.h"
 #include <limits>
 #include <map>
 #include <memory>
@@ -62,6 +63,7 @@ namespace core
 			Id id{ mNextId };
 			advancePast(id.value);
 			mEntities.emplace(id, std::move(entity));
+			++observationRevision;
 			return id;
 		}
 
@@ -85,6 +87,7 @@ namespace core
 			if (!mEntities.emplace(id, std::move(entity)).second) return false;
 
 			advancePast(id.value);
+			++observationRevision;
 			return true;
 		}
 
@@ -118,7 +121,9 @@ namespace core
 
 		bool remove(Id id)
 		{
-			return mEntities.erase(id) == 1;
+			if (mEntities.erase(id) != 1) return false;
+			++observationRevision;
+			return true;
 		}
 
 		std::map<Id, std::unique_ptr<Entity>> const& entries() const

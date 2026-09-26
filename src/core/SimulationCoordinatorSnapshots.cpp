@@ -52,14 +52,21 @@ namespace core
 		result.escalatorWalking = agent->getActiveEscalatorWalking();
 		result.traversalRequest = agent->getTraversalRequestId();
 		result.traversalPermit = agent->getTraversalPermitId();
-		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
+		if (!mWorld.mPendingInteractionIndexValid
+			|| mWorld.mPendingInteractionIndexRevision != observationRevision)
 		{
-			if (request->getActor() == result.id && request->getResult() == InteractionResult::Pending)
-			{
-				result.interactionRequest = requestId;
-				result.hasLocomotionTask = true;
-				break;
-			}
+			mWorld.mPendingInteractionIndex.clear();
+			for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
+				if (request->getResult() == InteractionResult::Pending)
+					mWorld.mPendingInteractionIndex.try_emplace(request->getActor(), requestId);
+			mWorld.mPendingInteractionIndexValid = true;
+			mWorld.mPendingInteractionIndexRevision = observationRevision;
+		}
+		if (auto found = mWorld.mPendingInteractionIndex.find(result.id);
+			found != mWorld.mPendingInteractionIndex.end())
+		{
+			result.interactionRequest = found->second;
+			result.hasLocomotionTask = true;
 		}
 
 		switch (agent->getState())

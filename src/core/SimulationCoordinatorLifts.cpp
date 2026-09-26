@@ -94,6 +94,7 @@ namespace core
 
 	void SimulationCoordinator::addLiftStopRequest(TraversalResource& resource, uint32_t stop, AgentId owner)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!owner || stop >= resource.mLiftStopRequestOwners.size()) return;
 		if (resource.mLiftStopRequestOwners[stop].insert(owner).second)
 			resource.mLiftStopRequestTicks[stop][owner] = mWorld.mSimulationTick;
@@ -101,6 +102,7 @@ namespace core
 
 	void SimulationCoordinator::removeLiftStopRequest(TraversalResource& resource, uint32_t stop, AgentId owner)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!owner || stop >= resource.mLiftStopRequestOwners.size()) return;
 		resource.mLiftStopRequestOwners[stop].erase(owner);
 		resource.mLiftStopRequestTicks[stop].erase(owner);
@@ -231,6 +233,7 @@ namespace core
 
 	void SimulationCoordinator::releaseLiftAdmission(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (auto request = mWorld.mTraversalRequests.find(requestId);
 			request && (request->mSourceSector != resource.mLiftSector || resource.mOpenPlatformLift))
 		{
@@ -272,6 +275,7 @@ namespace core
 
 	void SimulationCoordinator::requestLiftPassengerSafeExit(AgentId passenger, TraversalFailureReason reason)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto const& [resourceId, resourcePtr] : mWorld.mTraversalResources.entries())
 		{
 			(void)resourceId;
@@ -296,6 +300,7 @@ namespace core
 
 	void SimulationCoordinator::assignLiftSafeExitPaths(TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (resource.mLiftMoving || resource.mLiftCurrentStop >= resource.mLiftStops.size()
 			|| (resource.mLiftStopPhase != LiftStopPhase::Opening
 				&& resource.mLiftStopPhase != LiftStopPhase::Disembarking
@@ -369,6 +374,7 @@ namespace core
 	bool SimulationCoordinator::replaceOnboardLiftDestination(Agent& agent, shared_ptr<Path> const& path,
 		uint32_t& sourceNode)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto owner = getAgentId(&agent);
 		if (!owner || !path) return false;
 		for (auto const& [resourceId, resourcePtr] : mWorld.mTraversalResources.entries())
@@ -428,6 +434,7 @@ namespace core
 	void SimulationCoordinator::allocateLiftTraversal(TraversalRequestId requestId,
 		TraversalResource& edgeResource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
 		if (edgeResource.mOpenPlatformLift)
@@ -501,6 +508,7 @@ namespace core
 	void SimulationCoordinator::allocateLiftBoarding(TraversalRequestId requestId,
 		TraversalResource& edgeResource, TraversalResource& coordinator, uint32_t stop)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
 		// Shuttle boarding cannot overlap disembarkation at the aligned stop,
@@ -735,6 +743,7 @@ namespace core
 	// leave at the next safe stop and the request is denied.
 	void SimulationCoordinator::allocateLiftRiding(TraversalRequestId requestId, TraversalResource& coordinator)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
 		if (find(coordinator.mOccupants.begin(), coordinator.mOccupants.end(), request->mOwner)
@@ -873,6 +882,7 @@ namespace core
 	void SimulationCoordinator::allocateLiftDisembarking(TraversalRequestId requestId,
 		TraversalResource& edgeResource, TraversalResource& coordinator, uint32_t stop)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
 		if (find(coordinator.mOccupants.begin(), coordinator.mOccupants.end(), request->mOwner)

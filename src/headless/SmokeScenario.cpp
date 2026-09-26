@@ -46,6 +46,7 @@
 #endif
 
 void runSerializationSmokeChecks();
+void runSimulationObservationSmokeChecks();
 void runAgentGroupSmokeChecks();
 void runAgentGroupAssignmentSmokeChecks();
 void runAgentGroupCountSmokeChecks();
@@ -5497,6 +5498,7 @@ int main(int argc, char** argv)
 		}
 
 		runSerializationSmokeChecks();
+		runSimulationObservationSmokeChecks();
 		runAgentGroupSmokeChecks();
 		runAgentGroupAssignmentSmokeChecks();
 		runAgentGroupCountSmokeChecks();

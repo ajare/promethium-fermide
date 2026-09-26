@@ -119,6 +119,7 @@ namespace core
 
 	void World::recordConstruction(ConstructionRecord record)
 	{
+		invalidateSimulationSnapshot();
 		if (!mDeserializingConstruction)
 		{
 			mConstructionRecords.push_back(std::move(record));
@@ -768,6 +769,7 @@ namespace core
 
 	bool World::deserializeImpl(Serializer& serializer, SerializationWorkData& workData)
 	{
+		invalidateSimulationSnapshot();
 		serializer.beginMap("world");
 		auto const version = serializer.readUint32("version");
 		// Versions 1 through 6 predate Door opening styles; their records replay
@@ -1272,6 +1274,7 @@ namespace core
 
 	void World::resetSimulation()
 	{
+		invalidateSimulationSnapshot();
 		auto const wasModified = isModified();
 		auto const wasPaused = mSimulationPaused;
 		auto const agentTagRegistry = mAgentTagRegistry;
@@ -1297,6 +1300,7 @@ namespace core
 
 	void World::markSaved()
 	{
+		invalidateSimulationSnapshot();
 		markUnmodified();
 		for (auto const& [id, agent] : mAgents.entries())
 		{
@@ -1307,6 +1311,7 @@ namespace core
 
 	void World::saveTo(string const& filepath)
 	{
+		invalidateSimulationSnapshot();
 		requireWorldDocumentPath(filepath);
 		auto serializer = YamlSerializer::toFile(filepath);
 		SerializationWorkData workData;
@@ -1322,6 +1327,7 @@ namespace core
 	void World::resetForDeserialization(std::string name, uint32_t cellsWide, uint32_t levelsHigh,
 		bool preserveBehaviourRuntime)
 	{
+		invalidateSimulationSnapshot();
 		if (!preserveBehaviourRuntime)
 		{
 			mAgentBehaviourRuntime->teardownAll(*this,
@@ -1372,6 +1378,10 @@ namespace core
 		mNextQueueTicketValue = 1;
 		mNextDoorOpenLeaseValue = 1;
 		mAccumulatedTime = 0.0;
+		if (!preserveBehaviourRuntime) mTimeScale = 1.0;
+		mRecordingTickChanges = false;
+		mTickAgents.clear();
+		mTickOperations.clear();
 		mCurrentPhase = SimulationPhase::None;
 		if (!preserveBehaviourRuntime) mEvents.clear();
 		mTraversalWaitingPolicy = {};
@@ -1397,6 +1407,7 @@ namespace core
 
 	void World::applyConstructionRecord(ConstructionRecord const& record)
 	{
+		invalidateSimulationSnapshot();
 		// A record written before Transits and Doors carried a Layer replayed against
 		// the front pair, which is the only pair a two-Layer World could express.
 		auto const transitLayer = [](ConstructionRecord const& r) -> uint32_t
@@ -1667,6 +1678,7 @@ namespace core
 
 	void World::restoreCarriedAgents(std::vector<CarriedAgent> const& carried, bool landingChecked)
 	{
+		invalidateSimulationSnapshot();
 		for (auto const& saved : carried)
 		{
 			auto sector = getSectorAtPosition(saved.layer, saved.position.x, saved.position.y);
@@ -1708,6 +1720,7 @@ namespace core
 	void World::rebuildFromConstructionRecords(vector<ConstructionRecord> records,
 		uint32_t movedSectorIndex, int deltaX, int deltaY)
 	{
+		invalidateSimulationSnapshot();
 		struct ActiveLadder { uint32_t sector, level, x, height; };
 		vector<ActiveLadder> activeLadders;
 		for (auto const& record : mConstructionRecords)
@@ -2086,6 +2099,7 @@ namespace core
 
 	bool World::applyDeleteLayer(LayerDeletePlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		auto const plan = planDeleteLayer(requested.layerIndex);
 		if (!plan.valid) throw WorldException(this, plan.diagnostic);
 
@@ -2273,6 +2287,7 @@ namespace core
 
 	uint32_t World::applyLiftEdit(LiftEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused) throw WorldException(this, "Editing a Lift requires the simulation to be paused");
 		auto plan = requested.remove ? planRemoveLift(requested.sectorIndex)
 			: planResizeLift(requested.sectorIndex, requested.x, requested.y,
@@ -2722,6 +2737,7 @@ namespace core
 
 	uint32_t World::applyShuttleEdit(ShuttleEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused) throw WorldException(this, "Editing a Shuttle requires the simulation to be paused");
 		auto plan = requested.remove ? planRemoveShuttle(requested.sectorIndex)
 			: planResizeShuttleWithVehicle(requested.sectorIndex, requested.x, requested.y,
@@ -2935,6 +2951,7 @@ namespace core
 
 	uint32_t World::applyLadderEdit(LadderEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Editing a Ladder requires the simulation to be paused");
 		auto plan = requested.remove ? planRemoveLadder(requested.sectorIndex)
@@ -3035,6 +3052,7 @@ namespace core
 
 	uint32_t World::applyStaircaseEdit(StaircaseEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused) throw WorldException(this, "Editing a Staircase requires the simulation to be paused");
 		auto plan = requested.remove ? planRemoveStaircase(requested.sectorIndex)
 			: planResizeStaircase(requested.sectorIndex, requested.x, requested.y, requested.options);
@@ -3264,6 +3282,7 @@ namespace core
 
 	uint32_t World::applyStairwellEdit(StairwellEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Editing a Stairwell requires the simulation to be paused");
 		auto plan = requested.remove ? planRemoveStairwell(requested.sectorIndex)
@@ -4175,6 +4194,7 @@ namespace core
 
 	bool World::removeSectorDoor(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Door requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4302,6 +4322,7 @@ namespace core
 	shared_ptr<const SectorObject> World::applySectorBulkheadDoorOptions(uint32_t sectorIndex,
 		uint32_t objectIndex, CreateBulkheadDoorOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Editing a Bulkhead Door requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4353,6 +4374,7 @@ namespace core
 
 	bool World::removeSectorBulkheadDoor(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Bulkhead Door requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4437,6 +4459,7 @@ namespace core
 	shared_ptr<const SectorObject> World::applyRoomLadderOptions(uint32_t sectorIndex,
 		uint32_t objectIndex, CreateLadderOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Editing a Room Ladder requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4475,6 +4498,7 @@ namespace core
 
 	bool World::removeRoomLadder(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Room Ladder requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4535,6 +4559,7 @@ namespace core
 	shared_ptr<const SectorObject> World::applySectorForceBridgeOptions(uint32_t sectorIndex,
 		uint32_t objectIndex, CreateForceBridgeOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Editing a Force Bridge requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4571,6 +4596,7 @@ namespace core
 
 	bool World::removeSectorForceBridge(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Force Bridge requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4769,6 +4795,7 @@ namespace core
 
 	shared_ptr<const SectorObject> World::applyPlatformLiftEdit(PlatformLiftEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused) throw WorldException(this, "Editing a PlatformLift requires the simulation to be paused");
 		auto plan = requested.remove ? planRemovePlatformLift(requested.sectorIndex, requested.objectIndex)
 			: planPlatformLiftEdit(requested.sectorIndex, requested.objectIndex, requested.options);
@@ -4819,12 +4846,14 @@ namespace core
 
 	bool World::applyWalkwayEdit(WalkwayEditPlan const& plan)
 	{
+		invalidateSimulationSnapshot();
 		if (!plan.valid) throw WorldException(this, plan.diagnostic);
 		return removeSectorWalkway(plan.sectorIndex, plan.objectIndex);
 	}
 
 	bool World::removeSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Walkway requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -5000,6 +5029,7 @@ namespace core
 
 	bool World::removeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Window requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -5186,6 +5216,7 @@ namespace core
 
 	shared_ptr<const SectorObject> World::applyObjectMove(ObjectMovePlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Moving an object requires the simulation to be paused");
 		auto plan = requested;
@@ -5508,6 +5539,7 @@ namespace core
 
 	uint32_t World::applyLocationEdit(LocationEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		// A Background edit is carried in the same plan shape but reconstructs itself
 		// through the Background path, which knows what taking a Background away costs
 		// the Windows looking into it.
@@ -5733,6 +5765,7 @@ namespace core
 
 	uint32_t World::applyBackgroundEdit(LocationEditPlan const& requested)
 	{
+		invalidateSimulationSnapshot();
 		LocationEditPlan plan = requested.remove
 			? planRemoveBackground(requested.sectorIndex)
 			: planResizeBackground(requested.sectorIndex, requested.x, requested.y,
@@ -5770,6 +5803,7 @@ namespace core
 	bool World::setBackgroundColour(uint32_t sectorIndex, BackgroundColour const& colour,
 		std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
 			|| mSectors[sectorIndex]->getType() != SectorType::Background)
 		{
@@ -5804,6 +5838,7 @@ namespace core
 	bool World::setFacadeColour(uint32_t sectorIndex, BackgroundColour const& colour,
 		std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
 			|| mSectors[sectorIndex]->getType() != SectorType::Facade)
 		{

@@ -35,6 +35,7 @@ namespace core
 	TraversalRequestId SimulationCoordinator::createTraversalRequest(Agent const& agent, shared_ptr<const Edge> const& edge,
 		shared_ptr<const Vertex> const& source, shared_ptr<const Vertex> const& destination)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto owner = getAgentId(&agent);
 		if (!owner || !edge || !source || !destination)
 		{
@@ -79,6 +80,7 @@ namespace core
 
 	void SimulationCoordinator::attachQueueTicket(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || (request->mQueueTicket && request->mQueueApproach != ~0u))
 		{
@@ -119,6 +121,7 @@ namespace core
 		shared_ptr<const Edge> const& edge, Vector2 const& endpoint,
 		float movementDistance)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!edge || movementDistance < 0.0f || !agent.getSector()) return false;
 		auto resource = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
 		if (!resource || (!resource->mDoor && !resource->mLadder && !resource->mForceBridge
@@ -215,6 +218,7 @@ namespace core
 
 	void SimulationCoordinator::refreshQueuePositions(TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		// Doors and Ladders intentionally share this allocator: prefer proximity
 		// to the resource endpoint, then proximity to the waiting Agent.
 		for (auto& lane : resource.mQueueLanes)
@@ -296,6 +300,7 @@ namespace core
 
 	void SimulationCoordinator::updateTraversalProgressAndTimeouts()
 	{
+		mWorld.invalidateSimulationSnapshot();
 		vector<TraversalPermitId> expiredPermits;
 		for (auto const& [permitId, permit] : mWorld.mTraversalPermits.entries())
 		{
@@ -374,6 +379,7 @@ namespace core
 
 	void SimulationCoordinator::expireTraversalPermit(TraversalPermitId permitId)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto permit = mWorld.mTraversalPermits.find(permitId);
 		if (!permit || permit->mState != TraversalPermitState::Active) return;
 		auto requestId = permit->mRequest;
@@ -482,6 +488,7 @@ namespace core
 
 	void SimulationCoordinator::tryGrantDoorQueue(TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!resource.mEnabled || (!resource.mDoor && !resource.mForceBridge)
 			|| (resource.mDoor && !resource.mDoor->isOpen())
 			|| (resource.mForceBridge && !resource.mForceBridge->isExtended()))
@@ -611,6 +618,7 @@ namespace core
 
 	void SimulationCoordinator::releaseDoorQueueOwnership(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		for (auto& lane : resource.mQueueLanes)
 		{
 			lane.queue.erase(remove(lane.queue.begin(), lane.queue.end(), requestId), lane.queue.end());

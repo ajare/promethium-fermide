@@ -133,6 +133,7 @@ namespace core
 
 	bool World::setRandomSeed(uint64_t seed, string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (diagnostic) diagnostic->clear();
 		if (!mSimulationPaused)
 		{
@@ -222,6 +223,7 @@ namespace core
 	void World::attachAgentTagRegistry(string filename,
 		shared_ptr<AgentTagRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		filesystem::path const path(filename);
 		if (filename.empty() || path.is_absolute() || path.has_parent_path()
 			|| path.filename().string() != filename
@@ -258,6 +260,7 @@ namespace core
 	void World::attachAgentTagRegistryAndClearAssignments(string filename,
 		shared_ptr<AgentTagRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		filesystem::path const path(filename);
 		if (filename.empty() || path.is_absolute() || path.has_parent_path()
 			|| path.filename().string() != filename
@@ -289,6 +292,7 @@ namespace core
 
 	void World::detachAgentTagRegistry()
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentTagRegistryReference) return;
 		if (getAgentTagAssignmentCount() != 0 || getAgentTagSampleCount() != 0)
 		{
@@ -303,6 +307,7 @@ namespace core
 
 	void World::detachAgentTagRegistryAndClearAssignments()
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentTagRegistryReference) return;
 		clearAllAgentTagAssignmentsAndSamples();
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
@@ -313,6 +318,7 @@ namespace core
 
 	void World::resolveAgentTagRegistry(shared_ptr<AgentTagRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentTagRegistryReference)
 			throw invalid_argument("The World has no Agent tag registry reference to resolve");
 		if (!registry)
@@ -335,6 +341,7 @@ namespace core
 	void World::replaceAgentTagRegistryWithIndependentCopy(string filename,
 		shared_ptr<AgentTagRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		filesystem::path const path(filename);
 		if (filename.empty() || path.is_absolute() || path.has_parent_path()
 			|| path.filename().string() != filename
@@ -518,6 +525,7 @@ namespace core
 	void World::attachAgentBehaviourRegistry(string packageName,
 		shared_ptr<AgentBehaviourRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before changing its Agent behaviour registry");
 		filesystem::path const path(packageName);
@@ -590,6 +598,7 @@ namespace core
 	void World::attachAgentBehaviourRegistryAndClearAssignments(string packageName,
 		shared_ptr<AgentBehaviourRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before replacing its Agent behaviour registry");
 		filesystem::path const path(packageName);
@@ -630,6 +639,7 @@ namespace core
 
 	void World::detachAgentBehaviourRegistry()
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentBehaviourRegistryReference) return;
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before detaching its Agent behaviour registry");
@@ -645,6 +655,7 @@ namespace core
 
 	void World::detachAgentBehaviourRegistryAndClearAssignments()
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentBehaviourRegistryReference) return;
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before detaching its Agent behaviour registry");
@@ -670,6 +681,7 @@ namespace core
 
 	void World::resolveAgentBehaviourRegistry(shared_ptr<AgentBehaviourRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentBehaviourRegistryReference)
 			throw invalid_argument("The World has no Agent behaviour registry reference to resolve");
 		if (!registry)
@@ -791,6 +803,7 @@ namespace core
 
 	void World::markAgentBehaviourRegistryUnavailable(string diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentBehaviourRegistryReference) return;
 		// An admitted in-memory registry/runtime is not discarded merely because a
 		// later disk resolution attempt failed. Freshly deserialized Worlds have
@@ -809,6 +822,7 @@ namespace core
 	void World::replaceAgentBehaviourRegistryWithIndependentCopy(
 		string packageName, shared_ptr<AgentBehaviourRegistry> registry)
 	{
+		invalidateSimulationSnapshot();
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before replacing its Agent behaviour registry with a Save As copy");
 		filesystem::path const path(packageName);
@@ -877,6 +891,7 @@ namespace core
 		AgentBehaviourId behaviour, uint64_t revision,
 		AgentBehaviourConfiguration const& configuration, string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (diagnostic) diagnostic->clear();
 		auto const lookup = lookupAgent(agentId);
 		if (!lookup)
@@ -912,6 +927,7 @@ namespace core
 
 	bool World::clearAgentBehaviourAssignment(AgentId agentId, string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (diagnostic) diagnostic->clear();
 		auto const lookup = lookupAgent(agentId);
 		if (!lookup)
@@ -983,6 +999,7 @@ namespace core
 	vector<AgentBehaviourRuntimeDiagnostic>
 	World::consumeAgentBehaviourRuntimeDiagnostics()
 	{
+		invalidateSimulationSnapshot();
 		return mAgentBehaviourRuntime->consumeDiagnostics();
 	}
 
@@ -1206,6 +1223,7 @@ namespace core
 	void World::applyAgentTagReconciliations(
 		vector<AgentTagReconciliation> const& repairs)
 	{
+		invalidateSimulationSnapshot();
 		// A caller validates the complete transaction before reaching this seam.
 		// Sampling and application cannot refuse, so all repairs commit together.
 		for (auto const& repair : repairs)
@@ -1236,6 +1254,7 @@ namespace core
 
 	void World::reconcileAgentTagAssignments(AgentTagRegistry const& registry)
 	{
+		invalidateSimulationSnapshot();
 		vector<AgentTagReconciliation> repairs;
 		string diagnostic;
 		if (!inspectAgentTagAssignments(registry, true, &repairs, &diagnostic))
@@ -1256,6 +1275,7 @@ namespace core
 
 	void World::clearAgentTagAssignments(AgentTagId id)
 	{
+		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
@@ -1275,6 +1295,7 @@ namespace core
 
 	void World::clearAllAgentTagAssignmentsAndSamples()
 	{
+		invalidateSimulationSnapshot();
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
 			(void)agentId;
@@ -1288,6 +1309,7 @@ namespace core
 	void World::addAgentTagWalkSpeedModifierSamples(AgentTagId id,
 		AgentWalkSpeedModifierProperty const& property)
 	{
+		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
@@ -1303,6 +1325,7 @@ namespace core
 
 	void World::clearAgentTagWalkSpeedModifierSamples(AgentTagId id)
 	{
+		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
@@ -1318,6 +1341,7 @@ namespace core
 	void World::addAgentTagHeightModifierSamples(AgentTagId id,
 		AgentHeightModifierProperty const& property)
 	{
+		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
@@ -1333,6 +1357,7 @@ namespace core
 
 	void World::clearAgentTagHeightModifierSamples(AgentTagId id)
 	{
+		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
@@ -1368,6 +1393,7 @@ namespace core
 
 	void World::setLayerName(uint32_t layerIndex, std::string name)
 	{
+		invalidateSimulationSnapshot();
 		validateLayer("World::setLayerName", layerIndex);
 		mLayerNames[layerIndex] = std::move(name);
 		modify();
@@ -1380,6 +1406,7 @@ namespace core
 
 	uint32_t World::addLayer()
 	{
+		invalidateSimulationSnapshot();
 		auto const layerIndex = static_cast<uint32_t>(mLayers.size());
 
 		if (layerIndex >= CORE_MAX_LAYERS)
@@ -1705,6 +1732,7 @@ namespace core
 
 	uint32_t World::createLocation(string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor)
 	{
+		invalidateSimulationSnapshot();
 		auto sectorIndex = (uint32_t)mSectors.size();
 
 		auto location = make_shared<Location>(name, type, layerIndex, sectorIndex, x, y, cellsWide, levelsHigh, topLevelHeight, ~0u, isCorridor);
@@ -1715,6 +1743,7 @@ namespace core
 
 	uint32_t World::createLadder(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		auto y0 = y;
 		auto y1 = y + options.levelsHigh - 1;
 
@@ -1744,6 +1773,7 @@ namespace core
 
 	uint32_t World::createStairwell(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t levelsHigh, int mountSide)
 	{
+		invalidateSimulationSnapshot();
 		ASSERT_SIDE_OK(mountSide);
 
 		// Get Locations this Stairwell connects.  Because a Stairwell is two cells wide, we
@@ -1774,6 +1804,7 @@ namespace core
 	uint32_t World::createStaircase(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
 		int riseSide, float speed)
 	{
+		invalidateSimulationSnapshot();
 		ASSERT_SIDE_OK(riseSide);
 		uint32_t const lowerX = riseSide == CORE_SIDE_RIGHT ? x : x + cellsWide - 1;
 		uint32_t const upperX = riseSide == CORE_SIDE_RIGHT ? x + cellsWide - 1 : x;
@@ -1795,6 +1826,7 @@ namespace core
 	World::CreateObjectResult World::createLift(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
 		uint32_t levelsHigh, vector<uint32_t> const& stopOffsets)
 	{
+		invalidateSimulationSnapshot();
 		// Get Locations this Lift connects, all on the Layer directly in front.
 		vector<TransitStop> stops;
 		auto const& landing = mLayers[layerInFront(layerIndex)];
@@ -1827,6 +1859,7 @@ namespace core
 
 	World::CreateObjectResult World::createShuttle(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t numCars, uint32_t carWidth, vector<uint32_t> const& stopOffsets)
 	{
+		invalidateSimulationSnapshot();
 		// Get Locations this Shuttle connects, all on the Layer directly in front.
 		vector<TransitStop> stops;
 		auto const& landing = mLayers[layerInFront(layerIndex)];
@@ -1870,6 +1903,7 @@ namespace core
 
 	uint32_t World::addLocation(string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::addLocation({}, {}, {}, {}, {}, {}, {} {})", name, getSectorTypeString(type), layerIndex, x, y, cellsWide, levelsHigh, topLevelHeight);
 		
 		validateBounds(caller, x, y, cellsWide, levelsHigh);
@@ -1897,7 +1931,8 @@ namespace core
 
 	World::CreateObjectResult World::createDoor(uint32_t layerIndex, uint32_t x, uint32_t y,
 		uint32_t cellsWide, Door::Height height, uint32_t* vertexIdentifier)
-	{	
+	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::createDoor({}, {}, {}, {})", layerIndex, x, y, cellsWide);
 
 		// A Door is authored on the front Layer of its pair and opens into the Layer
@@ -1931,6 +1966,7 @@ namespace core
 
 	World::CreateObjectResult World::createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::createWindow({}, {}, {}, {}, {})", layerIndex, x, y, cellsWide, levelsHigh);
 
 		// A Window is authored on the front Layer of the pair it crosses.  The Layer
@@ -1976,6 +2012,7 @@ namespace core
 
 	World::CreateObjectResult World::createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side)
 	{
+		invalidateSimulationSnapshot();
 		ASSERT_SIDE_OK(side);
 
 		string caller = format("World::createBulkheadDoor({}, {}, {}, {})", layerIndex, x, y, side);
@@ -2023,6 +2060,7 @@ namespace core
 		uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags,
 		uint32_t* vertexIdentifier, uint32_t alternateX, int alternateSide)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::createPhysicalControl({}, {}, {}, {}, {})", layerIndex, x, y, side, flags);
 		vector<PhysicalControlCandidate> candidates{ { x, side } };
 		if (alternateX != ~0u && alternateSide >= CORE_SIDE_LEFT
@@ -2085,6 +2123,7 @@ namespace core
 
 	void World::reflowPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y)
 	{
+		invalidateSimulationSnapshot();
 		vector<uint32_t> row;
 		for (uint32_t i = 0; i < mPhysicalControlPlacements.size(); ++i)
 		{
@@ -2264,6 +2303,7 @@ namespace core
 
 	void World::bindPhysicalControl(CreateObjectResult& control, InteractionPointId point)
 	{
+		invalidateSimulationSnapshot();
 		control.interactionPoint = point;
 		auto object = control.sector->getObject(control.index)->_getObject();
 		auto button = dynamic_pointer_cast<Button>(object);
@@ -2288,6 +2328,7 @@ namespace core
 		CreateObjectResult& control, float standingY, float reach,
 		float durationSeconds, vector<InteractionBinding> bindings)
 	{
+		invalidateSimulationSnapshot();
 		if (!control.sector) throw invalid_argument("A physical control requires an owning sector");
 		auto sectorObject = control.sector->_getObject(control.index);
 		auto button = sectorObject ? dynamic_pointer_cast<Button>(sectorObject->_getObject()) : nullptr;
@@ -2303,6 +2344,7 @@ namespace core
 
 	World::CreateObjectResult World::createWalkway(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::createWalkway({}, {}, {})", layerIndex, x, y);
 		
 		validateCellOccupied(caller, layerIndex, x, y);
@@ -2322,6 +2364,7 @@ namespace core
 	World::CreateObjectResult World::createMarker(uint32_t layerIndex, uint32_t x,
 		uint32_t y, float xOffset, MarkerId id, string name, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::createMarker({}, {}, {}, {})", layerIndex, x, y, xOffset);
 
 		float xPos = x + xOffset;
@@ -2344,6 +2387,7 @@ namespace core
 
 	World::CreateObjectResult World::createForceBridge(uint32_t layerIndex, uint32_t x, uint32_t y, CreateForceBridgeOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		ASSERT_SIDE_OK(options.fromSide);
 
 		string caller = format("World::createForceBridge({}, {}, {}, {}, {}, {})", layerIndex, x, y, options.width, options.fromSide, options.startExtended);
@@ -2364,6 +2408,7 @@ namespace core
 
 	World::CreateObjectResult World::createLadderSectorObject(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLadderOptions const& options, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		auto layer = getLayer(layerIndex);
 
 		string caller = format("World::createLadderSectorObject({}, {}, {}, {}, {})", layerIndex, x, y, options.startExtended, options.levelsHigh);
@@ -2380,6 +2425,7 @@ namespace core
 
 	World::CreateObjectResult World::createPlatformLiftSectorObject(uint32_t layerIndex, uint32_t x, uint32_t y, CreateLiftOptions const& options, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		auto layer = getLayer(layerIndex);
 
 		string caller = format("World::createPlatformLiftSectorObject({}, {}, {})", layerIndex, x, y);
@@ -2400,6 +2446,7 @@ namespace core
 
 	shared_ptr<Sector> World::_getSector(uint32_t index)
 	{
+		invalidateSimulationSnapshot();
 		if (index >= getNumSectors())
 		{
 			throw WorldException(this, format("World::getSector({}) - index={} is out of range.", index, index));
@@ -2476,12 +2523,14 @@ namespace core
 
 	uint32_t World::addCorridor(uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
 	{
+		invalidateSimulationSnapshot();
 		return addCorridor(0, y, x, cellsWide, levelsHigh);
 	}
 
 	uint32_t World::addCorridor(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh)
 	{
+		invalidateSimulationSnapshot();
 		string const caller = format("World::addCorridor({}, {}, {}, {}, {})", layerIndex, y, x, cellsWide, levelsHigh);
 		// Every rejecting check runs before beginStructuralEdit() so a refused
 		// call stays a true no-op: no modified flag, no topology invalidation
@@ -2505,6 +2554,7 @@ namespace core
 
 	uint32_t World::addRoom(string const& name, uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight)
 	{
+		invalidateSimulationSnapshot();
 		string const caller = format("World::addRoom({}, {}, {}, {}, {}, {}, {})", name, layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight);
 		// Every rejecting check runs before beginStructuralEdit() so a refused
 		// call stays a true no-op: no modified flag, no topology invalidation
@@ -2578,6 +2628,7 @@ namespace core
 	uint32_t World::addBackground(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh, BackgroundColour const& colour)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canAddBackground(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
 			throw WorldException(this, diagnostic);
@@ -2655,6 +2706,7 @@ namespace core
 	uint32_t World::addFacade(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh, float topLevelHeight, BackgroundColour const& colour)
 	{
+		invalidateSimulationSnapshot();
 		return addFacade(Facade::defaultName(), layerIndex, y, x, cellsWide, levelsHigh,
 			topLevelHeight, colour);
 	}
@@ -2662,6 +2714,7 @@ namespace core
 	uint32_t World::addFacade(std::string const& name, uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, BackgroundColour const& colour)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canAddFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, &diagnostic))
 			throw WorldException(this, diagnostic);
@@ -2745,6 +2798,7 @@ namespace core
 
 	World::CreateLadderResult World::addLadder(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLadderOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addLadder");
 		// A Ladder Transit sits on layerIndex and lands on the Layer directly in front.
 		auto const landingLayer = layerInFront(layerIndex);
@@ -2917,6 +2971,7 @@ namespace core
 
 	uint32_t World::addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t levelsHigh, int mountSide)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addStairwell");
 		return addStairwell(layerIndex, y, x, CreateStairwellOptions{ levelsHigh, mountSide }).sectorIndex;
 	}
@@ -2924,6 +2979,7 @@ namespace core
 	World::CreateStairwellResult World::addStairwell(uint32_t layerIndex, uint32_t y, uint32_t x,
 		CreateStairwellOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addStairwell");
 		auto levelsHigh = options.levelsHigh;
 		auto mountSide = options.mountSide;
@@ -3104,11 +3160,13 @@ namespace core
 	uint32_t World::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		int riseSide, float speed)
 	{
+		invalidateSimulationSnapshot();
 		return addStaircase(layerIndex, y, x, CreateStaircaseOptions{ cellsWide, riseSide, speed });
 	}
 
 	uint32_t World::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, CreateStaircaseOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addStaircase");
 		string diagnostic;
 		if (!isfinite(options.speed))
@@ -3173,6 +3231,7 @@ namespace core
 	World::CreateLiftResult World::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide,
 		uint32_t levelsHigh)
 	{
+		invalidateSimulationSnapshot();
 		CreateLiftOptions options;
 		options.cellsWide = cellsWide;
 		options.levelsHigh = levelsHigh;
@@ -3193,6 +3252,7 @@ namespace core
 
 	World::CreateLiftResult World::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLiftOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addLift");
 		// The Lift Transit occupies layerIndex; its landings are the fore Layer of the
 		// pair it forms, which is the Layer directly in front.
@@ -3390,6 +3450,7 @@ namespace core
 
 	World::CreateShuttleResult World::addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addShuttle");
 		// The Shuttle Transit occupies layerIndex; its landings are the fore Layer of
 		// the pair it forms, which is the Layer directly in front.
@@ -3735,6 +3796,7 @@ namespace core
 
 	void World::removeLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canRemoveLocationWall(sectorIndex, levelIndex, side, &diagnostic))
 			throw WorldException(this, "World::removeLocationWall - " + diagnostic);
@@ -3759,6 +3821,7 @@ namespace core
 
 	void World::addLocationWall(uint32_t sectorIndex, uint32_t levelIndex, int side)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canAddLocationWall(sectorIndex, levelIndex, side, &diagnostic))
 			throw WorldException(this, "World::addLocationWall - " + diagnostic);
@@ -3798,6 +3861,7 @@ namespace core
 
 	World::CreateObjectResult World::_createSectorButton(string const& name, shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index)
 	{
+		invalidateSimulationSnapshot();
 		auto side = CORE_SIDE_MIDDLE;
 		uint32_t buttonX = sector->getCellX() + x;
 
@@ -3813,6 +3877,7 @@ namespace core
 
 	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index)
 	{
+		invalidateSimulationSnapshot();
 		int side = ((x + cellsWide) - 1) == sector->getCellX1() ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
 		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
 		uint32_t alternateX = ~0u;
@@ -3841,6 +3906,7 @@ namespace core
 
 	World::CreateObjectResult World::_createBulkheadDoorButton(shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index)
 	{
+		invalidateSimulationSnapshot();
 		uint32_t buttonX = side == CORE_SIDE_LEFT ? sector->getCellX1() : sector->getCellX0();
 
 		auto obj = createPhysicalControl("BulkheadDoor button", sector->getLayerIndex(), buttonX, y, CORE_SIDE_MIDDLE, 0);
@@ -3855,6 +3921,7 @@ namespace core
 
 	World::CreateObjectResult World::_createForceBridgeButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("_createForceBridgeButton(<sector>, {}, {}, {}, {}, {}, <index>)", x, y, cellsWide, side, flags);
 		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
 
@@ -3875,6 +3942,7 @@ namespace core
 		uint32_t x, uint32_t y, int side, uint32_t flags, uint32_t* index,
 		bool insetWithinCell)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("_createLadderButton(<sector>, {}, {}, {}, {}, <index>)", x, y, side, flags);
 		uint32_t buttonX = x;
 
@@ -3904,6 +3972,7 @@ namespace core
 
 	World::CreateObjectResult World::_createPlatformLiftButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("_createPlatformLiftButton(<sector>, {}, {}, {}, {}, {}, <index>)", x, y, cellsWide, side, flags);
 		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
 
@@ -4275,6 +4344,7 @@ namespace core
 	bool World::setSectorDoorHeight(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 		Door::Height height, std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		CreateDoorOptions options;
 		if (!getSectorDoorOptions(layerIndex, y, x, width, options))
 		{
@@ -4319,6 +4389,7 @@ namespace core
 	bool World::setSectorDoorOpenStyle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 		Door::OpenStyle style, std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		// Same patch shape as a Background recolour: the authored record is the
 		// persistence boundary, so the record's style and the live Door move
 		// together.  The most recent matching record wins, matching
@@ -4368,12 +4439,14 @@ namespace core
 
 	World::CreateDoorResult World::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x)
 	{
+		invalidateSimulationSnapshot();
 		return addSectorDoor(layerIndex, y, x, CreateDoorOptions{});
 	}
 
 	bool World::setLiftStopDoorOpenStyle(uint32_t liftSectorIndex, uint32_t stopIndex,
 		Door::OpenStyle style, std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		// A Lift's landing Doors have no Door records of their own; the Lift's
 		// producing record owns them.  The per-stop override therefore rides in
 		// that record, which is the persistence boundary: save/load and the
@@ -4443,6 +4516,7 @@ namespace core
 	bool World::setShuttleDoorOpenStyle(uint32_t shuttleSectorIndex, uint32_t stopIndex,
 		uint32_t carriageIndex, uint32_t doorIndex, Door::OpenStyle style, std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		// A Shuttle's landing Doors have no Door records of their own; the Shuttle's
 		// producing record owns them.  The per-Door override therefore rides in
 		// that record, which is the persistence boundary: save/load and the
@@ -4514,6 +4588,7 @@ namespace core
 
 	World::CreateDoorResult World::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, CreateDoorOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addSectorDoor");
 		uint32_t liftX, liftWidth;
 		if (getLiftLandingGeometry(layerBehind(layerIndex), y, x, liftX, liftWidth))
@@ -4560,6 +4635,7 @@ namespace core
 
 	void World::addSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
 			|| objectIndex >= mSectors[sectorIndex]->getNumObjects())
 		{
@@ -4714,6 +4790,7 @@ namespace core
 	shared_ptr<const DoorSectorObject> World::removeSectorDoorButton(uint32_t sectorIndex,
 		uint32_t objectIndex)
 	{
+		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Removing a Door Button requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -4794,6 +4871,7 @@ namespace core
 	World::CreateDoorResult World::_addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
 		CreateDoorOptions const& options, bool controlsAreExternallyBound)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::addSectorDoor({}, {}, {}, {})", layerIndex, y, x, options.width);
 
 		auto cellsWide = options.width;
@@ -5054,12 +5132,14 @@ namespace core
 
 	uint32_t World::addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh)
 	{
+		invalidateSimulationSnapshot();
 		return addSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, {}).window.index;
 	}
 
 	World::CreateWindowResult World::addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canAddSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
 			throw WorldException(this, diagnostic);
@@ -5209,12 +5289,14 @@ namespace core
 	World::CreateBulkheadDoorResult World::addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y,
 		uint32_t x, int side)
 	{
+		invalidateSimulationSnapshot();
 		return addSectorBulkheadDoor(layerIndex, y, x, side, CreateBulkheadDoorOptions{});
 	}
 
 	World::CreateBulkheadDoorResult World::addSectorBulkheadDoor(uint32_t layerIndex, uint32_t y, uint32_t x,
 		int side, CreateBulkheadDoorOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addSectorBulkheadDoor");
 		ASSERT_SIDE_OK(side);
 
@@ -5319,6 +5401,7 @@ namespace core
 
 	World::CreateObjectResult World::addSectorLightSwitch(uint32_t sectorIndex, uint32_t xOffset)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addSectorLightSwitch");
 		auto sector = _getSector(sectorIndex);
 		auto ctrl = _createSectorButton("Lightswitch", sector, xOffset, 0, CORE_BUTTON_F_AUTO_REENABLE);
@@ -5371,6 +5454,7 @@ namespace core
 	World::CreateObjectResult World::addSectorWalkway(uint32_t sectorIndex,
 		uint32_t levelIndex, uint32_t xOffset)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::addSectorWalkway({}, {}, {})", sectorIndex, levelIndex, xOffset);
 		string diagnostic;
 		if (!canAddSectorWalkway(sectorIndex, levelIndex, xOffset, &diagnostic))
@@ -5553,6 +5637,7 @@ namespace core
 
 	bool World::renameMarker(MarkerId id, string const& name, string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (!canRenameMarker(id, name, diagnostic)) return false;
 		auto const trimmed = Marker::trimName(name);
 		auto marker = mutableMarker(id);
@@ -5574,6 +5659,7 @@ namespace core
 	World::CreateObjectResult World::addSectorMarker(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		return addSectorMarker(sectorIndex, levelIndex, xOffset,
 			nextGeneratedMarkerName(), vertexIdentifier);
 	}
@@ -5581,6 +5667,7 @@ namespace core
 	World::CreateObjectResult World::addSectorMarker(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, string const& name, uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canAddSectorMarker(sectorIndex, levelIndex, xOffset, &diagnostic))
 			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
@@ -5601,6 +5688,7 @@ namespace core
 		uint32_t levelIndex, float xOffset, MarkerId id, string name,
 		uint32_t* vertexIdentifier)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!id) throw WorldException(this, "Marker ID cannot be zero");
 		if (lookupMarker(id)) throw WorldException(this, "Marker ID is already in use");
@@ -5692,6 +5780,7 @@ namespace core
 	bool World::removeSectorMarker(uint32_t sectorIndex, uint32_t objectIndex,
 		string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (!canRemoveSectorMarker(sectorIndex, objectIndex, diagnostic)) return false;
 		auto sector = _getSector(sectorIndex);
 		auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(objectIndex));
@@ -5717,6 +5806,7 @@ namespace core
 	World::CreateForceBridgeResult World::addSectorForceBridge(uint32_t sectorIndex,
 		uint32_t levelIndex, uint32_t xOffset)
 	{
+		invalidateSimulationSnapshot();
 		return addSectorForceBridge(sectorIndex, levelIndex, xOffset, CreateForceBridgeOptions{});
 	}
 
@@ -5789,6 +5879,7 @@ namespace core
 
 	World::CreateForceBridgeResult World::addSectorForceBridge(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, CreateForceBridgeOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		string caller = format("World::addSectorForceBridge({}, {}, {}, {}, {}, {})", sectorIndex, levelIndex, xOffset, options.width, options.fromSide, options.startExtended);
 		string diagnostic;
 		if (!canAddSectorForceBridge(sectorIndex, levelIndex, xOffset, options, &diagnostic))
@@ -5926,12 +6017,14 @@ namespace core
 	World::CreateLadderResult World::addRoomLadder(uint32_t sectorIndex,
 		uint32_t levelIndex, uint32_t xOffset)
 	{
+		invalidateSimulationSnapshot();
 		return addRoomLadder(sectorIndex, levelIndex, xOffset, { 0, false, true });
 	}
 
 	World::CreateLadderResult World::addRoomLadder(uint32_t sectorIndex,
 		uint32_t levelIndex, uint32_t xOffset, CreateLadderOptions options)
 	{
+		invalidateSimulationSnapshot();
 		uint32_t height{}; string diagnostic;
 		if (!canAddRoomLadder(sectorIndex, levelIndex, xOffset, &height, &diagnostic))
 			throw WorldException(this, format("World::addRoomLadder - {}", diagnostic));
@@ -5941,6 +6034,7 @@ namespace core
 
 	World::CreateLadderResult World::addSectorLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, CreateLadderOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addSectorLadder");
 		auto sector = _getSector(sectorIndex);
 		auto layerIndex = sector->getLayerIndex();
@@ -6148,6 +6242,7 @@ namespace core
 
 	World::CreatePlatformLiftResult World::addSectorPlatformLift(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, CreateLiftOptions const& options)
 	{
+		invalidateSimulationSnapshot();
 		string placementDiagnostic;
 		if (levelIndex != 0)
 			throw WorldException(this, "PlatformLifts must be placed on a Room's ground floor");
@@ -6330,6 +6425,7 @@ namespace core
 
 	void World::beginStructuralEdit(string const& operation)
 	{
+		invalidateSimulationSnapshot();
 		if (mBuildFinished && !mSimulationPaused)
 		{
 			throw WorldException(this, format(
@@ -6355,6 +6451,7 @@ namespace core
 	// graph and publishing the boundary events - lives in SimulationCoordinator.
 	void World::pauseSimulation()
 	{
+		invalidateSimulationSnapshot();
 		if (mSimulationPaused) return;
 		if (mCurrentPhase != SimulationPhase::None)
 			throw WorldException(this, "Simulation cannot be paused from inside a simulation phase");
@@ -6598,6 +6695,7 @@ namespace core
 
 	void World::buildGraph()
 	{
+		invalidateSimulationSnapshot();
 		mGraph->build();
 		mGraph->validate();
 		validateTraversalTopology(*mGraph);
@@ -6605,6 +6703,7 @@ namespace core
 
 	bool World::rebuildTraversalTopology()
 	{
+		invalidateSimulationSnapshot();
 		if (!mBuildFinished)
 		{
 			mTopologyDiagnostic = "finishBuild() must establish the initial topology";
@@ -6657,6 +6756,7 @@ namespace core
 
 	bool World::resumeSimulation()
 	{
+		invalidateSimulationSnapshot();
 		if (!mAgentBehaviourDependencyDiagnostic.empty())
 		{
 			mSimulationPaused = true;
@@ -6678,6 +6778,7 @@ namespace core
 
 	void World::finishBuild()
 	{
+		invalidateSimulationSnapshot();
 		if (mBuildFinished)
 		{
 			if (!mSimulationPaused)
@@ -6801,26 +6902,31 @@ namespace core
 
 	AgentId World::addOwnedAgentToSector(unique_ptr<Agent> agent, uint32_t sectorId, uint32_t levelOffset, float xOffset)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.addOwnedAgentToSector(std::move(agent), sectorId, levelOffset, xOffset);
 	}
 
 	AgentId World::addOwnedAgentToSector(unique_ptr<Agent> agent, uint32_t sectorId)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.addOwnedAgentToSector(std::move(agent), sectorId);
 	}
 
 	AgentId World::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createAgent(name, sectorId, levelOffset, xOffset);
 	}
 
 	AgentId World::createAgent(string const& name, uint32_t sectorId)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createAgent(name, sectorId);
 	}
 
 	void World::wakeAllAgents()
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.wakeAllAgents();
 	}
 
@@ -6853,6 +6959,7 @@ namespace core
 		shared_ptr<const Edge> const& edge, shared_ptr<const Vertex> const& source,
 		shared_ptr<const Vertex> const& destination)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createTraversalRequest(agent, edge, source, destination);
 	}
 
@@ -6860,6 +6967,7 @@ namespace core
 		shared_ptr<const Edge> const& edge, Vector2 const& endpoint,
 		float movementDistance)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.stopForAvailableQueuePosition(agent, edge, endpoint, movementDistance);
 	}
 
@@ -6871,17 +6979,20 @@ namespace core
 
 	void World::refreshQueuePositions(TraversalResource& resource)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.refreshQueuePositions(resource);
 	}
 
 	void World::updateTraversalProgressAndTimeouts()
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.updateTraversalProgressAndTimeouts();
 	}
 
 	void World::allocateTraversalRequest(TraversalRequestId requestId,
 		shared_ptr<const Edge> const& edge, shared_ptr<const Vertex> const& destination)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.allocateTraversalRequest(requestId, edge, destination);
 	}
 
@@ -6909,11 +7020,13 @@ namespace core
 
 	void World::addLiftStopRequest(TraversalResource& resource, uint32_t stop, AgentId owner)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.addLiftStopRequest(resource, stop, owner);
 	}
 
 	void World::removeLiftStopRequest(TraversalResource& resource, uint32_t stop, AgentId owner)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.removeLiftStopRequest(resource, stop, owner);
 	}
 
@@ -6930,6 +7043,7 @@ namespace core
 
 	void World::releaseLiftAdmission(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.releaseLiftAdmission(requestId, resource);
 	}
 
@@ -6947,17 +7061,20 @@ namespace core
 
 	void World::requestLiftPassengerSafeExit(AgentId passenger, TraversalFailureReason reason)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.requestLiftPassengerSafeExit(passenger, reason);
 	}
 
 	void World::assignLiftSafeExitPaths(TraversalResource& resource)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.assignLiftSafeExitPaths(resource);
 	}
 
 	bool World::replaceOnboardLiftDestination(Agent& agent, shared_ptr<Path> const& path,
 		uint32_t& sourceNode)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.replaceOnboardLiftDestination(agent, path, sourceNode);
 	}
 
@@ -6969,12 +7086,14 @@ namespace core
 
 	void World::denyTraversalRequest(TraversalRequestId requestId, TraversalFailureReason reason)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.denyTraversalRequest(requestId, reason);
 	}
 
 	bool World::commitTraversal(Agent& agent, TraversalRequestId requestId, TraversalPermitId permitId,
 		shared_ptr<const Vertex> const& destination)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.commitTraversal(agent, requestId, permitId, destination);
 	}
 
@@ -6986,6 +7105,7 @@ namespace core
 
 	void World::releaseTraversal(TraversalRequestId requestId, TraversalPermitId permitId)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.releaseTraversal(requestId, permitId);
 	}
 
@@ -7001,6 +7121,7 @@ namespace core
 
 	MovementCommandResult World::moveAgentToMarker(AgentId agent, MarkerId marker)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.moveAgentToMarker(agent, marker);
 	}
 
@@ -7012,6 +7133,7 @@ namespace core
 
 	MovementCommandResult World::moveBehaviourAgentToMarker(AgentId agent, MarkerId marker)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.moveAgentToMarker(agent, marker, true);
 	}
 
@@ -7047,16 +7169,19 @@ namespace core
 
 	void World::releaseAgentFromResource(TraversalResource& resource, AgentId id)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.releaseAgentFromResource(resource, id);
 	}
 
 	void World::releaseTraversalOwnership(AgentId id)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.releaseTraversalOwnership(id);
 	}
 
 	EntityRemovalResult World::removeAgent(AgentId id)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.removeAgent(id);
 	}
 
@@ -7069,6 +7194,7 @@ namespace core
 
 	bool World::setAgentActive(AgentId id, bool active, string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.setAgentActive(id, active, diagnostic);
 	}
 
@@ -7154,6 +7280,7 @@ namespace core
 
 	AgentGroupId World::addAgentGroup(std::string const& name)
 	{
+		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!canAddAgentGroup(name, &diagnostic))
 			throw WorldException(this, diagnostic);
@@ -7197,6 +7324,7 @@ namespace core
 	bool World::renameAgentGroup(AgentGroupId id, std::string const& name,
 		std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (!canRenameAgentGroup(id, name, diagnostic)) return false;
 
 		// Identity and position are untouched: only the name moves, and it moves
@@ -7234,6 +7362,7 @@ namespace core
 
 	bool World::setAgentGroup(AgentId agent, AgentGroupId group, std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		// Both halves are judged before a single field is written, so a refusal
 		// leaves every Agent and every group exactly as it was found.
 		if (!canSetAgentGroup(agent, group, diagnostic)) return false;
@@ -7294,6 +7423,7 @@ namespace core
 	bool World::setAgentGroupActive(AgentGroupId group, bool active,
 		std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		// Judge the group and the pause gate before changing the first member, so
 		// a refusal can never leave a partly toggled group.
 		if (!canSetAgentGroupActive(group, active, diagnostic)) return false;
@@ -7374,6 +7504,7 @@ namespace core
 	bool World::assignAgentTag(AgentId agent, AgentTagId tag,
 		string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (!canAssignAgentTag(agent, tag, diagnostic)) return false;
 		auto* target = mAgents.find(agent);
 		auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
@@ -7425,6 +7556,7 @@ namespace core
 	bool World::removeAgentTag(AgentId agent, AgentTagId tag,
 		string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (!canRemoveAgentTag(agent, tag, diagnostic)) return false;
 		auto* target = mAgents.find(agent);
 		target->removeAgentTag(tag);
@@ -7546,6 +7678,7 @@ namespace core
 		optional<AgentPropertySample> const& heightSample,
 		string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		if (diagnostic) diagnostic->clear();
 		auto const lookup = lookupAgent(agent);
 		if (!lookup)
@@ -7637,6 +7770,7 @@ namespace core
 
 	bool World::deleteAgentGroup(AgentGroupId id, std::string* diagnostic)
 	{
+		invalidateSimulationSnapshot();
 		// The whole operation is judged before a single field is written, so a
 		// refusal leaves the World exactly as it was found: no group gone,
 		// no assignment cleared, no half-deletion for a save to write down.
@@ -7678,12 +7812,14 @@ namespace core
 
 	InteractionPointId World::createInteractionPoint(string const& name)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createInteractionPoint(name);
 	}
 
 	InteractionPointId World::createInteractionPoint(string const& name, SectorId sector,
 		Vector2 position, float reach, float durationSeconds, vector<InteractionBinding> bindings)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createInteractionPoint(name, sector, position, reach, durationSeconds, std::move(bindings));
 	}
 
@@ -7699,6 +7835,7 @@ namespace core
 
 	EntityRemovalResult World::removeInteractionPoint(InteractionPointId id)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.removeInteractionPoint(id);
 	}
 
@@ -7709,17 +7846,20 @@ namespace core
 
 	InteractionRequestId World::requestInteraction(InteractionPointId pointId, AgentId actorId)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.requestInteraction(pointId, actorId);
 	}
 
 	InteractionRequestId World::requestInteractionForTraversal(InteractionPointId point, AgentId actor)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.requestInteractionForTraversal(point, actor);
 	}
 
 	InteractionRequestId World::requestInteractionWhilePassing(
 		InteractionPointId pointId, AgentId actorId)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.requestInteractionWhilePassing(pointId, actorId);
 	}
 
@@ -7735,6 +7875,7 @@ namespace core
 
 	DeviceOperationId World::createDeviceOperation(string const& name, AgentId requester)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createDeviceOperation(name, requester);
 	}
 
@@ -7755,11 +7896,13 @@ namespace core
 
 	EntityRemovalResult World::removeDeviceOperation(DeviceOperationId id)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.removeDeviceOperation(id);
 	}
 
 	TraversalResourceId World::createTraversalResource(string const& name)
 	{
+		invalidateSimulationSnapshot();
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(name)));
 		SimulationEvent event;
 		event.sequence = mNextEventSequence++;
@@ -7773,6 +7916,7 @@ namespace core
 	TraversalResourceId World::createDoorTraversalResource(string const& name,
 		shared_ptr<Door> door, DoorActivationMode mode, float holdOpenSeconds)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createDoorTraversalResource");
 		if (!door || holdOpenSeconds < 0.0f)
 		{
@@ -7795,6 +7939,7 @@ namespace core
 	TraversalResourceId World::createWindowTraversalResource(string const& name,
 		shared_ptr<Window> window)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createWindowTraversalResource");
 		if (!window) throw invalid_argument("A window traversal resource requires a Window");
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(
@@ -7811,6 +7956,7 @@ namespace core
 	TraversalResourceId World::createLadderTraversalResource(string const& name,
 		shared_ptr<Ladder> ladder, SectorId ladderSector, uint32_t directionalBatchLimit)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createLadderTraversalResource");
 		if (!ladder || !ladderSector || ladderSector.value > mSectors.size()
 			|| directionalBatchLimit == 0)
@@ -7849,6 +7995,7 @@ namespace core
 		shared_ptr<Lift> lift, SectorId liftSector, vector<LiftStop> stops, uint32_t capacity,
 		float minimumDwellSeconds, float maximumBoardingSeconds)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createLiftTraversalResource");
 		if (!lift || !liftSector || liftSector.value > mSectors.size() || stops.size() < 2
 			|| capacity == 0 || minimumDwellSeconds < 0.0f || maximumBoardingSeconds < minimumDwellSeconds)
@@ -7893,6 +8040,7 @@ namespace core
 		shared_ptr<Lift> lift, SectorId locationSector, vector<LiftStop> stops, uint32_t capacity,
 		float stopDurationSeconds)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createOpenPlatformLiftTraversalResource");
 		if (!lift || !locationSector || locationSector.value > mSectors.size() || stops.size() < 2
 			|| capacity == 0 || stopDurationSeconds < 0.0f)
@@ -7931,6 +8079,7 @@ namespace core
 		shared_ptr<Shuttle> shuttle, SectorId shuttleSector, vector<LiftStop> stops,
 		uint32_t capacity, float minimumDwellSeconds, float maximumBoardingSeconds)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createShuttleTraversalResource");
 		if (!shuttle || shuttle->getNumCars() == 0 || !shuttleSector
 			|| shuttleSector.value > mSectors.size() || stops.size() < 2 || capacity == 0
@@ -7989,6 +8138,7 @@ namespace core
 		shared_ptr<Stairwell> stairwell, SectorId stairwellSector, uint32_t capacity,
 		uint32_t directionalBatchLimit)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createStairwellTraversalResource");
 		if (!stairwell || !stairwellSector || stairwellSector.value > mSectors.size()
 			|| capacity == 0 || directionalBatchLimit == 0)
@@ -8017,6 +8167,7 @@ namespace core
 	TraversalResourceId World::createForceBridgeTraversalResource(string const& name,
 		shared_ptr<ForceBridge> forceBridge)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("createForceBridgeTraversalResource");
 		if (!forceBridge) throw invalid_argument("A force bridge traversal resource requires a ForceBridge");
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(
@@ -8034,6 +8185,7 @@ namespace core
 	void World::configureForceBridgeQueueLanes(TraversalResourceId resourceId,
 		SectorId sectorId, array<Vector2, 2> const& endpoints)
 	{
+		invalidateSimulationSnapshot();
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource || !resource->mForceBridge || !sectorId || sectorId.value > mSectors.size())
 			throw invalid_argument("Force Bridge queue lanes require a Force Bridge and source sector");
@@ -8073,6 +8225,7 @@ namespace core
 	void World::configureLadderQueueLanes(TraversalResourceId resourceId,
 		array<SectorId, 2> const& sectors, array<Vector2, 2> const& endpoints)
 	{
+		invalidateSimulationSnapshot();
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource || !resource->mLadder)
 			throw invalid_argument("Ladder queue lanes require a Ladder traversal resource");
@@ -8135,6 +8288,7 @@ namespace core
 	bool World::configureDoorQueueLane(TraversalResourceId resourceId, SectorId sectorId,
 		Vector2 origin, Vector2 direction, float extent)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("configureDoorQueueLane");
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource || !resource->mDoor || !sectorId || sectorId.value > mSectors.size()
@@ -8206,6 +8360,7 @@ namespace core
 
 	bool World::configureDoorCrossingLanes(TraversalResourceId resourceId, uint32_t laneCount)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("configureDoorCrossingLanes");
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource || !resource->mDoor || laneCount == 0)
@@ -8232,27 +8387,32 @@ namespace core
 	DoorOpenLeaseId World::acquireDoorOpenLease(TraversalResource& resource,
 		DoorOpenLeaseKind kind, TraversalRequestId request)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.acquireDoorOpenLease(resource, kind, request);
 	}
 
 	bool World::releaseDoorOpenLease(TraversalResource& resource, DoorOpenLeaseId lease)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.releaseDoorOpenLease(resource, lease);
 	}
 
 	DoorOpenLeaseId World::acquireDoorOpenLease(TraversalResourceId resource, DoorOpenLeaseKind kind)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.acquireDoorOpenLease(resource, kind);
 	}
 
 	bool World::releaseDoorOpenLease(TraversalResourceId resource, DoorOpenLeaseId lease)
 	{
+		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.releaseDoorOpenLease(resource, lease);
 	}
 
 	bool World::setDoorSensorObservation(TraversalResourceId resourceId, DoorSensorId sensor,
 		DoorSensorObservation observation)
 	{
+		invalidateSimulationSnapshot();
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource || !resource->mDoor || !sensor) return false;
 		if (observation == DoorSensorObservation::Clear) resource->mSensorObservations.erase(sensor);
@@ -8262,6 +8422,7 @@ namespace core
 
 	bool World::setTraversalResourceEnabled(TraversalResourceId resourceId, bool enabled)
 	{
+		invalidateSimulationSnapshot();
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource) return false;
 		if (resource->mEnabled == enabled
@@ -8299,6 +8460,7 @@ namespace core
 
 	bool World::addTraversalControl(TraversalResourceId resourceId, InteractionPointId controlId)
 	{
+		invalidateSimulationSnapshot();
 		beginStructuralEdit("addTraversalControl");
 		auto resource = mTraversalResources.find(resourceId);
 		auto control = mInteractionPoints.find(controlId);
@@ -8346,6 +8508,7 @@ namespace core
 
 	EntityRemovalResult World::removeTraversalResource(TraversalResourceId id)
 	{
+		invalidateSimulationSnapshot();
 		auto found = lookupTraversalResource(id);
 		if (!found)
 		{
@@ -8399,6 +8562,7 @@ namespace core
 
 	void World::setTraversalWaitingPolicy(TraversalWaitingPolicy policy)
 	{
+		invalidateSimulationSnapshot();
 		if (policy.localGoalTimeoutTicks == 0 || policy.permitProgressTimeoutTicks == 0
 			|| policy.replanIntervalTicks == 0 || policy.queueDelayPerAgentSeconds < 0.0f
 			|| policy.replanEtaMarginSeconds < 0.0f)
@@ -8462,32 +8626,38 @@ namespace core
 	// movement and result resolution - run in SimulationCoordinator (ADR 0004).
 	void World::advanceDeviceOperations()
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.advanceDeviceOperations();
 	}
 
 	void World::pressPhysicalControl(InteractionPointId pointId)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.pressPhysicalControl(pointId);
 	}
 
 	void World::tryPressUpcomingDoorButton(Agent& agent,
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.tryPressUpcomingDoorButton(agent, movementStart, movementEnd);
 	}
 
 	void World::allocateInteractions()
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.allocateInteractions();
 	}
 
 	void World::moveInteractions(float frameTime)
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.moveInteractions(frameTime);
 	}
 
 	void World::updateInteractionResults()
 	{
+		invalidateSimulationSnapshot();
 		mSimulationCoordinator.updateInteractionResults();
 	}
 
@@ -8516,9 +8686,27 @@ namespace core
 		return mSimulationCoordinator.getCurrentSimulationPhase();
 	}
 
+	void World::setSimulationTimeScale(double scale)
+	{
+		if (std::isnan(scale)) return;
+		mTimeScale = std::clamp(scale, 0.05, 100.0);
+	}
+
+	SimulationSnapshot const& World::getSimulationSnapshotView() const
+	{
+		if (!mSnapshotValid || mSnapshotMutationRevision != observationRevision)
+		{
+			mSnapshotCache = mSimulationCoordinator.getSimulationSnapshot();
+			mSnapshotMutationRevision = observationRevision;
+			mSnapshotValid = true;
+			++mSnapshotBuildCount;
+		}
+		return mSnapshotCache;
+	}
+
 	SimulationSnapshot World::getSimulationSnapshot() const
 	{
-		return mSimulationCoordinator.getSimulationSnapshot();
+		return getSimulationSnapshotView();
 	}
 
 	vector<SimulationEvent> World::consumeSimulationEvents()

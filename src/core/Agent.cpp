@@ -196,6 +196,7 @@ namespace core
 
 	bool Agent::deserializeImpl(Serializer& serializer, SerializationWorkData&)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		serializer.beginMap("agent");
 		mName = serializer.readString("name");
 		mFlags = serializer.readUint32("flags");
@@ -452,6 +453,7 @@ namespace core
 
 	void Agent::setFlags(uint32_t flags)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		auto const updated = mFlags | flags;
 		if (updated != mFlags)
 		{
@@ -462,6 +464,7 @@ namespace core
 
 	void Agent::unsetFlags(uint32_t flags)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		auto const updated = mFlags & ~flags;
 		if (updated != mFlags)
 		{
@@ -472,6 +475,7 @@ namespace core
 
 	void Agent::setActive(bool active)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (active != mActive)
 		{
 			mActive = active;
@@ -481,6 +485,7 @@ namespace core
 
 	void Agent::setPosition(SectorPosition pos, bool authored)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		mPosition = pos;
 		if (authored)
 		{
@@ -491,6 +496,7 @@ namespace core
 
 	void Agent::attachToWorld(World* world)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld && mWorld != world)
 		{
 			throw Exception("Agent is already attached to another World");
@@ -544,6 +550,7 @@ namespace core
 
 	void Agent::setPath(shared_ptr<Path> path, bool startPathing)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		mResetPosition = mPosition;
@@ -554,6 +561,7 @@ namespace core
 
 	void Agent::assignPath(shared_ptr<Path> path, bool startPathing, bool markModified)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		// An onboard replacement remains the same transport journey. Retarget the
 		// live ride request and stop-request ownership instead of cancelling into a
 		// needless exit/reboard cycle.
@@ -626,6 +634,7 @@ namespace core
 
 	void Agent::clearRuntimePath()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		cancelTraversal();
 		mEarlyDoorPressResource = {};
 		mEarlyDoorPressInteraction = {};
@@ -638,6 +647,7 @@ namespace core
 
 	void Agent::clearPath()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		clearRuntimePath();
@@ -649,6 +659,7 @@ namespace core
 
 	void Agent::startPathingInternal()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (!mPath.path || mPath.path->nodes.empty())
 		{
 			startIdling();
@@ -664,6 +675,7 @@ namespace core
 
 	void Agent::startPathing()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		startPathingInternal();
@@ -671,6 +683,7 @@ namespace core
 
 	void Agent::pausePathing()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		cancelTraversal();
@@ -681,6 +694,7 @@ namespace core
 
 	bool Agent::nextPathNode()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		++mPath.targetNode;
 
 		if (!mPath.path || mPath.targetNode >= mPath.path->nodes.size() - 1)
@@ -698,6 +712,7 @@ namespace core
 
 	void Agent::startIdling()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		cancelTraversal();
 		mEarlyDoorPressResource = {};
 		mEarlyDoorPressInteraction = {};
@@ -712,6 +727,7 @@ namespace core
 
 	bool Agent::moveToPosition(Vector2 const& pos, float frameTime, float speed)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		auto agentPos = getGlobalPosition();
 		auto posDist = agentPos.distanceTo(pos);
 		auto moveDist = speed * frameTime;
@@ -726,6 +742,7 @@ namespace core
 
 	int Agent::chooseVertexOffset(int /* dim */, pair<float, uint32_t> const* offsets, uint32_t /* numOffsets */)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		int chosen = 0;
 
 		if (chosen < 0)
@@ -788,6 +805,7 @@ namespace core
 
 	void Agent::moveToVertex(float frameTime)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (!mPath.path || mPath.targetNode >= mPath.path->nodes.size())
 		{
 			startIdling();
@@ -836,6 +854,7 @@ namespace core
 
 	void Agent::collectTraversalIntent()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mState != State::WaitingForTraversal || mTraversalTask || !mWorld
 			|| !mPath.path || mPath.targetNode + 1 >= mPath.path->nodes.size())
 		{
@@ -861,6 +880,7 @@ namespace core
 
 	void Agent::allocateTraversal()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mState != State::WaitingForTraversal || !mTraversalTask || !mWorld)
 		{
 			return;
@@ -928,6 +948,7 @@ namespace core
 
 	void Agent::commitTraversal()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mState != State::AwaitingTraversalCommit || !mTraversalTask || !mWorld)
 		{
 			return;
@@ -957,6 +978,7 @@ namespace core
 
 	void Agent::considerTraversalReplan()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (!mTraversalTask || mTraversalTask->permit || !mWorld || !mPath.path
 			|| mPath.path->nodes.empty()) return;
 		auto request = mWorld->lookupTraversalRequest(mTraversalTask->request);
@@ -979,6 +1001,7 @@ namespace core
 
 	void Agent::cleanupTraversal()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (!mTraversalTask || !mWorld)
 		{
 			return;
@@ -1026,6 +1049,7 @@ namespace core
 
 	bool Agent::moveToVertexOffset(int dim, float offset, float frameTime)
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		ASSERT_DIM_OK(dim);
 
 		auto targetPos = mPath.path->nodes[mPath.targetNode].targetVertex->getPosition();
@@ -1044,6 +1068,7 @@ namespace core
 
 	void Agent::wake()
 	{
+		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mState != State::Idle)
 		{
 			return;

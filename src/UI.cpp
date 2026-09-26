@@ -950,7 +950,7 @@ namespace
 	string nextAgentName(shared_ptr<const core::World> const& world)
 	{
 		set<string> names;
-		for (auto const& agent : world->getSimulationSnapshot().agents)
+		for (auto const& agent : world->getSimulationSnapshotView().agents)
 			names.insert(agent.name);
 
 		while (true)
@@ -3379,7 +3379,7 @@ namespace
 	string uniqueAgentName(shared_ptr<const core::World> const& world, string base)
 	{
 		set<string> names;
-		for (auto const& agent : world->getSimulationSnapshot().agents) names.insert(agent.name);
+		for (auto const& agent : world->getSimulationSnapshotView().agents) names.insert(agent.name);
 		if (!names.contains(base)) return base;
 		for (uint32_t suffix = 2;; ++suffix)
 		{
@@ -4822,6 +4822,19 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 
 void renderToolbar(shared_ptr<core::World> world)
 {
+	ImGui::SetNextItemWidth(95.0f);
+	auto speed = std::format("{:g}x", world->getSimulationTimeScale());
+	if (ImGui::BeginCombo("##SimulationSpeed", speed.c_str()))
+	{
+		for (double scale : { 0.25, 0.5, 1.0, 2.0, 5.0, 20.0 })
+			if (ImGui::Selectable(std::format("{:g}x", scale).c_str(),
+				scale == world->getSimulationTimeScale()))
+				world->setSimulationTimeScale(scale);
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Simulation speed; deferred time: %.3f s", world->getDeferredSimulationTime());
+	ImGui::SameLine();
 	if (ImGui::Button(gUISettings.worldPaused ? "Start" : "Stop"))
 	{
 		setWorldPaused(world, !gUISettings.worldPaused);
@@ -5848,7 +5861,7 @@ void renderLiftPanel(shared_ptr<const core::World> const& world,
 
 	if (!includeAgentDebug || !world) return;
 	auto resourceId = world->getTraversalResourceId(lift.get());
-	auto snapshot = world->getSimulationSnapshot();
+	auto const& snapshot = world->getSimulationSnapshotView();
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& candidate) { return candidate.id == resourceId; });
 	if (!resourceId || resource == snapshot.traversalResources.end())
@@ -5949,7 +5962,7 @@ void renderShuttlePanel(shared_ptr<const core::World> const& world,
 	}
 	if (!includeAgentDebug || !world) return;
 	auto resourceId = world->getTraversalResourceId(shuttle.get());
-	auto snapshot = world->getSimulationSnapshot();
+	auto const& snapshot = world->getSimulationSnapshotView();
 	auto resource = find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 		[resourceId](auto const& value) { return value.id == resourceId; });
 	if (!resourceId || resource == snapshot.traversalResources.end())

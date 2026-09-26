@@ -23,6 +23,7 @@ namespace core
 
 	void SimulationCoordinator::allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		constexpr uint32_t MaximumPreparationAttempts = 2;
 		constexpr uint64_t RetryDelayTicks = 3;
 
@@ -197,6 +198,7 @@ namespace core
 
 	void SimulationCoordinator::allocateExtensiblePreparation(TraversalRequestId requestId, TraversalResource& resource)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
 		if (!resource.mEnabled)
@@ -311,6 +313,7 @@ namespace core
 	DoorOpenLeaseId SimulationCoordinator::acquireDoorOpenLease(TraversalResource& resource,
 		DoorOpenLeaseKind kind, TraversalRequestId request)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto id = DoorOpenLeaseId{ mWorld.mNextDoorOpenLeaseValue++ };
 		resource.mOpenLeases.emplace(id, DoorOpenLease{ kind, request });
 		resource.mDoor->acquireOpenLease();
@@ -327,6 +330,7 @@ namespace core
 
 	bool SimulationCoordinator::releaseDoorOpenLease(TraversalResource& resource, DoorOpenLeaseId lease)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		if (!lease || resource.mOpenLeases.erase(lease) == 0) return false;
 		resource.mDoor->releaseOpenLease();
 		return true;
@@ -334,6 +338,7 @@ namespace core
 
 	DoorOpenLeaseId SimulationCoordinator::acquireDoorOpenLease(TraversalResourceId resourceId, DoorOpenLeaseKind kind)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto resource = mWorld.mTraversalResources.find(resourceId);
 		if (!resource || !resource->mDoor || !resource->mEnabled) return {};
 		return acquireDoorOpenLease(*resource, kind);
@@ -341,6 +346,7 @@ namespace core
 
 	bool SimulationCoordinator::releaseDoorOpenLease(TraversalResourceId resourceId, DoorOpenLeaseId lease)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto resource = mWorld.mTraversalResources.find(resourceId);
 		return resource && resource->mDoor && releaseDoorOpenLease(*resource, lease);
 	}
