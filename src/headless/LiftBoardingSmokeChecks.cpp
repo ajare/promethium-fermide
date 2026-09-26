@@ -1,11 +1,14 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 #include "core/Agent.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/World.h"
+#include "core/Sector.h"
+#include "core/Defines.h"
 
 namespace
 {
@@ -50,6 +53,63 @@ namespace
 				if (agent.state != core::AgentPathState::Idle)
 					throw std::runtime_error("Lift boarding journey did not finish: " + agent.name);
 	}
+}
+
+static void checkLiftCrossings(char const* filename, bool reduced)
+{
+	auto world = core::loadWorldDocument(filename);
+	if (!world) throw std::runtime_error("Lift crossing regression could not load World");
+	if (reduced)
+	{
+		// Two waiters at the same landing suffice: one occupies the threshold
+		// queue position, and the other used to cross from the adjacent position.
+		auto const initial = world->getSimulationSnapshot();
+		for (auto const& agent : initial.agents)
+			if (agent.id.value != 20 && agent.id.value != 21)
+			{
+				world->lookupAgent(agent.id).entity->clearPath();
+				if (!world->removeAgent(agent.id))
+					throw std::runtime_error("Could not reduce Lift crossing reproduction");
+			}
+	}
+	if (!world->resumeSimulation()) throw std::runtime_error("Could not resume Lift crossing World");
+	std::set<uint64_t> checked;
+	for (unsigned tick = 0; tick < 18000; ++tick)
+	{
+		if (!world->advanceTick()) throw std::runtime_error("Could not advance Lift crossing World");
+		auto const& snapshot = world->getSimulationSnapshotView();
+		for (auto const& request : snapshot.traversalRequests)
+		{
+			if (request.state != core::TraversalRequestState::Granted
+				|| request.sourceSector == request.destinationSector) continue;
+			auto sector = world->getSector((uint32_t)request.destinationSector.value - 1);
+			if (!sector || sector->getType() != core::SectorType::Lift
+				|| !checked.insert(request.id.value).second) continue;
+			auto agent = world->lookupAgent(request.owner).entity;
+			auto const position = agent->getGlobalPosition();
+			// Both fixture Lifts have full-width landing Doors (one and two cells).
+			auto const width = CORE_DOOR_CROSSING_HALF_WIDTH(sector->getCellsWide());
+			if (!core::isWithinDoorCrossingBand(position, request.sourceEndpoint, width))
+			{
+				std::cerr << "Boarding at tick " << tick + 1 << ": Agent " << request.owner.value
+					<< " x=" << position.x << " threshold=" << request.sourceEndpoint.x
+					<< " half-width=" << width << '\n';
+				throw std::runtime_error("Lift boarding started outside the crossing band");
+			}
+		}
+	}
+	if (checked.empty()) throw std::runtime_error("No Lift crossings checked");
+	if (reduced)
+		for (auto const& agent : world->getSimulationSnapshotView().agents)
+			if (agent.state != core::AgentPathState::Idle)
+				throw std::runtime_error("Lift crossing regression stranded a boarder");
+}
+
+void runLiftCrossingRepro(char const* filename)
+{
+	checkLiftCrossings(filename, false);
+	checkLiftCrossings(filename, true);
+	std::cout << "PASS: Lift boarding stays within the landing doorway in full and two-Agent runs\n";
 }
 
 // Replay authored paths, including opposing landing queues. A capacity-reserved

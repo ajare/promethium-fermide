@@ -48,6 +48,7 @@
 
 void runSerializationSmokeChecks();
 void runSimulationObservationSmokeChecks();
+void runLiftCrossingRepro(char const* filename);
 void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
 void runPausePositionSmokeChecks();
@@ -4395,8 +4396,10 @@ namespace
 			for (auto const& request : snapshot.traversalRequests)
 			{
 				if (request.resource != created.doors.front().traversalResource) continue;
+				// Admitted boarders release their waiting position to approach the
+				// threshold, but retain their logical ticket and capacity reservation.
 				if (request.state == core::TraversalRequestState::Pending
-					&& request.hasCapacityPosition && !request.hasQueuePosition) return false;
+					&& request.hasCapacityPosition && !request.queueTicket) return false;
 				if (request.hasQueuePosition)
 					corridorQueueTargets.push_back(request.queuePositionTarget);
 			}
@@ -6094,6 +6097,11 @@ int main(int argc, char** argv)
 		{
 			if (std::string(argv[2]) == "minimal") runPausePositionSmokeChecks();
 			else runPausePositionRepro(argv[2]);
+			return 0;
+		}
+		if (argc == 3 && std::string(argv[1]) == "--lift-crossing-repro")
+		{
+			runLiftCrossingRepro(argv[2]);
 			return 0;
 		}
 		if (argc == 3 && std::string(argv[1]) == "--lift-stall-repro")

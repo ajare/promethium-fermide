@@ -493,6 +493,8 @@ if(BUILD_TESTING)
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
     add_test(NAME lift-boarding-regression COMMAND prometheum-fermide-headless
         --lift-stall-repro "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
+    add_test(NAME lift-crossing-regression COMMAND prometheum-fermide-headless
+        --lift-crossing-repro "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
     add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 
     if(PF_BUILD_GUI)

@@ -598,9 +598,9 @@ namespace core
 	// boarding order redistributes every passenger's walking target across the
 	// buffered usable width. A Lift passenger reserves the free capacity position
 	// farthest from the Doors, while committed occupants are ordered by Stop. The
-	// passenger must have arrived at its queue position before the landing
-	// door lease is taken, and the grant releases the queue position and claims the
-	// first free crossing lane on the landing.
+	// passenger first reaches and releases its queue position, then approaches
+	// the landing threshold before taking the door lease and crossing grant.
+	// Lift passengers finish boarding in admission order.
 	void SimulationCoordinator::allocateLiftBoarding(TraversalRequestId requestId,
 		TraversalResource& edgeResource, TraversalResource& coordinator, uint32_t stop)
 	{
@@ -749,15 +749,18 @@ namespace core
 		if (!boardingLanding) return;
 		if (coordinator.mLift)
 		{
-			boardingLanding = mWorld.mTraversalResources.find(request->mResource);
-			if (!boardingLanding || request->mQueueApproach >= boardingLanding->mQueueLanes.size()
-				|| request->mQueuePosition == ~0u) return;
-			auto const& queueLane = boardingLanding->mQueueLanes[request->mQueueApproach];
-			if (request->mQueuePosition >= queueLane.positions.size()
-				|| !actor || actor->getGlobalPosition().distanceTo(
-					queueLane.positions[request->mQueuePosition]) > 0.001f) return;
+			// Capacity admission precedes the approach walk. Do not let a later
+			// admitted passenger overtake an earlier one approaching or crossing
+			// the Door. The reservation is released when entry commits.
+			for (auto reservation : coordinator.mAdmissionReservations)
+			{
+				auto earlier = mWorld.mTraversalRequests.find(reservation);
+				if (earlier && (earlier->mState == TraversalRequestState::Pending
+					|| earlier->mState == TraversalRequestState::Granted)
+					&& earlier->mQueueTicket.value < request->mQueueTicket.value) return;
+			}
 		}
-		else if (request->mQueuePosition != ~0u)
+		if (request->mQueuePosition != ~0u)
 		{
 			boardingLanding = mWorld.mTraversalResources.find(request->mResource);
 			if (!boardingLanding || request->mQueueApproach >= boardingLanding->mQueueLanes.size()) return;
@@ -771,14 +774,15 @@ namespace core
 			if (actor) actor->mTraversalLocalGoal.reset();
 			refreshQueuePositions(*boardingLanding);
 		}
-		if (coordinator.mShuttle)
+		if (coordinator.mLift || coordinator.mShuttle)
 		{
 			// Reaching a waiting position does not mean reaching the Door. After
 			// releasing that position, walk to the assigned threshold before allowing
 			// the in-place layer crossing; never board from a queue spot or Button.
 			if (!actor) return;
-			auto const crossingWidth = CORE_DOOR_CROSSING_HALF_WIDTH(
-				boardingLanding->mDoor->getCellsWide());
+			// Enclosed Lifts retain their centre-based landing alignment (ADR 0005).
+			auto const crossingWidth = coordinator.mLift ? 0.0f
+				: CORE_DOOR_CROSSING_HALF_WIDTH(boardingLanding->mDoor->getCellsWide());
 			if (!isWithinDoorCrossingBand(actor->getGlobalPosition(),
 				request->mSourceEndpoint, crossingWidth))
 			{
@@ -816,14 +820,6 @@ namespace core
 		}
 		auto lane = find(boardingLanding->mCrossingOwners.begin(), boardingLanding->mCrossingOwners.end(), TraversalRequestId{});
 		if (lane == boardingLanding->mCrossingOwners.end()) return;
-		if (coordinator.mLift)
-		{
-			auto& laneQueue = boardingLanding->mQueueLanes[request->mQueueApproach].queue;
-			laneQueue.erase(remove(laneQueue.begin(), laneQueue.end(), requestId), laneQueue.end());
-			request->mQueuePosition = ~0u;
-			actor->mTraversalLocalGoal.reset();
-			refreshQueuePositions(*boardingLanding);
-		}
 		request->mCrossingLane = (uint32_t)distance(boardingLanding->mCrossingOwners.begin(), lane);
 		*lane = requestId;
 		coordinator.mLiftAdmissionReservation = requestId;
