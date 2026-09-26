@@ -1901,6 +1901,39 @@ namespace
 			&& world.lookupAgent(cancelledId).entity->getSector() == world.getSector(fore).get();
 	}
 
+	bool traversalGeometryPolicyIsWorldOwned()
+	{
+		core::World configured("Configured traversal geometry", 2, 1);
+		core::World untouched("Default traversal geometry", 2, 1);
+
+		auto const& defaults = untouched.getTraversalGeometryPolicy();
+		if (defaults.minimumQueueSeparation != CORE_DOOR_QUEUE_STOP_WIDTH
+			|| defaults.advanceStepThreshold != CORE_AGENT_REACH_DIST
+			|| defaults.overflowTailSeparation != CORE_DOOR_QUEUE_STOP_WIDTH
+			|| defaults.occupantClearance != CORE_SHUTTLE_AGENT_BUFFER)
+		{
+			return false;
+		}
+
+		auto policy = configured.getTraversalGeometryPolicy();
+		policy.minimumQueueSeparation = 0.75f;
+		policy.advanceStepThreshold = 0.2f;
+		policy.overflowTailSeparation = 0.8f;
+		policy.occupantClearance = 0.15f;
+		configured.setTraversalGeometryPolicy(policy);
+
+		auto const& roundTripped = configured.getTraversalGeometryPolicy();
+		auto const& stillDefault = untouched.getTraversalGeometryPolicy();
+		return roundTripped.minimumQueueSeparation == 0.75f
+			&& roundTripped.advanceStepThreshold == 0.2f
+			&& roundTripped.overflowTailSeparation == 0.8f
+			&& roundTripped.occupantClearance == 0.15f
+			&& stillDefault.minimumQueueSeparation == CORE_DOOR_QUEUE_STOP_WIDTH
+			&& stillDefault.advanceStepThreshold == CORE_AGENT_REACH_DIST
+			&& stillDefault.overflowTailSeparation == CORE_DOOR_QUEUE_STOP_WIDTH
+			&& stillDefault.occupantClearance == CORE_SHUTTLE_AGENT_BUFFER;
+	}
+
 	bool resilientWaitingRetainsPriorityAndExpiresPermits()
 	{
 		core::World world("Resilient door waiting", 8, 2);
@@ -5844,6 +5877,11 @@ int main(int argc, char** argv)
 		if (!bandArrivalLeavesNonCrossingAgentsUnaffected())
 		{
 			std::cerr << "FAIL: non-crossing agent inside the band x range created a request\n";
+			return 1;
+		}
+		if (!traversalGeometryPolicyIsWorldOwned())
+		{
+			std::cerr << "FAIL: traversal geometry policy defaults, round trip, or World ownership failed\n";
 			return 1;
 		}
 		if (!resilientWaitingRetainsPriorityAndExpiresPermits())

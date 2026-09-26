@@ -8715,6 +8715,28 @@ namespace core
 		mTraversalWaitingPolicy = policy;
 	}
 
+	TraversalGeometryPolicy const& World::getTraversalGeometryPolicy() const
+	{
+		return mTraversalGeometryPolicy;
+	}
+
+	void World::setTraversalGeometryPolicy(TraversalGeometryPolicy policy)
+	{
+		if (!isfinite(policy.minimumQueueSeparation)
+			|| !isfinite(policy.advanceStepThreshold)
+			|| !isfinite(policy.overflowTailSeparation)
+			|| !isfinite(policy.occupantClearance)
+			|| policy.minimumQueueSeparation < CORE_DOOR_QUEUE_STOP_WIDTH
+			|| policy.advanceStepThreshold < 0.0f
+			|| policy.overflowTailSeparation < 0.0f
+			|| policy.occupantClearance < 0.0f)
+		{
+			throw invalid_argument("Traversal geometry policy values must be finite and non-negative, and queue separation cannot be below the authored lane pitch");
+		}
+		invalidateSimulationSnapshot();
+		mTraversalGeometryPolicy = policy;
+	}
+
 	float World::estimateTraversalDelay(TraversalResourceId resourceId, SectorId sourceSector) const
 	{
 		auto resource = mTraversalResources.find(resourceId);

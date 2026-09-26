@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/Defines.h"
 #include "core/EdgeType.h"
 #include "core/EntityId.h"
 #include "core/Vector2.h"
@@ -481,6 +482,21 @@ namespace core
 		uint32_t maximumDestinationRetries{ 2 };
 		float replanEtaMarginSeconds{ 2.0f };
 		float queueDelayPerAgentSeconds{ 1.0f };
+	};
+
+	// World-owned tuning for the physical placement of waiting and riding Agents.
+	// Consumers are introduced separately; these defaults preserve today's lane
+	// pitch, meaningful movement tolerance, tail spacing, and Shuttle clearance.
+	struct TraversalGeometryPolicy
+	{
+		// The authored queue lane pitch remains the minimum clearance guarantee.
+		float minimumQueueSeparation{ CORE_DOOR_QUEUE_STOP_WIDTH };
+		// Require a meaningful forward step before replacing a waiting target.
+		float advanceStepThreshold{ CORE_AGENT_REACH_DIST };
+		// Continue an overflowing queue at the authored lane pitch.
+		float overflowTailSeparation{ CORE_DOOR_QUEUE_STOP_WIDTH };
+		// Match the clearance already used to pack Shuttle occupants.
+		float occupantClearance{ CORE_SHUTTLE_AGENT_BUFFER };
 	};
 
 	class TraversalRequest

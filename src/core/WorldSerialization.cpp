@@ -1385,6 +1385,7 @@ namespace core
 		mCurrentPhase = SimulationPhase::None;
 		if (!preserveBehaviourRuntime) mEvents.clear();
 		mTraversalWaitingPolicy = {};
+		mTraversalGeometryPolicy = {};
 		mBuildFinished = false;
 		mSimulationPaused = false;
 		mTopologyDirty = true;

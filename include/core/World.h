@@ -623,6 +623,8 @@ namespace core
 
 		TraversalWaitingPolicy mTraversalWaitingPolicy;
 
+		TraversalGeometryPolicy mTraversalGeometryPolicy;
+
 		// Structural edits are transactional at the graph boundary. The world may
 		// only be changed after an explicit pause; the previous graph remains live
 		// until a replacement has built and validated successfully.
@@ -2141,6 +2143,10 @@ namespace core
 		TraversalWaitingPolicy const& getTraversalWaitingPolicy() const;
 
 		void setTraversalWaitingPolicy(TraversalWaitingPolicy policy);
+
+		TraversalGeometryPolicy const& getTraversalGeometryPolicy() const;
+
+		void setTraversalGeometryPolicy(TraversalGeometryPolicy policy);
 
 		// Pure route-cost query: it creates no ticket, operation, reservation, or permit.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
