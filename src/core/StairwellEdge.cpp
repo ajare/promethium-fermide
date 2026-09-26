@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/StairwellEdge.h"
 #include "core/Vertex.h"
 #include "core/Agent.h"
@@ -41,18 +42,21 @@ namespace core
 		return format("Stairwell edge for {}", mStairwell->getDescription());
 	}
 
-	bool StairwellEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool StairwellEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Stairwell)) return false;
 		return true;
 	}
 
-	EdgeTraversalRequestResult StairwellEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult StairwellEdge::requestTraversal(shared_ptr<const Vertex> targetVertex, shared_ptr<const Agent> agent) const
 	{
-		return EdgeTraversalRequestResult::OK;
+		return isTraversable(std::move(targetVertex), std::move(agent))
+			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float StairwellEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* /* agent */, bool /* edgeVisible */) const
+	float StairwellEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool /* edgeVisible */) const
 	{
+		if (agentForbidsEdge(agent, *this, TraversalKind::Stairwell)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
 	}
 

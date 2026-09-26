@@ -6773,6 +6773,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		ImGui::SetTooltip("Pause the simulation to activate or deactivate an Agent");
 	}
 
+	renderAgentIndividualProperties(world, id);
 	renderAgentEffectiveProperties(world, id);
 	renderAgentTagAssignmentChecklist(world, id);
 	renderAgentBehaviourConfigurationPanel(world, id);
@@ -8396,6 +8397,7 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	drawList->PushClipRect(worldTopLeft, worldBottomRight, true);
 	renderWorld(world, drawList);
 	renderGraph(graph, world, drawList);
+	renderSelectedAgentPath(world.get(), drawList);
 	drawSectorEditOverlay(drawList);
 	if (gAgentMove.dragging)
 	{

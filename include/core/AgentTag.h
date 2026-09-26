@@ -95,6 +95,38 @@ namespace core
 		bool operator==(AgentHeightModifierProperty const& other) const = default;
 	};
 
+	using TraversalMask = uint32_t;
+
+	enum class TraversalKind : TraversalMask
+	{
+		Staircase = TraversalMask{ 1 } << 0,
+		Escalator = TraversalMask{ 1 } << 1,
+		Stairwell = TraversalMask{ 1 } << 2,
+		Ladder = TraversalMask{ 1 } << 3,
+		Lift = TraversalMask{ 1 } << 4,
+		PlatformLift = TraversalMask{ 1 } << 5,
+		Shuttle = TraversalMask{ 1 } << 6,
+		Door = TraversalMask{ 1 } << 7,
+		Buttons = TraversalMask{ 1 } << 8
+	};
+
+	inline constexpr TraversalMask AllTraversalMaskBits{ (TraversalMask{ 1 } << 9) - 1 };
+	inline constexpr TraversalMask traversalMask(TraversalKind kind)
+	{
+		return static_cast<TraversalMask>(kind);
+	}
+	inline constexpr bool traversalMaskIsValid(TraversalMask mask)
+	{
+		return (mask & ~AllTraversalMaskBits) == 0;
+	}
+
+	struct AgentMobilityProfileProperty
+	{
+		TraversalMask forbiddenTraversals{ 0 };
+		uint64_t revision{ 0 };
+		bool operator==(AgentMobilityProfileProperty const&) const = default;
+	};
+
 	void agentColourToFloats(AgentColour const& colour, float out[3]);
 	AgentColour agentColourFromFloats(float const in[3]);
 
@@ -126,6 +158,7 @@ namespace core
 		void removeEscalatorWalkingChance() { mEscalatorWalkingChance.reset(); }
 		std::optional<AgentWalkSpeedModifierProperty> mWalkSpeedModifier;
 		std::optional<AgentHeightModifierProperty> mHeightModifier;
+		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
 			: mName(std::move(name))
@@ -146,6 +179,11 @@ namespace core
 			mHeightModifier = property;
 		}
 		void removeHeightModifier() { mHeightModifier.reset(); }
+		void setMobilityProfile(AgentMobilityProfileProperty property)
+		{
+			mMobilityProfile = property;
+		}
+		void removeMobilityProfile() { mMobilityProfile.reset(); }
 
 	public:
 		static constexpr size_t MaxNameCharacters{ 12 };
@@ -168,6 +206,10 @@ namespace core
 		AgentHeightModifierProperty const* getHeightModifier() const
 		{
 			return mHeightModifier ? &*mHeightModifier : nullptr;
+		}
+		AgentMobilityProfileProperty const* getMobilityProfile() const
+		{
+			return mMobilityProfile ? &*mMobilityProfile : nullptr;
 		}
 	};
 }

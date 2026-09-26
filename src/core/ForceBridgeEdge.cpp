@@ -2,6 +2,7 @@
 #include <limits>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/ForceBridgeEdge.h"
 #include "core/Agent.h"
 #include "core/Vertex.h"
@@ -42,18 +43,24 @@ namespace core
 		return format("ForceBridge edge for {}", mForceBridge->getDescription());
 	}
 
-	bool ForceBridgeEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool ForceBridgeEdge::isTraversable(shared_ptr<const Vertex>, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsButtons(agent.get()) && requiresButton()) return false;
 		return mForceBridge->isExtended();
 	}
 
-	EdgeTraversalRequestResult ForceBridgeEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult ForceBridgeEdge::requestTraversal(shared_ptr<const Vertex>,
+		shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsButtons(agent.get()) && requiresButton())
+			return EdgeTraversalRequestResult::Failed;
 		return mForceBridge->extend() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
 	float ForceBridgeEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const
 	{
+		if (agentForbidsButtons(agent) && requiresButton())
+			return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		if (!mForceBridge->isExtended())
 		{
 			auto source = getOtherVertex(targetVertex);
@@ -75,6 +82,11 @@ namespace core
 		}
 
 		return max(traverseTime, CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME);
+	}
+
+	bool ForceBridgeEdge::requiresButton() const
+	{
+		return mForceBridge->isExtensible();
 	}
 
 	TraversalResourceId ForceBridgeEdge::getTraversalResourceId() const

@@ -2,6 +2,7 @@
 #include <limits>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/LadderMountEdge.h"
 #include "core/Agent.h"
 #include "core/Vertex.h"
@@ -49,20 +50,23 @@ namespace core
 		return format("LadderMount edge for {}", mLadder->getDescription());
 	}
 
-	bool LadderMountEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool LadderMountEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Ladder)) return false;
 		// TODO: see if any Agents are on the Ladder
 
 		return true;
 	}
 
-	EdgeTraversalRequestResult LadderMountEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult LadderMountEdge::requestTraversal(shared_ptr<const Vertex> targetVertex, shared_ptr<const Agent> agent) const
 	{
-		return EdgeTraversalRequestResult::OK;
+		return isTraversable(std::move(targetVertex), std::move(agent))
+			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float LadderMountEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* /* agent */, bool /* edgeVisible */) const
+	float LadderMountEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool /* edgeVisible */) const
 	{
+		if (agentForbidsEdge(agent, *this, TraversalKind::Ladder)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		if (!mLadder->isExtended())
 		{
 			auto source = getOtherVertex(targetVertex);
@@ -73,6 +77,11 @@ namespace core
 				return numeric_limits<float>::infinity();
 		}
 		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+	}
+
+	bool LadderMountEdge::requiresButton() const
+	{
+		return mLadder->isExtensible();
 	}
 
 	TraversalResourceId LadderMountEdge::getTraversalResourceId() const

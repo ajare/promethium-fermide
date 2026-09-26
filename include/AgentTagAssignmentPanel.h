@@ -25,8 +25,13 @@ bool commitAgentTagAssignment(
 	core::AgentId agent, core::AgentTagId tag, bool assigned,
 	std::string& diagnostic);
 
-// Reports the selected Agent's effective Colour, sampled Walk speed modifier,
-// and sampled Height modifier, including source tags or their defaults. Kept separate
+// Edits properties authored directly on one Agent. Individual values override
+// values inherited from Agent tags and may only be changed while paused.
+void renderAgentIndividualProperties(
+	std::shared_ptr<core::World> const& world, core::AgentId agent);
+
+// Reports every calculated property value, identifying an individual override,
+// source tag, or default. Kept separate
 // so the headless ImGui seam exercises the Selection panel's read-only content.
 void renderAgentEffectiveProperties(
 	std::shared_ptr<core::World> const& world, core::AgentId agent);

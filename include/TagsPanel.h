@@ -112,6 +112,15 @@ bool commitAgentTagHeightModifierEdit(
 bool commitAgentTagHeightModifierRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
+bool commitAgentTagMobilityProfileAdd(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
+bool commitAgentTagMobilityProfileEdit(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	core::TraversalMask forbiddenTraversals, std::string& diagnostic);
+bool commitAgentTagMobilityProfileRemove(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
 
 // Deletes a tag and every assignment in loaded dependent Worlds as one
 // registry-history transaction. A refusal changes neither registry nor

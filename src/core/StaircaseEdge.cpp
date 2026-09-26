@@ -4,6 +4,7 @@
 
 #include "core/Agent.h"
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/StaircaseEdge.h"
 #include "core/Vertex.h"
 
@@ -28,8 +29,11 @@ namespace core
 	}
 
 	bool StaircaseEdge::isTraversable(shared_ptr<const Vertex> targetVertex,
-		shared_ptr<const Agent>) const
+		shared_ptr<const Agent> agent) const
 	{
+		auto const kind = mStaircase->isEscalator()
+			? TraversalKind::Escalator : TraversalKind::Staircase;
+		if (agentForbidsEdge(agent.get(), *this, kind)) return false;
 		if (!mStaircase->isEscalator()) return true;
 		auto sourceVertex = getOtherVertex(targetVertex);
 		bool const movingUp = targetVertex->getPosition().y > sourceVertex->getPosition().y;
@@ -44,8 +48,11 @@ namespace core
 	}
 
 	float StaircaseEdge::getWeight(shared_ptr<const Vertex> targetVertex,
-		Agent const*, bool) const
+		Agent const* agent, bool) const
 	{
+		auto const kind = mStaircase->isEscalator()
+			? TraversalKind::Escalator : TraversalKind::Staircase;
+		if (agentForbidsEdge(agent, *this, kind)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		if (!mStaircase->isEscalator()) return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
 		auto sourceVertex = getOtherVertex(targetVertex);
 		bool const movingUp = targetVertex->getPosition().y > sourceVertex->getPosition().y;

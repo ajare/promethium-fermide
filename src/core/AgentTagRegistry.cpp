@@ -108,6 +108,8 @@ namespace core
 				tag->setWalkSpeedModifier(*walkSpeed);
 			if (auto const* height = sourceTag->getHeightModifier())
 				tag->setHeightModifier(*height);
+			if (auto const* mobility = sourceTag->getMobilityProfile())
+				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
 				throw std::logic_error("Could not preserve an Agent tag ID while copying a registry");
 		}
@@ -136,7 +138,9 @@ namespace core
 				|| !optionalPropertyMatches(tag->getWalkSpeedModifier(),
 					candidate->getWalkSpeedModifier())
 				|| !optionalPropertyMatches(tag->getHeightModifier(),
-					candidate->getHeightModifier())) return false;
+					candidate->getHeightModifier())
+				|| !optionalPropertyMatches(tag->getMobilityProfile(),
+					candidate->getMobilityProfile())) return false;
 		}
 		return true;
 	}
@@ -279,6 +283,16 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getHeightModifier();
+	}
+
+	AgentMobilityProfileProperty const*
+	AgentTagRegistry::getAgentTagMobilityProfile(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getMobilityProfile();
 	}
 
 	void AgentTagRegistry::registerWorld(World& world)
@@ -536,6 +550,41 @@ namespace core
 					if (!source || !source->getWalkSpeedModifier()) continue;
 					return reject(std::format(
 						"Cannot add Walk speed modifier to Agent tag #{}: Agent '{}' in World '{}' already inherits Walk speed modifier from #{}",
+						target->getName(), agent->getName(), world->getName(),
+						source->getName()));
+				}
+			}
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::mobilityProfileAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto const* target = mTags.find(id);
+		if (!target)
+			return reject(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+		{
+			if (!world) continue;
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (!source || !source->getMobilityProfile()) continue;
+					return reject(std::format(
+						"Cannot add Mobility profile to Agent tag #{}: Agent '{}' in World '{}' already inherits Mobility profile from #{}",
 						target->getName(), agent->getName(), world->getName(),
 						source->getName()));
 				}
@@ -992,6 +1041,76 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagMobilityProfile(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format(
+			"Agent tag {} is not defined in this registry", id.value));
+		if (tag->getMobilityProfile()) return reject(std::format(
+			"Agent tag #{} already has Mobility profile", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!mobilityProfileAdditionIsValid(id, diagnostic)) return false;
+		try { tag->setMobilityProfile({ 0, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::setAgentTagMobilityProfile(AgentTagId id,
+		TraversalMask forbiddenTraversals, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format(
+			"Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getMobilityProfile();
+		if (!current) return reject(std::format(
+			"Agent tag #{} has no Mobility profile", tag->getName()));
+		if (!traversalMaskIsValid(forbiddenTraversals))
+			return reject("The Agent Mobility profile contains reserved traversal bits");
+		if (current->forbiddenTraversals == forbiddenTraversals)
+			return reject("The Agent Mobility profile is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		try { tag->setMobilityProfile({ forbiddenTraversals, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagMobilityProfile(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format(
+			"Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getMobilityProfile()) return reject(std::format(
+			"Agent tag #{} has no Mobility profile", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		try { (void)allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->removeMobilityProfile();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::loadedWorldAssignmentsAreValid(
 		AgentTagRegistry const& definitions, std::string* diagnostic,
 		std::vector<World const*> const& excludedWorlds) const
@@ -1019,7 +1138,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 1);
+		serializer.writeUint32("version", 2);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -1040,7 +1159,8 @@ namespace core
 			auto const* walkSpeed = tag->getWalkSpeedModifier();
 			auto const* height = tag->getHeightModifier();
 			auto const* chance = tag->getEscalatorWalkingChance();
-			if (colour || walkSpeed || height || chance)
+			auto const* mobility = tag->getMobilityProfile();
+			if (colour || walkSpeed || height || chance || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -1073,6 +1193,14 @@ namespace core
 				};
 				if (walkSpeed) writeModifier("walkSpeedModifier", *walkSpeed);
 				if (height) writeModifier("heightModifier", *height);
+				if (mobility)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "mobilityProfile");
+					serializer.writeUint64("revision", mobility->revision);
+					serializer.writeUint32("value", mobility->forbiddenTraversals);
+					serializer.endMap();
+				}
 				serializer.endArray();
 			}
 			serializer.endMap();
@@ -1085,7 +1213,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version != 1)
+		if (version != 1 && version != 2)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -1132,13 +1260,15 @@ namespace core
 				bool hasColour{ false };
 				bool hasWalkSpeedModifier{ false };
 				bool hasHeightModifier{ false };
+				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
 				{
 					serializer.beginMap("");
 					auto const type = serializer.readString("type");
 					if (type != "colour" && type != "walkSpeedModifier"
-						&& type != "heightModifier" && type != "escalatorWalkingChance")
+						&& type != "heightModifier" && type != "escalatorWalkingChance"
+						&& !(version >= 2 && type == "mobilityProfile"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -1153,6 +1283,10 @@ namespace core
 					if (type == "heightModifier" && hasHeightModifier)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Height modifier",
+							name));
+					if (type == "mobilityProfile" && hasMobilityProfile)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Mobility profile",
 							name));
 					auto const revision = serializer.readUint64("revision");
 					if (revision == 0)
@@ -1173,6 +1307,15 @@ namespace core
 							serializer.readUint8("b") };
 						tag->setColour({ colour, revision });
 						hasColour = true;
+					}
+					else if (type == "mobilityProfile")
+					{
+						auto const value = serializer.readUint32("value");
+						if (!traversalMaskIsValid(value))
+							throw SerializationException(
+								"Serialized Mobility profile contains reserved traversal bits");
+						tag->setMobilityProfile({ value, revision });
+						hasMobilityProfile = true;
 					}
 					else
 					{

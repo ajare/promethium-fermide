@@ -57,6 +57,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool heightModifierAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool mobilityProfileAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		void registerWorld(World& world);
 		void unregisterWorld(World& world);
 
@@ -87,6 +89,8 @@ namespace core
 		AgentWalkSpeedModifierProperty const* getAgentTagWalkSpeedModifier(
 			AgentTagId id) const;
 		AgentHeightModifierProperty const* getAgentTagHeightModifier(
+			AgentTagId id) const;
+		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
 
 		// Live usage is derived from every loaded World sharing this exact
@@ -153,6 +157,13 @@ namespace core
 		bool setAgentTagHeightModifier(AgentTagId id, AgentModifierRange range,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagHeightModifier(AgentTagId id,
+			std::string* diagnostic = nullptr);
+
+		bool addAgentTagMobilityProfile(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool setAgentTagMobilityProfile(AgentTagId id, TraversalMask forbiddenTraversals,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagMobilityProfile(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		// Used by registry undo/redo to reject a prospective definition set that

@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/LiftEdge.h"
 #include "core/Vertex.h"
 #include "core/Agent.h"
@@ -41,18 +42,21 @@ namespace core
 		return format("Lift edge for {}", mLift->getDescription());
 	}
 
-	bool LiftEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool LiftEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return false;
 		return true;
 	}
 
-	EdgeTraversalRequestResult LiftEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult LiftEdge::requestTraversal(shared_ptr<const Vertex> targetVertex, shared_ptr<const Agent> agent) const
 	{
-		return EdgeTraversalRequestResult::OK;
+		return isTraversable(std::move(targetVertex), std::move(agent))
+			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
 	float LiftEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const
 	{
+		if (agentForbidsEdge(agent, *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		(void)edgeVisible;
 		auto rideTime = getLength() / CORE_LIFT_SPEED;
 		auto ride = rideTime > CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
@@ -64,6 +68,11 @@ namespace core
 			? SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 }
 			: getVertex(1) ? SectorId{ (uint64_t)getVertex(1)->getSector()->getIndex() + 1 } : SectorId{};
 		return ride + agent->estimateTraversalDelay(getTraversalResourceId(), sourceSector);
+	}
+
+	bool LiftEdge::requiresButton() const
+	{
+		return true;
 	}
 
 	TraversalResourceId LiftEdge::getTraversalResourceId() const

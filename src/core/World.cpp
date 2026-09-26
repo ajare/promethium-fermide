@@ -1058,6 +1058,7 @@ namespace core
 			AgentTagId colourSource{};
 			AgentTagId walkSpeedSource{};
 			AgentTagId heightSource{};
+			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
 			for (auto const tag : agent->getAgentTagIds())
@@ -1114,6 +1115,15 @@ namespace core
 					}
 					heightSource = tag;
 					heightProperty = property;
+				}
+				if (definition->getMobilityProfile())
+				{
+					if (mobilityProfileSource)
+						return reject(format(
+							"Agent '{}' inherits Mobility profile from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(mobilityProfileSource),
+							definition->getName()));
+					mobilityProfileSource = tag;
 				}
 			}
 
@@ -7198,6 +7208,124 @@ namespace core
 		return mSimulationCoordinator.setAgentActive(id, active, diagnostic);
 	}
 
+	bool World::setAgentIndividualColour(AgentId id, optional<AgentColour> value,
+		string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualColour() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Agent Colour is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualColour(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentIndividualEscalatorWalkingChance(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentEscalatorWalkingChanceIsValid(*value, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualEscalatorWalkingChance() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Escalator walking chance is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualEscalatorWalkingChance(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentIndividualWalkSpeedModifier(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentWalkSpeedModifierRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualWalkSpeedModifier() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Walk speed modifier is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualWalkSpeedModifier(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentIndividualHeightModifier(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentHeightModifierRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualHeightModifier() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Height modifier is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualHeightModifier(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentIndividualMobilityProfile(AgentId id,
+		optional<TraversalMask> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !traversalMaskIsValid(*value))
+		{
+			if (diagnostic) *diagnostic = "The individual Mobility profile contains reserved traversal bits";
+			return false;
+		}
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualMobilityProfile() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Mobility profile is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualMobilityProfile(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	// Agent groups are authored World data, not simulation state (ADR 0006).
 	// They live in the World's own registry and never reach the coordinator,
 	// so creating and renaming need no pause, dirty no topology, and leave every
@@ -7497,6 +7625,13 @@ namespace core
 					agentLookup.entity->getName(), assignedDefinition->getName(),
 					source->getName()));
 			}
+			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Mobility profile is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(),
+					source->getName()));
+			}
 		}
 		return true;
 	}
@@ -7595,6 +7730,7 @@ namespace core
 		AgentTagId colourSource{};
 		AgentTagId walkSpeedSource{};
 		AgentTagId heightSource{};
+		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
 		for (auto const tag : tags)
@@ -7634,6 +7770,13 @@ namespace core
 						mAgentTagRegistry->getAgentTagName(heightSource), definition->getName()));
 				heightSource = tag;
 				heightProperty = property;
+			}
+			if (definition->getMobilityProfile())
+			{
+				if (mobilityProfileSource)
+					return reject(format("Mobility profile is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(mobilityProfileSource), definition->getName()));
+				mobilityProfileSource = tag;
 			}
 		}
 

@@ -152,6 +152,44 @@ namespace core
 			for (auto const id : mAgentTags) serializer.writeUint64("", id.value);
 			serializer.endArray();
 		}
+		if (mIndividualColour || mIndividualEscalatorWalkingChance
+			|| mIndividualWalkSpeedModifier || mIndividualHeightModifier
+			|| mIndividualMobilityProfile)
+		{
+			serializer.beginArray("individualProperties");
+			auto beginProperty = [&serializer](char const* type)
+			{
+				serializer.beginMap("");
+				serializer.writeString("type", type);
+			};
+			if (mIndividualColour)
+			{
+				beginProperty("colour");
+				serializer.writeUint8("r", mIndividualColour->r);
+				serializer.writeUint8("g", mIndividualColour->g);
+				serializer.writeUint8("b", mIndividualColour->b);
+				serializer.endMap();
+			}
+			auto writeFloatProperty = [&serializer, &beginProperty](char const* type, float value)
+			{
+				beginProperty(type);
+				serializer.writeFloat("value", value);
+				serializer.endMap();
+			};
+			if (mIndividualEscalatorWalkingChance)
+				writeFloatProperty("escalatorWalkingChance", *mIndividualEscalatorWalkingChance);
+			if (mIndividualWalkSpeedModifier)
+				writeFloatProperty("walkSpeedModifier", *mIndividualWalkSpeedModifier);
+			if (mIndividualHeightModifier)
+				writeFloatProperty("heightModifier", *mIndividualHeightModifier);
+			if (mIndividualMobilityProfile)
+			{
+				beginProperty("mobilityProfile");
+				serializer.writeUint32("value", *mIndividualMobilityProfile);
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		if (mWalkSpeedModifierSample || mHeightModifierSample)
 		{
 			serializer.beginArray("propertySamples");
@@ -220,6 +258,67 @@ namespace core
 			serializer.endArray();
 		}
 		mAgentTags = std::move(agentTags);
+		mIndividualColour.reset();
+		mIndividualEscalatorWalkingChance.reset();
+		mIndividualWalkSpeedModifier.reset();
+		mIndividualHeightModifier.reset();
+		mIndividualMobilityProfile.reset();
+		if (serializer.hasField("individualProperties"))
+		{
+			serializer.beginArray("individualProperties");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				auto const type = serializer.readString("type");
+				if (type == "colour")
+				{
+					if (mIndividualColour)
+						throw SerializationException("Serialized Agent contains more than one individual Colour");
+					mIndividualColour = AgentColour{ serializer.readUint8("r"),
+						serializer.readUint8("g"), serializer.readUint8("b") };
+				}
+				else if (type == "escalatorWalkingChance")
+				{
+					if (mIndividualEscalatorWalkingChance)
+						throw SerializationException("Serialized Agent contains more than one individual Escalator walking chance");
+					auto const value = serializer.readFloat("value");
+					if (!agentEscalatorWalkingChanceIsValid(value))
+						throw SerializationException("Serialized individual Escalator walking chance is invalid");
+					mIndividualEscalatorWalkingChance = value;
+				}
+				else if (type == "walkSpeedModifier")
+				{
+					if (mIndividualWalkSpeedModifier)
+						throw SerializationException("Serialized Agent contains more than one individual Walk speed modifier");
+					auto const value = serializer.readFloat("value");
+					if (!agentWalkSpeedModifierRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Walk speed modifier is invalid");
+					mIndividualWalkSpeedModifier = value;
+				}
+				else if (type == "heightModifier")
+				{
+					if (mIndividualHeightModifier)
+						throw SerializationException("Serialized Agent contains more than one individual Height modifier");
+					auto const value = serializer.readFloat("value");
+					if (!agentHeightModifierRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Height modifier is invalid");
+					mIndividualHeightModifier = value;
+				}
+				else if (type == "mobilityProfile")
+				{
+					if (mIndividualMobilityProfile)
+						throw SerializationException("Serialized Agent contains more than one individual Mobility profile");
+					auto const value = serializer.readUint32("value");
+					if (!traversalMaskIsValid(value))
+						throw SerializationException("Serialized individual Mobility profile contains reserved traversal bits");
+					mIndividualMobilityProfile = value;
+				}
+				else throw SerializationException(format(
+					"Unsupported individual Agent property type '{}'", type));
+				serializer.endMap();
+			}
+			serializer.endArray();
+		}
 		mWalkSpeedModifierSample.reset();
 		mHeightModifierSample.reset();
 		if (serializer.hasField("propertySamples"))
@@ -323,6 +422,8 @@ namespace core
 
 	EffectiveAgentEscalatorWalkingChance Agent::getEffectiveEscalatorWalkingChance() const
 	{
+		if (mIndividualEscalatorWalkingChance)
+			return { *mIndividualEscalatorWalkingChance, {}, true };
 		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
 			for (auto const tag : mAgentTags)
 			{
@@ -337,6 +438,12 @@ namespace core
 	EffectiveAgentColour Agent::getEffectiveColour() const
 	{
 		EffectiveAgentColour effective;
+		if (mIndividualColour)
+		{
+			effective.value = *mIndividualColour;
+			effective.individual = true;
+			return effective;
+		}
 		if (!mWorld || !mWorld->hasAttachedAgentTagRegistry()) return effective;
 
 		auto const& registry = mWorld->getAgentTagRegistry();
@@ -356,6 +463,12 @@ namespace core
 	EffectiveAgentWalkSpeedModifier Agent::getEffectiveWalkSpeedModifier() const
 	{
 		EffectiveAgentWalkSpeedModifier effective;
+		if (mIndividualWalkSpeedModifier)
+		{
+			effective.value = *mIndividualWalkSpeedModifier;
+			effective.individual = true;
+			return effective;
+		}
 		if (!mWalkSpeedModifierSample) return effective;
 		effective.value = mWalkSpeedModifierSample->value;
 		effective.sourceTag = mWalkSpeedModifierSample->sourceTag;
@@ -366,10 +479,41 @@ namespace core
 	EffectiveAgentHeightModifier Agent::getEffectiveHeightModifier() const
 	{
 		EffectiveAgentHeightModifier effective;
+		if (mIndividualHeightModifier)
+		{
+			effective.value = *mIndividualHeightModifier;
+			effective.individual = true;
+			return effective;
+		}
 		if (!mHeightModifierSample) return effective;
 		effective.value = mHeightModifierSample->value;
 		effective.sourceTag = mHeightModifierSample->sourceTag;
 		effective.propertyRevision = mHeightModifierSample->propertyRevision;
+		return effective;
+	}
+
+	EffectiveAgentMobilityProfile Agent::getEffectiveMobilityProfile() const
+	{
+		EffectiveAgentMobilityProfile effective;
+		if (mIndividualMobilityProfile)
+		{
+			effective.forbiddenTraversals = *mIndividualMobilityProfile;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mWorld || !mWorld->hasAttachedAgentTagRegistry()) return effective;
+		auto const& registry = mWorld->getAgentTagRegistry();
+		for (auto const tag : mAgentTags)
+		{
+			auto const* definition = registry->lookupAgentTag(tag);
+			if (!definition) continue;
+			auto const* profile = definition->getMobilityProfile();
+			if (!profile) continue;
+			effective.forbiddenTraversals = profile->forbiddenTraversals;
+			effective.sourceTag = tag;
+			effective.propertyRevision = profile->revision;
+			break;
+		}
 		return effective;
 	}
 

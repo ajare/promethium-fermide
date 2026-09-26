@@ -1556,6 +1556,74 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 }
 
 
+void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
+{
+	if (!drawList || !gUISettings.renderAgentDebug || !gSelectedAgent) return;
+	auto path = gSelectedAgent->getPath();
+	if ((!path || path->nodes.empty()) && world && world->isSimulationPaused()
+		&& world->isTraversalTopologyValid())
+	{
+		core::World::TopologyPathIntent intent;
+		if (world->getPausedPathIntent(*gSelectedAgent, intent)
+			&& intent.destinationSector
+			&& intent.destinationSector.value <= world->getNumSectors())
+		{
+			auto const destinationSector = world->getSector(
+				static_cast<uint32_t>(intent.destinationSector.value - 1));
+			auto const graph = world->getGraph();
+			auto const destination = graph && destinationSector
+				? graph->getClosestVertexInSector(
+					destinationSector.get(), intent.destinationPosition)
+				: nullptr;
+			if (destination) path = graph->calculatePath(gSelectedAgent, destination);
+		}
+	}
+	if (!path || path->nodes.empty()) return;
+
+	auto const visibleLayer = static_cast<uint32_t>(max(gUISettings.visibleLayer, 0));
+	auto const outlineColour = IM_COL32(32, 32, 32, 220);
+	auto const pathColour = IM_COL32(255, 196, 0, 240);
+
+	auto positionOnVisibleLayer = [visibleLayer](
+		shared_ptr<const core::Vertex> const& vertex, core::Vector2& position)
+	{
+		if (!vertex || !vertex->getSector()
+			|| vertex->getSector()->getLayerIndex() != visibleLayer) return false;
+		position = vertex->getPosition();
+		transformPosition(position);
+		return true;
+	};
+	auto drawSegment = [drawList, outlineColour, pathColour](
+		core::Vector2 const& from, core::Vector2 const& to)
+	{
+		drawList->AddLine({ from.x, from.y }, { to.x, to.y }, outlineColour, 5.0f);
+		drawList->AddLine({ from.x, from.y }, { to.x, to.y }, pathColour, 2.5f);
+	};
+
+	core::Vector2 firstPosition;
+	if (gSelectedAgent->getSector()
+		&& gSelectedAgent->getSector()->getLayerIndex() == visibleLayer
+		&& positionOnVisibleLayer(path->nodes.front().targetVertex, firstPosition))
+	{
+		auto agentPosition = gSelectedAgent->getGlobalPosition();
+		transformPosition(agentPosition);
+		drawSegment(agentPosition, firstPosition);
+	}
+
+	for (size_t index = 0; index < path->nodes.size(); ++index)
+	{
+		core::Vector2 position;
+		if (!positionOnVisibleLayer(path->nodes[index].targetVertex, position)) continue;
+		drawList->AddCircleFilled({ position.x, position.y }, 5.0f, outlineColour);
+		drawList->AddCircleFilled({ position.x, position.y }, 3.0f, pathColour);
+
+		if (index + 1 >= path->nodes.size()) continue;
+		core::Vector2 nextPosition;
+		if (positionOnVisibleLayer(path->nodes[index + 1].targetVertex, nextPosition))
+			drawSegment(position, nextPosition);
+	}
+}
+
 void renderSectorAgents(shared_ptr<const core::Sector> sector, WorldDrawList* drawList)
 {
 	auto const& agents = sector->getAgents();

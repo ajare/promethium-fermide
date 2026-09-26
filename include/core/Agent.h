@@ -36,13 +36,14 @@ namespace core
 	{
 		float value{ 0.0f };
 		AgentTagId sourceTag{};
+		bool individual{ false };
 	};
 
 	struct EffectiveAgentColour
 	{
 		AgentColour value{ EditorDefaultAgentColour };
-		// Empty means the editor fallback rather than an inherited property.
 		AgentTagId sourceTag{};
+		bool individual{ false };
 	};
 
 	enum class SampledAgentPropertyType
@@ -64,17 +65,25 @@ namespace core
 	struct EffectiveAgentWalkSpeedModifier
 	{
 		float value{ 1.0f };
-		// Empty means that base walk speed is unmodified.
 		AgentTagId sourceTag{};
 		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
 	};
 
 	struct EffectiveAgentHeightModifier
 	{
 		float value{ 1.0f };
-		// Empty means that standard visual height is unmodified.
 		AgentTagId sourceTag{};
 		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentMobilityProfile
+	{
+		TraversalMask forbiddenTraversals{ 0 };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
 	};
 
 	class Agent : public Serializable
@@ -137,6 +146,14 @@ namespace core
 		// structurally impossible in memory and gives persistence a stable numeric
 		// order. New Agents start with the empty set.
 		std::set<AgentTagId> mAgentTags;
+
+		// Individual Agent properties are authored directly on this Agent and
+		// override properties inherited from Agent tags.
+		std::optional<AgentColour> mIndividualColour;
+		std::optional<float> mIndividualEscalatorWalkingChance;
+		std::optional<float> mIndividualWalkSpeedModifier;
+		std::optional<float> mIndividualHeightModifier;
+		std::optional<TraversalMask> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
 		// simulation state. Their source identity and property revision make the
@@ -224,6 +241,16 @@ namespace core
 			mHeightModifierSample = sample;
 		}
 		void clearHeightModifierSample() { mHeightModifierSample.reset(); }
+		void setIndividualColour(std::optional<AgentColour> value)
+		{ mIndividualColour = value; modify(); }
+		void setIndividualEscalatorWalkingChance(std::optional<float> value)
+		{ mIndividualEscalatorWalkingChance = value; modify(); }
+		void setIndividualWalkSpeedModifier(std::optional<float> value)
+		{ mIndividualWalkSpeedModifier = value; modify(); }
+		void setIndividualHeightModifier(std::optional<float> value)
+		{ mIndividualHeightModifier = value; modify(); }
+		void setIndividualMobilityProfile(std::optional<TraversalMask> value)
+		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
 		{
 			mBehaviourAssignment = std::move(assignment);
@@ -300,21 +327,33 @@ namespace core
 		std::set<AgentTagId> const& getAgentTagIds() const { return mAgentTags; }
 		bool hasAgentTag(AgentTagId id) const { return mAgentTags.contains(id); }
 
-		// Resolves Colour through this Agent's assigned tags. Valid World state
-		// has at most one source; an uncoloured Agent receives the editor default.
+		std::optional<AgentColour> const& getIndividualColour() const
+		{ return mIndividualColour; }
+		std::optional<float> const& getIndividualEscalatorWalkingChance() const
+		{ return mIndividualEscalatorWalkingChance; }
+		std::optional<float> const& getIndividualWalkSpeedModifier() const
+		{ return mIndividualWalkSpeedModifier; }
+		std::optional<float> const& getIndividualHeightModifier() const
+		{ return mIndividualHeightModifier; }
+		std::optional<TraversalMask> const& getIndividualMobilityProfile() const
+		{ return mIndividualMobilityProfile; }
+
+		// Resolves Colour from the individual property first, then assigned tags;
+		// an uncoloured Agent receives the editor default.
 		EffectiveAgentColour getEffectiveColour() const;
 
-		// The persisted per-Agent Walk speed draw and its provenance. An Agent
-		// without the property exposes the neutral modifier and no source tag.
+		// Resolves an individual Walk speed value before the persisted tag sample.
+		// An Agent without either source exposes the neutral modifier.
 		EffectiveAgentWalkSpeedModifier getEffectiveWalkSpeedModifier() const;
 		std::optional<AgentPropertySample> const& getWalkSpeedModifierSample() const
 		{
 			return mWalkSpeedModifierSample;
 		}
 
-		// The persisted per-Agent Height draw and its provenance. It scales only
-		// visual height and bounds; physical simulation dimensions stay fixed.
+		// Resolves an individual Height value before the persisted tag sample. It
+		// scales only visual height and bounds; physical dimensions stay fixed.
 		EffectiveAgentHeightModifier getEffectiveHeightModifier() const;
+		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const
 		{
 			return mHeightModifierSample;

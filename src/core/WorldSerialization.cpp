@@ -399,7 +399,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 15);
+		serializer.writeUint32("version", 16);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -783,7 +783,7 @@ namespace core
 		// adds composite configuration plus the authored random seed, and version
 		// 15 renames vertical-position fields from Deck to Level. Older versions
 		// load with no assignment.
-		if (version < 1 || version > 15)
+		if (version < 1 || version > 16)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

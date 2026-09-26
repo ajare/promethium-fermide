@@ -289,6 +289,8 @@ add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/DocumentHistorySmokeChecks.cpp
     src/headless/AgentTagRegistrySmokeChecks.cpp
+    src/headless/AgentTagMobilityProfileSmokeChecks.cpp
+    src/headless/MobilityProfileRoutingSmokeChecks.cpp
     src/headless/AgentTagRegistryChangeSmokeChecks.cpp
     src/headless/AgentTagDocumentSaveSmokeChecks.cpp
     src/headless/AgentTagReloadSmokeChecks.cpp
@@ -301,6 +303,8 @@ add_executable(prometheum-fermide-headless
     src/headless/AgentWalkSpeedSmokeChecks.cpp
     src/headless/EscalatorWalkingSmokeChecks.cpp
     src/headless/AgentHeightSmokeChecks.cpp
+    src/headless/AgentIndividualPropertySmokeChecks.cpp
+    src/headless/AgentPathRenderSmokeChecks.cpp
     src/headless/AgentBehaviourRegistrySmokeChecks.cpp
     src/headless/AgentBehaviourAssignmentSmokeChecks.cpp
     src/headless/AgentBehaviourPortabilitySmokeChecks.cpp

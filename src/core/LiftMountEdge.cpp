@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/LiftMountEdge.h"
 #include "core/Agent.h"
 #include "core/Exceptions.h"
@@ -47,21 +48,29 @@ namespace core
 		return format("LiftMount edge for {}", mLift->getDescription());
 	}
 
-	bool LiftMountEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool LiftMountEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return false;
 		// TODO: see if any Agents are on the Lift
 
 		return true;
 	}
 
-	EdgeTraversalRequestResult LiftMountEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult LiftMountEdge::requestTraversal(shared_ptr<const Vertex> targetVertex, shared_ptr<const Agent> agent) const
 	{
-		return EdgeTraversalRequestResult::OK;
+		return isTraversable(std::move(targetVertex), std::move(agent))
+			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float LiftMountEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* /* agent */, bool /* edgeVisible */) const
+	float LiftMountEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool /* edgeVisible */) const
 	{
+		if (agentForbidsEdge(agent, *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+	}
+
+	bool LiftMountEdge::requiresButton() const
+	{
+		return true;
 	}
 
 	TraversalResourceId LiftMountEdge::getTraversalResourceId() const

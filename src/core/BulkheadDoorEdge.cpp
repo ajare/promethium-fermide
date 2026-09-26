@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/BulkheadDoorEdge.h"
 #include "core/Vertex.h"
 #include "core/Agent.h"
@@ -41,18 +42,23 @@ namespace core
 		return format("BulkheadDoor edge for {}", mDoor->getDescription());
 	}
 
-	bool BulkheadDoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool BulkheadDoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
 		return mDoor->isOpen();
 	}
 
-	EdgeTraversalRequestResult BulkheadDoorEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult BulkheadDoorEdge::requestTraversal(shared_ptr<const Vertex>,
+		shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
+			return EdgeTraversalRequestResult::Failed;
 		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
 	float BulkheadDoorEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const
 	{
+		if (agentForbidsEdge(agent, *this, TraversalKind::Door)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		// Weight is time to cross the Edge, plus possibly the time waiting for the Door to open.
 		auto distance = getLength();
 		float traverseTime = !agent || distance == 0.0f ? 0.0f : distance / agent->getWalkSpeed();
@@ -71,6 +77,11 @@ namespace core
 			traverseTime += agent->estimateTraversalDelay(getTraversalResourceId(), sourceSector);
 		}
 		return max(traverseTime, CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME);
+	}
+
+	bool BulkheadDoorEdge::requiresButton() const
+	{
+		return mDoor->getActivationMode() == DoorActivationMode::RemoteControlled;
 	}
 
 	TraversalResourceId BulkheadDoorEdge::getTraversalResourceId() const

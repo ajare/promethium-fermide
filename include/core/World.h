@@ -1888,6 +1888,17 @@ namespace core
 		bool setAgentActive(AgentId agent, bool active,
 			std::string* diagnostic = nullptr);
 
+		bool setAgentIndividualColour(AgentId agent, std::optional<AgentColour> value,
+			std::string* diagnostic = nullptr);
+		bool setAgentIndividualEscalatorWalkingChance(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualWalkSpeedModifier(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualHeightModifier(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualMobilityProfile(AgentId agent,
+			std::optional<TraversalMask> value, std::string* diagnostic = nullptr);
+
 		// Agent groups - authored, World-scoped classifications (ADR 0006).
 		// These are the only way in: the registry itself is never handed out, so
 		// no caller can rename or drop a group around the validation below.

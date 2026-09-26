@@ -145,8 +145,20 @@ A named reusable set of Agent properties that may be assigned to many Agents.
 _Avoid_: Agent group, label
 
 **Agent property**:
-One typed appearance or behaviour value supplied by an Agent tag.
-_Avoid_: Agent attribute, when referring to a value supplied by a tag
+One typed appearance or behaviour value authored directly on an Agent or supplied by an Agent tag. An individual Agent property overrides the same property inherited from a tag.
+_Avoid_: Agent attribute
+
+**Individual Agent property**:
+An Agent property authored directly on one Agent. Its concrete value takes precedence over the same property supplied by any assigned Agent tag.
+_Avoid_: Agent tag property, per-Agent tag
+
+**Mobility profile**:
+An Agent property whose bitfield identifies traversal kinds the Agent cannot use. A zero profile forbids nothing; the Buttons bit represents inability to operate an interaction point and therefore also forbids every traversal whose authored resource requires one.
+_Avoid_: Accessibility preference, capability probe
+
+**Forbidden traversal**:
+A transit, threshold, or button-operated resource excluded from an Agent's routing by its effective Mobility profile. It is represented as an untraversable route cost and is also refused at the runtime traversal gate.
+_Avoid_: Route preference, temporary obstruction
 
 **Agent tag registry**:
 A collection of Agent tags that forms one shared tag namespace for the Worlds that reference it.

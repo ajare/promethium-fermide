@@ -76,6 +76,10 @@ namespace core
 		// To be implemented by subclasses.  Returned weight is in seconds.
 		[[nodiscard]] virtual float getWeight(std::shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const = 0;
 
+		// True when using this Edge necessarily requires operating an interaction
+		// point. This is a pure function of authored resource data.
+		[[nodiscard]] virtual bool requiresButton() const { return false; }
+
 		// A positive value overrides the Agent's normal locomotion speed while crossing.
 		[[nodiscard]] virtual float getTraversalSpeed(Agent const* /* agent */) const { return 0.0f; }
 	

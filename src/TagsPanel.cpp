@@ -83,6 +83,12 @@ namespace
 		string diagnostic;
 	};
 
+	struct TagMobilityProfileEdit
+	{
+		uint64_t loadedRevision{ 0 };
+		string diagnostic;
+	};
+
 	struct RegistryWorldSnapshot
 	{
 		core::World* world{ nullptr };
@@ -137,6 +143,7 @@ namespace
 	map<uint64_t, TagWalkSpeedEdit> gTagWalkSpeedEdits;
 	map<uint64_t, TagEscalatorWalkingChanceEdit> gTagEscalatorWalkingChanceEdits;
 	map<uint64_t, TagHeightEdit> gTagHeightEdits;
+	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
 	PendingAgentTagRegistryChange gPendingAgentTagRegistryChange;
@@ -645,6 +652,73 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
+		auto const* mobility = registry->getAgentTagMobilityProfile(id);
+		if (mobility)
+		{
+			auto& edit = gTagMobilityProfileEdits[id.value];
+			if (edit.loadedRevision != mobility->revision)
+			{
+				edit.loadedRevision = mobility->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::TextUnformatted("Cannot use");
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeMobilityProfile"))
+			{
+				string diagnostic;
+				if (!commitAgentTagMobilityProfileRemove(registry, id, diagnostic))
+				{
+					edit.diagnostic = diagnostic;
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				}
+				else
+				{
+					gTagMobilityProfileEdits.erase(id.value);
+					mobility = nullptr;
+				}
+			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove Mobility profile");
+			if (mobility)
+			{
+				auto const authored = mobility->forbiddenTraversals;
+				auto const buttons = (authored
+					& core::traversalMask(core::TraversalKind::Buttons)) != 0;
+				auto renderKind = [&](char const* label, core::TraversalKind kind,
+					bool whollyButtonOperated = false)
+				{
+					auto const bit = core::traversalMask(kind);
+					bool checked = (authored & bit) != 0 || (buttons && whollyButtonOperated);
+					ImGui::BeginDisabled(buttons && whollyButtonOperated);
+					if (ImGui::Checkbox(label, &checked))
+					{
+						auto const next = checked ? authored | bit : authored & ~bit;
+						string diagnostic;
+						if (!commitAgentTagMobilityProfileEdit(registry, id, next, diagnostic))
+						{
+							edit.diagnostic = diagnostic;
+							core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+						}
+						else edit.diagnostic.clear();
+					}
+					ImGui::EndDisabled();
+				};
+				renderKind("Staircase", core::TraversalKind::Staircase);
+				renderKind("Escalator", core::TraversalKind::Escalator);
+				renderKind("Stairwell", core::TraversalKind::Stairwell);
+				renderKind("Ladder", core::TraversalKind::Ladder);
+				renderKind("Lift", core::TraversalKind::Lift, true);
+				renderKind("Platform lift", core::TraversalKind::PlatformLift, true);
+				renderKind("Shuttle", core::TraversalKind::Shuttle, true);
+				renderKind("Door", core::TraversalKind::Door);
+				renderKind("Buttons", core::TraversalKind::Buttons);
+				if (buttons)
+					ImGui::TextWrapped("Also forbids doors needing a button, extensible force bridges, and extensible ladders.");
+				if (!edit.diagnostic.empty())
+					ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s",
+						edit.diagnostic.c_str());
+			}
+		}
+
 	}
 
 	void renderTagAddPropertyDropdown(shared_ptr<core::AgentTagRegistry> const& registry,
@@ -654,7 +728,8 @@ namespace
 		auto const* walkSpeed = registry->getAgentTagWalkSpeedModifier(id);
 		auto const* height = registry->getAgentTagHeightModifier(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
-		auto const anyMissing = !colour || !walkSpeed || !height || !chance;
+		auto const* mobility = registry->getAgentTagMobilityProfile(id);
+		auto const anyMissing = !colour || !walkSpeed || !height || !chance || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(-1.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -689,6 +764,14 @@ namespace
 				if (!commitAgentTagHeightModifierAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagHeightEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!mobility && ImGui::Selectable("Mobility profile"))
+			{
+				string diagnostic;
+				if (!commitAgentTagMobilityProfileAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagMobilityProfileEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
 			ImGui::EndCombo();
@@ -1722,6 +1805,70 @@ bool commitAgentTagHeightModifierRemove(
 		return false;
 	}
 	if (!registry->removeAgentTagHeightModifier(id, &diagnostic)) return false;
+	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+	return true;
+}
+
+bool commitAgentTagMobilityProfileAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!registry)
+	{
+		diagnostic = "There is no Agent tag registry in which to add a Mobility profile";
+		return false;
+	}
+	auto undo = captureRegistrySnapshot(registry);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the Agent tag registry before adding a Mobility profile";
+		return false;
+	}
+	if (!registry->addAgentTagMobilityProfile(id, &diagnostic)) return false;
+	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+	return true;
+}
+
+bool commitAgentTagMobilityProfileEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::TraversalMask forbiddenTraversals, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!registry)
+	{
+		diagnostic = "There is no Agent tag registry in which to edit a Mobility profile";
+		return false;
+	}
+	auto undo = captureRegistrySnapshot(registry);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the Agent tag registry before editing a Mobility profile";
+		return false;
+	}
+	if (!registry->setAgentTagMobilityProfile(id, forbiddenTraversals, &diagnostic))
+		return false;
+	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+	return true;
+}
+
+bool commitAgentTagMobilityProfileRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!registry)
+	{
+		diagnostic = "There is no Agent tag registry from which to remove a Mobility profile";
+		return false;
+	}
+	auto undo = captureRegistrySnapshot(registry);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the Agent tag registry before removing a Mobility profile";
+		return false;
+	}
+	if (!registry->removeAgentTagMobilityProfile(id, &diagnostic)) return false;
 	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
 	return true;
 }

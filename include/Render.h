@@ -861,6 +861,9 @@ void renderGraph(std::shared_ptr<const core::Graph> graph,
 // fallback); selection always wins with its fixed gold highlight.
 ImU32 agentRenderColour(core::Agent const& agent, bool selected);
 void renderAgent(core::Agent const* agent, WorldDrawList* drawList);
+// Draws the selected Agent's assigned Path as a viewport overlay when Agent
+// debug rendering is enabled. Only portions on the visible Layer are shown.
+void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList);
 
 void renderWorld(std::shared_ptr<const core::World> world, WorldDrawList* drawList);
 

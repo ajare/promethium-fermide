@@ -1,6 +1,7 @@
 #include <cassert>
 
 #include "core/Defines.h"
+#include "core/MobilityProfile.h"
 #include "core/DoorEdge.h"
 #include "core/Vertex.h"
 #include "core/Agent.h"
@@ -42,18 +43,23 @@ namespace core
 		return format("Door edge for {}", mDoor->getDescription());
 	}
 
-	bool DoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	bool DoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
 		return mDoor->isOpen();
 	}
 
-	EdgeTraversalRequestResult DoorEdge::requestTraversal(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> /* agent */) const
+	EdgeTraversalRequestResult DoorEdge::requestTraversal(shared_ptr<const Vertex>,
+		shared_ptr<const Agent> agent) const
 	{
+		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
+			return EdgeTraversalRequestResult::Failed;
 		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
 	float DoorEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const
 	{
+		if (agentForbidsEdge(agent, *this, TraversalKind::Door)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		// Time in seconds.  As we are crossing Layers, the distance between Vertices is essentially zero.
 
 		float preparation = edgeVisible && mDoor->isOpen()
@@ -65,6 +71,11 @@ namespace core
 			? SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 }
 			: getVertex(1) ? SectorId{ (uint64_t)getVertex(1)->getSector()->getIndex() + 1 } : SectorId{};
 		return preparation + agent->estimateTraversalDelay(getTraversalResourceId(), sourceSector);
+	}
+
+	bool DoorEdge::requiresButton() const
+	{
+		return mDoor->getActivationMode() == DoorActivationMode::RemoteControlled;
 	}
 
 	TraversalResourceId DoorEdge::getTraversalResourceId() const
