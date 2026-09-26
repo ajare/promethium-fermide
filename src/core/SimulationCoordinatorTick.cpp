@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <new>
 #include <utility>
 
 #include "core/SimulationCoordinator.h"
@@ -608,6 +609,7 @@ namespace core
 	bool SimulationCoordinator::advanceTick()
 	{
 		if (mWorld.mSimulationPaused) return false;
+		auto const eventStart = mWorld.mEvents.size();
 		mWorld.invalidateSimulationSnapshot();
 		// The boundary runs with no active phase. Instances are synchronized before
 		// deterministic startup/outcome callbacks enqueue commands; those commands
@@ -633,6 +635,16 @@ namespace core
 		runSimulationPhase(SimulationPhase::CleanupAndEventPublication);
 		mWorld.invalidateSimulationSnapshot();
 		publishTickEvents();
+		if (mWorld.mSimulationObserver)
+		{
+			// Copy only this tick's publication; never drain the consumer queue.
+			try
+			{
+				std::vector<SimulationEvent> events(mWorld.mEvents.begin() + eventStart, mWorld.mEvents.end());
+				mWorld.mSimulationObserver->onTick(mWorld.mSimulationTick, events);
+			}
+			catch (std::bad_alloc const&) { /* Observation must fail soft. */ }
+		}
 		mWorld.mRecordingTickChanges = false;
 		mWorld.mCurrentPhase = SimulationPhase::None;
 		return true;

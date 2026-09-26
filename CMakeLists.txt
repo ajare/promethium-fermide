@@ -221,6 +221,15 @@ endif()
 # ready for future integration.
 add_subdirectory(ext/willpower)
 
+execute_process(COMMAND git describe --always --dirty
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE PF_BUILD_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT PF_BUILD_VERSION)
+    set(PF_BUILD_VERSION "unknown")
+endif()
+set_source_files_properties(src/core/SimulationMetricsCollector.cpp PROPERTIES
+    COMPILE_DEFINITIONS "PF_BUILD_VERSION=\"${PF_BUILD_VERSION}\"")
+
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
@@ -249,6 +258,24 @@ set_target_properties(prometheum-fermide-core PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
     OUTPUT_NAME "prometheum-fermide-core"
 )
+
+# Pinned MIT header-only HTTP dependency, without TLS or compression.
+FetchContent_Declare(cpp_httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG 787a34ad7f01f20922a237d5142aae469828be72 # v0.20.0
+)
+set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(cpp_httplib)
+add_library(pf-metrics STATIC src/metrics/PrometheusTextFormatter.cpp src/metrics/MetricsHttpServer.cpp)
+target_link_libraries(pf-metrics PUBLIC prometheum-fermide-core PRIVATE httplib::httplib)
+if(MSVC)
+    target_compile_options(pf-metrics PRIVATE /W3 /permissive-)
+else()
+    target_compile_options(pf-metrics PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-metrics)
 
 add_executable(prometheum-fermide-headless
     # The real renderer, linked headless so #49 can exercise renderSector's
@@ -337,6 +364,7 @@ add_executable(prometheum-fermide-headless
     src/headless/ShuttleDoorQuerySmokeChecks.cpp
     src/headless/ShuttleDoorRenderSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
+    src/headless/MetricsChecks.cpp
     src/headless/ThresholdRefusalSmokeChecks.cpp
     src/headless/ThresholdLayerOverlapSmokeChecks.cpp
     src/headless/WallRenderSmokeChecks.cpp
@@ -353,7 +381,7 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
-target_link_libraries(prometheum-fermide-headless PRIVATE prometheum-fermide-core)
+target_link_libraries(prometheum-fermide-headless PRIVATE pf-metrics httplib::httplib)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)
@@ -402,7 +430,7 @@ if(PF_BUILD_GUI)
         target_compile_options(imgui PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     target_link_libraries(imgui PRIVATE
-        prometheum-fermide-core libglew_static nfd::nfd
+        pf-metrics libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
         Willpower.Application ext::mpp-helper
     )
@@ -450,6 +478,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
+    add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 
     if(PF_BUILD_GUI)
         # Ticket #59: the GUI must exit with a controlled non-zero code when

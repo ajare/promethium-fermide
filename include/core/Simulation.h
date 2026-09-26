@@ -364,4 +364,13 @@ namespace core
 		std::string diagnostic;
 	};
 
+	// Non-owning observer; register/unregister on the simulation thread. Callbacks
+	// must not mutate World or consume its event queue.
+	class SimulationObserver
+	{
+	public:
+		virtual ~SimulationObserver() = default;
+		virtual void onTick(uint64_t tick, std::vector<SimulationEvent> const& tickEvents) noexcept = 0;
+	};
+
 } // core

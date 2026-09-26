@@ -1,7 +1,7 @@
-version: 1
+version: 2
 uuid: 5e9a3a89-0519-4813-ae6d-3ca7362028de
-nextAgentTagId: 3
-nextPropertyRevision: 11
+nextAgentTagId: 4
+nextPropertyRevision: 17
 tags:
   - id: 1
     name: male
@@ -35,3 +35,13 @@ tags:
         revision: 8
         min: 0.7
         max: 0.82
+  - id: 3
+    name: hates-stairs
+    displayColour:
+      r: 222
+      g: 194
+      b: 255
+    properties:
+      - type: mobilityProfile
+        revision: 16
+        value: 7

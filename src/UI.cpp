@@ -4735,6 +4735,16 @@ void renderMenu(shared_ptr<core::World>& world)
 				ImGui::EndMenu();
 			}
 
+			if (ImGui::BeginMenu("Metrics"))
+			{
+				if (ImGui::MenuItem("Enabled (loopback only)", nullptr, &gUISettings.metricsEnabled)) ImGui::MarkIniSettingsDirty();
+				if (ImGui::InputInt("Port", &gUISettings.metricsPort))
+				{
+					gUISettings.metricsPort = std::clamp(gUISettings.metricsPort, 1, 65535);
+					ImGui::MarkIniSettingsDirty();
+				}
+				ImGui::EndMenu();
+			}
 			ImGui::MenuItem("Grid", "G", &gUISettings.renderGrid);
 			ImGui::MenuItem("Show next layer wireframe", "F3", &gUISettings.renderNextLayerWireframe);
 			ImGui::MenuItem("World graph", "F4", &gUISettings.renderGraph);

@@ -68,6 +68,7 @@
 #include "Helpers.h"
 #include "UI.h"
 #include "UISettings.h"
+#include "metrics/MetricsHttpServer.h"
 #include "Exceptions.h"
 
 
@@ -75,6 +76,7 @@ spdlog::logger* gLogger{ nullptr };
 SDL_Window* gWindow{ nullptr };
 SDL_GLContext gContext{ nullptr };
 UISettings gUISettings;
+bool gMetricsDetail{ false };
 
 ImFont* gAgentIconFont{ nullptr };
 std::filesystem::path gResourceDirectory;
@@ -239,6 +241,19 @@ void setupImGui(SDL_Window* window, SDL_GLContext context)
 {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
+	ImGuiSettingsHandler metricsSettings;
+	metricsSettings.TypeName = "Metrics";
+	metricsSettings.TypeHash = ImHashStr("Metrics");
+	metricsSettings.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, char const*) -> void* { return &gUISettings; };
+	metricsSettings.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void*, char const* line) {
+		int value;
+		if (sscanf(line, "Enabled=%d", &value) == 1) gUISettings.metricsEnabled = value != 0;
+		if (sscanf(line, "Port=%d", &value) == 1 && value > 0 && value <= 65535) gUISettings.metricsPort = value;
+	};
+	metricsSettings.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler*, ImGuiTextBuffer* buffer) {
+		buffer->appendf("[Metrics][Settings]\nEnabled=%d\nPort=%d\n\n", gUISettings.metricsEnabled ? 1 : 0, gUISettings.metricsPort);
+	};
+	ImGui::AddSettingsHandler(&metricsSettings);
 	gImGuiContextCreated = true;
 	ImNodes::CreateContext();
 	ImNodes::PushAttributeFlag(ImNodesAttributeFlags_EnableLinkDetachWithDragClick);
@@ -785,6 +800,15 @@ std::shared_ptr<core::World> createTestWorld()
 void run()
 {
 	shared_ptr<core::World> world;// createTestWorld();
+	shared_ptr<core::World> metricsWorld;
+	std::unique_ptr<core::SimulationMetricsCollector> metricsCollector;
+	std::unique_ptr<metrics::MetricsHttpServer> metricsServer;
+	int metricsPort = -1;
+	struct ObserverCleanup
+	{
+		shared_ptr<core::World>& observedWorld;
+		~ObserverCleanup() { if (observedWorld) observedWorld->setSimulationObserver(nullptr); }
+	} observerCleanup{metricsWorld};
 	std::shared_ptr<core::Agent> pathingAgent = make_shared<core::Agent>("Pather");
 
 	// Render settings
@@ -831,6 +855,21 @@ void run()
 		// Logic
 		float updateTimeSecs = updateTimeMicros / 1'000'000.0f;
 
+		if (metricsWorld != world || metricsPort != gUISettings.metricsPort || (!gUISettings.metricsEnabled && metricsCollector))
+		{
+			if (metricsWorld) metricsWorld->setSimulationObserver(nullptr);
+			metricsServer.reset(); metricsCollector.reset(); metricsWorld.reset();
+			metricsPort = gUISettings.metricsPort;
+		}
+		if (gUISettings.metricsEnabled && world && !metricsCollector)
+		{
+			metricsWorld = world;
+			metricsCollector = std::make_unique<core::SimulationMetricsCollector>(*world, gMetricsDetail);
+			metricsServer = std::make_unique<metrics::MetricsHttpServer>(*metricsCollector);
+			if (!metricsServer->start(metricsPort)) fprintf(stderr, "%s\n", metricsServer->diagnostic().c_str());
+			world->setSimulationObserver(metricsCollector.get());
+		}
+		if (metricsCollector && (gUISettings.worldPaused || world->isSimulationPaused())) metricsCollector->refresh();
 		if (world)
 		{
 			world->update(gUISettings.worldPaused ? 0.0f : updateTimeSecs);
@@ -923,7 +962,7 @@ void outputException(std::string const& msg)
 //
 // Entrypoint
 //
-int main(int, char**)
+int main(int argc, char** argv)
 {
 	int exitCode{ 0 };
 
@@ -931,6 +970,17 @@ int main(int, char**)
 	{
 		initialise();
 		setup();
+		ImGui::LoadIniSettingsFromDisk(ImGui::GetIO().IniFilename);
+		for (int i = 1; i < argc; ++i)
+		{
+			if (std::string(argv[i]) == "--metrics-detail=sector,queue") gMetricsDetail = true;
+			if (std::string(argv[i]) == "--metrics-port" && i + 1 < argc)
+			{
+				auto port = std::stoi(argv[++i]);
+				if (port < 1 || port > 65535) throw std::invalid_argument("Invalid metrics port");
+				gUISettings.metricsPort = port; gUISettings.metricsEnabled = true;
+			}
+		}
 		run();
 	}
 	catch (ExitApplicationException& e)

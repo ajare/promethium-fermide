@@ -617,6 +617,7 @@ namespace core
 		bool mRecordingTickChanges{ false };
 
 		SimulationPhase mCurrentPhase{ SimulationPhase::None };
+		SimulationObserver* mSimulationObserver{ nullptr };
 
 		std::vector<SimulationEvent> mEvents;
 
@@ -2172,6 +2173,10 @@ namespace core
 		// snapshot builder - lives in SimulationCoordinator (ADR 0004 stage 5);
 		// every entry point below forwards to it.
 		void update(float elapsedSeconds);
+
+		// Non-owning; register/unregister on the simulation thread. The observer
+		// must outlive its registration and may only read World during callbacks.
+		void setSimulationObserver(SimulationObserver* observer) noexcept { mSimulationObserver = observer; }
 
 		// Headless deterministic seam. These methods never use render timing and
 		// report false when a behaviour failure stops the run before the next tick.

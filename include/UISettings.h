@@ -47,4 +47,6 @@ struct UISettings
 	float worldViewportHeight{ 0 };
 
 	bool worldPaused{ false };
+	bool metricsEnabled{ false };
+	int metricsPort{ 9464 };
 };

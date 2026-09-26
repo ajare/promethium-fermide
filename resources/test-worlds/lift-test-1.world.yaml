@@ -141,7 +141,15 @@ construction:
     minimumDwellSeconds: 0.75
     maximumBoardingSeconds: 5
     initialStop: 0
-agentGroups: []
+  - type: staircase
+    layer: 1
+    y: 1
+    x: 2
+    cellsWide: 2
+    riseSide: left
+    speed: 0
+agentGroups:
+  []
 nextMarkerId: 13
 nextAgentGroupId: 1
 agents:
@@ -417,6 +425,7 @@ agents:
       flags: 0
       tags:
         - 1
+        - 3
       propertySamples:
         - type: heightModifier
           sourceTag: 1

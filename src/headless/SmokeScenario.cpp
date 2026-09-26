@@ -25,6 +25,7 @@
 
 #include "core/Agent.h"
 #include "core/World.h"
+#include "core/SimulationMetricsCollector.h"
 #include "core/Button.h"
 #include "core/GapEdge.h"
 #include "core/Graph.h"
@@ -4935,7 +4936,7 @@ namespace
 #endif
 	}
 
-	ScaleObservation runScaledWorld(uint32_t agentCount, uint64_t ticks)
+	ScaleObservation runScaledWorld(uint32_t agentCount, uint64_t ticks, bool metricsEnabled = false)
 	{
 		constexpr uint32_t ResourceCount = 32;
 		core::World world("Scale world", 80, 2);
@@ -4959,6 +4960,8 @@ namespace
 			world.lookupAgent(id).entity->setPath(twoNodePath(source, destination, edge), true);
 		}
 
+		core::SimulationMetricsCollector metrics(world);
+		if (metricsEnabled) world.setSimulationObserver(&metrics);
 		ScaleObservation result;
 		auto digestEvents = [&](std::vector<core::SimulationEvent> const& events)
 		{
@@ -5491,6 +5494,9 @@ namespace
 	}
 }
 
+void runMetricsChecks();
+int runMetricsEndpoint(int argc, char** argv);
+
 int main(int argc, char** argv)
 {
 	bool const graphicsStartupOnly = argc > 1
@@ -5498,6 +5504,8 @@ int main(int argc, char** argv)
 
 	try
 	{
+		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
+		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
 		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")
 		{
 			if (std::string(argv[2]) == "minimal") runPausePositionSmokeChecks();
@@ -6013,7 +6021,7 @@ int main(int argc, char** argv)
 		}
 
 		auto representative = runScaledWorld(500, 60);
-		auto repeatedRepresentative = runScaledWorld(500, 60);
+		auto repeatedRepresentative = runScaledWorld(500, 60, true);
 		if (!representative.valid || !repeatedRepresentative.valid
 			|| representative.deterministicDigest != repeatedRepresentative.deterministicDigest)
 		{
