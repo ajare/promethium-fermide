@@ -346,6 +346,12 @@ namespace core
 		// own landing edge is not consulted, since the passenger is already aboard.
 		void allocateLiftRiding(TraversalRequestId requestId, TraversalResource& coordinator);
 
+		// Keep enclosed Lift occupants in deterministic door-to-car order. Existing
+		// physical order breaks equal-destination ties, preserving boarding order;
+		// destinations farther along the current run occupy positions farther from
+		// the doors. This changes manifest targets only and never moves an Agent.
+		void orderLiftOccupants(TraversalResource& resource);
+
 		// ------------------------------------------------------------------
 		// Lift disembarking branch (ADR 0004 stage 3)
 		//

@@ -80,6 +80,45 @@ namespace core
 		return destination;
 	}
 
+	void SimulationCoordinator::orderLiftOccupants(TraversalResource& resource)
+	{
+		if (!resource.mLift || resource.mOpenPlatformLift || resource.mLiftMoving) return;
+
+		// Lift capacity positions are authored from the doors into the car. Walk the
+		// manifest in the opposite direction so the first passenger fills the far
+		// end. Keeping this order for equal destinations also keeps boarding order
+		// without introducing a second source of manifest identity.
+		vector<uint32_t> occupiedPositions;
+		vector<AgentId> passengers;
+		for (uint32_t i = (uint32_t)resource.mOccupants.size(); i-- > 0;)
+			if (resource.mOccupants[i])
+			{
+				occupiedPositions.push_back(i);
+				passengers.push_back(resource.mOccupants[i]);
+			}
+
+		auto destinationProgress = [&](AgentId passenger)
+		{
+			auto destination = resource.mLiftPassengerDestinations.find(passenger);
+			uint32_t stop = destination == resource.mLiftPassengerDestinations.end()
+				? ~0u : destination->second;
+			if (stop >= resource.mLiftStops.size())
+			{
+				auto intent = resource.mLiftTripIntents.find(passenger);
+				if (intent != resource.mLiftTripIntents.end()) stop = intent->second.destinationStop;
+			}
+			if (stop >= resource.mLiftStops.size()) return numeric_limits<float>::infinity();
+			auto const delta = resource.mLiftStops[stop].globalPosition - resource.mLiftPosition;
+			return resource.mLiftDirection == TraversalDirection::Descending ? -delta : delta;
+		};
+		stable_sort(passengers.begin(), passengers.end(), [&](AgentId left, AgentId right)
+		{
+			return destinationProgress(left) > destinationProgress(right);
+		});
+		for (size_t rank = 0; rank < passengers.size(); ++rank)
+			resource.mOccupants[occupiedPositions[rank]] = passengers[rank];
+	}
+
 	bool SimulationCoordinator::liftHasDisembarkDemand(TraversalResource const& resource, uint32_t stop) const
 	{
 		for (auto occupant : resource.mOccupants)
@@ -501,7 +540,8 @@ namespace core
 	// and direction in the admission queue. A shuttle passenger is assigned its
 	// boarding door and a free capacity slot first; once entry commits, carriage
 	// boarding order redistributes every passenger's walking target across the
-	// buffered usable width. A lift passenger takes the first free slot. The
+	// buffered usable width. A Lift passenger reserves the free capacity position
+	// farthest from the Doors, while committed occupants are ordered by Stop. The
 	// passenger must have arrived at its queue position before the landing
 	// door lease is taken, and the grant releases the queue position and claims the
 	// first free crossing lane on the landing.
@@ -632,7 +672,7 @@ namespace core
 					}
 				}
 			}
-			else for (uint32_t i = first; i < first + count; ++i)
+			else for (uint32_t i = first + count; i-- > first;)
 				if (!coordinator.mOccupants[i] && !coordinator.mAdmissionReservations[i])
 				{ position = i; break; }
 			if (position == ~0u) return;
@@ -805,6 +845,7 @@ namespace core
 		{
 			addLiftStopRequest(coordinator, journeyStop, request->mOwner);
 			coordinator.mLiftPassengerDestinations[request->mOwner] = journeyStop;
+			orderLiftOccupants(coordinator);
 			// This passenger may have queued for serialized destination
 			// confirmation before another passenger activated the same stop.
 			// Sharing that destination makes the queued confirmation obsolete.
@@ -863,6 +904,7 @@ namespace core
 		}
 		addLiftStopRequest(coordinator, journeyStop, request->mOwner);
 		coordinator.mLiftPassengerDestinations[request->mOwner] = journeyStop;
+		orderLiftOccupants(coordinator);
 		coordinator.mLiftDestinationStop = journeyStop;
 		coordinator.mLiftConfirmationQueue.erase(coordinator.mLiftConfirmationQueue.begin());
 		coordinator.mLiftActiveConfirmation = coordinator.mLiftConfirmationQueue.empty()

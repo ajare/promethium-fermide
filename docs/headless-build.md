@@ -91,6 +91,21 @@ and verifies that authored capacity is unchanged. The paired-run simulation dige
 was deliberately regenerated in Debug and Release; both runs matched. The recorded
 queue digests above are unaffected.
 
+## Lift occupant ordering (#178)
+
+Enclosed Lift cars reserve free capacity positions from the end farthest from the
+Doors. Occupants with the same destination retain boarding order from farthest to
+nearest; occupants with different destinations are ordered so the Stop nearest
+along the current direction of travel is nearest the Doors. Equal destination
+comparisons preserve the deterministic manifest order established by stable
+capacity positions and traversal admission.
+
+`liftOccupantsAreOrderedByBoardingAndDestination` checks both rules through the
+simulation snapshot and then allows the existing finite-capacity journey check to
+cover boarding reservations, exact queue-position arrival, filling, and departure.
+The paired-run simulation digest was deliberately regenerated in Debug and Release;
+both runs matched. The recorded queue digests above are unaffected.
+
 ## Prerequisites
 
 - Windows x64

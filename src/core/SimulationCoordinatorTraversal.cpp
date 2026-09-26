@@ -390,9 +390,18 @@ namespace core
 				lift->mAdmissionReservations[position] = {};
 				lift->mOccupants[position] = owner;
 				lift->mLiftAdmissionReservation = {};
-				lift->mLiftPassenger = lift->mOccupants.front();
+				if (lift->mLift) orderLiftOccupants(*lift);
+				lift->mLiftPassenger = {};
+				for (auto occupant : lift->mOccupants)
+					if (occupant) { lift->mLiftPassenger = occupant; break; }
 				request->mCapacityPosition = ~0u;
 				if (lift->mShuttle) refreshShuttlePassengerTargets(*lift);
+				if (lift->mLift)
+				{
+					auto ordered = find(lift->mOccupants.begin(), lift->mOccupants.end(), owner);
+					if (ordered == lift->mOccupants.end()) return false;
+					position = (uint32_t)distance(lift->mOccupants.begin(), ordered);
+				}
 				auto local = lift->mCapacityPositions[position];
 				if (lift->mShuttle)
 				{
@@ -432,6 +441,7 @@ namespace core
 					removeLiftStopRequest(*lift, stop, owner);
 				lift->mLiftExitAtSafeStop.erase(owner);
 				lift->mLiftExitFailures.erase(owner);
+				if (lift->mLift) orderLiftOccupants(*lift);
 				lift->mLiftPassenger = {};
 				for (auto occupant : lift->mOccupants) if (occupant) { lift->mLiftPassenger = occupant; break; }
 				if (lift->mShuttle) refreshShuttlePassengerTargets(*lift);
