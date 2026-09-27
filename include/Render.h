@@ -46,18 +46,17 @@ inline constexpr float MarkerFloorLift{ 0.1f };	// how far the icon floats above
 //
 // How a Sector is drawn by one pass of the viewport.
 //
-// The selected Layer is drawn solid and whole. The Layer directly behind it is
-// drawn by two passes: solid, clipped to the apertures the selected Layer gives
-// it, and - while the wireframe overlay is on - outlined over the selection.
-// Every other Layer is hidden: nothing in front of the selection, and nothing
-// more than one Layer behind it.
+// Every Layer from the back-most through the selection is drawn solid in
+// back-to-front order. Each Layer also reveals its adjacent Transit apertures.
+// Only Layers in front of the selection are hidden. The optional next-Layer
+// wireframe is an extra overlay, independent of solid visibility.
 //
 enum class LayerRenderStyle
 {
 	Hidden,		// The Layer is not drawn at all.
-	Solid,		// The selected Layer, drawn whole.
+	Solid,		// A Layer's opaque surfaces and contents, drawn whole.
 	Wireframe,	// The Layer directly behind the selected Layer, outlined over the selection.
-	Aperture	// The Layer behind, drawn solid through an aperture in the selected Layer.
+	Aperture	// A Sector drawn solid through an aperture in the Layer in front.
 };
 
 //
@@ -70,18 +69,17 @@ struct RenderPass
 };
 
 //
-// The passes the viewport runs for one selected Layer, in draw order:
+// The detail passes for one Layer, in draw order:
 //
-//   1. the selected Layer, drawn solid and whole;
+//   1. this Layer, drawn solid and whole;
 //   2. the Transits of the Layer directly behind, drawn solid through the
-//      apertures the selected Layer's Locations give them;
-//   3. while the wireframe overlay is on, the whole Layer directly behind,
-//      outlined over the selection.
+//      apertures this Layer's Locations give them;
+//   3. for the selected Layer only, the optional next-Layer wireframe overlay.
 //
 // Pass 2 runs whether or not the overlay is on. The overlay contributes the
 // Layer behind's outlines; it is not what makes that Layer visible.
 //
-inline std::vector<RenderPass> renderPasses(uint32_t viewLayer, uint32_t layerCount,
+inline std::vector<RenderPass> layerRenderPasses(uint32_t viewLayer, uint32_t layerCount,
 	bool wireframeOverlay)
 {
 	std::vector<RenderPass> passes;
@@ -108,8 +106,24 @@ inline std::vector<RenderPass> renderPasses(uint32_t viewLayer, uint32_t layerCo
 	return passes;
 }
 
-// True while the Layer reaches the screen at all: the selected Layer, or the Layer
-// directly behind it.
+// Composite all Layers back-to-front, finishing at the selected Layer. Each
+// Layer retains its adjacent Transit apertures; only the selection gets the
+// optional x-ray overlay. Layers in front of the selection never contribute.
+inline std::vector<RenderPass> renderPasses(uint32_t viewLayer, uint32_t layerCount,
+	bool wireframeOverlay)
+{
+	std::vector<RenderPass> passes;
+	if (viewLayer >= layerCount) return passes;
+	for (auto layer = layerCount; layer-- > viewLayer;)
+	{
+		auto const details = layerRenderPasses(layer, layerCount,
+			wireframeOverlay && layer == viewLayer);
+		passes.insert(passes.end(), details.begin(), details.end());
+	}
+	return passes;
+}
+
+// A Layer is eligible for compositing; nearer Sectors may occlude its cells.
 inline bool isLayerDrawn(uint32_t layer, uint32_t viewLayer, uint32_t layerCount)
 {
 	if (layer >= layerCount || viewLayer >= layerCount)
@@ -117,7 +131,7 @@ inline bool isLayerDrawn(uint32_t layer, uint32_t viewLayer, uint32_t layerCount
 		return false;
 	}
 
-	return layer == viewLayer || layer == viewLayer + 1;
+	return layer >= viewLayer;
 }
 
 // Filled rather than outlined. Both the selected Layer and the Layer seen through

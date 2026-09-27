@@ -5325,11 +5325,9 @@ void layerHelperApiIsConsistentWithLayerCount()
 	require(CORE_MAX_LAYERS == 256, "CORE_MAX_LAYERS is not 256");
 }
 
-// The viewport draws the selected Layer solid and whole, then the Layer directly
-// behind it: solid through the apertures the selected Layer gives it, and outlined
-// over the selection while the wireframe overlay is on. Every other Layer - in
-// front of the selection, or more than one Layer behind it - is hidden.
-void onlyTheSelectedLayerAndTheLayerBehindAreDrawn()
+// All Layers behind the selection contribute, ordered back-to-front. Only
+// Layers in front of the selection are excluded.
+void allLayersBehindTheSelectionAreDrawn()
 {
 	require(isLayerDrawn(0, 0, 2), "The selected Layer is not drawn");
 	require(isLayerDrawn(1, 0, 2),
@@ -5341,8 +5339,8 @@ void onlyTheSelectedLayerAndTheLayerBehindAreDrawn()
 	require(isLayerDrawn(1, 1, 3) && isLayerDrawn(2, 1, 3) && !isLayerDrawn(0, 1, 3),
 		"A middle Layer does not draw itself and the Layer directly behind it");
 
-	require(isLayerDrawn(0, 0, 3) && isLayerDrawn(1, 0, 3) && !isLayerDrawn(2, 0, 3),
-		"More than one Layer behind the selection is drawn");
+	require(isLayerDrawn(0, 0, 3) && isLayerDrawn(1, 0, 3) && isLayerDrawn(2, 0, 3),
+		"A deeper Layer behind the selection is not drawn");
 
 	require(isLayerDrawn(2, 2, 3) && !isLayerDrawn(0, 2, 3) && !isLayerDrawn(1, 2, 3),
 		"The back-most Layer does not draw itself, or leaves other Layers drawn");
@@ -5350,24 +5348,23 @@ void onlyTheSelectedLayerAndTheLayerBehindAreDrawn()
 	require(!isLayerDrawn(3, 0, 3) && !isLayerDrawn(0, 3, 3),
 		"A Layer index outside the World's Layers is drawn");
 
-	// The selected Layer is drawn first and whole, the Layer directly behind it
-	// next through the selected Layer's apertures, and finally outlined over the
-	// selection while the overlay is on.
 	{
 		auto const passes = renderPasses(0, 3, true);
-		require(passes.size() == 3
-				&& passes[0].layer == 0 && passes[0].style == LayerRenderStyle::Solid
-				&& passes[1].layer == 1 && passes[1].style == LayerRenderStyle::Aperture
-				&& passes[2].layer == 1 && passes[2].style == LayerRenderStyle::Wireframe,
-			"The render passes are not the selected Layer, the Layer behind drawn solid through "
-			"its apertures, and one overlay");
+		require(passes.size() == 6
+				&& passes[0].layer == 2 && passes[0].style == LayerRenderStyle::Solid
+				&& passes[1].layer == 1 && passes[1].style == LayerRenderStyle::Solid
+				&& passes[2].layer == 2 && passes[2].style == LayerRenderStyle::Aperture
+				&& passes[3].layer == 0 && passes[3].style == LayerRenderStyle::Solid
+				&& passes[4].layer == 1 && passes[4].style == LayerRenderStyle::Aperture
+				&& passes[5].layer == 1 && passes[5].style == LayerRenderStyle::Wireframe,
+			"Layers are not composited back-to-front with their own aperture details");
 	}
 
 	// Turning the overlay off takes the outline away only: the Layer behind is
 	// still drawn solid through its apertures.
 	{
 		auto const passes = renderPasses(0, 3, false);
-		require(passes.size() == 2 && passes[1].style == LayerRenderStyle::Aperture,
+		require(passes.size() == 5 && passes.back().style == LayerRenderStyle::Aperture,
 			"Disabling the wireframe overlay removed more than the overlay pass");
 	}
 
@@ -5377,8 +5374,7 @@ void onlyTheSelectedLayerAndTheLayerBehindAreDrawn()
 			"The back-most Layer has no Layer behind it but produced more than its own pass");
 	}
 
-	// The same policy against a live World: whatever the Layer count, exactly the
-	// selected Layer and the Layer directly behind it are drawn.
+	// The same policy against a live World: all Layers at or behind the selection.
 	core::World world("Render layer policy", 4, 2);
 	world.addCorridor(0, 0, 4);
 	world.addLayer();
@@ -5392,10 +5388,9 @@ void onlyTheSelectedLayerAndTheLayerBehindAreDrawn()
 		{
 			if (!isLayerDrawn(layer, view, world.getLayerCount())) continue;
 			++drawn;
-			require(layer == view || layer == view + 1,
-				"A drawn Layer is neither the selected Layer nor the Layer directly behind it");
+			require(layer >= view, "A Layer in front of the selection was drawn");
 		}
-		auto const expected = view + 1 < world.getLayerCount() ? 2u : 1u;
+		auto const expected = world.getLayerCount() - view;
 		require(drawn == expected,
 			"The number of drawn Layers does not match the selected Layer");
 	}
@@ -6038,7 +6033,7 @@ void staircaseEditsReturnTheStaircaseOwnLayer()
 void runSerializationSmokeChecks()
 {
 	layerHelperApiIsConsistentWithLayerCount();
-	onlyTheSelectedLayerAndTheLayerBehindAreDrawn();
+	allLayersBehindTheSelectionAreDrawn();
 	graphConstructionWalksEveryAdjacentLayerPair();
 	thresholdsAndTransitsPairTheirOwnAdjacentLayerPair();
 	transitsOnTheLayerBehindAreOnlyDrawnThroughApertures();

@@ -6174,6 +6174,34 @@ int runMetricsEndpoint(int argc, char** argv);
 
 int main(int argc, char** argv)
 {
+	if (argc > 1 && (std::string(argv[1]) == "--viewport-checks"
+		|| std::string(argv[1]) == "--render-checks"))
+	{
+		try
+		{
+			runViewportCullingSmokeChecks();
+			if (std::string(argv[1]) == "--render-checks")
+			{
+				runRenderOrderSmokeChecks();
+				runWallRenderSmokeChecks();
+				runDoorOpenApartRenderSmokeChecks();
+				runDoorOpenLeftRenderSmokeChecks();
+				runDoorOpenRightRenderSmokeChecks();
+				runWindowIntoBackgroundSmokeChecks();
+				runWindowMultiBackgroundSmokeChecks();
+				runFacadeRenderSmokeChecks();
+				runFacadeDrawOrderSmokeChecks();
+				runShuttleDoorRenderSmokeChecks();
+				runViewportZoomSmokeChecks();
+			}
+		}
+		catch (std::exception const& error)
+		{
+			std::cerr << error.what() << '\n';
+			return 1;
+		}
+		return 0;
+	}
 	bool const graphicsStartupOnly = argc > 1
 		&& std::string(argv[1]) == "--graphics-startup-smoke";
 

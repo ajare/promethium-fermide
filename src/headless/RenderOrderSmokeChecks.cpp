@@ -293,8 +293,10 @@ namespace
 	}
 
 	//
-	// Paints the whole World for one selected Layer, exactly as the renderer
-	// orders it: the selected Layer first and whole, then the Layer directly
+	// Models ONE Layer's detail passes, not the final back-to-front composite.
+	// This isolates aperture and overlay contributions from the deeper base
+	// surfaces (covered by the real-renderer viewport checks): this Layer
+	// first and whole, then the Layer directly
 	// behind it solid through the selected Layer's apertures, then - overlay on -
 	// that same Layer outlined over the selection.
 	//
@@ -330,10 +332,10 @@ namespace
 			entry.sectorType = sector->getType();
 			entry.layer = sector->getLayerIndex();
 			entry.footprint = rectOf(*sector);
-			entry.drawn = isLayerDrawn(entry.layer, viewLayer, layerCount);
+			entry.drawn = entry.layer == viewLayer || entry.layer == viewLayer + 1;
 		}
 
-		for (auto const& pass : renderPasses(viewLayer, layerCount, overlayEnabled))
+		for (auto const& pass : layerRenderPasses(viewLayer, layerCount, overlayEnabled))
 		{
 			for (auto& [index, sector] : painted)
 			{
@@ -1207,19 +1209,18 @@ namespace
 	}
 
 	//
-	// The pass order itself: the selected Layer first and solid, then the Layer
-	// directly behind drawn solid through apertures, then one wireframe overlay of
-	// that same Layer, and nothing after that. renderPasses() is the very function
-	// renderWorld() drives, so this is the renderer's own order.
+	// Detail ordering within each Layer: its surface first, then adjacent
+	// Transit apertures, with the optional overlay last. The full composition
+	// repeats these details back-to-front (checked by the viewport regressions).
 	//
-	void theRenderPassOrderDrawsTheSelectedLayerFirst()
+	void layerDetailsDrawTheirSurfaceBeforeApertures()
 	{
 		for (uint32_t layerCount = 2; layerCount <= 4; ++layerCount)
 		{
 			for (uint32_t viewLayer = 0; viewLayer < layerCount; ++viewLayer)
 			{
 				auto const behind = viewLayer + 1 < layerCount;
-				auto const passes = renderPasses(viewLayer, layerCount, true);
+				auto const passes = layerRenderPasses(viewLayer, layerCount, true);
 
 				require(!passes.empty(), "a selected Layer produced no render pass");
 				require(passes.front().layer == viewLayer
@@ -1244,7 +1245,7 @@ namespace
 
 				// Turning the overlay off takes the outline away and nothing else:
 				// the Layer behind is still drawn solid through its apertures.
-				auto const noOverlay = renderPasses(viewLayer, layerCount, false);
+				auto const noOverlay = layerRenderPasses(viewLayer, layerCount, false);
 				require(noOverlay.size() == (behind ? 2u : 1u),
 					"disabling the wireframe overlay removed more than the overlay pass");
 				if (behind)
@@ -1783,7 +1784,7 @@ void runRenderOrderSmokeChecks()
 	theOverlayNeverLeaksSolidGeometryOrAgents();
 	theSelectedLayerPaintsItselfWhole();
 	theOverlayOutlinesTheWholeLayerBehind();
-	theRenderPassOrderDrawsTheSelectedLayerFirst();
+	layerDetailsDrawTheirSurfaceBeforeApertures();
 	aClearWindowShowsItsBackgroundsOwnColour();
 	aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay();
 	aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay();

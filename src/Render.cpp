@@ -1274,7 +1274,7 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 	// Layer behind it is drawn as an outline.
 	auto thresholdStyle = [&](shared_ptr<const core::Sector> authoredSector)
 	{
-		return style == LayerRenderStyle::Solid && sector == authoredSector
+		return isDrawnSolid(style) && sector == authoredSector
 			? LayerRenderStyle::Solid
 			: LayerRenderStyle::Wireframe;
 	};
@@ -1295,6 +1295,7 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 			if (flags & RENDER_SECTOR_OBJECTS_BEHIND)
 			{
 				auto door = static_pointer_cast<const core::DoorSectorObject>(object)->getDoor();
+				if (style == LayerRenderStyle::Aperture && door->getFrontSector() != sector) break;
 				renderDoor(door, layer, thresholdStyle(door->getFrontSector()), selected, drawList);
 			}
 			break;
@@ -1360,6 +1361,7 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 			if (flags & RENDER_SECTOR_OBJECTS_BEHIND)
 			{
 				auto window = static_pointer_cast<const core::WindowSectorObject>(object)->getWindow();
+				if (style == LayerRenderStyle::Aperture && window->getFrontSector() != sector) break;
 				renderWindow(window, layer, thresholdStyle(window->getFrontSector()), selected, drawList);
 			}
 			break;
@@ -1669,11 +1671,12 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// apertures are not painted over. On a Shuttle's own Layer its Doors are seen
 	// from the back and contribute wireframes rather than apertures; defer those
 	// outlines until after the filled carriage so the carriage cannot hide them.
-	// An Aperture pass is itself the view through a threshold and must not recurse
-	// into that same threshold.
+	// Apertures may reveal further thresholds, but only those authored on the
+	// current Layer: renderSectorObjects skips back-facing thresholds to avoid
+	// re-entering the same aperture. Nested scissor rectangles keep the view local.
 	auto const backObjectsFollowGeometry = sectorType == core::SectorType::Shuttle
-		&& style == LayerRenderStyle::Solid;
-	if (style != LayerRenderStyle::Aperture && !backObjectsFollowGeometry)
+		&& isDrawnSolid(style);
+	if (!backObjectsFollowGeometry)
 	{
 		renderSectorObjects(sector, layer, style, RENDER_SECTOR_OBJECTS_BEHIND, drawList);
 	}
@@ -1980,34 +1983,29 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 	auto const viewLayer = static_cast<uint32_t>(clamp(gUISettings.visibleLayer, 0,
 		static_cast<int>(layerCount) - 1));
 
-	// The selected Layer's Sectors are both the apertures onto the Layer directly
-	// behind and the Sectors whose controls are redrawn above clipped transits.
-	std::vector<std::shared_ptr<const core::Sector>> viewSectors;
-
-	if (viewLayer + 1 < layerCount)
-	{
-		viewSectors = viewportSectors(world, viewLayer);
-	}
+	drawList->PushClipRect({ gUISettings.worldViewportX, gUISettings.worldViewportY },
+		{ gUISettings.worldViewportX + gUISettings.worldViewportWidth,
+			gUISettings.worldViewportY + gUISettings.worldViewportHeight }, true);
 
 	for (auto const& pass : renderPasses(viewLayer, layerCount, gUISettings.renderNextLayerWireframe))
 	{
 		switch (pass.style)
 		{
 		case LayerRenderStyle::Solid:
-			// The selected Layer, drawn whole.
+			// Opaque surfaces cover the deeper Layers already drawn.
 			renderSectors(world, pass.layer, pass.style, drawList);
 			break;
 
 		case LayerRenderStyle::Aperture:
-			// The Layer directly behind, drawn solid through the apertures the
-			// selected Layer gives it.
-			renderBehindLayerTransits(world, pass.layer, viewSectors, drawList);
-
-			// Clipped transits intentionally draw over the selected Layer's
-			// Locations. Redraw the selected Layer's thresholds, then its controls,
-			// then its Agents above those transits.
-			renderThresholdsControlsAndAgentsAboveTransit(viewSectors, viewLayer, drawList);
+		{
+			auto const frontLayer = core::layerInFront(pass.layer);
+			auto const frontSectors = viewportSectors(world, frontLayer);
+			renderBehindLayerTransits(world, pass.layer, frontSectors, drawList);
+			// Each Layer owns its own aperture and foreground redraw, not just
+			// the selected Layer. Thresholds, controls and Agents stay in front.
+			renderThresholdsControlsAndAgentsAboveTransit(frontSectors, frontLayer, drawList);
 			break;
+		}
 
 		case LayerRenderStyle::Wireframe:
 			// The wireframe overlay x-rays the Layer directly behind: its whole
@@ -2031,4 +2029,5 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 	{
 		renderGrid(world, ImColor(128, 128, 127), 1.0f, drawList);
 	}
+	drawList->PopClipRect();
 }

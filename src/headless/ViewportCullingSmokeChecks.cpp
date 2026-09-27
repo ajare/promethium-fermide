@@ -122,6 +122,30 @@ namespace
 		};
 	}
 
+	// Sample the painter-ordered command stream, respecting nested scissor
+	// rectangles. These scenes use opaque untextured fills and sample away
+	// from outlines and text.
+	ImU32 colourAt(WorldDrawList const& draws, ImVec2 point)
+	{
+		ImU32 result = 0;
+		for (auto const& command : draws.commands())
+		{
+			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			if (!triangle) continue;
+			auto const& clip = triangle->clip;
+			if (point.x < clip.minimum.x || point.x >= clip.maximum.x
+				|| point.y < clip.minimum.y || point.y >= clip.maximum.y) continue;
+			auto cross = [point](ImVec2 a, ImVec2 b)
+				{ return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x); };
+			auto const a = cross(triangle->positions[0], triangle->positions[1]);
+			auto const b = cross(triangle->positions[1], triangle->positions[2]);
+			auto const c = cross(triangle->positions[2], triangle->positions[0]);
+			if ((a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0))
+				result = triangle->colour;
+		}
+		return result;
+	}
+
 	// How many vertices of the given colour fall inside the rectangle.
 	int verticesIn(ImDrawList const* drawList, ImU32 colour, ScreenRect const& rect)
 	{
@@ -232,10 +256,124 @@ void renderPassPaintsScrolledInSectorOnly()
 		"the Solid pass painted the culled level-0 Room below the viewport");
 }
 
+void backgroundsShowThroughEmptyLayers()
+{
+	ImGuiGuard imgui;
+	auto world = std::make_shared<core::World>("Background visibility", 6, 2);
+	while (world->getLayerCount() < 4) world->addLayer();
+	world->addBackground(3, 0, 0, 6, 2, { 23, 67, 109 });
+	world->addRoom("Front occluder", 0, 0, 0, 1, 1);
+	world->addRoom("Intermediate occluder", 2, 0, 1, 1, 1);
+	world->addBackground(1, 0, 2, 1, 1, { 151, 37, 83 });
+	world->finishBuild();
+	for (bool overlay : { false, true })
+	for (int selected = 0; selected < 4; ++selected)
+	for (float zoom : { 1.0f, 2.0f })
+	{
+		setViewport(-17, 11, 6 * CORE_CELL_WIDTH_PIXELS * zoom,
+			2 * CORE_LEVEL_HEIGHT_PIXELS * zoom);
+		gUISettings.worldZoom = zoom;
+		gUISettings.visibleLayer = selected;
+		gUISettings.renderNextLayerWireframe = overlay;
+		gUISettings.renderGrid = false;
+		WorldDrawList draws(WorldDrawList::ClipRectangle{ { 0, 0 },
+			{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
+		renderWorld(world, &draws);
+		for (int y = 0; y < 2; ++y)
+		for (int x = 0; x < 6; ++x)
+		{
+			core::Vector2 point{ x + 0.37f, y + 0.43f };
+			point.x = point.x * CORE_CELL_WIDTH_PIXELS * zoom + gUISettings.xOffset;
+			point.y = gUISettings.worldViewportHeight
+				- point.y * CORE_LEVEL_HEIGHT_PIXELS * zoom - gUISettings.yOffset;
+			auto expected = ImU32(ImColor(23, 67, 109));
+			if (y == 0 && ((x == 0 && selected == 0) || (x == 1 && selected <= 2)))
+				expected = kForeLocationFill;
+			if (y == 0 && x == 2 && selected <= 1) expected = ImU32(ImColor(151, 37, 83));
+			require(colourAt(draws, { point.x, point.y }) == expected,
+				"Back-to-front composition has the wrong visible Sector at "
+				+ std::to_string(x) + "," + std::to_string(y)
+				+ " with selected Layer " + std::to_string(selected));
+		}
+		require(colourAt(draws, { -1, 10 }) == 0, "World rendering escaped its viewport scissor");
+	}
+}
+
+void nestedWindowsKeepTheirScissors()
+{
+	ImGuiGuard imgui;
+	auto world = std::make_shared<core::World>("Nested apertures", 6, 2);
+	while (world->getLayerCount() < 3) world->addLayer();
+	world->addRoom("Front", 0, 0, 0, 6, 1);
+	world->addRoom("Middle", 1, 0, 0, 6, 1);
+	world->addBackground(2, 0, 0, 6, 1, { 23, 67, 109 });
+	auto front = world->addSectorWindow(0, 0, 1, 3, 1,
+		{ false, core::Window::State::Closed, core::Window::Style::Clear });
+	auto middle = world->addSectorWindow(1, 0, 2, 3, 1,
+		{ false, core::Window::State::Closed, core::Window::Style::Clear });
+	world->finishBuild();
+	setViewport(0, 0, 6 * CORE_CELL_WIDTH_PIXELS, 2 * CORE_LEVEL_HEIGHT_PIXELS);
+	gUISettings.visibleLayer = 0;
+	gUISettings.renderGrid = false;
+	gUISettings.renderNextLayerWireframe = false;
+	WorldDrawList draws(WorldDrawList::ClipRectangle{ { 0, 0 },
+		{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
+	renderWorld(world, &draws);
+	core::Vector2 frontMin, frontMax, middleMin, middleMax;
+	front.object->getFullShape(frontMin, frontMax);
+	middle.object->getFullShape(middleMin, middleMax);
+	auto sample = [&](float x)
+	{
+		auto const y = (frontMin.y + frontMax.y) * 0.5f;
+		return colourAt(draws, { x * CORE_CELL_WIDTH_PIXELS,
+			gUISettings.worldViewportHeight - y * CORE_LEVEL_HEIGHT_PIXELS });
+	};
+	require(sample((middleMin.x + frontMax.x) * 0.5f) == ImU32(ImColor(23, 67, 109)),
+		"Aligned Windows did not reveal the third Layer");
+	require(sample((frontMin.x + middleMin.x) * 0.5f) == ImU32(ImColor(224, 224, 255)),
+		"Deeper Window escaped its own scissor into the middle Room");
+	require(sample((frontMax.x + middleMax.x) * 0.5f) == kForeLocationFill,
+		"Deeper Window escaped the front Window's scissor");
+}
+
+void layerCompositionOrderStopsAtSelection()
+{
+	for (uint32_t count : { 2u, 4u, 256u })
+	for (uint32_t selected = 0; selected < count; ++selected)
+	for (bool overlay : { false, true })
+	{
+		auto const passes = renderPasses(selected, count, overlay);
+		auto nextSolid = count;
+		uint32_t outlines = 0;
+		for (auto const& pass : passes)
+		{
+			require(pass.layer >= selected && pass.layer < count,
+				"A render pass escaped the selected-to-back Layer range");
+			if (pass.style == LayerRenderStyle::Solid)
+				require(pass.layer == --nextSolid, "Solid Layers are not ordered back-to-front");
+			if (pass.style == LayerRenderStyle::Wireframe)
+			{
+				++outlines;
+				require(pass.layer == selected + 1, "Overlay moved beyond the next Layer");
+			}
+		}
+		require(nextSolid == selected, "Compositing stopped before the selected Layer");
+		require(outlines == (overlay && selected + 1 < count ? 1u : 0u),
+			"Overlay toggle changed the wrong passes");
+	}
+	require(renderPasses(4, 4, true).empty() && renderPasses(0, 0, true).empty(),
+		"Invalid selection generated render passes");
+}
+
 void runViewportCullingSmokeChecks()
 {
+	auto const savedSettings = gUISettings;
+	backgroundsShowThroughEmptyLayers();
+	nestedWindowsKeepTheirScissors();
+	layerCompositionOrderStopsAtSelection();
 	subLevelHeightViewportExcludesLevelTwo();
 	verticalOffsetTracksTheVisibleOrigin();
 	fullyScrolledTopLevelIsVisible();
 	renderPassPaintsScrolledInSectorOnly();
+	gUISettings = savedSettings;
 }
