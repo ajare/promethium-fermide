@@ -2947,7 +2947,11 @@ namespace
 			{
 				continue;
 			}
-			text += std::to_string(tick) + ':' + std::to_string((int)firstRequest->state) + ':'
+			// The first request may already be retired while the second Agent
+			// is still crossing. Keep observing the second without dereferencing end().
+			auto const hasFirstRequest = firstRequest != snapshot.traversalRequests.end();
+			text += std::to_string(tick) + ':'
+				+ std::to_string(hasFirstRequest ? (int)firstRequest->state : -1) + ':'
 				+ std::to_string((int)secondRequest->state) + ':'
 				+ std::to_string(std::bit_cast<uint32_t>(secondAgent->globalPosition.x)) + ';';
 			if (!secondCreatedOffCentre)
@@ -2957,9 +2961,9 @@ namespace
 			}
 			secondHadQueuePosition = secondHadQueuePosition || secondRequest->hasQueuePosition;
 			overlappedPending = overlappedPending
-				|| (firstRequest->state == core::TraversalRequestState::Pending
+				|| (hasFirstRequest && firstRequest->state == core::TraversalRequestState::Pending
 					&& secondRequest->state == core::TraversalRequestState::Pending);
-			if (firstGrantTick < 0 && std::any_of(snapshot.traversalPermits.begin(),
+			if (hasFirstRequest && firstGrantTick < 0 && std::any_of(snapshot.traversalPermits.begin(),
 				snapshot.traversalPermits.end(),
 				[&](auto const& permit) { return permit.request == firstRequest->id; }))
 			{
