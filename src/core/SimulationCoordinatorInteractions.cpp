@@ -13,6 +13,7 @@
 #include "core/Button.h"
 #include "core/Coordination.h"
 #include "core/ExtensibleObject.h"
+#include "core/MobilityProfile.h"
 #include "core/Sector.h"
 #include "core/Simulation.h"
 
@@ -183,7 +184,11 @@ namespace core
 		// A deactivated Agent is not simulated (#118), so it cannot take on new
 		// physical interaction work: the request is refused outright rather than
 		// parked, so it can never claim a place in the point's queue (#192).
-		if (!point || !actor || !actor->isActive() || !point->mSector
+		// The effective Mobility profile's Buttons bit is a capability rather
+		// than a route preference (ADR 0011), so a forbidden Agent is refused
+		// here too (#193); agentForbidsButtons keeps individual-over-tag
+		// precedence (ADR 0012) and never consults ordinary Door restrictions.
+		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor) || !point->mSector
 			|| (actor->getState() != Agent::State::Idle
 				&& actor->getState() != Agent::State::WaitingForTraversal)
 			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
@@ -236,8 +241,9 @@ namespace core
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
 		// Even the press a moving Agent makes in passing is physical work, so a
-		// deactivated Agent may not start one (#118, #192).
-		if (!point || !actor || !actor->isActive()
+		// deactivated Agent may not start one (#118, #192), and a
+		// Buttons-forbidden Agent may not operate a control at all (#193).
+		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor)
 			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 		{
 			return {};
@@ -733,13 +739,14 @@ namespace core
 					point->mQueue.erase(point->mQueue.begin());
 					continue;
 				}
-				// A request whose Agent was deactivated while it waited is cancelled
-				// here, before allocation, so it neither walks to the point nor holds
-				// the queue for the Agents behind it (#118, #192). Reactivation must
-				// not resume work the author stopped, matching the tick's rule for a
-				// retained route.
+				// A request whose Agent was deactivated, or whose effective Mobility
+				// profile now forbids Buttons, is cancelled here before allocation, so
+				// it neither walks to the point nor holds the queue for the Agents
+				// behind it (#118, #192, #193). A profile edited while paused must
+				// not be overridden by earlier work, and cancellation must not resume
+				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !actor->isActive())
+				if (!actor || !actor->isActive() || agentForbidsButtons(actor))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -778,12 +785,13 @@ namespace core
 				continue;
 			}
 			auto actor = mWorld.mAgents.find(request->mActor);
-			if (!actor || !actor->isActive()
+			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
 				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 			{
-				// A deactivated Agent must not walk to the point or press it, and the
-				// point must not stay reserved for it: cancel instead of suspending
-				// (#118, #192).
+				// A deactivated Agent must not walk to the point or press it, and a
+				// Buttons-forbidden Agent must not press it either; the point must
+				// not stay reserved for either: cancel instead of suspending
+				// (#118, #192, #193).
 				cancelInteraction(point->mActiveRequest);
 				continue;
 			}
