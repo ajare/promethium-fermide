@@ -401,7 +401,7 @@ set_target_properties(prometheum-fermide-headless PROPERTIES
 
 if(PF_BUILD_GUI)
     file(GLOB PF_IMGUI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/*.cpp")
-    add_executable(imgui
+    add_executable(editor
         src/Helpers.cpp
         src/SectorTileset.cpp
         src/ObjectTileset.cpp
@@ -423,45 +423,45 @@ if(PF_BUILD_GUI)
         src/AgentClipboard.cpp
         ${PF_IMGUI_SOURCES}
     )
-    target_compile_features(imgui PRIVATE cxx_std_20)
-    target_compile_definitions(imgui PRIVATE
+    target_compile_features(editor PRIVATE cxx_std_20)
+    target_compile_definitions(editor PRIVATE
         _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
         $<$<CONFIG:Debug>:_DEBUG>
     )
-    target_include_directories(imgui PRIVATE "${PF_INCLUDE_DIR}/imgui")
+    target_include_directories(editor PRIVATE "${PF_INCLUDE_DIR}/imgui")
     if(MSVC)
-        target_compile_options(imgui PRIVATE /W3 /permissive-)
-        target_link_options(imgui PRIVATE "$<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS>")
+        target_compile_options(editor PRIVATE /W3 /permissive-)
+        target_link_options(editor PRIVATE "$<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS>")
     else()
-        target_compile_options(imgui PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
     endif()
-    target_link_libraries(imgui PRIVATE
+    target_link_libraries(editor PRIVATE
         pf-metrics libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
         Willpower.Application ext::mpp-helper
     )
     if(WIN32)
-        target_link_libraries(imgui PRIVATE SDL2::SDL2main)
+        target_link_libraries(editor PRIVATE SDL2::SDL2main)
     endif()
-    pf_apply_high_analysis(imgui)
-    set_target_properties(imgui PROPERTIES
+    pf_apply_high_analysis(editor)
+    set_target_properties(editor PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
     )
-    willpower_deploy_runtime_dlls(imgui)
+    willpower_deploy_runtime_dlls(editor)
 
     # Copy on every build so manifest and art edits deploy without a C++ relink.
     add_custom_target(pf-sector-assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-            "$<TARGET_FILE_DIR:imgui>"
+            "$<TARGET_FILE_DIR:editor>"
         VERBATIM
     )
-    add_dependencies(imgui pf-sector-assets)
+    add_dependencies(editor pf-sector-assets)
 
-    add_custom_command(TARGET imgui POST_BUILD
+    add_custom_command(TARGET editor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/prometheum-fermide.ini"
-            "$<TARGET_FILE_DIR:imgui>/prometheum-fermide.ini"
+            "$<TARGET_FILE_DIR:editor>/prometheum-fermide.ini"
         COMMENT "Copying ImGui configuration"
     )
 endif()
@@ -513,7 +513,7 @@ if(BUILD_TESTING)
         add_test(NAME graphics-startup-failure
             COMMAND prometheum-fermide-headless --graphics-startup-smoke)
         set_tests_properties(graphics-startup-failure PROPERTIES
-            ENVIRONMENT "PF_GUI_EXECUTABLE=$<TARGET_FILE:imgui>"
-            WORKING_DIRECTORY "$<TARGET_FILE_DIR:imgui>")
+            ENVIRONMENT "PF_GUI_EXECUTABLE=$<TARGET_FILE:editor>"
+            WORKING_DIRECTORY "$<TARGET_FILE_DIR:editor>")
     endif()
 endif()

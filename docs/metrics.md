@@ -21,7 +21,7 @@ prometheum-fermide-headless --metrics --metrics-world resources/test-worlds/lift
 ```
 
 In the GUI, use **View → Metrics** to toggle the endpoint and edit its port.
-These preferences are saved in `imgui.ini`. `imgui --metrics-port 9464` overrides
+These preferences are saved in `imgui.ini`. `editor --metrics-port 9464` overrides
 the saved port and enables metrics. The endpoint follows the current World;
 changing Worlds starts a fresh collector. A port conflict prints a diagnostic
 without stopping simulation. Toggle off/on or change the port to retry.

@@ -1,6 +1,6 @@
 # Headless simulation smoke scenario
 
-The `core` target builds the shared simulation as `prometheum-fermide-core.lib`. Both the `headless` and `imgui` projects reference that static library, so simulation sources are compiled once per configuration instead of being duplicated in each executable. The `headless` target builds deterministic smoke scenarios without SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
+The `core` target builds the shared simulation as `prometheum-fermide-core.lib`. Both the `headless` and `editor` projects reference that static library, so simulation sources are compiled once per configuration instead of being duplicated in each executable. The `headless` target builds deterministic smoke scenarios without SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
 
 ## Deterministic simulation API
 
@@ -215,7 +215,7 @@ cmake --build out\build --config Debug
 ctest --test-dir out\build -C Debug --output-on-failure
 ```
 
-Use `Release` instead of `Debug` for an optimized build. CMake places final executables and libraries in `bin\x64\<Configuration>` within its build directory (for example, `out\build\bin\x64\Debug`). CMake fetches and statically links the graphical dependencies, then copies only `prometheum-fermide.ini` beside `imgui.exe`.
+Use `Release` instead of `Debug` for an optimized build. CMake places final executables and libraries in `bin\x64\<Configuration>` within its build directory (for example, `out\build\bin\x64\Debug`). CMake fetches and statically links the graphical dependencies, then copies only `prometheum-fermide.ini` beside `editor.exe`.
 
 ## Build and run only the headless scenario with MSBuild
 
@@ -235,11 +235,11 @@ World `headless.vcxproj` automatically builds its `core.vcxproj` project referen
 
 ## Build the complete solution
 
-The shared static library, graphical application, and headless target are all in `build\imgui.sln`:
+Build the shared static library, graphical application, and headless target through CMake:
 
 ```bat
-msbuild build\imgui.sln /m /p:Configuration=Debug /p:Platform=x64
-msbuild build\imgui.sln /m /p:Configuration=Release /p:Platform=x64
+cmake --build build-windows --config Debug --parallel
+cmake --build build-windows --config Release --parallel
 ```
 
-The graphical executable remains `bin\x64\<Configuration>\imgui.exe` and retains its existing runtime resource and DLL copy steps.
+The graphical target is `editor`. CMake generates `editor.vcxproj` and the `editor.dir` intermediate directory on Windows. The executable is `bin\x64\<Configuration>\editor.exe` within the build directory (`editor` on Linux), with the existing runtime resource and DLL copy steps.
