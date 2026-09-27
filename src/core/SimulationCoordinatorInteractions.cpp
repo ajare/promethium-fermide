@@ -180,7 +180,10 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
-		if (!point || !actor || !point->mSector
+		// A deactivated Agent is not simulated (#118), so it cannot take on new
+		// physical interaction work: the request is refused outright rather than
+		// parked, so it can never claim a place in the point's queue (#192).
+		if (!point || !actor || !actor->isActive() || !point->mSector
 			|| (actor->getState() != Agent::State::Idle
 				&& actor->getState() != Agent::State::WaitingForTraversal)
 			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
@@ -232,7 +235,9 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
-		if (!point || !actor
+		// Even the press a moving Agent makes in passing is physical work, so a
+		// deactivated Agent may not start one (#118, #192).
+		if (!point || !actor || !actor->isActive()
 			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 		{
 			return {};
@@ -728,6 +733,17 @@ namespace core
 					point->mQueue.erase(point->mQueue.begin());
 					continue;
 				}
+				// A request whose Agent was deactivated while it waited is cancelled
+				// here, before allocation, so it neither walks to the point nor holds
+				// the queue for the Agents behind it (#118, #192). Reactivation must
+				// not resume work the author stopped, matching the tick's rule for a
+				// retained route.
+				auto actor = mWorld.mAgents.find(request->mActor);
+				if (!actor || !actor->isActive())
+				{
+					cancelInteraction(requestId);
+					continue;
+				}
 				bool reusedActiveWork = false;
 				for (auto const& [operationId, requirement] : request->mOperations)
 				{
@@ -762,8 +778,12 @@ namespace core
 				continue;
 			}
 			auto actor = mWorld.mAgents.find(request->mActor);
-			if (!actor || actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
+			if (!actor || !actor->isActive()
+				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 			{
+				// A deactivated Agent must not walk to the point or press it, and the
+				// point must not stay reserved for it: cancel instead of suspending
+				// (#118, #192).
 				cancelInteraction(point->mActiveRequest);
 				continue;
 			}

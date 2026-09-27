@@ -1,4 +1,4 @@
-// Agent activation and deactivation, for ticket #118.
+// Agent activation and deactivation, for tickets #118 and #192.
 //
 // An activated Agent is simulated; a deactivated one keeps its authored
 // position and route but no tick acts on it. Activation is authored state
@@ -25,12 +25,17 @@
 //   object-move replay, and the Agent clipboard
 //   an Agent document that never carried the field loads activated, and a
 //   clipboard payload that never carried it reads activated
+//   a deactivated Agent is refused new interaction work and never walks to
+//   or presses a control; a request already queued when it is deactivated is
+//   cancelled so the queue behind it drains
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <yaml-cpp/yaml.h>
 
@@ -90,6 +95,28 @@ namespace
 		for (auto const& entry : world.getSimulationSnapshot().agents)
 			if (entry.id == id) return entry;
 		throw std::runtime_error("The snapshot does not name the Agent");
+	}
+
+	// Terminal interaction requests are retired once no live owner names them
+	// (#183), so an outcome is read from the published event stream rather than
+	// looking the hot-registry record up after the fact.
+	std::map<core::InteractionRequestId, core::InteractionResult> observedInteractionResults(
+		core::World& world, std::vector<core::InteractionRequestId> const& ids)
+	{
+		std::map<core::InteractionRequestId, core::InteractionResult> results;
+		for (auto id : ids) results.emplace(id, core::InteractionResult::Pending);
+		for (auto const& event : world.consumeSimulationEvents())
+		{
+			if (event.type != core::SimulationEventType::InteractionRequestChanged
+				&& event.type != core::SimulationEventType::InteractionRequestAdded)
+			{
+				continue;
+			}
+			if (event.interactionRequest.result == core::InteractionResult::Pending) continue;
+			auto found = results.find(event.interactionRequest.id);
+			if (found != results.end()) found->second = event.interactionRequest.result;
+		}
+		return results;
 	}
 
 	// One corridor, one marker at its far end, and two Agents at the near
@@ -454,6 +481,107 @@ namespace
 			"A non-boolean activation was read instead of refused");
 		require(!diagnostic.empty(), "A refused clipboard payload gave no reason");
 	}
+
+	// Ticket #192: a deactivated Agent is not simulated, so a direct interaction
+	// request must not admit it in the first place and a request that slipped in
+	// before deactivation must not move or press it.
+	void inactiveAgentsAreRefusedInteractionRequests()
+	{
+		core::World world("Inactive interaction", 10, 1);
+		auto const corridor = world.addCorridor(0, 0, 10);
+		world.finishBuild();
+		auto const sectorId = core::SectorId{ (uint64_t)corridor + 1 };
+
+		auto const operatorId = world.createAgent("Operator", corridor, 0, 1.0f);
+		core::InteractionBinding binding;
+		binding.command = { core::DeviceCommandType::SetSectorLights, sectorId, false };
+		auto const point = world.createInteractionPoint("Switch", sectorId,
+			{ 5.0f, 0.0f }, 0.1f, core::World::getFixedTimestep(), { binding });
+
+		std::string diagnostic;
+		world.pauseSimulation();
+		require(world.setAgentActive(operatorId, false, &diagnostic),
+			"The deactivation was refused: " + diagnostic);
+		require(world.resumeSimulation(), "The fixture could not resume");
+
+		// Admission: the direct request is refused outright, and the refusal
+		// leaves no request or device operation behind to block the point.
+		require(!world.requestInteraction(point, operatorId),
+			"A deactivated Agent's direct interaction request was accepted");
+
+		auto const* agent = world.lookupAgent(operatorId).entity;
+		auto const parkedAt = agent->getGlobalPosition();
+		world.advanceTicks(300);
+		require(agent->getGlobalPosition() == parkedAt,
+			"A deactivated Agent walked toward an Interaction point");
+		require(world.getSector(corridor)->areLightsOn(),
+			"A deactivated Agent pressed the control");
+		require(world.getSimulationSnapshot().interactionRequests.empty()
+			&& world.getSimulationSnapshot().deviceOperations.empty(),
+			"A refused interaction left coordination records behind");
+
+		// Reactivation restores ordinary interaction: the Agent walks to the
+		// point and the press reaches the control.
+		world.pauseSimulation();
+		require(world.setAgentActive(operatorId, true, &diagnostic),
+			"The reactivation was refused: " + diagnostic);
+		require(world.resumeSimulation(), "The fixture could not resume again");
+		auto const request = world.requestInteraction(point, operatorId);
+		require(static_cast<bool>(request), "The reactivated Agent's interaction was refused");
+		world.advanceTicks(900);
+		require(!world.getSector(corridor)->areLightsOn(),
+			"The reactivated Agent's press never reached the control");
+		require(observedInteractionResults(world, { request }).at(request)
+			== core::InteractionResult::Succeeded,
+			"The reactivated Agent's interaction did not succeed");
+	}
+
+	// Ticket #192: an interaction already queued when its Agent is deactivated
+	// is cancelled, not left holding the point for a stopped Agent. The queue
+	// behind it drains, and the deactivated Agent never moves.
+	void queuedInteractionsAreCancelledByDeactivation()
+	{
+		core::World world("Queued interaction", 12, 1);
+		auto const corridor = world.addCorridor(0, 0, 12);
+		world.finishBuild();
+		auto const sectorId = core::SectorId{ (uint64_t)corridor + 1 };
+
+		auto const first = world.createAgent("First", corridor, 0, 0.5f);
+		auto const second = world.createAgent("Second", corridor, 0, 1.5f);
+		auto const third = world.createAgent("Third", corridor, 0, 2.5f);
+
+		core::InteractionBinding binding;
+		binding.command = { core::DeviceCommandType::SetSectorLights, sectorId, false };
+		auto const point = world.createInteractionPoint("Switch", sectorId,
+			{ 6.0f, 0.0f }, 0.1f, core::World::getFixedTimestep(), { binding });
+
+		// Queue all three behind one point before any tick allocates the first.
+		std::string diagnostic;
+		world.pauseSimulation();
+		auto const firstRequest = world.requestInteraction(point, first);
+		auto const secondRequest = world.requestInteraction(point, second);
+		auto const thirdRequest = world.requestInteraction(point, third);
+		require(firstRequest && secondRequest && thirdRequest,
+			"The queued-interaction fixture could not queue its requests");
+		require(world.setAgentActive(second, false, &diagnostic),
+			"The deactivation was refused: " + diagnostic);
+		auto const parkedAt = world.lookupAgent(second).entity->getGlobalPosition();
+		require(world.resumeSimulation(), "The fixture could not resume");
+
+		world.advanceTicks(1400);
+
+		auto const results = observedInteractionResults(world,
+			{ firstRequest, secondRequest, thirdRequest });
+		require(world.lookupAgent(second).entity->getGlobalPosition() == parkedAt,
+			"A deactivated queued Agent walked toward the Interaction point");
+		require(results.at(firstRequest) == core::InteractionResult::Succeeded,
+			"The first Agent's press never succeeded");
+		require(results.at(secondRequest) == core::InteractionResult::Cancelled,
+			"A deactivated queued request was not cancelled");
+		require(results.at(thirdRequest) == core::InteractionResult::Succeeded,
+			"The queue did not advance past the deactivated Agent");
+		require(!world.getSector(corridor)->areLightsOn(), "The point was never pressed");
+	}
 }
 
 void runAgentActivationSmokeChecks()
@@ -467,4 +595,6 @@ void runAgentActivationSmokeChecks()
 	activationSurvivesSerializationAndReset();
 	activationSurvivesTopologyEdits();
 	clipboardCarriesActivation();
+	inactiveAgentsAreRefusedInteractionRequests();
+	queuedInteractionsAreCancelledByDeactivation();
 }
