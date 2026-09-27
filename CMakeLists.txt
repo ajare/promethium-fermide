@@ -318,6 +318,7 @@ add_executable(prometheum-fermide-headless
     src/headless/AgentTagRegistrySmokeChecks.cpp
     src/headless/AgentTagMobilityProfileSmokeChecks.cpp
     src/headless/MobilityProfileRoutingSmokeChecks.cpp
+    src/headless/RestoredPathMobilitySmokeChecks.cpp
     src/headless/InteractionMobilitySmokeChecks.cpp
     src/headless/AgentTagRegistryChangeSmokeChecks.cpp
     src/headless/AgentTagDocumentSaveSmokeChecks.cpp

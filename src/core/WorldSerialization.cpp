@@ -1277,6 +1277,35 @@ namespace core
 		return true;
 	}
 
+	void World::rebuildRestoredAgentPaths()
+	{
+		invalidateSimulationSnapshot();
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			(void)id;
+			if (!agent || !agent->mResetPath || agent->mResetPath->nodes.empty()) continue;
+			// Only a Path that still aliases its reset baseline is an untouched
+			// restored Path. One that has diverged belongs to a running simulation
+			// and is left where it is.
+			if (agent->mPath.path != agent->mResetPath) continue;
+			// The saved destination is the Path's final vertex, so re-searching from
+			// it preserves the Agent's intent while honouring the effective profile.
+			auto const destination = agent->mResetPath->nodes.back().targetVertex;
+			if (!destination) continue;
+			auto path = mGraph->calculatePath(agent.get(), destination);
+			if (!path || path->nodes.empty())
+			{
+				throw SerializationException(format(
+					"Restored Agent '{}' path destination is unreachable under its effective Mobility profile",
+					agent->getName()));
+			}
+			auto const active = agent->mResetPathActive;
+			agent->assignPath(std::move(path), active, false);
+			agent->mResetPath = agent->mPath.path;
+			agent->mResetPathActive = active;
+		}
+	}
+
 	void World::resetSimulation()
 	{
 		invalidateSimulationSnapshot();

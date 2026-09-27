@@ -383,6 +383,11 @@ namespace core
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
 		mAgentTagRegistry = std::move(registry);
 		mAgentTagRegistry->registerWorld(*this);
+
+		// A restored Path was searched before the tag-supplied properties in this
+		// registry were available. With the properties now in force, re-search so
+		// no restored Path can hold a traversal the effective profile forbids (#194).
+		rebuildRestoredAgentPaths();
 	}
 
 	void World::replaceAgentTagRegistryWithIndependentCopy(string filename,

@@ -901,6 +901,12 @@ namespace core
 		void resetForDeserialization(std::string name, uint32_t cellsWide, uint32_t levelsHigh,
 			bool preserveBehaviourRuntime = false);
 
+		// A restored Agent's saved Path was searched with whatever Agent properties
+		// were in force at the time. A tag-supplied Mobility profile only becomes
+		// available once its registry is resolved, so re-search each untouched
+		// restored Path from its saved destination at that point (ADR 0011, #194).
+		void rebuildRestoredAgentPaths();
+
 		// Constructs a validation candidate with the same dimensions and layer count as this World.
 		std::unique_ptr<World> makeCandidateWorld() const;
 

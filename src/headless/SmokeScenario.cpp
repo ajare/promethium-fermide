@@ -82,6 +82,7 @@ void runDocumentHistorySmokeChecks();
 void runAgentTagRegistrySmokeChecks();
 void runAgentTagMobilityProfileSmokeChecks();
 void runMobilityProfileRoutingSmokeChecks();
+void runRestoredPathMobilitySmokeChecks();
 void runInteractionMobilitySmokeChecks();
 void runAgentBehaviourRegistrySmokeChecks();
 void runAgentBehaviourAssignmentSmokeChecks();
@@ -6232,6 +6233,7 @@ int main(int argc, char** argv)
 		runAgentTagRegistrySmokeChecks();
 		runAgentTagMobilityProfileSmokeChecks();
 		runMobilityProfileRoutingSmokeChecks();
+		runRestoredPathMobilitySmokeChecks();
 		runInteractionMobilitySmokeChecks();
 		runAgentBehaviourRegistrySmokeChecks();
 		runAgentBehaviourAssignmentSmokeChecks();
