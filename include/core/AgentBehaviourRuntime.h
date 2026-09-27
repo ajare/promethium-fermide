@@ -29,6 +29,11 @@ namespace core
 		uint32_t commandsPerCallback{ 32u };
 		uint32_t logMessagesPerWindow{ 100u };
 		uint64_t logWindowTicks{ 600u };
+		// A log message is a diagnostic line, not a data channel. The per-message
+		// cap bounds one staged string and the window cap bounds the aggregate
+		// bytes staged and published for the window, independently of the count.
+		size_t logBytesPerMessage{ 4u * 1024u };
+		size_t logBytesPerWindow{ 256u * 1024u };
 	};
 
 	enum class AgentBehaviourRuntimeFailure
@@ -137,6 +142,8 @@ namespace core
 		static constexpr uint32_t DefaultCommandsPerCallback{ 32u };
 		static constexpr uint32_t DefaultLogMessagesPerWindow{ 100u };
 		static constexpr uint64_t DefaultLogWindowTicks{ 600u };
+		static constexpr size_t DefaultLogBytesPerMessage{ 4u * 1024u };
+		static constexpr size_t DefaultLogBytesPerWindow{ 256u * 1024u };
 		// Compatibility names for the scratch preflight API; scratch and live
 		// runtimes intentionally use the same defaults.
 		static constexpr size_t PreflightMemoryBudgetBytes{ DefaultMemoryBudgetBytes };

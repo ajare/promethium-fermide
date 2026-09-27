@@ -57,7 +57,8 @@ namespace core
 			return limits.memoryBytes != 0 && limits.instructionsPerCall != 0
 				&& limits.timersPerInstance != 0 && limits.callbacksPerBoundary != 0
 				&& limits.commandsPerCallback != 0
-				&& limits.logMessagesPerWindow != 0 && limits.logWindowTicks != 0;
+				&& limits.logMessagesPerWindow != 0 && limits.logWindowTicks != 0
+				&& limits.logBytesPerMessage != 0 && limits.logBytesPerWindow != 0;
 		}
 
 		struct StateCloser
@@ -757,7 +758,32 @@ namespace core
 			uint64_t stagedRandomState{ 0 };
 			std::vector<PendingMovementCommand> commands;
 			std::vector<PendingLogMessage> logs;
+			// Log staging budgets for the current window. The count and byte caps
+			// are fixed before the callback runs so a message that will ultimately
+			// be suppressed is never copied into host memory.
+			uint32_t logMessageCountLimit{ 0 };
+			size_t logMessageByteLimit{ 0 };
+			size_t logStagingByteLimit{ 0 };
+			size_t logStagedBytes{ 0 };
+			bool logsSuppressed{ false };
 		};
+
+		// Lua strings are byte sequences, but a log line is text. A message over
+		// the byte cap is truncated without splitting a multi-byte sequence, so
+		// the copy is always bounded and the result stays valid UTF-8.
+		std::string boundedLogMessage(char const* text, size_t length, size_t byteLimit)
+		{
+			if (length <= byteLimit) return std::string(text, length);
+			constexpr std::string_view marker = "...(truncated)";
+			if (byteLimit < marker.size()) return {};
+			size_t prefix = byteLimit - marker.size();
+			while (prefix > 0
+				&& (static_cast<unsigned char>(text[prefix]) & 0xC0u) == 0x80u)
+				--prefix;
+			std::string message(text, prefix);
+			message.append(marker);
+			return message;
+		}
 
 		void countCommand(lua_State* state, CallbackScope& scope)
 		{
@@ -1126,31 +1152,65 @@ namespace core
 		{
 			auto* scope = activeTimerScope(state);
 			if (!scope) return 0;
-			std::vector<std::string> values;
+			// Only the message and an optional level are meaningful, so no string
+			// argument is copied before the staging budgets admit the message.
+			int indices[2] = { 0, 0 };
+			int stringCount = 0;
 			for (int index = 1; index <= lua_gettop(state); ++index)
 				if (lua_type(state, index) == LUA_TSTRING)
 				{
-					size_t length = 0;
-					auto const* text = lua_tolstring(state, index, &length);
-					values.emplace_back(text, length);
+					if (stringCount == 2)
+						return luaL_error(state,
+							"log requires a message and optional level");
+					indices[stringCount++] = index;
 				}
-			if (values.empty() || values.size() > 2)
+			if (stringCount == 0)
 				return luaL_error(state, "log requires a message and optional level");
-			LogLevel level = LogLevel::Info;
-			auto parseLevel = [&](std::string const& value)
+			auto stringEquals = [&](int index, char const* value)
 			{
-				if (value == "debug") { level = LogLevel::Debug; return true; }
-				if (value == "info") { level = LogLevel::Info; return true; }
-				if (value == "warning") { level = LogLevel::Warning; return true; }
-				if (value == "error") { level = LogLevel::Error; return true; }
+				size_t length = 0;
+				auto const* text = lua_tolstring(state, index, &length);
+				return text && std::string_view(text, length) == value;
+			};
+			auto parseLevel = [&](int index, LogLevel& level)
+			{
+				if (stringEquals(index, "debug")) { level = LogLevel::Debug; return true; }
+				if (stringEquals(index, "info")) { level = LogLevel::Info; return true; }
+				if (stringEquals(index, "warning")) { level = LogLevel::Warning; return true; }
+				if (stringEquals(index, "error")) { level = LogLevel::Error; return true; }
 				return false;
 			};
-			std::string message;
-			if (values.size() == 1) message = std::move(values.front());
-			else if (parseLevel(values.front())) message = std::move(values.back());
-			else if (parseLevel(values.back())) message = std::move(values.front());
-			else return luaL_error(state,
-				"log level must be debug, info, warning, or error");
+			LogLevel level = LogLevel::Info;
+			int messageIndex = indices[0];
+			if (stringCount == 2)
+			{
+				if (parseLevel(indices[0], level)) messageIndex = indices[1];
+				else if (parseLevel(indices[1], level)) messageIndex = indices[0];
+				else return luaL_error(state,
+					"log level must be debug, info, warning, or error");
+			}
+			// The transactional window budget is shared across Agents, so messages
+			// beyond what the current window can still publish are counted but not
+			// staged. Truncation is reported on the line itself; a refusal is folded
+			// into the single bounded suppression summary.
+			if (scope->logs.size() >= scope->logMessageCountLimit
+				|| scope->logStagedBytes >= scope->logStagingByteLimit)
+			{
+				scope->logsSuppressed = true;
+				return 0;
+			}
+			size_t length = 0;
+			auto const* text = lua_tolstring(state, messageIndex, &length);
+			auto const remaining = scope->logStagingByteLimit - scope->logStagedBytes;
+			auto const byteLimit = std::min(scope->logMessageByteLimit, remaining);
+			auto message = boundedLogMessage(text ? text : "", length, byteLimit);
+			if (message.empty() && length != 0)
+			{
+				// Not even the truncation marker fits the remaining window bytes.
+				scope->logsSuppressed = true;
+				return 0;
+			}
+			scope->logStagedBytes += message.size();
 			scope->logs.push_back({ level, std::move(message) });
 			return 0;
 		}
@@ -1386,10 +1446,13 @@ namespace core
 		uint32_t commandLimit{ AgentBehaviourRuntimeAdapter::DefaultCommandsPerCallback };
 		uint32_t logLimit{ AgentBehaviourRuntimeAdapter::DefaultLogMessagesPerWindow };
 		uint64_t logWindowTicks{ AgentBehaviourRuntimeAdapter::DefaultLogWindowTicks };
+		size_t logMessageByteLimit{ AgentBehaviourRuntimeAdapter::DefaultLogBytesPerMessage };
+		size_t logWindowByteLimit{ AgentBehaviourRuntimeAdapter::DefaultLogBytesPerWindow };
 		uint32_t callbackCount{ 0 };
 		uint64_t currentTick{ 0 };
 		uint64_t logWindow{ 0 };
 		uint32_t logCount{ 0 };
+		size_t logWindowBytes{ 0 };
 		bool logSuppressionEmitted{ false };
 		std::unique_ptr<lua_State, StateCloser> state;
 		ModuleLoader hostLoader;
@@ -1411,6 +1474,8 @@ namespace core
 			, commandLimit(limits.commandsPerCallback)
 			, logLimit(limits.logMessagesPerWindow)
 			, logWindowTicks(limits.logWindowTicks)
+			, logMessageByteLimit(limits.logBytesPerMessage)
+			, logWindowByteLimit(limits.logBytesPerWindow)
 			, state(lua_newstate(budgetedAllocate, &budget))
 		{
 			if (!state) throw std::runtime_error("Could not create World Lua runtime");
@@ -1467,6 +1532,7 @@ namespace core
 			currentTick = 0;
 			logWindow = 0;
 			logCount = 0;
+			logWindowBytes = 0;
 			logSuppressionEmitted = false;
 			(void)lua_gc(state.get(), LUA_GCCOLLECT);
 		}
@@ -1785,6 +1851,21 @@ namespace core
 			pushImmutableProxy(lua);
 		}
 
+		// A window is a property of simulation time, not of a successful callback,
+		// so it is rolled over before staging as well as before publishing. This is
+		// what lets staging see the same remaining allowance publishing will.
+		void beginLogWindow()
+		{
+			auto const window = currentTick / logWindowTicks;
+			if (window != logWindow)
+			{
+				logWindow = window;
+				logCount = 0;
+				logWindowBytes = 0;
+				logSuppressionEmitted = false;
+			}
+		}
+
 		void prepareScope(World& world, AgentId agentId, Instance& instance,
 			std::vector<PendingMovementCommand> const& pendingCommands)
 		{
@@ -1794,6 +1875,14 @@ namespace core
 			instance.scope.commandLimit = commandLimit;
 			instance.scope.commands.clear();
 			instance.scope.logs.clear();
+			beginLogWindow();
+			instance.scope.logsSuppressed = false;
+			instance.scope.logStagedBytes = 0;
+			instance.scope.logMessageCountLimit = logCount < logLimit
+				? logLimit - logCount : 0;
+			instance.scope.logStagingByteLimit = logWindowBytes < logWindowByteLimit
+				? logWindowByteLimit - logWindowBytes : 0;
+			instance.scope.logMessageByteLimit = logMessageByteLimit;
 			instance.scope.stagedTimers = instance.timers;
 			instance.scope.stagedRandomState = instance.randomState;
 			instance.scope.inspectMove = [&world, agentId, &pendingCommands](MarkerId marker)
@@ -1855,35 +1944,38 @@ namespace core
 			};
 		}
 
-		void publishLogs(Instance const& instance,
-			std::vector<PendingLogMessage> const& messages)
+		void publishLogs(Instance const& instance)
 		{
-			auto const window = currentTick / logWindowTicks;
-			if (window != logWindow)
-			{
-				logWindow = window;
-				logCount = 0;
-				logSuppressionEmitted = false;
-			}
+			beginLogWindow();
+			auto const& messages = instance.scope.logs;
 			auto const source = std::format("Agent behaviour '{}' / Agent '{}'",
 				instance.behaviourName, instance.agentName);
 			auto const sourceId = instance.scope.agent.value
 				<= std::numeric_limits<uint32_t>::max()
 				? static_cast<uint32_t>(instance.scope.agent.value) : ~0u;
+			bool dropped = false;
 			for (auto const& message : messages)
 			{
-				if (logCount < logLimit)
+				// Staging already respected the window allowance; this remains a
+				// defensive bound so publishing can never exceed it either.
+				if (logCount >= logLimit
+					|| message.message.size() > logWindowByteLimit - logWindowBytes)
 				{
-					addLogMessage(source, sourceId, message.level, message.message);
-					++logCount;
+					dropped = true;
+					break;
 				}
-				else if (!logSuppressionEmitted)
-				{
-					addLogMessage("Agent behaviours", 0, LogLevel::Warning,
-						std::format("Agent behaviour log limit of {} per World per {} ticks exceeded; further messages suppressed",
-							logLimit, logWindowTicks));
-					logSuppressionEmitted = true;
-				}
+				addLogMessage(source, sourceId, message.level, message.message);
+				++logCount;
+				logWindowBytes += message.message.size();
+			}
+			if (!logSuppressionEmitted && (instance.scope.logsSuppressed || dropped))
+			{
+				// One fixed-width line per window keeps suppression reporting itself
+				// inside the same host-memory allowance as the logs it reports on.
+				addLogMessage("Agent behaviours", 0, LogLevel::Warning,
+					std::format("Agent behaviour log limit of {} messages / {} bytes per World per {} ticks exceeded; further messages suppressed",
+						logLimit, logWindowByteLimit, logWindowTicks));
+				logSuppressionEmitted = true;
 			}
 		}
 
@@ -1916,7 +2008,7 @@ namespace core
 				instance.randomState = instance.scope.stagedRandomState;
 				commands.insert(commands.end(), instance.scope.commands.begin(),
 					instance.scope.commands.end());
-				publishLogs(instance, instance.scope.logs);
+				publishLogs(instance);
 			}
 			else
 			{
@@ -2014,7 +2106,7 @@ namespace core
 					pushReadOnlyContext(world, instance);
 					auto const result = protectedCall(lua, budget, 2, 0);
 					instance.scope.active = false;
-					if (result.succeeded) publishLogs(instance, instance.scope.logs);
+					if (result.succeeded) publishLogs(instance);
 					else record(instance, AgentBehaviourRuntimeStage::Callback,
 						"on_stop", result);
 					instance.scope.logs.clear();
@@ -2534,7 +2626,8 @@ namespace core
 	{
 		return { mImpl->budget.byteLimit, mImpl->budget.instructionLimit,
 			mImpl->timerLimit, mImpl->callbackLimit, mImpl->commandLimit,
-			mImpl->logLimit, mImpl->logWindowTicks };
+			mImpl->logLimit, mImpl->logWindowTicks, mImpl->logMessageByteLimit,
+			mImpl->logWindowByteLimit };
 	}
 
 	void AgentBehaviourRuntimeAdapter::reset()

@@ -101,6 +101,14 @@ budget being exhausted disable the affected live instance through the same
 protected boundary and produce a structured runtime diagnostic; a refused heap
 growth does not invalidate the World's Lua state.
 
+Agent logging is bounded independently of the Lua heap so a callback cannot
+stage unbounded host memory. Each message is capped at a configurable 4 KiB
+default and truncated on a text boundary with a marker, and each log window
+publishes at most a configurable 100 messages / 256 KiB default. Messages beyond
+the window allowance are never copied, and one bounded warning reports the
+suppression for the window. Logs staged by a callback that later fails are not
+published.
+
 Behaviour modules obtain the immutable versioned host boundary through
 `require("prometheum.v1")` and must return this shape:
 

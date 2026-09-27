@@ -1858,6 +1858,36 @@ return { api_version = 1, factory = function()
   }
 end }
 )lua");
+		auto const oversizedLogging = add("Oversized logging", "oversized-logging.lua", R"lua(
+return { api_version = 1, factory = function()
+  return { on_start = function(context)
+    local message = string.rep("x", 1024 * 1024)
+    for i = 1, 300 do context.log(message) end
+  end }
+end }
+)lua");
+		auto const exactLogging = add("Exact logging", "exact-logging.lua", R"lua(
+return { api_version = 1, factory = function()
+  return { on_start = function(context)
+    for i = 1, 100 do context.log("line-" .. i) end
+  end }
+end }
+)lua");
+		auto const failingLogging = add("Failing logging", "failing-logging.lua", R"lua(
+return { api_version = 1, factory = function()
+  return { on_start = function(context)
+    context.log("before-failure")
+    error("logged then failed")
+  end }
+end }
+)lua");
+		auto const multibyteLogging = add("Multibyte logging", "multibyte-logging.lua", R"lua(
+return { api_version = 1, factory = function()
+  return { on_start = function(context)
+    context.log(string.rep("\xc3\xa9", 50))
+  end }
+end }
+)lua");
 
 		std::ostringstream digest;
 		{
@@ -1901,7 +1931,9 @@ end }
 				&& defaults.commandsPerCallback == 32u
 				&& defaults.timersPerInstance == 256u
 				&& defaults.logMessagesPerWindow == 100u
-				&& defaults.logWindowTicks == 600u,
+				&& defaults.logWindowTicks == 600u
+				&& defaults.logBytesPerMessage == 4u * 1024u
+				&& defaults.logBytesPerWindow == 256u * 1024u,
 				"Agent behaviour storm defaults changed");
 			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.finishBuild();
@@ -1987,6 +2019,105 @@ end }
 			require(messages.size() == 1 && messages[0].msg == "new-window",
 				"World log allowance did not reset after 600 ticks");
 			digest << "logs:101:1|";
+		}
+
+		{
+			core::World world("Log bytes", 8, 2,
+				{ 64u * 1024u * 1024u, 100'000u, 256u, 10'000u, 32u, 100u, 600u, 64u, 256u });
+			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.finishBuild();
+			auto const agent = world.createAgent("Oversized logger", room, 0, 0.5f);
+			auto const secondAgent = world.createAgent("Second oversized logger", room, 0, 1.5f);
+			world.pauseSimulation();
+			world.attachAgentBehaviourRegistry("storms.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(agent, oversizedLogging,
+				registry->lookupAgentBehaviour(oversizedLogging)->getRevision(), {})
+				&& world.setAgentBehaviourAssignment(secondAgent, oversizedLogging,
+					registry->lookupAgentBehaviour(oversizedLogging)->getRevision(), {})
+				&& world.resumeSimulation() && world.advanceTick(),
+				"Could not run the oversized-log fixture");
+			auto messages = core::consumeLogMessages();
+			require(!messages.empty()
+				&& messages.back().msg.find("further messages suppressed")
+					!= std::string::npos,
+				"Oversized logging did not produce a bounded suppression summary");
+			std::size_t publishedBytes = 0;
+			for (std::size_t index = 0; index + 1 < messages.size(); ++index)
+			{
+				publishedBytes += messages[index].msg.size();
+				require(messages[index].msg.size() == 64
+					&& messages[index].msg.find("(truncated)") != std::string::npos,
+					"An oversized log message was not truncated to the per-message cap");
+			}
+			require(messages.size() == 5 && publishedBytes == 256,
+				"Oversized logging did not respect the per-window byte allowance");
+			digest << "logbytes:" << messages.size() << ':' << publishedBytes << '|';
+		}
+
+		{
+			core::World world("Exact logs", 8, 2);
+			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.finishBuild();
+			auto const agent = world.createAgent("Exact logger", room, 0, 0.5f);
+			world.pauseSimulation();
+			world.attachAgentBehaviourRegistry("storms.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(agent, exactLogging,
+				registry->lookupAgentBehaviour(exactLogging)->getRevision(), {})
+				&& world.resumeSimulation() && world.advanceTick(),
+				"Could not run the exact-log fixture");
+			auto messages = core::consumeLogMessages();
+			bool suppressed = false;
+			for (auto const& message : messages)
+				if (message.msg.find("suppressed") != std::string::npos)
+					suppressed = true;
+			require(messages.size() == 100 && !suppressed,
+				"A callback within the log allowance was reported as suppressed");
+			digest << "exactlogs:" << messages.size() << '|';
+		}
+
+		{
+			core::World world("Failed logs", 8, 2);
+			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.finishBuild();
+			auto const agent = world.createAgent("Failing logger", room, 0, 0.5f);
+			world.pauseSimulation();
+			world.attachAgentBehaviourRegistry("storms.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(agent, failingLogging,
+				registry->lookupAgentBehaviour(failingLogging)->getRevision(), {}),
+				"Could not assign the failing-log fixture");
+			require(world.resumeSimulation() && !world.advanceTick()
+				&& world.isSimulationPaused() && world.getSimulationTick() == 0,
+				"A failed callback did not stop the run before its tick");
+			auto messages = core::consumeLogMessages();
+			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
+			require(messages.empty() && diagnostics.size() == 1
+				&& diagnostics[0].callback == "on_start"
+				&& diagnostics[0].stage == core::AgentBehaviourRuntimeStage::Callback,
+				"Logs from a failed callback were published or the failure was not diagnosed");
+			digest << "faillogs:" << messages.size() << ':' << diagnostics.size() << '|';
+		}
+
+		{
+			core::World world("Log truncation", 8, 2,
+				{ 64u * 1024u * 1024u, 100'000u, 256u, 10'000u, 32u, 100u, 600u, 31u, 1024u });
+			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.finishBuild();
+			auto const agent = world.createAgent("Multibyte logger", room, 0, 0.5f);
+			world.pauseSimulation();
+			world.attachAgentBehaviourRegistry("storms.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(agent, multibyteLogging,
+				registry->lookupAgentBehaviour(multibyteLogging)->getRevision(), {})
+				&& world.resumeSimulation() && world.advanceTick(),
+				"Could not run the multibyte-log fixture");
+			auto messages = core::consumeLogMessages();
+			bool validPrefix = messages.size() == 1 && messages[0].msg.size() == 30;
+			for (std::size_t index = 0; validPrefix && index < 16; index += 2)
+				validPrefix = static_cast<unsigned char>(messages[0].msg[index]) == 0xC3u
+					&& static_cast<unsigned char>(messages[0].msg[index + 1]) == 0xA9u;
+			require(validPrefix
+				&& messages[0].msg.find("(truncated)") != std::string::npos,
+				"A truncated log message split a multi-byte character");
+			digest << "logutf8:" << messages.size() << ':' << messages[0].msg.size() << '|';
 		}
 		return digest.str();
 	}
