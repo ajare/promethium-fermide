@@ -3393,9 +3393,14 @@ namespace core
 						source.b = plan.y; source.c = plan.x;
 						source.d = plan.cellsWide; source.e = plan.levelsHigh;
 					}
+					else if (source.type == ConstructionType::Facade)
+					{
+						source.a = plan.y; source.b = plan.x;
+						source.c = plan.cellsWide; source.d = plan.levelsHigh;
+					}
 					else
 					{
-						diagnostic = "Only rooms and corridors can be resized";
+						diagnostic = "Only rooms, corridors, and Facades can be resized";
 						return false;
 					}
 				}
@@ -5286,13 +5291,28 @@ namespace core
 	World::LocationEditPlan World::planResizeLocation(uint32_t sectorIndex,
 		uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
 	{
+		return planResizeOccupiable(sectorIndex, x, y, cellsWide, levelsHigh,
+			SectorType::Location, "Only rooms and corridors can be resized");
+	}
+
+	World::LocationEditPlan World::planResizeFacade(uint32_t sectorIndex,
+		uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh) const
+	{
+		return planResizeOccupiable(sectorIndex, x, y, cellsWide, levelsHigh,
+			SectorType::Facade, "Only Facades can be resized here");
+	}
+
+	World::LocationEditPlan World::planResizeOccupiable(uint32_t sectorIndex,
+		uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh,
+		SectorType requiredType, string const& refusal) const
+	{
 		LocationEditPlan plan;
 		plan.sectorIndex = sectorIndex;
 		plan.x = x; plan.y = y; plan.cellsWide = cellsWide; plan.levelsHigh = levelsHigh;
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
-			|| mSectors[sectorIndex]->getType() != SectorType::Location)
+			|| mSectors[sectorIndex]->getType() != requiredType)
 		{
-			plan.diagnostic = "Only rooms and corridors can be resized";
+			plan.diagnostic = refusal;
 			return plan;
 		}
 		auto sector = mSectors[sectorIndex];
@@ -5582,14 +5602,17 @@ namespace core
 			&& mSectors[requested.sectorIndex]->getType() == SectorType::Background)
 			return applyBackgroundEdit(requested);
 
-		// A Facade delete re-plans through the Facade path; a Facade resize keeps
-		// refusing through planResizeLocation, which is the ticket #53 decision.
+		// Facade edits re-plan through their type-specific public path, so a stale
+		// Room plan cannot be redirected at a Facade (or vice versa).
 		auto const facade = requested.sectorIndex < mSectors.size() && mSectors[requested.sectorIndex]
 			&& mSectors[requested.sectorIndex]->getType() == SectorType::Facade;
 		LocationEditPlan plan = requested.remove
 			? (facade ? planRemoveFacade(requested.sectorIndex) : planRemoveLocation(requested.sectorIndex))
-			: planResizeLocation(requested.sectorIndex, requested.x, requested.y,
-				requested.cellsWide, requested.levelsHigh);
+			: (facade
+				? planResizeFacade(requested.sectorIndex, requested.x, requested.y,
+					requested.cellsWide, requested.levelsHigh)
+				: planResizeLocation(requested.sectorIndex, requested.x, requested.y,
+					requested.cellsWide, requested.levelsHigh));
 		if (!plan.valid) throw WorldException(this, plan.diagnostic);
 
 		vector<ConstructionRecord> records;

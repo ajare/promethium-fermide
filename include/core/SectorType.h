@@ -30,12 +30,10 @@ namespace core
 	// Shuttle lands on a Facade exactly as it lands on a Room, and the landing
 	// Vertex of a Facade is a VertexType::Location (ticket #52).
 	//
-	// Checks that are about plain Location identity rather than traversal -
-	// the resize affordance, and the type-specific rendering rules - keep
-	// testing SectorType::Location directly.  Deletion is not one of them:
-	// a Facade is occupiable and deletes through its own planRemoveFacade()
-	// with the same Agent-and-object cascade a Room deletion plays, while
-	// Facade resize stays refused (ticket #53).
+	// Type-specific rendering keeps testing SectorType::Location directly.
+	// Footprint editing does not use this helper: a Facade is occupiable and
+	// resizes or deletes through its own plan entry points, with the same
+	// Agent-and-object cascade as a Room while preserving its Facade identity.
 	bool isLocationLike(SectorType type);
 
 } // core

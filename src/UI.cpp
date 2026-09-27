@@ -84,6 +84,7 @@
 #include "AgentDropTargets.h"
 #include "Helpers.h"
 #include "Exceptions.h"
+#include "WorldViewportDrag.h"
 #include "WorldViewportZoom.h"
 
 
@@ -432,6 +433,13 @@ namespace
 				- gUISettings.yOffset
 				- position.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
 		};
+	}
+
+	ImVec2 worldDragMousePosition()
+	{
+		return worldDragPositionInCanvas(ImGui::GetIO().MousePos,
+			{ gUISettings.worldViewportX, gUISettings.worldViewportY },
+			{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight });
 	}
 
 	PegmanTarget getPegmanTarget(shared_ptr<const core::World> const& world,
@@ -1694,7 +1702,7 @@ namespace
 		if (gPaint.dragging)
 		{
 			paletteConsumedMouse = true;
-			paintRectangle = getPaintRectangle(world, io.MousePos);
+			paintRectangle = getPaintRectangle(world, worldDragMousePosition());
 			if (paintRectangle.valid)
 			{
 				auto topLeft = worldToScreen({ (float)paintRectangle.x,
@@ -1869,24 +1877,25 @@ namespace
 		if (gPegman.phase == PalettePhase::Dragging)
 		{
 			paletteConsumedMouse = true;
+			auto const dragMouse = worldDragMousePosition();
 			if (gPegman.item == PaletteItem::Marker)
-				target = getMarkerTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getMarkerTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::Door)
-				target = getDoorTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getDoorTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::BulkheadDoor)
-				target = getBulkheadDoorTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getBulkheadDoorTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::Window)
-				target = getWindowTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getWindowTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::Walkway)
-				target = getWalkwayTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getWalkwayTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::ForceBridge)
-				target = getForceBridgeTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getForceBridgeTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::RoomLadder)
-				target = getRoomLadderTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getRoomLadderTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::PlatformLift)
-				target = getPlatformLiftTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getPlatformLiftTarget(world, dragMouse, canvasPos, canvasSize);
 			else
-				target = getPegmanTarget(world, io.MousePos, canvasPos, canvasSize);
+				target = getPegmanTarget(world, dragMouse, canvasPos, canvasSize);
 			if (!gUISettings.worldPaused) target.diagnostic = "Pause simulation to place objects";
 			if (ImGui::IsKeyPressed(ImGuiKey_Escape) || io.MouseClicked[1]) resetPegman();
 			else if (io.MouseReleased[0])
@@ -5312,10 +5321,7 @@ void renderFacadePanel(shared_ptr<core::World> const& world,
 	// construction, so every wall command against it refuses; showing buttons
 	// that can only ever be disabled would advertise an edit the type forbids.
 	ImGui::TextDisabled("Facades have no walls - the perimeter is open by construction.");
-	// Resizing stays out of scope for Facades (ticket #53): planResizeLocation
-	// refuses one, and the canvas offers no resize affordance. The panel says
-	// so rather than leaving the refusal to be discovered by a dead keypress.
-	ImGui::TextDisabled("Facades cannot be resized - delete and repaint to change the footprint.");
+	ImGui::TextDisabled("Drag the Facade's edges to resize it, or its interior to move it.");
 	ImGui::Separator();
 	if (ImGui::Button("Delete Facade"))
 	{
@@ -7450,6 +7456,7 @@ namespace
 	bool isSectorTypeResizable(core::SectorType type)
 	{
 		return type == core::SectorType::Location
+			|| type == core::SectorType::Facade
 			|| type == core::SectorType::Background
 			|| type == core::SectorType::Lift
 			|| type == core::SectorType::Shuttle
@@ -7523,19 +7530,15 @@ namespace
 			resetAgentMove();
 			return;
 		}
+		auto const dragMouse = worldDragMousePosition();
 		auto target = gAgentMove.originalPosition + core::Vector2{
-			(io.MousePos.x - gAgentMove.pressPosition.x)
+			(dragMouse.x - gAgentMove.pressPosition.x)
 				/ (CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom),
-			-(io.MousePos.y - gAgentMove.pressPosition.y)
+			-(dragMouse.y - gAgentMove.pressPosition.y)
 				/ (CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom) };
 		gAgentMove.preview = getAgentMoveTarget(world, gSelectedAgent, target);
 
 		if (!io.MouseReleased[0]) return;
-		if (!gWorldHovered)
-		{
-			resetAgentMove();
-			return;
-		}
 		if (!gAgentMove.preview)
 		{
 			core::addLogMessage("Agent editor", 0, core::LogLevel::Error,
@@ -7777,9 +7780,10 @@ namespace
 			return;
 		}
 
-		int deltaX = (int)round((io.MousePos.x - gObjectMove.pressPosition.x)
+		auto const dragMouse = worldDragMousePosition();
+		int deltaX = (int)round((dragMouse.x - gObjectMove.pressPosition.x)
 			/ (CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom));
-		int deltaY = (int)round(-(io.MousePos.y - gObjectMove.pressPosition.y)
+		int deltaY = (int)round(-(dragMouse.y - gObjectMove.pressPosition.y)
 			/ (CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom));
 		int targetX = (int)gObjectMove.originalX + deltaX;
 		int targetY = (int)gObjectMove.originalY + deltaY;
@@ -7853,11 +7857,6 @@ namespace
 
 		if (io.MouseReleased[0])
 		{
-			if (!gWorldHovered)
-			{
-				resetObjectMove();
-				return;
-			}
 			if (gObjectMove.preview.x == gObjectMove.originalX
 				&& gObjectMove.preview.y == gObjectMove.originalY
 				&& gObjectMove.preview.previewWidth == gObjectMove.originalWidth
@@ -7887,16 +7886,18 @@ namespace
 			return;
 		}
 
-		// A Background takes the same rectangle gesture as a Location, but its plan
-		// has to come from the Background editor so the Windows which lose it are
-		// named in the consequences rather than silently dropped by the replay.
-		auto const background = gSelectedSector->getType() == core::SectorType::Background;
-		auto previewRectangle = [&world, background](uint32_t sectorIndex,
+		// Backgrounds and Facades take the same rectangle gesture as a Location,
+		// but each uses its type-specific plan so its own cascade and invariants are
+		// preserved during the replay.
+		auto const sectorType = gSelectedSector->getType();
+		auto previewRectangle = [&world, sectorType](uint32_t sectorIndex,
 			uint32_t left, uint32_t bottom, uint32_t width, uint32_t height)
 		{
-			return background
-				? world->planResizeBackground(sectorIndex, left, bottom, width, height)
-				: world->planResizeLocation(sectorIndex, left, bottom, width, height);
+			if (sectorType == core::SectorType::Background)
+				return world->planResizeBackground(sectorIndex, left, bottom, width, height);
+			if (sectorType == core::SectorType::Facade)
+				return world->planResizeFacade(sectorIndex, left, bottom, width, height);
+			return world->planResizeLocation(sectorIndex, left, bottom, width, height);
 		};
 
 		auto hoverEdge = gSectorResize.dragging ? gSectorResize.edge
@@ -7975,9 +7976,10 @@ namespace
 		int bottom = (int)gSectorResize.originalY;
 		int right = left + (int)gSectorResize.originalWidth;
 		int top = bottom + (int)gSectorResize.originalHeight;
-		int deltaX = (int)round((io.MousePos.x - gSectorResize.pressPosition.x)
+		auto const dragMouse = worldDragMousePosition();
+		int deltaX = (int)round((dragMouse.x - gSectorResize.pressPosition.x)
 			/ (CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom));
-		int deltaY = (int)round(-(io.MousePos.y - gSectorResize.pressPosition.y)
+		int deltaY = (int)round(-(dragMouse.y - gSectorResize.pressPosition.y)
 			/ (CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom));
 		int* moving = nullptr;
 		int desired = 0;
@@ -8350,6 +8352,38 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		}
 	}
 
+	// A World-content drag owns a virtual pointer pinned just inside the canvas.
+	// Approaching an edge scrolls the viewport, and the actual scrollbar motion
+	// is folded into delta-based drags so their World target continues moving
+	// even after the physical pointer has left the view.
+	bool const worldContentDrag = io.MouseDown[ImGuiMouseButton_Left]
+		&& (gPaint.dragging || gPegman.phase == PalettePhase::Dragging
+			|| gAgentMove.dragging || gObjectMove.dragging || gSectorResize.dragging);
+	if (worldContentDrag && !gViewPan.dragging)
+	{
+		auto const requested = worldDragScrollDelta(io.MousePos, canvasPos, canvasSize,
+			io.DeltaTime);
+		auto const previousScroll = ImVec2(scrollX, scrollY);
+		scrollX = clamp(scrollX + requested.x, 0.0f, horizontalScrollMax);
+		scrollY = clamp(scrollY + requested.y, 0.0f, verticalScrollMax);
+		auto const applied = ImVec2(scrollX - previousScroll.x,
+			scrollY - previousScroll.y);
+		if (gAgentMove.dragging)
+		{
+			gAgentMove.pressPosition.x -= applied.x;
+			gAgentMove.pressPosition.y += applied.y;
+		}
+		if (gObjectMove.dragging)
+		{
+			gObjectMove.pressPosition.x -= applied.x;
+			gObjectMove.pressPosition.y += applied.y;
+		}
+		if (gSectorResize.dragging)
+		{
+			gSectorResize.pressPosition.x -= applied.x;
+			gSectorResize.pressPosition.y += applied.y;
+		}
+	}
 
 	if (showVerticalScrollbar)
 	{

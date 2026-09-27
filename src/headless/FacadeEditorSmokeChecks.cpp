@@ -16,6 +16,8 @@
 //   carries the new packed colour and a reload replays it
 //   a recolour touches nothing but the Facade it was aimed at
 //   the Background and Facade recolour paths do not cross types
+//   a Facade can be resized and moved while retaining colour, open ends,
+//   hosted objects, Agents, and its persisted footprint
 //   wall add/remove against a Facade refuse with a clear, Facade-naming
 //   diagnostic, both through the can-check and through the throwing command
 //   the Selection panel's gates hold: a Facade is selectable, and no wall
@@ -557,10 +559,72 @@ void applyingAFacadeDeleteRemovesItAndLeavesTheRestStanding()
 		"The surviving Agent did not reload after the Facade delete");
 }
 
-// The deletion paths do not cross types: the Facade plan refuses everything
-// which is not a Facade, and the Location paths keep refusing Facades exactly
-// as they did before - the resize refusal in particular is the ticket #53
-// decision, so it stays put with its diagnostic intact.
+// A Facade uses the same footprint-edit lifecycle as a Room while remaining a
+// Facade: it can expand in both axes, keeps its authored colour and open
+// perimeter, carries hosted objects and Agents when moved, and round-trips the
+// edited construction record.
+void aFacadeCanBeResizedAndMovedLikeARoom()
+{
+	core::World world("Facade footprint edit", 12, 4);
+	while (world.getLayerCount() < 2) world.addLayer();
+	auto const facadeIndex = world.addFacade("Resizable frontage", 1, 0, 1, 3, 2,
+		CORE_ROOM_MAX_HEIGHT, { 23, 67, 109 });
+	world.finishBuild();
+	world.pauseSimulation();
+	world.addSectorMarker(facadeIndex, 0, 1.5f, "Facade marker");
+	auto const agentId = world.createAgent("Facade resident", facadeIndex, 0, 2.0f);
+
+	auto resize = world.planResizeFacade(facadeIndex, 1, 0, 5, 3);
+	require(resize.valid, "Expanding a Facade was refused: " + resize.diagnostic);
+	require(!resize.remove && !resize.move && !resize.requiresConfirmation(),
+		"A harmless Facade expansion produced the wrong edit plan");
+	auto editedIndex = world.applyLocationEdit(resize);
+	auto facade = facadeIn(world, editedIndex);
+	require(facade->getCellX() == 1 && facade->getCellY() == 0
+		&& facade->getCellsWide() == 5 && facade->getLevelsHigh() == 3,
+		"The Facade did not take its expanded footprint");
+	require(facade->getName() == "Resizable frontage"
+		&& facade->getColour() == (core::BackgroundColour{ 23, 67, 109 }),
+		"Resizing changed the Facade's authored appearance");
+	for (uint32_t level = 0; level < facade->getLevelsHigh(); ++level)
+		for (int side = CORE_SIDE_LEFT; side <= CORE_SIDE_RIGHT; ++side)
+			require(facade->getEndType(level, side) == core::SectorEndType::None,
+				"Resizing put a wall on the Facade's open perimeter");
+
+	auto move = world.planResizeFacade(editedIndex, 5, 1, 5, 3);
+	require(move.valid && move.move,
+		"Moving a Facade was refused: " + move.diagnostic);
+	editedIndex = world.applyLocationEdit(move);
+	facade = facadeIn(world, editedIndex);
+	require(facade->getCellX() == 5 && facade->getCellY() == 1,
+		"The Facade did not move to the requested position");
+	auto const agent = world.lookupAgent(agentId).entity;
+	require(agent != nullptr && agent->getSector() == facade.get()
+		&& agent->getGlobalPosition().x == 7.0f
+		&& agent->getGlobalPosition().y == 1.0f,
+		"The Facade's Agent did not move with its Sector");
+	bool foundMarker = false;
+	for (uint32_t i = 0; i < facade->getNumObjects(); ++i)
+	{
+		auto const object = facade->getObject(i);
+		if (object && object->getObjectType() == core::SectorObjectType::Marker)
+			foundMarker = object->getCellX() == 6 && object->getCellY() == 1;
+	}
+	require(foundMarker, "The Facade's hosted Marker did not move with it");
+	require(world.isTraversalTopologyValid(),
+		"The Facade footprint edits left invalid topology: " + world.getTopologyDiagnostic());
+
+	core::World reloaded("Facade footprint edit", 1, 1);
+	loadInto(reloaded, serializeWorld(world));
+	auto const after = facadeIn(reloaded, editedIndex);
+	require(after->getCellX() == 5 && after->getCellY() == 1
+		&& after->getCellsWide() == 5 && after->getLevelsHigh() == 3
+		&& after->getColour() == (core::BackgroundColour{ 23, 67, 109 }),
+		"The edited Facade footprint did not survive save and reload");
+}
+
+// The Facade entry points do not cross types, and the Location entry points
+// continue to refuse Facades even though both share the same edit machinery.
 void theDeletionPlansDoNotCrossTypes()
 {
 	core::World world("Deletion refusal", 12, 3);
@@ -582,17 +646,19 @@ void theDeletionPlansDoNotCrossTypes()
 	auto const outsidePlan = world.planRemoveFacade(world.getNumSectors() + 8);
 	require(!outsidePlan.valid, "An index outside the World accepted the Facade delete plan");
 
-	// The old refusal is untouched: planRemoveLocation still will not delete a
-	// Facade, and planResizeLocation still will not resize one. Deletion has
-	// its own door; resize stays closed.
 	auto const wrongDoor = world.planRemoveLocation(facade);
 	require(!wrongDoor.valid
 		&& wrongDoor.diagnostic == "Only rooms and corridors can be deleted",
 		"planRemoveLocation changed its Facade refusal: " + wrongDoor.diagnostic);
-	auto const resize = world.planResizeLocation(facade, 3, 0, 3, 1);
-	require(!resize.valid
-		&& resize.diagnostic == "Only rooms and corridors can be resized",
-		"planResizeLocation changed its Facade refusal: " + resize.diagnostic);
+	auto const wrongResize = world.planResizeLocation(facade, 3, 0, 3, 1);
+	require(!wrongResize.valid
+		&& wrongResize.diagnostic == "Only rooms and corridors can be resized",
+		"planResizeLocation accepted a Facade: " + wrongResize.diagnostic);
+	auto const roomResize = world.planResizeFacade(room, 0, 0, 3, 1);
+	require(!roomResize.valid && roomResize.diagnostic.find("Facade") != std::string::npos,
+		"A Room accepted the Facade resize plan");
+	auto const backgroundResize = world.planResizeFacade(background, 0, 0, 3, 1);
+	require(!backgroundResize.valid, "A Background accepted the Facade resize plan");
 	require(world.getSector(facade)->getType() == core::SectorType::Facade,
 		"A refused delete or resize changed the Facade");
 	require(world.isTraversalTopologyValid(),
@@ -612,5 +678,6 @@ void runFacadeEditorSmokeChecks()
 	theFacadeDeletionPlanNamesItsAgentsAndHostedObjects();
 	anEmptyFacadeDeletesWithoutConfirmation();
 	applyingAFacadeDeleteRemovesItAndLeavesTheRestStanding();
+	aFacadeCanBeResizedAndMovedLikeARoom();
 	theDeletionPlansDoNotCrossTypes();
 }

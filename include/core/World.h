@@ -910,9 +910,13 @@ namespace core
 		// Constructs a validation candidate with the same dimensions and layer count as this World.
 		std::unique_ptr<World> makeCandidateWorld() const;
 
-		// Shared body of planRemoveLocation and planRemoveFacade: the same
-		// occupiable-removal cascade, gated on the Sector type the caller
-		// allows and refusing anything else with the caller's own diagnostic.
+		// Shared bodies of the Location and Facade footprint edits. They have the
+		// same occupiable cascade, gated on the Sector type each public entry point
+		// permits and refusing anything else with that entry point's diagnostic.
+		LocationEditPlan planResizeOccupiable(uint32_t sectorIndex, uint32_t x,
+			uint32_t y, uint32_t cellsWide, uint32_t levelsHigh,
+			SectorType requiredType, std::string const& refusal) const;
+
 		LocationEditPlan planRemoveOccupiable(uint32_t sectorIndex,
 			SectorType requiredType, std::string const& refusal) const;
 
@@ -1722,11 +1726,13 @@ namespace core
 
 		LocationEditPlan planRemoveLocation(uint32_t sectorIndex) const;
 
-		// A Facade is occupiable, so deleting it goes through the same cascade a
-		// Room deletion plays: the plan names the Agents inside and every hosted
-		// object which goes with it, and the apply rebuilds the rest of the
-		// World around the removal (ticket #53).  Resizing stays out of
-		// scope: planResizeLocation keeps refusing a Facade.
+		// A Facade is occupiable, so resizing and deleting it use the same cascade
+		// as a Room: plans name Agents and hosted objects which no longer fit, and
+		// applying a plan rebuilds the rest of the World around the edit. Separate
+		// entry points keep a Room edit from accidentally targeting a Facade.
+		LocationEditPlan planResizeFacade(uint32_t sectorIndex, uint32_t x, uint32_t y,
+			uint32_t cellsWide, uint32_t levelsHigh) const;
+
 		LocationEditPlan planRemoveFacade(uint32_t sectorIndex) const;
 
 		uint32_t applyLocationEdit(LocationEditPlan const& plan);
