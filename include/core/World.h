@@ -25,6 +25,7 @@
 #include "core/Graph.h"
 #include "core/Log.h"
 #include "core/Simulation.h"
+#include "core/SimulationStepTiming.h"
 #include "core/Coordination.h"
 #include "core/SimulationCoordinator.h"
 #include "core/EntityRegistry.h"
@@ -594,6 +595,7 @@ namespace core
 		EntityRegistry<TraversalPermitId, TraversalPermit> mTraversalPermits;
 
 		uint64_t mSimulationTick{ 0 };
+		SimulationStepTiming mSimulationStepTiming;
 
 		uint64_t mNextEventSequence{ 1 };
 
@@ -2239,6 +2241,12 @@ namespace core
 		void setSimulationTimeScale(double scale);
 		double getSimulationTimeScale() const { return mTimeScale; }
 		double getDeferredSimulationTime() const { return mAccumulatedTime; }
+		// Mean completed tick cost in the trailing wall-clock second, or zero
+		// when no ticks completed. Diagnostic only; includes event observation.
+		double getAverageSimulationStepMicroseconds() const
+		{
+			return mSimulationStepTiming.averageMicroseconds();
+		}
 		static constexpr uint32_t getMaxTicksPerUpdate() { return 600; }
 
 		std::vector<SimulationEvent> consumeSimulationEvents();

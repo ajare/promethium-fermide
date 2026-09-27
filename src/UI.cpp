@@ -4888,6 +4888,12 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 
 void renderToolbar(shared_ptr<core::World> world)
 {
+	auto const averageStepMilliseconds =
+		std::round(world->getAverageSimulationStepMicroseconds() / 100.0) / 10.0;
+	ImGui::Text("Simulation: %.1f ms / step", averageStepMilliseconds);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Average completed core tick time over the last second; excludes rendering.");
+
 	ImGui::SetNextItemWidth(95.0f);
 	auto speed = std::format("{:g}x", world->getSimulationTimeScale());
 	if (ImGui::BeginCombo("##SimulationSpeed", speed.c_str()))

@@ -468,6 +468,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(pf-simulation-step-timing-checks src/headless/SimulationStepTimingChecks.cpp)
+    target_compile_features(pf-simulation-step-timing-checks PRIVATE cxx_std_20)
+    target_include_directories(pf-simulation-step-timing-checks PRIVATE "${PF_INCLUDE_DIR}")
+    pf_apply_high_analysis(pf-simulation-step-timing-checks)
+    add_test(NAME simulation-step-timing COMMAND pf-simulation-step-timing-checks)
+
     add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
     target_compile_features(pf-occupant-packing-checks PRIVATE cxx_std_20)
     target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
