@@ -338,6 +338,78 @@ return { api_version = 1, factory = function() return {} end }
 			"A refused scratch allocation corrupted later Lua state creation");
 	}
 
+	// #188: a memory budget below what the sandbox needs must be refused with a
+	// structured result (or a controlled World construction failure), and a
+	// budget near the floor must still construct and run an ordinary behaviour
+	// without process termination.
+	void insufficientMemoryBudgetsAreRejectedOrContained()
+	{
+		auto const validSource =
+			"return { api_version = 1, factory = function() return {} end }\n";
+		core::AgentBehaviourRuntimeLimits tiny;
+		tiny.memoryBytes = 8192;
+		auto rejected = core::AgentBehaviourRuntimeAdapter::preflightModule(
+			"headless.behaviours", "valid.lua", validSource, {}, tiny);
+		require(!rejected.loaded
+			&& rejected.failure == core::AgentBehaviourRuntimeFailure::ConversionError
+			&& rejected.diagnostic.find("minimum") != std::string::npos
+			&& rejected.diagnostic.find("8192") != std::string::npos,
+			"A below-minimum scratch memory budget was not refused with a structured diagnostic");
+
+		for (auto const memoryBytes : { size_t{ 1024 }, size_t{ 8192 },
+			size_t{ 16 * 1024 }, size_t{ 32 * 1024 } })
+		{
+			core::AgentBehaviourRuntimeLimits swept;
+			swept.memoryBytes = memoryBytes;
+			auto result = core::AgentBehaviourRuntimeAdapter::preflightModule(
+				"headless.behaviours", "valid.lua", validSource, {}, swept);
+			require(!result.loaded && !result.diagnostic.empty(),
+				"A memory budget sweep step was not contained");
+		}
+		auto const defaultsLoaded = core::AgentBehaviourRuntimeAdapter::preflightModule(
+			"headless.behaviours", "valid.lua", validSource);
+		require(defaultsLoaded.loaded,
+			"The default scratch memory budget stopped preflighting a valid module");
+
+		bool threw = false;
+		try
+		{
+			core::World tinyWorld("Tiny budget", 4, 2, { size_t{ 8192 } });
+			(void)tinyWorld;
+		}
+		catch (std::invalid_argument const&)
+		{
+			threw = true;
+		}
+		require(threw,
+			"A below-minimum World memory budget did not fail as a controlled construction error");
+
+		TemporaryDirectory temporary;
+		auto const package = temporary.path / "tight.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeText(package / "trivial.lua",
+			"return { api_version = 1, factory = function() return { on_start = function() end } end }\n");
+		auto const behaviour = registry->addAgentBehaviour("Trivial", "trivial.lua", {});
+		require(registry->lookupAgentBehaviour(behaviour)->getModuleStatus()
+				== core::AgentBehaviourModuleStatus::Loaded,
+			"The tight-budget fixture did not preflight");
+
+		core::World world("Tight budget", 8, 2, { 128u * 1024u, 100'000u });
+		auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
+		world.finishBuild();
+		auto const agent = world.createAgent("Walker", room, 0, 0.5f);
+		world.pauseSimulation();
+		world.attachAgentBehaviourRegistry("tight.behaviours", registry);
+		require(world.setAgentBehaviourAssignment(agent, behaviour,
+			registry->lookupAgentBehaviour(behaviour)->getRevision(), {}),
+			"Could not assign the tight-budget fixture");
+		require(world.resumeSimulation() && world.advanceTick()
+			&& world.consumeAgentBehaviourRuntimeDiagnostics().empty(),
+			"An ordinary behaviour startup near the memory floor was not contained");
+	}
+
 	void liveLoadsFactoriesAndCallbacksAreContained()
 	{
 		TemporaryDirectory temporary;
@@ -2408,6 +2480,7 @@ void runAgentBehaviourRuntimeSmokeChecks()
 	prohibitedHostSurfacesAreAbsent();
 	customLoaderIsReservedAndImmutable();
 	scratchExecutionIsBudgeted();
+	insufficientMemoryBudgetsAreRejectedOrContained();
 	liveLoadsFactoriesAndCallbacksAreContained();
 	independentStartupInstancesMoveDeterministically();
 	manifestHelpersHavePrivatePerAgentGraphs();

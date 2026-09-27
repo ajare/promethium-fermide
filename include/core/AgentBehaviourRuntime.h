@@ -136,6 +136,13 @@ namespace core
 	public:
 		static constexpr uint32_t HostApiVersion{ 1 };
 		static constexpr size_t DefaultMemoryBudgetBytes{ 64u * 1024u * 1024u };
+		// Floor below which a scratch or live Lua state cannot reliably build its
+		// deterministic sandbox (state, selected libraries, private environment,
+		// immutable proxies, and opaque metatables). Budgets below this are
+		// rejected up front so the small unprotected scaffolding allocations
+		// always have headroom; genuine exhaustion above the floor is contained
+		// by the protected setup and marshalling boundaries.
+		static constexpr size_t MinimumMemoryBudgetBytes{ 64u * 1024u };
 		static constexpr uint32_t DefaultInstructionBudget{ 100'000u };
 		static constexpr uint32_t DefaultTimersPerInstance{ 256u };
 		static constexpr uint32_t DefaultCallbacksPerBoundary{ 10'000u };

@@ -73,6 +73,26 @@ namespace core
 
 		void pushPrivateEnvironment(lua_State* state);
 		void installDeterministicSandbox(lua_State* state);
+		void ensureOpaqueMetatables(lua_State* state);
+
+		// Thrown by the panic handler when an unprotected Lua allocation fails.
+		// Lua's default panic aborts the process; a host-installed panic must not
+		// return, so it throws and unwinds to the nearest C++ handler instead.
+		// A panic resets the Lua thread but does not leave it safe to reuse, so
+		// the live runtime treats this exception as fatal to its Lua state.
+		struct LuaPanicError : std::runtime_error
+		{
+			using std::runtime_error::runtime_error;
+		};
+
+		int luaPanic(lua_State* state)
+		{
+			size_t length = 0;
+			auto const* message = lua_tolstring(state, -1, &length);
+			lua_settop(state, 0);
+			throw LuaPanicError(message ? std::string(message, length)
+				: "Lua sandbox allocation failed");
+		}
 
 		struct ModuleLoader
 		{
@@ -420,6 +440,47 @@ namespace core
 			lua_setglobal(state, "__prometheum_traceback");
 		}
 
+		// Sandbox setup is the one phase that must run before any protected call
+		// can exist, so it is invoked as a C trampoline inside lua_pcall: a Lua
+		// allocation failure during library opening, environment construction, or
+		// metatable setup becomes a recoverable LUA_ERRMEM status instead of
+		// reaching the (host-installed, throw-based) panic handler. The scratch
+		// variant leaves the private environment on top of the stack.
+		struct ScratchSetup
+		{
+			ModuleLoader* loader;
+			bool opaqueMetatables;
+		};
+
+		int initializeScratchState(lua_State* state)
+		{
+			auto* setup = static_cast<ScratchSetup*>(
+				lua_touserdata(state, lua_upvalueindex(1)));
+			sol::state_view lua(state);
+			openScratchLibraries(lua, *setup->loader);
+			if (setup->opaqueMetatables)
+			{
+				ensureOpaqueMetatables(state);
+				return 0;
+			}
+			pushPrivateEnvironment(state);
+			return 1;
+		}
+
+		int runScratchSetup(lua_State* state, ModuleLoader* loader,
+			bool opaqueMetatables, std::string& message)
+		{
+			ScratchSetup setup{ loader, opaqueMetatables };
+			lua_pushlightuserdata(state, &setup);
+			lua_pushcclosure(state, initializeScratchState, 1);
+			auto const status = lua_pcall(state, 0, opaqueMetatables ? 0 : 1, 0);
+			if (status == LUA_OK) return status;
+			auto const* text = lua_tostring(state, -1);
+			message = text ? text : "Lua sandbox initialization failed";
+			lua_pop(state, 1);
+			return status;
+		}
+
 		size_t diagnosticLine(std::string_view traceback,
 			std::string_view chunkName)
 		{
@@ -507,6 +568,16 @@ namespace core
 				chunkName + ":1: Lua runtime limits must be nonzero", {},
 				AgentBehaviourRuntimeFailure::ConversionError);
 		}
+		if (limits.memoryBytes
+			< AgentBehaviourRuntimeAdapter::MinimumMemoryBudgetBytes)
+		{
+			return failure(normalizedPackage, normalizedModule,
+				chunkName + ":1: Lua memory budget is below the minimum required to initialize the sandbox",
+				std::format("Agent behaviour memory budget of {} bytes is below the {} byte minimum required to initialize the Lua sandbox",
+					limits.memoryBytes,
+					AgentBehaviourRuntimeAdapter::MinimumMemoryBudgetBytes),
+				AgentBehaviourRuntimeFailure::ConversionError);
+		}
 		if (!source.empty() && static_cast<unsigned char>(source.front()) == 0x1b)
 		{
 			return failure(normalizedPackage, normalizedModule,
@@ -522,6 +593,9 @@ namespace core
 			return failure(normalizedPackage, normalizedModule,
 				chunkName + ":1: could not create the budgeted Lua scratch state");
 		}
+		// Never let an unprotected allocation terminate the process: the panic
+		// handler throws a catchable error instead of Lua's default abort.
+		lua_atpanic(ownedState.get(), luaPanic);
 
 		try
 		{
@@ -531,8 +605,24 @@ namespace core
 			loader.packageName = normalizedPackage;
 			for (auto const& helper : helpers)
 				loader.modules.emplace(helper.name, helper);
-			openScratchLibraries(lua, loader);
-			pushPrivateEnvironment(state);
+			std::string setupMessage;
+			auto const setupStatus = runScratchSetup(state, &loader, false,
+				setupMessage);
+			if (setupStatus != LUA_OK)
+			{
+				auto const kind = (setupStatus == LUA_ERRMEM
+					|| budget.memoryLimitExceeded)
+					? AgentBehaviourRuntimeFailure::MemoryBudgetExceeded
+					: AgentBehaviourRuntimeFailure::LuaError;
+				auto const summary = kind
+						== AgentBehaviourRuntimeFailure::MemoryBudgetExceeded
+					? std::string("Agent behaviour memory budget is insufficient to initialize the Lua sandbox")
+					: std::string{};
+				return failure(normalizedPackage, normalizedModule,
+					chunkName + ":1: "
+						+ (summary.empty() ? setupMessage : summary),
+					summary.empty() ? setupMessage : summary, kind);
+			}
 			auto const environment = lua_gettop(state);
 			lua_pushlightuserdata(state, &loader);
 			lua_pushcclosure(state, requireDeclaredModule, 1);
@@ -1641,6 +1731,53 @@ namespace core
 				AgentBehaviourConfigurationValue(configuration));
 		}
 
+		// Per-instance marshalling trampolines are cached in the registry once
+		// per live runtime so the protected marshalling call never pushes a
+		// fresh C closure at the point of use (that push would itself allocate
+		// outside a protected boundary). Each trampoline reads its payload from
+		// the stack rather than from an upvalue.
+		int marshallPrivateEnvironment(lua_State* state)
+		{
+			pushPrivateEnvironment(state);
+			return 1;
+		}
+
+		int marshallConfiguration(lua_State* state)
+		{
+			auto const* configuration = static_cast<AgentBehaviourConfiguration const*>(
+				lua_touserdata(state, 1));
+			pushConfiguration(state, *configuration);
+			return 1;
+		}
+
+		int registerTrampoline(lua_State* state, lua_CFunction trampoline)
+		{
+			lua_pushcfunction(state, trampoline);
+			return luaL_ref(state, LUA_REGISTRYINDEX);
+		}
+
+		bool protectedMarshall(lua_State* state, int trampolineReference,
+			void const* payload, int resultCount, ProtectedCallResult& result)
+		{
+			lua_rawgeti(state, LUA_REGISTRYINDEX, trampolineReference);
+			if (payload) lua_pushlightuserdata(state, const_cast<void*>(payload));
+			auto const status = lua_pcall(state, payload ? 1 : 0, resultCount, 0);
+			if (status == LUA_OK)
+			{
+				result.succeeded = true;
+				return true;
+			}
+			auto const* message = lua_tostring(state, -1);
+			result.failure = (status == LUA_ERRMEM
+				|| scratchBudget(state).memoryLimitExceeded)
+				? AgentBehaviourRuntimeFailure::MemoryBudgetExceeded
+				: AgentBehaviourRuntimeFailure::LuaError;
+			result.diagnostic = message ? message : "Lua marshalling failed";
+			result.traceback = result.diagnostic;
+			lua_pop(state, 1);
+			return false;
+		}
+
 		uint64_t mixRandomSeed(uint64_t value)
 		{
 			value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -1768,6 +1905,12 @@ namespace core
 		uint32_t logCount{ 0 };
 		size_t logWindowBytes{ 0 };
 		bool logSuppressionEmitted{ false };
+		int privateEnvironmentTrampolineReference{ LUA_NOREF };
+		int configurationTrampolineReference{ LUA_NOREF };
+		// Set when the panic handler fires on an unprotected allocation: the Lua
+		// thread has been reset but is no longer safe to reuse, so every instance
+		// is abandoned and no further Lua work is attempted.
+		bool stateFailed{ false };
 		std::unique_ptr<lua_State, StateCloser> state;
 		ModuleLoader hostLoader;
 		std::map<AgentId, Instance> instances;
@@ -1793,10 +1936,38 @@ namespace core
 			, state(lua_newstate(budgetedAllocate, &budget))
 		{
 			if (!state) throw std::runtime_error("Could not create World Lua runtime");
-			sol::state_view lua(state.get());
+			// Never let an unprotected allocation terminate the process.
+			lua_atpanic(state.get(), luaPanic);
 			hostLoader.packageName = "World Agent behaviours";
-			openScratchLibraries(lua, hostLoader);
-			ensureOpaqueMetatables(state.get());
+			std::string setupMessage;
+			auto const setupStatus = runScratchSetup(state.get(), &hostLoader, true,
+				setupMessage);
+			if (setupStatus != LUA_OK)
+				throw std::runtime_error(
+					"Could not initialize World Lua runtime: " + setupMessage);
+			privateEnvironmentTrampolineReference = registerTrampoline(state.get(),
+				marshallPrivateEnvironment);
+			configurationTrampolineReference = registerTrampoline(state.get(),
+				marshallConfiguration);
+		}
+
+		// A panic has already reset the Lua thread; the state is unusable, so
+		// every instance is abandoned without touching it. The registry
+		// references are reclaimed by lua_close on destruction.
+		void poison()
+		{
+			stateFailed = true;
+			for (auto& [agent, instance] : instances)
+			{
+				(void)agent;
+				instance.scope.active = false;
+				instance.scope.commands.clear();
+				instance.moduleLoader.reset();
+			}
+			instances.clear();
+			disabledBehaviours.clear();
+			pendingLifecycleOutcomes.clear();
+			callbackCount = 0;
 		}
 
 		void release(Instance& instance)
@@ -1834,6 +2005,25 @@ namespace core
 
 		void clear()
 		{
+			if (stateFailed)
+			{
+				// poison() already abandoned every instance; the dead Lua state
+				// must not be touched again. Registry references are reclaimed by
+				// lua_close on destruction.
+				instances.clear();
+				disabledBehaviours.clear();
+				pendingLifecycleOutcomes.clear();
+				diagnostics.clear();
+				observedOutcomeCount = 0;
+				lastObservedSequence = 0;
+				callbackCount = 0;
+				currentTick = 0;
+				logWindow = 0;
+				logCount = 0;
+				logWindowBytes = 0;
+				logSuppressionEmitted = false;
+				return;
+			}
 			for (auto& [agent, instance] : instances)
 			{
 				(void)agent;
@@ -1890,7 +2080,15 @@ namespace core
 			}
 			auto const chunk = lua_gettop(lua);
 
-			pushPrivateEnvironment(lua);
+			ProtectedCallResult environmentResult;
+			if (!protectedMarshall(lua, privateEnvironmentTrampolineReference,
+				nullptr, 1, environmentResult))
+			{
+				record(definition, AgentBehaviourRuntimeStage::ModuleLoad, {},
+					environmentResult);
+				lua_settop(lua, base);
+				return false;
+			}
 			auto const environment = lua_gettop(lua);
 			lua_pushvalue(lua, environment);
 			instance.environmentReference = luaL_ref(lua, LUA_REGISTRYINDEX);
@@ -1935,7 +2133,15 @@ namespace core
 				return conversionFailure(AgentBehaviourRuntimeStage::Factory,
 					"Agent behaviour module factory is invalid");
 
-			pushConfiguration(lua, definition.assignment->configuration);
+			ProtectedCallResult configurationResult;
+			if (!protectedMarshall(lua, configurationTrampolineReference,
+				&definition.assignment->configuration, 1, configurationResult))
+			{
+				record(definition, AgentBehaviourRuntimeStage::Factory, {},
+					configurationResult);
+				lua_settop(lua, base);
+				return false;
+			}
 			lua_pushvalue(lua, -1);
 			instance.configurationReference = luaL_ref(lua, LUA_REGISTRYINDEX);
 			auto const factoryCalled = protectedCall(lua, budget, 1, 1);
@@ -2624,6 +2830,9 @@ namespace core
 	{
 		if (!limitsAreValid(limits))
 			throw std::invalid_argument("Agent behaviour runtime limits must be nonzero");
+		if (limits.memoryBytes < MinimumMemoryBudgetBytes)
+			throw std::invalid_argument(
+				"Agent behaviour memory budget is below the minimum required to initialize the Lua sandbox");
 		mImpl = std::make_unique<Impl>(limits);
 	}
 
@@ -2746,6 +2955,7 @@ namespace core
 	bool AgentBehaviourRuntimeAdapter::runBoundary(World& world)
 	{
 		if (world.mCurrentPhase != SimulationPhase::None) return true;
+		if (mImpl->stateFailed) return true;
 		auto const diagnosticsBefore = mImpl->diagnostics.size();
 		std::vector<Impl::Definition> definitions;
 		Impl::SourcePack sources;
@@ -2777,6 +2987,17 @@ namespace core
 			mImpl->currentTick = world.mSimulationTick;
 			mImpl->synchronize(world, registry.get(), sources, definitions);
 			mImpl->runBoundaryCallbacks(world);
+		}
+		catch (LuaPanicError const& error)
+		{
+			// The panic handler fired on an unprotected allocation. Lua has reset
+			// the thread but it is not safe to reuse, so the runtime is abandoned
+			// and every behaviour instance is disabled for the rest of the run.
+			mImpl->diagnostics.push_back({
+				AgentBehaviourRuntimeFailure::MemoryBudgetExceeded,
+				AgentBehaviourRuntimeStage::Callback, {}, {}, world.mSimulationTick,
+				{}, {}, {}, {}, {}, error.what(), error.what() });
+			mImpl->poison();
 		}
 		catch (std::exception const& error)
 		{
@@ -2819,6 +3040,7 @@ namespace core
 
 	void AgentBehaviourRuntimeAdapter::observeOutcome(SimulationEvent const& event)
 	{
+		if (mImpl->stateFailed) return;
 		Impl::PendingOutcome outcome;
 		AgentId agent;
 		outcome.sequence = event.sequence;
@@ -2862,6 +3084,7 @@ namespace core
 	void AgentBehaviourRuntimeAdapter::observeActivation(
 		SimulationEvent const& event)
 	{
+		if (mImpl->stateFailed) return;
 		if (event.type != SimulationEventType::AgentActivated
 			&& event.type != SimulationEventType::AgentDeactivated) return;
 		Impl::PendingOutcome outcome;
@@ -2877,6 +3100,7 @@ namespace core
 	void AgentBehaviourRuntimeAdapter::removeInstance(World& world,
 		AgentId agent, AgentBehaviourTeardownReason reason)
 	{
+		if (mImpl->stateFailed) return;
 		mImpl->pendingLifecycleOutcomes.erase(agent);
 		auto found = mImpl->instances.find(agent);
 		if (found == mImpl->instances.end()) return;
@@ -2898,6 +3122,7 @@ namespace core
 	void AgentBehaviourRuntimeAdapter::teardownAll(World& world,
 		AgentBehaviourTeardownReason reason)
 	{
+		if (mImpl->stateFailed) return;
 		for (auto& [agent, instance] : mImpl->instances)
 		{
 			(void)agent;
