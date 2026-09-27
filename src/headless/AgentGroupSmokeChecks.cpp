@@ -255,9 +255,11 @@ namespace
 			"A multi-byte Agent group name one byte past the limit was accepted");
 		require(!world.canAddAgentGroup(std::string("Bad\xFF\xFE"), &diagnostic),
 			"A name that is not valid UTF-8 was accepted as an Agent group name");
-		require(world.canAddAgentGroup("Crew \U0001F6E0"),
+		// Explicit UTF-8 byte sequences, rather than universal character names,
+		// so the bytes do not depend on the compiler's narrow execution charset.
+		require(world.canAddAgentGroup(std::string("Crew \xf0\x9f\x9b\xa0")),  // U+1F6E0, four bytes
 			"A four-byte codepoint was refused in an Agent group name");
-		require(world.canAddAgentGroup("Euro \u20AC"),
+		require(world.canAddAgentGroup(std::string("Euro \xe2\x82\xac")),  // U+20AC, three bytes
 			"A three-byte codepoint was refused in an Agent group name");
 		// An overlong encoding of "/" has the shape of a two-byte sequence but
 		// is not valid UTF-8, and neither is a lone surrogate half.
