@@ -116,6 +116,7 @@ void runFacadeEditorSmokeChecks();
 void runPaletteTraySmokeChecks();
 void runOnboardAgentDeletionSmokeChecks();
 void runViewportCullingSmokeChecks();
+void runViewportZoomSmokeChecks();
 void runZeroSizeLocationSmokeChecks();
 void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
@@ -6269,6 +6270,7 @@ int main(int argc, char** argv)
 		runOnboardAgentDeletionSmokeChecks();
 		runWallRenderSmokeChecks();
 		runViewportCullingSmokeChecks();
+		runViewportZoomSmokeChecks();
 		runZeroSizeLocationSmokeChecks();
 		runIsolatedSectorPathingSmokeChecks();
 		runPathfindingWorkspaceSmokeChecks();

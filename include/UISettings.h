@@ -36,6 +36,10 @@ struct UISettings
 
 	bool renderAgentDebug{ true };
 
+	// Scale multiplier used to present the World canvas. Values greater than one
+	// zoom in; editor chrome is not scaled.
+	float worldZoom{ 1.0f };
+
 	float xOffset{ 32 };
 
 	float yOffset{ 32 };

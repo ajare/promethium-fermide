@@ -94,8 +94,8 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 
 void transformPosition(core::Vector2& p)
 {
-	p.x *= CORE_CELL_WIDTH_PIXELS;
-	p.y *= CORE_LEVEL_HEIGHT_PIXELS;
+	p.x *= CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+	p.y *= CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
 	p.y = gUISettings.worldViewportY + gUISettings.worldViewportHeight - p.y;
 
 	p.x += gUISettings.worldViewportX + gUISettings.xOffset;
@@ -167,7 +167,9 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 
 	const ImColor laneColour(0, 210, 255, 210);
 	const ImColor occupiedColour(255, 170, 0, 230);
-	const float slotRadius = max(5.0f, CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * 0.35f);
+	const float slotRadius = max(5.0f,
+		CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * 0.35f)
+		* gUISettings.worldZoom;
 
 	// Door queue geometry belongs to one approach layer, so only show the visible
 	// side. A selected Ladder is different: its two approach lanes are its lower
@@ -233,13 +235,15 @@ void renderGrid(shared_ptr<const core::World> const& world, ImColor const& colou
 	// when the canvas is larger than the world.
 	for (uint32_t x = 0; x <= world->getCellsWide(); ++x)
 	{
-		float screenX = topLeft.x + x * CORE_CELL_WIDTH_PIXELS;
+		float screenX = topLeft.x
+			+ x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
 		drawList->AddLine({ screenX, topLeft.y }, { screenX, bottomRight.y }, colour, width);
 	}
 
 	for (uint32_t y = 0; y <= world->getLevelsHigh(); ++y)
 	{
-		float screenY = bottomRight.y - y * CORE_LEVEL_HEIGHT_PIXELS;
+		float screenY = bottomRight.y
+			- y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
 		drawList->AddLine({ topLeft.x, screenY }, { bottomRight.x, screenY }, colour, width);
 	}
 }
@@ -618,7 +622,8 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 	auto const apertureBottom = max(bounds0.y, bounds2.y);
 	auto const screenX = [&](float worldX)
 	{
-		return apertureLeft + (worldX - worldX0) * CORE_CELL_WIDTH_PIXELS;
+		return apertureLeft + (worldX - worldX0) * CORE_CELL_WIDTH_PIXELS
+			* gUISettings.worldZoom;
 	};
 
 	if (style == LayerRenderStyle::Solid)
@@ -982,7 +987,7 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 	ImFont* font = gAgentIconFont ? gAgentIconFont : ImGui::GetFont();
 	auto sourceSize = font->FontSize;
 	auto sourceBounds = font->CalcTextSizeA(sourceSize, FLT_MAX, 0.0f, ICON_FA_MAP_MARKER_ALT);
-	auto fontSize = sourceSize * MarkerIconSize
+	auto fontSize = sourceSize * MarkerIconSize * gUISettings.worldZoom
 		/ max(max(sourceBounds.x, sourceBounds.y), 1.0f);
 	auto size = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MAP_MARKER_ALT);
 	ImVec2 topLeft{ point.x - size.x * 0.5f, point.y - size.y };
@@ -1909,8 +1914,11 @@ void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit
 std::vector<std::shared_ptr<const core::Sector>> viewportSectors(
 	std::shared_ptr<const core::World> const& world, uint32_t layer)
 {
-	return world->getSectorsInBounds(layer, -gUISettings.xOffset, -gUISettings.yOffset,
-		gUISettings.worldViewportWidth, gUISettings.worldViewportHeight);
+	auto const inverseZoom = 1.0f / gUISettings.worldZoom;
+	return world->getSectorsInBounds(layer,
+		-gUISettings.xOffset * inverseZoom, -gUISettings.yOffset * inverseZoom,
+		gUISettings.worldViewportWidth * inverseZoom,
+		gUISettings.worldViewportHeight * inverseZoom);
 }
 
 

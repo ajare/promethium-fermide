@@ -84,6 +84,7 @@
 #include "AgentDropTargets.h"
 #include "Helpers.h"
 #include "Exceptions.h"
+#include "WorldViewportZoom.h"
 
 
 extern spdlog::logger* gLogger;
@@ -413,10 +414,12 @@ namespace
 
 	core::Vector2 screenToWorld(ImVec2 position)
 	{
+		auto const cellWidth = CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+		auto const levelHeight = CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
 		return {
-			(position.x - gUISettings.worldViewportX - gUISettings.xOffset) / CORE_CELL_WIDTH_PIXELS,
+			(position.x - gUISettings.worldViewportX - gUISettings.xOffset) / cellWidth,
 			(gUISettings.worldViewportY + gUISettings.worldViewportHeight - position.y
-				- gUISettings.yOffset) / CORE_LEVEL_HEIGHT_PIXELS
+				- gUISettings.yOffset) / levelHeight
 		};
 	}
 
@@ -424,9 +427,10 @@ namespace
 	{
 		return {
 			gUISettings.worldViewportX + gUISettings.xOffset
-				+ position.x * CORE_CELL_WIDTH_PIXELS,
+				+ position.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
 			gUISettings.worldViewportY + gUISettings.worldViewportHeight
-				- gUISettings.yOffset - position.y * CORE_LEVEL_HEIGHT_PIXELS
+				- gUISettings.yOffset
+				- position.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom
 		};
 	}
 
@@ -829,9 +833,11 @@ namespace
 				// The icon is drawn MarkerFloorLift above the floor, so the hit box covers
 				// the icon and the gap down to the floor the Vertex stays on.
 				auto point = worldToScreen({ worldPosition.x, worldPosition.y + MarkerFloorLift });
-				auto floorPad = MarkerFloorLift * CORE_LEVEL_HEIGHT_PIXELS + 2.0f;
-				if (pointInRect(position, point - ImVec2(MarkerIconSize * 0.5f, MarkerIconSize),
-					point + ImVec2(MarkerIconSize * 0.5f, floorPad))) return object;
+				auto floorPad = MarkerFloorLift * CORE_LEVEL_HEIGHT_PIXELS
+					* gUISettings.worldZoom + 2.0f;
+				auto const iconSize = MarkerIconSize * gUISettings.worldZoom;
+				if (pointInRect(position, point - ImVec2(iconSize * 0.5f, iconSize),
+					point + ImVec2(iconSize * 0.5f, floorPad))) return object;
 			}
 		}
 		return nullptr;
@@ -874,7 +880,8 @@ namespace
 				auto ladder = static_pointer_cast<const core::LadderSectorObject>(object)->getLadder();
 				core::Vector2 min, max;
 				ladder->getCurrentShape(min, max);
-				float tolerance = 5.0f / (float)CORE_CELL_WIDTH_PIXELS;
+				float tolerance = 5.0f
+					/ ((float)CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom);
 				if (worldPosition.x < min.x - tolerance || worldPosition.x > max.x + tolerance
 					|| worldPosition.y < min.y - tolerance || worldPosition.y > max.y + tolerance) continue;
 				// At a shared endpoint the upper segment has the greater base level.
@@ -1954,7 +1961,9 @@ namespace
 					? worldToScreen({ target.sector->getPosition().x + target.localX,
 						target.floorY + MarkerFloorLift })
 					: io.MousePos;
-				drawMarkerIcon(drawList, preview, MarkerIconSize, colour);
+				drawMarkerIcon(drawList, preview,
+					target.sector ? MarkerIconSize * gUISettings.worldZoom : MarkerIconSize,
+					colour);
 			}
 			else if (gPegman.item == PaletteItem::Walkway)
 			{
@@ -2030,9 +2039,11 @@ namespace
 			}
 			else
 			{
+				auto const previewScale = target ? gUISettings.worldZoom : 1.0f;
 				drawPegman(drawList, io.MousePos,
-					CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS,
-					CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS, colour);
+					CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * previewScale,
+					CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
+					colour);
 			}
 			if (!target.diagnostic.empty()) ImGui::SetTooltip("%s", target.diagnostic.c_str());
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -2041,8 +2052,9 @@ namespace
 		{
 			auto globalX = gPegman.sector->getPosition().x + gPegman.localX;
 			drawPegman(drawList, worldToScreen({ globalX, gPegman.feetY }),
-				CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS,
-				CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS, yellow);
+				CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
+				CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
+				yellow);
 		}
 
 		gPegmanConsumesLeftMouse = gSectorResize.dragging || gObjectMove.dragging
@@ -4846,6 +4858,21 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 	ImGui::SameLine();
 	imgui::ToggleButton("Agent Debug", "Agent debug", &gUISettings.renderAgentDebug);
 
+	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+	ImGui::SetNextItemWidth(80.0f);
+	auto const zoomLabel = std::format("{:g}x", gUISettings.worldZoom);
+	if (ImGui::BeginCombo("##WorldZoom", zoomLabel.c_str()))
+	{
+		for (float zoom : { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f })
+		{
+			if (ImGui::Selectable(std::format("{:g}x", zoom).c_str(),
+				zoom == gUISettings.worldZoom))
+				gUISettings.worldZoom = zoom;
+		}
+		ImGui::EndCombo();
+	}
+	if (ImGui::IsItemHovered()) ImGui::SetTooltip("World zoom");
+
 	ImGui::End();
 }
 
@@ -7497,8 +7524,10 @@ namespace
 			return;
 		}
 		auto target = gAgentMove.originalPosition + core::Vector2{
-			(io.MousePos.x - gAgentMove.pressPosition.x) / CORE_CELL_WIDTH_PIXELS,
-			-(io.MousePos.y - gAgentMove.pressPosition.y) / CORE_LEVEL_HEIGHT_PIXELS };
+			(io.MousePos.x - gAgentMove.pressPosition.x)
+				/ (CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom),
+			-(io.MousePos.y - gAgentMove.pressPosition.y)
+				/ (CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom) };
 		gAgentMove.preview = getAgentMoveTarget(world, gSelectedAgent, target);
 
 		if (!io.MouseReleased[0]) return;
@@ -7748,8 +7777,10 @@ namespace
 			return;
 		}
 
-		int deltaX = (int)round((io.MousePos.x - gObjectMove.pressPosition.x) / CORE_CELL_WIDTH_PIXELS);
-		int deltaY = (int)round(-(io.MousePos.y - gObjectMove.pressPosition.y) / CORE_LEVEL_HEIGHT_PIXELS);
+		int deltaX = (int)round((io.MousePos.x - gObjectMove.pressPosition.x)
+			/ (CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom));
+		int deltaY = (int)round(-(io.MousePos.y - gObjectMove.pressPosition.y)
+			/ (CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom));
 		int targetX = (int)gObjectMove.originalX + deltaX;
 		int targetY = (int)gObjectMove.originalY + deltaY;
 		int targetWidth = (int)gObjectMove.originalWidth;
@@ -7944,8 +7975,10 @@ namespace
 		int bottom = (int)gSectorResize.originalY;
 		int right = left + (int)gSectorResize.originalWidth;
 		int top = bottom + (int)gSectorResize.originalHeight;
-		int deltaX = (int)round((io.MousePos.x - gSectorResize.pressPosition.x) / CORE_CELL_WIDTH_PIXELS);
-		int deltaY = (int)round(-(io.MousePos.y - gSectorResize.pressPosition.y) / CORE_LEVEL_HEIGHT_PIXELS);
+		int deltaX = (int)round((io.MousePos.x - gSectorResize.pressPosition.x)
+			/ (CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom));
+		int deltaY = (int)round(-(io.MousePos.y - gSectorResize.pressPosition.y)
+			/ (CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom));
 		int* moving = nullptr;
 		int desired = 0;
 		switch (gSectorResize.edge)
@@ -8250,31 +8283,20 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	ImGui::PopStyleVar();
 
 	ImVec2 canvasPos = ImGui::GetCursorScreenPos();
-	ImVec2 canvasSize = ImGui::GetContentRegionAvail();
-	canvasSize.x = max(canvasSize.x, 1.0f);
-	canvasSize.y = max(canvasSize.y, 1.0f);
 
 	auto const& style = ImGui::GetStyle();
 	float const scrollbarThickness = ImGui::GetFrameHeight();
 	float const horizontalScrollbarSpace = scrollbarThickness + style.ItemSpacing.y;
 	float const verticalScrollbarSpace = scrollbarThickness + style.ItemSpacing.x;
-	float const worldWidth = (float)world->getCellsWide() * (float)CORE_CELL_WIDTH_PIXELS;
-	float const worldHeight = (float)world->getLevelsHigh() * (float)CORE_LEVEL_HEIGHT_PIXELS;
-
-	bool showHorizontalScrollbar = worldWidth > canvasSize.x;
-	bool showVerticalScrollbar = worldHeight > canvasSize.y;
-	// One scrollbar reduces the other axis, which can make the other scrollbar necessary.
-	if (showHorizontalScrollbar && worldHeight > canvasSize.y - horizontalScrollbarSpace)
-		showVerticalScrollbar = true;
-	if (showVerticalScrollbar && worldWidth > canvasSize.x - verticalScrollbarSpace)
-		showHorizontalScrollbar = true;
-
-	if (showHorizontalScrollbar)
-		canvasSize.y = max(canvasSize.y - horizontalScrollbarSpace, 1.0f);
-	if (showVerticalScrollbar)
-		canvasSize.x = max(canvasSize.x - verticalScrollbarSpace, 1.0f);
-	float const horizontalScrollMax = max(worldWidth - canvasSize.x, 0.0f);
-	float const verticalScrollMax = max(worldHeight - canvasSize.y, 0.0f);
+	auto const layout = worldViewportLayout(ImGui::GetContentRegionAvail(),
+		{ (float)world->getCellsWide() * (float)CORE_CELL_WIDTH_PIXELS,
+			(float)world->getLevelsHigh() * (float)CORE_LEVEL_HEIGHT_PIXELS },
+		gUISettings.worldZoom, horizontalScrollbarSpace, verticalScrollbarSpace);
+	auto const canvasSize = layout.canvasSize;
+	bool const showHorizontalScrollbar = layout.horizontalScrollbar;
+	bool const showVerticalScrollbar = layout.verticalScrollbar;
+	float const horizontalScrollMax = layout.scrollMaximum.x;
+	float const verticalScrollMax = layout.scrollMaximum.y;
 
 	gUISettings.worldViewportX = canvasPos.x;
 	gUISettings.worldViewportY = canvasPos.y;
@@ -8288,6 +8310,16 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 
 	static float scrollX = 0.0f;
 	static float scrollY = 0.0f;
+	static float previousZoom = gUISettings.worldZoom;
+	if (previousZoom != gUISettings.worldZoom)
+	{
+		// Preserve the same World-space origin when the scale changes. The new
+		// maxima below still clamp it when zooming far enough out to remove a bar.
+		auto const ratio = gUISettings.worldZoom / previousZoom;
+		scrollX *= ratio;
+		scrollY *= ratio;
+		previousZoom = gUISettings.worldZoom;
+	}
 
 	// Drag-scrolling the view. The gesture is claimed by the modifiers held
 	// when the button goes down, so the click never reaches the world or the
@@ -8317,6 +8349,7 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 			scrollY = clamp(gViewPan.scrollAtPress.y - drag.y, 0.0f, verticalScrollMax);
 		}
 	}
+
 
 	if (showVerticalScrollbar)
 	{
@@ -8361,7 +8394,8 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		// agents over sector objects, and sector objects over their owning sector.
 		// While picking an agent's path destination only vertices are selectable,
 		// with a slightly enlarged target radius to make them easier to pick.
-		float vertexRadius = RENDER_VERTEX_SIZE / (float)CORE_LEVEL_HEIGHT_PIXELS;
+		float vertexRadius = RENDER_VERTEX_SIZE
+			/ ((float)CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom);
 		if (gSelectingAgentPathDestination) vertexRadius *= 1.5f;
 		if (gUISettings.renderGraph)
 			gHoveredVertex = graph->getVertexAtPosition(gUISettings.visibleLayer, mousePos.x,
@@ -8437,8 +8471,8 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 			auto position = core::Vector2{ preview.sector->getPosition().x + preview.localX,
 				preview.floorY };
 			drawPegman(drawList, worldToScreen(position),
-				CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS,
-				CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS,
+				CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
+				CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
 				IM_COL32(255, 255, 0, 255));
 		}
 		else if (!preview.diagnostic.empty()) ImGui::SetTooltip("%s", preview.diagnostic.c_str());

@@ -373,6 +373,7 @@ add_executable(prometheum-fermide-headless
     src/headless/ThresholdLayerOverlapSmokeChecks.cpp
     src/headless/WallRenderSmokeChecks.cpp
     src/headless/ViewportCullingSmokeChecks.cpp
+    src/headless/ViewportZoomSmokeChecks.cpp
     src/headless/WindowLayerSmokeChecks.cpp
     src/headless/WindowIntoBackgroundSmokeChecks.cpp
     src/headless/WindowMultiBackgroundSmokeChecks.cpp
