@@ -8075,6 +8075,12 @@ namespace core
 		return mSimulationCoordinator.cancelInteraction(id);
 	}
 
+	EntityRemovalResult World::removeInteractionRequest(InteractionRequestId id)
+	{
+		invalidateSimulationSnapshot();
+		return mSimulationCoordinator.removeInteractionRequest(id);
+	}
+
 	DeviceOperationId World::createDeviceOperation(string const& name, AgentId requester)
 	{
 		invalidateSimulationSnapshot();

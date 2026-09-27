@@ -89,6 +89,8 @@ Interaction is requested with `InteractionPointId` and `AgentId`. Bindings conta
 
 Callers observe immutable snapshots and operation states (`Pending`, `Running`, and terminal outcomes) instead of receiving device-completion callbacks. UI interaction resolves the stable ID from a physical button and submits the request through `World`; rendering reads physical state without mutating simulation objects.
 
+Terminal requests and operations are coordination records, not history. Once no live owner still names one - a point's queue, a traversal's active preparation, an Agent's early door press, another request, or a traversal's preparation operation - the tick boundary retires it and publishes `InteractionRequestRemoved` or `DeviceOperationRemoved`. A waiting traversal therefore always observes its result before the record can go, while a caller that needs a durable outcome reads the terminal event or the live snapshot rather than a registry lookup after the fact (ADR 0013).
+
 ## Ownership and topology
 
 `World` is the authoritative lifetime owner for migrated entities. Relationships use typed IDs rather than owning or ambiguous raw pointers. Removing an entity invalidates its handle and cleans dependent ownership.

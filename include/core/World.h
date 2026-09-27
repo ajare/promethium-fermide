@@ -2065,6 +2065,8 @@ namespace core
 
 		bool cancelInteraction(InteractionRequestId id);
 
+		EntityRemovalResult removeInteractionRequest(InteractionRequestId id);
+
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 
 		EntityLookup<DeviceOperation> lookupDeviceOperation(DeviceOperationId id);

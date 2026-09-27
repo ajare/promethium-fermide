@@ -230,6 +230,35 @@ namespace
 		return phaseEventCount == ticks * std::size(expected);
 	}
 
+	// Terminal interaction requests are retired once no live owner names them
+	// (#183), so a scenario which wants to assert an outcome reads the published
+	// event stream instead of looking the hot-registry record up after the fact.
+	// One drain collects every requested outcome together.
+	std::map<core::InteractionRequestId, core::InteractionResult> observedInteractionResults(
+		core::World& world, std::vector<core::InteractionRequestId> const& ids)
+	{
+		std::map<core::InteractionRequestId, core::InteractionResult> results;
+		for (auto id : ids) results.emplace(id, core::InteractionResult::Pending);
+		for (auto const& event : world.consumeSimulationEvents())
+		{
+			if (event.type != core::SimulationEventType::InteractionRequestChanged
+				&& event.type != core::SimulationEventType::InteractionRequestAdded)
+			{
+				continue;
+			}
+			if (event.interactionRequest.result == core::InteractionResult::Pending) continue;
+			auto found = results.find(event.interactionRequest.id);
+			if (found != results.end()) found->second = event.interactionRequest.result;
+		}
+		return results;
+	}
+
+	core::InteractionResult observedInteractionResult(core::World& world,
+		core::InteractionRequestId id)
+	{
+		return observedInteractionResults(world, { id }).at(id);
+	}
+
 	bool accumulatedRenderTimeAdvancesWholeTicksOnly()
 	{
 		core::World world("Accumulator check", 1, 1);
@@ -1229,17 +1258,63 @@ namespace
 		}
 
 		world.advanceTicks(3);
-		first = world.lookupInteractionRequest(firstRequest);
-		second = world.lookupInteractionRequest(secondRequest);
+		// Both requests reached a terminal outcome and were retired with their
+		// shared operation, so the outcomes come from the published events.
+		auto const results = observedInteractionResults(world, { firstRequest, secondRequest });
 		auto snapshot = world.getSimulationSnapshot();
-		return first && first.entity->getResult() == core::InteractionResult::Cancelled
-			&& second && second.entity->getResult() == core::InteractionResult::Succeeded
+		return results.at(firstRequest) == core::InteractionResult::Cancelled
+			&& results.at(secondRequest) == core::InteractionResult::Succeeded
 			&& !world.getSector(corridorIndex)->areLightsOn()
-			&& snapshot.deviceOperations.size() == 1
-			&& snapshot.deviceOperations.front().hasCommand
-			&& snapshot.deviceOperations.front().command.type == core::DeviceCommandType::SetSectorLights
-			&& snapshot.deviceOperations.front().state == core::DeviceOperationState::Succeeded
+			&& snapshot.deviceOperations.empty()
+			&& snapshot.interactionRequests.empty()
 			&& snapshot.interactionPoints.front().activeRequest == core::InteractionRequestId{};
+	}
+
+	// Ticket #183: a long-running World must keep coordination records bounded by
+	// active work. A single Agent hammering one light switch must not leave a
+	// growing trail of terminal interaction requests and device operations behind.
+	bool repeatedInteractionsRetireTerminalRecords()
+	{
+		core::World world("Interaction retirement", 6, 2);
+		auto corridorIndex = world.addCorridor(0, 0, 5);
+		world.finishBuild();
+		auto sectorId = core::SectorId{ (uint64_t)corridorIndex + 1 };
+		auto agent = world.createAgent("Repeat operator", corridorIndex, 0, 0.5f);
+
+		core::InteractionBinding binding;
+		binding.command = { core::DeviceCommandType::SetSectorLights, sectorId, false };
+		binding.requirement = core::InteractionBindingRequirement::Required;
+		auto point = world.createInteractionPoint("Repeat light control", sectorId,
+			{ 0.5f, 0.0f }, 0.6f, 0.0f, { binding });
+
+		size_t maximumRequests = 0;
+		size_t maximumOperations = 0;
+		for (uint32_t i = 0; i < 200; ++i)
+		{
+			auto request = world.requestInteraction(point, agent);
+			if (!request) return false;
+			world.advanceTicks(4);
+			// Every request must actually reach a terminal outcome, otherwise the
+			// bounded registry would only prove that work never completed.
+			if (observedInteractionResult(world, request) == core::InteractionResult::Pending)
+			{
+				return false;
+			}
+			auto snapshot = world.getSimulationSnapshot();
+			maximumRequests = std::max(maximumRequests, snapshot.interactionRequests.size());
+			maximumOperations = std::max(maximumOperations, snapshot.deviceOperations.size());
+			// At most the request still being observed plus a terminal record awaiting
+			// the next tick boundary may remain; historical traffic may not accumulate.
+			if (snapshot.interactionRequests.size() > 1 || snapshot.deviceOperations.size() > 1)
+			{
+				return false;
+			}
+		}
+
+		world.advanceTicks(4);
+		auto final = world.getSimulationSnapshot();
+		return final.interactionRequests.empty() && final.deviceOperations.empty()
+			&& maximumRequests <= 1 && maximumOperations <= 1;
 	}
 
 	bool singleAgentDoorJourney(core::DoorActivationMode mode)
@@ -1268,11 +1343,16 @@ namespace
 
 		bool observedWaitingForFullOpen = false;
 		bool observedVisibleCrossingLease = false;
+		bool observedDoorOperationSucceeded = false;
 		for (uint32_t i = 0; i < MaximumSimulationTicks && agent->getState() != core::Agent::State::Idle; ++i)
 		{
 			world.advanceTick();
 			auto snapshot = world.getSimulationSnapshot();
 			auto const& resource = snapshot.traversalResources.front();
+			observedDoorOperationSucceeded = observedDoorOperationSucceeded || std::any_of(
+				snapshot.deviceOperations.begin(), snapshot.deviceOperations.end(),
+				[](auto const& operation) { return operation.command.type == core::DeviceCommandType::OpenDoor
+					&& operation.state == core::DeviceOperationState::Succeeded; });
 			if (resource.doorState == core::DoorSnapshotState::Opening
 				&& snapshot.traversalPermits.empty()
 				&& agent->getSector() == world.getSector(fore).get())
@@ -1290,11 +1370,9 @@ namespace
 
 		auto completed = world.getSimulationSnapshot();
 		if (!observedWaitingForFullOpen || !observedVisibleCrossingLease
+			|| !observedDoorOperationSucceeded
 			|| agent->getState() != core::Agent::State::Idle
 			|| agent->getSector() != world.getSector(back).get()
-			|| completed.deviceOperations.size() != 1
-			|| completed.deviceOperations.front().command.type != core::DeviceCommandType::OpenDoor
-			|| completed.deviceOperations.front().state != core::DeviceOperationState::Succeeded
 			|| completed.traversalResources.front().doorActivationMode != mode
 			|| completed.traversalResources.front().openLeaseCount != 0)
 		{
@@ -1628,11 +1706,16 @@ namespace
 
 		bool observedSharedPreparation = false;
 		bool cancelledFirst = false;
+		bool observedSharedOperationSucceeded = false;
 		for (uint32_t i = 0; i < MaximumSimulationTicks
 			&& second->getState() != core::Agent::State::Idle; ++i)
 		{
 			world.advanceTick();
 			auto snapshot = world.getSimulationSnapshot();
+			observedSharedOperationSucceeded = observedSharedOperationSucceeded || std::any_of(
+				snapshot.deviceOperations.begin(), snapshot.deviceOperations.end(),
+				[](auto const& operation) { return operation.command.type == core::DeviceCommandType::OpenDoor
+					&& operation.state == core::DeviceOperationState::Succeeded; });
 			if (!cancelledFirst && snapshot.traversalRequests.size() == 2
 				&& snapshot.interactionRequests.size() == 1
 				&& snapshot.deviceOperations.size() == 1
@@ -1646,15 +1729,11 @@ namespace
 			}
 		}
 
-		auto snapshot = world.getSimulationSnapshot();
 		return observedSharedPreparation && cancelledFirst
+			&& observedSharedOperationSucceeded
 			&& first->getSector() == world.getSector(fore).get()
 			&& second->getState() == core::Agent::State::Idle
-			&& second->getSector() == world.getSector(back).get()
-			&& snapshot.deviceOperations.size() >= 1
-			&& std::any_of(snapshot.deviceOperations.begin(), snapshot.deviceOperations.end(), [](auto const& operation)
-				{ return operation.command.type == core::DeviceCommandType::OpenDoor
-					&& operation.state == core::DeviceOperationState::Succeeded; });
+			&& second->getSector() == world.getSector(back).get();
 	}
 
 	bool remoteDoorWithoutReachableControlIsUnavailable()
@@ -2976,7 +3055,7 @@ namespace
 			{ 3.5f, 0.0f }, 1.0f, 0.0f, { { close, core::InteractionBindingRequirement::Required } });
 		auto closeRequest = world.requestInteraction(point, actor);
 		world.advanceTicks(4);
-		if (world.lookupInteractionRequest(closeRequest).entity->getResult() != core::InteractionResult::Rejected
+		if (observedInteractionResult(world, closeRequest) != core::InteractionResult::Rejected
 			|| !world.releaseDoorOpenLease(created.traversalResource, lease)) return false;
 
 		world.setDoorSensorObservation(created.traversalResource, sensor, core::DoorSensorObservation::Obstruction);
@@ -5457,8 +5536,8 @@ namespace
 		auto failedBestEffort = request.entity->getOperations()[1].first;
 		world.lookupDeviceOperation(failedBestEffort).entity->setState(core::DeviceOperationState::Failed);
 		world.advanceTicks(4);
-		request = world.lookupInteractionRequest(requestId);
-		if (!request || request.entity->getResult() != core::InteractionResult::SucceededWithBestEffortFailure)
+		if (observedInteractionResult(world, requestId)
+			!= core::InteractionResult::SucceededWithBestEffortFailure)
 		{
 			return false;
 		}
@@ -5476,7 +5555,7 @@ namespace
 		world.lookupDeviceOperation(failedRequest.entity->getOperations().front().first).entity->setState(
 			core::DeviceOperationState::Failed);
 		world.advanceTick();
-		return world.lookupInteractionRequest(failedRequestId).entity->getResult() == core::InteractionResult::Failed;
+		return observedInteractionResult(world, failedRequestId) == core::InteractionResult::Failed;
 	}
 
 	struct ScaleObservation
@@ -6343,6 +6422,11 @@ int main(int argc, char** argv)
 		if (!typedLightingInteractionCoalescesAndCancelsByRequester())
 		{
 			std::cerr << "FAIL: typed lighting interaction, coalescing, or requester cancellation failed\n";
+			return 1;
+		}
+		if (!repeatedInteractionsRetireTerminalRecords())
+		{
+			std::cerr << "FAIL: repeated interactions accumulated terminal coordination records\n";
 			return 1;
 		}
 		if (!interactionBindingAggregationIsMeaningful())

@@ -2,6 +2,7 @@
 #include <cmath>
 #include <format>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -319,6 +320,26 @@ namespace core
 		mWorld.mAgentBehaviourRuntime->observeOutcome(event);
 		mWorld.mEvents.push_back(std::move(event));
 		return true;
+	}
+
+	EntityRemovalResult SimulationCoordinator::removeInteractionRequest(InteractionRequestId id)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		auto found = lookupInteractionRequest(id);
+		if (!found)
+		{
+			return { false, found.diagnostic };
+		}
+		auto snapshot = makeInteractionRequestSnapshot(id, *found.entity);
+		mWorld.mInteractionRequests.remove(id);
+
+		SimulationEvent event;
+		event.sequence = mWorld.mNextEventSequence++;
+		event.tick = mWorld.mSimulationTick;
+		event.type = SimulationEventType::InteractionRequestRemoved;
+		event.interactionRequest = std::move(snapshot);
+		mWorld.mEvents.push_back(std::move(event));
+		return { true, {} };
 	}
 
 	DeviceOperationId SimulationCoordinator::createDeviceOperation(string const& name, AgentId requester)
@@ -838,6 +859,77 @@ namespace core
 				mWorld.mEvents.push_back(std::move(event));
 			}
 		}
+	}
+
+	void SimulationCoordinator::retireConsumedCoordination()
+	{
+		mWorld.invalidateSimulationSnapshot();
+
+		// A terminal record is still somebody's unread outcome: the point that
+		// queued the request, the traversal resource waiting on a shared
+		// preparation, or the Agent that pressed a control while passing. Only
+		// when no live owner names it may the record go.
+		std::set<InteractionRequestId> referencedRequests;
+		for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
+		{
+			(void)pointId;
+			if (point->mActiveRequest) referencedRequests.insert(point->mActiveRequest);
+			for (auto requestId : point->mQueue)
+			{
+				if (requestId) referencedRequests.insert(requestId);
+			}
+		}
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (resource->mActivePreparation) referencedRequests.insert(resource->mActivePreparation);
+		}
+		for (auto const& [agentId, agent] : mWorld.mAgents.entries())
+		{
+			(void)agentId;
+			if (agent->mEarlyDoorPressInteraction) referencedRequests.insert(agent->mEarlyDoorPressInteraction);
+		}
+
+		std::vector<InteractionRequestId> retiredRequests;
+		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
+		{
+			if (request->mResult != InteractionResult::Pending && !referencedRequests.contains(id))
+			{
+				retiredRequests.push_back(id);
+			}
+		}
+		std::set<InteractionRequestId> retiring(retiredRequests.begin(), retiredRequests.end());
+
+		// Device operations outlive their request while another live owner - a
+		// request which is staying, or a traversal request still preparing -
+		// names them.
+		std::set<DeviceOperationId> referencedOperations;
+		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
+		{
+			if (retiring.contains(id)) continue;
+			for (auto const& [operationId, requirement] : request->mOperations)
+			{
+				(void)requirement;
+				referencedOperations.insert(operationId);
+			}
+		}
+		for (auto const& [id, request] : mWorld.mTraversalRequests.entries())
+		{
+			(void)id;
+			if (request->mPreparationOperation) referencedOperations.insert(request->mPreparationOperation);
+		}
+
+		std::vector<DeviceOperationId> retiredOperations;
+		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
+		{
+			if (operation->mState == DeviceOperationState::Pending
+				|| operation->mState == DeviceOperationState::Running) continue;
+			if (!referencedOperations.contains(id)) retiredOperations.push_back(id);
+		}
+
+		// Requests first: dropping them releases the operations only they named.
+		for (auto requestId : retiredRequests) removeInteractionRequest(requestId);
+		for (auto operationId : retiredOperations) removeDeviceOperation(operationId);
 	}
 
 } // core

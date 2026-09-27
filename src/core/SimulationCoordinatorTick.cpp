@@ -631,6 +631,11 @@ namespace core
 		mWorld.mTickOperationLimit = mWorld.mDeviceOperations.nextId();
 		mWorld.mRecordingTickChanges = true;
 		++mWorld.mSimulationTick;
+		// A tick boundary is the only safe place to retire terminal records: the
+		// previous tick has already published its transitions and offered every
+		// waiting traversal its chance to observe, and this tick's owners have
+		// not yet started. Records a live owner still names are never retired.
+		retireConsumedCoordination();
 		updateMovementGoals();
 
 		runSimulationPhase(SimulationPhase::ResourceAdvancement);

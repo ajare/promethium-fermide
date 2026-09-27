@@ -158,6 +158,12 @@ namespace core
 
 		bool cancelInteraction(InteractionRequestId id);
 
+		// The counterpart of removeDeviceOperation for a request. A terminal
+		// request is normally retired automatically once nothing live still
+		// names it; this entry point exists for callers which need to drop a
+		// record explicitly.
+		EntityRemovalResult removeInteractionRequest(InteractionRequestId id);
+
 		// Device-operation lifecycle. Commands coalesce: one accepted command is
 		// shared by every requester, and the operation outlives no requester.
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
@@ -694,6 +700,16 @@ namespace core
 		// Releases a cancelling Actor's claim on each operation its request
 		// needed; an operation nobody still wants is cancelled with it.
 		void detachInteractionRequester(InteractionRequest& request);
+
+		// Retires terminal interaction requests and device operations once no
+		// live owner - an interaction point, a traversal resource's active
+		// preparation, an Agent's early door press, another request, or a
+		// traversal request's preparation - still names them. Keeping the hot
+		// registries bounded by active work rather than total historical traffic
+		// (#183) must never erase a result a waiting traversal has not seen, so
+		// the sweep runs at the tick boundary, after the previous tick published
+		// its outcomes and every waiting traversal had its chance to observe.
+		void retireConsumedCoordination();
 
 		// The coordinator owns no state. It reaches the registries it drives
 		// through the World that owns it.
