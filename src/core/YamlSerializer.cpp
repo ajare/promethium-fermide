@@ -1,11 +1,20 @@
 #include "core/YamlSerializer.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <limits>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#	include <process.h>
+#else
+#	include <unistd.h>
+#endif
 
 namespace core
 {
@@ -22,6 +31,50 @@ namespace core
 		{
 			std::error_code ignored;
 			std::filesystem::remove(tempPath, ignored);
+		}
+
+		// #190: a save's temporary file must be uniquely named and created
+		// exclusively. A predictable, shared path may already be a symbolic link
+		// aimed at the destination (or at any other file), so truncating it would
+		// destroy that file before the save commits, and two concurrent saves
+		// would otherwise share one inode.
+		std::uint64_t currentProcessId()
+		{
+#if defined(_WIN32)
+			return static_cast<std::uint64_t>(::_getpid());
+#else
+			return static_cast<std::uint64_t>(::getpid());
+#endif
+		}
+
+		std::filesystem::path temporarySavePath(std::filesystem::path const& destination)
+		{
+			std::filesystem::path directory = destination.parent_path();
+			if (directory.empty())
+			{
+				directory = std::filesystem::path(".");
+			}
+			static std::atomic<std::uint64_t> sequence{ 0 };
+			return directory
+				/ std::format("{}.saving.{}.{}.tmp", destination.filename().string(),
+					currentProcessId(), sequence.fetch_add(1, std::memory_order_relaxed));
+		}
+
+		// Exclusive creation ("x"): the open fails with EEXIST if anything already
+		// occupies the path, and never follows an existing symbolic link, so a save
+		// can only ever write to a file it created itself. The failure code lets
+		// the caller pick a fresh name and retry after an unlikely collision.
+		std::FILE* openExclusiveTemporaryFile(std::filesystem::path const& path, int& errorCode)
+		{
+#if defined(_WIN32)
+			std::FILE* file = nullptr;
+			errorCode = ::_wfopen_s(&file, path.c_str(), L"wbx");
+			return file;
+#else
+			std::FILE* file = std::fopen(path.c_str(), "wbx");
+			errorCode = file != nullptr ? 0 : errno;
+			return file;
+#endif
 		}
 	}
 
@@ -315,10 +368,11 @@ namespace core
 			return;
 		}
 
-		// Install the save transactionally (#62): write a temporary file in the
-		// destination directory, flush and close it with explicit error checks,
-		// and only then atomically replace the destination. A late write failure
-		// keeps the previous file intact and reports failure to the caller.
+		// Install the save transactionally (#62): write a uniquely named,
+		// exclusively created temporary file in the destination directory, flush
+		// and close it with explicit error checks, and only then atomically replace
+		// the destination. A late write failure keeps the previous file intact and
+		// reports failure to the caller (#190).
 		std::string const content = mEmitter.c_str();
 
 		// #92: renaming over a symbolic link would replace the link itself with
@@ -341,55 +395,60 @@ namespace core
 		auto const existingStatus = std::filesystem::status(destination, error);
 		bool const preservePermissions = !error && std::filesystem::is_regular_file(existingStatus);
 
-		std::filesystem::path directory = destination.parent_path();
-		if (directory.empty())
+		// Open a uniquely named temporary file with exclusive creation. The loop
+		// tolerates the rare name collision with another save by choosing a fresh
+		// name; the exclusive open never follows an existing symbolic link at the
+		// temporary path (#190).
+		std::FILE* output = nullptr;
+		std::filesystem::path tempPath;
+		int openError = 0;
+		constexpr int maxOpenAttempts = 64;
+		for (int attempt = 0; attempt < maxOpenAttempts; ++attempt)
 		{
-			directory = std::filesystem::path(".");
-		}
-		std::filesystem::path const tempPath
-			= directory / (destination.filename().string() + ".saving.tmp");
-
-		{
-			std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
-			if (!output)
+			tempPath = temporarySavePath(destination);
+			output = openExclusiveTemporaryFile(tempPath, openError);
+			if (output != nullptr || openError != EEXIST)
 			{
-				throw SerializationException(std::format("Could not open temporary YAML file for writing: {}",
-					tempPath.string()));
+				break;
 			}
+		}
+		if (output == nullptr)
+		{
+			throw SerializationException(std::format("Could not open temporary YAML file for writing: {}",
+				tempPath.string()));
+		}
 
+		{
 			constexpr size_t chunkSize = 64 * 1024;
 			size_t written = 0;
 			while (written < content.size())
 			{
 				auto const chunk = std::min(chunkSize, content.size() - written);
-				output.write(content.data() + written, static_cast<std::streamsize>(chunk));
+				if (std::fwrite(content.data() + written, 1, chunk, output) != chunk)
+				{
+					std::fclose(output);
+					removeTempFile(tempPath);
+					throw SerializationException(std::format("Could not write YAML file: {}", mSource));
+				}
 				written += chunk;
 				if (gWriteFailureAfterBytes != 0 && written >= gWriteFailureAfterBytes)
 				{
-					output.close();
+					std::fclose(output);
 					removeTempFile(tempPath);
 					throw SerializationException(std::format(
 						"Could not write YAML file: {} (write failed after {} bytes)", mSource, written));
-				}
-				if (!output.good())
-				{
-					output.close();
-					removeTempFile(tempPath);
-					throw SerializationException(std::format("Could not write YAML file: {}", mSource));
 				}
 			}
 
 			// A buffered write can still fail here; observing flush and close is
 			// the whole point of writing through an explicit stream.
-			output.flush();
-			if (!output.good())
+			if (std::fflush(output) != 0)
 			{
-				output.close();
+				std::fclose(output);
 				removeTempFile(tempPath);
 				throw SerializationException(std::format("Could not flush YAML file: {}", mSource));
 			}
-			output.close();
-			if (!output.good())
+			if (std::fclose(output) != 0)
 			{
 				removeTempFile(tempPath);
 				throw SerializationException(std::format("Could not close YAML file: {}", mSource));
