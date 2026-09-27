@@ -149,6 +149,60 @@ namespace core
 			lua_sethook(state, nullptr, 0, 0);
 		}
 
+		ScratchBudget& scratchBudget(lua_State* state)
+		{
+			void* userData = nullptr;
+			(void)lua_getallocf(state, &userData);
+			return *static_cast<ScratchBudget*>(userData);
+		}
+
+		bool budgetExhausted(ScratchBudget const& budget)
+		{
+			return budget.instructionLimitExceeded || budget.memoryLimitExceeded;
+		}
+
+		char const* budgetDiagnostic(ScratchBudget const& budget)
+		{
+			return budget.memoryLimitExceeded
+				? "Agent behaviour memory budget exceeded"
+				: "Agent behaviour instruction budget exceeded";
+		}
+
+		int raiseBudgetDiagnostic(lua_State* state, ScratchBudget const& budget)
+		{
+			return luaL_error(state, "%s", budgetDiagnostic(budget));
+		}
+
+		// Lua's own pcall and xpcall can catch the instruction-hook and allocator
+		// budget errors, so a hostile module could retry a caught exhaustion
+		// forever or return a valid contract after exceeding a host budget. The
+		// sandbox replaces them with a wrapper that raises as soon as a sticky
+		// budget flag is set; an outer wrapper re-raises on the way out, so the
+		// failure always reaches the host boundary regardless of nesting.
+		int budgetedProtectedCall(lua_State* state)
+		{
+			auto& budget = scratchBudget(state);
+			if (budgetExhausted(budget)) return raiseBudgetDiagnostic(state, budget);
+			auto const argumentCount = lua_gettop(state);
+			lua_pushvalue(state, lua_upvalueindex(1));
+			lua_insert(state, 1);
+			lua_call(state, argumentCount, LUA_MULTRET);
+			if (budgetExhausted(budget)) return raiseBudgetDiagnostic(state, budget);
+			return lua_gettop(state);
+		}
+
+		void installBudgetedProtectedCall(lua_State* state, char const* name)
+		{
+			lua_getglobal(state, name);
+			if (!lua_isfunction(state, -1) || !lua_iscfunction(state, -1))
+			{
+				lua_pop(state, 1);
+				return;
+			}
+			lua_pushcclosure(state, budgetedProtectedCall, 1);
+			lua_setglobal(state, name);
+		}
+
 		int tracebackHandler(lua_State* state)
 		{
 			auto const* message = lua_tostring(state, 1);
@@ -323,6 +377,8 @@ namespace core
 			lua.open_libraries(sol::lib::base, sol::lib::table, sol::lib::string,
 				sol::lib::math, sol::lib::utf8);
 			auto* state = lua.lua_state();
+			installBudgetedProtectedCall(state, "pcall");
+			installBudgetedProtectedCall(state, "xpcall");
 
 			// The package library is never opened. Replace its require function
 			// with the one reserved host-module loader and remove base functions
@@ -511,6 +567,12 @@ namespace core
 				return failure(normalizedPackage, normalizedModule, error.what(), {},
 					failureKind(budget));
 			}
+			// A protected call inside the module may have swallowed the budget
+			// error, so success alone does not clear the sticky budget flags.
+			if (budgetExhausted(budget))
+				return failure(normalizedPackage, normalizedModule,
+					chunkName + ":1: " + budgetDiagnostic(budget),
+					budgetDiagnostic(budget), failureKind(budget));
 			sol::object exports = moduleResult.get<sol::object>();
 			if (exports.get_type() != sol::type::table)
 			{
@@ -561,6 +623,10 @@ namespace core
 				return failure(normalizedPackage, normalizedModule, error.what(), {},
 					failureKind(budget));
 			}
+			if (budgetExhausted(budget))
+				return failure(normalizedPackage, normalizedModule,
+					chunkName + ":1: " + budgetDiagnostic(budget),
+					budgetDiagnostic(budget), failureKind(budget));
 			sol::object instanceObject = factoryResult.get<sol::object>();
 			if (instanceObject.get_type() != sol::type::table)
 			{
@@ -1121,6 +1187,16 @@ namespace core
 				return result;
 			}
 			lua_remove(state, functionIndex);
+			if (budgetExhausted(budget))
+			{
+				// A protected call inside the sandbox may have caught the budget
+				// error, so a successful host call is not proof the budget held.
+				ProtectedCallResult result;
+				result.failure = failureKind(budget);
+				result.diagnostic = budgetDiagnostic(budget);
+				result.traceback = result.diagnostic;
+				return result;
+			}
 			ProtectedCallResult result;
 			result.succeeded = true;
 			return result;

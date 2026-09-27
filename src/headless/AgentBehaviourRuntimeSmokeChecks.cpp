@@ -258,6 +258,66 @@ return { api_version = 1, factory = function() return {} end }
 			&& excessiveAllocation.traceback.find("memory") != std::string::npos,
 			"A module escaped the scratch-state memory budget");
 
+		// A sandbox pcall can catch the hook and allocator errors, so accepting a
+		// successful outer load is not enough: budget exhaustion is sticky and
+		// terminal even when the Lua code reports success.
+		auto caughtRunaway = preflight(R"lua(
+pcall(function() while true do end end)
+return { api_version = 1, factory = function() return {} end }
+)lua");
+		require(!caughtRunaway.loaded
+			&& caughtRunaway.failure
+				== core::AgentBehaviourRuntimeFailure::InstructionBudgetExceeded,
+			"A module that caught instruction exhaustion was accepted");
+
+		auto nestedCaughtRunaway = preflight(R"lua(
+pcall(function()
+  pcall(function() while true do end end)
+end)
+return { api_version = 1, factory = function() return {} end }
+)lua");
+		require(!nestedCaughtRunaway.loaded
+			&& nestedCaughtRunaway.failure
+				== core::AgentBehaviourRuntimeFailure::InstructionBudgetExceeded,
+			"A nested caught instruction exhaustion escaped the scratch budget");
+
+		// Repro from #185: catching and retrying exhaustion forever must not
+		// prevent the host from regaining control. If this hangs, the fix has
+		// regressed; run it under an external timeout when bisecting old builds.
+		auto retryRunaway = preflight(R"lua(
+while true do
+  pcall(function() while true do end end)
+end
+)lua");
+		require(!retryRunaway.loaded
+			&& retryRunaway.failure
+				== core::AgentBehaviourRuntimeFailure::InstructionBudgetExceeded,
+			"An instruction-exhaustion retry loop escaped the scratch budget");
+
+		auto caughtAllocation = preflight(R"lua(
+pcall(function() local excessive = string.rep("x", 70 * 1024 * 1024) end)
+return { api_version = 1, factory = function() return {} end }
+)lua");
+		require(!caughtAllocation.loaded
+			&& caughtAllocation.failure
+				== core::AgentBehaviourRuntimeFailure::MemoryBudgetExceeded,
+			"A module that caught memory exhaustion was accepted");
+
+		// Ordinary application errors stay catchable: only host budget
+		// exhaustion becomes terminal.
+		auto ordinaryCatch = preflight(R"lua(
+local ok, message = pcall(function() error("expected") end)
+if ok or tostring(message):find("expected") == nil then
+  error("ordinary pcall semantics changed")
+end
+if xpcall(function() error("boom") end, function(text) return text end) then
+  error("ordinary xpcall semantics changed")
+end
+return { api_version = 1, factory = function() return {} end }
+)lua");
+		require(ordinaryCatch.loaded,
+			"Ordinary application errors stopped being catchable with pcall/xpcall");
+
 		auto configured = core::AgentBehaviourRuntimeAdapter::preflightModule(
 			"headless.behaviours", "configured.lua", R"lua(
 local total = 0
@@ -309,6 +369,22 @@ return { api_version = 1, factory = function()
   return { on_start = function() while true do end end }
 end }
 )lua");
+		auto const caughtCallbackBudget = add("Caught callback budget",
+			"caught-callback-budget.lua", R"lua(
+return { api_version = 1, factory = function()
+  return { on_start = function()
+    pcall(function() while true do end end)
+  end }
+end }
+)lua");
+		auto const caughtCallbackAllocation = add("Caught callback allocation",
+			"caught-callback-allocation.lua", R"lua(
+return { api_version = 1, factory = function()
+  return { on_start = function()
+    pcall(function() local excessive = string.rep("x", 70 * 1024 * 1024) end)
+  end }
+end }
+)lua");
 		auto const memoryBudget = add("Memory budget", "memory-budget.lua", R"lua(
 return { api_version = 1, factory = function()
   return { on_start = function()
@@ -331,10 +407,12 @@ return { api_version = 1, factory = function()
 end }
 )lua");
 
-		auto runInstructionStage = [&](core::AgentBehaviourId behaviour,
-			core::AgentBehaviourRuntimeStage expectedStage)
+		auto runBudgetStage = [&](core::AgentBehaviourId behaviour,
+			core::AgentBehaviourRuntimeStage expectedStage,
+			core::AgentBehaviourRuntimeFailure expectedFailure
+				= core::AgentBehaviourRuntimeFailure::InstructionBudgetExceeded)
 		{
-			core::World world("Instruction containment", 6, 2,
+			core::World world("Budget containment", 6, 2,
 				{ 64u * 1024u * 1024u, 1'000u });
 			auto const room = world.addRoom("Room", 0, 0, 0, 6, 1);
 			world.finishBuild();
@@ -343,27 +421,31 @@ end }
 			world.attachAgentBehaviourRegistry("abuse.behaviours", registry);
 			require(world.setAgentBehaviourAssignment(agent, behaviour,
 				registry->lookupAgentBehaviour(behaviour)->getRevision(), {}),
-				"Could not assign an instruction abuse fixture");
+				"Could not assign a budget abuse fixture");
 			require(world.getAgentBehaviourRuntimeLimits().instructionsPerCall == 1'000u,
 				"The per-World instruction limit was not retained");
 			require(world.resumeSimulation(),
-				"Could not resume an instruction abuse fixture");
+				"Could not resume a budget abuse fixture");
 			world.advanceTick();
 			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
 			require(diagnostics.size() == 1
-				&& diagnostics[0].failure
-					== core::AgentBehaviourRuntimeFailure::InstructionBudgetExceeded
+				&& diagnostics[0].failure == expectedFailure
 				&& diagnostics[0].stage == expectedStage
 				&& diagnostics[0].agent == agent
 				&& !world.agentBehaviourOwnsMovement(agent),
-				"Instruction exhaustion escaped, lacked structure, or retained ownership");
+				"Budget exhaustion escaped, lacked structure, or retained ownership");
 		};
-		runInstructionStage(loadBudget,
+		runBudgetStage(loadBudget,
 			core::AgentBehaviourRuntimeStage::ModuleLoad);
-		runInstructionStage(factoryBudget,
+		runBudgetStage(factoryBudget,
 			core::AgentBehaviourRuntimeStage::Factory);
-		runInstructionStage(callbackBudget,
+		runBudgetStage(callbackBudget,
 			core::AgentBehaviourRuntimeStage::Callback);
+		runBudgetStage(caughtCallbackBudget,
+			core::AgentBehaviourRuntimeStage::Callback);
+		runBudgetStage(caughtCallbackAllocation,
+			core::AgentBehaviourRuntimeStage::Callback,
+			core::AgentBehaviourRuntimeFailure::MemoryBudgetExceeded);
 
 		{
 			core::World world("Memory recovery", 8, 2,
