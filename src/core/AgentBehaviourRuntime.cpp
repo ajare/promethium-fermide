@@ -1685,20 +1685,48 @@ namespace core
 			InteractionResult interactionResult{ InteractionResult::Pending };
 		};
 
+		// Registry-owned immutable text. One pack is shared by every Agent in one
+		// boundary and its helper sources are materialized only when at least one
+		// instance must be constructed, so an unchanged tick copies no source.
+		struct SourcePack
+		{
+			std::string packageName;
+			std::vector<AgentBehaviourHelperSource> helpers;
+			bool materialized{ false };
+
+			void materialize(AgentBehaviourRegistry const& registry)
+			{
+				if (materialized) return;
+				materialized = true;
+				helpers.reserve(registry.mHelperModules.size());
+				for (auto const& [name, helper] : registry.mHelperModules)
+				{
+					auto source = registry.mSourceCache.find(
+						helper->getSourceModulePath());
+					if (source == registry.mSourceCache.end()) continue;
+					helpers.push_back({ name, helper->getSourceModulePath(),
+						source->second });
+				}
+			}
+		};
+
+		// A transient, non-owning view of one desired instance. Every referenced
+		// value is owned by the World, its registry, or a boundary-owned
+		// SourcePack and outlives the boundary that builds the view.
 		struct Definition
 		{
 			AgentId agent;
-			std::string agentName;
-			std::string behaviourName;
-			AgentBehaviourAssignment assignment;
+			std::string_view agentName;
+			std::string_view behaviourName;
+			AgentBehaviourAssignment const* assignment{ nullptr };
 			bool active{ true };
 			uint64_t randomSeed{ 0 };
-			std::string registryUuid;
+			std::string_view registryUuid;
 			uint64_t packageRevision{ 0 };
-			std::string packageName;
-			std::string moduleName;
-			std::string source;
-			std::vector<AgentBehaviourHelperSource> helpers;
+			std::string_view packageName;
+			std::string_view moduleName;
+			std::string_view source;
+			std::vector<AgentBehaviourHelperSource> const* helpers{ nullptr };
 		};
 
 		struct Instance
@@ -1787,9 +1815,12 @@ namespace core
 			std::string_view callback, ProtectedCallResult const& result)
 		{
 			diagnostics.push_back({ result.failure, stage, definition.agent,
-				definition.assignment.behaviour, currentTick, definition.agentName,
-				definition.behaviourName, definition.packageName, definition.moduleName,
-				std::string(callback), result.diagnostic, result.traceback });
+				definition.assignment->behaviour, currentTick,
+				std::string(definition.agentName),
+				std::string(definition.behaviourName),
+				std::string(definition.packageName),
+				std::string(definition.moduleName), std::string(callback),
+				result.diagnostic, result.traceback });
 		}
 
 		void record(Instance const& instance, AgentBehaviourRuntimeStage stage,
@@ -1838,8 +1869,9 @@ namespace core
 				lua_settop(lua, base);
 				return false;
 			};
-			auto const chunkName = "@" + definition.packageName + "/"
-				+ definition.moduleName;
+			std::string const chunkName = std::string("@")
+				+ std::string(definition.packageName) + "/"
+				+ std::string(definition.moduleName);
 			budget.memoryLimitExceeded = false;
 			auto const loadStatus = luaL_loadbufferx(lua, definition.source.data(),
 				definition.source.size(), chunkName.c_str(), "t");
@@ -1866,7 +1898,7 @@ namespace core
 			instance.moduleLoader->packageName = definition.packageName;
 			instance.moduleLoader->hostModuleReference = hostLoader.hostModuleReference;
 			instance.moduleLoader->environmentReference = instance.environmentReference;
-			for (auto const& helper : definition.helpers)
+			for (auto const& helper : *definition.helpers)
 				instance.moduleLoader->modules.emplace(helper.name, helper);
 			lua_pushlightuserdata(lua, instance.moduleLoader.get());
 			lua_pushcclosure(lua, requireDeclaredModule, 1);
@@ -1877,7 +1909,7 @@ namespace core
 					"Agent behaviour module has no isolated environment");
 			lua_remove(lua, environment);
 
-			instance.moduleLoader->dependencyChain.push_back(definition.moduleName);
+			instance.moduleLoader->dependencyChain.emplace_back(definition.moduleName);
 			auto const moduleLoaded = protectedCall(lua, budget, 0, 1);
 			instance.moduleLoader->dependencyChain.clear();
 			if (!moduleLoaded.succeeded)
@@ -1903,7 +1935,7 @@ namespace core
 				return conversionFailure(AgentBehaviourRuntimeStage::Factory,
 					"Agent behaviour module factory is invalid");
 
-			pushConfiguration(lua, definition.assignment.configuration);
+			pushConfiguration(lua, definition.assignment->configuration);
 			lua_pushvalue(lua, -1);
 			instance.configurationReference = luaL_ref(lua, LUA_REGISTRYINDEX);
 			auto const factoryCalled = protectedCall(lua, budget, 1, 1);
@@ -1934,8 +1966,8 @@ namespace core
 			return true;
 		}
 
-		void synchronize(World& world,
-			std::vector<Definition> const& definitions)
+		void synchronize(World& world, AgentBehaviourRegistry const* registry,
+			SourcePack& sources, std::vector<Definition> const& definitions)
 		{
 			std::map<AgentId, Definition const*> desired;
 			for (auto const& definition : definitions)
@@ -1945,7 +1977,7 @@ namespace core
 			{
 				auto found = desired.find(iterator->first);
 				if (found != desired.end()
-					&& iterator->second.assignment == found->second->assignment
+					&& iterator->second.assignment == *found->second->assignment
 					&& iterator->second.registryUuid == found->second->registryUuid
 					&& iterator->second.packageRevision == found->second->packageRevision)
 				{
@@ -1960,8 +1992,11 @@ namespace core
 			for (auto const& definition : definitions)
 			{
 				if (instances.contains(definition.agent)) continue;
+				// An unchanged instance needs no source at all; only a new or
+				// changed one materializes the shared registry sources.
+				sources.materialize(*registry);
 				Instance instance;
-				instance.assignment = definition.assignment;
+				instance.assignment = *definition.assignment;
 				instance.agentName = definition.agentName;
 				instance.behaviourName = definition.behaviourName;
 				instance.suspended = !definition.active;
@@ -1971,16 +2006,16 @@ namespace core
 				instance.packageName = definition.packageName;
 				instance.moduleName = definition.moduleName;
 				instance.scope.agent = definition.agent;
-				if (failedBehaviours.contains(definition.assignment.behaviour))
+				if (failedBehaviours.contains(definition.assignment->behaviour))
 					instance.disabled = true;
 				else if (!construct(definition, instance))
 				{
 					instance.disabled = true;
-					failedBehaviours.insert(definition.assignment.behaviour);
+					failedBehaviours.insert(definition.assignment->behaviour);
 					for (auto& [otherAgent, other] : instances)
 					{
 						(void)otherAgent;
-						if (other.assignment.behaviour != definition.assignment.behaviour
+						if (other.assignment.behaviour != definition.assignment->behaviour
 							|| other.disabled) continue;
 						teardownInstance(world, other,
 							AgentBehaviourTeardownReason::InstanceFailure, true);
@@ -2609,16 +2644,10 @@ namespace core
 				world.mAgentBehaviourRuntime->getLimits());
 			prepared->mImpl->currentTick = world.mSimulationTick;
 
-			std::vector<AgentBehaviourHelperSource> helpers;
-			helpers.reserve(registry.mHelperModules.size());
-			for (auto const& [name, helper] : registry.mHelperModules)
-			{
-				auto source = registry.mSourceCache.find(helper->getSourceModulePath());
-				if (source == registry.mSourceCache.end()) continue;
-				helpers.push_back({ name, helper->getSourceModulePath(), source->second });
-			}
+			Impl::SourcePack sources;
 
 			std::vector<Impl::Definition> definitions;
+			bool packageNameResolved = false;
 			for (auto const& [agentId, agent] : world.mAgents.entries())
 			{
 				if (!agent || !agent->getBehaviourAssignment()) continue;
@@ -2636,14 +2665,19 @@ namespace core
 				auto source = registry.mSourceCache.find(
 					behaviour->getSourceModulePath());
 				if (source == registry.mSourceCache.end()) continue;
+				if (!packageNameResolved)
+				{
+					packageNameResolved = true;
+					sources.packageName = registry.mPackageDirectory
+						? registry.mPackageDirectory->filename().string()
+						: world.getAgentBehaviourRegistryPackageName();
+				}
 				definitions.push_back({ agentId, agent->getName(), behaviour->getName(),
-					assignment, agent->isActive(),
+					&assignment, agent->isActive(),
 					deriveRandomSeed(world.mRandomSeed, agentId, assignment.behaviour),
 					registry.getUuid(), registry.getPackageRevision(),
-					registry.mPackageDirectory
-						? registry.mPackageDirectory->filename().string()
-						: world.getAgentBehaviourRegistryPackageName(),
-					behaviour->getSourceModulePath(), source->second, helpers });
+					sources.packageName, behaviour->getSourceModulePath(),
+					source->second, &sources.helpers });
 			}
 
 			// EntityRegistry iteration is stable Agent-ID order. Unlike live
@@ -2651,8 +2685,11 @@ namespace core
 			// all configuration-specific failures in one reload attempt.
 			for (auto const& definition : definitions)
 			{
+				// Reload always constructs every instance, so its shared sources are
+				// materialized once rather than copied into each definition.
+				sources.materialize(registry);
 				Impl::Instance instance;
-				instance.assignment = definition.assignment;
+				instance.assignment = *definition.assignment;
 				instance.agentName = definition.agentName;
 				instance.behaviourName = definition.behaviourName;
 				instance.suspended = !definition.active;
@@ -2711,17 +2748,11 @@ namespace core
 		if (world.mCurrentPhase != SimulationPhase::None) return true;
 		auto const diagnosticsBefore = mImpl->diagnostics.size();
 		std::vector<Impl::Definition> definitions;
+		Impl::SourcePack sources;
 		auto const registry = world.mAgentBehaviourRegistry;
 		if (registry && registry->mPackageDirectory)
 		{
-			std::vector<AgentBehaviourHelperSource> helpers;
-			helpers.reserve(registry->mHelperModules.size());
-			for (auto const& [name, helper] : registry->mHelperModules)
-			{
-				auto source = registry->mSourceCache.find(helper->getSourceModulePath());
-				if (source == registry->mSourceCache.end()) continue;
-				helpers.push_back({ name, helper->getSourceModulePath(), source->second });
-			}
+			sources.packageName = registry->mPackageDirectory->filename().string();
 			for (auto const& [agentId, agent] : world.mAgents.entries())
 			{
 				if (!agent || !agent->getBehaviourAssignment()) continue;
@@ -2734,17 +2765,17 @@ namespace core
 					behaviour->getSourceModulePath());
 				if (source == registry->mSourceCache.end()) continue;
 				definitions.push_back({ agentId, agent->getName(), behaviour->getName(),
-					assignment, agent->isActive(),
+					&assignment, agent->isActive(),
 					deriveRandomSeed(world.mRandomSeed, agentId, assignment.behaviour),
 					registry->getUuid(), registry->getPackageRevision(),
-					registry->mPackageDirectory->filename().string(),
-					behaviour->getSourceModulePath(), source->second, helpers });
+					sources.packageName, behaviour->getSourceModulePath(),
+					source->second, &sources.helpers });
 			}
 		}
 		try
 		{
 			mImpl->currentTick = world.mSimulationTick;
-			mImpl->synchronize(world, definitions);
+			mImpl->synchronize(world, registry.get(), sources, definitions);
 			mImpl->runBoundaryCallbacks(world);
 		}
 		catch (std::exception const& error)
