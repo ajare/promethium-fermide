@@ -5,7 +5,7 @@ A simulation of people moving through a two-dimensional world while doors, lifts
 ## World and routes
 
 **World**:
-The complete simulation aggregate, including its spatial structure, movement network, devices, and agents.
+The complete simulation aggregate, including its spatial structure, movement network, devices, and agents. A World's size is bounded by a total cell budget (`CORE_MAX_WORLD_CELLS`): each Layer owns one cell per (x, level) position, and the cells summed across every Layer must fit that budget.
 
 **Layer**:
 One of the ordered spatial planes used to represent depth in the two-dimensional world. Layers are numbered from front (0) to back. A World may have between 2 and 256 layers.

@@ -13,7 +13,10 @@ namespace core
 		, mLevelsHigh(levelsHigh)
 		, mZ(z)
 	{
-		mCells.resize(cellsWide * levelsHigh);
+		// The World refuses dimensions whose product cannot back a Layer within
+		// the cell budget, so this stays 64-bit clear of any wrap; the cast keeps
+		// the arithmetic wide on every platform rather than trusting the check.
+		mCells.resize(static_cast<size_t>(cellsWide) * levelsHigh);
 	}
 
 	uint32_t Layer::getCellsWide() const
@@ -48,13 +51,13 @@ namespace core
 	CellDefinition const& Layer::getCellDefinition(uint32_t x, uint32_t y) const
 	{
 		validateCellBounds(x, y);
-		return mCells[y * mCellsWide + x];
+		return mCells[static_cast<size_t>(y) * mCellsWide + x];
 	}
 
 	CellDefinition& Layer::getCellDefinition(uint32_t x, uint32_t y)
 	{
 		validateCellBounds(x, y);
-		return mCells[y * mCellsWide + x];
+		return mCells[static_cast<size_t>(y) * mCellsWide + x];
 
 	}
 

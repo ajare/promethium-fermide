@@ -1186,6 +1186,16 @@ namespace core
 		World(std::string const& name, uint32_t cellsWide, uint32_t levelsHigh,
 			AgentBehaviourRuntimeLimits behaviourRuntimeLimits = {});
 
+		// A World allocates one CellDefinition per (x, level) on each Layer, so
+		// dimensions are accepted only when the total across `layerCount` Layers
+		// stays within CORE_MAX_WORLD_CELLS. The product is evaluated in 64 bits
+		// so an overflowing pair is refused rather than wrapping to a short
+		// allocation (#184). Returns false and fills `diagnostic` when the size
+		// is unsupported; the editor and loader use the same rule as the
+		// constructor.
+		static bool dimensionsAreSupported(uint32_t cellsWide, uint32_t levelsHigh,
+			uint32_t layerCount, std::string* diagnostic = nullptr);
+
 		virtual ~World();
 
 		std::string const& getName() const;

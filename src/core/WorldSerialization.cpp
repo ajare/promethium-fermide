@@ -793,10 +793,6 @@ namespace core
 		auto const cellsWide = serializer.readUint32("cellsWide");
 		auto const levelsHigh = serializer.readUint32(serializer.hasField("levelsHigh")
 			? "levelsHigh" : "decksHigh");
-		if (cellsWide == 0 || levelsHigh == 0)
-		{
-			throw SerializationException("World dimensions must be positive");
-		}
 
 		optional<AgentTagRegistryReference> agentTagRegistryReference;
 		if (version >= 10 && serializer.hasField("agentTagRegistry"))
@@ -852,6 +848,15 @@ namespace core
 		if (layerCount < 2 || layerCount > CORE_MAX_LAYERS)
 		{
 			throw SerializationException(format("World layer count {} is out of range", layerCount));
+		}
+		// The same size rule as the constructor, applied before the loading World
+		// is touched, so an overflowing dimension pair is a document error rather
+		// than a crash in the candidate replay (#184).
+		string dimensionDiagnostic;
+		if (!dimensionsAreSupported(cellsWide, levelsHigh, layerCount,
+			&dimensionDiagnostic))
+		{
+			throw SerializationException(dimensionDiagnostic);
 		}
 		mLayers.resize(layerCount);
 		mLayerNames.resize(layerCount);

@@ -976,6 +976,76 @@ agents: []
 			"A rejected addLayer() still changed the layer count");
 	}
 
+	void oversizedWorldDimensionsAreRefusedBeforeCellAccess()
+	{
+		// #184: cellsWide * levelsHigh used to overflow uint32_t to zero, so a
+		// Layer allocated no cells while bounds validation still accepted (0, 0).
+		bool constructorRefused = false;
+		std::string constructorDiagnostic;
+		try
+		{
+			core::World oversized("Overflow", 65536, 65536);
+		}
+		catch (core::WorldException const& exception)
+		{
+			constructorRefused = true;
+			constructorDiagnostic = exception.what();
+		}
+		require(constructorRefused,
+			"An overflowing World size was accepted by the constructor");
+		require(constructorDiagnostic.find("limit") != std::string::npos,
+			"An overflowing World size did not report the cell limit");
+
+		std::string diagnostic;
+		require(core::World::dimensionsAreSupported(4, 2, 2, &diagnostic),
+			"A small World size was refused");
+		require(diagnostic.empty(), "An accepted World size left a diagnostic");
+		require(!core::World::dimensionsAreSupported(0, 4, 2, &diagnostic),
+			"A zero-width World size was accepted");
+		require(!core::World::dimensionsAreSupported(4, 0, 2, &diagnostic),
+			"A zero-level World size was accepted");
+		// The budget is total cells across Layers, so a per-Layer product that
+		// only crosses the limit once both Layers are counted is still refused.
+		require(!core::World::dimensionsAreSupported(
+				CORE_MAX_WORLD_CELLS / 2 + 1, 1, 2, &diagnostic),
+			"A World just over the total cell limit was accepted");
+		require(!core::World::dimensionsAreSupported(1, 1,
+				CORE_MAX_LAYERS + 1, &diagnostic),
+			"A World with too many Layers was accepted");
+
+		// A normal World still allocates every cell and indexes within bounds.
+		core::World const normal("Normal", 4, 3);
+		require(!normal.getLayer(0)->getCellDefinition(3, 2).occupied(),
+			"A normal World did not allocate its full cell grid");
+
+		// The load path applies the same rule and refuses the document before
+		// mutating the World being loaded into.
+		auto const yaml = R"yaml(version: 1
+name: Overflow
+cellsWide: 65536
+levelsHigh: 65536
+construction: []
+agents: []
+)yaml";
+		core::World loaded("placeholder", 2, 2);
+		core::SerializationWorkData workData;
+		auto reader = core::YamlSerializer::fromString(yaml);
+		reader->deserialize();
+		bool loadRefused = false;
+		try
+		{
+			(void)loaded.deserialize(*reader, workData);
+		}
+		catch (core::SerializationException const&)
+		{
+			loadRefused = true;
+		}
+		require(loadRefused, "An overflowing World document was accepted");
+		require(loaded.getName() == "placeholder" && loaded.getCellsWide() == 2
+			&& loaded.getLevelsHigh() == 2,
+			"A refused World document still mutated the loading World");
+	}
+
 	void deletingAMiddleLayerCompactsTheLayersAboveIt()
 	{
 		core::World world("Compacting", 8, 3);
@@ -5780,6 +5850,7 @@ void runSerializationSmokeChecks()
 	worldLayerNamesRoundTrip();
 	addedLayersAppendToTheBackAndRoundTrip();
 	layerCountIsCappedAtCoreMaxLayers();
+	oversizedWorldDimensionsAreRefusedBeforeCellAccess();
 	deletingAMiddleLayerCompactsTheLayersAboveIt();
 	deletingTheFrontLayerRemovesTransitsOneLayerBehind();
 	layerDeletionPreservesAuthoredRecordDependencies();

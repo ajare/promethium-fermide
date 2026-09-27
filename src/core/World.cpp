@@ -108,12 +108,58 @@ namespace core
 		, mAgentBehaviourRuntime(std::make_unique<AgentBehaviourRuntimeAdapter>(
 			behaviourRuntimeLimits))
 	{
+		// Refuse an unsupported size before any Layer is allocated or any cell
+		// buffer is sized, so a wrapped product can never become an empty Layer
+		// that still validates in-bounds reads (#184).
+		string dimensionDiagnostic;
+		if (!dimensionsAreSupported(cellsWide, levelsHigh,
+			static_cast<uint32_t>(mLayers.size()), &dimensionDiagnostic))
+		{
+			throw WorldException(this, dimensionDiagnostic);
+		}
+
 		for (uint32_t i = 0; i < mLayers.size(); ++i)
 		{
 			mLayers[i] = make_shared<Layer>(this, cellsWide, levelsHigh, i);
 		}
 
 		mGraph = make_shared<Graph>(this);
+	}
+
+	bool World::dimensionsAreSupported(uint32_t cellsWide, uint32_t levelsHigh,
+		uint32_t layerCount, string* diagnostic)
+	{
+		if (diagnostic) diagnostic->clear();
+
+		auto const reject = [diagnostic](string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+
+		if (cellsWide == 0 || levelsHigh == 0)
+		{
+			return reject("World dimensions must be positive");
+		}
+
+		if (layerCount < 2 || layerCount > CORE_MAX_LAYERS)
+		{
+			return reject(format("World layer count {} is out of range", layerCount));
+		}
+
+		// One CellDefinition per (x, level) per Layer. Evaluating the product in
+		// 64 bits keeps an overflowing pair from wrapping back under the limit.
+		uint64_t const cellsPerLayer =
+			static_cast<uint64_t>(cellsWide) * levelsHigh;
+		uint64_t const totalCells = cellsPerLayer * layerCount;
+		if (totalCells > CORE_MAX_WORLD_CELLS)
+		{
+			return reject(format(
+				"World dimensions {} x {} over {} layers exceed the {} cell limit",
+				cellsWide, levelsHigh, layerCount, CORE_MAX_WORLD_CELLS));
+		}
+
+		return true;
 	}
 
 	World::~World()
@@ -1424,6 +1470,15 @@ namespace core
 		{
 			throw WorldException(this,
 				format("World cannot have more than {} layers", CORE_MAX_LAYERS));
+		}
+
+		// Adding a Layer repeats the same cells the existing Layers own, so the
+		// World's total cell budget must still hold with the new Layer counted.
+		string dimensionDiagnostic;
+		if (!dimensionsAreSupported(mCellsWide, mLevelsHigh, layerIndex + 1,
+			&dimensionDiagnostic))
+		{
+			throw WorldException(this, dimensionDiagnostic);
 		}
 
 		mLayers.push_back(make_shared<Layer>(this, mCellsWide, mLevelsHigh, layerIndex));

@@ -2965,8 +2965,17 @@ namespace
 			ImGui::InputText("Name", gNewWorldName, sizeof(gNewWorldName));
 			ImGui::InputInt("Width", &gNewWorldWidth);
 			ImGui::InputInt("Levels", &gNewWorldLevels);
-			bool const valid = gNewWorldName[0] != '\0'
-				&& gNewWorldWidth > 0 && gNewWorldLevels > 0;
+			bool const positiveDimensions =
+				gNewWorldWidth > 0 && gNewWorldLevels > 0;
+			// The dialog applies the same cell-budget rule as the World constructor
+			// so an unsupported size is refused here, with the previous document
+			// left open, rather than thrown through the frame loop (#184).
+			string dimensionDiagnostic;
+			bool const dimensionsValid = positiveDimensions
+				&& core::World::dimensionsAreSupported(
+					static_cast<uint32_t>(gNewWorldWidth),
+					static_cast<uint32_t>(gNewWorldLevels), 2, &dimensionDiagnostic);
+			bool const valid = gNewWorldName[0] != '\0' && dimensionsValid;
 			if (ImGui::Button("Create") && valid)
 			{
 				if (world && world->hasAttachedAgentTagRegistry())
@@ -2983,7 +2992,18 @@ namespace
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
-			if (!valid) ImGui::TextDisabled("Name, width, and level count are required.");
+			if (gNewWorldName[0] == '\0')
+			{
+				ImGui::TextDisabled("Name is required.");
+			}
+			else if (!positiveDimensions)
+			{
+				ImGui::TextDisabled("Width and level count must be positive.");
+			}
+			else if (!dimensionsValid)
+			{
+				ImGui::TextDisabled("%s", dimensionDiagnostic.c_str());
+			}
 			ImGui::EndPopup();
 		}
 

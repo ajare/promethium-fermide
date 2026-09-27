@@ -27,6 +27,13 @@
 
 #define CORE_MAX_LAYERS								256
 
+// Every Layer allocates one CellDefinition per (x, level) position, so the real
+// bound on World dimensions is memory, not reachability. This caps the total
+// cells across all Layers and is checked in 64 bits before any allocation, so an
+// overflowing dimension pair is refused instead of wrapping to a short buffer
+// (#184). At roughly 64 bytes per CellDefinition this is a ~256 MiB ceiling.
+#define CORE_MAX_WORLD_CELLS						4194304u
+
 namespace core
 {
 	inline bool isFrontMostLayer(uint32_t layer)
