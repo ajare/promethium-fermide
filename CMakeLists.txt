@@ -442,6 +442,7 @@ if(PF_BUILD_GUI)
     set_target_properties(imgui PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
     )
+    willpower_deploy_runtime_dlls(imgui)
 
     # Copy on every build so manifest and art edits deploy without a C++ relink.
     add_custom_target(pf-sector-assets ALL
