@@ -63,7 +63,7 @@ namespace core
 	{
 		ASSERT_SIDE_OK(side);
 
-		return mSectors[side];
+		return mSectors[side].lock();
 	}
 
 	float BulkheadDoor::getAutomaticSensorDistance() const

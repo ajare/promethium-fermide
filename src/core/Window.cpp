@@ -97,17 +97,19 @@ namespace core
 	{
 		ASSERT_PAIR_SIDE_OK(pairSide);
 
-		return mSectors[pairSide];
+		return mSectors[pairSide].lock();
 	}
 
 	uint32_t Window::getFrontLayer() const
 	{
-		return mSectors[0] ? mSectors[0]->getLayerIndex() : ~0u;
+		auto const front = mSectors[0].lock();
+		return front ? front->getLayerIndex() : ~0u;
 	}
 
 	uint32_t Window::getBackLayer() const
 	{
-		return mSectors[1] ? mSectors[1]->getLayerIndex() : ~0u;
+		auto const back = mSectors[1].lock();
+		return back ? back->getLayerIndex() : ~0u;
 	}
 
 	void Window::setState(State state, Style style)

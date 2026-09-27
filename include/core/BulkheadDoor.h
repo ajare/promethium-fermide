@@ -27,7 +27,7 @@ namespace core
 		OpenStyle mOpenStyle;
 		float mAutomaticSensorDistance{ CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE };
 
-		std::shared_ptr<const Sector> mSectors[2];
+		std::weak_ptr<const Sector> mSectors[2];
 
 	public:
 

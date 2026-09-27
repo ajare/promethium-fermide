@@ -45,7 +45,7 @@ namespace core
 
 		Style mStyle;
 
-		std::shared_ptr<const Sector> mSectors[2];
+		std::weak_ptr<const Sector> mSectors[2];
 
 		bool mTraversalConfigured{ false };
 
@@ -74,13 +74,13 @@ namespace core
 		// with no back Sector only survives from a map saved before the back-most Layer
 		// was ruled out, and a Layer deletion removes it.
 		[[nodiscard]] std::shared_ptr<const Sector> getSector(uint32_t pairSide) const;
-		[[nodiscard]] std::shared_ptr<const Sector> getFrontSector() const { return mSectors[0]; }
+		[[nodiscard]] std::shared_ptr<const Sector> getFrontSector() const { return mSectors[0].lock(); }
 		// The Window's back Sector is the Sector behind its first cell.  A Window may
 		// span several Backgrounds behind it (#36), so for such a Window this field
 		// is the first Background in the span and is non-authoritative: nothing may
 		// traverse into a Background anyway, and the renderer derives what lies
 		// behind the whole aperture from the cell grid.
-		[[nodiscard]] std::shared_ptr<const Sector> getBackSector() const { return mSectors[1]; }
+		[[nodiscard]] std::shared_ptr<const Sector> getBackSector() const { return mSectors[1].lock(); }
 		// The absolute Layers the Window crosses.  ~0u when a side has no Sector.
 		[[nodiscard]] uint32_t getFrontLayer() const;
 		[[nodiscard]] uint32_t getBackLayer() const;

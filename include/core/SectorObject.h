@@ -22,7 +22,9 @@ namespace core
 
 		SectorObjectType mObjectType;
 
-		std::shared_ptr<const Sector> mSector;
+		// The Sector owns its SectorObjects; the back-reference is weak so the
+		// Sector <-> SectorObject relationship cannot leak as a cycle (#182).
+		std::weak_ptr<const Sector> mSector;
 
 		std::shared_ptr<Object> mObject;
 

@@ -34,17 +34,19 @@ namespace core
 	std::shared_ptr<const Sector> Door::getSector(uint32_t pairSide) const
 	{
 		ASSERT_PAIR_SIDE_OK(pairSide);
-		return mSectors[pairSide];
+		return mSectors[pairSide].lock();
 	}
 
 	uint32_t Door::getFrontLayer() const
 	{
-		return mSectors[0] ? mSectors[0]->getLayerIndex() : ~0u;
+		auto const front = mSectors[0].lock();
+		return front ? front->getLayerIndex() : ~0u;
 	}
 
 	uint32_t Door::getBackLayer() const
 	{
-		return mSectors[1] ? mSectors[1]->getLayerIndex() : ~0u;
+		auto const back = mSectors[1].lock();
+		return back ? back->getLayerIndex() : ~0u;
 	}
 
 	void Door::configureTraversal(DoorActivationMode mode, TraversalResourceId resource,

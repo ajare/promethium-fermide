@@ -33,8 +33,9 @@ namespace core
 
 		VertexSubType mSubType;
 
-		// Reference to the Sector this Vertex is within
-		std::shared_ptr<Sector> mSector;
+		// Reference to the Sector this Vertex is within.  The Sector is owned by
+		// the World, never by a Vertex, so this back-reference is weak (#182).
+		std::weak_ptr<Sector> mSector;
 
 		// Offset within the Sector, not global position.  This is used to calculate
 		// the Vertex's position within the world.

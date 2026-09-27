@@ -64,7 +64,7 @@ namespace core
 	Edge::Edge(uint32_t id, EdgeType type)
 		: mId(id)
 		, mType(type)
-		, mVertices{ nullptr, nullptr }
+		, mVertices{}
 	{
 	}
 
@@ -120,7 +120,12 @@ namespace core
 	*/
 	bool Edge::isInterLayer() const
 	{
-		return mVertices[0]->getSector()->getLayerIndex() != mVertices[1]->getSector()->getLayerIndex();
+		auto const v0 = mVertices[0].lock();
+		auto const v1 = mVertices[1].lock();
+		assert(v0 != nullptr);
+		assert(v1 != nullptr);
+
+		return v0->getSector()->getLayerIndex() != v1->getSector()->getLayerIndex();
 	}
 
 	/***
@@ -137,7 +142,7 @@ namespace core
 			throw GraphException(format("Edge::_setVertex({}, <Vertex>) - index={} out of bounds", index, index));
 		}
 
-		if (mVertices[index])
+		if (!mVertices[index].expired())
 		{
 			throw GraphException(format("Edge::_setVertex({}, <Vertex>) - index={} is aleady set", index, index));
 		}
@@ -159,7 +164,7 @@ namespace core
 			throw GraphException(format("Edge::getVertex({}) - index={} out of bounds", index, index));
 		}
 
-		return mVertices[index];
+		return mVertices[index].lock();
 	}
 
 	/***
@@ -171,14 +176,18 @@ namespace core
 	*/
 	shared_ptr<const Vertex> Edge::getOtherVertex(shared_ptr<const Vertex> vertex) const
 	{
-		assert(mVertices[0] != nullptr);
-		assert(mVertices[1] != nullptr);
+		auto const v0 = mVertices[0].lock();
+		auto const v1 = mVertices[1].lock();
+		assert(v0 != nullptr);
+		assert(v1 != nullptr);
+
+		shared_ptr<const Vertex> const locked[2] = { v0, v1 };
 
 		for (int i = 0; i < 2; ++i)
 		{
-			if (vertex->getId() == mVertices[i]->getId())
+			if (vertex->getId() == locked[i]->getId())
 			{
-				return mVertices[1 - i];
+				return locked[1 - i];
 			}
 		}
 
@@ -194,10 +203,12 @@ namespace core
 	*/
 	float Edge::getLength() const
 	{
-		assert(mVertices[0] != nullptr);
-		assert(mVertices[1] != nullptr);
+		auto const v0 = mVertices[0].lock();
+		auto const v1 = mVertices[1].lock();
+		assert(v0 != nullptr);
+		assert(v1 != nullptr);
 
-		return mVertices[0]->getPosition().distanceTo(mVertices[1]->getPosition());
+		return v0->getPosition().distanceTo(v1->getPosition());
 	}
 
 } // core

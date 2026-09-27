@@ -30,7 +30,10 @@ namespace core
 
 		EdgeType mType;
 
-		std::shared_ptr<const Vertex> mVertices[2];
+		// Endpoint Vertices are owned by the owning Graph (and, transitively, by
+		// its World).  They are referenced weakly so the Vertex <-> Edge adjacency
+		// does not form a strong-reference cycle that outlives the Graph (#182).
+		std::weak_ptr<const Vertex> mVertices[2];
 
 	private:
 		

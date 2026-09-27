@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "core/Vertex.h"
 #include "core/VertexType.h"
 #include "core/Edge.h"
@@ -135,7 +137,7 @@ namespace core
 	*/
 	shared_ptr<Sector> Vertex::getSector() const
 	{
-		return mSector;
+		return mSector.lock();
 	}
 
 	/***
@@ -159,7 +161,10 @@ namespace core
 	*/
 	Vector2 Vertex::getPosition() const
 	{
-		Vector2 cellPos{ (float)mSector->getCellX(), (float)mSector->getCellY() };
+		auto const sector = mSector.lock();
+		assert(sector != nullptr);
+
+		Vector2 cellPos{ (float)sector->getCellX(), (float)sector->getCellY() };
 		return cellPos + getSectorOffset();
 	}
 

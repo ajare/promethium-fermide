@@ -30,7 +30,7 @@ namespace core
 
 	shared_ptr<const Sector> SectorObject::getSector() const
 	{
-		return mSector;
+		return mSector.lock();
 	}
 
 	shared_ptr<Object> SectorObject::_getObject() const

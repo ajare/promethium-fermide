@@ -117,6 +117,7 @@ void runViewportCullingSmokeChecks();
 void runZeroSizeLocationSmokeChecks();
 void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
+void runWorldTeardownSmokeChecks();
 void runGraphicsStartupSmokeChecks();
 
 static_assert(!std::is_convertible_v<core::AgentId, core::InteractionPointId>);
@@ -6109,6 +6110,11 @@ int main(int argc, char** argv)
 			runLiftBoardingRepro(argv[2]);
 			return 0;
 		}
+		if (argc > 1 && std::string(argv[1]) == "--world-teardown-smoke")
+		{
+			runWorldTeardownSmokeChecks();
+			return 0;
+		}
 		if (graphicsStartupOnly)
 		{
 			runGraphicsStartupSmokeChecks();
@@ -6183,6 +6189,7 @@ int main(int argc, char** argv)
 		runZeroSizeLocationSmokeChecks();
 		runIsolatedSectorPathingSmokeChecks();
 		runPathfindingWorkspaceSmokeChecks();
+		runWorldTeardownSmokeChecks();
 
 		auto const deepJourney = runThreeLayerTransitJourney();
 		if (!deepJourney.pathShapeValid)
