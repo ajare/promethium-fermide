@@ -89,7 +89,16 @@ Undeclared, absolute, traversal, and path-like imports are refused. I/O, OS,
 environment, filesystem, debug, coroutine, dynamic loading, entropy, and wall
 clock facilities are absent. Scripts receive only selected base operations and
 immutable `table`, `string`, `math`, and `utf8` libraries; `string.dump`,
-`math.random`, and `math.randomseed` are excluded. Import cycles are rejected
+`math.random`, and `math.randomseed` are excluded. `pairs` and `next` iterate
+keys in a defined order — booleans (`false` before `true`), then numbers
+ascending, then strings in byte order — so the per-state string hash seed cannot
+reach behaviour decisions; identity-bearing keys are refused because no
+cross-process order exists for them. `pairs` drives that same `next`, so a key
+removed during a loop is simply no longer visited. `tostring` renders
+identity-bearing values as a stable type label (`table`, `function`, or
+`userdata`) instead of a process address, and `string.format` refuses the `%p`
+conversion and routes `%s` through that same representation, including through
+the `value:format(...)` method form. Import cycles are rejected
 during deterministic preflight with the complete dependency chain. A helper may
 return any Lua value; table exports (including nested tables) are immutable, and
 repeated imports within one Agent resolve through that Agent's private cache.

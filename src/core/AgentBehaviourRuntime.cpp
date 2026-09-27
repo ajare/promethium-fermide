@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <format>
 #include <functional>
@@ -70,6 +72,7 @@ namespace core
 		};
 
 		void pushPrivateEnvironment(lua_State* state);
+		void installDeterministicSandbox(lua_State* state);
 
 		struct ModuleLoader
 		{
@@ -406,6 +409,8 @@ namespace core
 				lua_setfield(state, -2, "randomseed");
 			}
 			lua_pop(state, 1);
+
+			installDeterministicSandbox(state);
 
 			loader.hostModuleReference = createImmutableProxy(state, true);
 			lua_pushlightuserdata(state, &loader);
@@ -1289,6 +1294,287 @@ namespace core
 			lua_remove(state, copy - 1);
 			makeTopImmutable(state);
 			lua_setfield(state, environment, name);
+		}
+
+		// Table keys are ordered by a defined total order so that Lua's native
+		// per-state string hash seed cannot leak into behaviour execution: booleans
+		// (false first), then numbers (ascending), then strings (byte order).
+		// Identity-bearing keys have no cross-process stable order, so iteration
+		// refuses them rather than silently replaying differently.
+		int deterministicKeyRank(int type)
+		{
+			if (type == LUA_TBOOLEAN) return 0;
+			if (type == LUA_TNUMBER) return 1;
+			if (type == LUA_TSTRING) return 2;
+			return 3;
+		}
+
+		// Lua table keys normalize integral floats to integers, so a numeric key is
+		// either an exact lua_Integer or a non-integral float. Comparing integer and
+		// float keys through double could make two distinct keys look equal above
+		// 2^53, which would let the native traversal order decide the successor;
+		// compare them exactly instead.
+		bool numberIsInteger(lua_State* state, int index, lua_Integer& value)
+		{
+			if (lua_isinteger(state, index))
+			{
+				value = lua_tointeger(state, index);
+				return true;
+			}
+			auto const number = lua_tonumber(state, index);
+			if (number < -9223372036854775808.0
+				|| number >= 9223372036854775808.0)
+				return false;
+			auto const converted = static_cast<lua_Integer>(number);
+			if (static_cast<lua_Number>(converted) != number) return false;
+			value = converted;
+			return true;
+		}
+
+		int compareIntegerAndNumber(lua_Integer integer, lua_Number number)
+		{
+			if (number >= 9223372036854775808.0) return -1;
+			if (number < -9223372036854775808.0) return 1;
+			auto const truncated = static_cast<lua_Integer>(number);
+			if (integer != truncated) return integer < truncated ? -1 : 1;
+			auto const fraction = number - static_cast<lua_Number>(truncated);
+			if (fraction > 0) return -1;
+			if (fraction < 0) return 1;
+			return 0;
+		}
+
+		int deterministicKeyCompare(lua_State* state, int leftIndex,
+			int rightIndex)
+		{
+			leftIndex = lua_absindex(state, leftIndex);
+			rightIndex = lua_absindex(state, rightIndex);
+			auto const leftType = lua_type(state, leftIndex);
+			auto const rightType = lua_type(state, rightIndex);
+			if (leftType != rightType)
+			{
+				auto const leftRank = deterministicKeyRank(leftType);
+				auto const rightRank = deterministicKeyRank(rightType);
+				return leftRank < rightRank ? -1 : (leftRank > rightRank ? 1 : 0);
+			}
+			if (leftType == LUA_TBOOLEAN)
+			{
+				auto const left = lua_toboolean(state, leftIndex);
+				auto const right = lua_toboolean(state, rightIndex);
+				if (left == right) return 0;
+				return left ? 1 : -1;
+			}
+			if (leftType == LUA_TNUMBER)
+			{
+				lua_Integer leftInteger = 0;
+				lua_Integer rightInteger = 0;
+				auto const leftIsInteger = numberIsInteger(state, leftIndex,
+					leftInteger);
+				auto const rightIsInteger = numberIsInteger(state, rightIndex,
+					rightInteger);
+				if (leftIsInteger && rightIsInteger)
+					return leftInteger < rightInteger
+						? -1 : (leftInteger > rightInteger ? 1 : 0);
+				if (!leftIsInteger && !rightIsInteger)
+				{
+					auto const left = lua_tonumber(state, leftIndex);
+					auto const right = lua_tonumber(state, rightIndex);
+					return left < right ? -1 : (left > right ? 1 : 0);
+				}
+				if (leftIsInteger)
+					return compareIntegerAndNumber(leftInteger,
+						lua_tonumber(state, rightIndex));
+				return -compareIntegerAndNumber(rightInteger,
+					lua_tonumber(state, leftIndex));
+			}
+			if (leftType == LUA_TSTRING)
+			{
+				size_t leftLength = 0;
+				size_t rightLength = 0;
+				auto const* left = lua_tolstring(state, leftIndex, &leftLength);
+				auto const* right = lua_tolstring(state, rightIndex, &rightLength);
+				auto const common = leftLength < rightLength
+					? leftLength : rightLength;
+				auto const compared = std::memcmp(left, right, common);
+				if (compared != 0) return compared < 0 ? -1 : 1;
+				return leftLength < rightLength
+					? -1 : (leftLength > rightLength ? 1 : 0);
+			}
+			return 0;
+		}
+
+		// next is stateless, so it scans the current keys for the successor of the
+		// control key. The scan allocates nothing on the Lua heap, so a large table
+		// cannot turn one Lua step into unbounded host allocation.
+		int deterministicNext(lua_State* state)
+		{
+			luaL_checktype(state, 1, LUA_TTABLE);
+			auto const argumentCount = lua_gettop(state);
+			bool const hasControl = argumentCount >= 2
+				&& !lua_isnoneornil(state, 2);
+
+			lua_pushnil(state);
+			auto const best = lua_gettop(state);
+			bool found = !hasControl;
+			char const* unsupportedType = nullptr;
+			lua_pushnil(state);
+			while (lua_next(state, 1) != 0)
+			{
+				auto const key = lua_absindex(state, -2);
+				auto const type = lua_type(state, key);
+				if (type != LUA_TBOOLEAN && type != LUA_TNUMBER
+					&& type != LUA_TSTRING)
+				{
+					unsupportedType = luaL_typename(state, key);
+					lua_pop(state, 2);
+					break;
+				}
+				bool candidate = true;
+				if (hasControl)
+				{
+					auto const compared = deterministicKeyCompare(state, key, 2);
+					if (compared == 0) found = true;
+					candidate = compared > 0;
+				}
+				if (candidate)
+				{
+					lua_pushvalue(state, best);
+					auto const currentBest = lua_gettop(state);
+					if (lua_isnil(state, currentBest)
+						|| deterministicKeyCompare(state, key, currentBest) < 0)
+					{
+						lua_pop(state, 1);
+						lua_pushvalue(state, key);
+						lua_replace(state, best);
+					}
+					else
+					{
+						lua_pop(state, 1);
+					}
+				}
+				lua_pop(state, 1);
+			}
+			if (unsupportedType)
+				return luaL_error(state,
+					"Agent behaviour table iteration requires boolean, number, or string keys; got %s",
+					unsupportedType);
+			if (!found) return luaL_error(state, "invalid key to 'next'");
+			lua_pushvalue(state, best);
+			if (lua_isnil(state, -1)) return 0;
+			lua_pushvalue(state, -1);
+			lua_rawget(state, 1);
+			return 2;
+		}
+
+		int deterministicPairs(lua_State* state)
+		{
+			luaL_checktype(state, 1, LUA_TTABLE);
+			lua_pushcfunction(state, deterministicNext);
+			lua_pushvalue(state, 1);
+			lua_pushnil(state);
+			return 3;
+		}
+
+		bool isIdentityBearing(lua_State* state, int index)
+		{
+			auto const type = lua_type(state, index);
+			return type == LUA_TTABLE || type == LUA_TFUNCTION
+				|| type == LUA_TUSERDATA || type == LUA_TLIGHTUSERDATA
+				|| type == LUA_TTHREAD;
+		}
+
+		// Behaviour-visible identity must not be a process address, and a
+		// first-observation serial would still depend on replay-wide ordering. A
+		// type label is unconditionally stable; values that already define
+		// __tostring keep their semantic representation.
+		void pushDeterministicString(lua_State* state, int index)
+		{
+			index = lua_absindex(state, index);
+			if (!isIdentityBearing(state, index))
+			{
+				luaL_tolstring(state, index, nullptr);
+				return;
+			}
+			if (luaL_getmetafield(state, index, "__tostring") != LUA_TNIL)
+			{
+				lua_pop(state, 1);
+				luaL_tolstring(state, index, nullptr);
+				return;
+			}
+			lua_pushstring(state, luaL_typename(state, index));
+		}
+
+		int deterministicToString(lua_State* state)
+		{
+			pushDeterministicString(state, 1);
+			return 1;
+		}
+
+		bool formatContainsPointerConversion(std::string_view format)
+		{
+			for (size_t index = 0; index < format.size(); ++index)
+			{
+				if (format[index] != '%') continue;
+				size_t cursor = index + 1;
+				while (cursor < format.size()
+					&& std::strchr("-+ #0", format[cursor]) != nullptr) ++cursor;
+				while (cursor < format.size()
+					&& std::isdigit(static_cast<unsigned char>(format[cursor]))) ++cursor;
+				if (cursor < format.size() && format[cursor] == '.')
+				{
+					++cursor;
+					while (cursor < format.size()
+						&& std::isdigit(static_cast<unsigned char>(format[cursor]))) ++cursor;
+				}
+				if (cursor < format.size() && format[cursor] == 'p') return true;
+				index = cursor;
+			}
+			return false;
+		}
+
+		// string.format reaches identity-bearing values through %s and %p. The %p
+		// conversion is refused outright, and %s arguments are routed through the
+		// deterministic representation before the native formatter runs.
+		int deterministicFormat(lua_State* state)
+		{
+			auto const argumentCount = lua_gettop(state);
+			size_t formatLength = 0;
+			auto const* format = luaL_checklstring(state, 1, &formatLength);
+			if (formatContainsPointerConversion(
+				std::string_view(format, formatLength)))
+				return luaL_error(state,
+					"string.format does not support the '%%p' conversion in Agent "
+					"behaviours because object addresses are not deterministic");
+			for (int index = 2; index <= argumentCount; ++index)
+			{
+				if (!isIdentityBearing(state, index)) continue;
+				pushDeterministicString(state, index);
+				lua_replace(state, index);
+			}
+			lua_pushvalue(state, lua_upvalueindex(1));
+			lua_insert(state, 1);
+			lua_call(state, argumentCount, LUA_MULTRET);
+			return lua_gettop(state);
+		}
+
+		// Installed on the raw globals so that both the private environment and the
+		// string metatable's __index (used by s:format(...)) reach it. The native
+		// formatter is captured as an upvalue before the global is replaced.
+		void installDeterministicSandbox(lua_State* state)
+		{
+			lua_pushcfunction(state, deterministicPairs);
+			lua_setglobal(state, "pairs");
+			lua_pushcfunction(state, deterministicNext);
+			lua_setglobal(state, "next");
+			lua_pushcfunction(state, deterministicToString);
+			lua_setglobal(state, "tostring");
+			lua_getglobal(state, "string");
+			if (lua_istable(state, -1))
+			{
+				lua_getfield(state, -1, "format");
+				lua_pushcclosure(state, deterministicFormat, 1);
+				lua_setfield(state, -2, "format");
+			}
+			lua_pop(state, 1);
 		}
 
 		void pushPrivateEnvironment(lua_State* state)
