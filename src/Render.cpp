@@ -2003,7 +2003,8 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 		switch (pass.style)
 		{
 		case LayerRenderStyle::Solid:
-			// Opaque surfaces cover the deeper Layers already drawn.
+			// Only the selected Layer is drawn whole. Deeper geometry enters through
+			// the clipped aperture paths below or through nested thresholds.
 			renderSectors(world, pass.layer, pass.style, drawList);
 			break;
 
@@ -2012,8 +2013,8 @@ void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 			auto const frontLayer = core::layerInFront(pass.layer);
 			auto const frontSectors = viewportSectors(world, frontLayer);
 			renderBehindLayerTransits(world, pass.layer, frontSectors, drawList);
-			// Each Layer owns its own aperture and foreground redraw, not just
-			// the selected Layer. Thresholds, controls and Agents stay in front.
+			// Clipped Transits draw over the selected Layer's Locations. Restore
+			// that Layer's thresholds, controls, and Agents in front of them.
 			renderThresholdsControlsAndAgentsAboveTransit(frontSectors, frontLayer, drawList);
 			break;
 		}

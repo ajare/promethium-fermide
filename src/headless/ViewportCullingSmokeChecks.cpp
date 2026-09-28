@@ -35,6 +35,7 @@
 #include "UISettings.h"
 #include "core/World.h"
 #include "core/Defines.h"
+#include "core/DoorSectorObject.h"
 #include "core/Sector.h"
 
 extern UISettings gUISettings;
@@ -256,46 +257,41 @@ void renderPassPaintsScrolledInSectorOnly()
 		"the Solid pass painted the culled level-0 Room below the viewport");
 }
 
-void backgroundsShowThroughEmptyLayers()
+void emptyCellsDoNotRevealDeeperLayers()
 {
 	ImGuiGuard imgui;
-	auto world = std::make_shared<core::World>("Background visibility", 6, 2);
+	auto world = std::make_shared<core::World>("Selected Layer only", 6, 2);
 	while (world->getLayerCount() < 4) world->addLayer();
+	world->addRoom("Selected", 0, 0, 0, 1, 1);
 	world->addBackground(3, 0, 0, 6, 2, { 23, 67, 109 });
-	world->addRoom("Front occluder", 0, 0, 0, 1, 1);
-	world->addRoom("Intermediate occluder", 2, 0, 1, 1, 1);
-	world->addBackground(1, 0, 2, 1, 1, { 151, 37, 83 });
 	world->finishBuild();
+
 	for (bool overlay : { false, true })
-	for (int selected = 0; selected < 4; ++selected)
 	for (float zoom : { 1.0f, 2.0f })
 	{
 		setViewport(-17, 11, 6 * CORE_CELL_WIDTH_PIXELS * zoom,
 			2 * CORE_LEVEL_HEIGHT_PIXELS * zoom);
 		gUISettings.worldZoom = zoom;
-		gUISettings.visibleLayer = selected;
+		gUISettings.visibleLayer = 0;
 		gUISettings.renderNextLayerWireframe = overlay;
 		gUISettings.renderGrid = false;
 		WorldDrawList draws(WorldDrawList::ClipRectangle{ { 0, 0 },
 			{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
 		renderWorld(world, &draws);
-		for (int y = 0; y < 2; ++y)
-		for (int x = 0; x < 6; ++x)
+
+		auto sample = [&](float x, float y)
 		{
-			core::Vector2 point{ x + 0.37f, y + 0.43f };
-			point.x = point.x * CORE_CELL_WIDTH_PIXELS * zoom + gUISettings.xOffset;
-			point.y = gUISettings.worldViewportHeight
-				- point.y * CORE_LEVEL_HEIGHT_PIXELS * zoom - gUISettings.yOffset;
-			auto expected = ImU32(ImColor(23, 67, 109));
-			if (y == 0 && ((x == 0 && selected == 0) || (x == 1 && selected <= 2)))
-				expected = kForeLocationFill;
-			if (y == 0 && x == 2 && selected <= 1) expected = ImU32(ImColor(151, 37, 83));
-			require(colourAt(draws, { point.x, point.y }) == expected,
-				"Back-to-front composition has the wrong visible Sector at "
-				+ std::to_string(x) + "," + std::to_string(y)
-				+ " with selected Layer " + std::to_string(selected));
-		}
-		require(colourAt(draws, { -1, 10 }) == 0, "World rendering escaped its viewport scissor");
+			return colourAt(draws, {
+				x * CORE_CELL_WIDTH_PIXELS * zoom + gUISettings.xOffset,
+				gUISettings.worldViewportHeight
+					- y * CORE_LEVEL_HEIGHT_PIXELS * zoom - gUISettings.yOffset });
+		};
+		require(sample(0.37f, 0.43f) == kForeLocationFill,
+			"The selected Layer's Room was not rendered");
+		require(sample(2.37f, 0.43f) == 0,
+			"An empty selected-Layer cell revealed a deeper Layer");
+		require(colourAt(draws, { -1, 10 }) == 0,
+			"World rendering escaped its viewport scissor");
 	}
 }
 
@@ -336,28 +332,66 @@ void nestedWindowsKeepTheirScissors()
 		"Deeper Window escaped the front Window's scissor");
 }
 
-void layerCompositionOrderStopsAtSelection()
+void nestedOpenDoorsRevealTheBackLayer()
+{
+	ImGuiGuard imgui;
+	auto world = std::make_shared<core::World>("Nested Door apertures", 6, 2);
+	while (world->getLayerCount() < 3) world->addLayer();
+	world->addRoom("Front", 0, 0, 0, 6, 1);
+	world->addRoom("Middle", 1, 0, 0, 6, 1);
+	world->addFacade("Back", 2, 0, 0, 6, 1, CORE_ROOM_MAX_HEIGHT, { 23, 67, 109 });
+	auto const front = world->addSectorDoor(0, 0, 2);
+	auto const middle = world->addSectorDoor(1, 0, 2);
+	world->finishBuild();
+	world->pauseSimulation();
+
+	for (auto const& created : { front, middle })
+	{
+		auto const object = created.door.sector->getObject(created.door.index);
+		auto const door = std::static_pointer_cast<const core::DoorSectorObject>(object)->getDoor();
+		door->open();
+		while (!door->isOpen()) door->update(door->getOpenCloseTime() * 0.25f);
+	}
+
+	setViewport(0, 0, 6 * CORE_CELL_WIDTH_PIXELS, 2 * CORE_LEVEL_HEIGHT_PIXELS);
+	gUISettings.visibleLayer = 0;
+	gUISettings.renderGrid = false;
+	gUISettings.renderNextLayerWireframe = false;
+	WorldDrawList draws(WorldDrawList::ClipRectangle{ { 0, 0 },
+		{ gUISettings.worldViewportWidth, gUISettings.worldViewportHeight } });
+	renderWorld(world, &draws);
+
+	require(colourAt(draws, {
+		2.5f * CORE_CELL_WIDTH_PIXELS,
+		gUISettings.worldViewportHeight - 0.5f * CORE_LEVEL_HEIGHT_PIXELS })
+		== ImU32(ImColor(23, 67, 109)),
+		"Aligned open Doors did not reveal the back Layer");
+}
+
+void renderPassesDrawOnlyTheSelectionWhole()
 {
 	for (uint32_t count : { 2u, 4u, 256u })
 	for (uint32_t selected = 0; selected < count; ++selected)
 	for (bool overlay : { false, true })
 	{
 		auto const passes = renderPasses(selected, count, overlay);
-		auto nextSolid = count;
+		uint32_t solids = 0;
 		uint32_t outlines = 0;
 		for (auto const& pass : passes)
 		{
-			require(pass.layer >= selected && pass.layer < count,
-				"A render pass escaped the selected-to-back Layer range");
 			if (pass.style == LayerRenderStyle::Solid)
-				require(pass.layer == --nextSolid, "Solid Layers are not ordered back-to-front");
+			{
+				++solids;
+				require(pass.layer == selected,
+					"A Layer other than the selection received a whole-Layer pass");
+			}
 			if (pass.style == LayerRenderStyle::Wireframe)
 			{
 				++outlines;
 				require(pass.layer == selected + 1, "Overlay moved beyond the next Layer");
 			}
 		}
-		require(nextSolid == selected, "Compositing stopped before the selected Layer");
+		require(solids == 1, "The selection did not receive exactly one solid pass");
 		require(outlines == (overlay && selected + 1 < count ? 1u : 0u),
 			"Overlay toggle changed the wrong passes");
 	}
@@ -368,9 +402,10 @@ void layerCompositionOrderStopsAtSelection()
 void runViewportCullingSmokeChecks()
 {
 	auto const savedSettings = gUISettings;
-	backgroundsShowThroughEmptyLayers();
+	emptyCellsDoNotRevealDeeperLayers();
 	nestedWindowsKeepTheirScissors();
-	layerCompositionOrderStopsAtSelection();
+	nestedOpenDoorsRevealTheBackLayer();
+	renderPassesDrawOnlyTheSelectionWhole();
 	subLevelHeightViewportExcludesLevelTwo();
 	verticalOffsetTracksTheVisibleOrigin();
 	fullyScrolledTopLevelIsVisible();

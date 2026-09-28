@@ -46,15 +46,15 @@ inline constexpr float MarkerFloorLift{ 0.1f };	// how far the icon floats above
 //
 // How a Sector is drawn by one pass of the viewport.
 //
-// Every Layer from the back-most through the selection is drawn solid in
-// back-to-front order. Each Layer also reveals its adjacent Transit apertures.
-// Only Layers in front of the selection are hidden. The optional next-Layer
-// wireframe is an extra overlay, independent of solid visibility.
+// The selected Layer is drawn solid and whole. Deeper Layers are drawn only
+// where an aperture clips them, with nested apertures continuing all the way
+// to the back-most Layer. The optional next-Layer wireframe is an extra overlay,
+// independent of aperture visibility.
 //
 enum class LayerRenderStyle
 {
 	Hidden,		// The Layer is not drawn at all.
-	Solid,		// A Layer's opaque surfaces and contents, drawn whole.
+	Solid,		// The selected Layer's opaque surfaces and contents, drawn whole.
 	Wireframe,	// The Layer directly behind the selected Layer, outlined over the selection.
 	Aperture	// A Sector drawn solid through an aperture in the Layer in front.
 };
@@ -106,24 +106,17 @@ inline std::vector<RenderPass> layerRenderPasses(uint32_t viewLayer, uint32_t la
 	return passes;
 }
 
-// Composite all Layers back-to-front, finishing at the selected Layer. Each
-// Layer retains its adjacent Transit apertures; only the selection gets the
-// optional x-ray overlay. Layers in front of the selection never contribute.
+// Draw the selected Layer only. Its Aperture pass admits adjacent Transit
+// geometry; Door and Window rendering recursively follows nested apertures to
+// deeper Layers under progressively intersected clip rectangles.
 inline std::vector<RenderPass> renderPasses(uint32_t viewLayer, uint32_t layerCount,
 	bool wireframeOverlay)
 {
-	std::vector<RenderPass> passes;
-	if (viewLayer >= layerCount) return passes;
-	for (auto layer = layerCount; layer-- > viewLayer;)
-	{
-		auto const details = layerRenderPasses(layer, layerCount,
-			wireframeOverlay && layer == viewLayer);
-		passes.insert(passes.end(), details.begin(), details.end());
-	}
-	return passes;
+	return layerRenderPasses(viewLayer, layerCount, wireframeOverlay);
 }
 
-// A Layer is eligible for compositing; nearer Sectors may occlude its cells.
+// True only for the Layer drawn whole. Deeper Sectors may still contribute
+// through recursively clipped apertures without making their Layer visible.
 inline bool isLayerDrawn(uint32_t layer, uint32_t viewLayer, uint32_t layerCount)
 {
 	if (layer >= layerCount || viewLayer >= layerCount)
@@ -131,7 +124,7 @@ inline bool isLayerDrawn(uint32_t layer, uint32_t viewLayer, uint32_t layerCount
 		return false;
 	}
 
-	return layer >= viewLayer;
+	return layer == viewLayer;
 }
 
 // Filled rather than outlined. Both the selected Layer and the Layer seen through
