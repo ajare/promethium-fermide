@@ -82,6 +82,10 @@ _Avoid_: Stair speed modifier, mobility profile
 An Agent property from 0.5 through 3 that weights known and expected waiting components of perceived route cost. Its neutral default is 1; it does not alter actual device timing or queue service.
 _Avoid_: Effort aversion, interaction aversion
 
+**Crowd aversion**:
+An Agent property from 0 through 3 that weights discomfort from locally observed access-zone density. Its neutral default is 1; it does not alter capacity, queue order, or waiting estimates.
+_Avoid_: Waiting aversion, capacity
+
 **Route observation**:
 Information locally available to an Agent when it chooses or revises a Path, such as a nearby queue or visible device state. The live state of a remote resource is not a Route observation.
 _Avoid_: Global simulation state, perfect knowledge

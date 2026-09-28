@@ -156,6 +156,7 @@ namespace core
 			|| mIndividualWalkSpeedModifier || mIndividualHeightModifier
 			|| mIndividualStairSpeedModifier || mIndividualInteractionAversion
 			|| mIndividualEffortAversion || mIndividualWaitingAversion
+			|| mIndividualCrowdAversion
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -192,6 +193,8 @@ namespace core
 				writeFloatProperty("effortAversion", *mIndividualEffortAversion);
 			if (mIndividualWaitingAversion)
 				writeFloatProperty("waitingAversion", *mIndividualWaitingAversion);
+			if (mIndividualCrowdAversion)
+				writeFloatProperty("crowdAversion", *mIndividualCrowdAversion);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -201,7 +204,7 @@ namespace core
 			serializer.endArray();
 		}
 		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
-			|| mInteractionAversionSample || mEffortAversionSample || mWaitingAversionSample)
+			|| mInteractionAversionSample || mEffortAversionSample || mWaitingAversionSample || mCrowdAversionSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -226,6 +229,8 @@ namespace core
 				writeSample("effortAversion", *mEffortAversionSample);
 			if (mWaitingAversionSample)
 				writeSample("waitingAversion", *mWaitingAversionSample);
+			if (mCrowdAversionSample)
+				writeSample("crowdAversion", *mCrowdAversionSample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -285,6 +290,7 @@ namespace core
 		mIndividualInteractionAversion.reset();
 		mIndividualEffortAversion.reset();
 		mIndividualWaitingAversion.reset();
+		mIndividualCrowdAversion.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -363,6 +369,15 @@ namespace core
 						throw SerializationException("Serialized individual Waiting aversion is invalid");
 					mIndividualWaitingAversion = value;
 				}
+				else if (type == "crowdAversion")
+				{
+					if (mIndividualCrowdAversion)
+						throw SerializationException("Serialized Agent contains more than one individual Crowd aversion");
+					auto const value = serializer.readFloat("value");
+					if (!agentCrowdAversionRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Crowd aversion is invalid");
+					mIndividualCrowdAversion = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -384,6 +399,7 @@ namespace core
 		mInteractionAversionSample.reset();
 		mEffortAversionSample.reset();
 		mWaitingAversionSample.reset();
+		mCrowdAversionSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -429,6 +445,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::WaitingAversion;
 					destination = &mWaitingAversionSample;
 					displayName = "Waiting aversion";
+				}
+				else if (type == "crowdAversion")
+				{
+					sample.type = SampledAgentPropertyType::CrowdAversion;
+					destination = &mCrowdAversionSample;
+					displayName = "Crowd aversion";
 				}
 				else
 				{
@@ -643,6 +665,22 @@ namespace core
 		return effective;
 	}
 
+	EffectiveAgentCrowdAversion Agent::getEffectiveCrowdAversion() const
+	{
+		EffectiveAgentCrowdAversion effective;
+		if (mIndividualCrowdAversion)
+		{
+			effective.value = *mIndividualCrowdAversion;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mCrowdAversionSample) return effective;
+		effective.value = mCrowdAversionSample->value;
+		effective.sourceTag = mCrowdAversionSample->sourceTag;
+		effective.propertyRevision = mCrowdAversionSample->propertyRevision;
+		return effective;
+	}
+
 	EffectiveAgentMobilityProfile Agent::getEffectiveMobilityProfile() const
 	{
 		EffectiveAgentMobilityProfile effective;
@@ -741,6 +779,12 @@ namespace core
 	float Agent::estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const
 	{
 		return mWorld ? mWorld->estimateTraversalDelay(resource, sourceSector) : 0.0f;
+	}
+
+	float Agent::observeAccessZoneDensity(TraversalResourceId resource,
+		SectorId sourceSector) const
+	{
+		return mWorld ? mWorld->observeAccessZoneDensity(resource, sourceSector) : 0.0f;
 	}
 
 	optional<LiftRouteAccessObservation> Agent::observeLiftAccess(

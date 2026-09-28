@@ -107,6 +107,38 @@ namespace
 			"Waiting aversion changed objective device or queue timing");
 	}
 
+	void crowdAversionReversesWaitingChoiceWithoutChangingTiming()
+	{
+		core::RouteChoicePolicy policy;
+		core::DirectedTraversalFacts lift;
+		lift.feasible = true;
+		lift.components.motionSeconds = 2.0f;
+		lift.components.knownWaitSeconds = 1.0f;
+		lift.components.expectedWaitSeconds = 2.0f;
+		lift.components.crowdingUnits = 3.0f;
+		lift.objectiveDurationSeconds = 5.0f;
+		core::DirectedTraversalFacts walk;
+		walk.feasible = true;
+		walk.components.motionSeconds = 8.0f;
+		walk.objectiveDurationSeconds = 8.0f;
+
+		core::EffectiveRoutingProfile low;
+		low.crowdAversion = core::AgentCrowdAversionMinimum;
+		auto high = low;
+		high.crowdAversion = core::AgentCrowdAversionMaximum;
+		auto const lowLift = policy.evaluate(lift, low);
+		auto const highLift = policy.evaluate(lift, high);
+		auto const lowWalk = policy.evaluate(walk, low);
+		auto const highWalk = policy.evaluate(walk, high);
+		require(lowLift && highLift && lowWalk && highWalk
+			&& lowLift->perceivedCost < lowWalk->perceivedCost
+			&& highLift->perceivedCost > highWalk->perceivedCost,
+			"Crowd aversion did not reverse a waiting-versus-walking choice");
+		require(lowLift->objectiveDurationSeconds == highLift->objectiveDurationSeconds
+			&& lowLift->objectiveDurationSeconds == lift.objectiveDurationSeconds,
+			"Crowd aversion changed objective device or queue timing");
+	}
+
 	void platformLiftUsesSlowerFiniteService()
 	{
 		auto world = core::loadWorldDocument(testWorld("platformlift-test-1.world.yaml"));
@@ -150,5 +182,6 @@ void runLiftRouteCostSmokeChecks()
 {
 	enclosedLiftSeparatesAccessFromRide();
 	waitingAversionReversesWaitingChoiceWithoutChangingTiming();
+	crowdAversionReversesWaitingChoiceWithoutChangingTiming();
 	platformLiftUsesSlowerFiniteService();
 }

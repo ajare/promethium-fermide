@@ -172,6 +172,25 @@ namespace core
 		return true;
 	}
 
+	bool agentCrowdAversionRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Crowd aversion endpoints must be finite");
+		if (range.minimum < AgentCrowdAversionMinimum
+			|| range.maximum > AgentCrowdAversionMaximum)
+			return reject("Crowd aversion endpoints must be between 0 and 3");
+		if (range.minimum > range.maximum)
+			return reject("Crowd aversion minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	float sampleAgentModifier(AgentModifierRange const& range)
 	{
 		if (!(range.minimum < range.maximum)) return range.minimum;

@@ -49,8 +49,15 @@ namespace core
 					/ std::max(1u, liftAccess->capacity);
 			}
 			else if (!liftAccess && context.legacyAgent)
+			{
+				auto const sourceSector = SectorId{ (uint64_t)sector->getIndex() + 1 };
+				// Admission delay and visible density are deliberately independent:
+				// Waiting aversion weights the former and Crowd aversion the latter.
 				c.knownWaitSeconds += context.legacyAgent->estimateTraversalDelay(
-					edge.getTraversalResourceId(), SectorId{ (uint64_t)sector->getIndex() + 1 });
+					edge.getTraversalResourceId(), sourceSector);
+				c.crowdingUnits = context.legacyAgent->observeAccessZoneDensity(
+					edge.getTraversalResourceId(), sourceSector);
+			}
 		}
 		else
 		{

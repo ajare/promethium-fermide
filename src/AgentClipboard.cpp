@@ -87,12 +87,17 @@ namespace
 			&& !core::agentWaitingAversionRangeIsValid(
 				{ *payload.individualWaitingAversion, *payload.individualWaitingAversion },
 				&diagnostic)) return false;
+		if (payload.individualCrowdAversion
+			&& !core::agentCrowdAversionRangeIsValid(
+				{ *payload.individualCrowdAversion, *payload.individualCrowdAversion },
+				&diagnostic)) return false;
 		if (payload.agentTags.empty())
 		{
 			if (payload.agentTagRegistryUuid || payload.walkSpeedModifierSample
 				|| payload.heightModifierSample || payload.stairSpeedModifierSample
 				|| payload.interactionAversionSample || payload.effortAversionSample
-				|| payload.waitingAversionSample)
+				|| payload.waitingAversionSample
+				|| payload.crowdAversionSample)
 			{
 				return reject(
 					"An untagged Agent clipboard payload cannot carry registry or sample state");
@@ -139,7 +144,10 @@ namespace
 				payload.effortAversionSample)
 			&& validateSample("Waiting aversion",
 				core::SampledAgentPropertyType::WaitingAversion,
-				payload.waitingAversionSample);
+				payload.waitingAversionSample)
+			&& validateSample("Crowd aversion",
+				core::SampledAgentPropertyType::CrowdAversion,
+				payload.crowdAversionSample);
 	}
 
 	bool clipboardTagStateFitsWorld(core::World const& world,
@@ -161,7 +169,7 @@ namespace
 		return world.validateAgentTagAssignments(payload.agentTags,
 			payload.walkSpeedModifierSample, payload.heightModifierSample,
 			payload.stairSpeedModifierSample, payload.interactionAversionSample,
-			payload.effortAversionSample, payload.waitingAversionSample, &diagnostic);
+			payload.effortAversionSample, payload.waitingAversionSample, payload.crowdAversionSample, &diagnostic);
 	}
 
 	AgentClipboardConfigurationValue portableValue(core::World const& world,
@@ -440,6 +448,8 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualEffortAversion = lookup.entity->getIndividualEffortAversion();
 	payload.waitingAversionSample = lookup.entity->getWaitingAversionSample();
 	payload.individualWaitingAversion = lookup.entity->getIndividualWaitingAversion();
+	payload.crowdAversionSample = lookup.entity->getCrowdAversionSample();
+	payload.individualCrowdAversion = lookup.entity->getIndividualCrowdAversion();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -514,6 +524,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualWaitingAversion)
 		output << YAML::Key << "waitingAversion" << YAML::Value
 			<< *payload.individualWaitingAversion;
+	if (payload.individualCrowdAversion)
+		output << YAML::Key << "crowdAversion" << YAML::Value
+			<< *payload.individualCrowdAversion;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -542,7 +555,7 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 		output << YAML::EndSeq;
 		if (payload.walkSpeedModifierSample || payload.heightModifierSample
 			|| payload.stairSpeedModifierSample || payload.interactionAversionSample
-			|| payload.effortAversionSample || payload.waitingAversionSample)
+			|| payload.effortAversionSample || payload.waitingAversionSample || payload.crowdAversionSample)
 		{
 			output << YAML::Key << "propertySamples" << YAML::Value << YAML::BeginSeq;
 			auto writeSample = [&output](char const* type,
@@ -568,6 +581,8 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 				writeSample("effortAversion", *payload.effortAversionSample);
 			if (payload.waitingAversionSample)
 				writeSample("waitingAversion", *payload.waitingAversionSample);
+			if (payload.crowdAversionSample)
+				writeSample("crowdAversion", *payload.crowdAversionSample);
 			output << YAML::EndSeq;
 		}
 	}
@@ -686,6 +701,20 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		if (!core::agentWaitingAversionRangeIsValid({ value, value }, &diagnostic))
 			return false;
 		payload.individualWaitingAversion = value;
+	}
+
+	if (object["crowdAversion"])
+	{
+		float value;
+		try { value = object["crowdAversion"].as<float>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Crowd aversion must be a number";
+			return false;
+		}
+		if (!core::agentCrowdAversionRangeIsValid({ value, value }, &diagnostic))
+			return false;
+		payload.individualCrowdAversion = value;
 	}
 
 	// An absent `group` is an ungrouped Agent, which is exactly how a
@@ -872,6 +901,11 @@ bool readAgentClipboardObject(YAML::Node const& object,
 				sample.type = core::SampledAgentPropertyType::WaitingAversion;
 				destination = &payload.waitingAversionSample;
 			}
+			else if (type == "crowdAversion")
+			{
+				sample.type = core::SampledAgentPropertyType::CrowdAversion;
+				destination = &payload.crowdAversionSample;
+			}
 			else
 			{
 				diagnostic = "Clipboard Agent property sample type is not supported";
@@ -885,7 +919,8 @@ bool readAgentClipboardObject(YAML::Node const& object,
 						: type == "heightModifier" ? "Height modifier"
 						: type == "stairSpeedModifier" ? "Stair speed modifier"
 						: type == "interactionAversion" ? "Interaction aversion"
-						: type == "effortAversion" ? "Effort aversion" : "Waiting aversion");
+						: type == "effortAversion" ? "Effort aversion"
+						: type == "waitingAversion" ? "Waiting aversion" : "Crowd aversion");
 				return false;
 			}
 			*destination = sample;
@@ -1095,6 +1130,18 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			}
 		}
 
+		if (payload.individualCrowdAversion)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualCrowdAversion(agentId,
+				payload.individualCrowdAversion, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Crowd aversion could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+
 		if (groupName)
 		{
 			// The destination's own group when it already defines this exact
@@ -1120,7 +1167,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			if (!world->restoreAgentTagAssignments(agentId, payload.agentTags,
 				payload.walkSpeedModifierSample, payload.heightModifierSample,
 				payload.stairSpeedModifierSample, payload.interactionAversionSample,
-				payload.effortAversionSample, payload.waitingAversionSample, &assignDiagnostic))
+				payload.effortAversionSample, payload.waitingAversionSample, payload.crowdAversionSample, &assignDiagnostic))
 			{
 				diagnostic = "The pasted Agent's tag assignments could not be restored: "
 					+ assignDiagnostic + rollBack();

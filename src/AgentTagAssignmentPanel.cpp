@@ -221,6 +221,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualWaitingAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualWaitingAversion(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::CrowdAversion),
+			target->getIndividualCrowdAversion().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualCrowdAversion(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -299,7 +303,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	}
 	if (target->getIndividualEscalatorWalkingChance() || target->getIndividualStairSpeedModifier()
 		|| target->getIndividualInteractionAversion() || target->getIndividualEffortAversion()
-		|| target->getIndividualWaitingAversion() || target->getIndividualMobilityProfile())
+		|| target->getIndividualWaitingAversion() || target->getIndividualCrowdAversion() || target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
 	{
@@ -407,6 +411,28 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			string diagnostic;
 			commitIndividualPropertyEdit(world, [&](string* out)
 				{ return world->setAgentIndividualWaitingAversion(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
+	if (target->getIndividualCrowdAversion())
+	{
+		auto value = *target->getIndividualCrowdAversion();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Crowd aversion##individual", &value, 0.01f,
+			core::AgentCrowdAversionMinimum, core::AgentCrowdAversionMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualCrowdAversion(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualCrowdAversion"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualCrowdAversion(agent, nullopt, out); }, diagnostic);
 			warn(diagnostic);
 		}
 	}
@@ -553,6 +579,13 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Waiting aversion: %.2f from #%s", waiting.value,
 			world->getAgentTagRegistry()->getAgentTagName(waiting.sourceTag).c_str());
 	else ImGui::TextUnformatted("Waiting aversion: 1.00 (default)");
+	auto const crowd = lookup.entity->getEffectiveCrowdAversion();
+	if (crowd.individual)
+		ImGui::Text("Crowd aversion: %.2f (individual)", crowd.value);
+	else if (crowd.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Crowd aversion: %.2f from #%s", crowd.value,
+			world->getAgentTagRegistry()->getAgentTagName(crowd.sourceTag).c_str());
+	else ImGui::TextUnformatted("Crowd aversion: 1.00 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.forbiddenTraversals);
