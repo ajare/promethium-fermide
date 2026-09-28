@@ -153,6 +153,25 @@ namespace core
 		return true;
 	}
 
+	bool agentWaitingAversionRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Waiting aversion endpoints must be finite");
+		if (range.minimum < AgentWaitingAversionMinimum
+			|| range.maximum > AgentWaitingAversionMaximum)
+			return reject("Waiting aversion endpoints must be between 0.5 and 3");
+		if (range.minimum > range.maximum)
+			return reject("Waiting aversion minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	float sampleAgentModifier(AgentModifierRange const& range)
 	{
 		if (!(range.minimum < range.maximum)) return range.minimum;

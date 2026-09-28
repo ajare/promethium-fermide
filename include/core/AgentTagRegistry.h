@@ -63,6 +63,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool effortAversionAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool waitingAversionAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		bool mobilityProfileAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		void registerWorld(World& world);
@@ -101,6 +103,8 @@ namespace core
 		AgentInteractionAversionProperty const* getAgentTagInteractionAversion(
 			AgentTagId id) const;
 		AgentEffortAversionProperty const* getAgentTagEffortAversion(
+			AgentTagId id) const;
+		AgentWaitingAversionProperty const* getAgentTagWaitingAversion(
 			AgentTagId id) const;
 		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
@@ -189,6 +193,12 @@ namespace core
 		bool setAgentTagEffortAversion(AgentTagId id, AgentModifierRange range,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagEffortAversion(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool addAgentTagWaitingAversion(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool setAgentTagWaitingAversion(AgentTagId id, AgentModifierRange range,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagWaitingAversion(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagMobilityProfile(AgentTagId id,

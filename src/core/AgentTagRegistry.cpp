@@ -114,6 +114,8 @@ namespace core
 				tag->setInteractionAversion(*interaction);
 			if (auto const* effort = sourceTag->getEffortAversion())
 				tag->setEffortAversion(*effort);
+			if (auto const* waiting = sourceTag->getWaitingAversion())
+				tag->setWaitingAversion(*waiting);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
 				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
@@ -151,6 +153,8 @@ namespace core
 					candidate->getInteractionAversion())
 				|| !optionalPropertyMatches(tag->getEffortAversion(),
 					candidate->getEffortAversion())
+				|| !optionalPropertyMatches(tag->getWaitingAversion(),
+					candidate->getWaitingAversion())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
 					candidate->getMobilityProfile())) return false;
 		}
@@ -325,6 +329,16 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getEffortAversion();
+	}
+
+	AgentWaitingAversionProperty const*
+	AgentTagRegistry::getAgentTagWaitingAversion(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getWaitingAversion();
 	}
 
 	AgentMobilityProfileProperty const*
@@ -692,6 +706,39 @@ namespace core
 					if (!source || !source->getEffortAversion()) continue;
 					return reject(std::format(
 						"Cannot add Effort aversion to Agent tag #{}: Agent '{}' in World '{}' already inherits Effort aversion from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::waitingAversionAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format(
+			"Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+		{
+			if (!world) continue;
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (!source || !source->getWaitingAversion()) continue;
+					return reject(std::format(
+						"Cannot add Waiting aversion to Agent tag #{}: Agent '{}' in World '{}' already inherits Waiting aversion from #{}",
 						target->getName(), agent->getName(), world->getName(), source->getName()));
 				}
 			}
@@ -1323,6 +1370,27 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagWaitingAversion(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getWaitingAversion()) return reject(std::format(
+			"Agent tag #{} already has Waiting aversion", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!waitingAversionAdditionIsValid(id, diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setWaitingAversion({ DefaultAgentWaitingAversionRange, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagWaitingAversionSamples(id, *tag->getWaitingAversion());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1367,6 +1435,28 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::setAgentTagWaitingAversion(AgentTagId id,
+		AgentModifierRange range, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getWaitingAversion();
+		if (!current) return reject(std::format("Agent tag #{} has no Waiting aversion", tag->getName()));
+		if (!agentWaitingAversionRangeIsValid(range, diagnostic)) return false;
+		if (current->range == range) return reject("The Agent Waiting aversion range is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setWaitingAversion({ range, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagWaitingAversionSamples(id, *tag->getWaitingAversion());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::setAgentTagMobilityProfile(AgentTagId id,
 		TraversalMask forbiddenTraversals, std::string* diagnostic)
 	{
@@ -1405,6 +1495,23 @@ namespace core
 		for (auto* world : mLoadedWorlds)
 			if (world) world->clearAgentTagEffortAversionSamples(id);
 		tag->removeEffortAversion();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagWaitingAversion(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getWaitingAversion()) return reject(std::format(
+			"Agent tag #{} has no Waiting aversion", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world) world->clearAgentTagWaitingAversionSamples(id);
+		tag->removeWaitingAversion();
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -1459,7 +1566,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 5);
+		serializer.writeUint32("version", 6);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -1482,9 +1589,10 @@ namespace core
 			auto const* stairSpeed = tag->getStairSpeedModifier();
 			auto const* interaction = tag->getInteractionAversion();
 			auto const* effort = tag->getEffortAversion();
+			auto const* waiting = tag->getWaitingAversion();
 			auto const* chance = tag->getEscalatorWalkingChance();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || interaction || effort || chance || mobility)
+			if (colour || walkSpeed || height || stairSpeed || interaction || effort || waiting || chance || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -1520,6 +1628,7 @@ namespace core
 				if (stairSpeed) writeModifier("stairSpeedModifier", *stairSpeed);
 				if (interaction) writeModifier("interactionAversion", *interaction);
 				if (effort) writeModifier("effortAversion", *effort);
+				if (waiting) writeModifier("waitingAversion", *waiting);
 				if (mobility)
 				{
 					serializer.beginMap("");
@@ -1540,7 +1649,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 5)
+		if (version < 1 || version > 6)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -1590,6 +1699,7 @@ namespace core
 				bool hasStairSpeedModifier{ false };
 				bool hasInteractionAversion{ false };
 				bool hasEffortAversion{ false };
+				bool hasWaitingAversion{ false };
 				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
@@ -1601,7 +1711,8 @@ namespace core
 						&& !(version >= 2 && type == "mobilityProfile")
 						&& !(version >= 3 && type == "interactionAversion")
 						&& !(version >= 4 && type == "stairSpeedModifier")
-						&& !(version >= 5 && type == "effortAversion"))
+						&& !(version >= 5 && type == "effortAversion")
+						&& !(version >= 6 && type == "waitingAversion"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -1626,6 +1737,9 @@ namespace core
 					if (type == "effortAversion" && hasEffortAversion)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Effort aversion", name));
+					if (type == "waitingAversion" && hasWaitingAversion)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Waiting aversion", name));
 					if (type == "mobilityProfile" && hasMobilityProfile)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Mobility profile",
@@ -1697,13 +1811,21 @@ namespace core
 							tag->setInteractionAversion({ range, revision });
 							hasInteractionAversion = true;
 						}
-						else
+						else if (type == "effortAversion")
 						{
 							if (!agentEffortAversionRangeIsValid(range, &rangeDiagnostic))
 								throw SerializationException(
 									"Serialized Effort aversion range is invalid: " + rangeDiagnostic);
 							tag->setEffortAversion({ range, revision });
 							hasEffortAversion = true;
+						}
+						else
+						{
+							if (!agentWaitingAversionRangeIsValid(range, &rangeDiagnostic))
+								throw SerializationException(
+									"Serialized Waiting aversion range is invalid: " + rangeDiagnostic);
+							tag->setWaitingAversion({ range, revision });
+							hasWaitingAversion = true;
 						}
 					}
 					serializer.endMap();

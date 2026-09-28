@@ -211,6 +211,7 @@ namespace core
 			profile.escalatorWalkingChance = routingAgent->getEffectiveEscalatorWalkingChance().value;
 			profile.interactionAversion = routingAgent->getEffectiveInteractionAversion().value;
 			profile.effortAversion = routingAgent->getEffectiveEffortAversion().value;
+			profile.waitingAversion = routingAgent->getEffectiveWaitingAversion().value;
 			RouteDecisionContext const context{ routingAgent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
 				routingAgent->getWalkSpeed() };

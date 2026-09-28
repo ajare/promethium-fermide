@@ -18,12 +18,12 @@ namespace
 		if (!condition) throw std::runtime_error(message);
 	}
 
-	std::string serialize(core::World const& world)
+	std::string serialize(core::Serializable const& document)
 	{
 		auto writer = core::YamlSerializer::toString();
 		core::SerializationWorkData work;
 		work.markSerializedUnmodified = false;
-		world.serialize(*writer, work);
+		document.serialize(*writer, work);
 		writer->serialize();
 		return writer->getSerializedString();
 	}
@@ -35,10 +35,14 @@ void runAgentIndividualPropertySmokeChecks()
 		core::AgentPropertyType::InteractionAversion);
 	auto const effortMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::EffortAversion);
+	auto const waitingMetadata = core::agentPropertyMetadata(
+		core::AgentPropertyType::WaitingAversion);
 	require(interactionMetadata.name == "Interaction aversion"
 		&& interactionMetadata.propertyNamespace == "Pathing"
 		&& effortMetadata.name == "Effort aversion"
 		&& effortMetadata.propertyNamespace == "Pathing"
+		&& waitingMetadata.name == "Waiting aversion"
+		&& waitingMetadata.propertyNamespace == "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::StairSpeedModifier).propertyNamespace
 			== "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
@@ -73,6 +77,19 @@ void runAgentIndividualPropertySmokeChecks()
 	require(registry->setAgentTagInteractionAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagEffortAversion(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagEffortAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
+	require(registry->addAgentTagWaitingAversion(tag, &diagnostic), diagnostic);
+	require(registry->getAgentTagWaitingAversion(tag)->range
+		== core::DefaultAgentWaitingAversionRange,
+		"Waiting aversion did not default to neutral");
+	require(!registry->setAgentTagWaitingAversion(tag, { 0.49f, 1.0f }, &diagnostic)
+		&& diagnostic.find("between 0.5 and 3") != std::string::npos,
+		"Agent tag accepted an out-of-range Waiting aversion");
+	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
+	auto const registryYaml = serialize(*registry);
+	require(registryYaml.find("version: 6") != std::string::npos
+		&& registryYaml.find("type: waitingAversion") != std::string::npos
+		&& registryYaml.find("min: 2.5") != std::string::npos,
+		"The Agent tag Waiting aversion range was not persisted");
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagMobilityProfile(tag,
 		core::traversalMask(core::TraversalKind::Staircase), &diagnostic), diagnostic);
@@ -107,6 +124,11 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveEffortAversion().sourceTag == tag,
 		"The Agent did not inherit its sampled Effort aversion");
 	require(world->setAgentIndividualEffortAversion(id, 0.0f, &diagnostic), diagnostic);
+	require(agent->getWaitingAversionSample()
+		&& agent->getEffectiveWaitingAversion().value == 2.5f
+		&& agent->getEffectiveWaitingAversion().sourceTag == tag,
+		"The Agent did not inherit its sampled Waiting aversion");
+	require(world->setAgentIndividualWaitingAversion(id, 0.5f, &diagnostic), diagnostic);
 	auto const directMask = core::traversalMask(core::TraversalKind::Lift);
 	require(world->setAgentIndividualMobilityProfile(id, directMask, &diagnostic), diagnostic);
 
@@ -124,6 +146,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveInteractionAversion().value == 0.0f
 		&& agent->getEffectiveEffortAversion().individual
 		&& agent->getEffectiveEffortAversion().value == 0.0f
+		&& agent->getEffectiveWaitingAversion().individual
+		&& agent->getEffectiveWaitingAversion().value == 0.5f
 		&& agent->getEffectiveMobilityProfile().individual
 		&& agent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
 		"Individual Agent properties did not override inherited tag values");
@@ -133,6 +157,9 @@ void runAgentIndividualPropertySmokeChecks()
 	require(!world->setAgentIndividualStairSpeedModifier(id, 1.51f, &diagnostic)
 		&& diagnostic.find("between 0.5 and 1.5") != std::string::npos,
 		"An out-of-range individual Stair speed modifier was accepted");
+	require(!world->setAgentIndividualWaitingAversion(id, 0.49f, &diagnostic)
+		&& diagnostic.find("between 0.5 and 3") != std::string::npos,
+		"An out-of-range individual Waiting aversion was accepted");
 	require(!world->setAgentIndividualMobilityProfile(id,
 		core::TraversalMask{ 1 } << 9, &diagnostic)
 		&& diagnostic.find("reserved") != std::string::npos,
@@ -143,7 +170,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("interactionAversion") != std::string::npos
-		&& yaml.find("effortAversion") != std::string::npos,
+		&& yaml.find("effortAversion") != std::string::npos
+		&& yaml.find("waitingAversion") != std::string::npos,
 		"Individual Agent properties were not persisted in World schema 19");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 	auto reader = core::YamlSerializer::fromString(yaml);
@@ -160,6 +188,10 @@ void runAgentIndividualPropertySmokeChecks()
 		&& loadedAgent->getEffectiveInteractionAversion().value == 0.0f
 		&& loadedAgent->getEffectiveEffortAversion().individual
 		&& loadedAgent->getEffectiveEffortAversion().value == 0.0f
+		&& loadedAgent->getWaitingAversionSample()
+		&& loadedAgent->getWaitingAversionSample()->value == 2.5f
+		&& loadedAgent->getEffectiveWaitingAversion().individual
+		&& loadedAgent->getEffectiveWaitingAversion().value == 0.5f
 		&& loadedAgent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
 		"Individual Agent properties did not round-trip");
 

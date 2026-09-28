@@ -283,6 +283,7 @@ namespace core
 			if (agent->getStairSpeedModifierSample()) ++count;
 			if (agent->getInteractionAversionSample()) ++count;
 			if (agent->getEffortAversionSample()) ++count;
+			if (agent->getWaitingAversionSample()) ++count;
 		}
 		return count;
 	}
@@ -1133,12 +1134,14 @@ namespace core
 			AgentTagId stairSpeedSource{};
 			AgentTagId interactionAversionSource{};
 			AgentTagId effortAversionSource{};
+			AgentTagId waitingAversionSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
 			AgentStairSpeedModifierProperty const* stairSpeedProperty{ nullptr };
 			AgentInteractionAversionProperty const* interactionAversionProperty{ nullptr };
 			AgentEffortAversionProperty const* effortAversionProperty{ nullptr };
+			AgentWaitingAversionProperty const* waitingAversionProperty{ nullptr };
 			for (auto const tag : agent->getAgentTagIds())
 			{
 				auto const* definition = registry.lookupAgentTag(tag);
@@ -1223,6 +1226,16 @@ namespace core
 							definition->getName()));
 					effortAversionSource = tag;
 					effortAversionProperty = property;
+				}
+				if (auto const* property = definition->getWaitingAversion())
+				{
+					if (waitingAversionSource)
+						return reject(format(
+							"Agent '{}' inherits Waiting aversion from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(waitingAversionSource),
+							definition->getName()));
+					waitingAversionSource = tag;
+					waitingAversionProperty = property;
 				}
 				if (definition->getMobilityProfile())
 				{
@@ -1326,6 +1339,11 @@ namespace core
 				effortAversionProperty ? &effortAversionProperty->range : nullptr,
 				effortAversionProperty ? effortAversionProperty->revision : 0,
 				agent->getEffortAversionSample(), repair.effortAversionAction)) return false;
+			if (!inspectSample("Waiting aversion", SampledAgentPropertyType::WaitingAversion,
+				waitingAversionSource,
+				waitingAversionProperty ? &waitingAversionProperty->range : nullptr,
+				waitingAversionProperty ? waitingAversionProperty->revision : 0,
+				agent->getWaitingAversionSample(), repair.waitingAversionAction)) return false;
 
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
 			{
@@ -1352,11 +1370,17 @@ namespace core
 				repair.effortAversionSource = effortAversionSource;
 				repair.effortAversionProperty = *effortAversionProperty;
 			}
+			if (repair.waitingAversionAction == AgentTagSampleRepairAction::Resample)
+			{
+				repair.waitingAversionSource = waitingAversionSource;
+				repair.waitingAversionProperty = *waitingAversionProperty;
+			}
 			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.interactionAversionAction != AgentTagSampleRepairAction::None
-				|| repair.effortAversionAction != AgentTagSampleRepairAction::None))
+				|| repair.effortAversionAction != AgentTagSampleRepairAction::None
+				|| repair.waitingAversionAction != AgentTagSampleRepairAction::None))
 			{
 				repairs->push_back(repair);
 			}
@@ -1425,6 +1449,15 @@ namespace core
 					repair.effortAversionProperty.revision,
 					sampleAgentModifier(repair.effortAversionProperty.range) });
 			}
+			if (repair.waitingAversionAction == AgentTagSampleRepairAction::Clear)
+				agent->clearWaitingAversionSample();
+			else if (repair.waitingAversionAction == AgentTagSampleRepairAction::Resample)
+			{
+				agent->setWaitingAversionSample({
+					SampledAgentPropertyType::WaitingAversion, repair.waitingAversionSource,
+					repair.waitingAversionProperty.revision,
+					sampleAgentModifier(repair.waitingAversionProperty.range) });
+			}
 		}
 		if (!repairs.empty()) modify();
 	}
@@ -1474,6 +1507,9 @@ namespace core
 			if (agent->getEffortAversionSample()
 				&& agent->getEffortAversionSample()->sourceTag == id)
 				agent->clearEffortAversionSample();
+			if (agent->getWaitingAversionSample()
+				&& agent->getWaitingAversionSample()->sourceTag == id)
+				agent->clearWaitingAversionSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -1492,6 +1528,7 @@ namespace core
 			agent->clearStairSpeedModifierSample();
 			agent->clearInteractionAversionSample();
 			agent->clearEffortAversionSample();
+			agent->clearWaitingAversionSample();
 		}
 	}
 
@@ -1618,6 +1655,38 @@ namespace core
 			if (!agent || !agent->getEffortAversionSample()
 				|| agent->getEffortAversionSample()->sourceTag != id) continue;
 			agent->clearEffortAversionSample();
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::addAgentTagWaitingAversionSamples(AgentTagId id,
+		AgentWaitingAversionProperty const& property)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->hasAgentTag(id)) continue;
+			agent->setWaitingAversionSample({
+				SampledAgentPropertyType::WaitingAversion, id, property.revision,
+				sampleAgentModifier(property.range) });
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::clearAgentTagWaitingAversionSamples(AgentTagId id)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->getWaitingAversionSample()
+				|| agent->getWaitingAversionSample()->sourceTag != id) continue;
+			agent->clearWaitingAversionSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -7767,6 +7836,29 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualWaitingAversion(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentWaitingAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualWaitingAversion() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Waiting aversion is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualWaitingAversion(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<TraversalMask> value, string* diagnostic)
 	{
@@ -8111,6 +8203,12 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Effort aversion is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getWaitingAversion() && source->getWaitingAversion())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Waiting aversion is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -8134,6 +8232,7 @@ namespace core
 		optional<AgentPropertySample> stairSpeedSample;
 		optional<AgentPropertySample> interactionAversionSample;
 		optional<AgentPropertySample> effortAversionSample;
+		optional<AgentPropertySample> waitingAversionSample;
 		if (auto const* property = definition->getWalkSpeedModifier())
 		{
 			walkSpeedSample = AgentPropertySample{
@@ -8164,12 +8263,19 @@ namespace core
 				SampledAgentPropertyType::EffortAversion, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		if (auto const* property = definition->getWaitingAversion())
+		{
+			waitingAversionSample = AgentPropertySample{
+				SampledAgentPropertyType::WaitingAversion, tag, property->revision,
+				sampleAgentModifier(property->range) };
+		}
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
 		if (stairSpeedSample) target->setStairSpeedModifierSample(*stairSpeedSample);
 		if (interactionAversionSample) target->setInteractionAversionSample(*interactionAversionSample);
 		if (effortAversionSample) target->setEffortAversionSample(*effortAversionSample);
+		if (waitingAversionSample) target->setWaitingAversionSample(*waitingAversionSample);
 		modify();
 		return true;
 	}
@@ -8220,6 +8326,9 @@ namespace core
 		if (target->getEffortAversionSample()
 			&& target->getEffortAversionSample()->sourceTag == tag)
 			target->clearEffortAversionSample();
+		if (target->getWaitingAversionSample()
+			&& target->getWaitingAversionSample()->sourceTag == tag)
+			target->clearWaitingAversionSample();
 		modify();
 		return true;
 	}
@@ -8230,6 +8339,7 @@ namespace core
 		optional<AgentPropertySample> const& stairSpeedSample,
 		optional<AgentPropertySample> const& interactionAversionSample,
 		optional<AgentPropertySample> const& effortAversionSample,
+		optional<AgentPropertySample> const& waitingAversionSample,
 		string* diagnostic) const
 	{
 		if (diagnostic) diagnostic->clear();
@@ -8242,7 +8352,7 @@ namespace core
 		if (tags.empty())
 		{
 			if (walkSpeedSample || heightSample || stairSpeedSample
-				|| interactionAversionSample || effortAversionSample)
+				|| interactionAversionSample || effortAversionSample || waitingAversionSample)
 				return reject("An untagged Agent cannot carry modifier samples");
 			return true;
 		}
@@ -8256,12 +8366,14 @@ namespace core
 		AgentTagId stairSpeedSource{};
 		AgentTagId interactionAversionSource{};
 		AgentTagId effortAversionSource{};
+		AgentTagId waitingAversionSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
 		AgentStairSpeedModifierProperty const* stairSpeedProperty{ nullptr };
 		AgentInteractionAversionProperty const* interactionAversionProperty{ nullptr };
 		AgentEffortAversionProperty const* effortAversionProperty{ nullptr };
+		AgentWaitingAversionProperty const* waitingAversionProperty{ nullptr };
 		for (auto const tag : tags)
 		{
 			auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
@@ -8324,6 +8436,14 @@ namespace core
 				effortAversionSource = tag;
 				effortAversionProperty = property;
 			}
+			if (auto const* property = definition->getWaitingAversion())
+			{
+				if (waitingAversionSource)
+					return reject(format("Waiting aversion is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(waitingAversionSource), definition->getName()));
+				waitingAversionSource = tag;
+				waitingAversionProperty = property;
+			}
 			if (definition->getMobilityProfile())
 			{
 				if (mobilityProfileSource)
@@ -8378,7 +8498,12 @@ namespace core
 				effortAversionSource,
 				effortAversionProperty ? &effortAversionProperty->range : nullptr,
 				effortAversionProperty ? effortAversionProperty->revision : 0,
-				effortAversionSample);
+				effortAversionSample)
+			&& validateSample("Waiting aversion", SampledAgentPropertyType::WaitingAversion,
+				waitingAversionSource,
+				waitingAversionProperty ? &waitingAversionProperty->range : nullptr,
+				waitingAversionProperty ? waitingAversionProperty->revision : 0,
+				waitingAversionSample);
 	}
 
 	bool World::restoreAgentTagAssignments(AgentId agent,
@@ -8388,6 +8513,7 @@ namespace core
 		optional<AgentPropertySample> const& stairSpeedSample,
 		optional<AgentPropertySample> const& interactionAversionSample,
 		optional<AgentPropertySample> const& effortAversionSample,
+		optional<AgentPropertySample> const& waitingAversionSample,
 		string* diagnostic)
 	{
 		invalidateSimulationSnapshot();
@@ -8405,7 +8531,8 @@ namespace core
 			return false;
 		}
 		if (!validateAgentTagAssignments(tags, walkSpeedSample, heightSample,
-			stairSpeedSample, interactionAversionSample, effortAversionSample, diagnostic))
+			stairSpeedSample, interactionAversionSample, effortAversionSample,
+			waitingAversionSample, diagnostic))
 			return false;
 
 		auto* target = mAgents.find(agent);
@@ -8414,7 +8541,8 @@ namespace core
 			&& target->getHeightModifierSample() == heightSample
 			&& target->getStairSpeedModifierSample() == stairSpeedSample
 			&& target->getInteractionAversionSample() == interactionAversionSample
-			&& target->getEffortAversionSample() == effortAversionSample) return true;
+			&& target->getEffortAversionSample() == effortAversionSample
+			&& target->getWaitingAversionSample() == waitingAversionSample) return true;
 
 		target->setAgentTags(tags);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
@@ -8427,6 +8555,8 @@ namespace core
 		else target->clearInteractionAversionSample();
 		if (effortAversionSample) target->setEffortAversionSample(*effortAversionSample);
 		else target->clearEffortAversionSample();
+		if (waitingAversionSample) target->setWaitingAversionSample(*waitingAversionSample);
+		else target->clearWaitingAversionSample();
 		modify();
 		return true;
 	}

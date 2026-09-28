@@ -155,7 +155,8 @@ namespace core
 		if (mIndividualColour || mIndividualEscalatorWalkingChance
 			|| mIndividualWalkSpeedModifier || mIndividualHeightModifier
 			|| mIndividualStairSpeedModifier || mIndividualInteractionAversion
-			|| mIndividualEffortAversion || mIndividualMobilityProfile)
+			|| mIndividualEffortAversion || mIndividualWaitingAversion
+			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
 			auto beginProperty = [&serializer](char const* type)
@@ -189,6 +190,8 @@ namespace core
 				writeFloatProperty("interactionAversion", *mIndividualInteractionAversion);
 			if (mIndividualEffortAversion)
 				writeFloatProperty("effortAversion", *mIndividualEffortAversion);
+			if (mIndividualWaitingAversion)
+				writeFloatProperty("waitingAversion", *mIndividualWaitingAversion);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -198,7 +201,7 @@ namespace core
 			serializer.endArray();
 		}
 		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
-			|| mInteractionAversionSample || mEffortAversionSample)
+			|| mInteractionAversionSample || mEffortAversionSample || mWaitingAversionSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -221,6 +224,8 @@ namespace core
 				writeSample("interactionAversion", *mInteractionAversionSample);
 			if (mEffortAversionSample)
 				writeSample("effortAversion", *mEffortAversionSample);
+			if (mWaitingAversionSample)
+				writeSample("waitingAversion", *mWaitingAversionSample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -279,6 +284,7 @@ namespace core
 		mIndividualStairSpeedModifier.reset();
 		mIndividualInteractionAversion.reset();
 		mIndividualEffortAversion.reset();
+		mIndividualWaitingAversion.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -348,6 +354,15 @@ namespace core
 						throw SerializationException("Serialized individual Effort aversion is invalid");
 					mIndividualEffortAversion = value;
 				}
+				else if (type == "waitingAversion")
+				{
+					if (mIndividualWaitingAversion)
+						throw SerializationException("Serialized Agent contains more than one individual Waiting aversion");
+					auto const value = serializer.readFloat("value");
+					if (!agentWaitingAversionRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Waiting aversion is invalid");
+					mIndividualWaitingAversion = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -368,6 +383,7 @@ namespace core
 		mStairSpeedModifierSample.reset();
 		mInteractionAversionSample.reset();
 		mEffortAversionSample.reset();
+		mWaitingAversionSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -407,6 +423,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::EffortAversion;
 					destination = &mEffortAversionSample;
 					displayName = "Effort aversion";
+				}
+				else if (type == "waitingAversion")
+				{
+					sample.type = SampledAgentPropertyType::WaitingAversion;
+					destination = &mWaitingAversionSample;
+					displayName = "Waiting aversion";
 				}
 				else
 				{
@@ -602,6 +624,22 @@ namespace core
 		effective.value = mEffortAversionSample->value;
 		effective.sourceTag = mEffortAversionSample->sourceTag;
 		effective.propertyRevision = mEffortAversionSample->propertyRevision;
+		return effective;
+	}
+
+	EffectiveAgentWaitingAversion Agent::getEffectiveWaitingAversion() const
+	{
+		EffectiveAgentWaitingAversion effective;
+		if (mIndividualWaitingAversion)
+		{
+			effective.value = *mIndividualWaitingAversion;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mWaitingAversionSample) return effective;
+		effective.value = mWaitingAversionSample->value;
+		effective.sourceTag = mWaitingAversionSample->sourceTag;
+		effective.propertyRevision = mWaitingAversionSample->propertyRevision;
 		return effective;
 	}
 
