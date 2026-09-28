@@ -7091,7 +7091,7 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 				requestLayerDelete(world, layer);
 			}
 			ImGui::EndDisabled();
-			if (ImGui::IsItemHovered())
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			{
 				if (canDelete)
 					ImGui::SetTooltip("Delete %s and everything on it", world->getLayerName(layer).c_str());
@@ -7153,6 +7153,11 @@ void renderLevelsPanel(shared_ptr<core::World> const& world)
 				else { pending = std::move(plan); pendingWorld = world; open = true; }
 			}
 			ImGui::EndDisabled();
+			if (world->getLevelsHigh() <= 1
+				&& ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			{
+				ImGui::SetTooltip("A World must keep at least one Level");
+			}
 			ImGui::PopID();
 		}
 		ImGui::EndTable();
