@@ -9384,6 +9384,19 @@ namespace core
 		}
 	}
 
+	uint32_t World::countStandingAgentsOnEscalator(Agent const* observer, Edge const* edge) const
+	{
+		if (!observer || !edge) return 0;
+		uint32_t count = 0;
+		for (auto const& [id, candidate] : mAgents.entries())
+		{
+			(void)id;
+			if (candidate.get() != observer && candidate->isActive()
+				&& candidate->isStandingOnEscalator(edge)) ++count;
+		}
+		return count;
+	}
+
 	float World::estimateTraversalDelay(TraversalResourceId resourceId, SectorId sourceSector) const
 	{
 		auto resource = mTraversalResources.find(resourceId);

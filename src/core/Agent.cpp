@@ -705,6 +705,11 @@ namespace core
 		return mWorld ? mWorld->estimateTraversalDelay(resource, sourceSector) : 0.0f;
 	}
 
+	uint32_t Agent::countObservedStandingEscalatorAgents(Edge const* edge) const
+	{
+		return mWorld ? mWorld->countStandingAgentsOnEscalator(this, edge) : 0;
+	}
+
 	uint32_t Agent::getFlags() const
 	{
 		return mFlags;

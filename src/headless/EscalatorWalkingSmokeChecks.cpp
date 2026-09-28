@@ -218,8 +218,12 @@ namespace
 					for (int query = 0; query < (observations ? 5 : 1); ++query)
 					{
 						require(fixture.world.getSimulationSnapshot().agents.front().escalatorWalking == decision, "snapshot tri-state");
+						auto const expectedRouteSpeed = 0.75f
+							+ fixture.agent()->getEffectiveEscalatorWalkingChance().value
+								* fixture.agent()->getWalkSpeed();
 						require(std::abs(fixture.edge->getWeight(fixture.target, fixture.agent(), true)
-							- fixture.edge->getLength() / 0.75f) < 1e-6f, "route cost changed");
+							- fixture.edge->getLength() / expectedRouteSpeed) < 1e-6f,
+							"route estimate did not use expected walking contribution");
 						(void)fixture.world.getGraph()->calculatePath(fixture.agent(), fixture.target);
 					}
 				}
@@ -292,6 +296,58 @@ return {
 			"Lua random draws changed Escalator decisions or movement");
 	}
 
+	void routeChoiceFactsAndLocalCongestion()
+	{
+		Fixture fixture(1.0f);
+		auto const source = fixture.edge->getOtherVertex(fixture.target);
+		auto const policy = fixture.world.getRouteChoicePolicy();
+		auto profile = policy.baselineProfile;
+		profile.escalatorWalkingChance = fixture.agent()->getEffectiveEscalatorWalkingChance().value;
+		core::RouteDecisionContext context{ fixture.agent(), profile, policy,
+			fixture.agent()->getSector(), fixture.agent()->getWalkSpeed() };
+
+		auto clear = fixture.edge->getDirectedTraversalFacts(fixture.target, context);
+		require(clear.feasible, "permitted Escalator direction became infeasible");
+		auto const expectedSpeed = 0.75f + fixture.agent()->getWalkSpeed();
+		require(std::abs(clear.components.motionSeconds
+			- fixture.edge->getLength() / expectedSpeed) < 1e-6f,
+			"pre-boarding duration ignored walking chance");
+		require(clear.components.interactionUnits == policy.escalatorMountDismountInteraction
+			&& clear.components.physicalEffortUnits > 0.0f,
+			"Escalator estimate omitted mount/dismount or effort cost");
+		auto reverse = fixture.edge->getDirectedTraversalFacts(source, context);
+		require(!reverse.feasible, "travel against Escalator direction remained a finite option");
+
+		auto path = fixture.world.getGraph()->calculatePath(fixture.agent(), fixture.target);
+		require(path && std::any_of(path->nodes.begin(), path->nodes.end(), [&](auto const& node)
+			{ return node.edge && node.edge->getId() == fixture.edge->getId(); }),
+			"upward Escalator lost to adjacent stationary stairs");
+
+		auto const localX = source->getPosition().x
+			- static_cast<float>(fixture.agent()->getSector()->getCellX0());
+		auto const standingId = fixture.world.createAgent("Standing occupant", fixture.origin, 0, localX);
+		auto* standingAgent = fixture.world.lookupAgent(standingId).entity;
+		// Merely being next to the entry does not make a passing Agent congestion.
+		auto passing = fixture.edge->getDirectedTraversalFacts(fixture.target, context);
+		require(std::abs(passing.components.motionSeconds - clear.components.motionSeconds) < 1e-6f,
+			"an Agent passing the Escalator entry was treated as congestion");
+		auto standingPath = fixture.world.getGraph()->calculatePath(standingAgent, fixture.target);
+		require(bool(standingPath), "standing occupant has no Escalator Path");
+		standingAgent->setPath(standingPath, true);
+		require(fixture.world.resumeSimulation(), "resume standing occupant");
+		for (int tick = 0; tick < 1000
+			&& !standingAgent->getActiveEscalatorWalking().has_value(); ++tick) fixture.tick(1);
+		require(standingAgent->getActiveEscalatorWalking().has_value()
+			&& !*standingAgent->getActiveEscalatorWalking(), "occupant did not stand on Escalator");
+
+		auto congested = fixture.edge->getDirectedTraversalFacts(fixture.target, context);
+		require(std::abs(congested.components.motionSeconds
+			- fixture.edge->getLength() / 0.75f) < 1e-6f,
+			"visible entry congestion did not suppress expected walking");
+		require(congested.components.physicalEffortUnits < clear.components.physicalEffortUnits,
+			"suppressed walking retained its expected effort");
+	}
+
 	void movementAndReplay()
 	{
 		for (float speed : { 0.75f, -0.75f })
@@ -356,6 +412,7 @@ return {
 void runEscalatorWalkingSmokeChecks()
 {
 	propertyWorkflows();
+	routeChoiceFactsAndLocalCongestion();
 	movementAndReplay();
 	luaRandomnessIsIndependent();
 }

@@ -2246,8 +2246,9 @@ namespace core
 
 		void setTraversalGeometryPolicy(TraversalGeometryPolicy policy);
 
-		// Pure route-cost query: it creates no ticket, operation, reservation, or permit.
+		// Pure route-cost queries: they create no ticket, operation, reservation, or permit.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
+		uint32_t countStandingAgentsOnEscalator(Agent const* observer, Edge const* edge) const;
 
 		// Wakes every Agent the World owns. Forwards to SimulationCoordinator,
 		// where the Agent lifecycle lives (ADR 0004).

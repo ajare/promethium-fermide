@@ -469,6 +469,10 @@ namespace core
 		bool isWalkingOnEscalator(Edge const* edge) const
 		{ return mTraversalTask && mTraversalTask->edge.get() == edge
 			&& mTraversalTask->escalatorWalking.value_or(false); }
+		bool isStandingOnEscalator(Edge const* edge) const
+		{ return mTraversalTask && mTraversalTask->edge.get() == edge
+			&& mTraversalTask->escalatorWalking.has_value()
+			&& !*mTraversalTask->escalatorWalking; }
 
 		float getClimbSpeed() const;
 
@@ -476,8 +480,9 @@ namespace core
 		// modifiers are introduced separately; this is the neutral physical speed.
 		float getStationaryStairSpeed(bool ascending) const;
 
-		// Used by edge route-cost implementations; this is an observation only.
+		// Used by edge route-cost implementations; these are observations only.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
+		uint32_t countObservedStandingEscalatorAgents(Edge const* edge) const;
 
 		uint32_t getFlags() const;
 

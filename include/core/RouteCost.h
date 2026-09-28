@@ -26,6 +26,7 @@ namespace core
 	struct EffectiveRoutingProfile
 	{
 		float stairSpeedModifier = 1;
+		float escalatorWalkingChance = 0;
 		float waitingAversion = 1;
 		float effortAversion = 1;
 		float interactionAversion = 1;
@@ -65,6 +66,15 @@ namespace core
 		float stairAscentEffortPerRise = 1.5f;
 		float stairDescentEffortPerRise = 0.25f;
 		float stairInteractionPerFlight = 0.15f;
+		// Escalator route estimates use the expected contribution of walking;
+		// admission still makes the authoritative deterministic walk/stand draw.
+		float escalatorAscentEffortPerRise = 0.1f;
+		float escalatorDescentEffortPerRise = 0.05f;
+		float escalatorWalkingEffortPerUnit = 0.1f;
+		float escalatorMountDismountInteraction = 0.3f;
+		// Standing occupants divided by the evaluating Agent's walking chance.
+		// At or above this value, expected walking is suppressed.
+		float escalatorCongestionThreshold = 1.0f;
 		[[nodiscard]] std::optional<EvaluatedRouteCost> evaluate(
 			DirectedTraversalFacts const& facts, EffectiveRoutingProfile const& profile) const
 		{
@@ -78,7 +88,8 @@ namespace core
 			for (auto value : { c.motionSeconds, c.knownWaitSeconds, c.expectedWaitSeconds,
 				c.physicalEffortUnits, c.interactionUnits, c.crowdingUnits, c.riskUnits,
 				c.uncertaintyUnits, c.perceptionVariationUnits, facts.optimisticLowerBoundSeconds,
-				profile.stairSpeedModifier, profile.waitingAversion, profile.effortAversion, profile.interactionAversion,
+				profile.stairSpeedModifier, profile.escalatorWalkingChance, profile.waitingAversion,
+				profile.effortAversion, profile.interactionAversion,
 				profile.crowdAversion, profile.riskAversion }) validate(value);
 			if (facts.objectiveDurationSeconds) validate(*facts.objectiveDurationSeconds);
 			auto cost = c.motionSeconds + profile.waitingAversion * (c.knownWaitSeconds + c.expectedWaitSeconds)

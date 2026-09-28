@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <limits>
@@ -11,6 +12,18 @@
 namespace core
 {
 	using namespace std;
+
+	namespace
+	{
+		bool entryIsVisibleFrom(shared_ptr<const Vertex> const& entry, Sector const* observationSector)
+		{
+			if (!observationSector) return false;
+			for (auto const& edge : entry->getEdges())
+				if (edge->getType() == EdgeType::StaircaseMount
+					&& edge->getOtherVertex(entry)->getSector().get() == observationSector) return true;
+			return false;
+		}
+	}
 
 	StaircaseEdge::StaircaseEdge(shared_ptr<Staircase> staircase)
 		: Edge(EdgeType::Staircase), mStaircase(std::move(staircase)) {}
@@ -48,7 +61,7 @@ namespace core
 	}
 
 	float StaircaseEdge::getWeight(shared_ptr<const Vertex> targetVertex,
-		Agent const* agent, bool) const
+		Agent const* agent, bool edgeVisible) const
 	{
 		auto const kind = mStaircase->isEscalator()
 			? TraversalKind::Escalator : TraversalKind::Staircase;
@@ -59,7 +72,16 @@ namespace core
 		{
 			if (movingUp != (mStaircase->getSpeed() > 0.0f))
 				return numeric_limits<float>::infinity();
-			return getLength() / abs(mStaircase->getSpeed());
+			auto chance = agent ? agent->getEffectiveEscalatorWalkingChance().value : 0.0f;
+			if (agent && edgeVisible && chance > 0.0f
+				&& entryIsVisibleFrom(sourceVertex, agent->getSector()))
+			{
+				auto const congestion = static_cast<float>(
+					agent->countObservedStandingEscalatorAgents(this)) / chance;
+				if (congestion >= RouteChoicePolicy{}.escalatorCongestionThreshold) chance = 0.0f;
+			}
+			return getLength() / (abs(mStaircase->getSpeed())
+				+ chance * (agent ? agent->getWalkSpeed() : 0.0f));
 		}
 		auto const policy = RouteChoicePolicy{};
 		auto const speed = agent ? agent->getStationaryStairSpeed(movingUp)
@@ -70,13 +92,39 @@ namespace core
 	DirectedTraversalFacts StaircaseEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
-		if (mStaircase->isEscalator())
-			return Edge::getDirectedTraversalFacts(std::move(targetVertex), context);
 		DirectedTraversalFacts facts;
-		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Staircase)) return facts;
 		auto const sourceVertex = getOtherVertex(targetVertex);
 		auto const rise = targetVertex->getPosition().y - sourceVertex->getPosition().y;
 		auto const ascending = rise > 0.0f;
+		if (mStaircase->isEscalator())
+		{
+			if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Escalator)
+				|| ascending != (mStaircase->getSpeed() > 0.0f)) return facts;
+			auto walkingChance = clamp(context.profile.escalatorWalkingChance, 0.0f, 1.0f);
+			if (context.legacyAgent && walkingChance > 0.0f
+				&& entryIsVisibleFrom(sourceVertex, context.observationSector))
+			{
+				// A zero walking chance already contributes no expected walking and is
+				// deliberately handled before this division.
+				auto const congestion = static_cast<float>(
+					context.legacyAgent->countObservedStandingEscalatorAgents(this)) / walkingChance;
+				if (congestion >= context.policy.escalatorCongestionThreshold) walkingChance = 0.0f;
+			}
+			auto const expectedSpeed = abs(mStaircase->getSpeed())
+				+ walkingChance * context.walkSpeed;
+			facts.feasible = true;
+			facts.components.motionSeconds = getLength() / expectedSpeed;
+			facts.components.physicalEffortUnits = abs(rise) * (ascending
+				? context.policy.escalatorAscentEffortPerRise
+				: context.policy.escalatorDescentEffortPerRise)
+				+ walkingChance * getLength() * context.policy.escalatorWalkingEffortPerUnit;
+			facts.components.interactionUnits = context.policy.escalatorMountDismountInteraction;
+			facts.objectiveDurationSeconds = facts.components.motionSeconds;
+			facts.optimisticLowerBoundSeconds = getLength()
+				/ (abs(mStaircase->getSpeed()) + context.walkSpeed);
+			return facts;
+		}
+		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Staircase)) return facts;
 		auto const speed = (ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed)
 			* context.profile.stairSpeedModifier;
 		facts.feasible = true;
