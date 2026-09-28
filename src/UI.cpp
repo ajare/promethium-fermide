@@ -7123,6 +7123,8 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 
 void renderWorldPanel(shared_ptr<core::World> world)
 {
+	ImGui::Indent(ImGui::GetTreeNodeToLabelSpacing());
+
 	if (ImGui::CollapsingHeader("Tags"))
 	{
 		// Registry reference changes remain ordinary unsaved World edits. Their
@@ -7157,11 +7159,15 @@ void renderWorldPanel(shared_ptr<core::World> world)
 
 	renderSelectedObjectPanel(world);
 	renderSelectedAgentPanel(world);
+
+	ImGui::Unindent(ImGui::GetTreeNodeToLabelSpacing());
 }
 
 
 void renderGraphPanel(shared_ptr<const core::Graph> graph)
 {
+	ImGui::Indent(ImGui::GetTreeNodeToLabelSpacing());
+
 	if (ImGui::CollapsingHeader("Edges"))
 		{
 			ImGuiTableFlags flags =
@@ -7203,6 +7209,8 @@ void renderGraphPanel(shared_ptr<const core::Graph> graph)
 				ImGui::EndTable();
 			}
 		}
+
+	ImGui::Unindent(ImGui::GetTreeNodeToLabelSpacing());
 }
 
 
