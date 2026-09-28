@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <initializer_list>
 #include <stdexcept>
@@ -32,6 +33,13 @@ namespace core
 		float interactionAversion = 1;
 		float crowdAversion = 1;
 		float riskAversion = 1;
+	};
+
+	struct LiftRouteAccessObservation
+	{
+		uint32_t queuedAgents = 0;
+		uint32_t capacity = 1;
+		float minimumDwellSeconds = 0;
 	};
 
 	struct DirectedTraversalFacts
@@ -75,6 +83,19 @@ namespace core
 		// Standing occupants divided by the evaluating Agent's walking chance.
 		// At or above this value, expected walking is suppressed.
 		float escalatorCongestionThreshold = 1.0f;
+		// A transport journey pays access and exit overhead at its thresholds;
+		// body edges contain only ride and intermediate-service time.
+		float liftExpectedWaitSeconds = 3.25f;
+		float liftExpectedQueuePassengers = 1.0f;
+		float liftQueueServiceSeconds = 2.0f;
+		float liftBoardingSeconds = 1.0f;
+		float liftAlightingSeconds = 1.0f;
+		float liftCallBoardingInteraction = 0.75f;
+		float liftAlightingInteraction = 0.25f;
+		float liftExpectedIntermediateStopsPerLevel = 0.12f;
+		float liftExpectedCrowdingUnits = 0.2f;
+		float platformLiftPreparationSeconds = 2.0f;
+		float platformLiftInconvenience = 8.0f;
 		[[nodiscard]] std::optional<EvaluatedRouteCost> evaluate(
 			DirectedTraversalFacts const& facts, EffectiveRoutingProfile const& profile) const
 		{

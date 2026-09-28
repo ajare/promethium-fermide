@@ -14,6 +14,8 @@ namespace core
 	{
 		friend class World;
 		TraversalResourceId mTraversalResource;
+		uint32_t mRouteCapacity{ 1 };
+		float mRouteMinimumDwellSeconds{ 0.75f };
 
 	public:
 
@@ -21,7 +23,15 @@ namespace core
 
 		[[nodiscard]] TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
 		[[nodiscard]] virtual bool isOpenPlatformLift() const { return false; }
-		void configureTraversal(TraversalResourceId resource) { mTraversalResource = resource; }
+		[[nodiscard]] uint32_t getRouteCapacity() const { return mRouteCapacity; }
+		[[nodiscard]] float getRouteMinimumDwellSeconds() const { return mRouteMinimumDwellSeconds; }
+		void configureTraversal(TraversalResourceId resource, uint32_t capacity = 1,
+			float minimumDwellSeconds = 0.75f)
+		{
+			mTraversalResource = resource;
+			mRouteCapacity = capacity;
+			mRouteMinimumDwellSeconds = minimumDwellSeconds;
+		}
 		// The replacement coordinator is authoritative for motion; keep the legacy
 		// renderable shape synchronized without entering its callback state machine.
 		void setCoordinatedPosition(float globalPosition)

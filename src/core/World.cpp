@@ -3767,7 +3767,7 @@ namespace core
 		auto coordinator = createLiftTraversalResource("Lift journey", lift,
 			SectorId{ (uint64_t)liftTransit->getIndex() + 1 }, liftStops, options.capacity,
 			options.minimumDwellSeconds, options.maximumBoardingSeconds);
-		lift->configureTraversal(coordinator);
+		lift->configureTraversal(coordinator, options.capacity, options.minimumDwellSeconds);
 		liftRes.traversalResource = coordinator;
 		auto liftResource = mTraversalResources.find(coordinator);
 		liftResource->mLiftCurrentStop = options.initialStop;
@@ -6745,7 +6745,8 @@ namespace core
 		auto coordinator = createOpenPlatformLiftTraversalResource("Open platform lift journey", lift,
 			SectorId{ (uint64_t)sector->getIndex() + 1 }, stops, options.capacity,
 			options.platformStopDurationSeconds);
-		lift->configureTraversal(coordinator);
+		lift->configureTraversal(coordinator, options.capacity,
+			options.platformStopDurationSeconds);
 		liftRes.traversalResource = coordinator;
 		auto resource = mTraversalResources.find(coordinator);
 
@@ -9397,6 +9398,28 @@ namespace core
 		return count;
 	}
 
+	optional<LiftRouteAccessObservation> World::observeLiftAccess(
+		TraversalResourceId resourceId, Vector2 const& sourceEndpoint, bool includeLocalQueue) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (!resource) return nullopt;
+		auto coordinator = resource->mLiftCoordinator
+			? mTraversalResources.find(resource->mLiftCoordinator) : resource;
+		if (!coordinator || !coordinator->mLift || coordinator->mLiftStops.empty()) return nullopt;
+
+		auto stop = findLiftStop(*coordinator, sourceEndpoint);
+		if (stop >= coordinator->mLiftStops.size()) return nullopt;
+		uint32_t queued = 0;
+		if (includeLocalQueue)
+			for (auto requestId : coordinator->mAdmissionQueue)
+			{
+				auto request = mTraversalRequests.find(requestId);
+				if (request && findLiftStop(*coordinator, request->mSourceEndpoint) == stop) ++queued;
+			}
+		return LiftRouteAccessObservation{ queued, max(1u, coordinator->mCapacity),
+			(float)coordinator->mLiftMinimumDwellTicks * getFixedTimestep() };
+	}
+
 	float World::estimateTraversalDelay(TraversalResourceId resourceId, SectorId sourceSector) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
@@ -9417,7 +9440,7 @@ namespace core
 			if (stop < lift->mLiftStops.size())
 			{
 				delay += abs(lift->mLiftPosition - lift->mLiftStops[stop].globalPosition)
-					/ (lift->mShuttle ? CORE_SHUTTLE_SPEED : CORE_LIFT_SPEED);
+					/ (lift->mShuttle ? lift->mShuttle->getSpeed() : lift->mLift->getSpeed());
 				// Existing scheduled stops add stable preparation/service cost without
 				// creating a reservation as a side effect of path search.
 				for (uint32_t i = 0; i < lift->mLiftStops.size(); ++i)

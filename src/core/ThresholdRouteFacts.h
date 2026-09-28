@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "core/Agent.h"
 #include "core/Door.h"
 #include "core/Edge.h"
@@ -25,21 +27,56 @@ namespace core
 		auto& c = facts.components;
 		c.motionSeconds = motionSeconds;
 		facts.optimisticLowerBoundSeconds = motionSeconds;
+		auto const sourceEndpoint = source ? source->getPosition() : Vector2{};
+		// Querying an unobserved landing returns static capacity only. The World does
+		// not inspect its queue, car position, calls, or scheduler state.
+		auto liftAccess = context.legacyAgent ? context.legacyAgent->observeLiftAccess(
+			edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
+		bool const liftBoarding = liftAccess && sector && isLocationLike(sector->getType());
 		// Style deliberately never enters routing, including tall OpenUp animation timing.
 		float preparationProbability = observed ? (door.isOpen() ? 0.0f : 1.0f)
 			: policy.unobservedDoorClosedProbability;
 		if (observed)
 		{
 			c.knownWaitSeconds = preparationProbability * openingSeconds;
-			if (context.legacyAgent)
+			if (liftBoarding)
+			{
+				// The access-zone queue is observable; remote car allocation is not.
+				c.expectedWaitSeconds = policy.liftExpectedWaitSeconds;
+				c.knownWaitSeconds += policy.liftQueueServiceSeconds
+					* (float)liftAccess->queuedAgents / std::max(1u, liftAccess->capacity);
+				c.crowdingUnits = (float)liftAccess->queuedAgents
+					/ std::max(1u, liftAccess->capacity);
+			}
+			else if (!liftAccess && context.legacyAgent)
 				c.knownWaitSeconds += context.legacyAgent->estimateTraversalDelay(
 					edge.getTraversalResourceId(), SectorId{ (uint64_t)sector->getIndex() + 1 });
 		}
 		else
+		{
 			c.expectedWaitSeconds = preparationProbability * openingSeconds
 				+ policy.unobservedDoorQueueSeconds;
+			if (liftBoarding)
+			{
+				c.expectedWaitSeconds += policy.liftExpectedWaitSeconds
+					+ policy.liftQueueServiceSeconds * policy.liftExpectedQueuePassengers
+					/ std::max(1u, liftAccess->capacity);
+				c.crowdingUnits = policy.liftExpectedCrowdingUnits;
+			}
+		}
 		c.interactionUnits = policy.thresholdInteraction;
-		if (door.getActivationMode() == DoorActivationMode::Manual)
+		if (liftBoarding)
+		{
+			c.motionSeconds += policy.liftBoardingSeconds;
+			c.expectedWaitSeconds += liftAccess->minimumDwellSeconds;
+			c.interactionUnits += policy.liftCallBoardingInteraction;
+		}
+		else if (liftAccess)
+		{
+			c.motionSeconds += policy.liftAlightingSeconds;
+			c.interactionUnits += policy.liftAlightingInteraction;
+		}
+		else if (door.getActivationMode() == DoorActivationMode::Manual)
 			c.interactionUnits += preparationProbability * policy.manualDoorInteraction;
 		else if (door.getActivationMode() == DoorActivationMode::RemoteControlled)
 			c.interactionUnits += preparationProbability * policy.remoteDoorInteraction;

@@ -20,6 +20,7 @@ namespace core
 {
 	class World;
 	class Sector;
+	struct LiftRouteAccessObservation;
 
 	struct PathIterator
 	{
@@ -482,6 +483,9 @@ namespace core
 
 		// Used by edge route-cost implementations; these are observations only.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
+		std::optional<LiftRouteAccessObservation> observeLiftAccess(
+			TraversalResourceId resource, Vector2 const& sourceEndpoint,
+			bool includeLocalQueue = true) const;
 		uint32_t countObservedStandingEscalatorAgents(Edge const* edge) const;
 
 		uint32_t getFlags() const;

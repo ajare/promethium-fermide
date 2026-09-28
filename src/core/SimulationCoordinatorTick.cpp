@@ -172,8 +172,9 @@ namespace core
 				}
 				if (resource.mLiftStopPhase == LiftStopPhase::Moving)
 				{
-					auto amount = (resource.mShuttle ? CORE_SHUTTLE_SPEED : CORE_LIFT_SPEED)
-						* World::getFixedTimestep();
+					auto const speed = resource.mShuttle ? resource.mShuttle->getSpeed()
+						: resource.mLift->getSpeed();
+					auto amount = speed * World::getFixedTimestep();
 					if (target > resource.mLiftPosition)
 						resource.mLiftPosition = min(target, resource.mLiftPosition + amount);
 					else resource.mLiftPosition = max(target, resource.mLiftPosition - amount);

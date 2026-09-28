@@ -2248,6 +2248,9 @@ namespace core
 
 		// Pure route-cost queries: they create no ticket, operation, reservation, or permit.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
+		std::optional<LiftRouteAccessObservation> observeLiftAccess(
+			TraversalResourceId resource, Vector2 const& sourceEndpoint,
+			bool includeLocalQueue = true) const;
 		uint32_t countStandingAgentsOnEscalator(Agent const* observer, Edge const* edge) const;
 
 		// Wakes every Agent the World owns. Forwards to SimulationCoordinator,

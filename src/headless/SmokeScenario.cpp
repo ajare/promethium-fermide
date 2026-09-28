@@ -126,6 +126,7 @@ void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
 void runThresholdRouteCostSmokeChecks();
 void runStairRouteCostSmokeChecks();
+void runLiftRouteCostSmokeChecks();
 void runWorldTeardownSmokeChecks();
 void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
@@ -6323,6 +6324,7 @@ int main(int argc, char** argv)
 		runPathfindingWorkspaceSmokeChecks();
 		runThresholdRouteCostSmokeChecks();
 		runStairRouteCostSmokeChecks();
+		runLiftRouteCostSmokeChecks();
 		runWorldTeardownSmokeChecks();
 
 		auto const deepJourney = runThreeLayerTransitJourney();

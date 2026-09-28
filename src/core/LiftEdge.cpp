@@ -58,7 +58,7 @@ namespace core
 	{
 		if (agentForbidsEdge(agent, *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		(void)edgeVisible;
-		auto rideTime = getLength() / CORE_LIFT_SPEED;
+		auto rideTime = getLength() / mLift->getSpeed();
 		auto ride = rideTime > CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
 			? rideTime : CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
 		if (!agent) return ride;
@@ -68,6 +68,26 @@ namespace core
 			? SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 }
 			: getVertex(1) ? SectorId{ (uint64_t)getVertex(1)->getSector()->getIndex() + 1 } : SectorId{};
 		return ride + agent->estimateTraversalDelay(getTraversalResourceId(), sourceSector);
+	}
+
+	DirectedTraversalFacts LiftEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
+	{
+		if (agentForbidsEdge(context.legacyAgent, *this,
+			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return {};
+		DirectedTraversalFacts facts;
+		facts.feasible = true;
+		auto const distance = getLength();
+		facts.components.motionSeconds = distance / mLift->getSpeed();
+		// Each body segment represents disjoint physical travel. This allowance can
+		// therefore accumulate for a long journey without repeating admission or exit.
+		facts.components.expectedWaitSeconds = distance
+			* context.policy.liftExpectedIntermediateStopsPerLevel
+			* mLift->getRouteMinimumDwellSeconds();
+		facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+		facts.objectiveDurationSeconds = facts.components.motionSeconds
+			+ facts.components.expectedWaitSeconds;
+		return facts;
 	}
 
 	bool LiftEdge::requiresButton() const

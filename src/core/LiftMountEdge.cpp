@@ -1,9 +1,11 @@
 #include <cassert>
+#include <cmath>
 
 #include "core/Defines.h"
 #include "core/MobilityProfile.h"
 #include "core/LiftMountEdge.h"
 #include "core/Agent.h"
+#include "core/Vertex.h"
 #include "core/Exceptions.h"
 
 
@@ -66,6 +68,57 @@ namespace core
 	{
 		if (agentForbidsEdge(agent, *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
 		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+	}
+
+	DirectedTraversalFacts LiftMountEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
+	{
+		if (agentForbidsEdge(context.legacyAgent, *this,
+			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return {};
+		DirectedTraversalFacts facts;
+		facts.feasible = true;
+		// The authored PlatformLift object is the Location-side Vertex. Entering
+		// therefore targets the topology-only Lift Vertex; leaving targets the object.
+		bool const boarding = target && !target->getObject();
+		auto& c = facts.components;
+		if (boarding)
+		{
+			auto const capacity = max(1u, mLift->getRouteCapacity());
+			bool const observed = context.legacyAgent && context.observationSector
+				&& getOtherVertex(target)->getSector().get() == context.observationSector
+				&& abs(context.legacyAgent->getGlobalPosition().y
+					- getOtherVertex(target)->getPosition().y) <= 0.5f;
+			auto observation = observed ? context.legacyAgent->observeLiftAccess(
+				getTraversalResourceId(), getOtherVertex(target)->getPosition()) : nullopt;
+			if (observation)
+			{
+				c.expectedWaitSeconds = context.policy.liftExpectedWaitSeconds;
+				c.knownWaitSeconds = context.policy.liftQueueServiceSeconds
+					* (float)observation->queuedAgents / max(1u, observation->capacity);
+				c.crowdingUnits = (float)observation->queuedAgents
+					/ max(1u, observation->capacity);
+			}
+			else
+			{
+				c.expectedWaitSeconds = context.policy.liftExpectedWaitSeconds
+					+ context.policy.liftQueueServiceSeconds
+					* context.policy.liftExpectedQueuePassengers / capacity;
+				c.crowdingUnits = context.policy.liftExpectedCrowdingUnits;
+			}
+			c.expectedWaitSeconds += mLift->getRouteMinimumDwellSeconds()
+				+ context.policy.platformLiftPreparationSeconds;
+			c.motionSeconds = context.policy.liftBoardingSeconds;
+			c.interactionUnits = context.policy.liftCallBoardingInteraction
+				+ context.policy.platformLiftInconvenience;
+		}
+		else
+		{
+			c.motionSeconds = context.policy.liftAlightingSeconds;
+			c.interactionUnits = context.policy.liftAlightingInteraction;
+		}
+		facts.objectiveDurationSeconds = c.motionSeconds + c.knownWaitSeconds
+			+ c.expectedWaitSeconds;
+		return facts;
 	}
 
 	bool LiftMountEdge::requiresButton() const

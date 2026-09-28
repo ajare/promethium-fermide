@@ -705,6 +705,12 @@ namespace core
 		return mWorld ? mWorld->estimateTraversalDelay(resource, sourceSector) : 0.0f;
 	}
 
+	optional<LiftRouteAccessObservation> Agent::observeLiftAccess(
+		TraversalResourceId resource, Vector2 const& sourceEndpoint, bool includeLocalQueue) const
+	{
+		return mWorld ? mWorld->observeLiftAccess(resource, sourceEndpoint, includeLocalQueue) : nullopt;
+	}
+
 	uint32_t Agent::countObservedStandingEscalatorAgents(Edge const* edge) const
 	{
 		return mWorld ? mWorld->countStandingAgentsOnEscalator(this, edge) : 0;
