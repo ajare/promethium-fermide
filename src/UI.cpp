@@ -6494,8 +6494,20 @@ void renderLocationWallEditor(shared_ptr<core::World> const& world,
 
 void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 {
-	if ((!gSelectedSector && !gSelectedSectorObject)
-		|| !ImGui::CollapsingHeader("Selection", nullptr, 0)) return;
+	if (!gSelectedSector && !gSelectedSectorObject) return;
+
+	string selectedName;
+	if (gSelectedSector)
+	{
+		selectedName = gSelectedSector->getName();
+		if (selectedName.empty()) selectedName = gSelectedSector->getDescription();
+	}
+	else if (auto marker = dynamic_pointer_cast<const core::MarkerSectorObject>(gSelectedSectorObject))
+		selectedName = marker->getMarker()->getName();
+	else selectedName = gSelectedSectorObject->getDescription();
+
+	auto const header = format("Selection: {}###Selection", selectedName);
+	if (!ImGui::CollapsingHeader(header.c_str(), nullptr, 0)) return;
 
 	if (gSelectedSector)
 	{
@@ -6832,7 +6844,9 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 void renderSelectedAgentPanel(shared_ptr<core::World> world)
 {
-	if (!gSelectedAgent || !ImGui::CollapsingHeader("Selection")) return;
+	if (!gSelectedAgent) return;
+	auto const header = format("Selection: {}###Selection", gSelectedAgent->getName());
+	if (!ImGui::CollapsingHeader(header.c_str())) return;
 
 	auto id = world->getAgentId(gSelectedAgent);
 	auto sector = gSelectedAgent->getSector();
