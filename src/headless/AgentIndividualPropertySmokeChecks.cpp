@@ -44,7 +44,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
 			== "Pathing"
 		&& !core::agentPropertyMetadata(core::AgentPropertyType::Colour).propertyNamespace
-		&& !core::agentPropertyMetadata(core::AgentPropertyType::EscalatorWalkingChance).propertyNamespace
+		&& core::agentPropertyMetadata(core::AgentPropertyType::EscalatorWalkingChance).propertyNamespace
+			== "Pathing"
 		&& !core::agentPropertyMetadata(core::AgentPropertyType::WalkSpeedModifier).propertyNamespace
 		&& !core::agentPropertyMetadata(core::AgentPropertyType::HeightModifier).propertyNamespace,
 		"Agent property names and namespaces are not independently classified");

@@ -36,7 +36,7 @@ namespace core
 		{
 		case AgentPropertyType::Colour: return { "Colour", std::nullopt };
 		case AgentPropertyType::EscalatorWalkingChance:
-			return { "Escalator walking chance", std::nullopt };
+			return { "Escalator walking chance", "Pathing" };
 		case AgentPropertyType::WalkSpeedModifier:
 			return { "Walk speed modifier", std::nullopt };
 		case AgentPropertyType::HeightModifier: return { "Height modifier", std::nullopt };

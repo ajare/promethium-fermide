@@ -537,70 +537,6 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
-		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
-		if (chance)
-		{
-			auto& edit = gTagEscalatorWalkingChanceEdits[id.value];
-			if (!edit.pending && edit.loadedRevision != chance->revision)
-			{
-				edit.value = chance->value;
-				edit.loadedRevision = chance->revision;
-				edit.diagnostic.clear();
-			}
-			ImGui::SetNextItemWidth(256.0f);
-			if (ImGui::DragFloat("Escalator walking chance", &edit.value,
-				0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
-				edit.pending = true;
-			auto const finished = ImGui::IsItemDeactivatedAfterEdit();
-			auto const cancelled = ImGui::IsItemDeactivated() && !finished;
-			if (edit.pending && finished)
-			{
-				string diagnostic;
-				if (!commitAgentTagEscalatorWalkingChanceEdit(
-					registry, id, edit.value, diagnostic)
-					&& diagnostic != "The Agent Escalator walking chance is unchanged")
-				{
-					edit.diagnostic = diagnostic;
-					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				}
-				else edit.diagnostic.clear();
-				edit.pending = false;
-				chance = registry->getAgentTagEscalatorWalkingChance(id);
-				if (chance)
-				{
-					edit.value = chance->value;
-					edit.loadedRevision = chance->revision;
-				}
-			}
-			else if (edit.pending && cancelled)
-			{
-				edit.value = chance->value;
-				edit.pending = false;
-				edit.diagnostic.clear();
-			}
-			ImGui::SameLine();
-			bool removed{ false };
-			if (ImGui::Button(ICON_FA_TIMES "##removeEscalatorWalkingChance"))
-			{
-				string diagnostic;
-				if (!commitAgentTagEscalatorWalkingChanceRemove(registry, id, diagnostic))
-				{
-					edit.diagnostic = diagnostic;
-					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				}
-				else
-				{
-					gTagEscalatorWalkingChanceEdits.erase(id.value);
-					chance = nullptr;
-					removed = true;
-				}
-			}
-			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove Escalator walking chance");
-			if (!removed && !edit.diagnostic.empty())
-				ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s",
-					edit.diagnostic.c_str());
-		}
-
 		auto const* height = registry->getAgentTagHeightModifier(id);
 		if (height)
 		{
@@ -670,8 +606,72 @@ namespace
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
 		auto const* effort = registry->getAgentTagEffortAversion(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
-		if (stairSpeed || interaction || effort || pathingMobility)
-			renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
+		if (chance)
+		{
+			auto& edit = gTagEscalatorWalkingChanceEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != chance->revision)
+			{
+				edit.value = chance->value;
+				edit.loadedRevision = chance->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloat("Escalator walking chance", &edit.value,
+				0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
+				edit.pending = true;
+			auto const finished = ImGui::IsItemDeactivatedAfterEdit();
+			auto const cancelled = ImGui::IsItemDeactivated() && !finished;
+			if (edit.pending && finished)
+			{
+				string diagnostic;
+				if (!commitAgentTagEscalatorWalkingChanceEdit(
+					registry, id, edit.value, diagnostic)
+					&& diagnostic != "The Agent Escalator walking chance is unchanged")
+				{
+					edit.diagnostic = diagnostic;
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				}
+				else edit.diagnostic.clear();
+				edit.pending = false;
+				chance = registry->getAgentTagEscalatorWalkingChance(id);
+				if (chance)
+				{
+					edit.value = chance->value;
+					edit.loadedRevision = chance->revision;
+				}
+			}
+			else if (edit.pending && cancelled)
+			{
+				edit.value = chance->value;
+				edit.pending = false;
+				edit.diagnostic.clear();
+			}
+			ImGui::SameLine();
+			bool removed{ false };
+			if (ImGui::Button(ICON_FA_TIMES "##removeEscalatorWalkingChance"))
+			{
+				string diagnostic;
+				if (!commitAgentTagEscalatorWalkingChanceRemove(registry, id, diagnostic))
+				{
+					edit.diagnostic = diagnostic;
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				}
+				else
+				{
+					gTagEscalatorWalkingChanceEdits.erase(id.value);
+					chance = nullptr;
+					removed = true;
+				}
+			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove Escalator walking chance");
+			if (!removed && !edit.diagnostic.empty())
+				ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s",
+					edit.diagnostic.c_str());
+		}
+
+		if (chance || stairSpeed || interaction || effort || pathingMobility)
+			renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 		if (stairSpeed)
 		{
 			auto& edit = gTagStairSpeedEdits[id.value];
@@ -858,14 +858,6 @@ namespace
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
 		{
-			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
-			{
-				string diagnostic;
-				if (!commitAgentTagEscalatorWalkingChanceAdd(registry, id, diagnostic))
-					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				else gTagEscalatorWalkingChanceEdits.erase(id.value);
-				ImGui::CloseCurrentPopup();
-			}
 			if (!colour && ImGui::Selectable(propertyName(core::AgentPropertyType::Colour)))
 			{
 				string diagnostic;
@@ -890,8 +882,16 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!stairSpeed || !interaction || !effort || !mobility)
-				renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+			if (!chance || !stairSpeed || !interaction || !effort || !mobility)
+				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
+			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
+			{
+				string diagnostic;
+				if (!commitAgentTagEscalatorWalkingChanceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagEscalatorWalkingChanceEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
 			if (!stairSpeed && ImGui::Selectable(propertyName(core::AgentPropertyType::StairSpeedModifier)))
 			{
 				string diagnostic;

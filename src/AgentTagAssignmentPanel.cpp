@@ -192,10 +192,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualColour().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualColour(agent,
 				enabled ? optional<core::AgentColour>{ core::EditorDefaultAgentColour } : nullopt, out); });
-		propertyCheckbox(propertyName(core::AgentPropertyType::EscalatorWalkingChance),
-			target->getIndividualEscalatorWalkingChance().has_value(),
-			[&](bool enabled, string* out) { return world->setAgentIndividualEscalatorWalkingChance(
-				agent, enabled ? optional<float>{ 0.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::WalkSpeedModifier),
 			target->getIndividualWalkSpeedModifier().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualWalkSpeedModifier(
@@ -204,7 +200,11 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualHeightModifier().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualHeightModifier(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
-		renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
+		propertyCheckbox(propertyName(core::AgentPropertyType::EscalatorWalkingChance),
+			target->getIndividualEscalatorWalkingChance().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualEscalatorWalkingChance(
+				agent, enabled ? optional<float>{ 0.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::StairSpeedModifier),
 			target->getIndividualStairSpeedModifier().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualStairSpeedModifier(
@@ -246,27 +246,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			string diagnostic;
 			commitIndividualPropertyEdit(world, [&](string* out)
 				{ return world->setAgentIndividualColour(agent, nullopt, out); }, diagnostic);
-			warn(diagnostic);
-		}
-	}
-	if (target->getIndividualEscalatorWalkingChance())
-	{
-		auto value = *target->getIndividualEscalatorWalkingChance();
-		ImGui::SetNextItemWidth(PropertyWidgetWidth);
-		if (ImGui::DragFloat("Escalator walking chance##individual", &value,
-			0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
-		{
-			string diagnostic;
-			commitIndividualPropertyEdit(world, [&](string* out)
-				{ return world->setAgentIndividualEscalatorWalkingChance(agent, value, out); }, diagnostic);
-			warn(diagnostic);
-		}
-		ImGui::SameLine();
-		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualEscalatorChance"))
-		{
-			string diagnostic;
-			commitIndividualPropertyEdit(world, [&](string* out)
-				{ return world->setAgentIndividualEscalatorWalkingChance(agent, nullopt, out); }, diagnostic);
 			warn(diagnostic);
 		}
 	}
@@ -314,9 +293,31 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
-	if (target->getIndividualStairSpeedModifier() || target->getIndividualInteractionAversion()
-		|| target->getIndividualEffortAversion() || target->getIndividualMobilityProfile())
-		renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+	if (target->getIndividualEscalatorWalkingChance() || target->getIndividualStairSpeedModifier()
+		|| target->getIndividualInteractionAversion() || target->getIndividualEffortAversion()
+		|| target->getIndividualMobilityProfile())
+		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
+	if (target->getIndividualEscalatorWalkingChance())
+	{
+		auto value = *target->getIndividualEscalatorWalkingChance();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Escalator walking chance##individual", &value,
+			0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualEscalatorWalkingChance(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualEscalatorChance"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualEscalatorWalkingChance(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualStairSpeedModifier())
 	{
 		auto value = *target->getIndividualStairSpeedModifier();
@@ -441,14 +442,6 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		return;
 	}
 
-	auto const chance = lookup.entity->getEffectiveEscalatorWalkingChance();
-	if (chance.individual)
-		ImGui::Text("Escalator walking chance: %.3f (individual)", chance.value);
-	else if (chance.sourceTag && world->hasAttachedAgentTagRegistry())
-		ImGui::Text("Escalator walking chance: %.3f from #%s", chance.value,
-			world->getAgentTagRegistry()->getAgentTagName(chance.sourceTag).c_str());
-	else ImGui::TextUnformatted("Escalator walking chance: 0.000 (standing default)");
-
 	auto const effective = lookup.entity->getEffectiveColour();
 	if (effective.individual)
 	{
@@ -496,7 +489,15 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	}
 	else ImGui::Text("Height modifier: 1.000x (visual default)");
 
-	renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+	renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
+	auto const chance = lookup.entity->getEffectiveEscalatorWalkingChance();
+	if (chance.individual)
+		ImGui::Text("Escalator walking chance: %.3f (individual)", chance.value);
+	else if (chance.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Escalator walking chance: %.3f from #%s", chance.value,
+			world->getAgentTagRegistry()->getAgentTagName(chance.sourceTag).c_str());
+	else ImGui::TextUnformatted("Escalator walking chance: 0.000 (standing default)");
+
 	auto const stairSpeed = lookup.entity->getEffectiveStairSpeedModifier();
 	if (stairSpeed.individual)
 		ImGui::Text("Stair speed modifier: %.3fx (individual)", stairSpeed.value);
