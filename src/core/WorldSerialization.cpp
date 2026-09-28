@@ -1613,7 +1613,11 @@ namespace core
 		// created, so removals have to replay before Transits rather than after them.
 		auto isLocationPrerequisite = [](ConstructionType type)
 		{
-			return type == ConstructionType::RemoveWall;
+			// Walkways provide the upper landing floor validated while a Stairwell,
+			// Staircase, or other Transit is replayed. Replaying them afterwards can
+			// both reject a valid extension and then report the Transit-occupied old
+			// landing as the reason the Walkway itself is no longer traversable.
+			return type == ConstructionType::RemoveWall || type == ConstructionType::Walkway;
 		};
 		struct Item { ConstructionRecord record; uint32_t oldSector{ ~0u }; };
 		vector<Item> locations, transits, other;

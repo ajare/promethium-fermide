@@ -2137,6 +2137,32 @@ agents: []
 			"The extended Stairwell does not span the new level");
 	}
 
+	void stairwellEditsReplayWalkwaysBeforeTransits()
+	{
+		core::World world("Stairwell walkway order", 16, 5);
+		auto room = world.addRoom("Room", 0, 0, 9, 5, 5);
+		for (uint32_t x = 0; x < 5; ++x) world.addSectorWalkway(room, 1, x);
+		for (uint32_t x = 3; x < 5; ++x) world.addSectorWalkway(room, 2, x);
+
+		core::World::CreateLiftOptions liftOptions;
+		liftOptions.stopOffsets = { 0, 1 };
+		world.addSectorPlatformLift(room, 0, 0, liftOptions);
+		auto created = world.addStairwell(1, 0, 12,
+			core::World::CreateStairwellOptions{ 2, CORE_SIDE_RIGHT });
+		world.finishBuild();
+		world.pauseSimulation();
+
+		core::World::CreateStairwellOptions extended{ 3, CORE_SIDE_RIGHT };
+		auto plan = world.planResizeStairwell(created.sectorIndex, 12, 0, extended);
+		require(plan.valid,
+			"Extending a Stairwell onto authored Walkways replayed the Transit first");
+		auto edited = world.applyStairwellEdit(plan);
+		auto stairwell = std::dynamic_pointer_cast<const core::StairwellTransit>(
+			world.getSector(edited));
+		require(stairwell && stairwell->getLevelsHigh() == 3,
+			"The Stairwell was not extended over its Walkway landing floors");
+	}
+
 	// Same ordering bug the Stairwell edit had: a Ladder extended onto a
 	// Location authored after it must replay Locations before Transits.
 	void ladderEditsReplayLocationsBeforeTransits()
@@ -6132,6 +6158,7 @@ void runSerializationSmokeChecks()
 	laddersCanBeValidatedEditedAndDeleted();
 	stairwellsCanBeValidatedEditedAndDeleted();
 	stairwellEditsReplayLocationsBeforeTransits();
+	stairwellEditsReplayWalkwaysBeforeTransits();
 	ladderEditsReplayLocationsBeforeTransits();
 	staircaseEditsReplayLocationsBeforeTransits();
 	physicalControlsPreferDistinctWallPositions();
