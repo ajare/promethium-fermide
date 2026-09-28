@@ -105,14 +105,16 @@ struct AgentClipboardPayload
 	std::optional<std::string> group;
 
 	// Agent tag IDs only have meaning in the registry identified by this UUID.
-	// All four fields are omitted for an untagged Agent, which keeps legacy and
+	// Registry and sample fields are omitted for an untagged Agent, which keeps legacy and
 	// untagged payloads portable. A tagged payload carries the complete stable-ID
 	// assignment set and exact modifier samples, including source and revision.
 	std::optional<std::string> agentTagRegistryUuid;
 	std::set<core::AgentTagId> agentTags;
 	std::optional<core::AgentPropertySample> walkSpeedModifierSample;
 	std::optional<core::AgentPropertySample> heightModifierSample;
+	std::optional<core::AgentPropertySample> stairSpeedModifierSample;
 	std::optional<core::AgentPropertySample> interactionAversionSample;
+	std::optional<float> individualStairSpeedModifier;
 	std::optional<float> individualInteractionAversion;
 
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.

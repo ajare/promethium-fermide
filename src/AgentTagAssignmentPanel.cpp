@@ -204,7 +204,11 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualHeightModifier().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualHeightModifier(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
-		renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+		renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+		propertyCheckbox(propertyName(core::AgentPropertyType::StairSpeedModifier),
+			target->getIndividualStairSpeedModifier().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualStairSpeedModifier(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::InteractionAversion),
 			target->getIndividualInteractionAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualInteractionAversion(
@@ -306,9 +310,31 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
-	if (target->getIndividualInteractionAversion()
+	if (target->getIndividualStairSpeedModifier() || target->getIndividualInteractionAversion()
 		|| target->getIndividualMobilityProfile())
-		renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+		renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+	if (target->getIndividualStairSpeedModifier())
+	{
+		auto value = *target->getIndividualStairSpeedModifier();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Stair speed modifier##individual", &value, 0.005f,
+			core::AgentStairSpeedModifierMinimum, core::AgentStairSpeedModifierMaximum,
+			"%.3fx", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualStairSpeedModifier(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualStairSpeed"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualStairSpeedModifier(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualInteractionAversion())
 	{
 		auto value = *target->getIndividualInteractionAversion();
@@ -444,7 +470,15 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	}
 	else ImGui::Text("Height modifier: 1.000x (visual default)");
 
-	renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+	renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+	auto const stairSpeed = lookup.entity->getEffectiveStairSpeedModifier();
+	if (stairSpeed.individual)
+		ImGui::Text("Stair speed modifier: %.3fx (individual)", stairSpeed.value);
+	else if (stairSpeed.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Stair speed modifier: %.3fx from #%s", stairSpeed.value,
+			world->getAgentTagRegistry()->getAgentTagName(stairSpeed.sourceTag).c_str());
+	else ImGui::TextUnformatted("Stair speed modifier: 1.000x (default)");
+
 	auto const interaction = lookup.entity->getEffectiveInteractionAversion();
 	if (interaction.individual)
 		ImGui::Text("Interaction aversion: %.2f (individual)", interaction.value);

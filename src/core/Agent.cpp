@@ -154,7 +154,7 @@ namespace core
 		}
 		if (mIndividualColour || mIndividualEscalatorWalkingChance
 			|| mIndividualWalkSpeedModifier || mIndividualHeightModifier
-			|| mIndividualInteractionAversion || mIndividualMobilityProfile)
+			|| mIndividualStairSpeedModifier || mIndividualInteractionAversion || mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
 			auto beginProperty = [&serializer](char const* type)
@@ -182,6 +182,8 @@ namespace core
 				writeFloatProperty("walkSpeedModifier", *mIndividualWalkSpeedModifier);
 			if (mIndividualHeightModifier)
 				writeFloatProperty("heightModifier", *mIndividualHeightModifier);
+			if (mIndividualStairSpeedModifier)
+				writeFloatProperty("stairSpeedModifier", *mIndividualStairSpeedModifier);
 			if (mIndividualInteractionAversion)
 				writeFloatProperty("interactionAversion", *mIndividualInteractionAversion);
 			if (mIndividualMobilityProfile)
@@ -192,7 +194,8 @@ namespace core
 			}
 			serializer.endArray();
 		}
-		if (mWalkSpeedModifierSample || mHeightModifierSample || mInteractionAversionSample)
+		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
+			|| mInteractionAversionSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -209,6 +212,8 @@ namespace core
 				writeSample("walkSpeedModifier", *mWalkSpeedModifierSample);
 			if (mHeightModifierSample)
 				writeSample("heightModifier", *mHeightModifierSample);
+			if (mStairSpeedModifierSample)
+				writeSample("stairSpeedModifier", *mStairSpeedModifierSample);
 			if (mInteractionAversionSample)
 				writeSample("interactionAversion", *mInteractionAversionSample);
 			serializer.endArray();
@@ -266,6 +271,7 @@ namespace core
 		mIndividualEscalatorWalkingChance.reset();
 		mIndividualWalkSpeedModifier.reset();
 		mIndividualHeightModifier.reset();
+		mIndividualStairSpeedModifier.reset();
 		mIndividualInteractionAversion.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
@@ -309,6 +315,15 @@ namespace core
 						throw SerializationException("Serialized individual Height modifier is invalid");
 					mIndividualHeightModifier = value;
 				}
+				else if (type == "stairSpeedModifier")
+				{
+					if (mIndividualStairSpeedModifier)
+						throw SerializationException("Serialized Agent contains more than one individual Stair speed modifier");
+					auto const value = serializer.readFloat("value");
+					if (!agentStairSpeedModifierRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Stair speed modifier is invalid");
+					mIndividualStairSpeedModifier = value;
+				}
 				else if (type == "interactionAversion")
 				{
 					if (mIndividualInteractionAversion)
@@ -335,6 +350,7 @@ namespace core
 		}
 		mWalkSpeedModifierSample.reset();
 		mHeightModifierSample.reset();
+		mStairSpeedModifierSample.reset();
 		mInteractionAversionSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
@@ -357,6 +373,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::HeightModifier;
 					destination = &mHeightModifierSample;
 					displayName = "Height modifier";
+				}
+				else if (type == "stairSpeedModifier")
+				{
+					sample.type = SampledAgentPropertyType::StairSpeedModifier;
+					destination = &mStairSpeedModifierSample;
+					displayName = "Stair speed modifier";
 				}
 				else if (type == "interactionAversion")
 				{
@@ -513,6 +535,22 @@ namespace core
 		return effective;
 	}
 
+	EffectiveAgentStairSpeedModifier Agent::getEffectiveStairSpeedModifier() const
+	{
+		EffectiveAgentStairSpeedModifier effective;
+		if (mIndividualStairSpeedModifier)
+		{
+			effective.value = *mIndividualStairSpeedModifier;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mStairSpeedModifierSample) return effective;
+		effective.value = mStairSpeedModifierSample->value;
+		effective.sourceTag = mStairSpeedModifierSample->sourceTag;
+		effective.propertyRevision = mStairSpeedModifierSample->propertyRevision;
+		return effective;
+	}
+
 	EffectiveAgentInteractionAversion Agent::getEffectiveInteractionAversion() const
 	{
 		EffectiveAgentInteractionAversion effective;
@@ -620,7 +658,8 @@ namespace core
 	float Agent::getStationaryStairSpeed(bool ascending) const
 	{
 		auto const policy = mWorld ? mWorld->getRouteChoicePolicy() : RouteChoicePolicy{};
-		return ascending ? policy.stairAscentSpeed : policy.stairDescentSpeed;
+		return (ascending ? policy.stairAscentSpeed : policy.stairDescentSpeed)
+			* getEffectiveStairSpeedModifier().value;
 	}
 
 	float Agent::estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const

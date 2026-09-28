@@ -35,6 +35,8 @@ void runAgentIndividualPropertySmokeChecks()
 		core::AgentPropertyType::InteractionAversion);
 	require(interactionMetadata.name == "Interaction aversion"
 		&& interactionMetadata.propertyNamespace == "Pathing"
+		&& core::agentPropertyMetadata(core::AgentPropertyType::StairSpeedModifier).propertyNamespace
+			== "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
 			== "Pathing"
 		&& !core::agentPropertyMetadata(core::AgentPropertyType::Colour).propertyNamespace
@@ -54,6 +56,14 @@ void runAgentIndividualPropertySmokeChecks()
 	require(registry->setAgentTagWalkSpeedModifier(tag, { 0.9f, 0.9f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagHeightModifier(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagHeightModifier(tag, { 0.8f, 0.8f }, &diagnostic), diagnostic);
+	require(registry->addAgentTagStairSpeedModifier(tag, &diagnostic), diagnostic);
+	require(registry->getAgentTagStairSpeedModifier(tag)->range
+		== core::DefaultAgentStairSpeedModifierRange,
+		"Stair speed modifier did not default to neutral");
+	require(!registry->setAgentTagStairSpeedModifier(tag, { 0.49f, 1.0f }, &diagnostic)
+		&& diagnostic.find("between 0.5 and 1.5") != std::string::npos,
+		"Agent tag accepted an out-of-range Stair speed modifier");
+	require(registry->setAgentTagStairSpeedModifier(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagInteractionAversion(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagInteractionAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
@@ -76,9 +86,15 @@ void runAgentIndividualPropertySmokeChecks()
 	require(world->setAgentIndividualEscalatorWalkingChance(id, 0.75f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualWalkSpeedModifier(id, 1.1f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualHeightModifier(id, 0.95f, &diagnostic), diagnostic);
+	require(agent->getStairSpeedModifierSample()
+		&& agent->getStairSpeedModifierSample()->type == core::SampledAgentPropertyType::StairSpeedModifier
+		&& agent->getEffectiveStairSpeedModifier().value == 0.75f
+		&& agent->getEffectiveStairSpeedModifier().sourceTag == tag,
+		"The Agent did not inherit its sampled Stair speed modifier");
 	require(agent->getEffectiveInteractionAversion().value == 2.0f
 		&& agent->getEffectiveInteractionAversion().sourceTag == tag,
 		"The Agent did not inherit its sampled Interaction aversion");
+	require(world->setAgentIndividualStairSpeedModifier(id, 1.5f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualInteractionAversion(id, 0.0f, &diagnostic), diagnostic);
 	auto const directMask = core::traversalMask(core::TraversalKind::Lift);
 	require(world->setAgentIndividualMobilityProfile(id, directMask, &diagnostic), diagnostic);
@@ -91,6 +107,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveWalkSpeedModifier().value == 1.1f
 		&& agent->getEffectiveHeightModifier().individual
 		&& agent->getEffectiveHeightModifier().value == 0.95f
+		&& agent->getEffectiveStairSpeedModifier().individual
+		&& agent->getEffectiveStairSpeedModifier().value == 1.5f
 		&& agent->getEffectiveInteractionAversion().individual
 		&& agent->getEffectiveInteractionAversion().value == 0.0f
 		&& agent->getEffectiveMobilityProfile().individual
@@ -99,6 +117,9 @@ void runAgentIndividualPropertySmokeChecks()
 	require(core::agentForbidsTraversal(agent, core::TraversalKind::Lift)
 		&& !core::agentForbidsTraversal(agent, core::TraversalKind::Staircase),
 		"Routing did not use the individual Mobility profile instead of its tag");
+	require(!world->setAgentIndividualStairSpeedModifier(id, 1.51f, &diagnostic)
+		&& diagnostic.find("between 0.5 and 1.5") != std::string::npos,
+		"An out-of-range individual Stair speed modifier was accepted");
 	require(!world->setAgentIndividualMobilityProfile(id,
 		core::TraversalMask{ 1 } << 9, &diagnostic)
 		&& diagnostic.find("reserved") != std::string::npos,
@@ -107,6 +128,7 @@ void runAgentIndividualPropertySmokeChecks()
 	auto const yaml = serialize(*world);
 	require(yaml.find("version: 18") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
+		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("interactionAversion") != std::string::npos,
 		"Individual Agent properties were not persisted in World schema 18");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);
@@ -115,7 +137,11 @@ void runAgentIndividualPropertySmokeChecks()
 	core::SerializationWorkData work;
 	require(loaded->deserialize(*reader, work), "The individual-property World did not deserialize");
 	auto* loadedAgent = loaded->lookupAgent(id).entity;
-	require(loadedAgent && loadedAgent->getEffectiveColour().individual
+	require(loadedAgent && loadedAgent->getStairSpeedModifierSample()
+		&& loadedAgent->getStairSpeedModifierSample()->value == 0.75f
+		&& loadedAgent->getEffectiveColour().individual
+		&& loadedAgent->getEffectiveStairSpeedModifier().individual
+		&& loadedAgent->getEffectiveStairSpeedModifier().value == 1.5f
 		&& loadedAgent->getEffectiveInteractionAversion().individual
 		&& loadedAgent->getEffectiveInteractionAversion().value == 0.0f
 		&& loadedAgent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,

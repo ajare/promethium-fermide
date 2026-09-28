@@ -96,6 +96,25 @@ namespace core
 		return true;
 	}
 
+	bool agentStairSpeedModifierRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Stair speed modifier endpoints must be finite");
+		if (range.minimum < AgentStairSpeedModifierMinimum
+			|| range.maximum > AgentStairSpeedModifierMaximum)
+			return reject("Stair speed modifier endpoints must be between 0.5 and 1.5");
+		if (range.minimum > range.maximum)
+			return reject("Stair speed modifier minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic)
 	{

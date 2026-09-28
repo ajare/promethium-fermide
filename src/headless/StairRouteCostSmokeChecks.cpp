@@ -1,6 +1,7 @@
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
+#include <vector>
 
 #include "core/Agent.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -37,6 +38,7 @@ namespace
 		auto const policy = world->getRouteChoicePolicy();
 		core::RouteDecisionContext context{ agent, policy.baselineProfile, policy,
 			agent->getSector(), agent->getWalkSpeed() };
+		auto const ladderSpeed = agent->getClimbSpeed();
 		bool checked = false;
 		for (auto const& edge : graph->getEdges())
 		{
@@ -68,10 +70,37 @@ namespace
 			require(std::abs(edge->getTraversalSpeed(agent, upper) - policy.stairAscentSpeed) < 0.0001f
 				&& std::abs(edge->getTraversalSpeed(agent, lower) - policy.stairDescentSpeed) < 0.0001f,
 				"Estimated and runtime stationary Staircase speeds disagree");
+			world->pauseSimulation();
+			std::string diagnostic;
+			require(world->setAgentIndividualStairSpeedModifier(core::AgentId{ 1 }, 0.5f,
+				&diagnostic), diagnostic.c_str());
+			auto slowProfile = policy.baselineProfile;
+			slowProfile.stairSpeedModifier = agent->getEffectiveStairSpeedModifier().value;
+			core::RouteDecisionContext slowContext{ agent, slowProfile, policy,
+				agent->getSector(), agent->getWalkSpeed() };
+			auto slowUp = edge->getDirectedTraversalFacts(upper, slowContext);
+			require(std::abs(slowUp.components.motionSeconds
+				- up.components.motionSeconds / 0.5f) < 0.0001f
+				&& std::abs(edge->getTraversalSpeed(agent, upper)
+					- policy.stairAscentSpeed * 0.5f) < 0.0001f,
+				"Stair speed modifier changed estimated and runtime speed differently");
 			checked = true;
 			break;
 		}
 		require(checked, "Staircase fixture has no stationary flight");
+		require(agent->getClimbSpeed() == ladderSpeed,
+			"Stair speed modifier changed Ladder climb speed");
+		bool escalatorChecked = false;
+		for (auto const& edge : graph->getEdges())
+		{
+			if (edge->getType() != core::EdgeType::Staircase
+				|| edge->getTraversalSpeed(nullptr) <= 0.0f) continue;
+			require(std::abs(edge->getTraversalSpeed(agent) - edge->getTraversalSpeed(nullptr)) < 0.0001f,
+				"Stair speed modifier changed moving Escalator belt speed");
+			escalatorChecked = true;
+			break;
+		}
+		require(escalatorChecked, "Staircase fixture has no moving Escalator");
 	}
 
 	std::shared_ptr<const core::Vertex> markerVertex(
@@ -83,6 +112,43 @@ namespace
 			if (marker && marker->getId().value == markerId) return vertex;
 		}
 		return {};
+	}
+
+	void stairSpeedCanReverseRouteChoice()
+	{
+		auto world = core::loadWorldDocument(testWorld("staircase-test-1.world.yaml"));
+		world->pauseSimulation();
+		auto graph = world->getGraph();
+		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
+		std::vector<std::shared_ptr<const core::Vertex>> markers;
+		for (auto const& vertex : graph->getVertices())
+			if (std::dynamic_pointer_cast<core::Marker>(vertex->getObject())) markers.push_back(vertex);
+		std::string diagnostic;
+		require(world->setAgentIndividualStairSpeedModifier(core::AgentId{ 1 }, 0.5f,
+			&diagnostic), diagnostic.c_str());
+		std::vector<std::shared_ptr<core::Path>> slow;
+		for (auto const& source : markers)
+			for (auto const& target : markers)
+				slow.push_back(graph->calculatePath(agent, source, target));
+		require(world->setAgentIndividualStairSpeedModifier(core::AgentId{ 1 }, 1.5f,
+			&diagnostic), diagnostic.c_str());
+		bool reversed = false;
+		size_t index = 0;
+		for (auto const& source : markers)
+			for (auto const& target : markers)
+			{
+				auto fast = graph->calculatePath(agent, source, target);
+				auto const& before = slow[index++];
+				if (!before || !fast || before->nodes.size() != fast->nodes.size())
+				{
+					if (bool(before) != bool(fast) || (before && fast)) reversed = true;
+					continue;
+				}
+				for (size_t node = 1; node < fast->nodes.size(); ++node)
+					if (before->nodes[node].edge->getId() != fast->nodes[node].edge->getId())
+					{ reversed = true; break; }
+			}
+		require(reversed, "Stair speed modifier did not reverse any competing route choice");
 	}
 
 	void multiFlightStairwellAccumulatesEveryFlight()
@@ -141,5 +207,6 @@ namespace
 void runStairRouteCostSmokeChecks()
 {
 	stationaryStaircaseIsDirectionalAndPhysical();
+	stairSpeedCanReverseRouteChoice();
 	multiFlightStairwellAccumulatesEveryFlight();
 }

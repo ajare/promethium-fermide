@@ -66,6 +66,10 @@ _Avoid_: Reservation, traversal permit
 An Agent's subjective, seconds-equivalent judgement of a possible Path, combining expected duration with effort, waiting, interaction, crowding, risk, uncertainty, and personal preference. It is not elapsed journey time.
 _Avoid_: Edge weight, actual travel time
 
+**Stair speed modifier**:
+An Agent property from 0.5 through 1.5 that multiplies physical and estimated movement speed on stationary Staircases and Stairwells. Its neutral default is 1; it does not alter Ladder speed or moving Escalator belt speed.
+_Avoid_: Walk speed modifier, effort aversion
+
 **Interaction aversion**:
 An Agent property from 0 through 3 that weights the perceived inconvenience of Door activation and threshold interaction. Its neutral default is 1; it changes route preference, not whether an interaction is possible.
 _Avoid_: Mobility profile, interaction capability

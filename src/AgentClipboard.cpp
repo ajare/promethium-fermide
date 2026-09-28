@@ -71,6 +71,10 @@ namespace
 			diagnostic = std::move(reason);
 			return false;
 		};
+		if (payload.individualStairSpeedModifier
+			&& !core::agentStairSpeedModifierRangeIsValid(
+				{ *payload.individualStairSpeedModifier, *payload.individualStairSpeedModifier },
+				&diagnostic)) return false;
 		if (payload.individualInteractionAversion
 			&& !core::agentInteractionAversionRangeIsValid(
 				{ *payload.individualInteractionAversion, *payload.individualInteractionAversion },
@@ -78,7 +82,8 @@ namespace
 		if (payload.agentTags.empty())
 		{
 			if (payload.agentTagRegistryUuid || payload.walkSpeedModifierSample
-				|| payload.heightModifierSample || payload.interactionAversionSample)
+				|| payload.heightModifierSample || payload.stairSpeedModifierSample
+				|| payload.interactionAversionSample)
 			{
 				return reject(
 					"An untagged Agent clipboard payload cannot carry registry or sample state");
@@ -114,6 +119,9 @@ namespace
 			&& validateSample("Height modifier",
 				core::SampledAgentPropertyType::HeightModifier,
 				payload.heightModifierSample)
+			&& validateSample("Stair speed modifier",
+				core::SampledAgentPropertyType::StairSpeedModifier,
+				payload.stairSpeedModifierSample)
 			&& validateSample("Interaction aversion",
 				core::SampledAgentPropertyType::InteractionAversion,
 				payload.interactionAversionSample);
@@ -137,7 +145,7 @@ namespace
 		}
 		return world.validateAgentTagAssignments(payload.agentTags,
 			payload.walkSpeedModifierSample, payload.heightModifierSample,
-			payload.interactionAversionSample, &diagnostic);
+			payload.stairSpeedModifierSample, payload.interactionAversionSample, &diagnostic);
 	}
 
 	AgentClipboardConfigurationValue portableValue(core::World const& world,
@@ -408,7 +416,9 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.agentTags = lookup.entity->getAgentTagIds();
 	payload.walkSpeedModifierSample = lookup.entity->getWalkSpeedModifierSample();
 	payload.heightModifierSample = lookup.entity->getHeightModifierSample();
+	payload.stairSpeedModifierSample = lookup.entity->getStairSpeedModifierSample();
 	payload.interactionAversionSample = lookup.entity->getInteractionAversionSample();
+	payload.individualStairSpeedModifier = lookup.entity->getIndividualStairSpeedModifier();
 	payload.individualInteractionAversion = lookup.entity->getIndividualInteractionAversion();
 	if (!payload.agentTags.empty())
 	{
@@ -472,6 +482,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	// so a payload written before activation existed reads back activated
 	// (#118).
 	if (!payload.active) output << YAML::Key << "active" << YAML::Value << false;
+	if (payload.individualStairSpeedModifier)
+		output << YAML::Key << "stairSpeedModifier" << YAML::Value
+			<< *payload.individualStairSpeedModifier;
 	if (payload.individualInteractionAversion)
 		output << YAML::Key << "interactionAversion" << YAML::Value
 			<< *payload.individualInteractionAversion;
@@ -502,7 +515,7 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 		for (auto const tag : payload.agentTags) output << tag.value;
 		output << YAML::EndSeq;
 		if (payload.walkSpeedModifierSample || payload.heightModifierSample
-			|| payload.interactionAversionSample)
+			|| payload.stairSpeedModifierSample || payload.interactionAversionSample)
 		{
 			output << YAML::Key << "propertySamples" << YAML::Value << YAML::BeginSeq;
 			auto writeSample = [&output](char const* type,
@@ -520,6 +533,8 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 				writeSample("walkSpeedModifier", *payload.walkSpeedModifierSample);
 			if (payload.heightModifierSample)
 				writeSample("heightModifier", *payload.heightModifierSample);
+			if (payload.stairSpeedModifierSample)
+				writeSample("stairSpeedModifier", *payload.stairSpeedModifierSample);
 			if (payload.interactionAversionSample)
 				writeSample("interactionAversion", *payload.interactionAversionSample);
 			output << YAML::EndSeq;
@@ -585,6 +600,20 @@ bool readAgentClipboardObject(YAML::Node const& object,
 			diagnostic = "Clipboard field 'active' must be a boolean";
 			return false;
 		}
+	}
+
+	if (object["stairSpeedModifier"])
+	{
+		float value;
+		try { value = object["stairSpeedModifier"].as<float>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Stair speed modifier must be a number";
+			return false;
+		}
+		if (!core::agentStairSpeedModifierRangeIsValid({ value, value }, &diagnostic))
+			return false;
+		payload.individualStairSpeedModifier = value;
 	}
 
 	if (object["interactionAversion"])
@@ -765,6 +794,11 @@ bool readAgentClipboardObject(YAML::Node const& object,
 				sample.type = core::SampledAgentPropertyType::HeightModifier;
 				destination = &payload.heightModifierSample;
 			}
+			else if (type == "stairSpeedModifier")
+			{
+				sample.type = core::SampledAgentPropertyType::StairSpeedModifier;
+				destination = &payload.stairSpeedModifierSample;
+			}
 			else if (type == "interactionAversion")
 			{
 				sample.type = core::SampledAgentPropertyType::InteractionAversion;
@@ -780,7 +814,8 @@ bool readAgentClipboardObject(YAML::Node const& object,
 				diagnostic = format(
 					"Clipboard Agent contains more than one {} sample",
 					type == "walkSpeedModifier" ? "Walk speed modifier"
-						: type == "heightModifier" ? "Height modifier" : "Interaction aversion");
+						: type == "heightModifier" ? "Height modifier"
+						: type == "stairSpeedModifier" ? "Stair speed modifier" : "Interaction aversion");
 				return false;
 			}
 			*destination = sample;
@@ -944,6 +979,17 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		// allowed while the simulation runs, and a pasted Agent the payload
 		// deactivated must land deactivated rather than be refused (#118).
 		created->setActive(payload.active);
+		if (payload.individualStairSpeedModifier)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualStairSpeedModifier(agentId,
+				payload.individualStairSpeedModifier, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Stair speed modifier could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
 		if (payload.individualInteractionAversion)
 		{
 			string propertyDiagnostic;
@@ -980,7 +1026,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			string assignDiagnostic;
 			if (!world->restoreAgentTagAssignments(agentId, payload.agentTags,
 				payload.walkSpeedModifierSample, payload.heightModifierSample,
-				payload.interactionAversionSample, &assignDiagnostic))
+				payload.stairSpeedModifierSample, payload.interactionAversionSample, &assignDiagnostic))
 			{
 				diagnostic = "The pasted Agent's tag assignments could not be restored: "
 					+ assignDiagnostic + rollBack();

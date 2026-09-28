@@ -25,6 +25,7 @@ namespace core
 
 	struct EffectiveRoutingProfile
 	{
+		float stairSpeedModifier = 1;
 		float waitingAversion = 1;
 		float effortAversion = 1;
 		float interactionAversion = 1;
@@ -77,7 +78,7 @@ namespace core
 			for (auto value : { c.motionSeconds, c.knownWaitSeconds, c.expectedWaitSeconds,
 				c.physicalEffortUnits, c.interactionUnits, c.crowdingUnits, c.riskUnits,
 				c.uncertaintyUnits, c.perceptionVariationUnits, facts.optimisticLowerBoundSeconds,
-				profile.waitingAversion, profile.effortAversion, profile.interactionAversion,
+				profile.stairSpeedModifier, profile.waitingAversion, profile.effortAversion, profile.interactionAversion,
 				profile.crowdAversion, profile.riskAversion }) validate(value);
 			if (facts.objectiveDurationSeconds) validate(*facts.objectiveDurationSeconds);
 			auto cost = c.motionSeconds + profile.waitingAversion * (c.knownWaitSeconds + c.expectedWaitSeconds)

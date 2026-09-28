@@ -77,7 +77,8 @@ namespace core
 		auto const sourceVertex = getOtherVertex(targetVertex);
 		auto const rise = targetVertex->getPosition().y - sourceVertex->getPosition().y;
 		auto const ascending = rise > 0.0f;
-		auto const speed = ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed;
+		auto const speed = (ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed)
+			* context.profile.stairSpeedModifier;
 		facts.feasible = true;
 		facts.components.motionSeconds = getLength() / speed;
 		facts.components.physicalEffortUnits = abs(rise) * (ascending

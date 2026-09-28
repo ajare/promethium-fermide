@@ -547,6 +547,9 @@ namespace core
 			AgentTagSampleRepairAction heightAction{ AgentTagSampleRepairAction::None };
 			AgentTagId heightSource{};
 			AgentHeightModifierProperty heightProperty{};
+			AgentTagSampleRepairAction stairSpeedAction{ AgentTagSampleRepairAction::None };
+			AgentTagId stairSpeedSource{};
+			AgentStairSpeedModifierProperty stairSpeedProperty{};
 			AgentTagSampleRepairAction interactionAversionAction{ AgentTagSampleRepairAction::None };
 			AgentTagId interactionAversionSource{};
 			AgentInteractionAversionProperty interactionAversionProperty{};
@@ -573,6 +576,9 @@ namespace core
 		void addAgentTagHeightModifierSamples(AgentTagId id,
 			AgentHeightModifierProperty const& property);
 		void clearAgentTagHeightModifierSamples(AgentTagId id);
+		void addAgentTagStairSpeedModifierSamples(AgentTagId id,
+			AgentStairSpeedModifierProperty const& property);
+		void clearAgentTagStairSpeedModifierSamples(AgentTagId id);
 		void addAgentTagInteractionAversionSamples(AgentTagId id,
 			AgentInteractionAversionProperty const& property);
 		void clearAgentTagInteractionAversionSamples(AgentTagId id);
@@ -831,6 +837,7 @@ namespace core
 			std::set<AgentTagId> agentTags;
 			std::optional<AgentPropertySample> walkSpeedModifierSample;
 			std::optional<AgentPropertySample> heightModifierSample;
+			std::optional<AgentPropertySample> stairSpeedModifierSample;
 			std::optional<AgentBehaviourAssignment> behaviourAssignment;
 			bool active{ true };
 		};
@@ -1946,6 +1953,8 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualHeightModifier(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualStairSpeedModifier(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualInteractionAversion(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
@@ -2046,6 +2055,7 @@ namespace core
 		bool validateAgentTagAssignments(std::set<AgentTagId> const& tags,
 			std::optional<AgentPropertySample> const& walkSpeedSample,
 			std::optional<AgentPropertySample> const& heightSample,
+			std::optional<AgentPropertySample> const& stairSpeedSample,
 			std::optional<AgentPropertySample> const& interactionAversionSample,
 			std::string* diagnostic = nullptr) const;
 
@@ -2056,6 +2066,7 @@ namespace core
 			std::set<AgentTagId> const& tags,
 			std::optional<AgentPropertySample> const& walkSpeedSample,
 			std::optional<AgentPropertySample> const& heightSample,
+			std::optional<AgentPropertySample> const& stairSpeedSample,
 			std::optional<AgentPropertySample> const& interactionAversionSample,
 			std::string* diagnostic = nullptr);
 

@@ -154,6 +154,7 @@ namespace
 	map<uint64_t, TagWalkSpeedEdit> gTagWalkSpeedEdits;
 	map<uint64_t, TagEscalatorWalkingChanceEdit> gTagEscalatorWalkingChanceEdits;
 	map<uint64_t, TagHeightEdit> gTagHeightEdits;
+	map<uint64_t, TagHeightEdit> gTagStairSpeedEdits;
 	map<uint64_t, TagHeightEdit> gTagInteractionAversionEdits;
 	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
@@ -664,10 +665,44 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
+		auto const* stairSpeed = registry->getAgentTagStairSpeedModifier(id);
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
-		if (interaction || pathingMobility)
-			renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+		if (stairSpeed || interaction || pathingMobility)
+			renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+		if (stairSpeed)
+		{
+			auto& edit = gTagStairSpeedEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != stairSpeed->revision)
+			{
+				edit.range = stairSpeed->range;
+				edit.loadedRevision = stairSpeed->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::StairSpeedModifier),
+				&edit.range.minimum, &edit.range.maximum, 0.005f,
+				core::AgentStairSpeedModifierMinimum, core::AgentStairSpeedModifierMaximum,
+				"Min %.3f", "Max %.3f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
+			{
+				string diagnostic;
+				if (!commitAgentTagStairSpeedModifierEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Stair speed modifier range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				stairSpeed = registry->getAgentTagStairSpeedModifier(id);
+				if (stairSpeed) { edit.range = stairSpeed->range; edit.loadedRevision = stairSpeed->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeStairSpeedModifier"))
+			{
+				string diagnostic;
+				if (!commitAgentTagStairSpeedModifierRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagStairSpeedEdits.erase(id.value); stairSpeed = nullptr; }
+			}
+		}
 		if (interaction)
 		{
 			auto& edit = gTagInteractionAversionEdits[id.value];
@@ -780,9 +815,10 @@ namespace
 		auto const* walkSpeed = registry->getAgentTagWalkSpeedModifier(id);
 		auto const* height = registry->getAgentTagHeightModifier(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
+		auto const* stairSpeed = registry->getAgentTagStairSpeedModifier(id);
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
-		auto const anyMissing = !colour || !walkSpeed || !height || !chance || !interaction || !mobility;
+		auto const anyMissing = !colour || !walkSpeed || !height || !chance || !stairSpeed || !interaction || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -819,8 +855,16 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!interaction || !mobility)
-				renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+			if (!stairSpeed || !interaction || !mobility)
+				renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
+			if (!stairSpeed && ImGui::Selectable(propertyName(core::AgentPropertyType::StairSpeedModifier)))
+			{
+				string diagnostic;
+				if (!commitAgentTagStairSpeedModifierAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagStairSpeedEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
 			if (!interaction && ImGui::Selectable(propertyName(core::AgentPropertyType::InteractionAversion)))
 			{
 				string diagnostic;
@@ -1874,15 +1918,15 @@ bool commitAgentTagHeightModifierRemove(
 
 namespace
 {
-	bool commitInteractionAversionChange(
+	bool commitSampledPathingPropertyChange(
 		shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
-		string& diagnostic, char const* action,
+		string& diagnostic, char const* action, char const* property,
 		function<bool(core::AgentTagRegistry&, string*)> change)
 	{
 		diagnostic.clear();
 		if (!registry)
 		{
-			diagnostic = format("There is no Agent tag registry in which to {} Interaction aversion", action);
+			diagnostic = format("There is no Agent tag registry in which to {} {}", action, property);
 			return false;
 		}
 		vector<core::World*> participants;
@@ -1896,7 +1940,7 @@ namespace
 		auto undo = captureRegistrySnapshot(registry, participants, id);
 		if (!undo)
 		{
-			diagnostic = format("Could not capture the registry and loaded Worlds before {} Interaction aversion", action);
+			diagnostic = format("Could not capture the registry and loaded Worlds before {} {}", action, property);
 			return false;
 		}
 		if (!change(*registry, &diagnostic)) return false;
@@ -1905,11 +1949,35 @@ namespace
 	}
 }
 
+bool commitAgentTagStairSpeedModifierAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Stair speed modifier",
+		[id](auto& target, string* out) { return target.addAgentTagStairSpeedModifier(id, out); });
+}
+
+bool commitAgentTagStairSpeedModifierEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Stair speed modifier",
+		[id, range](auto& target, string* out) { return target.setAgentTagStairSpeedModifier(id, range, out); });
+}
+
+bool commitAgentTagStairSpeedModifierRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Stair speed modifier",
+		[id](auto& target, string* out) { return target.removeAgentTagStairSpeedModifier(id, out); });
+}
+
 bool commitAgentTagInteractionAversionAdd(
 	shared_ptr<core::AgentTagRegistry> const& registry,
 	core::AgentTagId id, string& diagnostic)
 {
-	return commitInteractionAversionChange(registry, id, diagnostic, "adding",
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Interaction aversion",
 		[id](auto& target, string* out) { return target.addAgentTagInteractionAversion(id, out); });
 }
 
@@ -1917,7 +1985,7 @@ bool commitAgentTagInteractionAversionEdit(
 	shared_ptr<core::AgentTagRegistry> const& registry,
 	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
 {
-	return commitInteractionAversionChange(registry, id, diagnostic, "editing",
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Interaction aversion",
 		[id, range](auto& target, string* out) { return target.setAgentTagInteractionAversion(id, range, out); });
 }
 
@@ -1925,7 +1993,7 @@ bool commitAgentTagInteractionAversionRemove(
 	shared_ptr<core::AgentTagRegistry> const& registry,
 	core::AgentTagId id, string& diagnostic)
 {
-	return commitInteractionAversionChange(registry, id, diagnostic, "removing",
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Interaction aversion",
 		[id](auto& target, string* out) { return target.removeAgentTagInteractionAversion(id, out); });
 }
 
