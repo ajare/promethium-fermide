@@ -6453,6 +6453,8 @@ namespace core
 
 		if (options.extensible)
 		{
+			if (options.controlCount > 0) forceBridge->addPreparationSide(options.fromSide);
+			if (options.controlCount > 1) forceBridge->addPreparationSide(1 - options.fromSide);
 			if (x == sector->getCellX0() && (x + options.width - 1) == sector->getCellX1())
 			{
 				throw WorldException(this, format("{} - No space to place Force Bridge controls", caller));

@@ -365,6 +365,7 @@ add_executable(prometheum-fermide-headless
     src/headless/StairRouteCostSmokeChecks.cpp
     src/headless/LiftRouteCostSmokeChecks.cpp
     src/headless/ShuttleRouteCostSmokeChecks.cpp
+    src/headless/LadderForceBridgeRouteCostSmokeChecks.cpp
     src/headless/WorldTeardownSmokeChecks.cpp
     src/headless/RenderGuiStubs.cpp
     src/headless/RenderOrderSmokeChecks.cpp

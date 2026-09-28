@@ -83,6 +83,21 @@ namespace core
 		float stairAscentEffortPerRise = 1.5f;
 		float stairDescentEffortPerRise = 0.25f;
 		float stairInteractionPerFlight = 0.15f;
+		// Ladders remain usable but carry ordinary effort, mounting inconvenience,
+		// and perceived exposure. A later Agent property scales ladder speed; this
+		// baseline uses the Agent's current effective physical climb speed.
+		float ladderAscentEffortPerUnit = 1.5f;
+		float ladderDescentEffortPerUnit = 1.0f;
+		float ladderMountDismountInteraction = 1.5f;
+		float ladderRiskPerUnit = 8.0f;
+		// Extensible resources use these expectations when their deployed state is
+		// not a local Route observation. Interaction is expected in the same
+		// proportion as deployment delay.
+		float unobservedLadderRetractedProbability = 0.5f;
+		float unobservedForceBridgeRetractedProbability = 0.5f;
+		float unobservedExtensionUncertaintyFraction = 0.25f;
+		float extensiblePreparationInteraction = 1.0f;
+		float forceBridgeRiskPerUnit = 0.25f;
 		// Escalator route estimates use the expected contribution of walking;
 		// admission still makes the authoritative deterministic walk/stand draw.
 		float escalatorAscentEffortPerRise = 0.1f;
@@ -151,5 +166,6 @@ namespace core
 		Sector const* const observationSector = nullptr;
 		float const walkSpeed = 0.5f;
 		World const* const world = nullptr;
+		float const climbSpeed = 0.25f;
 	};
 }

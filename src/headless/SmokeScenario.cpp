@@ -128,6 +128,7 @@ void runThresholdRouteCostSmokeChecks();
 void runStairRouteCostSmokeChecks();
 void runLiftRouteCostSmokeChecks();
 void runShuttleRouteCostSmokeChecks();
+void runLadderForceBridgeRouteCostSmokeChecks();
 void runWorldTeardownSmokeChecks();
 void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
@@ -6329,6 +6330,7 @@ int main(int argc, char** argv)
 		runZeroSizeLocationSmokeChecks();
 		runIsolatedSectorPathingSmokeChecks();
 		runPathfindingWorkspaceSmokeChecks();
+		runLadderForceBridgeRouteCostSmokeChecks();
 		runThresholdRouteCostSmokeChecks();
 		runStairRouteCostSmokeChecks();
 		runLiftRouteCostSmokeChecks();

@@ -43,6 +43,19 @@ namespace core
 		return mFromSide;
 	}
 
+	void ForceBridge::addPreparationSide(int side)
+	{
+		if (side == CORE_SIDE_LEFT || side == CORE_SIDE_RIGHT)
+			mPreparationSides[side == CORE_SIDE_RIGHT ? 1 : 0] = true;
+	}
+
+	bool ForceBridge::canPrepareFromPosition(float sourceX) const
+	{
+		if (!isExtensible()) return true;
+		auto const bridgeMiddle = getPosition().x + getSize().x * 0.5f;
+		return mPreparationSides[sourceX > bridgeMiddle ? 1 : 0];
+	}
+
 	/***
 
 	getDescription()

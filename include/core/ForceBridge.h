@@ -17,6 +17,7 @@ namespace core
 	private:
 
 		int mFromSide;
+		bool mPreparationSides[2]{ false, false };
 
 		TraversalResourceId mTraversalResource;
 
@@ -31,6 +32,8 @@ namespace core
 		[[nodiscard]] TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
 
 		void configureTraversal(TraversalResourceId resource) { mTraversalResource = resource; }
+		void addPreparationSide(int side);
+		[[nodiscard]] bool canPrepareFromPosition(float sourceX) const;
 
 		// Overridden from Object
 		[[nodiscard]] std::string getDescription() const override;

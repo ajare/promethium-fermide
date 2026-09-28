@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 
 #include "core/Defines.h"
@@ -64,12 +65,65 @@ namespace core
 		// If Edge isn't visible, then assume we have to wait for the Ladder to extend.
 		if (!edgeVisible || !mLadder->isExtended())
 		{
-			// TODO: if not visible, could hedge by assuming a percentage chance of it
-			//       being extended, and multiply the extend time by that. 
 			traverseTime += mLadder->getExtendRetractTime();
 		}
 
 		return max(traverseTime, CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME);
+	}
+
+	DirectedTraversalFacts LadderEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
+	{
+		DirectedTraversalFacts facts;
+		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Ladder)) return facts;
+		auto const source = getOtherVertex(targetVertex);
+		auto const rise = targetVertex->getPosition().y - source->getPosition().y;
+		auto const distance = getLength();
+		auto const speed = context.climbSpeed > 0.0f
+			? context.climbSpeed : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED);
+		facts.feasible = true;
+		auto& c = facts.components;
+		c.motionSeconds = distance == 0.0f
+			? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / speed;
+		c.physicalEffortUnits = distance * (rise > 0.0f
+			? context.policy.ladderAscentEffortPerUnit
+			: context.policy.ladderDescentEffortPerUnit);
+		c.interactionUnits = context.policy.ladderMountDismountInteraction;
+		c.riskUnits = distance * context.policy.ladderRiskPerUnit;
+
+		if (mLadder->isExtensible())
+		{
+			bool locallyObserved = false;
+			if (context.observationSector)
+				for (auto const& edge : source->getEdges())
+					if (edge->getType() == EdgeType::LadderMount
+						&& edge->getOtherVertex(source)->getSector().get()
+							== context.observationSector)
+					{ locallyObserved = true; break; }
+			auto const preparation = mLadder->getExtendRetractTime();
+			if (locallyObserved)
+			{
+				if (!mLadder->isExtended())
+					c.knownWaitSeconds = preparation
+						* (1.0f - std::clamp(mLadder->getExtendedPercentage(), 0.0f, 1.0f));
+				if (mLadder->isRetracted() || mLadder->isRetracting())
+					c.interactionUnits += context.policy.extensiblePreparationInteraction;
+			}
+			else
+			{
+				auto const probability = std::clamp(
+					context.policy.unobservedLadderRetractedProbability, 0.0f, 1.0f);
+				c.expectedWaitSeconds = probability * preparation;
+				c.interactionUnits += probability
+					* context.policy.extensiblePreparationInteraction;
+				c.uncertaintyUnits = probability * (1.0f - probability) * preparation
+					* context.policy.unobservedExtensionUncertaintyFraction;
+			}
+		}
+		facts.objectiveDurationSeconds = c.motionSeconds + c.knownWaitSeconds
+			+ c.expectedWaitSeconds;
+		facts.optimisticLowerBoundSeconds = c.motionSeconds;
+		return facts;
 	}
 
 	bool LadderEdge::requiresButton() const

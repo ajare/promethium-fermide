@@ -215,7 +215,7 @@ namespace core
 			profile.crowdAversion = routingAgent->getEffectiveCrowdAversion().value;
 			RouteDecisionContext const context{ routingAgent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				routingAgent->getWalkSpeed(), graph->getWorld() };
+				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed() };
 			auto const inferredSource = !source;
 			if (inferredSource)
 			{

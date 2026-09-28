@@ -79,6 +79,27 @@ namespace core
 		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
 	}
 
+	DirectedTraversalFacts LadderMountEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
+	{
+		DirectedTraversalFacts facts;
+		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Ladder)) return facts;
+		auto const source = getOtherVertex(targetVertex);
+		if (mLadder->isExtensible() && source && source->getType() != VertexType::Ladder)
+		{
+			auto const sourceSector = source->getSector()
+				? SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 }
+				: SectorId{};
+			// Preparation capability is authored, not inferred from the Ladder's
+			// transient deployed state. An already-extended Ladder may retract before
+			// a remote Agent reaches it.
+			if (!mLadder->hasExtensionControlInSector(sourceSector)) return facts;
+		}
+		facts.feasible = true;
+		facts.objectiveDurationSeconds = 0.0f;
+		return facts;
+	}
+
 	bool LadderMountEdge::requiresButton() const
 	{
 		return mLadder->isExtensible();

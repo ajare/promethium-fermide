@@ -42,6 +42,10 @@ namespace core
 		uint32_t getExtensionLeaseCount() const { return mExtensionLeaseCount; }
 		void addExtensionControlSector(SectorId sector);
 		bool canPrepareFrom(SectorId sector) const;
+		bool hasExtensionControlInSector(SectorId sector) const
+		{
+			return mExtensionControlSectors.contains(sector);
+		}
 		bool hasExtensionControl() const { return !mExtensionControlSectors.empty(); }
 	};
 }

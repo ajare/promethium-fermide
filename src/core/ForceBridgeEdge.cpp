@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <limits>
 
@@ -75,13 +76,59 @@ namespace core
 
 		// If Edge isn't visible, then assume we have to wait for the ForceBridge.
 		if (!edgeVisible || !mForceBridge->isExtended())
-		{
-			// TODO: if not visible, could hedge by assuming a percentage chance of it
-			//       being extended, and multiply the extend time by that.
 			traverseTime += mForceBridge->getExtendRetractTime();
-		}
 
 		return max(traverseTime, CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME);
+	}
+
+	DirectedTraversalFacts ForceBridgeEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
+	{
+		DirectedTraversalFacts facts;
+		if (agentForbidsButtons(context.legacyAgent) && requiresButton()) return facts;
+		auto const source = getOtherVertex(targetVertex);
+		auto const sourceSector = source && source->getSector()
+			? SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 }
+			: SectorId{};
+		if (mForceBridge->isExtensible()
+			&& (!mForceBridge->hasExtensionControlInSector(sourceSector)
+				|| !source || !mForceBridge->canPrepareFromPosition(source->getPosition().x)))
+			return facts;
+
+		facts.feasible = true;
+		auto& c = facts.components;
+		auto const distance = getLength();
+		c.motionSeconds = distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
+			: distance / context.walkSpeed;
+		c.riskUnits = distance * context.policy.forceBridgeRiskPerUnit;
+		if (mForceBridge->isExtensible())
+		{
+			auto const locallyObserved = source && source->getSector().get()
+				== context.observationSector;
+			auto const preparation = mForceBridge->getExtendRetractTime();
+			if (locallyObserved)
+			{
+				if (!mForceBridge->isExtended())
+					c.knownWaitSeconds = preparation * (1.0f - std::clamp(
+						mForceBridge->getExtendedPercentage(), 0.0f, 1.0f));
+				if (mForceBridge->isRetracted() || mForceBridge->isRetracting())
+					c.interactionUnits = context.policy.extensiblePreparationInteraction;
+			}
+			else
+			{
+				auto const probability = std::clamp(
+					context.policy.unobservedForceBridgeRetractedProbability, 0.0f, 1.0f);
+				c.expectedWaitSeconds = probability * preparation;
+				c.interactionUnits = probability
+					* context.policy.extensiblePreparationInteraction;
+				c.uncertaintyUnits = probability * (1.0f - probability) * preparation
+					* context.policy.unobservedExtensionUncertaintyFraction;
+			}
+		}
+		facts.objectiveDurationSeconds = c.motionSeconds + c.knownWaitSeconds
+			+ c.expectedWaitSeconds;
+		facts.optimisticLowerBoundSeconds = c.motionSeconds;
+		return facts;
 	}
 
 	bool ForceBridgeEdge::requiresButton() const
