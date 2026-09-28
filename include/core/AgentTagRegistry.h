@@ -59,6 +59,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool stairSpeedModifierAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool ladderSpeedModifierAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		bool interactionAversionAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		bool effortAversionAdditionIsValid(AgentTagId id,
@@ -101,6 +103,8 @@ namespace core
 		AgentHeightModifierProperty const* getAgentTagHeightModifier(
 			AgentTagId id) const;
 		AgentStairSpeedModifierProperty const* getAgentTagStairSpeedModifier(
+			AgentTagId id) const;
+		AgentLadderSpeedModifierProperty const* getAgentTagLadderSpeedModifier(
 			AgentTagId id) const;
 		AgentInteractionAversionProperty const* getAgentTagInteractionAversion(
 			AgentTagId id) const;
@@ -184,6 +188,13 @@ namespace core
 		bool setAgentTagStairSpeedModifier(AgentTagId id, AgentModifierRange range,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagStairSpeedModifier(AgentTagId id,
+			std::string* diagnostic = nullptr);
+
+		bool addAgentTagLadderSpeedModifier(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool setAgentTagLadderSpeedModifier(AgentTagId id, AgentModifierRange range,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagLadderSpeedModifier(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagInteractionAversion(AgentTagId id,

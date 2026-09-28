@@ -113,8 +113,10 @@ struct AgentClipboardPayload
 	std::optional<core::AgentPropertySample> walkSpeedModifierSample;
 	std::optional<core::AgentPropertySample> heightModifierSample;
 	std::optional<core::AgentPropertySample> stairSpeedModifierSample;
+	std::optional<core::AgentPropertySample> ladderSpeedModifierSample;
 	std::optional<core::AgentPropertySample> interactionAversionSample;
 	std::optional<float> individualStairSpeedModifier;
+	std::optional<float> individualLadderSpeedModifier;
 	std::optional<float> individualInteractionAversion;
 	std::optional<core::AgentPropertySample> effortAversionSample;
 	std::optional<float> individualEffortAversion;

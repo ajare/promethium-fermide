@@ -39,6 +39,16 @@ void runAgentIndividualPropertySmokeChecks()
 		core::AgentPropertyType::WaitingAversion);
 	auto const crowdMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::CrowdAversion);
+	auto const ladderSpeedMetadata = core::agentPropertyMetadata(
+		core::AgentPropertyType::LadderSpeedModifier);
+	std::string ladderDiagnostic;
+	require(ladderSpeedMetadata.name == "Ladder speed modifier"
+		&& ladderSpeedMetadata.propertyNamespace == "Pathing"
+		&& core::DefaultAgentLadderSpeedModifierRange == core::AgentModifierRange{}
+		&& core::agentLadderSpeedModifierRangeIsValid({ 0.5f, 1.5f }, &ladderDiagnostic)
+		&& !core::agentLadderSpeedModifierRangeIsValid({ 0.49f, 1.0f }, &ladderDiagnostic)
+		&& ladderDiagnostic.find("between 0.5 and 1.5") != std::string::npos,
+		"Ladder speed modifier metadata, default, or range contract is invalid");
 	require(interactionMetadata.name == "Interaction aversion"
 		&& interactionMetadata.propertyNamespace == "Pathing"
 		&& effortMetadata.name == "Effort aversion"
@@ -77,6 +87,11 @@ void runAgentIndividualPropertySmokeChecks()
 		&& diagnostic.find("between 0.5 and 1.5") != std::string::npos,
 		"Agent tag accepted an out-of-range Stair speed modifier");
 	require(registry->setAgentTagStairSpeedModifier(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
+	require(registry->addAgentTagLadderSpeedModifier(tag, &diagnostic), diagnostic);
+	require(registry->getAgentTagLadderSpeedModifier(tag)->range
+		== core::DefaultAgentLadderSpeedModifierRange,
+		"Ladder speed modifier did not default to neutral");
+	require(registry->setAgentTagLadderSpeedModifier(tag, { 0.8f, 0.8f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagInteractionAversion(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagInteractionAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagEffortAversion(tag, &diagnostic), diagnostic);
@@ -90,7 +105,8 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Waiting aversion");
 	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const registryYaml = serialize(*registry);
-	require(registryYaml.find("version: 7") != std::string::npos
+	require(registryYaml.find("version: 8") != std::string::npos
+		&& registryYaml.find("type: ladderSpeedModifier") != std::string::npos
 		&& registryYaml.find("type: waitingAversion") != std::string::npos
 		&& registryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Waiting aversion range was not persisted");
@@ -103,7 +119,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Crowd aversion");
 	require(registry->setAgentTagCrowdAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const crowdRegistryYaml = serialize(*registry);
-	require(crowdRegistryYaml.find("version: 7") != std::string::npos
+	require(crowdRegistryYaml.find("version: 8") != std::string::npos
 		&& crowdRegistryYaml.find("type: crowdAversion") != std::string::npos
 		&& crowdRegistryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Crowd aversion range was not persisted");
@@ -132,10 +148,16 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveStairSpeedModifier().value == 0.75f
 		&& agent->getEffectiveStairSpeedModifier().sourceTag == tag,
 		"The Agent did not inherit its sampled Stair speed modifier");
+	require(agent->getLadderSpeedModifierSample()
+		&& agent->getLadderSpeedModifierSample()->type == core::SampledAgentPropertyType::LadderSpeedModifier
+		&& agent->getEffectiveLadderSpeedModifier().value == 0.8f
+		&& agent->getEffectiveLadderSpeedModifier().sourceTag == tag,
+		"The Agent did not inherit its sampled Ladder speed modifier");
 	require(agent->getEffectiveInteractionAversion().value == 2.0f
 		&& agent->getEffectiveInteractionAversion().sourceTag == tag,
 		"The Agent did not inherit its sampled Interaction aversion");
 	require(world->setAgentIndividualStairSpeedModifier(id, 1.5f, &diagnostic), diagnostic);
+	require(world->setAgentIndividualLadderSpeedModifier(id, 1.5f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualInteractionAversion(id, 0.0f, &diagnostic), diagnostic);
 	require(agent->getEffectiveEffortAversion().value == 2.0f
 		&& agent->getEffectiveEffortAversion().sourceTag == tag,
@@ -164,6 +186,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveHeightModifier().value == 0.95f
 		&& agent->getEffectiveStairSpeedModifier().individual
 		&& agent->getEffectiveStairSpeedModifier().value == 1.5f
+		&& agent->getEffectiveLadderSpeedModifier().individual
+		&& agent->getEffectiveLadderSpeedModifier().value == 1.5f
 		&& agent->getEffectiveInteractionAversion().individual
 		&& agent->getEffectiveInteractionAversion().value == 0.0f
 		&& agent->getEffectiveEffortAversion().individual
@@ -181,6 +205,9 @@ void runAgentIndividualPropertySmokeChecks()
 	require(!world->setAgentIndividualStairSpeedModifier(id, 1.51f, &diagnostic)
 		&& diagnostic.find("between 0.5 and 1.5") != std::string::npos,
 		"An out-of-range individual Stair speed modifier was accepted");
+	require(!world->setAgentIndividualLadderSpeedModifier(id, 1.51f, &diagnostic)
+		&& diagnostic.find("between 0.5 and 1.5") != std::string::npos,
+		"An out-of-range individual Ladder speed modifier was accepted");
 	require(!world->setAgentIndividualWaitingAversion(id, 0.49f, &diagnostic)
 		&& diagnostic.find("between 0.5 and 3") != std::string::npos,
 		"An out-of-range individual Waiting aversion was accepted");
@@ -196,6 +223,7 @@ void runAgentIndividualPropertySmokeChecks()
 	require(yaml.find("version: 19") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
+		&& yaml.find("ladderSpeedModifier") != std::string::npos
 		&& yaml.find("interactionAversion") != std::string::npos
 		&& yaml.find("effortAversion") != std::string::npos
 		&& yaml.find("waitingAversion") != std::string::npos
@@ -209,9 +237,13 @@ void runAgentIndividualPropertySmokeChecks()
 	auto* loadedAgent = loaded->lookupAgent(id).entity;
 	require(loadedAgent && loadedAgent->getStairSpeedModifierSample()
 		&& loadedAgent->getStairSpeedModifierSample()->value == 0.75f
+		&& loadedAgent->getLadderSpeedModifierSample()
+		&& loadedAgent->getLadderSpeedModifierSample()->value == 0.8f
 		&& loadedAgent->getEffectiveColour().individual
 		&& loadedAgent->getEffectiveStairSpeedModifier().individual
 		&& loadedAgent->getEffectiveStairSpeedModifier().value == 1.5f
+		&& loadedAgent->getEffectiveLadderSpeedModifier().individual
+		&& loadedAgent->getEffectiveLadderSpeedModifier().value == 1.5f
 		&& loadedAgent->getEffectiveInteractionAversion().individual
 		&& loadedAgent->getEffectiveInteractionAversion().value == 0.0f
 		&& loadedAgent->getEffectiveEffortAversion().individual

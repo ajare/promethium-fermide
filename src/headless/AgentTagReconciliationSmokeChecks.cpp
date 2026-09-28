@@ -103,6 +103,9 @@ namespace
 		require(registry->addAgentTagWalkSpeedModifier(stale, &diagnostic), diagnostic);
 		require(registry->setAgentTagWalkSpeedModifier(
 			stale, { 0.9f, 0.9f }, &diagnostic), diagnostic);
+		require(registry->addAgentTagLadderSpeedModifier(stale, &diagnostic), diagnostic);
+		require(registry->setAgentTagLadderSpeedModifier(
+			stale, { 0.8f, 0.8f }, &diagnostic), diagnostic);
 		require(registry->addAgentTagHeightModifier(obsolete, &diagnostic), diagnostic);
 		require(registry->setAgentTagHeightModifier(
 			obsolete, { 0.8f, 0.8f }, &diagnostic), diagnostic);
@@ -119,6 +122,8 @@ namespace
 			&& source->assignAgentTag(carol, unrelated, &diagnostic), diagnostic);
 		auto const oldAliceWalk = *source->lookupAgent(alice).entity
 			->getWalkSpeedModifierSample();
+		auto const oldAliceLadder = *source->lookupAgent(alice).entity
+			->getLadderSpeedModifierSample();
 		auto const oldBobHeight = *source->lookupAgent(bob).entity
 			->getHeightModifierSample();
 		auto const unchangedCarolWalk = *source->lookupAgent(carol).entity
@@ -138,6 +143,8 @@ namespace
 
 		require(registry->setAgentTagWalkSpeedModifier(
 			stale, { 1.1f, 1.1f }, &diagnostic), diagnostic);
+		require(registry->setAgentTagLadderSpeedModifier(
+			stale, { 1.2f, 1.2f }, &diagnostic), diagnostic);
 		require(registry->addAgentTagHeightModifier(newlyModified, &diagnostic), diagnostic);
 		require(registry->setAgentTagHeightModifier(
 			newlyModified, { 0.75f, 0.75f }, &diagnostic), diagnostic);
@@ -156,12 +163,19 @@ namespace
 		auto const* reopenedCarol = reopened->lookupAgent(carol).entity;
 		auto const aliceWalk = reopenedAlice->getWalkSpeedModifierSample();
 		auto const aliceHeight = reopenedAlice->getHeightModifierSample();
+		auto const aliceLadder = reopenedAlice->getLadderSpeedModifierSample();
 		require(aliceWalk && aliceWalk->sourceTag == stale
 			&& aliceWalk->propertyRevision
 				== registry->getAgentTagWalkSpeedModifier(stale)->revision
 			&& std::abs(aliceWalk->value - 1.1f) < 0.000001f
 			&& *aliceWalk != oldAliceWalk,
 			"A stale Walk speed revision was not resampled against the evolved registry");
+		require(aliceLadder && aliceLadder->sourceTag == stale
+			&& aliceLadder->propertyRevision
+				== registry->getAgentTagLadderSpeedModifier(stale)->revision
+			&& std::abs(aliceLadder->value - 1.2f) < 0.000001f
+			&& *aliceLadder != oldAliceLadder,
+			"A stale Ladder speed revision was not resampled against the evolved registry");
 		require(aliceHeight && aliceHeight->sourceTag == newlyModified
 			&& aliceHeight->propertyRevision
 				== registry->getAgentTagHeightModifier(newlyModified)->revision
@@ -177,6 +191,7 @@ namespace
 
 		// Once the repaired World is saved, another open is stable and clean.
 		auto const repairedAliceWalk = *aliceWalk;
+		auto const repairedAliceLadder = *aliceLadder;
 		auto const repairedAliceHeight = *aliceHeight;
 		reopened->saveTo(worldPath.string());
 		reopened.reset();
@@ -184,6 +199,8 @@ namespace
 		require(!stable->isModified()
 			&& stable->lookupAgent(alice).entity->getWalkSpeedModifierSample()
 				== std::optional<core::AgentPropertySample>{ repairedAliceWalk }
+			&& stable->lookupAgent(alice).entity->getLadderSpeedModifierSample()
+				== std::optional<core::AgentPropertySample>{ repairedAliceLadder }
 			&& stable->lookupAgent(alice).entity->getHeightModifierSample()
 				== std::optional<core::AgentPropertySample>{ repairedAliceHeight },
 			"A saved reconciliation rerolled or dirtied an unchanged reopen");

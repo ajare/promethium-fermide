@@ -209,6 +209,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualStairSpeedModifier().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualStairSpeedModifier(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::LadderSpeedModifier),
+			target->getIndividualLadderSpeedModifier().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualLadderSpeedModifier(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::InteractionAversion),
 			target->getIndividualInteractionAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualInteractionAversion(
@@ -302,7 +306,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		}
 	}
 	if (target->getIndividualEscalatorWalkingChance() || target->getIndividualStairSpeedModifier()
-		|| target->getIndividualInteractionAversion() || target->getIndividualEffortAversion()
+		|| target->getIndividualLadderSpeedModifier() || target->getIndividualInteractionAversion() || target->getIndividualEffortAversion()
 		|| target->getIndividualWaitingAversion() || target->getIndividualCrowdAversion() || target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
@@ -345,6 +349,28 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			string diagnostic;
 			commitIndividualPropertyEdit(world, [&](string* out)
 				{ return world->setAgentIndividualStairSpeedModifier(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
+	if (target->getIndividualLadderSpeedModifier())
+	{
+		auto value = *target->getIndividualLadderSpeedModifier();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Ladder speed modifier##individual", &value, 0.005f,
+			core::AgentLadderSpeedModifierMinimum, core::AgentLadderSpeedModifierMaximum,
+			"%.3fx", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualLadderSpeedModifier(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualLadderSpeed"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualLadderSpeedModifier(agent, nullopt, out); }, diagnostic);
 			warn(diagnostic);
 		}
 	}
@@ -557,6 +583,14 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Stair speed modifier: %.3fx from #%s", stairSpeed.value,
 			world->getAgentTagRegistry()->getAgentTagName(stairSpeed.sourceTag).c_str());
 	else ImGui::TextUnformatted("Stair speed modifier: 1.000x (default)");
+
+	auto const ladderSpeed = lookup.entity->getEffectiveLadderSpeedModifier();
+	if (ladderSpeed.individual)
+		ImGui::Text("Ladder speed modifier: %.3fx (individual)", ladderSpeed.value);
+	else if (ladderSpeed.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Ladder speed modifier: %.3fx from #%s", ladderSpeed.value,
+			world->getAgentTagRegistry()->getAgentTagName(ladderSpeed.sourceTag).c_str());
+	else ImGui::TextUnformatted("Ladder speed modifier: 1.000x (default)");
 
 	auto const interaction = lookup.entity->getEffectiveInteractionAversion();
 	if (interaction.individual)

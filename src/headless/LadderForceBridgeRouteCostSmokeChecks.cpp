@@ -54,6 +54,28 @@ namespace
 				"Ladder effort was not finite and direction-sensitive");
 			require(up.components.interactionUnits > 0.0f && up.components.riskUnits > 0.0f,
 				"Ladder mounting and ordinary risk were not distinct finite components");
+
+			world->pauseSimulation();
+			std::string diagnostic;
+			require(world->setAgentIndividualLadderSpeedModifier(
+				core::AgentId{ 1 }, 0.5f, &diagnostic),
+				"Could not set slow Ladder speed for traversal check");
+			auto const slowTraversalSpeed = agent->getClimbSpeed();
+			core::RouteDecisionContext slowContext{ agent, policy.baselineProfile, policy,
+				agent->getSector(), agent->getWalkSpeed(), world.get(), agent->getClimbSpeed() };
+			auto const slowDuration = edge->getDirectedTraversalFacts(upper, slowContext)
+				.components.motionSeconds;
+			require(world->setAgentIndividualLadderSpeedModifier(
+				core::AgentId{ 1 }, 1.5f, &diagnostic),
+				"Could not set fast Ladder speed for traversal check");
+			auto const fastTraversalSpeed = agent->getClimbSpeed();
+			core::RouteDecisionContext fastContext{ agent, policy.baselineProfile, policy,
+				agent->getSector(), agent->getWalkSpeed(), world.get(), agent->getClimbSpeed() };
+			auto const fastDuration = edge->getDirectedTraversalFacts(upper, fastContext)
+				.components.motionSeconds;
+			require(std::abs(fastTraversalSpeed / slowTraversalSpeed - 3.0f) < 0.0001f
+				&& std::abs(slowDuration / fastDuration - 3.0f) < 0.0001f,
+				"Measured and estimated Ladder speeds did not scale consistently");
 			checked = true;
 			break;
 		}
@@ -134,6 +156,30 @@ namespace
 		}
 		require(!usedLadder && usedStairs,
 			"Default Agent preferred a modest Ladder shortcut to conventional stairs");
+
+		std::string diagnostic;
+		world.pauseSimulation();
+		auto const unchangedWalkSpeed = agent->getWalkSpeed();
+		auto const unchangedStairSpeed = agent->getStationaryStairSpeed(true);
+		require(world.setAgentIndividualLadderSpeedModifier(id, 1.5f, &diagnostic),
+			"Could not set fast individual Ladder speed modifier");
+		auto fastPath = world.getGraph()->calculatePath(agent, target);
+		require(fastPath != nullptr, "Fast Ladder climber produced no route");
+		bool fastUsedLadder = false;
+		for (auto const& node : fastPath->nodes) if (node.edge)
+			fastUsedLadder = fastUsedLadder
+				|| node.edge->getTraversalResourceId() == ladder.traversalResource;
+		require(fastUsedLadder,
+			"Changing only Ladder speed did not reverse the Ladder-versus-stairs decision");
+		require(agent->getWalkSpeed() == unchangedWalkSpeed
+			&& agent->getStationaryStairSpeed(true) == unchangedStairSpeed,
+			"Ladder speed modifier changed walking or stationary-stair speed");
+
+		auto const fastClimbSpeed = agent->getClimbSpeed();
+		require(world.setAgentIndividualLadderSpeedModifier(id, 0.5f, &diagnostic),
+			"Could not set slow individual Ladder speed modifier");
+		require(std::abs(fastClimbSpeed / agent->getClimbSpeed() - 3.0f) < 0.0001f,
+			"Measured Ladder movement speed did not scale with the effective modifier");
 	}
 
 	void forceBridgeUsesWalkingExposureAndApproachControls()

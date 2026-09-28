@@ -18,6 +18,7 @@ namespace core
 		WalkSpeedModifier,
 		HeightModifier,
 		StairSpeedModifier,
+		LadderSpeedModifier,
 		InteractionAversion,
 		EffortAversion,
 		WaitingAversion,
@@ -43,6 +44,7 @@ namespace core
 			return { "Walk speed modifier", std::nullopt };
 		case AgentPropertyType::HeightModifier: return { "Height modifier", std::nullopt };
 		case AgentPropertyType::StairSpeedModifier: return { "Stair speed modifier", "Pathing" };
+		case AgentPropertyType::LadderSpeedModifier: return { "Ladder speed modifier", "Pathing" };
 		case AgentPropertyType::InteractionAversion: return { "Interaction aversion", "Pathing" };
 		case AgentPropertyType::EffortAversion: return { "Effort aversion", "Pathing" };
 		case AgentPropertyType::WaitingAversion: return { "Waiting aversion", "Pathing" };
@@ -123,6 +125,9 @@ namespace core
 	inline constexpr float AgentStairSpeedModifierMinimum{ 0.5f };
 	inline constexpr float AgentStairSpeedModifierMaximum{ 1.5f };
 	inline constexpr AgentModifierRange DefaultAgentStairSpeedModifierRange{};
+	inline constexpr float AgentLadderSpeedModifierMinimum{ 0.5f };
+	inline constexpr float AgentLadderSpeedModifierMaximum{ 1.5f };
+	inline constexpr AgentModifierRange DefaultAgentLadderSpeedModifierRange{};
 	inline constexpr float AgentInteractionAversionMinimum{ 0.0f };
 	inline constexpr float AgentInteractionAversionMaximum{ 3.0f };
 	inline constexpr AgentModifierRange DefaultAgentInteractionAversionRange{};
@@ -158,6 +163,14 @@ namespace core
 		uint64_t revision{ 0 };
 
 		bool operator==(AgentStairSpeedModifierProperty const& other) const = default;
+	};
+
+	struct AgentLadderSpeedModifierProperty
+	{
+		AgentModifierRange range{};
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentLadderSpeedModifierProperty const& other) const = default;
 	};
 
 	struct AgentInteractionAversionProperty
@@ -237,6 +250,8 @@ namespace core
 		std::string* diagnostic = nullptr);
 	bool agentStairSpeedModifierRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
+	bool agentLadderSpeedModifierRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
 	bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
 	bool agentEffortAversionRangeIsValid(AgentModifierRange const& range,
@@ -266,6 +281,7 @@ namespace core
 		std::optional<AgentWalkSpeedModifierProperty> mWalkSpeedModifier;
 		std::optional<AgentHeightModifierProperty> mHeightModifier;
 		std::optional<AgentStairSpeedModifierProperty> mStairSpeedModifier;
+		std::optional<AgentLadderSpeedModifierProperty> mLadderSpeedModifier;
 		std::optional<AgentInteractionAversionProperty> mInteractionAversion;
 		std::optional<AgentEffortAversionProperty> mEffortAversion;
 		std::optional<AgentWaitingAversionProperty> mWaitingAversion;
@@ -296,6 +312,11 @@ namespace core
 			mStairSpeedModifier = property;
 		}
 		void removeStairSpeedModifier() { mStairSpeedModifier.reset(); }
+		void setLadderSpeedModifier(AgentLadderSpeedModifierProperty property)
+		{
+			mLadderSpeedModifier = property;
+		}
+		void removeLadderSpeedModifier() { mLadderSpeedModifier.reset(); }
 		void setInteractionAversion(AgentInteractionAversionProperty property)
 		{
 			mInteractionAversion = property;
@@ -347,6 +368,10 @@ namespace core
 		AgentStairSpeedModifierProperty const* getStairSpeedModifier() const
 		{
 			return mStairSpeedModifier ? &*mStairSpeedModifier : nullptr;
+		}
+		AgentLadderSpeedModifierProperty const* getLadderSpeedModifier() const
+		{
+			return mLadderSpeedModifier ? &*mLadderSpeedModifier : nullptr;
 		}
 		AgentInteractionAversionProperty const* getInteractionAversion() const
 		{

@@ -110,6 +110,8 @@ namespace core
 				tag->setHeightModifier(*height);
 			if (auto const* stairSpeed = sourceTag->getStairSpeedModifier())
 				tag->setStairSpeedModifier(*stairSpeed);
+			if (auto const* ladderSpeed = sourceTag->getLadderSpeedModifier())
+				tag->setLadderSpeedModifier(*ladderSpeed);
 			if (auto const* interaction = sourceTag->getInteractionAversion())
 				tag->setInteractionAversion(*interaction);
 			if (auto const* effort = sourceTag->getEffortAversion())
@@ -151,6 +153,8 @@ namespace core
 					candidate->getHeightModifier())
 				|| !optionalPropertyMatches(tag->getStairSpeedModifier(),
 					candidate->getStairSpeedModifier())
+				|| !optionalPropertyMatches(tag->getLadderSpeedModifier(),
+					candidate->getLadderSpeedModifier())
 				|| !optionalPropertyMatches(tag->getInteractionAversion(),
 					candidate->getInteractionAversion())
 				|| !optionalPropertyMatches(tag->getEffortAversion(),
@@ -313,6 +317,16 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getStairSpeedModifier();
+	}
+
+	AgentLadderSpeedModifierProperty const*
+	AgentTagRegistry::getAgentTagLadderSpeedModifier(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getLadderSpeedModifier();
 	}
 
 	AgentInteractionAversionProperty const*
@@ -654,6 +668,39 @@ namespace core
 					if (!source || !source->getStairSpeedModifier()) continue;
 					return reject(std::format(
 						"Cannot add Stair speed modifier to Agent tag #{}: Agent '{}' in World '{}' already inherits Stair speed modifier from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::ladderSpeedModifierAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format(
+			"Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+		{
+			if (!world) continue;
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (!source || !source->getLadderSpeedModifier()) continue;
+					return reject(std::format(
+						"Cannot add Ladder speed modifier to Agent tag #{}: Agent '{}' in World '{}' already inherits Ladder speed modifier from #{}",
 						target->getName(), agent->getName(), world->getName(), source->getName()));
 				}
 			}
@@ -1336,6 +1383,66 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagLadderSpeedModifier(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getLadderSpeedModifier()) return reject(std::format(
+			"Agent tag #{} already has Ladder speed modifier", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!ladderSpeedModifierAdditionIsValid(id, diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setLadderSpeedModifier({ DefaultAgentLadderSpeedModifierRange, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagLadderSpeedModifierSamples(id, *tag->getLadderSpeedModifier());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::setAgentTagLadderSpeedModifier(AgentTagId id,
+		AgentModifierRange range, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getLadderSpeedModifier();
+		if (!current) return reject(std::format("Agent tag #{} has no Ladder speed modifier", tag->getName()));
+		if (!agentLadderSpeedModifierRangeIsValid(range, diagnostic)) return false;
+		if (current->range == range) return reject("The Agent Ladder speed modifier range is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setLadderSpeedModifier({ range, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagLadderSpeedModifierSamples(id, *tag->getLadderSpeedModifier());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagLadderSpeedModifier(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getLadderSpeedModifier()) return reject(std::format(
+			"Agent tag #{} has no Ladder speed modifier", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world) world->clearAgentTagLadderSpeedModifierSamples(id);
+		tag->removeLadderSpeedModifier();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagInteractionAversion(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1673,7 +1780,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 7);
+		serializer.writeUint32("version", 8);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -1694,13 +1801,14 @@ namespace core
 			auto const* walkSpeed = tag->getWalkSpeedModifier();
 			auto const* height = tag->getHeightModifier();
 			auto const* stairSpeed = tag->getStairSpeedModifier();
+			auto const* ladderSpeed = tag->getLadderSpeedModifier();
 			auto const* interaction = tag->getInteractionAversion();
 			auto const* effort = tag->getEffortAversion();
 			auto const* waiting = tag->getWaitingAversion();
 			auto const* crowd = tag->getCrowdAversion();
 			auto const* chance = tag->getEscalatorWalkingChance();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || interaction || effort || waiting || crowd || chance || mobility)
+			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || chance || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -1734,6 +1842,7 @@ namespace core
 				if (walkSpeed) writeModifier("walkSpeedModifier", *walkSpeed);
 				if (height) writeModifier("heightModifier", *height);
 				if (stairSpeed) writeModifier("stairSpeedModifier", *stairSpeed);
+				if (ladderSpeed) writeModifier("ladderSpeedModifier", *ladderSpeed);
 				if (interaction) writeModifier("interactionAversion", *interaction);
 				if (effort) writeModifier("effortAversion", *effort);
 				if (waiting) writeModifier("waitingAversion", *waiting);
@@ -1758,7 +1867,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 7)
+		if (version < 1 || version > 8)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -1806,6 +1915,7 @@ namespace core
 				bool hasWalkSpeedModifier{ false };
 				bool hasHeightModifier{ false };
 				bool hasStairSpeedModifier{ false };
+				bool hasLadderSpeedModifier{ false };
 				bool hasInteractionAversion{ false };
 				bool hasEffortAversion{ false };
 				bool hasWaitingAversion{ false };
@@ -1823,7 +1933,8 @@ namespace core
 						&& !(version >= 4 && type == "stairSpeedModifier")
 						&& !(version >= 5 && type == "effortAversion")
 						&& !(version >= 6 && type == "waitingAversion")
-						&& !(version >= 7 && type == "crowdAversion"))
+						&& !(version >= 7 && type == "crowdAversion")
+						&& !(version >= 8 && type == "ladderSpeedModifier"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -1842,6 +1953,9 @@ namespace core
 					if (type == "stairSpeedModifier" && hasStairSpeedModifier)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Stair speed modifier", name));
+					if (type == "ladderSpeedModifier" && hasLadderSpeedModifier)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Ladder speed modifier", name));
 					if (type == "interactionAversion" && hasInteractionAversion)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Interaction aversion", name));
@@ -1916,6 +2030,14 @@ namespace core
 									"Serialized Stair speed modifier range is invalid: " + rangeDiagnostic);
 							tag->setStairSpeedModifier({ range, revision });
 							hasStairSpeedModifier = true;
+						}
+						else if (type == "ladderSpeedModifier")
+						{
+							if (!agentLadderSpeedModifierRangeIsValid(range, &rangeDiagnostic))
+								throw SerializationException(
+									"Serialized Ladder speed modifier range is invalid: " + rangeDiagnostic);
+							tag->setLadderSpeedModifier({ range, revision });
+							hasLadderSpeedModifier = true;
 						}
 						else if (type == "interactionAversion")
 						{

@@ -1746,7 +1746,8 @@ namespace core
 				sector->getIndex(), sector->getLayerIndex(), agent->getGlobalPosition(),
 				agent->getAgentGroupId(), agent->getAgentTagIds(),
 				agent->getWalkSpeedModifierSample(), agent->getHeightModifierSample(),
-				agent->getStairSpeedModifierSample(), agent->getBehaviourAssignment(), agent->isActive() });
+				agent->getStairSpeedModifierSample(), agent->getLadderSpeedModifierSample(),
+				agent->getIndividualLadderSpeedModifier(), agent->getBehaviourAssignment(), agent->isActive() });
 		}
 		return carried;
 	}
@@ -1786,6 +1787,9 @@ namespace core
 				raw->setHeightModifierSample(*saved.heightModifierSample);
 			if (saved.stairSpeedModifierSample)
 				raw->setStairSpeedModifierSample(*saved.stairSpeedModifierSample);
+			if (saved.ladderSpeedModifierSample)
+				raw->setLadderSpeedModifierSample(*saved.ladderSpeedModifierSample);
+			raw->setIndividualLadderSpeedModifier(saved.individualLadderSpeedModifier);
 			if (saved.behaviourAssignment)
 				raw->mBehaviourAssignment = *saved.behaviourAssignment;
 			_getSector(sector->getIndex())->mAgents.insert(raw);

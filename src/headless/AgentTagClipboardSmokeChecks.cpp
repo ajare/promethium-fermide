@@ -81,6 +81,7 @@ namespace
 		core::AgentTagId walkSpeed;
 		core::AgentTagId height;
 		core::AgentTagId stairSpeed;
+		core::AgentTagId ladderSpeed;
 	};
 
 	TagFixture makeTagFixture()
@@ -91,6 +92,7 @@ namespace
 		fixture.walkSpeed = fixture.registry->addAgentTag("pace");
 		fixture.height = fixture.registry->addAgentTag("stature");
 		fixture.stairSpeed = fixture.registry->addAgentTag("stairs");
+		fixture.ladderSpeed = fixture.registry->addAgentTag("ladders");
 		std::string diagnostic;
 		require(fixture.registry->addAgentTagColour(fixture.colour, &diagnostic),
 			diagnostic);
@@ -108,6 +110,10 @@ namespace
 			fixture.stairSpeed, &diagnostic), diagnostic);
 		require(fixture.registry->setAgentTagStairSpeedModifier(
 			fixture.stairSpeed, { 0.5f, 1.5f }, &diagnostic), diagnostic);
+		require(fixture.registry->addAgentTagLadderSpeedModifier(
+			fixture.ladderSpeed, &diagnostic), diagnostic);
+		require(fixture.registry->setAgentTagLadderSpeedModifier(
+			fixture.ladderSpeed, { 0.6f, 1.4f }, &diagnostic), diagnostic);
 		return fixture;
 	}
 
@@ -116,7 +122,8 @@ namespace
 	{
 		auto const id = world.world->createAgent(name, world.corridor, 0, 2.0f);
 		std::string diagnostic;
-		for (auto const tag : { fixture.colour, fixture.walkSpeed, fixture.height, fixture.stairSpeed })
+		for (auto const tag : { fixture.colour, fixture.walkSpeed, fixture.height,
+			fixture.stairSpeed, fixture.ladderSpeed })
 			require(world.world->assignAgentTag(id, tag, &diagnostic), diagnostic);
 		return id;
 	}
@@ -149,10 +156,13 @@ namespace
 		std::string propertyDiagnostic;
 		require(source.world->setAgentIndividualStairSpeedModifier(
 			agent, 1.25f, &propertyDiagnostic), propertyDiagnostic);
+		require(source.world->setAgentIndividualLadderSpeedModifier(
+			agent, 1.35f, &propertyDiagnostic), propertyDiagnostic);
 		auto const entity = source.world->lookupAgent(agent).entity;
 		auto const expectedWalk = entity->getWalkSpeedModifierSample();
 		auto const expectedHeight = entity->getHeightModifierSample();
 		auto const expectedStairSpeed = entity->getStairSpeedModifierSample();
+		auto const expectedLadderSpeed = entity->getLadderSpeedModifierSample();
 
 		auto const text = makeAgentClipboardText(
 			makeAgentClipboardPayload(*source.world, agent, "Alice copy"), false);
@@ -160,6 +170,8 @@ namespace
 
 		require(payload.individualStairSpeedModifier == 1.25f,
 			"The clipboard payload lost the individual Stair speed modifier");
+		require(payload.individualLadderSpeedModifier == 1.35f,
+			"The clipboard payload lost the individual Ladder speed modifier");
 		require(payload.agentTagRegistryUuid
 			&& *payload.agentTagRegistryUuid == fixture.registry->getUuid(),
 			"The clipboard payload lost the source registry UUID");
@@ -167,7 +179,8 @@ namespace
 			"The clipboard payload lost an Agent tag assignment");
 		require(payload.walkSpeedModifierSample == expectedWalk
 			&& payload.heightModifierSample == expectedHeight
-			&& payload.stairSpeedModifierSample == expectedStairSpeed,
+			&& payload.stairSpeedModifierSample == expectedStairSpeed
+			&& payload.ladderSpeedModifierSample == expectedLadderSpeed,
 			"The clipboard payload changed a modifier value or its provenance");
 		require(text.find("agentTagRegistryUuid") != std::string::npos
 			&& text.find("propertyRevision") != std::string::npos
@@ -189,6 +202,8 @@ namespace
 		std::string propertyDiagnostic;
 		require(source.world->setAgentIndividualStairSpeedModifier(
 			original, 1.25f, &propertyDiagnostic), propertyDiagnostic);
+		require(source.world->setAgentIndividualLadderSpeedModifier(
+			original, 1.35f, &propertyDiagnostic), propertyDiagnostic);
 		auto const sourceAgent = source.world->lookupAgent(original).entity;
 		auto const payload = readPayload(makeAgentClipboardText(
 			makeAgentClipboardPayload(*source.world, original, "Alice copy"), false));
@@ -211,6 +226,9 @@ namespace
 		require(pastedAgent->getIndividualStairSpeedModifier()
 			== sourceAgent->getIndividualStairSpeedModifier(),
 			"Same-registry paste did not restore the individual Stair speed modifier");
+		require(pastedAgent->getIndividualLadderSpeedModifier()
+			== sourceAgent->getIndividualLadderSpeedModifier(),
+			"Same-registry paste did not restore the individual Ladder speed modifier");
 		require(pastedAgent->getAgentTagIds() == sourceAgent->getAgentTagIds(),
 			"Same-registry paste did not restore exact Agent tag assignments");
 		require(pastedAgent->getWalkSpeedModifierSample()
@@ -218,7 +236,9 @@ namespace
 			&& pastedAgent->getHeightModifierSample()
 				== sourceAgent->getHeightModifierSample()
 			&& pastedAgent->getStairSpeedModifierSample()
-				== sourceAgent->getStairSpeedModifierSample(),
+				== sourceAgent->getStairSpeedModifierSample()
+			&& pastedAgent->getLadderSpeedModifierSample()
+				== sourceAgent->getLadderSpeedModifierSample(),
 			"Same-registry paste resampled a modifier instead of restoring it exactly");
 		require(gWorldDocumentHistory.undoCount() == 1,
 			"A tagged Agent paste was not exactly one World edit");

@@ -115,6 +115,25 @@ namespace core
 		return true;
 	}
 
+	bool agentLadderSpeedModifierRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Ladder speed modifier endpoints must be finite");
+		if (range.minimum < AgentLadderSpeedModifierMinimum
+			|| range.maximum > AgentLadderSpeedModifierMaximum)
+			return reject("Ladder speed modifier endpoints must be between 0.5 and 1.5");
+		if (range.minimum > range.maximum)
+			return reject("Ladder speed modifier minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic)
 	{

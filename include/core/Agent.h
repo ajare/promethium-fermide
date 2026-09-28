@@ -52,6 +52,7 @@ namespace core
 		WalkSpeedModifier,
 		HeightModifier,
 		StairSpeedModifier,
+		LadderSpeedModifier,
 		InteractionAversion,
 		EffortAversion,
 		WaitingAversion,
@@ -85,6 +86,14 @@ namespace core
 	};
 
 	struct EffectiveAgentStairSpeedModifier
+	{
+		float value{ 1.0f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentLadderSpeedModifier
 	{
 		float value{ 1.0f };
 		AgentTagId sourceTag{};
@@ -200,6 +209,7 @@ namespace core
 		std::optional<float> mIndividualWalkSpeedModifier;
 		std::optional<float> mIndividualHeightModifier;
 		std::optional<float> mIndividualStairSpeedModifier;
+		std::optional<float> mIndividualLadderSpeedModifier;
 		std::optional<float> mIndividualInteractionAversion;
 		std::optional<float> mIndividualEffortAversion;
 		std::optional<float> mIndividualWaitingAversion;
@@ -212,6 +222,7 @@ namespace core
 		std::optional<AgentPropertySample> mWalkSpeedModifierSample;
 		std::optional<AgentPropertySample> mHeightModifierSample;
 		std::optional<AgentPropertySample> mStairSpeedModifierSample;
+		std::optional<AgentPropertySample> mLadderSpeedModifierSample;
 		std::optional<AgentPropertySample> mInteractionAversionSample;
 		std::optional<AgentPropertySample> mEffortAversionSample;
 		std::optional<AgentPropertySample> mWaitingAversionSample;
@@ -302,6 +313,11 @@ namespace core
 			mStairSpeedModifierSample = sample;
 		}
 		void clearStairSpeedModifierSample() { mStairSpeedModifierSample.reset(); }
+		void setLadderSpeedModifierSample(AgentPropertySample sample)
+		{
+			mLadderSpeedModifierSample = sample;
+		}
+		void clearLadderSpeedModifierSample() { mLadderSpeedModifierSample.reset(); }
 		void setInteractionAversionSample(AgentPropertySample sample)
 		{
 			mInteractionAversionSample = sample;
@@ -332,6 +348,8 @@ namespace core
 		{ mIndividualHeightModifier = value; modify(); }
 		void setIndividualStairSpeedModifier(std::optional<float> value)
 		{ mIndividualStairSpeedModifier = value; modify(); }
+		void setIndividualLadderSpeedModifier(std::optional<float> value)
+		{ mIndividualLadderSpeedModifier = value; modify(); }
 		void setIndividualInteractionAversion(std::optional<float> value)
 		{ mIndividualInteractionAversion = value; modify(); }
 		void setIndividualEffortAversion(std::optional<float> value)
@@ -428,6 +446,8 @@ namespace core
 		{ return mIndividualHeightModifier; }
 		std::optional<float> const& getIndividualStairSpeedModifier() const
 		{ return mIndividualStairSpeedModifier; }
+		std::optional<float> const& getIndividualLadderSpeedModifier() const
+		{ return mIndividualLadderSpeedModifier; }
 		std::optional<float> const& getIndividualInteractionAversion() const
 		{ return mIndividualInteractionAversion; }
 		std::optional<float> const& getIndividualEffortAversion() const
@@ -455,6 +475,7 @@ namespace core
 		// scales only visual height and bounds; physical dimensions stay fixed.
 		EffectiveAgentHeightModifier getEffectiveHeightModifier() const;
 		EffectiveAgentStairSpeedModifier getEffectiveStairSpeedModifier() const;
+		EffectiveAgentLadderSpeedModifier getEffectiveLadderSpeedModifier() const;
 		EffectiveAgentInteractionAversion getEffectiveInteractionAversion() const;
 		EffectiveAgentEffortAversion getEffectiveEffortAversion() const;
 		EffectiveAgentWaitingAversion getEffectiveWaitingAversion() const;
@@ -467,6 +488,10 @@ namespace core
 		std::optional<AgentPropertySample> const& getStairSpeedModifierSample() const
 		{
 			return mStairSpeedModifierSample;
+		}
+		std::optional<AgentPropertySample> const& getLadderSpeedModifierSample() const
+		{
+			return mLadderSpeedModifierSample;
 		}
 		std::optional<AgentPropertySample> const& getInteractionAversionSample() const
 		{

@@ -557,6 +557,9 @@ namespace core
 			AgentTagSampleRepairAction stairSpeedAction{ AgentTagSampleRepairAction::None };
 			AgentTagId stairSpeedSource{};
 			AgentStairSpeedModifierProperty stairSpeedProperty{};
+			AgentTagSampleRepairAction ladderSpeedAction{ AgentTagSampleRepairAction::None };
+			AgentTagId ladderSpeedSource{};
+			AgentLadderSpeedModifierProperty ladderSpeedProperty{};
 			AgentTagSampleRepairAction interactionAversionAction{ AgentTagSampleRepairAction::None };
 			AgentTagId interactionAversionSource{};
 			AgentInteractionAversionProperty interactionAversionProperty{};
@@ -595,6 +598,9 @@ namespace core
 		void addAgentTagStairSpeedModifierSamples(AgentTagId id,
 			AgentStairSpeedModifierProperty const& property);
 		void clearAgentTagStairSpeedModifierSamples(AgentTagId id);
+		void addAgentTagLadderSpeedModifierSamples(AgentTagId id,
+			AgentLadderSpeedModifierProperty const& property);
+		void clearAgentTagLadderSpeedModifierSamples(AgentTagId id);
 		void addAgentTagInteractionAversionSamples(AgentTagId id,
 			AgentInteractionAversionProperty const& property);
 		void clearAgentTagInteractionAversionSamples(AgentTagId id);
@@ -863,6 +869,8 @@ namespace core
 			std::optional<AgentPropertySample> walkSpeedModifierSample;
 			std::optional<AgentPropertySample> heightModifierSample;
 			std::optional<AgentPropertySample> stairSpeedModifierSample;
+			std::optional<AgentPropertySample> ladderSpeedModifierSample;
+			std::optional<float> individualLadderSpeedModifier;
 			std::optional<AgentBehaviourAssignment> behaviourAssignment;
 			bool active{ true };
 		};
@@ -1994,6 +2002,8 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualStairSpeedModifier(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualLadderSpeedModifier(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualInteractionAversion(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualEffortAversion(AgentId agent,
@@ -2101,6 +2111,7 @@ namespace core
 			std::optional<AgentPropertySample> const& walkSpeedSample,
 			std::optional<AgentPropertySample> const& heightSample,
 			std::optional<AgentPropertySample> const& stairSpeedSample,
+			std::optional<AgentPropertySample> const& ladderSpeedSample,
 			std::optional<AgentPropertySample> const& interactionAversionSample,
 			std::optional<AgentPropertySample> const& effortAversionSample,
 			std::optional<AgentPropertySample> const& waitingAversionSample,
@@ -2115,6 +2126,7 @@ namespace core
 			std::optional<AgentPropertySample> const& walkSpeedSample,
 			std::optional<AgentPropertySample> const& heightSample,
 			std::optional<AgentPropertySample> const& stairSpeedSample,
+			std::optional<AgentPropertySample> const& ladderSpeedSample,
 			std::optional<AgentPropertySample> const& interactionAversionSample,
 			std::optional<AgentPropertySample> const& effortAversionSample,
 			std::optional<AgentPropertySample> const& waitingAversionSample,
