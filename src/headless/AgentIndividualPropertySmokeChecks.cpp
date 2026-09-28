@@ -85,7 +85,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"An individual Mobility profile accepted a reserved bit");
 
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 16") != std::string::npos
+	require(yaml.find("version: 17") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos,
 		"Individual Agent properties were not persisted in World schema 16");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);

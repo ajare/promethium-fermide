@@ -703,7 +703,8 @@ namespace core
 			// overrides are all defaults persists none of them.
 			std::vector<uint32_t> overrides{};
 			// Marker / RemoveMarker: stable World-local identity. Marker also
-			// uses name above. Zero occurs only while migrating versions 1-10.
+			// uses name above and c for its MarkerProperties bitfield. Zero identity
+			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
 		};
 
@@ -1020,11 +1021,11 @@ namespace core
 		CreateObjectResult createWalkway(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t* vertexIdentifier = nullptr);
 
 		CreateObjectResult createMarker(uint32_t layerIndex, uint32_t x, uint32_t y,
-			float xOffset, MarkerId id, std::string name,
+			float xOffset, MarkerId id, std::string name, MarkerProperties properties,
 			uint32_t* vertexIdentifier = nullptr);
 		CreateObjectResult addSectorMarkerRestored(uint32_t sectorIndex,
 			uint32_t levelIndex, float xOffset, MarkerId id, std::string name,
-			uint32_t* vertexIdentifier = nullptr);
+			MarkerProperties properties = 0, uint32_t* vertexIdentifier = nullptr);
 
 		CreateObjectResult createForceBridge(uint32_t layerIndex, uint32_t x, uint32_t y, CreateForceBridgeOptions const& options);
 
@@ -1722,6 +1723,9 @@ namespace core
 		bool canRenameMarker(MarkerId id, std::string const& name,
 			std::string* diagnostic = nullptr) const;
 		bool renameMarker(MarkerId id, std::string const& name,
+			std::string* diagnostic = nullptr);
+		// Properties which affect routing can only be edited while a built World is paused.
+		bool setMarkerProperties(MarkerId id, MarkerProperties properties,
 			std::string* diagnostic = nullptr);
 
 		bool canRemoveSectorMarker(uint32_t sectorIndex, uint32_t objectIndex,

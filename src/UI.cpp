@@ -3332,6 +3332,7 @@ namespace
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
 		core::World::CreateLiftOptions platformLift;
+		core::MarkerProperties markerProperties{ 0 };
 		uint32_t width{ 1 }, height{ 1 };
 	};
 
@@ -3568,8 +3569,12 @@ namespace
 		}
 		else
 		{
+			auto marker = static_pointer_cast<const core::MarkerSectorObject>(
+				gSelectedSectorObject)->getMarker();
 			output << YAML::Key << "type" << YAML::Value << "Marker"
-				<< YAML::Key << "object" << YAML::Value << YAML::BeginMap << YAML::EndMap;
+				<< YAML::Key << "object" << YAML::Value << YAML::BeginMap
+				<< YAML::Key << "properties" << YAML::Value << marker->getProperties()
+				<< YAML::EndMap;
 		}
 		output << YAML::EndMap << YAML::EndMap;
 		if (!output.good()) throw runtime_error(output.GetLastError());
@@ -3694,7 +3699,15 @@ namespace
 			else if (style == "Frosted") definition.window.style = core::Window::Style::Frosted;
 			else throw runtime_error("Window style is invalid");
 		}
-		else if (type == "Marker") definition.type = ClipboardObjectType::Marker;
+		else if (type == "Marker")
+		{
+			definition.type = ClipboardObjectType::Marker;
+			definition.markerProperties = object["properties"]
+				? requiredYaml<core::MarkerProperties>(object, "properties") : 0;
+			if (definition.markerProperties
+				& ~core::markerPropertyBit(core::MarkerProperty::BlocksPathing))
+				throw runtime_error("Marker properties contain unknown bits");
+		}
 		else if (type == "Walkway") definition.type = ClipboardObjectType::Walkway;
 		else if (type == "ForceBridge")
 		{
@@ -4089,6 +4102,11 @@ namespace
 					auto result = world->addSectorMarker(markerSector->getIndex(),
 						y - markerSector->getCellY(), markerOffset);
 					created = result.sector->getObject(result.index);
+					auto marker = static_pointer_cast<const core::MarkerSectorObject>(
+						created)->getMarker();
+					if (!world->setMarkerProperties(marker->getId(),
+						definition.markerProperties, &diagnostic))
+						throw runtime_error(diagnostic);
 				}
 				world->finishBuild();
 				setSelectionMode(UISettings::SelectionMode::Object);

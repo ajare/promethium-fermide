@@ -2526,7 +2526,8 @@ namespace core
 	}
 
 	World::CreateObjectResult World::createMarker(uint32_t layerIndex, uint32_t x,
-		uint32_t y, float xOffset, MarkerId id, string name, uint32_t* vertexIdentifier)
+		uint32_t y, float xOffset, MarkerId id, string name,
+		MarkerProperties properties, uint32_t* vertexIdentifier)
 	{
 		invalidateSimulationSnapshot();
 		string caller = format("World::createMarker({}, {}, {}, {})", layerIndex, x, y, xOffset);
@@ -2543,7 +2544,8 @@ namespace core
 		auto sector = _getSector(cellDef.sectorIndex);
 
 		return {
-			sector->createMarker(sector, id, std::move(name), x, y, xPos - x, vertexIdentifier),
+			sector->createMarker(sector, id, std::move(name), properties,
+				x, y, xPos - x, vertexIdentifier),
 			SectorObjectType::Marker,
 			sector
 		};
@@ -5789,6 +5791,41 @@ namespace core
 		return true;
 	}
 
+	bool World::setMarkerProperties(MarkerId id, MarkerProperties properties,
+		string* diagnostic)
+	{
+		auto reject = [diagnostic](string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
+			return reject("Marker properties contain unknown bits");
+		auto marker = mutableMarker(id);
+		if (!marker) return reject("Marker does not exist");
+		if (mBuildFinished && !mSimulationPaused)
+			return reject("Marker pathing properties can only be changed while the simulation is paused");
+		if (marker->getProperties() == properties)
+		{
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
+			[id](ConstructionRecord const& candidate)
+			{
+				return candidate.type == ConstructionType::Marker
+					&& candidate.markerId == id;
+			});
+		if (record == mConstructionRecords.end())
+			throw WorldException(this, "setMarkerProperties - Marker has no authored record");
+		invalidateSimulationSnapshot();
+		marker->setProperties(properties);
+		record->c = properties;
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	World::CreateObjectResult World::addSectorMarker(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, uint32_t* vertexIdentifier)
 	{
@@ -5814,16 +5851,18 @@ namespace core
 		auto const id = MarkerId{ mNextMarkerId };
 		mNextMarkerId = mNextMarkerId == numeric_limits<uint64_t>::max() ? 0 : mNextMarkerId + 1;
 		return addSectorMarkerRestored(sectorIndex, levelIndex, xOffset, id, trimmed,
-			vertexIdentifier);
+			0, vertexIdentifier);
 	}
 
 	World::CreateObjectResult World::addSectorMarkerRestored(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, MarkerId id, string name,
-		uint32_t* vertexIdentifier)
+		MarkerProperties properties, uint32_t* vertexIdentifier)
 	{
 		invalidateSimulationSnapshot();
 		string diagnostic;
 		if (!id) throw WorldException(this, "Marker ID cannot be zero");
+		if (properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
+			throw WorldException(this, "Marker properties contain unknown bits");
 		if (lookupMarker(id)) throw WorldException(this, "Marker ID is already in use");
 		if (!canAddSectorMarker(sectorIndex, levelIndex, xOffset, &diagnostic))
 			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
@@ -5840,10 +5879,12 @@ namespace core
 		auto& cellDef = layer->getCellDefinition(sector->getCellX() + (uint32_t)xOffset,
 			sector->getCellY() + levelIndex);
 		auto createdMarker = createMarker(layerIndex, sector->getCellX(),
-			sector->getCellY() + levelIndex, xOffset, id, name, vertexIdentifier);
+			sector->getCellY() + levelIndex, xOffset, id, name, properties,
+			vertexIdentifier);
 		cellDef.markers.push_back(createdMarker.index);
 		ConstructionRecord record{ ConstructionType::Marker };
-		record.a = sectorIndex; record.b = levelIndex; record.x = xOffset;
+		record.a = sectorIndex; record.b = levelIndex; record.c = properties;
+		record.x = xOffset;
 		record.markerId = id; record.name = std::move(name);
 		recordConstruction(std::move(record));
 		return createdMarker;

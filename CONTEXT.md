@@ -75,8 +75,12 @@ An Agent's propensity to retain its current Path unless another known Path is su
 _Avoid_: Route lock, forbidden traversal
 
 **Marker**:
-A named, World-owned authored point in a Location with stable identity. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename. Agent behaviours cannot choose arbitrary Vertices as destinations.
+A named, World-owned authored point in a Location with stable identity and a set of Marker properties. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename. Agent behaviours cannot choose arbitrary Vertices as destinations.
 _Avoid_: Vertex, destination vertex
+
+**Blocks pathing**:
+A Marker property that prevents a Path from using the Marker as an intermediate waypoint. The Marker remains valid as a Path's origin or destination.
+_Avoid_: Obstacle, which suggests a physical collision boundary
 
 **Route loss**:
 The condition in which an Agent's selected destination has no valid Path, either when movement first begins or after the simulation attempts to replace an invalidated Path. An Agent behaviour may respond by choosing a new destination.

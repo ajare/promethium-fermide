@@ -5,6 +5,7 @@
 #include "core/Defines.h"
 #include "core/Pathing.h"
 #include "core/Graph.h"
+#include "core/Marker.h"
 #include "core/Agent.h"
 #include "core/Edge.h"
 #include "core/Exceptions.h"
@@ -149,6 +150,12 @@ namespace core
 				return distance / agent->getWalkSpeed();
 			}
 
+			bool blocksPathing(node_type const& vertex)
+			{
+				auto marker = std::dynamic_pointer_cast<Marker>(vertex->getObject());
+				return marker && marker->hasProperty(MarkerProperty::BlocksPathing);
+			}
+
 			bool graphSlot(Graph const* graph, node_type const& vertex, uint32_t& slot)
 			{
 				if (!vertex) return false;
@@ -213,6 +220,9 @@ namespace core
 				auto const currentSlot = workspace.get();
 				if (currentSlot == targetSlot) break;
 				auto const& current = vertices[currentSlot];
+				// A blocking Marker can still be a Path endpoint. It cannot be expanded
+				// as an intermediate waypoint; a Path which starts there may leave it.
+				if (currentSlot != sourceSlot && blocksPathing(current)) continue;
 
 				for (auto const& edge : current->getEdges())
 				{

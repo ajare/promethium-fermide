@@ -56,6 +56,14 @@ namespace
 			"A valid Marker rename was refused: " + diagnostic);
 		require(world.lookupMarker(ids[0])->getName() == "Lobby",
 			"Marker rename changed or lost the destination");
+		auto const blocksPathing = core::markerPropertyBit(
+			core::MarkerProperty::BlocksPathing);
+		require(world.setMarkerProperties(ids[0], blocksPathing, &diagnostic),
+			"A valid Marker property edit was refused: " + diagnostic);
+		require(world.lookupMarker(ids[0])->hasProperty(core::MarkerProperty::BlocksPathing),
+			"The Marker did not retain its Blocks pathing property");
+		require(!world.setMarkerProperties(ids[0], blocksPathing | (1u << 31), &diagnostic),
+			"An unknown Marker property bit was accepted");
 
 		auto const beforeDelete = serializeWorld(world);
 		auto firstObject = world.getSector(room)->getObject(0);
@@ -66,6 +74,9 @@ namespace
 		require(restored->lookupMarker(ids[0])
 			&& restored->lookupMarker(ids[0])->getName() == "Lobby",
 			"Snapshot restoration did not restore the same Marker identity");
+		require(restored->lookupMarker(ids[0])->hasProperty(
+			core::MarkerProperty::BlocksPathing),
+			"Snapshot restoration did not restore Marker properties");
 
 		world.addSectorMarker(room, 0, 5.5f, "Replacement");
 		auto afterDelete = world.getMarkerIds();
@@ -83,6 +94,44 @@ namespace
 		reopened->addSectorMarker(corridor, 0, 2.5f, "Later");
 		require(reopened->getMarkerIds().front().value > deletedId.value,
 			"Save/load reused the highest deleted Marker ID");
+	}
+
+	void blockingMarkerCannotBeAnIntermediatePathVertex()
+	{
+		core::World world("Blocking Marker", 12, 1);
+		auto corridor = world.addCorridor(0, 0, 12);
+		uint32_t sourceVertex = 0, blockingVertex = 0, destinationVertex = 0;
+		world.addSectorMarker(corridor, 0, 1.5f, "Source", &sourceVertex);
+		world.addSectorMarker(corridor, 0, 5.5f, "Blocker", &blockingVertex);
+		world.addSectorMarker(corridor, 0, 9.5f, "Destination", &destinationVertex);
+		world.finishBuild();
+		world.pauseSimulation();
+
+		auto graph = world.getGraph();
+		core::Agent routingAgent("Marker pathing check");
+		auto source = graph->getVertexByIdentifier(sourceVertex);
+		auto blocker = graph->getVertexByIdentifier(blockingVertex);
+		auto destination = graph->getVertexByIdentifier(destinationVertex);
+		require(graph->calculatePath(&routingAgent, source, destination) != nullptr,
+			"The linear Marker route was not initially traversable");
+
+		auto blockerId = world.getMarkerIds()[1];
+		auto const blocksPathing = core::markerPropertyBit(
+			core::MarkerProperty::BlocksPathing);
+		std::string diagnostic;
+		require(world.setMarkerProperties(blockerId, blocksPathing, &diagnostic),
+			"Could not set Blocks pathing: " + diagnostic);
+		require(graph->calculatePath(&routingAgent, source, destination) == nullptr,
+			"A Path ran through a Marker which blocks pathing");
+		require(graph->calculatePath(&routingAgent, source, blocker) != nullptr,
+			"A blocking Marker could not remain a Path destination");
+		require(graph->calculatePath(&routingAgent, blocker, destination) != nullptr,
+			"A Path could not start at a blocking Marker");
+
+		require(world.setMarkerProperties(blockerId, 0, &diagnostic),
+			"Could not clear Blocks pathing: " + diagnostic);
+		require(graph->calculatePath(&routingAgent, source, destination) != nullptr,
+			"Clearing Blocks pathing did not restore the route");
 	}
 
 	void identitySurvivesReplayAndCompleteSerialization()
@@ -116,5 +165,6 @@ namespace
 void runMarkerIdentitySmokeChecks()
 {
 	markersHaveValidatedStableIdentity();
+	blockingMarkerCannotBeAnIntermediatePathVertex();
 	identitySurvivesReplayAndCompleteSerialization();
 }

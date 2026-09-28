@@ -24,10 +24,12 @@ namespace core
 	- cellX and cellY are global, not relative to the Location that it's in.
 	- cellsWide should generally be 1, but in theory there's no reason why it can't be any value greater than zero.
 	*/
-	Marker::Marker(MarkerId id, string name, uint32_t cellX, uint32_t cellY, float xOffset)
+	Marker::Marker(MarkerId id, string name, MarkerProperties properties,
+		uint32_t cellX, uint32_t cellY, float xOffset)
 		: Object((float)cellX, (float)cellY, 1.0f, 0.0f)
 		, mId(id)
 		, mName(std::move(name))
+		, mProperties(properties)
 		, mCellX(cellX)
 		, mCellY(cellY)
 		, mOffset(xOffset)

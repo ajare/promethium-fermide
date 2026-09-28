@@ -346,7 +346,8 @@ namespace core
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeFloat("xOffset", record.x);
 			serializer.writeUint64("id", record.markerId.value);
-			serializer.writeString("name", record.name); break;
+			serializer.writeString("name", record.name);
+			serializer.writeUint32("properties", record.c); break;
 		case ConstructionType::RemoveWall:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeString("side", sideName(record.i)); break;
@@ -376,8 +377,9 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
-		// Version 15 renames the vertical-position schema fields from Deck to Level.
-		// Version 14 adds the authored deterministic random seed and recursive
+		// Version 17 adds the Marker properties bitfield. Version 15 renames the
+		// vertical-position schema fields from Deck to Level. Version 14 adds the
+		// authored deterministic random seed and recursive
 		// List/Record behaviour configuration values. Version 13 adds typed
 		// per-Agent behaviour assignments. Version 12 adds
 		// the optional external Agent behaviour registry package reference.
@@ -399,7 +401,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 16);
+		serializer.writeUint32("version", 17);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -731,6 +733,12 @@ namespace core
 				record.markerId = MarkerId{ serializer.readUint64("id") };
 				record.name = serializer.readString("name");
 			}
+			if (version >= 17)
+			{
+				record.c = serializer.readUint32("properties");
+				if (record.c & ~markerPropertyBit(MarkerProperty::BlocksPathing))
+					throw SerializationException("Serialized Marker properties contain unknown bits");
+			}
 			break;
 		case ConstructionType::RemoveWall:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
@@ -781,9 +789,9 @@ namespace core
 		// Version 12 adds the optional Agent behaviour registry package
 		// reference; version 13 adds typed per-Agent assignments, version 14
 		// adds composite configuration plus the authored random seed, and version
-		// 15 renames vertical-position fields from Deck to Level. Older versions
-		// load with no assignment.
-		if (version < 1 || version > 16)
+		// 15 renames vertical-position fields from Deck to Level, and version 17
+		// adds Marker properties. Older versions load with no assignment.
+		if (version < 1 || version > 17)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1518,7 +1526,7 @@ namespace core
 			break;
 		case ConstructionType::Marker:
 			addSectorMarkerRestored(record.a, record.b, record.x,
-				record.markerId, record.name);
+				record.markerId, record.name, record.c);
 			break;
 		case ConstructionType::RemoveWall:
 			removeLocationWall(record.a, record.b, record.i);

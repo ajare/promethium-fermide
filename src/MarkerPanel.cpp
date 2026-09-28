@@ -56,6 +56,31 @@ void renderMarkerEditorPanel(
 		std::strncpy(name.data(), marker->getName().c_str(), name.size() - 1);
 		name.back() = '\0';
 	}
+
+	ImGui::Separator();
+	ImGui::TextUnformatted("Properties");
+	bool blocksPathing = marker->hasProperty(core::MarkerProperty::BlocksPathing);
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	if (ImGui::Checkbox("Blocks pathing", &blocksPathing))
+	{
+		auto undo = captureDocumentSnapshot(world);
+		auto properties = marker->getProperties();
+		auto const bit = core::markerPropertyBit(core::MarkerProperty::BlocksPathing);
+		properties = blocksPathing ? properties | bit : properties & ~bit;
+		std::string diagnostic;
+		if (world->setMarkerProperties(marker->getId(), properties, &diagnostic))
+			commitDocumentEdit(std::move(undo));
+		else if (reportError)
+			reportError(diagnostic);
+		else
+			core::addLogMessage("Marker editor", 0,
+				core::LogLevel::Warning, diagnostic);
+	}
+	ImGui::EndDisabled();
+	if (!world->isSimulationPaused()
+		&& ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		ImGui::SetTooltip("Pause the simulation to edit pathing properties");
+
 	auto position = marker->getPosition();
 	position.x += marker->getOffset();
 	ImGui::Text("Position: %.2f, %.2f",

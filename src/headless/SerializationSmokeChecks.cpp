@@ -693,7 +693,7 @@ namespace
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 16") != std::string::npos
+		require(yaml.find("version: 17") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -759,7 +759,7 @@ namespace
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 16", "version: 14");
+		replaceAll("version: 17", "version: 14");
 		replaceAll("levelsHigh", "decksHigh");
 		replaceAll("levelIndex", "deckIndex");
 		replaceAll("topLevelHeight", "topDeckHeight");
@@ -3298,7 +3298,7 @@ agents: []
 			("A Lift stop style override was refused: " + diagnostic).c_str());
 
 		auto const yaml = serialize(authored);
-		require(yaml.find("version: 16") != std::string::npos,
+		require(yaml.find("version: 17") != std::string::npos,
 			"A map with authored Door styles was not written at the current schema version");
 		require(yaml.find("version: 6") == std::string::npos,
 			"A map with authored Door styles still carries version 6");
@@ -3383,7 +3383,7 @@ agents: []
 			"A legacy Shuttle-owned Door");
 
 		// The current reader still refuses anything above its own ceiling.
-		auto const futureYaml = std::string("version: 17")
+		auto const futureYaml = std::string("version: 18")
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try
@@ -3398,7 +3398,7 @@ agents: []
 		{
 			refusedFuture = true;
 		}
-		require(refusedFuture, "A version-12 map was accepted by the current reader");
+		require(refusedFuture, "A future map was accepted by the current reader");
 	}
 
 	// Ticket #85: each Door at a Lift stop carries an individually authored
@@ -5263,7 +5263,7 @@ agents: []
 			"A removed missing World remained in the in-memory recent files");
 
 		auto const available = directory / "available.world.yaml";
-		std::ofstream(available) << "version: 16\n";
+		std::ofstream(available) << "version: 17\n";
 		recent.add(available.string());
 		require(!recent.removeUnavailable(available.string())
 			&& recent.entries().size() == 1,
