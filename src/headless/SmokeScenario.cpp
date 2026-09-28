@@ -125,6 +125,7 @@ void runZeroSizeLocationSmokeChecks();
 void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
 void runWorldTeardownSmokeChecks();
+void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
 
 static_assert(!std::is_convertible_v<core::AgentId, core::InteractionPointId>);
@@ -6196,6 +6197,7 @@ int main(int argc, char** argv)
 				runFacadeDrawOrderSmokeChecks();
 				runShuttleDoorRenderSmokeChecks();
 				runViewportZoomSmokeChecks();
+				runWorldRenderLifetimeSmokeChecks();
 			}
 		}
 		catch (std::exception const& error)
@@ -6311,6 +6313,7 @@ int main(int argc, char** argv)
 		runViewportCullingSmokeChecks();
 		runViewportDragScrollSmokeChecks();
 		runViewportZoomSmokeChecks();
+		runWorldRenderLifetimeSmokeChecks();
 		runZeroSizeLocationSmokeChecks();
 		runIsolatedSectorPathingSmokeChecks();
 		runPathfindingWorkspaceSmokeChecks();

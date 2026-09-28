@@ -53,14 +53,23 @@ extern std::shared_ptr<const core::SectorObject> gHoveredSectorObject, gSelected
 // Backgrounds behind it from the back Layer's cell grid (#37, and #36 made
 // the Window's single back Sector non-authoritative for such a span), and
 // the renderSector -> renderSectorObjects -> renderWindow chain which
-// reaches renderWindowClear carries no World pointer. renderWorld()
-// sets this on entry; every render entry point goes through it.
+// reaches renderWindowClear carries no World pointer. A RenderWorldScope
+// installs it for exactly one render and restores the previous World when it
+// goes out of scope. renderWorld() opens one per call; a headless caller that
+// drives the Sector-level passes directly opens its own when those passes need
+// the World, instead of leaving it to process-global state.
 //
 static std::shared_ptr<const core::World> gRenderWorld;
 
-void setRenderWorld(std::shared_ptr<const core::World> world)
+RenderWorldScope::RenderWorldScope(std::shared_ptr<const core::World> world)
+	: mPrevious(std::move(gRenderWorld))
 {
 	gRenderWorld = std::move(world);
+}
+
+RenderWorldScope::~RenderWorldScope()
+{
+	gRenderWorld = std::move(mPrevious);
 }
 
 extern ImFont* gAgentIconFont;
@@ -1974,9 +1983,11 @@ void renderBehindLayerTransits(shared_ptr<const core::World> world, uint32_t beh
 
 void renderWorld(shared_ptr<const core::World> world, WorldDrawList* drawList)
 {
-	// The cell-grid lookup a multi-Background aperture composites from (#37)
-	// needs the World; the sector-rendering chain does not carry one.
-	setRenderWorld(world);
+	// Own the World for exactly this call. The scope restores the previous
+	// World on every exit, so closing the last document releases it as soon as
+	// the viewport stops rendering it and an early return cannot leave it
+	// reachable by the Sector-level passes.
+	RenderWorldScope renderWorldScope(world);
 	if (!drawList) return;
 
 	auto const layerCount = world->getLayerCount();

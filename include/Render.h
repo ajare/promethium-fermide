@@ -882,15 +882,37 @@ void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList);
 void renderWorld(std::shared_ptr<const core::World> world, WorldDrawList* drawList);
 
 //
-// Publishes the World rendered by the viewport.
+// Publishes the World the Sector-level render passes read while a render is
+// in flight.
 //
-// renderWorld() calls this on entry. The Sector-level passes read the
-// World back from here because their call chain carries no World pointer,
-// which is the same route #37 opened for the multi-Background aperture
-// composite. An open wall needs it too: the stretch of wall a removed end
-// takes away is the overlap with the Sector on the far side of that boundary.
+// Those passes do not thread a World through their signatures: the
+// multi-Background aperture composite (#37) looks up a Window's backing cell
+// grid, and an open wall needs the Sector on the far side of its boundary. A
+// RenderWorldScope publishes the World for its own lifetime and restores
+// whatever was published before, including when the scope is left by an early
+// return or an exception, so no render path can leave a stale World reachable
+// by a later pass.
 //
-void setRenderWorld(std::shared_ptr<const core::World> world);
+// The scope owns the World for exactly that span rather than becoming a
+// second document owner: releasing the last external shared_ptr destroys the
+// World as soon as the scope ends. renderWorld() opens one scope per call; a
+// headless caller driving the Sector-level passes directly opens its own
+// scope instead of relying on process-global state.
+//
+class RenderWorldScope
+{
+public:
+	explicit RenderWorldScope(std::shared_ptr<const core::World> world);
+	~RenderWorldScope();
+
+	RenderWorldScope(RenderWorldScope const&) = delete;
+	RenderWorldScope& operator=(RenderWorldScope const&) = delete;
+	RenderWorldScope(RenderWorldScope&&) = delete;
+	RenderWorldScope& operator=(RenderWorldScope&&) = delete;
+
+private:
+	std::shared_ptr<const core::World> mPrevious;
+};
 
 //
 // The Sectors of one Layer that the current viewport sees: culled from the

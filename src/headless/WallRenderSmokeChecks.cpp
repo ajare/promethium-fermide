@@ -172,7 +172,7 @@ namespace
 	std::vector<WallLine> renderWalls(std::shared_ptr<core::World> const& world,
 		uint32_t sectorIndex, int viewLayer = 0)
 	{
-		setRenderWorld(world);
+		RenderWorldScope renderWorldScope(world);
 		gUISettings.visibleLayer = viewLayer;
 
 		auto drawList = testDrawList();

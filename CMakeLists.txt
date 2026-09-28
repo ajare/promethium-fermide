@@ -378,6 +378,7 @@ add_executable(prometheum-fermide-headless
     src/headless/ViewportCullingSmokeChecks.cpp
     src/headless/ViewportDragScrollSmokeChecks.cpp
     src/headless/ViewportZoomSmokeChecks.cpp
+    src/headless/WorldRenderLifetimeSmokeChecks.cpp
     src/headless/WindowLayerSmokeChecks.cpp
     src/headless/WindowIntoBackgroundSmokeChecks.cpp
     src/headless/WindowMultiBackgroundSmokeChecks.cpp
