@@ -53,9 +53,12 @@ namespace core
 		{
 			throw invalid_argument("An interaction point requires a valid sector");
 		}
-		if (reach < 0.0f || durationSeconds < 0.0f || bindings.empty())
+		if (!std::isfinite(position.x) || !std::isfinite(position.y)
+			|| !std::isfinite(reach) || reach < 0.0f
+			|| !std::isfinite(durationSeconds) || durationSeconds < 0.0f
+			|| bindings.empty())
 		{
-			throw invalid_argument("An interaction point requires non-negative timing and at least one binding");
+			throw invalid_argument("An interaction point requires a finite position, non-negative finite reach and duration, and at least one binding");
 		}
 		for (auto const& binding : bindings)
 		{
@@ -76,7 +79,15 @@ namespace core
 				throw invalid_argument("An interaction binding requires a valid command target");
 			}
 		}
-		auto durationTicks = max<uint64_t>(1, (uint64_t)ceil(durationSeconds / World::getFixedTimestep()));
+		// A float-to-integer conversion outside the representable range is
+		// undefined behavior, so a finite but enormous duration saturates rather
+		// than overflowing the tick budget.
+		double const rawTicks = ceil(static_cast<double>(durationSeconds)
+			/ static_cast<double>(World::getFixedTimestep()));
+		constexpr auto maxTicks = numeric_limits<uint64_t>::max();
+		auto const durationTicks = rawTicks >= static_cast<double>(maxTicks)
+			? maxTicks
+			: max<uint64_t>(1, static_cast<uint64_t>(rawTicks));
 		auto id = mWorld.mInteractionPoints.add(unique_ptr<InteractionPoint>(new InteractionPoint(
 			name, sector, position, reach, durationTicks, std::move(bindings))));
 		SimulationEvent event;
