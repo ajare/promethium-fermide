@@ -62,6 +62,18 @@ _Avoid_: Stop, queue position
 An agent's planned sequence of vertices and edges. A path expresses route intent, not permission to traverse every edge immediately.
 _Avoid_: Reservation, traversal permit
 
+**Perceived route cost**:
+An Agent's subjective, seconds-equivalent judgement of a possible Path, combining expected duration with effort, waiting, interaction, crowding, risk, uncertainty, and personal preference. It is not elapsed journey time.
+_Avoid_: Edge weight, actual travel time
+
+**Route observation**:
+Information locally available to an Agent when it chooses or revises a Path, such as a nearby queue or visible device state. The live state of a remote resource is not a Route observation.
+_Avoid_: Global simulation state, perfect knowledge
+
+**Route persistence**:
+An Agent's propensity to retain its current Path unless another known Path is sufficiently preferable or the current Path becomes invalid.
+_Avoid_: Route lock, forbidden traversal
+
 **Marker**:
 A named, World-owned authored point in a Location with stable identity. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename. Agent behaviours cannot choose arbitrary Vertices as destinations.
 _Avoid_: Vertex, destination vertex
