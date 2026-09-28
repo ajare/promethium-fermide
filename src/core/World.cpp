@@ -265,6 +265,7 @@ namespace core
 			if (agent->getHeightModifierSample()) ++count;
 			if (agent->getStairSpeedModifierSample()) ++count;
 			if (agent->getInteractionAversionSample()) ++count;
+			if (agent->getEffortAversionSample()) ++count;
 		}
 		return count;
 	}
@@ -1114,11 +1115,13 @@ namespace core
 			AgentTagId heightSource{};
 			AgentTagId stairSpeedSource{};
 			AgentTagId interactionAversionSource{};
+			AgentTagId effortAversionSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
 			AgentStairSpeedModifierProperty const* stairSpeedProperty{ nullptr };
 			AgentInteractionAversionProperty const* interactionAversionProperty{ nullptr };
+			AgentEffortAversionProperty const* effortAversionProperty{ nullptr };
 			for (auto const tag : agent->getAgentTagIds())
 			{
 				auto const* definition = registry.lookupAgentTag(tag);
@@ -1193,6 +1196,16 @@ namespace core
 							definition->getName()));
 					interactionAversionSource = tag;
 					interactionAversionProperty = property;
+				}
+				if (auto const* property = definition->getEffortAversion())
+				{
+					if (effortAversionSource)
+						return reject(format(
+							"Agent '{}' inherits Effort aversion from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(effortAversionSource),
+							definition->getName()));
+					effortAversionSource = tag;
+					effortAversionProperty = property;
 				}
 				if (definition->getMobilityProfile())
 				{
@@ -1291,6 +1304,11 @@ namespace core
 				interactionAversionProperty ? &interactionAversionProperty->range : nullptr,
 				interactionAversionProperty ? interactionAversionProperty->revision : 0,
 				agent->getInteractionAversionSample(), repair.interactionAversionAction)) return false;
+			if (!inspectSample("Effort aversion", SampledAgentPropertyType::EffortAversion,
+				effortAversionSource,
+				effortAversionProperty ? &effortAversionProperty->range : nullptr,
+				effortAversionProperty ? effortAversionProperty->revision : 0,
+				agent->getEffortAversionSample(), repair.effortAversionAction)) return false;
 
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
 			{
@@ -1312,10 +1330,16 @@ namespace core
 				repair.interactionAversionSource = interactionAversionSource;
 				repair.interactionAversionProperty = *interactionAversionProperty;
 			}
+			if (repair.effortAversionAction == AgentTagSampleRepairAction::Resample)
+			{
+				repair.effortAversionSource = effortAversionSource;
+				repair.effortAversionProperty = *effortAversionProperty;
+			}
 			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
-				|| repair.interactionAversionAction != AgentTagSampleRepairAction::None))
+				|| repair.interactionAversionAction != AgentTagSampleRepairAction::None
+				|| repair.effortAversionAction != AgentTagSampleRepairAction::None))
 			{
 				repairs->push_back(repair);
 			}
@@ -1375,6 +1399,15 @@ namespace core
 					repair.interactionAversionProperty.revision,
 					sampleAgentModifier(repair.interactionAversionProperty.range) });
 			}
+			if (repair.effortAversionAction == AgentTagSampleRepairAction::Clear)
+				agent->clearEffortAversionSample();
+			else if (repair.effortAversionAction == AgentTagSampleRepairAction::Resample)
+			{
+				agent->setEffortAversionSample({
+					SampledAgentPropertyType::EffortAversion, repair.effortAversionSource,
+					repair.effortAversionProperty.revision,
+					sampleAgentModifier(repair.effortAversionProperty.range) });
+			}
 		}
 		if (!repairs.empty()) modify();
 	}
@@ -1421,6 +1454,9 @@ namespace core
 			if (agent->getInteractionAversionSample()
 				&& agent->getInteractionAversionSample()->sourceTag == id)
 				agent->clearInteractionAversionSample();
+			if (agent->getEffortAversionSample()
+				&& agent->getEffortAversionSample()->sourceTag == id)
+				agent->clearEffortAversionSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -1438,6 +1474,7 @@ namespace core
 			agent->clearHeightModifierSample();
 			agent->clearStairSpeedModifierSample();
 			agent->clearInteractionAversionSample();
+			agent->clearEffortAversionSample();
 		}
 	}
 
@@ -1532,6 +1569,38 @@ namespace core
 			if (!agent || !agent->getStairSpeedModifierSample()
 				|| agent->getStairSpeedModifierSample()->sourceTag != id) continue;
 			agent->clearStairSpeedModifierSample();
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::addAgentTagEffortAversionSamples(AgentTagId id,
+		AgentEffortAversionProperty const& property)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->hasAgentTag(id)) continue;
+			agent->setEffortAversionSample({
+				SampledAgentPropertyType::EffortAversion, id, property.revision,
+				sampleAgentModifier(property.range) });
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::clearAgentTagEffortAversionSamples(AgentTagId id)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->getEffortAversionSample()
+				|| agent->getEffortAversionSample()->sourceTag != id) continue;
+			agent->clearEffortAversionSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -7657,6 +7726,29 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualEffortAversion(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentEffortAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualEffortAversion() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Effort aversion is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualEffortAversion(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<TraversalMask> value, string* diagnostic)
 	{
@@ -7995,6 +8087,12 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Interaction aversion is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getEffortAversion() && source->getEffortAversion())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Effort aversion is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -8017,6 +8115,7 @@ namespace core
 		optional<AgentPropertySample> heightSample;
 		optional<AgentPropertySample> stairSpeedSample;
 		optional<AgentPropertySample> interactionAversionSample;
+		optional<AgentPropertySample> effortAversionSample;
 		if (auto const* property = definition->getWalkSpeedModifier())
 		{
 			walkSpeedSample = AgentPropertySample{
@@ -8041,11 +8140,18 @@ namespace core
 				SampledAgentPropertyType::InteractionAversion, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		if (auto const* property = definition->getEffortAversion())
+		{
+			effortAversionSample = AgentPropertySample{
+				SampledAgentPropertyType::EffortAversion, tag, property->revision,
+				sampleAgentModifier(property->range) };
+		}
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
 		if (stairSpeedSample) target->setStairSpeedModifierSample(*stairSpeedSample);
 		if (interactionAversionSample) target->setInteractionAversionSample(*interactionAversionSample);
+		if (effortAversionSample) target->setEffortAversionSample(*effortAversionSample);
 		modify();
 		return true;
 	}
@@ -8093,6 +8199,9 @@ namespace core
 		if (target->getInteractionAversionSample()
 			&& target->getInteractionAversionSample()->sourceTag == tag)
 			target->clearInteractionAversionSample();
+		if (target->getEffortAversionSample()
+			&& target->getEffortAversionSample()->sourceTag == tag)
+			target->clearEffortAversionSample();
 		modify();
 		return true;
 	}
@@ -8102,6 +8211,7 @@ namespace core
 		optional<AgentPropertySample> const& heightSample,
 		optional<AgentPropertySample> const& stairSpeedSample,
 		optional<AgentPropertySample> const& interactionAversionSample,
+		optional<AgentPropertySample> const& effortAversionSample,
 		string* diagnostic) const
 	{
 		if (diagnostic) diagnostic->clear();
@@ -8113,7 +8223,8 @@ namespace core
 
 		if (tags.empty())
 		{
-			if (walkSpeedSample || heightSample || stairSpeedSample || interactionAversionSample)
+			if (walkSpeedSample || heightSample || stairSpeedSample
+				|| interactionAversionSample || effortAversionSample)
 				return reject("An untagged Agent cannot carry modifier samples");
 			return true;
 		}
@@ -8126,11 +8237,13 @@ namespace core
 		AgentTagId heightSource{};
 		AgentTagId stairSpeedSource{};
 		AgentTagId interactionAversionSource{};
+		AgentTagId effortAversionSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
 		AgentStairSpeedModifierProperty const* stairSpeedProperty{ nullptr };
 		AgentInteractionAversionProperty const* interactionAversionProperty{ nullptr };
+		AgentEffortAversionProperty const* effortAversionProperty{ nullptr };
 		for (auto const tag : tags)
 		{
 			auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
@@ -8185,6 +8298,14 @@ namespace core
 				interactionAversionSource = tag;
 				interactionAversionProperty = property;
 			}
+			if (auto const* property = definition->getEffortAversion())
+			{
+				if (effortAversionSource)
+					return reject(format("Effort aversion is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(effortAversionSource), definition->getName()));
+				effortAversionSource = tag;
+				effortAversionProperty = property;
+			}
 			if (definition->getMobilityProfile())
 			{
 				if (mobilityProfileSource)
@@ -8234,7 +8355,12 @@ namespace core
 				interactionAversionSource,
 				interactionAversionProperty ? &interactionAversionProperty->range : nullptr,
 				interactionAversionProperty ? interactionAversionProperty->revision : 0,
-				interactionAversionSample);
+				interactionAversionSample)
+			&& validateSample("Effort aversion", SampledAgentPropertyType::EffortAversion,
+				effortAversionSource,
+				effortAversionProperty ? &effortAversionProperty->range : nullptr,
+				effortAversionProperty ? effortAversionProperty->revision : 0,
+				effortAversionSample);
 	}
 
 	bool World::restoreAgentTagAssignments(AgentId agent,
@@ -8243,6 +8369,7 @@ namespace core
 		optional<AgentPropertySample> const& heightSample,
 		optional<AgentPropertySample> const& stairSpeedSample,
 		optional<AgentPropertySample> const& interactionAversionSample,
+		optional<AgentPropertySample> const& effortAversionSample,
 		string* diagnostic)
 	{
 		invalidateSimulationSnapshot();
@@ -8260,7 +8387,7 @@ namespace core
 			return false;
 		}
 		if (!validateAgentTagAssignments(tags, walkSpeedSample, heightSample,
-			stairSpeedSample, interactionAversionSample, diagnostic))
+			stairSpeedSample, interactionAversionSample, effortAversionSample, diagnostic))
 			return false;
 
 		auto* target = mAgents.find(agent);
@@ -8268,7 +8395,8 @@ namespace core
 			&& target->getWalkSpeedModifierSample() == walkSpeedSample
 			&& target->getHeightModifierSample() == heightSample
 			&& target->getStairSpeedModifierSample() == stairSpeedSample
-			&& target->getInteractionAversionSample() == interactionAversionSample) return true;
+			&& target->getInteractionAversionSample() == interactionAversionSample
+			&& target->getEffortAversionSample() == effortAversionSample) return true;
 
 		target->setAgentTags(tags);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
@@ -8279,6 +8407,8 @@ namespace core
 		else target->clearStairSpeedModifierSample();
 		if (interactionAversionSample) target->setInteractionAversionSample(*interactionAversionSample);
 		else target->clearInteractionAversionSample();
+		if (effortAversionSample) target->setEffortAversionSample(*effortAversionSample);
+		else target->clearEffortAversionSample();
 		modify();
 		return true;
 	}

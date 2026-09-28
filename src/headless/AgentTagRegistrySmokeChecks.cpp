@@ -115,7 +115,7 @@ namespace
 			"A new registry did not start both non-reused allocators at one");
 
 		auto const registryYaml = readText(registryPath);
-		require(registryYaml.find("version: 4") != std::string::npos
+		require(registryYaml.find("version: 5") != std::string::npos
 			&& registryYaml.find("uuid: " + registry->getUuid()) != std::string::npos
 			&& registryYaml.find("nextAgentTagId: 1") != std::string::npos
 			&& registryYaml.find("nextPropertyRevision: 1") != std::string::npos
@@ -126,7 +126,7 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 18") != std::string::npos
+		require(worldYaml.find("version: 19") != std::string::npos
 			&& worldYaml.find("filename: station.tags.yaml") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-10 registry reference");
@@ -162,9 +162,9 @@ namespace
 	{
 		core::World source("Legacy", 4, 2);
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 18");
-		require(version != std::string::npos, "The current World schema was not version 18");
-		yaml.replace(version, std::string("version: 18").size(), "version: 9");
+		auto const version = yaml.find("version: 19");
+		require(version != std::string::npos, "The current World schema was not version 19");
+		yaml.replace(version, std::string("version: 19").size(), "version: 9");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		auto reader = core::YamlSerializer::fromString(yaml);
@@ -362,10 +362,10 @@ namespace
 		auto unsupportedRegistry = core::AgentTagRegistry::create();
 		unsupportedRegistry->saveTo(malformedRegistryPath.string());
 		auto unsupportedYaml = readText(malformedRegistryPath);
-		auto const version = unsupportedYaml.find("version: 4");
+		auto const version = unsupportedYaml.find("version: 5");
 		require(version != std::string::npos,
-			"The registry fixture did not contain schema version 4");
-		unsupportedYaml.replace(version, std::string("version: 4").size(), "version: 5");
+			"The registry fixture did not contain schema version 5");
+		unsupportedYaml.replace(version, std::string("version: 5").size(), "version: 6");
 		writeText(malformedRegistryPath, unsupportedYaml);
 		bool unsupportedRefused{ false };
 		try

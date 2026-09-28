@@ -19,6 +19,7 @@ namespace core
 		HeightModifier,
 		StairSpeedModifier,
 		InteractionAversion,
+		EffortAversion,
 		MobilityProfile
 	};
 
@@ -41,6 +42,7 @@ namespace core
 		case AgentPropertyType::HeightModifier: return { "Height modifier", std::nullopt };
 		case AgentPropertyType::StairSpeedModifier: return { "Stair speed modifier", "Pathing" };
 		case AgentPropertyType::InteractionAversion: return { "Interaction aversion", "Pathing" };
+		case AgentPropertyType::EffortAversion: return { "Effort aversion", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -120,6 +122,9 @@ namespace core
 	inline constexpr float AgentInteractionAversionMinimum{ 0.0f };
 	inline constexpr float AgentInteractionAversionMaximum{ 3.0f };
 	inline constexpr AgentModifierRange DefaultAgentInteractionAversionRange{};
+	inline constexpr float AgentEffortAversionMinimum{ 0.0f };
+	inline constexpr float AgentEffortAversionMaximum{ 3.0f };
+	inline constexpr AgentModifierRange DefaultAgentEffortAversionRange{};
 
 	struct AgentWalkSpeedModifierProperty
 	{
@@ -151,6 +156,14 @@ namespace core
 		uint64_t revision{ 0 };
 
 		bool operator==(AgentInteractionAversionProperty const& other) const = default;
+	};
+
+	struct AgentEffortAversionProperty
+	{
+		AgentModifierRange range{};
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentEffortAversionProperty const& other) const = default;
 	};
 
 	using TraversalMask = uint32_t;
@@ -200,6 +213,8 @@ namespace core
 		std::string* diagnostic = nullptr);
 	bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
+	bool agentEffortAversionRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
 	float sampleAgentModifier(AgentModifierRange const& range);
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
@@ -222,6 +237,7 @@ namespace core
 		std::optional<AgentHeightModifierProperty> mHeightModifier;
 		std::optional<AgentStairSpeedModifierProperty> mStairSpeedModifier;
 		std::optional<AgentInteractionAversionProperty> mInteractionAversion;
+		std::optional<AgentEffortAversionProperty> mEffortAversion;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -253,6 +269,11 @@ namespace core
 			mInteractionAversion = property;
 		}
 		void removeInteractionAversion() { mInteractionAversion.reset(); }
+		void setEffortAversion(AgentEffortAversionProperty property)
+		{
+			mEffortAversion = property;
+		}
+		void removeEffortAversion() { mEffortAversion.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -288,6 +309,10 @@ namespace core
 		AgentInteractionAversionProperty const* getInteractionAversion() const
 		{
 			return mInteractionAversion ? &*mInteractionAversion : nullptr;
+		}
+		AgentEffortAversionProperty const* getEffortAversion() const
+		{
+			return mEffortAversion ? &*mEffortAversion : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

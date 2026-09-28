@@ -116,6 +116,8 @@ struct AgentClipboardPayload
 	std::optional<core::AgentPropertySample> interactionAversionSample;
 	std::optional<float> individualStairSpeedModifier;
 	std::optional<float> individualInteractionAversion;
+	std::optional<core::AgentPropertySample> effortAversionSample;
+	std::optional<float> individualEffortAversion;
 
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.
 	// Marker configuration values have already been replaced by names.

@@ -33,8 +33,12 @@ void runAgentIndividualPropertySmokeChecks()
 {
 	auto const interactionMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::InteractionAversion);
+	auto const effortMetadata = core::agentPropertyMetadata(
+		core::AgentPropertyType::EffortAversion);
 	require(interactionMetadata.name == "Interaction aversion"
 		&& interactionMetadata.propertyNamespace == "Pathing"
+		&& effortMetadata.name == "Effort aversion"
+		&& effortMetadata.propertyNamespace == "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::StairSpeedModifier).propertyNamespace
 			== "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
@@ -66,6 +70,8 @@ void runAgentIndividualPropertySmokeChecks()
 	require(registry->setAgentTagStairSpeedModifier(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagInteractionAversion(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagInteractionAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
+	require(registry->addAgentTagEffortAversion(tag, &diagnostic), diagnostic);
+	require(registry->setAgentTagEffortAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagMobilityProfile(tag,
 		core::traversalMask(core::TraversalKind::Staircase), &diagnostic), diagnostic);
@@ -96,6 +102,10 @@ void runAgentIndividualPropertySmokeChecks()
 		"The Agent did not inherit its sampled Interaction aversion");
 	require(world->setAgentIndividualStairSpeedModifier(id, 1.5f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualInteractionAversion(id, 0.0f, &diagnostic), diagnostic);
+	require(agent->getEffectiveEffortAversion().value == 2.0f
+		&& agent->getEffectiveEffortAversion().sourceTag == tag,
+		"The Agent did not inherit its sampled Effort aversion");
+	require(world->setAgentIndividualEffortAversion(id, 0.0f, &diagnostic), diagnostic);
 	auto const directMask = core::traversalMask(core::TraversalKind::Lift);
 	require(world->setAgentIndividualMobilityProfile(id, directMask, &diagnostic), diagnostic);
 
@@ -111,6 +121,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveStairSpeedModifier().value == 1.5f
 		&& agent->getEffectiveInteractionAversion().individual
 		&& agent->getEffectiveInteractionAversion().value == 0.0f
+		&& agent->getEffectiveEffortAversion().individual
+		&& agent->getEffectiveEffortAversion().value == 0.0f
 		&& agent->getEffectiveMobilityProfile().individual
 		&& agent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
 		"Individual Agent properties did not override inherited tag values");
@@ -126,11 +138,12 @@ void runAgentIndividualPropertySmokeChecks()
 		"An individual Mobility profile accepted a reserved bit");
 
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 18") != std::string::npos
+	require(yaml.find("version: 19") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
-		&& yaml.find("interactionAversion") != std::string::npos,
-		"Individual Agent properties were not persisted in World schema 18");
+		&& yaml.find("interactionAversion") != std::string::npos
+		&& yaml.find("effortAversion") != std::string::npos,
+		"Individual Agent properties were not persisted in World schema 19");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 	auto reader = core::YamlSerializer::fromString(yaml);
 	reader->deserialize();
@@ -144,6 +157,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& loadedAgent->getEffectiveStairSpeedModifier().value == 1.5f
 		&& loadedAgent->getEffectiveInteractionAversion().individual
 		&& loadedAgent->getEffectiveInteractionAversion().value == 0.0f
+		&& loadedAgent->getEffectiveEffortAversion().individual
+		&& loadedAgent->getEffectiveEffortAversion().value == 0.0f
 		&& loadedAgent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
 		"Individual Agent properties did not round-trip");
 

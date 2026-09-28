@@ -156,6 +156,7 @@ namespace
 	map<uint64_t, TagHeightEdit> gTagHeightEdits;
 	map<uint64_t, TagHeightEdit> gTagStairSpeedEdits;
 	map<uint64_t, TagHeightEdit> gTagInteractionAversionEdits;
+	map<uint64_t, TagHeightEdit> gTagEffortAversionEdits;
 	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
@@ -667,8 +668,9 @@ namespace
 
 		auto const* stairSpeed = registry->getAgentTagStairSpeedModifier(id);
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
+		auto const* effort = registry->getAgentTagEffortAversion(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
-		if (stairSpeed || interaction || pathingMobility)
+		if (stairSpeed || interaction || effort || pathingMobility)
 			renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
 		if (stairSpeed)
 		{
@@ -714,12 +716,10 @@ namespace
 			}
 			ImGui::SetNextItemWidth(256.0f);
 			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::InteractionAversion),
-				&edit.range.minimum,
-				&edit.range.maximum, 0.01f, core::AgentInteractionAversionMinimum,
-				core::AgentInteractionAversionMaximum, "Min %.2f", "Max %.2f",
-				ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
-			auto const finished = ImGui::IsItemDeactivatedAfterEdit();
-			if (edit.pending && finished)
+				&edit.range.minimum, &edit.range.maximum, 0.01f,
+				core::AgentInteractionAversionMinimum, core::AgentInteractionAversionMaximum,
+				"Min %.2f", "Max %.2f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
 			{
 				string diagnostic;
 				if (!commitAgentTagInteractionAversionEdit(registry, id, edit.range, diagnostic)
@@ -736,6 +736,39 @@ namespace
 				if (!commitAgentTagInteractionAversionRemove(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else { gTagInteractionAversionEdits.erase(id.value); interaction = nullptr; }
+			}
+		}
+		if (effort)
+		{
+			auto& edit = gTagEffortAversionEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != effort->revision)
+			{
+				edit.range = effort->range;
+				edit.loadedRevision = effort->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::EffortAversion),
+				&edit.range.minimum, &edit.range.maximum, 0.01f,
+				core::AgentEffortAversionMinimum, core::AgentEffortAversionMaximum,
+				"Min %.2f", "Max %.2f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
+			{
+				string diagnostic;
+				if (!commitAgentTagEffortAversionEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Effort aversion range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				effort = registry->getAgentTagEffortAversion(id);
+				if (effort) { edit.range = effort->range; edit.loadedRevision = effort->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeEffortAversion"))
+			{
+				string diagnostic;
+				if (!commitAgentTagEffortAversionRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagEffortAversionEdits.erase(id.value); effort = nullptr; }
 			}
 		}
 
@@ -817,8 +850,10 @@ namespace
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		auto const* stairSpeed = registry->getAgentTagStairSpeedModifier(id);
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
+		auto const* effort = registry->getAgentTagEffortAversion(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
-		auto const anyMissing = !colour || !walkSpeed || !height || !chance || !stairSpeed || !interaction || !mobility;
+		auto const anyMissing = !colour || !walkSpeed || !height || !chance
+			|| !stairSpeed || !interaction || !effort || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -871,6 +906,14 @@ namespace
 				if (!commitAgentTagInteractionAversionAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagInteractionAversionEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!effort && ImGui::Selectable(propertyName(core::AgentPropertyType::EffortAversion)))
+			{
+				string diagnostic;
+				if (!commitAgentTagEffortAversionAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagEffortAversionEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
 			if (!mobility && ImGui::Selectable(propertyName(core::AgentPropertyType::MobilityProfile)))
@@ -1995,6 +2038,30 @@ bool commitAgentTagInteractionAversionRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Interaction aversion",
 		[id](auto& target, string* out) { return target.removeAgentTagInteractionAversion(id, out); });
+}
+
+bool commitAgentTagEffortAversionAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Effort aversion",
+		[id](auto& target, string* out) { return target.addAgentTagEffortAversion(id, out); });
+}
+
+bool commitAgentTagEffortAversionEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Effort aversion",
+		[id, range](auto& target, string* out) { return target.setAgentTagEffortAversion(id, range, out); });
+}
+
+bool commitAgentTagEffortAversionRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Effort aversion",
+		[id](auto& target, string* out) { return target.removeAgentTagEffortAversion(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

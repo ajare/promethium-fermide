@@ -209,6 +209,7 @@ namespace core
 			// context; directed-edge capture then reuses the concrete value.
 			profile.stairSpeedModifier = routingAgent->getEffectiveStairSpeedModifier().value;
 			profile.interactionAversion = routingAgent->getEffectiveInteractionAversion().value;
+			profile.effortAversion = routingAgent->getEffectiveEffortAversion().value;
 			RouteDecisionContext const context{ routingAgent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
 				routingAgent->getWalkSpeed() };

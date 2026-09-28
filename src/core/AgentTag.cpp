@@ -134,6 +134,25 @@ namespace core
 		return true;
 	}
 
+	bool agentEffortAversionRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Effort aversion endpoints must be finite");
+		if (range.minimum < AgentEffortAversionMinimum
+			|| range.maximum > AgentEffortAversionMaximum)
+			return reject("Effort aversion endpoints must be between 0 and 3");
+		if (range.minimum > range.maximum)
+			return reject("Effort aversion minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	float sampleAgentModifier(AgentModifierRange const& range)
 	{
 		if (!(range.minimum < range.maximum)) return range.minimum;

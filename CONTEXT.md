@@ -74,6 +74,10 @@ _Avoid_: Walk speed modifier, effort aversion
 An Agent property from 0 through 3 that weights the perceived inconvenience of Door activation and threshold interaction. Its neutral default is 1; it changes route preference, not whether an interaction is possible.
 _Avoid_: Mobility profile, interaction capability
 
+**Effort aversion**:
+An Agent property from 0 through 3 that weights physical-effort components of perceived route cost. Its neutral default is 1; it does not alter objective duration or physical movement speed.
+_Avoid_: Stair speed modifier, mobility profile
+
 **Route observation**:
 Information locally available to an Agent when it chooses or revises a Path, such as a nearby queue or visible device state. The live state of a remote resource is not a Route observation.
 _Avoid_: Global simulation state, perfect knowledge

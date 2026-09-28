@@ -559,6 +559,9 @@ namespace core
 			AgentTagSampleRepairAction interactionAversionAction{ AgentTagSampleRepairAction::None };
 			AgentTagId interactionAversionSource{};
 			AgentInteractionAversionProperty interactionAversionProperty{};
+			AgentTagSampleRepairAction effortAversionAction{ AgentTagSampleRepairAction::None };
+			AgentTagId effortAversionSource{};
+			AgentEffortAversionProperty effortAversionProperty{};
 		};
 
 		// Checks every assigned stable ID and inherited property against a
@@ -588,6 +591,9 @@ namespace core
 		void addAgentTagInteractionAversionSamples(AgentTagId id,
 			AgentInteractionAversionProperty const& property);
 		void clearAgentTagInteractionAversionSamples(AgentTagId id);
+		void addAgentTagEffortAversionSamples(AgentTagId id,
+			AgentEffortAversionProperty const& property);
+		void clearAgentTagEffortAversionSamples(AgentTagId id);
 
 		// Case-sensitive name lookup across the groups this World owns, with
 		// one group optionally excluded so a group renaming itself to the name
@@ -1963,6 +1969,8 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualInteractionAversion(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualEffortAversion(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
 			std::optional<TraversalMask> value, std::string* diagnostic = nullptr);
 
@@ -2063,6 +2071,7 @@ namespace core
 			std::optional<AgentPropertySample> const& heightSample,
 			std::optional<AgentPropertySample> const& stairSpeedSample,
 			std::optional<AgentPropertySample> const& interactionAversionSample,
+			std::optional<AgentPropertySample> const& effortAversionSample,
 			std::string* diagnostic = nullptr) const;
 
 		// Restores one Agent's complete tag state after the preflight above.
@@ -2074,6 +2083,7 @@ namespace core
 			std::optional<AgentPropertySample> const& heightSample,
 			std::optional<AgentPropertySample> const& stairSpeedSample,
 			std::optional<AgentPropertySample> const& interactionAversionSample,
+			std::optional<AgentPropertySample> const& effortAversionSample,
 			std::string* diagnostic = nullptr);
 
 		// The assigned tag set in stable numeric order. Throws when `agent` is

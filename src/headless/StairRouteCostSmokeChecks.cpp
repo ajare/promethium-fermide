@@ -151,6 +151,61 @@ namespace
 		require(reversed, "Stair speed modifier did not reverse any competing route choice");
 	}
 
+	void effortAversionCanReverseRouteChoiceWithoutChangingSpeed()
+	{
+		auto world = core::loadWorldDocument(testWorld("staircase-test-1.world.yaml"));
+		world->pauseSimulation();
+		auto graph = world->getGraph();
+		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
+		std::vector<std::shared_ptr<const core::Vertex>> markers;
+		for (auto const& vertex : graph->getVertices())
+			if (std::dynamic_pointer_cast<core::Marker>(vertex->getObject())) markers.push_back(vertex);
+
+		float stairSpeed = 0.0f;
+		for (auto const& edge : graph->getEdges())
+		{
+			if (edge->getType() != core::EdgeType::Staircase
+				|| edge->getTraversalSpeed(nullptr) > 0.0f) continue;
+			stairSpeed = edge->getTraversalSpeed(agent, edge->getVertex(1));
+			break;
+		}
+		require(stairSpeed > 0.0f, "Effort-aversion fixture has no stationary Staircase");
+
+		std::string diagnostic;
+		require(world->setAgentIndividualEffortAversion(core::AgentId{ 1 }, 0.0f,
+			&diagnostic), diagnostic.c_str());
+		std::vector<std::shared_ptr<core::Path>> lowAversion;
+		for (auto const& source : markers)
+			for (auto const& target : markers)
+				lowAversion.push_back(graph->calculatePath(agent, source, target));
+		require(world->setAgentIndividualEffortAversion(core::AgentId{ 1 }, 3.0f,
+			&diagnostic), diagnostic.c_str());
+
+		bool reversed = false;
+		size_t index = 0;
+		for (auto const& source : markers)
+			for (auto const& target : markers)
+			{
+				auto highAversion = graph->calculatePath(agent, source, target);
+				auto const& low = lowAversion[index++];
+				if (!low || !highAversion) continue;
+				if (low->nodes.size() != highAversion->nodes.size()) { reversed = true; continue; }
+				for (size_t node = 1; node < low->nodes.size(); ++node)
+					if (low->nodes[node].edge->getId() != highAversion->nodes[node].edge->getId())
+					{ reversed = true; break; }
+			}
+		require(reversed, "Effort aversion did not reverse any stairs-versus-alternative route choice");
+
+		for (auto const& edge : graph->getEdges())
+		{
+			if (edge->getType() != core::EdgeType::Staircase
+				|| edge->getTraversalSpeed(nullptr) > 0.0f) continue;
+			require(std::abs(edge->getTraversalSpeed(agent, edge->getVertex(1)) - stairSpeed) < 0.0001f,
+				"Effort aversion changed physical stair speed");
+			break;
+		}
+	}
+
 	void multiFlightStairwellAccumulatesEveryFlight()
 	{
 		auto world = core::loadWorldDocument(testWorld("stairwell-test-1.world.yaml"));
@@ -208,5 +263,6 @@ void runStairRouteCostSmokeChecks()
 {
 	stationaryStaircaseIsDirectionalAndPhysical();
 	stairSpeedCanReverseRouteChoice();
+	effortAversionCanReverseRouteChoiceWithoutChangingSpeed();
 	multiFlightStairwellAccumulatesEveryFlight();
 }

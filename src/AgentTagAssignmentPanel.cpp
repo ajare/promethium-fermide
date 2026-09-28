@@ -213,6 +213,11 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualInteractionAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualInteractionAversion(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		renderPropertyNamespace(core::AgentPropertyType::EffortAversion);
+		propertyCheckbox(propertyName(core::AgentPropertyType::EffortAversion),
+			target->getIndividualEffortAversion().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualEffortAversion(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -357,6 +362,30 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
+	if (target->getIndividualEffortAversion() || target->getIndividualMobilityProfile())
+		renderPropertyNamespace(core::AgentPropertyType::EffortAversion);
+	if (target->getIndividualEffortAversion())
+	{
+		auto value = *target->getIndividualEffortAversion();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Effort aversion##individual", &value, 0.01f,
+			core::AgentEffortAversionMinimum, core::AgentEffortAversionMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualEffortAversion(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualEffortAversion"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualEffortAversion(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
@@ -486,6 +515,14 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Interaction aversion: %.2f from #%s", interaction.value,
 			world->getAgentTagRegistry()->getAgentTagName(interaction.sourceTag).c_str());
 	else ImGui::TextUnformatted("Interaction aversion: 1.00 (default)");
+	renderPropertyNamespace(core::AgentPropertyType::EffortAversion);
+	auto const effort = lookup.entity->getEffectiveEffortAversion();
+	if (effort.individual)
+		ImGui::Text("Effort aversion: %.2f (individual)", effort.value);
+	else if (effort.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Effort aversion: %.2f from #%s", effort.value,
+			world->getAgentTagRegistry()->getAgentTagName(effort.sourceTag).c_str());
+	else ImGui::TextUnformatted("Effort aversion: 1.00 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.forbiddenTraversals);
