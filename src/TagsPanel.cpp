@@ -890,7 +890,7 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!stairSpeed || !interaction || !mobility)
+			if (!stairSpeed || !interaction || !effort || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
 			if (!stairSpeed && ImGui::Selectable(propertyName(core::AgentPropertyType::StairSpeedModifier)))
 			{

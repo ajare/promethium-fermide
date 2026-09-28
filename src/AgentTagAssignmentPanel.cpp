@@ -213,7 +213,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualInteractionAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualInteractionAversion(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
-		renderPropertyNamespace(core::AgentPropertyType::EffortAversion);
 		propertyCheckbox(propertyName(core::AgentPropertyType::EffortAversion),
 			target->getIndividualEffortAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualEffortAversion(
@@ -316,7 +315,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		}
 	}
 	if (target->getIndividualStairSpeedModifier() || target->getIndividualInteractionAversion()
-		|| target->getIndividualMobilityProfile())
+		|| target->getIndividualEffortAversion() || target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::StairSpeedModifier);
 	if (target->getIndividualStairSpeedModifier())
 	{
@@ -362,8 +361,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
-	if (target->getIndividualEffortAversion() || target->getIndividualMobilityProfile())
-		renderPropertyNamespace(core::AgentPropertyType::EffortAversion);
 	if (target->getIndividualEffortAversion())
 	{
 		auto value = *target->getIndividualEffortAversion();
@@ -515,7 +512,6 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Interaction aversion: %.2f from #%s", interaction.value,
 			world->getAgentTagRegistry()->getAgentTagName(interaction.sourceTag).c_str());
 	else ImGui::TextUnformatted("Interaction aversion: 1.00 (default)");
-	renderPropertyNamespace(core::AgentPropertyType::EffortAversion);
 	auto const effort = lookup.entity->getEffectiveEffortAversion();
 	if (effort.individual)
 		ImGui::Text("Effort aversion: %.2f (individual)", effort.value);
