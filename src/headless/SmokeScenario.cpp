@@ -127,6 +127,7 @@ void runPathfindingWorkspaceSmokeChecks();
 void runThresholdRouteCostSmokeChecks();
 void runStairRouteCostSmokeChecks();
 void runLiftRouteCostSmokeChecks();
+void runShuttleRouteCostSmokeChecks();
 void runWorldTeardownSmokeChecks();
 void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
@@ -6216,6 +6217,12 @@ int main(int argc, char** argv)
 
 	try
 	{
+		if (argc > 1 && std::string(argv[1]) == "--shuttle-route-checks")
+		{
+			runShuttleRouteCostSmokeChecks();
+			std::cout << "PASS: Shuttle route costs\n";
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
@@ -6325,6 +6332,7 @@ int main(int argc, char** argv)
 		runThresholdRouteCostSmokeChecks();
 		runStairRouteCostSmokeChecks();
 		runLiftRouteCostSmokeChecks();
+		runShuttleRouteCostSmokeChecks();
 		runWorldTeardownSmokeChecks();
 
 		auto const deepJourney = runThreeLayerTransitJourney();

@@ -787,6 +787,12 @@ namespace core
 		return mWorld ? mWorld->observeAccessZoneDensity(resource, sourceSector) : 0.0f;
 	}
 
+	optional<ShuttleRouteAccessObservation> Agent::observeShuttleAccess(
+		TraversalResourceId resource, Vector2 const& endpoint, bool includeLocalQueue) const
+	{
+		return mWorld ? mWorld->observeShuttleAccess(resource, endpoint, includeLocalQueue) : nullopt;
+	}
+
 	optional<LiftRouteAccessObservation> Agent::observeLiftAccess(
 		TraversalResourceId resource, Vector2 const& sourceEndpoint, bool includeLocalQueue) const
 	{

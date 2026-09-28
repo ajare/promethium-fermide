@@ -30,6 +30,29 @@ no unknown queue delay. Threshold/manual/remote interaction defaults are
 timing; visual animation timing remains unchanged. Unmigrated modes retain the
 compatibility adapter.
 
+## Shuttle journey route costs (#215)
+
+`ShuttleRouteCostSmokeChecks.cpp` covers actual stop-distance/speed ride time,
+per-departure dwell (including intermediate service), one boarding charge,
+capacity-dependent missed service, local queue observations, remote-state
+isolation, independent aversions, and short/long walking alternatives. Run it
+alone with `prometheum-fermide-headless.exe --shuttle-route-checks`.
+
+Landing Doors charge boarding/alighting and interaction; Shuttle body arcs never
+repeat admission. Travel between Doors at the same Stop is walking, not a ride.
+The baseline service interval is 12 seconds: admission expects half an interval
+plus one interval per capacity-sized expected queue. Unknown queues default to
+one passenger; unknown crowding defaults to 0.2. Capacity sums each Carriage
+reachable from the connected access zone once, regardless of its Door count.
+Local observations replace these queue/crowding expectations, but never inspect
+remote vehicle position, passenger manifests, or scheduled requests. Alighting
+does not pay another service wait. Null-Agent previews retain authored facts.
+
+The distance crossover fixture uses an Agent with a 0.8 Walk speed modifier:
+the current default Shuttle speed equals neutral walking speed, so a neutral
+Agent should not prefer it over unobstructed parallel walking merely because
+the trip is long. No simulation movement speeds are changed by this ticket.
+
 ## Deterministic simulation API
 
 `World::advanceTick()` and `World::advanceTicks()` are the headless seam. Each tick is `World::getFixedTimestep()` (1/60 second) and runs these phases in order:

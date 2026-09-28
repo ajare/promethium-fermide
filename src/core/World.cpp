@@ -9658,6 +9658,46 @@ namespace core
 		return count;
 	}
 
+	optional<ShuttleRouteAccessObservation> World::observeShuttleAccess(
+		TraversalResourceId resourceId, Vector2 const& endpoint, bool includeLocalQueue) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (!resource) return nullopt;
+		auto coordinator = resource->mLiftCoordinator
+			? mTraversalResources.find(resource->mLiftCoordinator) : resource;
+		if (!coordinator || !coordinator->mShuttle) return nullopt;
+		auto door = find_if(coordinator->mShuttleDoors.begin(), coordinator->mShuttleDoors.end(),
+			[&](auto const& candidate)
+			{
+				return candidate.landingResource == resourceId
+					|| abs(coordinator->mLiftStops[candidate.stopIndex].globalPosition
+						+ candidate.carriagePosition - endpoint.x) < 0.001f;
+			});
+		if (door == coordinator->mShuttleDoors.end()) return nullopt;
+		// Only carriages reachable from this connected access zone contribute.
+		uint32_t capacity = 0;
+		for (auto const& carriage : coordinator->mShuttleCarriages)
+			if (any_of(coordinator->mShuttleDoors.begin(), coordinator->mShuttleDoors.end(),
+				[&](auto const& candidate) { return candidate.stopIndex == door->stopIndex
+					&& candidate.accessZoneIndex == door->accessZoneIndex
+					&& candidate.carriageIndex == carriage.index; }))
+				capacity += carriage.capacity;
+		uint32_t queued = 0;
+		if (includeLocalQueue)
+			for (auto id : coordinator->mAdmissionQueue)
+			{
+				auto request = mTraversalRequests.find(id);
+				if (!request || request->mSourceSector != door->locationSector) continue;
+				if (any_of(coordinator->mShuttleDoors.begin(), coordinator->mShuttleDoors.end(),
+					[&](auto const& candidate) { return candidate.landingResource == request->mResource
+						&& candidate.stopIndex == door->stopIndex
+						&& candidate.accessZoneIndex == door->accessZoneIndex; })) ++queued;
+			}
+		return ShuttleRouteAccessObservation{ queued, max(1u, capacity),
+			(float)coordinator->mLiftMinimumDwellTicks * getFixedTimestep(),
+			coordinator->mLiftStops[door->stopIndex].globalPosition };
+	}
+
 	optional<LiftRouteAccessObservation> World::observeLiftAccess(
 		TraversalResourceId resourceId, Vector2 const& sourceEndpoint, bool includeLocalQueue) const
 	{

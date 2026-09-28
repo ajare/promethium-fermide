@@ -201,6 +201,7 @@ namespace core
 	public:
 
 		explicit Graph(World* world);
+		[[nodiscard]] World const* getWorld() const { return mwWorld; }
 
 		virtual ~Graph() = default;
 

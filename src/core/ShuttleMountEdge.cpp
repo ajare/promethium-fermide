@@ -71,6 +71,17 @@ namespace core
 				SectorId{ (uint64_t)targetVertex->getSector()->getIndex() + 1 }) : 0.0f);
 	}
 
+	DirectedTraversalFacts ShuttleMountEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
+	{
+		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Shuttle)) return {};
+		// Topology connector only: admission is charged at the landing Door.
+		DirectedTraversalFacts facts;
+		facts.feasible = true;
+		facts.objectiveDurationSeconds = 0.0f;
+		return facts;
+	}
+
 	bool ShuttleMountEdge::requiresButton() const
 	{
 		return true;

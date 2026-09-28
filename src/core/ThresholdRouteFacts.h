@@ -8,6 +8,7 @@
 #include "core/MobilityProfile.h"
 #include "core/Vertex.h"
 #include "core/Sector.h"
+#include "core/World.h"
 
 namespace core
 {
@@ -32,6 +33,32 @@ namespace core
 		// not inspect its queue, car position, calls, or scheduler state.
 		auto liftAccess = context.legacyAgent ? context.legacyAgent->observeLiftAccess(
 			edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
+		auto shuttleAccess = context.world ? context.world->observeShuttleAccess(
+			edge.getTraversalResourceId(), sourceEndpoint, observed)
+			: context.legacyAgent ? context.legacyAgent->observeShuttleAccess(
+				edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
+		if (shuttleAccess)
+		{
+			bool const boarding = sector && isLocationLike(sector->getType());
+			c.motionSeconds += boarding ? policy.shuttleBoardingSeconds : policy.shuttleAlightingSeconds;
+			c.interactionUnits = policy.thresholdInteraction + (boarding
+				? policy.shuttleBoardingInteraction : policy.shuttleAlightingInteraction);
+			if (boarding)
+			{
+				// Half a headway to the next service, plus expected missed services.
+				// No vehicle position, manifest, or remote queue is consulted.
+				auto passengers = observed ? (float)shuttleAccess->queuedAgents
+					: policy.shuttleExpectedQueuePassengers;
+				c.expectedWaitSeconds = policy.shuttleHeadwaySeconds
+					* (0.5f + passengers / shuttleAccess->capacity);
+				c.crowdingUnits = observed ? passengers / shuttleAccess->capacity
+					: policy.shuttleExpectedCrowdingUnits;
+				if (observed) c.knownWaitSeconds = door.isOpen() ? 0.0f : openingSeconds;
+				else c.expectedWaitSeconds += policy.unobservedDoorClosedProbability * openingSeconds;
+			}
+			facts.objectiveDurationSeconds = c.motionSeconds + c.knownWaitSeconds + c.expectedWaitSeconds;
+			return facts;
+		}
 		bool const liftBoarding = liftAccess && sector && isLocationLike(sector->getType());
 		// Style deliberately never enters routing, including tall OpenUp animation timing.
 		float preparationProbability = observed ? (door.isOpen() ? 0.0f : 1.0f)

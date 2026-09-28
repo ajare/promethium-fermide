@@ -10,6 +10,7 @@ namespace core
 {
 	class Agent;
 	class Sector;
+	class World;
 
 	struct RouteCostComponents
 	{
@@ -40,6 +41,14 @@ namespace core
 		uint32_t queuedAgents = 0;
 		uint32_t capacity = 1;
 		float minimumDwellSeconds = 0;
+	};
+
+	struct ShuttleRouteAccessObservation
+	{
+		uint32_t queuedAgents = 0;
+		uint32_t capacity = 1;
+		float minimumDwellSeconds = 0;
+		float stopPosition = 0;
 	};
 
 	struct DirectedTraversalFacts
@@ -94,6 +103,14 @@ namespace core
 		float liftAlightingInteraction = 0.25f;
 		float liftExpectedIntermediateStopsPerLevel = 0.12f;
 		float liftExpectedCrowdingUnits = 0.2f;
+		// Expected service interval, independent of unobserved vehicle position.
+		float shuttleHeadwaySeconds = 12.0f;
+		float shuttleExpectedQueuePassengers = 1.0f;
+		float shuttleBoardingSeconds = 1.0f;
+		float shuttleAlightingSeconds = 1.0f;
+		float shuttleBoardingInteraction = 0.75f;
+		float shuttleAlightingInteraction = 0.25f;
+		float shuttleExpectedCrowdingUnits = 0.2f;
 		float platformLiftPreparationSeconds = 2.0f;
 		float platformLiftInconvenience = 8.0f;
 		[[nodiscard]] std::optional<EvaluatedRouteCost> evaluate(
@@ -133,5 +150,6 @@ namespace core
 		RouteChoicePolicy const policy;
 		Sector const* const observationSector = nullptr;
 		float const walkSpeed = 0.5f;
+		World const* const world = nullptr;
 	};
 }

@@ -72,7 +72,8 @@ namespace
 			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / filename);
 			auto graph = world->getGraph();
 			core::Agent agent("Reference walker");
-			core::RouteDecisionContext const context{ &agent, {}, {} };
+			core::RouteDecisionContext const context{ &agent, {}, {}, nullptr,
+				agent.getWalkSpeed(), world.get() };
 			auto const& vertices = graph->getVertices();
 			for (auto const& source : vertices)
 			{

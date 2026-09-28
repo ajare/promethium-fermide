@@ -4,6 +4,7 @@
 #include "core/MobilityProfile.h"
 #include "core/ShuttleEdge.h"
 #include "core/Vertex.h"
+#include "core/World.h"
 #include "core/Agent.h"
 #include "core/Exceptions.h"
 
@@ -61,6 +62,36 @@ namespace core
 		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
 			+ (agent && resource ? agent->estimateTraversalDelay(resource,
 				SectorId{ (uint64_t)targetVertex->getSector()->getIndex() + 1 }) : 0.0f);
+	}
+
+	DirectedTraversalFacts ShuttleEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
+	{
+		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Shuttle)) return {};
+		auto source = getOtherVertex(target);
+		auto observe = [&](Vector2 const& endpoint)
+		{
+			return context.world ? context.world->observeShuttleAccess(getTraversalResourceId(), endpoint, false)
+				: context.legacyAgent ? context.legacyAgent->observeShuttleAccess(getTraversalResourceId(), endpoint, false)
+				: std::nullopt;
+		};
+		auto from = observe(source->getPosition());
+		auto to = observe(target->getPosition());
+		DirectedTraversalFacts facts;
+		facts.feasible = true;
+		auto& c = facts.components;
+		if (from && to)
+		{
+			auto distance = std::abs(to->stopPosition - from->stopPosition);
+			c.motionSeconds = distance > 0 ? distance / mShuttle->getSpeed() : getLength() / context.walkSpeed;
+			// Departure dwell on each leg includes intermediate stop service, without
+			// repeating the initial headway, queue, or boarding interaction.
+			if (distance > 0) c.expectedWaitSeconds = from->minimumDwellSeconds;
+		}
+		else c.motionSeconds = getLength() / mShuttle->getSpeed();
+		facts.optimisticLowerBoundSeconds = c.motionSeconds;
+		facts.objectiveDurationSeconds = c.motionSeconds + c.expectedWaitSeconds;
+		return facts;
 	}
 
 	bool ShuttleEdge::requiresButton() const

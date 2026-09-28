@@ -535,6 +535,8 @@ namespace core
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
 		float observeAccessZoneDensity(TraversalResourceId resource,
 			SectorId sourceSector) const;
+		std::optional<ShuttleRouteAccessObservation> observeShuttleAccess(
+			TraversalResourceId resource, Vector2 const& endpoint, bool includeLocalQueue) const;
 		std::optional<LiftRouteAccessObservation> observeLiftAccess(
 			TraversalResourceId resource, Vector2 const& sourceEndpoint,
 			bool includeLocalQueue = true) const;
