@@ -13,7 +13,12 @@ namespace core
 	{
 		std::shared_ptr<const Edge> edge;
 		std::shared_ptr<const Vertex> targetVertex;
+		// Legacy name retained for serialization/runtime compatibility; this is a
+		// cumulative perceived score, never a movement duration.
 		float edgeWeight;
+		std::optional<float> objectiveDurationSeconds;
+
+		float getCumulativePerceivedCost() const { return edgeWeight; }
 	};
 
 	struct Path

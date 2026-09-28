@@ -623,6 +623,7 @@ namespace core
 
 		std::vector<SimulationEvent> mEvents;
 
+		RouteChoicePolicy mRouteChoicePolicy;
 		TraversalWaitingPolicy mTraversalWaitingPolicy;
 
 		TraversalGeometryPolicy mTraversalGeometryPolicy;
@@ -1881,6 +1882,10 @@ namespace core
 		// Returns false when the Agent has no paused path intent.
 		bool getPausedPathIntent(Agent const& agent, TopologyPathIntent& intent) const;
 
+		// Editor operation: clears live/reset Paths and retained destination intent.
+		// Requires a paused World and refuses behaviour-owned movement.
+		bool clearAgentPath(AgentId agent);
+
 		bool isTraversalTopologyDirty() const { return mTopologyDirty; }
 
 		bool isTraversalTopologyValid() const { return mTopologyValid; }
@@ -2177,6 +2182,9 @@ namespace core
 		EntityRemovalResult removeTraversalResource(TraversalResourceId id);
 
 		EntityLookup<TraversalRequest const> lookupTraversalRequest(TraversalRequestId id) const;
+
+		RouteChoicePolicy const& getRouteChoicePolicy() const { return mRouteChoicePolicy; }
+		void setRouteChoicePolicy(RouteChoicePolicy policy) { mRouteChoicePolicy = policy; }
 
 		TraversalWaitingPolicy const& getTraversalWaitingPolicy() const;
 

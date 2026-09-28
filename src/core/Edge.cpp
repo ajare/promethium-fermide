@@ -1,6 +1,8 @@
 #include <cassert>
+#include <limits>
 
 #include "core/Edge.h"
+#include "core/Defines.h"
 #include "core/Vertex.h"
 #include "core/Exceptions.h"
 
@@ -44,20 +46,31 @@ namespace core
 	dynamic factors, for instance the speed of a Lift.  The weight calculation is
 	bi-directional and takes a target Vertex to determine direction.  There are times
 	when we want to mark an Edge as untraversable.  This is done by returning a very
-	large time value - CORE_GRAPH_EDGE_UNTRAVERSABLE - which can be used in two ways:
-	  
-	  - The Edge can be used, as a last resort if there are no other routes available
-	  - The Edge effectively does not exist
-
-	How Agents choose to interpret weights greater than or equal to this value is up to them.  
-	They will have to handle the situation where they suddenly become cut off - eg the only
-	Door out of a Location becomes locked from the outside.
+	large time value - CORE_GRAPH_EDGE_UNTRAVERSABLE. The compatibility adapter
+	translates this (and legacy positive infinity) into hard exclusion, never a
+	last-resort route. New implementations expose DirectedTraversalFacts instead;
+	finite perceived dislike is independent of feasibility and objective duration.
 
 	As Graphs may be copied, and their Edges and Vertices copied as well, we still
 	need a way to know whether an Edge in one Graph is the same as in another - ie
 	topologically the same, even if its weights and other values are different.  For
 	this, we use an GUID (IdGenerator), and the Edge::sameAs() method.
 	*/
+
+	DirectedTraversalFacts Edge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
+	{
+		auto const weight = getWeight(targetVertex, context.legacyAgent, true);
+		// Legacy hard exclusions use either the finite sentinel or +infinity
+		// (wrong-way Escalators and resources unpreparable from this side).
+		// New facts must use feasible=false, never a non-finite component.
+		if (weight == CORE_GRAPH_EDGE_UNTRAVERSABLE
+			|| weight == std::numeric_limits<float>::infinity()) return {};
+		DirectedTraversalFacts facts;
+		facts.feasible = true;
+		facts.components.motionSeconds = weight;
+		return facts;
+	}
 
 	uint32_t Edge::IdGenerator = 0;
 

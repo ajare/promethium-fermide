@@ -13,6 +13,31 @@ namespace
 		if (!value) throw std::runtime_error(message);
 	}
 
+	void clearPausedPathDoesNotResume()
+	{
+		core::World world("Clear paused Path", 6, 2);
+		auto corridor = world.addCorridor(0, 0, 5);
+		uint32_t destination = 0;
+		world.addSectorMarker(corridor, 0, 4.5f, &destination);
+		world.finishBuild();
+		auto id = world.createAgent("Walker", corridor, 0, 0.5f);
+		auto agent = world.lookupAgent(id).entity;
+		agent->setPath(world.getGraph()->calculatePath(agent,
+			world.getGraph()->getVertexByIdentifier(destination)), true);
+		require(world.advanceTicks(30), "Clear Path fixture could not advance");
+		require(!world.clearAgentPath(id), "Editor Path clear accepted a running World");
+		world.pauseSimulation();
+		core::World::TopologyPathIntent intent;
+		require(world.getPausedPathIntent(*agent, intent), "Pause did not retain destination");
+		auto const position = agent->getGlobalPosition();
+		require(world.clearAgentPath(id), "Paused Path could not be cleared");
+		require(!agent->getPath() && !world.getPausedPathIntent(*agent, intent),
+			"Clear Path left live or paused destination intent");
+		require(world.resumeSimulation() && world.advanceTicks(60), "Cleared World could not resume");
+		require(!agent->getPath() && agent->getGlobalPosition() == position,
+			"Cleared Path resumed movement");
+	}
+
 	void pauseWalkingAgent(bool startsAtMarker)
 	{
 		core::World world("Pause walking", 6, 2);
@@ -63,6 +88,7 @@ namespace
 
 void runPausePositionSmokeChecks()
 {
+	clearPausedPathDoesNotResume();
 	pauseWalkingAgent(true);
 	pauseWalkingAgent(false);
 }

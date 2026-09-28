@@ -6636,6 +6636,17 @@ namespace core
 		mSimulationCoordinator.publishTopologyEvent(SimulationEventType::SimulationPaused);
 	}
 
+	bool World::clearAgentPath(AgentId id)
+	{
+		if (!isSimulationPaused() || agentBehaviourOwnsMovement(id)) return false;
+		auto agent = mAgents.find(id);
+		if (!agent) return false;
+		mSimulationCoordinator.clearAgentMovementForBehaviourEdit(id);
+		agent->clearPath();
+		modify();
+		return true;
+	}
+
 	bool World::getPausedPathIntent(Agent const& agent, TopologyPathIntent& intent) const
 	{
 		for (auto const& [id, candidate] : mPausedPathIntents)

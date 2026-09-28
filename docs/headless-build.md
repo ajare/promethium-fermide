@@ -179,6 +179,39 @@ carrying its occupants. Queue state is not consulted by pathfinding and introduc
 no general collision avoidance, so an unrelated Agent's Path is not displaced by
 waiting Agents.
 
+## Perceived-cost routing (#205)
+
+Routing now uses Dijkstra with graph-slot tie-breaking, retaining the reusable
+Graph-owned workspace. `RouteCost.h` separates explicit feasibility, validated
+non-negative cost components, optional objective duration, and perceived cost.
+A World owns the runtime `RouteChoicePolicy`; each synchronous query copies its
+policy/profile into a const `RouteDecisionContext` and captures both directions
+of every arc before expanding the frontier. Relaxation reads only this snapshot.
+Snapshot buffers are reused and included in scratch-allocation accounting.
+
+`Edge::getDirectedTraversalFacts` is the migration seam. Its default adapter
+retains existing `getWeight(..., true)` behaviour, including Mobility checks and
+legacy finite-sentinel/+infinity exclusions. New facts use `feasible=false` for
+exclusions; even a perceived cost above the old sentinel remains usable. Invalid
+components, totals, or cumulative scores are rejected with `invalid_argument`.
+The compatibility adapter does not claim that mixed legacy weights are objective
+time: cumulative objective duration is unavailable until all traversed edges
+supply it. `PathNode::edgeWeight` remains the cumulative perceived score for
+compatibility, also exposed as `getCumulativePerceivedCost()`.
+
+The initial capture is O(E) per query and still performs legacy tag/live-state
+lookups. Compact authored facts, effective physical profiles, local-only
+observations, and traversal-specific timing are subsequent migration work; no
+claim of local-only knowledge is made for the compatibility adapter. Actual
+movement and traversal coordination continue using their existing timing APIs.
+
+`PathfindingWorkspaceSmokeChecks` checks all vertex pairs in the four bundled
+#191 Worlds against an independent reference Dijkstra, component validation,
+finite dislike versus exclusion, graph-slot ties, null-Agent previews,
+source-equals-target, unreachable/stale workspace behaviour, and warmed scratch
+allocation stability. Existing Mobility routing and runtime-gate tests remain
+active.
+
 ## Prerequisites
 
 - Windows x64

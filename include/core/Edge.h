@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/EdgeType.h"
+#include "core/RouteCost.h"
 #include "core/EdgeTraversalRequestResult.h"
 #include "core/EntityId.h"
 
@@ -78,6 +79,10 @@ namespace core
 
 		// To be implemented by subclasses.  Returned weight is in seconds.
 		[[nodiscard]] virtual float getWeight(std::shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const = 0;
+
+		// Migration seam: subclasses may expose facts without encoding exclusion in a weight.
+		[[nodiscard]] virtual DirectedTraversalFacts getDirectedTraversalFacts(
+			std::shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const;
 
 		// True when using this Edge necessarily requires operating an interaction
 		// point. This is a pure function of authored resource data.

@@ -13,6 +13,24 @@
 
 namespace core
 {
+	void PathfindingWorkspace::captureRouteCosts(Graph const& graph, RouteDecisionContext const& context)
+	{
+		auto const oldOffsetsCapacity = routeOffsets.capacity();
+		auto const oldCostsCapacity = routeCosts.capacity();
+		routeOffsets.resize(graph.getVertices().size());
+		routeCosts.clear();
+		routeCosts.reserve(graph.getEdges().size() * 2);
+		for (auto const& vertex : graph.getVertices())
+		{
+			routeOffsets[vertex->getSearchIndex()] = routeCosts.size();
+			for (auto const& edge : vertex->getEdges())
+				routeCosts.push_back(context.policy.evaluate(
+					edge->getDirectedTraversalFacts(edge->getOtherVertex(vertex), context), context.profile));
+		}
+		if (routeOffsets.capacity() != oldOffsetsCapacity) ++mScratchAllocationCount;
+		if (routeCosts.capacity() != oldCostsCapacity) ++mScratchAllocationCount;
+	}
+
 	bool PathfindingWorkspace::precedes(FrontierNode const& left, FrontierNode const& right)
 	{
 		if (left.priority < right.priority) return true;
@@ -64,6 +82,7 @@ namespace core
 		};
 
 		resizeTracked(scores);
+		resizeTracked(durations);
 		resizeTracked(cameFrom);
 		resizeTracked(visitGenerations);
 		resizeTracked(edges);
@@ -142,14 +161,6 @@ namespace core
 
 		namespace
 		{
-			float vertexHeuristic(Agent const* agent, node_type const& source, node_type const& target)
-			{
-				auto const& pos0 = source->getPosition();
-				auto const& pos1 = target->getPosition();
-				auto const distance = std::fabs(pos1.x - pos0.x) + std::fabs(pos1.y - pos0.y);
-				return distance / agent->getWalkSpeed();
-			}
-
 			bool blocksPathing(node_type const& vertex)
 			{
 				auto marker = std::dynamic_pointer_cast<Marker>(vertex->getObject());
@@ -175,10 +186,10 @@ namespace core
 				auto slot = targetSlot;
 				while (slot != sourceSlot)
 				{
-					nodes.push_back({ workspace.edges[slot], vertices[slot], workspace.scores[slot] });
+					nodes.push_back({ workspace.edges[slot], vertices[slot], workspace.scores[slot], workspace.durations[slot] });
 					slot = workspace.cameFrom[slot];
 				}
-				nodes.push_back({ nullptr, vertices[sourceSlot], 0.0f });
+				nodes.push_back({ nullptr, vertices[sourceSlot], 0.0f, 0.0f });
 				std::reverse(nodes.begin(), nodes.end());
 				return std::make_shared<Path>(std::move(nodes));
 			}
@@ -187,6 +198,13 @@ namespace core
 		std::shared_ptr<Path> findPath(Agent const* agent, Graph const* graph,
 			node_type source, node_type target)
 		{
+			if (!graph || (!agent && !source)) return nullptr;
+			// A real baseline Agent keeps legacy implementations null-safe.
+			std::optional<Agent> baselineAgent;
+			if (!agent) baselineAgent.emplace("Route preview");
+			auto const* routingAgent = agent ? agent : &*baselineAgent;
+			RouteDecisionContext const context{ routingAgent,
+				graph->getRouteChoicePolicy().baselineProfile, graph->getRouteChoicePolicy() };
 			auto const inferredSource = !source;
 			if (inferredSource)
 			{
@@ -208,10 +226,12 @@ namespace core
 			auto& workspace = graph->getPathfindingWorkspace();
 			auto const& vertices = graph->getVertices();
 			workspace.beginSearch(vertices.size());
+			workspace.captureRouteCosts(*graph, context);
 			auto const generation = workspace.getGeneration();
 			workspace.visitGenerations[sourceSlot] = generation;
 			workspace.cameFrom[sourceSlot] = sourceSlot;
 			workspace.scores[sourceSlot] = 0.0f;
+			workspace.durations[sourceSlot] = 0.0f;
 			workspace.edges[sourceSlot].reset();
 			workspace.put(sourceSlot, 0.0f);
 
@@ -224,23 +244,32 @@ namespace core
 				// as an intermediate waypoint; a Path which starts there may leave it.
 				if (currentSlot != sourceSlot && blocksPathing(current)) continue;
 
+				auto arcIndex = workspace.routeOffsets[currentSlot];
 				for (auto const& edge : current->getEdges())
 				{
 					auto const next = edge->getOtherVertex(current);
 					auto const nextSlot = next->getSearchIndex();
-					auto const edgeCost = edge->getWeight(next, agent, true);
-					if (!std::isfinite(edgeCost) || edgeCost >= CORE_GRAPH_EDGE_UNTRAVERSABLE) continue;
-					auto const newCost = workspace.scores[currentSlot] + edgeCost;
+					auto const& cost = workspace.routeCosts[arcIndex++];
+					if (!cost) continue;
+					auto const newCost = workspace.scores[currentSlot] + cost->perceivedCost;
+					if (!std::isfinite(newCost))
+						throw std::invalid_argument("Cumulative route cost is not finite");
 
 					if (workspace.visitGenerations[nextSlot] != generation
 						|| newCost < workspace.scores[nextSlot])
 					{
 						workspace.visitGenerations[nextSlot] = generation;
 						workspace.scores[nextSlot] = newCost;
+						workspace.durations[nextSlot].reset();
+						if (workspace.durations[currentSlot] && cost->objectiveDurationSeconds)
+						{
+							auto const duration = *workspace.durations[currentSlot] + *cost->objectiveDurationSeconds;
+							if (!std::isfinite(duration)) throw std::invalid_argument("Route duration is not finite");
+							workspace.durations[nextSlot] = duration;
+						}
 						workspace.cameFrom[nextSlot] = currentSlot;
 						workspace.edges[nextSlot] = edge;
-						workspace.put(nextSlot,
-							newCost + vertexHeuristic(agent, next, target));
+						workspace.put(nextSlot, newCost);
 					}
 				}
 			}
@@ -263,10 +292,17 @@ namespace core
 					&& firstVertex->getSubType() != VertexSubType::Interactable
 					&& path->nodes[1].edge && path->nodes[1].edge->getType() == EdgeType::Location)
 				{
+					auto const skippedDuration = path->nodes[1].objectiveDurationSeconds;
 					auto const skippedCost = path->nodes[1].edgeWeight;
 					path->nodes.erase(path->nodes.begin());
 					path->nodes[0].edge = nullptr;
-					for (auto& node : path->nodes) node.edgeWeight -= skippedCost;
+					for (auto& node : path->nodes)
+					{
+						node.edgeWeight -= skippedCost;
+						if (node.objectiveDurationSeconds && skippedDuration)
+							*node.objectiveDurationSeconds -= *skippedDuration;
+					}
+					path->nodes[0].objectiveDurationSeconds = 0.0f;
 				}
 			}
 

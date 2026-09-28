@@ -26,6 +26,10 @@ namespace core
 		};
 
 		std::vector<float> scores;
+		std::vector<std::optional<float>> durations;
+		std::vector<size_t> routeOffsets;
+		std::vector<std::optional<EvaluatedRouteCost>> routeCosts;
+		void captureRouteCosts(Graph const& graph, RouteDecisionContext const& context);
 		std::vector<uint32_t> cameFrom;
 		std::vector<uint32_t> visitGenerations;
 		std::vector<std::shared_ptr<const Edge>> edges;

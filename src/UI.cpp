@@ -6882,6 +6882,25 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		ImGui::EndDisabled();
 		if (behaviourOwnsMovement && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip("The enabled Agent behaviour owns movement");
+
+		core::World::TopologyPathIntent intent;
+		auto const hasPath = gSelectedAgent->getPath()
+			|| world->getPausedPathIntent(*gSelectedAgent, intent);
+		ImGui::SameLine();
+		ImGui::BeginDisabled(behaviourOwnsMovement || !hasPath);
+		if (ImGui::Button("Clear path"))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			if (undo)
+			{
+				if (!world->isSimulationPaused()) world->pauseSimulation();
+				gUISettings.worldPaused = true;
+				if (world->clearAgentPath(id)) commitDocumentEdit(std::move(undo));
+			}
+		}
+		ImGui::EndDisabled();
+		if (behaviourOwnsMovement && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("The enabled Agent behaviour owns movement");
 	}
 
 	const char* state = "Unknown";
@@ -6911,7 +6930,23 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	}
 	else
 	{
-		ImGui::Text("Path: <none>");
+		// Pausing cancels live traversal, not the Agent's destination intent.
+		core::World::TopologyPathIntent intent;
+		if (world->isSimulationPaused() && world->getPausedPathIntent(*gSelectedAgent, intent))
+		{
+			auto const destination = intent.destinationSector
+				&& intent.destinationSector.value <= world->getNumSectors()
+				? world->getSector(static_cast<uint32_t>(intent.destinationSector.value - 1))
+				: nullptr;
+			ImGui::TextUnformatted("Path: paused");
+			ImGui::Text("Destination: %s (%.2f, %.2f)",
+				destination ? destination->getDescription().c_str() : "<unknown>",
+				intent.destinationPosition.x, intent.destinationPosition.y);
+		}
+		else
+		{
+			ImGui::TextUnformatted("Path: <none>");
+		}
 	}
 
 	if (gSelectedVertex)
@@ -7247,7 +7282,9 @@ void renderPathingPanel(shared_ptr<core::World> const& world,
 				float curWeight = 0.0f;
 				for (auto const& node : path->nodes)
 				{
-					auto const& [edge, targetVertex, cumulativeWeight] = node;
+					auto const& edge = node.edge;
+					auto const& targetVertex = node.targetVertex;
+					auto const cumulativeWeight = node.getCumulativePerceivedCost();
 
 					string edgeText = edge ? edge->getDescription() : "<no edge>";
 					string pathVertexText = targetVertex->getDescription();

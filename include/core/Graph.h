@@ -222,6 +222,7 @@ namespace core
 
 		// Read-only diagnostic: counts capacity growth in Graph-owned search scratch.
 		uint64_t getScratchAllocationCount() const;
+		RouteChoicePolicy const& getRouteChoicePolicy() const;
 
 		std::shared_ptr<Path> calculatePath(Agent const* agent, std::shared_ptr<const Vertex> source, std::shared_ptr<const Vertex> target) const;
 

@@ -1,4 +1,7 @@
 #include <bit>
+#include <filesystem>
+#include <limits>
+#include "core/AgentTagRegistryDocument.h"
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -9,6 +12,7 @@
 #include "core/Edge.h"
 #include "core/Graph.h"
 #include "core/Path.h"
+#include "core/Pathing.h"
 #include "core/Vertex.h"
 #include "core/World.h"
 
@@ -27,6 +31,80 @@ namespace
 		for (auto const& node : path->nodes)
 			result.emplace_back(node.targetVertex->getId(), std::bit_cast<uint32_t>(node.edgeWeight));
 		return result;
+	}
+
+	void costContract()
+	{
+		core::RouteChoicePolicy policy;
+		core::DirectedTraversalFacts facts;
+		require(!policy.evaluate(facts, {}), "Excluded traversal acquired a finite cost");
+		facts.feasible = true;
+		facts.components.motionSeconds = 2;
+		facts.components.physicalEffortUnits = 2000000;
+		facts.objectiveDurationSeconds = 2;
+		auto cost = policy.evaluate(facts, {});
+		require(cost && cost->perceivedCost == 2000002 && cost->objectiveDurationSeconds == 2,
+			"Finite dislike became exclusion or changed objective duration");
+		core::PathfindingWorkspace workspace;
+		workspace.beginSearch(4);
+		workspace.put(3, 1);
+		workspace.put(1, 1);
+		workspace.put(2, 1);
+		require(workspace.get() == 1 && workspace.get() == 2 && workspace.get() == 3,
+			"Equal-cost frontier ties are not ordered by graph slot");
+		for (float invalid : { -1.0f, std::numeric_limits<float>::infinity(),
+			std::numeric_limits<float>::quiet_NaN() })
+		{
+			facts.components.riskUnits = invalid;
+			bool rejected = false;
+			try { (void)policy.evaluate(facts, {}); }
+			catch (std::invalid_argument const&) { rejected = true; }
+			require(rejected, "Invalid component entered routing");
+		}
+	}
+
+	void bundledRoutesMatchReference()
+	{
+		auto const root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+		for (auto const* filename : { "lift-test-1.world.yaml", "shuttle-test-1.world.yaml",
+			"stairwell-test-1.world.yaml", "staircase-test-1.world.yaml" })
+		{
+			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / filename);
+			auto graph = world->getGraph();
+			core::Agent agent("Reference walker");
+			core::RouteDecisionContext const context{ &agent, {}, {} };
+			auto const& vertices = graph->getVertices();
+			for (auto const& source : vertices)
+			{
+				// Independent O(V^2) Dijkstra, no production heap or workspace.
+				std::vector<float> distances(vertices.size(), std::numeric_limits<float>::infinity());
+				std::vector<bool> settled(vertices.size(), false);
+				distances[source->getSearchIndex()] = 0;
+				for (size_t step = 0; step < vertices.size(); ++step)
+				{
+					size_t best = vertices.size();
+					for (size_t i = 0; i < vertices.size(); ++i)
+						if (!settled[i] && (best == vertices.size() || distances[i] < distances[best])) best = i;
+					if (best == vertices.size() || !std::isfinite(distances[best])) break;
+					settled[best] = true;
+					for (auto const& edge : vertices[best]->getEdges())
+					{
+						auto next = edge->getOtherVertex(vertices[best]);
+						auto cost = context.policy.evaluate(edge->getDirectedTraversalFacts(next, context), context.profile);
+						if (cost) distances[next->getSearchIndex()] = std::min(distances[next->getSearchIndex()],
+							distances[best] + cost->perceivedCost);
+					}
+				}
+				for (auto const& target : vertices)
+				{
+					auto path = graph->calculatePath(&agent, source, target);
+					auto expected = distances[target->getSearchIndex()];
+					require(bool(path) == std::isfinite(expected), "Reference reachability mismatch");
+					if (path) require(std::abs(path->nodes.back().edgeWeight - expected) < 0.001f,
+						"Bundled Path does not minimise perceived directed costs (#191)");
+				}
+			}
+		}
 	}
 
 	void reusedWorkspaceIsStableAndDoesNotGrow()
@@ -76,6 +154,11 @@ namespace
 			require(std::abs(cumulativeCost - node.edgeWeight) < 0.0001f,
 				"Path cumulative cost differs from its Edge weights");
 		}
+		require(!first->nodes.back().objectiveDurationSeconds,
+			"Legacy mixed weights were reported as objective duration");
+		auto const preview = graph->calculatePath(nullptr, source, destination);
+		require(preview && digest(preview) == digest(first), "Null-Agent baseline preview changed routing");
+		require(!graph->calculatePath(nullptr, destination), "Null-Agent inferred source was accepted");
 		auto const expectedDigest = digest(first);
 		auto const allocationsAfterWarmup = graph->getScratchAllocationCount();
 		require(allocationsAfterWarmup != 0, "The first Path search did not initialise workspace scratch");
@@ -108,5 +191,7 @@ namespace
 
 void runPathfindingWorkspaceSmokeChecks()
 {
+	costContract();
+	bundledRoutesMatchReference();
 	reusedWorkspaceIsStableAndDoesNotGrow();
 }

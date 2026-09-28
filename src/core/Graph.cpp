@@ -206,6 +206,11 @@ namespace core
 		return it->second;
 	}
 
+	RouteChoicePolicy const& Graph::getRouteChoicePolicy() const
+	{
+		return mwWorld->getRouteChoicePolicy();
+	}
+
 	shared_ptr<Path> Graph::calculatePath(Agent const* agent, shared_ptr<const Vertex> source, shared_ptr<const Vertex> target) const
 	{
 		return pathing::findPath(agent, this, source, target);
