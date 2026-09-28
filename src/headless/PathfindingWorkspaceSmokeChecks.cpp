@@ -154,8 +154,9 @@ namespace
 			require(std::abs(cumulativeCost - node.edgeWeight) < 0.0001f,
 				"Path cumulative cost differs from its Edge weights");
 		}
-		require(!first->nodes.back().objectiveDurationSeconds,
-			"Legacy mixed weights were reported as objective duration");
+		require(first->nodes.back().objectiveDurationSeconds
+			&& std::abs(*first->nodes.back().objectiveDurationSeconds - cumulativeCost) < 0.0001f,
+			"Walking Path did not report physical objective duration");
 		auto const preview = graph->calculatePath(nullptr, source, destination);
 		require(preview && digest(preview) == digest(first), "Null-Agent baseline preview changed routing");
 		require(!graph->calculatePath(nullptr, destination), "Null-Agent inferred source was accepted");

@@ -124,6 +124,7 @@ void runViewportZoomSmokeChecks();
 void runZeroSizeLocationSmokeChecks();
 void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
+void runThresholdRouteCostSmokeChecks();
 void runWorldTeardownSmokeChecks();
 void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
@@ -351,7 +352,8 @@ namespace
 		return inferredPath && inferredPath->nodes.size() == 1
 			&& inferredPath->nodes.front().targetVertex->sameAs(destination)
 			&& !inferredPath->nodes.front().edge
-			&& inferredPath->nodes.front().edgeWeight == 0.0f
+			&& inferredPath->nodes.front().edgeWeight == 3.0f / agent->getWalkSpeed()
+			&& inferredPath->nodes.front().objectiveDurationSeconds == 3.0f / agent->getWalkSpeed()
 			&& explicitPath && explicitPath->nodes.size() == 2
 			&& explicitPath->nodes.front().targetVertex->sameAs(source);
 	}
@@ -6317,6 +6319,7 @@ int main(int argc, char** argv)
 		runZeroSizeLocationSmokeChecks();
 		runIsolatedSectorPathingSmokeChecks();
 		runPathfindingWorkspaceSmokeChecks();
+		runThresholdRouteCostSmokeChecks();
 		runWorldTeardownSmokeChecks();
 
 		auto const deepJourney = runThreeLayerTransitJourney();

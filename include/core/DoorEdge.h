@@ -27,6 +27,9 @@ namespace core
 
 		EdgeTraversalRequestResult requestTraversal(std::shared_ptr<const Vertex> targetVertex, std::shared_ptr<const Agent> agent) const override;
 
+		DirectedTraversalFacts getDirectedTraversalFacts(std::shared_ptr<const Vertex> targetVertex,
+			RouteDecisionContext const& context) const override;
+
 		float getWeight(std::shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const override;
 
 		[[nodiscard]] bool requiresButton() const override;

@@ -1,4 +1,5 @@
 #include <cassert>
+#include "ThresholdRouteFacts.h"
 
 #include "core/Defines.h"
 #include "core/MobilityProfile.h"
@@ -54,6 +55,15 @@ namespace core
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
 			return EdgeTraversalRequestResult::Failed;
 		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
+	}
+
+	DirectedTraversalFacts BulkheadDoorEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
+	{
+		auto const distance = getLength();
+		return thresholdRouteFacts(*this, *mDoor, target, context,
+			distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed,
+			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
 	}
 
 	float BulkheadDoorEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const

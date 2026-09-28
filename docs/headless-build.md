@@ -2,6 +2,34 @@
 
 The `core` target builds the shared simulation as `prometheum-fermide-core.lib`. Both the `headless` and `editor` projects reference that static library, so simulation sources are compiled once per configuration instead of being duplicated in each executable. The `headless` target builds deterministic smoke scenarios without SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
 
+## Walking and threshold route costs (#206)
+
+`ThresholdRouteCostSmokeChecks.cpp` covers physical walking and Bulkhead Door
+crossing distance, Walk speed scaling, Door crossing and opening preparation,
+automatic/manual/remote interaction costs, approach-side queue charging, and
+unobserved state/queue isolation. Paired alternatives reproduce #206's manual
+check: an open automatic Door beats a nearby closed remote Door; opening the
+remote Door makes the shorter route win. All four opening styles, including a
+tall Door, retain the same costs and selected Path.
+
+The saved `realistic-pathing-test.world.yaml` also exercises inferred-source
+routing: the Agent's actual position splits the ordinary floor edge beneath it,
+so both approach directions compete with their physical walking costs. The
+search does not first force a visit to the nearest vertex. Reconstruction retains
+that initial approach in cumulative cost and duration; explicit-source queries
+still start at zero. The scenario checks the manual alternative, repeat-query
+determinism, warmed scratch reuse, and arrival at the saved destination.
+
+These arcs expose motion and estimated objective duration separately from
+perceived inconvenience. The query captures effective Walk speed and the Agent's
+current Sector. Only thresholds approached from that Sector reveal state and
+queue delay; other thresholds (including null-Agent previews) use policy
+expectations. Defaults assume a 50% chance of needing opening preparation and
+no unknown queue delay. Threshold/manual/remote interaction defaults are
+0.05/0.5/2 seconds-equivalent. Opening preparation uses style-independent nominal
+timing; visual animation timing remains unchanged. Unmigrated modes retain the
+compatibility adapter.
+
 ## Deterministic simulation API
 
 `World::advanceTick()` and `World::advanceTicks()` are the headless seam. Each tick is `World::getFixedTimestep()` (1/60 second) and runs these phases in order:

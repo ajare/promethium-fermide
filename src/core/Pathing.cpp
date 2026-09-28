@@ -6,6 +6,7 @@
 #include "core/Pathing.h"
 #include "core/Graph.h"
 #include "core/Marker.h"
+#include "core/Location.h"
 #include "core/Agent.h"
 #include "core/Edge.h"
 #include "core/Exceptions.h"
@@ -175,7 +176,7 @@ namespace core
 				return slot < vertices.size() && vertices[slot].get() == vertex.get();
 			}
 
-			std::shared_ptr<Path> reconstructPath(Graph const* graph, uint32_t sourceSlot,
+			std::shared_ptr<Path> reconstructPath(Graph const* graph,
 				uint32_t targetSlot, PathfindingWorkspace const& workspace)
 			{
 				auto const generation = workspace.getGeneration();
@@ -184,12 +185,12 @@ namespace core
 				std::vector<PathNode> nodes;
 				auto const& vertices = graph->getVertices();
 				auto slot = targetSlot;
-				while (slot != sourceSlot)
+				while (workspace.cameFrom[slot] != slot)
 				{
 					nodes.push_back({ workspace.edges[slot], vertices[slot], workspace.scores[slot], workspace.durations[slot] });
 					slot = workspace.cameFrom[slot];
 				}
-				nodes.push_back({ nullptr, vertices[sourceSlot], 0.0f, 0.0f });
+				nodes.push_back({ nullptr, vertices[slot], workspace.scores[slot], workspace.durations[slot] });
 				std::reverse(nodes.begin(), nodes.end());
 				return std::make_shared<Path>(std::move(nodes));
 			}
@@ -204,7 +205,8 @@ namespace core
 			if (!agent) baselineAgent.emplace("Route preview");
 			auto const* routingAgent = agent ? agent : &*baselineAgent;
 			RouteDecisionContext const context{ routingAgent,
-				graph->getRouteChoicePolicy().baselineProfile, graph->getRouteChoicePolicy() };
+				graph->getRouteChoicePolicy().baselineProfile, graph->getRouteChoicePolicy(),
+				agent ? agent->getSector() : nullptr, routingAgent->getWalkSpeed() };
 			auto const inferredSource = !source;
 			if (inferredSource)
 			{
@@ -228,12 +230,45 @@ namespace core
 			workspace.beginSearch(vertices.size());
 			workspace.captureRouteCosts(*graph, context);
 			auto const generation = workspace.getGeneration();
-			workspace.visitGenerations[sourceSlot] = generation;
-			workspace.cameFrom[sourceSlot] = sourceSlot;
-			workspace.scores[sourceSlot] = 0.0f;
-			workspace.durations[sourceSlot] = 0.0f;
-			workspace.edges[sourceSlot].reset();
-			workspace.put(sourceSlot, 0.0f);
+			auto seed = [&](node_type const& vertex, float approachSeconds)
+			{
+				auto slot = vertex->getSearchIndex();
+				if (!std::isfinite(approachSeconds) || approachSeconds < 0)
+					throw std::invalid_argument("Invalid route approach duration");
+				if (workspace.visitGenerations[slot] == generation
+					&& workspace.scores[slot] <= approachSeconds) return;
+				workspace.visitGenerations[slot] = generation;
+				workspace.cameFrom[slot] = slot;
+				workspace.scores[slot] = approachSeconds;
+				workspace.durations[slot] = approachSeconds;
+				workspace.edges[slot].reset();
+				workspace.put(slot, approachSeconds);
+			};
+			auto const floorSource = inferredSource && dynamic_cast<Location const*>(agent->getSector());
+			if (floorSource)
+			{
+				auto const position = agent->getGlobalPosition();
+				seed(source, position.distanceTo(source->getPosition()) / context.walkSpeed);
+				// A virtual source splits the ordinary floor edge beneath the Agent.
+				// Seed both endpoints with actual approach time, not the full edge
+				// length from an arbitrarily chosen nearest vertex. Never split a
+				// Gap, Force Bridge, threshold, or transit edge to bypass admission.
+				for (auto const& edge : graph->getEdges())
+				{
+					if (edge->getType() != EdgeType::Location) continue;
+					auto a = edge->getVertex(0);
+					auto b = edge->getVertex(1);
+					if (a->getSector().get() != agent->getSector()
+						|| b->getSector().get() != agent->getSector()) continue;
+					auto const pa = a->getPosition();
+					auto const pb = b->getPosition();
+					if (std::abs(pa.y - position.y) > 0.001f || std::abs(pb.y - position.y) > 0.001f
+						|| position.x <= std::min(pa.x, pb.x) || position.x >= std::max(pa.x, pb.x)) continue;
+					seed(a, position.distanceTo(pa) / context.walkSpeed);
+					seed(b, position.distanceTo(pb) / context.walkSpeed);
+				}
+			}
+			else seed(source, 0.0f);
 
 			while (!workspace.frontierEmpty())
 			{
@@ -242,7 +277,13 @@ namespace core
 				auto const& current = vertices[currentSlot];
 				// A blocking Marker can still be a Path endpoint. It cannot be expanded
 				// as an intermediate waypoint; a Path which starts there may leave it.
-				if (currentSlot != sourceSlot && blocksPathing(current)) continue;
+				if (blocksPathing(current))
+				{
+					auto const isOrigin = floorSource
+						? current->getPosition().distanceTo(agent->getGlobalPosition()) < 0.001f
+						: currentSlot == sourceSlot;
+					if (!isOrigin) continue;
+				}
 
 				auto arcIndex = workspace.routeOffsets[currentSlot];
 				for (auto const& edge : current->getEdges())
@@ -274,39 +315,7 @@ namespace core
 				}
 			}
 
-			auto path = reconstructPath(graph, sourceSlot, targetSlot, workspace);
-
-			// Skip a backwards approach only along ordinary horizontal floor.
-			if (inferredSource && path && path->nodes.size() >= 2)
-			{
-				auto const& agentPosition = agent->getGlobalPosition();
-				auto const& firstVertex = path->nodes[0].targetVertex;
-				auto const& secondVertex = path->nodes[1].targetVertex;
-				auto const firstDirection = firstVertex->getPosition() - agentPosition;
-				auto const secondDirection = secondVertex->getPosition() - agentPosition;
-				auto const directionsAreOpposite =
-					firstDirection.x * secondDirection.x + firstDirection.y * secondDirection.y < 0.0f;
-
-				if (firstVertex->getSector() == secondVertex->getSector() && directionsAreOpposite
-					&& std::abs(firstDirection.y) < 0.001f && std::abs(secondDirection.y) < 0.001f
-					&& firstVertex->getSubType() != VertexSubType::Interactable
-					&& path->nodes[1].edge && path->nodes[1].edge->getType() == EdgeType::Location)
-				{
-					auto const skippedDuration = path->nodes[1].objectiveDurationSeconds;
-					auto const skippedCost = path->nodes[1].edgeWeight;
-					path->nodes.erase(path->nodes.begin());
-					path->nodes[0].edge = nullptr;
-					for (auto& node : path->nodes)
-					{
-						node.edgeWeight -= skippedCost;
-						if (node.objectiveDurationSeconds && skippedDuration)
-							*node.objectiveDurationSeconds -= *skippedDuration;
-					}
-					path->nodes[0].objectiveDurationSeconds = 0.0f;
-				}
-			}
-
-			return path;
+			return reconstructPath(graph, targetSlot, workspace);
 		}
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(

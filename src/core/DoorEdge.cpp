@@ -1,4 +1,5 @@
 #include <cassert>
+#include "ThresholdRouteFacts.h"
 
 #include "core/Defines.h"
 #include "core/MobilityProfile.h"
@@ -55,6 +56,14 @@ namespace core
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
 			return EdgeTraversalRequestResult::Failed;
 		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
+	}
+
+	DirectedTraversalFacts DoorEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
+	{
+		// Runtime keeps an ordinary Door crossing in place for six 1/60-second ticks.
+		return thresholdRouteFacts(*this, *mDoor, target, context, 6.0f / 60.0f,
+			CORE_DOOR_OPEN_CLOSE_TIME);
 	}
 
 	float DoorEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const

@@ -353,9 +353,12 @@ namespace
 		auto const target = world->getGraph()->getVertexByIdentifier(targetIdentifier);
 		auto shortPath = world->getGraph()->calculatePath(shortAgent, target);
 		auto tallPath = world->getGraph()->calculatePath(tallAgent, target);
+		// Inferred Paths include the physical approach from each distinct spawn.
+		auto const approachDifference = (shortAgent->getGlobalPosition().distanceTo(target->getPosition())
+			- tallAgent->getGlobalPosition().distanceTo(target->getPosition())) / shortAgent->getWalkSpeed();
 		require(shortPath && tallPath && shortPath->nodes.size() == tallPath->nodes.size()
 			&& std::abs(shortPath->nodes.back().edgeWeight
-				- tallPath->nodes.back().edgeWeight) < 0.000001f,
+				- tallPath->nodes.back().edgeWeight - approachDifference) < 0.000001f,
 			"Visual Height changed path topology or route timing");
 		auto const shortStart = shortAgent->getGlobalPosition();
 		auto const tallStart = tallAgent->getGlobalPosition();

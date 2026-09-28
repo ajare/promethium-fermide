@@ -8,6 +8,7 @@
 namespace core
 {
 	class Agent;
+	class Sector;
 
 	struct RouteCostComponents
 	{
@@ -49,6 +50,12 @@ namespace core
 	struct RouteChoicePolicy
 	{
 		EffectiveRoutingProfile baselineProfile;
+		// Seconds-equivalent threshold inconvenience and unknown-state expectations.
+		float thresholdInteraction = 0.05f;
+		float manualDoorInteraction = 0.5f;
+		float remoteDoorInteraction = 2.0f;
+		float unobservedDoorClosedProbability = 0.5f;
+		float unobservedDoorQueueSeconds = 0.0f;
 		[[nodiscard]] std::optional<EvaluatedRouteCost> evaluate(
 			DirectedTraversalFacts const& facts, EffectiveRoutingProfile const& profile) const
 		{
@@ -83,5 +90,7 @@ namespace core
 		Agent const* const legacyAgent;
 		EffectiveRoutingProfile const profile;
 		RouteChoicePolicy const policy;
+		Sector const* const observationSector = nullptr;
+		float const walkSpeed = 0.5f;
 	};
 }

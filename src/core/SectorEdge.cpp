@@ -49,6 +49,19 @@ namespace core
 		return EdgeTraversalRequestResult::OK;
 	}
 
+	DirectedTraversalFacts SectorEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
+	{
+		DirectedTraversalFacts facts;
+		facts.feasible = true;
+		auto const distance = getLength();
+		facts.components.motionSeconds = distance == 0.0f
+			? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed;
+		facts.objectiveDurationSeconds = facts.components.motionSeconds;
+		facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+		return facts;
+	}
+
 	float SectorEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool edgeVisible) const
 	{
 		CORE_VAR_UNUSED(edgeVisible);
@@ -57,11 +70,11 @@ namespace core
 
 		if (distance == 0.0f)
 		{
-			return 0.0f;
+			return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
 		}
 
 		// Time in seconds
-		return max(distance / agent->getWalkSpeed(), CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME);
+		return distance / (agent ? agent->getWalkSpeed() : CORE_AGENT_BASE_WALK_SPEED);
 	}
 
 } // core
