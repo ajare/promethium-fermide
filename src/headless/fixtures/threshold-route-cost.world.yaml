@@ -1,0 +1,228 @@
+# Stable regression fixture for ThresholdRouteCostSmokeChecks. Keep this separate
+# from the editable sample worlds under resources/test-worlds.
+version: 18
+name: Threshold route cost regression
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 6
+layers: 2
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 2
+    cellsWide: 5
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 9
+    cellsWide: 5
+    levelsHigh: 1
+  - type: room
+    name: Room 1
+    layer: 1
+    y: 2
+    x: 5
+    cellsWide: 6
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: door
+    layer: 0
+    y: 2
+    x: 6
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 2
+    x: 9
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: marker
+    sectorIndex: 1
+    levelIndex: 0
+    xOffset: 4.609375
+    id: 1
+    name: Marker 1
+    properties: 0
+  - type: corridor
+    layer: 0
+    y: 3
+    x: 2
+    cellsWide: 12
+    levelsHigh: 1
+  - type: lift
+    layer: 1
+    y: 2
+    x: 3
+    cellsWide: 1
+    levelsHigh: 2
+    stopOffsets: [0, 1]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+  - type: lift
+    layer: 1
+    y: 2
+    x: 12
+    cellsWide: 1
+    levelsHigh: 2
+    stopOffsets: [0, 1]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+  - type: marker
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 2.96875
+    id: 2
+    name: Marker 2
+    properties: 0
+  - type: corridor
+    layer: 0
+    y: 0
+    x: 6
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 0
+    x: 1
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 0
+    x: 12
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 1
+    cellsWide: 14
+    levelsHigh: 1
+  - type: room
+    name: Room 2
+    layer: 1
+    y: 0
+    x: 3
+    cellsWide: 4
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: room
+    name: Room 3
+    layer: 1
+    y: 0
+    x: 9
+    cellsWide: 4
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: staircase
+    layer: 1
+    y: 0
+    x: 1
+    cellsWide: 2
+    riseSide: right
+    speed: 0
+  - type: staircase
+    layer: 1
+    y: 0
+    x: 13
+    cellsWide: 2
+    riseSide: left
+    speed: 0
+  - type: door
+    layer: 0
+    y: 0
+    x: 12
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 0
+    x: 3
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 0
+    x: 6
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 0
+    x: 9
+    width: 1
+    height: regular
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    preButtonActivation: manual
+  - type: marker
+    sectorIndex: 9
+    levelIndex: 0
+    xOffset: 7.03125
+    id: 3
+    name: Marker 3
+    properties: 0
+agentGroups:
+  []
+nextMarkerId: 4
+nextAgentGroupId: 1
+agents:
+  - id: 1
+    agent:
+      name: Agent 1
+      flags: 0
+      individualProperties:
+        - type: interactionAversion
+          value: 3
+    sector: 6
+    localX: 2.3125
+    localY: 0
+    path:
+      destinationSector: 9
+      destinationLocalX: 7.03125
+      destinationLocalY: 0
+      active: true

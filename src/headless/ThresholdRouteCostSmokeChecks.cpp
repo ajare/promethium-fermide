@@ -19,8 +19,9 @@ namespace
 
 	void actualPositionChoosesManualAlternative()
 	{
-		auto const root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
-		auto world = core::loadWorldDocument(root / "resources/test-worlds/realistic-pathing-test.world.yaml");
+		auto const fixture = std::filesystem::path(__FILE__).parent_path()
+			/ "fixtures/threshold-route-cost.world.yaml";
+		auto world = core::loadWorldDocument(fixture);
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		require(agent != nullptr, "Realistic-pathing fixture has no Agent");
 		auto path = agent->getPath();

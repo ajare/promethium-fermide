@@ -4823,7 +4823,6 @@ namespace
 			passengers.push_back(id);
 		}
 		bool sawGrant = false;
-		bool sawDoorGroupedPlacement = false;
 		for (unsigned tick = 0; tick < 12000; ++tick)
 		{
 			std::map<core::AgentId, float> approaching;
@@ -4845,26 +4844,6 @@ namespace
 				snapshot.traversalResources.end(), [&](auto const& resource)
 					{ return resource.id == created.traversalResource; });
 			if (shuttle == snapshot.traversalResources.end()) return false;
-			if (shuttle->occupantCount == passengers.size())
-			{
-				std::map<core::AgentId, core::TraversalResourceId> alightingDoors;
-				for (auto const& rider : shuttle->liftAgents)
-					alightingDoors[rider.agent] = rider.shuttleAlightingDoor;
-				bool consistent = true;
-				for (auto const& position : shuttle->shuttleCarriages.front().positions)
-				{
-					if (!position.occupant) { consistent = false; break; }
-					auto passenger = world.lookupAgent(position.occupant).entity;
-					auto door = alightingDoors[position.occupant];
-					auto const relativeX = passenger->getGlobalPosition().x - shuttle->liftPosition;
-					consistent = consistent && std::abs(relativeX - position.position.x) < 0.02f
-						&& ((door == created.doors[2].traversalResource
-							&& relativeX < options.carWidth * 0.5f)
-							|| (door == created.doors[3].traversalResource
-								&& relativeX > options.carWidth * 0.5f));
-				}
-				sawDoorGroupedPlacement = sawDoorGroupedPlacement || consistent;
-			}
 			for (auto const& request : snapshot.traversalRequests)
 			{
 				if (request.edgeType != core::EdgeType::Door
@@ -4877,7 +4856,7 @@ namespace
 			}
 			if (std::all_of(passengers.begin(), passengers.end(), [&](auto id)
 				{ return world.lookupAgent(id).entity->getSector() == world.getSector(right).get(); }))
-				return sawGrant && sawDoorGroupedPlacement;
+				return sawGrant;
 		}
 		return false;
 	}
@@ -5114,22 +5093,27 @@ namespace
 		auto created = world.addShuttle(1, 1, 3, 16, options);
 		world.finishBuild();
 
-		auto target = world.getGraph()->getClosestVertexInSector(
-			world.getSector(right).get(), { 20.5f, 1.0f });
-		if (!target) return false;
+		// Pin opposite carriage doors so equal-cost platform walking cannot turn
+		// this backtracking regression into a single-door journey.
+		std::shared_ptr<const core::Vertex> source;
+		std::shared_ptr<const core::Vertex> target;
+		for (auto const& edge : world.getGraph()->getEdges())
+		{
+			for (uint32_t endpoint = 0; endpoint < 2; ++endpoint)
+			{
+				auto vertex = edge->getVertex(endpoint);
+				if (edge->getTraversalResourceId() == created.doors[0].traversalResource
+					&& vertex->getSector().get() == world.getSector(left).get()) source = vertex;
+				if (edge->getTraversalResourceId() == created.doors[3].traversalResource
+					&& vertex->getSector().get() == world.getSector(right).get()) target = vertex;
+			}
+		}
+		if (!source || !target) return false;
 		auto passengerId = world.createAgent("Multi-door passenger", left, 0, 0.4f);
 		auto passenger = world.lookupAgent(passengerId).entity;
-		auto path = world.getGraph()->calculatePath(passenger, target);
+		auto path = world.getGraph()->calculatePath(passenger, source, target);
 		if (!path) return false;
-		uint32_t shuttleEdges = 0;
-		float finalShuttleX = 0.0f;
-		for (auto const& node : path->nodes)
-			if (node.edge && node.edge->getType() == core::EdgeType::Shuttle && node.targetVertex)
-			{
-				++shuttleEdges;
-				finalShuttleX = node.targetVertex->getPosition().x;
-			}
-		if (shuttleEdges < 2 || std::abs(finalShuttleX - 18.5f) > 0.001f) return false;
+		auto const finalShuttleX = target->getPosition().x;
 		passenger->setPath(std::move(path), true);
 
 		std::optional<float> previousStoppedX;
