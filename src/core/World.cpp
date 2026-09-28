@@ -1707,9 +1707,12 @@ namespace core
 				caller, options.crossingLanes, options.width));
 		if (options.height != Door::Height::Regular && options.height != Door::Height::Tall)
 			throw WorldException(this, format("{} - unknown Door height", caller));
-		if (options.holdOpenSeconds < 0.0f)
+		// Finite as well as non-negative: NaN slips past every `< 0.0f` range
+		// check and infinity is non-negative, and either would reach the
+		// float-to-tick conversion of the Door's traversal resource (#198).
+		if (!isFiniteTiming(options.holdOpenSeconds))
 		{
-			throw WorldException(this, format("{} - Door hold-open time cannot be negative.", caller));
+			throw WorldException(this, format("{} - Door hold-open time must be finite and non-negative.", caller));
 		}
 	}
 
@@ -1836,10 +1839,13 @@ namespace core
 			throw WorldException(this, format("{} - Lift capacity {} exceeds {} representable interior standing positions.",
 				caller, options.capacity, representablePositions));
 		}
-		if (options.minimumDwellSeconds < 0.0f || options.maximumBoardingSeconds < 0.0f
+		// Finite as well as ordered: a NaN dwell or boarding window makes every
+		// comparison false, and positive infinity stays non-negative (#198).
+		if (!isFiniteTiming(options.minimumDwellSeconds)
+			|| !isFiniteTiming(options.maximumBoardingSeconds)
 			|| options.maximumBoardingSeconds < options.minimumDwellSeconds)
 		{
-			throw WorldException(this, format("{} - Lift timing requires 0 <= minimum dwell <= maximum boarding time.", caller));
+			throw WorldException(this, format("{} - Lift timing requires finite values with 0 <= minimum dwell <= maximum boarding time.", caller));
 		}
 	}
 
@@ -1868,9 +1874,12 @@ namespace core
 		auto const representablePositions = maximumShuttleCarriageCapacity(options.carWidth);
 		if (options.capacity == 0 || options.capacity > representablePositions)
 			throw WorldException(this, format("{} - Shuttle capacity cannot be represented by buffered carriage standing positions.", caller));
-		if (options.minimumDwellSeconds < 0.0f
+		// Finite as well as ordered: a NaN dwell or boarding window makes every
+		// comparison false, and positive infinity stays non-negative (#198).
+		if (!isFiniteTiming(options.minimumDwellSeconds)
+			|| !isFiniteTiming(options.maximumBoardingSeconds)
 			|| options.maximumBoardingSeconds < options.minimumDwellSeconds)
-			throw WorldException(this, format("{} - Shuttle timing requires 0 <= minimum dwell <= maximum boarding time.", caller));
+			throw WorldException(this, format("{} - Shuttle timing requires finite values with 0 <= minimum dwell <= maximum boarding time.", caller));
 	}
 
 	shared_ptr<const Layer> World::getLayer(uint32_t layerIndex) const
@@ -3408,7 +3417,6 @@ namespace core
 	World::CreateLiftResult World::addLift(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLiftOptions const& options)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addLift");
 		// The Lift Transit occupies layerIndex; its landings are the fore Layer of the
 		// pair it forms, which is the Layer directly in front.
 		validateLayer(format("World::addLift({}, ...)", layerIndex), layerIndex);
@@ -3420,9 +3428,14 @@ namespace core
 		// Checks
 		string caller = format("World::addLift({}, {}, {}, {}, <stopOffsts>)", layerIndex, y, x, options.cellsWide);
 
+		// Option and timing checks run before beginStructuralEdit() so a refused
+		// add is a true no-op and no non-finite timing reaches the tick
+		// conversion (#198).
 		validateLiftOptions(caller, options);
 		if (options.cellsWide > 2)
 			throw WorldException(this, format("{} - enclosed Lift width must be one or two cells.", caller));
+
+		beginStructuralEdit("addLift");
 
 		auto levelsHigh = options.levelsHigh ? options.levelsHigh : options.stopOffsets.back() + 1;
 		if (options.stopOffsets.back() >= levelsHigh)
@@ -3608,7 +3621,6 @@ namespace core
 	World::CreateShuttleResult World::addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addShuttle");
 		// The Shuttle Transit occupies layerIndex; its landings are the fore Layer of
 		// the pair it forms, which is the Layer directly in front.
 		validateLayer(format("World::addShuttle({}, ...)", layerIndex), layerIndex);
@@ -3627,8 +3639,11 @@ namespace core
 		// BACK: XDX-------
 		// FORE: -D-....-D-
 
-
+		// Option and timing checks run before beginStructuralEdit() so a refused
+		// add is a true no-op and no non-finite timing reaches the tick
+		// conversion (#198).
 		validateShuttleOptions(caller, options);
+		beginStructuralEdit("addShuttle");
 		validateBounds(caller, x, y, cellsWide, 1);
 		validateLayerSpace(caller, layerIndex, x, y, cellsWide, 1);
 
@@ -5353,8 +5368,8 @@ namespace core
 			if (x >= mCellsWide - 1) return reject("Bulkhead Doors require a cell on each side");
 			thresholdX = x + 1;
 		}
-		if (options.holdOpenSeconds < 0.0f)
-			return reject("Bulkhead Door hold-open time cannot be negative");
+		if (!isFiniteTiming(options.holdOpenSeconds))
+			return reject("Bulkhead Door hold-open time must be finite and non-negative");
 		if (!isfinite(options.automaticSensorDistance)
 			|| options.automaticSensorDistance < 0.0f)
 			return reject("Bulkhead Door automatic sensor distance must be finite and non-negative");
@@ -5411,13 +5426,17 @@ namespace core
 		int side, CreateBulkheadDoorOptions const& options)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addSectorBulkheadDoor");
 		ASSERT_SIDE_OK(side);
 
 		string caller = format("World::addSectorBulkheadDoor({}, {}, {}, {})", layerIndex, y, x, side);
 		string diagnostic;
+		// The option and placement preflight runs before beginStructuralEdit() so a
+		// refused Bulkhead Door add is a true no-op and no non-finite timing
+		// reaches the tick conversion (#198).
 		if (!canAddSectorBulkheadDoor(layerIndex, y, x, side, options, &diagnostic))
 			throw WorldException(this, format("{} - {}", caller, diagnostic));
+
+		beginStructuralEdit("addSectorBulkheadDoor");
 
 		// Get locations on either side.
 		auto layer = getLayer(layerIndex);
@@ -6311,8 +6330,8 @@ namespace core
 		if (!room || room->isCorridor()) return reject("PlatformLifts can only be placed in Rooms");
 		if (xOffset >= room->getCellsWide()) return reject("PlatformLift position is outside the Room");
 		if (requested.cellsWide != 1) return reject("Editor PlatformLifts are one cell wide");
-		if (requested.platformStopDurationSeconds < 0.0f)
-			return reject("PlatformLift stop duration cannot be negative");
+		if (!isFiniteTiming(requested.platformStopDurationSeconds))
+			return reject("PlatformLift stop duration must be finite and non-negative");
 		auto stops = requested.stopOffsets;
 		sort(stops.begin(), stops.end());
 		stops.erase(unique(stops.begin(), stops.end()), stops.end());
@@ -8170,12 +8189,15 @@ namespace core
 		shared_ptr<Door> door, DoorActivationMode mode, float holdOpenSeconds)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("createDoorTraversalResource");
-		if (!door || holdOpenSeconds < 0.0f)
+		// Every rejecting check runs before beginStructuralEdit() so a refused
+		// resource is a true no-op: no traversal resource, event, or dirty
+		// document (#198).
+		if (!door || !isFiniteTiming(holdOpenSeconds))
 		{
-			throw invalid_argument("A door traversal resource requires a Door and non-negative hold time");
+			throw invalid_argument("A door traversal resource requires a Door and a finite, non-negative hold time");
 		}
-		auto holdTicks = (uint64_t)ceil(holdOpenSeconds / getFixedTimestep());
+		beginStructuralEdit("createDoorTraversalResource");
+		auto holdTicks = secondsToTicks(holdOpenSeconds, getFixedTimestep());
 		auto laneCount = max(1u, door->getCellsWide());
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(
 			new TraversalResource(name, std::move(door), mode, holdTicks)));
@@ -8249,12 +8271,20 @@ namespace core
 		float minimumDwellSeconds, float maximumBoardingSeconds)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("createLiftTraversalResource");
 		if (!lift || !liftSector || liftSector.value > mSectors.size() || stops.size() < 2
-			|| capacity == 0 || minimumDwellSeconds < 0.0f || maximumBoardingSeconds < minimumDwellSeconds)
+			|| capacity == 0)
 		{
-			throw invalid_argument("A lift traversal resource requires a lift sector, at least two stops, positive capacity, and valid dwell timing");
+			throw invalid_argument("A lift traversal resource requires a lift sector, at least two stops, and positive capacity");
 		}
+		// Timing is judged before beginStructuralEdit() and before the stop loop,
+		// so a refused resource changes nothing and no non-finite value reaches
+		// the tick conversion (#198).
+		if (!isFiniteTiming(minimumDwellSeconds) || !isFiniteTiming(maximumBoardingSeconds)
+			|| maximumBoardingSeconds < minimumDwellSeconds)
+		{
+			throw invalid_argument("A lift traversal resource requires finite dwell timing with 0 <= minimum dwell <= maximum boarding time");
+		}
+		beginStructuralEdit("createLiftTraversalResource");
 		for (uint32_t i = 0; i < stops.size(); ++i)
 		{
 			if (!stops[i].locationSector || stops[i].locationSector.value > mSectors.size())
@@ -8278,8 +8308,8 @@ namespace core
 			OccupantPackingLayout::Compact);
 		for (uint32_t i = 0; i < capacity; ++i)
 			positions[i] = { occupantTargets[i], 0.0f };
-		auto minimumDwellTicks = (uint64_t)ceil(minimumDwellSeconds / getFixedTimestep());
-		auto maximumBoardingTicks = (uint64_t)ceil(maximumBoardingSeconds / getFixedTimestep());
+		auto minimumDwellTicks = secondsToTicks(minimumDwellSeconds, getFixedTimestep());
+		auto maximumBoardingTicks = secondsToTicks(maximumBoardingSeconds, getFixedTimestep());
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(
 			name, std::move(lift), liftSector, std::move(stops), capacity,
 			minimumDwellTicks, maximumBoardingTicks, std::move(positions))));
@@ -8297,10 +8327,15 @@ namespace core
 		float stopDurationSeconds)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("createOpenPlatformLiftTraversalResource");
 		if (!lift || !locationSector || locationSector.value > mSectors.size() || stops.size() < 2
-			|| capacity == 0 || stopDurationSeconds < 0.0f)
-			throw invalid_argument("An open platform lift requires a location, at least two stops, positive capacity, and a non-negative stop duration");
+			|| capacity == 0)
+			throw invalid_argument("An open platform lift requires a location, at least two stops, and positive capacity");
+		// Timing is judged before beginStructuralEdit() and before the stop loop,
+		// so a refused resource changes nothing and no non-finite value reaches
+		// the tick conversion (#198).
+		if (!isFiniteTiming(stopDurationSeconds))
+			throw invalid_argument("An open platform lift requires a finite, non-negative stop duration");
+		beginStructuralEdit("createOpenPlatformLiftTraversalResource");
 		for (uint32_t i = 0; i < stops.size(); ++i)
 		{
 			if (stops[i].locationSector != locationSector || stops[i].landingResource
@@ -8315,7 +8350,7 @@ namespace core
 			+ CORE_AGENT_MAX_WIDTH * 0.5f;
 		for (uint32_t i = 0; i < capacity; ++i)
 			positions[i] = { start + i * CORE_AGENT_MAX_WIDTH, 0.0f };
-		auto stopDurationTicks = (uint64_t)ceil(stopDurationSeconds / getFixedTimestep());
+		auto stopDurationTicks = secondsToTicks(stopDurationSeconds, getFixedTimestep());
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(name,
 			std::move(lift), locationSector, std::move(stops), capacity,
 			stopDurationTicks, stopDurationTicks, std::move(positions))));
@@ -8336,11 +8371,16 @@ namespace core
 		uint32_t capacity, float minimumDwellSeconds, float maximumBoardingSeconds)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("createShuttleTraversalResource");
 		if (!shuttle || shuttle->getNumCars() == 0 || !shuttleSector
-			|| shuttleSector.value > mSectors.size() || stops.size() < 2 || capacity == 0
-			|| minimumDwellSeconds < 0.0f || maximumBoardingSeconds < minimumDwellSeconds)
-			throw invalid_argument("A coupled shuttle requires valid stops, carriages, positive per-carriage capacity, and dwell timing");
+			|| shuttleSector.value > mSectors.size() || stops.size() < 2 || capacity == 0)
+			throw invalid_argument("A coupled shuttle requires valid stops, carriages, and positive per-carriage capacity");
+		// Timing is judged before beginStructuralEdit() and before the stop loop,
+		// so a refused resource changes nothing and no non-finite value reaches
+		// the tick conversion (#198).
+		if (!isFiniteTiming(minimumDwellSeconds) || !isFiniteTiming(maximumBoardingSeconds)
+			|| maximumBoardingSeconds < minimumDwellSeconds)
+			throw invalid_argument("A coupled shuttle requires finite dwell timing with 0 <= minimum dwell <= maximum boarding time");
+		beginStructuralEdit("createShuttleTraversalResource");
 		for (uint32_t i = 0; i < stops.size(); ++i)
 		{
 			auto landing = mTraversalResources.find(stops[i].landingResource);
@@ -8368,8 +8408,8 @@ namespace core
 				positions.push_back({ carriage * (shuttle->getCarWidth() + 1.0f)
 					+ first + (last - first) * progress, 0.0f });
 			}
-		auto minimumDwellTicks = (uint64_t)ceil(minimumDwellSeconds / getFixedTimestep());
-		auto maximumBoardingTicks = (uint64_t)ceil(maximumBoardingSeconds / getFixedTimestep());
+		auto minimumDwellTicks = secondsToTicks(minimumDwellSeconds, getFixedTimestep());
+		auto maximumBoardingTicks = secondsToTicks(maximumBoardingSeconds, getFixedTimestep());
 		auto shuttlePtr = shuttle;
 		auto stopCount = (uint32_t)stops.size();
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(

@@ -4371,8 +4371,8 @@ namespace core
 		auto object = dynamic_pointer_cast<BulkheadDoorSectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) throw WorldException(this, "The selected object is not a Bulkhead Door");
-		if (options.holdOpenSeconds < 0.0f)
-			throw WorldException(this, "Bulkhead Door hold-open time cannot be negative");
+		if (!isFiniteTiming(options.holdOpenSeconds))
+			throw WorldException(this, "Bulkhead Door hold-open time must be finite and non-negative");
 		if (!isfinite(options.automaticSensorDistance)
 			|| options.automaticSensorDistance < 0.0f)
 			throw WorldException(this,

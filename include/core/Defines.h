@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 
 #define CORE_VAR_UNUSED(x)							(void)x
 
@@ -145,6 +147,32 @@ namespace core
 		return cellsWide == 0 ? 0 : static_cast<uint32_t>(
 			((float)cellsWide - CORE_SHUTTLE_AGENT_BUFFER)
 			/ (CORE_AGENT_MAX_WIDTH + CORE_SHUTTLE_AGENT_BUFFER));
+	}
+
+	// Every authored or API-supplied duration shares one contract: it must be
+	// finite and non-negative. An ordinary `seconds < 0.0f` range check lets a
+	// NaN through, because every comparison against NaN is false, and positive
+	// infinity is non-negative too. A non-finite value then reaches a
+	// float-to-tick conversion whose result is outside uint64_t, which is
+	// undefined behaviour (#198). Door hold-open, Bulkhead Door hold-open, Lift
+	// and Shuttle dwell/boarding, and Platform lift stop duration all judge their
+	// timing with this predicate so the rule lives in one place.
+	inline bool isFiniteTiming(float seconds)
+	{
+		return std::isfinite(seconds) && seconds >= 0.0f;
+	}
+
+	// Rounds a validated duration up to whole ticks at the given timestep. A
+	// finite but enormous duration still exceeds uint64_t after the division, so
+	// the result saturates instead of converting out of range (#197, #198).
+	inline uint64_t secondsToTicks(float seconds, float timestep)
+	{
+		double const rawTicks = std::ceil(static_cast<double>(seconds)
+			/ static_cast<double>(timestep));
+		constexpr auto maxTicks = std::numeric_limits<uint64_t>::max();
+		return rawTicks >= static_cast<double>(maxTicks)
+			? maxTicks
+			: static_cast<uint64_t>(rawTicks);
 	}
 }
 

@@ -47,6 +47,7 @@
 #endif
 
 #include "core/Vector2.h"
+#include "core/Defines.h"
 #include "core/Background.h"
 #include "core/Button.h"
 #include "core/Door.h"
@@ -1028,9 +1029,10 @@ namespace
 		else if (draft.capacity <= 0 || draft.capacity
 			> (int)core::maximumShuttleCarriageCapacity((uint32_t)draft.carWidth))
 			draft.diagnostic = "Capacity cannot be represented by buffered carriage positions";
-		else if (draft.minimumDwellSeconds < 0.0f
+		else if (!core::isFiniteTiming(draft.minimumDwellSeconds)
+			|| !core::isFiniteTiming(draft.maximumBoardingSeconds)
 			|| draft.maximumBoardingSeconds < draft.minimumDwellSeconds)
-			draft.diagnostic = "Maximum boarding time must be at least the non-negative minimum dwell";
+			draft.diagnostic = "Maximum boarding time must be a finite value at least the finite non-negative minimum dwell";
 		auto candidates = shuttleCandidates(world, draft);
 		draft.stopOffsets.erase(remove_if(draft.stopOffsets.begin(), draft.stopOffsets.end(),
 			[&](auto stop) { return find(candidates.begin(), candidates.end(), stop) == candidates.end(); }),
@@ -3658,8 +3660,8 @@ namespace
 			definition.bulkheadDoor.automaticSensorDistance = object["automaticSensorDistance"]
 				? object["automaticSensorDistance"].as<float>()
 				: CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE;
-			if (definition.bulkheadDoor.holdOpenSeconds < 0.0f)
-				throw runtime_error("Bulkhead Door holdOpenSeconds cannot be negative");
+			if (!core::isFiniteTiming(definition.bulkheadDoor.holdOpenSeconds))
+				throw runtime_error("Bulkhead Door holdOpenSeconds must be finite and non-negative");
 			if (!isfinite(definition.bulkheadDoor.automaticSensorDistance)
 				|| definition.bulkheadDoor.automaticSensorDistance < 0.0f)
 				throw runtime_error("Bulkhead Door automaticSensorDistance must be finite and non-negative");
@@ -3728,8 +3730,8 @@ namespace
 				// window is the closest equivalent to the new fixed stop duration.
 				definition.platformLift.platformStopDurationSeconds = requiredYaml<float>(
 					object, "maximumBoardingSeconds");
-			if (definition.platformLift.platformStopDurationSeconds < 0.0f)
-				throw runtime_error("PlatformLift stopDurationSeconds cannot be negative");
+			if (!core::isFiniteTiming(definition.platformLift.platformStopDurationSeconds))
+				throw runtime_error("PlatformLift stopDurationSeconds must be finite and non-negative");
 		}
 		else if (type == "RoomLadder")
 		{
@@ -5453,7 +5455,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Maximum physical gap between the Bulkhead Door and an Agent");
 	ImGui::InputInt("Crossing lanes", &crossingLanes);
-	bool valid = holdOpenSeconds >= 0.0f && isfinite(automaticSensorDistance)
+	bool valid = core::isFiniteTiming(holdOpenSeconds) && isfinite(automaticSensorDistance)
 		&& automaticSensorDistance >= 0.0f && crossingLanes == 1
 		&& (remote || (!leftControl && !rightControl));
 	ImGui::BeginDisabled(!world->isSimulationPaused() || !valid || objectIndex == ~0u);
@@ -5870,7 +5872,7 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	sort(draft.stopOffsets.begin(), draft.stopOffsets.end());
 	bool changed = draft.stopOffsets != current.stopOffsets
 		|| abs(draft.platformStopDurationSeconds - current.platformStopDurationSeconds) > 0.0001f;
-	ImGui::BeginDisabled(!changed || draft.platformStopDurationSeconds < 0.0f);
+	ImGui::BeginDisabled(!changed || !core::isFiniteTiming(draft.platformStopDurationSeconds));
 	if (ImGui::Button("Apply PlatformLift settings"))
 	{
 		auto plan = world->planPlatformLiftEdit(room->getIndex(), objectIndex, draft);
