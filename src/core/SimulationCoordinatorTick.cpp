@@ -740,7 +740,12 @@ namespace core
 			auto const localWalk = task.edge && task.edge->getType() == EdgeType::Location
 				&& task.sourceVertex && task.destinationVertex
 				&& task.sourceVertex->getSector() == task.destinationVertex->getSector();
-			if (!localWalk && (agent.mState == Agent::State::TraversingEdge
+			// Stairs are continuous walking surfaces. Their in-flight position is a safe
+			// pause position, just like same-sector walking.
+			auto const continuousStair = task.edge
+				&& (task.edge->getType() == EdgeType::Staircase
+					|| task.edge->getType() == EdgeType::Stairwell);
+			if (!localWalk && !continuousStair && (agent.mState == Agent::State::TraversingEdge
 				|| agent.mState == Agent::State::AwaitingTraversalCommit)
 				&& task.sourceVertex && agent.getSector())
 			{
@@ -812,6 +817,23 @@ namespace core
 				if (path && !path->nodes.empty())
 				{
 					agent->assignPath(std::move(path), intent.wasPathing, false);
+					if (intent.wasPathing && intent.resumeContinuousTraversal)
+					{
+						for (uint32_t node = 1; node < agent->mPath.path->nodes.size(); ++node)
+						{
+							auto const& edge = agent->mPath.path->nodes[node].edge;
+							auto const& target = agent->mPath.path->nodes[node].targetVertex;
+							if (!edge || !target || edge->getType() != intent.traversalEdgeType
+								|| target->getPosition().distanceTo(
+									intent.traversalDestinationPosition) > 0.001f) continue;
+							auto const source = edge->getOtherVertex(target);
+							if (!source || source->getPosition().distanceTo(
+								intent.traversalSourcePosition) > 0.001f) continue;
+							agent->mPath.targetNode = node - 1;
+							agent->mState = Agent::State::WaitingForTraversal;
+							break;
+						}
+					}
 					if (goal != mWorld.mMovementGoals.end())
 						goal->second.routeLossReason = RouteLossReason::None;
 				}
@@ -838,9 +860,26 @@ namespace core
 			{
 				auto destination = agent->mPath.path->nodes.back().targetVertex;
 				if (destination && destination->getSector())
-					mWorld.mPausedPathIntents[id] = {
-						SectorId{ (uint64_t)destination->getSector()->getIndex() + 1 },
-						destination->getPosition(), agent->mState != Agent::State::Idle };
+				{
+					auto& intent = mWorld.mPausedPathIntents[id];
+					intent.destinationSector = SectorId{
+						(uint64_t)destination->getSector()->getIndex() + 1 };
+					intent.destinationPosition = destination->getPosition();
+					intent.wasPathing = agent->mState != Agent::State::Idle;
+					if (agent->mState == Agent::State::TraversingEdge && agent->mTraversalTask
+						&& agent->mTraversalTask->edge && agent->mTraversalTask->sourceVertex
+						&& agent->mTraversalTask->destinationVertex)
+					{
+						auto const type = agent->mTraversalTask->edge->getType();
+						intent.resumeContinuousTraversal = type == EdgeType::Staircase
+							|| type == EdgeType::Stairwell;
+						intent.traversalEdgeType = type;
+						intent.traversalSourcePosition =
+							agent->mTraversalTask->sourceVertex->getPosition();
+						intent.traversalDestinationPosition =
+							agent->mTraversalTask->destinationVertex->getPosition();
+					}
+				}
 			}
 			cancelTraversalForTopologyRebuild(*agent);
 		}

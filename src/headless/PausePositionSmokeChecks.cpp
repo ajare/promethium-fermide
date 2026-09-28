@@ -1,9 +1,13 @@
+#include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 
 #include "core/Agent.h"
 #include "core/AgentTagRegistryDocument.h"
+#include "core/Edge.h"
 #include "core/Graph.h"
+#include "core/Path.h"
 #include "core/World.h"
 
 namespace
@@ -11,6 +15,77 @@ namespace
 	void require(bool value, char const* message)
 	{
 		if (!value) throw std::runtime_error(message);
+	}
+
+	std::filesystem::path testWorld(char const* name)
+	{
+		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
+			/ "resources" / "test-worlds" / name;
+	}
+
+	void pauseOnStairsPreservesPosition(char const* filename, core::EdgeType edgeType)
+	{
+		auto world = core::loadWorldDocument(testWorld(filename));
+		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
+		std::shared_ptr<core::Path> path;
+		std::shared_ptr<const core::Edge> stair;
+		std::shared_ptr<const core::Vertex> source;
+		std::shared_ptr<const core::Vertex> destination;
+		for (auto const& candidate : world->getGraph()->getVertices())
+		{
+			auto candidatePath = world->getGraph()->calculatePath(agent, candidate);
+			if (!candidatePath) continue;
+			for (size_t node = 1; node < candidatePath->nodes.size(); ++node)
+			{
+				auto const& edge = candidatePath->nodes[node].edge;
+				if (!edge || edge->getType() != edgeType) continue;
+				if (edgeType == core::EdgeType::Staircase
+					&& edge->getTraversalSpeed(nullptr) > 0.0f) continue;
+				path = std::move(candidatePath);
+				stair = edge;
+				source = path->nodes[node - 1].targetVertex;
+				destination = path->nodes[node].targetVertex;
+				break;
+			}
+			if (stair) break;
+		}
+		require((bool)stair, "Pause fixture has no reachable stationary stair edge");
+		agent->setPath(path, true);
+
+		bool partway = false;
+		for (unsigned tick = 0; tick < 600; ++tick)
+		{
+			require(world->advanceTicks(1), "Stair pause fixture could not advance");
+			auto const position = agent->getGlobalPosition();
+			if (agent->getState() == core::Agent::State::TraversingEdge
+				&& position.distanceTo(source->getPosition()) > 0.02f
+				&& position.distanceTo(destination->getPosition()) > 0.02f
+				&& std::abs(position.distanceTo(source->getPosition())
+					+ position.distanceTo(destination->getPosition()) - stair->getLength()) < 0.001f)
+			{
+				partway = true;
+				break;
+			}
+		}
+		require(partway, "Agent did not reach the middle of the stair edge");
+		auto const beforePause = agent->getGlobalPosition();
+		auto const distanceBeforeResume = beforePause.distanceTo(destination->getPosition());
+		world->pauseSimulation();
+		require(agent->getGlobalPosition() == beforePause,
+			"Pausing moved an Agent back to the start of the stairs");
+		require(world->resumeSimulation(), "Paused stair traversal could not resume");
+		auto previousDistance = distanceBeforeResume;
+		bool continued = false;
+		for (unsigned tick = 0; tick < 30; ++tick)
+		{
+			require(world->advanceTicks(1), "Resumed stair traversal could not advance");
+			auto const distance = agent->getGlobalPosition().distanceTo(destination->getPosition());
+			require(distance <= previousDistance + 0.0001f,
+				"Resumed Agent moved back toward the start of the stairs");
+			continued = continued || distance < previousDistance - 0.0001f;
+			previousDistance = distance;
+		}
+		require(continued, "Resumed Agent did not continue across the stairs");
 	}
 
 	void clearPausedPathDoesNotResume()
@@ -91,6 +166,8 @@ void runPausePositionSmokeChecks()
 	clearPausedPathDoesNotResume();
 	pauseWalkingAgent(true);
 	pauseWalkingAgent(false);
+	pauseOnStairsPreservesPosition("staircase-test-1.world.yaml", core::EdgeType::Staircase);
+	pauseOnStairsPreservesPosition("stairwell-test-1.world.yaml", core::EdgeType::Stairwell);
 }
 
 // Optional full-document reproduction, independent of the bundled fixture's

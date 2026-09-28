@@ -421,6 +421,12 @@ namespace core
 			SectorId destinationSector;
 			Vector2 destinationPosition;
 			bool wasPathing{ false };
+			// A continuous stair crossing can resume from its physical pause position
+			// instead of walking back to the edge's source Vertex.
+			bool resumeContinuousTraversal{ false };
+			EdgeType traversalEdgeType{ EdgeType::Location };
+			Vector2 traversalSourcePosition;
+			Vector2 traversalDestinationPosition;
 		};
 
 	public:
