@@ -1035,6 +1035,14 @@ namespace core
 		CreateDoorResult _addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, CreateDoorOptions const& options,
 			bool controlsAreExternallyBound = false);
 
+		// The complete Door option and placement preflight. Every rejecting check a
+		// Door add can make lives here, so the public addSectorDoor() can run it
+		// before beginStructuralEdit() and a refused call stays a true no-op
+		// (ticket #196). _addSectorDoor() runs it again so the lift and shuttle
+		// builders stay self-validating.
+		void validateSectorDoorPlacement(std::string const& caller, uint32_t layerIndex, uint32_t y,
+			uint32_t x, CreateDoorOptions const& options, bool controlsAreExternallyBound) const;
+
 		CreateObjectResult _createSectorButton(std::string const& name, std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index = nullptr);
 
 		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr);

@@ -1693,12 +1693,96 @@ namespace core
 
 	void World::validateSectorDoorOptions(string const& caller, CreateDoorOptions const& options) const
 	{
+		// A zero-width Door would cover no cell: its placement loop runs zero times,
+		// leaving the Door's two Sectors unset for the queue configuration to
+		// dereference. A crossing-lane count above the usable threshold width is not
+		// buildable either, and until now it was only caught after the Door's
+		// objects and traversal resource existed. Both are refused here, before any
+		// object or resource exists (ticket #196).
+		if (options.width == 0)
+			throw WorldException(this, format("{} - a Door must be at least one cell wide", caller));
+		if (options.crossingLanes > options.width)
+			throw WorldException(this, format(
+				"{} - Door crossing lane count {} exceeds the usable threshold width {}",
+				caller, options.crossingLanes, options.width));
 		if (options.height != Door::Height::Regular && options.height != Door::Height::Tall)
 			throw WorldException(this, format("{} - unknown Door height", caller));
 		if (options.holdOpenSeconds < 0.0f)
 		{
 			throw WorldException(this, format("{} - Door hold-open time cannot be negative.", caller));
 		}
+	}
+
+	void World::validateSectorDoorPlacement(string const& caller, uint32_t layerIndex, uint32_t y,
+		uint32_t x, CreateDoorOptions const& options, bool controlsAreExternallyBound) const
+	{
+		auto const cellsWide = options.width;
+
+		// A Door is authored on the front Layer of the pair it crosses.
+		validateLayer(caller, layerIndex);
+		if (layerIndex + 1 >= getLayerCount())
+		{
+			throw WorldException(this,
+				format("{} - a Door needs a Layer directly behind the Layer it is authored on", caller));
+		}
+		auto const backLayer = layerBehind(layerIndex);
+
+		validateSectorDoorOptions(caller, options);
+		if (!controlsAreExternallyBound && options.activationMode != DoorActivationMode::RemoteControlled
+			&& (options.controls[0] || options.controls[1]))
+		{
+			throw WorldException(this,
+				format("{} - physical controls require remote-controlled activation", caller));
+		}
+		constexpr uint32_t levelsHigh = 1;
+		validateBounds(caller, x, y, cellsWide, levelsHigh);
+		validateSpaceOnlyInOneSector(caller, layerIndex, x, y, cellsWide, levelsHigh);
+		validateSpaceOnlyInOneSector(caller, backLayer, x, y, cellsWide, levelsHigh);
+
+		auto const frontLayer = getLayer(layerIndex);
+		auto const behindLayer = getLayer(backLayer);
+
+		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+			{
+				auto const& cellDef0 = frontLayer->getCellDefinition(ix, iy);
+				auto const& cellDef1 = behindLayer->getCellDefinition(ix, iy);
+
+				if (cellDef0.sectorIndex == ~0u)
+				{
+					throw WorldException(this, format("{} - front Layer cell at {},{} is not occupied.", caller, ix, iy));
+				}
+
+				if (options.height == Door::Height::Tall)
+				{
+					auto const room = dynamic_pointer_cast<const Location>(getSector(cellDef0.sectorIndex));
+					if (!room || room->getType() != SectorType::Location || room->isCorridor())
+						throw WorldException(this, format("{} - a tall Door is only available in a Room", caller));
+				}
+
+				if (cellDef1.sectorIndex == ~0u)
+				{
+					throw WorldException(this, format("{} - back Layer cell at {},{} is not occupied.", caller, ix, iy));
+				}
+
+				if (cellDef0.hasObject() || !cellDef0.markers.empty())
+				{
+					throw WorldException(this, format(
+						"{} - another object occupies front Layer cell at {},{}", caller, ix, iy));
+				}
+
+				// The levels above the threshold are the opening's headroom: a Walkway or
+				// other floor there runs through the opening.
+				if (iy != y && (cellDef0.floorType != CellFloorType::None
+					|| cellDef1.floorType != CellFloorType::None))
+				{
+					throw WorldException(this, format(
+						"{} - a Door cannot open through a Walkway above its threshold", caller));
+				}
+
+				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef0.sectorIndex);
+				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef1.sectorIndex);
+			}
 	}
 
 	void World::validateSectorForceBridgeOptions(string const& caller, CreateForceBridgeOptions const& options) const
@@ -4663,7 +4747,12 @@ namespace core
 	World::CreateDoorResult World::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, CreateDoorOptions const& options)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addSectorDoor");
+		string const caller = format("World::addSectorDoor({}, {}, {}, {})", layerIndex, y, x, options.width);
+		// Every rejecting check runs before beginStructuralEdit() so a refused call
+		// stays a true no-op: no SectorObjects, traversal resources, events, or
+		// construction records, no modified flag, and no dirty topology
+		// (ticket #196).
+		validateSectorDoorOptions(caller, options);
 		uint32_t liftX, liftWidth;
 		if (getLiftLandingGeometry(layerBehind(layerIndex), y, x, liftX, liftWidth))
 		{
@@ -4688,6 +4777,9 @@ namespace core
 			sort(idlePlan.stopOffsets.begin(), idlePlan.stopOffsets.end());
 			vector<ConstructionRecord> records;
 			if (!prepareLiftEdit(idlePlan, records, diagnostic)) throw WorldException(this, diagnostic);
+			// The plan is complete and every authored record is built, so the edit
+			// can commit without a later refusal stranding a dirty World.
+			beginStructuralEdit("addSectorDoor");
 			rebuildFromConstructionRecords(std::move(records));
 			auto const& cell = mLayers[layerIndex]->getCellDefinition(liftX, y);
 			auto sector = _getSector(cell.sectorIndex);
@@ -4695,6 +4787,9 @@ namespace core
 			auto doorObject = dynamic_pointer_cast<DoorSectorObject>(sector->_getObject(cell.sectorObjectIndex));
 			return { doorResult, {}, doorObject->getDoor()->getTraversalResourceId() };
 		}
+		// Complete option and placement preflight, still before any mutation.
+		validateSectorDoorPlacement(caller, layerIndex, y, x, options, false);
+		beginStructuralEdit("addSectorDoor");
 		auto result = _addSectorDoor(layerIndex, y, x, options);
 		ConstructionRecord record{ ConstructionType::Door };
 		record.layer = layerIndex;
@@ -4948,77 +5043,22 @@ namespace core
 		invalidateSimulationSnapshot();
 		string caller = format("World::addSectorDoor({}, {}, {}, {})", layerIndex, y, x, options.width);
 
-		auto cellsWide = options.width;
-
-		// A Door is authored on the front Layer of the pair it crosses.
-		validateLayer(caller, layerIndex);
-		if (layerIndex + 1 >= getLayerCount())
-		{
-			throw WorldException(this,
-				format("{} - a Door needs a Layer directly behind the Layer it is authored on", caller));
-		}
-		auto const backLayer = layerBehind(layerIndex);
-
-		validateSectorDoorOptions(caller, options);
-		if (!controlsAreExternallyBound && options.activationMode != DoorActivationMode::RemoteControlled
-			&& (options.controls[0] || options.controls[1]))
-		{
-			throw WorldException(this,
-				format("{} - physical controls require remote-controlled activation", caller));
-		}
+		auto const cellsWide = options.width;
 		constexpr uint32_t levelsHigh = 1;
-		validateBounds(caller, x, y, cellsWide, levelsHigh);
-		validateSpaceOnlyInOneSector(caller, layerIndex, x, y, cellsWide, levelsHigh);
-		validateSpaceOnlyInOneSector(caller, backLayer, x, y, cellsWide, levelsHigh);
 
+		// The placement preflight is the sole home of the rejecting checks. It has
+		// proved every cell of the rectangle is occupied inside one Sector on each
+		// Layer of the pair, so the Door's two Sectors come straight from the
+		// authored cell.
+		validateSectorDoorPlacement(caller, layerIndex, y, x, options, controlsAreExternallyBound);
+
+		auto const backLayer = layerBehind(layerIndex);
 		auto frontLayer = getLayer(layerIndex);
 		auto behindLayer = getLayer(backLayer);
-
-		shared_ptr<Sector> sectors[2];
-		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
-			for (uint32_t ix = x; ix < x + cellsWide; ++ix)
-		{
-			auto& cellDef0 = frontLayer->getCellDefinition(ix, iy);
-			auto& cellDef1 = behindLayer->getCellDefinition(ix, iy);
-
-			if (cellDef0.sectorIndex == ~0u)
-			{
-				throw WorldException(this, format("{} - front Layer cell at {},{} is not occupied.", caller, ix, iy));
-			}
-
-			sectors[0] = _getSector(cellDef0.sectorIndex);
-			if (options.height == Door::Height::Tall)
-			{
-				auto const room = dynamic_pointer_cast<Location>(sectors[0]);
-				if (!room || room->getType() != SectorType::Location || room->isCorridor())
-					throw WorldException(this, format("{} - a tall Door is only available in a Room", caller));
-			}
-
-			if (cellDef1.sectorIndex == ~0u)
-			{
-				throw WorldException(this, format("{} - back Layer cell at {},{} is not occupied.", caller, ix, iy));
-			}
-
-			sectors[1] = _getSector(cellDef1.sectorIndex);
-
-			if (cellDef0.hasObject() || !cellDef0.markers.empty())
-			{
-				throw WorldException(this, format(
-					"{} - another object occupies front Layer cell at {},{}", caller, ix, iy));
-			}
-
-			// The levels above the threshold are the opening's headroom: a Walkway or
-			// other floor there runs through the opening.
-			if (iy != y && (cellDef0.floorType != CellFloorType::None
-				|| cellDef1.floorType != CellFloorType::None))
-			{
-				throw WorldException(this, format(
-					"{} - a Door cannot open through a Walkway above its threshold", caller));
-			}
-
-			validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef0.sectorIndex);
-			validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef1.sectorIndex);
-		}
+		shared_ptr<Sector> sectors[2] = {
+			_getSector(frontLayer->getCellDefinition(x, y).sectorIndex),
+			_getSector(behindLayer->getCellDefinition(x, y).sectorIndex)
+		};
 
 		// Create door, making sure we add it to the other Location as well
 		// If there is a button, then a stateful button will control a stateless door - the state
