@@ -53,18 +53,50 @@ namespace core
 		auto const kind = mStaircase->isEscalator()
 			? TraversalKind::Escalator : TraversalKind::Staircase;
 		if (agentForbidsEdge(agent, *this, kind)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		if (!mStaircase->isEscalator()) return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
 		auto sourceVertex = getOtherVertex(targetVertex);
 		bool const movingUp = targetVertex->getPosition().y > sourceVertex->getPosition().y;
-		if (movingUp != (mStaircase->getSpeed() > 0.0f))
-			return numeric_limits<float>::infinity();
-		return getLength() / abs(mStaircase->getSpeed());
+		if (mStaircase->isEscalator())
+		{
+			if (movingUp != (mStaircase->getSpeed() > 0.0f))
+				return numeric_limits<float>::infinity();
+			return getLength() / abs(mStaircase->getSpeed());
+		}
+		auto const policy = RouteChoicePolicy{};
+		auto const speed = agent ? agent->getStationaryStairSpeed(movingUp)
+			: (movingUp ? policy.stairAscentSpeed : policy.stairDescentSpeed);
+		return getLength() / speed;
 	}
 
-	float StaircaseEdge::getTraversalSpeed(Agent const* agent) const
+	DirectedTraversalFacts StaircaseEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
-		return abs(mStaircase->getSpeed())
-			+ (mStaircase->isEscalator() && agent && agent->isWalkingOnEscalator(this)
-				? agent->getWalkSpeed() : 0.0f);
+		if (mStaircase->isEscalator())
+			return Edge::getDirectedTraversalFacts(std::move(targetVertex), context);
+		DirectedTraversalFacts facts;
+		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Staircase)) return facts;
+		auto const sourceVertex = getOtherVertex(targetVertex);
+		auto const rise = targetVertex->getPosition().y - sourceVertex->getPosition().y;
+		auto const ascending = rise > 0.0f;
+		auto const speed = ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed;
+		facts.feasible = true;
+		facts.components.motionSeconds = getLength() / speed;
+		facts.components.physicalEffortUnits = abs(rise) * (ascending
+			? context.policy.stairAscentEffortPerRise : context.policy.stairDescentEffortPerRise);
+		facts.components.interactionUnits = abs(rise) * context.policy.stairInteractionPerFlight;
+		facts.objectiveDurationSeconds = facts.components.motionSeconds;
+		facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+		return facts;
+	}
+
+	float StaircaseEdge::getTraversalSpeed(Agent const* agent,
+		shared_ptr<const Vertex> const& targetVertex) const
+	{
+		if (mStaircase->isEscalator())
+			return abs(mStaircase->getSpeed())
+				+ (agent && agent->isWalkingOnEscalator(this) ? agent->getWalkSpeed() : 0.0f);
+		if (!agent || !targetVertex) return 0.0f;
+		auto const ascending = targetVertex->getPosition().y
+			> getOtherVertex(targetVertex)->getPosition().y;
+		return agent->getStationaryStairSpeed(ascending);
 	}
 }

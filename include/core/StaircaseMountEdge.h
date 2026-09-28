@@ -16,5 +16,7 @@ namespace core
 		[[nodiscard]] bool isTraversable(std::shared_ptr<const Vertex>, std::shared_ptr<const Agent>) const override;
 		EdgeTraversalRequestResult requestTraversal(std::shared_ptr<const Vertex>, std::shared_ptr<const Agent>) const override;
 		[[nodiscard]] float getWeight(std::shared_ptr<const Vertex>, Agent const*, bool) const override;
+		[[nodiscard]] DirectedTraversalFacts getDirectedTraversalFacts(
+			std::shared_ptr<const Vertex>, RouteDecisionContext const&) const override;
 	};
 }

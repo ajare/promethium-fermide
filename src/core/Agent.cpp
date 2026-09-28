@@ -617,6 +617,12 @@ namespace core
 		return (float)CORE_AGENT_BASE_CLIMB_SPEED;
 	}
 
+	float Agent::getStationaryStairSpeed(bool ascending) const
+	{
+		auto const policy = mWorld ? mWorld->getRouteChoicePolicy() : RouteChoicePolicy{};
+		return ascending ? policy.stairAscentSpeed : policy.stairDescentSpeed;
+	}
+
 	float Agent::estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const
 	{
 		return mWorld ? mWorld->estimateTraversalDelay(resource, sourceSector) : 0.0f;
@@ -1331,7 +1337,8 @@ namespace core
 					moveToPosition(mTraversalTask->sourceVertex->getPosition(), frameTime, getWalkSpeed());
 					break;
 				}
-				float traversalSpeed = mTraversalTask->edge->getTraversalSpeed(this);
+				float traversalSpeed = mTraversalTask->edge->getTraversalSpeed(
+					this, mTraversalTask->destinationVertex);
 				if (traversalSpeed <= 0.0f)
 					traversalSpeed = mTraversalTask->edge->getType() == EdgeType::Ladder
 						? getClimbSpeed() : getWalkSpeed();

@@ -1,0 +1,145 @@
+#include <cmath>
+#include <filesystem>
+#include <stdexcept>
+
+#include "core/Agent.h"
+#include "core/AgentTagRegistryDocument.h"
+#include "core/Edge.h"
+#include "core/Graph.h"
+#include "core/Marker.h"
+#include "core/Path.h"
+#include "core/RouteCost.h"
+#include "core/Vertex.h"
+#include "core/World.h"
+
+namespace
+{
+	void require(bool value, char const* message)
+	{
+		if (!value) throw std::runtime_error(message);
+	}
+
+	std::filesystem::path testWorld(char const* name)
+	{
+		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
+			/ "resources" / "test-worlds" / name;
+	}
+
+	void stationaryStaircaseIsDirectionalAndPhysical()
+	{
+		auto world = core::loadWorldDocument(testWorld("staircase-test-1.world.yaml"));
+		auto graph = world->getGraph();
+		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
+		auto configured = world->getRouteChoicePolicy();
+		configured.stairAscentSpeed = 0.25f;
+		configured.stairDescentSpeed = 0.5f;
+		world->setRouteChoicePolicy(configured);
+		auto const policy = world->getRouteChoicePolicy();
+		core::RouteDecisionContext context{ agent, policy.baselineProfile, policy,
+			agent->getSector(), agent->getWalkSpeed() };
+		bool checked = false;
+		for (auto const& edge : graph->getEdges())
+		{
+			if (edge->getType() == core::EdgeType::StaircaseMount)
+			{
+				auto facts = edge->getDirectedTraversalFacts(edge->getVertex(1), context);
+				require(facts.feasible && facts.components.interactionUnits == 0.0f
+					&& facts.objectiveDurationSeconds == 0.0f,
+					"A topology-only Staircase mount acquired a per-Vertex charge");
+				continue;
+			}
+			if (edge->getType() != core::EdgeType::Staircase
+				|| edge->getTraversalSpeed(nullptr) > 0.0f) continue;
+			auto lower = edge->getVertex(0);
+			auto upper = edge->getVertex(1);
+			if (lower->getPosition().y > upper->getPosition().y) std::swap(lower, upper);
+			auto up = edge->getDirectedTraversalFacts(upper, context);
+			auto down = edge->getDirectedTraversalFacts(lower, context);
+			auto const length = edge->getLength();
+			require(up.feasible && down.feasible
+				&& std::abs(up.components.motionSeconds - length / policy.stairAscentSpeed) < 0.0001f
+				&& std::abs(down.components.motionSeconds - length / policy.stairDescentSpeed) < 0.0001f,
+				"Stationary Staircase duration ignored physical length or direction");
+			require(up.components.physicalEffortUnits > down.components.physicalEffortUnits,
+				"Staircase ascent did not carry greater baseline effort");
+			require(std::abs(up.components.interactionUnits - policy.stairInteractionPerFlight) < 0.0001f
+				&& std::abs(down.components.interactionUnits - policy.stairInteractionPerFlight) < 0.0001f,
+				"Staircase interaction was not charged once per flight");
+			require(std::abs(edge->getTraversalSpeed(agent, upper) - policy.stairAscentSpeed) < 0.0001f
+				&& std::abs(edge->getTraversalSpeed(agent, lower) - policy.stairDescentSpeed) < 0.0001f,
+				"Estimated and runtime stationary Staircase speeds disagree");
+			checked = true;
+			break;
+		}
+		require(checked, "Staircase fixture has no stationary flight");
+	}
+
+	std::shared_ptr<const core::Vertex> markerVertex(
+		std::shared_ptr<const core::Graph> const& graph, uint64_t markerId)
+	{
+		for (auto const& vertex : graph->getVertices())
+		{
+			auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+			if (marker && marker->getId().value == markerId) return vertex;
+		}
+		return {};
+	}
+
+	void multiFlightStairwellAccumulatesEveryFlight()
+	{
+		auto world = core::loadWorldDocument(testWorld("stairwell-test-1.world.yaml"));
+		auto graph = world->getGraph();
+		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
+		auto const policy = world->getRouteChoicePolicy();
+		core::RouteDecisionContext context{ agent, policy.baselineProfile, policy,
+			agent->getSector(), agent->getWalkSpeed() };
+		auto const level0 = markerVertex(graph, 1);
+		auto const level2 = markerVertex(graph, 5);
+		require(level0 && level2, "Stairwell fixture is missing endpoint Markers");
+		auto upPath = graph->calculatePath(agent, level0, level2);
+		auto downPath = graph->calculatePath(agent, level2, level0);
+		require(upPath && downPath, "Two-level Stairwell route is unreachable");
+
+		auto totals = [&](std::shared_ptr<core::Path> const& path)
+		{
+			core::RouteCostComponents total;
+			float length = 0.0f;
+			for (auto const& node : path->nodes)
+			{
+				if (!node.edge || node.edge->getType() != core::EdgeType::Stairwell) continue;
+				auto facts = node.edge->getDirectedTraversalFacts(node.targetVertex, context);
+				require(facts.feasible, "Stairwell body edge became infeasible");
+				total.motionSeconds += facts.components.motionSeconds;
+				total.physicalEffortUnits += facts.components.physicalEffortUnits;
+				total.interactionUnits += facts.components.interactionUnits;
+				length += node.edge->getLength();
+			}
+			return std::pair{ total, length };
+		};
+		auto const [up, upLength] = totals(upPath);
+		auto const [down, downLength] = totals(downPath);
+		require(upLength > 0.0f && std::abs(upLength - downLength) < 0.0001f,
+			"Stairwell route did not traverse the same physical run in reverse");
+		require(std::abs(up.motionSeconds - upLength / policy.stairAscentSpeed) < 0.0001f
+			&& std::abs(down.motionSeconds - downLength / policy.stairDescentSpeed) < 0.0001f,
+			"Multi-flight Stairwell collapsed to one graph minimum cost");
+		require(std::abs(up.interactionUnits - 2.0f * policy.stairInteractionPerFlight) < 0.0001f
+			&& std::abs(down.interactionUnits - 2.0f * policy.stairInteractionPerFlight) < 0.0001f,
+			"Stairwell interaction followed topology Vertices instead of flights");
+		require(up.physicalEffortUnits > down.physicalEffortUnits,
+			"Stairwell ascent did not carry greater baseline effort");
+
+		world->pauseSimulation();
+		require(world->setAgentIndividualMobilityProfile(core::AgentId{ 1 },
+			core::traversalMask(core::TraversalKind::Stairwell)),
+			"Could not forbid Stairwell traversal");
+		require(!graph->calculatePath(agent, level0, level2),
+			"A forbidden Stairwell remained a finite fallback alternative");
+	}
+}
+
+void runStairRouteCostSmokeChecks()
+{
+	stationaryStaircaseIsDirectionalAndPhysical();
+	multiFlightStairwellAccumulatesEveryFlight();
+}

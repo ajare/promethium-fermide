@@ -29,6 +29,12 @@ namespace core
 
 		float getWeight(std::shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const override;
 
+		[[nodiscard]] DirectedTraversalFacts getDirectedTraversalFacts(
+			std::shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const override;
+
+		[[nodiscard]] float getTraversalSpeed(Agent const* agent,
+			std::shared_ptr<const Vertex> const& targetVertex = {}) const override;
+
 		TraversalResourceId getTraversalResourceId() const override;
 	};
 

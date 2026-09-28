@@ -422,6 +422,10 @@ namespace core
 
 		float getClimbSpeed() const;
 
+		// Uses the World's configured stationary-stair baseline. Stair speed
+		// modifiers are introduced separately; this is the neutral physical speed.
+		float getStationaryStairSpeed(bool ascending) const;
+
 		// Used by edge route-cost implementations; this is an observation only.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
 
