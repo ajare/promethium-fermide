@@ -3804,6 +3804,35 @@ agents: []
 			"Unchanged rebuild of the corrected Lift");
 	}
 
+	void liftCarKeepsItsShaftRelativeLevelWhenExtendedDownward()
+	{
+		core::World world("Lift downward extension", 6, 4);
+		world.addRoom("Landing 1", 0, 1, 0, 6, 1);
+		world.addRoom("Landing 2", 0, 2, 0, 6, 1);
+		world.addRoom("Landing 3", 0, 3, 0, 6, 1);
+		core::World::CreateLiftOptions options;
+		options.levelsHigh = 3;
+		options.stopOffsets = { 0, 1, 2 };
+		options.initialStop = 1;
+		auto const created = world.addLift(1, 1, 2, options);
+		world.finishBuild();
+		world.pauseSimulation();
+		auto const liftSector = created.lift.sector->getIndex();
+		auto const before = std::dynamic_pointer_cast<const core::LiftTransit>(
+			world.getSector(liftSector));
+		require(before && std::abs(before->getLift()->getPosition().y - 2.0f) < 0.001f,
+			"The Lift car did not start one Level above the shaft bottom");
+
+		auto const plan = world.planResizeLift(liftSector, 2, 0, 1, 4);
+		require(plan.valid,
+			("Extending the Lift shaft downward was refused: " + plan.diagnostic).c_str());
+		auto const resizedSector = world.applyLiftEdit(plan);
+		auto const after = std::dynamic_pointer_cast<const core::LiftTransit>(
+			world.getSector(resizedSector));
+		require(after && std::abs(after->getLift()->getPosition().y - 1.0f) < 0.001f,
+			"Extending the shaft downward did not keep the car one Level above its bottom");
+	}
+
 	// Ticket #86: per-stop Door styles follow the stop's identity when the Lift
 	// moves or resizes without changing its stop levels. The overrides remap by
 	// absolute landing level rather than by the transient offset from the shaft
@@ -6089,6 +6118,7 @@ void runSerializationSmokeChecks()
 	liftStopDoorStyleOverridesArePerStopAndPersist();
 	liftCreationStopDoorStylesAreAuthoredAndPersist();
 	liftShortStopDoorStyleVectorEditPreservesEarlierOverrides();
+	liftCarKeepsItsShaftRelativeLevelWhenExtendedDownward();
 	liftDoorStylesFollowStopsWhenTheLiftMovesOrResizes();
 	liftDoorStylesReconcileWhenStopsChange();
 	shuttleDoorStyleOverridesAreIndividualAndPersist();

@@ -1649,6 +1649,14 @@ namespace core
 		else
 		{
 			auto const oldY = found->a;
+			auto oldPosition = (float)oldY;
+			if (found->g < found->values.size()) oldPosition += found->values[found->g];
+			for (auto const& [id, resource] : mTraversalResources.entries())
+			{
+				(void)id;
+				if (resource->mLift && resource->mLiftSector.value == (uint64_t)plan.sectorIndex + 1)
+				{ oldPosition = resource->mLiftPosition; break; }
+			}
 			found->a = plan.y; found->b = plan.x; found->c = plan.cellsWide;
 			found->e = plan.levelsHigh;
 			// Per-stop Door style overrides follow their stop, keyed by the
@@ -1676,17 +1684,16 @@ namespace core
 			if (all_of(found->overrides.begin(), found->overrides.end(),
 				[](uint32_t style) { return style == ~0u; }))
 				found->overrides.clear();
-			auto oldPosition = 0.0f;
-			for (auto const& [id, resource] : mTraversalResources.entries())
-			{
-				(void)id;
-				if (resource->mLift && resource->mLiftSector.value == (uint64_t)plan.sectorIndex + 1)
-				{ oldPosition = resource->mLiftPosition; break; }
-			}
+			// The car belongs to a Level within the shaft, not to an absolute World
+			// Level.  Moving the shaft's bottom (including extending it downward)
+			// translates the car's target by the same amount before the nearest
+			// surviving stop is selected.
+			auto const relativePosition = oldPosition - (float)oldY;
+			auto const targetPosition = (float)plan.y + relativePosition;
 			auto nearest = min_element(found->values.begin(), found->values.end(), [&](auto a, auto b)
 			{
-				auto da = abs((float)(plan.y + a) - oldPosition);
-				auto db = abs((float)(plan.y + b) - oldPosition);
+				auto da = abs((float)(plan.y + a) - targetPosition);
+				auto db = abs((float)(plan.y + b) - targetPosition);
 				return da == db ? a < b : da < db;
 			});
 			found->g = (uint32_t)distance(found->values.begin(), nearest);
@@ -2277,8 +2284,9 @@ namespace core
 		{
 			(void)id;
 			if (!resource->mLift || resource->mLiftSector.value != (uint64_t)sectorIndex + 1) continue;
-			auto currentLevel = (uint32_t)round(resource->mLiftPosition);
-			if (find(newStops.begin(), newStops.end(), currentLevel) == newStops.end())
+			auto const relativePosition = resource->mLiftPosition - (float)lift->getCellY();
+			auto const targetLevel = (uint32_t)round((float)y + relativePosition);
+			if (find(newStops.begin(), newStops.end(), targetLevel) == newStops.end())
 				plan.consequences.push_back("Relocate the Lift car to the nearest remaining stop");
 		}
 		vector<ConstructionRecord> records;
