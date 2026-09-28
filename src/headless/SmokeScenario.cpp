@@ -6215,6 +6215,7 @@ int main(int argc, char** argv)
 
 	try
 	{
+		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
 		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")

@@ -408,6 +408,9 @@ namespace core
 		serializer.writeUint32("levelsHigh", mLevelsHigh);
 		serializer.writeUint32("layers", getLayerCount());
 
+		serializer.beginArray("levelNames");
+		for (auto const& name : mLevelNames) serializer.writeString("", name);
+		serializer.endArray();
 		serializer.beginArray("layerNames");
 		for (auto const& name : mLayerNames) serializer.writeString("", name);
 		serializer.endArray();
@@ -866,6 +869,23 @@ namespace core
 			&dimensionDiagnostic))
 		{
 			throw SerializationException(dimensionDiagnostic);
+		}
+		mLevelNames.clear();
+		for (uint32_t level = 0; level < levelsHigh; ++level)
+			mLevelNames.push_back(format("Level {}", level));
+		if (serializer.hasField("levelNames"))
+		{
+			serializer.beginArray("levelNames");
+			uint32_t index = 0;
+			while (serializer.nextArrayItem())
+			{
+				if (index >= levelsHigh) throw SerializationException("Too many Level names");
+				auto name = serializer.readString("");
+				if (name.empty()) throw SerializationException("Level name cannot be empty");
+				mLevelNames[index++] = std::move(name);
+			}
+			serializer.endArray();
+			if (index != levelsHigh) throw SerializationException("Too few Level names");
 		}
 		mLayers.resize(layerCount);
 		mLayerNames.resize(layerCount);
@@ -2038,6 +2058,162 @@ namespace core
 		}
 
 		return records;
+	}
+
+	void World::addLevel()
+	{
+		string diagnostic;
+		if (!dimensionsAreSupported(mCellsWide, mLevelsHigh + 1, getLayerCount(), &diagnostic))
+			throw WorldException(this, diagnostic);
+		auto records = mConstructionRecords;
+		auto agents = captureAgentsForReplay();
+		mLevelNames.push_back(format("Level {}", mLevelsHigh));
+		resetForDeserialization(mName, mCellsWide, mLevelsHigh + 1, true);
+		mDeserializingConstruction = true;
+		try { for (auto const& record : records) applyConstructionRecord(record); finishBuild(); }
+		catch (...) { mDeserializingConstruction = false; throw; }
+		mDeserializingConstruction = false;
+		mConstructionRecords = std::move(records);
+		restoreCarriedAgents(agents, true);
+		mSimulationPaused = true;
+		modify();
+	}
+
+	vector<World::ConstructionRecord> World::recordsWithoutLevel(uint32_t level,
+		vector<bool>& removed, vector<string>& consequences) const
+	{
+		removed.assign(mSectors.size(), false);
+		for (auto const& sector : mSectors)
+			if (sector) removed[sector->getIndex()] = sector->getCellY() <= level
+				&& sector->getCellY() + sector->getLevelsHigh() > level;
+		// A Transit cannot retain a landing in a deleted Sector.
+		bool changed;
+		do
+		{
+			changed = false;
+			for (auto const& sector : mSectors)
+			{
+				auto transit = dynamic_pointer_cast<const Transit>(sector);
+				if (!transit || removed[sector->getIndex()]) continue;
+				for (uint32_t stop = 0; stop < transit->getNumStops(); ++stop)
+					if (auto landing = transit->getStop(stop).sector;
+						landing && removed[landing->getIndex()])
+					{
+						removed[sector->getIndex()] = true;
+						changed = true;
+						break;
+					}
+			}
+		} while (changed);
+		vector<uint32_t> sectorMap(mSectors.size(), ~0u);
+		uint32_t next = 0;
+		set<void const*> seen;
+		for (auto const& sector : mSectors)
+		{
+			if (!sector) continue;
+			if (!removed[sector->getIndex()]) { sectorMap[sector->getIndex()] = next++; continue; }
+			consequences.push_back("Delete Sector " + sector->getName());
+			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+				if (auto object = sector->getObject(i); object && seen.insert(object.get()).second)
+					consequences.push_back("Delete " + object->getDescription());
+		}
+		for (auto const& [id, agent] : mAgents.entries())
+			if (agent->getSector() && removed[agent->getSector()->getIndex()])
+				consequences.push_back("Delete Agent " + agent->getName());
+
+		auto touchesRemoved = [&](uint32_t layer, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+		{
+			for (auto const& sector : mSectors)
+				if (sector && removed[sector->getIndex()] && sector->getLayerIndex() == layer
+					&& x < sector->getCellX() + sector->getCellsWide() && x + width > sector->getCellX()
+					&& y < sector->getCellY() + sector->getLevelsHigh() && y + height > sector->getCellY()) return true;
+			return false;
+		};
+		vector<ConstructionRecord> records;
+		uint32_t producer = 0;
+		for (auto record : mConstructionRecords)
+		{
+			if (constructionTypeCreatesSector(record.type))
+			{
+				if (removed[producer++]) continue;
+				auto& y = record.type == ConstructionType::Room ? record.b : record.a;
+				if (y > level) --y;
+			}
+			else if (record.type == ConstructionType::Door || record.type == ConstructionType::Window
+				|| record.type == ConstructionType::BulkheadDoor)
+			{
+				bool door = record.type == ConstructionType::Door;
+				bool window = record.type == ConstructionType::Window;
+				auto layer = door ? (record.layer == ~0u ? 0u : record.layer) : record.a;
+				auto& y = door ? record.a : record.b;
+				auto x = door ? record.b : record.c;
+				auto width = window ? record.d : 1u;
+				auto height = window ? record.e : 1u;
+				if ((y <= level && y + height > level)
+					|| touchesRemoved(layer, x, y, width, height)
+					|| (!door && !window && x > 0 && touchesRemoved(layer, x - 1, y, 1, 1))
+					|| ((door || window) && touchesRemoved(layer + 1, x, y, width, height))) continue;
+				if (y > level) --y;
+			}
+			else
+			{
+				if (record.a >= sectorMap.size() || sectorMap[record.a] == ~0u) continue;
+				record.a = sectorMap[record.a];
+			}
+			records.push_back(std::move(record));
+		}
+		return records;
+	}
+
+	World::LevelDeletePlan World::planDeleteLevel(uint32_t level) const
+	{
+		LevelDeletePlan plan;
+		plan.levelIndex = level;
+		if (level >= mLevelsHigh || mLevelsHigh <= 1)
+		{ plan.diagnostic = "A World must keep at least one Level"; return plan; }
+		try
+		{
+			vector<bool> removed;
+			auto records = recordsWithoutLevel(level, removed, plan.consequences);
+			auto candidate = makeCandidateWorld();
+			candidate->resetForDeserialization(mName, mCellsWide, mLevelsHigh - 1);
+			candidate->mDeserializingConstruction = true;
+			for (auto const& record : records) candidate->applyConstructionRecord(record);
+			candidate->finishBuild();
+			plan.consequences.insert(plan.consequences.begin(), "Delete " + getLevelName(level));
+			if (level + 1 < mLevelsHigh) plan.consequences.push_back("Move all higher Levels down by one");
+			plan.valid = true;
+		}
+		catch (Exception const& error) { plan.diagnostic = error.getMessage(); }
+		catch (exception const& error) { plan.diagnostic = error.what(); }
+		return plan;
+	}
+
+	bool World::applyDeleteLevel(LevelDeletePlan const& requested)
+	{
+		auto plan = planDeleteLevel(requested.levelIndex);
+		if (!plan.valid) throw WorldException(this, plan.diagnostic);
+		vector<bool> removed;
+		vector<string> consequences;
+		auto records = recordsWithoutLevel(plan.levelIndex, removed, consequences);
+		vector<CarriedAgent> agents;
+		for (auto agent : captureAgentsForReplay())
+		{
+			if (removed[agent.sectorIndex]) continue;
+			if (agent.position.y > plan.levelIndex) agent.position.y -= 1;
+			agents.push_back(std::move(agent));
+		}
+		mLevelNames.erase(mLevelNames.begin() + plan.levelIndex);
+		resetForDeserialization(mName, mCellsWide, mLevelsHigh - 1, true);
+		mDeserializingConstruction = true;
+		try { for (auto const& record : records) applyConstructionRecord(record); finishBuild(); }
+		catch (...) { mDeserializingConstruction = false; throw; }
+		mDeserializingConstruction = false;
+		mConstructionRecords = std::move(records);
+		restoreCarriedAgents(agents, true);
+		mSimulationPaused = true;
+		modify();
+		return true;
 	}
 
 	World::LayerDeletePlan World::planDeleteLayer(uint32_t layerIndex) const

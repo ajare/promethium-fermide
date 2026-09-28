@@ -448,6 +448,7 @@ namespace core
 
 		std::vector<std::shared_ptr<Layer>> mLayers;
 		std::vector<std::string> mLayerNames;
+		std::vector<std::string> mLevelNames;
 
 		std::vector<std::shared_ptr<Sector>> mSectors;
 
@@ -924,6 +925,8 @@ namespace core
 
 		// Authored construction records rewritten for a Layer deletion: casualties
 		// are dropped and every remaining Layer index compacts forward by one.
+		std::vector<ConstructionRecord> recordsWithoutLevel(uint32_t level,
+			std::vector<bool>& removed, std::vector<std::string>& consequences) const;
 		std::vector<ConstructionRecord> recordsWithoutLayer(uint32_t layerIndex,
 			LayerDeleteImpact& impact) const;
 
@@ -1365,6 +1368,18 @@ namespace core
 		// Plans the destructive deletion of a Layer.  The plan is side-effect free
 		// and validates that the compacted World can be rebuilt before it is
 		// offered for confirmation.  A World must keep at least two Layers.
+		struct LevelDeletePlan
+		{
+			uint32_t levelIndex{};
+			bool valid{ false };
+			std::string diagnostic;
+			std::vector<std::string> consequences;
+		};
+		std::string const& getLevelName(uint32_t level) const;
+		void setLevelName(uint32_t level, std::string name);
+		void addLevel();
+		LevelDeletePlan planDeleteLevel(uint32_t level) const;
+		bool applyDeleteLevel(LevelDeletePlan const& plan);
 		LayerDeletePlan planDeleteLayer(uint32_t layerIndex) const;
 
 		// Applies a confirmed Layer deletion by rewriting and replaying the authored

@@ -1259,6 +1259,65 @@ agents: []
 			"A refused World document still mutated the loading World");
 	}
 
+	void levelsHaveNamesLimitsAndCascadingDeletion()
+	{
+		require(core::World::dimensionsAreSupported(2, 128, 2), "128 Levels refused");
+		require(!core::World::dimensionsAreSupported(2, 129, 2), "129 Levels accepted");
+		core::World world("Levels", 8, 4);
+		require(world.getLevelName(0) == "Level 0", "Default Level name incorrect");
+		world.setLevelName(3, "Roof");
+		world.addRoom("Spanning", 0, 0, 0, 8, 2);
+		world.addRoom("Survivor", 0, 3, 0, 8, 1);
+		world.finishBuild();
+		auto lost = world.createAgent("Lost", 0, 0, 1.0f);
+		auto kept = world.createAgent("Kept", 1, 0, 1.0f);
+		world.addLevel();
+		require(world.getLevelsHigh() == 5 && world.getLevelName(4) == "Level 4",
+			"Adding a Level failed");
+		auto plan = world.planDeleteLevel(1);
+		require(plan.valid, plan.diagnostic.c_str());
+		require(std::any_of(plan.consequences.begin(), plan.consequences.end(),
+			[](auto const& text) { return text == "Delete Agent Lost"; }), "Missing Agent cascade");
+		world.applyDeleteLevel(plan);
+		require(world.getLevelsHigh() == 4 && world.getLevelName(2) == "Roof",
+			"Level names did not compact");
+		require(!world.lookupAgent(lost) && world.lookupAgent(kept), "Wrong Agents survived deletion");
+		require(world.lookupAgent(kept).entity->getGlobalPosition().y == 2.0f, "Agent did not move down");
+		auto writer = core::YamlSerializer::toString();
+		core::SerializationWorkData data;
+		world.serialize(*writer, data);
+		writer->serialize();
+		auto reader = core::YamlSerializer::fromString(writer->getSerializedString());
+		reader->deserialize();
+		core::World loaded("Loaded", 2, 1);
+		loaded.deserialize(*reader, data);
+		require(loaded.getLevelName(2) == "Roof", "Level names did not round-trip");
+		auto legacy = core::YamlSerializer::fromString(
+			"version: 1\nname: Legacy\ncellsWide: 2\nlevelsHigh: 2\nconstruction: []\nagents: []\n");
+		legacy->deserialize();
+		loaded.deserialize(*legacy, data);
+		require(loaded.getLevelName(1) == "Level 1", "Legacy Level names not defaulted");
+
+		core::World transitWorld("Cascade", 8, 4);
+		transitWorld.addRoom("Landing", 0, 0, 0, 8, 3);
+		transitWorld.addRoom("Back", 1, 0, 0, 8, 3);
+		transitWorld.addSectorDoor(0, 0, 2);
+		transitWorld.addSectorWindow(0, 1, 4, 1, 1);
+		transitWorld.finishBuild();
+		auto cascade = transitWorld.planDeleteLevel(1);
+		require(cascade.valid, cascade.diagnostic.c_str());
+		require(cascade.consequences.size() >= 5, "Missing threshold cascades");
+		transitWorld.applyDeleteLevel(cascade);
+		require(transitWorld.getNumSectors() == 0, "Spanning Sectors survived Level deletion");
+
+		core::World maximum("Maximum", 2, 128);
+		bool refused = false;
+		try { maximum.addLevel(); } catch (core::WorldException const&) { refused = true; }
+		require(refused && maximum.getLevelsHigh() == 128, "Adding Level 129 was not refused");
+		core::World minimum("Minimum", 2, 1);
+		require(!minimum.planDeleteLevel(0).valid, "Last Level deletion accepted");
+	}
+
 	void deletingAMiddleLayerCompactsTheLayersAboveIt()
 	{
 		core::World world("Compacting", 8, 3);
@@ -6091,6 +6150,7 @@ void runSerializationSmokeChecks()
 	addedLayersAppendToTheBackAndRoundTrip();
 	layerCountIsCappedAtCoreMaxLayers();
 	oversizedWorldDimensionsAreRefusedBeforeCellAccess();
+	levelsHaveNamesLimitsAndCascadingDeletion();
 	deletingAMiddleLayerCompactsTheLayersAboveIt();
 	deletingTheFrontLayerRemovesTransitsOneLayerBehind();
 	layerDeletionPreservesAuthoredRecordDependencies();

@@ -2206,6 +2206,7 @@ namespace
 	};
 
 	std::map<uint32_t, LayerNameEdit> gLayerNameEdits;
+	std::map<uint32_t, LayerNameEdit> gLevelNameEdits;
 
 	std::string trimLayerName(std::string const& value)
 	{
@@ -2217,13 +2218,13 @@ namespace
 
 	// Inline editor for one layer's name.  The edit is committed when the field is
 	// submitted with Enter or loses focus, and is undoable as a single document edit.
-	void renderLayerNameEditor(shared_ptr<core::World> const& world, uint32_t layer)
+	void renderLayerNameEditor(shared_ptr<core::World> const& world, uint32_t layer, bool level = false)
 	{
-		auto& edit = gLayerNameEdits[layer];
+		auto& edit = level ? gLevelNameEdits[layer] : gLayerNameEdits[layer];
 
 		if (!edit.editing)
 		{
-			auto const& name = world->getLayerName(layer);
+			auto const& name = level ? world->getLevelName(layer) : world->getLayerName(layer);
 			std::strncpy(edit.text.data(), name.c_str(), edit.text.size() - 1);
 			edit.text[edit.text.size() - 1] = '\0';
 		}
@@ -2237,7 +2238,7 @@ namespace
 			if (submitted || ImGui::IsItemActivated())
 			{
 				edit.editing = true;
-				edit.previous = world->getLayerName(layer);
+				edit.previous = level ? world->getLevelName(layer) : world->getLayerName(layer);
 			}
 			return;
 		}
@@ -2252,7 +2253,8 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			world->setLayerName(layer, next);
+			if (level) world->setLevelName(layer, next);
+			else world->setLayerName(layer, next);
 			commitDocumentEdit(std::move(undo));
 		}
 		catch (std::exception const& error)
@@ -2313,6 +2315,7 @@ namespace
 		gShuttleDraft.reset();
 		gShuttleDoorCandidates.clear();
 		gLayerNameEdits.clear();
+		gLevelNameEdits.clear();
 		resetAgentGroupsPanelState();
 		resetAgentTagAssignmentPanelState();
 		resetTagsPanelState();
@@ -7121,6 +7124,96 @@ void renderLayersPanel(shared_ptr<core::World> const& world)
 }
 
 
+void renderLevelsPanel(shared_ptr<core::World> const& world)
+{
+	if (!world) return;
+	static optional<core::World::LevelDeletePlan> pending;
+	static weak_ptr<core::World> pendingWorld;
+	if (pendingWorld.lock() != world) pending.reset();
+	bool open = false;
+	if (ImGui::BeginTable("Levels", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV | ImGuiTableFlags_RowBg))
+	{
+		ImGui::TableSetupColumn("Level name", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthFixed);
+		ImGui::TableHeadersRow();
+		for (uint32_t level = 0; level < world->getLevelsHigh(); ++level)
+		{
+			ImGui::PushID(level);
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			renderLayerNameEditor(world, level, true);
+			ImGui::TableSetColumnIndex(1);
+			ImGui::BeginDisabled(world->getLevelsHigh() <= 1);
+			if (ImGui::Button(ICON_FA_TRASH))
+			{
+				if (!world->isSimulationPaused()) world->pauseSimulation();
+				gUISettings.worldPaused = true;
+				auto plan = world->planDeleteLevel(level);
+				if (!plan.valid) reportEditorError("Levels", plan.diagnostic);
+				else { pending = std::move(plan); pendingWorld = world; open = true; }
+			}
+			ImGui::EndDisabled();
+			ImGui::PopID();
+		}
+		ImGui::EndTable();
+	}
+	auto clearSelections = []
+	{
+		gHoveredAgent = nullptr; gSelectedAgent = nullptr;
+		gHoveredSector.reset(); gSelectedSector.reset();
+		gHoveredSectorObject.reset(); gSelectedSectorObject.reset();
+		gLevelNameEdits.clear();
+	};
+	bool canAdd = core::World::dimensionsAreSupported(world->getCellsWide(),
+		world->getLevelsHigh() + 1, world->getLayerCount());
+	ImGui::BeginDisabled(!canAdd);
+	if (ImGui::Button(ICON_FA_PLUS " Add Level"))
+	{
+		auto undo = captureDocumentSnapshot(world);
+		try
+		{
+			world->addLevel();
+			gUISettings.worldPaused = true;
+			clearSelections();
+			commitDocumentEdit(std::move(undo));
+		}
+		catch (core::Exception const& error) { reportEditorError("Levels", error.getMessage()); }
+		catch (std::exception const& error) { reportEditorError("Levels", error.what()); }
+	}
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::TextDisabled("%u of %u Levels", world->getLevelsHigh(), (uint32_t)CORE_MAX_LEVELS);
+	if (open) ImGui::OpenPopup("Delete Level?");
+	if (ImGui::BeginPopupModal("Delete Level?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		if (pending)
+		{
+			ImGui::TextUnformatted("Confirm cascading deletions:");
+			ImGui::BeginChild("Consequences", ImVec2(520, 280));
+			for (auto const& consequence : pending->consequences)
+				ImGui::BulletText("%s", consequence.c_str());
+			ImGui::EndChild();
+			if (ImGui::Button("Delete"))
+			{
+				auto undo = captureDocumentSnapshot(world);
+				try
+				{
+					world->applyDeleteLevel(*pending);
+					clearSelections();
+					commitDocumentEdit(std::move(undo));
+				}
+				catch (core::Exception const& error) { reportEditorError("Levels", error.getMessage()); }
+				catch (std::exception const& error) { reportEditorError("Levels", error.what()); }
+				pending.reset();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+		}
+		if (ImGui::Button("Cancel")) { pending.reset(); ImGui::CloseCurrentPopup(); }
+		ImGui::EndPopup();
+	}
+}
+
 void renderWorldPanel(shared_ptr<core::World> world)
 {
 	ImGui::Indent(ImGui::GetTreeNodeToLabelSpacing());
@@ -7494,6 +7587,8 @@ void renderControlsWindow(shared_ptr<core::World> world, shared_ptr<const core::
 		renderToolbar(world);
 	if (ImGui::CollapsingHeader("Layers", ImGuiTreeNodeFlags_DefaultOpen))
 		renderLayersPanel(world);
+	if (ImGui::CollapsingHeader("Levels", ImGuiTreeNodeFlags_DefaultOpen))
+		renderLevelsPanel(world);
 	if (ImGui::CollapsingHeader("World", ImGuiTreeNodeFlags_DefaultOpen))
 		renderWorldPanel(world);
 	if (ImGui::CollapsingHeader("Path finding"))

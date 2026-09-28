@@ -34,6 +34,7 @@
 // cells across all Layers and is checked in 64 bits before any allocation, so an
 // overflowing dimension pair is refused instead of wrapping to a short buffer
 // (#184). At roughly 64 bytes per CellDefinition this is a ~256 MiB ceiling.
+#define CORE_MAX_LEVELS 128u
 #define CORE_MAX_WORLD_CELLS						4194304u
 
 namespace core

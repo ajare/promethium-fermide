@@ -123,7 +123,21 @@ namespace core
 			mLayers[i] = make_shared<Layer>(this, cellsWide, levelsHigh, i);
 		}
 
+		for (uint32_t level = 0; level < levelsHigh; ++level)
+			mLevelNames.push_back(format("Level {}", level));
 		mGraph = make_shared<Graph>(this);
+	}
+
+	std::string const& World::getLevelName(uint32_t level) const
+	{
+		return mLevelNames.at(level);
+	}
+
+	void World::setLevelName(uint32_t level, std::string name)
+	{
+		if (name.empty()) throw WorldException(this, "Level name cannot be empty");
+		mLevelNames.at(level) = std::move(name);
+		modify();
 	}
 
 	bool World::dimensionsAreSupported(uint32_t cellsWide, uint32_t levelsHigh,
@@ -141,6 +155,9 @@ namespace core
 		{
 			return reject("World dimensions must be positive");
 		}
+
+		if (levelsHigh > CORE_MAX_LEVELS)
+			return reject(format("World Level count exceeds the {} Level limit", CORE_MAX_LEVELS));
 
 		if (layerCount < 2 || layerCount > CORE_MAX_LAYERS)
 		{
