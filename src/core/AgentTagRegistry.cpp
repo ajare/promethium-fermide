@@ -108,6 +108,8 @@ namespace core
 				tag->setWalkSpeedModifier(*walkSpeed);
 			if (auto const* height = sourceTag->getHeightModifier())
 				tag->setHeightModifier(*height);
+			if (auto const* interaction = sourceTag->getInteractionAversion())
+				tag->setInteractionAversion(*interaction);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
 				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
@@ -139,6 +141,8 @@ namespace core
 					candidate->getWalkSpeedModifier())
 				|| !optionalPropertyMatches(tag->getHeightModifier(),
 					candidate->getHeightModifier())
+				|| !optionalPropertyMatches(tag->getInteractionAversion(),
+					candidate->getInteractionAversion())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
 					candidate->getMobilityProfile())) return false;
 		}
@@ -283,6 +287,16 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getHeightModifier();
+	}
+
+	AgentInteractionAversionProperty const*
+	AgentTagRegistry::getAgentTagInteractionAversion(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getInteractionAversion();
 	}
 
 	AgentMobilityProfileProperty const*
@@ -552,6 +566,39 @@ namespace core
 						"Cannot add Walk speed modifier to Agent tag #{}: Agent '{}' in World '{}' already inherits Walk speed modifier from #{}",
 						target->getName(), agent->getName(), world->getName(),
 						source->getName()));
+				}
+			}
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::interactionAversionAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format(
+			"Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+		{
+			if (!world) continue;
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (!source || !source->getInteractionAversion()) continue;
+					return reject(std::format(
+						"Cannot add Interaction aversion to Agent tag #{}: Agent '{}' in World '{}' already inherits Interaction aversion from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
 				}
 			}
 		}
@@ -1041,6 +1088,66 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagInteractionAversion(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getInteractionAversion()) return reject(std::format(
+			"Agent tag #{} already has Interaction aversion", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!interactionAversionAdditionIsValid(id, diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setInteractionAversion({ DefaultAgentInteractionAversionRange, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagInteractionAversionSamples(id, *tag->getInteractionAversion());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::setAgentTagInteractionAversion(AgentTagId id,
+		AgentModifierRange range, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getInteractionAversion();
+		if (!current) return reject(std::format("Agent tag #{} has no Interaction aversion", tag->getName()));
+		if (!agentInteractionAversionRangeIsValid(range, diagnostic)) return false;
+		if (current->range == range) return reject("The Agent Interaction aversion range is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setInteractionAversion({ range, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagInteractionAversionSamples(id, *tag->getInteractionAversion());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagInteractionAversion(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getInteractionAversion()) return reject(std::format(
+			"Agent tag #{} has no Interaction aversion", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world) world->clearAgentTagInteractionAversionSamples(id);
+		tag->removeInteractionAversion();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1138,7 +1245,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 2);
+		serializer.writeUint32("version", 3);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -1158,9 +1265,10 @@ namespace core
 			auto const* colour = tag->getColour();
 			auto const* walkSpeed = tag->getWalkSpeedModifier();
 			auto const* height = tag->getHeightModifier();
+			auto const* interaction = tag->getInteractionAversion();
 			auto const* chance = tag->getEscalatorWalkingChance();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || chance || mobility)
+			if (colour || walkSpeed || height || interaction || chance || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -1193,6 +1301,7 @@ namespace core
 				};
 				if (walkSpeed) writeModifier("walkSpeedModifier", *walkSpeed);
 				if (height) writeModifier("heightModifier", *height);
+				if (interaction) writeModifier("interactionAversion", *interaction);
 				if (mobility)
 				{
 					serializer.beginMap("");
@@ -1213,7 +1322,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version != 1 && version != 2)
+		if (version < 1 || version > 3)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -1260,6 +1369,7 @@ namespace core
 				bool hasColour{ false };
 				bool hasWalkSpeedModifier{ false };
 				bool hasHeightModifier{ false };
+				bool hasInteractionAversion{ false };
 				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
@@ -1268,7 +1378,8 @@ namespace core
 					auto const type = serializer.readString("type");
 					if (type != "colour" && type != "walkSpeedModifier"
 						&& type != "heightModifier" && type != "escalatorWalkingChance"
-						&& !(version >= 2 && type == "mobilityProfile"))
+						&& !(version >= 2 && type == "mobilityProfile")
+						&& !(version >= 3 && type == "interactionAversion"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -1284,6 +1395,9 @@ namespace core
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Height modifier",
 							name));
+					if (type == "interactionAversion" && hasInteractionAversion)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Interaction aversion", name));
 					if (type == "mobilityProfile" && hasMobilityProfile)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Mobility profile",
@@ -1331,14 +1445,21 @@ namespace core
 							tag->setWalkSpeedModifier({ range, revision });
 							hasWalkSpeedModifier = true;
 						}
-						else
+						else if (type == "heightModifier")
 						{
 							if (!agentHeightModifierRangeIsValid(range, &rangeDiagnostic))
 								throw SerializationException(
-									"Serialized Height modifier range is invalid: "
-									+ rangeDiagnostic);
+									"Serialized Height modifier range is invalid: " + rangeDiagnostic);
 							tag->setHeightModifier({ range, revision });
 							hasHeightModifier = true;
+						}
+						else
+						{
+							if (!agentInteractionAversionRangeIsValid(range, &rangeDiagnostic))
+								throw SerializationException(
+									"Serialized Interaction aversion range is invalid: " + rangeDiagnostic);
+							tag->setInteractionAversion({ range, revision });
+							hasInteractionAversion = true;
 						}
 					}
 					serializer.endMap();

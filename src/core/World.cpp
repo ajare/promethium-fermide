@@ -263,6 +263,7 @@ namespace core
 			if (!agent) continue;
 			if (agent->getWalkSpeedModifierSample()) ++count;
 			if (agent->getHeightModifierSample()) ++count;
+			if (agent->getInteractionAversionSample()) ++count;
 		}
 		return count;
 	}
@@ -1110,9 +1111,11 @@ namespace core
 			AgentTagId colourSource{};
 			AgentTagId walkSpeedSource{};
 			AgentTagId heightSource{};
+			AgentTagId interactionAversionSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
+			AgentInteractionAversionProperty const* interactionAversionProperty{ nullptr };
 			for (auto const tag : agent->getAgentTagIds())
 			{
 				auto const* definition = registry.lookupAgentTag(tag);
@@ -1167,6 +1170,16 @@ namespace core
 					}
 					heightSource = tag;
 					heightProperty = property;
+				}
+				if (auto const* property = definition->getInteractionAversion())
+				{
+					if (interactionAversionSource)
+						return reject(format(
+							"Agent '{}' inherits Interaction aversion from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(interactionAversionSource),
+							definition->getName()));
+					interactionAversionSource = tag;
+					interactionAversionProperty = property;
 				}
 				if (definition->getMobilityProfile())
 				{
@@ -1256,6 +1269,11 @@ namespace core
 				heightSource, heightProperty ? &heightProperty->range : nullptr,
 				heightProperty ? heightProperty->revision : 0,
 				agent->getHeightModifierSample(), repair.heightAction)) return false;
+			if (!inspectSample("Interaction aversion", SampledAgentPropertyType::InteractionAversion,
+				interactionAversionSource,
+				interactionAversionProperty ? &interactionAversionProperty->range : nullptr,
+				interactionAversionProperty ? interactionAversionProperty->revision : 0,
+				agent->getInteractionAversionSample(), repair.interactionAversionAction)) return false;
 
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
 			{
@@ -1267,8 +1285,14 @@ namespace core
 				repair.heightSource = heightSource;
 				repair.heightProperty = *heightProperty;
 			}
+			if (repair.interactionAversionAction == AgentTagSampleRepairAction::Resample)
+			{
+				repair.interactionAversionSource = interactionAversionSource;
+				repair.interactionAversionProperty = *interactionAversionProperty;
+			}
 			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
-				|| repair.heightAction != AgentTagSampleRepairAction::None))
+				|| repair.heightAction != AgentTagSampleRepairAction::None
+				|| repair.interactionAversionAction != AgentTagSampleRepairAction::None))
 			{
 				repairs->push_back(repair);
 			}
@@ -1310,6 +1334,15 @@ namespace core
 					repair.heightProperty.revision,
 					sampleAgentModifier(repair.heightProperty.range) });
 			}
+			if (repair.interactionAversionAction == AgentTagSampleRepairAction::Clear)
+				agent->clearInteractionAversionSample();
+			else if (repair.interactionAversionAction == AgentTagSampleRepairAction::Resample)
+			{
+				agent->setInteractionAversionSample({
+					SampledAgentPropertyType::InteractionAversion, repair.interactionAversionSource,
+					repair.interactionAversionProperty.revision,
+					sampleAgentModifier(repair.interactionAversionProperty.range) });
+			}
 		}
 		if (!repairs.empty()) modify();
 	}
@@ -1350,6 +1383,9 @@ namespace core
 			if (agent->getHeightModifierSample()
 				&& agent->getHeightModifierSample()->sourceTag == id)
 				agent->clearHeightModifierSample();
+			if (agent->getInteractionAversionSample()
+				&& agent->getInteractionAversionSample()->sourceTag == id)
+				agent->clearInteractionAversionSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -1365,6 +1401,7 @@ namespace core
 			agent->setAgentTags({});
 			agent->clearWalkSpeedModifierSample();
 			agent->clearHeightModifierSample();
+			agent->clearInteractionAversionSample();
 		}
 	}
 
@@ -1427,6 +1464,38 @@ namespace core
 			if (!agent || !agent->getHeightModifierSample()
 				|| agent->getHeightModifierSample()->sourceTag != id) continue;
 			agent->clearHeightModifierSample();
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::addAgentTagInteractionAversionSamples(AgentTagId id,
+		AgentInteractionAversionProperty const& property)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->hasAgentTag(id)) continue;
+			agent->setInteractionAversionSample({
+				SampledAgentPropertyType::InteractionAversion, id, property.revision,
+				sampleAgentModifier(property.range) });
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::clearAgentTagInteractionAversionSamples(AgentTagId id)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->getInteractionAversionSample()
+				|| agent->getInteractionAversionSample()->sourceTag != id) continue;
+			agent->clearInteractionAversionSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -7474,6 +7543,29 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualInteractionAversion(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentInteractionAversionRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualInteractionAversion() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Interaction aversion is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualInteractionAversion(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<TraversalMask> value, string* diagnostic)
 	{
@@ -7800,6 +7892,12 @@ namespace core
 					agentLookup.entity->getName(), assignedDefinition->getName(),
 					source->getName()));
 			}
+			if (assignedDefinition->getInteractionAversion() && source->getInteractionAversion())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Interaction aversion is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -7820,6 +7918,7 @@ namespace core
 		auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
 		optional<AgentPropertySample> walkSpeedSample;
 		optional<AgentPropertySample> heightSample;
+		optional<AgentPropertySample> interactionAversionSample;
 		if (auto const* property = definition->getWalkSpeedModifier())
 		{
 			walkSpeedSample = AgentPropertySample{
@@ -7832,9 +7931,16 @@ namespace core
 				SampledAgentPropertyType::HeightModifier, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		if (auto const* property = definition->getInteractionAversion())
+		{
+			interactionAversionSample = AgentPropertySample{
+				SampledAgentPropertyType::InteractionAversion, tag, property->revision,
+				sampleAgentModifier(property->range) };
+		}
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
+		if (interactionAversionSample) target->setInteractionAversionSample(*interactionAversionSample);
 		modify();
 		return true;
 	}
@@ -7876,6 +7982,9 @@ namespace core
 		if (target->getHeightModifierSample()
 			&& target->getHeightModifierSample()->sourceTag == tag)
 			target->clearHeightModifierSample();
+		if (target->getInteractionAversionSample()
+			&& target->getInteractionAversionSample()->sourceTag == tag)
+			target->clearInteractionAversionSample();
 		modify();
 		return true;
 	}
@@ -7883,6 +7992,7 @@ namespace core
 	bool World::validateAgentTagAssignments(set<AgentTagId> const& tags,
 		optional<AgentPropertySample> const& walkSpeedSample,
 		optional<AgentPropertySample> const& heightSample,
+		optional<AgentPropertySample> const& interactionAversionSample,
 		string* diagnostic) const
 	{
 		if (diagnostic) diagnostic->clear();
@@ -7894,7 +8004,7 @@ namespace core
 
 		if (tags.empty())
 		{
-			if (walkSpeedSample || heightSample)
+			if (walkSpeedSample || heightSample || interactionAversionSample)
 				return reject("An untagged Agent cannot carry modifier samples");
 			return true;
 		}
@@ -7905,9 +8015,11 @@ namespace core
 		AgentTagId colourSource{};
 		AgentTagId walkSpeedSource{};
 		AgentTagId heightSource{};
+		AgentTagId interactionAversionSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
+		AgentInteractionAversionProperty const* interactionAversionProperty{ nullptr };
 		for (auto const tag : tags)
 		{
 			auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
@@ -7945,6 +8057,14 @@ namespace core
 						mAgentTagRegistry->getAgentTagName(heightSource), definition->getName()));
 				heightSource = tag;
 				heightProperty = property;
+			}
+			if (auto const* property = definition->getInteractionAversion())
+			{
+				if (interactionAversionSource)
+					return reject(format("Interaction aversion is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(interactionAversionSource), definition->getName()));
+				interactionAversionSource = tag;
+				interactionAversionProperty = property;
 			}
 			if (definition->getMobilityProfile())
 			{
@@ -7987,13 +8107,19 @@ namespace core
 			walkSpeedProperty ? walkSpeedProperty->revision : 0, walkSpeedSample)
 			&& validateSample("Height modifier", SampledAgentPropertyType::HeightModifier,
 				heightSource, heightProperty ? &heightProperty->range : nullptr,
-				heightProperty ? heightProperty->revision : 0, heightSample);
+				heightProperty ? heightProperty->revision : 0, heightSample)
+			&& validateSample("Interaction aversion", SampledAgentPropertyType::InteractionAversion,
+				interactionAversionSource,
+				interactionAversionProperty ? &interactionAversionProperty->range : nullptr,
+				interactionAversionProperty ? interactionAversionProperty->revision : 0,
+				interactionAversionSample);
 	}
 
 	bool World::restoreAgentTagAssignments(AgentId agent,
 		set<AgentTagId> const& tags,
 		optional<AgentPropertySample> const& walkSpeedSample,
 		optional<AgentPropertySample> const& heightSample,
+		optional<AgentPropertySample> const& interactionAversionSample,
 		string* diagnostic)
 	{
 		invalidateSimulationSnapshot();
@@ -8010,19 +8136,23 @@ namespace core
 				*diagnostic = "Pause the simulation before restoring Agent tag assignments";
 			return false;
 		}
-		if (!validateAgentTagAssignments(tags, walkSpeedSample, heightSample, diagnostic))
+		if (!validateAgentTagAssignments(tags, walkSpeedSample, heightSample,
+			interactionAversionSample, diagnostic))
 			return false;
 
 		auto* target = mAgents.find(agent);
 		if (target->getAgentTagIds() == tags
 			&& target->getWalkSpeedModifierSample() == walkSpeedSample
-			&& target->getHeightModifierSample() == heightSample) return true;
+			&& target->getHeightModifierSample() == heightSample
+			&& target->getInteractionAversionSample() == interactionAversionSample) return true;
 
 		target->setAgentTags(tags);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		else target->clearWalkSpeedModifierSample();
 		if (heightSample) target->setHeightModifierSample(*heightSample);
 		else target->clearHeightModifierSample();
+		if (interactionAversionSample) target->setInteractionAversionSample(*interactionAversionSample);
+		else target->clearInteractionAversionSample();
 		modify();
 		return true;
 	}

@@ -66,6 +66,10 @@ _Avoid_: Reservation, traversal permit
 An Agent's subjective, seconds-equivalent judgement of a possible Path, combining expected duration with effort, waiting, interaction, crowding, risk, uncertainty, and personal preference. It is not elapsed journey time.
 _Avoid_: Edge weight, actual travel time
 
+**Interaction aversion**:
+An Agent property from 0 through 3 that weights the perceived inconvenience of Door activation and threshold interaction. Its neutral default is 1; it changes route preference, not whether an interaction is possible.
+_Avoid_: Mobility profile, interaction capability
+
 **Route observation**:
 Information locally available to an Agent when it chooses or revises a Path, such as a nearby queue or visible device state. The live state of a remote resource is not a Route observation.
 _Avoid_: Global simulation state, perfect knowledge
@@ -167,6 +171,10 @@ _Avoid_: Agent attribute
 **Individual Agent property**:
 An Agent property authored directly on one Agent. Its concrete value takes precedence over the same property supplied by any assigned Agent tag.
 _Avoid_: Agent tag property, per-Agent tag
+
+**Agent property namespace**:
+An optional category that groups Agent properties in editor surfaces without becoming part of the property's name. Properties without one belong to the default, unlabelled group.
+_Avoid_: Property name prefix, Agent tag
 
 **Mobility profile**:
 An Agent property whose bitfield identifies traversal kinds the Agent cannot use. A zero profile forbids nothing; the Buttons bit represents inability to operate an interaction point and therefore also forbids every traversal whose authored resource requires one.

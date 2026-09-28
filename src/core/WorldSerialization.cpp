@@ -401,7 +401,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 17);
+		serializer.writeUint32("version", 18);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -789,9 +789,9 @@ namespace core
 		// Version 12 adds the optional Agent behaviour registry package
 		// reference; version 13 adds typed per-Agent assignments, version 14
 		// adds composite configuration plus the authored random seed, and version
-		// 15 renames vertical-position fields from Deck to Level, and version 17
-		// adds Marker properties. Older versions load with no assignment.
-		if (version < 1 || version > 17)
+		// 15 renames vertical-position fields from Deck to Level, version 17 adds
+		// Marker properties, and version 18 adds Interaction aversion.
+		if (version < 1 || version > 18)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

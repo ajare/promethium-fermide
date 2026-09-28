@@ -31,6 +31,18 @@ namespace
 
 void runAgentIndividualPropertySmokeChecks()
 {
+	auto const interactionMetadata = core::agentPropertyMetadata(
+		core::AgentPropertyType::InteractionAversion);
+	require(interactionMetadata.name == "Interaction aversion"
+		&& interactionMetadata.propertyNamespace == "Pathing"
+		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
+			== "Pathing"
+		&& !core::agentPropertyMetadata(core::AgentPropertyType::Colour).propertyNamespace
+		&& !core::agentPropertyMetadata(core::AgentPropertyType::EscalatorWalkingChance).propertyNamespace
+		&& !core::agentPropertyMetadata(core::AgentPropertyType::WalkSpeedModifier).propertyNamespace
+		&& !core::agentPropertyMetadata(core::AgentPropertyType::HeightModifier).propertyNamespace,
+		"Agent property names and namespaces are not independently classified");
+
 	auto registry = core::AgentTagRegistry::create();
 	auto const tag = registry->addAgentTag("tag-values");
 	std::string diagnostic;
@@ -42,6 +54,8 @@ void runAgentIndividualPropertySmokeChecks()
 	require(registry->setAgentTagWalkSpeedModifier(tag, { 0.9f, 0.9f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagHeightModifier(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagHeightModifier(tag, { 0.8f, 0.8f }, &diagnostic), diagnostic);
+	require(registry->addAgentTagInteractionAversion(tag, &diagnostic), diagnostic);
+	require(registry->setAgentTagInteractionAversion(tag, { 2.0f, 2.0f }, &diagnostic), diagnostic);
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 	require(registry->setAgentTagMobilityProfile(tag,
 		core::traversalMask(core::TraversalKind::Staircase), &diagnostic), diagnostic);
@@ -62,6 +76,10 @@ void runAgentIndividualPropertySmokeChecks()
 	require(world->setAgentIndividualEscalatorWalkingChance(id, 0.75f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualWalkSpeedModifier(id, 1.1f, &diagnostic), diagnostic);
 	require(world->setAgentIndividualHeightModifier(id, 0.95f, &diagnostic), diagnostic);
+	require(agent->getEffectiveInteractionAversion().value == 2.0f
+		&& agent->getEffectiveInteractionAversion().sourceTag == tag,
+		"The Agent did not inherit its sampled Interaction aversion");
+	require(world->setAgentIndividualInteractionAversion(id, 0.0f, &diagnostic), diagnostic);
 	auto const directMask = core::traversalMask(core::TraversalKind::Lift);
 	require(world->setAgentIndividualMobilityProfile(id, directMask, &diagnostic), diagnostic);
 
@@ -73,6 +91,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveWalkSpeedModifier().value == 1.1f
 		&& agent->getEffectiveHeightModifier().individual
 		&& agent->getEffectiveHeightModifier().value == 0.95f
+		&& agent->getEffectiveInteractionAversion().individual
+		&& agent->getEffectiveInteractionAversion().value == 0.0f
 		&& agent->getEffectiveMobilityProfile().individual
 		&& agent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
 		"Individual Agent properties did not override inherited tag values");
@@ -85,9 +105,10 @@ void runAgentIndividualPropertySmokeChecks()
 		"An individual Mobility profile accepted a reserved bit");
 
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 17") != std::string::npos
-		&& yaml.find("individualProperties") != std::string::npos,
-		"Individual Agent properties were not persisted in World schema 16");
+	require(yaml.find("version: 18") != std::string::npos
+		&& yaml.find("individualProperties") != std::string::npos
+		&& yaml.find("interactionAversion") != std::string::npos,
+		"Individual Agent properties were not persisted in World schema 18");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 	auto reader = core::YamlSerializer::fromString(yaml);
 	reader->deserialize();
@@ -95,6 +116,8 @@ void runAgentIndividualPropertySmokeChecks()
 	require(loaded->deserialize(*reader, work), "The individual-property World did not deserialize");
 	auto* loadedAgent = loaded->lookupAgent(id).entity;
 	require(loadedAgent && loadedAgent->getEffectiveColour().individual
+		&& loadedAgent->getEffectiveInteractionAversion().individual
+		&& loadedAgent->getEffectiveInteractionAversion().value == 0.0f
 		&& loadedAgent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
 		"Individual Agent properties did not round-trip");
 

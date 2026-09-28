@@ -57,6 +57,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool heightModifierAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool interactionAversionAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		bool mobilityProfileAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		void registerWorld(World& world);
@@ -89,6 +91,8 @@ namespace core
 		AgentWalkSpeedModifierProperty const* getAgentTagWalkSpeedModifier(
 			AgentTagId id) const;
 		AgentHeightModifierProperty const* getAgentTagHeightModifier(
+			AgentTagId id) const;
+		AgentInteractionAversionProperty const* getAgentTagInteractionAversion(
 			AgentTagId id) const;
 		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
@@ -157,6 +161,13 @@ namespace core
 		bool setAgentTagHeightModifier(AgentTagId id, AgentModifierRange range,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagHeightModifier(AgentTagId id,
+			std::string* diagnostic = nullptr);
+
+		bool addAgentTagInteractionAversion(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool setAgentTagInteractionAversion(AgentTagId id, AgentModifierRange range,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagInteractionAversion(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagMobilityProfile(AgentTagId id,

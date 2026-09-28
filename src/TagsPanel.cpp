@@ -34,6 +34,17 @@ namespace
 	char const* const DeletePopupId{ "Delete Agent tag?" };
 	char const* const RegistryChangePopupId{ "Clear Agent tags and change registry?" };
 
+	char const* propertyName(core::AgentPropertyType type)
+	{
+		return core::agentPropertyMetadata(type).name.data();
+	}
+
+	void renderPropertyNamespace(core::AgentPropertyType type)
+	{
+		auto const propertyNamespace = core::agentPropertyMetadata(type).propertyNamespace;
+		if (propertyNamespace) ImGui::SeparatorText(propertyNamespace->data());
+	}
+
 	struct TagNameEdit
 	{
 		array<char, NameBufferSize> text{};
@@ -143,6 +154,7 @@ namespace
 	map<uint64_t, TagWalkSpeedEdit> gTagWalkSpeedEdits;
 	map<uint64_t, TagEscalatorWalkingChanceEdit> gTagEscalatorWalkingChanceEdits;
 	map<uint64_t, TagHeightEdit> gTagHeightEdits;
+	map<uint64_t, TagHeightEdit> gTagInteractionAversionEdits;
 	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
@@ -652,7 +664,47 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
-		auto const* mobility = registry->getAgentTagMobilityProfile(id);
+		auto const* interaction = registry->getAgentTagInteractionAversion(id);
+		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
+		if (interaction || pathingMobility)
+			renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+		if (interaction)
+		{
+			auto& edit = gTagInteractionAversionEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != interaction->revision)
+			{
+				edit.range = interaction->range;
+				edit.loadedRevision = interaction->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::InteractionAversion),
+				&edit.range.minimum,
+				&edit.range.maximum, 0.01f, core::AgentInteractionAversionMinimum,
+				core::AgentInteractionAversionMaximum, "Min %.2f", "Max %.2f",
+				ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			auto const finished = ImGui::IsItemDeactivatedAfterEdit();
+			if (edit.pending && finished)
+			{
+				string diagnostic;
+				if (!commitAgentTagInteractionAversionEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Interaction aversion range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				interaction = registry->getAgentTagInteractionAversion(id);
+				if (interaction) { edit.range = interaction->range; edit.loadedRevision = interaction->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeInteractionAversion"))
+			{
+				string diagnostic;
+				if (!commitAgentTagInteractionAversionRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagInteractionAversionEdits.erase(id.value); interaction = nullptr; }
+			}
+		}
+
+		auto const* mobility = pathingMobility;
 		if (mobility)
 		{
 			auto& edit = gTagMobilityProfileEdits[id.value];
@@ -728,13 +780,14 @@ namespace
 		auto const* walkSpeed = registry->getAgentTagWalkSpeedModifier(id);
 		auto const* height = registry->getAgentTagHeightModifier(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
+		auto const* interaction = registry->getAgentTagInteractionAversion(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
-		auto const anyMissing = !colour || !walkSpeed || !height || !chance || !mobility;
+		auto const anyMissing = !colour || !walkSpeed || !height || !chance || !interaction || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
-		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
 		{
-			if (!chance && ImGui::Selectable("Escalator walking chance"))
+			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
 				string diagnostic;
 				if (!commitAgentTagEscalatorWalkingChanceAdd(registry, id, diagnostic))
@@ -742,7 +795,7 @@ namespace
 				else gTagEscalatorWalkingChanceEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!colour && ImGui::Selectable("Colour"))
+			if (!colour && ImGui::Selectable(propertyName(core::AgentPropertyType::Colour)))
 			{
 				string diagnostic;
 				if (!commitAgentTagColourAdd(registry, id, diagnostic))
@@ -750,7 +803,7 @@ namespace
 				else gTagColourEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!walkSpeed && ImGui::Selectable("Walk speed modifier"))
+			if (!walkSpeed && ImGui::Selectable(propertyName(core::AgentPropertyType::WalkSpeedModifier)))
 			{
 				string diagnostic;
 				if (!commitAgentTagWalkSpeedModifierAdd(registry, id, diagnostic))
@@ -758,7 +811,7 @@ namespace
 				else gTagWalkSpeedEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!height && ImGui::Selectable("Height modifier"))
+			if (!height && ImGui::Selectable(propertyName(core::AgentPropertyType::HeightModifier)))
 			{
 				string diagnostic;
 				if (!commitAgentTagHeightModifierAdd(registry, id, diagnostic))
@@ -766,7 +819,17 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!mobility && ImGui::Selectable("Mobility profile"))
+			if (!interaction || !mobility)
+				renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+			if (!interaction && ImGui::Selectable(propertyName(core::AgentPropertyType::InteractionAversion)))
+			{
+				string diagnostic;
+				if (!commitAgentTagInteractionAversionAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagInteractionAversionEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!mobility && ImGui::Selectable(propertyName(core::AgentPropertyType::MobilityProfile)))
 			{
 				string diagnostic;
 				if (!commitAgentTagMobilityProfileAdd(registry, id, diagnostic))
@@ -1807,6 +1870,63 @@ bool commitAgentTagHeightModifierRemove(
 	if (!registry->removeAgentTagHeightModifier(id, &diagnostic)) return false;
 	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
 	return true;
+}
+
+namespace
+{
+	bool commitInteractionAversionChange(
+		shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+		string& diagnostic, char const* action,
+		function<bool(core::AgentTagRegistry&, string*)> change)
+	{
+		diagnostic.clear();
+		if (!registry)
+		{
+			diagnostic = format("There is no Agent tag registry in which to {} Interaction aversion", action);
+			return false;
+		}
+		vector<core::World*> participants;
+		try
+		{
+			for (auto const& usage : registry->getLoadedAgentTagUsage(id))
+				if (usage.world && usage.agentCount > 0)
+					participants.push_back(const_cast<core::World*>(usage.world));
+		}
+		catch (std::exception const& error) { diagnostic = error.what(); return false; }
+		auto undo = captureRegistrySnapshot(registry, participants, id);
+		if (!undo)
+		{
+			diagnostic = format("Could not capture the registry and loaded Worlds before {} Interaction aversion", action);
+			return false;
+		}
+		if (!change(*registry, &diagnostic)) return false;
+		agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
+		return true;
+	}
+}
+
+bool commitAgentTagInteractionAversionAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitInteractionAversionChange(registry, id, diagnostic, "adding",
+		[id](auto& target, string* out) { return target.addAgentTagInteractionAversion(id, out); });
+}
+
+bool commitAgentTagInteractionAversionEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitInteractionAversionChange(registry, id, diagnostic, "editing",
+		[id, range](auto& target, string* out) { return target.setAgentTagInteractionAversion(id, range, out); });
+}
+
+bool commitAgentTagInteractionAversionRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitInteractionAversionChange(registry, id, diagnostic, "removing",
+		[id](auto& target, string* out) { return target.removeAgentTagInteractionAversion(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

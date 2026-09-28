@@ -112,6 +112,8 @@ struct AgentClipboardPayload
 	std::set<core::AgentTagId> agentTags;
 	std::optional<core::AgentPropertySample> walkSpeedModifierSample;
 	std::optional<core::AgentPropertySample> heightModifierSample;
+	std::optional<core::AgentPropertySample> interactionAversionSample;
+	std::optional<float> individualInteractionAversion;
 
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.
 	// Marker configuration values have already been replaced by names.

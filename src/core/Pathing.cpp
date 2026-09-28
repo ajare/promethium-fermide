@@ -204,9 +204,13 @@ namespace core
 			std::optional<Agent> baselineAgent;
 			if (!agent) baselineAgent.emplace("Route preview");
 			auto const* routingAgent = agent ? agent : &*baselineAgent;
-			RouteDecisionContext const context{ routingAgent,
-				graph->getRouteChoicePolicy().baselineProfile, graph->getRouteChoicePolicy(),
-				agent ? agent->getSector() : nullptr, routingAgent->getWalkSpeed() };
+			auto profile = graph->getRouteChoicePolicy().baselineProfile;
+			// Resolve Agent-authored preferences once for this immutable search
+			// context; directed-edge capture then reuses the concrete value.
+			profile.interactionAversion = routingAgent->getEffectiveInteractionAversion().value;
+			RouteDecisionContext const context{ routingAgent, profile,
+				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
+				routingAgent->getWalkSpeed() };
 			auto const inferredSource = !source;
 			if (inferredSource)
 			{

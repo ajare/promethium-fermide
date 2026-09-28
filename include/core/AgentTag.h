@@ -6,10 +6,44 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace core
 {
+	enum class AgentPropertyType
+	{
+		Colour,
+		EscalatorWalkingChance,
+		WalkSpeedModifier,
+		HeightModifier,
+		InteractionAversion,
+		MobilityProfile
+	};
+
+	struct AgentPropertyMetadata
+	{
+		std::string_view name;
+		// No namespace means the property belongs to the default, unlabelled group.
+		std::optional<std::string_view> propertyNamespace;
+	};
+
+	inline constexpr AgentPropertyMetadata agentPropertyMetadata(AgentPropertyType type)
+	{
+		switch (type)
+		{
+		case AgentPropertyType::Colour: return { "Colour", std::nullopt };
+		case AgentPropertyType::EscalatorWalkingChance:
+			return { "Escalator walking chance", std::nullopt };
+		case AgentPropertyType::WalkSpeedModifier:
+			return { "Walk speed modifier", std::nullopt };
+		case AgentPropertyType::HeightModifier: return { "Height modifier", std::nullopt };
+		case AgentPropertyType::InteractionAversion: return { "Interaction aversion", "Pathing" };
+		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
+		}
+		return { {}, std::nullopt };
+	}
+
 	// The first hardcoded Agent property. It deliberately has no alpha channel:
 	// ordinary Agents are opaque, and selection replaces this colour entirely.
 	struct AgentColour
@@ -78,6 +112,9 @@ namespace core
 	inline constexpr float AgentHeightModifierMinimum{ 0.7f };
 	inline constexpr float AgentHeightModifierMaximum{ 1.0f };
 	inline constexpr AgentModifierRange DefaultAgentHeightModifierRange{};
+	inline constexpr float AgentInteractionAversionMinimum{ 0.0f };
+	inline constexpr float AgentInteractionAversionMaximum{ 3.0f };
+	inline constexpr AgentModifierRange DefaultAgentInteractionAversionRange{};
 
 	struct AgentWalkSpeedModifierProperty
 	{
@@ -93,6 +130,14 @@ namespace core
 		uint64_t revision{ 0 };
 
 		bool operator==(AgentHeightModifierProperty const& other) const = default;
+	};
+
+	struct AgentInteractionAversionProperty
+	{
+		AgentModifierRange range{};
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentInteractionAversionProperty const& other) const = default;
 	};
 
 	using TraversalMask = uint32_t;
@@ -138,6 +183,8 @@ namespace core
 		std::string* diagnostic = nullptr);
 	bool agentHeightModifierRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
+	bool agentInteractionAversionRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
 	float sampleAgentModifier(AgentModifierRange const& range);
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
@@ -158,6 +205,7 @@ namespace core
 		void removeEscalatorWalkingChance() { mEscalatorWalkingChance.reset(); }
 		std::optional<AgentWalkSpeedModifierProperty> mWalkSpeedModifier;
 		std::optional<AgentHeightModifierProperty> mHeightModifier;
+		std::optional<AgentInteractionAversionProperty> mInteractionAversion;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -179,6 +227,11 @@ namespace core
 			mHeightModifier = property;
 		}
 		void removeHeightModifier() { mHeightModifier.reset(); }
+		void setInteractionAversion(AgentInteractionAversionProperty property)
+		{
+			mInteractionAversion = property;
+		}
+		void removeInteractionAversion() { mInteractionAversion.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -206,6 +259,10 @@ namespace core
 		AgentHeightModifierProperty const* getHeightModifier() const
 		{
 			return mHeightModifier ? &*mHeightModifier : nullptr;
+		}
+		AgentInteractionAversionProperty const* getInteractionAversion() const
+		{
+			return mInteractionAversion ? &*mInteractionAversion : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

@@ -23,6 +23,18 @@ namespace
 	core::AgentTagId gSelectedAssignedTag{};
 	core::World const* gChipWorld{ nullptr };
 	core::AgentId gChipAgent{};
+	constexpr float PropertyWidgetWidth{ 256.0f };
+
+	char const* propertyName(core::AgentPropertyType type)
+	{
+		return core::agentPropertyMetadata(type).name.data();
+	}
+
+	void renderPropertyNamespace(core::AgentPropertyType type)
+	{
+		auto const propertyNamespace = core::agentPropertyMetadata(type).propertyNamespace;
+		if (propertyNamespace) ImGui::SeparatorText(propertyNamespace->data());
+	}
 
 	string mobilityProfileSummary(core::TraversalMask mask)
 	{
@@ -163,10 +175,52 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	};
 
 	ImGui::BeginDisabled(!paused);
+	ImGui::SetNextItemWidth(PropertyWidgetWidth);
+	if (ImGui::BeginCombo("##individualAgentProperties", "Properties..."))
+	{
+		auto propertyCheckbox = [&](char const* label, bool enabled,
+			function<bool(bool, string*)> edit)
+		{
+			auto checked = enabled;
+			if (!ImGui::Checkbox(label, &checked)) return;
+			string diagnostic;
+			commitIndividualPropertyEdit(world,
+				[&](string* out) { return edit(checked, out); }, diagnostic);
+			warn(diagnostic);
+		};
+		propertyCheckbox(propertyName(core::AgentPropertyType::Colour),
+			target->getIndividualColour().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualColour(agent,
+				enabled ? optional<core::AgentColour>{ core::EditorDefaultAgentColour } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::EscalatorWalkingChance),
+			target->getIndividualEscalatorWalkingChance().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualEscalatorWalkingChance(
+				agent, enabled ? optional<float>{ 0.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::WalkSpeedModifier),
+			target->getIndividualWalkSpeedModifier().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualWalkSpeedModifier(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::HeightModifier),
+			target->getIndividualHeightModifier().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualHeightModifier(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+		propertyCheckbox(propertyName(core::AgentPropertyType::InteractionAversion),
+			target->getIndividualInteractionAversion().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualInteractionAversion(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
+			target->getIndividualMobilityProfile().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
+				agent, enabled ? optional<core::TraversalMask>{ 0 } : nullopt, out); });
+		ImGui::EndCombo();
+	}
+
 	if (target->getIndividualColour())
 	{
 		float rgb[3];
 		core::agentColourToFloats(*target->getIndividualColour(), rgb);
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
 		if (ImGui::ColorEdit3("Colour##individual", rgb,
 			ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_Uint8))
 		{
@@ -190,6 +244,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	if (target->getIndividualEscalatorWalkingChance())
 	{
 		auto value = *target->getIndividualEscalatorWalkingChance();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
 		if (ImGui::DragFloat("Escalator walking chance##individual", &value,
 			0.005f, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
 		{
@@ -210,6 +265,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	if (target->getIndividualWalkSpeedModifier())
 	{
 		auto value = *target->getIndividualWalkSpeedModifier();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
 		if (ImGui::DragFloat("Walk speed modifier##individual", &value, 0.005f,
 			core::AgentWalkSpeedModifierMinimum, core::AgentWalkSpeedModifierMaximum,
 			"%.3fx", ImGuiSliderFlags_AlwaysClamp))
@@ -231,6 +287,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	if (target->getIndividualHeightModifier())
 	{
 		auto value = *target->getIndividualHeightModifier();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
 		if (ImGui::DragFloat("Height modifier##individual", &value, 0.005f,
 			core::AgentHeightModifierMinimum, core::AgentHeightModifierMaximum,
 			"%.3fx", ImGuiSliderFlags_AlwaysClamp))
@@ -246,6 +303,31 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			string diagnostic;
 			commitIndividualPropertyEdit(world, [&](string* out)
 				{ return world->setAgentIndividualHeightModifier(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
+	if (target->getIndividualInteractionAversion()
+		|| target->getIndividualMobilityProfile())
+		renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+	if (target->getIndividualInteractionAversion())
+	{
+		auto value = *target->getIndividualInteractionAversion();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Interaction aversion##individual", &value, 0.01f,
+			core::AgentInteractionAversionMinimum, core::AgentInteractionAversionMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualInteractionAversion(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualInteractionAversion"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualInteractionAversion(agent, nullopt, out); }, diagnostic);
 			warn(diagnostic);
 		}
 	}
@@ -291,35 +373,6 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		}
 	}
 
-	auto const anyMissing = !target->getIndividualColour()
-		|| !target->getIndividualEscalatorWalkingChance()
-		|| !target->getIndividualWalkSpeedModifier()
-		|| !target->getIndividualHeightModifier()
-		|| !target->getIndividualMobilityProfile();
-	ImGui::BeginDisabled(!anyMissing);
-	if (ImGui::BeginCombo("##addIndividualAgentProperty", "Add property..."))
-	{
-		auto add = [&](char const* label, bool missing, function<bool(string*)> edit)
-		{
-			if (!missing || !ImGui::Selectable(label)) return;
-			string diagnostic;
-			commitIndividualPropertyEdit(world, edit, diagnostic);
-			warn(diagnostic);
-			ImGui::CloseCurrentPopup();
-		};
-		add("Colour", !target->getIndividualColour(), [&](string* out)
-			{ return world->setAgentIndividualColour(agent, core::EditorDefaultAgentColour, out); });
-		add("Escalator walking chance", !target->getIndividualEscalatorWalkingChance(),
-			[&](string* out) { return world->setAgentIndividualEscalatorWalkingChance(agent, 0.0f, out); });
-		add("Walk speed modifier", !target->getIndividualWalkSpeedModifier(),
-			[&](string* out) { return world->setAgentIndividualWalkSpeedModifier(agent, 1.0f, out); });
-		add("Height modifier", !target->getIndividualHeightModifier(),
-			[&](string* out) { return world->setAgentIndividualHeightModifier(agent, 1.0f, out); });
-		add("Mobility profile", !target->getIndividualMobilityProfile(),
-			[&](string* out) { return world->setAgentIndividualMobilityProfile(agent, 0, out); });
-		ImGui::EndCombo();
-	}
-	ImGui::EndDisabled();
 	ImGui::EndDisabled();
 	if (!paused) ImGui::TextDisabled("Pause the simulation to edit individual properties.");
 }
@@ -390,6 +443,15 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 			registry->getAgentTagName(height.sourceTag).c_str());
 	}
 	else ImGui::Text("Height modifier: 1.000x (visual default)");
+
+	renderPropertyNamespace(core::AgentPropertyType::InteractionAversion);
+	auto const interaction = lookup.entity->getEffectiveInteractionAversion();
+	if (interaction.individual)
+		ImGui::Text("Interaction aversion: %.2f (individual)", interaction.value);
+	else if (interaction.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Interaction aversion: %.2f from #%s", interaction.value,
+			world->getAgentTagRegistry()->getAgentTagName(interaction.sourceTag).c_str());
+	else ImGui::TextUnformatted("Interaction aversion: 1.00 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.forbiddenTraversals);

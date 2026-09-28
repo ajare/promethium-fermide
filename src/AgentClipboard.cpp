@@ -71,10 +71,14 @@ namespace
 			diagnostic = std::move(reason);
 			return false;
 		};
+		if (payload.individualInteractionAversion
+			&& !core::agentInteractionAversionRangeIsValid(
+				{ *payload.individualInteractionAversion, *payload.individualInteractionAversion },
+				&diagnostic)) return false;
 		if (payload.agentTags.empty())
 		{
 			if (payload.agentTagRegistryUuid || payload.walkSpeedModifierSample
-				|| payload.heightModifierSample)
+				|| payload.heightModifierSample || payload.interactionAversionSample)
 			{
 				return reject(
 					"An untagged Agent clipboard payload cannot carry registry or sample state");
@@ -109,7 +113,10 @@ namespace
 			payload.walkSpeedModifierSample)
 			&& validateSample("Height modifier",
 				core::SampledAgentPropertyType::HeightModifier,
-				payload.heightModifierSample);
+				payload.heightModifierSample)
+			&& validateSample("Interaction aversion",
+				core::SampledAgentPropertyType::InteractionAversion,
+				payload.interactionAversionSample);
 	}
 
 	bool clipboardTagStateFitsWorld(core::World const& world,
@@ -129,7 +136,8 @@ namespace
 			return false;
 		}
 		return world.validateAgentTagAssignments(payload.agentTags,
-			payload.walkSpeedModifierSample, payload.heightModifierSample, &diagnostic);
+			payload.walkSpeedModifierSample, payload.heightModifierSample,
+			payload.interactionAversionSample, &diagnostic);
 	}
 
 	AgentClipboardConfigurationValue portableValue(core::World const& world,
@@ -400,6 +408,8 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.agentTags = lookup.entity->getAgentTagIds();
 	payload.walkSpeedModifierSample = lookup.entity->getWalkSpeedModifierSample();
 	payload.heightModifierSample = lookup.entity->getHeightModifierSample();
+	payload.interactionAversionSample = lookup.entity->getInteractionAversionSample();
+	payload.individualInteractionAversion = lookup.entity->getIndividualInteractionAversion();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -462,6 +472,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	// so a payload written before activation existed reads back activated
 	// (#118).
 	if (!payload.active) output << YAML::Key << "active" << YAML::Value << false;
+	if (payload.individualInteractionAversion)
+		output << YAML::Key << "interactionAversion" << YAML::Value
+			<< *payload.individualInteractionAversion;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -488,7 +501,8 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 			<< YAML::Key << "tags" << YAML::Value << YAML::Flow << YAML::BeginSeq;
 		for (auto const tag : payload.agentTags) output << tag.value;
 		output << YAML::EndSeq;
-		if (payload.walkSpeedModifierSample || payload.heightModifierSample)
+		if (payload.walkSpeedModifierSample || payload.heightModifierSample
+			|| payload.interactionAversionSample)
 		{
 			output << YAML::Key << "propertySamples" << YAML::Value << YAML::BeginSeq;
 			auto writeSample = [&output](char const* type,
@@ -506,6 +520,8 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 				writeSample("walkSpeedModifier", *payload.walkSpeedModifierSample);
 			if (payload.heightModifierSample)
 				writeSample("heightModifier", *payload.heightModifierSample);
+			if (payload.interactionAversionSample)
+				writeSample("interactionAversion", *payload.interactionAversionSample);
 			output << YAML::EndSeq;
 		}
 	}
@@ -569,6 +585,20 @@ bool readAgentClipboardObject(YAML::Node const& object,
 			diagnostic = "Clipboard field 'active' must be a boolean";
 			return false;
 		}
+	}
+
+	if (object["interactionAversion"])
+	{
+		float value;
+		try { value = object["interactionAversion"].as<float>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Interaction aversion must be a number";
+			return false;
+		}
+		if (!core::agentInteractionAversionRangeIsValid({ value, value }, &diagnostic))
+			return false;
+		payload.individualInteractionAversion = value;
 	}
 
 	// An absent `group` is an ungrouped Agent, which is exactly how a
@@ -735,6 +765,11 @@ bool readAgentClipboardObject(YAML::Node const& object,
 				sample.type = core::SampledAgentPropertyType::HeightModifier;
 				destination = &payload.heightModifierSample;
 			}
+			else if (type == "interactionAversion")
+			{
+				sample.type = core::SampledAgentPropertyType::InteractionAversion;
+				destination = &payload.interactionAversionSample;
+			}
 			else
 			{
 				diagnostic = "Clipboard Agent property sample type is not supported";
@@ -744,7 +779,8 @@ bool readAgentClipboardObject(YAML::Node const& object,
 			{
 				diagnostic = format(
 					"Clipboard Agent contains more than one {} sample",
-					type == "walkSpeedModifier" ? "Walk speed modifier" : "Height modifier");
+					type == "walkSpeedModifier" ? "Walk speed modifier"
+						: type == "heightModifier" ? "Height modifier" : "Interaction aversion");
 				return false;
 			}
 			*destination = sample;
@@ -908,6 +944,17 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		// allowed while the simulation runs, and a pasted Agent the payload
 		// deactivated must land deactivated rather than be refused (#118).
 		created->setActive(payload.active);
+		if (payload.individualInteractionAversion)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualInteractionAversion(agentId,
+				payload.individualInteractionAversion, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Interaction aversion could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
 
 		if (groupName)
 		{
@@ -933,7 +980,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			string assignDiagnostic;
 			if (!world->restoreAgentTagAssignments(agentId, payload.agentTags,
 				payload.walkSpeedModifierSample, payload.heightModifierSample,
-				&assignDiagnostic))
+				payload.interactionAversionSample, &assignDiagnostic))
 			{
 				diagnostic = "The pasted Agent's tag assignments could not be restored: "
 					+ assignDiagnostic + rollBack();

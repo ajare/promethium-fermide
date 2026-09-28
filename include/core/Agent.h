@@ -49,7 +49,8 @@ namespace core
 	enum class SampledAgentPropertyType
 	{
 		WalkSpeedModifier,
-		HeightModifier
+		HeightModifier,
+		InteractionAversion
 	};
 
 	struct AgentPropertySample
@@ -71,6 +72,14 @@ namespace core
 	};
 
 	struct EffectiveAgentHeightModifier
+	{
+		float value{ 1.0f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentInteractionAversion
 	{
 		float value{ 1.0f };
 		AgentTagId sourceTag{};
@@ -153,6 +162,7 @@ namespace core
 		std::optional<float> mIndividualEscalatorWalkingChance;
 		std::optional<float> mIndividualWalkSpeedModifier;
 		std::optional<float> mIndividualHeightModifier;
+		std::optional<float> mIndividualInteractionAversion;
 		std::optional<TraversalMask> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -160,6 +170,7 @@ namespace core
 		// draw inspectable and let loading distinguish stable data from stale data.
 		std::optional<AgentPropertySample> mWalkSpeedModifierSample;
 		std::optional<AgentPropertySample> mHeightModifierSample;
+		std::optional<AgentPropertySample> mInteractionAversionSample;
 
 		// Activation is authored state (#118): an activated Agent is simulated,
 		// a deactivated one keeps its authored position and route but no tick
@@ -241,6 +252,11 @@ namespace core
 			mHeightModifierSample = sample;
 		}
 		void clearHeightModifierSample() { mHeightModifierSample.reset(); }
+		void setInteractionAversionSample(AgentPropertySample sample)
+		{
+			mInteractionAversionSample = sample;
+		}
+		void clearInteractionAversionSample() { mInteractionAversionSample.reset(); }
 		void setIndividualColour(std::optional<AgentColour> value)
 		{ mIndividualColour = value; modify(); }
 		void setIndividualEscalatorWalkingChance(std::optional<float> value)
@@ -249,6 +265,8 @@ namespace core
 		{ mIndividualWalkSpeedModifier = value; modify(); }
 		void setIndividualHeightModifier(std::optional<float> value)
 		{ mIndividualHeightModifier = value; modify(); }
+		void setIndividualInteractionAversion(std::optional<float> value)
+		{ mIndividualInteractionAversion = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<TraversalMask> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -335,6 +353,8 @@ namespace core
 		{ return mIndividualWalkSpeedModifier; }
 		std::optional<float> const& getIndividualHeightModifier() const
 		{ return mIndividualHeightModifier; }
+		std::optional<float> const& getIndividualInteractionAversion() const
+		{ return mIndividualInteractionAversion; }
 		std::optional<TraversalMask> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -353,10 +373,15 @@ namespace core
 		// Resolves an individual Height value before the persisted tag sample. It
 		// scales only visual height and bounds; physical dimensions stay fixed.
 		EffectiveAgentHeightModifier getEffectiveHeightModifier() const;
+		EffectiveAgentInteractionAversion getEffectiveInteractionAversion() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const
 		{
 			return mHeightModifierSample;
+		}
+		std::optional<AgentPropertySample> const& getInteractionAversionSample() const
+		{
+			return mInteractionAversionSample;
 		}
 
 		// Whether this Agent is simulated. Deactivation changes no authored

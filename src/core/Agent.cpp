@@ -154,7 +154,7 @@ namespace core
 		}
 		if (mIndividualColour || mIndividualEscalatorWalkingChance
 			|| mIndividualWalkSpeedModifier || mIndividualHeightModifier
-			|| mIndividualMobilityProfile)
+			|| mIndividualInteractionAversion || mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
 			auto beginProperty = [&serializer](char const* type)
@@ -182,6 +182,8 @@ namespace core
 				writeFloatProperty("walkSpeedModifier", *mIndividualWalkSpeedModifier);
 			if (mIndividualHeightModifier)
 				writeFloatProperty("heightModifier", *mIndividualHeightModifier);
+			if (mIndividualInteractionAversion)
+				writeFloatProperty("interactionAversion", *mIndividualInteractionAversion);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -190,7 +192,7 @@ namespace core
 			}
 			serializer.endArray();
 		}
-		if (mWalkSpeedModifierSample || mHeightModifierSample)
+		if (mWalkSpeedModifierSample || mHeightModifierSample || mInteractionAversionSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -207,6 +209,8 @@ namespace core
 				writeSample("walkSpeedModifier", *mWalkSpeedModifierSample);
 			if (mHeightModifierSample)
 				writeSample("heightModifier", *mHeightModifierSample);
+			if (mInteractionAversionSample)
+				writeSample("interactionAversion", *mInteractionAversionSample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -262,6 +266,7 @@ namespace core
 		mIndividualEscalatorWalkingChance.reset();
 		mIndividualWalkSpeedModifier.reset();
 		mIndividualHeightModifier.reset();
+		mIndividualInteractionAversion.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -304,6 +309,15 @@ namespace core
 						throw SerializationException("Serialized individual Height modifier is invalid");
 					mIndividualHeightModifier = value;
 				}
+				else if (type == "interactionAversion")
+				{
+					if (mIndividualInteractionAversion)
+						throw SerializationException("Serialized Agent contains more than one individual Interaction aversion");
+					auto const value = serializer.readFloat("value");
+					if (!agentInteractionAversionRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Interaction aversion is invalid");
+					mIndividualInteractionAversion = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -321,6 +335,7 @@ namespace core
 		}
 		mWalkSpeedModifierSample.reset();
 		mHeightModifierSample.reset();
+		mInteractionAversionSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -342,6 +357,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::HeightModifier;
 					destination = &mHeightModifierSample;
 					displayName = "Height modifier";
+				}
+				else if (type == "interactionAversion")
+				{
+					sample.type = SampledAgentPropertyType::InteractionAversion;
+					destination = &mInteractionAversionSample;
+					displayName = "Interaction aversion";
 				}
 				else
 				{
@@ -489,6 +510,22 @@ namespace core
 		effective.value = mHeightModifierSample->value;
 		effective.sourceTag = mHeightModifierSample->sourceTag;
 		effective.propertyRevision = mHeightModifierSample->propertyRevision;
+		return effective;
+	}
+
+	EffectiveAgentInteractionAversion Agent::getEffectiveInteractionAversion() const
+	{
+		EffectiveAgentInteractionAversion effective;
+		if (mIndividualInteractionAversion)
+		{
+			effective.value = *mIndividualInteractionAversion;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mInteractionAversionSample) return effective;
+		effective.value = mInteractionAversionSample->value;
+		effective.sourceTag = mInteractionAversionSample->sourceTag;
+		effective.propertyRevision = mInteractionAversionSample->propertyRevision;
 		return effective;
 	}
 

@@ -1,4 +1,4 @@
-version: 17
+version: 18
 name: Untitled
 randomSeed: 0
 cellsWide: 16
@@ -213,6 +213,9 @@ agents:
     agent:
       name: Agent 1
       flags: 0
+      individualProperties:
+        - type: interactionAversion
+          value: 3
     sector: 6
     localX: 2.3125
     localY: 0
