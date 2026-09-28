@@ -6887,8 +6887,48 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 			ImGui::SetTooltip("The enabled Agent behaviour owns movement");
 
 		core::World::TopologyPathIntent intent;
-		auto const hasPath = gSelectedAgent->getPath()
-			|| world->getPausedPathIntent(*gSelectedAgent, intent);
+		auto const livePath = gSelectedAgent->getPath();
+		auto const hasPausedIntent = world->getPausedPathIntent(*gSelectedAgent, intent);
+		auto const hasPath = livePath || hasPausedIntent;
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(behaviourOwnsMovement || !hasPath);
+		if (ImGui::Button("Recalculate path"))
+		{
+			shared_ptr<const core::Vertex> destination;
+			if (livePath && !livePath->nodes.empty())
+				destination = livePath->nodes.back().targetVertex;
+			else if (hasPausedIntent && intent.destinationSector
+				&& intent.destinationSector.value <= world->getNumSectors())
+			{
+				auto const sector = world->getSector(
+					static_cast<uint32_t>(intent.destinationSector.value - 1));
+				destination = world->getGraph()->getClosestVertexInSector(
+					sector.get(), intent.destinationPosition);
+			}
+
+			auto newPath = destination
+				? world->getGraph()->calculatePath(gSelectedAgent, destination)
+				: nullptr;
+			if (!newPath)
+				reportEditorError("Agent path", "No path is available to the current destination");
+			else
+			{
+				auto const wasPathing = livePath
+					? gSelectedAgent->getState() != core::Agent::State::Idle
+					: intent.wasPathing;
+				applyAgentPathEdit(world, gSelectedAgent, std::move(newPath), wasPathing, true);
+			}
+		}
+		ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+		{
+			if (behaviourOwnsMovement)
+				ImGui::SetTooltip("The enabled Agent behaviour owns movement");
+			else if (!hasPath)
+				ImGui::SetTooltip("Set a path before recalculating it");
+		}
+
 		ImGui::SameLine();
 		ImGui::BeginDisabled(behaviourOwnsMovement || !hasPath);
 		if (ImGui::Button("Clear path"))
