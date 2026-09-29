@@ -18,12 +18,16 @@ namespace core
 		std::shared_ptr<const Vertex> target, RouteDecisionContext const& context,
 		float motionSeconds, float openingSeconds)
 	{
-		if (agentRejectsEdge(context.legacyAgent, edge, TraversalKind::Door, context.allowFallbackMobility)) return {};
+		DirectedTraversalFacts facts;
+		if (agentRejectsEdge(context.legacyAgent, edge, TraversalKind::Door, context.allowFallbackMobility))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto source = edge.getOtherVertex(target);
 		auto sector = source ? source->getSector() : nullptr;
 		bool const observed = sector && sector.get() == context.observationSector;
 		auto const& policy = context.policy;
-		DirectedTraversalFacts facts;
 		facts.feasible = true;
 		auto& c = facts.components;
 		c.motionSeconds = motionSeconds;
@@ -37,6 +41,13 @@ namespace core
 			edge.getTraversalResourceId(), sourceEndpoint, observed)
 			: context.legacyAgent ? context.legacyAgent->observeShuttleAccess(
 				edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
+		if (door.getActivationMode() == DoorActivationMode::Unavailable
+			&& !door.isOpen() && !liftAccess && !shuttleAccess)
+		{
+			facts.feasible = false;
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
 		if (shuttleAccess)
 		{
 			bool const boarding = sector && isLocationLike(sector->getType());

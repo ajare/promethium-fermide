@@ -79,6 +79,14 @@ namespace core
 		bool routeDiagnosticContextIsStale(Agent const& agent,
 			Graph const& graph, Path const& path);
 
+		// Runs a bounded reverse search only when requested. It does not attach a
+		// search tree or alternative set to the Agent or Path.
+		std::optional<PathRouteExplanation> explainRoute(Agent const& agent,
+			Graph const& graph, Path const& path,
+			uint32_t maximumExpandedVertices = 4096,
+			uint32_t maximumEvaluatedTraversals = 32768);
+		char const* routeExclusionReasonText(RouteExclusionReason reason);
+
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(
 			std::shared_ptr<Path> path, Vertex const* vertex, uint32_t index = 0);
 	}

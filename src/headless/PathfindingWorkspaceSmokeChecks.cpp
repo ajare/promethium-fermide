@@ -168,6 +168,22 @@ namespace
 				== core::RoutingPropertySource::Default
 			&& !core::pathing::routeDiagnosticContextIsStale(*agent, *graph, *first),
 			"Fresh Path diagnostics did not identify default property provenance");
+		auto const explanation = core::pathing::explainRoute(*agent, *graph, *first);
+		auto const repeatedExplanation = core::pathing::explainRoute(*agent, *graph, *first);
+		require(explanation && repeatedExplanation
+			&& explanation->vertices.size() == first->nodes.size()
+			&& explanation->vertices.back().target
+			&& !explanation->capturedContextStale
+			&& explanation->comparisonEvidence == core::RouteExplanationEvidence::CurrentContext,
+			"On-demand Route explanation omitted Path Vertices or current-context evidence");
+		require(explanation->vertices.front().continuations.size()
+			== repeatedExplanation->vertices.front().continuations.size()
+			&& explanation->vertices.front().continuations.front().edge->getId()
+				== repeatedExplanation->vertices.front().continuations.front().edge->getId(),
+			"The same decision context produced non-deterministic Route explanation ordering");
+		auto const bounded = core::pathing::explainRoute(*agent, *graph, *first, 1, 1);
+		require(bounded && bounded->analysisTruncated,
+			"Route alternative analysis ignored its explicit work bounds");
 		agent->setPath(first, true);
 		world.pauseSimulation();
 		core::World::TopologyPathIntent pausedIntent;
@@ -180,6 +196,10 @@ namespace
 			"Could not change a diagnostic routing property");
 		require(core::pathing::routeDiagnosticContextIsStale(*agent, *graph, *first),
 			"A property change did not mark captured Path diagnostics stale");
+		auto const currentExplanation = core::pathing::explainRoute(*agent, *graph, *first);
+		require(currentExplanation && currentExplanation->capturedContextStale
+			&& currentExplanation->comparisonEvidence == core::RouteExplanationEvidence::CurrentContext,
+			"Changed evidence was presented as the historical Route decision context");
 		auto const individualPath = graph->calculatePath(agent, source, destination);
 		auto const individualDiagnostic = individualPath
 			? core::pathing::getRouteDiagnostics(*individualPath) : std::nullopt;

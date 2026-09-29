@@ -1,12 +1,14 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <queue>
 
 #include "core/Defines.h"
 #include "core/Pathing.h"
 #include "core/Graph.h"
 #include "core/Marker.h"
 #include "core/Location.h"
+#include "core/MobilityProfile.h"
 #include "core/Agent.h"
 #include "core/Edge.h"
 #include "core/Exceptions.h"
@@ -269,6 +271,30 @@ namespace core
 					provenance(agent.getEffectiveRoutePersistence())
 				};
 			}
+
+			RouteDiagnosticContext diagnosticContext(Agent const& agent, Graph const& graph,
+				EffectiveRoutingProfile const& profile, bool allowFallback)
+			{
+				auto const mobility = agent.getEffectiveMobilityProfile();
+				return { profile, effectiveProvenance(agent), mobility.value,
+					provenance(mobility), graph.getWorld()
+						? graph.getWorld()->getTopologyGeneration() : 0,
+					allowFallback };
+			}
+
+			RouteDecisionContext currentDecisionContext(Agent const& agent,
+				Graph const& graph, Vertex const* target, bool allowFallback)
+			{
+				auto const profile = effectiveProfile(agent, graph.getRouteChoicePolicy());
+				auto const* world = graph.getWorld();
+				auto const worldSeed = world ? world->getRandomSeed() : uint64_t{ 0 };
+				auto const agentId = world ? world->getAgentId(&agent).value : uint64_t{ 0 };
+				auto const journeyIdentity = agent.getRouteJourneyIdentity(target);
+				return { &agent, profile, graph.getRouteChoicePolicy(), agent.getSector(),
+					agent.getWalkSpeed(), world, agent.getClimbSpeed(), allowFallback,
+					worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
+						^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL), 0 };
+			}
 		}
 
 		std::shared_ptr<Path> findPath(Agent const* agent, Graph const* graph,
@@ -409,11 +435,14 @@ namespace core
 				auto path = reconstructPath(graph, targetSlot, workspace);
 				if (path)
 				{
-					path->diagnosticContext = RouteDiagnosticContext{
-						searchContext.profile,
-						agent ? effectiveProvenance(*agent) : RoutingProfileProvenance{},
-						graph->getWorld() ? graph->getWorld()->getTopologyGeneration() : 0
-					};
+					if (agent)
+						path->diagnosticContext = diagnosticContext(*agent, *graph,
+							searchContext.profile, searchContext.allowFallbackMobility);
+					else
+						path->diagnosticContext = RouteDiagnosticContext{
+							searchContext.profile, {}, {}, {},
+							graph->getWorld() ? graph->getWorld()->getTopologyGeneration() : 0,
+							searchContext.allowFallbackMobility };
 				}
 				return path;
 			};
@@ -528,7 +557,10 @@ namespace core
 				&& current.riskAversion == captured.profile.riskAversion
 				&& current.routeFamiliarity == captured.profile.routeFamiliarity
 				&& current.routePersistence == captured.profile.routePersistence;
-			return !sameProfile || effectiveProvenance(agent) != captured.provenance;
+			auto const mobility = agent.getEffectiveMobilityProfile();
+			return !sameProfile || effectiveProvenance(agent) != captured.provenance
+				|| mobility.value != captured.mobilityProfile
+				|| provenance(mobility) != captured.mobilityProvenance;
 		}
 
 		bool routeDiagnosticContextIsStale(Agent const& agent,
@@ -536,6 +568,211 @@ namespace core
 		{
 			return !path.diagnosticContext
 				|| routeDiagnosticContextIsStale(agent, graph, *path.diagnosticContext);
+		}
+
+		char const* routeExclusionReasonText(RouteExclusionReason reason)
+		{
+			switch (reason)
+			{
+			case RouteExclusionReason::Mobility: return "excluded by the Agent's Mobility profile";
+			case RouteExclusionReason::Direction: return "excluded by traversal direction";
+			case RouteExclusionReason::Control: return "excluded because no usable control can open or prepare it";
+			case RouteExclusionReason::PreparationSide: return "excluded because the resource cannot be prepared from this side";
+			case RouteExclusionReason::Permission: return "excluded because traversal permission is unavailable";
+			case RouteExclusionReason::NoContinuation: return "excluded because it has no feasible continuation to the target";
+			case RouteExclusionReason::AnalysisLimit: return "not compared because the bounded analysis limit was reached";
+			case RouteExclusionReason::Unknown: return "excluded by traversal feasibility";
+			default: return "";
+			}
+		}
+
+		std::optional<PathRouteExplanation> explainRoute(Agent const& agent,
+			Graph const& graph, Path const& path, uint32_t maximumExpandedVertices,
+			uint32_t maximumEvaluatedTraversals)
+		{
+			if (path.nodes.empty() || !path.nodes.back().targetVertex
+				|| maximumExpandedVertices == 0 || maximumEvaluatedTraversals == 0)
+				return std::nullopt;
+
+			auto const target = path.nodes.back().targetVertex;
+			auto const allowFallback = path.diagnosticContext
+				&& path.diagnosticContext->allowFallbackMobility;
+			auto const context = currentDecisionContext(agent, graph, target.get(), allowFallback);
+			auto const vertexCount = graph.getVertices().size();
+			std::vector<float> costs(vertexCount, std::numeric_limits<float>::infinity());
+			std::vector<PerceivedRouteCostComponents> components(vertexCount);
+			using QueueItem = std::pair<float, uint32_t>;
+			std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> queue;
+			costs[target->getSearchIndex()] = 0.0f;
+			queue.push({ 0.0f, target->getSearchIndex() });
+			uint32_t expanded = 0;
+			uint32_t evaluated = 0;
+			bool truncated = false;
+
+			auto add = [](PerceivedRouteCostComponents left,
+				PerceivedRouteCostComponents const& right)
+			{
+				left.movement += right.movement; left.knownWait += right.knownWait;
+				left.expectedWait += right.expectedWait; left.effort += right.effort;
+				left.interaction += right.interaction; left.crowding += right.crowding;
+				left.risk += right.risk; left.uncertainty += right.uncertainty;
+				left.stableVariation += right.stableVariation;
+				return left;
+			};
+			auto mobilityReason = [&](Edge const& edge)
+			{
+				auto rejected = [&](TraversalKind kind)
+				{
+					auto const use = agentEdgeUse(&agent, edge, kind);
+					return use == MobilityUse::CannotUse || (!allowFallback
+						&& use == MobilityUse::OnlyIfNoOtherOption);
+				};
+				switch (edge.getType())
+				{
+				case EdgeType::Door: case EdgeType::BulkheadDoor: return rejected(TraversalKind::Door);
+				case EdgeType::Ladder: case EdgeType::LadderMount: return rejected(TraversalKind::Ladder);
+				case EdgeType::Lift: case EdgeType::LiftMount:
+					return rejected(TraversalKind::Lift) || rejected(TraversalKind::PlatformLift);
+				case EdgeType::Shuttle: case EdgeType::ShuttleMount: return rejected(TraversalKind::Shuttle);
+				case EdgeType::Stairwell: case EdgeType::StairwellMount: return rejected(TraversalKind::Stairwell);
+				case EdgeType::Staircase: case EdgeType::StaircaseMount:
+					return rejected(TraversalKind::Staircase) || rejected(TraversalKind::Escalator);
+				default: return false;
+				}
+			};
+			auto evaluate = [&](std::shared_ptr<const Edge> const& edge,
+				std::shared_ptr<const Vertex> const& to)
+			{
+				auto facts = edge->getDirectedTraversalFacts(to, context);
+				if (facts.feasible && facts.components.uncertaintyUnits > 0)
+				{
+					auto mix = [](uint64_t value)
+					{
+						value += 0x9e3779b97f4a7c15ULL;
+						value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+						value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+						return value ^ (value >> 31);
+					};
+					auto const hash = mix(context.perceptionKey
+						^ (uint64_t{ edge->getId() } << 32) ^ to->getId()
+						^ mix(context.observationEpoch));
+					auto const unit = static_cast<float>(hash >> 40) / 16777215.0f;
+					auto const amplitude = (1.0f - context.profile.routeFamiliarity)
+						* facts.components.uncertaintyUnits;
+					facts.components.perceptionVariationUnits = (unit * 2.0f - 1.0f) * amplitude;
+				}
+				if (!facts.feasible && facts.exclusionReason == RouteExclusionReason::None)
+				{
+					if (mobilityReason(*edge)) facts.exclusionReason = RouteExclusionReason::Mobility;
+					else if (edge->getType() == EdgeType::Gap || edge->getType() == EdgeType::Window)
+						facts.exclusionReason = RouteExclusionReason::Permission;
+					else facts.exclusionReason = RouteExclusionReason::Unknown;
+				}
+				return std::pair{ facts, context.policy.evaluate(facts, context.profile) };
+			};
+
+			while (!queue.empty())
+			{
+				auto const [cost, slot] = queue.top(); queue.pop();
+				if (cost != costs[slot]) continue;
+				if (++expanded > maximumExpandedVertices) { truncated = true; break; }
+				auto const& current = graph.getVertices()[slot];
+				if (current.get() != target.get() && blocksPathing(current)) continue;
+				for (auto const& edge : current->getEdges())
+				{
+					if (++evaluated > maximumEvaluatedTraversals) { truncated = true; break; }
+					auto const source = edge->getOtherVertex(current);
+					auto const [facts, arc] = evaluate(edge, current);
+					if (!arc) continue;
+					auto const candidate = cost + arc->perceivedCost;
+					auto const sourceSlot = source->getSearchIndex();
+					if (candidate < costs[sourceSlot])
+					{
+						costs[sourceSlot] = candidate;
+						components[sourceSlot] = add(arc->components, components[slot]);
+						queue.push({ candidate, sourceSlot });
+					}
+				}
+				if (truncated) break;
+			}
+
+			PathRouteExplanation result;
+			result.capturedContextStale = routeDiagnosticContextIsStale(agent, graph, path);
+			// Alternative evidence is intentionally recomputed now. Only the selected
+			// suffix has retained decision-time evidence.
+			result.comparisonEvidence = RouteExplanationEvidence::CurrentContext;
+			result.analysisTruncated = truncated;
+			result.vertices.reserve(path.nodes.size());
+			for (uint32_t i = 0; i < path.nodes.size(); ++i)
+			{
+				auto const& node = path.nodes[i];
+				PathVertexExplanation vertex{ i, node.targetVertex, i + 1 == path.nodes.size() };
+				if (vertex.target || !node.targetVertex)
+				{
+					result.vertices.push_back(std::move(vertex));
+					continue;
+				}
+				auto const selectedEdge = path.nodes[i + 1].edge;
+				auto const incomingEdge = i ? node.edge : nullptr;
+				for (auto const& edge : node.targetVertex->getEdges())
+				{
+					if (edge == incomingEdge && edge != selectedEdge) continue;
+					auto next = edge->getOtherVertex(node.targetVertex);
+					auto const [facts, arc] = evaluate(edge, next);
+					RouteContinuationExplanation continuation;
+					continuation.edge = edge;
+					continuation.nextVertex = next;
+					continuation.selected = edge == selectedEdge;
+					continuation.exclusionReason = facts.exclusionReason;
+					if (arc && std::isfinite(costs[next->getSearchIndex()]))
+					{
+						continuation.feasible = true;
+						continuation.perceivedContinuationCost = arc->perceivedCost
+							+ costs[next->getSearchIndex()];
+						continuation.components = add(arc->components,
+							components[next->getSearchIndex()]);
+					}
+					else if (arc)
+						continuation.exclusionReason = truncated
+							? RouteExclusionReason::AnalysisLimit : RouteExclusionReason::NoContinuation;
+					vertex.continuations.push_back(std::move(continuation));
+				}
+				// The selected suffix is retained decision-time evidence. Alternatives are
+				// recomputed only on demand; when the context is stale the UI labels that
+				// comparison as current rather than rewriting this history.
+				for (auto& continuation : vertex.continuations)
+				{
+					if (!continuation.selected) continue;
+					PerceivedRouteCostComponents suffix;
+					bool available = true;
+					for (uint32_t n = i + 1; n < path.nodes.size(); ++n)
+					{
+						if (!path.nodes[n].diagnosticCost) { available = false; break; }
+						suffix = add(suffix, path.nodes[n].diagnosticCost->components);
+					}
+					if (available)
+					{
+						continuation.capturedComponents = suffix;
+						continuation.capturedPerceivedContinuationCost = suffix.total();
+					}
+				}
+				std::sort(vertex.continuations.begin(), vertex.continuations.end(),
+					[](auto const& left, auto const& right)
+					{
+						if (left.selected != right.selected) return left.selected;
+						if (left.feasible != right.feasible) return left.feasible;
+						if (left.feasible && left.perceivedContinuationCost != right.perceivedContinuationCost)
+							return left.perceivedContinuationCost < right.perceivedContinuationCost;
+						if (left.nextVertex->getId() != right.nextVertex->getId())
+							return left.nextVertex->getId() < right.nextVertex->getId();
+						return left.edge->getId() < right.edge->getId();
+					});
+				vertex.meaningfulDecision = std::any_of(vertex.continuations.begin(),
+					vertex.continuations.end(), [](auto const& item)
+					{ return !item.selected && item.feasible; });
+				result.vertices.push_back(std::move(vertex));
+			}
+			return result;
 		}
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(

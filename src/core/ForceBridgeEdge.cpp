@@ -85,7 +85,11 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentRejectsButtons(context.legacyAgent, context.allowFallbackMobility) && requiresButton()) return facts;
+		if (agentRejectsButtons(context.legacyAgent, context.allowFallbackMobility) && requiresButton())
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto const source = getOtherVertex(targetVertex);
 		auto const sourceSector = source && source->getSector()
 			? SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 }
@@ -93,7 +97,10 @@ namespace core
 		if (mForceBridge->isExtensible()
 			&& (!mForceBridge->hasExtensionControlInSector(sourceSector)
 				|| !source || !mForceBridge->canPrepareFromPosition(source->getPosition().x)))
+		{
+			facts.exclusionReason = RouteExclusionReason::PreparationSide;
 			return facts;
+		}
 
 		facts.feasible = true;
 		auto& c = facts.components;

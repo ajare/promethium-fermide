@@ -5,6 +5,7 @@
 
 #include "core/Edge.h"
 #include "core/EntityId.h"
+#include "core/AgentTag.h"
 #include "core/Vertex.h"
 
 
@@ -46,7 +47,10 @@ namespace core
 	{
 		EffectiveRoutingProfile profile;
 		RoutingProfileProvenance provenance;
+		MobilityProfile mobilityProfile;
+		RoutingPropertyProvenance mobilityProvenance;
 		uint64_t topologyGeneration{ 0 };
+		bool allowFallbackMobility{ false };
 	};
 
 	struct PathNode
@@ -78,6 +82,42 @@ namespace core
 		float perceivedCost{ 0 };
 		std::optional<float> objectiveEstimatedDurationSeconds;
 		RouteDiagnosticContext context;
+	};
+
+	enum class RouteExplanationEvidence
+	{
+		DecisionTime,
+		CurrentContext
+	};
+
+	struct RouteContinuationExplanation
+	{
+		std::shared_ptr<const Edge> edge;
+		std::shared_ptr<const Vertex> nextVertex;
+		bool selected{ false };
+		bool feasible{ false };
+		RouteExclusionReason exclusionReason{ RouteExclusionReason::None };
+		float perceivedContinuationCost{ 0 };
+		PerceivedRouteCostComponents components;
+		std::optional<float> capturedPerceivedContinuationCost;
+		std::optional<PerceivedRouteCostComponents> capturedComponents;
+	};
+
+	struct PathVertexExplanation
+	{
+		uint32_t pathNodeIndex{ 0 };
+		std::shared_ptr<const Vertex> vertex;
+		bool target{ false };
+		bool meaningfulDecision{ false };
+		std::vector<RouteContinuationExplanation> continuations;
+	};
+
+	struct PathRouteExplanation
+	{
+		RouteExplanationEvidence comparisonEvidence{ RouteExplanationEvidence::CurrentContext };
+		bool capturedContextStale{ true };
+		bool analysisTruncated{ false };
+		std::vector<PathVertexExplanation> vertices;
 	};
 
 } // core

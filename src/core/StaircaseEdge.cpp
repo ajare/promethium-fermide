@@ -98,8 +98,16 @@ namespace core
 		auto const ascending = rise > 0.0f;
 		if (mStaircase->isEscalator())
 		{
-			if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Escalator, context.allowFallbackMobility)
-				|| ascending != (mStaircase->getSpeed() > 0.0f)) return facts;
+			if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Escalator, context.allowFallbackMobility))
+			{
+				facts.exclusionReason = RouteExclusionReason::Mobility;
+				return facts;
+			}
+			if (ascending != (mStaircase->getSpeed() > 0.0f))
+			{
+				facts.exclusionReason = RouteExclusionReason::Direction;
+				return facts;
+			}
 			auto walkingChance = clamp(context.profile.escalatorWalkingChance, 0.0f, 1.0f);
 			if (context.legacyAgent && walkingChance > 0.0f
 				&& entryIsVisibleFrom(sourceVertex, context.observationSector))
@@ -124,7 +132,11 @@ namespace core
 				/ (abs(mStaircase->getSpeed()) + context.walkSpeed);
 			return facts;
 		}
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Staircase, context.allowFallbackMobility)) return facts;
+		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Staircase, context.allowFallbackMobility))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto const speed = (ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed)
 			* context.profile.stairSpeedModifier;
 		facts.feasible = true;

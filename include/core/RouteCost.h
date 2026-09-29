@@ -56,9 +56,23 @@ namespace core
 		float stopPosition = 0;
 	};
 
+	enum class RouteExclusionReason
+	{
+		None,
+		Mobility,
+		Direction,
+		Control,
+		PreparationSide,
+		Permission,
+		NoContinuation,
+		AnalysisLimit,
+		Unknown
+	};
+
 	struct DirectedTraversalFacts
 	{
 		bool feasible = false;
+		RouteExclusionReason exclusionReason{ RouteExclusionReason::None };
 		RouteCostComponents components;
 		// Legacy weights mix duration and preference: do not report them as time.
 		std::optional<float> objectiveDurationSeconds;

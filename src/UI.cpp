@@ -6879,7 +6879,7 @@ namespace
 		if (core::pathing::routeDiagnosticContextIsStale(
 			agent, *world->getGraph(), diagnostic->context))
 			ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
-				"Captured context is stale because routing properties or topology changed; values below explain the selected Path when it was calculated.");
+				"Captured context is stale because routing properties, Mobility, or topology changed; values below explain the selected Path when it was calculated.");
 		else
 			ImGui::TextDisabled("Generated on demand from the selected Path's captured route-decision context.");
 
@@ -6924,6 +6924,145 @@ namespace
 		property("Route familiarity", profile.routeFamiliarity, sources.routeFamiliarity);
 		property("Route persistence", profile.routePersistence, sources.routePersistence);
 		ImGui::TreePop();
+	}
+
+	void renderRouteExplanation(shared_ptr<core::World> const& world,
+		core::Agent const& agent)
+	{
+		static core::AgentId explainedAgentId{};
+		static shared_ptr<core::Path> explainedPath;
+		static shared_ptr<core::Path> explainedLivePath;
+		static core::SectorId explainedDestinationSector{};
+		static core::Vector2 explainedDestinationPosition;
+		static bool reconstructedPausedPath = false;
+		static std::optional<core::PathRouteExplanation> explanation;
+		static string message;
+		auto const path = agent.getPath();
+		auto const agentId = world->getAgentId(&agent);
+		if (ImGui::Button("Explain Route"))
+		{
+			explainedAgentId = agentId;
+			explainedPath = path;
+			explainedLivePath = path;
+			reconstructedPausedPath = false;
+			explanation.reset();
+			message.clear();
+			if (!explainedPath)
+			{
+				core::World::TopologyPathIntent intent;
+				if (world->getPausedPathIntent(agent, intent) && intent.destinationSector
+					&& intent.destinationSector.value <= world->getNumSectors())
+				{
+					auto const destinationSector = world->getSector(
+						static_cast<uint32_t>(intent.destinationSector.value - 1));
+					auto const destination = world->getGraph()->getClosestVertexInSector(
+						destinationSector.get(), intent.destinationPosition);
+					explainedPath = destination
+						? world->getGraph()->calculatePath(&agent, destination) : nullptr;
+					explainedDestinationSector = intent.destinationSector;
+					explainedDestinationPosition = intent.destinationPosition;
+					reconstructedPausedPath = true;
+				}
+			}
+			if (!explainedPath || explainedPath->nodes.empty()
+				|| !explainedPath->nodes.back().targetVertex)
+				message = reconstructedPausedPath
+					? "The paused Path has a retained target, but no valid current route can be explained."
+					: "No route to explain: the selected Agent has no current Path and target.";
+			else
+			{
+				explanation = core::pathing::explainRoute(agent, *world->getGraph(), *explainedPath);
+				if (!explanation)
+					message = "Route explanation is unavailable for this Path.";
+			}
+		}
+		if (explainedAgentId != agentId) return;
+		bool pathChanged = !reconstructedPausedPath && explainedLivePath != path;
+		if (reconstructedPausedPath)
+		{
+			core::World::TopologyPathIntent intent;
+			pathChanged = path || !world->getPausedPathIntent(agent, intent)
+				|| intent.destinationSector != explainedDestinationSector
+				|| intent.destinationPosition.distanceTo(explainedDestinationPosition) > 0.001f;
+		}
+		if (pathChanged && explanation)
+		{
+			explanation.reset();
+			message = "The Path changed. Press Explain Route to analyse the new Path.";
+		}
+		if (!message.empty()) ImGui::TextWrapped("%s", message.c_str());
+		if (!explanation) return;
+
+		if (reconstructedPausedPath)
+			ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
+				"Paused Path: reconstructed on demand from its retained target. Comparison totals use current context; original decision-time evidence is unavailable.");
+		else
+			ImGui::TextDisabled("Alternatives and comparison totals use current observations; selected suffixes also retain explicitly labelled decision-time evidence.");
+		if (explanation->capturedContextStale)
+			ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
+				"The captured routing properties, Mobility, or topology are stale, so all comparison totals are current-context values.");
+		if (explanation->analysisTruncated)
+			ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
+				"The bounded alternative analysis reached its limit; unanalysed continuations are marked explicitly.");
+
+		auto difference = [](core::PerceivedRouteCostComponents const& value,
+			core::PerceivedRouteCostComponents const& selected)
+		{
+			return format("movement {:+.3f}, known wait {:+.3f}, expected wait {:+.3f}, effort {:+.3f}, interaction {:+.3f}, crowding {:+.3f}, risk {:+.3f}, uncertainty {:+.3f}, stable variation {:+.3f}",
+				value.movement - selected.movement, value.knownWait - selected.knownWait,
+				value.expectedWait - selected.expectedWait, value.effort - selected.effort,
+				value.interaction - selected.interaction, value.crowding - selected.crowding,
+				value.risk - selected.risk, value.uncertainty - selected.uncertainty,
+				value.stableVariation - selected.stableVariation);
+		};
+		for (auto const& vertex : explanation->vertices)
+		{
+			auto const label = format("Vertex {}: {}###RouteExplanationVertex{}",
+				vertex.pathNodeIndex + 1, vertex.vertex
+					? vertex.vertex->getDescription() : "<unavailable>", vertex.pathNodeIndex);
+			if (!ImGui::TreeNode(label.c_str())) continue;
+			if (vertex.target)
+			{
+				ImGui::TextUnformatted("Target Vertex: the Path ends here.");
+				ImGui::TreePop();
+				continue;
+			}
+			if (!vertex.meaningfulDecision)
+				ImGui::TextWrapped("%s pass-through Vertex: no meaningful feasible alternative existed.",
+					vertex.vertex && !vertex.vertex->getObject() ? "Topology-only" : "Mandatory");
+
+			auto selected = std::find_if(vertex.continuations.begin(), vertex.continuations.end(),
+				[](auto const& item) { return item.selected; });
+			for (auto const& continuation : vertex.continuations)
+			{
+				auto const destination = continuation.nextVertex
+					? continuation.nextVertex->getDescription() : "<unavailable>";
+				if (!reconstructedPausedPath && continuation.selected
+					&& continuation.capturedPerceivedContinuationCost)
+					ImGui::Text("Selected continuation -> %s: %.3f perceived total (decision-time evidence)",
+						destination.c_str(), *continuation.capturedPerceivedContinuationCost);
+				if (!continuation.feasible)
+				{
+					ImGui::TextWrapped("%s%s -> %s: %s.", continuation.selected ? "Selected; " : "",
+						continuation.edge ? continuation.edge->getDescription().c_str() : "Traversal",
+						destination.c_str(), core::pathing::routeExclusionReasonText(
+							continuation.exclusionReason));
+					continue;
+				}
+				ImGui::Text("%s%s -> %s: %.3f perceived continuation total%s",
+					continuation.selected ? "Selected; " : "Alternative; ",
+					continuation.edge ? continuation.edge->getDescription().c_str() : "Traversal",
+					destination.c_str(), continuation.perceivedContinuationCost,
+					" (current context)");
+				if (!continuation.selected && selected != vertex.continuations.end()
+					&& selected->feasible)
+				{
+					ImGui::TextWrapped("Component differences from selected: %s.",
+						difference(continuation.components, selected->components).c_str());
+				}
+			}
+			ImGui::TreePop();
+		}
 	}
 }
 
@@ -7092,6 +7231,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	}
 
 	renderRouteCostDiagnostics(world, *gSelectedAgent);
+	renderRouteExplanation(world, *gSelectedAgent);
 
 	if (gSelectedVertex)
 	{

@@ -83,7 +83,11 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Ladder, context.allowFallbackMobility)) return facts;
+		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Ladder, context.allowFallbackMobility))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto const source = getOtherVertex(targetVertex);
 		if (mLadder->isExtensible() && source && source->getType() != VertexType::Ladder)
 		{
@@ -93,7 +97,11 @@ namespace core
 			// Preparation capability is authored, not inferred from the Ladder's
 			// transient deployed state. An already-extended Ladder may retract before
 			// a remote Agent reaches it.
-			if (!mLadder->hasExtensionControlInSector(sourceSector)) return facts;
+			if (!mLadder->hasExtensionControlInSector(sourceSector))
+			{
+				facts.exclusionReason = RouteExclusionReason::PreparationSide;
+				return facts;
+			}
 		}
 		facts.feasible = true;
 		facts.objectiveDurationSeconds = 0.0f;
