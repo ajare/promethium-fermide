@@ -32,6 +32,7 @@ namespace core
 
 	class Graph
 	{
+		friend struct GraphSourceIndexTestAccess;
 		friend std::shared_ptr<Path> pathing::findPath(Agent const*, Graph const*,
 			std::shared_ptr<const Vertex>, std::shared_ptr<const Vertex>);
 		friend std::optional<std::pair<float, float>> pathing::comparePathSuffixCosts(
@@ -110,6 +111,29 @@ namespace core
 		std::map<uint32_t, std::shared_ptr<const Vertex>> mIdentifierVertexLookup;
 
 		std::map<std::shared_ptr<SectorObject>, std::vector<std::shared_ptr<Vertex>>> mSectorObjectVertexLookup;
+
+		struct SourceCandidate
+		{
+			std::shared_ptr<const Vertex> vertex;
+			size_t order;
+		};
+		struct FloorInterval
+		{
+			uint32_t sourceSlot, targetSlot;
+			float left, right, maxRight;
+			size_t order;
+		};
+		struct SourceRow
+		{
+			std::vector<SourceCandidate> candidates;
+			std::vector<FloorInterval> intervals;
+		};
+		// Sector identity includes Layer; exact heights retain the tolerance test.
+		std::map<Sector const*, std::map<float, SourceRow>> mSourceRows;
+		mutable std::vector<FloorInterval const*> mContainingIntervals;
+		void buildSourceIndexes();
+		void collectFloorIntervals(std::vector<FloorInterval> const&, size_t, size_t, float) const;
+		void findContainingFloorIntervals(Sector const*, Vector2 const&) const;
 
 		mutable PathfindingWorkspace mPathfindingWorkspace;
 
@@ -228,6 +252,17 @@ namespace core
 
 		Log const& getBuildLog() const;
 
+		struct SourceIndexStatistics
+		{
+			uint64_t candidatesExamined{ 0 }, intervalsExamined{ 0 }, containingIntervals{ 0 };
+			uint64_t builds{ 0 };
+			size_t bytes{ 0 };
+			double buildSeconds{ 0 }, selectionSeconds{ 0 }, seedingSeconds{ 0 }, arcScoringSeconds{ 0 };
+		};
+		SourceIndexStatistics const& getSourceIndexStatistics() const { return mSourceIndexStatistics; }
+	private:
+		mutable SourceIndexStatistics mSourceIndexStatistics;
+	public:
 		// Read-only diagnostic: counts capacity growth in Graph-owned search scratch.
 		uint64_t getScratchAllocationCount() const;
 		size_t getPathfindingScratchBytes() const;

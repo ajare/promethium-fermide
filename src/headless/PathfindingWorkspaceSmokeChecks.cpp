@@ -24,6 +24,62 @@
 
 size_t getHeadlessWorkingSetBytes();
 
+namespace core
+{
+	// Test-only access to original Sector enumeration and indexed query output.
+	// The oracle below reads edges/cells, never the index's runs or intervals.
+	struct GraphSourceIndexTestAccess
+	{
+		static void checkOverlappingIntervals(Graph const& graph)
+		{
+			// Balanced subtree maxima for nested, crossing and coincident intervals.
+			std::vector<Graph::FloorInterval> intervals{
+				{ 0, 0, 0, 20, 20, 0 }, { 0, 0, 1, 2, 20, 1 },
+				{ 0, 0, 2, 12, 12, 2 }, { 0, 0, 3, 4, 20, 3 },
+				{ 0, 0, 4, 15, 15, 4 }, { 0, 0, 4, 15, 15, 5 },
+				{ 0, 0, 6, 9, 9, 6 } };
+			for (float x : { -1.0f, 0.0f, 2.0f, 4.0f, 5.5f, 6.0f, 9.0f, 15.0f, 20.0f })
+			{
+				graph.mContainingIntervals.clear();
+				graph.collectFloorIntervals(intervals, 0, intervals.size(), x);
+				std::vector<Graph::FloorInterval const*> expected;
+				for (auto const& interval : intervals)
+					if (interval.left < x && x < interval.right) expected.push_back(&interval);
+				if (graph.mContainingIntervals != expected)
+					throw std::runtime_error("Interval tree omitted nested/coincident overlap or included boundary");
+			}
+			graph.mContainingIntervals.clear();
+		}
+		static auto const& candidates(Graph const& graph, Sector const* sector)
+		{ return graph.mSectorVertexLookup.at(sector); }
+		static void checkIntervals(Graph const& graph, Sector const* sector, Vector2 position)
+		{
+			std::vector<std::pair<uint32_t, uint32_t>> expected, actual;
+			for (auto const& vertex : graph.getVertices())
+				for (auto const& edge : vertex->getEdges())
+				{
+					auto target = edge->getOtherVertex(vertex);
+					if (vertex->getSector().get() != sector || target->getSector().get() != sector
+						|| edge->getType() != EdgeType::Location || vertex->getSearchIndex() >= target->getSearchIndex()) continue;
+					auto a = vertex->getPosition(), b = target->getPosition();
+					if (std::abs(a.y - position.y) <= 0.001f && std::abs(b.y - position.y) <= 0.001f
+						&& position.x > std::min(a.x, b.x) && position.x < std::max(a.x, b.x))
+						expected.emplace_back(vertex->getSearchIndex(), target->getSearchIndex());
+				}
+			auto const capacity = graph.mContainingIntervals.capacity();
+			graph.findContainingFloorIntervals(sector, position);
+			if (graph.mContainingIntervals.capacity() != capacity)
+				throw std::runtime_error("Containing-floor query grew scratch");
+			for (auto interval : graph.mContainingIntervals)
+			{
+				if (std::abs(graph.getVertices()[interval->targetSlot]->getPosition().y - position.y) <= 0.001f)
+					actual.emplace_back(interval->sourceSlot, interval->targetSlot);
+			}
+			if (actual != expected) throw std::runtime_error("Indexed floor seeds differ from brute-force ordered endpoints");
+		}
+	};
+}
+
 namespace
 {
 	void require(bool condition, char const* message)
@@ -176,23 +232,25 @@ namespace
 			{
 				auto sector = origin->getSector();
 				if (!dynamic_cast<core::Location const*>(sector.get())) continue;
-				for (float offset : { -0.5f, 0.0f, 0.5f })
+				for (float offset : { -1.0f, -0.5f, -0.001f, 0.0f, 0.001f, 0.25f, 0.5f, 1.0f })
+				for (float heightOffset : { -0.0011f, -0.001f, 0.0f, 0.001f, 0.0011f })
 				{
 					auto position = origin->getPosition();
 					position.x += offset;
+					position.y += heightOffset;
 					if (position.x < 0 || position.x > world->getCellsWide()
 						|| position.y < 0 || position.y >= world->getLevelsHigh()) continue;
 					auto actual = graph->getPathSourceVertex(sector.get(), position);
-					bool actualReachable = false;
+					core::GraphSourceIndexTestAccess::checkIntervals(*graph, sector.get(), position);
 					std::shared_ptr<const core::Vertex> expected;
 					auto best = std::numeric_limits<float>::infinity();
-					for (auto const& candidate : graph->getVertices())
+					for (auto const& candidate : core::GraphSourceIndexTestAccess::candidates(*graph, sector.get()))
 					{
 						if (candidate->getSector() != sector) continue;
 						auto target = candidate->getPosition();
 						if (std::abs(target.y - position.y) > 0.001f) continue;
 						auto distance = position.distanceToSq(target);
-						if (distance > best) continue;
+						if (distance >= best) continue;
 						bool reachable = true;
 						for (int x = static_cast<int>(std::floor(std::min(position.x, target.x)));
 							x < static_cast<int>(std::ceil(std::max(position.x, target.x))); ++x)
@@ -207,19 +265,104 @@ namespace
 						{
 							expected = candidate;
 							best = distance;
-							if (candidate == actual) actualReachable = true;
 						}
 					}
-					// Sector lookup order can differ from the global vertex order at
-					// coincident topology vertices. Require the same reachable minimum.
-					if (bool(actual) != bool(expected) || (actual && (!actualReachable
-						|| actual->getPosition().distanceToSq(position) != best)))
+					// Exact identity matters at coincident thresholds, not just distance.
+					if (actual != expected)
 						throw std::runtime_error(std::string("Floor source mismatch in ") + name
 							+ " at " + std::to_string(position.x) + "," + std::to_string(position.y)
 							+ ": expected " + (expected ? expected->getDescription() : "none")
 							+ ", actual " + (actual ? actual->getDescription() : "none"));
 				}
 			}
+		}
+	}
+
+	void sourceIndexesFollowWalkwayEdits()
+	{
+		core::World world("Source topology edits", 8, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 8, 2);
+		uint32_t removed = 0;
+		for (uint32_t x = 0; x < 8; ++x)
+		{
+			auto walkway = world.addSectorWalkway(room, 1, x);
+			if (x == 3) removed = walkway.index;
+		}
+		world.addSectorMarker(room, 1, 2.5f);
+		world.addSectorMarker(room, 1, 5.5f);
+		world.finishBuild();
+		world.pauseSimulation();
+		auto sector = world.getSector(room);
+		core::Vector2 const position{ 3.5f, 1.0f };
+		require(world.getGraph()->getPathSourceVertex(sector.get(), position) != nullptr,
+			"Supported Walkway has no source");
+		require(world.removeSectorWalkway(room, removed) && world.rebuildTraversalTopology(),
+			"Could not rebuild edited Walkway topology");
+		sector = world.getSector(room);
+		require(!world.getGraph()->getPathSourceVertex(sector.get(), position),
+			"Source index retained removed Floor support");
+		core::GraphSourceIndexTestAccess::checkIntervals(*world.getGraph(), sector.get(), position);
+		world.addSectorWalkway(room, 1, 3);
+		require(world.rebuildTraversalTopology(), "Could not restore Walkway topology");
+		sector = world.getSector(room);
+		require(world.getGraph()->getPathSourceVertex(sector.get(), position) != nullptr,
+			"Source index missed restored Floor support");
+		core::GraphSourceIndexTestAccess::checkIntervals(*world.getGraph(), sector.get(), position);
+	}
+
+	void sourceIndexWorkIsLocal()
+	{
+		for (uint32_t count : { 32u, 128u, 512u })
+		{
+			core::World world("Source index scale", count + 8, 2);
+			auto sector = world.addRoom("Source", 0, 0, 0, count + 8, 2);
+			auto back = world.addRoom("Other Layer", 1, 0, 0, count + 8, 2);
+			uint32_t nearId, farId;
+			world.addSectorMarker(sector, 0, 1.5f, &nearId);
+			world.addSectorMarker(sector, 0, 4.5f, &farId);
+			for (uint32_t x = 0; x < count; ++x)
+			{
+				world.addSectorMarker(sector, 0, x + 6.5f, "Front " + std::to_string(x));
+				world.addSectorMarker(back, 0, x + 0.5f, "Back " + std::to_string(x));
+			}
+			world.finishBuild();
+			world.pauseSimulation();
+			auto id = world.createAgent("Source walker", sector, 0, 2.5f);
+			auto agent = world.lookupAgent(id).entity;
+			auto graph = world.getGraph();
+			auto target = graph->getVertexByIdentifier(farId);
+			auto first = graph->calculatePath(agent, target);
+			require(first && first->nodes.front().targetVertex == target,
+				"Virtual source forced nearest endpoint instead of optimal endpoint");
+			auto allocations = graph->getScratchAllocationCount();
+			auto backSource = graph->getPathSourceVertex(world.getSector(back).get(), { 2.5f, 0.0f });
+			require(backSource && backSource->getSector()->getLayerIndex() == 1,
+				"Coincident positions on different Layers shared a source");
+			auto before = graph->getSourceIndexStatistics();
+			for (int repeat = 0; repeat < 10; ++repeat)
+			{
+				require(graph->getPathSourceVertex(agent->getSector(), { 3.0f, 0.0f })
+					== graph->getVertexByIdentifier(nearId), "Source tie changed original candidate order");
+				require(digest(graph->calculatePath(agent, target)) == digest(first), "Indexed repeated Path changed");
+			}
+			auto after = graph->getSourceIndexStatistics();
+			require(after.candidatesExamined - before.candidatesExamined <= 40,
+				"Unrelated Markers increased source candidate work");
+			require(after.intervalsExamined - before.intervalsExamined <= 40 * std::bit_width(count + 4),
+				"Unrelated segments caused linear interval work");
+			require(after.containingIntervals - before.containingIntervals == 10,
+				"Source seeding omitted or duplicated containing intervals");
+			require(after.builds == before.builds && graph->getScratchAllocationCount() == allocations,
+				"Warm queries rebuilt source topology or grew scratch");
+			core::GraphSourceIndexTestAccess::checkIntervals(*graph, agent->getSector(), agent->getGlobalPosition());
+			core::GraphSourceIndexTestAccess::checkOverlappingIntervals(*graph);
+			std::cout << "source-index markers=" << count << " bytes=" << after.bytes
+				<< " build-ms=" << after.buildSeconds * 1000
+				<< " selection-ms=" << (after.selectionSeconds - before.selectionSeconds) * 1000
+				<< " seeding-ms=" << (after.seedingSeconds - before.seedingSeconds) * 1000
+				<< " arc-scoring-ms=" << (after.arcScoringSeconds - before.arcScoringSeconds) * 1000
+				<< " candidates=" << after.candidatesExamined - before.candidatesExamined
+				<< " intervals=" << after.intervalsExamined - before.intervalsExamined << '\n';
 		}
 	}
 
@@ -471,6 +614,9 @@ namespace
 				<< " before-routing-MiB=" << memoryBeforeRouting / (1024.0 * 1024.0)
 				<< " lower-bound-builds=" << graph->getRouteLowerBoundBuildCount()
 				<< " lower-bound-hits=" << graph->getRouteLowerBoundHitCount()
+				<< " source-index-bytes=" << graph->getSourceIndexStatistics().bytes
+				<< " source-selection-ms=" << graph->getSourceIndexStatistics().selectionSeconds * 1000
+				<< " source-seeding-ms=" << graph->getSourceIndexStatistics().seedingSeconds * 1000
 				<< " digest=" << hash << '\n';
 			if (!pass) { expected = hash; allocations = graph->getScratchAllocationCount(); }
 			else if (pass == 1)
@@ -667,6 +813,8 @@ void runPathfindingWorkspaceSmokeChecks()
 	lowerBoundsAreUniversalAndBounded();
 	doorObservationEpochsIgnoreTicks();
 	sourceInferenceMatchesOpenIntervalReference();
+	sourceIndexWorkIsLocal();
+	sourceIndexesFollowWalkwayEdits();
 	uncertainRoutesSurviveWorldReset();
 	auto const first = populationRoutingRun();
 	require(first == populationRoutingRun({}, false), "Fresh population Path digest changed");

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <queue>
@@ -20,7 +21,6 @@ namespace core
 	{
 		mTopologyCaptured = false;
 		directedArcs.clear();
-		floorArcs.clear();
 		routeOffsets.clear();
 		for (auto& table : mTargetLowerBounds) table.target = NoPosition;
 	}
@@ -30,9 +30,6 @@ namespace core
 		if (mTopologyCaptured) return;
 		auto const oldOffsetsCapacity = routeOffsets.capacity();
 		auto const oldArcsCapacity = directedArcs.capacity();
-		auto const oldFloorCapacity = floorArcs.capacity();
-		floorArcs.clear();
-		floorArcs.reserve(graph.getEdges().size());
 		routeOffsets.resize(graph.getVertices().size() + 1);
 		directedArcs.clear();
 		directedArcs.reserve(graph.getEdges().size() * 2);
@@ -51,17 +48,11 @@ namespace core
 					: length / (CORE_AGENT_BASE_WALK_SPEED * AgentWalkSpeedModifierMaximum);
 				directedArcs.push_back({ &edge, target->getSearchIndex(), length, lowerBound,
 					(uint64_t{ edge->getRoutingIndex() } << 32) ^ target->getSearchIndex() });
-				if (edge->getType() == EdgeType::Location
-					&& vertex->getSearchIndex() < target->getSearchIndex()
-					&& vertex->getSector() == target->getSector())
-					floorArcs.push_back({ vertex->getSector().get(), vertex->getSearchIndex(),
-						target->getSearchIndex(), vertex->getPosition(), target->getPosition() });
 			}
 		}
 		routeOffsets.back() = directedArcs.size();
 		if (routeOffsets.capacity() != oldOffsetsCapacity) ++mScratchAllocationCount;
 		if (directedArcs.capacity() != oldArcsCapacity) ++mScratchAllocationCount;
-		if (floorArcs.capacity() != oldFloorCapacity) ++mScratchAllocationCount;
 		// Reserve every LRU slot on warm-up, so novel destinations and evictions
 		// cannot grow scratch during later searches on this Graph.
 		for (auto& table : mTargetLowerBounds)
@@ -80,7 +71,6 @@ namespace core
 		for (auto const& table : mTargetLowerBounds)
 			lowerBoundBytes += table.distances.capacity() * sizeof(double);
 		return lowerBoundBytes + directedArcs.capacity() * sizeof(DirectedArc)
-			+ floorArcs.capacity() * sizeof(FloorArc)
 			+ routeOffsets.capacity() * sizeof(size_t)
 			+ routeCosts.capacity() * sizeof(decltype(routeCosts)::value_type)
 			+ selectedRouteCosts.capacity() * sizeof(decltype(selectedRouteCosts)::value_type)
@@ -474,7 +464,10 @@ namespace core
 			{
 				auto& workspace = graph->getPathfindingWorkspace();
 				auto const& vertices = graph->getVertices();
+				auto const scoringStarted = std::chrono::steady_clock::now();
 				workspace.captureRouteCosts(*graph, searchContext);
+				graph->mSourceIndexStatistics.arcScoringSeconds += std::chrono::duration<double>(
+					std::chrono::steady_clock::now() - scoringStarted).count();
 				workspace.prepareTargetLowerBounds(targetSlot);
 				workspace.beginSearch(vertices.size());
 				auto const generation = workspace.getGeneration();
@@ -496,22 +489,26 @@ namespace core
 				auto const floorSource = inferredSource && dynamic_cast<Location const*>(agent->getSector());
 				if (floorSource)
 				{
+					auto const started = std::chrono::steady_clock::now();
 					auto const position = agent->getGlobalPosition();
 					seed(source, position.distanceTo(source->getPosition()) / searchContext.walkSpeed);
 					// A virtual source splits the ordinary floor edge beneath the Agent.
 					// Seed both endpoints with actual approach time, not the full edge
 					// length from an arbitrarily chosen nearest vertex. Never split a
 					// Gap, Force Bridge, threshold, or transit edge to bypass admission.
-					for (auto const& arc : workspace.floorArcs)
+					graph->findContainingFloorIntervals(agent->getSector(), position);
+					for (auto const* interval : graph->mContainingIntervals)
 					{
-						if (arc.sector != agent->getSector()) continue;
-						auto const pa = arc.sourcePosition;
-						auto const pb = arc.targetPosition;
+						auto const& arc = *interval;
+						auto const pa = vertices[arc.sourceSlot]->getPosition();
+						auto const pb = vertices[arc.targetSlot]->getPosition();
 						if (std::abs(pa.y - position.y) > 0.001f || std::abs(pb.y - position.y) > 0.001f
 							|| position.x <= std::min(pa.x, pb.x) || position.x >= std::max(pa.x, pb.x)) continue;
 						seed(vertices[arc.sourceSlot], position.distanceTo(pa) / searchContext.walkSpeed);
 						seed(vertices[arc.targetSlot], position.distanceTo(pb) / searchContext.walkSpeed);
 					}
+					graph->mSourceIndexStatistics.seedingSeconds += std::chrono::duration<double>(
+						std::chrono::steady_clock::now() - started).count();
 				}
 				else seed(source, 0.0f);
 

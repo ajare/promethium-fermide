@@ -1,4 +1,5 @@
 #include <cassert>
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -147,6 +148,7 @@ namespace core
 	{
 		// Transit occupants use their transit-specific topology, not Location floor.
 		if (!dynamic_cast<Location const*>(sector)) return getClosestVertexInSector(sector, pos);
+		auto const started = chrono::steady_clock::now();
 		auto const found = mSectorVertexLookup.find(sector);
 		if (found == mSectorVertexLookup.end()) return nullptr;
 		if (!isfinite(pos.x) || !isfinite(pos.y) || pos.x < 0 || pos.x > mwWorld->getCellsWide()
@@ -171,20 +173,48 @@ namespace core
 		else if (pos.x != floor(pos.x)) return nullptr;
 		shared_ptr<const Vertex> closest;
 		float distance = numeric_limits<float>::max();
-		for (auto const& vertex : found->second)
+		size_t order = numeric_limits<size_t>::max();
+		auto const indexed = mSourceRows.find(sector);
+		if (indexed == mSourceRows.end()) return nullptr;
+		auto const& rows = indexed->second;
+		auto const infinity = numeric_limits<float>::infinity();
+		for (auto rowIt = rows.lower_bound(nextafter(pos.y - 0.001f, -infinity));
+			rowIt != rows.end() && rowIt->first <= nextafter(pos.y + 0.001f, infinity); ++rowIt)
 		{
-			auto const target = vertex->getPosition();
-			if (abs(target.y - pos.y) > 0.001f) continue;
-			auto const candidateDistance = pos.distanceToSq(target);
-			if (candidateDistance >= distance) continue;
-			// Inclusive endpoints preserve the old open-interval Floor check: a
-			// Vertex on a Floor boundary does not require support beyond it.
-			if (target.x >= left && target.x <= right)
+			if (abs(rowIt->first - pos.y) > 0.001f) continue;
+			auto const& candidates = rowIt->second.candidates;
+			auto xLess = [](SourceCandidate const& candidate, float x)
+			{ return candidate.vertex->getPosition().x < x; };
+			auto begin = lower_bound(candidates.begin(), candidates.end(), left, xLess);
+			auto end = upper_bound(begin, candidates.end(), right, [](float x, SourceCandidate const& candidate)
+			{ return x < candidate.vertex->getPosition().x; });
+			auto after = lower_bound(begin, end, pos.x, xLess);
+			auto before = after;
+			auto inspect = [&](SourceCandidate const& candidate)
 			{
-				distance = candidateDistance;
-				closest = vertex;
+				++mSourceIndexStatistics.candidatesExamined;
+				auto const d = pos.distanceToSq(candidate.vertex->getPosition());
+				if (d < distance || (closest && d == distance && candidate.order < order))
+				{ distance = d; order = candidate.order; closest = candidate.vertex; }
+			};
+			// Examine both nearest sides, including every floating-point distance tie
+			// and coincident Vertex. Original Sector order, not x order, wins ties.
+			while (before != begin)
+			{
+				auto const& candidate = *--before;
+				auto const dx = pos.x - candidate.vertex->getPosition().x;
+				if (dx * dx > distance) break;
+				inspect(candidate);
+			}
+			while (after != end)
+			{
+				auto const& candidate = *after++;
+				auto const dx = pos.x - candidate.vertex->getPosition().x;
+				if (dx * dx > distance) break;
+				inspect(candidate);
 			}
 		}
+		mSourceIndexStatistics.selectionSeconds += chrono::duration<double>(chrono::steady_clock::now() - started).count();
 		return closest;
 	}
 
@@ -1573,6 +1603,87 @@ namespace core
 		}
 	}
 
+	void Graph::buildSourceIndexes()
+	{
+		auto const started = chrono::steady_clock::now();
+		for (auto const& [sector, vertices] : mSectorVertexLookup)
+		{
+			if (!dynamic_cast<Location const*>(sector)) continue;
+			for (size_t order = 0; order < vertices.size(); ++order)
+				mSourceRows[sector][vertices[order]->getPosition().y].candidates.push_back({ vertices[order], order });
+		}
+		size_t order = 0;
+		for (auto const& vertex : mVertices)
+		{
+			if (!dynamic_cast<Location const*>(vertex->getSector().get())) continue;
+			for (auto const& edge : vertex->getEdges())
+			{
+				auto const target = edge->getOtherVertex(vertex);
+				if (edge->getType() != EdgeType::Location || vertex->getSearchIndex() >= target->getSearchIndex()
+					|| vertex->getSector() != target->getSector()) continue;
+				auto const a = vertex->getPosition(), b = target->getPosition();
+				mSourceRows[vertex->getSector().get()][a.y].intervals.push_back(
+					{ vertex->getSearchIndex(), target->getSearchIndex(), min(a.x, b.x), max(a.x, b.x), 0, order++ });
+			}
+		}
+		mContainingIntervals.reserve(order);
+		mSourceIndexStatistics.bytes = mContainingIntervals.capacity() * sizeof(FloorInterval const*);
+		for (auto& [sector, rows] : mSourceRows)
+		{
+			for (auto& [height, row] : rows)
+			{
+				stable_sort(row.candidates.begin(), row.candidates.end(), [](auto const& a, auto const& b)
+				{ return a.vertex->getPosition().x < b.vertex->getPosition().x; });
+				auto& intervals = row.intervals;
+				stable_sort(intervals.begin(), intervals.end(), [](auto const& a, auto const& b) { return a.left < b.left; });
+				// An implicit balanced interval tree: each midpoint caches the maximum
+				// right endpoint in its subtree. Nested/overlapping intervals are retained.
+				auto augment = [&](auto&& self, size_t begin, size_t end) -> float
+				{
+					if (begin == end) return -numeric_limits<float>::infinity();
+					auto const mid = begin + (end - begin) / 2;
+					return intervals[mid].maxRight = max(intervals[mid].right,
+						max(self(self, begin, mid), self(self, mid + 1, end)));
+				};
+				augment(augment, 0, intervals.size());
+				mSourceIndexStatistics.bytes += sizeof(SourceRow) + sizeof(float)
+					+ row.candidates.capacity() * sizeof(SourceCandidate) + intervals.capacity() * sizeof(FloorInterval);
+			}
+		}
+		++mSourceIndexStatistics.builds;
+		mSourceIndexStatistics.buildSeconds += chrono::duration<double>(chrono::steady_clock::now() - started).count();
+	}
+
+	void Graph::collectFloorIntervals(vector<FloorInterval> const& intervals, size_t begin, size_t end, float x) const
+	{
+		if (begin == end) return;
+		auto const mid = begin + (end - begin) / 2;
+		auto const& interval = intervals[mid];
+		++mSourceIndexStatistics.intervalsExamined;
+		if (interval.maxRight <= x) return;
+		collectFloorIntervals(intervals, begin, mid, x);
+		if (interval.left >= x) return;
+		if (x < interval.right) mContainingIntervals.push_back(&interval);
+		collectFloorIntervals(intervals, mid + 1, end, x);
+	}
+
+	void Graph::findContainingFloorIntervals(Sector const* sector, Vector2 const& position) const
+	{
+		mContainingIntervals.clear();
+		auto const found = mSourceRows.find(sector);
+		if (found == mSourceRows.end()) return;
+		auto const infinity = numeric_limits<float>::infinity();
+		for (auto row = found->second.lower_bound(nextafter(position.y - 0.001f, -infinity));
+			row != found->second.end() && row->first <= nextafter(position.y + 0.001f, infinity); ++row)
+		{
+			if (abs(row->first - position.y) > 0.001f) continue;
+			collectFloorIntervals(row->second.intervals, 0, row->second.intervals.size(), position.x);
+		}
+		// Preserve the old directed-arc enumeration order for equal-cost seeds.
+		sort(mContainingIntervals.begin(), mContainingIntervals.end(), [](auto a, auto b) { return a->order < b->order; });
+		mSourceIndexStatistics.containingIntervals += mContainingIntervals.size();
+	}
+
 	void Graph::build()
 	{
 		mPathfindingWorkspace.invalidateTopology();
@@ -1581,6 +1692,8 @@ namespace core
 		mEdges.clear();
 		mSectorVertexLookup.clear();
 		mOrdinaryFloorRuns.clear();
+		mSourceRows.clear();
+		mContainingIntervals.clear();
 		mIdentifierVertexLookup.clear();
 		mSectorObjectVertexLookup.clear();
 
@@ -1667,6 +1780,7 @@ namespace core
 		{
 			const_cast<Vertex*>(mVertices[slot].get())->mSearchIndex = static_cast<uint32_t>(slot);
 		}
+		buildSourceIndexes();
 	}
 	void Graph::validate()
 	{

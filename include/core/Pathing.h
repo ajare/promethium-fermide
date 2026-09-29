@@ -39,13 +39,6 @@ namespace core
 			uint64_t perceptionIdentity;
 		};
 		std::vector<DirectedArc> directedArcs;
-		struct FloorArc
-		{
-			Sector const* sector;
-			uint32_t sourceSlot, targetSlot;
-			Vector2 sourcePosition, targetPosition;
-		};
-		std::vector<FloorArc> floorArcs;
 		void invalidateTopology();
 		[[nodiscard]] uint64_t getDirectedFactsBuildCount() const { return mDirectedFactsBuildCount; }
 		[[nodiscard]] size_t getScratchBytes() const;
