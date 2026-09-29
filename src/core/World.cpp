@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "core/RestorationTiming.h"
 #include "core/OccupantPacking.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRuntime.h"
@@ -6330,11 +6331,19 @@ namespace core
 
 	bool World::markerNameTaken(string const& trimmed, MarkerId except) const
 	{
-		for (auto const id : getMarkerIds())
+		// Inspect objects directly: getMarkerIds() followed by lookupMarker()
+		// rescans all objects for every identity, making repeated insertion
+		// cubic (including both validated restoration replays).
+		for (auto const& sector : mSectors)
 		{
-			if (id == except) continue;
-			auto marker = lookupMarker(id);
-			if (marker && marker->getName() == trimmed) return true;
+			if (!sector) continue;
+			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+			{
+				auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
+				if (!object) continue;
+				auto marker = object->getMarker();
+				if (marker->getId() != except && marker->getName() == trimmed) return true;
+			}
 		}
 		return false;
 	}
@@ -7515,6 +7524,7 @@ namespace core
 
 	void World::buildGraph()
 	{
+		RestorationTiming timing("graph-resources");
 		invalidateSimulationSnapshot();
 		mGraph->build();
 		mGraph->validate();

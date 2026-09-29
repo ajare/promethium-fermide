@@ -2505,7 +2505,11 @@ namespace
 		try
 		{
 			normalized = normalizedFilepath(filepath);
-			auto loaded = core::loadWorldDocument(normalized);
+			auto loaded = [&]
+			{
+				ApplicationBusyScope busy("Loading World...");
+				return core::loadWorldDocument(normalized);
+			}();
 			auto previousRegistry = world && world->hasAttachedAgentTagRegistry()
 				? world->getAgentTagRegistry() : nullptr;
 			auto previousBehaviourRegistry = world
@@ -4151,6 +4155,7 @@ void resetWorldSimulation(shared_ptr<core::World> const& world)
 {
 	try
 	{
+		ApplicationBusyScope busy("Resetting simulation...");
 		world->resetSimulation();
 		clearDocumentState(false);
 		gUISettings.worldPaused = world->isSimulationPaused();

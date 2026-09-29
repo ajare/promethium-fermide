@@ -9,6 +9,7 @@
 #include "core/AgentTagRegistry.h"
 #include "core/AgentBehaviourRegistryDocument.h"
 #include "core/World.h"
+#include "core/RestorationTiming.h"
 #include "core/WorldDocument.h"
 #include "core/SerializationException.h"
 #include "core/BinarySerializer.h"
@@ -471,6 +472,7 @@ namespace core
 	std::shared_ptr<World> loadWorldDocument(
 		std::filesystem::path const& worldFilepath)
 	{
+		RestorationTiming timing("reload-total");
 		requireWorldDocumentPath(worldFilepath);
 		auto const canonicalWorld = requireCanonicalRegularFile(
 			worldFilepath, "World");
@@ -480,12 +482,17 @@ namespace core
 		if (worldDocumentFormat(canonicalWorld) == WorldDocumentFormat::Binary)
 			serializer = BinarySerializer::fromFile(canonicalWorld.string());
 		else serializer = YamlSerializer::fromFile(canonicalWorld.string());
-		serializer->deserialize();
-		SerializationWorkData workData;
-		if (!loaded->deserialize(*serializer, workData))
 		{
-			throw SerializationException("Could not deserialize World");
+			RestorationTiming phase("reload-read-parse");
+			serializer->deserialize();
 		}
+		SerializationWorkData workData;
+		{
+			RestorationTiming phase("reload-reconstruction");
+			if (!loaded->deserialize(*serializer, workData))
+				throw SerializationException("Could not deserialize World");
+		}
+		RestorationTiming registries("reload-registries");
 		loadAndAttachAgentTagRegistry(*loaded, canonicalWorld);
 		// A behaviour-registry refusal propagates without replacing the caller's
 		// state; the temporary World unregisters from every shared registry

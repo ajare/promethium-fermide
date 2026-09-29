@@ -334,6 +334,16 @@ configuring an existing clone, populate Willpower and its nested dependencies:
 git submodule update --init --recursive
 ```
 
+## Reset and reload profiling
+
+Run `prometheum-fermide-headless.exe --restoration-benchmark <world>` for five
+load/run/reset/run/release cycles with authored-state, Path, trace and lifetime
+checks. Set `PF_RESTORATION_TIMING=1` for nested phase timings. This measures
+restoration separately from routing throughput and fixture generation; timings
+are informational. See [reset/reload measurements and reproduction](restoration-performance.md)
+for the binary-versus-YAML experiment, root cause, before/after distributions,
+memory observations and remaining manual editor check.
+
 ## CMake build
 
 Configure a 64-bit Visual Studio build tree:

@@ -178,6 +178,26 @@ void setWindowTitle(string const& title)
 	if (gWindow) SDL_SetWindowTitle(gWindow, title.c_str());
 }
 
+ApplicationBusyScope::ApplicationBusyScope(char const* operation)
+{
+	if (!gWindow) return;
+	mPreviousTitle = SDL_GetWindowTitle(gWindow);
+	mPreviousCursor = SDL_GetCursor();
+	mBusyCursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
+	if (mBusyCursor) SDL_SetCursor(mBusyCursor);
+	SDL_SetWindowTitle(gWindow, (mPreviousTitle + " - " + operation).c_str());
+}
+
+ApplicationBusyScope::~ApplicationBusyScope()
+{
+	if (gWindow) SDL_SetWindowTitle(gWindow, mPreviousTitle.c_str());
+	if (mBusyCursor)
+	{
+		SDL_SetCursor(mPreviousCursor);
+		SDL_FreeCursor(mBusyCursor);
+	}
+}
+
 SDL_Window* createWindow()
 {
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0)

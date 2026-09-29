@@ -47,7 +47,13 @@ namespace
 		require(world.lookupMarker(ids[1])->getName() == "entrance",
 			"Marker name uniqueness was not case-sensitive");
 
+		auto otherRoom = world.addRoom("Other Room", 1, 0, 0, 12, 1);
+		world.addSectorMarker(otherRoom, 0, 4.5f, "Elsewhere");
 		std::string diagnostic;
+		require(!world.canRenameMarker(ids[0], "Elsewhere", &diagnostic),
+			"Marker names were only checked in the current Sector");
+		require(world.canRenameMarker(ids[0], "Entrance", &diagnostic),
+			"Marker name validation did not exclude its own identity");
 		require(!world.canRenameMarker(ids[1], " Entrance ", &diagnostic),
 			"A duplicate Marker name was accepted");
 		require(!world.canRenameMarker(ids[1], "\xC0\x80", &diagnostic),

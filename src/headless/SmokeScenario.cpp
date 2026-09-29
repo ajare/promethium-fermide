@@ -126,6 +126,7 @@ void runZeroSizeLocationSmokeChecks();
 void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
+void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
 void runThresholdRouteCostSmokeChecks();
 void runStairRouteCostSmokeChecks();
 void runLiftRouteCostSmokeChecks();
@@ -6181,6 +6182,18 @@ size_t getHeadlessWorkingSetBytes()
 	return currentWorkingSetBytes();
 }
 
+size_t getHeadlessPeakWorkingSetBytes()
+{
+#if defined(_WIN32)
+	PROCESS_MEMORY_COUNTERS counters{};
+	counters.cb = sizeof(counters);
+	return GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))
+		? counters.PeakWorkingSetSize : 0;
+#else
+	return 0; // Unavailable; not a zero-memory claim.
+#endif
+}
+
 int main(int argc, char** argv)
 {
 	if (argc > 1 && (std::string(argv[1]) == "--viewport-checks"
@@ -6217,6 +6230,23 @@ int main(int argc, char** argv)
 
 	try
 	{
+		if (argc > 1 && std::string(argv[1]) == "--restoration-benchmark")
+		{
+			if (argc != 3 && argc != 4)
+				throw std::invalid_argument("Usage: --restoration-benchmark <world> [cycles]");
+			unsigned cycles = 5;
+			if (argc == 4)
+			{
+				std::string argument = argv[3];
+				size_t consumed = 0;
+				auto const count = std::stoul(argument, &consumed);
+				if (consumed != argument.size() || count == 0 || count > 1000)
+					throw std::invalid_argument("Restoration cycles must be between 1 and 1000");
+				cycles = static_cast<unsigned>(count);
+			}
+			runRestorationBenchmark(argv[2], cycles);
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--write-routing-scale-world")
 		{
 			if (argc != 3) throw std::invalid_argument("Usage: --write-routing-scale-world <new.world.yaml>");

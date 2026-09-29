@@ -1,4 +1,5 @@
 #include "core/World.h"
+#include "core/RestorationTiming.h"
 #include "core/WorldDocument.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRuntime.h"
@@ -1069,6 +1070,7 @@ namespace core
 		// that identity from the deterministic replay and will write it on save.
 		try
 		{
+			RestorationTiming timing("validation-replay");
 			World candidate(name, cellsWide, levelsHigh);
 			while (candidate.getLayerCount() < layerCount) candidate.addLayer();
 			candidate.mDeserializingConstruction = true;
@@ -1130,6 +1132,7 @@ namespace core
 		mDeserializingConstruction = true;
 		try
 		{
+			RestorationTiming timing("construction-replay");
 			for (auto const& record : records)
 			{
 				applyConstructionRecord(record);
@@ -1329,6 +1332,7 @@ namespace core
 
 	void World::rebuildRestoredAgentPaths()
 	{
+		RestorationTiming timing("restored-paths");
 		invalidateSimulationSnapshot();
 		struct RebuiltPath
 		{
@@ -1368,26 +1372,43 @@ namespace core
 
 	void World::resetSimulation()
 	{
+		RestorationTiming timing("reset-total");
 		invalidateSimulationSnapshot();
 		auto const wasModified = isModified();
 		auto const wasPaused = mSimulationPaused;
 		auto const agentTagRegistry = mAgentTagRegistry;
 		auto const behaviourRegistry = mAgentBehaviourRegistry;
 
-		auto output = YamlSerializer::toString();
+		// Use the same named-field schema, migration and validation pipeline as
+		// documents; only the transient encoding differs from YAML.
+		auto output = BinarySerializer::toString();
 		SerializationWorkData writeData;
 		writeData.markSerializedUnmodified = false;
-		serialize(*output, writeData);
-		output->serialize();
+		{
+			RestorationTiming phase("reset-serialization");
+			serialize(*output, writeData);
+			output->serialize();
+		}
 
-		auto input = YamlSerializer::fromString(output->getSerializedString());
-		input->deserialize();
+		auto input = BinarySerializer::fromString(output->getSerializedString());
+		output.reset(); // Do not retain both serializer trees through reconstruction.
+		{
+			RestorationTiming phase("reset-parse");
+			input->deserialize();
+		}
 		SerializationWorkData readData;
-		deserialize(*input, readData);
-		if (agentTagRegistry && mAgentTagRegistryReference)
-			resolveAgentTagRegistry(agentTagRegistry);
-		if (behaviourRegistry && mAgentBehaviourRegistryReference)
-			resolveAgentBehaviourRegistry(behaviourRegistry);
+		{
+			RestorationTiming phase("reset-reconstruction");
+			deserialize(*input, readData);
+		}
+		input.reset();
+		{
+			RestorationTiming phase("reset-registries");
+			if (agentTagRegistry && mAgentTagRegistryReference)
+				resolveAgentTagRegistry(agentTagRegistry);
+			if (behaviourRegistry && mAgentBehaviourRegistryReference)
+				resolveAgentBehaviourRegistry(behaviourRegistry);
+		}
 		if (wasModified) markModified();
 		if (wasPaused) pauseSimulation();
 	}
