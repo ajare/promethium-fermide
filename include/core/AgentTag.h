@@ -205,34 +205,53 @@ namespace core
 		bool operator==(AgentCrowdAversionProperty const& other) const = default;
 	};
 
-	using TraversalMask = uint32_t;
-
-	enum class TraversalKind : TraversalMask
+	enum class TraversalKind : uint8_t
 	{
-		Staircase = TraversalMask{ 1 } << 0,
-		Escalator = TraversalMask{ 1 } << 1,
-		Stairwell = TraversalMask{ 1 } << 2,
-		Ladder = TraversalMask{ 1 } << 3,
-		Lift = TraversalMask{ 1 } << 4,
-		PlatformLift = TraversalMask{ 1 } << 5,
-		Shuttle = TraversalMask{ 1 } << 6,
-		Door = TraversalMask{ 1 } << 7,
-		Buttons = TraversalMask{ 1 } << 8
+		Staircase,
+		Escalator,
+		Stairwell,
+		Ladder,
+		Lift,
+		PlatformLift,
+		Shuttle,
+		Door,
+		Buttons,
+		Count
 	};
 
-	inline constexpr TraversalMask AllTraversalMaskBits{ (TraversalMask{ 1 } << 9) - 1 };
-	inline constexpr TraversalMask traversalMask(TraversalKind kind)
+	enum class MobilityUse : uint8_t
 	{
-		return static_cast<TraversalMask>(kind);
-	}
-	inline constexpr bool traversalMaskIsValid(TraversalMask mask)
+		CanUse,
+		CannotUse,
+		OnlyIfNoOtherOption
+	};
+
+	struct MobilityProfile
 	{
-		return (mask & ~AllTraversalMaskBits) == 0;
+		std::array<MobilityUse, static_cast<size_t>(TraversalKind::Count)> uses{};
+
+		[[nodiscard]] MobilityUse get(TraversalKind kind) const
+		{
+			return uses.at(static_cast<size_t>(kind));
+		}
+		void set(TraversalKind kind, MobilityUse use)
+		{
+			uses.at(static_cast<size_t>(kind)) = use;
+		}
+		bool operator==(MobilityProfile const&) const = default;
+	};
+
+	inline constexpr bool mobilityProfileIsValid(MobilityProfile const& profile)
+	{
+		for (auto const use : profile.uses)
+			if (use != MobilityUse::CanUse && use != MobilityUse::CannotUse
+				&& use != MobilityUse::OnlyIfNoOtherOption) return false;
+		return true;
 	}
 
 	struct AgentMobilityProfileProperty
 	{
-		TraversalMask forbiddenTraversals{ 0 };
+		MobilityProfile value{};
 		uint64_t revision{ 0 };
 		bool operator==(AgentMobilityProfileProperty const&) const = default;
 	};

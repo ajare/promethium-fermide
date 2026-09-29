@@ -234,97 +234,106 @@ namespace core
 			if (!graphSlot(graph, source, sourceSlot) || !graphSlot(graph, target, targetSlot))
 				return nullptr;
 
-			auto& workspace = graph->getPathfindingWorkspace();
-			auto const& vertices = graph->getVertices();
-			workspace.beginSearch(vertices.size());
-			workspace.captureRouteCosts(*graph, context);
-			auto const generation = workspace.getGeneration();
-			auto seed = [&](node_type const& vertex, float approachSeconds)
+			auto runSearch = [&](RouteDecisionContext const& searchContext)
 			{
-				auto slot = vertex->getSearchIndex();
-				if (!std::isfinite(approachSeconds) || approachSeconds < 0)
-					throw std::invalid_argument("Invalid route approach duration");
-				if (workspace.visitGenerations[slot] == generation
-					&& workspace.scores[slot] <= approachSeconds) return;
-				workspace.visitGenerations[slot] = generation;
-				workspace.cameFrom[slot] = slot;
-				workspace.scores[slot] = approachSeconds;
-				workspace.durations[slot] = approachSeconds;
-				workspace.edges[slot].reset();
-				workspace.put(slot, approachSeconds);
-			};
-			auto const floorSource = inferredSource && dynamic_cast<Location const*>(agent->getSector());
-			if (floorSource)
-			{
-				auto const position = agent->getGlobalPosition();
-				seed(source, position.distanceTo(source->getPosition()) / context.walkSpeed);
-				// A virtual source splits the ordinary floor edge beneath the Agent.
-				// Seed both endpoints with actual approach time, not the full edge
-				// length from an arbitrarily chosen nearest vertex. Never split a
-				// Gap, Force Bridge, threshold, or transit edge to bypass admission.
-				for (auto const& edge : graph->getEdges())
+				auto& workspace = graph->getPathfindingWorkspace();
+				auto const& vertices = graph->getVertices();
+				workspace.beginSearch(vertices.size());
+				workspace.captureRouteCosts(*graph, searchContext);
+				auto const generation = workspace.getGeneration();
+				auto seed = [&](node_type const& vertex, float approachSeconds)
 				{
-					if (edge->getType() != EdgeType::Location) continue;
-					auto a = edge->getVertex(0);
-					auto b = edge->getVertex(1);
-					if (a->getSector().get() != agent->getSector()
-						|| b->getSector().get() != agent->getSector()) continue;
-					auto const pa = a->getPosition();
-					auto const pb = b->getPosition();
-					if (std::abs(pa.y - position.y) > 0.001f || std::abs(pb.y - position.y) > 0.001f
-						|| position.x <= std::min(pa.x, pb.x) || position.x >= std::max(pa.x, pb.x)) continue;
-					seed(a, position.distanceTo(pa) / context.walkSpeed);
-					seed(b, position.distanceTo(pb) / context.walkSpeed);
-				}
-			}
-			else seed(source, 0.0f);
-
-			while (!workspace.frontierEmpty())
-			{
-				auto const currentSlot = workspace.get();
-				if (currentSlot == targetSlot) break;
-				auto const& current = vertices[currentSlot];
-				// A blocking Marker can still be a Path endpoint. It cannot be expanded
-				// as an intermediate waypoint; a Path which starts there may leave it.
-				if (blocksPathing(current))
+					auto slot = vertex->getSearchIndex();
+					if (!std::isfinite(approachSeconds) || approachSeconds < 0)
+						throw std::invalid_argument("Invalid route approach duration");
+					if (workspace.visitGenerations[slot] == generation
+						&& workspace.scores[slot] <= approachSeconds) return;
+					workspace.visitGenerations[slot] = generation;
+					workspace.cameFrom[slot] = slot;
+					workspace.scores[slot] = approachSeconds;
+					workspace.durations[slot] = approachSeconds;
+					workspace.edges[slot].reset();
+					workspace.put(slot, approachSeconds);
+				};
+				auto const floorSource = inferredSource && dynamic_cast<Location const*>(agent->getSector());
+				if (floorSource)
 				{
-					auto const isOrigin = floorSource
-						? current->getPosition().distanceTo(agent->getGlobalPosition()) < 0.001f
-						: currentSlot == sourceSlot;
-					if (!isOrigin) continue;
-				}
-
-				auto arcIndex = workspace.routeOffsets[currentSlot];
-				for (auto const& edge : current->getEdges())
-				{
-					auto const next = edge->getOtherVertex(current);
-					auto const nextSlot = next->getSearchIndex();
-					auto const& cost = workspace.routeCosts[arcIndex++];
-					if (!cost) continue;
-					auto const newCost = workspace.scores[currentSlot] + cost->perceivedCost;
-					if (!std::isfinite(newCost))
-						throw std::invalid_argument("Cumulative route cost is not finite");
-
-					if (workspace.visitGenerations[nextSlot] != generation
-						|| newCost < workspace.scores[nextSlot])
+					auto const position = agent->getGlobalPosition();
+					seed(source, position.distanceTo(source->getPosition()) / searchContext.walkSpeed);
+					// A virtual source splits the ordinary floor edge beneath the Agent.
+					// Seed both endpoints with actual approach time, not the full edge
+					// length from an arbitrarily chosen nearest vertex. Never split a
+					// Gap, Force Bridge, threshold, or transit edge to bypass admission.
+					for (auto const& edge : graph->getEdges())
 					{
-						workspace.visitGenerations[nextSlot] = generation;
-						workspace.scores[nextSlot] = newCost;
-						workspace.durations[nextSlot].reset();
-						if (workspace.durations[currentSlot] && cost->objectiveDurationSeconds)
-						{
-							auto const duration = *workspace.durations[currentSlot] + *cost->objectiveDurationSeconds;
-							if (!std::isfinite(duration)) throw std::invalid_argument("Route duration is not finite");
-							workspace.durations[nextSlot] = duration;
-						}
-						workspace.cameFrom[nextSlot] = currentSlot;
-						workspace.edges[nextSlot] = edge;
-						workspace.put(nextSlot, newCost);
+						if (edge->getType() != EdgeType::Location) continue;
+						auto a = edge->getVertex(0);
+						auto b = edge->getVertex(1);
+						if (a->getSector().get() != agent->getSector()
+							|| b->getSector().get() != agent->getSector()) continue;
+						auto const pa = a->getPosition();
+						auto const pb = b->getPosition();
+						if (std::abs(pa.y - position.y) > 0.001f || std::abs(pb.y - position.y) > 0.001f
+							|| position.x <= std::min(pa.x, pb.x) || position.x >= std::max(pa.x, pb.x)) continue;
+						seed(a, position.distanceTo(pa) / searchContext.walkSpeed);
+						seed(b, position.distanceTo(pb) / searchContext.walkSpeed);
 					}
 				}
-			}
+				else seed(source, 0.0f);
 
-			return reconstructPath(graph, targetSlot, workspace);
+				while (!workspace.frontierEmpty())
+				{
+					auto const currentSlot = workspace.get();
+					if (currentSlot == targetSlot) break;
+					auto const& current = vertices[currentSlot];
+					// A blocking Marker can still be a Path endpoint. It cannot be expanded
+					// as an intermediate waypoint; a Path which starts there may leave it.
+					if (blocksPathing(current))
+					{
+						auto const isOrigin = floorSource
+							? current->getPosition().distanceTo(agent->getGlobalPosition()) < 0.001f
+							: currentSlot == sourceSlot;
+						if (!isOrigin) continue;
+					}
+
+					auto arcIndex = workspace.routeOffsets[currentSlot];
+					for (auto const& edge : current->getEdges())
+					{
+						auto const next = edge->getOtherVertex(current);
+						auto const nextSlot = next->getSearchIndex();
+						auto const& cost = workspace.routeCosts[arcIndex++];
+						if (!cost) continue;
+						auto const newCost = workspace.scores[currentSlot] + cost->perceivedCost;
+						if (!std::isfinite(newCost))
+							throw std::invalid_argument("Cumulative route cost is not finite");
+
+						if (workspace.visitGenerations[nextSlot] != generation
+							|| newCost < workspace.scores[nextSlot])
+						{
+							workspace.visitGenerations[nextSlot] = generation;
+							workspace.scores[nextSlot] = newCost;
+							workspace.durations[nextSlot].reset();
+							if (workspace.durations[currentSlot] && cost->objectiveDurationSeconds)
+							{
+								auto const duration = *workspace.durations[currentSlot] + *cost->objectiveDurationSeconds;
+								if (!std::isfinite(duration)) throw std::invalid_argument("Route duration is not finite");
+								workspace.durations[nextSlot] = duration;
+							}
+							workspace.cameFrom[nextSlot] = currentSlot;
+							workspace.edges[nextSlot] = edge;
+							workspace.put(nextSlot, newCost);
+						}
+					}
+				}
+
+				return reconstructPath(graph, targetSlot, workspace);
+			};
+
+			if (auto path = runSearch(context)) return path;
+			RouteDecisionContext const fallbackContext{ routingAgent, profile,
+				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
+				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(), true };
+			return runSearch(fallbackContext);
 		}
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(

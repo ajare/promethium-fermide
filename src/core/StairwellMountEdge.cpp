@@ -72,7 +72,7 @@ namespace core
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		facts.feasible = !agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Stairwell);
+		facts.feasible = !agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Stairwell, context.allowFallbackMobility);
 		if (facts.feasible) facts.objectiveDurationSeconds = 0.0f;
 		return facts;
 	}

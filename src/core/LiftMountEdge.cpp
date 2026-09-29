@@ -73,8 +73,9 @@ namespace core
 	DirectedTraversalFacts LiftMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		if (agentForbidsEdge(context.legacyAgent, *this,
-			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return {};
+		if (agentRejectsEdge(context.legacyAgent, *this,
+			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift,
+			context.allowFallbackMobility)) return {};
 		DirectedTraversalFacts facts;
 		facts.feasible = true;
 		// The authored PlatformLift object is the Location-side Vertex. Entering

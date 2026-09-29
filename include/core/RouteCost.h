@@ -167,5 +167,8 @@ namespace core
 		float const walkSpeed = 0.5f;
 		World const* const world = nullptr;
 		float const climbSpeed = 0.25f;
+		// False for the first search pass. If no Path exists, pathfinding repeats
+		// with fallback Mobility profile entries admitted.
+		bool const allowFallbackMobility = false;
 	};
 }

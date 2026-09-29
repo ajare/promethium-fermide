@@ -171,7 +171,7 @@ bool commitAgentTagMobilityProfileAdd(
 	std::string& diagnostic);
 bool commitAgentTagMobilityProfileEdit(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
-	core::TraversalMask forbiddenTraversals, std::string& diagnostic);
+	core::MobilityProfile value, std::string& diagnostic);
 bool commitAgentTagMobilityProfileRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);

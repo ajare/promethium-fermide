@@ -63,9 +63,11 @@ namespace
 		}
 	};
 
-	core::TraversalMask ladderRestriction()
+	core::MobilityProfile ladderRestriction()
 	{
-		return core::traversalMask(core::TraversalKind::Ladder);
+		core::MobilityProfile profile;
+		profile.set(core::TraversalKind::Ladder, core::MobilityUse::CannotUse);
+		return profile;
 	}
 
 	unsigned untraversableEdgeCount(core::Agent const* agent, core::Path const& path)

@@ -75,7 +75,7 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Ladder)) return facts;
+		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Ladder, context.allowFallbackMobility)) return facts;
 		auto const source = getOtherVertex(targetVertex);
 		auto const rise = targetVertex->getPosition().y - source->getPosition().y;
 		auto const distance = getLength();

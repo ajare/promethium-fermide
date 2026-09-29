@@ -8045,13 +8045,13 @@ namespace core
 	}
 
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
-		optional<TraversalMask> value, string* diagnostic)
+		optional<MobilityProfile> value, string* diagnostic)
 	{
 		auto lookup = lookupAgent(id);
 		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
-		if (value && !traversalMaskIsValid(*value))
+		if (value && !mobilityProfileIsValid(*value))
 		{
-			if (diagnostic) *diagnostic = "The individual Mobility profile contains reserved traversal bits";
+			if (diagnostic) *diagnostic = "The individual Mobility profile contains an invalid Mobility use";
 			return false;
 		}
 		if (!mSimulationPaused)

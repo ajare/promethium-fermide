@@ -2013,7 +2013,7 @@ namespace core
 		bool setAgentIndividualCrowdAversion(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
-			std::optional<TraversalMask> value, std::string* diagnostic = nullptr);
+			std::optional<MobilityProfile> value, std::string* diagnostic = nullptr);
 
 		// Agent groups - authored, World-scoped classifications (ADR 0006).
 		// These are the only way in: the registry itself is never handed out, so

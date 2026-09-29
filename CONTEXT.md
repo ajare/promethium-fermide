@@ -193,12 +193,20 @@ An optional category that groups Agent properties in editor surfaces without bec
 _Avoid_: Property name prefix, Agent tag
 
 **Mobility profile**:
-An Agent property whose bitfield identifies traversal kinds the Agent cannot use. A zero profile forbids nothing; the Buttons bit represents inability to operate an interaction point and therefore also forbids every traversal whose authored resource requires one.
-_Avoid_: Accessibility preference, capability probe
+An Agent property that assigns one Mobility use to each traversal kind: Can use, Cannot use, or Only if no other option. Buttons describes use of interaction points and also governs every traversal whose authored resource requires one.
+_Avoid_: Bitfield, capability probe
+
+**Mobility use**:
+An Agent's authored relationship to one traversal kind. Can use admits it normally; Cannot use excludes it from routing and refuses it at the runtime traversal gate; Only if no other option admits it only when no Path exists without last-resort traversals.
+_Avoid_: Accessibility preference, perceived route cost
 
 **Forbidden traversal**:
-A transit, threshold, or button-operated resource excluded from an Agent's routing by its effective Mobility profile. It is represented as an untraversable route cost and is also refused at the runtime traversal gate.
-_Avoid_: Route preference, temporary obstruction
+A transit, threshold, or button-operated resource whose effective Mobility use is Cannot use. It is excluded from routing and refused at the runtime traversal gate.
+_Avoid_: Last-resort traversal, temporary obstruction
+
+**Last-resort traversal**:
+A transit, threshold, or button-operated resource whose effective Mobility use is Only if no other option. Routing excludes all such traversals on its first attempt and admits them on a second attempt only after finding no Path; runtime traversal then permits the selected Path.
+_Avoid_: Forbidden traversal, high perceived route cost
 
 **Agent tag registry**:
 A collection of Agent tags that forms one shared tag namespace for the Worlds that reference it.

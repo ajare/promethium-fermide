@@ -1,4 +1,5 @@
 #include "core/AgentTagRegistry.h"
+#include "core/MobilityProfile.h"
 
 #include <algorithm>
 #include <array>
@@ -1581,7 +1582,7 @@ namespace core
 			"Agent tag #{} already has Mobility profile", tag->getName()));
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
 		if (!mobilityProfileAdditionIsValid(id, diagnostic)) return false;
-		try { tag->setMobilityProfile({ 0, allocatePropertyRevision() }); }
+		try { tag->setMobilityProfile({ {}, allocatePropertyRevision() }); }
 		catch (std::exception const& error) { return reject(error.what()); }
 		modify();
 		if (diagnostic) diagnostic->clear();
@@ -1655,7 +1656,7 @@ namespace core
 	}
 
 	bool AgentTagRegistry::setAgentTagMobilityProfile(AgentTagId id,
-		TraversalMask forbiddenTraversals, std::string* diagnostic)
+		MobilityProfile value, std::string* diagnostic)
 	{
 		auto reject = [diagnostic](std::string reason)
 		{
@@ -1668,12 +1669,12 @@ namespace core
 		auto const* current = tag->getMobilityProfile();
 		if (!current) return reject(std::format(
 			"Agent tag #{} has no Mobility profile", tag->getName()));
-		if (!traversalMaskIsValid(forbiddenTraversals))
-			return reject("The Agent Mobility profile contains reserved traversal bits");
-		if (current->forbiddenTraversals == forbiddenTraversals)
+		if (!mobilityProfileIsValid(value))
+			return reject("The Agent Mobility profile contains an invalid Mobility use");
+		if (current->value == value)
 			return reject("The Agent Mobility profile is unchanged");
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
-		try { tag->setMobilityProfile({ forbiddenTraversals, allocatePropertyRevision() }); }
+		try { tag->setMobilityProfile({ value, allocatePropertyRevision() }); }
 		catch (std::exception const& error) { return reject(error.what()); }
 		modify();
 		if (diagnostic) diagnostic->clear();
@@ -1780,7 +1781,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 8);
+		serializer.writeUint32("version", 9);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -1852,7 +1853,7 @@ namespace core
 					serializer.beginMap("");
 					serializer.writeString("type", "mobilityProfile");
 					serializer.writeUint64("revision", mobility->revision);
-					serializer.writeUint32("value", mobility->forbiddenTraversals);
+					serializeMobilityProfile(serializer, mobility->value);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1867,7 +1868,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 8)
+		if (version < 1 || version > 9)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -1994,10 +1995,7 @@ namespace core
 					}
 					else if (type == "mobilityProfile")
 					{
-						auto const value = serializer.readUint32("value");
-						if (!traversalMaskIsValid(value))
-							throw SerializationException(
-								"Serialized Mobility profile contains reserved traversal bits");
+						auto const value = deserializeMobilityProfile(serializer);
 						tag->setMobilityProfile({ value, revision });
 						hasMobilityProfile = true;
 					}

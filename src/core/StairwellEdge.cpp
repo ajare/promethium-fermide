@@ -71,7 +71,7 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Stairwell)) return facts;
+		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Stairwell, context.allowFallbackMobility)) return facts;
 		auto const sourceVertex = getOtherVertex(targetVertex);
 		auto const rise = targetVertex->getPosition().y - sourceVertex->getPosition().y;
 		auto const ascending = rise > 0.0f;

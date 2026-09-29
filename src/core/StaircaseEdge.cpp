@@ -98,7 +98,7 @@ namespace core
 		auto const ascending = rise > 0.0f;
 		if (mStaircase->isEscalator())
 		{
-			if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Escalator)
+			if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Escalator, context.allowFallbackMobility)
 				|| ascending != (mStaircase->getSpeed() > 0.0f)) return facts;
 			auto walkingChance = clamp(context.profile.escalatorWalkingChance, 0.0f, 1.0f);
 			if (context.legacyAgent && walkingChance > 0.0f
@@ -124,7 +124,7 @@ namespace core
 				/ (abs(mStaircase->getSpeed()) + context.walkSpeed);
 			return facts;
 		}
-		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Staircase)) return facts;
+		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Staircase, context.allowFallbackMobility)) return facts;
 		auto const speed = (ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed)
 			* context.profile.stairSpeedModifier;
 		facts.feasible = true;

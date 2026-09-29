@@ -46,27 +46,26 @@ void runAgentTagMobilityProfileSmokeChecks()
 	std::string diagnostic;
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 	require(registry->getAgentTagMobilityProfile(tag)
-		&& registry->getAgentTagMobilityProfile(tag)->forbiddenTraversals == 0
+		&& registry->getAgentTagMobilityProfile(tag)->value == core::MobilityProfile{}
 		&& registry->getAgentTagMobilityProfile(tag)->revision == 1,
-		"A Mobility profile did not begin at zero with a revision");
+		"A Mobility profile did not begin with every traversal usable and a revision");
 
-	for (core::TraversalMask mask = 1; mask <= core::AllTraversalMaskBits; ++mask)
-	{
-		require(registry->setAgentTagMobilityProfile(tag, mask, &diagnostic), diagnostic);
-		require(registry->getAgentTagMobilityProfile(tag)->forbiddenTraversals == mask,
-			"A valid Mobility profile mask did not round-trip in memory");
-	}
-	auto const beforeRefusal = serialize(*registry);
-	require(!registry->setAgentTagMobilityProfile(tag, core::TraversalMask{ 1 } << 9,
-		&diagnostic) && diagnostic.find("reserved") != std::string::npos
-		&& serialize(*registry) == beforeRefusal,
-		"A reserved Mobility profile bit was not refused atomically");
+	core::MobilityProfile profile;
+	profile.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
+	profile.set(core::TraversalKind::Ladder, core::MobilityUse::OnlyIfNoOtherOption);
+	profile.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+	require(registry->setAgentTagMobilityProfile(tag, profile, &diagnostic), diagnostic);
+	require(registry->getAgentTagMobilityProfile(tag)->value == profile,
+		"A ternary Mobility profile did not round-trip in memory");
+	auto const serialized = serialize(*registry);
+	require(serialized.find("version: 9") != std::string::npos
+		&& serialized.find("onlyIfNoOtherOption") != std::string::npos,
+		"A ternary Mobility profile was not serialized explicitly");
 
-	auto loaded = deserialize(beforeRefusal);
+	auto loaded = deserialize(serialized);
 	require(loaded->getAgentTagMobilityProfile(tag)
-		&& loaded->getAgentTagMobilityProfile(tag)->forbiddenTraversals
-			== core::AllTraversalMaskBits,
-		"A version 2 Mobility profile did not survive serialization");
+		&& loaded->getAgentTagMobilityProfile(tag)->value == profile,
+		"A ternary Mobility profile did not survive serialization");
 	auto copy = core::AgentTagRegistry::copyWithNewUuid(*loaded);
 	require(copy->hasEquivalentDefinitions(*loaded),
 		"Registry copying did not preserve a Mobility profile");
@@ -79,8 +78,7 @@ void runAgentTagMobilityProfileSmokeChecks()
 	world->pauseSimulation();
 	require(world->assignAgentTag(agentId, tag, &diagnostic), diagnostic);
 	auto const agent = world->lookupAgent(agentId);
-	require(static_cast<bool>(agent) && agent.entity->getEffectiveMobilityProfile().forbiddenTraversals
-		== core::AllTraversalMaskBits
+	require(static_cast<bool>(agent) && agent.entity->getEffectiveMobilityProfile().value == profile
 		&& agent.entity->getEffectiveMobilityProfile().sourceTag == tag,
 		"An Agent did not derive its effective Mobility profile from its tag");
 }

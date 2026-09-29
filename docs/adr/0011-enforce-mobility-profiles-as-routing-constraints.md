@@ -1,15 +1,19 @@
-# Enforce Mobility profiles as routing constraints
+# Enforce Mobility profiles in routing and traversal
 
-Status: accepted
+Status: accepted (amended)
 
-An Agent's effective Mobility profile is a tag-supplied bitfield of forbidden traversals. It spans transits, ordinary and Bulkhead Doors, and the ability to operate interaction points. Routing classifies a forbidden edge as untraversable, with the traversal-time gate repeating the check only as defence in depth for an existing Path. It is not a dynamic coordination decision or capability probe.
+An Agent's effective Mobility profile assigns one of three Mobility uses to every traversal kind: Can use, Cannot use, or Only if no other option. It spans transits, ordinary and Bulkhead Doors, and the ability to operate interaction points.
 
-The Buttons bit is a capability rather than a traversal kind. Its consequences are derived from authored resource data through `Edge::requiresButton()`: remote-controlled Doors, all Lifts and Shuttles, extensible Force Bridges, and extensible Ladders require buttons. The classification never depends on current open, extended, moving, lease, or queue state, preserving deterministic routing. Lift and Shuttle landing Doors remain governed by their transport and Buttons bits, not by the Door bit.
+Cannot use is a hard traversal constraint. Only if no other option is a last-resort routing constraint rather than a perceived-cost preference: routing first searches with every last-resort traversal excluded, then repeats with them admitted only when the first search finds no Path. This was chosen over a large finite penalty, which could cease to mean "only" in a sufficiently large World and would mix Mobility use into perceived route cost.
+
+The Buttons entry describes interaction-point use rather than a traversal kind. Its consequences are derived from authored resource data through `Edge::requiresButton()`: remote-controlled Doors, all Lifts and Shuttles, extensible Force Bridges, and extensible Ladders require buttons. When both a traversal entry and Buttons apply, Cannot use takes precedence over Only if no other option, which takes precedence over Can use. Classification never depends on current open, extended, moving, lease, or queue state, preserving deterministic routing.
 
 ## Consequences
 
-- A forbidden traversal is omitted from every Path by returning the graph's untraversable cost. If no alternative exists, the existing Route loss contract reports `unreachable`.
+- A Cannot use traversal is omitted from every Path. If no permitted Path exists, the existing Route loss contract reports `unreachable`.
+- Routing uses at most two searches: one without last-resort traversals and, only if that fails, one with them.
+- Runtime traversal gates refuse Cannot use but permit a last-resort traversal already selected in a Path.
 - Both transit mount and body edges apply the same classification.
-- Mobility profiles are derived from Agent tag registry data and are neither cached nor persisted on Agents.
-- A zero or absent profile preserves existing routing exactly.
+- Mobility profiles may be supplied by an Agent tag or authored directly on an Agent under ADR 0012.
+- An absent profile, or one whose entries are all Can use, preserves ordinary routing exactly.
 - Runtime traversal refusal protects Paths created before an effective profile changed, but coordination does not reinterpret or override the profile.

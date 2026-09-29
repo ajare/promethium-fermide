@@ -888,7 +888,7 @@ namespace
 				edit.loadedRevision = mobility->revision;
 				edit.diagnostic.clear();
 			}
-			ImGui::TextUnformatted("Cannot use");
+			ImGui::TextUnformatted("Mobility profile");
 			ImGui::SameLine();
 			if (ImGui::Button(ICON_FA_TIMES "##removeMobilityProfile"))
 			{
@@ -907,18 +907,16 @@ namespace
 			if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove Mobility profile");
 			if (mobility)
 			{
-				auto const authored = mobility->forbiddenTraversals;
-				auto const buttons = (authored
-					& core::traversalMask(core::TraversalKind::Buttons)) != 0;
-				auto renderKind = [&](char const* label, core::TraversalKind kind,
-					bool whollyButtonOperated = false)
+				auto const authored = mobility->value;
+				auto renderKind = [&](char const* label, core::TraversalKind kind)
 				{
-					auto const bit = core::traversalMask(kind);
-					bool checked = (authored & bit) != 0 || (buttons && whollyButtonOperated);
-					ImGui::BeginDisabled(buttons && whollyButtonOperated);
-					if (ImGui::Checkbox(label, &checked))
+					constexpr char const* options[]{ "Can use", "Cannot use", "Only if no other option" };
+					auto selected = static_cast<int>(authored.get(kind));
+					ImGui::SetNextItemWidth(256.0f);
+					if (ImGui::Combo(label, &selected, options, IM_ARRAYSIZE(options)))
 					{
-						auto const next = checked ? authored | bit : authored & ~bit;
+						auto next = authored;
+						next.set(kind, static_cast<core::MobilityUse>(selected));
 						string diagnostic;
 						if (!commitAgentTagMobilityProfileEdit(registry, id, next, diagnostic))
 						{
@@ -927,19 +925,18 @@ namespace
 						}
 						else edit.diagnostic.clear();
 					}
-					ImGui::EndDisabled();
 				};
 				renderKind("Staircase", core::TraversalKind::Staircase);
 				renderKind("Escalator", core::TraversalKind::Escalator);
 				renderKind("Stairwell", core::TraversalKind::Stairwell);
 				renderKind("Ladder", core::TraversalKind::Ladder);
-				renderKind("Lift", core::TraversalKind::Lift, true);
-				renderKind("Platform lift", core::TraversalKind::PlatformLift, true);
-				renderKind("Shuttle", core::TraversalKind::Shuttle, true);
+				renderKind("Lift", core::TraversalKind::Lift);
+				renderKind("Platform lift", core::TraversalKind::PlatformLift);
+				renderKind("Shuttle", core::TraversalKind::Shuttle);
 				renderKind("Door", core::TraversalKind::Door);
 				renderKind("Buttons", core::TraversalKind::Buttons);
-				if (buttons)
-					ImGui::TextWrapped("Also forbids doors needing a button, extensible force bridges, and extensible ladders.");
+				if (authored.get(core::TraversalKind::Buttons) != core::MobilityUse::CanUse)
+					ImGui::TextWrapped("The Buttons setting also applies to doors needing a button, extensible force bridges, and extensible ladders.");
 				if (!edit.diagnostic.empty())
 					ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s",
 						edit.diagnostic.c_str());
@@ -2293,7 +2290,7 @@ bool commitAgentTagMobilityProfileAdd(
 
 bool commitAgentTagMobilityProfileEdit(
 	shared_ptr<core::AgentTagRegistry> const& registry,
-	core::AgentTagId id, core::TraversalMask forbiddenTraversals, string& diagnostic)
+	core::AgentTagId id, core::MobilityProfile value, string& diagnostic)
 {
 	diagnostic.clear();
 	if (!registry)
@@ -2307,7 +2304,7 @@ bool commitAgentTagMobilityProfileEdit(
 		diagnostic = "Could not capture the Agent tag registry before editing a Mobility profile";
 		return false;
 	}
-	if (!registry->setAgentTagMobilityProfile(id, forbiddenTraversals, &diagnostic))
+	if (!registry->setAgentTagMobilityProfile(id, value, &diagnostic))
 		return false;
 	agentTagRegistryDocumentHistory(registry).commit(std::move(undo));
 	return true;

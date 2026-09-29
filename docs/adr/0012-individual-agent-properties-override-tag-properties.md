@@ -10,5 +10,5 @@ Individual Walk speed and Height modifiers are concrete authored values rather t
 
 - Effective property lookup follows one order: individual value, inherited tag value, then the existing default.
 - Individual properties are World-owned authored data, persisted with the Agent and editable only while simulation is paused.
-- Direct Mobility profiles use the same traversal mask validation and routing enforcement as tag-supplied profiles.
+- Direct Mobility profiles use the same per-traversal Mobility uses and routing enforcement as tag-supplied profiles.
 - Removing an individual property is non-destructive to its underlying tag property and sample.

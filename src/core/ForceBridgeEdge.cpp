@@ -85,7 +85,7 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentForbidsButtons(context.legacyAgent) && requiresButton()) return facts;
+		if (agentRejectsButtons(context.legacyAgent, context.allowFallbackMobility) && requiresButton()) return facts;
 		auto const source = getOtherVertex(targetVertex);
 		auto const sourceSector = source && source->getSector()
 			? SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 }

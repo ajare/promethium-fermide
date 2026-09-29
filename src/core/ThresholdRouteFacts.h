@@ -18,7 +18,7 @@ namespace core
 		std::shared_ptr<const Vertex> target, RouteDecisionContext const& context,
 		float motionSeconds, float openingSeconds)
 	{
-		if (agentForbidsEdge(context.legacyAgent, edge, TraversalKind::Door)) return {};
+		if (agentRejectsEdge(context.legacyAgent, edge, TraversalKind::Door, context.allowFallbackMobility)) return {};
 		auto source = edge.getOtherVertex(target);
 		auto sector = source ? source->getSector() : nullptr;
 		bool const observed = sector && sector.get() == context.observationSector;

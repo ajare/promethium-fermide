@@ -6,6 +6,7 @@
 #include "core/Path.h"
 #include "core/AgentTagRegistry.h"
 #include "core/Log.h"
+#include "core/MobilityProfile.h"
 #include "core/Exceptions.h"
 #include "core/SerializationException.h"
 
@@ -200,7 +201,7 @@ namespace core
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
-				serializer.writeUint32("value", *mIndividualMobilityProfile);
+				serializeMobilityProfile(serializer, *mIndividualMobilityProfile);
 				serializer.endMap();
 			}
 			serializer.endArray();
@@ -396,10 +397,7 @@ namespace core
 				{
 					if (mIndividualMobilityProfile)
 						throw SerializationException("Serialized Agent contains more than one individual Mobility profile");
-					auto const value = serializer.readUint32("value");
-					if (!traversalMaskIsValid(value))
-						throw SerializationException("Serialized individual Mobility profile contains reserved traversal bits");
-					mIndividualMobilityProfile = value;
+					mIndividualMobilityProfile = deserializeMobilityProfile(serializer);
 				}
 				else throw SerializationException(format(
 					"Unsupported individual Agent property type '{}'", type));
@@ -723,7 +721,7 @@ namespace core
 		EffectiveAgentMobilityProfile effective;
 		if (mIndividualMobilityProfile)
 		{
-			effective.forbiddenTraversals = *mIndividualMobilityProfile;
+			effective.value = *mIndividualMobilityProfile;
 			effective.individual = true;
 			return effective;
 		}
@@ -735,7 +733,7 @@ namespace core
 			if (!definition) continue;
 			auto const* profile = definition->getMobilityProfile();
 			if (!profile) continue;
-			effective.forbiddenTraversals = profile->forbiddenTraversals;
+			effective.value = profile->value;
 			effective.sourceTag = tag;
 			effective.propertyRevision = profile->revision;
 			break;

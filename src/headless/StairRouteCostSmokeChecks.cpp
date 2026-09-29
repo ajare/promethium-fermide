@@ -251,8 +251,14 @@ namespace
 			"Stairwell ascent did not carry greater baseline effort");
 
 		world->pauseSimulation();
-		require(world->setAgentIndividualMobilityProfile(core::AgentId{ 1 },
-			core::traversalMask(core::TraversalKind::Stairwell)),
+		core::MobilityProfile mobility;
+		mobility.set(core::TraversalKind::Stairwell, core::MobilityUse::OnlyIfNoOtherOption);
+		require(world->setAgentIndividualMobilityProfile(core::AgentId{ 1 }, mobility),
+			"Could not make Stairwell traversal a last resort");
+		require(static_cast<bool>(graph->calculatePath(agent, level0, level2)),
+			"A last-resort Stairwell was not used when no other Path existed");
+		mobility.set(core::TraversalKind::Stairwell, core::MobilityUse::CannotUse);
+		require(world->setAgentIndividualMobilityProfile(core::AgentId{ 1 }, mobility),
 			"Could not forbid Stairwell traversal");
 		require(!graph->calculatePath(agent, level0, level2),
 			"A forbidden Stairwell remained a finite fallback alternative");

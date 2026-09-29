@@ -83,7 +83,7 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentForbidsEdge(context.legacyAgent, *this, TraversalKind::Ladder)) return facts;
+		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Ladder, context.allowFallbackMobility)) return facts;
 		auto const source = getOtherVertex(targetVertex);
 		if (mLadder->isExtensible() && source && source->getType() != VertexType::Ladder)
 		{

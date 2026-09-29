@@ -135,7 +135,7 @@ namespace core
 
 	struct EffectiveAgentMobilityProfile
 	{
-		TraversalMask forbiddenTraversals{ 0 };
+		MobilityProfile value{};
 		AgentTagId sourceTag{};
 		uint64_t propertyRevision{ 0 };
 		bool individual{ false };
@@ -214,7 +214,7 @@ namespace core
 		std::optional<float> mIndividualEffortAversion;
 		std::optional<float> mIndividualWaitingAversion;
 		std::optional<float> mIndividualCrowdAversion;
-		std::optional<TraversalMask> mIndividualMobilityProfile;
+		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
 		// simulation state. Their source identity and property revision make the
@@ -358,7 +358,7 @@ namespace core
 		{ mIndividualWaitingAversion = value; modify(); }
 		void setIndividualCrowdAversion(std::optional<float> value)
 		{ mIndividualCrowdAversion = value; modify(); }
-		void setIndividualMobilityProfile(std::optional<TraversalMask> value)
+		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
 		{
@@ -456,7 +456,7 @@ namespace core
 		{ return mIndividualWaitingAversion; }
 		std::optional<float> const& getIndividualCrowdAversion() const
 		{ return mIndividualCrowdAversion; }
-		std::optional<TraversalMask> const& getIndividualMobilityProfile() const
+		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
 		// Resolves Colour from the individual property first, then assigned tags;

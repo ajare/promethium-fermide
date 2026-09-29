@@ -50,9 +50,11 @@ void runMobilityProfileRoutingSmokeChecks()
 	auto const tag = registry->addAgentTag("restricted");
 	std::string diagnostic;
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
-	auto const mask = core::traversalMask(core::TraversalKind::Staircase)
-		| core::traversalMask(core::TraversalKind::Buttons);
-	require(registry->setAgentTagMobilityProfile(tag, mask, &diagnostic), diagnostic);
+	core::MobilityProfile profile;
+	profile.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
+	profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+	profile.set(core::TraversalKind::Ladder, core::MobilityUse::OnlyIfNoOtherOption);
+	require(registry->setAgentTagMobilityProfile(tag, profile, &diagnostic), diagnostic);
 
 	auto world = std::make_shared<core::World>("Routing", 4, 2);
 	world->attachAgentTagRegistry("routing.tags.yaml", registry);
@@ -73,6 +75,10 @@ void runMobilityProfileRoutingSmokeChecks()
 		"An unrelated traversal kind was forbidden");
 	require(core::agentForbidsEdge(agent, buttonOperated, core::TraversalKind::Ladder),
 		"Buttons did not forbid an edge requiring an interaction point");
+	require(!core::agentForbidsEdge(agent, ordinary, core::TraversalKind::Ladder)
+		&& core::agentRejectsEdge(agent, ordinary, core::TraversalKind::Ladder, false)
+		&& !core::agentRejectsEdge(agent, ordinary, core::TraversalKind::Ladder, true),
+		"A last-resort traversal was not excluded only from the first routing pass");
 	require(!core::agentForbidsEdge(nullptr, buttonOperated, core::TraversalKind::Staircase),
 		"A route without an Agent unexpectedly acquired Mobility restrictions");
 }

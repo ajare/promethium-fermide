@@ -105,7 +105,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Waiting aversion");
 	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const registryYaml = serialize(*registry);
-	require(registryYaml.find("version: 8") != std::string::npos
+	require(registryYaml.find("version: 9") != std::string::npos
 		&& registryYaml.find("type: ladderSpeedModifier") != std::string::npos
 		&& registryYaml.find("type: waitingAversion") != std::string::npos
 		&& registryYaml.find("min: 2.5") != std::string::npos,
@@ -119,13 +119,14 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Crowd aversion");
 	require(registry->setAgentTagCrowdAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const crowdRegistryYaml = serialize(*registry);
-	require(crowdRegistryYaml.find("version: 8") != std::string::npos
+	require(crowdRegistryYaml.find("version: 9") != std::string::npos
 		&& crowdRegistryYaml.find("type: crowdAversion") != std::string::npos
 		&& crowdRegistryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Crowd aversion range was not persisted");
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
-	require(registry->setAgentTagMobilityProfile(tag,
-		core::traversalMask(core::TraversalKind::Staircase), &diagnostic), diagnostic);
+	core::MobilityProfile tagMobility;
+	tagMobility.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
+	require(registry->setAgentTagMobilityProfile(tag, tagMobility, &diagnostic), diagnostic);
 
 	auto world = std::make_shared<core::World>("Individual properties", 8, 2);
 	world->attachAgentTagRegistry("individual.tags.yaml", registry);
@@ -173,8 +174,9 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveCrowdAversion().sourceTag == tag,
 		"The Agent did not inherit its sampled Crowd aversion");
 	require(world->setAgentIndividualCrowdAversion(id, 0.5f, &diagnostic), diagnostic);
-	auto const directMask = core::traversalMask(core::TraversalKind::Lift);
-	require(world->setAgentIndividualMobilityProfile(id, directMask, &diagnostic), diagnostic);
+	core::MobilityProfile directMobility;
+	directMobility.set(core::TraversalKind::Lift, core::MobilityUse::CannotUse);
+	require(world->setAgentIndividualMobilityProfile(id, directMobility, &diagnostic), diagnostic);
 
 	require(agent->getEffectiveColour().individual
 		&& agent->getEffectiveColour().value == (core::AgentColour{ 100, 110, 120 })
@@ -197,7 +199,7 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveCrowdAversion().individual
 		&& agent->getEffectiveCrowdAversion().value == 0.5f
 		&& agent->getEffectiveMobilityProfile().individual
-		&& agent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
+		&& agent->getEffectiveMobilityProfile().value == directMobility,
 		"Individual Agent properties did not override inherited tag values");
 	require(core::agentForbidsTraversal(agent, core::TraversalKind::Lift)
 		&& !core::agentForbidsTraversal(agent, core::TraversalKind::Staircase),
@@ -214,11 +216,11 @@ void runAgentIndividualPropertySmokeChecks()
 	require(!world->setAgentIndividualCrowdAversion(id, -0.01f, &diagnostic)
 		&& diagnostic.find("between 0 and 3") != std::string::npos,
 		"An out-of-range individual Crowd aversion was accepted");
-	require(!world->setAgentIndividualMobilityProfile(id,
-		core::TraversalMask{ 1 } << 9, &diagnostic)
-		&& diagnostic.find("reserved") != std::string::npos,
-		"An individual Mobility profile accepted a reserved bit");
-
+	auto invalidMobility = directMobility;
+	invalidMobility.uses[0] = static_cast<core::MobilityUse>(3);
+	require(!world->setAgentIndividualMobilityProfile(id, invalidMobility, &diagnostic)
+		&& diagnostic.find("invalid Mobility use") != std::string::npos,
+		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
 	require(yaml.find("version: 19") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
@@ -256,7 +258,7 @@ void runAgentIndividualPropertySmokeChecks()
 		&& loadedAgent->getCrowdAversionSample()->value == 2.5f
 		&& loadedAgent->getEffectiveCrowdAversion().individual
 		&& loadedAgent->getEffectiveCrowdAversion().value == 0.5f
-		&& loadedAgent->getEffectiveMobilityProfile().forbiddenTraversals == directMask,
+		&& loadedAgent->getEffectiveMobilityProfile().value == directMobility,
 		"Individual Agent properties did not round-trip");
 
 	require(world->setAgentIndividualColour(id, std::nullopt, &diagnostic), diagnostic);

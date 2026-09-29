@@ -42,6 +42,13 @@ namespace
 		if (!condition) throw std::runtime_error(message);
 	}
 
+	core::MobilityProfile cannotUse(core::TraversalKind kind)
+	{
+		core::MobilityProfile profile;
+		profile.set(kind, core::MobilityUse::CannotUse);
+		return profile;
+	}
+
 	// Terminal interaction requests are retired once no live owner names them
 	// (#183), so an outcome is read from the published event stream rather than
 	// looking the hot-registry record up after the fact.
@@ -74,7 +81,7 @@ namespace
 		std::string diagnostic;
 		require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 		require(registry->setAgentTagMobilityProfile(tag,
-			core::traversalMask(core::TraversalKind::Buttons), &diagnostic), diagnostic);
+			cannotUse(core::TraversalKind::Buttons), &diagnostic), diagnostic);
 
 		core::World world("Interaction mobility", 8, 1);
 		world.attachAgentTagRegistry("interaction-mobility.tags.yaml", registry);
@@ -111,7 +118,7 @@ namespace
 		// Individual profile without Buttons overrides the inherited one.
 		world.pauseSimulation();
 		require(world.setAgentIndividualMobilityProfile(agentId,
-			core::traversalMask(core::TraversalKind::Lift), &diagnostic), diagnostic);
+			cannotUse(core::TraversalKind::Lift), &diagnostic), diagnostic);
 		require(!core::agentForbidsButtons(agent),
 			"The individual profile did not override the inherited Buttons restriction");
 		require(world.resumeSimulation(), "The override fixture did not resume");
@@ -134,7 +141,7 @@ namespace
 
 		// Clearing the tag restriction lets the same interaction succeed.
 		world.pauseSimulation();
-		require(registry->setAgentTagMobilityProfile(tag, core::TraversalMask{ 0 }, &diagnostic), diagnostic);
+		require(registry->setAgentTagMobilityProfile(tag, {}, &diagnostic), diagnostic);
 		require(!core::agentForbidsButtons(agent), "Clearing the tag profile left Buttons forbidden");
 		require(world.resumeSimulation(), "The cleared fixture did not resume");
 		auto const allowed = world.requestInteraction(point, agentId);
@@ -169,7 +176,7 @@ namespace
 		auto const secondRequest = world.requestInteraction(point, second);
 		require(firstRequest && secondRequest, "The queued fixture could not queue its requests");
 		require(world.setAgentIndividualMobilityProfile(second,
-			core::traversalMask(core::TraversalKind::Buttons), &diagnostic), diagnostic);
+			cannotUse(core::TraversalKind::Buttons), &diagnostic), diagnostic);
 		auto const parkedAt = world.lookupAgent(second).entity->getGlobalPosition();
 		require(world.resumeSimulation(), "The queued fixture did not resume");
 

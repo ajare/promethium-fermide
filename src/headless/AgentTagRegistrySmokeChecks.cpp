@@ -115,7 +115,7 @@ namespace
 			"A new registry did not start both non-reused allocators at one");
 
 		auto const registryYaml = readText(registryPath);
-		require(registryYaml.find("version: 8") != std::string::npos
+		require(registryYaml.find("version: 9") != std::string::npos
 			&& registryYaml.find("uuid: " + registry->getUuid()) != std::string::npos
 			&& registryYaml.find("nextAgentTagId: 1") != std::string::npos
 			&& registryYaml.find("nextPropertyRevision: 1") != std::string::npos
@@ -362,10 +362,10 @@ namespace
 		auto unsupportedRegistry = core::AgentTagRegistry::create();
 		unsupportedRegistry->saveTo(malformedRegistryPath.string());
 		auto unsupportedYaml = readText(malformedRegistryPath);
-		auto const version = unsupportedYaml.find("version: 8");
+		auto const version = unsupportedYaml.find("version: 9");
 		require(version != std::string::npos,
-			"The registry fixture did not contain schema version 8");
-		unsupportedYaml.replace(version, std::string("version: 8").size(), "version: 9");
+			"The registry fixture did not contain schema version 9");
+		unsupportedYaml.replace(version, std::string("version: 9").size(), "version: 10");
 		writeText(malformedRegistryPath, unsupportedYaml);
 		bool unsupportedRefused{ false };
 		try

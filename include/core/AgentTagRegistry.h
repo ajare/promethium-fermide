@@ -224,7 +224,7 @@ namespace core
 
 		bool addAgentTagMobilityProfile(AgentTagId id,
 			std::string* diagnostic = nullptr);
-		bool setAgentTagMobilityProfile(AgentTagId id, TraversalMask forbiddenTraversals,
+		bool setAgentTagMobilityProfile(AgentTagId id, MobilityProfile value,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagMobilityProfile(AgentTagId id,
 			std::string* diagnostic = nullptr);

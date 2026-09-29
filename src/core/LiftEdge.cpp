@@ -73,8 +73,9 @@ namespace core
 	DirectedTraversalFacts LiftEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
-		if (agentForbidsEdge(context.legacyAgent, *this,
-			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return {};
+		if (agentRejectsEdge(context.legacyAgent, *this,
+			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift,
+			context.allowFallbackMobility)) return {};
 		DirectedTraversalFacts facts;
 		facts.feasible = true;
 		auto const distance = getLength();

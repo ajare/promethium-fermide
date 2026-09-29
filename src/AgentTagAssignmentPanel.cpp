@@ -36,9 +36,8 @@ namespace
 		if (propertyNamespace) ImGui::SeparatorText(propertyNamespace->data());
 	}
 
-	string mobilityProfileSummary(core::TraversalMask mask)
+	string mobilityProfileSummary(core::MobilityProfile const& profile)
 	{
-		if (mask == 0) return "nothing forbidden";
 		struct Entry { core::TraversalKind kind; char const* name; };
 		constexpr array entries{
 			Entry{ core::TraversalKind::Staircase, "Staircase" },
@@ -51,12 +50,23 @@ namespace
 			Entry{ core::TraversalKind::Door, "Door" },
 			Entry{ core::TraversalKind::Buttons, "Buttons" }
 		};
-		string result;
+		string cannotUse;
+		string fallback;
 		for (auto const& entry : entries)
 		{
-			if ((mask & core::traversalMask(entry.kind)) == 0) continue;
-			if (!result.empty()) result += ", ";
-			result += entry.name;
+			auto& list = profile.get(entry.kind) == core::MobilityUse::CannotUse
+				? cannotUse : fallback;
+			if (profile.get(entry.kind) == core::MobilityUse::CanUse) continue;
+			if (!list.empty()) list += ", ";
+			list += entry.name;
+		}
+		if (cannotUse.empty() && fallback.empty()) return "can use everything";
+		string result;
+		if (!cannotUse.empty()) result = "cannot use " + cannotUse;
+		if (!fallback.empty())
+		{
+			if (!result.empty()) result += "; ";
+			result += "last resort: " + fallback;
 		}
 		return result;
 	}
@@ -232,7 +242,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
-				agent, enabled ? optional<core::TraversalMask>{ 0 } : nullopt, out); });
+				agent, enabled ? optional<core::MobilityProfile>{ {} } : nullopt, out); });
 		ImGui::EndCombo();
 	}
 
@@ -465,36 +475,32 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
-		auto const buttons = (authored
-			& core::traversalMask(core::TraversalKind::Buttons)) != 0;
-		ImGui::TextUnformatted("Cannot use");
-		auto renderKind = [&](char const* label, core::TraversalKind kind,
-			bool whollyButtonOperated = false)
+		auto renderKind = [&](char const* label, core::TraversalKind kind)
 		{
-			auto const bit = core::traversalMask(kind);
-			bool checked = (authored & bit) != 0 || (buttons && whollyButtonOperated);
-			ImGui::BeginDisabled(buttons && whollyButtonOperated);
-			if (ImGui::Checkbox(label, &checked))
+			constexpr char const* options[]{ "Can use", "Cannot use", "Only if no other option" };
+			auto selected = static_cast<int>(authored.get(kind));
+			ImGui::SetNextItemWidth(PropertyWidgetWidth);
+			if (ImGui::Combo(label, &selected, options, IM_ARRAYSIZE(options)))
 			{
-				auto const next = checked ? authored | bit : authored & ~bit;
+				auto next = authored;
+				next.set(kind, static_cast<core::MobilityUse>(selected));
 				string diagnostic;
 				commitIndividualPropertyEdit(world, [&](string* out)
 					{ return world->setAgentIndividualMobilityProfile(agent, next, out); }, diagnostic);
 				warn(diagnostic);
 			}
-			ImGui::EndDisabled();
 		};
 		renderKind("Staircase##individual", core::TraversalKind::Staircase);
 		renderKind("Escalator##individual", core::TraversalKind::Escalator);
 		renderKind("Stairwell##individual", core::TraversalKind::Stairwell);
 		renderKind("Ladder##individual", core::TraversalKind::Ladder);
-		renderKind("Lift##individual", core::TraversalKind::Lift, true);
-		renderKind("Platform lift##individual", core::TraversalKind::PlatformLift, true);
-		renderKind("Shuttle##individual", core::TraversalKind::Shuttle, true);
+		renderKind("Lift##individual", core::TraversalKind::Lift);
+		renderKind("Platform lift##individual", core::TraversalKind::PlatformLift);
+		renderKind("Shuttle##individual", core::TraversalKind::Shuttle);
 		renderKind("Door##individual", core::TraversalKind::Door);
 		renderKind("Buttons##individual", core::TraversalKind::Buttons);
-		if (buttons)
-			ImGui::TextWrapped("Also forbids doors needing a button, extensible force bridges, and extensible ladders.");
+		if (authored.get(core::TraversalKind::Buttons) != core::MobilityUse::CanUse)
+			ImGui::TextWrapped("The Buttons setting also applies to doors needing a button, extensible force bridges, and extensible ladders.");
 		if (ImGui::SmallButton(ICON_FA_TIMES " Remove Mobility profile##individual"))
 		{
 			string diagnostic;
@@ -622,13 +628,13 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	else ImGui::TextUnformatted("Crowd aversion: 1.00 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
-	auto const mobilitySummary = mobilityProfileSummary(mobility.forbiddenTraversals);
+	auto const mobilitySummary = mobilityProfileSummary(mobility.value);
 	if (mobility.individual)
 		ImGui::Text("Mobility profile: %s (individual)", mobilitySummary.c_str());
 	else if (mobility.sourceTag && world->hasAttachedAgentTagRegistry())
 		ImGui::Text("Mobility profile: %s from #%s", mobilitySummary.c_str(),
 			world->getAgentTagRegistry()->getAgentTagName(mobility.sourceTag).c_str());
-	else ImGui::TextUnformatted("Mobility profile: nothing forbidden (default)");
+	else ImGui::TextUnformatted("Mobility profile: can use everything (default)");
 }
 
 void renderAgentTagAssignmentChecklist(shared_ptr<core::World> const& world,
