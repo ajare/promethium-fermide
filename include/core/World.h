@@ -427,6 +427,9 @@ namespace core
 			EdgeType traversalEdgeType{ EdgeType::Location };
 			Vector2 traversalSourcePosition;
 			Vector2 traversalDestinationPosition;
+			// Preserves the exact historical explanation after pause tears down the
+			// live Path. It is transient and never serialized.
+			std::optional<PathRouteDiagnostics> routeDiagnostics;
 		};
 
 	public:

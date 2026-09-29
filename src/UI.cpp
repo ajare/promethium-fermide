@@ -6842,6 +6842,91 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 }
 
 
+namespace
+{
+	const char* routingPropertySource(core::RoutingPropertyProvenance const& provenance,
+		string& storage)
+	{
+		switch (provenance.source)
+		{
+		case core::RoutingPropertySource::Individual: return "individual value";
+		case core::RoutingPropertySource::AgentTagSample:
+			storage = format("Agent-tag sample #{}", provenance.sourceTag.value);
+			return storage.c_str();
+		default: return "default";
+		}
+	}
+
+	void renderRouteCostDiagnostics(shared_ptr<core::World> const& world,
+		core::Agent const& agent)
+	{
+		if (!ImGui::TreeNode("Route cost diagnostics")) return;
+		auto const& path = agent.getPath();
+		std::optional<core::PathRouteDiagnostics> diagnostic;
+		if (path) diagnostic = core::pathing::getRouteDiagnostics(*path);
+		else
+		{
+			core::World::TopologyPathIntent intent;
+			if (world->getPausedPathIntent(agent, intent)) diagnostic = intent.routeDiagnostics;
+		}
+		if (!diagnostic)
+		{
+			ImGui::TextDisabled("Unavailable: this Path has no captured route-decision context.");
+			ImGui::TextWrapped("Restored and legacy Paths are not silently recomputed from current observations.");
+			ImGui::TreePop();
+			return;
+		}
+		if (core::pathing::routeDiagnosticContextIsStale(
+			agent, *world->getGraph(), diagnostic->context))
+			ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
+				"Captured context is stale because routing properties or topology changed; values below explain the selected Path when it was calculated.");
+		else
+			ImGui::TextDisabled("Generated on demand from the selected Path's captured route-decision context.");
+
+		auto const& c = diagnostic->components;
+		ImGui::Text("Perceived route cost: %.3f", diagnostic->perceivedCost);
+		if (diagnostic->objectiveEstimatedDurationSeconds)
+			ImGui::Text("Objective estimated duration: %.3f s",
+				*diagnostic->objectiveEstimatedDurationSeconds);
+		else
+			ImGui::TextDisabled("Objective estimated duration: unavailable (not actual elapsed time)");
+		ImGui::SeparatorText("Perceived cost components");
+		ImGui::Text("Movement: %.3f", c.movement);
+		ImGui::Text("Known wait: %.3f", c.knownWait);
+		ImGui::Text("Expected wait: %.3f", c.expectedWait);
+		ImGui::Text("Effort: %.3f", c.effort);
+		ImGui::Text("Interaction: %.3f", c.interaction);
+		ImGui::Text("Crowding: %.3f", c.crowding);
+		ImGui::Text("Risk: %.3f", c.risk);
+		ImGui::Text("Uncertainty: %.3f", c.uncertainty);
+		ImGui::Text("Stable variation: %.3f", c.stableVariation);
+		ImGui::Text("Component sum: %.3f", c.total());
+
+		auto property = [](char const* name, float value,
+			core::RoutingPropertyProvenance const& source)
+		{
+			string sourceText;
+			ImGui::Text("%s: %.3f (%s)", name, value,
+				routingPropertySource(source, sourceText));
+		};
+		auto const& profile = diagnostic->context.profile;
+		auto const& sources = diagnostic->context.provenance;
+		ImGui::SeparatorText("Effective properties at calculation");
+		property("Walk speed modifier", profile.walkSpeedModifier, sources.walkSpeedModifier);
+		property("Stair speed modifier", profile.stairSpeedModifier, sources.stairSpeedModifier);
+		property("Ladder speed modifier", profile.ladderSpeedModifier, sources.ladderSpeedModifier);
+		property("Escalator walking chance", profile.escalatorWalkingChance, sources.escalatorWalkingChance);
+		property("Waiting aversion", profile.waitingAversion, sources.waitingAversion);
+		property("Effort aversion", profile.effortAversion, sources.effortAversion);
+		property("Interaction aversion", profile.interactionAversion, sources.interactionAversion);
+		property("Crowd aversion", profile.crowdAversion, sources.crowdAversion);
+		property("Risk aversion", profile.riskAversion, sources.riskAversion);
+		property("Route familiarity", profile.routeFamiliarity, sources.routeFamiliarity);
+		property("Route persistence", profile.routePersistence, sources.routePersistence);
+		ImGui::TreePop();
+	}
+}
+
 void renderSelectedAgentPanel(shared_ptr<core::World> world)
 {
 	if (!gSelectedAgent) return;
@@ -7005,6 +7090,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 			ImGui::TextUnformatted("Path: <none>");
 		}
 	}
+
+	renderRouteCostDiagnostics(world, *gSelectedAgent);
 
 	if (gSelectedVertex)
 	{

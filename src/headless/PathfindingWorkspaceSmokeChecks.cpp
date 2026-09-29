@@ -158,6 +158,38 @@ namespace
 		require(first->nodes.back().objectiveDurationSeconds
 			&& std::abs(*first->nodes.back().objectiveDurationSeconds - cumulativeCost) < 0.0001f,
 			"Walking Path did not report physical objective duration");
+		auto const diagnostic = core::pathing::getRouteDiagnostics(*first);
+		require(diagnostic
+			&& std::abs(diagnostic->components.total() - diagnostic->perceivedCost) < 0.0001f
+			&& diagnostic->objectiveEstimatedDurationSeconds
+			&& std::abs(*diagnostic->objectiveEstimatedDurationSeconds - cumulativeCost) < 0.0001f,
+			"On-demand Path diagnostics did not preserve cost components and objective duration");
+		require(diagnostic->context.provenance.effortAversion.source
+				== core::RoutingPropertySource::Default
+			&& !core::pathing::routeDiagnosticContextIsStale(*agent, *graph, *first),
+			"Fresh Path diagnostics did not identify default property provenance");
+		agent->setPath(first, true);
+		world.pauseSimulation();
+		core::World::TopologyPathIntent pausedIntent;
+		require(world.getPausedPathIntent(*agent, pausedIntent)
+			&& pausedIntent.routeDiagnostics
+			&& std::abs(pausedIntent.routeDiagnostics->perceivedCost
+				- diagnostic->perceivedCost) < 0.0001f,
+			"Pausing discarded the selected Path's captured diagnostics");
+		require(world.setAgentIndividualEffortAversion(world.getAgentId(agent), 2.0f),
+			"Could not change a diagnostic routing property");
+		require(core::pathing::routeDiagnosticContextIsStale(*agent, *graph, *first),
+			"A property change did not mark captured Path diagnostics stale");
+		auto const individualPath = graph->calculatePath(agent, source, destination);
+		auto const individualDiagnostic = individualPath
+			? core::pathing::getRouteDiagnostics(*individualPath) : std::nullopt;
+		require(individualDiagnostic
+			&& individualDiagnostic->context.provenance.effortAversion.source
+				== core::RoutingPropertySource::Individual,
+			"Path diagnostics did not identify individual property provenance");
+		core::Path restoredLikePath;
+		require(!core::pathing::getRouteDiagnostics(restoredLikePath),
+			"A Path without captured historical context fabricated diagnostics");
 		auto const preview = graph->calculatePath(nullptr, source, destination);
 		require(preview && digest(preview) == digest(first), "Null-Agent baseline preview changed routing");
 		require(!graph->calculatePath(nullptr, destination), "Null-Agent inferred source was accepted");

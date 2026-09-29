@@ -31,6 +31,7 @@ namespace core
 		std::vector<std::optional<float>> durations;
 		std::vector<size_t> routeOffsets;
 		std::vector<std::optional<EvaluatedRouteCost>> routeCosts;
+		std::vector<std::optional<size_t>> selectedRouteCosts;
 		void captureRouteCosts(Graph const& graph, RouteDecisionContext const& context);
 		std::vector<uint32_t> cameFrom;
 		std::vector<uint32_t> visitGenerations;
@@ -69,6 +70,14 @@ namespace core
 			Agent const& agent, Graph const& graph,
 			Path const& current, uint32_t currentFromNode,
 			Path const& alternative, uint32_t alternativeFromNode);
+
+		// Aggregation is intentionally on demand. A Path without a captured
+		// decision context (notably a restored Path) has no historical diagnostic.
+		std::optional<PathRouteDiagnostics> getRouteDiagnostics(Path const& path);
+		bool routeDiagnosticContextIsStale(Agent const& agent,
+			Graph const& graph, RouteDiagnosticContext const& context);
+		bool routeDiagnosticContextIsStale(Agent const& agent,
+			Graph const& graph, Path const& path);
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(
 			std::shared_ptr<Path> path, Vertex const* vertex, uint32_t index = 0);

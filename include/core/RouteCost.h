@@ -28,7 +28,9 @@ namespace core
 
 	struct EffectiveRoutingProfile
 	{
+		float walkSpeedModifier = 1;
 		float stairSpeedModifier = 1;
+		float ladderSpeedModifier = 1;
 		float escalatorWalkingChance = 0;
 		float waitingAversion = 1;
 		float effortAversion = 1;
@@ -63,10 +65,32 @@ namespace core
 		float optimisticLowerBoundSeconds = 0;
 	};
 
+	// Weighted seconds-equivalent contributions. Unlike DirectedTraversalFacts,
+	// these values add directly to the perceived total shown in diagnostics.
+	struct PerceivedRouteCostComponents
+	{
+		float movement = 0;
+		float knownWait = 0;
+		float expectedWait = 0;
+		float effort = 0;
+		float interaction = 0;
+		float crowding = 0;
+		float risk = 0;
+		float uncertainty = 0;
+		float stableVariation = 0;
+
+		[[nodiscard]] float total() const
+		{
+			return movement + knownWait + expectedWait + effort + interaction
+				+ crowding + risk + uncertainty + stableVariation;
+		}
+	};
+
 	struct EvaluatedRouteCost
 	{
 		float perceivedCost;
 		std::optional<float> objectiveDurationSeconds;
+		PerceivedRouteCostComponents components;
 	};
 
 	struct RouteChoicePolicy
@@ -158,7 +182,8 @@ namespace core
 			for (auto value : { c.motionSeconds, c.knownWaitSeconds, c.expectedWaitSeconds,
 				c.physicalEffortUnits, c.interactionUnits, c.crowdingUnits, c.riskUnits,
 				c.uncertaintyUnits, facts.optimisticLowerBoundSeconds,
-				profile.stairSpeedModifier, profile.escalatorWalkingChance, profile.waitingAversion,
+				profile.walkSpeedModifier, profile.stairSpeedModifier,
+				profile.ladderSpeedModifier, profile.escalatorWalkingChance, profile.waitingAversion,
 				profile.effortAversion, profile.interactionAversion,
 				profile.crowdAversion, profile.riskAversion, profile.routeFamiliarity,
 				profile.routePersistence }) validate(value);
@@ -166,16 +191,25 @@ namespace core
 				|| !std::isfinite(c.perceptionVariationUnits))
 				throw std::invalid_argument("Invalid route familiarity or perception variation");
 			if (facts.objectiveDurationSeconds) validate(*facts.objectiveDurationSeconds);
-			auto cost = c.motionSeconds + profile.waitingAversion * (c.knownWaitSeconds + c.expectedWaitSeconds)
-				+ profile.effortAversion * c.physicalEffortUnits + profile.interactionAversion * c.interactionUnits
-				+ profile.crowdAversion * c.crowdingUnits + profile.riskAversion * c.riskUnits
-				+ (1.0f - profile.routeFamiliarity) * c.uncertaintyUnits
-				+ c.perceptionVariationUnits;
+			PerceivedRouteCostComponents components{
+				c.motionSeconds,
+				profile.waitingAversion * c.knownWaitSeconds,
+				profile.waitingAversion * c.expectedWaitSeconds,
+				profile.effortAversion * c.physicalEffortUnits,
+				profile.interactionAversion * c.interactionUnits,
+				profile.crowdAversion * c.crowdingUnits,
+				profile.riskAversion * c.riskUnits,
+				(1.0f - profile.routeFamiliarity) * c.uncertaintyUnits,
+				c.perceptionVariationUnits
+			};
+			auto cost = components.total();
 			if (!std::isfinite(cost)) throw std::invalid_argument("Route cost is not finite");
 			// Stable error may be negative, but perception can never undercut the
-			// directed traversal's universal physical lower bound.
+			// directed traversal's universal physical lower bound. Attribute any
+			// clamping to variation so the diagnostic components still add exactly.
 			cost = std::max(cost, facts.optimisticLowerBoundSeconds);
-			return EvaluatedRouteCost{ cost, facts.objectiveDurationSeconds };
+			components.stableVariation += cost - components.total();
+			return EvaluatedRouteCost{ cost, facts.objectiveDurationSeconds, components };
 		}
 	};
 

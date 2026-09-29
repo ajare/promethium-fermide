@@ -104,6 +104,7 @@ namespace core
 
 		resizeTracked(scores);
 		resizeTracked(durations);
+		resizeTracked(selectedRouteCosts);
 		resizeTracked(cameFrom);
 		resizeTracked(visitGenerations);
 		resizeTracked(edges);
@@ -207,12 +208,66 @@ namespace core
 				auto slot = targetSlot;
 				while (workspace.cameFrom[slot] != slot)
 				{
-					nodes.push_back({ workspace.edges[slot], vertices[slot], workspace.scores[slot], workspace.durations[slot] });
+					std::optional<EvaluatedRouteCost> diagnostic;
+					if (workspace.selectedRouteCosts[slot])
+						diagnostic = workspace.routeCosts[*workspace.selectedRouteCosts[slot]];
+					nodes.push_back({ workspace.edges[slot], vertices[slot], workspace.scores[slot],
+						workspace.durations[slot], diagnostic });
 					slot = workspace.cameFrom[slot];
 				}
-				nodes.push_back({ nullptr, vertices[slot], workspace.scores[slot], workspace.durations[slot] });
+				// The inferred-source approach is part of both perceived movement and
+				// objective estimated duration, even though it has no Graph Edge.
+				EvaluatedRouteCost sourceCost{ workspace.scores[slot], workspace.durations[slot] };
+				sourceCost.components.movement = workspace.scores[slot];
+				nodes.push_back({ nullptr, vertices[slot], workspace.scores[slot],
+					workspace.durations[slot], sourceCost });
 				std::reverse(nodes.begin(), nodes.end());
-				return std::make_shared<Path>(std::move(nodes));
+				return std::make_shared<Path>(Path{ std::move(nodes) });
+			}
+
+			template<typename EffectiveProperty>
+			RoutingPropertyProvenance provenance(EffectiveProperty const& property)
+			{
+				if (property.individual)
+					return { RoutingPropertySource::Individual, {} };
+				if (property.sourceTag)
+					return { RoutingPropertySource::AgentTagSample, property.sourceTag };
+				return {};
+			}
+
+			EffectiveRoutingProfile effectiveProfile(Agent const& agent,
+				RouteChoicePolicy const& policy)
+			{
+				auto result = policy.baselineProfile;
+				result.walkSpeedModifier = agent.getEffectiveWalkSpeedModifier().value;
+				result.stairSpeedModifier = agent.getEffectiveStairSpeedModifier().value;
+				result.ladderSpeedModifier = agent.getEffectiveLadderSpeedModifier().value;
+				result.escalatorWalkingChance = agent.getEffectiveEscalatorWalkingChance().value;
+				result.interactionAversion = agent.getEffectiveInteractionAversion().value;
+				result.effortAversion = agent.getEffectiveEffortAversion().value;
+				result.waitingAversion = agent.getEffectiveWaitingAversion().value;
+				result.crowdAversion = agent.getEffectiveCrowdAversion().value;
+				result.riskAversion = agent.getEffectiveRiskAversion().value;
+				result.routeFamiliarity = agent.getEffectiveRouteFamiliarity().value;
+				result.routePersistence = agent.getEffectiveRoutePersistence().value;
+				return result;
+			}
+
+			RoutingProfileProvenance effectiveProvenance(Agent const& agent)
+			{
+				return {
+					provenance(agent.getEffectiveWalkSpeedModifier()),
+					provenance(agent.getEffectiveStairSpeedModifier()),
+					provenance(agent.getEffectiveLadderSpeedModifier()),
+					provenance(agent.getEffectiveEscalatorWalkingChance()),
+					provenance(agent.getEffectiveWaitingAversion()),
+					provenance(agent.getEffectiveEffortAversion()),
+					provenance(agent.getEffectiveInteractionAversion()),
+					provenance(agent.getEffectiveCrowdAversion()),
+					provenance(agent.getEffectiveRiskAversion()),
+					provenance(agent.getEffectiveRouteFamiliarity()),
+					provenance(agent.getEffectiveRoutePersistence())
+				};
 			}
 		}
 
@@ -224,18 +279,7 @@ namespace core
 			// Resolve Agent-authored preferences once for this immutable search
 			// context. A null-Agent editor preview deliberately keeps the explicit
 			// policy baseline instead of manufacturing and dereferencing an Agent.
-			if (agent)
-			{
-				profile.stairSpeedModifier = agent->getEffectiveStairSpeedModifier().value;
-				profile.escalatorWalkingChance = agent->getEffectiveEscalatorWalkingChance().value;
-				profile.interactionAversion = agent->getEffectiveInteractionAversion().value;
-				profile.effortAversion = agent->getEffectiveEffortAversion().value;
-				profile.waitingAversion = agent->getEffectiveWaitingAversion().value;
-				profile.crowdAversion = agent->getEffectiveCrowdAversion().value;
-				profile.riskAversion = agent->getEffectiveRiskAversion().value;
-				profile.routeFamiliarity = agent->getEffectiveRouteFamiliarity().value;
-				profile.routePersistence = agent->getEffectiveRoutePersistence().value;
-			}
+			if (agent) profile = effectiveProfile(*agent, graph->getRouteChoicePolicy());
 			auto const worldSeed = graph->getWorld() ? graph->getWorld()->getRandomSeed() : uint64_t{ 0 };
 			auto const agentId = agent && graph->getWorld()
 				? graph->getWorld()->getAgentId(agent).value : uint64_t{ 0 };
@@ -286,6 +330,7 @@ namespace core
 					workspace.scores[slot] = approachSeconds;
 					workspace.durations[slot] = approachSeconds;
 					workspace.edges[slot].reset();
+					workspace.selectedRouteCosts[slot].reset();
 					workspace.put(slot, approachSeconds);
 				};
 				auto const floorSource = inferredSource && dynamic_cast<Location const*>(agent->getSector());
@@ -334,7 +379,8 @@ namespace core
 					{
 						auto const next = edge->getOtherVertex(current);
 						auto const nextSlot = next->getSearchIndex();
-						auto const& cost = workspace.routeCosts[arcIndex++];
+						auto const routeCostIndex = arcIndex++;
+						auto const& cost = workspace.routeCosts[routeCostIndex];
 						if (!cost) continue;
 						auto const newCost = workspace.scores[currentSlot] + cost->perceivedCost;
 						if (!std::isfinite(newCost))
@@ -354,12 +400,22 @@ namespace core
 							}
 							workspace.cameFrom[nextSlot] = currentSlot;
 							workspace.edges[nextSlot] = edge;
+							workspace.selectedRouteCosts[nextSlot] = routeCostIndex;
 							workspace.put(nextSlot, newCost);
 						}
 					}
 				}
 
-				return reconstructPath(graph, targetSlot, workspace);
+				auto path = reconstructPath(graph, targetSlot, workspace);
+				if (path)
+				{
+					path->diagnosticContext = RouteDiagnosticContext{
+						searchContext.profile,
+						agent ? effectiveProvenance(*agent) : RoutingProfileProvenance{},
+						graph->getWorld() ? graph->getWorld()->getTopologyGeneration() : 0
+					};
+				}
+				return path;
 			};
 
 			if (auto path = runSearch(context)) return path;
@@ -428,6 +484,58 @@ namespace core
 			auto const alternativeCost = score(alternative, alternativeFromNode);
 			if (!currentCost || !alternativeCost) return std::nullopt;
 			return std::pair{ *currentCost, *alternativeCost };
+		}
+
+		std::optional<PathRouteDiagnostics> getRouteDiagnostics(Path const& path)
+		{
+			if (!path.diagnosticContext || path.nodes.empty()) return std::nullopt;
+			PathRouteDiagnostics result;
+			result.context = *path.diagnosticContext;
+			for (auto const& node : path.nodes)
+			{
+				if (!node.diagnosticCost) return std::nullopt;
+				auto const& c = node.diagnosticCost->components;
+				result.components.movement += c.movement;
+				result.components.knownWait += c.knownWait;
+				result.components.expectedWait += c.expectedWait;
+				result.components.effort += c.effort;
+				result.components.interaction += c.interaction;
+				result.components.crowding += c.crowding;
+				result.components.risk += c.risk;
+				result.components.uncertainty += c.uncertainty;
+				result.components.stableVariation += c.stableVariation;
+			}
+			result.perceivedCost = path.nodes.back().getCumulativePerceivedCost();
+			result.objectiveEstimatedDurationSeconds
+				= path.nodes.back().objectiveDurationSeconds;
+			return result;
+		}
+
+		bool routeDiagnosticContextIsStale(Agent const& agent,
+			Graph const& graph, RouteDiagnosticContext const& captured)
+		{
+			if (graph.getWorld()
+				&& captured.topologyGeneration != graph.getWorld()->getTopologyGeneration()) return true;
+			auto const current = effectiveProfile(agent, graph.getRouteChoicePolicy());
+			auto const sameProfile = current.walkSpeedModifier == captured.profile.walkSpeedModifier
+				&& current.stairSpeedModifier == captured.profile.stairSpeedModifier
+				&& current.ladderSpeedModifier == captured.profile.ladderSpeedModifier
+				&& current.escalatorWalkingChance == captured.profile.escalatorWalkingChance
+				&& current.waitingAversion == captured.profile.waitingAversion
+				&& current.effortAversion == captured.profile.effortAversion
+				&& current.interactionAversion == captured.profile.interactionAversion
+				&& current.crowdAversion == captured.profile.crowdAversion
+				&& current.riskAversion == captured.profile.riskAversion
+				&& current.routeFamiliarity == captured.profile.routeFamiliarity
+				&& current.routePersistence == captured.profile.routePersistence;
+			return !sameProfile || effectiveProvenance(agent) != captured.provenance;
+		}
+
+		bool routeDiagnosticContextIsStale(Agent const& agent,
+			Graph const& graph, Path const& path)
+		{
+			return !path.diagnosticContext
+				|| routeDiagnosticContextIsStale(agent, graph, *path.diagnosticContext);
 		}
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(

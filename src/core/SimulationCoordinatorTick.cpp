@@ -867,6 +867,7 @@ namespace core
 						(uint64_t)destination->getSector()->getIndex() + 1 };
 					intent.destinationPosition = destination->getPosition();
 					intent.wasPathing = agent->mState != Agent::State::Idle;
+					intent.routeDiagnostics = pathing::getRouteDiagnostics(*agent->mPath.path);
 					if (agent->mState == Agent::State::TraversingEdge && agent->mTraversalTask
 						&& agent->mTraversalTask->edge && agent->mTraversalTask->sourceVertex
 						&& agent->mTraversalTask->destinationVertex)
