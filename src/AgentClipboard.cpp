@@ -103,6 +103,10 @@ namespace
 			&& !core::agentRouteFamiliarityRangeIsValid(
 				{ *payload.individualRouteFamiliarity, *payload.individualRouteFamiliarity },
 				&diagnostic)) return false;
+		if (payload.individualRoutePersistence
+			&& !core::agentRoutePersistenceRangeIsValid(
+				{ *payload.individualRoutePersistence, *payload.individualRoutePersistence },
+				&diagnostic)) return false;
 		if (payload.agentTags.empty())
 		{
 			if (payload.agentTagRegistryUuid || payload.walkSpeedModifierSample
@@ -110,7 +114,7 @@ namespace
 				|| payload.ladderSpeedModifierSample || payload.interactionAversionSample
 				|| payload.effortAversionSample || payload.waitingAversionSample
 				|| payload.crowdAversionSample || payload.riskAversionSample
-				|| payload.routeFamiliaritySample)
+				|| payload.routeFamiliaritySample || payload.routePersistenceSample)
 			{
 				return reject(
 					"An untagged Agent clipboard payload cannot carry registry or sample state");
@@ -169,7 +173,10 @@ namespace
 				payload.riskAversionSample)
 			&& validateSample("Route familiarity",
 				core::SampledAgentPropertyType::RouteFamiliarity,
-				payload.routeFamiliaritySample);
+				payload.routeFamiliaritySample)
+			&& validateSample("Route persistence",
+				core::SampledAgentPropertyType::RoutePersistence,
+				payload.routePersistenceSample);
 	}
 
 	bool clipboardTagStateFitsWorld(core::World const& world,
@@ -193,7 +200,8 @@ namespace
 			payload.stairSpeedModifierSample, payload.ladderSpeedModifierSample,
 			payload.interactionAversionSample, payload.effortAversionSample,
 			payload.waitingAversionSample, payload.crowdAversionSample,
-			payload.riskAversionSample, payload.routeFamiliaritySample, &diagnostic);
+			payload.riskAversionSample, payload.routeFamiliaritySample,
+			payload.routePersistenceSample, &diagnostic);
 	}
 
 	AgentClipboardConfigurationValue portableValue(core::World const& world,
@@ -480,6 +488,8 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualRiskAversion = lookup.entity->getIndividualRiskAversion();
 	payload.routeFamiliaritySample = lookup.entity->getRouteFamiliaritySample();
 	payload.individualRouteFamiliarity = lookup.entity->getIndividualRouteFamiliarity();
+	payload.routePersistenceSample = lookup.entity->getRoutePersistenceSample();
+	payload.individualRoutePersistence = lookup.entity->getIndividualRoutePersistence();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -566,6 +576,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualRouteFamiliarity)
 		output << YAML::Key << "routeFamiliarity" << YAML::Value
 			<< *payload.individualRouteFamiliarity;
+	if (payload.individualRoutePersistence)
+		output << YAML::Key << "routePersistence" << YAML::Value
+			<< *payload.individualRoutePersistence;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -596,7 +609,8 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 			|| payload.stairSpeedModifierSample || payload.ladderSpeedModifierSample
 			|| payload.interactionAversionSample || payload.effortAversionSample
 			|| payload.waitingAversionSample || payload.crowdAversionSample
-			|| payload.riskAversionSample || payload.routeFamiliaritySample)
+			|| payload.riskAversionSample || payload.routeFamiliaritySample
+			|| payload.routePersistenceSample)
 		{
 			output << YAML::Key << "propertySamples" << YAML::Value << YAML::BeginSeq;
 			auto writeSample = [&output](char const* type,
@@ -630,6 +644,8 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 				writeSample("riskAversion", *payload.riskAversionSample);
 			if (payload.routeFamiliaritySample)
 				writeSample("routeFamiliarity", *payload.routeFamiliaritySample);
+			if (payload.routePersistenceSample)
+				writeSample("routePersistence", *payload.routePersistenceSample);
 			output << YAML::EndSeq;
 		}
 	}
@@ -804,6 +820,20 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		if (!core::agentRouteFamiliarityRangeIsValid({ value, value }, &diagnostic))
 			return false;
 		payload.individualRouteFamiliarity = value;
+	}
+
+	if (object["routePersistence"])
+	{
+		float value;
+		try { value = object["routePersistence"].as<float>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Route persistence must be a number";
+			return false;
+		}
+		if (!core::agentRoutePersistenceRangeIsValid({ value, value }, &diagnostic))
+			return false;
+		payload.individualRoutePersistence = value;
 	}
 
 	// An absent `group` is an ungrouped Agent, which is exactly how a
@@ -1010,6 +1040,11 @@ bool readAgentClipboardObject(YAML::Node const& object,
 				sample.type = core::SampledAgentPropertyType::RouteFamiliarity;
 				destination = &payload.routeFamiliaritySample;
 			}
+			else if (type == "routePersistence")
+			{
+				sample.type = core::SampledAgentPropertyType::RoutePersistence;
+				destination = &payload.routePersistenceSample;
+			}
 			else
 			{
 				diagnostic = "Clipboard Agent property sample type is not supported";
@@ -1026,7 +1061,8 @@ bool readAgentClipboardObject(YAML::Node const& object,
 						: type == "effortAversion" ? "Effort aversion"
 						: type == "waitingAversion" ? "Waiting aversion"
 						: type == "crowdAversion" ? "Crowd aversion"
-						: type == "riskAversion" ? "Risk aversion" : "Route familiarity");
+						: type == "riskAversion" ? "Risk aversion"
+						: type == "routeFamiliarity" ? "Route familiarity" : "Route persistence");
 				return false;
 			}
 			*destination = sample;
@@ -1283,6 +1319,18 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			}
 		}
 
+		if (payload.individualRoutePersistence)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualRoutePersistence(agentId,
+				payload.individualRoutePersistence, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Route persistence could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+
 		if (groupName)
 		{
 			// The destination's own group when it already defines this exact
@@ -1310,7 +1358,8 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				payload.stairSpeedModifierSample, payload.ladderSpeedModifierSample,
 				payload.interactionAversionSample, payload.effortAversionSample,
 				payload.waitingAversionSample, payload.crowdAversionSample,
-				payload.riskAversionSample, payload.routeFamiliaritySample, &assignDiagnostic))
+				payload.riskAversionSample, payload.routeFamiliaritySample,
+				payload.routePersistenceSample, &assignDiagnostic))
 			{
 				diagnostic = "The pasted Agent's tag assignments could not be restored: "
 					+ assignDiagnostic + rollBack();

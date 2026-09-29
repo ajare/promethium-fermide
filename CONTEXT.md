@@ -99,7 +99,7 @@ An Agent property from 0 through 1 that reduces uncertainty premiums and stable 
 _Avoid_: Route observation, topology knowledge
 
 **Route persistence**:
-An Agent's propensity to retain its current Path unless another known Path is sufficiently preferable or the current Path becomes invalid.
+An Agent property from 0 through 1 that sets the minimum proportional perceived-cost improvement required before voluntarily replacing a still-valid Path. Its default is 0.15; hard Path invalidation bypasses it.
 _Avoid_: Route lock, forbidden traversal
 
 **Marker**:

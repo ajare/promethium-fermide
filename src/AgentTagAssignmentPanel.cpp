@@ -247,6 +247,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualRouteFamiliarity().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualRouteFamiliarity(
 				agent, enabled ? optional<float>{ 0.5f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::RoutePersistence),
+			target->getIndividualRoutePersistence().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualRoutePersistence(
+				agent, enabled ? optional<float>{ 0.5f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -328,6 +332,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		|| target->getIndividualEffortAversion() || target->getIndividualWaitingAversion()
 		|| target->getIndividualCrowdAversion() || target->getIndividualRiskAversion()
 		|| target->getIndividualCrowdAversion() || target->getIndividualRouteFamiliarity()
+		|| target->getIndividualCrowdAversion() || target->getIndividualRoutePersistence()
 		|| target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
@@ -527,6 +532,28 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
+	if (target->getIndividualRoutePersistence())
+	{
+		auto value = *target->getIndividualRoutePersistence();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Route persistence##individual", &value, 0.01f,
+			core::AgentRoutePersistenceMinimum, core::AgentRoutePersistenceMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRoutePersistence(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualRoutePersistence"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRoutePersistence(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
@@ -695,6 +722,13 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Route familiarity: %.2f from #%s", familiarity.value,
 			world->getAgentTagRegistry()->getAgentTagName(familiarity.sourceTag).c_str());
 	else ImGui::TextUnformatted("Route familiarity: 0.50 (default)");
+	auto const persistence = lookup.entity->getEffectiveRoutePersistence();
+	if (persistence.individual)
+		ImGui::Text("Route persistence: %.2f (individual)", persistence.value);
+	else if (persistence.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Route persistence: %.2f from #%s", persistence.value,
+			world->getAgentTagRegistry()->getAgentTagName(persistence.sourceTag).c_str());
+	else ImGui::TextUnformatted("Route persistence: 0.15 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.value);

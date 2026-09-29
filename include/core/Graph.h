@@ -34,6 +34,8 @@ namespace core
 	{
 		friend std::shared_ptr<Path> pathing::findPath(Agent const*, Graph const*,
 			std::shared_ptr<const Vertex>, std::shared_ptr<const Vertex>);
+		friend std::optional<std::pair<float, float>> pathing::comparePathSuffixCosts(
+			Agent const&, Graph const&, Path const&, uint32_t, Path const&, uint32_t);
 
 		struct ObjectData
 		{

@@ -4,12 +4,14 @@
 #include "core/Edge.h"
 #include "core/Location.h"
 #include "core/Path.h"
+#include "core/Pathing.h"
 #include "core/AgentTagRegistry.h"
 #include "core/Log.h"
 #include "core/MobilityProfile.h"
 #include "core/Exceptions.h"
 #include "core/SerializationException.h"
 
+#include <algorithm>
 #include <type_traits>
 #include <variant>
 
@@ -160,6 +162,7 @@ namespace core
 			|| mIndividualCrowdAversion
 			|| mIndividualRiskAversion
 			|| mIndividualRouteFamiliarity
+			|| mIndividualRoutePersistence
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -204,6 +207,8 @@ namespace core
 				writeFloatProperty("riskAversion", *mIndividualRiskAversion);
 			if (mIndividualRouteFamiliarity)
 				writeFloatProperty("routeFamiliarity", *mIndividualRouteFamiliarity);
+			if (mIndividualRoutePersistence)
+				writeFloatProperty("routePersistence", *mIndividualRoutePersistence);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -215,7 +220,7 @@ namespace core
 		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
 			|| mLadderSpeedModifierSample || mInteractionAversionSample || mEffortAversionSample
 			|| mWaitingAversionSample || mCrowdAversionSample || mRiskAversionSample
-			|| mRouteFamiliaritySample)
+			|| mRouteFamiliaritySample || mRoutePersistenceSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -248,6 +253,8 @@ namespace core
 				writeSample("riskAversion", *mRiskAversionSample);
 			if (mRouteFamiliaritySample)
 				writeSample("routeFamiliarity", *mRouteFamiliaritySample);
+			if (mRoutePersistenceSample)
+				writeSample("routePersistence", *mRoutePersistenceSample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -311,6 +318,7 @@ namespace core
 		mIndividualCrowdAversion.reset();
 		mIndividualRiskAversion.reset();
 		mIndividualRouteFamiliarity.reset();
+		mIndividualRoutePersistence.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -425,6 +433,15 @@ namespace core
 						throw SerializationException("Serialized individual Route familiarity is invalid");
 					mIndividualRouteFamiliarity = value;
 				}
+				else if (type == "routePersistence")
+				{
+					if (mIndividualRoutePersistence)
+						throw SerializationException("Serialized Agent contains more than one individual Route persistence");
+					auto const value = serializer.readFloat("value");
+					if (!agentRoutePersistenceRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Route persistence is invalid");
+					mIndividualRoutePersistence = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -447,6 +464,7 @@ namespace core
 		mCrowdAversionSample.reset();
 		mRiskAversionSample.reset();
 		mRouteFamiliaritySample.reset();
+		mRoutePersistenceSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -516,6 +534,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::RouteFamiliarity;
 					destination = &mRouteFamiliaritySample;
 					displayName = "Route familiarity";
+				}
+				else if (type == "routePersistence")
+				{
+					sample.type = SampledAgentPropertyType::RoutePersistence;
+					destination = &mRoutePersistenceSample;
+					displayName = "Route persistence";
 				}
 				else
 				{
@@ -799,6 +823,22 @@ namespace core
 		if (!destination) return mRouteJourneySequence;
 		return mRouteJourneyDestinationVertexId == destination->getId()
 			? mRouteJourneySequence : mRouteJourneySequence + 1;
+	}
+
+	EffectiveAgentRoutePersistence Agent::getEffectiveRoutePersistence() const
+	{
+		EffectiveAgentRoutePersistence effective;
+		if (mIndividualRoutePersistence)
+		{
+			effective.value = *mIndividualRoutePersistence;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mRoutePersistenceSample) return effective;
+		effective.value = mRoutePersistenceSample->value;
+		effective.sourceTag = mRoutePersistenceSample->sourceTag;
+		effective.propertyRevision = mRoutePersistenceSample->propertyRevision;
+		return effective;
 	}
 
 	EffectiveAgentMobilityProfile Agent::getEffectiveMobilityProfile() const
@@ -1463,18 +1503,6 @@ namespace core
 		for (uint32_t i = 0; i < consumed && mPath.path; ++i) nextPathNode();
 	}
 
-	float Agent::estimateRemainingPathSeconds(shared_ptr<Path> const& path, uint32_t fromNode) const
-	{
-		if (!path) return 0.0f;
-		float result = 0.0f;
-		for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
-		{
-			auto const& node = path->nodes[i];
-			if (node.edge) result += node.edge->getWeight(node.targetVertex, this, true);
-		}
-		return result;
-	}
-
 	void Agent::considerTraversalReplan()
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
@@ -1490,9 +1518,14 @@ namespace core
 		auto target = mPath.path->nodes.back().targetVertex;
 		auto alternative = mWorld->getGraph()->calculatePath(this, mTraversalTask->sourceVertex, target);
 		if (!alternative || alternative->nodes.size() < 2) return;
-		auto currentEta = estimateRemainingPathSeconds(mPath.path, mPath.targetNode);
-		auto alternativeEta = estimateRemainingPathSeconds(alternative, 0);
-		if (alternativeEta + policy.replanEtaMarginSeconds < currentEta)
+		// Re-score both complete suffixes from one immutable current observation
+		// context rather than comparing the old Path's stored decision with a new one.
+		auto const costs = pathing::comparePathSuffixCosts(*this, *mWorld->getGraph(),
+			*mPath.path, mPath.targetNode, *alternative, 0);
+		if (!costs) return;
+		auto const persistence = getEffectiveRoutePersistence().value;
+		if (mWorld->getRouteChoicePolicy().shouldReplacePath(
+			costs->first, costs->second, persistence))
 		{
 			assignPath(std::move(alternative), true, false);
 		}

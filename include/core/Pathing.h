@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include "core/Path.h"
@@ -60,6 +62,13 @@ namespace core
 	{
 		std::shared_ptr<Path> findPath(Agent const* agent, Graph const* graph,
 			std::shared_ptr<const Vertex> source, std::shared_ptr<const Vertex> target);
+
+		// Scores both suffixes from one immutable Route decision context so a
+		// waiting reconsideration never compares stale or differently observed costs.
+		std::optional<std::pair<float, float>> comparePathSuffixCosts(
+			Agent const& agent, Graph const& graph,
+			Path const& current, uint32_t currentFromNode,
+			Path const& alternative, uint32_t alternativeFromNode);
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(
 			std::shared_ptr<Path> path, Vertex const* vertex, uint32_t index = 0);

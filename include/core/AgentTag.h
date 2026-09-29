@@ -25,6 +25,7 @@ namespace core
 		CrowdAversion,
 		RiskAversion,
 		RouteFamiliarity,
+		RoutePersistence,
 		MobilityProfile
 	};
 
@@ -53,6 +54,7 @@ namespace core
 		case AgentPropertyType::CrowdAversion: return { "Crowd aversion", "Pathing" };
 		case AgentPropertyType::RiskAversion: return { "Risk aversion", "Pathing" };
 		case AgentPropertyType::RouteFamiliarity: return { "Route familiarity", "Pathing" };
+		case AgentPropertyType::RoutePersistence: return { "Route persistence", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -150,6 +152,9 @@ namespace core
 	inline constexpr float AgentRouteFamiliarityMinimum{ 0.0f };
 	inline constexpr float AgentRouteFamiliarityMaximum{ 1.0f };
 	inline constexpr AgentModifierRange DefaultAgentRouteFamiliarityRange{ 0.5f, 0.5f };
+	inline constexpr float AgentRoutePersistenceMinimum{ 0.0f };
+	inline constexpr float AgentRoutePersistenceMaximum{ 1.0f };
+	inline constexpr AgentModifierRange DefaultAgentRoutePersistenceRange{ 0.15f, 0.15f };
 
 	struct AgentWalkSpeedModifierProperty
 	{
@@ -231,6 +236,14 @@ namespace core
 		bool operator==(AgentRouteFamiliarityProperty const& other) const = default;
 	};
 
+	struct AgentRoutePersistenceProperty
+	{
+		AgentModifierRange range{ DefaultAgentRoutePersistenceRange };
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentRoutePersistenceProperty const& other) const = default;
+	};
+
 	enum class TraversalKind : uint8_t
 	{
 		Staircase,
@@ -309,6 +322,8 @@ namespace core
 		std::string* diagnostic = nullptr);
 	bool agentRouteFamiliarityRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
+	bool agentRoutePersistenceRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
 	float sampleAgentModifier(AgentModifierRange const& range);
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
@@ -337,6 +352,7 @@ namespace core
 		std::optional<AgentCrowdAversionProperty> mCrowdAversion;
 		std::optional<AgentRiskAversionProperty> mRiskAversion;
 		std::optional<AgentRouteFamiliarityProperty> mRouteFamiliarity;
+		std::optional<AgentRoutePersistenceProperty> mRoutePersistence;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -398,6 +414,11 @@ namespace core
 			mRouteFamiliarity = property;
 		}
 		void removeRouteFamiliarity() { mRouteFamiliarity.reset(); }
+		void setRoutePersistence(AgentRoutePersistenceProperty property)
+		{
+			mRoutePersistence = property;
+		}
+		void removeRoutePersistence() { mRoutePersistence.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -457,6 +478,10 @@ namespace core
 		AgentRouteFamiliarityProperty const* getRouteFamiliarity() const
 		{
 			return mRouteFamiliarity ? &*mRouteFamiliarity : nullptr;
+		}
+		AgentRoutePersistenceProperty const* getRoutePersistence() const
+		{
+			return mRoutePersistence ? &*mRoutePersistence : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

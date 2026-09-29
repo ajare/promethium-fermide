@@ -288,6 +288,7 @@ namespace core
 			if (agent->getCrowdAversionSample()) ++count;
 			if (agent->getRiskAversionSample()) ++count;
 			if (agent->getRouteFamiliaritySample()) ++count;
+			if (agent->getRoutePersistenceSample()) ++count;
 		}
 		return count;
 	}
@@ -1143,6 +1144,7 @@ namespace core
 			AgentTagId crowdAversionSource{};
 			AgentTagId riskAversionSource{};
 			AgentTagId routeFamiliaritySource{};
+			AgentTagId routePersistenceSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -1154,6 +1156,7 @@ namespace core
 			AgentCrowdAversionProperty const* crowdAversionProperty{ nullptr };
 			AgentRiskAversionProperty const* riskAversionProperty{ nullptr };
 			AgentRouteFamiliarityProperty const* routeFamiliarityProperty{ nullptr };
+			AgentRoutePersistenceProperty const* routePersistenceProperty{ nullptr };
 			for (auto const tag : agent->getAgentTagIds())
 			{
 				auto const* definition = registry.lookupAgentTag(tag);
@@ -1289,6 +1292,16 @@ namespace core
 					routeFamiliaritySource = tag;
 					routeFamiliarityProperty = property;
 				}
+				if (auto const* property = definition->getRoutePersistence())
+				{
+					if (routePersistenceSource)
+						return reject(format(
+							"Agent '{}' inherits Route persistence from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(routePersistenceSource),
+							definition->getName()));
+					routePersistenceSource = tag;
+					routePersistenceProperty = property;
+				}
 				if (definition->getMobilityProfile())
 				{
 					if (mobilityProfileSource)
@@ -1415,6 +1428,11 @@ namespace core
 				routeFamiliarityProperty ? &routeFamiliarityProperty->range : nullptr,
 				routeFamiliarityProperty ? routeFamiliarityProperty->revision : 0,
 				agent->getRouteFamiliaritySample(), repair.routeFamiliarityAction)) return false;
+			if (!inspectSample("Route persistence", SampledAgentPropertyType::RoutePersistence,
+				routePersistenceSource,
+				routePersistenceProperty ? &routePersistenceProperty->range : nullptr,
+				routePersistenceProperty ? routePersistenceProperty->revision : 0,
+				agent->getRoutePersistenceSample(), repair.routePersistenceAction)) return false;
 
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
 			{
@@ -1466,6 +1484,11 @@ namespace core
 				repair.routeFamiliaritySource = routeFamiliaritySource;
 				repair.routeFamiliarityProperty = *routeFamiliarityProperty;
 			}
+			if (repair.routePersistenceAction == AgentTagSampleRepairAction::Resample)
+			{
+				repair.routePersistenceSource = routePersistenceSource;
+				repair.routePersistenceProperty = *routePersistenceProperty;
+			}
 			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
@@ -1475,7 +1498,8 @@ namespace core
 				|| repair.waitingAversionAction != AgentTagSampleRepairAction::None
 				|| repair.crowdAversionAction != AgentTagSampleRepairAction::None
 				|| repair.riskAversionAction != AgentTagSampleRepairAction::None
-				|| repair.routeFamiliarityAction != AgentTagSampleRepairAction::None))
+				|| repair.routeFamiliarityAction != AgentTagSampleRepairAction::None
+				|| repair.routePersistenceAction != AgentTagSampleRepairAction::None))
 			{
 				repairs->push_back(repair);
 			}
@@ -1589,6 +1613,15 @@ namespace core
 					repair.routeFamiliarityProperty.revision,
 					sampleAgentModifier(repair.routeFamiliarityProperty.range) });
 			}
+			if (repair.routePersistenceAction == AgentTagSampleRepairAction::Clear)
+				agent->clearRoutePersistenceSample();
+			else if (repair.routePersistenceAction == AgentTagSampleRepairAction::Resample)
+			{
+				agent->setRoutePersistenceSample({
+					SampledAgentPropertyType::RoutePersistence, repair.routePersistenceSource,
+					repair.routePersistenceProperty.revision,
+					sampleAgentModifier(repair.routePersistenceProperty.range) });
+			}
 		}
 		if (!repairs.empty()) modify();
 	}
@@ -1653,6 +1686,9 @@ namespace core
 			if (agent->getRouteFamiliaritySample()
 				&& agent->getRouteFamiliaritySample()->sourceTag == id)
 				agent->clearRouteFamiliaritySample();
+			if (agent->getRoutePersistenceSample()
+				&& agent->getRoutePersistenceSample()->sourceTag == id)
+				agent->clearRoutePersistenceSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -1960,6 +1996,38 @@ namespace core
 			if (!agent || !agent->getRouteFamiliaritySample()
 				|| agent->getRouteFamiliaritySample()->sourceTag != id) continue;
 			agent->clearRouteFamiliaritySample();
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::addAgentTagRoutePersistenceSamples(AgentTagId id,
+		AgentRoutePersistenceProperty const& property)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->hasAgentTag(id)) continue;
+			agent->setRoutePersistenceSample({
+				SampledAgentPropertyType::RoutePersistence, id, property.revision,
+				sampleAgentModifier(property.range) });
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::clearAgentTagRoutePersistenceSamples(AgentTagId id)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->getRoutePersistenceSample()
+				|| agent->getRoutePersistenceSample()->sourceTag != id) continue;
+			agent->clearRoutePersistenceSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -8226,6 +8294,29 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualRoutePersistence(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentRoutePersistenceRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualRoutePersistence() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Route persistence is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualRoutePersistence(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<MobilityProfile> value, string* diagnostic)
 	{
@@ -8600,6 +8691,12 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Route familiarity is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getRoutePersistence() && source->getRoutePersistence())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Route persistence is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -8628,6 +8725,7 @@ namespace core
 		optional<AgentPropertySample> crowdAversionSample;
 		optional<AgentPropertySample> riskAversionSample;
 		optional<AgentPropertySample> routeFamiliaritySample;
+		optional<AgentPropertySample> routePersistenceSample;
 		if (auto const* property = definition->getWalkSpeedModifier())
 		{
 			walkSpeedSample = AgentPropertySample{
@@ -8688,6 +8786,12 @@ namespace core
 				SampledAgentPropertyType::RouteFamiliarity, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		if (auto const* property = definition->getRoutePersistence())
+		{
+			routePersistenceSample = AgentPropertySample{
+				SampledAgentPropertyType::RoutePersistence, tag, property->revision,
+				sampleAgentModifier(property->range) };
+		}
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
@@ -8699,6 +8803,7 @@ namespace core
 		if (crowdAversionSample) target->setCrowdAversionSample(*crowdAversionSample);
 		if (riskAversionSample) target->setRiskAversionSample(*riskAversionSample);
 		if (routeFamiliaritySample) target->setRouteFamiliaritySample(*routeFamiliaritySample);
+		if (routePersistenceSample) target->setRoutePersistenceSample(*routePersistenceSample);
 		modify();
 		return true;
 	}
@@ -8764,6 +8869,9 @@ namespace core
 		if (target->getRouteFamiliaritySample()
 			&& target->getRouteFamiliaritySample()->sourceTag == tag)
 			target->clearRouteFamiliaritySample();
+		if (target->getRoutePersistenceSample()
+			&& target->getRoutePersistenceSample()->sourceTag == tag)
+			target->clearRoutePersistenceSample();
 		modify();
 		return true;
 	}
@@ -8779,6 +8887,7 @@ namespace core
 		optional<AgentPropertySample> const& crowdAversionSample,
 		optional<AgentPropertySample> const& riskAversionSample,
 		optional<AgentPropertySample> const& routeFamiliaritySample,
+		optional<AgentPropertySample> const& routePersistenceSample,
 		string* diagnostic) const
 	{
 		if (diagnostic) diagnostic->clear();
@@ -8792,7 +8901,8 @@ namespace core
 		{
 			if (walkSpeedSample || heightSample || stairSpeedSample || ladderSpeedSample
 				|| interactionAversionSample || effortAversionSample || waitingAversionSample
-				|| crowdAversionSample || riskAversionSample || routeFamiliaritySample)
+				|| crowdAversionSample || riskAversionSample || routeFamiliaritySample
+				|| routePersistenceSample)
 				return reject("An untagged Agent cannot carry modifier samples");
 			return true;
 		}
@@ -8811,6 +8921,7 @@ namespace core
 		AgentTagId crowdAversionSource{};
 		AgentTagId riskAversionSource{};
 		AgentTagId routeFamiliaritySource{};
+		AgentTagId routePersistenceSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -8822,6 +8933,7 @@ namespace core
 		AgentCrowdAversionProperty const* crowdAversionProperty{ nullptr };
 		AgentRiskAversionProperty const* riskAversionProperty{ nullptr };
 		AgentRouteFamiliarityProperty const* routeFamiliarityProperty{ nullptr };
+		AgentRoutePersistenceProperty const* routePersistenceProperty{ nullptr };
 		for (auto const tag : tags)
 		{
 			auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
@@ -8924,6 +9036,14 @@ namespace core
 				routeFamiliaritySource = tag;
 				routeFamiliarityProperty = property;
 			}
+			if (auto const* property = definition->getRoutePersistence())
+			{
+				if (routePersistenceSource)
+					return reject(format("Route persistence is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(routePersistenceSource), definition->getName()));
+				routePersistenceSource = tag;
+				routePersistenceProperty = property;
+			}
 			if (definition->getMobilityProfile())
 			{
 				if (mobilityProfileSource)
@@ -9001,7 +9121,12 @@ namespace core
 				routeFamiliaritySource,
 				routeFamiliarityProperty ? &routeFamiliarityProperty->range : nullptr,
 				routeFamiliarityProperty ? routeFamiliarityProperty->revision : 0,
-				routeFamiliaritySample);
+				routeFamiliaritySample)
+			&& validateSample("Route persistence", SampledAgentPropertyType::RoutePersistence,
+				routePersistenceSource,
+				routePersistenceProperty ? &routePersistenceProperty->range : nullptr,
+				routePersistenceProperty ? routePersistenceProperty->revision : 0,
+				routePersistenceSample);
 	}
 
 	bool World::restoreAgentTagAssignments(AgentId agent,
@@ -9016,6 +9141,7 @@ namespace core
 		optional<AgentPropertySample> const& crowdAversionSample,
 		optional<AgentPropertySample> const& riskAversionSample,
 		optional<AgentPropertySample> const& routeFamiliaritySample,
+		optional<AgentPropertySample> const& routePersistenceSample,
 		string* diagnostic)
 	{
 		invalidateSimulationSnapshot();
@@ -9035,7 +9161,7 @@ namespace core
 		if (!validateAgentTagAssignments(tags, walkSpeedSample, heightSample,
 			stairSpeedSample, ladderSpeedSample, interactionAversionSample, effortAversionSample,
 			waitingAversionSample, crowdAversionSample, riskAversionSample,
-			routeFamiliaritySample, diagnostic))
+			routeFamiliaritySample, routePersistenceSample, diagnostic))
 			return false;
 
 		auto* target = mAgents.find(agent);
@@ -9049,7 +9175,8 @@ namespace core
 			&& target->getWaitingAversionSample() == waitingAversionSample
 			&& target->getCrowdAversionSample() == crowdAversionSample
 			&& target->getRiskAversionSample() == riskAversionSample
-			&& target->getRouteFamiliaritySample() == routeFamiliaritySample) return true;
+			&& target->getRouteFamiliaritySample() == routeFamiliaritySample
+			&& target->getRoutePersistenceSample() == routePersistenceSample) return true;
 
 		target->setAgentTags(tags);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
@@ -9072,6 +9199,8 @@ namespace core
 		else target->clearRiskAversionSample();
 		if (routeFamiliaritySample) target->setRouteFamiliaritySample(*routeFamiliaritySample);
 		else target->clearRouteFamiliaritySample();
+		if (routePersistenceSample) target->setRoutePersistenceSample(*routePersistenceSample);
+		else target->clearRoutePersistenceSample();
 		modify();
 		return true;
 	}

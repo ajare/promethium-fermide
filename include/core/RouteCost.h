@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -35,6 +36,7 @@ namespace core
 		float crowdAversion = 1;
 		float riskAversion = 1;
 		float routeFamiliarity = 0.5f;
+		float routePersistence = 0.15f;
 	};
 
 	struct LiftRouteAccessObservation
@@ -129,6 +131,20 @@ namespace core
 		float shuttleExpectedCrowdingUnits = 0.2f;
 		float platformLiftPreparationSeconds = 2.0f;
 		float platformLiftInconvenience = 8.0f;
+		// A still-valid Path is replaced only when an alternative clears this
+		// absolute gain and the Agent's proportional persistence threshold.
+		float minimumSwitchGainSeconds = 2.0f;
+		[[nodiscard]] bool shouldReplacePath(float currentCost, float alternativeCost,
+			float routePersistence) const
+		{
+			if (!std::isfinite(currentCost) || !std::isfinite(alternativeCost)
+				|| !std::isfinite(routePersistence) || !std::isfinite(minimumSwitchGainSeconds)
+				|| currentCost < 0 || alternativeCost < 0 || routePersistence < 0
+				|| routePersistence > 1 || minimumSwitchGainSeconds < 0)
+				throw std::invalid_argument("Invalid Route persistence comparison");
+			return currentCost - alternativeCost
+				> std::max(minimumSwitchGainSeconds, currentCost * routePersistence);
+		}
 		[[nodiscard]] std::optional<EvaluatedRouteCost> evaluate(
 			DirectedTraversalFacts const& facts, EffectiveRoutingProfile const& profile) const
 		{
@@ -144,8 +160,10 @@ namespace core
 				c.uncertaintyUnits, facts.optimisticLowerBoundSeconds,
 				profile.stairSpeedModifier, profile.escalatorWalkingChance, profile.waitingAversion,
 				profile.effortAversion, profile.interactionAversion,
-				profile.crowdAversion, profile.riskAversion, profile.routeFamiliarity }) validate(value);
-			if (profile.routeFamiliarity > 1 || !std::isfinite(c.perceptionVariationUnits))
+				profile.crowdAversion, profile.riskAversion, profile.routeFamiliarity,
+				profile.routePersistence }) validate(value);
+			if (profile.routeFamiliarity > 1 || profile.routePersistence > 1
+				|| !std::isfinite(c.perceptionVariationUnits))
 				throw std::invalid_argument("Invalid route familiarity or perception variation");
 			if (facts.objectiveDurationSeconds) validate(*facts.objectiveDurationSeconds);
 			auto cost = c.motionSeconds + profile.waitingAversion * (c.knownWaitSeconds + c.expectedWaitSeconds)

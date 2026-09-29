@@ -235,6 +235,7 @@ namespace core
 			profile.crowdAversion = routingAgent->getEffectiveCrowdAversion().value;
 			profile.riskAversion = routingAgent->getEffectiveRiskAversion().value;
 			profile.routeFamiliarity = routingAgent->getEffectiveRouteFamiliarity().value;
+			profile.routePersistence = routingAgent->getEffectiveRoutePersistence().value;
 			auto const worldSeed = graph->getWorld() ? graph->getWorld()->getRandomSeed() : uint64_t{ 0 };
 			auto const agentId = agent && graph->getWorld()
 				? graph->getWorld()->getAgentId(agent).value : uint64_t{ 0 };
@@ -364,6 +365,64 @@ namespace core
 				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(),
 				true, perceptionKey, 0 };
 			return runSearch(fallbackContext);
+		}
+
+		std::optional<std::pair<float, float>> comparePathSuffixCosts(
+			Agent const& agent, Graph const& graph,
+			Path const& current, uint32_t currentFromNode,
+			Path const& alternative, uint32_t alternativeFromNode)
+		{
+			if (current.nodes.empty() || alternative.nodes.empty()
+				|| currentFromNode >= current.nodes.size()
+				|| alternativeFromNode >= alternative.nodes.size()) return std::nullopt;
+
+			auto profile = graph.getRouteChoicePolicy().baselineProfile;
+			profile.stairSpeedModifier = agent.getEffectiveStairSpeedModifier().value;
+			profile.escalatorWalkingChance = agent.getEffectiveEscalatorWalkingChance().value;
+			profile.interactionAversion = agent.getEffectiveInteractionAversion().value;
+			profile.effortAversion = agent.getEffectiveEffortAversion().value;
+			profile.waitingAversion = agent.getEffectiveWaitingAversion().value;
+			profile.crowdAversion = agent.getEffectiveCrowdAversion().value;
+			profile.riskAversion = agent.getEffectiveRiskAversion().value;
+			profile.routeFamiliarity = agent.getEffectiveRouteFamiliarity().value;
+			profile.routePersistence = agent.getEffectiveRoutePersistence().value;
+			auto const* world = graph.getWorld();
+			auto const worldSeed = world ? world->getRandomSeed() : uint64_t{ 0 };
+			auto const agentId = world ? world->getAgentId(&agent).value : uint64_t{ 0 };
+			auto const target = alternative.nodes.back().targetVertex.get();
+			auto const journeyIdentity = agent.getRouteJourneyIdentity(target);
+			auto const perceptionKey = worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
+				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
+			RouteDecisionContext const context{ &agent, profile, graph.getRouteChoicePolicy(),
+				agent.getSector(), agent.getWalkSpeed(), world, agent.getClimbSpeed(),
+				true, perceptionKey, 0 };
+
+			auto& workspace = graph.getPathfindingWorkspace();
+			workspace.captureRouteCosts(graph, context);
+			auto score = [&](Path const& path, uint32_t fromNode) -> std::optional<float>
+			{
+				float total = 0.0f;
+				for (uint32_t i = fromNode + 1; i < path.nodes.size(); ++i)
+				{
+					auto const& source = path.nodes[i - 1].targetVertex;
+					auto const& edge = path.nodes[i].edge;
+					if (!source || !edge) return std::nullopt;
+					auto const& edges = source->getEdges();
+					auto found = std::find(edges.begin(), edges.end(), edge);
+					if (found == edges.end()) return std::nullopt;
+					auto const index = workspace.routeOffsets[source->getSearchIndex()]
+						+ static_cast<size_t>(found - edges.begin());
+					if (index >= workspace.routeCosts.size() || !workspace.routeCosts[index])
+						return std::nullopt;
+					total += workspace.routeCosts[index]->perceivedCost;
+					if (!std::isfinite(total)) return std::nullopt;
+				}
+				return total;
+			};
+			auto const currentCost = score(current, currentFromNode);
+			auto const alternativeCost = score(alternative, alternativeFromNode);
+			if (!currentCost || !alternativeCost) return std::nullopt;
+			return std::pair{ *currentCost, *alternativeCost };
 		}
 
 		std::shared_ptr<const Vertex> findNextVertexForVertexInPath(

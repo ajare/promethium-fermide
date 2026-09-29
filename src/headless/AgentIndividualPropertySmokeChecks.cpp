@@ -31,6 +31,14 @@ namespace
 
 void runAgentIndividualPropertySmokeChecks()
 {
+	core::RouteChoicePolicy persistencePolicy;
+	persistencePolicy.minimumSwitchGainSeconds = 2.0f;
+	require(!persistencePolicy.shouldReplacePath(100.0f, 84.0f, 0.20f)
+		&& persistencePolicy.shouldReplacePath(100.0f, 79.0f, 0.20f)
+		&& !persistencePolicy.shouldReplacePath(10.0f, 8.0f, 0.0f)
+		&& persistencePolicy.shouldReplacePath(10.0f, 7.9f, 0.0f),
+		"Route persistence did not require both strict absolute and proportional gains");
+
 	auto const interactionMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::InteractionAversion);
 	auto const effortMetadata = core::agentPropertyMetadata(
@@ -43,6 +51,8 @@ void runAgentIndividualPropertySmokeChecks()
 		core::AgentPropertyType::RiskAversion);
 	auto const familiarityMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::RouteFamiliarity);
+	auto const persistenceMetadata = core::agentPropertyMetadata(
+		core::AgentPropertyType::RoutePersistence);
 	auto const ladderSpeedMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::LadderSpeedModifier);
 	std::string ladderDiagnostic;
@@ -65,6 +75,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& riskMetadata.propertyNamespace == "Pathing"
 		&& familiarityMetadata.name == "Route familiarity"
 		&& familiarityMetadata.propertyNamespace == "Pathing"
+		&& persistenceMetadata.name == "Route persistence"
+		&& persistenceMetadata.propertyNamespace == "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::StairSpeedModifier).propertyNamespace
 			== "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
@@ -113,7 +125,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Waiting aversion");
 	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const registryYaml = serialize(*registry);
-	require(registryYaml.find("version: 11") != std::string::npos
+	require(registryYaml.find("version: 12") != std::string::npos
 		&& registryYaml.find("type: ladderSpeedModifier") != std::string::npos
 		&& registryYaml.find("type: waitingAversion") != std::string::npos
 		&& registryYaml.find("min: 2.5") != std::string::npos,
@@ -127,7 +139,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Crowd aversion");
 	require(registry->setAgentTagCrowdAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const crowdRegistryYaml = serialize(*registry);
-	require(crowdRegistryYaml.find("version: 11") != std::string::npos
+	require(crowdRegistryYaml.find("version: 12") != std::string::npos
 		&& crowdRegistryYaml.find("type: crowdAversion") != std::string::npos
 		&& crowdRegistryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Crowd aversion range was not persisted");
@@ -140,7 +152,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Risk aversion");
 	require(registry->setAgentTagRiskAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const riskRegistryYaml = serialize(*registry);
-	require(riskRegistryYaml.find("version: 11") != std::string::npos
+	require(riskRegistryYaml.find("version: 12") != std::string::npos
 		&& riskRegistryYaml.find("type: riskAversion") != std::string::npos,
 		"The Agent tag Risk aversion range was not persisted");
 	require(registry->addAgentTagRouteFamiliarity(tag, &diagnostic), diagnostic);
@@ -152,9 +164,20 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Route familiarity");
 	require(registry->setAgentTagRouteFamiliarity(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
 	auto const familiarityRegistryYaml = serialize(*registry);
-	require(familiarityRegistryYaml.find("version: 11") != std::string::npos
+	require(familiarityRegistryYaml.find("version: 12") != std::string::npos
 		&& familiarityRegistryYaml.find("type: routeFamiliarity") != std::string::npos,
 		"The Agent tag Route familiarity range was not persisted");
+	require(registry->addAgentTagRoutePersistence(tag, &diagnostic), diagnostic);
+	require(registry->getAgentTagRoutePersistence(tag)->range
+		== core::DefaultAgentRoutePersistenceRange
+		&& core::DefaultAgentRoutePersistenceRange.minimum == 0.15f,
+		"Route persistence did not default to 0.15");
+	require(!registry->setAgentTagRoutePersistence(tag, { -0.01f, 1.0f }, &diagnostic)
+		&& diagnostic.find("between 0 and 1") != std::string::npos,
+		"Agent tag accepted an out-of-range Route persistence");
+	require(registry->setAgentTagRoutePersistence(tag, { 0.8f, 0.8f }, &diagnostic), diagnostic);
+	require(serialize(*registry).find("type: routePersistence") != std::string::npos,
+		"The Agent tag Route persistence range was not persisted");
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 	core::MobilityProfile tagMobility;
 	tagMobility.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
@@ -216,6 +239,11 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveRouteFamiliarity().sourceTag == tag,
 		"The Agent did not inherit its sampled Route familiarity");
 	require(world->setAgentIndividualRouteFamiliarity(id, 0.5f, &diagnostic), diagnostic);
+	require(agent->getRoutePersistenceSample()
+		&& agent->getEffectiveRoutePersistence().value == 0.8f
+		&& agent->getEffectiveRoutePersistence().sourceTag == tag,
+		"The Agent did not inherit its sampled Route persistence");
+	require(world->setAgentIndividualRoutePersistence(id, 0.25f, &diagnostic), diagnostic);
 	core::MobilityProfile directMobility;
 	directMobility.set(core::TraversalKind::Lift, core::MobilityUse::CannotUse);
 	require(world->setAgentIndividualMobilityProfile(id, directMobility, &diagnostic), diagnostic);
@@ -244,6 +272,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveRiskAversion().value == 0.5f
 		&& agent->getEffectiveRouteFamiliarity().individual
 		&& agent->getEffectiveRouteFamiliarity().value == 0.5f
+		&& agent->getEffectiveRoutePersistence().individual
+		&& agent->getEffectiveRoutePersistence().value == 0.25f
 		&& agent->getEffectiveMobilityProfile().individual
 		&& agent->getEffectiveMobilityProfile().value == directMobility,
 		"Individual Agent properties did not override inherited tag values");
@@ -268,13 +298,16 @@ void runAgentIndividualPropertySmokeChecks()
 	require(!world->setAgentIndividualRouteFamiliarity(id, -0.01f, &diagnostic)
 		&& diagnostic.find("between 0 and 1") != std::string::npos,
 		"An out-of-range individual Route familiarity was accepted");
+	require(!world->setAgentIndividualRoutePersistence(id, 1.01f, &diagnostic)
+		&& diagnostic.find("between 0 and 1") != std::string::npos,
+		"An out-of-range individual Route persistence was accepted");
 	auto invalidMobility = directMobility;
 	invalidMobility.uses[0] = static_cast<core::MobilityUse>(3);
 	require(!world->setAgentIndividualMobilityProfile(id, invalidMobility, &diagnostic)
 		&& diagnostic.find("invalid Mobility use") != std::string::npos,
 		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 21") != std::string::npos
+	require(yaml.find("version: 22") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("ladderSpeedModifier") != std::string::npos
@@ -283,8 +316,9 @@ void runAgentIndividualPropertySmokeChecks()
 		&& yaml.find("waitingAversion") != std::string::npos
 		&& yaml.find("crowdAversion") != std::string::npos
 		&& yaml.find("riskAversion") != std::string::npos
-		&& yaml.find("routeFamiliarity") != std::string::npos,
-		"Individual Agent properties were not persisted in World schema 21");
+		&& yaml.find("routeFamiliarity") != std::string::npos
+		&& yaml.find("routePersistence") != std::string::npos,
+		"Individual Agent properties were not persisted in World schema 22");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 	auto reader = core::YamlSerializer::fromString(yaml);
 	reader->deserialize();
@@ -318,6 +352,10 @@ void runAgentIndividualPropertySmokeChecks()
 		&& loadedAgent->getEffectiveRiskAversion().value == 0.5f
 		&& loadedAgent->getRouteFamiliaritySample()
 		&& loadedAgent->getRouteFamiliaritySample()->value == 0.75f
+		&& loadedAgent->getRoutePersistenceSample()
+		&& loadedAgent->getRoutePersistenceSample()->value == 0.8f
+		&& loadedAgent->getEffectiveRoutePersistence().individual
+		&& loadedAgent->getEffectiveRoutePersistence().value == 0.25f
 		&& loadedAgent->getEffectiveRouteFamiliarity().individual
 		&& loadedAgent->getEffectiveRouteFamiliarity().value == 0.5f
 		&& loadedAgent->getEffectiveMobilityProfile().value == directMobility,

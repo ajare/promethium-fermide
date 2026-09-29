@@ -58,7 +58,8 @@ namespace core
 		WaitingAversion,
 		CrowdAversion,
 		RiskAversion,
-		RouteFamiliarity
+		RouteFamiliarity,
+		RoutePersistence
 	};
 
 	struct AgentPropertySample
@@ -151,6 +152,14 @@ namespace core
 		bool individual{ false };
 	};
 
+	struct EffectiveAgentRoutePersistence
+	{
+		float value{ 0.15f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
 	struct EffectiveAgentMobilityProfile
 	{
 		MobilityProfile value{};
@@ -238,6 +247,7 @@ namespace core
 		std::optional<float> mIndividualCrowdAversion;
 		std::optional<float> mIndividualRiskAversion;
 		std::optional<float> mIndividualRouteFamiliarity;
+		std::optional<float> mIndividualRoutePersistence;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -253,6 +263,7 @@ namespace core
 		std::optional<AgentPropertySample> mCrowdAversionSample;
 		std::optional<AgentPropertySample> mRiskAversionSample;
 		std::optional<AgentPropertySample> mRouteFamiliaritySample;
+		std::optional<AgentPropertySample> mRoutePersistenceSample;
 
 		// Activation is authored state (#118): an activated Agent is simulated,
 		// a deactivated one keeps its authored position and route but no tick
@@ -374,6 +385,11 @@ namespace core
 			mRouteFamiliaritySample = sample;
 		}
 		void clearRouteFamiliaritySample() { mRouteFamiliaritySample.reset(); }
+		void setRoutePersistenceSample(AgentPropertySample sample)
+		{
+			mRoutePersistenceSample = sample;
+		}
+		void clearRoutePersistenceSample() { mRoutePersistenceSample.reset(); }
 		void setIndividualColour(std::optional<AgentColour> value)
 		{ mIndividualColour = value; modify(); }
 		void setIndividualEscalatorWalkingChance(std::optional<float> value)
@@ -398,6 +414,8 @@ namespace core
 		{ mIndividualRiskAversion = value; modify(); }
 		void setIndividualRouteFamiliarity(std::optional<float> value)
 		{ mIndividualRouteFamiliarity = value; modify(); }
+		void setIndividualRoutePersistence(std::optional<float> value)
+		{ mIndividualRoutePersistence = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -445,8 +463,6 @@ namespace core
 		void cleanupTraversal();
 
 		void considerTraversalReplan();
-
-		float estimateRemainingPathSeconds(std::shared_ptr<Path> const& path, uint32_t fromNode) const;
 
 		void cancelTraversal();
 
@@ -500,6 +516,8 @@ namespace core
 		{ return mIndividualRiskAversion; }
 		std::optional<float> const& getIndividualRouteFamiliarity() const
 		{ return mIndividualRouteFamiliarity; }
+		std::optional<float> const& getIndividualRoutePersistence() const
+		{ return mIndividualRoutePersistence; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -526,6 +544,7 @@ namespace core
 		EffectiveAgentCrowdAversion getEffectiveCrowdAversion() const;
 		EffectiveAgentRiskAversion getEffectiveRiskAversion() const;
 		EffectiveAgentRouteFamiliarity getEffectiveRouteFamiliarity() const;
+		EffectiveAgentRoutePersistence getEffectiveRoutePersistence() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		uint64_t getRouteJourneyIdentity(Vertex const* destination) const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const
@@ -563,6 +582,10 @@ namespace core
 		std::optional<AgentPropertySample> const& getRouteFamiliaritySample() const
 		{
 			return mRouteFamiliaritySample;
+		}
+		std::optional<AgentPropertySample> const& getRoutePersistenceSample() const
+		{
+			return mRoutePersistenceSample;
 		}
 
 		// Whether this Agent is simulated. Deactivation changes no authored

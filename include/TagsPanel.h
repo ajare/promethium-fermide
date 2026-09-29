@@ -184,6 +184,15 @@ bool commitAgentTagRouteFamiliarityEdit(
 bool commitAgentTagRouteFamiliarityRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
+bool commitAgentTagRoutePersistenceAdd(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
+bool commitAgentTagRoutePersistenceEdit(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	core::AgentModifierRange range, std::string& diagnostic);
+bool commitAgentTagRoutePersistenceRemove(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
 bool commitAgentTagMobilityProfileAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
