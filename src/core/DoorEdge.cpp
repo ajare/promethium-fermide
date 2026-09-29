@@ -66,22 +66,6 @@ namespace core
 			CORE_DOOR_OPEN_CLOSE_TIME);
 	}
 
-	float DoorEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Door)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		// Time in seconds.  As we are crossing Layers, the distance between Vertices is essentially zero.
-
-		float preparation = edgeVisible && mDoor->isOpen()
-			? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : mDoor->getOpenCloseTime();
-		if (!agent) return preparation;
-		auto targetSector = targetVertex && targetVertex->getSector()
-			? SectorId{ (uint64_t)targetVertex->getSector()->getIndex() + 1 } : SectorId{};
-		auto sourceSector = getVertex(0) && SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 } != targetSector
-			? SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 }
-			: getVertex(1) ? SectorId{ (uint64_t)getVertex(1)->getSector()->getIndex() + 1 } : SectorId{};
-		return preparation + agent->estimateTraversalDelay(getTraversalResourceId(), sourceSector);
-	}
-
 	bool DoorEdge::requiresButton() const
 	{
 		return mDoor->getActivationMode() == DoorActivationMode::RemoteControlled;

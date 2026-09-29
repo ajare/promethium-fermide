@@ -397,7 +397,7 @@ namespace
 		auto slowPath = world->getGraph()->calculatePath(slow, target);
 		auto fastPath = world->getGraph()->calculatePath(fast, target);
 		require(slowPath && fastPath && slowPath->nodes.size() == fastPath->nodes.size()
-			&& slowPath->nodes.back().edgeWeight > fastPath->nodes.back().edgeWeight,
+			&& slowPath->nodes.back().cumulativePerceivedCost > fastPath->nodes.back().cumulativePerceivedCost,
 			"Equal routes did not report a lower route time for the faster Agent");
 
 		auto const slowStart = slow->getGlobalPosition();

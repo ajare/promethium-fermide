@@ -229,11 +229,11 @@ namespace core
 		}
 	};
 
-	// Constructed once per synchronous query. Legacy access is confined to snapshot
-	// capture; the frontier consumes only captured directed costs, never live state.
+	// Constructed once per synchronous query. Agent observations are confined to
+	// snapshot capture; the frontier consumes only captured directed costs, never live state.
 	struct RouteDecisionContext
 	{
-		Agent const* const legacyAgent;
+		Agent const* const agent;
 		EffectiveRoutingProfile const profile;
 		RouteChoicePolicy const policy;
 		Sector const* const observationSector = nullptr;

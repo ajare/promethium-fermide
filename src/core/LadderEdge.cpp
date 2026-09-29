@@ -56,26 +56,15 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float LadderEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool edgeVisible) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Ladder)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		auto distance = getLength();
-		float traverseTime = distance == 0.0f ? 0.0f : distance / agent->getClimbSpeed();
-
-		// If Edge isn't visible, then assume we have to wait for the Ladder to extend.
-		if (!edgeVisible || !mLadder->isExtended())
-		{
-			traverseTime += mLadder->getExtendRetractTime();
-		}
-
-		return max(traverseTime, CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME);
-	}
-
 	DirectedTraversalFacts LadderEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (routeRejectsEdge(context, *this, TraversalKind::Ladder)) return facts;
+		if (routeRejectsEdge(context, *this, TraversalKind::Ladder))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto const source = getOtherVertex(targetVertex);
 		auto const rise = getDirectedRise(*targetVertex);
 		auto const distance = getLength();

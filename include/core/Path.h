@@ -57,17 +57,16 @@ namespace core
 	{
 		std::shared_ptr<const Edge> edge;
 		std::shared_ptr<const Vertex> targetVertex;
-		// Legacy name retained for serialization/runtime compatibility; this is a
-		// cumulative perceived score, never a movement duration. Inferred-source
+		// Cumulative perceived score, never a movement duration. Inferred-source
 		// Paths include the initial walk to their first vertex (whose edge is null).
-		float edgeWeight;
+		float cumulativePerceivedCost;
 		std::optional<float> objectiveDurationSeconds;
 		// Captured from the immutable route-decision context. It is deliberately
 		// not serialized: a restored Path must report historical diagnostics as
 		// unavailable rather than recreating them from current observations.
 		std::optional<EvaluatedRouteCost> diagnosticCost;
 
-		float getCumulativePerceivedCost() const { return edgeWeight; }
+		float getCumulativePerceivedCost() const { return cumulativePerceivedCost; }
 	};
 
 	struct Path

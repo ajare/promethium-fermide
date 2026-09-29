@@ -7661,28 +7661,28 @@ void renderPathingPanel(shared_ptr<core::World> const& world,
 				ImGui::TableSetupColumn("Edge");
 				ImGui::TableSetupColumn("Target vertex");
 				ImGui::TableSetupColumn("Action");
-				ImGui::TableSetupColumn("Edge weight");
-				ImGui::TableSetupColumn("Cumulative weight");
+				ImGui::TableSetupColumn("Traversal perceived cost");
+				ImGui::TableSetupColumn("Cumulative perceived cost");
 				ImGui::TableHeadersRow();
 
 				int curRow = 0;
-				float curWeight = 0.0f;
+				float previousPerceivedCost = 0.0f;
 				for (auto const& node : path->nodes)
 				{
 					auto const& edge = node.edge;
 					auto const& targetVertex = node.targetVertex;
-					auto const cumulativeWeight = node.getCumulativePerceivedCost();
+					auto const cumulativePerceivedCost = node.getCumulativePerceivedCost();
 
 					string edgeText = edge ? edge->getDescription() : "<no edge>";
 					string pathVertexText = targetVertex->getDescription();
 					
 					string vertexActionText = "--";
 
-					auto nodeWeight = cumulativeWeight - curWeight;
-					curWeight = cumulativeWeight;
+					auto traversalPerceivedCost = cumulativePerceivedCost - previousPerceivedCost;
+					previousPerceivedCost = cumulativePerceivedCost;
 					
-					string curWeightText = to_string(nodeWeight);
-					string totalWeightText = to_string(cumulativeWeight);
+					string traversalCostText = to_string(traversalPerceivedCost);
+					string cumulativeCostText = to_string(cumulativePerceivedCost);
 
 					ImGui::TableNextRow();
 
@@ -7698,13 +7698,13 @@ void renderPathingPanel(shared_ptr<core::World> const& world,
 					ImGui::TableSetColumnIndex(2);
 					ImGui::TextUnformatted(vertexActionText.c_str());
 
-					// Edge weight
+					// Traversal perceived cost
 					ImGui::TableSetColumnIndex(3);
-					ImGui::TextUnformatted(curWeightText.c_str());
+					ImGui::TextUnformatted(traversalCostText.c_str());
 
-					// Cumulative weight
+					// Cumulative perceived cost
 					ImGui::TableSetColumnIndex(4);
-					ImGui::TextUnformatted(totalWeightText.c_str());
+					ImGui::TextUnformatted(cumulativeCostText.c_str());
 
 					curRow++;
 				}

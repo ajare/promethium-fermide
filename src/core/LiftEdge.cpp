@@ -54,28 +54,16 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float LiftEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const
-	{
-		if (agentForbidsEdge(agent, *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		(void)edgeVisible;
-		auto rideTime = getLength() / mLift->getSpeed();
-		auto ride = rideTime > CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-			? rideTime : CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
-		if (!agent) return ride;
-		auto targetSector = targetVertex && targetVertex->getSector()
-			? SectorId{ (uint64_t)targetVertex->getSector()->getIndex() + 1 } : SectorId{};
-		auto sourceSector = getVertex(0) && SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 } != targetSector
-			? SectorId{ (uint64_t)getVertex(0)->getSector()->getIndex() + 1 }
-			: getVertex(1) ? SectorId{ (uint64_t)getVertex(1)->getSector()->getIndex() + 1 } : SectorId{};
-		return ride + agent->estimateTraversalDelay(getTraversalResourceId(), sourceSector);
-	}
-
 	DirectedTraversalFacts LiftEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
-		if (routeRejectsEdge(context, *this,
-			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return {};
 		DirectedTraversalFacts facts;
+		if (routeRejectsEdge(context, *this,
+			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		facts.feasible = true;
 		auto const distance = getLength();
 		facts.components.motionSeconds = distance / mLift->getSpeed();

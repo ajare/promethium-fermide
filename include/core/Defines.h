@@ -213,7 +213,6 @@ namespace core
 // Graph
 //
 #define CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME			0.1f
-#define CORE_GRAPH_EDGE_UNTRAVERSABLE				999999.0f
 
 
 //

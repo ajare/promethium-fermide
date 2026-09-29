@@ -55,24 +55,20 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float ShuttleEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool /* edgeVisible */) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Shuttle)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		auto resource = getTraversalResourceId();
-		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-			+ (agent && resource ? agent->estimateTraversalDelay(resource,
-				SectorId{ (uint64_t)targetVertex->getSector()->getIndex() + 1 }) : 0.0f);
-	}
-
 	DirectedTraversalFacts ShuttleEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		if (routeRejectsEdge(context, *this, TraversalKind::Shuttle)) return {};
+		if (routeRejectsEdge(context, *this, TraversalKind::Shuttle))
+		{
+			DirectedTraversalFacts facts;
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto source = getOtherVertex(target);
 		auto observe = [&](Vector2 const& endpoint)
 		{
 			return context.world ? context.world->observeShuttleAccess(getTraversalResourceId(), endpoint, false)
-				: context.legacyAgent ? context.legacyAgent->observeShuttleAccess(getTraversalResourceId(), endpoint, false)
+				: context.agent ? context.agent->observeShuttleAccess(getTraversalResourceId(), endpoint, false)
 				: std::nullopt;
 		};
 		auto from = observe(source->getPosition());

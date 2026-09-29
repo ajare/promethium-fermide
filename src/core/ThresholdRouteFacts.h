@@ -35,11 +35,11 @@ namespace core
 		auto const sourceEndpoint = source ? source->getPosition() : Vector2{};
 		// Querying an unobserved landing returns static capacity only. The World does
 		// not inspect its queue, car position, calls, or scheduler state.
-		auto liftAccess = context.legacyAgent ? context.legacyAgent->observeLiftAccess(
+		auto liftAccess = context.agent ? context.agent->observeLiftAccess(
 			edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
 		auto shuttleAccess = context.world ? context.world->observeShuttleAccess(
 			edge.getTraversalResourceId(), sourceEndpoint, observed)
-			: context.legacyAgent ? context.legacyAgent->observeShuttleAccess(
+			: context.agent ? context.agent->observeShuttleAccess(
 				edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
 		if (door.getActivationMode() == DoorActivationMode::Unavailable
 			&& !door.isOpen() && !liftAccess && !shuttleAccess)
@@ -86,14 +86,14 @@ namespace core
 				c.crowdingUnits = (float)liftAccess->queuedAgents
 					/ std::max(1u, liftAccess->capacity);
 			}
-			else if (!liftAccess && context.legacyAgent)
+			else if (!liftAccess && context.agent)
 			{
 				auto const sourceSector = SectorId{ (uint64_t)sector->getIndex() + 1 };
 				// Admission delay and visible density are deliberately independent:
 				// Waiting aversion weights the former and Crowd aversion the latter.
-				c.knownWaitSeconds += context.legacyAgent->estimateTraversalDelay(
+				c.knownWaitSeconds += context.agent->estimateTraversalDelay(
 					edge.getTraversalResourceId(), sourceSector);
-				c.crowdingUnits = context.legacyAgent->observeAccessZoneDensity(
+				c.crowdingUnits = context.agent->observeAccessZoneDensity(
 					edge.getTraversalResourceId(), sourceSector);
 			}
 		}

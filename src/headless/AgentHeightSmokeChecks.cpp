@@ -357,8 +357,8 @@ namespace
 		auto const approachDifference = (shortAgent->getGlobalPosition().distanceTo(target->getPosition())
 			- tallAgent->getGlobalPosition().distanceTo(target->getPosition())) / shortAgent->getWalkSpeed();
 		require(shortPath && tallPath && shortPath->nodes.size() == tallPath->nodes.size()
-			&& std::abs(shortPath->nodes.back().edgeWeight
-				- tallPath->nodes.back().edgeWeight - approachDifference) < 0.000001f,
+			&& std::abs(shortPath->nodes.back().cumulativePerceivedCost
+				- tallPath->nodes.back().cumulativePerceivedCost - approachDifference) < 0.000001f,
 			"Visual Height changed path topology or route timing");
 		auto const shortStart = shortAgent->getGlobalPosition();
 		auto const tallStart = tallAgent->getGlobalPosition();

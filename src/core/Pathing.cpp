@@ -95,11 +95,11 @@ namespace core
 	void PathfindingWorkspace::captureRouteCosts(Graph const& graph, RouteDecisionContext const& input)
 	{
 		captureTopology(graph);
-		RouteDecisionContext const context{ input.legacyAgent, input.profile, input.policy,
+		RouteDecisionContext const context{ input.agent, input.profile, input.policy,
 			input.observationSector, input.walkSpeed, input.world, input.climbSpeed,
 			input.allowFallbackMobility, input.perceptionKey, input.observationEpoch,
 			input.mobilityProfile ? input.mobilityProfile : std::optional<MobilityProfile>{
-				input.legacyAgent ? input.legacyAgent->getEffectiveMobilityProfile().value : MobilityProfile{} } };
+				input.agent ? input.agent->getEffectiveMobilityProfile().value : MobilityProfile{} } };
 		auto const oldCostsCapacity = routeCosts.capacity();
 		routeCosts.clear();
 		routeCosts.reserve(directedArcs.size());

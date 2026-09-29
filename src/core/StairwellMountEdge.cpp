@@ -62,18 +62,13 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float StairwellMountEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool /* edgeVisible */) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Stairwell)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		return 0.0f;
-	}
-
 	DirectedTraversalFacts StairwellMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
 		facts.feasible = !routeRejectsEdge(context, *this, TraversalKind::Stairwell);
 		if (facts.feasible) facts.objectiveDurationSeconds = 0.0f;
+		else facts.exclusionReason = RouteExclusionReason::Mobility;
 		return facts;
 	}
 

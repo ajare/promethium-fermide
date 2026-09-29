@@ -62,19 +62,15 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float ShuttleMountEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool /* edgeVisible */) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Shuttle)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		auto resource = getTraversalResourceId();
-		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-			+ (agent && resource ? agent->estimateTraversalDelay(resource,
-				SectorId{ (uint64_t)targetVertex->getSector()->getIndex() + 1 }) : 0.0f);
-	}
-
 	DirectedTraversalFacts ShuttleMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
-		if (routeRejectsEdge(context, *this, TraversalKind::Shuttle)) return {};
+		if (routeRejectsEdge(context, *this, TraversalKind::Shuttle))
+		{
+			DirectedTraversalFacts facts;
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		// Topology connector only: admission is charged at the landing Door.
 		DirectedTraversalFacts facts;
 		facts.feasible = true;

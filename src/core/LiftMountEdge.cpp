@@ -64,18 +64,16 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float LiftMountEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool /* edgeVisible */) const
-	{
-		if (agentForbidsEdge(agent, *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
-	}
-
 	DirectedTraversalFacts LiftMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		if (routeRejectsEdge(context, *this,
-			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return {};
 		DirectedTraversalFacts facts;
+		if (routeRejectsEdge(context, *this,
+			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		facts.feasible = true;
 		// The authored PlatformLift object is the Location-side Vertex. Entering
 		// therefore targets the topology-only Lift Vertex; leaving targets the object.
@@ -84,11 +82,11 @@ namespace core
 		if (boarding)
 		{
 			auto const capacity = max(1u, mLift->getRouteCapacity());
-			bool const observed = context.legacyAgent && context.observationSector
+			bool const observed = context.agent && context.observationSector
 				&& getOtherVertex(target)->getSector().get() == context.observationSector
-				&& abs(context.legacyAgent->getGlobalPosition().y
+				&& abs(context.agent->getGlobalPosition().y
 					- getOtherVertex(target)->getPosition().y) <= 0.5f;
-			auto observation = observed ? context.legacyAgent->observeLiftAccess(
+			auto observation = observed ? context.agent->observeLiftAccess(
 				getTraversalResourceId(), getOtherVertex(target)->getPosition()) : nullopt;
 			if (observation)
 			{

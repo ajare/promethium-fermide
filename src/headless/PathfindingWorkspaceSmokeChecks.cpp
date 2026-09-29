@@ -37,7 +37,7 @@ namespace
 	{
 		PathDigest result;
 		for (auto const& node : path->nodes)
-			result.emplace_back(node.targetVertex->getId(), std::bit_cast<uint32_t>(node.edgeWeight));
+			result.emplace_back(node.targetVertex->getId(), std::bit_cast<uint32_t>(node.cumulativePerceivedCost));
 		return result;
 	}
 
@@ -47,11 +47,11 @@ namespace
 		core::DirectedTraversalFacts facts;
 		require(!policy.evaluate(facts, {}), "Excluded traversal acquired a finite cost");
 		facts.feasible = true;
-		facts.components.motionSeconds = 2;
-		facts.components.physicalEffortUnits = 2000000;
-		facts.objectiveDurationSeconds = 2;
+		facts.components.motionSeconds = 2.0f;
+		facts.components.physicalEffortUnits = 2000000.0f;
+		facts.objectiveDurationSeconds = 2.0f;
 		auto cost = policy.evaluate(facts, {});
-		require(cost && cost->perceivedCost == 2000002 && cost->objectiveDurationSeconds == 2,
+		require(cost && cost->perceivedCost == 2000002.0f && cost->objectiveDurationSeconds == 2.0f,
 			"Finite dislike became exclusion or changed objective duration");
 		core::PathfindingWorkspace workspace;
 		workspace.beginSearch(4);
@@ -109,7 +109,7 @@ namespace
 					auto path = graph->calculatePath(&agent, source, target);
 					auto expected = distances[target->getSearchIndex()];
 					require(bool(path) == std::isfinite(expected), "Reference reachability mismatch");
-					if (path) require(std::abs(path->nodes.back().edgeWeight - expected) < 0.001f,
+					if (path) require(std::abs(path->nodes.back().cumulativePerceivedCost - expected) < 0.001f,
 						"Bundled Path does not minimise perceived directed costs (#191)");
 				}
 			}
@@ -129,7 +129,7 @@ namespace
 		world.finishBuild();
 		world.pauseSimulation();
 		auto id = world.createAgent("Uncertain walker", lower, 0, 1.5f);
-		require(world.setAgentIndividualRouteFamiliarity(id, 0), "Could not set uncertain profile");
+		require(world.setAgentIndividualRouteFamiliarity(id, 0.0f), "Could not set uncertain profile");
 		auto target = world.getGraph()->getVertexByIdentifier(destination);
 		auto markerId = std::dynamic_pointer_cast<core::Marker>(target->getObject())->getMarkerId();
 		auto source = world.getGraph()->getVertexByIdentifier(origin);
@@ -142,7 +142,7 @@ namespace
 		PathDigest expected;
 		for (auto const& node : before->nodes)
 		{
-			expected.emplace_back(node.targetVertex->getSearchIndex(), std::bit_cast<uint32_t>(node.edgeWeight));
+			expected.emplace_back(node.targetVertex->getSearchIndex(), std::bit_cast<uint32_t>(node.cumulativePerceivedCost));
 			uncertain = uncertain || (node.diagnosticCost && node.diagnosticCost->components.uncertainty > 0
 				&& node.diagnosticCost->components.stableVariation != 0);
 		}
@@ -161,7 +161,7 @@ namespace
 		require(after != nullptr, "Reset lost the uncertain Path");
 		PathDigest actual;
 		for (auto const& node : after->nodes)
-			actual.emplace_back(node.targetVertex->getSearchIndex(), std::bit_cast<uint32_t>(node.edgeWeight));
+			actual.emplace_back(node.targetVertex->getSearchIndex(), std::bit_cast<uint32_t>(node.cumulativePerceivedCost));
 		require(actual == expected, "Process-global Edge IDs changed perceived costs after a World reset");
 	}
 
@@ -335,7 +335,7 @@ namespace
 					require(bounds[source] <= distances[target], "Shared lower bound overestimated a valid profile");
 					auto path = graph->calculatePath(agent, graph->getVertices()[source], graph->getVertices()[target]);
 					require(bool(path) == std::isfinite(distances[target])
-						&& (!path || path->nodes.back().edgeWeight == distances[target]),
+						&& (!path || path->nodes.back().cumulativePerceivedCost == distances[target]),
 						"Bounded search disagreed with exact float reference Dijkstra at a profile extreme");
 				}
 			}
@@ -457,7 +457,7 @@ namespace
 				{
 					if (node.edge) traversalKinds |= 1u << static_cast<uint32_t>(node.edge->getType());
 					hash = (hash ^ node.targetVertex->getSearchIndex()) * 1099511628211ULL;
-					hash = (hash ^ std::bit_cast<uint32_t>(node.edgeWeight)) * 1099511628211ULL;
+					hash = (hash ^ std::bit_cast<uint32_t>(node.cumulativePerceivedCost)) * 1099511628211ULL;
 				}
 			}
 			for (auto kind : { core::EdgeType::Lift, core::EdgeType::Ladder, core::EdgeType::Staircase })
@@ -542,22 +542,26 @@ namespace
 		auto const first = graph->calculatePath(agent, source, destination);
 		require(first && first->nodes.size() >= 2, "The workspace fixture has no connected Path");
 		float cumulativeCost = 0.0f;
+		float cumulativeDuration = 0.0f;
 		for (size_t i = 1; i < first->nodes.size(); ++i)
 		{
 			auto const& node = first->nodes[i];
 			require(node.edge != nullptr, "A non-source Path node has no Edge");
-			cumulativeCost += node.edge->getWeight(node.targetVertex, agent, true);
-			require(std::abs(cumulativeCost - node.edgeWeight) < 0.0001f,
-				"Path cumulative cost differs from its Edge weights");
+			require(node.diagnosticCost && node.diagnosticCost->objectiveDurationSeconds,
+				"Walking Path node omitted captured route facts");
+			cumulativeCost += node.diagnosticCost->perceivedCost;
+			cumulativeDuration += *node.diagnosticCost->objectiveDurationSeconds;
+			require(std::abs(cumulativeCost - node.cumulativePerceivedCost) < 0.0001f,
+				"Path cumulative perceived cost differs from captured route costs");
 		}
 		require(first->nodes.back().objectiveDurationSeconds
-			&& std::abs(*first->nodes.back().objectiveDurationSeconds - cumulativeCost) < 0.0001f,
+			&& std::abs(*first->nodes.back().objectiveDurationSeconds - cumulativeDuration) < 0.0001f,
 			"Walking Path did not report physical objective duration");
 		auto const diagnostic = core::pathing::getRouteDiagnostics(*first);
 		require(diagnostic
 			&& std::abs(diagnostic->components.total() - diagnostic->perceivedCost) < 0.0001f
 			&& diagnostic->objectiveEstimatedDurationSeconds
-			&& std::abs(*diagnostic->objectiveEstimatedDurationSeconds - cumulativeCost) < 0.0001f,
+			&& std::abs(*diagnostic->objectiveEstimatedDurationSeconds - cumulativeDuration) < 0.0001f,
 			"On-demand Path diagnostics did not preserve cost components and objective duration");
 		require(diagnostic->context.provenance.effortAversion.source
 				== core::RoutingPropertySource::Default
@@ -645,7 +649,7 @@ namespace
 		require(stationary && stationary->nodes.size() == 1
 			&& stationary->nodes.front().targetVertex == source
 			&& !stationary->nodes.front().edge
-			&& std::abs(stationary->nodes.front().edgeWeight) < 0.0001f,
+			&& std::abs(stationary->nodes.front().cumulativePerceivedCost) < 0.0001f,
 			"Source-equals-target Path behaviour changed");
 	}
 }

@@ -64,21 +64,6 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float LadderMountEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool /* edgeVisible */) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Ladder)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		if (!mLadder->isExtended())
-		{
-			auto source = getOtherVertex(targetVertex);
-			auto sourceSector = source && source->getSector()
-				? SectorId{ (uint64_t)source->getSector()->getIndex() + 1 } : SectorId{};
-			if (source && source->getType() != VertexType::Ladder
-				&& !mLadder->canPrepareFrom(sourceSector))
-				return numeric_limits<float>::infinity();
-		}
-		return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
-	}
-
 	DirectedTraversalFacts LadderMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{

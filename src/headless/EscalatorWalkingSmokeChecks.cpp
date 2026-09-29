@@ -93,6 +93,17 @@ namespace
 
 		core::Agent* agent() { return world.lookupAgent(id).entity; }
 
+		core::DirectedTraversalFacts routeFacts(std::shared_ptr<const core::Vertex> destination)
+		{
+			auto profile = world.getRouteChoicePolicy().baselineProfile;
+			profile.escalatorWalkingChance = agent()->getEffectiveEscalatorWalkingChance().value;
+			core::RouteDecisionContext const context{ agent(), profile,
+				world.getRouteChoicePolicy(), agent()->getSector(), agent()->getWalkSpeed(),
+				&world, agent()->getClimbSpeed(), false, 0, 0,
+				agent()->getEffectiveMobilityProfile().value };
+			return edge->getDirectedTraversalFacts(std::move(destination), context);
+		}
+
 		void route(bool observations)
 		{
 			// Return by the separate stationary Staircase, not against moving steps.
@@ -221,7 +232,8 @@ namespace
 						auto const expectedRouteSpeed = 0.75f
 							+ fixture.agent()->getEffectiveEscalatorWalkingChance().value
 								* fixture.agent()->getWalkSpeed();
-						require(std::abs(fixture.edge->getWeight(fixture.target, fixture.agent(), true)
+						auto const facts = fixture.routeFacts(fixture.target);
+						require(facts.feasible && std::abs(facts.components.motionSeconds
 							- fixture.edge->getLength() / expectedRouteSpeed) < 1e-6f,
 							"route estimate did not use expected walking contribution");
 						(void)fixture.world.getGraph()->calculatePath(fixture.agent(), fixture.target);
@@ -370,7 +382,11 @@ return {
 			{
 				Fixture fixture(chance, speed);
 				require(!fixture.edge->isTraversable(fixture.edge->getOtherVertex(fixture.target), nullptr), "reverse traversal permitted");
-				require(!std::isfinite(fixture.edge->getWeight(fixture.edge->getOtherVertex(fixture.target), fixture.agent(), true)), "reverse route cost");
+				auto const reverseFacts = fixture.routeFacts(
+					fixture.edge->getOtherVertex(fixture.target));
+				require(!reverseFacts.feasible
+					&& reverseFacts.exclusionReason == core::RouteExclusionReason::Direction,
+					"reverse route feasibility");
 				auto run = traverse(fixture, 1, 1, true);
 				require(run.decisions == std::vector<bool>{ chance == 1 }, "endpoint decision");
 			}

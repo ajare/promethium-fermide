@@ -20,11 +20,8 @@ namespace core
 	a Location leads to another Location at a higher level but there is no Walkway for it to
 	connect to.
 
-	Gaps are essentially not crossable, but are included as Edges with a very high weight in
-	case that some means of crossing them (jumping?) might be added.  If an Agent receives a
-	path with a large weight, it needs to decide whether to ignore it completely and give up
-	on where it is going, or use that path in some vain hope that something will change by the
-	time it gets to the gap.
+	Gaps are not crossable. They remain in the topology to represent absent physical
+	continuation, but directed route facts exclude them from every Path.
 	*/
 
 	GapEdge::GapEdge()
@@ -57,9 +54,12 @@ namespace core
 		return EdgeTraversalRequestResult::Failed;
 	}
 
-	float GapEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* /* agent */, bool /* edgeVisible */) const
+	DirectedTraversalFacts GapEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex>, RouteDecisionContext const&) const
 	{
-		return CORE_GRAPH_EDGE_UNTRAVERSABLE;
+		DirectedTraversalFacts facts;
+		facts.exclusionReason = RouteExclusionReason::NoContinuation;
+		return facts;
 	}
 
 } // core

@@ -27,8 +27,8 @@ queue delay; other thresholds (including null-Agent previews) use policy
 expectations. Defaults assume a 50% chance of needing opening preparation and
 no unknown queue delay. Threshold/manual/remote interaction defaults are
 0.05/0.5/2 seconds-equivalent. Opening preparation uses style-independent nominal
-timing; visual animation timing remains unchanged. Unmigrated modes retain the
-compatibility adapter.
+timing; visual animation timing remains unchanged. Every traversal now supplies
+explicit directed facts; there is no combined Edge-weight compatibility path.
 
 ## Shuttle journey route costs (#215)
 
@@ -240,21 +240,19 @@ policy/profile into a const `RouteDecisionContext` and captures both directions
 of every arc before expanding the frontier. Relaxation reads only this snapshot.
 Snapshot buffers are reused and included in scratch-allocation accounting.
 
-`Edge::getDirectedTraversalFacts` is the migration seam. Its default adapter
-retains existing `getWeight(..., true)` behaviour, including Mobility checks and
-legacy finite-sentinel/+infinity exclusions. New facts use `feasible=false` for
-exclusions; even a perceived cost above the old sentinel remains usable. Invalid
+`Edge::getDirectedTraversalFacts` is the sole route-query contract. Every Edge
+supplies explicit directed feasibility, objective duration, and cost components;
+exclusions use `feasible=false`, never finite sentinels or infinity. Even a
+perceived cost above historical sentinel values remains usable. Invalid
 components, totals, or cumulative scores are rejected with `invalid_argument`.
-The compatibility adapter does not claim that mixed legacy weights are objective
-time: cumulative objective duration is unavailable until all traversed edges
-supply it. `PathNode::edgeWeight` remains the cumulative perceived score for
-compatibility, also exposed as `getCumulativePerceivedCost()`.
+`PathNode::cumulativePerceivedCost` stores only the cumulative perceived score,
+also exposed as `getCumulativePerceivedCost()`.
 
-The initial capture is O(E) per query and still performs legacy tag/live-state
-lookups. Compact authored facts, effective physical profiles, local-only
-observations, and traversal-specific timing are subsequent migration work; no
-claim of local-only knowledge is made for the compatibility adapter. Actual
-movement and traversal coordination continue using their existing timing APIs.
+The initial capture is O(E) per query. Compact authored facts, effective physical
+profiles, local-only observations, and traversal-specific timing keep routing
+separate from runtime movement. Actual movement and traversal coordination use
+physical traversal speeds, device timing, reservations, and permits rather than
+perceived cost.
 
 `PathfindingWorkspaceSmokeChecks` checks all vertex pairs in the four bundled
 #191 Worlds against an independent reference Dijkstra, component validation,

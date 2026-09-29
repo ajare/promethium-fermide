@@ -358,7 +358,7 @@ namespace
 		return inferredPath && inferredPath->nodes.size() == 1
 			&& inferredPath->nodes.front().targetVertex->sameAs(destination)
 			&& !inferredPath->nodes.front().edge
-			&& inferredPath->nodes.front().edgeWeight == 3.0f / agent->getWalkSpeed()
+			&& inferredPath->nodes.front().cumulativePerceivedCost == 3.0f / agent->getWalkSpeed()
 			&& inferredPath->nodes.front().objectiveDurationSeconds == 3.0f / agent->getWalkSpeed()
 			&& explicitPath && explicitPath->nodes.size() == 2
 			&& explicitPath->nodes.front().targetVertex->sameAs(source);
@@ -2541,7 +2541,15 @@ namespace
 		// Route estimation observes queue demand but creates no coordination state.
 		auto requestCount = fresh.traversalRequests.size();
 		auto permitCount = fresh.traversalPermits.size();
-		if (edge->getWeight(destination, world.lookupAgent(ids.front()).entity, true) <= 0.0f
+		auto routeAgent = world.lookupAgent(ids.front()).entity;
+		auto const& routePolicy = world.getRouteChoicePolicy();
+		core::RouteDecisionContext const routeContext{ routeAgent,
+			routePolicy.baselineProfile, routePolicy, routeAgent->getSector(),
+			routeAgent->getWalkSpeed(), &world, routeAgent->getClimbSpeed(), false,
+			0, 0, routeAgent->getEffectiveMobilityProfile().value };
+		auto const routeCost = routePolicy.evaluate(
+			edge->getDirectedTraversalFacts(destination, routeContext), routeContext.profile);
+		if (!routeCost || routeCost->perceivedCost <= 0.0f
 			|| world.getSimulationSnapshot().traversalRequests.size() != requestCount
 			|| world.getSimulationSnapshot().traversalPermits.size() != permitCount) return false;
 

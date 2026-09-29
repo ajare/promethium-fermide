@@ -92,12 +92,9 @@ namespace core
 		// To be implemented by subclasses.
 		virtual EdgeTraversalRequestResult requestTraversal(std::shared_ptr<const Vertex> targetVertex, std::shared_ptr<const Agent> agent) const = 0 ;
 
-		// To be implemented by subclasses.  Returned weight is in seconds.
-		[[nodiscard]] virtual float getWeight(std::shared_ptr<const Vertex> targetVertex, Agent const* agent, bool edgeVisible) const = 0;
-
-		// Migration seam: subclasses may expose facts without encoding exclusion in a weight.
+		// Supplies directed feasibility and objective facts for route evaluation.
 		[[nodiscard]] virtual DirectedTraversalFacts getDirectedTraversalFacts(
-			std::shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const;
+			std::shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const = 0;
 
 		// True when using this Edge necessarily requires operating an interaction
 		// point. This is a pure function of authored resource data.

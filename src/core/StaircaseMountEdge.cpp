@@ -25,13 +25,6 @@ namespace core
 		return isTraversable(std::move(target), std::move(agent))
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
-	float StaircaseMountEdge::getWeight(shared_ptr<const Vertex>, Agent const* agent, bool) const
-	{
-		auto const kind = mStaircase->isEscalator()
-			? TraversalKind::Escalator : TraversalKind::Staircase;
-		return agentForbidsEdge(agent, *this, kind) ? CORE_GRAPH_EDGE_UNTRAVERSABLE : 0.0f;
-	}
-
 	DirectedTraversalFacts StaircaseMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
@@ -40,6 +33,7 @@ namespace core
 		DirectedTraversalFacts facts;
 		facts.feasible = !routeRejectsEdge(context, *this, kind);
 		if (facts.feasible) facts.objectiveDurationSeconds = 0.0f;
+		else facts.exclusionReason = RouteExclusionReason::Mobility;
 		return facts;
 	}
 }

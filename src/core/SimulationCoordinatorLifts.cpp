@@ -458,7 +458,9 @@ namespace core
 			if (!landingEdge) continue;
 			auto path = make_shared<Path>();
 			path->nodes.push_back({ nullptr, source, 0.0f });
-			path->nodes.push_back({ landingEdge, destination, landingEdge->getWeight(destination, agent, true) });
+			// This safety Path is a runtime coordination command, not a route-choice
+			// result; crossing remains governed by the landing permit and physical timing.
+			path->nodes.push_back({ landingEdge, destination, 0.0f });
 			agent->assignPath(std::move(path), true, false);
 			assigned.push_back(passenger);
 		}

@@ -62,19 +62,4 @@ namespace core
 		return facts;
 	}
 
-	float SectorEdge::getWeight(shared_ptr<const Vertex> /* targetVertex */, Agent const* agent, bool edgeVisible) const
-	{
-		CORE_VAR_UNUSED(edgeVisible);
-
-		auto distance = getLength();
-
-		if (distance == 0.0f)
-		{
-			return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
-		}
-
-		// Time in seconds
-		return distance / (agent ? agent->getWalkSpeed() : CORE_AGENT_BASE_WALK_SPEED);
-	}
-
 } // core

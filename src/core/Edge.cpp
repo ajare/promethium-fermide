@@ -1,8 +1,6 @@
 #include <cassert>
-#include <limits>
 
 #include "core/Edge.h"
-#include "core/Defines.h"
 #include "core/Vertex.h"
 #include "core/Exceptions.h"
 
@@ -20,9 +18,9 @@ namespace core
 	the main members of the	Graph class, along with Vertex.  It is designed to be
 	subclassed to provide functionality specific to the Sector it is used in.
 
-	An Edge has two Vertices, and a weight function, which depends on various
-	external factors.  The Vertices may be in different Layers, in which case the
-	transition along the Edge is usually instantaneous, once traversal conditions
+	An Edge has two Vertices and supplies directed traversal facts for route
+	evaluation. The Vertices may be in different Layers, in which case the
+	transition along the Edge is usually instantaneous once traversal conditions
 	have been fulfilled.
 
 	There are two functions used to handle movement of an Agent along an Edge:
@@ -42,35 +40,15 @@ namespace core
 	an enum rather than true/false so that a more detailed failure reason can be returned
 	for Agents to make decisions with.
 
-	Weight is the time in seconds, to cross the Edge, and will depend on various
-	dynamic factors, for instance the speed of a Lift.  The weight calculation is
-	bi-directional and takes a target Vertex to determine direction.  There are times
-	when we want to mark an Edge as untraversable.  This is done by returning a very
-	large time value - CORE_GRAPH_EDGE_UNTRAVERSABLE. The compatibility adapter
-	translates this (and legacy positive infinity) into hard exclusion, never a
-	last-resort route. New implementations expose DirectedTraversalFacts instead;
-	finite perceived dislike is independent of feasibility and objective duration.
+	Route evaluation obtains explicit feasibility, objective duration, and cost
+	components from getDirectedTraversalFacts(). Runtime movement remains governed
+	by isTraversable(), requestTraversal(), permits, and physical traversal speeds.
 
 	As Graphs may be copied, and their Edges and Vertices copied as well, we still
 	need a way to know whether an Edge in one Graph is the same as in another - ie
 	topologically the same, even if its weights and other values are different.  For
 	this, we use an GUID (IdGenerator), and the Edge::sameAs() method.
 	*/
-
-	DirectedTraversalFacts Edge::getDirectedTraversalFacts(
-		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
-	{
-		auto const weight = getWeight(targetVertex, context.legacyAgent, true);
-		// Legacy hard exclusions use either the finite sentinel or +infinity
-		// (wrong-way Escalators and resources unpreparable from this side).
-		// New facts must use feasible=false, never a non-finite component.
-		if (weight == CORE_GRAPH_EDGE_UNTRAVERSABLE
-			|| weight == std::numeric_limits<float>::infinity()) return {};
-		DirectedTraversalFacts facts;
-		facts.feasible = true;
-		facts.components.motionSeconds = weight;
-		return facts;
-	}
 
 	uint32_t Edge::IdGenerator = 0;
 
@@ -91,8 +69,8 @@ namespace core
 	sameAs()
 	--------
 
-	An Agent may have its own Graph, but that Graph will only differ in Edge weights.  Thus we need a way to
-	compare Edges in different Graphs to determine if they are the same topological Edge.  This is done
+	An Agent may evaluate the same Graph with different directed route costs. Thus we need a way to
+	compare Edges across graph copies to determine if they are the same topological Edge. This is done
 	with this method.  We do not override the equality operators.
 	*/
 	bool Edge::sameAs(shared_ptr<const Edge> other) const

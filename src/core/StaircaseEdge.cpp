@@ -60,35 +60,6 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float StaircaseEdge::getWeight(shared_ptr<const Vertex> targetVertex,
-		Agent const* agent, bool edgeVisible) const
-	{
-		auto const kind = mStaircase->isEscalator()
-			? TraversalKind::Escalator : TraversalKind::Staircase;
-		if (agentForbidsEdge(agent, *this, kind)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		auto sourceVertex = getOtherVertex(targetVertex);
-		bool const movingUp = targetVertex->getPosition().y > sourceVertex->getPosition().y;
-		if (mStaircase->isEscalator())
-		{
-			if (movingUp != (mStaircase->getSpeed() > 0.0f))
-				return numeric_limits<float>::infinity();
-			auto chance = agent ? agent->getEffectiveEscalatorWalkingChance().value : 0.0f;
-			if (agent && edgeVisible && chance > 0.0f
-				&& entryIsVisibleFrom(sourceVertex, agent->getSector()))
-			{
-				auto const congestion = static_cast<float>(
-					agent->countObservedStandingEscalatorAgents(this)) / chance;
-				if (congestion >= RouteChoicePolicy{}.escalatorCongestionThreshold) chance = 0.0f;
-			}
-			return getLength() / (abs(mStaircase->getSpeed())
-				+ chance * (agent ? agent->getWalkSpeed() : 0.0f));
-		}
-		auto const policy = RouteChoicePolicy{};
-		auto const speed = agent ? agent->getStationaryStairSpeed(movingUp)
-			: (movingUp ? policy.stairAscentSpeed : policy.stairDescentSpeed);
-		return getLength() / speed;
-	}
-
 	DirectedTraversalFacts StaircaseEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
@@ -109,13 +80,13 @@ namespace core
 				return facts;
 			}
 			auto walkingChance = clamp(context.profile.escalatorWalkingChance, 0.0f, 1.0f);
-			if (context.legacyAgent && walkingChance > 0.0f
+			if (context.agent && walkingChance > 0.0f
 				&& entryIsVisibleFrom(sourceVertex, context.observationSector))
 			{
 				// A zero walking chance already contributes no expected walking and is
 				// deliberately handled before this division.
 				auto const congestion = static_cast<float>(
-					context.legacyAgent->countObservedStandingEscalatorAgents(this)) / walkingChance;
+					context.agent->countObservedStandingEscalatorAgents(this)) / walkingChance;
 				if (congestion >= context.policy.escalatorCongestionThreshold) walkingChance = 0.0f;
 			}
 			auto const expectedSpeed = abs(mStaircase->getSpeed())

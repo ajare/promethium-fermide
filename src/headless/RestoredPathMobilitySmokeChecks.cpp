@@ -73,12 +73,18 @@ namespace
 
 	unsigned untraversableEdgeCount(core::Agent const* agent, core::Path const& path)
 	{
+		auto profile = core::RouteChoicePolicy{}.baselineProfile;
+		core::RouteDecisionContext const context{ agent, profile, {},
+			agent ? agent->getSector() : nullptr,
+			agent ? agent->getWalkSpeed() : CORE_AGENT_BASE_WALK_SPEED,
+			nullptr, agent ? agent->getClimbSpeed() : CORE_AGENT_BASE_CLIMB_SPEED,
+			true, 0, 0, agent ? std::optional{ agent->getEffectiveMobilityProfile().value }
+				: std::optional<core::MobilityProfile>{} };
 		unsigned count = 0;
 		for (auto const& node : path.nodes)
 		{
-			if (!node.edge) continue;
-			auto const weight = node.edge->getWeight(node.targetVertex, agent, true);
-			if (!std::isfinite(weight) || weight >= CORE_GRAPH_EDGE_UNTRAVERSABLE) ++count;
+			if (node.edge && !node.edge->getDirectedTraversalFacts(
+				node.targetVertex, context).feasible) ++count;
 		}
 		return count;
 	}

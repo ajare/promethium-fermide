@@ -36,9 +36,15 @@ namespace
 		{
 			return core::EdgeTraversalRequestResult::OK;
 		}
-		float getWeight(std::shared_ptr<const core::Vertex>, core::Agent const*, bool) const override
+		core::DirectedTraversalFacts getDirectedTraversalFacts(
+			std::shared_ptr<const core::Vertex>, core::RouteDecisionContext const&) const override
 		{
-			return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+			core::DirectedTraversalFacts facts;
+			facts.feasible = true;
+			facts.components.motionSeconds = CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+			facts.objectiveDurationSeconds = facts.components.motionSeconds;
+			facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+			return facts;
 		}
 		bool requiresButton() const override { return mRequiresButton; }
 	};

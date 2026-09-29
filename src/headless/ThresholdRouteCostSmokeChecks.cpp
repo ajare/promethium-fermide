@@ -42,14 +42,14 @@ namespace
 		{
 			auto repeated = graph->calculatePath(agent, destination);
 			require(repeated && repeated->nodes.front().targetVertex == warm->nodes.front().targetVertex
-				&& repeated->nodes.back().edgeWeight == warm->nodes.back().edgeWeight,
+				&& repeated->nodes.back().cumulativePerceivedCost == warm->nodes.back().cumulativePerceivedCost,
 				"Actual-position routing is not deterministic");
 		}
 		require(graph->getScratchAllocationCount() == allocations,
 			"Actual-position routing grew warmed search scratch");
 		auto const approach = agent->getGlobalPosition().distanceTo(path->nodes.front().targetVertex->getPosition())
 			/ agent->getWalkSpeed();
-		require(std::abs(path->nodes.front().edgeWeight - approach) < 0.0001f
+		require(std::abs(path->nodes.front().cumulativePerceivedCost - approach) < 0.0001f
 			&& path->nodes.front().objectiveDurationSeconds == approach,
 			"Actual approach cost was lost in reconstruction");
 		require(world->resumeSimulation() && world->advanceTicks(3600), "Realistic journey could not advance");

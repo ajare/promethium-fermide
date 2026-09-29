@@ -37,10 +37,20 @@ namespace core
 		return isTraversable({}, {}) ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float WindowEdge::getWeight(shared_ptr<const Vertex>, Agent const*, bool) const
+	DirectedTraversalFacts WindowEdge::getDirectedTraversalFacts(
+		shared_ptr<const Vertex>, RouteDecisionContext const&) const
 	{
-		return isTraversable({}, {}) ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-			: CORE_GRAPH_EDGE_UNTRAVERSABLE;
+		DirectedTraversalFacts facts;
+		facts.feasible = mWindow && mWindow->isNormallyTraversable();
+		facts.exclusionReason = facts.feasible
+			? RouteExclusionReason::None : RouteExclusionReason::Control;
+		if (facts.feasible)
+		{
+			facts.components.motionSeconds = CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+			facts.objectiveDurationSeconds = facts.components.motionSeconds;
+			facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+		}
+		return facts;
 	}
 
 	TraversalResourceId WindowEdge::getTraversalResourceId() const

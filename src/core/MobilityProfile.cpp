@@ -72,13 +72,13 @@ namespace core
 	{
 		return context.mobilityProfile
 			? rejects(context.mobilityProfile->get(TraversalKind::Buttons), context.allowFallbackMobility)
-			: agentRejectsButtons(context.legacyAgent, context.allowFallbackMobility);
+			: agentRejectsButtons(context.agent, context.allowFallbackMobility);
 	}
 
 	bool routeRejectsEdge(RouteDecisionContext const& context, Edge const& edge, TraversalKind kind)
 	{
 		if (!context.mobilityProfile)
-			return agentRejectsEdge(context.legacyAgent, edge, kind, context.allowFallbackMobility);
+			return agentRejectsEdge(context.agent, edge, kind, context.allowFallbackMobility);
 		auto use = context.mobilityProfile->get(kind);
 		if (edge.requiresButton())
 			use = combineMobilityUse(use, context.mobilityProfile->get(TraversalKind::Buttons));

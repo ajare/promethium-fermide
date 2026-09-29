@@ -55,23 +55,15 @@ namespace core
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
-	float StairwellEdge::getWeight(shared_ptr<const Vertex> targetVertex, Agent const* agent, bool /* edgeVisible */) const
-	{
-		if (agentForbidsEdge(agent, *this, TraversalKind::Stairwell)) return CORE_GRAPH_EDGE_UNTRAVERSABLE;
-		auto const sourceVertex = getOtherVertex(targetVertex);
-		auto const rise = targetVertex->getPosition().y - sourceVertex->getPosition().y;
-		auto const ascending = rise > 0.0f;
-		auto const policy = RouteChoicePolicy{};
-		auto const speed = agent ? agent->getStationaryStairSpeed(ascending)
-			: (ascending ? policy.stairAscentSpeed : policy.stairDescentSpeed);
-		return getLength() / speed;
-	}
-
 	DirectedTraversalFacts StairwellEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (routeRejectsEdge(context, *this, TraversalKind::Stairwell)) return facts;
+		if (routeRejectsEdge(context, *this, TraversalKind::Stairwell))
+		{
+			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
 		auto const rise = getDirectedRise(*targetVertex);
 		auto const ascending = rise > 0.0f;
 		auto const speed = (ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed)

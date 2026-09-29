@@ -1915,9 +1915,15 @@ agents: []
 		auto low = edge->getVertex(0)->getPosition().y < edge->getVertex(1)->getPosition().y
 			? edge->getVertex(0) : edge->getVertex(1);
 		auto high = low == edge->getVertex(0) ? edge->getVertex(1) : edge->getVertex(0);
+		auto const& routePolicy = world.getRouteChoicePolicy();
+		core::RouteDecisionContext const routeContext{ nullptr, routePolicy.baselineProfile,
+			routePolicy, nullptr, CORE_AGENT_BASE_WALK_SPEED, &world,
+			CORE_AGENT_BASE_CLIMB_SPEED };
+		auto const upwardFacts = edge->getDirectedTraversalFacts(high, routeContext);
+		auto const downwardFacts = edge->getDirectedTraversalFacts(low, routeContext);
 		require(edge->isTraversable(high, nullptr) && !edge->isTraversable(low, nullptr)
-			&& std::isfinite(edge->getWeight(high, nullptr, true))
-			&& !std::isfinite(edge->getWeight(low, nullptr, true))
+			&& upwardFacts.feasible && !downwardFacts.feasible
+			&& downwardFacts.exclusionReason == core::RouteExclusionReason::Direction
 			&& std::abs(edge->getTraversalSpeed(nullptr) - 1.25f) < 0.001f,
 			"Positive-speed Escalator is not one-way upward at its configured speed");
 
