@@ -160,6 +160,7 @@ namespace
 	map<uint64_t, TagHeightEdit> gTagEffortAversionEdits;
 	map<uint64_t, TagHeightEdit> gTagWaitingAversionEdits;
 	map<uint64_t, TagHeightEdit> gTagCrowdAversionEdits;
+	map<uint64_t, TagHeightEdit> gTagRiskAversionEdits;
 	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
@@ -611,6 +612,7 @@ namespace
 		auto const* effort = registry->getAgentTagEffortAversion(id);
 		auto const* waiting = registry->getAgentTagWaitingAversion(id);
 		auto const* crowd = registry->getAgentTagCrowdAversion(id);
+		auto const* risk = registry->getAgentTagRiskAversion(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		if (chance)
@@ -676,7 +678,7 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
-		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || pathingMobility)
+		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || pathingMobility)
 			renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 		if (stairSpeed)
 		{
@@ -879,6 +881,40 @@ namespace
 			}
 		}
 
+		if (risk)
+		{
+			auto& edit = gTagRiskAversionEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != risk->revision)
+			{
+				edit.range = risk->range;
+				edit.loadedRevision = risk->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::RiskAversion),
+				&edit.range.minimum, &edit.range.maximum, 0.01f,
+				core::AgentRiskAversionMinimum, core::AgentRiskAversionMaximum,
+				"Min %.2f", "Max %.2f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
+			{
+				string diagnostic;
+				if (!commitAgentTagRiskAversionEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Risk aversion range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				risk = registry->getAgentTagRiskAversion(id);
+				if (risk) { edit.range = risk->range; edit.loadedRevision = risk->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeRiskAversion"))
+			{
+				string diagnostic;
+				if (!commitAgentTagRiskAversionRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagRiskAversionEdits.erase(id.value); risk = nullptr; }
+			}
+		}
+
 		auto const* mobility = pathingMobility;
 		if (mobility)
 		{
@@ -958,9 +994,11 @@ namespace
 		auto const* effort = registry->getAgentTagEffortAversion(id);
 		auto const* waiting = registry->getAgentTagWaitingAversion(id);
 		auto const* crowd = registry->getAgentTagCrowdAversion(id);
+		auto const* risk = registry->getAgentTagRiskAversion(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
-			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !mobility;
+			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
+			|| !crowd || !risk || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -989,7 +1027,7 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !mobility)
+			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
@@ -1045,6 +1083,14 @@ namespace
 				if (!commitAgentTagCrowdAversionAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagCrowdAversionEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!risk && ImGui::Selectable(propertyName(core::AgentPropertyType::RiskAversion)))
+			{
+				string diagnostic;
+				if (!commitAgentTagRiskAversionAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagRiskAversionEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
 			if (!mobility && ImGui::Selectable(propertyName(core::AgentPropertyType::MobilityProfile)))
@@ -2265,6 +2311,30 @@ bool commitAgentTagCrowdAversionRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Crowd aversion",
 		[id](auto& target, string* out) { return target.removeAgentTagCrowdAversion(id, out); });
+}
+
+bool commitAgentTagRiskAversionAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Risk aversion",
+		[id](auto& target, string* out) { return target.addAgentTagRiskAversion(id, out); });
+}
+
+bool commitAgentTagRiskAversionEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Risk aversion",
+		[id, range](auto& target, string* out) { return target.setAgentTagRiskAversion(id, range, out); });
+}
+
+bool commitAgentTagRiskAversionRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Risk aversion",
+		[id](auto& target, string* out) { return target.removeAgentTagRiskAversion(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

@@ -213,6 +213,7 @@ namespace core
 			profile.effortAversion = routingAgent->getEffectiveEffortAversion().value;
 			profile.waitingAversion = routingAgent->getEffectiveWaitingAversion().value;
 			profile.crowdAversion = routingAgent->getEffectiveCrowdAversion().value;
+			profile.riskAversion = routingAgent->getEffectiveRiskAversion().value;
 			RouteDecisionContext const context{ routingAgent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
 				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed() };

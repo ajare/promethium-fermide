@@ -182,6 +182,50 @@ namespace
 			"Measured Ladder movement speed did not scale with the effective modifier");
 	}
 
+	void riskAversionChangesPreferenceWithoutChangingFeasibility()
+	{
+		core::World world("Risk preference", 10, 2);
+		auto const lower = world.addCorridor(0, 0, 10);
+		auto const upper = world.addCorridor(1, 0, 10);
+		auto const ladder = world.addLadder(1, 0, 4, { 2, false, true });
+		world.addStaircase(1, 0, 5, { 2, CORE_SIDE_RIGHT, 0.0f });
+		world.finishBuild();
+		auto const id = world.createAgent("Risk chooser", lower, 0, 4.5f);
+		auto* agent = world.lookupAgent(id).entity;
+		auto const target = world.getGraph()->getClosestVertexInSector(
+			world.getSector(upper).get(), { 5.5f, 1.0f });
+		auto usesLadder = [&](std::shared_ptr<core::Path> const& path)
+		{
+			if (!path) return false;
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getTraversalResourceId() == ladder.traversalResource)
+					return true;
+			return false;
+		};
+
+		world.pauseSimulation();
+		std::string diagnostic;
+		auto const walkSpeed = agent->getWalkSpeed();
+		auto const climbSpeed = agent->getClimbSpeed();
+		require(world.setAgentIndividualRiskAversion(id, 0.0f, &diagnostic),
+			"Could not set low Risk aversion");
+		require(usesLadder(world.getGraph()->calculatePath(agent, target)),
+			"A low-risk-aversion Agent did not use the competitive Ladder");
+		require(world.setAgentIndividualRiskAversion(id, 3.0f, &diagnostic),
+			"Could not set high Risk aversion");
+		require(!usesLadder(world.getGraph()->calculatePath(agent, target)),
+			"A high-risk-aversion Agent did not avoid the competitive Ladder");
+		require(agent->getWalkSpeed() == walkSpeed && agent->getClimbSpeed() == climbSpeed,
+			"Risk aversion changed physical movement speed");
+
+		core::MobilityProfile onlyLadder;
+		onlyLadder.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
+		require(world.setAgentIndividualMobilityProfile(id, onlyLadder, &diagnostic),
+			"Could not make the Ladder the only permitted Path");
+		require(usesLadder(world.getGraph()->calculatePath(agent, target)),
+			"Risk aversion made the only permitted risk-bearing Path unavailable");
+	}
+
 	void forceBridgeUsesWalkingExposureAndApproachControls()
 	{
 		core::World world("Force Bridge route costs", 8, 3);
@@ -241,5 +285,6 @@ void runLadderForceBridgeRouteCostSmokeChecks()
 	ladderCostsPhysicalClimbingEffortMountingAndRisk();
 	extensibleLadderUsesLocalStateAndRemoteExpectation();
 	defaultAgentAvoidsACompetitiveLadderShortcut();
+	riskAversionChangesPreferenceWithoutChangingFeasibility();
 	forceBridgeUsesWalkingExposureAndApproachControls();
 }

@@ -56,7 +56,8 @@ namespace core
 		InteractionAversion,
 		EffortAversion,
 		WaitingAversion,
-		CrowdAversion
+		CrowdAversion,
+		RiskAversion
 	};
 
 	struct AgentPropertySample
@@ -126,6 +127,14 @@ namespace core
 	};
 
 	struct EffectiveAgentCrowdAversion
+	{
+		float value{ 1.0f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentRiskAversion
 	{
 		float value{ 1.0f };
 		AgentTagId sourceTag{};
@@ -214,6 +223,7 @@ namespace core
 		std::optional<float> mIndividualEffortAversion;
 		std::optional<float> mIndividualWaitingAversion;
 		std::optional<float> mIndividualCrowdAversion;
+		std::optional<float> mIndividualRiskAversion;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -227,6 +237,7 @@ namespace core
 		std::optional<AgentPropertySample> mEffortAversionSample;
 		std::optional<AgentPropertySample> mWaitingAversionSample;
 		std::optional<AgentPropertySample> mCrowdAversionSample;
+		std::optional<AgentPropertySample> mRiskAversionSample;
 
 		// Activation is authored state (#118): an activated Agent is simulated,
 		// a deactivated one keeps its authored position and route but no tick
@@ -338,6 +349,11 @@ namespace core
 			mCrowdAversionSample = sample;
 		}
 		void clearCrowdAversionSample() { mCrowdAversionSample.reset(); }
+		void setRiskAversionSample(AgentPropertySample sample)
+		{
+			mRiskAversionSample = sample;
+		}
+		void clearRiskAversionSample() { mRiskAversionSample.reset(); }
 		void setIndividualColour(std::optional<AgentColour> value)
 		{ mIndividualColour = value; modify(); }
 		void setIndividualEscalatorWalkingChance(std::optional<float> value)
@@ -358,6 +374,8 @@ namespace core
 		{ mIndividualWaitingAversion = value; modify(); }
 		void setIndividualCrowdAversion(std::optional<float> value)
 		{ mIndividualCrowdAversion = value; modify(); }
+		void setIndividualRiskAversion(std::optional<float> value)
+		{ mIndividualRiskAversion = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -456,6 +474,8 @@ namespace core
 		{ return mIndividualWaitingAversion; }
 		std::optional<float> const& getIndividualCrowdAversion() const
 		{ return mIndividualCrowdAversion; }
+		std::optional<float> const& getIndividualRiskAversion() const
+		{ return mIndividualRiskAversion; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -480,6 +500,7 @@ namespace core
 		EffectiveAgentEffortAversion getEffectiveEffortAversion() const;
 		EffectiveAgentWaitingAversion getEffectiveWaitingAversion() const;
 		EffectiveAgentCrowdAversion getEffectiveCrowdAversion() const;
+		EffectiveAgentRiskAversion getEffectiveRiskAversion() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const
 		{
@@ -508,6 +529,10 @@ namespace core
 		std::optional<AgentPropertySample> const& getCrowdAversionSample() const
 		{
 			return mCrowdAversionSample;
+		}
+		std::optional<AgentPropertySample> const& getRiskAversionSample() const
+		{
+			return mRiskAversionSample;
 		}
 
 		// Whether this Agent is simulated. Deactivation changes no authored

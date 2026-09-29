@@ -23,6 +23,7 @@ namespace core
 		EffortAversion,
 		WaitingAversion,
 		CrowdAversion,
+		RiskAversion,
 		MobilityProfile
 	};
 
@@ -49,6 +50,7 @@ namespace core
 		case AgentPropertyType::EffortAversion: return { "Effort aversion", "Pathing" };
 		case AgentPropertyType::WaitingAversion: return { "Waiting aversion", "Pathing" };
 		case AgentPropertyType::CrowdAversion: return { "Crowd aversion", "Pathing" };
+		case AgentPropertyType::RiskAversion: return { "Risk aversion", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -140,6 +142,9 @@ namespace core
 	inline constexpr float AgentCrowdAversionMinimum{ 0.0f };
 	inline constexpr float AgentCrowdAversionMaximum{ 3.0f };
 	inline constexpr AgentModifierRange DefaultAgentCrowdAversionRange{};
+	inline constexpr float AgentRiskAversionMinimum{ 0.0f };
+	inline constexpr float AgentRiskAversionMaximum{ 3.0f };
+	inline constexpr AgentModifierRange DefaultAgentRiskAversionRange{};
 
 	struct AgentWalkSpeedModifierProperty
 	{
@@ -203,6 +208,14 @@ namespace core
 		uint64_t revision{ 0 };
 
 		bool operator==(AgentCrowdAversionProperty const& other) const = default;
+	};
+
+	struct AgentRiskAversionProperty
+	{
+		AgentModifierRange range{};
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentRiskAversionProperty const& other) const = default;
 	};
 
 	enum class TraversalKind : uint8_t
@@ -279,6 +292,8 @@ namespace core
 		std::string* diagnostic = nullptr);
 	bool agentCrowdAversionRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
+	bool agentRiskAversionRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
 	float sampleAgentModifier(AgentModifierRange const& range);
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
@@ -305,6 +320,7 @@ namespace core
 		std::optional<AgentEffortAversionProperty> mEffortAversion;
 		std::optional<AgentWaitingAversionProperty> mWaitingAversion;
 		std::optional<AgentCrowdAversionProperty> mCrowdAversion;
+		std::optional<AgentRiskAversionProperty> mRiskAversion;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -356,6 +372,11 @@ namespace core
 			mCrowdAversion = property;
 		}
 		void removeCrowdAversion() { mCrowdAversion.reset(); }
+		void setRiskAversion(AgentRiskAversionProperty property)
+		{
+			mRiskAversion = property;
+		}
+		void removeRiskAversion() { mRiskAversion.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -407,6 +428,10 @@ namespace core
 		AgentCrowdAversionProperty const* getCrowdAversion() const
 		{
 			return mCrowdAversion ? &*mCrowdAversion : nullptr;
+		}
+		AgentRiskAversionProperty const* getRiskAversion() const
+		{
+			return mRiskAversion ? &*mRiskAversion : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

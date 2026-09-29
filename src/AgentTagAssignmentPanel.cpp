@@ -239,6 +239,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualCrowdAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualCrowdAversion(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::RiskAversion),
+			target->getIndividualRiskAversion().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualRiskAversion(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -316,8 +320,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		}
 	}
 	if (target->getIndividualEscalatorWalkingChance() || target->getIndividualStairSpeedModifier()
-		|| target->getIndividualLadderSpeedModifier() || target->getIndividualInteractionAversion() || target->getIndividualEffortAversion()
-		|| target->getIndividualWaitingAversion() || target->getIndividualCrowdAversion() || target->getIndividualMobilityProfile())
+		|| target->getIndividualLadderSpeedModifier() || target->getIndividualInteractionAversion()
+		|| target->getIndividualEffortAversion() || target->getIndividualWaitingAversion()
+		|| target->getIndividualCrowdAversion() || target->getIndividualRiskAversion()
+		|| target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
 	{
@@ -469,6 +475,28 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			string diagnostic;
 			commitIndividualPropertyEdit(world, [&](string* out)
 				{ return world->setAgentIndividualCrowdAversion(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
+	if (target->getIndividualRiskAversion())
+	{
+		auto value = *target->getIndividualRiskAversion();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Risk aversion##individual", &value, 0.01f,
+			core::AgentRiskAversionMinimum, core::AgentRiskAversionMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRiskAversion(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualRiskAversion"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRiskAversion(agent, nullopt, out); }, diagnostic);
 			warn(diagnostic);
 		}
 	}
@@ -626,6 +654,13 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Crowd aversion: %.2f from #%s", crowd.value,
 			world->getAgentTagRegistry()->getAgentTagName(crowd.sourceTag).c_str());
 	else ImGui::TextUnformatted("Crowd aversion: 1.00 (default)");
+	auto const risk = lookup.entity->getEffectiveRiskAversion();
+	if (risk.individual)
+		ImGui::Text("Risk aversion: %.2f (individual)", risk.value);
+	else if (risk.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Risk aversion: %.2f from #%s", risk.value,
+			world->getAgentTagRegistry()->getAgentTagName(risk.sourceTag).c_str());
+	else ImGui::TextUnformatted("Risk aversion: 1.00 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.value);

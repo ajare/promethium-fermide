@@ -86,6 +86,10 @@ _Avoid_: Effort aversion, interaction aversion
 An Agent property from 0 through 3 that weights discomfort from locally observed access-zone density. Its neutral default is 1; it does not alter capacity, queue order, or waiting estimates.
 _Avoid_: Waiting aversion, capacity
 
+**Risk aversion**:
+An Agent property from 0 through 3 that weights finite perceived risk on Ladders, exposed Force Bridges, and other risk-bearing traversals. Its neutral default is 1; it does not alter feasibility, physical duration, or accident behaviour.
+_Avoid_: Mobility profile, effort aversion
+
 **Route observation**:
 Information locally available to an Agent when it chooses or revises a Path, such as a nearby queue or visible device state. The live state of a remote resource is not a Route observation.
 _Avoid_: Global simulation state, perfect knowledge

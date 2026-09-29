@@ -124,6 +124,8 @@ struct AgentClipboardPayload
 	std::optional<float> individualWaitingAversion;
 	std::optional<core::AgentPropertySample> crowdAversionSample;
 	std::optional<float> individualCrowdAversion;
+	std::optional<core::AgentPropertySample> riskAversionSample;
+	std::optional<float> individualRiskAversion;
 
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.
 	// Marker configuration values have already been replaced by names.

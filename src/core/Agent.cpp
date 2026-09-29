@@ -158,6 +158,7 @@ namespace core
 			|| mIndividualStairSpeedModifier || mIndividualLadderSpeedModifier
 			|| mIndividualInteractionAversion || mIndividualEffortAversion || mIndividualWaitingAversion
 			|| mIndividualCrowdAversion
+			|| mIndividualRiskAversion
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -198,6 +199,8 @@ namespace core
 				writeFloatProperty("waitingAversion", *mIndividualWaitingAversion);
 			if (mIndividualCrowdAversion)
 				writeFloatProperty("crowdAversion", *mIndividualCrowdAversion);
+			if (mIndividualRiskAversion)
+				writeFloatProperty("riskAversion", *mIndividualRiskAversion);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -207,7 +210,8 @@ namespace core
 			serializer.endArray();
 		}
 		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
-			|| mLadderSpeedModifierSample || mInteractionAversionSample || mEffortAversionSample || mWaitingAversionSample || mCrowdAversionSample)
+			|| mLadderSpeedModifierSample || mInteractionAversionSample || mEffortAversionSample
+			|| mWaitingAversionSample || mCrowdAversionSample || mRiskAversionSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -236,6 +240,8 @@ namespace core
 				writeSample("waitingAversion", *mWaitingAversionSample);
 			if (mCrowdAversionSample)
 				writeSample("crowdAversion", *mCrowdAversionSample);
+			if (mRiskAversionSample)
+				writeSample("riskAversion", *mRiskAversionSample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -297,6 +303,7 @@ namespace core
 		mIndividualEffortAversion.reset();
 		mIndividualWaitingAversion.reset();
 		mIndividualCrowdAversion.reset();
+		mIndividualRiskAversion.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -393,6 +400,15 @@ namespace core
 						throw SerializationException("Serialized individual Crowd aversion is invalid");
 					mIndividualCrowdAversion = value;
 				}
+				else if (type == "riskAversion")
+				{
+					if (mIndividualRiskAversion)
+						throw SerializationException("Serialized Agent contains more than one individual Risk aversion");
+					auto const value = serializer.readFloat("value");
+					if (!agentRiskAversionRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Risk aversion is invalid");
+					mIndividualRiskAversion = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -413,6 +429,7 @@ namespace core
 		mEffortAversionSample.reset();
 		mWaitingAversionSample.reset();
 		mCrowdAversionSample.reset();
+		mRiskAversionSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -470,6 +487,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::CrowdAversion;
 					destination = &mCrowdAversionSample;
 					displayName = "Crowd aversion";
+				}
+				else if (type == "riskAversion")
+				{
+					sample.type = SampledAgentPropertyType::RiskAversion;
+					destination = &mRiskAversionSample;
+					displayName = "Risk aversion";
 				}
 				else
 				{
@@ -713,6 +736,22 @@ namespace core
 		effective.value = mCrowdAversionSample->value;
 		effective.sourceTag = mCrowdAversionSample->sourceTag;
 		effective.propertyRevision = mCrowdAversionSample->propertyRevision;
+		return effective;
+	}
+
+	EffectiveAgentRiskAversion Agent::getEffectiveRiskAversion() const
+	{
+		EffectiveAgentRiskAversion effective;
+		if (mIndividualRiskAversion)
+		{
+			effective.value = *mIndividualRiskAversion;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mRiskAversionSample) return effective;
+		effective.value = mRiskAversionSample->value;
+		effective.sourceTag = mRiskAversionSample->sourceTag;
+		effective.propertyRevision = mRiskAversionSample->propertyRevision;
 		return effective;
 	}
 
