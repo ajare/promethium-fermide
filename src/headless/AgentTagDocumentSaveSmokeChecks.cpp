@@ -13,6 +13,7 @@
 #include "core/AgentTagRegistry.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/World.h"
+#include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
 void runAgentTagDocumentSaveSmokeChecks();
@@ -155,10 +156,10 @@ namespace
 		auto const registryOnDisk = readFile(fixture.registryPath);
 		fixture.editModifier(1.1f);
 
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(1);
+		core::setTransactionalWriteFailureAfterBytesForTesting(1);
 		std::string diagnostic;
 		auto const saved = saveWorldDocument(fixture.target(), &diagnostic);
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(!saved && diagnostic.find("Agent tag registry") != std::string::npos,
 			"An injected registry failure was not reported as a registry save failure");
 		require(readFile(fixture.registryPath) == registryOnDisk

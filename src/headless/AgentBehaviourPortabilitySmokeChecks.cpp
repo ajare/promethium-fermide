@@ -18,6 +18,7 @@
 #include "core/AgentTagRegistryDocument.h"
 #include "core/World.h"
 #include "core/SerializationWorkData.h"
+#include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
 void runAgentBehaviourPortabilitySmokeChecks();
@@ -237,10 +238,10 @@ namespace
 		auto failureDirectory = temporary.path / "failure";
 		std::filesystem::create_directory(failureDirectory);
 		auto failedWorld = failureDirectory / "failed.world.yaml";
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(1);
+		core::setTransactionalWriteFailureAfterBytesForTesting(1);
 		auto saved = saveWorldDocument({ reopened, failedWorld.string(), {},
 			&history, copiedPackage.string() }, &diagnostic);
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(!saved && !std::filesystem::exists(
 			failureDirectory / copiedPackage.filename())
 			&& reopened->getExpectedAgentBehaviourRegistryUuid()

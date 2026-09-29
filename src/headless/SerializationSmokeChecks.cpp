@@ -32,6 +32,7 @@
 #include "core/StairwellTransit.h"
 #include "core/Staircase.h"
 #include "core/StaircaseTransit.h"
+#include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
 namespace
@@ -133,6 +134,56 @@ namespace
 		require(reader->readString("source") == "file", "YAML file did not round-trip");
 	}
 
+	void transactionalWriterPreservesOpaqueBytes()
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = filesystem::temp_directory_path()
+			/ "pf-transactional-byte-writer-smoke";
+		std::error_code error;
+		filesystem::remove_all(directory, error);
+		filesystem::create_directories(directory);
+		struct DirectoryCleanup
+		{
+			filesystem::path path;
+			~DirectoryCleanup()
+			{
+				std::error_code ignored;
+				filesystem::remove_all(path, ignored);
+			}
+		} cleanup{ directory };
+
+		auto const destination = directory / "opaque.bin";
+		std::string const bytes{ '\x01', '\0', '\x02', '\0', static_cast<char>(0xff) };
+		core::writeFileTransactionally(destination, bytes);
+
+		auto readSavedBytes = [&destination]()
+		{
+			std::ifstream input(destination, std::ios::binary);
+			return std::string((std::istreambuf_iterator<char>(input)),
+				std::istreambuf_iterator<char>());
+		};
+		require(readSavedBytes() == bytes,
+			"transactional byte writer truncated content at an embedded NUL byte");
+
+		core::setTransactionalWriteFailureAfterBytesForTesting(2);
+		bool failed = false;
+		try
+		{
+			core::writeFileTransactionally(destination, std::string(1024, 'x'));
+		}
+		catch (core::SerializationException const&)
+		{
+			failed = true;
+		}
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
+		require(failed, "shared transactional writer failure seam did not fail the write");
+		require(readSavedBytes() == bytes,
+			"failed opaque byte write changed the existing destination");
+		require(std::distance(filesystem::directory_iterator(directory),
+			filesystem::directory_iterator()) == 1,
+			"failed opaque byte write left a temporary file behind");
+	}
+
 	void worldDocumentsRequireTheWorldYamlSuffix()
 	{
 		namespace filesystem = std::filesystem;
@@ -232,7 +283,7 @@ namespace
 			return count;
 		};
 
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(4096);
+		core::setTransactionalWriteFailureAfterBytesForTesting(4096);
 		bool reportedFailure = false;
 		try
 		{
@@ -242,7 +293,7 @@ namespace
 		{
 			reportedFailure = true;
 		}
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 
 		require(reportedFailure, "injected late write failure did not report a save error");
 		require(readFile() == originalContents, "failed save destroyed the previous save file");
@@ -298,7 +349,7 @@ namespace
 			return writer;
 		};
 
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(4096);
+		core::setTransactionalWriteFailureAfterBytesForTesting(4096);
 		bool reportedFailure = false;
 		try
 		{
@@ -308,7 +359,7 @@ namespace
 		{
 			reportedFailure = true;
 		}
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(reportedFailure, "injected late write failure did not report a save error");
 		require(readFile(destination) == originalContents,
 			"a failed save followed a predictable temporary path and destroyed the destination");
@@ -407,7 +458,7 @@ namespace
 		writer->beginMap("");
 		writer->writeString("payload", std::string(256 * 1024, 'x'));
 		writer->endMap();
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(4096);
+		core::setTransactionalWriteFailureAfterBytesForTesting(4096);
 		bool reportedFailure = false;
 		try
 		{
@@ -417,7 +468,7 @@ namespace
 		{
 			reportedFailure = true;
 		}
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 
 		require(reportedFailure, "injected late write failure did not report a save error");
 		require(filesystem::is_symlink(filesystem::symlink_status(legacyTemp)),
@@ -601,7 +652,7 @@ namespace
 		// Edit again, then fail the save mid-write.
 		world.markModified();
 		require(world.isModified(), "World did not become dirty after an edit");
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(4096);
+		core::setTransactionalWriteFailureAfterBytesForTesting(4096);
 		bool reportedFailure = false;
 		try
 		{
@@ -611,7 +662,7 @@ namespace
 		{
 			reportedFailure = true;
 		}
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(reportedFailure, "injected write failure did not report a save error");
 		require(world.isModified(),
 			"failed save cleared the unsaved-changes state; Save would be disabled and "
@@ -6127,6 +6178,7 @@ void runSerializationSmokeChecks()
 	transitsOnTheLayerBehindAreOnlyDrawnThroughApertures();
 	stringYamlRoundTripsPrimitiveValues();
 	fileYamlRoundTrips();
+	transactionalWriterPreservesOpaqueBytes();
 	worldDocumentsRequireTheWorldYamlSuffix();
 	lateWriteFailurePreservesThePreviousSaveFile();
 	saveNeverTouchesAPredictableTemporaryPath();

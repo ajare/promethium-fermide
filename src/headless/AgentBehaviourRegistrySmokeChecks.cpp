@@ -16,6 +16,7 @@
 #include "core/AgentBehaviourRegistryDocument.h"
 #include "core/World.h"
 #include "core/Log.h"
+#include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
 namespace
@@ -599,7 +600,7 @@ namespace
 			"An occupied package directory did not refuse no-clobber creation");
 		std::filesystem::remove_all(packageDirectory);
 
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(1);
+		core::setTransactionalWriteFailureAfterBytesForTesting(1);
 		bool refused{ false };
 		try
 		{
@@ -609,7 +610,7 @@ namespace
 		{
 			refused = true;
 		}
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(refused, "The injected manifest write failure was not reported");
 		require(!std::filesystem::exists(packageDirectory),
 			"A failed registry creation left a partial package directory");

@@ -11,6 +11,7 @@
 #include "core/AgentTagRegistry.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/World.h"
+#include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
 namespace
@@ -458,7 +459,7 @@ namespace
 		world.saveTo(worldPath.string());
 		auto const registryPath = core::defaultAgentTagRegistryPath(worldPath);
 
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(1);
+		core::setTransactionalWriteFailureAfterBytesForTesting(1);
 		bool refused{ false };
 		try
 		{
@@ -468,7 +469,7 @@ namespace
 		{
 			refused = true;
 		}
-		core::YamlSerializer::setWriteFailureAfterBytesForTesting(0);
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(refused, "The injected registry write failure was not reported");
 		require(!std::filesystem::exists(registryPath),
 			"A failed registry creation left a partial destination file");
