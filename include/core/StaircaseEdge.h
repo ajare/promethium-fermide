@@ -7,6 +7,7 @@ namespace core
 {
 	class StaircaseEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<Staircase> mStaircase;
 	public:
 		StaircaseEdge(std::shared_ptr<Staircase> staircase);

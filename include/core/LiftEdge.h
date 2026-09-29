@@ -10,6 +10,7 @@ namespace core
 
 	class LiftEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<Lift> mLift;
 
 	public:

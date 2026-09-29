@@ -369,6 +369,171 @@ namespace
 		}
 	}
 
+	// Independent eager facts/policy oracle. Includes stable variation, but never
+	// calls RouteTraversalInputs or reads the demand cache.
+	std::vector<std::optional<core::EvaluatedRouteCost>> eagerCosts(core::Graph const& graph,
+		core::RouteDecisionContext const& context)
+	{
+		std::vector<std::optional<core::EvaluatedRouteCost>> result;
+		auto mix = [](uint64_t value)
+		{
+			value += 0x9e3779b97f4a7c15ULL;
+			value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+			value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+			return value ^ (value >> 31);
+		};
+		for (auto const& vertex : graph.getVertices()) for (auto const& edge : vertex->getEdges())
+		{
+			auto target = edge->getOtherVertex(vertex);
+			auto facts = edge->getDirectedTraversalFacts(target, context);
+			if (facts.feasible && facts.components.uncertaintyUnits > 0)
+			{
+				auto const hash = mix(context.perceptionKey ^ (uint64_t{edge->getRoutingIndex()} << 32)
+					^ target->getSearchIndex() ^ mix(context.observationEpoch));
+				auto const unit = static_cast<float>(hash >> 40) / 16777215.0f;
+				facts.components.perceptionVariationUnits = (unit * 2.0f - 1.0f)
+					* ((1.0f - context.profile.routeFamiliarity) * facts.components.uncertaintyUnits);
+			}
+			result.push_back(context.policy.evaluate(facts, context.profile));
+		}
+		return result;
+	}
+
+	void checkDemandCosts(core::PathfindingWorkspace& workspace,
+		std::vector<std::optional<core::EvaluatedRouteCost>> const& expected)
+	{
+		auto const allocations = workspace.getScratchAllocationCount();
+		auto const evaluated = workspace.work.evaluatedArcs;
+		for (size_t i = 0; i < expected.size(); ++i)
+		{
+			auto const& actual = workspace.evaluateArc(i);
+			require(bool(actual) == bool(expected[i]), "Demand scorer changed hard feasibility");
+			if (!actual) continue;
+			require(actual->perceivedCost == expected[i]->perceivedCost
+				&& actual->objectiveDurationSeconds == expected[i]->objectiveDurationSeconds,
+				"Demand scorer differs from independent eager cost/duration");
+			auto const& a = actual->components;
+			auto const& b = expected[i]->components;
+			require(a.movement == b.movement && a.knownWait == b.knownWait && a.expectedWait == b.expectedWait
+				&& a.effort == b.effort && a.interaction == b.interaction && a.crowding == b.crowding
+				&& a.risk == b.risk && a.uncertainty == b.uncertainty && a.stableVariation == b.stableVariation,
+				"Demand diagnostics differ from independent eager components");
+		}
+		require(workspace.work.evaluatedArcs - evaluated == expected.size(), "Demand cache did not start a fresh decision/pass");
+		for (size_t i = 0; i < expected.size(); ++i) workspace.evaluateArc(i);
+		require(workspace.work.evaluatedArcs - evaluated == expected.size()
+			&& workspace.getScratchAllocationCount() == allocations, "Demand cache repeated work or grew scratch");
+	}
+
+	void capturedInputsMatchEagerProviders()
+	{
+		auto const root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+		for (auto const* filename : { "lift-test-1.world.yaml", "shuttle-test-1.world.yaml",
+			"stairwell-test-1.world.yaml", "staircase-test-1.world.yaml", "ladder-test-1.world.yaml",
+			"forcebridge-test-1.world.yaml", "platformlift-test-1.world.yaml", "bulkhead-test-1.world.yaml",
+			"door-test-1.world.yaml" })
+		{
+			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / filename);
+			auto graph = world->getGraph();
+			auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
+			if (agent && !agent->getSector()) agent = nullptr;
+			core::PathfindingWorkspace workspace;
+			for (float extreme : { 0.0f, 1.0f }) for (bool fallback : { false, true })
+			for (uint32_t observedSector = 0; observedSector <= world->getNumSectors(); ++observedSector)
+			{
+				core::EffectiveRoutingProfile profile;
+				profile.walkSpeedModifier = extreme ? core::AgentWalkSpeedModifierMaximum : core::AgentWalkSpeedModifierMinimum;
+				profile.stairSpeedModifier = profile.ladderSpeedModifier = extreme ? 1.5f : 0.5f;
+				profile.escalatorWalkingChance = profile.routeFamiliarity = extreme;
+				profile.effortAversion = profile.interactionAversion = profile.riskAversion = profile.crowdAversion = extreme * 3;
+				profile.waitingAversion = extreme ? 3 : 0.5f;
+				core::MobilityProfile mobility;
+				mobility.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+				core::RouteDecisionContext context{ agent, profile, {},
+					observedSector < world->getNumSectors() ? world->getSector(observedSector).get() : nullptr,
+					CORE_AGENT_BASE_WALK_SPEED * profile.walkSpeedModifier, world.get(),
+					CORE_AGENT_BASE_CLIMB_SPEED * profile.ladderSpeedModifier, fallback, 12345, 7, mobility };
+				workspace.beginRouteDecision(*graph, context);
+				checkDemandCosts(workspace, eagerCosts(*graph, context));
+				if (!fallback)
+				{
+					workspace.allowFallbackMobility();
+					checkDemandCosts(workspace, eagerCosts(*graph, workspace.decisionContext()));
+				}
+			}
+		}
+	}
+
+	void localDemandWorkIsBounded()
+	{
+		core::World world("Demand-local", 1024, 1);
+		auto sector = world.addCorridor(0, 0, 1024);
+		std::vector<uint32_t> markers(1000);
+		for (uint32_t i = 0; i < markers.size(); ++i) world.addSectorMarker(sector, 0, i + 0.5f, &markers[i]);
+		world.finishBuild();
+		auto graph = world.getGraph();
+		auto agent = world.lookupAgent(world.createAgent("Local", sector, 0, 500.5f)).entity;
+		auto source = graph->getVertexByIdentifier(markers[500]);
+		auto target = graph->getVertexByIdentifier(markers[501]);
+		auto before = graph->getRouteWorkCounts();
+		auto path = graph->calculatePath(agent, source, target);
+		auto after = graph->getRouteWorkCounts();
+		require(path && path->nodes.back().cumulativePerceivedCost == 1.0f / agent->getWalkSpeed(),
+			"Local demand route is not minimum physical cost");
+		require(after.evaluatedArcs - before.evaluatedArcs < graph->getEdges().size() * 2
+			&& after.evaluatedArcs - before.evaluatedArcs < 10 && after.preparedArcs == 0,
+			"Local routing hid whole-Graph work in cost or snapshot preparation");
+		before = after;
+		auto same = graph->calculatePath(agent, source, source);
+		require(same && graph->getRouteWorkCounts().evaluatedArcs == before.evaluatedArcs,
+			"Source-equals-target evaluated unused arcs");
+		before = graph->getRouteWorkCounts();
+		auto suffixes = core::pathing::comparePathSuffixCosts(*agent, *graph, *path, 0, *path, 0);
+		after = graph->getRouteWorkCounts();
+		require(suffixes && suffixes->first == suffixes->second && after.evaluatedArcs - before.evaluatedArcs == 1
+			&& after.cacheHits > before.cacheHits, "Suffix comparison did not share one demand context/cache");
+		before = after;
+		auto explanation = core::pathing::explainRoute(*agent, *graph, *path, 1, 1);
+		require(explanation && explanation->analysisTruncated
+			&& graph->getRouteWorkCounts().evaluatedArcs - before.evaluatedArcs <= 1,
+			"Explanation exceeded its cost-evaluation budget");
+
+		auto const agentId = world.getAgentId(agent);
+		for (auto mode : { 0, 1, 2 })
+		{
+			world.resetSimulation();
+			graph = world.getGraph();
+			agent = world.lookupAgent(agentId).entity;
+			source = graph->getClosestVertexInSector(agent->getSector(), { 500.5f, 0 });
+			std::vector<std::shared_ptr<const core::Vertex>> destinations;
+			for (uint32_t i = 0; i < 1000; ++i)
+				destinations.push_back(graph->getClosestVertexInSector(agent->getSector(), { i + 0.5f, 0 }));
+			for (int pass = 0; pass < 2; ++pass)
+			{
+				before = graph->getRouteWorkCounts();
+				auto const builds = graph->getRouteLowerBoundBuildCount(), hits = graph->getRouteLowerBoundHitCount();
+				auto const allocations = graph->getScratchAllocationCount();
+				auto const start = std::chrono::steady_clock::now();
+				for (uint32_t i = 0; i < 1000; ++i)
+				{
+					auto destination = destinations[mode == 0 ? 501 : mode == 1 ? 999 : i];
+					require(graph->calculatePath(agent, source, destination) != nullptr, "Demand workload lost route");
+				}
+				after = graph->getRouteWorkCounts();
+				auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+				require(!pass || graph->getScratchAllocationCount() == allocations, "Demand workloads grew warmed scratch");
+				std::cout << "routing-demand workload=" << (mode == 0 ? "local" : mode == 1 ? "long" : "distinct")
+					<< " pass=" << pass << " paths/s=" << 1000 / seconds
+					<< " evaluated=" << after.evaluatedArcs - before.evaluatedArcs
+					<< " expanded=" << after.expandedVertices - before.expandedVertices
+					<< " prepared=" << after.preparedArcs - before.preparedArcs
+					<< " lower-builds=" << graph->getRouteLowerBoundBuildCount() - builds
+					<< " lower-hits=" << graph->getRouteLowerBoundHitCount() - hits
+					<< " scratch-growth=" << graph->getScratchAllocationCount() - allocations << '\n';
+			}
+		}
+	}
+
 	void doorObservationEpochsIgnoreTicks()
 	{
 		core::World world("Door route epochs", 12, 1);
@@ -383,6 +548,28 @@ namespace
 		require(world.observeAccessZoneDensity(door.traversalResource, sector) == 0,
 			"Empty Door observation reported crowding");
 		auto const emptyEpoch = resource->getDoorRouteObservationEpoch();
+		auto observer = world.lookupAgent(world.createAgent("Observer", fore, 0, 0.5f)).entity;
+		core::RouteDecisionContext frozen{ observer, {}, {}, observer->getSector(), observer->getWalkSpeed(), &world };
+		core::PathfindingWorkspace demand;
+		demand.beginRouteDecision(*world.getGraph(), frozen);
+		auto emptyCosts = eagerCosts(*world.getGraph(), frozen);
+		auto benchmark = [&](char const* label)
+		{
+			auto const graph = world.getGraph();
+			auto const before = graph->getRouteWorkCounts();
+			auto const started = std::chrono::steady_clock::now();
+			for (int i = 0; i < 1000; ++i)
+				require(graph->calculatePath(observer, graph->getVertexByIdentifier(destination)) != nullptr,
+					"Observed demand route disappeared");
+			auto const after = graph->getRouteWorkCounts();
+			std::cout << "routing-observations " << label << " paths/s="
+				<< 1000 / std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
+				<< " evaluated=" << after.evaluatedArcs - before.evaluatedArcs
+				<< " prepared=" << after.preparedArcs - before.preparedArcs
+				<< " expanded=" << after.expandedVertices - before.expandedVertices << '\n';
+		};
+		benchmark("cold");
+		benchmark("unchanged");
 		world.advanceTicks(3);
 		for (int observer = 0; observer < 20; ++observer)
 		{
@@ -401,6 +588,17 @@ namespace
 		require(world.observeAccessZoneDensity(door.traversalResource, sector) > 0
 			&& world.estimateTraversalDelay(door.traversalResource, sector) > 0,
 			"Changed Door queue did not refresh the compact observation");
+		// Evaluate only after live queues changed: the old decision must still
+		// reproduce its old evidence, including costs not previously requested.
+		checkDemandCosts(demand, emptyCosts);
+		demand.beginRouteDecision(*world.getGraph(), frozen);
+		auto queuedCosts = eagerCosts(*world.getGraph(), frozen);
+		checkDemandCosts(demand, queuedCosts);
+		bool changed = false;
+		for (size_t i = 0; i < emptyCosts.size(); ++i)
+			if (emptyCosts[i] && queuedCosts[i] && emptyCosts[i]->perceivedCost != queuedCosts[i]->perceivedCost) changed = true;
+		require(changed, "New decision reused stale local observations");
+		benchmark("changed");
 		auto const queuedEpoch = resource->getDoorRouteObservationEpoch();
 		require(queuedEpoch > emptyEpoch, "Door observation did not publish its changed queue");
 		(void)world.observeAccessZoneDensity(door.traversalResource, sector);
@@ -469,9 +667,12 @@ namespace
 					settled[best] = true;
 					for (auto arc = workspace.routeOffsets[best]; arc < workspace.routeOffsets[best + 1]; ++arc)
 					{
-						auto const& cost = workspace.routeCosts[arc];
+						auto const& directed = workspace.directedArcs[arc];
+						auto target = directed.targetSlot;
+						// Independent eager provider, not the demand scorer/cache.
+						auto const cost = context.policy.evaluate((*directed.edge)->getDirectedTraversalFacts(
+							graph->getVertices()[target], context), profile);
 						if (!cost) continue;
-						auto target = workspace.directedArcs[arc].targetSlot;
 						distances[target] = std::min(distances[target], distances[best] + cost->perceivedCost);
 					}
 				}
@@ -615,6 +816,10 @@ namespace
 				<< " paths/s=" << 1000 / seconds << " scratch-bytes=" << graph->getPathfindingScratchBytes()
 				<< " working-set-MiB=" << getHeadlessWorkingSetBytes() / (1024.0 * 1024.0)
 				<< " before-routing-MiB=" << memoryBeforeRouting / (1024.0 * 1024.0)
+				<< " evaluated-arcs=" << graph->getRouteWorkCounts().evaluatedArcs
+				<< " prepared-arcs=" << graph->getRouteWorkCounts().preparedArcs
+				<< " expanded=" << graph->getRouteWorkCounts().expandedVertices
+				<< " preparation-ms=" << graph->getRouteWorkCounts().preparationSeconds * 1000
 				<< " lower-bound-builds=" << graph->getRouteLowerBoundBuildCount()
 				<< " lower-bound-hits=" << graph->getRouteLowerBoundHitCount()
 				<< " source-index-bytes=" << graph->getSourceIndexStatistics().bytes
@@ -911,6 +1116,8 @@ void writeRoutingScaleWorld(std::filesystem::path const& output)
 void runPathfindingWorkspaceSmokeChecks()
 {
 	costContract();
+	capturedInputsMatchEagerProviders();
+	localDemandWorkIsBounded();
 	bundledRoutesMatchReference();
 	reusedWorkspaceIsStableAndDoesNotGrow();
 	lowerBoundsAreUniversalAndBounded();

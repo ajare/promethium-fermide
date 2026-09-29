@@ -10,6 +10,7 @@ namespace core
 
 	class ShuttleEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<Shuttle> mShuttle;
 
 	public:

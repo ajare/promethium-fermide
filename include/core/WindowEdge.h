@@ -7,6 +7,7 @@ namespace core
 {
 	class WindowEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<Window> mWindow;
 
 	public:

@@ -10,6 +10,7 @@ namespace core
 
 	class BulkheadDoorEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<BulkheadDoor> mDoor;
 
 	public:

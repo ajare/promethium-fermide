@@ -10,6 +10,7 @@ namespace core
 
 	class ForceBridgeEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<ForceBridge> mForceBridge;
 
 	public:

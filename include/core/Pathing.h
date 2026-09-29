@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/Path.h"
+#include "core/RouteTraversalInputs.h"
 #include "core/Vector2.h"
 
 namespace core
@@ -37,6 +38,7 @@ namespace core
 			float length;
 			float universalLowerBound;
 			uint64_t perceptionIdentity;
+			size_t inputIndex;
 		};
 		std::vector<DirectedArc> directedArcs;
 		void invalidateTopology();
@@ -51,9 +53,27 @@ namespace core
 		std::vector<float> scores;
 		std::vector<std::optional<float>> durations;
 		std::vector<size_t> routeOffsets;
+		// Only slots requested through evaluateArc in the current decision/pass
+		// are valid; unrequested storage deliberately retains stale bytes.
 		std::vector<std::optional<EvaluatedRouteCost>> routeCosts;
 		std::vector<std::optional<size_t>> selectedRouteCosts;
+		// Explicit eager diagnostic seam; normal routing uses beginRouteDecision.
 		void captureRouteCosts(Graph const& graph, RouteDecisionContext const& context);
+		void beginRouteDecision(Graph const& graph, RouteDecisionContext const& context);
+		void allowFallbackMobility();
+		std::optional<EvaluatedRouteCost> const& evaluateArc(size_t index);
+		[[nodiscard]] RouteExclusionReason arcExclusion(size_t index) const { return mExclusions.at(index); }
+		struct WorkCounts
+		{
+			uint64_t decisions = 0;
+			uint64_t preparedArcs = 0;
+			uint64_t evaluatedArcs = 0;
+			uint64_t cacheHits = 0;
+			uint64_t expandedVertices = 0;
+			double preparationSeconds = 0;
+		};
+		WorkCounts work;
+		[[nodiscard]] RouteDecisionContext const& decisionContext() const { return *mDecision; }
 		std::vector<uint32_t> cameFrom;
 		std::vector<uint32_t> visitGenerations;
 		std::vector<std::shared_ptr<const Edge>> edges;
@@ -75,6 +95,14 @@ namespace core
 		uint64_t mScratchAllocationCount{ 0 };
 		uint64_t mDirectedFactsBuildCount{ 0 };
 		bool mTopologyCaptured = false;
+		std::vector<size_t> mInputArcs;
+		std::vector<RouteTraversalInputs> mInputs;
+		std::vector<uint32_t> mCostGenerations;
+		std::vector<RouteExclusionReason> mExclusions;
+		DirectedTraversalFacts arcFacts(size_t index) const;
+		uint32_t mCostGeneration = 0;
+		std::optional<RouteDecisionContext> mDecision;
+		void nextCostGeneration();
 		void captureTopology(Graph const& graph);
 		struct TargetLowerBounds
 		{

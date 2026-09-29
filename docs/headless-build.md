@@ -320,6 +320,63 @@ and rerun to assess UI responsiveness; interactive UI verification is still
 manual. Large-World serialization/reset overhead is not measured as routing
 throughput.
 
+## Demand-driven routing (#230)
+
+Normal searches now start one value-only decision snapshot, then evaluate/cache
+only requested directed arcs. The Graph owns generation-stamped cost and
+exclusion slots; there is no per-Agent Graph or weight matrix. Walking consumes
+cached lengths without a per-query arc pre-pass. Non-walking arcs capture scalar
+authored inputs and permitted observations before expansion; this remains
+O(non-walking arcs), is explicitly counted, and does not apply Agent-specific
+cost formulae. `RouteTraversalInputs::evaluate` cannot read an Agent, World,
+registry, queue, or device. All properties, policy and perception identity are
+copied once. Fallback admission retains the snapshot but advances the cost
+cache generation, so first-pass exclusions cannot leak into the second pass.
+
+`captureRouteCosts` remains an explicitly eager diagnostic/test seam, not the
+normal routing entry point. The older Edge fact providers remain available as
+an independent differential oracle. Tests compare every component, feasibility
+and duration across nine bundled Worlds, local/remote observations, profile
+extremes and fallback admission. Frozen-input tests change queues *before*
+evaluating previously unrequested arcs. Existing independent Dijkstra, topology,
+blocking Marker, approach-cost and reset/replay checks remain enabled.
+
+Suffix comparisons request just their arcs under one context. Explanations use
+the same demand scorer, with a single traversal budget covering reverse search
+and continuation reporting. Selected historical evidence remains separate from
+current comparison evidence. Evaluated costs and cumulative search scores are
+validated before frontier insertion.
+
+`Graph::getRouteWorkCounts()` exposes cumulative decisions, prepared non-walking
+arcs, evaluated arcs, cache hits, expanded vertices and preparation time.
+Existing counters expose topology builds, lower-bound builds/hits, scratch growth
+and bytes. Source-index `arcScoringSeconds` now measures relaxation/scoring time;
+snapshot preparation has its own timer. Lower-bound construction remains a
+separately counted whole-Graph operation on target-cache misses.
+
+Run `--routing-scale-checks` for the measurements. One Windows/MSVC Release run
+recorded the following 1,000-query batches (timings are not portable limits):
+
+| Workload | Cold Paths/s | Warm Paths/s | Evaluated arcs/batch | Expanded vertices/batch | Prepared arcs/batch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Nearby, 1,000-Marker Corridor | 1,876,880 | 2,807,410 | 2,000 | 1,000 | 0 |
+| Distant, same Corridor | 14,404 | 14,383 | 1,088,000 | 544,000 | 0 |
+| 1,000 distinct destinations | 23,750 | 23,581 | 544,598 | 272,299 | 0 |
+| Mixed 1,000-Agent population | 16,195 | 16,229 | 837,381 | 415,618 | 56,000 |
+
+The nearby query scores two arcs, not the whole Corridor. Warm scratch growth is
+zero in all workloads, including target LRU eviction. Distinct destinations build
+1,000 lower-bound tables per batch; nearby/distant warm batches hit 1,000 times.
+The mixed population retains four shared target tables, 684,856 workspace bytes,
+and digest `16756504350970399886` across cold/warm/reset/fresh-World runs. Snapshot
+preparation took about 4.6 ms per warm population batch. The Door observation
+fixture records cold/unchanged/changed throughput separately (about 1.17/1.18/1.17
+million Paths/s here), with 3,000 evaluations, 2,000 expansions and 2,000 prepared
+arcs each; changed observations refresh costs without changing work counts.
+
+Release editor/headless builds and all 59 registered tests passed. Interactive
+stress-World UI verification remains manual; the #224 generator is unchanged.
+
 ## Prerequisites
 
 - Windows x64

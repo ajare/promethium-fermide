@@ -10,6 +10,7 @@ namespace core
 
 	class LadderEdge : public Edge
 	{
+		friend struct RouteTraversalInputs;
 		std::shared_ptr<Ladder> mLadder;
 
 	public:

@@ -33,6 +33,8 @@ namespace core
 	class Graph
 	{
 		friend struct GraphSourceIndexTestAccess;
+		friend std::optional<PathRouteExplanation> pathing::explainRoute(Agent const&, Graph const&,
+			Path const&, uint32_t, uint32_t);
 		friend std::shared_ptr<Path> pathing::findPath(Agent const*, Graph const*,
 			std::shared_ptr<const Vertex>, std::shared_ptr<const Vertex>);
 		friend std::optional<std::pair<float, float>> pathing::comparePathSuffixCosts(
@@ -267,6 +269,8 @@ namespace core
 		uint64_t getScratchAllocationCount() const;
 		size_t getPathfindingScratchBytes() const;
 		uint64_t getDirectedFactsBuildCount() const;
+		[[nodiscard]] PathfindingWorkspace::WorkCounts const& getRouteWorkCounts() const
+		{ return mPathfindingWorkspace.work; }
 		uint64_t getRouteLowerBoundBuildCount() const;
 		uint64_t getRouteLowerBoundHitCount() const;
 		RouteChoicePolicy const& getRouteChoicePolicy() const;

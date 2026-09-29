@@ -230,7 +230,8 @@ namespace core
 	};
 
 	// Constructed once per synchronous query. Agent observations are confined to
-	// snapshot capture; the frontier consumes only captured directed costs, never live state.
+	// input capture; demand evaluation consumes value-only traversal inputs and
+	// this frozen profile/policy, never live Agent or resource state.
 	struct RouteDecisionContext
 	{
 		Agent const* const agent;
