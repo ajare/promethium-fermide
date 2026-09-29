@@ -24,6 +24,7 @@
 #include "core/ForceBridgeSectorObject.h"
 #include "core/Button.h"
 #include "core/WindowSectorObject.h"
+#include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 
 #include <algorithm>
@@ -524,11 +525,16 @@ namespace core
 
 		auto readLayer = [&](char const* field) -> uint32_t
 		{
-			// Version 4 writes a layer index.  The first version 4 writer still used the
-			// legacy "fore" / "back" names, so both spellings are accepted.
-			auto const legacy = serializer.readString(field, true, "");
-			if (legacy == "fore") return static_cast<uint32_t>(0);
-			if (legacy == "back") return static_cast<uint32_t>(layerBehind(0));
+			// Version 4 writes a layer index. Early version 4 and 5 YAML writers also
+			// used the legacy "fore" / "back" names, so those old schema versions
+			// inspect the scalar as text. Newer schemas read its declared integer
+			// type directly, which also preserves strict binary type matching.
+			if (version <= 5)
+			{
+				auto const legacy = serializer.readString(field, true, "");
+				if (legacy == "fore") return static_cast<uint32_t>(0);
+				if (legacy == "back") return static_cast<uint32_t>(layerBehind(0));
+			}
 
 			auto const layer = serializer.readUint32(field);
 			if (layer >= static_cast<uint32_t>(mLayers.size()))
@@ -1400,8 +1406,11 @@ namespace core
 	void World::saveTo(string const& filepath)
 	{
 		invalidateSimulationSnapshot();
-		requireWorldDocumentPath(filepath);
-		auto serializer = YamlSerializer::toFile(filepath);
+		auto const format = worldDocumentFormat(filepath);
+		std::unique_ptr<Serializer> serializer;
+		if (format == WorldDocumentFormat::Binary)
+			serializer = BinarySerializer::toFile(filepath);
+		else serializer = YamlSerializer::toFile(filepath);
 		SerializationWorkData workData;
 		workData.markSerializedUnmodified = false;
 		serialize(*serializer, workData);

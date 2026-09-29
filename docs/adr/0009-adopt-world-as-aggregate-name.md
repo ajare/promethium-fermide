@@ -13,7 +13,7 @@ The complete simulation aggregate is named `World`. The term covers its spatial 
 ## Consequences
 
 - The aggregate class and its source files are `World`, `World.h`, `World.cpp`, and `WorldSerialization.cpp`; related identifiers use `world` consistently.
-- Persisted World documents use the required `.world.yaml` filename suffix, distinguishing them from other YAML documents.
+- Persisted World documents use `.world` for the binary representation and `.world.yaml` for the human-readable YAML representation. Both representations use the same World schema.
 - `World` is the canonical glossary term and ownership scope, including World-owned Markers and Agent groups.
 - Existing YAML documents remain loadable because their schema has no aggregate-name wrapper or discriminator to migrate.
 - Agent behaviour teardown reports `world_close`. No source-level aliases or legacy scripting value are retained.

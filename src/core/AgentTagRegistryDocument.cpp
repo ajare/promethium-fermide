@@ -11,6 +11,7 @@
 #include "core/World.h"
 #include "core/WorldDocument.h"
 #include "core/SerializationException.h"
+#include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 
 namespace core
@@ -475,7 +476,10 @@ namespace core
 			worldFilepath, "World");
 		requireWorldDocumentPath(canonicalWorld);
 		auto loaded = std::make_shared<World>("Loading", 1, 1);
-		auto serializer = YamlSerializer::fromFile(canonicalWorld.string());
+		std::unique_ptr<Serializer> serializer;
+		if (worldDocumentFormat(canonicalWorld) == WorldDocumentFormat::Binary)
+			serializer = BinarySerializer::fromFile(canonicalWorld.string());
+		else serializer = YamlSerializer::fromFile(canonicalWorld.string());
 		serializer->deserialize();
 		SerializationWorkData workData;
 		if (!loaded->deserialize(*serializer, workData))

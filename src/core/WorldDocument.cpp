@@ -4,11 +4,19 @@
 
 namespace core
 {
+	namespace
+	{
+		bool hasCompleteSuffix(std::string const& filename, std::string_view suffix)
+		{
+			return filename.size() > suffix.size() && filename.ends_with(suffix);
+		}
+	}
+
 	bool isWorldDocumentPath(std::filesystem::path const& filepath)
 	{
 		auto const filename = filepath.filename().string();
-		return filename.size() > WorldDocumentFilenameSuffix.size()
-			&& filename.ends_with(WorldDocumentFilenameSuffix);
+		return hasCompleteSuffix(filename, BinaryWorldDocumentFilenameSuffix)
+			|| hasCompleteSuffix(filename, YamlWorldDocumentFilenameSuffix);
 	}
 
 	void requireWorldDocumentPath(std::filesystem::path const& filepath)
@@ -16,16 +24,29 @@ namespace core
 		if (!isWorldDocumentPath(filepath))
 		{
 			throw SerializationException(
-				"A World document file must end with .world.yaml");
+				"A World document file must end with .world or .world.yaml");
 		}
+	}
+
+	WorldDocumentFormat worldDocumentFormat(std::filesystem::path const& filepath)
+	{
+		auto const filename = filepath.filename().string();
+		if (hasCompleteSuffix(filename, YamlWorldDocumentFilenameSuffix))
+			return WorldDocumentFormat::Yaml;
+		if (hasCompleteSuffix(filename, BinaryWorldDocumentFilenameSuffix))
+			return WorldDocumentFormat::Binary;
+		requireWorldDocumentPath(filepath);
+		throw SerializationException("Unsupported World document format");
 	}
 
 	std::filesystem::path worldDocumentBasePath(
 		std::filesystem::path const& filepath)
 	{
-		requireWorldDocumentPath(filepath);
+		auto const format = worldDocumentFormat(filepath);
+		auto const suffix = format == WorldDocumentFormat::Binary
+			? BinaryWorldDocumentFilenameSuffix : YamlWorldDocumentFilenameSuffix;
 		auto filename = filepath.filename().string();
-		filename.erase(filename.size() - WorldDocumentFilenameSuffix.size());
+		filename.erase(filename.size() - suffix.size());
 		return filepath.parent_path() / filename;
 	}
 }

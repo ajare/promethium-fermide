@@ -122,8 +122,18 @@ namespace core
 		if (mContainers.empty())
 		{
 			if (mRoot) throw SerializationException("Cannot write more than one binary root value");
-			mRoot = std::move(value);
-			return *mRoot;
+			if (name.empty())
+			{
+				mRoot = std::move(value);
+				return *mRoot;
+			}
+			// Preserve a named schema root as one field in an otherwise implicit
+			// root map. This keeps beginMap("world") symmetric without adding a
+			// special root-name field to the binary envelope.
+			mRoot = std::make_unique<Node>();
+			mRoot->type = Map;
+			mRoot->fields.emplace_back(name, std::move(value));
+			return *mRoot->fields.back().second;
 		}
 
 		auto& parent = *mContainers.back();

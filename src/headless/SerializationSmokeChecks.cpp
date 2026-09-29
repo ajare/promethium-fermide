@@ -18,6 +18,7 @@
 
 #include "core/Graph.h"
 #include "core/World.h"
+#include "core/WorldDocument.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/BinarySerializer.h"
@@ -298,7 +299,7 @@ namespace
 			"failed opaque byte write left a temporary file behind");
 	}
 
-	void worldDocumentsRequireTheWorldYamlSuffix()
+	void worldDocumentsUseTheirExactSuffixFormat()
 	{
 		namespace filesystem = std::filesystem;
 		auto const directory = filesystem::temp_directory_path()
@@ -316,36 +317,91 @@ namespace
 			}
 		} cleanup{ directory };
 
-		core::World world("Filename", 4, 2);
-		auto const legacyPath = directory / "filename.yaml";
-		bool saveRefused{ false };
-		try { world.saveTo(legacyPath.string()); }
-		catch (core::SerializationException const& exception)
+		for (auto const* refused : { ".world", ".world.yaml", "filename.yaml",
+			"filename.bin", "filename.WORLD", "filename.world.YAML",
+			"filename.world.yaml.bak", "filename.world.bin" })
 		{
-			saveRefused = std::string(exception.what()).find(".world.yaml")
-				!= std::string::npos;
+			require(!core::isWorldDocumentPath(directory / refused),
+				"An unsupported World document name was accepted");
 		}
-		require(saveRefused && !filesystem::exists(legacyPath),
-			"A World save without the .world.yaml suffix was accepted");
+		require(core::isWorldDocumentPath(directory / "filename.world")
+			&& core::isWorldDocumentPath(directory / "filename.world.yaml"),
+			"A supported World document suffix was refused");
+		require(core::worldDocumentBasePath(directory / "filename.world")
+			== directory / "filename"
+			&& core::worldDocumentBasePath(directory / "filename.world.yaml")
+			== directory / "filename",
+			"World document formats produced different base paths");
 
-		auto const worldPath = directory / "filename.world.yaml";
-		world.saveTo(worldPath.string());
-		require(filesystem::is_regular_file(worldPath),
-			"A .world.yaml World document was not saved");
-		auto loaded = core::loadWorldDocument(worldPath);
-		require(loaded && loaded->getName() == "Filename",
-			"A .world.yaml World document did not load");
+		core::World world("Binary document", 6, 3);
+		auto const room = world.addRoom("Authored room", 0, 0, 0, 5, 2);
+		world.addRoom("Rear room", 1, 0, 0, 5, 2);
+		world.finishBuild();
+		world.createAgent("Authored Agent", room, 0, 0.5f);
+		auto* authoredAgent = world.getAgentAtPosition(0, 0.5f, 0.0f);
+		require(authoredAgent != nullptr, "The binary World fixture has no Agent");
 
-		filesystem::copy_file(worldPath, legacyPath);
-		bool loadRefused{ false };
-		try { (void)core::loadWorldDocument(legacyPath); }
-		catch (core::SerializationException const& exception)
+		auto const binaryPath = directory / "filename.world";
+		auto const yamlPath = directory / "converted.world.yaml";
+		world.saveTo(binaryPath.string());
+		require(filesystem::is_regular_file(binaryPath) && !world.isModified()
+			&& !authoredAgent->isModified(),
+			"A binary World document or its Agents were not committed cleanly");
+		auto binary = core::loadWorldDocument(binaryPath);
+		require(binary && binary->getName() == "Binary document"
+			&& binary->getCellsWide() == 6 && binary->getLevelsHigh() == 3
+			&& binary->getAgentAtPosition(0, 0.5f, 0.0f) != nullptr,
+			"A representative binary World document did not round-trip");
+
+		binary->saveTo(yamlPath.string());
+		auto yaml = core::loadWorldDocument(yamlPath);
+		require(yaml && yaml->getName() == "Binary document"
+			&& yaml->getAgentAtPosition(0, 0.5f, 0.0f) != nullptr,
+			"Binary-to-YAML World conversion did not round-trip");
+		auto const convertedBack = directory / "converted-back.world";
+		yaml->saveTo(convertedBack.string());
+		auto roundTripped = core::loadWorldDocument(convertedBack);
+		require(roundTripped && roundTripped->getName() == "Binary document",
+			"YAML-to-binary World conversion did not round-trip");
+
+		// Dispatch is solely from the complete suffix: valid content under the
+		// other format's name must not trigger sniffing or fallback.
+		auto const disguisedBinary = directory / "binary.world.yaml";
+		auto const disguisedYaml = directory / "yaml.world";
+		filesystem::copy_file(binaryPath, disguisedBinary);
+		filesystem::copy_file(yamlPath, disguisedYaml);
+		for (auto const& path : { disguisedBinary, disguisedYaml })
 		{
-			loadRefused = std::string(exception.what()).find(".world.yaml")
-				!= std::string::npos;
+			bool refused{ false };
+			try { (void)core::loadWorldDocument(path); }
+			catch (core::SerializationException const&) { refused = true; }
+			require(refused, "A mislabeled World document used format fallback");
 		}
-		require(loadRefused,
-			"A World load without the .world.yaml suffix was accepted");
+
+		// Binary writes have the same transactional and dirty-state guarantees as
+		// YAML writes, including no temporary file after failure.
+		std::ifstream beforeInput(binaryPath, std::ios::binary);
+		auto const before = std::string((std::istreambuf_iterator<char>(beforeInput)),
+			std::istreambuf_iterator<char>());
+		world.markModified();
+		core::setTransactionalWriteFailureAfterBytesForTesting(1);
+		bool failed{ false };
+		try { world.saveTo(binaryPath.string()); }
+		catch (core::SerializationException const&) { failed = true; }
+		core::setTransactionalWriteFailureAfterBytesForTesting(0);
+		std::ifstream afterInput(binaryPath, std::ios::binary);
+		auto const after = std::string((std::istreambuf_iterator<char>(afterInput)),
+			std::istreambuf_iterator<char>());
+		require(failed && world.isModified() && before == after,
+			"A failed binary save changed the destination or clean state");
+		bool temporaryLeftBehind{ false };
+		for (auto const& entry : filesystem::directory_iterator(directory))
+		{
+			if (entry.path().filename().string().find(".saving") != std::string::npos)
+				temporaryLeftBehind = true;
+		}
+		require(!temporaryLeftBehind,
+			"A failed binary save left a temporary file behind");
 	}
 
 	// #62: a late save write failure must report failure and leave the previous
@@ -6294,7 +6350,7 @@ void runSerializationSmokeChecks()
 	binarySerializerHonoursTheSerializerContract();
 	fileYamlRoundTrips();
 	transactionalWriterPreservesOpaqueBytes();
-	worldDocumentsRequireTheWorldYamlSuffix();
+	worldDocumentsUseTheirExactSuffixFormat();
 	lateWriteFailurePreservesThePreviousSaveFile();
 	saveNeverTouchesAPredictableTemporaryPath();
 #if !defined(_WIN32)
