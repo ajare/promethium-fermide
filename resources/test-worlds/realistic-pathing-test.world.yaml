@@ -1,12 +1,20 @@
-version: 18
+version: 19
 name: Untitled
 randomSeed: 0
 cellsWide: 16
 levelsHigh: 6
-layers: 2
+layers: 3
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+  - Level 3
+  - Level 4
+  - Level 5
 layerNames:
   - Layer 0
   - Layer 1
+  - Background
 construction:
   - type: corridor
     layer: 0
@@ -18,7 +26,7 @@ construction:
     layer: 0
     y: 2
     x: 9
-    cellsWide: 5
+    cellsWide: 7
     levelsHigh: 1
   - type: room
     name: Room 1
@@ -28,72 +36,12 @@ construction:
     cellsWide: 6
     levelsHigh: 1
     topLevelHeight: 0.9
-  - type: door
-    layer: 0
-    y: 2
-    x: 6
-    width: 1
-    height: regular
-    foreControl: false
-    backControl: false
-    activationMode: manual
-    holdOpenSeconds: 5
-    crossingLanes: 0
-    openStyle: openUp
-  - type: door
-    layer: 0
-    y: 2
-    x: 9
-    width: 1
-    height: regular
-    foreControl: false
-    backControl: false
-    activationMode: manual
-    holdOpenSeconds: 5
-    crossingLanes: 0
-    openStyle: openUp
-  - type: marker
-    sectorIndex: 1
-    levelIndex: 0
-    xOffset: 4.609375
-    id: 1
-    name: Marker 1
-    properties: 0
   - type: corridor
     layer: 0
     y: 3
     x: 2
-    cellsWide: 12
+    cellsWide: 14
     levelsHigh: 1
-  - type: lift
-    layer: 1
-    y: 2
-    x: 3
-    cellsWide: 1
-    levelsHigh: 2
-    stopOffsets: [0, 1]
-    capacity: 2
-    minimumDwellSeconds: 0.75
-    maximumBoardingSeconds: 5
-    initialStop: 0
-  - type: lift
-    layer: 1
-    y: 2
-    x: 12
-    cellsWide: 1
-    levelsHigh: 2
-    stopOffsets: [0, 1]
-    capacity: 2
-    minimumDwellSeconds: 0.75
-    maximumBoardingSeconds: 5
-    initialStop: 0
-  - type: marker
-    sectorIndex: 2
-    levelIndex: 0
-    xOffset: 2.96875
-    id: 2
-    name: Marker 2
-    properties: 0
   - type: corridor
     layer: 0
     y: 0
@@ -134,6 +82,40 @@ construction:
     cellsWide: 4
     levelsHigh: 1
     topLevelHeight: 0.9
+  - type: corridor
+    layer: 0
+    y: 4
+    x: 2
+    cellsWide: 14
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 5
+    x: 2
+    cellsWide: 14
+    levelsHigh: 1
+  - type: lift
+    layer: 1
+    y: 2
+    x: 3
+    cellsWide: 1
+    levelsHigh: 2
+    stopOffsets: [0, 1]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+  - type: lift
+    layer: 1
+    y: 2
+    x: 12
+    cellsWide: 1
+    levelsHigh: 4
+    stopOffsets: [0, 1, 2, 3]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 2
   - type: staircase
     layer: 1
     y: 0
@@ -148,6 +130,44 @@ construction:
     cellsWide: 2
     riseSide: left
     speed: 0
+  - type: door
+    layer: 0
+    y: 2
+    x: 6
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 2
+    x: 9
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: marker
+    sectorIndex: 1
+    levelIndex: 0
+    xOffset: 4.609375
+    id: 1
+    name: Marker 1
+    properties: 0
+  - type: marker
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 2.96875
+    id: 2
+    name: Marker 2
+    properties: 0
   - type: door
     layer: 0
     y: 0
@@ -198,29 +218,81 @@ construction:
     openStyle: openUp
     preButtonActivation: manual
   - type: marker
-    sectorIndex: 9
+    sectorIndex: 7
     levelIndex: 0
     xOffset: 7.03125
     id: 3
     name: Marker 3
     properties: 0
+  - type: stairwell
+    layer: 1
+    y: 2
+    x: 14
+    levelsHigh: 4
+    mountSide: left
+    directionalCapacity: 0
+    directionalBatchLimit: 4
+  - type: marker
+    sectorIndex: 11
+    levelIndex: 0
+    xOffset: 8.84375
+    id: 4
+    name: Marker 4
+    properties: 0
+  - type: window
+    layer: 0
+    y: 2
+    x: 5
+    cellsWide: 1
+    levelsHigh: 1
+    traversable: false
+    initialState: closed
+    style: clear
+  - type: background
+    layer: 2
+    y: 1
+    x: 0
+    cellsWide: 16
+    levelsHigh: 3
+    colour: 6324384
 agentGroups:
   []
-nextMarkerId: 4
+nextMarkerId: 5
 nextAgentGroupId: 1
 agents:
   - id: 1
     agent:
       name: Agent 1
       flags: 0
-      individualProperties:
-        - type: interactionAversion
-          value: 3
+    sector: 5
+    localX: 1.015625
+    localY: 0
+  - id: 2
+    agent:
+      name: Agent 2
+      flags: 0
     sector: 6
-    localX: 2.3125
+    localX: 2.0366526
+    localY: 0
+  - id: 3
+    agent:
+      name: Agent 3
+      flags: 0
+      individualProperties:
+        - type: effortAversion
+          value: 0
+    sector: 1
+    localX: 5.140625
     localY: 0
     path:
-      destinationSector: 9
-      destinationLocalX: 7.03125
+      destinationSector: 11
+      destinationLocalX: 8.84375
       destinationLocalY: 0
       active: true
+  - id: 4
+    agent:
+      name: Agent 4
+      flags: 0
+    sector: 2
+    localX: 0.4375
+    localY: 0
