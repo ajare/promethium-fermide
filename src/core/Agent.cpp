@@ -131,6 +131,22 @@ namespace core
 	{
 	}
 
+	Agent::~Agent()
+	{
+		if (mStandingRouteEdge) mStandingRouteEdge->changeStandingRouteAgents(-1);
+	}
+
+	void Agent::syncStandingRouteObservation()
+	{
+		auto standing = mActive && mTraversalTask
+			&& mTraversalTask->escalatorWalking.has_value()
+			&& !*mTraversalTask->escalatorWalking ? mTraversalTask->edge : nullptr;
+		if (standing == mStandingRouteEdge) return;
+		if (mStandingRouteEdge) mStandingRouteEdge->changeStandingRouteAgents(-1);
+		if (standing) standing->changeStandingRouteAgents(1);
+		mStandingRouteEdge = std::move(standing);
+	}
+
 	bool Agent::childrenModified() const
 	{
 		return false;
@@ -608,6 +624,7 @@ namespace core
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
 		mTraversalTask.reset();
+		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
 		return true;
@@ -1003,6 +1020,7 @@ namespace core
 		if (active != mActive)
 		{
 			mActive = active;
+			syncStandingRouteObservation();
 			modify();
 		}
 	}
@@ -1481,6 +1499,7 @@ namespace core
 				auto const unit = static_cast<double>(draw >> 11) * 0x1.0p-53;
 				mTraversalTask->escalatorWalking = unit < getEffectiveEscalatorWalkingChance().value;
 			}
+			syncStandingRouteObservation();
 			mState = State::TraversingEdge;
 		}
 	}
@@ -1545,6 +1564,7 @@ namespace core
 		{
 			mWorld->releaseTraversal(mTraversalTask->request, mTraversalTask->permit);
 			mTraversalTask.reset();
+			syncStandingRouteObservation();
 			mTraversalLocalGoal.reset();
 			if (mQueuedTraversalTask)
 			{
@@ -1575,6 +1595,7 @@ namespace core
 			}
 		}
 		mTraversalTask.reset();
+		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
 	}

@@ -19,7 +19,7 @@ namespace core
 		float motionSeconds, float openingSeconds)
 	{
 		DirectedTraversalFacts facts;
-		if (agentRejectsEdge(context.legacyAgent, edge, TraversalKind::Door, context.allowFallbackMobility))
+		if (routeRejectsEdge(context, edge, TraversalKind::Door))
 		{
 			facts.exclusionReason = RouteExclusionReason::Mobility;
 			return facts;

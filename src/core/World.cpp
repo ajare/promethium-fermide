@@ -10161,14 +10161,40 @@ namespace core
 	uint32_t World::countStandingAgentsOnEscalator(Agent const* observer, Edge const* edge) const
 	{
 		if (!observer || !edge) return 0;
-		uint32_t count = 0;
-		for (auto const& [id, candidate] : mAgents.entries())
+		auto const count = edge->getStandingRouteAgents();
+		return count - (observer->isActive() && observer->isStandingOnEscalator(edge) ? 1u : 0u);
+	}
+
+	void World::captureTransportRouteQueues(TraversalResource const& resource) const
+	{
+		if (resource.mCapturedRouteQueueEpoch == resource.mRouteQueueEpoch
+			&& resource.mRouteQueuedByStop.size() == resource.mLiftStops.size()
+			&& resource.mRouteQueuedByShuttleDoor.size() == resource.mShuttleDoors.size()) return;
+		resource.mRouteQueuedByStop.assign(resource.mLiftStops.size(), 0);
+		resource.mRouteQueuedByShuttleDoor.assign(resource.mShuttleDoors.size(), 0);
+		for (auto id : resource.mAdmissionQueue)
 		{
-			(void)id;
-			if (candidate.get() != observer && candidate->isActive()
-				&& candidate->isStandingOnEscalator(edge)) ++count;
+			auto request = mTraversalRequests.find(id);
+			if (!request) continue;
+			if (!resource.mShuttle)
+			{
+				auto stop = findLiftStop(resource, request->mSourceEndpoint);
+				if (stop < resource.mRouteQueuedByStop.size()) ++resource.mRouteQueuedByStop[stop];
+				continue;
+			}
+			for (size_t index = 0; index < resource.mShuttleDoors.size(); ++index)
+			{
+				auto const& door = resource.mShuttleDoors[index];
+				if (request->mSourceSector != door.locationSector) continue;
+				if (any_of(resource.mShuttleDoors.begin(), resource.mShuttleDoors.end(),
+					[&](auto const& candidate) { return candidate.landingResource == request->mResource
+						&& candidate.stopIndex == door.stopIndex
+						&& candidate.accessZoneIndex == door.accessZoneIndex; }))
+					++resource.mRouteQueuedByShuttleDoor[index];
+			}
 		}
-		return count;
+		resource.mCapturedRouteQueueEpoch = resource.mRouteQueueEpoch;
+		++resource.mRouteQueueSnapshotBuildCount;
 	}
 
 	optional<ShuttleRouteAccessObservation> World::observeShuttleAccess(
@@ -10187,25 +10213,31 @@ namespace core
 						+ candidate.carriagePosition - endpoint.x) < 0.001f;
 			});
 		if (door == coordinator->mShuttleDoors.end()) return nullopt;
-		// Only carriages reachable from this connected access zone contribute.
-		uint32_t capacity = 0;
-		for (auto const& carriage : coordinator->mShuttleCarriages)
-			if (any_of(coordinator->mShuttleDoors.begin(), coordinator->mShuttleDoors.end(),
-				[&](auto const& candidate) { return candidate.stopIndex == door->stopIndex
-					&& candidate.accessZoneIndex == door->accessZoneIndex
-					&& candidate.carriageIndex == carriage.index; }))
-				capacity += carriage.capacity;
+		// Stops, Carriages and access-zone associations are fixed for this resource
+		// identity. Structural edits replace the resource; queue changes do not
+		// recompute these authored facts. During initial construction the number
+		// of mapped Doors can still grow before the Graph is published.
+		if (coordinator->mRouteShuttleDoorCapacities.size() != coordinator->mShuttleDoors.size())
+		{
+			coordinator->mRouteShuttleDoorCapacities.assign(coordinator->mShuttleDoors.size(), 0);
+			for (size_t index = 0; index < coordinator->mShuttleDoors.size(); ++index)
+			{
+				auto const& access = coordinator->mShuttleDoors[index];
+				for (auto const& carriage : coordinator->mShuttleCarriages)
+					if (any_of(coordinator->mShuttleDoors.begin(), coordinator->mShuttleDoors.end(),
+						[&](auto const& candidate) { return candidate.stopIndex == access.stopIndex
+							&& candidate.accessZoneIndex == access.accessZoneIndex
+							&& candidate.carriageIndex == carriage.index; }))
+						coordinator->mRouteShuttleDoorCapacities[index] += carriage.capacity;
+			}
+		}
+		auto const capacity = coordinator->mRouteShuttleDoorCapacities[door - coordinator->mShuttleDoors.begin()];
 		uint32_t queued = 0;
 		if (includeLocalQueue)
-			for (auto id : coordinator->mAdmissionQueue)
-			{
-				auto request = mTraversalRequests.find(id);
-				if (!request || request->mSourceSector != door->locationSector) continue;
-				if (any_of(coordinator->mShuttleDoors.begin(), coordinator->mShuttleDoors.end(),
-					[&](auto const& candidate) { return candidate.landingResource == request->mResource
-						&& candidate.stopIndex == door->stopIndex
-						&& candidate.accessZoneIndex == door->accessZoneIndex; })) ++queued;
-			}
+		{
+			captureTransportRouteQueues(*coordinator);
+			queued = coordinator->mRouteQueuedByShuttleDoor[door - coordinator->mShuttleDoors.begin()];
+		}
 		return ShuttleRouteAccessObservation{ queued, max(1u, capacity),
 			(float)coordinator->mLiftMinimumDwellTicks * getFixedTimestep(),
 			coordinator->mLiftStops[door->stopIndex].globalPosition };
@@ -10224,13 +10256,46 @@ namespace core
 		if (stop >= coordinator->mLiftStops.size()) return nullopt;
 		uint32_t queued = 0;
 		if (includeLocalQueue)
-			for (auto requestId : coordinator->mAdmissionQueue)
-			{
-				auto request = mTraversalRequests.find(requestId);
-				if (request && findLiftStop(*coordinator, request->mSourceEndpoint) == stop) ++queued;
-			}
+		{
+			captureTransportRouteQueues(*coordinator);
+			queued = coordinator->mRouteQueuedByStop[stop];
+		}
 		return LiftRouteAccessObservation{ queued, max(1u, coordinator->mCapacity),
 			(float)coordinator->mLiftMinimumDwellTicks * getFixedTimestep() };
+	}
+
+	void World::captureDoorRouteObservation(TraversalResource const& resource) const
+	{
+		// Ordinary and Bulkhead Doors have exactly two authored approaches.
+		// Compare O(1) scalar facts, never requests or Agents. This also catches
+		// direct authored reconfiguration without fragile queue-mutation hooks.
+		TraversalResource::DoorRouteObservationKey key;
+		for (size_t index = 0; index < 2; ++index)
+		{
+			auto const& lane = resource.mQueueLanes[index];
+			key.sectors[index] = lane.sector;
+			key.queued[index] = lane.queue.size();
+			key.positions[index] = lane.positions.size();
+		}
+		key.crossingLanes = max<size_t>(1, resource.mCrossingOwners.size());
+		key.open = resource.mDoor->isOpen();
+		key.activationMode = resource.mDoor->getActivationMode();
+		if (resource.mDoorRouteObservationEpoch && key == resource.mDoorRouteObservationKey) return;
+		resource.mDoorRouteObservationKey = key;
+		++resource.mDoorRouteObservationEpoch;
+		resource.mDoorRouteServiceBatches = static_cast<float>(
+			(key.queued[0] + key.queued[1] + key.crossingLanes - 1) / key.crossingLanes);
+		for (size_t index = 0; index < 2; ++index)
+		{
+			size_t queued = 0, positions = 0;
+			for (size_t other = 0; other < 2; ++other)
+				if (key.sectors[index] == key.sectors[other])
+				{
+					queued += key.queued[other];
+					positions += key.positions[other];
+				}
+			resource.mDoorRouteDensity[index] = static_cast<float>(queued) / max<size_t>(1, positions);
+		}
 	}
 
 	float World::observeAccessZoneDensity(TraversalResourceId resourceId,
@@ -10238,6 +10303,14 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource) return 0.0f;
+		if (resource->mDoor && resource->mQueueLanes.size() == 2)
+		{
+			captureDoorRouteObservation(*resource);
+			for (size_t index = 0; index < 2; ++index)
+				if (resource->mDoorRouteObservationKey.sectors[index] == sourceSector)
+					return resource->mDoorRouteDensity[index];
+			return 0.0f;
+		}
 		size_t queued = 0;
 		size_t positions = 0;
 		for (auto const& lane : resource->mQueueLanes)
@@ -10286,6 +10359,11 @@ namespace core
 			return delay;
 		}
 
+		if (resource->mDoor && resource->mQueueLanes.size() == 2)
+		{
+			captureDoorRouteObservation(*resource);
+			return resource->mDoorRouteServiceBatches * mTraversalWaitingPolicy.queueDelayPerAgentSeconds;
+		}
 		size_t ahead = 0;
 		for (auto const& lane : resource->mQueueLanes) ahead += lane.queue.size();
 		auto lanes = max<size_t>(1, resource->mCrossingOwners.size());

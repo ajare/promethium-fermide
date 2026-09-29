@@ -1223,6 +1223,8 @@ namespace core
 		// own traversal-request allocation, so no forward is left for them.
 
 		uint32_t findLiftStop(TraversalResource const& resource, Vector2 const& endpoint) const;
+		void captureTransportRouteQueues(TraversalResource const& resource) const;
+		void captureDoorRouteObservation(TraversalResource const& resource) const;
 
 		uint32_t findAgentLiftDestination(Agent const& agent, TraversalResource const& resource) const;
 

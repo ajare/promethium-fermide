@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -124,6 +125,7 @@ void runViewportZoomSmokeChecks();
 void runZeroSizeLocationSmokeChecks();
 void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
+void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runThresholdRouteCostSmokeChecks();
 void runStairRouteCostSmokeChecks();
 void runLiftRouteCostSmokeChecks();
@@ -6166,6 +6168,11 @@ namespace
 void runMetricsChecks();
 int runMetricsEndpoint(int argc, char** argv);
 
+size_t getHeadlessWorkingSetBytes()
+{
+	return currentWorkingSetBytes();
+}
+
 int main(int argc, char** argv)
 {
 	if (argc > 1 && (std::string(argv[1]) == "--viewport-checks"
@@ -6202,6 +6209,19 @@ int main(int argc, char** argv)
 
 	try
 	{
+		if (argc > 1 && std::string(argv[1]) == "--write-routing-scale-world")
+		{
+			if (argc != 3) throw std::invalid_argument("Usage: --write-routing-scale-world <new.world.yaml>");
+			writeRoutingScaleWorld(argv[2]);
+			std::cout << "PASS: wrote routing stress World and adjacent tag registry\n";
+			return 0;
+		}
+		if (argc > 1 && std::string(argv[1]) == "--routing-scale-checks")
+		{
+			runPathfindingWorkspaceSmokeChecks();
+			std::cout << "PASS: population routing\n";
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--shuttle-route-checks")
 		{
 			runShuttleRouteCostSmokeChecks();

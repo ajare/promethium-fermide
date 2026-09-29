@@ -20,6 +20,7 @@ namespace core
 	class Edge
 	{
 		friend class Graph;
+		friend class Agent;
 
 	private:
 
@@ -28,6 +29,7 @@ namespace core
 	private:
 
 		uint32_t mId;
+		uint32_t mRoutingIndex = 0;
 
 		EdgeType mType;
 
@@ -35,6 +37,13 @@ namespace core
 		// its World).  They are referenced weakly so the Vertex <-> Edge adjacency
 		// does not form a strong-reference cycle that outlives the Graph (#182).
 		std::weak_ptr<const Vertex> mVertices[2];
+		// Geometry is fixed when Graph construction attaches both endpoints.
+		float mLength = 0;
+		float mRise = 0;
+		uint32_t mTargetVertexId = 0;
+		mutable uint32_t mStandingRouteAgents = 0;
+		mutable uint64_t mStandingRouteEpoch = 0;
+		void changeStandingRouteAgents(int delta) const;
 
 	private:
 		
@@ -54,6 +63,9 @@ namespace core
 		[[nodiscard]] bool sameAs(std::shared_ptr<const Edge> other) const;
 
 		[[nodiscard]] uint32_t getId() const;
+		// Dense Graph-local identity, reproducible after a World reset. Unlike
+		// getId(), this is not a process-global object identity.
+		[[nodiscard]] uint32_t getRoutingIndex() const { return mRoutingIndex; }
 
 		[[nodiscard]] EdgeType getType() const;
 
@@ -64,6 +76,9 @@ namespace core
 		[[nodiscard]] std::shared_ptr<const Vertex> getOtherVertex(std::shared_ptr<const Vertex> vertex) const;
 
 		float getLength() const;
+		float getDirectedRise(Vertex const& target) const;
+		uint32_t getStandingRouteAgents() const { return mStandingRouteAgents; }
+		uint64_t getStandingRouteEpoch() const { return mStandingRouteEpoch; }
 
 		// To be implemented by subclasses.
 		[[nodiscard]] virtual std::string getDescription() const = 0;

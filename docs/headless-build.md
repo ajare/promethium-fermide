@@ -263,6 +263,65 @@ source-equals-target, unreachable/stale workspace behaviour, and warmed scratch
 allocation stability. Existing Mobility routing and runtime-gate tests remain
 active.
 
+## Population routing (#224)
+
+Run `prometheum-fermide-headless.exe --routing-scale-checks` for independent
+reference-Dijkstra checks, source-inference boundary checks, and a generated
+mixed population: 1,000 Agents, 2,040 Vertices, four Levels, stationary
+Staircases, Escalators, a Ladder, and a Lift. Profiles include defaults,
+shared-tag properties, and unquantised individual properties. Timed batches
+include actual source inference and cross-Level destinations, and must use
+multiple traversal kinds. Cold, warm, World-reset, and independently rebuilt
+Worlds must reproduce the same Path/cost digest. Warm scratch allocations and
+immutable-geometry rebuild counts must not grow. Separate tests exercise
+uncertain route costs across reset, profile extremes, cache eviction, topology
+invalidation, and observation epochs across ticks, cancellation and activation.
+
+The Graph retains directed adjacency, lengths, rises, floor intervals, floor
+segments, and deterministic Graph-local perception identities. Source inference
+no longer repeatedly walks floor cells for every progressively closer Marker.
+Authored device speeds/timings remain scalar device facts; Shuttle access-zone
+capacities are cached independently of queue changes. Effective properties and
+their diagnostic provenance are resolved together once; Mobility is shared by
+both feasibility passes. Relaxation reads only captured costs and compact arcs:
+no tag/registry scans, queue walks, weak endpoint locks, or scratch allocation.
+
+Lift/Shuttle queue snapshots update on admission membership epochs. Escalator
+standing counts update on admission, cancellation, cleanup and activation—not
+population scans. Door observations compare the exact scalar state of their two
+approaches and publish a new epoch only when that state changes. This preserves
+local visibility without tick-wide invalidation or approximate queue buckets.
+Runtime admission and physical motion are unchanged.
+
+A four-entry, Graph-local target LRU caches reverse shortest-path lower bounds.
+Walking uses maximum valid Walk speed; every other arc is relaxed to zero,
+including fast transport and forbidden directions. Ignoring feasibility and
+blocking Markers can only lower these bounds. Conservative rounding allowances
+cover both reverse sums and forward float accumulation; zero remains the safe
+fallback. All four tables reserve storage at warm-up, so eviction allocates no
+scratch. Profiles, policy and observations do not enter this universal bound
+cache. No route-result cache or property quantisation is used.
+
+A Windows/MSVC Release run observed approximately 9,000–10,000 Paths/second,
+645,848 workspace bytes, four target builds and 1,996 hits after the warm batch,
+and digest `16756504350970399886`. Working set was about 20–22 MiB for routing
+and 26 MiB after serialization-based reset. These are observations, not portable
+timing or peak-memory limits. Reset serialization is outside the routing timer.
+The complete Release editor/headless build and headless suite passed, with
+unchanged simulation event/snapshot digests.
+
+To generate an editor-loadable fixture and its adjacent tag registry:
+
+```bat
+prometheum-fermide-headless.exe --write-routing-scale-world routing-scale.world.yaml
+```
+
+The command refuses existing output files, assigns varied destinations, and
+checks document round-trip loading. Open the World in the editor, resume, reset,
+and rerun to assess UI responsiveness; interactive UI verification is still
+manual. Large-World serialization/reset overhead is not measured as routing
+throughput.
+
 ## Prerequisites
 
 - Windows x64

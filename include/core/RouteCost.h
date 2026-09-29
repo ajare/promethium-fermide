@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/AgentTag.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -243,5 +245,7 @@ namespace core
 		bool const allowFallbackMobility = false;
 		uint64_t const perceptionKey = 0;
 		uint64_t const observationEpoch = 0;
+		// Populated once at snapshot capture; direct diagnostic callers may omit it.
+		std::optional<MobilityProfile> const mobilityProfile = std::nullopt;
 	};
 }

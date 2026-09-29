@@ -346,6 +346,21 @@ return {
 			"visible entry congestion did not suppress expected walking");
 		require(congested.components.physicalEffortUnits < clear.components.physicalEffortUnits,
 			"suppressed walking retained its expected effort");
+		require(fixture.edge->getStandingRouteAgents() == 1
+			&& standingAgent->countObservedStandingEscalatorAgents(fixture.edge.get()) == 0,
+			"shared Escalator observation counted its observer or lost its occupant");
+		auto const epoch = fixture.edge->getStandingRouteEpoch();
+		fixture.tick(1);
+		require(fixture.edge->getStandingRouteEpoch() == epoch,
+			"unchanged Escalator occupancy advanced the routing epoch with the tick");
+		standingAgent->setActive(false);
+		require(fixture.edge->getStandingRouteAgents() == 0, "deactivation retained observed congestion");
+		standingAgent->setActive(true);
+		require(fixture.edge->getStandingRouteAgents() == 1, "reactivation lost observed congestion");
+		standingAgent->clearPath();
+		require(fixture.edge->getStandingRouteAgents() == 0
+			&& fixture.edge->getStandingRouteEpoch() == epoch + 3,
+			"cancellation did not publish the changed Escalator observation");
 	}
 
 	void movementAndReplay()

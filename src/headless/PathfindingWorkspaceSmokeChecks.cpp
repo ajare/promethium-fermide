@@ -1,4 +1,8 @@
 #include <bit>
+#include <chrono>
+#include <iostream>
+#include "core/Defines.h"
+#include "core/AgentTagRegistry.h"
 #include <filesystem>
 #include <limits>
 #include "core/AgentTagRegistryDocument.h"
@@ -11,10 +15,14 @@
 #include "core/Agent.h"
 #include "core/Edge.h"
 #include "core/Graph.h"
+#include "core/Location.h"
+#include "core/Marker.h"
 #include "core/Path.h"
 #include "core/Pathing.h"
 #include "core/Vertex.h"
 #include "core/World.h"
+
+size_t getHeadlessWorkingSetBytes();
 
 namespace
 {
@@ -106,6 +114,393 @@ namespace
 				}
 			}
 		}
+	}
+
+	void uncertainRoutesSurviveWorldReset()
+	{
+		core::World world("Uncertain reset", 8, 3);
+		auto lower = world.addCorridor(0, 0, 8);
+		world.addCorridor(1, 0, 8);
+		auto upper = world.addCorridor(2, 0, 8);
+		world.addLadder(1, 0, 4, { 3, true, true });
+		uint32_t destination, origin;
+		world.addSectorMarker(lower, 0, 1.5f, &destination);
+		world.addSectorMarker(upper, 0, 6.5f, &origin);
+		world.finishBuild();
+		world.pauseSimulation();
+		auto id = world.createAgent("Uncertain walker", lower, 0, 1.5f);
+		require(world.setAgentIndividualRouteFamiliarity(id, 0), "Could not set uncertain profile");
+		auto target = world.getGraph()->getVertexByIdentifier(destination);
+		auto markerId = std::dynamic_pointer_cast<core::Marker>(target->getObject())->getMarkerId();
+		auto source = world.getGraph()->getVertexByIdentifier(origin);
+		auto sourceMarkerId = std::dynamic_pointer_cast<core::Marker>(source->getObject())->getMarkerId();
+		// Evaluate a hypothetical return from the upper Stop. The Agent remains
+		// below and cannot observe the Ladder from that remote approach.
+		auto before = world.getGraph()->calculatePath(world.lookupAgent(id).entity, source, target);
+		require(before != nullptr, "Uncertain reset fixture has no Path");
+		bool uncertain = false;
+		PathDigest expected;
+		for (auto const& node : before->nodes)
+		{
+			expected.emplace_back(node.targetVertex->getSearchIndex(), std::bit_cast<uint32_t>(node.edgeWeight));
+			uncertain = uncertain || (node.diagnosticCost && node.diagnosticCost->components.uncertainty > 0
+				&& node.diagnosticCost->components.stableVariation != 0);
+		}
+		require(uncertain, "Reset fixture did not exercise uncertain perceived route costs");
+		world.resetSimulation();
+		target.reset();
+		source.reset();
+		for (auto const& vertex : world.getGraph()->getVertices())
+		{
+			auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+			if (marker && marker->getMarkerId() == markerId) target = vertex;
+			if (marker && marker->getMarkerId() == sourceMarkerId) source = vertex;
+		}
+		require(target && source, "Reset lost an uncertain route Marker");
+		auto after = world.getGraph()->calculatePath(world.lookupAgent(id).entity, source, target);
+		require(after != nullptr, "Reset lost the uncertain Path");
+		PathDigest actual;
+		for (auto const& node : after->nodes)
+			actual.emplace_back(node.targetVertex->getSearchIndex(), std::bit_cast<uint32_t>(node.edgeWeight));
+		require(actual == expected, "Process-global Edge IDs changed perceived costs after a World reset");
+	}
+
+	void sourceInferenceMatchesOpenIntervalReference()
+	{
+		auto root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
+		for (auto name : { "forcebridge-test-1.world.yaml", "staircase-test-1.world.yaml", "platformlift-test-1.world.yaml" })
+		{
+			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / name);
+			auto graph = world->getGraph();
+			for (auto const& origin : graph->getVertices())
+			{
+				auto sector = origin->getSector();
+				if (!dynamic_cast<core::Location const*>(sector.get())) continue;
+				for (float offset : { -0.5f, 0.0f, 0.5f })
+				{
+					auto position = origin->getPosition();
+					position.x += offset;
+					if (position.x < 0 || position.x > world->getCellsWide()
+						|| position.y < 0 || position.y >= world->getLevelsHigh()) continue;
+					auto actual = graph->getPathSourceVertex(sector.get(), position);
+					bool actualReachable = false;
+					std::shared_ptr<const core::Vertex> expected;
+					auto best = std::numeric_limits<float>::infinity();
+					for (auto const& candidate : graph->getVertices())
+					{
+						if (candidate->getSector() != sector) continue;
+						auto target = candidate->getPosition();
+						if (std::abs(target.y - position.y) > 0.001f) continue;
+						auto distance = position.distanceToSq(target);
+						if (distance > best) continue;
+						bool reachable = true;
+						for (int x = static_cast<int>(std::floor(std::min(position.x, target.x)));
+							x < static_cast<int>(std::ceil(std::max(position.x, target.x))); ++x)
+						{
+							if (x < 0 || x >= static_cast<int>(world->getCellsWide())) { reachable = false; break; }
+							auto const& cell = std::as_const(*world).getLayer(sector->getLayerIndex())
+								->getCellDefinition(x, static_cast<uint32_t>(std::round(position.y)));
+							if (cell.sectorIndex != sector->getIndex() || cell.floorType == core::CellFloorType::None
+								|| cell.floorType == core::CellFloorType::ForceBridge) { reachable = false; break; }
+						}
+						if (reachable)
+						{
+							expected = candidate;
+							best = distance;
+							if (candidate == actual) actualReachable = true;
+						}
+					}
+					// Sector lookup order can differ from the global vertex order at
+					// coincident topology vertices. Require the same reachable minimum.
+					if (bool(actual) != bool(expected) || (actual && (!actualReachable
+						|| actual->getPosition().distanceToSq(position) != best)))
+						throw std::runtime_error(std::string("Floor source mismatch in ") + name
+							+ " at " + std::to_string(position.x) + "," + std::to_string(position.y)
+							+ ": expected " + (expected ? expected->getDescription() : "none")
+							+ ", actual " + (actual ? actual->getDescription() : "none"));
+				}
+			}
+		}
+	}
+
+	void doorObservationEpochsIgnoreTicks()
+	{
+		core::World world("Door route epochs", 12, 1);
+		auto fore = world.addRoom("Fore", 0, 0, 0, 12, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto door = world.addSectorDoor(0, 0, 5, {});
+		uint32_t destination;
+		world.addSectorMarker(back, 0, 8.5f, &destination);
+		world.finishBuild();
+		auto resource = world.lookupTraversalResource(door.traversalResource).entity;
+		auto sector = core::SectorId{ static_cast<uint64_t>(fore) + 1 };
+		require(world.observeAccessZoneDensity(door.traversalResource, sector) == 0,
+			"Empty Door observation reported crowding");
+		auto const emptyEpoch = resource->getDoorRouteObservationEpoch();
+		world.advanceTicks(3);
+		for (int observer = 0; observer < 20; ++observer)
+		{
+			(void)world.observeAccessZoneDensity(door.traversalResource, sector);
+			(void)world.estimateTraversalDelay(door.traversalResource, sector);
+		}
+		require(resource->getDoorRouteObservationEpoch() == emptyEpoch,
+			"Door observation epoch advanced with ticks or observers");
+		for (int index = 0; index < 4; ++index)
+		{
+			auto agent = world.lookupAgent(world.createAgent("Waiter", fore, 0, 5.5f)).entity;
+			agent->setPath(world.getGraph()->calculatePath(agent,
+				world.getGraph()->getVertexByIdentifier(destination)), true);
+		}
+		world.advanceTicks(10);
+		require(world.observeAccessZoneDensity(door.traversalResource, sector) > 0
+			&& world.estimateTraversalDelay(door.traversalResource, sector) > 0,
+			"Changed Door queue did not refresh the compact observation");
+		auto const queuedEpoch = resource->getDoorRouteObservationEpoch();
+		require(queuedEpoch > emptyEpoch, "Door observation did not publish its changed queue");
+		(void)world.observeAccessZoneDensity(door.traversalResource, sector);
+		require(resource->getDoorRouteObservationEpoch() == queuedEpoch,
+			"Unchanged Door facts rebuilt the shared observation");
+		world.pauseSimulation();
+		require(world.observeAccessZoneDensity(door.traversalResource, sector) == 0
+			&& resource->getDoorRouteObservationEpoch() > queuedEpoch,
+			"Door observation retained cancelled queue membership");
+	}
+
+	void lowerBoundsAreUniversalAndBounded()
+	{
+		core::World world("Routing lower bounds", 20, 2);
+		auto lower = world.addCorridor(0, 0, 20);
+		auto upper = world.addCorridor(1, 0, 20);
+		world.addSectorMarker(lower, 0, 1.5f);
+		world.addSectorMarker(lower, 0, 18.5f);
+		world.addSectorMarker(upper, 0, 1.5f);
+		world.addSectorMarker(upper, 0, 18.5f);
+		world.addStaircase(1, 0, 8, { 2, CORE_SIDE_RIGHT, 0.0f });
+		world.addLadder(1, 0, 2, { 2, false, true });
+		world.addLift(1, 0, 14, 2, 2);
+		world.finishBuild();
+		auto graph = world.getGraph();
+		auto const count = graph->getVertices().size();
+		auto id = world.createAgent("Bound reference", lower, 0, 1.5f);
+		auto agent = world.lookupAgent(id).entity;
+		world.pauseSimulation();
+		require(world.setAgentIndividualStairSpeedModifier(id, 1.5f)
+			&& world.setAgentIndividualLadderSpeedModifier(id, 1.5f)
+			&& world.setAgentIndividualInteractionAversion(id, 0)
+			&& world.setAgentIndividualEffortAversion(id, 0)
+			&& world.setAgentIndividualCrowdAversion(id, 0)
+			&& world.setAgentIndividualRiskAversion(id, 0)
+			&& world.setAgentIndividualWaitingAversion(id, 0.5f)
+			&& world.setAgentIndividualRouteFamiliarity(id, 1), "Could not set extreme routing profile");
+		core::PathfindingWorkspace workspace;
+		for (float speed : { core::AgentWalkSpeedModifierMinimum, 1.0f,
+			core::AgentWalkSpeedModifierMaximum })
+		{
+			core::EffectiveRoutingProfile profile;
+			profile.walkSpeedModifier = speed;
+			profile.stairSpeedModifier = 1.5f;
+			profile.ladderSpeedModifier = 1.5f;
+			profile.interactionAversion = profile.effortAversion = profile.crowdAversion = profile.riskAversion = 0;
+			profile.waitingAversion = 0.5f;
+			profile.routeFamiliarity = 1;
+			require(world.setAgentIndividualWalkSpeedModifier(id, speed), "Could not set reference Walk speed");
+			core::RouteDecisionContext context{ agent, profile, {}, agent->getSector(),
+				CORE_AGENT_BASE_WALK_SPEED * speed, &world, CORE_AGENT_BASE_CLIMB_SPEED * 1.5f };
+			workspace.captureRouteCosts(*graph, context);
+			for (uint32_t source = 0; source < count; ++source)
+			{
+				// Independent float Dijkstra: deliberately retain the production
+				// accumulation precision, including zero-cost topology connectors.
+				std::vector<float> distances(count, std::numeric_limits<float>::infinity());
+				std::vector<bool> settled(count, false);
+				distances[source] = 0;
+				for (size_t step = 0; step < count; ++step)
+				{
+					size_t best = count;
+					for (size_t i = 0; i < count; ++i)
+						if (!settled[i] && (best == count || distances[i] < distances[best])) best = i;
+					if (best == count || !std::isfinite(distances[best])) break;
+					settled[best] = true;
+					for (auto arc = workspace.routeOffsets[best]; arc < workspace.routeOffsets[best + 1]; ++arc)
+					{
+						auto const& cost = workspace.routeCosts[arc];
+						if (!cost) continue;
+						auto target = workspace.directedArcs[arc].targetSlot;
+						distances[target] = std::min(distances[target], distances[best] + cost->perceivedCost);
+					}
+				}
+				for (uint32_t target = 0; target < count; ++target)
+				{
+					auto const& bounds = workspace.prepareTargetLowerBounds(target);
+					require(bounds[source] <= distances[target], "Shared lower bound overestimated a valid profile");
+					auto path = graph->calculatePath(agent, graph->getVertices()[source], graph->getVertices()[target]);
+					require(bool(path) == std::isfinite(distances[target])
+						&& (!path || path->nodes.back().edgeWeight == distances[target]),
+						"Bounded search disagreed with exact float reference Dijkstra at a profile extreme");
+				}
+			}
+		}
+		auto const builds = workspace.getLowerBoundBuildCount();
+		auto const allocations = workspace.getScratchAllocationCount();
+		workspace.prepareTargetLowerBounds(static_cast<uint32_t>(count - 1));
+		require(workspace.getLowerBoundBuildCount() == builds && workspace.getLowerBoundHitCount() > 0,
+			"Repeated target did not reuse its lower bounds");
+		for (uint32_t target = 0; target < 5; ++target) workspace.prepareTargetLowerBounds(target);
+		auto const evicted = workspace.getLowerBoundBuildCount();
+		workspace.prepareTargetLowerBounds(0);
+		require(workspace.getLowerBoundBuildCount() == evicted + 1, "Target LRU did not evict its oldest table");
+		workspace.invalidateTopology();
+		workspace.captureRouteCosts(*graph, { nullptr, {}, {} });
+		workspace.prepareTargetLowerBounds(0);
+		require(workspace.getLowerBoundBuildCount() == evicted + 2
+			&& workspace.getScratchAllocationCount() == allocations,
+			"Topology invalidation retained stale bounds or evictions grew warmed scratch");
+	}
+
+	uint64_t populationRoutingRun(std::filesystem::path const& output = {}, bool verifyReset = true)
+	{
+		auto const registryPath = output.empty() ? std::filesystem::path{}
+			: core::defaultAgentTagRegistryPath(output);
+		if (!output.empty())
+			require(!std::filesystem::exists(output) && !std::filesystem::exists(registryPath),
+				"Refusing to overwrite a routing stress World or tag registry");
+		core::World world("Population routing", 512, 4);
+		std::vector<uint32_t> sectors;
+		std::vector<uint32_t> markers;
+		for (uint32_t level = 0; level < 4; ++level)
+		{
+			auto sector = world.addCorridor(level, 0, 512);
+			sectors.push_back(sector);
+			for (uint32_t x = 0; x < 500; ++x)
+			{
+				uint32_t marker;
+				world.addSectorMarker(sector, 0, x + 0.5f,
+					"Population marker " + std::to_string(level * 512 + x), &marker);
+				markers.push_back(marker);
+			}
+		}
+		for (uint32_t level = 0; level < 3; ++level)
+		{
+			world.addStaircase(1, level, 10 + level * 10, { 2, CORE_SIDE_RIGHT, 0.0f });
+			world.addStaircase(1, level, 60 + level * 10, { 2, CORE_SIDE_RIGHT, 0.5f });
+		}
+		world.addLadder(1, 0, 110, { 4, false, true });
+		world.addLift(1, 0, 510, 2, 4);
+		world.finishBuild();
+		world.pauseSimulation();
+		auto registry = core::AgentTagRegistry::create();
+		world.attachAgentTagRegistry(output.empty() ? "population.tags.yaml" : registryPath.filename().string(), registry);
+		auto tag = registry->addAgentTag("shared-route");
+		require(registry->addAgentTagEffortAversion(tag), "Could not add population tag property");
+		require(registry->setAgentTagEffortAversion(tag, { 2.0f, 2.0f }), "Could not set population tag property");
+		std::vector<core::Agent*> agents;
+		for (uint32_t index = 0; index < 1000; ++index)
+		{
+			auto id = world.createAgent("Population walker", sectors[index % 4], 0, (index % 512) + 0.5f);
+			if (index % 3 == 1)
+				require(world.assignAgentTag(id, tag), "Could not assign population tag");
+			if (index % 3 == 2)
+			{
+				require(world.setAgentIndividualEffortAversion(id, (index % 301) / 100.0f), "Could not set population effort");
+				require(world.setAgentIndividualWalkSpeedModifier(id, 0.8f + (index % 401) / 1000.0f), "Could not set population speed");
+				require(world.setAgentIndividualRiskAversion(id, (index % 301) / 100.0f), "Could not set population risk");
+				require(world.setAgentIndividualWaitingAversion(id, 0.5f + (index % 251) / 100.0f), "Could not set population waiting");
+				require(world.setAgentIndividualRouteFamiliarity(id, (index % 101) / 100.0f), "Could not set population familiarity");
+			}
+			agents.push_back(world.lookupAgent(id).entity);
+		}
+		auto graph = world.getGraph();
+		uint64_t expected = 0;
+		uint64_t allocations = 0;
+		auto const memoryBeforeRouting = getHeadlessWorkingSetBytes();
+		constexpr uint32_t destinations[]{ 601, 1243, 1981, 17 };
+		std::array<core::MarkerId, 4> destinationIds;
+		std::array<std::shared_ptr<const core::Vertex>, 4> targets;
+		for (size_t index = 0; index < targets.size(); ++index)
+		{
+			targets[index] = graph->getVertexByIdentifier(markers[destinations[index]]);
+			auto marker = std::dynamic_pointer_cast<core::Marker>(targets[index]->getObject());
+			require(marker != nullptr, "Population destination is not a Marker");
+			destinationIds[index] = marker->getMarkerId();
+		}
+		for (uint32_t pass = 0; pass < (output.empty() && verifyReset ? 3u : 2u); ++pass)
+		{
+			if (pass == 2)
+			{
+				std::vector<core::AgentId> ids;
+				for (auto agent : agents) ids.push_back(world.getAgentId(agent));
+				world.resetSimulation();
+				graph = world.getGraph();
+				targets = {};
+				for (auto const& vertex : graph->getVertices())
+				{
+					auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+					if (!marker) continue;
+					for (size_t index = 0; index < targets.size(); ++index)
+						if (marker->getMarkerId() == destinationIds[index]) targets[index] = vertex;
+				}
+				for (auto const& target : targets) require(target != nullptr, "Reset lost a destination Marker");
+				for (size_t index = 0; index < ids.size(); ++index)
+					agents[index] = world.lookupAgent(ids[index]).entity;
+			}
+			auto start = std::chrono::steady_clock::now();
+			uint64_t hash = 1469598103934665603ULL;
+			uint32_t traversalKinds = 0;
+			for (uint32_t index = 0; index < agents.size(); ++index)
+			{
+				auto const& target = targets[index % targets.size()];
+				// Include real source inference and virtual floor-edge splitting,
+				// not just the cheaper explicit-Vertex diagnostic query.
+				auto path = graph->calculatePath(agents[index], target);
+				require(path != nullptr, "Population route was unreachable");
+				for (auto const& node : path->nodes)
+				{
+					if (node.edge) traversalKinds |= 1u << static_cast<uint32_t>(node.edge->getType());
+					hash = (hash ^ node.targetVertex->getSearchIndex()) * 1099511628211ULL;
+					hash = (hash ^ std::bit_cast<uint32_t>(node.edgeWeight)) * 1099511628211ULL;
+				}
+			}
+			for (auto kind : { core::EdgeType::Lift, core::EdgeType::Ladder, core::EdgeType::Staircase })
+				require((traversalKinds & (1u << static_cast<uint32_t>(kind))) != 0,
+					"Population routes did not exercise a mixed set of traversal modes");
+			auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+			std::cout << "routing-population agents=" << agents.size()
+				<< " vertices=" << graph->getVertices().size() << ' ' << (pass == 2 ? "reset" : pass ? "warm" : "cold")
+				<< " paths/s=" << 1000 / seconds << " scratch-bytes=" << graph->getPathfindingScratchBytes()
+				<< " working-set-MiB=" << getHeadlessWorkingSetBytes() / (1024.0 * 1024.0)
+				<< " before-routing-MiB=" << memoryBeforeRouting / (1024.0 * 1024.0)
+				<< " lower-bound-builds=" << graph->getRouteLowerBoundBuildCount()
+				<< " lower-bound-hits=" << graph->getRouteLowerBoundHitCount()
+				<< " digest=" << hash << '\n';
+			if (!pass) { expected = hash; allocations = graph->getScratchAllocationCount(); }
+			else if (pass == 1)
+			{
+				require(hash == expected, "Population warm Path digest changed");
+				require(allocations == graph->getScratchAllocationCount(), "Population warm scratch grew");
+				require(graph->getRouteLowerBoundBuildCount() == 4
+					&& graph->getRouteLowerBoundHitCount() >= 1996,
+					"Population did not share target bounds across exact individual profiles");
+			}
+			else require(hash == expected, "World reset changed the population Path digest");
+		}
+		require(graph->getDirectedFactsBuildCount() == 1, "Population rebuilt immutable directed geometry");
+		if (!output.empty())
+		{
+			registry->saveTo(registryPath.string());
+			for (uint32_t index = 0; index < agents.size(); ++index)
+			{
+				auto const& target = targets[index % targets.size()];
+				auto path = graph->calculatePath(agents[index], target);
+				require(path != nullptr, "Exported population Agent has no destination Path");
+				agents[index]->setPath(path, true);
+			}
+			world.saveTo(output.string());
+			auto reopened = core::loadWorldDocument(output);
+			require(reopened->getSimulationSnapshot().agents.size() == agents.size()
+				&& reopened->getGraph()->getVertices().size() == graph->getVertices().size(),
+				"Exported routing stress World did not round-trip with its tag registry");
+		}
+		return expected;
 	}
 
 	void reusedWorkspaceIsStableAndDoesNotGrow()
@@ -225,6 +620,18 @@ namespace
 		}
 		require(graph->getScratchAllocationCount() == allocationsAfterWarmup,
 			"A warmed Path workspace grew while searching the same Graph");
+		require(graph->getDirectedFactsBuildCount() == 1,
+			"Property changes or repeated searches rebuilt immutable directed geometry");
+
+		core::PathfindingWorkspace topologyWorkspace;
+		core::RouteDecisionContext baseline{ nullptr, {}, {} };
+		topologyWorkspace.captureRouteCosts(*graph, baseline);
+		auto const beforeRebuild = topologyWorkspace.getScratchAllocationCount();
+		topologyWorkspace.invalidateTopology();
+		topologyWorkspace.captureRouteCosts(*graph, baseline);
+		require(topologyWorkspace.getDirectedFactsBuildCount() == 2
+			&& topologyWorkspace.getScratchAllocationCount() == beforeRebuild,
+			"Explicit topology invalidation failed to rebuild using retained storage");
 
 		require(!graph->calculatePath(agent, source, unreachable),
 			"A Path crossed between disconnected Sectors");
@@ -243,9 +650,20 @@ namespace
 	}
 }
 
+void writeRoutingScaleWorld(std::filesystem::path const& output)
+{
+	(void)populationRoutingRun(output);
+}
+
 void runPathfindingWorkspaceSmokeChecks()
 {
 	costContract();
 	bundledRoutesMatchReference();
 	reusedWorkspaceIsStableAndDoesNotGrow();
+	lowerBoundsAreUniversalAndBounded();
+	doorObservationEpochsIgnoreTicks();
+	sourceInferenceMatchesOpenIntervalReference();
+	uncertainRoutesSurviveWorldReset();
+	auto const first = populationRoutingRun();
+	require(first == populationRoutingRun({}, false), "Fresh population Path digest changed");
 }

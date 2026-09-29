@@ -85,7 +85,7 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentRejectsButtons(context.legacyAgent, context.allowFallbackMobility) && requiresButton())
+		if (routeRejectsButtons(context) && requiresButton())
 		{
 			facts.exclusionReason = RouteExclusionReason::Mobility;
 			return facts;

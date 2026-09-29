@@ -321,8 +321,10 @@ namespace core
 				resource.mLiftTripIntents.erase(intent);
 			}
 		}
+		auto const oldQueueSize = resource.mAdmissionQueue.size();
 		resource.mAdmissionQueue.erase(remove(resource.mAdmissionQueue.begin(),
 			resource.mAdmissionQueue.end(), requestId), resource.mAdmissionQueue.end());
+		if (resource.mAdmissionQueue.size() != oldQueueSize) ++resource.mRouteQueueEpoch;
 		resource.mLiftConfirmationQueue.erase(remove(resource.mLiftConfirmationQueue.begin(),
 			resource.mLiftConfirmationQueue.end(), requestId), resource.mLiftConfirmationQueue.end());
 		if (resource.mLiftActiveConfirmation == requestId)
@@ -628,6 +630,7 @@ namespace core
 			attachQueueTicket(requestId, edgeResource);
 			if (!request->mQueueTicket) return;
 			coordinator.mAdmissionQueue.push_back(requestId);
+			++coordinator.mRouteQueueEpoch;
 			coordinator.mLiftTripIntents[request->mOwner] = { stop, desiredStop, mWorld.mSimulationTick };
 		}
 		if (!request->mPreparationRequested)
@@ -741,6 +744,7 @@ namespace core
 			}
 			coordinator.mAdmissionReservations[position] = requestId;
 			coordinator.mAdmissionQueue.erase(selected);
+			++coordinator.mRouteQueueEpoch;
 			if (coordinator.mShuttle) refreshShuttlePassengerTargets(coordinator);
 		}
 		// Door assignment can differ from the edge that originally queued this

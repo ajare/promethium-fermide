@@ -2,6 +2,7 @@
 
 #include "core/ObservationRevision.h"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -369,6 +370,28 @@ namespace core
 		std::map<AgentId, Vector2> mLiftPassengerTargets;
 		std::vector<TraversalRequestId> mAdmissionReservations;
 		std::vector<TraversalRequestId> mAdmissionQueue;
+		// Routing observes queue membership, not simulation ticks or vehicle motion.
+		uint64_t mRouteQueueEpoch{ 1 };
+		mutable uint64_t mCapturedRouteQueueEpoch{ 0 };
+		mutable std::vector<uint32_t> mRouteQueuedByStop;
+		mutable std::vector<uint32_t> mRouteQueuedByShuttleDoor;
+		// Carriage/access-zone geometry is authored, not a queue observation.
+		mutable std::vector<uint32_t> mRouteShuttleDoorCapacities;
+		mutable uint64_t mRouteQueueSnapshotBuildCount{ 0 };
+		struct DoorRouteObservationKey
+		{
+			std::array<SectorId, 2> sectors;
+			std::array<size_t, 2> queued{};
+			std::array<size_t, 2> positions{};
+			size_t crossingLanes = 0;
+			bool open = false;
+			DoorActivationMode activationMode{ DoorActivationMode::Unavailable };
+			bool operator==(DoorRouteObservationKey const&) const = default;
+		};
+		mutable DoorRouteObservationKey mDoorRouteObservationKey;
+		mutable std::array<float, 2> mDoorRouteDensity{};
+		mutable float mDoorRouteServiceBatches = 0;
+		mutable uint64_t mDoorRouteObservationEpoch = 0;
 		// Request leases cover preparation, admission, and active crossings;
 		// occupant leases persist independently after a ladder entry commits.
 		std::set<TraversalRequestId> mExtensionRequestLeases;
@@ -459,6 +482,9 @@ namespace core
 		bool isNarrowStairwell() const { return mStairwell != nullptr; }
 		bool isEnabled() const { return mEnabled; }
 		uint32_t getCapacity() const { return mCapacity; }
+		uint64_t getRouteQueueEpoch() const { return mRouteQueueEpoch; }
+		uint64_t getDoorRouteObservationEpoch() const { return mDoorRouteObservationEpoch; }
+		uint64_t getRouteQueueSnapshotBuildCount() const { return mRouteQueueSnapshotBuildCount; }
 		SectorId getLadderSector() const { return mLadderSector; }
 		DoorActivationMode getDoorActivationMode() const { return mDoorActivationMode; }
 		std::vector<InteractionPointId> const& getControls() const { return mControls; }

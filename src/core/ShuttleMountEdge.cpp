@@ -74,7 +74,7 @@ namespace core
 	DirectedTraversalFacts ShuttleMountEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
 	{
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Shuttle, context.allowFallbackMobility)) return {};
+		if (routeRejectsEdge(context, *this, TraversalKind::Shuttle)) return {};
 		// Topology connector only: admission is charged at the landing Door.
 		DirectedTraversalFacts facts;
 		facts.feasible = true;

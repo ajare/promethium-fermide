@@ -161,6 +161,14 @@ namespace core
 		}
 
 		mVertices[index] = vertex;
+		auto const v0 = mVertices[0].lock();
+		auto const v1 = mVertices[1].lock();
+		if (v0 && v1)
+		{
+			mLength = v0->getPosition().distanceTo(v1->getPosition());
+			mRise = v1->getPosition().y - v0->getPosition().y;
+			mTargetVertexId = v1->getId();
+		}
 	}
 
 	/***
@@ -216,12 +224,20 @@ namespace core
 	*/
 	float Edge::getLength() const
 	{
-		auto const v0 = mVertices[0].lock();
-		auto const v1 = mVertices[1].lock();
-		assert(v0 != nullptr);
-		assert(v1 != nullptr);
+		return mLength;
+	}
 
-		return v0->getPosition().distanceTo(v1->getPosition());
+	float Edge::getDirectedRise(Vertex const& target) const
+	{
+		return target.getId() == mTargetVertexId ? mRise : -mRise;
+	}
+
+	void Edge::changeStandingRouteAgents(int delta) const
+	{
+		assert(delta == 1 || (delta == -1 && mStandingRouteAgents > 0));
+		if (delta > 0) ++mStandingRouteAgents;
+		else --mStandingRouteAgents;
+		++mStandingRouteEpoch;
 	}
 
 } // core

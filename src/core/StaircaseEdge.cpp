@@ -94,11 +94,11 @@ namespace core
 	{
 		DirectedTraversalFacts facts;
 		auto const sourceVertex = getOtherVertex(targetVertex);
-		auto const rise = targetVertex->getPosition().y - sourceVertex->getPosition().y;
+		auto const rise = getDirectedRise(*targetVertex);
 		auto const ascending = rise > 0.0f;
 		if (mStaircase->isEscalator())
 		{
-			if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Escalator, context.allowFallbackMobility))
+			if (routeRejectsEdge(context, *this, TraversalKind::Escalator))
 			{
 				facts.exclusionReason = RouteExclusionReason::Mobility;
 				return facts;
@@ -132,7 +132,7 @@ namespace core
 				/ (abs(mStaircase->getSpeed()) + context.walkSpeed);
 			return facts;
 		}
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Staircase, context.allowFallbackMobility))
+		if (routeRejectsEdge(context, *this, TraversalKind::Staircase))
 		{
 			facts.exclusionReason = RouteExclusionReason::Mobility;
 			return facts;

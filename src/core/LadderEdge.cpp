@@ -75,9 +75,9 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Ladder, context.allowFallbackMobility)) return facts;
+		if (routeRejectsEdge(context, *this, TraversalKind::Ladder)) return facts;
 		auto const source = getOtherVertex(targetVertex);
-		auto const rise = targetVertex->getPosition().y - source->getPosition().y;
+		auto const rise = getDirectedRise(*targetVertex);
 		auto const distance = getLength();
 		auto const speed = context.climbSpeed > 0.0f
 			? context.climbSpeed : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED);

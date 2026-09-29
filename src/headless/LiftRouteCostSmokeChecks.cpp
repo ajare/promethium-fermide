@@ -76,6 +76,60 @@ namespace
 			"Lift capacity did not increase expected admission waiting");
 	}
 
+	void transportQueueSnapshotsAreEventDriven()
+	{
+		core::World world("Routing queue epochs", 10, 2);
+		auto lower = world.addCorridor(0, 0, 10);
+		auto upper = world.addCorridor(1, 0, 10);
+		world.addLift(1, 0, 8, 2, 2);
+		world.finishBuild();
+		auto graph = world.getGraph();
+		core::TraversalResourceId resourceId;
+		for (auto const& edge : graph->getEdges())
+			if (edge->getType() == core::EdgeType::Lift) resourceId = edge->getTraversalResourceId();
+		auto resource = world.lookupTraversalResource(resourceId).entity;
+		require(resource != nullptr, "Queue epoch fixture has no Lift resource");
+		auto target = graph->getClosestVertexInSector(world.getSector(upper).get(), { 1.5f, 1.0f });
+		for (uint32_t index = 0; index < 8; ++index)
+		{
+			auto agent = world.lookupAgent(world.createAgent("Queue observer", lower, 0, 8.5f)).entity;
+			auto path = graph->calculatePath(agent, target);
+			require(path != nullptr, "Queue epoch fixture has no Path");
+			agent->setPath(path, true);
+		}
+		require(world.resumeSimulation(), "Could not resume queue epoch fixture");
+		bool sawQueue = false;
+		for (uint32_t tick = 0; tick < 240; ++tick)
+		{
+			auto before = world.observeLiftAccess(resourceId, { 8.5f, 0 }, true);
+			auto const builds = resource->getRouteQueueSnapshotBuildCount();
+			auto const epoch = resource->getRouteQueueEpoch();
+			for (int observer = 0; observer < 20; ++observer)
+			{
+				auto repeated = world.observeLiftAccess(resourceId, { 8.5f, 0 }, true);
+				require(repeated && before && repeated->queuedAgents == before->queuedAgents,
+					"Shared queue observation changed without a mutation");
+			}
+			require(resource->getRouteQueueSnapshotBuildCount() == builds,
+				"Multiple observers traversed the same unchanged queue");
+			world.advanceTick();
+			auto const afterTickBuilds = resource->getRouteQueueSnapshotBuildCount();
+			(void)world.observeLiftAccess(resourceId, { 8.5f, 0 }, false);
+			require(resource->getRouteQueueSnapshotBuildCount() == afterTickBuilds,
+				"Remote observation captured a local queue");
+			auto after = world.observeLiftAccess(resourceId, { 8.5f, 0 }, true);
+			if (resource->getRouteQueueEpoch() == epoch)
+				require(resource->getRouteQueueSnapshotBuildCount() == builds,
+					"A simulation tick invalidated an unchanged queue snapshot");
+			sawQueue = sawQueue || (after && after->queuedAgents > 0);
+		}
+		require(sawQueue, "Queue epoch fixture never exercised waiting Agents");
+		world.pauseSimulation();
+		auto cancelled = world.observeLiftAccess(resourceId, { 8.5f, 0 }, true);
+		require(cancelled && cancelled->queuedAgents == 0,
+			"Queue snapshot retained cancelled requests after pause");
+	}
+
 	void waitingAversionReversesWaitingChoiceWithoutChangingTiming()
 	{
 		core::RouteChoicePolicy policy;
@@ -181,6 +235,7 @@ namespace
 void runLiftRouteCostSmokeChecks()
 {
 	enclosedLiftSeparatesAccessFromRide();
+	transportQueueSnapshotsAreEventDriven();
 	waitingAversionReversesWaitingChoiceWithoutChangingTiming();
 	crowdAversionReversesWaitingChoiceWithoutChangingTiming();
 	platformLiftUsesSlowerFiniteService();

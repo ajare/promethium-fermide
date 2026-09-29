@@ -101,6 +101,11 @@ namespace core
 		std::vector<std::shared_ptr<const Edge>> mEdges;
 
 		std::map<Sector const*, VertexList> mSectorVertexLookup;
+		struct FloorRun
+		{
+			uint32_t level, left, right; // right is the exclusive cell boundary
+		};
+		std::map<Sector const*, std::vector<FloorRun>> mOrdinaryFloorRuns;
 
 		std::map<uint32_t, std::shared_ptr<const Vertex>> mIdentifierVertexLookup;
 
@@ -225,6 +230,10 @@ namespace core
 
 		// Read-only diagnostic: counts capacity growth in Graph-owned search scratch.
 		uint64_t getScratchAllocationCount() const;
+		size_t getPathfindingScratchBytes() const;
+		uint64_t getDirectedFactsBuildCount() const;
+		uint64_t getRouteLowerBoundBuildCount() const;
+		uint64_t getRouteLowerBoundHitCount() const;
 		RouteChoicePolicy const& getRouteChoicePolicy() const;
 
 		std::shared_ptr<Path> calculatePath(Agent const* agent, std::shared_ptr<const Vertex> source, std::shared_ptr<const Vertex> target) const;

@@ -95,6 +95,7 @@ namespace core
 			== resource.mAdmissionQueue.end())
 		{
 			resource.mAdmissionQueue.push_back(requestId);
+			++resource.mRouteQueueEpoch;
 			sort(resource.mAdmissionQueue.begin(), resource.mAdmissionQueue.end(),
 				[&](auto lhs, auto rhs)
 				{
@@ -240,6 +241,7 @@ namespace core
 			if (selected == resource.mAdmissionQueue.end()) break;
 			auto requestId = *selected;
 			resource.mAdmissionQueue.erase(selected);
+			++resource.mRouteQueueEpoch;
 			auto request = mWorld.mTraversalRequests.find(requestId);
 			if (resource.mLadder)
 			{
@@ -266,8 +268,10 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		// Cancellation, denial, or completion must surrender every form of waiting
 		// ownership so neither a queue place nor a capacity reservation leaks.
+		auto const oldQueueSize = resource.mAdmissionQueue.size();
 		resource.mAdmissionQueue.erase(remove(resource.mAdmissionQueue.begin(),
 			resource.mAdmissionQueue.end(), requestId), resource.mAdmissionQueue.end());
+		if (resource.mAdmissionQueue.size() != oldQueueSize) ++resource.mRouteQueueEpoch;
 		for (auto& lane : resource.mQueueLanes)
 			lane.queue.erase(remove(lane.queue.begin(), lane.queue.end(), requestId), lane.queue.end());
 		for (auto& reservation : resource.mAdmissionReservations)

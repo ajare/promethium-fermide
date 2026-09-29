@@ -298,6 +298,8 @@ namespace core
 		Vector2 mPathStartPosition;
 
 		std::optional<TraversalTask> mTraversalTask;
+		std::shared_ptr<const Edge> mStandingRouteEdge;
+		void syncStandingRouteObservation();
 		// A queue request may be made while the preceding same-sector Location
 		// edge is still active, allowing the Agent to stop before the queue tail.
 		std::optional<TraversalTask> mQueuedTraversalTask;
@@ -478,7 +480,9 @@ namespace core
 
 		Agent(std::string const& name);
 
-		virtual ~Agent() = default;
+		virtual ~Agent();
+		Agent(Agent const&) = delete;
+		Agent& operator=(Agent const&) = delete;
 
 		std::string const& getName() const;
 

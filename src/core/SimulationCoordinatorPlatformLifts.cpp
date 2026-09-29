@@ -121,6 +121,7 @@ namespace core
 				request->mQueueTicket = QueueTicketId{ mWorld.mNextQueueTicketValue++ };
 				request->mQueuedAtTick = mWorld.mSimulationTick;
 				resource.mAdmissionQueue.push_back(requestId);
+				++resource.mRouteQueueEpoch;
 				resource.mLiftTripIntents[request->mOwner] = { origin, destination, mWorld.mSimulationTick };
 			}
 			if (!request->mPreparationRequested)
@@ -187,8 +188,10 @@ namespace core
 			resource.mAdmissionReservations[capacityPosition] = requestId;
 			resource.mVirtualBoundaryOwners.front() = requestId;
 			request->mCapacityPosition = capacityPosition;
+			auto const oldQueueSize = resource.mAdmissionQueue.size();
 			resource.mAdmissionQueue.erase(remove(resource.mAdmissionQueue.begin(),
 				resource.mAdmissionQueue.end(), requestId), resource.mAdmissionQueue.end());
+			if (resource.mAdmissionQueue.size() != oldQueueSize) ++resource.mRouteQueueEpoch;
 			auto& laneQueue = resource.mQueueLanes[request->mQueueApproach].queue;
 			laneQueue.erase(remove(laneQueue.begin(), laneQueue.end(), requestId), laneQueue.end());
 			request->mQueuePosition = ~0u;

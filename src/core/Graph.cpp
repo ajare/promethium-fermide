@@ -149,6 +149,26 @@ namespace core
 		if (!dynamic_cast<Location const*>(sector)) return getClosestVertexInSector(sector, pos);
 		auto const found = mSectorVertexLookup.find(sector);
 		if (found == mSectorVertexLookup.end()) return nullptr;
+		if (!isfinite(pos.x) || !isfinite(pos.y) || pos.x < 0 || pos.x > mwWorld->getCellsWide()
+			|| pos.y < 0 || pos.y >= mwWorld->getLevelsHigh()) return nullptr;
+		// Find the connected ordinary Floor interval in immutable topology facts.
+		// No per-query cell walk, and no rescanning progressively shorter approach
+		// intervals while considering a long row of Markers.
+		auto const row = static_cast<uint32_t>(round(pos.y));
+		float left = pos.x, right = pos.x;
+		if (auto runs = mOrdinaryFloorRuns.find(sector); runs != mOrdinaryFloorRuns.end())
+		{
+			auto run = lower_bound(runs->second.begin(), runs->second.end(), row,
+				[&](FloorRun const& candidate, uint32_t level)
+				{ return candidate.level < level || (candidate.level == level && candidate.right < pos.x); });
+			if (run != runs->second.end() && run->level == row && run->left <= pos.x)
+			{
+				left = static_cast<float>(run->left);
+				right = static_cast<float>(run->right);
+			}
+			else if (pos.x != floor(pos.x)) return nullptr;
+		}
+		else if (pos.x != floor(pos.x)) return nullptr;
 		shared_ptr<const Vertex> closest;
 		float distance = numeric_limits<float>::max();
 		for (auto const& vertex : found->second)
@@ -157,29 +177,9 @@ namespace core
 			if (abs(target.y - pos.y) > 0.001f) continue;
 			auto const candidateDistance = pos.distanceToSq(target);
 			if (candidateDistance >= distance) continue;
-			bool reachable = true;
-			// Inspect the open horizontal interval, so a vertex on the edge of a
-			// floor is reachable without treating the void beyond it as support.
-			for (int x = static_cast<int>(floor(min(pos.x, target.x)));
-				x < static_cast<int>(ceil(max(pos.x, target.x))); ++x)
-			{
-				if (x < 0 || x >= static_cast<int>(mwWorld->getCellsWide())
-					|| pos.y < 0 || pos.y >= mwWorld->getLevelsHigh())
-				{
-					reachable = false;
-					break;
-				}
-				auto const& cell = mwWorld->getLayer(sector->getLayerIndex())
-					->getCellDefinition(static_cast<uint32_t>(x), static_cast<uint32_t>(round(pos.y)));
-				if (cell.sectorIndex != sector->getIndex()
-					|| cell.floorType == CellFloorType::None
-					|| cell.floorType == CellFloorType::ForceBridge)
-				{
-					reachable = false;
-					break;
-				}
-			}
-			if (reachable)
+			// Inclusive endpoints preserve the old open-interval Floor check: a
+			// Vertex on a Floor boundary does not require support beyond it.
+			if (target.x >= left && target.x <= right)
 			{
 				distance = candidateDistance;
 				closest = vertex;
@@ -229,6 +229,26 @@ namespace core
 	uint64_t Graph::getScratchAllocationCount() const
 	{
 		return mPathfindingWorkspace.getScratchAllocationCount();
+	}
+
+	size_t Graph::getPathfindingScratchBytes() const
+	{
+		return mPathfindingWorkspace.getScratchBytes();
+	}
+
+	uint64_t Graph::getDirectedFactsBuildCount() const
+	{
+		return mPathfindingWorkspace.getDirectedFactsBuildCount();
+	}
+
+	uint64_t Graph::getRouteLowerBoundBuildCount() const
+	{
+		return mPathfindingWorkspace.getLowerBoundBuildCount();
+	}
+
+	uint64_t Graph::getRouteLowerBoundHitCount() const
+	{
+		return mPathfindingWorkspace.getLowerBoundHitCount();
 	}
 
 	PathfindingWorkspace& Graph::getPathfindingWorkspace() const
@@ -1555,10 +1575,12 @@ namespace core
 
 	void Graph::build()
 	{
+		mPathfindingWorkspace.invalidateTopology();
 		mBuildLog.clear();
 		mVertices.clear();
 		mEdges.clear();
 		mSectorVertexLookup.clear();
+		mOrdinaryFloorRuns.clear();
 		mIdentifierVertexLookup.clear();
 		mSectorObjectVertexLookup.clear();
 
@@ -1609,6 +1631,35 @@ namespace core
 
 		// Connect Layers
 		processCrossLevelVertices(crossLevelVertexLists);
+
+		// Source inference uses the same open-interval support rule as ordinary
+		// walking. Force Bridges remain separate controlled traversals even when
+		// extended, so they must never join these runs.
+		for (auto const& [sector, vertices] : mSectorVertexLookup)
+		{
+			(void)vertices;
+			if (!dynamic_cast<Location const*>(sector)) continue;
+			auto& runs = mOrdinaryFloorRuns[sector];
+			auto layer = mwWorld->getLayer(sector->getLayerIndex());
+			auto const endX = min(mwWorld->getCellsWide(), sector->getCellX0() + sector->getCellsWide());
+			auto const endY = min(mwWorld->getLevelsHigh(), sector->getCellY0() + sector->getLevelsHigh());
+			for (auto y = sector->getCellY0(); y < endY; ++y)
+			{
+				optional<uint32_t> left;
+				for (auto x = sector->getCellX0(); x < endX; ++x)
+				{
+					auto const& cell = layer->getCellDefinition(x, y);
+					auto const supported = cell.sectorIndex == sector->getIndex()
+						&& cell.floorType != CellFloorType::None && cell.floorType != CellFloorType::ForceBridge;
+					if (supported && !left) left = x;
+					if (!supported && left) { runs.push_back({ y, *left, x }); left.reset(); }
+				}
+				if (left) runs.push_back({ y, *left, endX });
+			}
+		}
+
+		for (size_t slot = 0; slot < mEdges.size(); ++slot)
+			const_cast<Edge*>(mEdges[slot].get())->mRoutingIndex = static_cast<uint32_t>(slot);
 
 		// Graph order is deterministic and remains fixed for this Graph's lifetime.
 		// Publish it directly on each Vertex so searches need no ID hash lookup.

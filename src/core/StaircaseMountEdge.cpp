@@ -38,8 +38,7 @@ namespace core
 		auto const kind = mStaircase->isEscalator()
 			? TraversalKind::Escalator : TraversalKind::Staircase;
 		DirectedTraversalFacts facts;
-		facts.feasible = !agentRejectsEdge(context.legacyAgent, *this, kind,
-			context.allowFallbackMobility);
+		facts.feasible = !routeRejectsEdge(context, *this, kind);
 		if (facts.feasible) facts.objectiveDurationSeconds = 0.0f;
 		return facts;
 	}

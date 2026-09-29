@@ -16,13 +16,93 @@
 
 namespace core
 {
-	void PathfindingWorkspace::captureRouteCosts(Graph const& graph, RouteDecisionContext const& context)
+	void PathfindingWorkspace::invalidateTopology()
 	{
+		mTopologyCaptured = false;
+		directedArcs.clear();
+		floorArcs.clear();
+		routeOffsets.clear();
+		for (auto& table : mTargetLowerBounds) table.target = NoPosition;
+	}
+
+	void PathfindingWorkspace::captureTopology(Graph const& graph)
+	{
+		if (mTopologyCaptured) return;
 		auto const oldOffsetsCapacity = routeOffsets.capacity();
+		auto const oldArcsCapacity = directedArcs.capacity();
+		auto const oldFloorCapacity = floorArcs.capacity();
+		floorArcs.clear();
+		floorArcs.reserve(graph.getEdges().size());
+		routeOffsets.resize(graph.getVertices().size() + 1);
+		directedArcs.clear();
+		directedArcs.reserve(graph.getEdges().size() * 2);
+		for (auto const& vertex : graph.getVertices())
+		{
+			routeOffsets[vertex->getSearchIndex()] = directedArcs.size();
+			for (auto const& edge : vertex->getEdges())
+			{
+				auto const target = edge->getOtherVertex(vertex);
+				auto const length = edge->getLength();
+				// Relax every non-walking traversal to zero, including all fast
+				// transports, forbidden directions, and coincident topology arcs.
+				// The remaining walking costs use the maximum valid physical speed.
+				auto const lowerBound = edge->getType() != EdgeType::Location ? 0.0f
+					: length == 0 ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
+					: length / (CORE_AGENT_BASE_WALK_SPEED * AgentWalkSpeedModifierMaximum);
+				directedArcs.push_back({ &edge, target->getSearchIndex(), length, lowerBound,
+					(uint64_t{ edge->getRoutingIndex() } << 32) ^ target->getSearchIndex() });
+				if (edge->getType() == EdgeType::Location
+					&& vertex->getSearchIndex() < target->getSearchIndex()
+					&& vertex->getSector() == target->getSector())
+					floorArcs.push_back({ vertex->getSector().get(), vertex->getSearchIndex(),
+						target->getSearchIndex(), vertex->getPosition(), target->getPosition() });
+			}
+		}
+		routeOffsets.back() = directedArcs.size();
+		if (routeOffsets.capacity() != oldOffsetsCapacity) ++mScratchAllocationCount;
+		if (directedArcs.capacity() != oldArcsCapacity) ++mScratchAllocationCount;
+		if (floorArcs.capacity() != oldFloorCapacity) ++mScratchAllocationCount;
+		// Reserve every LRU slot on warm-up, so novel destinations and evictions
+		// cannot grow scratch during later searches on this Graph.
+		for (auto& table : mTargetLowerBounds)
+		{
+			auto const oldCapacity = table.distances.capacity();
+			table.distances.resize(graph.getVertices().size());
+			if (table.distances.capacity() != oldCapacity) ++mScratchAllocationCount;
+		}
+		++mDirectedFactsBuildCount;
+		mTopologyCaptured = true;
+	}
+
+	size_t PathfindingWorkspace::getScratchBytes() const
+	{
+		size_t lowerBoundBytes = 0;
+		for (auto const& table : mTargetLowerBounds)
+			lowerBoundBytes += table.distances.capacity() * sizeof(double);
+		return lowerBoundBytes + directedArcs.capacity() * sizeof(DirectedArc)
+			+ floorArcs.capacity() * sizeof(FloorArc)
+			+ routeOffsets.capacity() * sizeof(size_t)
+			+ routeCosts.capacity() * sizeof(decltype(routeCosts)::value_type)
+			+ selectedRouteCosts.capacity() * sizeof(decltype(selectedRouteCosts)::value_type)
+			+ scores.capacity() * sizeof(float)
+			+ durations.capacity() * sizeof(decltype(durations)::value_type)
+			+ (cameFrom.capacity() + visitGenerations.capacity()
+				+ mFrontierPositions.capacity() + mFrontierGenerations.capacity()) * sizeof(uint32_t)
+			+ edges.capacity() * sizeof(decltype(edges)::value_type)
+			+ mFrontier.capacity() * sizeof(FrontierNode);
+	}
+
+	void PathfindingWorkspace::captureRouteCosts(Graph const& graph, RouteDecisionContext const& input)
+	{
+		captureTopology(graph);
+		RouteDecisionContext const context{ input.legacyAgent, input.profile, input.policy,
+			input.observationSector, input.walkSpeed, input.world, input.climbSpeed,
+			input.allowFallbackMobility, input.perceptionKey, input.observationEpoch,
+			input.mobilityProfile ? input.mobilityProfile : std::optional<MobilityProfile>{
+				input.legacyAgent ? input.legacyAgent->getEffectiveMobilityProfile().value : MobilityProfile{} } };
 		auto const oldCostsCapacity = routeCosts.capacity();
-		routeOffsets.resize(graph.getVertices().size());
 		routeCosts.clear();
-		routeCosts.reserve(graph.getEdges().size() * 2);
+		routeCosts.reserve(directedArcs.size());
 		auto mix = [](uint64_t value)
 		{
 			value += 0x9e3779b97f4a7c15ULL;
@@ -30,28 +110,99 @@ namespace core
 			value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
 			return value ^ (value >> 31);
 		};
-		for (auto const& vertex : graph.getVertices())
+		for (auto const& arc : directedArcs)
 		{
-			routeOffsets[vertex->getSearchIndex()] = routeCosts.size();
-			for (auto const& edge : vertex->getEdges())
+			auto const& edge = *arc.edge;
+			DirectedTraversalFacts facts;
+			if (edge->getType() == EdgeType::Location)
 			{
-				auto const target = edge->getOtherVertex(vertex);
-				auto facts = edge->getDirectedTraversalFacts(target, context);
-				if (facts.feasible && facts.components.uncertaintyUnits > 0)
-				{
-					auto const hash = mix(context.perceptionKey
-						^ (uint64_t{ edge->getId() } << 32) ^ target->getId()
-						^ mix(context.observationEpoch));
-					auto const unit = static_cast<float>(hash >> 40) / 16777215.0f;
-					auto const amplitude = (1.0f - context.profile.routeFamiliarity)
-						* facts.components.uncertaintyUnits;
-					facts.components.perceptionVariationUnits = (unit * 2.0f - 1.0f) * amplitude;
-				}
-				routeCosts.push_back(context.policy.evaluate(facts, context.profile));
+				facts.feasible = true;
+				facts.components.motionSeconds = arc.length == 0.0f
+					? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : arc.length / context.walkSpeed;
+				facts.objectiveDurationSeconds = facts.components.motionSeconds;
+				facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+			}
+			else facts = edge->getDirectedTraversalFacts(graph.getVertices()[arc.targetSlot], context);
+			if (facts.feasible && facts.components.uncertaintyUnits > 0)
+			{
+				auto const hash = mix(context.perceptionKey
+					^ arc.perceptionIdentity ^ mix(context.observationEpoch));
+				auto const unit = static_cast<float>(hash >> 40) / 16777215.0f;
+				auto const amplitude = (1.0f - context.profile.routeFamiliarity)
+					* facts.components.uncertaintyUnits;
+				facts.components.perceptionVariationUnits = (unit * 2.0f - 1.0f) * amplitude;
+			}
+			routeCosts.push_back(context.policy.evaluate(facts, context.profile));
+		}
+		if (routeCosts.capacity() != oldCostsCapacity) ++mScratchAllocationCount;
+	}
+
+	std::vector<double> const& PathfindingWorkspace::prepareTargetLowerBounds(uint32_t targetSlot)
+	{
+		if (!mTopologyCaptured || static_cast<size_t>(targetSlot) + 1 >= routeOffsets.size())
+			throw std::invalid_argument("Lower-bound target is outside captured topology");
+		++mLowerBoundClock;
+		for (size_t index = 0; index < mTargetLowerBounds.size(); ++index)
+		{
+			auto& table = mTargetLowerBounds[index];
+			if (table.target != targetSlot) continue;
+			table.lastUse = mLowerBoundClock;
+			mSelectedLowerBounds = index;
+			++mLowerBoundHitCount;
+			return table.distances;
+		}
+		auto selected = std::min_element(mTargetLowerBounds.begin(), mTargetLowerBounds.end(),
+			[](auto const& a, auto const& b) { return a.lastUse < b.lastUse; });
+		mSelectedLowerBounds = static_cast<size_t>(selected - mTargetLowerBounds.begin());
+		auto& table = *selected;
+		table.target = targetSlot;
+		table.lastUse = mLowerBoundClock;
+		std::fill(table.distances.begin(), table.distances.end(), std::numeric_limits<double>::infinity());
+		// Universal bounds are symmetric, so ordinary adjacency is also reverse
+		// adjacency. Ignore blocking Markers and feasibility: this is a relaxation.
+		beginSearch(table.distances.size());
+		table.distances[targetSlot] = 0;
+		put(targetSlot, 0);
+		while (!frontierEmpty())
+		{
+			auto const current = get();
+			for (auto index = routeOffsets[current]; index < routeOffsets[current + 1]; ++index)
+			{
+				auto const& arc = directedArcs[index];
+				auto const candidate = table.distances[current] + arc.universalLowerBound;
+				if (candidate >= table.distances[arc.targetSlot]) continue;
+				table.distances[arc.targetSlot] = candidate;
+				put(arc.targetSlot, candidate);
 			}
 		}
-		if (routeOffsets.capacity() != oldOffsetsCapacity) ++mScratchAllocationCount;
-		if (routeCosts.capacity() != oldCostsCapacity) ++mScratchAllocationCount;
+		auto const count = static_cast<double>(table.distances.size());
+		auto const factor = std::max(0.0, 1.0 - 2.0 * count * std::numeric_limits<float>::epsilon());
+		for (auto& distance : table.distances)
+			if (std::isfinite(distance)) distance = std::max(0.0,
+				distance * factor - count * std::numeric_limits<float>::denorm_min());
+		++mLowerBoundBuildCount;
+		return table.distances;
+	}
+
+	double PathfindingWorkspace::routePriority(uint32_t slot, float score) const
+	{
+		auto const& table = mTargetLowerBounds[mSelectedLowerBounds];
+		if (table.target == NoPosition || slot == table.target) return score;
+		auto const lowerBound = table.distances[slot];
+		if (!std::isfinite(lowerBound)) return score; // zero-heuristic fallback
+		// Costs are accumulated in float for compatibility. Reverse sums have a
+		// different order: ordinary g+h could slightly overestimate the final
+		// float score. Any optimal continuation is simple (at most V arcs). Budget
+		// two float epsilons per vertex for both summations and arc rounding, plus
+		// absolute underflow error. Discount g as well as h: g participates in
+		// every remaining addition. A target retains its exact score, so stopping
+		// when it wins the frontier remains sound even at rounding boundaries.
+		auto const count = static_cast<double>(table.distances.size());
+		auto const factor = 1.0 - 2.0 * count * std::numeric_limits<float>::epsilon();
+		if (factor <= 0) return score; // zero heuristic for very large Graphs
+		// Adding non-negative costs cannot reduce g, even with float rounding.
+		return std::max(static_cast<double>(score), (static_cast<double>(score) + lowerBound) * factor
+			- count * std::numeric_limits<float>::denorm_min());
 	}
 
 	bool PathfindingWorkspace::precedes(FrontierNode const& left, FrontierNode const& right)
@@ -139,7 +290,7 @@ namespace core
 		return mFrontier.empty();
 	}
 
-	void PathfindingWorkspace::put(uint32_t slot, float priority)
+	void PathfindingWorkspace::put(uint32_t slot, double priority)
 	{
 		if (mFrontierGenerations[slot] == mGeneration
 			&& mFrontierPositions[slot] != NoPosition)
@@ -238,48 +389,26 @@ namespace core
 			}
 
 			EffectiveRoutingProfile effectiveProfile(Agent const& agent,
-				RouteChoicePolicy const& policy)
+				RouteChoicePolicy const& policy, RoutingProfileProvenance* sources = nullptr)
 			{
 				auto result = policy.baselineProfile;
-				result.walkSpeedModifier = agent.getEffectiveWalkSpeedModifier().value;
-				result.stairSpeedModifier = agent.getEffectiveStairSpeedModifier().value;
-				result.ladderSpeedModifier = agent.getEffectiveLadderSpeedModifier().value;
-				result.escalatorWalkingChance = agent.getEffectiveEscalatorWalkingChance().value;
-				result.interactionAversion = agent.getEffectiveInteractionAversion().value;
-				result.effortAversion = agent.getEffectiveEffortAversion().value;
-				result.waitingAversion = agent.getEffectiveWaitingAversion().value;
-				result.crowdAversion = agent.getEffectiveCrowdAversion().value;
-				result.riskAversion = agent.getEffectiveRiskAversion().value;
-				result.routeFamiliarity = agent.getEffectiveRouteFamiliarity().value;
-				result.routePersistence = agent.getEffectiveRoutePersistence().value;
-				return result;
-			}
-
-			RoutingProfileProvenance effectiveProvenance(Agent const& agent)
-			{
-				return {
-					provenance(agent.getEffectiveWalkSpeedModifier()),
-					provenance(agent.getEffectiveStairSpeedModifier()),
-					provenance(agent.getEffectiveLadderSpeedModifier()),
-					provenance(agent.getEffectiveEscalatorWalkingChance()),
-					provenance(agent.getEffectiveWaitingAversion()),
-					provenance(agent.getEffectiveEffortAversion()),
-					provenance(agent.getEffectiveInteractionAversion()),
-					provenance(agent.getEffectiveCrowdAversion()),
-					provenance(agent.getEffectiveRiskAversion()),
-					provenance(agent.getEffectiveRouteFamiliarity()),
-					provenance(agent.getEffectiveRoutePersistence())
+				auto resolve = [&](auto const& property, auto member)
+				{
+					if (sources) sources->*member = provenance(property);
+					return property.value;
 				};
-			}
-
-			RouteDiagnosticContext diagnosticContext(Agent const& agent, Graph const& graph,
-				EffectiveRoutingProfile const& profile, bool allowFallback)
-			{
-				auto const mobility = agent.getEffectiveMobilityProfile();
-				return { profile, effectiveProvenance(agent), mobility.value,
-					provenance(mobility), graph.getWorld()
-						? graph.getWorld()->getTopologyGeneration() : 0,
-					allowFallback };
+				result.walkSpeedModifier = resolve(agent.getEffectiveWalkSpeedModifier(), &RoutingProfileProvenance::walkSpeedModifier);
+				result.stairSpeedModifier = resolve(agent.getEffectiveStairSpeedModifier(), &RoutingProfileProvenance::stairSpeedModifier);
+				result.ladderSpeedModifier = resolve(agent.getEffectiveLadderSpeedModifier(), &RoutingProfileProvenance::ladderSpeedModifier);
+				result.escalatorWalkingChance = resolve(agent.getEffectiveEscalatorWalkingChance(), &RoutingProfileProvenance::escalatorWalkingChance);
+				result.interactionAversion = resolve(agent.getEffectiveInteractionAversion(), &RoutingProfileProvenance::interactionAversion);
+				result.effortAversion = resolve(agent.getEffectiveEffortAversion(), &RoutingProfileProvenance::effortAversion);
+				result.waitingAversion = resolve(agent.getEffectiveWaitingAversion(), &RoutingProfileProvenance::waitingAversion);
+				result.crowdAversion = resolve(agent.getEffectiveCrowdAversion(), &RoutingProfileProvenance::crowdAversion);
+				result.riskAversion = resolve(agent.getEffectiveRiskAversion(), &RoutingProfileProvenance::riskAversion);
+				result.routeFamiliarity = resolve(agent.getEffectiveRouteFamiliarity(), &RoutingProfileProvenance::routeFamiliarity);
+				result.routePersistence = resolve(agent.getEffectiveRoutePersistence(), &RoutingProfileProvenance::routePersistence);
+				return result;
 			}
 
 			RouteDecisionContext currentDecisionContext(Agent const& agent,
@@ -291,7 +420,8 @@ namespace core
 				auto const agentId = world ? world->getAgentId(&agent).value : uint64_t{ 0 };
 				auto const journeyIdentity = agent.getRouteJourneyIdentity(target);
 				return { &agent, profile, graph.getRouteChoicePolicy(), agent.getSector(),
-					agent.getWalkSpeed(), world, agent.getClimbSpeed(), allowFallback,
+					CORE_AGENT_BASE_WALK_SPEED * profile.walkSpeedModifier, world,
+					CORE_AGENT_BASE_CLIMB_SPEED * profile.ladderSpeedModifier, allowFallback,
 					worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
 						^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL), 0 };
 			}
@@ -305,7 +435,9 @@ namespace core
 			// Resolve Agent-authored preferences once for this immutable search
 			// context. A null-Agent editor preview deliberately keeps the explicit
 			// policy baseline instead of manufacturing and dereferencing an Agent.
-			if (agent) profile = effectiveProfile(*agent, graph->getRouteChoicePolicy());
+			RoutingProfileProvenance profileSources;
+			if (agent) profile = effectiveProfile(*agent, graph->getRouteChoicePolicy(), &profileSources);
+			auto const mobility = agent ? agent->getEffectiveMobilityProfile() : EffectiveAgentMobilityProfile{};
 			auto const worldSeed = graph->getWorld() ? graph->getWorld()->getRandomSeed() : uint64_t{ 0 };
 			auto const agentId = agent && graph->getWorld()
 				? graph->getWorld()->getAgentId(agent).value : uint64_t{ 0 };
@@ -315,10 +447,11 @@ namespace core
 				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
 			RouteDecisionContext const context{ agent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				agent ? agent->getWalkSpeed() : static_cast<float>(CORE_AGENT_BASE_WALK_SPEED),
+				CORE_AGENT_BASE_WALK_SPEED * (agent ? profile.walkSpeedModifier : 1.0f),
 				graph->getWorld(),
-				agent ? agent->getClimbSpeed() : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED),
-				false, perceptionKey, 0 };
+				CORE_AGENT_BASE_CLIMB_SPEED * (agent ? profile.ladderSpeedModifier : 1.0f),
+				false, perceptionKey, 0,
+				mobility.value };
 			auto const inferredSource = !source;
 			if (inferredSource)
 			{
@@ -341,8 +474,9 @@ namespace core
 			{
 				auto& workspace = graph->getPathfindingWorkspace();
 				auto const& vertices = graph->getVertices();
-				workspace.beginSearch(vertices.size());
 				workspace.captureRouteCosts(*graph, searchContext);
+				workspace.prepareTargetLowerBounds(targetSlot);
+				workspace.beginSearch(vertices.size());
 				auto const generation = workspace.getGeneration();
 				auto seed = [&](node_type const& vertex, float approachSeconds)
 				{
@@ -357,7 +491,7 @@ namespace core
 					workspace.durations[slot] = approachSeconds;
 					workspace.edges[slot].reset();
 					workspace.selectedRouteCosts[slot].reset();
-					workspace.put(slot, approachSeconds);
+					workspace.put(slot, workspace.routePriority(slot, approachSeconds));
 				};
 				auto const floorSource = inferredSource && dynamic_cast<Location const*>(agent->getSector());
 				if (floorSource)
@@ -368,19 +502,15 @@ namespace core
 					// Seed both endpoints with actual approach time, not the full edge
 					// length from an arbitrarily chosen nearest vertex. Never split a
 					// Gap, Force Bridge, threshold, or transit edge to bypass admission.
-					for (auto const& edge : graph->getEdges())
+					for (auto const& arc : workspace.floorArcs)
 					{
-						if (edge->getType() != EdgeType::Location) continue;
-						auto a = edge->getVertex(0);
-						auto b = edge->getVertex(1);
-						if (a->getSector().get() != agent->getSector()
-							|| b->getSector().get() != agent->getSector()) continue;
-						auto const pa = a->getPosition();
-						auto const pb = b->getPosition();
+						if (arc.sector != agent->getSector()) continue;
+						auto const pa = arc.sourcePosition;
+						auto const pb = arc.targetPosition;
 						if (std::abs(pa.y - position.y) > 0.001f || std::abs(pb.y - position.y) > 0.001f
 							|| position.x <= std::min(pa.x, pb.x) || position.x >= std::max(pa.x, pb.x)) continue;
-						seed(a, position.distanceTo(pa) / searchContext.walkSpeed);
-						seed(b, position.distanceTo(pb) / searchContext.walkSpeed);
+						seed(vertices[arc.sourceSlot], position.distanceTo(pa) / searchContext.walkSpeed);
+						seed(vertices[arc.targetSlot], position.distanceTo(pb) / searchContext.walkSpeed);
 					}
 				}
 				else seed(source, 0.0f);
@@ -400,12 +530,12 @@ namespace core
 						if (!isOrigin) continue;
 					}
 
-					auto arcIndex = workspace.routeOffsets[currentSlot];
-					for (auto const& edge : current->getEdges())
+					for (auto routeCostIndex = workspace.routeOffsets[currentSlot];
+						routeCostIndex < workspace.routeOffsets[currentSlot + 1]; ++routeCostIndex)
 					{
-						auto const next = edge->getOtherVertex(current);
-						auto const nextSlot = next->getSearchIndex();
-						auto const routeCostIndex = arcIndex++;
+						auto const& arc = workspace.directedArcs[routeCostIndex];
+						auto const& edge = *arc.edge;
+						auto const nextSlot = arc.targetSlot;
 						auto const& cost = workspace.routeCosts[routeCostIndex];
 						if (!cost) continue;
 						auto const newCost = workspace.scores[currentSlot] + cost->perceivedCost;
@@ -427,7 +557,7 @@ namespace core
 							workspace.cameFrom[nextSlot] = currentSlot;
 							workspace.edges[nextSlot] = edge;
 							workspace.selectedRouteCosts[nextSlot] = routeCostIndex;
-							workspace.put(nextSlot, newCost);
+							workspace.put(nextSlot, workspace.routePriority(nextSlot, newCost));
 						}
 					}
 				}
@@ -435,25 +565,19 @@ namespace core
 				auto path = reconstructPath(graph, targetSlot, workspace);
 				if (path)
 				{
-					if (agent)
-						path->diagnosticContext = diagnosticContext(*agent, *graph,
-							searchContext.profile, searchContext.allowFallbackMobility);
-					else
-						path->diagnosticContext = RouteDiagnosticContext{
-							searchContext.profile, {}, {}, {},
-							graph->getWorld() ? graph->getWorld()->getTopologyGeneration() : 0,
-							searchContext.allowFallbackMobility };
+					path->diagnosticContext = RouteDiagnosticContext{
+						searchContext.profile, profileSources, mobility.value, provenance(mobility),
+						graph->getWorld() ? graph->getWorld()->getTopologyGeneration() : 0,
+						searchContext.allowFallbackMobility };
 				}
 				return path;
 			};
 
 			if (auto path = runSearch(context)) return path;
 			RouteDecisionContext const fallbackContext{ agent, profile,
-				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				agent ? agent->getWalkSpeed() : static_cast<float>(CORE_AGENT_BASE_WALK_SPEED),
-				graph->getWorld(),
-				agent ? agent->getClimbSpeed() : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED),
-				true, perceptionKey, 0 };
+				context.policy, context.observationSector, context.walkSpeed,
+				context.world, context.climbSpeed,
+				true, perceptionKey, 0, context.mobilityProfile };
 			return runSearch(fallbackContext);
 		}
 
@@ -466,16 +590,7 @@ namespace core
 				|| currentFromNode >= current.nodes.size()
 				|| alternativeFromNode >= alternative.nodes.size()) return std::nullopt;
 
-			auto profile = graph.getRouteChoicePolicy().baselineProfile;
-			profile.stairSpeedModifier = agent.getEffectiveStairSpeedModifier().value;
-			profile.escalatorWalkingChance = agent.getEffectiveEscalatorWalkingChance().value;
-			profile.interactionAversion = agent.getEffectiveInteractionAversion().value;
-			profile.effortAversion = agent.getEffectiveEffortAversion().value;
-			profile.waitingAversion = agent.getEffectiveWaitingAversion().value;
-			profile.crowdAversion = agent.getEffectiveCrowdAversion().value;
-			profile.riskAversion = agent.getEffectiveRiskAversion().value;
-			profile.routeFamiliarity = agent.getEffectiveRouteFamiliarity().value;
-			profile.routePersistence = agent.getEffectiveRoutePersistence().value;
+			auto const profile = effectiveProfile(agent, graph.getRouteChoicePolicy());
 			auto const* world = graph.getWorld();
 			auto const worldSeed = world ? world->getRandomSeed() : uint64_t{ 0 };
 			auto const agentId = world ? world->getAgentId(&agent).value : uint64_t{ 0 };
@@ -484,7 +599,8 @@ namespace core
 			auto const perceptionKey = worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
 				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
 			RouteDecisionContext const context{ &agent, profile, graph.getRouteChoicePolicy(),
-				agent.getSector(), agent.getWalkSpeed(), world, agent.getClimbSpeed(),
+				agent.getSector(), CORE_AGENT_BASE_WALK_SPEED * profile.walkSpeedModifier,
+				world, CORE_AGENT_BASE_CLIMB_SPEED * profile.ladderSpeedModifier,
 				true, perceptionKey, 0 };
 
 			auto& workspace = graph.getPathfindingWorkspace();
@@ -545,7 +661,8 @@ namespace core
 		{
 			if (graph.getWorld()
 				&& captured.topologyGeneration != graph.getWorld()->getTopologyGeneration()) return true;
-			auto const current = effectiveProfile(agent, graph.getRouteChoicePolicy());
+			RoutingProfileProvenance sources;
+			auto const current = effectiveProfile(agent, graph.getRouteChoicePolicy(), &sources);
 			auto const sameProfile = current.walkSpeedModifier == captured.profile.walkSpeedModifier
 				&& current.stairSpeedModifier == captured.profile.stairSpeedModifier
 				&& current.ladderSpeedModifier == captured.profile.ladderSpeedModifier
@@ -558,7 +675,7 @@ namespace core
 				&& current.routeFamiliarity == captured.profile.routeFamiliarity
 				&& current.routePersistence == captured.profile.routePersistence;
 			auto const mobility = agent.getEffectiveMobilityProfile();
-			return !sameProfile || effectiveProvenance(agent) != captured.provenance
+			return !sameProfile || sources != captured.provenance
 				|| mobility.value != captured.mobilityProfile
 				|| provenance(mobility) != captured.mobilityProvenance;
 		}
@@ -654,7 +771,7 @@ namespace core
 						return value ^ (value >> 31);
 					};
 					auto const hash = mix(context.perceptionKey
-						^ (uint64_t{ edge->getId() } << 32) ^ to->getId()
+						^ (uint64_t{ edge->getRoutingIndex() } << 32) ^ to->getSearchIndex()
 						^ mix(context.observationEpoch));
 					auto const unit = static_cast<float>(hash >> 40) / 16777215.0f;
 					auto const amplitude = (1.0f - context.profile.routeFamiliarity)

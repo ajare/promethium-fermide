@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "core/Path.h"
+#include "core/Vector2.h"
 
 namespace core
 {
@@ -23,9 +25,35 @@ namespace core
 	public:
 		struct FrontierNode
 		{
-			float priority;
+			double priority;
 			uint32_t slot;
 		};
+
+		struct DirectedArc
+		{
+			// Borrowed from the Graph-owned adjacency lists, never Agent-owned.
+			std::shared_ptr<const Edge> const* edge;
+			uint32_t targetSlot;
+			float length;
+			float universalLowerBound;
+			uint64_t perceptionIdentity;
+		};
+		std::vector<DirectedArc> directedArcs;
+		struct FloorArc
+		{
+			Sector const* sector;
+			uint32_t sourceSlot, targetSlot;
+			Vector2 sourcePosition, targetPosition;
+		};
+		std::vector<FloorArc> floorArcs;
+		void invalidateTopology();
+		[[nodiscard]] uint64_t getDirectedFactsBuildCount() const { return mDirectedFactsBuildCount; }
+		[[nodiscard]] size_t getScratchBytes() const;
+		// Four target tables, LRU-bounded and invalidated with directed topology.
+		std::vector<double> const& prepareTargetLowerBounds(uint32_t targetSlot);
+		[[nodiscard]] double routePriority(uint32_t slot, float score) const;
+		[[nodiscard]] uint64_t getLowerBoundBuildCount() const { return mLowerBoundBuildCount; }
+		[[nodiscard]] uint64_t getLowerBoundHitCount() const { return mLowerBoundHitCount; }
 
 		std::vector<float> scores;
 		std::vector<std::optional<float>> durations;
@@ -40,7 +68,7 @@ namespace core
 		void beginSearch(size_t vertexCount);
 		[[nodiscard]] uint32_t getGeneration() const;
 		[[nodiscard]] bool frontierEmpty() const;
-		void put(uint32_t slot, float priority);
+		void put(uint32_t slot, double priority);
 		uint32_t get();
 		[[nodiscard]] uint64_t getScratchAllocationCount() const;
 
@@ -52,6 +80,20 @@ namespace core
 		std::vector<uint32_t> mFrontierGenerations;
 		uint32_t mGeneration{ 0 };
 		uint64_t mScratchAllocationCount{ 0 };
+		uint64_t mDirectedFactsBuildCount{ 0 };
+		bool mTopologyCaptured = false;
+		void captureTopology(Graph const& graph);
+		struct TargetLowerBounds
+		{
+			uint32_t target = NoPosition;
+			uint64_t lastUse = 0;
+			std::vector<double> distances;
+		};
+		std::array<TargetLowerBounds, 4> mTargetLowerBounds;
+		size_t mSelectedLowerBounds = 0;
+		uint64_t mLowerBoundClock = 0;
+		uint64_t mLowerBoundBuildCount = 0;
+		uint64_t mLowerBoundHitCount = 0;
 
 		[[nodiscard]] static bool precedes(FrontierNode const& left, FrontierNode const& right);
 		void swapFrontierNodes(uint32_t left, uint32_t right);

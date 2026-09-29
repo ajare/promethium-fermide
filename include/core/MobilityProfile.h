@@ -7,6 +7,11 @@ namespace core
 	class Agent;
 	class Edge;
 	class Serializer;
+	struct RouteDecisionContext;
+
+	[[nodiscard]] bool routeRejectsEdge(RouteDecisionContext const& context,
+		Edge const& edge, TraversalKind kind);
+	[[nodiscard]] bool routeRejectsButtons(RouteDecisionContext const& context);
 
 	void serializeMobilityProfile(Serializer& serializer, MobilityProfile const& profile);
 	[[nodiscard]] MobilityProfile deserializeMobilityProfile(Serializer& serializer);

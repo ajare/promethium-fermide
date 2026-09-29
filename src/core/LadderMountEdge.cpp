@@ -83,7 +83,7 @@ namespace core
 		shared_ptr<const Vertex> targetVertex, RouteDecisionContext const& context) const
 	{
 		DirectedTraversalFacts facts;
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Ladder, context.allowFallbackMobility))
+		if (routeRejectsEdge(context, *this, TraversalKind::Ladder))
 		{
 			facts.exclusionReason = RouteExclusionReason::Mobility;
 			return facts;

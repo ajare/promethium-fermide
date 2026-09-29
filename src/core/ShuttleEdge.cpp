@@ -67,7 +67,7 @@ namespace core
 	DirectedTraversalFacts ShuttleEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		if (agentRejectsEdge(context.legacyAgent, *this, TraversalKind::Shuttle, context.allowFallbackMobility)) return {};
+		if (routeRejectsEdge(context, *this, TraversalKind::Shuttle)) return {};
 		auto source = getOtherVertex(target);
 		auto observe = [&](Vector2 const& endpoint)
 		{
