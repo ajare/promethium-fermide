@@ -2919,7 +2919,7 @@ namespace
 				if (target.worldFilepath.empty())
 					return refuse("The World has no file path");
 				if (!core::isWorldDocumentPath(target.worldFilepath))
-					return refuse("A World document file must end with .world.yaml");
+					return refuse("A World document file must end with .world or .world.yaml");
 				auto const path = normalizedSavePath(target.worldFilepath);
 				auto const [entry, inserted] = worldPaths.emplace(
 					target.world.get(), path);

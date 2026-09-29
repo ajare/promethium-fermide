@@ -81,8 +81,9 @@ namespace
 		DocumentHistory worldHistory;
 		core::AgentTagId tag{};
 
-		explicit SavedFixture(std::string const& stem)
-			: worldPath(temporary.path / (stem + ".world.yaml")),
+		explicit SavedFixture(std::string const& stem,
+			std::string const& worldSuffix = ".world.yaml")
+			: worldPath(temporary.path / (stem + worldSuffix)),
 			registryPath(temporary.path / (stem + ".tags.yaml")),
 			world(std::make_shared<core::World>(stem, 8, 2))
 		{
@@ -173,7 +174,7 @@ namespace
 
 	void saveAllCompletesRegistryPhaseBeforeAnyWorld()
 	{
-		SavedFixture first("first");
+		SavedFixture first("first", ".world");
 		SavedFixture second("second");
 		first.editModifier(1.1f);
 		second.editModifier(1.2f);
@@ -252,7 +253,7 @@ namespace
 
 		auto const destinationDirectory = fixture.temporary.path / "copy";
 		std::filesystem::create_directory(destinationDirectory);
-		auto const destinationWorld = destinationDirectory / "renamed.world.yaml";
+		auto const destinationWorld = destinationDirectory / "renamed.world";
 		auto const destinationRegistry = destinationDirectory
 			/ fixture.world->getAgentTagRegistryFilename();
 		require(saveWorldDocument({ copiedWorld, destinationWorld.string(),
@@ -297,6 +298,46 @@ namespace
 			&& serializeRegistry(*sourceRegistry) == sourceRegistryYaml
 			&& serializeWorld(*fixture.world) == sourceWorldYaml,
 			"Editing the copied registry affected the original registry or World");
+	}
+
+	void binaryRoundTripAndBidirectionalConversionRetainRegistry()
+	{
+		SavedFixture fixture("binary-source", ".world");
+		auto const sourceRegistry = fixture.registry;
+		auto const sourceUuid = sourceRegistry->getUuid();
+		std::string diagnostic;
+		fixture.editModifier(1.15f);
+		require(saveWorldDocument(fixture.target(), &diagnostic), diagnostic);
+
+		auto binary = core::loadWorldDocument(fixture.worldPath);
+		require(binary->getAgentTagRegistry() == sourceRegistry
+			&& binary->getExpectedAgentTagRegistryUuid() == sourceUuid
+			&& binary->getAgentTagAssignmentCount() == 1,
+			"A binary World did not resolve its adjacent Agent tag registry");
+
+		DocumentHistory history;
+		history.markSaved();
+		auto const yamlPath = fixture.temporary.path / "converted.world.yaml";
+		require(saveWorldDocument({ binary, yamlPath.string(),
+			fixture.registryPath.string(), &history }, &diagnostic),
+			"Binary-to-YAML coordinated conversion failed: " + diagnostic);
+		auto yaml = core::loadWorldDocument(yamlPath);
+		require(yaml->getAgentTagRegistry() == sourceRegistry
+			&& yaml->getExpectedAgentTagRegistryUuid() == sourceUuid
+			&& yaml->getAgentTagAssignmentCount() == 1,
+			"Binary-to-YAML conversion changed the Agent tag registry relationship");
+
+		auto const binaryAgainPath = fixture.temporary.path / "converted-again.world";
+		require(saveWorldDocument({ yaml, binaryAgainPath.string(),
+			fixture.registryPath.string(), &history }, &diagnostic),
+			"YAML-to-binary coordinated conversion failed: " + diagnostic);
+		auto binaryAgain = core::loadWorldDocument(binaryAgainPath);
+		require(binaryAgain->getAgentTagRegistry() == sourceRegistry
+			&& binaryAgain->getExpectedAgentTagRegistryUuid() == sourceUuid
+			&& binaryAgain->getAgentTagAssignmentCount() == 1
+			&& sourceRegistry->getAgentTagWalkSpeedModifier(fixture.tag)->range
+				== core::AgentModifierRange{ 1.15f, 1.15f },
+			"YAML-to-binary conversion lost meaningful World or registry state");
 	}
 
 	void registryCollisionLeavesSourceAndDestinationUnchanged()
@@ -380,6 +421,7 @@ void runAgentTagDocumentSaveSmokeChecks()
 	saveAllCompletesRegistryPhaseBeforeAnyWorld();
 	sameDirectorySaveAsRetainsRegistryReference();
 	crossDirectorySaveAsCopiesEquivalentIndependentRegistry();
+	binaryRoundTripAndBidirectionalConversionRetainRegistry();
 	registryCollisionLeavesSourceAndDestinationUnchanged();
 	closePromptNamesOnlyTheDirtyDocumentKinds();
 }

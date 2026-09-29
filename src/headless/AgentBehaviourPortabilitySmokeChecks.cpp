@@ -191,7 +191,7 @@ namespace
 		TemporaryDirectory temporary;
 		auto sourceDirectory = temporary.path / "source";
 		std::filesystem::create_directory(sourceDirectory);
-		auto worldPath = sourceDirectory / "station.world.yaml";
+		auto worldPath = sourceDirectory / "station.world";
 		auto world = std::make_shared<core::World>("Station", 10, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 10, 1);
 		world->addSectorMarker(room, 0, 7.5f, "Alpha");
@@ -213,6 +213,12 @@ namespace
 		require(saveWorldDocument({ world, worldPath.string(), {}, &history,
 			package.string() }, &diagnostic), diagnostic);
 		auto sourceUuid = registry->getUuid();
+		auto binaryReopened = core::loadWorldDocument(worldPath);
+		require(binaryReopened->getAgentBehaviourRegistry() == registry
+			&& binaryReopened->getExpectedAgentBehaviourRegistryUuid() == sourceUuid
+			&& binaryReopened->getAgentBehaviourAssignmentCount() == 1,
+			"A binary World did not resolve its adjacent Agent behaviour registry package");
+		binaryReopened.reset();
 
 		auto destinationDirectory = temporary.path / "copy";
 		std::filesystem::create_directory(destinationDirectory);
@@ -237,16 +243,32 @@ namespace
 
 		auto failureDirectory = temporary.path / "failure";
 		std::filesystem::create_directory(failureDirectory);
-		auto failedWorld = failureDirectory / "failed.world.yaml";
-		core::setTransactionalWriteFailureAfterBytesForTesting(1);
+		auto failedWorld = failureDirectory / "failed.world";
+		auto registryBeforeFailure = reopened->getAgentBehaviourRegistry();
+		auto const packageNameBeforeFailure
+			= reopened->getAgentBehaviourRegistryPackageName();
+		auto const expectedUuidBeforeFailure
+			= reopened->getExpectedAgentBehaviourRegistryUuid();
+		auto const worldWasModified = reopened->isModified();
+		auto const historyStateBeforeFailure = history.currentStateId();
+		// The package copy can be installed, but a directory at the World path
+		// makes the later transactional World replacement fail. This exercises
+		// rollback after the live dependency was temporarily replaced.
+		std::filesystem::create_directory(failedWorld);
 		auto saved = saveWorldDocument({ reopened, failedWorld.string(), {},
 			&history, copiedPackage.string() }, &diagnostic);
-		core::setTransactionalWriteFailureAfterBytesForTesting(0);
 		require(!saved && !std::filesystem::exists(
 			failureDirectory / copiedPackage.filename())
+			&& std::filesystem::is_directory(failedWorld)
+			&& reopened->getAgentBehaviourRegistry() == registryBeforeFailure
+			&& reopened->getAgentBehaviourRegistryPackageName()
+				== packageNameBeforeFailure
 			&& reopened->getExpectedAgentBehaviourRegistryUuid()
-				!= sourceUuid,
-			"Failed Save As left a package or changed the source dependency");
+				== expectedUuidBeforeFailure
+			&& reopened->isModified() == worldWasModified
+			&& history.currentStateId() == historyStateBeforeFailure
+			&& expectedUuidBeforeFailure != sourceUuid,
+			"Failed YAML-to-binary Save As left a package or changed the live source dependency or dirty state");
 	}
 }
 

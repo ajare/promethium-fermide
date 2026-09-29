@@ -9,8 +9,9 @@ namespace core
 	class AgentTagRegistry;
 	class World;
 
-	// The default adjacent filename used by the Tags panel. For
-	// `/project/station.world.yaml` this is `/project/station.tags.yaml`.
+	// The default adjacent filename used by the Tags panel. Both
+	// `/project/station.world` and `/project/station.world.yaml` resolve to
+	// `/project/station.tags.yaml`.
 	std::filesystem::path defaultAgentTagRegistryPath(
 		std::filesystem::path const& worldFilepath);
 
@@ -60,8 +61,9 @@ namespace core
 		std::shared_ptr<AgentTagRegistry> const& registry,
 		bool discardDirty = false);
 
-	// Loads a complete .world.yaml World document and its optional registry into
-	// temporary state. No caller-owned World is changed when either document is refused.
+	// Loads a complete binary or YAML World document and its optional registries
+	// into temporary state. No caller-owned World is changed when the World or a
+	// fatal dependency is refused.
 	std::shared_ptr<World> loadWorldDocument(
 		std::filesystem::path const& worldFilepath);
 }

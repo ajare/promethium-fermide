@@ -16,8 +16,8 @@ namespace core
 	// An Agent behaviour registry package is a directory whose name ends with
 	// .behaviours and whose manifest is the fixed file behaviours.yaml inside
 	// it. The directory also holds the package's managed Lua source modules.
-	// The default adjacent package for `/project/station.world.yaml` is the
-	// directory `/project/station.behaviours/`.
+	// The default adjacent package for `/project/station.world` and
+	// `/project/station.world.yaml` is `/project/station.behaviours/`.
 	std::filesystem::path defaultAgentBehaviourRegistryPackagePath(
 		std::filesystem::path const& worldFilepath);
 	std::filesystem::path agentBehaviourRegistryManifestPath(

@@ -6243,6 +6243,12 @@ int main(int argc, char** argv)
 			return 0;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
+		if (argc > 1 && std::string(argv[1]) == "--coordinated-document-checks")
+		{
+			runAgentBehaviourPortabilitySmokeChecks();
+			runAgentTagDocumentSaveSmokeChecks();
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
 		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")
