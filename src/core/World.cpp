@@ -410,9 +410,8 @@ namespace core
 		mAgentTagRegistry = std::move(registry);
 		mAgentTagRegistry->registerWorld(*this);
 
-		// A restored Path was searched before the tag-supplied properties in this
-		// registry were available. With the properties now in force, re-search so
-		// no restored Path can hold a traversal the effective profile forbids (#194).
+		// Saved route intent stays unevaluated until reconciliation has made every
+		// tag-supplied routing property and persisted sample effective (#194, #221).
 		rebuildRestoredAgentPaths();
 	}
 

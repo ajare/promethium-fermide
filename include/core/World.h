@@ -701,6 +701,16 @@ namespace core
 
 		std::map<AgentId, TopologyPathIntent> mPausedPathIntents;
 
+		struct RestoredPathIntent
+		{
+			std::shared_ptr<const Vertex> destination;
+			bool active{ false };
+		};
+		// Deserialization restores route intent before an external Agent-tag
+		// registry is available. Keep that intent unevaluated until registry
+		// reconciliation has supplied every effective routing property (#221).
+		std::map<AgentId, RestoredPathIntent> mPendingRestoredPathIntents;
+
 		Log mBuildLog;
 
 		// Authored facade operations are the persistence boundary. Replaying them
@@ -971,10 +981,9 @@ namespace core
 		void resetForDeserialization(std::string name, uint32_t cellsWide, uint32_t levelsHigh,
 			bool preserveBehaviourRuntime = false);
 
-		// A restored Agent's saved Path was searched with whatever Agent properties
-		// were in force at the time. A tag-supplied Mobility profile only becomes
-		// available once its registry is resolved, so re-search each untouched
-		// restored Path from its saved destination at that point (ADR 0011, #194).
+		// Evaluate saved route intent only after every effective Agent property is
+		// available. Worlds without a tag registry call this at the end of
+		// deserialization; referenced registries call it after reconciliation.
 		void rebuildRestoredAgentPaths();
 
 		// Constructs a validation candidate with the same dimensions and layer count as this World.

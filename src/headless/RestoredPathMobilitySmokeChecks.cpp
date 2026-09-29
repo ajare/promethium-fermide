@@ -36,6 +36,7 @@
 #include "core/MobilityProfile.h"
 #include "core/Path.h"
 #include "core/World.h"
+#include "core/YamlSerializer.h"
 
 void runRestoredPathMobilitySmokeChecks();
 
@@ -152,6 +153,34 @@ namespace
 		}
 	};
 
+	// A referenced registry is resolved after the World YAML. The saved route
+	// intent must remain unevaluated in that interval rather than briefly becoming
+	// a permissive or stale Path (#221).
+	void savedIntentWaitsForRegistryResolution()
+	{
+		TemporaryDirectory temporary;
+		Fixture fixture(true);
+		fixture.authorRoute(true);
+		fixture.save(temporary.path);
+		auto const worldPath = temporary.path / "restored.world.yaml";
+
+		auto restored = std::make_shared<core::World>("Loading", 1, 1);
+		auto serializer = core::YamlSerializer::fromFile(worldPath.string());
+		serializer->deserialize();
+		core::SerializationWorkData workData;
+		require(restored->deserialize(*serializer, workData),
+			"The World YAML did not deserialize");
+		auto* agent = restored->lookupAgent(fixture.id).entity;
+		require(agent && !agent->getPath(),
+			"Saved route intent was evaluated before tag-registry resolution");
+
+		core::loadAndAttachAgentTagRegistry(*restored, worldPath);
+		auto path = agent->getPath();
+		require(path && edgeKindCount(*path, core::EdgeType::Ladder) == 0
+			&& edgeKindCount(*path, core::EdgeType::Staircase) > 0,
+			"Registry resolution did not evaluate saved intent with the effective profile");
+	}
+
 	// The core regression: after load, the restored Path must be the one the
 	// effective (here tag-supplied) profile permits.
 	void tagSuppliedProfileIsHonouredByTheRestoredPath()
@@ -267,6 +296,7 @@ namespace
 
 void runRestoredPathMobilitySmokeChecks()
 {
+	savedIntentWaitsForRegistryResolution();
 	tagSuppliedProfileIsHonouredByTheRestoredPath();
 	restoredActivePathReachesTheMarkerByTheStaircase();
 	restoredInactivePathKeepsItsDestinationWithoutStarting();

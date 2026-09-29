@@ -1272,23 +1272,15 @@ namespace core
 						+ Vector2{ entry.destinationLocalX, entry.destinationLocalY };
 					auto destination = mGraph->getClosestVertexInSector(
 						destinationSector.get(), destinationPosition);
-					auto path = mGraph->calculatePath(rawAgent, destination);
-					if (!path || path->nodes.empty())
-					{
-						throw SerializationException(format(
-							"Serialized Agent '{}' path destination is unreachable", agentName));
-					}
-					rawAgent->assignPath(std::move(path), entry.pathActive, false);
-					rawAgent->mResetPath = rawAgent->mPath.path;
-					rawAgent->mResetPathActive = entry.pathActive;
+					// The document persists destination intent, not an authoritative route
+					// or perceived total. In particular, do not search while tag-supplied
+					// routing properties are still unavailable (#221).
+					mPendingRestoredPathIntents.emplace(entry.id,
+						RestoredPathIntent{ std::move(destination), entry.pathActive });
 				}
 			}
 			catch (Exception const& error)
 			{
-				// The route could not be rebuilt after the Agent was taken in.  Put
-				// the World back the way it was found, so a rejected open never
-				// leaves a half-restored Agent behind for the next attempt to trip
-				// over (#60).
 				entry.sector->mAgents.erase(rawAgent);
 				mAgentIds.erase(rawAgent);
 				mAgents.remove(entry.id);
@@ -1304,36 +1296,68 @@ namespace core
 			}
 		}
 
+		// With no external tag namespace, all effective properties were available
+		// during Agent deserialization. Otherwise resolution owns this lifecycle
+		// point after it has reconciled the persisted samples with the registry.
+		if (!mAgentTagRegistryReference)
+		{
+			try { rebuildRestoredAgentPaths(); }
+			catch (...)
+			{
+				// Preserve the existing all-or-nothing Agent restoration contract when
+				// a persisted destination is malformed or no longer reachable.
+				for (auto const& [id, agent] : mAgents.entries())
+				{
+					(void)id;
+					if (agent && agent->getSector())
+						const_cast<Sector*>(agent->getSector())->mAgents.erase(agent.get());
+				}
+				mAgents = {};
+				mAgentIds.clear();
+				mPendingRestoredPathIntents.clear();
+				throw;
+			}
+		}
 		return true;
 	}
 
 	void World::rebuildRestoredAgentPaths()
 	{
 		invalidateSimulationSnapshot();
-		for (auto const& [id, agent] : mAgents.entries())
+		struct RebuiltPath
 		{
-			(void)id;
-			if (!agent || !agent->mResetPath || agent->mResetPath->nodes.empty()) continue;
-			// Only a Path that still aliases its reset baseline is an untouched
-			// restored Path. One that has diverged belongs to a running simulation
-			// and is left where it is.
-			if (agent->mPath.path != agent->mResetPath) continue;
-			// The saved destination is the Path's final vertex, so re-searching from
-			// it preserves the Agent's intent while honouring the effective profile.
-			auto const destination = agent->mResetPath->nodes.back().targetVertex;
-			if (!destination) continue;
-			auto path = mGraph->calculatePath(agent.get(), destination);
+			Agent* agent;
+			shared_ptr<Path> path;
+			bool active;
+		};
+		vector<RebuiltPath> rebuilt;
+		rebuilt.reserve(mPendingRestoredPathIntents.size());
+		// Validate every route before publishing any of them, so one unreachable
+		// destination cannot leave a partially restored set of Agents.
+		for (auto const& [id, intent] : mPendingRestoredPathIntents)
+		{
+			auto* agent = mAgents.find(id);
+			if (!agent)
+				throw SerializationException("Restored path intent refers to a missing Agent");
+			if (!intent.destination)
+				throw SerializationException(format(
+					"Restored Agent '{}' path has no destination", agent->getName()));
+			auto path = mGraph->calculatePath(agent, intent.destination);
 			if (!path || path->nodes.empty())
 			{
 				throw SerializationException(format(
-					"Restored Agent '{}' path destination is unreachable under its effective Mobility profile",
+					"Restored Agent '{}' path destination is unreachable under its effective routing profile",
 					agent->getName()));
 			}
-			auto const active = agent->mResetPathActive;
-			agent->assignPath(std::move(path), active, false);
-			agent->mResetPath = agent->mPath.path;
-			agent->mResetPathActive = active;
+			rebuilt.push_back({ agent, std::move(path), intent.active });
 		}
+		for (auto& route : rebuilt)
+		{
+			route.agent->assignPath(std::move(route.path), route.active, false);
+			route.agent->mResetPath = route.agent->mPath.path;
+			route.agent->mResetPathActive = route.active;
+		}
+		mPendingRestoredPathIntents.clear();
 	}
 
 	void World::resetSimulation()
@@ -1457,6 +1481,7 @@ namespace core
 		mTopologyGeneration = 0;
 		mTopologyDiagnostic.clear();
 		if (!preserveBehaviourRuntime) mPausedPathIntents.clear();
+		mPendingRestoredPathIntents.clear();
 		mBuildLog.clear();
 	}
 

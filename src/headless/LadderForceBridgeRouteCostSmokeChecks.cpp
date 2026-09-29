@@ -218,6 +218,20 @@ namespace
 		require(agent->getWalkSpeed() == walkSpeed && agent->getClimbSpeed() == climbSpeed,
 			"Risk aversion changed physical movement speed");
 
+		// Editor previews have no Agent. Their route choice comes from the explicit
+		// baseline profile rather than a manufactured default Agent (#221).
+		auto const source = world.getGraph()->getClosestVertexInSector(
+			world.getSector(lower).get(), { 4.5f, 0.0f });
+		auto policy = world.getRouteChoicePolicy();
+		policy.baselineProfile.riskAversion = 0.0f;
+		world.setRouteChoicePolicy(policy);
+		require(usesLadder(world.getGraph()->calculatePath(nullptr, source, target)),
+			"Low-risk baseline preview did not use the competitive Ladder");
+		policy.baselineProfile.riskAversion = 3.0f;
+		world.setRouteChoicePolicy(policy);
+		require(!usesLadder(world.getGraph()->calculatePath(nullptr, source, target)),
+			"High-risk baseline preview did not avoid the competitive Ladder");
+
 		core::MobilityProfile onlyLadder;
 		onlyLadder.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
 		require(world.setAgentIndividualMobilityProfile(id, onlyLadder, &diagnostic),

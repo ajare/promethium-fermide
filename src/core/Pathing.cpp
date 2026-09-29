@@ -220,31 +220,34 @@ namespace core
 			node_type source, node_type target)
 		{
 			if (!graph || (!agent && !source)) return nullptr;
-			// A real baseline Agent keeps legacy implementations null-safe.
-			std::optional<Agent> baselineAgent;
-			if (!agent) baselineAgent.emplace("Route preview");
-			auto const* routingAgent = agent ? agent : &*baselineAgent;
 			auto profile = graph->getRouteChoicePolicy().baselineProfile;
 			// Resolve Agent-authored preferences once for this immutable search
-			// context; directed-edge capture then reuses the concrete value.
-			profile.stairSpeedModifier = routingAgent->getEffectiveStairSpeedModifier().value;
-			profile.escalatorWalkingChance = routingAgent->getEffectiveEscalatorWalkingChance().value;
-			profile.interactionAversion = routingAgent->getEffectiveInteractionAversion().value;
-			profile.effortAversion = routingAgent->getEffectiveEffortAversion().value;
-			profile.waitingAversion = routingAgent->getEffectiveWaitingAversion().value;
-			profile.crowdAversion = routingAgent->getEffectiveCrowdAversion().value;
-			profile.riskAversion = routingAgent->getEffectiveRiskAversion().value;
-			profile.routeFamiliarity = routingAgent->getEffectiveRouteFamiliarity().value;
-			profile.routePersistence = routingAgent->getEffectiveRoutePersistence().value;
+			// context. A null-Agent editor preview deliberately keeps the explicit
+			// policy baseline instead of manufacturing and dereferencing an Agent.
+			if (agent)
+			{
+				profile.stairSpeedModifier = agent->getEffectiveStairSpeedModifier().value;
+				profile.escalatorWalkingChance = agent->getEffectiveEscalatorWalkingChance().value;
+				profile.interactionAversion = agent->getEffectiveInteractionAversion().value;
+				profile.effortAversion = agent->getEffectiveEffortAversion().value;
+				profile.waitingAversion = agent->getEffectiveWaitingAversion().value;
+				profile.crowdAversion = agent->getEffectiveCrowdAversion().value;
+				profile.riskAversion = agent->getEffectiveRiskAversion().value;
+				profile.routeFamiliarity = agent->getEffectiveRouteFamiliarity().value;
+				profile.routePersistence = agent->getEffectiveRoutePersistence().value;
+			}
 			auto const worldSeed = graph->getWorld() ? graph->getWorld()->getRandomSeed() : uint64_t{ 0 };
 			auto const agentId = agent && graph->getWorld()
 				? graph->getWorld()->getAgentId(agent).value : uint64_t{ 0 };
-			auto const journeyIdentity = routingAgent->getRouteJourneyIdentity(target.get());
+			auto const journeyIdentity = agent
+				? agent->getRouteJourneyIdentity(target.get()) : uint64_t{ 0 };
 			auto const perceptionKey = worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
 				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
-			RouteDecisionContext const context{ routingAgent, profile,
+			RouteDecisionContext const context{ agent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(),
+				agent ? agent->getWalkSpeed() : static_cast<float>(CORE_AGENT_BASE_WALK_SPEED),
+				graph->getWorld(),
+				agent ? agent->getClimbSpeed() : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED),
 				false, perceptionKey, 0 };
 			auto const inferredSource = !source;
 			if (inferredSource)
@@ -360,9 +363,11 @@ namespace core
 			};
 
 			if (auto path = runSearch(context)) return path;
-			RouteDecisionContext const fallbackContext{ routingAgent, profile,
+			RouteDecisionContext const fallbackContext{ agent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(),
+				agent ? agent->getWalkSpeed() : static_cast<float>(CORE_AGENT_BASE_WALK_SPEED),
+				graph->getWorld(),
+				agent ? agent->getClimbSpeed() : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED),
 				true, perceptionKey, 0 };
 			return runSearch(fallbackContext);
 		}

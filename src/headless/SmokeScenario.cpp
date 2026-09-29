@@ -6208,6 +6208,12 @@ int main(int argc, char** argv)
 			std::cout << "PASS: Shuttle route costs\n";
 			return 0;
 		}
+		if (argc > 1 && std::string(argv[1]) == "--restored-path-checks")
+		{
+			runRestoredPathMobilitySmokeChecks();
+			std::cout << "PASS: restored Path profiles\n";
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
