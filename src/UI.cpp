@@ -2274,6 +2274,10 @@ namespace
 	};
 
 	constexpr size_t MaximumRecentFiles{ 5 };
+	constexpr nfdu8filteritem_t WorldDocumentDialogFilters[] = {
+		{ "Binary World", "world" },
+		{ "YAML World", "world.yaml" }
+	};
 	string gWorldFilepath;
 	RecentFiles gRecentFiles{ MaximumRecentFiles };
 	string gPendingRecentFilepath;
@@ -2405,6 +2409,9 @@ namespace
 			currentAgentBehaviourRegistryPackagePath(world) };
 	}
 
+	string normalizedFilepath(string const& filepath);
+	void addRecentFile(string const& filepath);
+
 	bool saveWorld(shared_ptr<core::World> const& world, bool saveAs)
 	{
 		if (!world) return false;
@@ -2413,13 +2420,13 @@ namespace
 		if (saveAs || filepath.empty())
 		{
 			nfdu8char_t* selectedPathRaw{ nullptr };
-			nfdu8filteritem_t const filters[] = { { "World document", "world.yaml" } };
 			filesystem::path const current(filepath);
 			auto const directory = filepath.empty() ? string() : current.parent_path().string();
 			auto defaultName = filepath.empty()
 				? world->getName() + string(core::WorldDocumentFilenameSuffix)
 				: current.filename().string();
-			auto const result = NFD_SaveDialogU8(&selectedPathRaw, filters, 1,
+			auto const result = NFD_SaveDialogU8(&selectedPathRaw,
+				WorldDocumentDialogFilters, 2,
 				directory.empty() ? nullptr : directory.c_str(), defaultName.c_str());
 			unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(
 				selectedPathRaw, NFD_FreePathU8);
@@ -2430,13 +2437,13 @@ namespace
 					+ (NFD_GetError() ? NFD_GetError() : "unknown native dialog error"));
 				return false;
 			}
-			filepath = selectedPath.get();
-			filesystem::path selected(filepath);
-			if (!selected.has_extension())
-				filepath += core::WorldDocumentFilenameSuffix;
-			else if (!core::isWorldDocumentPath(filepath))
+			try
 			{
-				reportFileError("A World document file must end with .world.yaml");
+				filepath = core::worldDocumentSavePath(selectedPath.get()).string();
+			}
+			catch (std::exception const& error)
+			{
+				reportFileError(error.what());
 				return false;
 			}
 		}
@@ -2449,6 +2456,8 @@ namespace
 			return false;
 		}
 		gWorldFilepath = std::move(filepath);
+		setWindowTitle(filesystem::path(gWorldFilepath).filename().string());
+		addRecentFile(gWorldFilepath);
 		return true;
 	}
 
@@ -2536,8 +2545,8 @@ namespace
 	void openWorld(shared_ptr<core::World>& world)
 	{
 		nfdu8char_t* selectedPathRaw{ nullptr };
-		nfdu8filteritem_t const filters[] = { { "World document", "world.yaml" } };
-		auto const result = NFD_OpenDialogU8(&selectedPathRaw, filters, 1, nullptr);
+		auto const result = NFD_OpenDialogU8(&selectedPathRaw,
+			WorldDocumentDialogFilters, 2, nullptr);
 		unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(
 			selectedPathRaw, NFD_FreePathU8);
 		if (result == NFD_CANCEL) return;

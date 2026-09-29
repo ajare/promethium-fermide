@@ -327,6 +327,28 @@ namespace
 		require(core::isWorldDocumentPath(directory / "filename.world")
 			&& core::isWorldDocumentPath(directory / "filename.world.yaml"),
 			"A supported World document suffix was refused");
+		require(core::WorldDocumentFilenameSuffix
+			== core::BinaryWorldDocumentFilenameSuffix,
+			"New World documents do not default to the binary suffix");
+		require(core::worldDocumentSavePath(directory / "untitled")
+			== directory / "untitled.world"
+			&& core::worldDocumentSavePath(directory / "binary.world")
+			== directory / "binary.world"
+			&& core::worldDocumentSavePath(directory / "yaml.world.yaml")
+			== directory / "yaml.world.yaml",
+			"Save As did not default to binary or retain a supported suffix");
+		for (auto const* refused : { "filename.yaml", "filename.bin", ".world",
+			"filename.WORLD", "filename.world.YAML" })
+		{
+			bool rejected{ false };
+			try { (void)core::worldDocumentSavePath(directory / refused); }
+			catch (core::SerializationException const& exception)
+			{
+				rejected = std::string(exception.what()).find("World document")
+					!= std::string::npos;
+			}
+			require(rejected, "Save As accepted an unsupported suffix or gave an unclear diagnostic");
+		}
 		require(core::worldDocumentBasePath(directory / "filename.world")
 			== directory / "filename"
 			&& core::worldDocumentBasePath(directory / "filename.world.yaml")
@@ -5574,15 +5596,16 @@ agents: []
 		first.initialize(file);
 		require(std::filesystem::exists(file), "Recent-file storage was not created on first startup");
 		first.add("/tmp/alpha.world.yaml");
-		first.add("/tmp/beta.world.yaml");
+		first.add("/tmp/beta.world");
 		first.add("/tmp/alpha.world.yaml");
+		first.add("/tmp/beta.world");
 		RecentFiles restarted(3);
 		restarted.initialize(file);
 		require(restarted.entries().size() == 2,
 			"Recent files were not restored after startup");
-		require(restarted.entries()[0] == "/tmp/alpha.world.yaml"
-			&& restarted.entries()[1] == "/tmp/beta.world.yaml",
-			"Recent files did not retain most-recent-first order or deduplication");
+		require(restarted.entries()[0] == "/tmp/beta.world"
+			&& restarted.entries()[1] == "/tmp/alpha.world.yaml",
+			"Recent binary and YAML Worlds did not retain order or deduplication");
 		std::filesystem::remove_all(directory);
 	}
 
@@ -5593,7 +5616,7 @@ agents: []
 		std::filesystem::remove_all(directory);
 		std::filesystem::create_directories(directory);
 		auto const storage = directory / "recent-files.txt";
-		auto const missing = (directory / "moved.world.yaml").string();
+		auto const missing = (directory / "moved.world").string();
 
 		RecentFiles recent(3);
 		recent.initialize(storage);
@@ -5603,8 +5626,8 @@ agents: []
 		require(recent.empty(),
 			"A removed missing World remained in the in-memory recent files");
 
-		auto const available = directory / "available.world.yaml";
-		std::ofstream(available) << "version: 19\n";
+		auto const available = directory / "available.world";
+		std::ofstream(available, std::ios::binary) << "binary";
 		recent.add(available.string());
 		require(!recent.removeUnavailable(available.string())
 			&& recent.entries().size() == 1,

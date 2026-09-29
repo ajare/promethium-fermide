@@ -39,6 +39,22 @@ namespace core
 		throw SerializationException("Unsupported World document format");
 	}
 
+	std::filesystem::path worldDocumentSavePath(
+		std::filesystem::path const& filepath)
+	{
+		auto const filename = filepath.filename().string();
+		if (filename.empty() || filename == BinaryWorldDocumentFilenameSuffix
+			|| filename == YamlWorldDocumentFilenameSuffix)
+		{
+			requireWorldDocumentPath(filepath);
+		}
+		if (isWorldDocumentPath(filepath)) return filepath;
+		if (!filepath.has_extension())
+			return filepath.string() + std::string(BinaryWorldDocumentFilenameSuffix);
+		requireWorldDocumentPath(filepath);
+		throw SerializationException("Unsupported World document save path");
+	}
+
 	std::filesystem::path worldDocumentBasePath(
 		std::filesystem::path const& filepath)
 	{
