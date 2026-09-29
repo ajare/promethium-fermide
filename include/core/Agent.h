@@ -57,7 +57,8 @@ namespace core
 		EffortAversion,
 		WaitingAversion,
 		CrowdAversion,
-		RiskAversion
+		RiskAversion,
+		RouteFamiliarity
 	};
 
 	struct AgentPropertySample
@@ -142,6 +143,14 @@ namespace core
 		bool individual{ false };
 	};
 
+	struct EffectiveAgentRouteFamiliarity
+	{
+		float value{ 0.5f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
 	struct EffectiveAgentMobilityProfile
 	{
 		MobilityProfile value{};
@@ -193,6 +202,10 @@ namespace core
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };
+		// Transient, Agent-local journey identity used only for stable route
+		// perception. Reset/reload starts the deterministic sequence again.
+		uint64_t mRouteJourneySequence{ 0 };
+		uint32_t mRouteJourneyDestinationVertexId{ 0 };
 
 		// The Agent group this Agent is assigned to (ADR 0006). An empty
 		// AgentGroupId means no Agent group, which is the default for every
@@ -224,6 +237,7 @@ namespace core
 		std::optional<float> mIndividualWaitingAversion;
 		std::optional<float> mIndividualCrowdAversion;
 		std::optional<float> mIndividualRiskAversion;
+		std::optional<float> mIndividualRouteFamiliarity;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -238,6 +252,7 @@ namespace core
 		std::optional<AgentPropertySample> mWaitingAversionSample;
 		std::optional<AgentPropertySample> mCrowdAversionSample;
 		std::optional<AgentPropertySample> mRiskAversionSample;
+		std::optional<AgentPropertySample> mRouteFamiliaritySample;
 
 		// Activation is authored state (#118): an activated Agent is simulated,
 		// a deactivated one keeps its authored position and route but no tick
@@ -354,6 +369,11 @@ namespace core
 			mRiskAversionSample = sample;
 		}
 		void clearRiskAversionSample() { mRiskAversionSample.reset(); }
+		void setRouteFamiliaritySample(AgentPropertySample sample)
+		{
+			mRouteFamiliaritySample = sample;
+		}
+		void clearRouteFamiliaritySample() { mRouteFamiliaritySample.reset(); }
 		void setIndividualColour(std::optional<AgentColour> value)
 		{ mIndividualColour = value; modify(); }
 		void setIndividualEscalatorWalkingChance(std::optional<float> value)
@@ -376,6 +396,8 @@ namespace core
 		{ mIndividualCrowdAversion = value; modify(); }
 		void setIndividualRiskAversion(std::optional<float> value)
 		{ mIndividualRiskAversion = value; modify(); }
+		void setIndividualRouteFamiliarity(std::optional<float> value)
+		{ mIndividualRouteFamiliarity = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -476,6 +498,8 @@ namespace core
 		{ return mIndividualCrowdAversion; }
 		std::optional<float> const& getIndividualRiskAversion() const
 		{ return mIndividualRiskAversion; }
+		std::optional<float> const& getIndividualRouteFamiliarity() const
+		{ return mIndividualRouteFamiliarity; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -501,7 +525,9 @@ namespace core
 		EffectiveAgentWaitingAversion getEffectiveWaitingAversion() const;
 		EffectiveAgentCrowdAversion getEffectiveCrowdAversion() const;
 		EffectiveAgentRiskAversion getEffectiveRiskAversion() const;
+		EffectiveAgentRouteFamiliarity getEffectiveRouteFamiliarity() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
+		uint64_t getRouteJourneyIdentity(Vertex const* destination) const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const
 		{
 			return mHeightModifierSample;
@@ -533,6 +559,10 @@ namespace core
 		std::optional<AgentPropertySample> const& getRiskAversionSample() const
 		{
 			return mRiskAversionSample;
+		}
+		std::optional<AgentPropertySample> const& getRouteFamiliaritySample() const
+		{
+			return mRouteFamiliaritySample;
 		}
 
 		// Whether this Agent is simulated. Deactivation changes no authored

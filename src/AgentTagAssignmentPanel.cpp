@@ -243,6 +243,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualRiskAversion().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualRiskAversion(
 				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::RouteFamiliarity),
+			target->getIndividualRouteFamiliarity().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualRouteFamiliarity(
+				agent, enabled ? optional<float>{ 0.5f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -323,6 +327,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		|| target->getIndividualLadderSpeedModifier() || target->getIndividualInteractionAversion()
 		|| target->getIndividualEffortAversion() || target->getIndividualWaitingAversion()
 		|| target->getIndividualCrowdAversion() || target->getIndividualRiskAversion()
+		|| target->getIndividualCrowdAversion() || target->getIndividualRouteFamiliarity()
 		|| target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
@@ -500,6 +505,28 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
+	if (target->getIndividualRouteFamiliarity())
+	{
+		auto value = *target->getIndividualRouteFamiliarity();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Route familiarity##individual", &value, 0.01f,
+			core::AgentRouteFamiliarityMinimum, core::AgentRouteFamiliarityMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRouteFamiliarity(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualRouteFamiliarity"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRouteFamiliarity(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
@@ -661,6 +688,13 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Risk aversion: %.2f from #%s", risk.value,
 			world->getAgentTagRegistry()->getAgentTagName(risk.sourceTag).c_str());
 	else ImGui::TextUnformatted("Risk aversion: 1.00 (default)");
+	auto const familiarity = lookup.entity->getEffectiveRouteFamiliarity();
+	if (familiarity.individual)
+		ImGui::Text("Route familiarity: %.2f (individual)", familiarity.value);
+	else if (familiarity.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Route familiarity: %.2f from #%s", familiarity.value,
+			world->getAgentTagRegistry()->getAgentTagName(familiarity.sourceTag).c_str());
+	else ImGui::TextUnformatted("Route familiarity: 0.50 (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.value);

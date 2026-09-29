@@ -159,6 +159,7 @@ namespace core
 			|| mIndividualInteractionAversion || mIndividualEffortAversion || mIndividualWaitingAversion
 			|| mIndividualCrowdAversion
 			|| mIndividualRiskAversion
+			|| mIndividualRouteFamiliarity
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -201,6 +202,8 @@ namespace core
 				writeFloatProperty("crowdAversion", *mIndividualCrowdAversion);
 			if (mIndividualRiskAversion)
 				writeFloatProperty("riskAversion", *mIndividualRiskAversion);
+			if (mIndividualRouteFamiliarity)
+				writeFloatProperty("routeFamiliarity", *mIndividualRouteFamiliarity);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -211,7 +214,8 @@ namespace core
 		}
 		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
 			|| mLadderSpeedModifierSample || mInteractionAversionSample || mEffortAversionSample
-			|| mWaitingAversionSample || mCrowdAversionSample || mRiskAversionSample)
+			|| mWaitingAversionSample || mCrowdAversionSample || mRiskAversionSample
+			|| mRouteFamiliaritySample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -242,6 +246,8 @@ namespace core
 				writeSample("crowdAversion", *mCrowdAversionSample);
 			if (mRiskAversionSample)
 				writeSample("riskAversion", *mRiskAversionSample);
+			if (mRouteFamiliaritySample)
+				writeSample("routeFamiliarity", *mRouteFamiliaritySample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -304,6 +310,7 @@ namespace core
 		mIndividualWaitingAversion.reset();
 		mIndividualCrowdAversion.reset();
 		mIndividualRiskAversion.reset();
+		mIndividualRouteFamiliarity.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -409,6 +416,15 @@ namespace core
 						throw SerializationException("Serialized individual Risk aversion is invalid");
 					mIndividualRiskAversion = value;
 				}
+				else if (type == "routeFamiliarity")
+				{
+					if (mIndividualRouteFamiliarity)
+						throw SerializationException("Serialized Agent contains more than one individual Route familiarity");
+					auto const value = serializer.readFloat("value");
+					if (!agentRouteFamiliarityRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Route familiarity is invalid");
+					mIndividualRouteFamiliarity = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -430,6 +446,7 @@ namespace core
 		mWaitingAversionSample.reset();
 		mCrowdAversionSample.reset();
 		mRiskAversionSample.reset();
+		mRouteFamiliaritySample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -493,6 +510,12 @@ namespace core
 					sample.type = SampledAgentPropertyType::RiskAversion;
 					destination = &mRiskAversionSample;
 					displayName = "Risk aversion";
+				}
+				else if (type == "routeFamiliarity")
+				{
+					sample.type = SampledAgentPropertyType::RouteFamiliarity;
+					destination = &mRouteFamiliaritySample;
+					displayName = "Route familiarity";
 				}
 				else
 				{
@@ -755,6 +778,29 @@ namespace core
 		return effective;
 	}
 
+	EffectiveAgentRouteFamiliarity Agent::getEffectiveRouteFamiliarity() const
+	{
+		EffectiveAgentRouteFamiliarity effective;
+		if (mIndividualRouteFamiliarity)
+		{
+			effective.value = *mIndividualRouteFamiliarity;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mRouteFamiliaritySample) return effective;
+		effective.value = mRouteFamiliaritySample->value;
+		effective.sourceTag = mRouteFamiliaritySample->sourceTag;
+		effective.propertyRevision = mRouteFamiliaritySample->propertyRevision;
+		return effective;
+	}
+
+	uint64_t Agent::getRouteJourneyIdentity(Vertex const* destination) const
+	{
+		if (!destination) return mRouteJourneySequence;
+		return mRouteJourneyDestinationVertexId == destination->getId()
+			? mRouteJourneySequence : mRouteJourneySequence + 1;
+	}
+
 	EffectiveAgentMobilityProfile Agent::getEffectiveMobilityProfile() const
 	{
 		EffectiveAgentMobilityProfile effective;
@@ -1000,6 +1046,16 @@ namespace core
 	void Agent::assignPath(shared_ptr<Path> path, bool startPathing, bool markModified)
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
+		auto const destination = path && !path->nodes.empty()
+			? path->nodes.back().targetVertex.get() : nullptr;
+		auto acceptJourneyIdentity = [&]
+		{
+			if (destination && destination->getId() != mRouteJourneyDestinationVertexId)
+			{
+				++mRouteJourneySequence;
+				mRouteJourneyDestinationVertexId = destination->getId();
+			}
+		};
 		// An onboard replacement remains the same transport journey. Retarget the
 		// live ride request and stop-request ownership instead of cancelling into a
 		// needless exit/reboard cycle.
@@ -1007,6 +1063,7 @@ namespace core
 		if (startPathing && path && mTraversalTask && !mTraversalTask->permit && mWorld
 			&& mWorld->replaceOnboardLiftDestination(*this, path, replacementSource))
 		{
+			acceptJourneyIdentity();
 			mPath.path = std::move(path);
 			mPath.targetNode = replacementSource;
 			mTraversalTask->edge = mPath.path->nodes[replacementSource + 1].edge;
@@ -1045,6 +1102,7 @@ namespace core
 						&& edge->getTraversalResourceId() == request.entity->getResource()
 						&& edge->getType() == request.entity->getEdgeType())
 					{
+						acceptJourneyIdentity();
 						mPath.path = std::move(path);
 						mPath.targetNode = i;
 						mTraversalTask->edge = edge;
@@ -1060,6 +1118,7 @@ namespace core
 
 		mPathStartPosition = mPosition.sector() ? getGlobalPosition() : Vector2::ZERO;
 		clearRuntimePath();
+		acceptJourneyIdentity();
 		mPath.path = std::move(path);
 		mPath.targetNode = 0;
 		if (markModified) modify();
@@ -1140,6 +1199,7 @@ namespace core
 			mState = State::Idle;
 			mPath.path = nullptr;
 			mPath.targetNode = 0;
+			mRouteJourneyDestinationVertexId = 0;
 			addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started idling"));
 			return true;
 		}
@@ -1159,6 +1219,7 @@ namespace core
 		mState = State::Idle;
 		mPath.path = nullptr;
 		mPath.targetNode = 0;
+		mRouteJourneyDestinationVertexId = 0;
 
 		addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started idling"));
 	}

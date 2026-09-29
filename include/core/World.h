@@ -575,6 +575,9 @@ namespace core
 			AgentTagSampleRepairAction riskAversionAction{ AgentTagSampleRepairAction::None };
 			AgentTagId riskAversionSource{};
 			AgentRiskAversionProperty riskAversionProperty{};
+			AgentTagSampleRepairAction routeFamiliarityAction{ AgentTagSampleRepairAction::None };
+			AgentTagId routeFamiliaritySource{};
+			AgentRouteFamiliarityProperty routeFamiliarityProperty{};
 		};
 
 		// Checks every assigned stable ID and inherited property against a
@@ -619,6 +622,9 @@ namespace core
 		void addAgentTagRiskAversionSamples(AgentTagId id,
 			AgentRiskAversionProperty const& property);
 		void clearAgentTagRiskAversionSamples(AgentTagId id);
+		void addAgentTagRouteFamiliaritySamples(AgentTagId id,
+			AgentRouteFamiliarityProperty const& property);
+		void clearAgentTagRouteFamiliaritySamples(AgentTagId id);
 
 		// Case-sensitive name lookup across the groups this World owns, with
 		// one group optionally excluded so a group renaming itself to the name
@@ -2020,6 +2026,8 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualRiskAversion(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualRouteFamiliarity(AgentId agent,
+			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
 			std::optional<MobilityProfile> value, std::string* diagnostic = nullptr);
 
@@ -2125,6 +2133,7 @@ namespace core
 			std::optional<AgentPropertySample> const& waitingAversionSample,
 			std::optional<AgentPropertySample> const& crowdAversionSample,
 			std::optional<AgentPropertySample> const& riskAversionSample,
+			std::optional<AgentPropertySample> const& routeFamiliaritySample,
 			std::string* diagnostic = nullptr) const;
 
 		// Restores one Agent's complete tag state after the preflight above.
@@ -2141,6 +2150,7 @@ namespace core
 			std::optional<AgentPropertySample> const& waitingAversionSample,
 			std::optional<AgentPropertySample> const& crowdAversionSample,
 			std::optional<AgentPropertySample> const& riskAversionSample,
+			std::optional<AgentPropertySample> const& routeFamiliaritySample,
 			std::string* diagnostic = nullptr);
 
 		// The assigned tag set in stable numeric order. Throws when `agent` is

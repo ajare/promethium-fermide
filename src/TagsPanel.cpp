@@ -161,6 +161,7 @@ namespace
 	map<uint64_t, TagHeightEdit> gTagWaitingAversionEdits;
 	map<uint64_t, TagHeightEdit> gTagCrowdAversionEdits;
 	map<uint64_t, TagHeightEdit> gTagRiskAversionEdits;
+	map<uint64_t, TagHeightEdit> gTagRouteFamiliarityEdits;
 	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
@@ -613,6 +614,7 @@ namespace
 		auto const* waiting = registry->getAgentTagWaitingAversion(id);
 		auto const* crowd = registry->getAgentTagCrowdAversion(id);
 		auto const* risk = registry->getAgentTagRiskAversion(id);
+		auto const* familiarity = registry->getAgentTagRouteFamiliarity(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		if (chance)
@@ -915,6 +917,40 @@ namespace
 			}
 		}
 
+		if (familiarity)
+		{
+			auto& edit = gTagRouteFamiliarityEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != familiarity->revision)
+			{
+				edit.range = familiarity->range;
+				edit.loadedRevision = familiarity->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::RouteFamiliarity),
+				&edit.range.minimum, &edit.range.maximum, 0.01f,
+				core::AgentRouteFamiliarityMinimum, core::AgentRouteFamiliarityMaximum,
+				"Min %.2f", "Max %.2f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
+			{
+				string diagnostic;
+				if (!commitAgentTagRouteFamiliarityEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Route familiarity range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				familiarity = registry->getAgentTagRouteFamiliarity(id);
+				if (familiarity) { edit.range = familiarity->range; edit.loadedRevision = familiarity->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeRouteFamiliarity"))
+			{
+				string diagnostic;
+				if (!commitAgentTagRouteFamiliarityRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagRouteFamiliarityEdits.erase(id.value); familiarity = nullptr; }
+			}
+		}
+
 		auto const* mobility = pathingMobility;
 		if (mobility)
 		{
@@ -995,10 +1031,11 @@ namespace
 		auto const* waiting = registry->getAgentTagWaitingAversion(id);
 		auto const* crowd = registry->getAgentTagCrowdAversion(id);
 		auto const* risk = registry->getAgentTagRiskAversion(id);
+		auto const* familiarity = registry->getAgentTagRouteFamiliarity(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
-			|| !crowd || !risk || !mobility;
+			|| !crowd || !risk || !familiarity || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -1027,7 +1064,7 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !mobility)
+			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
@@ -1091,6 +1128,14 @@ namespace
 				if (!commitAgentTagRiskAversionAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagRiskAversionEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!familiarity && ImGui::Selectable(propertyName(core::AgentPropertyType::RouteFamiliarity)))
+			{
+				string diagnostic;
+				if (!commitAgentTagRouteFamiliarityAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagRouteFamiliarityEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
 			if (!mobility && ImGui::Selectable(propertyName(core::AgentPropertyType::MobilityProfile)))
@@ -2335,6 +2380,30 @@ bool commitAgentTagRiskAversionRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Risk aversion",
 		[id](auto& target, string* out) { return target.removeAgentTagRiskAversion(id, out); });
+}
+
+bool commitAgentTagRouteFamiliarityAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Route familiarity",
+		[id](auto& target, string* out) { return target.addAgentTagRouteFamiliarity(id, out); });
+}
+
+bool commitAgentTagRouteFamiliarityEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Route familiarity",
+		[id, range](auto& target, string* out) { return target.setAgentTagRouteFamiliarity(id, range, out); });
+}
+
+bool commitAgentTagRouteFamiliarityRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Route familiarity",
+		[id](auto& target, string* out) { return target.removeAgentTagRouteFamiliarity(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

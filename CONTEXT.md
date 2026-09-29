@@ -94,6 +94,10 @@ _Avoid_: Mobility profile, effort aversion
 Information locally available to an Agent when it chooses or revises a Path, such as a nearby queue or visible device state. The live state of a remote resource is not a Route observation.
 _Avoid_: Global simulation state, perfect knowledge
 
+**Route familiarity**:
+An Agent property from 0 through 1 that reduces uncertainty premiums and stable perception variation for uncertain route components. Its neutral default is 0.5; it improves confidence in baseline expectations but never reveals remote live queues or device states.
+_Avoid_: Route observation, topology knowledge
+
 **Route persistence**:
 An Agent's propensity to retain its current Path unless another known Path is sufficiently preferable or the current Path becomes invalid.
 _Avoid_: Route lock, forbidden traversal

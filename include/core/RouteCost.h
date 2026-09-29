@@ -34,6 +34,7 @@ namespace core
 		float interactionAversion = 1;
 		float crowdAversion = 1;
 		float riskAversion = 1;
+		float routeFamiliarity = 0.5f;
 	};
 
 	struct LiftRouteAccessObservation
@@ -140,18 +141,22 @@ namespace core
 			auto const& c = facts.components;
 			for (auto value : { c.motionSeconds, c.knownWaitSeconds, c.expectedWaitSeconds,
 				c.physicalEffortUnits, c.interactionUnits, c.crowdingUnits, c.riskUnits,
-				c.uncertaintyUnits, c.perceptionVariationUnits, facts.optimisticLowerBoundSeconds,
+				c.uncertaintyUnits, facts.optimisticLowerBoundSeconds,
 				profile.stairSpeedModifier, profile.escalatorWalkingChance, profile.waitingAversion,
 				profile.effortAversion, profile.interactionAversion,
-				profile.crowdAversion, profile.riskAversion }) validate(value);
+				profile.crowdAversion, profile.riskAversion, profile.routeFamiliarity }) validate(value);
+			if (profile.routeFamiliarity > 1 || !std::isfinite(c.perceptionVariationUnits))
+				throw std::invalid_argument("Invalid route familiarity or perception variation");
 			if (facts.objectiveDurationSeconds) validate(*facts.objectiveDurationSeconds);
 			auto cost = c.motionSeconds + profile.waitingAversion * (c.knownWaitSeconds + c.expectedWaitSeconds)
 				+ profile.effortAversion * c.physicalEffortUnits + profile.interactionAversion * c.interactionUnits
 				+ profile.crowdAversion * c.crowdingUnits + profile.riskAversion * c.riskUnits
-				+ c.uncertaintyUnits + c.perceptionVariationUnits;
-			validate(cost);
-			if (cost < facts.optimisticLowerBoundSeconds)
-				throw std::invalid_argument("Route cost is below its physical lower bound");
+				+ (1.0f - profile.routeFamiliarity) * c.uncertaintyUnits
+				+ c.perceptionVariationUnits;
+			if (!std::isfinite(cost)) throw std::invalid_argument("Route cost is not finite");
+			// Stable error may be negative, but perception can never undercut the
+			// directed traversal's universal physical lower bound.
+			cost = std::max(cost, facts.optimisticLowerBoundSeconds);
 			return EvaluatedRouteCost{ cost, facts.objectiveDurationSeconds };
 		}
 	};
@@ -170,5 +175,7 @@ namespace core
 		// False for the first search pass. If no Path exists, pathfinding repeats
 		// with fallback Mobility profile entries admitted.
 		bool const allowFallbackMobility = false;
+		uint64_t const perceptionKey = 0;
+		uint64_t const observationEpoch = 0;
 	};
 }

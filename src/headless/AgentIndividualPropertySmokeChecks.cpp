@@ -41,6 +41,8 @@ void runAgentIndividualPropertySmokeChecks()
 		core::AgentPropertyType::CrowdAversion);
 	auto const riskMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::RiskAversion);
+	auto const familiarityMetadata = core::agentPropertyMetadata(
+		core::AgentPropertyType::RouteFamiliarity);
 	auto const ladderSpeedMetadata = core::agentPropertyMetadata(
 		core::AgentPropertyType::LadderSpeedModifier);
 	std::string ladderDiagnostic;
@@ -61,6 +63,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& crowdMetadata.propertyNamespace == "Pathing"
 		&& riskMetadata.name == "Risk aversion"
 		&& riskMetadata.propertyNamespace == "Pathing"
+		&& familiarityMetadata.name == "Route familiarity"
+		&& familiarityMetadata.propertyNamespace == "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::StairSpeedModifier).propertyNamespace
 			== "Pathing"
 		&& core::agentPropertyMetadata(core::AgentPropertyType::MobilityProfile).propertyNamespace
@@ -109,7 +113,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Waiting aversion");
 	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const registryYaml = serialize(*registry);
-	require(registryYaml.find("version: 10") != std::string::npos
+	require(registryYaml.find("version: 11") != std::string::npos
 		&& registryYaml.find("type: ladderSpeedModifier") != std::string::npos
 		&& registryYaml.find("type: waitingAversion") != std::string::npos
 		&& registryYaml.find("min: 2.5") != std::string::npos,
@@ -123,7 +127,7 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Crowd aversion");
 	require(registry->setAgentTagCrowdAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const crowdRegistryYaml = serialize(*registry);
-	require(crowdRegistryYaml.find("version: 10") != std::string::npos
+	require(crowdRegistryYaml.find("version: 11") != std::string::npos
 		&& crowdRegistryYaml.find("type: crowdAversion") != std::string::npos
 		&& crowdRegistryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Crowd aversion range was not persisted");
@@ -136,9 +140,21 @@ void runAgentIndividualPropertySmokeChecks()
 		"Agent tag accepted an out-of-range Risk aversion");
 	require(registry->setAgentTagRiskAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const riskRegistryYaml = serialize(*registry);
-	require(riskRegistryYaml.find("version: 10") != std::string::npos
+	require(riskRegistryYaml.find("version: 11") != std::string::npos
 		&& riskRegistryYaml.find("type: riskAversion") != std::string::npos,
 		"The Agent tag Risk aversion range was not persisted");
+	require(registry->addAgentTagRouteFamiliarity(tag, &diagnostic), diagnostic);
+	require(registry->getAgentTagRouteFamiliarity(tag)->range
+		== core::DefaultAgentRouteFamiliarityRange,
+		"Route familiarity did not default to neutral");
+	require(!registry->setAgentTagRouteFamiliarity(tag, { -0.01f, 1.0f }, &diagnostic)
+		&& diagnostic.find("between 0 and 1") != std::string::npos,
+		"Agent tag accepted an out-of-range Route familiarity");
+	require(registry->setAgentTagRouteFamiliarity(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
+	auto const familiarityRegistryYaml = serialize(*registry);
+	require(familiarityRegistryYaml.find("version: 11") != std::string::npos
+		&& familiarityRegistryYaml.find("type: routeFamiliarity") != std::string::npos,
+		"The Agent tag Route familiarity range was not persisted");
 	require(registry->addAgentTagMobilityProfile(tag, &diagnostic), diagnostic);
 	core::MobilityProfile tagMobility;
 	tagMobility.set(core::TraversalKind::Staircase, core::MobilityUse::CannotUse);
@@ -195,6 +211,11 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveRiskAversion().sourceTag == tag,
 		"The Agent did not inherit its sampled Risk aversion");
 	require(world->setAgentIndividualRiskAversion(id, 0.5f, &diagnostic), diagnostic);
+	require(agent->getRouteFamiliaritySample()
+		&& agent->getEffectiveRouteFamiliarity().value == 0.75f
+		&& agent->getEffectiveRouteFamiliarity().sourceTag == tag,
+		"The Agent did not inherit its sampled Route familiarity");
+	require(world->setAgentIndividualRouteFamiliarity(id, 0.5f, &diagnostic), diagnostic);
 	core::MobilityProfile directMobility;
 	directMobility.set(core::TraversalKind::Lift, core::MobilityUse::CannotUse);
 	require(world->setAgentIndividualMobilityProfile(id, directMobility, &diagnostic), diagnostic);
@@ -221,6 +242,8 @@ void runAgentIndividualPropertySmokeChecks()
 		&& agent->getEffectiveCrowdAversion().value == 0.5f
 		&& agent->getEffectiveRiskAversion().individual
 		&& agent->getEffectiveRiskAversion().value == 0.5f
+		&& agent->getEffectiveRouteFamiliarity().individual
+		&& agent->getEffectiveRouteFamiliarity().value == 0.5f
 		&& agent->getEffectiveMobilityProfile().individual
 		&& agent->getEffectiveMobilityProfile().value == directMobility,
 		"Individual Agent properties did not override inherited tag values");
@@ -242,13 +265,16 @@ void runAgentIndividualPropertySmokeChecks()
 	require(!world->setAgentIndividualRiskAversion(id, -0.01f, &diagnostic)
 		&& diagnostic.find("between 0 and 3") != std::string::npos,
 		"An out-of-range individual Risk aversion was accepted");
+	require(!world->setAgentIndividualRouteFamiliarity(id, -0.01f, &diagnostic)
+		&& diagnostic.find("between 0 and 1") != std::string::npos,
+		"An out-of-range individual Route familiarity was accepted");
 	auto invalidMobility = directMobility;
 	invalidMobility.uses[0] = static_cast<core::MobilityUse>(3);
 	require(!world->setAgentIndividualMobilityProfile(id, invalidMobility, &diagnostic)
 		&& diagnostic.find("invalid Mobility use") != std::string::npos,
 		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 20") != std::string::npos
+	require(yaml.find("version: 21") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("ladderSpeedModifier") != std::string::npos
@@ -256,8 +282,9 @@ void runAgentIndividualPropertySmokeChecks()
 		&& yaml.find("effortAversion") != std::string::npos
 		&& yaml.find("waitingAversion") != std::string::npos
 		&& yaml.find("crowdAversion") != std::string::npos
-		&& yaml.find("riskAversion") != std::string::npos,
-		"Individual Agent properties were not persisted in World schema 20");
+		&& yaml.find("riskAversion") != std::string::npos
+		&& yaml.find("routeFamiliarity") != std::string::npos,
+		"Individual Agent properties were not persisted in World schema 21");
 	auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 	auto reader = core::YamlSerializer::fromString(yaml);
 	reader->deserialize();
@@ -289,6 +316,10 @@ void runAgentIndividualPropertySmokeChecks()
 		&& loadedAgent->getRiskAversionSample()->value == 2.5f
 		&& loadedAgent->getEffectiveRiskAversion().individual
 		&& loadedAgent->getEffectiveRiskAversion().value == 0.5f
+		&& loadedAgent->getRouteFamiliaritySample()
+		&& loadedAgent->getRouteFamiliaritySample()->value == 0.75f
+		&& loadedAgent->getEffectiveRouteFamiliarity().individual
+		&& loadedAgent->getEffectiveRouteFamiliarity().value == 0.5f
 		&& loadedAgent->getEffectiveMobilityProfile().value == directMobility,
 		"Individual Agent properties did not round-trip");
 

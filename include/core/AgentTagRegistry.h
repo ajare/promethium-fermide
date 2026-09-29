@@ -71,6 +71,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool riskAversionAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool routeFamiliarityAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		bool mobilityProfileAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		void registerWorld(World& world);
@@ -117,6 +119,8 @@ namespace core
 		AgentCrowdAversionProperty const* getAgentTagCrowdAversion(
 			AgentTagId id) const;
 		AgentRiskAversionProperty const* getAgentTagRiskAversion(
+			AgentTagId id) const;
+		AgentRouteFamiliarityProperty const* getAgentTagRouteFamiliarity(
 			AgentTagId id) const;
 		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
@@ -230,6 +234,12 @@ namespace core
 		bool setAgentTagRiskAversion(AgentTagId id, AgentModifierRange range,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagRiskAversion(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool addAgentTagRouteFamiliarity(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool setAgentTagRouteFamiliarity(AgentTagId id, AgentModifierRange range,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagRouteFamiliarity(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagMobilityProfile(AgentTagId id,

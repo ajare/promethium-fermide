@@ -21,12 +21,32 @@ namespace core
 		routeOffsets.resize(graph.getVertices().size());
 		routeCosts.clear();
 		routeCosts.reserve(graph.getEdges().size() * 2);
+		auto mix = [](uint64_t value)
+		{
+			value += 0x9e3779b97f4a7c15ULL;
+			value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+			value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+			return value ^ (value >> 31);
+		};
 		for (auto const& vertex : graph.getVertices())
 		{
 			routeOffsets[vertex->getSearchIndex()] = routeCosts.size();
 			for (auto const& edge : vertex->getEdges())
-				routeCosts.push_back(context.policy.evaluate(
-					edge->getDirectedTraversalFacts(edge->getOtherVertex(vertex), context), context.profile));
+			{
+				auto const target = edge->getOtherVertex(vertex);
+				auto facts = edge->getDirectedTraversalFacts(target, context);
+				if (facts.feasible && facts.components.uncertaintyUnits > 0)
+				{
+					auto const hash = mix(context.perceptionKey
+						^ (uint64_t{ edge->getId() } << 32) ^ target->getId()
+						^ mix(context.observationEpoch));
+					auto const unit = static_cast<float>(hash >> 40) / 16777215.0f;
+					auto const amplitude = (1.0f - context.profile.routeFamiliarity)
+						* facts.components.uncertaintyUnits;
+					facts.components.perceptionVariationUnits = (unit * 2.0f - 1.0f) * amplitude;
+				}
+				routeCosts.push_back(context.policy.evaluate(facts, context.profile));
+			}
 		}
 		if (routeOffsets.capacity() != oldOffsetsCapacity) ++mScratchAllocationCount;
 		if (routeCosts.capacity() != oldCostsCapacity) ++mScratchAllocationCount;
@@ -214,9 +234,17 @@ namespace core
 			profile.waitingAversion = routingAgent->getEffectiveWaitingAversion().value;
 			profile.crowdAversion = routingAgent->getEffectiveCrowdAversion().value;
 			profile.riskAversion = routingAgent->getEffectiveRiskAversion().value;
+			profile.routeFamiliarity = routingAgent->getEffectiveRouteFamiliarity().value;
+			auto const worldSeed = graph->getWorld() ? graph->getWorld()->getRandomSeed() : uint64_t{ 0 };
+			auto const agentId = agent && graph->getWorld()
+				? graph->getWorld()->getAgentId(agent).value : uint64_t{ 0 };
+			auto const journeyIdentity = routingAgent->getRouteJourneyIdentity(target.get());
+			auto const perceptionKey = worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
+				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
 			RouteDecisionContext const context{ routingAgent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed() };
+				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(),
+				false, perceptionKey, 0 };
 			auto const inferredSource = !source;
 			if (inferredSource)
 			{
@@ -333,7 +361,8 @@ namespace core
 			if (auto path = runSearch(context)) return path;
 			RouteDecisionContext const fallbackContext{ routingAgent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(), true };
+				routingAgent->getWalkSpeed(), graph->getWorld(), routingAgent->getClimbSpeed(),
+				true, perceptionKey, 0 };
 			return runSearch(fallbackContext);
 		}
 

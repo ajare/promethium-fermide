@@ -123,6 +123,8 @@ namespace core
 				tag->setCrowdAversion(*crowd);
 			if (auto const* risk = sourceTag->getRiskAversion())
 				tag->setRiskAversion(*risk);
+			if (auto const* familiarity = sourceTag->getRouteFamiliarity())
+				tag->setRouteFamiliarity(*familiarity);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
 				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
@@ -168,6 +170,8 @@ namespace core
 					candidate->getCrowdAversion())
 				|| !optionalPropertyMatches(tag->getRiskAversion(),
 					candidate->getRiskAversion())
+				|| !optionalPropertyMatches(tag->getRouteFamiliarity(),
+					candidate->getRouteFamiliarity())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
 					candidate->getMobilityProfile())) return false;
 		}
@@ -382,6 +386,16 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getRiskAversion();
+	}
+
+	AgentRouteFamiliarityProperty const*
+	AgentTagRegistry::getAgentTagRouteFamiliarity(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getRouteFamiliarity();
 	}
 
 	AgentMobilityProfileProperty const*
@@ -859,18 +873,11 @@ namespace core
 	bool AgentTagRegistry::riskAversionAdditionIsValid(AgentTagId id,
 		std::string* diagnostic) const
 	{
-		auto reject = [diagnostic](std::string reason)
-		{
-			if (diagnostic) *diagnostic = std::move(reason);
-			return false;
-		};
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
 		auto const* target = mTags.find(id);
-		if (!target) return reject(std::format(
-			"Agent tag {} is not defined in this registry", id.value));
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
 		for (auto const* world : mLoadedWorlds)
-		{
-			if (!world) continue;
-			for (auto const& [agentId, agent] : world->mAgents.entries())
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
 			{
 				(void)agentId;
 				if (!agent || !agent->hasAgentTag(id)) continue;
@@ -878,13 +885,35 @@ namespace core
 				{
 					if (assigned == id) continue;
 					auto const* source = mTags.find(assigned);
-					if (!source || !source->getRiskAversion()) continue;
-					return reject(std::format(
+					if (source && source->getRiskAversion()) return reject(std::format(
 						"Cannot add Risk aversion to Agent tag #{}: Agent '{}' in World '{}' already inherits Risk aversion from #{}",
 						target->getName(), agent->getName(), world->getName(), source->getName()));
 				}
 			}
-		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::routeFamiliarityAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (source && source->getRouteFamiliarity()) return reject(std::format(
+						"Cannot add Route familiarity to Agent tag #{}: Agent '{}' in World '{}' already inherits Route familiarity from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -1635,6 +1664,27 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagRouteFamiliarity(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getRouteFamiliarity()) return reject(std::format(
+			"Agent tag #{} already has Route familiarity", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!routeFamiliarityAdditionIsValid(id, diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setRouteFamiliarity({ DefaultAgentRouteFamiliarityRange, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagRouteFamiliaritySamples(id, *tag->getRouteFamiliarity());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1745,6 +1795,28 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::setAgentTagRouteFamiliarity(AgentTagId id,
+		AgentModifierRange range, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getRouteFamiliarity();
+		if (!current) return reject(std::format("Agent tag #{} has no Route familiarity", tag->getName()));
+		if (!agentRouteFamiliarityRangeIsValid(range, diagnostic)) return false;
+		if (current->range == range) return reject("The Agent Route familiarity range is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setRouteFamiliarity({ range, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagRouteFamiliaritySamples(id, *tag->getRouteFamiliarity());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::setAgentTagMobilityProfile(AgentTagId id,
 		MobilityProfile value, std::string* diagnostic)
 	{
@@ -1839,6 +1911,23 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::removeAgentTagRouteFamiliarity(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getRouteFamiliarity()) return reject(std::format(
+			"Agent tag #{} has no Route familiarity", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world) world->clearAgentTagRouteFamiliaritySamples(id);
+		tag->removeRouteFamiliarity();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::removeAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1888,7 +1977,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 10);
+		serializer.writeUint32("version", 11);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -1915,9 +2004,10 @@ namespace core
 			auto const* waiting = tag->getWaitingAversion();
 			auto const* crowd = tag->getCrowdAversion();
 			auto const* risk = tag->getRiskAversion();
+			auto const* familiarity = tag->getRouteFamiliarity();
 			auto const* chance = tag->getEscalatorWalkingChance();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || chance || mobility)
+			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || chance || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -1957,6 +2047,7 @@ namespace core
 				if (waiting) writeModifier("waitingAversion", *waiting);
 				if (crowd) writeModifier("crowdAversion", *crowd);
 				if (risk) writeModifier("riskAversion", *risk);
+				if (familiarity) writeModifier("routeFamiliarity", *familiarity);
 				if (mobility)
 				{
 					serializer.beginMap("");
@@ -1977,7 +2068,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 10)
+		if (version < 1 || version > 11)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -2031,6 +2122,7 @@ namespace core
 				bool hasWaitingAversion{ false };
 				bool hasCrowdAversion{ false };
 				bool hasRiskAversion{ false };
+				bool hasRouteFamiliarity{ false };
 				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
@@ -2046,7 +2138,8 @@ namespace core
 						&& !(version >= 6 && type == "waitingAversion")
 						&& !(version >= 7 && type == "crowdAversion")
 						&& !(version >= 8 && type == "ladderSpeedModifier")
-						&& !(version >= 10 && type == "riskAversion"))
+						&& !(version >= 10 && type == "riskAversion")
+						&& !(version >= 11 && type == "routeFamiliarity"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -2083,6 +2176,9 @@ namespace core
 					if (type == "riskAversion" && hasRiskAversion)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Risk aversion", name));
+					if (type == "routeFamiliarity" && hasRouteFamiliarity)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Route familiarity", name));
 					if (type == "mobilityProfile" && hasMobilityProfile)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Mobility profile",
@@ -2183,13 +2279,21 @@ namespace core
 							tag->setCrowdAversion({ range, revision });
 							hasCrowdAversion = true;
 						}
-						else
+						else if (type == "riskAversion")
 						{
 							if (!agentRiskAversionRangeIsValid(range, &rangeDiagnostic))
 								throw SerializationException(
 									"Serialized Risk aversion range is invalid: " + rangeDiagnostic);
 							tag->setRiskAversion({ range, revision });
 							hasRiskAversion = true;
+						}
+						else
+						{
+							if (!agentRouteFamiliarityRangeIsValid(range, &rangeDiagnostic))
+								throw SerializationException(
+									"Serialized Route familiarity range is invalid: " + rangeDiagnostic);
+							tag->setRouteFamiliarity({ range, revision });
+							hasRouteFamiliarity = true;
 						}
 					}
 					serializer.endMap();
