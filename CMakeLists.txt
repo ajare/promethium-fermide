@@ -259,6 +259,13 @@ set_target_properties(prometheum-fermide-core PROPERTIES
     OUTPUT_NAME "prometheum-fermide-core"
 )
 
+# Standalone authored-World generator (no GUI dependency).
+add_executable(pf-generate-world scripts/generate_new_world.cpp)
+target_link_libraries(pf-generate-world PRIVATE prometheum-fermide-core)
+target_compile_definitions(pf-generate-world PRIVATE PF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+set_target_properties(pf-generate-world PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
+pf_apply_high_analysis(pf-generate-world)
+
 # Pinned MIT header-only HTTP dependency, without TLS or compression.
 FetchContent_Declare(cpp_httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
@@ -476,6 +483,19 @@ if(PF_BUILD_GUI)
 endif()
 
 include(CTest)
+if(BUILD_TESTING)
+    foreach(seed IN ITEMS 0 1 42 2026)
+        add_test(NAME world-generator-${seed} COMMAND pf-generate-world
+            --seed ${seed} --force
+            --output "${CMAKE_BINARY_DIR}/generated-world-tests/seed-${seed}/new-world.world")
+        set_tests_properties(world-generator-${seed} PROPERTIES TIMEOUT 180)
+    endforeach()
+    add_test(NAME world-generator-cli COMMAND ${CMAKE_COMMAND}
+        "-DGENERATOR=$<TARGET_FILE:pf-generate-world>"
+        "-DFIXTURE_DIR=${CMAKE_BINARY_DIR}/generated-world-tests/cli"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/world_generator_cli.cmake")
+    set_tests_properties(world-generator-cli PROPERTIES TIMEOUT 180)
+endif()
 if(BUILD_TESTING)
     add_executable(pf-simulation-step-timing-checks src/headless/SimulationStepTimingChecks.cpp)
     target_compile_features(pf-simulation-step-timing-checks PRIVATE cxx_std_20)
