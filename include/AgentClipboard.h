@@ -134,6 +134,13 @@ struct AgentClipboardPayload
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.
 	// Marker configuration values have already been replaced by names.
 	std::optional<AgentClipboardBehaviourAssignment> behaviour;
+
+	// Authorization IDs remain opaque unless the destination has the exact
+	// process-local identity of the originating World. A different World strips
+	// this complete block rather than matching either IDs or display names.
+	std::optional<std::string> authorizationWorldIdentity;
+	std::set<core::AccessPermissionId> directAccessGrants;
+	std::set<core::PermissionSetId> permissionSets;
 };
 
 // The payload a copy of `agent` carries. `name` is the name the copy will

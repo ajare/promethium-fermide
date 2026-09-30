@@ -3357,13 +3357,23 @@ namespace
 	optional<core::Vector2> gLastWorldCursor;
 	string gClipboardError;
 	double gClipboardErrorUntil{ 0.0 };
+	bool gClipboardMessageIsWarning{ false };
 	string gConsumedCutClipboard;
 
 	void reportEditorError(string const& source, string message)
 	{
 		gClipboardError = std::move(message);
 		gClipboardErrorUntil = ImGui::GetTime() + 3.0;
+		gClipboardMessageIsWarning = false;
 		core::addLogMessage(source, 0, core::LogLevel::Error, gClipboardError);
+	}
+
+	void reportClipboardWarning(string message)
+	{
+		gClipboardError = std::move(message);
+		gClipboardErrorUntil = ImGui::GetTime() + 5.0;
+		gClipboardMessageIsWarning = true;
+		core::addLogMessage("Clipboard", 0, core::LogLevel::Warning, gClipboardError);
 	}
 
 	void reportClipboardError(string message)
@@ -3967,6 +3977,7 @@ namespace
 				if (!armAgentPlacement(gPegman.pastedAgent, *world, payload, sector,
 					y - sector->getCellY(), localX, diagnostic))
 					throw runtime_error(diagnostic);
+				if (!diagnostic.empty()) reportClipboardWarning(diagnostic);
 				if (!world->isSimulationPaused()) world->pauseSimulation();
 				gUISettings.worldPaused = true;
 				gPegman.phase = PalettePhase::Falling;
@@ -5069,7 +5080,9 @@ void renderStatusBar(shared_ptr<const core::World> const& world)
 				auto width = ImGui::CalcTextSize(gClipboardError.c_str()).x;
 				ImGui::SameLine(max(ImGui::GetCursorPosX() + style.ItemSpacing.x,
 					ImGui::GetWindowWidth() - width - style.WindowPadding.x));
-				ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%s",
+				ImGui::TextColored(gClipboardMessageIsWarning
+					? ImVec4(1.0f, 0.75f, 0.2f, 1.0f)
+					: ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "%s",
 					gClipboardError.c_str());
 			}
 

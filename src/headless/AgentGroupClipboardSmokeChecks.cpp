@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -753,6 +754,132 @@ namespace
 	// The whole trip: copy in one World, paste in another that already
 	// defines the same group name. The two Worlds' Agent group IDs are
 	// unrelated, and the paste lands on the destination's own.
+	void authorizationIsPreservedOnlyInTheOriginatingWorld()
+	{
+		resetUndoHistory();
+		auto source = buildPasteWorld("Authorization source");
+		source.world->pauseSimulation();
+		auto const direct = source.world->addAccessPermission("Direct key");
+		auto const fromSet = source.world->addAccessPermission("Set key");
+		auto const permissionSet = source.world->addPermissionSet("Operators");
+		std::string diagnostic;
+		require(source.world->setPermissionSetAccessPermission(
+			permissionSet, fromSet, true, &diagnostic), diagnostic);
+		auto const original = createAgent(*source.world, "Authorized", source.room);
+		require(source.world->grantAgentAccessPermission(original, direct, &diagnostic), diagnostic);
+		require(source.world->setAgentPermissionSetAssignment(
+			original, permissionSet, true, &diagnostic), diagnostic);
+
+		auto const text = copyText(*source.world, original, "Authorized copy");
+		require(text.find("authorization:") != std::string::npos
+			&& text.find("worldIdentity:") != std::string::npos,
+			"The clipboard omitted its guarded authorization block");
+		auto read = readClipboard(text);
+		require(read.payload.directAccessGrants == std::set<core::AccessPermissionId>{ direct }
+			&& read.payload.permissionSets == std::set<core::PermissionSetId>{ permissionSet },
+			"The clipboard did not capture authored authorization exactly");
+
+		auto samePlaced = place(source.world, read.payload,
+			source.world->getSector(source.corridor), 0, 2.0f);
+		require(source.world->getAgentDirectAccessGrants(samePlaced)
+			== std::vector<core::AccessPermissionId>{ direct }
+			&& source.world->getAgentPermissionSetAssignments(samePlaced)
+				== std::vector<core::PermissionSetId>{ permissionSet },
+			"Same-World paste did not preserve complete authored authorization");
+
+		// Give another World coincident IDs and names. The origin identity, not
+		// either local representation, decides whether they mean anything.
+		auto destination = buildPasteWorld("Authorization destination");
+		destination.world->pauseSimulation();
+		auto const coincident = destination.world->addAccessPermission("Direct key");
+		auto const coincidentSet = destination.world->addPermissionSet("Operators");
+		require(coincident == direct && coincidentSet == permissionSet,
+			"Cross-World fixture did not produce coincident local IDs");
+		PendingAgentPlacement pending;
+		auto const destinationSector = destination.world->getSector(destination.room);
+		diagnostic.clear();
+		require(armAgentPlacement(pending, *destination.world, read.payload,
+			destinationSector, 0, 2.0f, diagnostic), diagnostic);
+		require(diagnostic.find("another World") != std::string::npos,
+			"Cross-World paste emitted no authorization warning");
+		require(pending.payload.directAccessGrants.empty()
+			&& pending.payload.permissionSets.empty()
+			&& !pending.payload.authorizationWorldIdentity,
+			"Cross-World paste retained World-local authorization");
+		auto const beforeCancel = destination.world->getSimulationSnapshot().agents.size();
+		auto const undoBeforeCancel = gWorldDocumentHistory.undoCount();
+		pending.cancel();
+		require(destination.world->getSimulationSnapshot().agents.size() == beforeCancel
+			&& gWorldDocumentHistory.undoCount() == undoBeforeCancel,
+			"Cancelling deferred cross-World paste changed the document");
+
+		diagnostic.clear();
+		require(armAgentPlacement(pending, *destination.world, read.payload,
+			destinationSector, 0, 2.0f, diagnostic), diagnostic);
+		core::AgentId crossPlaced;
+		require(commitPendingAgentPlacement(pending, destination.world,
+			crossPlaced, diagnostic), diagnostic);
+		require(destination.world->getAgentDirectAccessGrants(crossPlaced).empty()
+			&& destination.world->getAgentPermissionSetAssignments(crossPlaced).empty(),
+			"Cross-World paste matched authorization by name or coincident ID");
+		require(gWorldDocumentHistory.undoCount() == undoBeforeCancel + 1,
+			"Warning-producing paste was not one document operation");
+		restoreDocument(destination.world, false);
+		require(!destination.world->lookupAgent(crossPlaced),
+			"Undo left the cross-World pasted Agent behind");
+		restoreDocument(destination.world, true);
+		require(destination.world->lookupAgent(crossPlaced)
+			&& destination.world->getAgentDirectAccessGrants(crossPlaced).empty(),
+			"Redo did not restore the complete stripped paste result");
+
+		// Structurally malformed authorization is rejected while parsing, before
+		// it can be partially interpreted or applied.
+		auto malformedDocument = YAML::Load(legacyClipboardText(
+			"    name: Malformed\n    flags: 0\n"));
+		auto malformedObject = malformedDocument["prometheumClipboard"]["object"];
+		malformedObject["authorization"]["worldIdentity"]
+			= source.world->getClipboardIdentity();
+		malformedObject["authorization"]["directGrants"].push_back(direct.value);
+		malformedObject["authorization"]["directGrants"].push_back(direct.value);
+		malformedObject["authorization"]["permissionSets"] = YAML::Node(YAML::NodeType::Sequence);
+		AgentClipboardPayload malformedPayload;
+		diagnostic.clear();
+		require(!readAgentClipboardObject(malformedObject, malformedPayload, diagnostic),
+			"Malformed duplicate authorization IDs were accepted");
+
+		// Stale IDs are refused in the origin but stripped in another World.
+		auto stale = read.payload;
+		stale.directAccessGrants.insert(core::AccessPermissionId{ 256 });
+		PendingAgentPlacement refused;
+		diagnostic.clear();
+		require(!armAgentPlacement(refused, *source.world, stale,
+			source.world->getSector(source.room), 0, 1.0f, diagnostic)
+			&& !refused.armed(), "Stale same-World authorization was accepted");
+		diagnostic.clear();
+		require(armAgentPlacement(refused, *destination.world, stale,
+			destination.world->getSector(destination.room), 0, 1.0f, diagnostic)
+			&& refused.payload.directAccessGrants.empty(),
+			"Stale cross-World authorization was not stripped as one block");
+
+		// A legacy object map has no authorization and remains unrestricted.
+		auto legacy = readClipboard(legacyClipboardText(
+			"    name: Legacy\n    flags: 0\n"));
+		auto legacyPlaced = place(source.world, legacy.payload,
+			source.world->getSector(source.corridor), 0, 5.0f);
+		require(source.world->getAgentEffectiveAccessGrants(legacyPlaced).empty(),
+			"Legacy clipboard payload acquired authorization");
+
+		// Cut captures authored authorization before removing the Agent.
+		auto cutText = copyText(*source.world, original, "Authorized", true);
+		require(cutAgent(source.world, original, diagnostic), diagnostic);
+		auto cutRead = readClipboard(cutText);
+		auto cutPlaced = place(source.world, cutRead.payload,
+			source.world->getSector(source.room), 0, 4.0f);
+		require(source.world->getAgentDirectAccessGrants(cutPlaced)
+			== std::vector<core::AccessPermissionId>{ direct },
+			"Cut and same-World paste lost authored authorization");
+	}
+
 	void anAgentCopiedBetweenWorldsJoinsTheDestinationGroup()
 	{
 		resetUndoHistory();
@@ -809,5 +936,6 @@ void runAgentGroupClipboardSmokeChecks()
 	undoTakesThePastedAgentAndItsNewGroupTogether();
 	undoOfAReusingPasteLeavesTheDestinationGroupAlone();
 	cuttingAGroupedAgentLeavesItsSourceGroupDefined();
+	authorizationIsPreservedOnlyInTheOriginatingWorld();
 	anAgentCopiedBetweenWorldsJoinsTheDestinationGroup();
 }

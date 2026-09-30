@@ -456,6 +456,56 @@ namespace
 		if (configuration) *configuration = std::move(converted);
 		return true;
 	}
+
+	bool authorizationForWorld(core::World const& world,
+		AgentClipboardPayload const& source, AgentClipboardPayload& result,
+		string& warning, string& diagnostic)
+	{
+		result = source;
+		warning.clear();
+		if (!source.authorizationWorldIdentity)
+		{
+			if (!source.directAccessGrants.empty() || !source.permissionSets.empty())
+			{
+				diagnostic = "Clipboard Agent authorization has no originating World identity";
+				return false;
+			}
+			return true; // Legacy payload: unrestricted authorization.
+		}
+		if (!core::AgentTagRegistry::uuidIsValid(*source.authorizationWorldIdentity))
+		{
+			diagnostic = "Clipboard Agent authorization has an invalid originating World identity";
+			return false;
+		}
+		if (source.directAccessGrants.empty() && source.permissionSets.empty())
+		{
+			diagnostic = "Clipboard Agent authorization is empty";
+			return false;
+		}
+
+		if (*source.authorizationWorldIdentity != world.getClipboardIdentity())
+		{
+			result.authorizationWorldIdentity.reset();
+			result.directAccessGrants.clear();
+			result.permissionSets.clear();
+			warning = "The pasted Agent came from another World; its direct Access permission grants and Permission set assignments were removed";
+			return true;
+		}
+
+		for (auto permission : source.directAccessGrants)
+			if (!permission || !world.lookupAccessPermission(permission))
+			{
+				diagnostic = format("Clipboard Agent authorization references stale Access permission {}", permission.value);
+				return false;
+			}
+		for (auto permissionSet : source.permissionSets)
+			if (!permissionSet || !world.lookupPermissionSet(permissionSet))
+			{
+				diagnostic = format("Clipboard Agent authorization references stale Permission set {}", permissionSet.value);
+				return false;
+			}
+		return true;
+	}
 }
 
 AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
@@ -497,6 +547,15 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 				"A tagged Agent's World has no Agent tag registry identity");
 		payload.agentTagRegistryUuid = world.getExpectedAgentTagRegistryUuid();
 	}
+	auto const directGrants = world.getAgentDirectAccessGrants(agent);
+	auto const permissionSets = world.getAgentPermissionSetAssignments(agent);
+	if (!directGrants.empty() || !permissionSets.empty())
+	{
+		payload.authorizationWorldIdentity = world.getClipboardIdentity();
+		payload.directAccessGrants.insert(directGrants.begin(), directGrants.end());
+		payload.permissionSets.insert(permissionSets.begin(), permissionSets.end());
+	}
+
 	if (auto const& assignment = lookup.entity->getBehaviourAssignment())
 	{
 		if (!world.hasAgentBehaviourRegistryReference())
@@ -535,6 +594,14 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 		&& (!core::AgentBehaviourRegistry::uuidIsValid(payload.behaviour->registryUuid)
 			|| !payload.behaviour->behaviour || !payload.behaviour->revision))
 		throw invalid_argument("Agent behaviour clipboard identity is invalid");
+	if (payload.authorizationWorldIdentity)
+	{
+		if (!core::AgentTagRegistry::uuidIsValid(*payload.authorizationWorldIdentity)
+			|| (payload.directAccessGrants.empty() && payload.permissionSets.empty()))
+			throw invalid_argument("Agent authorization clipboard identity is invalid");
+	}
+	else if (!payload.directAccessGrants.empty() || !payload.permissionSets.empty())
+		throw invalid_argument("Agent authorization clipboard identity is missing");
 
 	YAML::Emitter output;
 	output << YAML::BeginMap
@@ -596,6 +663,18 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 			writePortableValue(output, value);
 			output << YAML::EndMap;
 		}
+		output << YAML::EndSeq << YAML::EndMap;
+	}
+	if (payload.authorizationWorldIdentity)
+	{
+		output << YAML::Key << "authorization" << YAML::Value << YAML::BeginMap
+			<< YAML::Key << "worldIdentity" << YAML::Value
+			<< *payload.authorizationWorldIdentity
+			<< YAML::Key << "directGrants" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+		for (auto permission : payload.directAccessGrants) output << permission.value;
+		output << YAML::EndSeq
+			<< YAML::Key << "permissionSets" << YAML::Value << YAML::Flow << YAML::BeginSeq;
+		for (auto permissionSet : payload.permissionSets) output << permissionSet.value;
 		output << YAML::EndSeq << YAML::EndMap;
 	}
 	if (!payload.agentTags.empty())
@@ -918,6 +997,66 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		payload.behaviour = std::move(assignment);
 	}
 
+	if (object["authorization"])
+	{
+		auto const authorization = object["authorization"];
+		if (!authorization.IsMap())
+		{
+			diagnostic = "Clipboard field 'authorization' must be a map";
+			return false;
+		}
+		try
+		{
+			payload.authorizationWorldIdentity
+				= authorization["worldIdentity"].as<string>();
+		}
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Agent authorization requires an originating World identity";
+			return false;
+		}
+		if (!core::AgentTagRegistry::uuidIsValid(*payload.authorizationWorldIdentity))
+		{
+			diagnostic = "Clipboard Agent authorization has an invalid originating World identity";
+			return false;
+		}
+		auto readIds = [&](char const* field, auto& destination, char const* kind)
+		{
+			auto const values = authorization[field];
+			if (!values || !values.IsSequence())
+			{
+				diagnostic = format("Clipboard Agent authorization field '{}' must be a sequence", field);
+				return false;
+			}
+			for (auto const& entry : values)
+			{
+				uint64_t value;
+				try { value = entry.as<uint64_t>(); }
+				catch (exception const&)
+				{
+					diagnostic = format("Clipboard Agent authorization {} IDs must be unsigned integers", kind);
+					return false;
+				}
+				using Id = typename decay_t<decltype(destination)>::value_type;
+				Id id{ value };
+				if (!id || !destination.insert(id).second)
+				{
+					diagnostic = format("Clipboard Agent authorization {} IDs must be nonzero and unique", kind);
+					return false;
+				}
+			}
+			return true;
+		};
+		if (!readIds("directGrants", payload.directAccessGrants, "Access permission")
+			|| !readIds("permissionSets", payload.permissionSets, "Permission set"))
+			return false;
+		if (payload.directAccessGrants.empty() && payload.permissionSets.empty())
+		{
+			diagnostic = "Clipboard Agent authorization is empty";
+			return false;
+		}
+	}
+
 	if (object["agentTagRegistryUuid"])
 	{
 		try { payload.agentTagRegistryUuid
@@ -1086,12 +1225,16 @@ core::AgentGroupId findAgentGroupByName(core::World const& world,
 }
 
 bool armAgentPlacement(PendingAgentPlacement& pending,
-	core::World const& world, AgentClipboardPayload const& payload,
+	core::World const& world, AgentClipboardPayload const& sourcePayload,
 	shared_ptr<const core::Sector> sector,
 	uint32_t levelOffset, float localX, string& diagnostic)
 {
 	pending.cancel();
 	diagnostic.clear();
+	AgentClipboardPayload payload;
+	string warning;
+	if (!authorizationForWorld(world, sourcePayload, payload, warning, diagnostic))
+		return false;
 
 	if (!sector)
 	{
@@ -1124,11 +1267,12 @@ bool armAgentPlacement(PendingAgentPlacement& pending,
 	pending.sector = sector;
 	pending.levelOffset = levelOffset;
 	pending.localX = localX;
+	diagnostic = std::move(warning);
 	return true;
 }
 
 bool commitAgentPlacement(shared_ptr<core::World> const& world,
-	AgentClipboardPayload const& payload,
+	AgentClipboardPayload const& sourcePayload,
 	shared_ptr<const core::Sector> sector,
 	uint32_t levelOffset, float localX,
 	core::AgentId& placed, string& diagnostic)
@@ -1141,6 +1285,10 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		diagnostic = "There is no World to place an Agent in";
 		return false;
 	}
+	AgentClipboardPayload payload;
+	string authorizationWarning;
+	if (!authorizationForWorld(*world, sourcePayload, payload,
+		authorizationWarning, diagnostic)) return false;
 	if (!sector)
 	{
 		diagnostic = "There is no sector to place an Agent in";
@@ -1166,12 +1314,15 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	core::AgentBehaviourConfiguration behaviourConfiguration;
 	if (!clipboardBehaviourFitsWorld(*world, payload,
 		&behaviourConfiguration, diagnostic)) return false;
-	if ((!payload.agentTags.empty() || payload.behaviour)
+	if ((!payload.agentTags.empty() || payload.behaviour
+		|| payload.authorizationWorldIdentity)
 		&& !world->isSimulationPaused())
 	{
-		diagnostic = payload.behaviour
-			? "Pause the simulation before pasting an Agent with a behaviour"
-			: "Pause the simulation before pasting a tagged Agent";
+		diagnostic = payload.authorizationWorldIdentity
+			? "Pause the simulation before pasting an Agent with authorization"
+			: payload.behaviour
+				? "Pause the simulation before pasting an Agent with a behaviour"
+				: "Pause the simulation before pasting a tagged Agent";
 		return false;
 	}
 
@@ -1378,6 +1529,27 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				return false;
 			}
 		}
+		for (auto permission : payload.directAccessGrants)
+		{
+			string assignDiagnostic;
+			if (!world->grantAgentAccessPermission(agentId, permission, &assignDiagnostic))
+			{
+				diagnostic = "The pasted Agent's direct Access permission grants could not be restored: "
+					+ assignDiagnostic + rollBack();
+				return false;
+			}
+		}
+		for (auto permissionSet : payload.permissionSets)
+		{
+			string assignDiagnostic;
+			if (!world->setAgentPermissionSetAssignment(
+				agentId, permissionSet, true, &assignDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Permission set assignments could not be restored: "
+					+ assignDiagnostic + rollBack();
+				return false;
+			}
+		}
 	}
 	catch (core::Exception const& error)
 	{
@@ -1394,6 +1566,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	// one undo entry covers all three, and undoing it takes all three away.
 	commitDocumentEdit(std::move(undo));
 	placed = agentId;
+	diagnostic = std::move(authorizationWarning);
 	return true;
 }
 

@@ -102,6 +102,7 @@ namespace core
 	World::World(string const& name, uint32_t cellsWide, uint32_t levelsHigh,
 		AgentBehaviourRuntimeLimits behaviourRuntimeLimits)
 		: mName(name)
+		, mClipboardIdentity(AgentTagRegistry::create()->getUuid())
 		, mCellsWide(cellsWide)
 		, mLevelsHigh(levelsHigh)
 		, mLayers(2)

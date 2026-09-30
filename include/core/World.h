@@ -456,6 +456,11 @@ namespace core
 
 		std::string mName;
 
+		// Process-local, opaque identity used to keep World-owned clipboard
+		// references from acquiring meaning in another World. It is deliberately
+		// neither authored nor serialized.
+		std::string mClipboardIdentity;
+
 		// Authored entropy root for deterministic per-Agent behaviour streams.
 		// Live stream positions remain runtime-only and are recreated from this
 		// value, Agent ID, and behaviour ID on reset or reload.
@@ -1353,6 +1358,7 @@ namespace core
 		virtual ~World();
 
 		std::string const& getName() const;
+		std::string const& getClipboardIdentity() const { return mClipboardIdentity; }
 		std::weak_ptr<void const> getLifetimeToken() const { return mLifetimeToken; }
 
 		uint64_t getRandomSeed() const { return mRandomSeed; }
