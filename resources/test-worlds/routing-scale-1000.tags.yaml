@@ -1,0 +1,16 @@
+version: 12
+uuid: baa9f1bf-1eec-4a51-b759-c88bba82ae78
+nextAgentTagId: 2
+nextPropertyRevision: 3
+tags:
+  - id: 1
+    name: shared-route
+    displayColour:
+      r: 222
+      g: 194
+      b: 255
+    properties:
+      - type: effortAversion
+        revision: 2
+        min: 2
+        max: 2

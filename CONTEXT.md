@@ -286,9 +286,25 @@ _Avoid_: Callback, traversal request
 The authority that owns admission, queueing, capacity, reservations, and permits for movement through a shared resource or threshold.
 _Avoid_: Traversal controller, device controller
 
+**Access permission**:
+A named, World-owned authorization that may be required to operate a protected Interaction point or manually open an ordinary Door. It retains its identity when renamed; deleting it removes it from every requirement, Permission set, and Agent. An Agent may receive an Access permission directly or through an assigned Permission set.
+_Avoid_: Traversal permit, which authorizes one specific transition at runtime
+
+**Permission requirement**:
+The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation.
+_Avoid_: Permission set, which grants Access permissions to an Agent
+
+**Permission grant**:
+An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes affect its current grants until the simulation is reset. A changed effective grant invalidates any affected Path.
+_Avoid_: Traversal permit, Permission requirement
+
+**Permission set**:
+A named, reusable World-owned collection of Access permissions that may be assigned to Agents. It retains its identity when renamed; deleting it removes its Agent assignments but leaves its Access permissions intact. An Agent's effective Permission grants are the union of its direct grants and the grants conferred by all its assigned Permission sets.
+_Avoid_: Permission requirement, Agent tag
+
 **Traversal permit**:
 A short-lived authorization to perform one specific sector transition after all door, capacity, and resource-position conditions are satisfied.
-_Avoid_: Path, reservation
+_Avoid_: Path, reservation, Access permission
 
 ## Editor rendering and resources
 
