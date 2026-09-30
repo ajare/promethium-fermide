@@ -273,6 +273,57 @@ void renderAgentAccessPermissions(shared_ptr<core::World> const& world, core::Ag
 	ImGui::EndDisabled(); ImGui::TreePop();
 }
 
+void renderAgentRuntimeProperties(shared_ptr<core::World> const& world, core::AgentId agent)
+{
+	if (!world || !ImGui::TreeNode("Runtime properties")) return;
+	ImGui::TextWrapped("Changes affect the current simulation only and are restored from authored values by Reset simulation.");
+	if (world->getAccessPermissionCount() == 0 && world->getPermissionSetCount() == 0)
+	{
+		ImGui::TextDisabled("No runtime properties are available.");
+		ImGui::TreePop();
+		return;
+	}
+
+	auto currentAssignments = world->getAgentCurrentPermissionSetAssignments(agent);
+	set<core::PermissionSetId> assigned(currentAssignments.begin(), currentAssignments.end());
+	if (world->getPermissionSetCount()) ImGui::TextDisabled("Current Permission sets");
+	ImGui::PushID("runtime-permission-sets");
+	for (auto setId : world->getPermissionSetIds())
+	{
+		ImGui::PushID(static_cast<int>(setId.value));
+		bool selected = assigned.contains(setId);
+		if (ImGui::Checkbox(world->getPermissionSetName(setId).c_str(), &selected))
+			world->setAgentRuntimePermissionSetAssignment(agent, setId, selected);
+		ImGui::PopID();
+	}
+	ImGui::PopID();
+
+	auto currentDirect = asSet(world->getAgentCurrentDirectAccessGrants(agent));
+	if (world->getAccessPermissionCount()) ImGui::TextDisabled("Current direct grants and effective sources");
+	ImGui::PushID("runtime-direct-grants");
+	for (auto id : world->getAccessPermissionIds())
+	{
+		ImGui::PushID(static_cast<int>(id.value));
+		bool selected = currentDirect.contains(id);
+		if (ImGui::Checkbox(world->getAccessPermissionName(id).c_str(), &selected))
+			world->setAgentRuntimeAccessPermissionGrant(agent, id, selected);
+		auto sources = world->getAgentAccessGrantSources(agent, id);
+		if (sources.direct || !sources.permissionSets.empty())
+		{
+			string text = sources.direct ? "direct" : "";
+			for (auto setId : sources.permissionSets)
+			{
+				if (!text.empty()) text += ", ";
+				text += world->getPermissionSetName(setId);
+			}
+			ImGui::SameLine(); ImGui::TextDisabled("effective: %s", text.c_str());
+		}
+		ImGui::PopID();
+	}
+	ImGui::PopID();
+	ImGui::TreePop();
+}
+
 void renderInteractionPermissionRequirements(shared_ptr<core::World> const& world,
 	core::InteractionPointId point)
 {

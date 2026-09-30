@@ -613,6 +613,57 @@ namespace
 			"Access permission deletion left a Lift landing requirement");
 	}
 
+	void runtimePropertiesPanelChangesCurrentAuthorizationOnly()
+	{
+		auto world = std::make_shared<core::World>("runtime properties panel", 2, 1);
+		auto corridor = world->addCorridor(0, 0, 2);
+		world->finishBuild(); world->pauseSimulation();
+		auto agent = world->createAgent("agent", corridor, 0, 0.5f);
+		auto permission = world->addAccessPermission("Runtime key");
+		auto permissionSet = world->addPermissionSet("Runtime card");
+		std::string diagnostic;
+		require(world->setPermissionSetAccessPermission(permissionSet, permission,
+			true, &diagnostic), diagnostic);
+		world->markSaved();
+		require(world->resumeSimulation(), "runtime properties fixture did not resume");
+
+		require(world->setAgentRuntimeAccessPermissionGrant(agent, permission, true),
+			"runtime direct grant was refused while simulation was running");
+		require(world->setAgentRuntimePermissionSetAssignment(agent, permissionSet, true),
+			"runtime Permission set assignment was refused while simulation was running");
+		require(world->getAgentCurrentDirectAccessGrants(agent)
+			== std::vector<core::AccessPermissionId>{ permission },
+			"runtime direct grant was not visible as current Agent state");
+		require(world->getAgentCurrentPermissionSetAssignments(agent)
+			== std::vector<core::PermissionSetId>{ permissionSet },
+			"runtime Permission set assignment was not visible as current Agent state");
+		require(world->getAgentDirectAccessGrants(agent).empty()
+			&& world->getAgentPermissionSetAssignments(agent).empty(),
+			"runtime authorization rewrote the authored Agent configuration");
+		require(!world->isModified(), "runtime authorization dirtied the World document");
+
+		ImGui::CreateContext();
+		auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(800, 600);
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImGui::NewFrame(); ImGui::Begin("Runtime properties test");
+		ImGui::SetNextItemOpen(true);
+		renderAgentRuntimeProperties(world, agent);
+		ImGui::End(); ImGui::Render(); ImGui::DestroyContext();
+
+		world->resetSimulation();
+		require(world->getAgentCurrentDirectAccessGrants(agent).empty()
+			&& world->getAgentCurrentPermissionSetAssignments(agent).empty(),
+			"Reset did not restore authored Agent authorization");
+		world->pauseSimulation();
+		require(world->setAgentRuntimeAccessPermissionGrant(agent, permission, true)
+			&& world->getAgentCurrentDirectAccessGrants(agent)
+				== std::vector<core::AccessPermissionId>{ permission },
+			"runtime direct grant was unavailable while simulation was paused");
+		world->resetSimulation();
+		require(world->getAgentCurrentDirectAccessGrants(agent).empty(),
+			"Reset did not clear a paused runtime authorization change");
+	}
+
 	void panelCommitParticipatesInHistory()
 	{
 		auto world = std::make_shared<core::World>("panel", 2, 1);
@@ -660,5 +711,6 @@ void runAccessPermissionSmokeChecks()
 	malformedAuthorizationIsTransactional();
 	extensibleControlRequirementsPersistIndependently();
 	transportLandingRequirementsPersist();
+	runtimePropertiesPanelChangesCurrentAuthorizationOnly();
 	panelCommitParticipatesInHistory();
 }

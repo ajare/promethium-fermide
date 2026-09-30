@@ -7137,6 +7137,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	renderAgentIndividualProperties(world, id);
 	renderAgentEffectiveProperties(world, id);
 	renderAgentAccessPermissions(world, id);
+	renderAgentRuntimeProperties(world, id);
 	renderAgentTagAssignmentChecklist(world, id);
 	renderAgentBehaviourConfigurationPanel(world, id);
 

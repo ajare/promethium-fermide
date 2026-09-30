@@ -34,6 +34,7 @@ bool commitManualDoorPermissionRequirement(std::shared_ptr<core::World> const& w
 
 void renderPermissionsPanel(std::shared_ptr<core::World> const& world);
 void renderAgentAccessPermissions(std::shared_ptr<core::World> const& world, core::AgentId agent);
+void renderAgentRuntimeProperties(std::shared_ptr<core::World> const& world, core::AgentId agent);
 void renderInteractionPermissionRequirements(std::shared_ptr<core::World> const& world,
 	core::InteractionPointId point);
 void renderManualDoorPermissionRequirements(std::shared_ptr<core::World> const& world,

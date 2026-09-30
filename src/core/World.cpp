@@ -9734,6 +9734,18 @@ namespace core
 		return true;
 	}
 
+	vector<AccessPermissionId> World::getAgentCurrentDirectAccessGrants(AgentId id) const
+	{
+		auto agent = mAgents.find(id);
+		if (!agent) throw invalid_argument("Unknown Agent");
+		auto grants = currentDirectAccessGrants(*agent);
+		vector<AccessPermissionId> result;
+		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
+			if (grants.test(bit) && mAccessPermissions[bit])
+				result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
 	bool World::setAgentRuntimePermissionSetAssignment(AgentId agentId,
 		PermissionSetId id, bool assigned)
 	{
@@ -9762,6 +9774,14 @@ namespace core
 				reconsiderAgentAuthorizationPath(*agent,
 					AccessPermissionId{ bit + 1 }, after.test(bit));
 		return true;
+	}
+
+	vector<PermissionSetId> World::getAgentCurrentPermissionSetAssignments(AgentId id) const
+	{
+		auto agent = mAgents.find(id);
+		if (!agent) throw invalid_argument("Unknown Agent");
+		auto assignments = currentPermissionSets(*agent);
+		return { assignments.begin(), assignments.end() };
 	}
 
 	vector<AccessPermissionId> World::getAgentEffectiveAccessGrants(AgentId id) const

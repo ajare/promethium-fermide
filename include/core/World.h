@@ -680,10 +680,6 @@ namespace core
 		std::bitset<256> effectiveAccessGrants(Agent const& agent) const;
 		AccessPermissionId accessPermissionNamed(std::string_view name) const;
 		PermissionSetId permissionSetNamed(std::string_view name) const;
-		bool setAgentRuntimeAccessPermissionGrant(AgentId agent,
-			AccessPermissionId permission, bool granted);
-		bool setAgentRuntimePermissionSetAssignment(AgentId agent,
-			PermissionSetId set, bool assigned);
 		std::vector<AccessPermissionId> missingInteractionPermissions(
 			InteractionPoint const& point, Agent const& agent) const;
 		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;
@@ -2296,6 +2292,16 @@ namespace core
 			std::string* diagnostic = nullptr)
 		{ return setAgentAccessPermissionGrant(agent, permission, false, diagnostic); }
 		std::vector<AccessPermissionId> getAgentDirectAccessGrants(AgentId agent) const;
+
+		// Current authorization is simulation state. These mutations are available
+		// while paused or running, never dirty authored data, and Reset simulation
+		// restores the authored direct grants and Permission set assignments.
+		bool setAgentRuntimeAccessPermissionGrant(AgentId agent,
+			AccessPermissionId permission, bool granted);
+		std::vector<AccessPermissionId> getAgentCurrentDirectAccessGrants(AgentId agent) const;
+		bool setAgentRuntimePermissionSetAssignment(AgentId agent,
+			PermissionSetId set, bool assigned);
+		std::vector<PermissionSetId> getAgentCurrentPermissionSetAssignments(AgentId agent) const;
 		std::vector<AccessPermissionId> getAgentEffectiveAccessGrants(AgentId agent) const;
 
 		struct EffectiveAccessGrantSources

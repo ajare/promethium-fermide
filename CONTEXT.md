@@ -295,7 +295,7 @@ The set of Access permissions required for a protected operation. An Agent satis
 _Avoid_: Permission set, which grants Access permissions to an Agent
 
 **Permission grant**:
-An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes affect its current grants until the simulation is reset. Losing an effective grant immediately replans any affected Path and clears it if no Path remains; gaining one uses ordinary Route persistence.
+An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes made through the Agent Selection panel or an Agent behaviour affect its current grants until the simulation is reset. Losing an effective grant immediately replans any affected Path and clears it if no Path remains; gaining one uses ordinary Route persistence.
 _Avoid_: Traversal permit, Permission requirement
 
 **Permission set**:
