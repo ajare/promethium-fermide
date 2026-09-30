@@ -2348,6 +2348,11 @@ namespace core
 		{
 			throw WorldException(this, format("{} - Door hold-open time must be finite and non-negative.", caller));
 		}
+		if (!mDeserializingConstruction)
+			for (auto const& requirement : options.controlPermissionRequirements)
+				for (auto permission : requirement)
+					if (!lookupAccessPermission(permission))
+						throw WorldException(this, format("{} - a Door control requirement references an unknown Access permission", caller));
 	}
 
 	void World::validateSectorDoorPlacement(string const& caller, uint32_t layerIndex, uint32_t y,
@@ -5449,6 +5454,10 @@ namespace core
 		record.p = options.controls[0]; record.q = options.controls[1];
 		record.i = static_cast<int32_t>(options.activationMode); record.x = options.holdOpenSeconds;
 		record.j = static_cast<int32_t>(options.openStyle);
+		for (size_t side = 0; side < 2; ++side)
+			for (auto permission : options.controlPermissionRequirements[side])
+				record.controlPermissionRequirements[side].push_back(
+					static_cast<uint32_t>(permission.value));
 		recordConstruction(std::move(record));
 		return result;
 	}
@@ -5499,11 +5508,6 @@ namespace core
 		{
 			throw WorldException(this, "This Door already has Door Buttons on both sides");
 		}
-		// Migrating a direct Door requirement onto side-specific controls belongs to
-		// the controlled-Door slice. Until then, never silently discard or weaken it.
-		if (!source->values.empty())
-			throw WorldException(this, "Clear the manual Door permission requirement before adding Buttons");
-
 		// The edit is all-or-nothing: every side that still lacks a Button must
 		// have space for one before either side is created.
 		shared_ptr<const Sector> sides[2];
@@ -5540,6 +5544,12 @@ namespace core
 			auto point = createPhysicalControlInteractionPoint("Door button", control,
 				(float)doorObject->getCellY(), CORE_AGENT_MAX_HEIGHT * 0.4f,
 				getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
+			auto interaction = mInteractionPoints.find(point);
+			for (auto permission : source->values)
+			{
+				interaction->mPermissionRequirement.set(permission - 1);
+				source->controlPermissionRequirements[side].push_back(permission);
+			}
 			if (!addTraversalControl(door->getTraversalResourceId(), point))
 			{
 				throw WorldException(this, "Could not bind the Door Button to its Door");
@@ -5561,6 +5571,10 @@ namespace core
 		source->i = static_cast<int32_t>(DoorActivationMode::RemoteControlled);
 		source->p = true;
 		source->q = true;
+		// The direct interaction no longer exists. Its access intent now belongs
+		// independently to each generated control.
+		source->values.clear();
+		door->mPermissionRequirement.reset();
 	}
 
 	bool World::canAddSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
@@ -5584,8 +5598,7 @@ namespace core
 					&& record.b == doorObject->getCellX()
 					&& record.c == door->getCellsWide();
 			});
-		return source != mConstructionRecords.end() && source->values.empty()
-			&& !(source->p && source->q);
+		return source != mConstructionRecords.end() && !(source->p && source->q);
 	}
 
 	bool World::canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
@@ -5613,7 +5626,7 @@ namespace core
 	}
 
 	shared_ptr<const DoorSectorObject> World::removeSectorDoorButton(uint32_t sectorIndex,
-		uint32_t objectIndex)
+		uint32_t objectIndex, optional<vector<AccessPermissionId>> resultingRequirement)
 	{
 		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
@@ -5660,11 +5673,38 @@ namespace core
 			throw WorldException(this, "This Door has no Door Buttons to remove");
 		}
 
+		// Collapse two independent operations only when their requirements agree.
+		// A caller resolving a conflict must supply the resulting all-of set;
+		// omitting it refuses before the rebuild, leaving the Door untouched.
+		array<vector<AccessPermissionId>, 2> sideRequirements;
+		auto resource = mTraversalResources.find(door->getTraversalResourceId());
+		for (auto pointId : resource->mControls)
+		{
+			auto point = mInteractionPoints.find(pointId);
+			if (!point) continue;
+			size_t side = point->mSector == SectorId{ static_cast<uint64_t>(door->getBackSector()->getIndex()) + 1 } ? 1 : 0;
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (point->mPermissionRequirement.test(bit))
+					sideRequirements[side].push_back(AccessPermissionId{ bit + 1 });
+		}
+		vector<AccessPermissionId> collapsed;
+		if (resultingRequirement) collapsed = *resultingRequirement;
+		else if (sideRequirements[0] == sideRequirements[1]) collapsed = sideRequirements[0];
+		else throw WorldException(this,
+			"Door controls have different permission requirements; choose the resulting manual Door requirement");
+		bitset<AccessPermission::Capacity> seenPermissions;
+		for (auto permission : collapsed)
+		{
+			if (!lookupAccessPermission(permission))
+				throw WorldException(this, "The resulting Door requirement references an unknown Access permission");
+			if (seenPermissions.test(permission.value - 1))
+				throw WorldException(this, "The resulting Door requirement contains a duplicate Access permission");
+			seenPermissions.set(permission.value - 1);
+		}
+
 		// The record is the authored source of truth: clearing its control flags
 		// and restoring the pre-Button activation mode, then replaying, removes
 		// both Buttons, their InteractionPoints, and their traversal bindings.
-		// Existing authored/YAML Buttons have no prior mode to restore; manual is
-		// the usable fallback once their remote controls have been removed.
 		vector<ConstructionRecord> records = mConstructionRecords;
 		for (auto& record : records)
 		{
@@ -5677,6 +5717,11 @@ namespace core
 					? record.preButtonActivationMode
 					: static_cast<int32_t>(DoorActivationMode::Manual);
 				record.preButtonActivationMode = -1;
+				record.values.clear();
+				if (record.i == static_cast<int32_t>(DoorActivationMode::Manual))
+					for (auto permission : collapsed)
+						record.values.push_back(static_cast<uint32_t>(permission.value));
+				record.controlPermissionRequirements = {};
 			}
 		}
 		rebuildFromConstructionRecords(std::move(records));
@@ -5828,6 +5873,11 @@ namespace core
 					auto point = createPhysicalControlInteractionPoint("Door button",
 						createdControls[i], (float)y, CORE_AGENT_MAX_HEIGHT * 0.4f,
 						getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
+					auto interaction = mInteractionPoints.find(point);
+					for (auto permission : options.controlPermissionRequirements[i])
+					{
+						interaction->mPermissionRequirement.set(permission.value - 1);
+					}
 					addTraversalControl(traversalResource, point);
 				}
 			}
@@ -6019,6 +6069,11 @@ namespace core
 		if (options.activationMode != DoorActivationMode::RemoteControlled
 			&& (options.controls[0] || options.controls[1]))
 			return reject("Physical controls require a remote-controlled Bulkhead Door");
+		if (!mDeserializingConstruction)
+			for (auto const& requirement : options.controlPermissionRequirements)
+				for (auto permission : requirement)
+					if (!lookupAccessPermission(permission))
+						return reject("A Bulkhead Door control requirement references an unknown Access permission");
 		try
 		{
 			auto const& left = mLayers[layerIndex]->getCellDefinition(thresholdX - 1, y);
@@ -6160,6 +6215,11 @@ namespace core
 				auto point = createPhysicalControlInteractionPoint("Bulkhead door button",
 					createdControls[i], (float)y, 0.15f, getFixedTimestep(),
 					{ { command, InteractionBindingRequirement::Required } });
+				auto interaction = mInteractionPoints.find(point);
+				for (auto permission : options.controlPermissionRequirements[i])
+				{
+					interaction->mPermissionRequirement.set(permission.value - 1);
+				}
 				addTraversalControl(traversalResource, point);
 			}
 		}
@@ -6169,6 +6229,10 @@ namespace core
 		record.j = static_cast<int32_t>(options.activationMode);
 		record.x = options.holdOpenSeconds; record.d = options.crossingLanes;
 		record.y = options.automaticSensorDistance;
+		for (size_t controlSide = 0; controlSide < 2; ++controlSide)
+			for (auto permission : options.controlPermissionRequirements[controlSide])
+				record.controlPermissionRequirements[controlSide].push_back(
+					static_cast<uint32_t>(permission.value));
 		recordConstruction(std::move(record));
 		return { doorObject, { createdControls[0], createdControls[1] }, traversalResource };
 	}
@@ -9438,9 +9502,14 @@ namespace core
 			if (resource->mDoor) resource->mDoor->mPermissionRequirement.reset(bit);
 		}
 		for (auto& record : mConstructionRecords)
+		{
 			if (record.type == ConstructionType::Door)
 				record.values.erase(remove(record.values.begin(), record.values.end(), id.value),
 					record.values.end());
+			for (auto& requirement : record.controlPermissionRequirements)
+				requirement.erase(remove(requirement.begin(), requirement.end(), id.value),
+					requirement.end());
+		}
 		mAccessPermissions[bit].reset();
 		modify();
 		if (diagnostic) diagnostic->clear();
@@ -9514,6 +9583,42 @@ namespace core
 		}
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
 		point->mPermissionRequirement = next;
+		// Generated Door controls also persist the requirement against their
+		// authored approach side. Interaction point IDs are replay-order handles
+		// and cannot safely identify a side after one sibling control is removed.
+		for (auto const& [resourceId, resource] : mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (!resource->mDoor || find(resource->mControls.begin(), resource->mControls.end(), id)
+				== resource->mControls.end()) continue;
+			size_t side = 0;
+			if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource->mDoor))
+				side = point->mSector == SectorId{ static_cast<uint64_t>(bulkhead->getSideSector(CORE_SIDE_RIGHT)->getIndex()) + 1 } ? 1 : 0;
+			else
+				side = point->mSector == SectorId{ static_cast<uint64_t>(resource->mDoor->getBackSector()->getIndex()) + 1 } ? 1 : 0;
+			for (auto& record : mConstructionRecords)
+			{
+				bool matches = false;
+				if (record.type == ConstructionType::Door)
+					matches = record.layer == resource->mDoor->getFrontLayer()
+						&& record.a == static_cast<uint32_t>(resource->mDoor->getPosition().y)
+						&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().x)
+						&& record.c == resource->mDoor->getCellsWide();
+				else if (record.type == ConstructionType::BulkheadDoor)
+					matches = record.a == resource->mDoor->getFrontLayer()
+						&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().y)
+						&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
+							== static_cast<uint32_t>(round(resource->mDoor->getPosition().x
+								+ resource->mDoor->getSize().x * 0.5f));
+				if (!matches) continue;
+				record.controlPermissionRequirements[side].clear();
+				for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+					if (next.test(bit)) record.controlPermissionRequirements[side].push_back(
+						static_cast<uint32_t>(bit + 1));
+				break;
+			}
+			break;
+		}
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -9614,6 +9719,21 @@ namespace core
 			&& agentSatisfiesDoorPermission(*resource->mDoor, *agent);
 	}
 
+	bool World::canAgentOperateDoorControl(TraversalResourceId doorId, SectorId approach,
+		AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !resource->mDoor || !agent) return false;
+		for (auto pointId : resource->mControls)
+		{
+			auto point = mInteractionPoints.find(pointId);
+			if (point && point->mSector == approach)
+				return missingInteractionPermissions(*point, *agent).empty();
+		}
+		return false;
+	}
+
 	bool World::canAgentTraverseManualDoorNow(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
@@ -9646,12 +9766,23 @@ namespace core
 		if (!agent.mPath.path || agent.mPath.path->nodes.empty()
 			|| (agent.mTraversalTask && agent.mTraversalTask->permit)) return;
 		auto const bit = changed.value - 1;
+		auto resourceUsesPermission = [&](TraversalResource const& resource)
+		{
+			if (!resource.mDoor) return false;
+			if (resource.mDoor->mPermissionRequirement.test(bit)) return true;
+			for (auto pointId : resource.mControls)
+			{
+				auto point = mInteractionPoints.find(pointId);
+				if (point && point->mPermissionRequirement.test(bit)) return true;
+			}
+			return false;
+		};
 		auto edgeUsesPermission = [&](shared_ptr<const Edge> const& edge)
 		{
-			if (!edge || edge->getType() != EdgeType::Door) return false;
+			if (!edge || (edge->getType() != EdgeType::Door
+				&& edge->getType() != EdgeType::BulkheadDoor)) return false;
 			auto resource = mTraversalResources.find(edge->getTraversalResourceId());
-			return resource && resource->mDoor
-				&& resource->mDoor->mPermissionRequirement.test(bit);
+			return resource && resourceUsesPermission(*resource);
 		};
 		bool currentRelevant = false;
 		for (uint32_t i = agent.mPath.targetNode + 1; i < agent.mPath.path->nodes.size(); ++i)
@@ -9663,8 +9794,7 @@ namespace core
 			for (auto const& [resourceId, resource] : mTraversalResources.entries())
 			{
 				(void)resourceId;
-				availableRouteChanged = availableRouteChanged || (resource->mDoor
-					&& resource->mDoor->mPermissionRequirement.test(bit));
+				availableRouteChanged = availableRouteChanged || resourceUsesPermission(*resource);
 			}
 			if (!availableRouteChanged) return;
 		}

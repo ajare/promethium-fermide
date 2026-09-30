@@ -159,6 +159,11 @@ namespace core
 				&& !context.world->canAgentOpenManualDoor(door.getTraversalResourceId(),
 					context.world->getAgentId(context.agent)))
 				result.exclusion = RouteExclusionReason::Permission;
+			if (door.getActivationMode() == DoorActivationMode::RemoteControlled
+				&& !result.open && context.world && context.agent
+				&& !context.world->canAgentOperateDoorControl(door.getTraversalResourceId(),
+					sourceSector, context.world->getAgentId(context.agent)))
+				result.exclusion = RouteExclusionReason::Permission;
 			if (door.getActivationMode() == DoorActivationMode::Manual) result.activation = 1;
 			else if (door.getActivationMode() == DoorActivationMode::RemoteControlled) result.activation = 2;
 			if (result.observed && context.agent && !result.lift && !result.shuttle)

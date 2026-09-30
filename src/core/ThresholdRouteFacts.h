@@ -48,6 +48,20 @@ namespace core
 			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
 		}
+		// A controlled Door is feasible only when this Agent can operate the
+		// control on the approach side. The sole exception is a fully open Door
+		// observed from that side; authorization governs operation, not passage.
+		// Never inspect an unobserved Door's live open state here.
+		if (door.getActivationMode() == DoorActivationMode::RemoteControlled
+			&& !(observed && door.isOpen()) && context.world && context.agent
+			&& !context.world->canAgentOperateDoorControl(edge.getTraversalResourceId(),
+				sector ? SectorId{ static_cast<uint64_t>(sector->getIndex()) + 1 } : SectorId{},
+				context.world->getAgentId(context.agent)))
+		{
+			facts.feasible = false;
+			facts.exclusionReason = RouteExclusionReason::Permission;
+			return facts;
+		}
 		if (shuttleAccess)
 		{
 			bool const boarding = sector && isLocationLike(sector->getType());

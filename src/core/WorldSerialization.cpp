@@ -311,6 +311,15 @@ namespace core
 				for (auto permission : record.values) serializer.writeUint64("", permission);
 				serializer.endArray();
 			}
+			for (size_t side = 0; side < 2; ++side)
+				if (!record.controlPermissionRequirements[side].empty())
+				{
+					serializer.beginArray(side == 0 ? "foreControlPermissionRequirement"
+						: "backControlPermissionRequirement");
+					for (auto permission : record.controlPermissionRequirements[side])
+						serializer.writeUint64("", permission);
+					serializer.endArray();
+				}
 			break;
 		case ConstructionType::Window:
 		{
@@ -329,7 +338,17 @@ namespace core
 			serializer.writeBool("foreControl", record.p); serializer.writeBool("backControl", record.q);
 			serializer.writeString("activationMode", activationName(record.j));
 			serializer.writeFloat("holdOpenSeconds", record.x); serializer.writeUint32("crossingLanes", record.d);
-			serializer.writeFloat("automaticSensorDistance", record.y); break;
+			serializer.writeFloat("automaticSensorDistance", record.y);
+			for (size_t side = 0; side < 2; ++side)
+				if (!record.controlPermissionRequirements[side].empty())
+				{
+					serializer.beginArray(side == 0 ? "foreControlPermissionRequirement"
+						: "backControlPermissionRequirement");
+					for (auto permission : record.controlPermissionRequirements[side])
+						serializer.writeUint64("", permission);
+					serializer.endArray();
+				}
+			break;
 		case ConstructionType::LightSwitch:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("xOffset", record.b); break;
 		case ConstructionType::ForceBridge:
@@ -385,7 +404,8 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
-		// Version 24 adds buttonless manual ordinary Door permission requirements.
+		// Version 25 gives ordinary and Bulkhead Door controls stable side-specific
+		// permission requirements. Version 24 adds buttonless manual ordinary Door permission requirements.
 		// Version 23 adds World-owned Access permission definitions, direct Agent
 		// grants, and Interaction point requirements. Version 17 adds the Marker
 		// properties bitfield. Version 15 renames the
@@ -412,7 +432,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 24);
+		serializer.writeUint32("version", 25);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -740,6 +760,18 @@ namespace core
 				while (serializer.nextArrayItem()) record.values.push_back(serializer.readUint32(""));
 				serializer.endArray();
 			}
+			if (version >= 25)
+				for (size_t controlSide = 0; controlSide < 2; ++controlSide)
+				{
+					auto const* field = controlSide == 0 ? "foreControlPermissionRequirement"
+						: "backControlPermissionRequirement";
+					if (!serializer.hasField(field)) continue;
+					serializer.beginArray(field);
+					while (serializer.nextArrayItem())
+						record.controlPermissionRequirements[controlSide].push_back(
+							serializer.readUint32(""));
+					serializer.endArray();
+				}
 			break;
 		case ConstructionType::Window:
 		{
@@ -761,7 +793,20 @@ namespace core
 			record.j = readActivation("activationMode"); record.x = serializer.readFloat("holdOpenSeconds");
 			record.d = serializer.readUint32("crossingLanes");
 			record.y = serializer.readFloat("automaticSensorDistance", true,
-				CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE); break;
+				CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE);
+			if (version >= 25)
+				for (size_t controlSide = 0; controlSide < 2; ++controlSide)
+				{
+					auto const* field = controlSide == 0 ? "foreControlPermissionRequirement"
+						: "backControlPermissionRequirement";
+					if (!serializer.hasField(field)) continue;
+					serializer.beginArray(field);
+					while (serializer.nextArrayItem())
+						record.controlPermissionRequirements[controlSide].push_back(
+							serializer.readUint32(""));
+					serializer.endArray();
+				}
+			break;
 		case ConstructionType::LightSwitch:
 			record.a = serializer.readUint32("sectorIndex"); record.b = serializer.readUint32("xOffset"); break;
 		case ConstructionType::ForceBridge:
@@ -856,8 +901,9 @@ namespace core
 		// Marker properties, version 18 adds Interaction aversion, version 19
 		// adds Effort aversion, version 20 adds Risk aversion, version 21
 		// adds Route familiarity, version 22 adds Route persistence, version 23
-		// adds Access permissions, and version 24 adds manual Door requirements.
-		if (version < 1 || version > 24)
+		// adds Access permissions, version 24 adds manual Door requirements, and
+		// version 25 adds side-specific ordinary and Bulkhead Door controls.
+		if (version < 1 || version > 25)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1176,18 +1222,39 @@ namespace core
 		};
 		for (auto const& record : records)
 		{
-			if (record.type != ConstructionType::Door || record.values.empty()) continue;
-			if (record.i != static_cast<int32_t>(DoorActivationMode::Manual)
-				|| record.p || record.q)
-				throw SerializationException("A Door permission requirement belongs only to a buttonless manual ordinary Door");
-			bitset<256> seen;
-			for (auto id : record.values)
+			if (record.type == ConstructionType::Door && !record.values.empty())
 			{
-				if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
-					throw SerializationException("Serialized Door permission requirement is dangling");
-				if (seen.test(id - 1))
-					throw SerializationException("Serialized Door permission requirement contains a duplicate");
-				seen.set(id - 1);
+				if (record.i != static_cast<int32_t>(DoorActivationMode::Manual)
+					|| record.p || record.q)
+					throw SerializationException("A Door permission requirement belongs only to a buttonless manual ordinary Door");
+				bitset<256> seen;
+				for (auto id : record.values)
+				{
+					if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
+						throw SerializationException("Serialized Door permission requirement is dangling");
+					if (seen.test(id - 1))
+						throw SerializationException("Serialized Door permission requirement contains a duplicate");
+					seen.set(id - 1);
+				}
+			}
+			if (record.type != ConstructionType::Door
+				&& record.type != ConstructionType::BulkheadDoor) continue;
+			bool const controls[2]{ record.p, record.q };
+			auto const mode = record.type == ConstructionType::Door ? record.i : record.j;
+			for (size_t side = 0; side < 2; ++side)
+			{
+				if (!record.controlPermissionRequirements[side].empty()
+					&& (!controls[side] || mode != static_cast<int32_t>(DoorActivationMode::RemoteControlled)))
+					throw SerializationException("A Door control requirement belongs only to an Agent-operated control");
+				bitset<256> seen;
+				for (auto id : record.controlPermissionRequirements[side])
+				{
+					if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
+						throw SerializationException("Serialized Door control requirement is dangling");
+					if (seen.test(id - 1))
+						throw SerializationException("Serialized Door control requirement contains a duplicate");
+					seen.set(id - 1);
+				}
 			}
 		}
 
@@ -1270,12 +1337,49 @@ namespace core
 			candidate.finishBuild();
 			for (auto const& [pointId, requirement] : serializedRequirements)
 			{
-				(void)requirement;
-				if (!candidate.mInteractionPoints.find(pointId)
-					|| !candidate.isInteractionPointPermissionEligible(pointId))
+				auto point = candidate.mInteractionPoints.find(pointId);
+				if (!point || !candidate.isInteractionPointPermissionEligible(pointId))
 					throw SerializationException(format(
 						"Serialized Access permission requirement has invalid or ineligible Interaction point {}",
 						pointId.value));
+				// Versions 23-24 persisted generated controls only by replay-order
+				// Interaction point ID. Migrate those requirements onto the stable
+				// authored approach side before adopting the records.
+				if (version >= 25) continue;
+				for (auto const& [resourceId, resource] : candidate.mTraversalResources.entries())
+				{
+					(void)resourceId;
+					if (!resource->mDoor || find(resource->mControls.begin(),
+						resource->mControls.end(), pointId) == resource->mControls.end()) continue;
+					size_t side = 0;
+					if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource->mDoor))
+						side = point->mSector == SectorId{ static_cast<uint64_t>(
+							bulkhead->getSideSector(CORE_SIDE_RIGHT)->getIndex()) + 1 } ? 1 : 0;
+					else side = point->mSector == SectorId{ static_cast<uint64_t>(
+						resource->mDoor->getBackSector()->getIndex()) + 1 } ? 1 : 0;
+					for (auto& record : records)
+					{
+						bool matches = record.type == ConstructionType::Door
+							&& record.layer == resource->mDoor->getFrontLayer()
+							&& record.a == static_cast<uint32_t>(resource->mDoor->getPosition().y)
+							&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().x)
+							&& record.c == resource->mDoor->getCellsWide();
+						if (record.type == ConstructionType::BulkheadDoor)
+							matches = record.a == resource->mDoor->getFrontLayer()
+								&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().y)
+								&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
+									== static_cast<uint32_t>(round(resource->mDoor->getPosition().x
+										+ resource->mDoor->getSize().x * 0.5f));
+						if (!matches) continue;
+						auto& authored = record.controlPermissionRequirements[side];
+						authored.clear();
+						for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+							if (requirement.test(bit)) authored.push_back(
+								static_cast<uint32_t>(bit + 1));
+						break;
+					}
+					break;
+				}
 			}
 		}
 		catch (SerializationException const&) { throw; }
@@ -1677,9 +1781,18 @@ namespace core
 		// deserializeImpl - clears them itself before restoring.
 		mPendingPermissionRequirements.clear();
 		if (preserveBehaviourRuntime)
+		{
+			set<InteractionPointId> authoredDoorControls;
+			for (auto const& [resourceId, resource] : mTraversalResources.entries())
+			{
+				(void)resourceId;
+				if (!resource->mDoor || resource->mLiftCoordinator || resource->mShuttle) continue;
+				authoredDoorControls.insert(resource->mControls.begin(), resource->mControls.end());
+			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
-				if (point->mPermissionRequirement.any())
+				if (point->mPermissionRequirement.any() && !authoredDoorControls.contains(id))
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
+		}
 		else
 			mAccessPermissions = {};
 		mInteractionPoints = {};
@@ -1793,6 +1906,13 @@ namespace core
 				for (auto permission : record.values)
 					resource->mDoor->mPermissionRequirement.set(permission - 1);
 			}
+			for (size_t side = 0; side < 2; ++side)
+				if (created.controls[side].interactionPoint)
+				{
+					auto point = mInteractionPoints.find(created.controls[side].interactionPoint);
+					for (auto permission : record.controlPermissionRequirements[side])
+						point->mPermissionRequirement.set(permission - 1);
+				}
 			break;
 		}
 		case ConstructionType::Window:
@@ -1800,10 +1920,16 @@ namespace core
 				{ record.p, static_cast<Window::State>(record.i), static_cast<Window::Style>(record.j) });
 			break;
 		case ConstructionType::BulkheadDoor:
-			addSectorBulkheadDoor(record.a, record.b, record.c, record.i,
-				{ { record.p, record.q }, static_cast<DoorActivationMode>(record.j), record.x,
-					record.d, record.y });
+		{
+			CreateBulkheadDoorOptions options{ { record.p, record.q },
+				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y };
+			for (size_t side = 0; side < 2; ++side)
+				for (auto permission : record.controlPermissionRequirements[side])
+					options.controlPermissionRequirements[side].push_back(
+						AccessPermissionId{ permission });
+			addSectorBulkheadDoor(record.a, record.b, record.c, record.i, options);
 			break;
+		}
 		case ConstructionType::LightSwitch:
 			addSectorLightSwitch(record.a, record.b);
 			break;
@@ -4837,6 +4963,10 @@ namespace core
 		if (found == mConstructionRecords.rend()) return false;
 		options = { { found->p, found->q }, static_cast<DoorActivationMode>(found->j),
 			found->x, found->d, found->y };
+		for (size_t side = 0; side < 2; ++side)
+			for (auto permission : found->controlPermissionRequirements[side])
+				options.controlPermissionRequirements[side].push_back(
+					AccessPermissionId{ permission });
 		return true;
 	}
 
@@ -4878,6 +5008,23 @@ namespace core
 		found->j = static_cast<int32_t>(options.activationMode);
 		found->x = options.holdOpenSeconds; found->d = options.crossingLanes;
 		found->y = options.automaticSensorDistance;
+		for (size_t side = 0; side < 2; ++side)
+		{
+			if (!options.controls[side])
+			{
+				// Deleting a control deletes the requirement belonging to that
+				// operation; it must not slide onto the surviving side on replay.
+				found->controlPermissionRequirements[side].clear();
+				continue;
+			}
+			if (!options.controlPermissionRequirements[side].empty())
+			{
+				found->controlPermissionRequirements[side].clear();
+				for (auto permission : options.controlPermissionRequirements[side])
+					found->controlPermissionRequirements[side].push_back(
+						static_cast<uint32_t>(permission.value));
+			}
+		}
 		auto layer = object->getSector()->getLayerIndex();
 		auto y = object->getCellY();
 		rebuildFromConstructionRecords(std::move(records));

@@ -71,6 +71,7 @@ namespace core
 			// Zero derives one lane per cell of usable threshold width.
 			uint32_t crossingLanes{ 0 };
 			Door::OpenStyle openStyle{ Door::OpenStyle::OpenUp };
+			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 		};
 
 		struct CreateDoorResult
@@ -87,6 +88,7 @@ namespace core
 			float holdOpenSeconds{ CORE_BULKHEAD_DOOR_STAY_OPEN_TIME };
 			uint32_t crossingLanes{ 1 };
 			float automaticSensorDistance{ CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE };
+			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 		};
 
 		struct CreateBulkheadDoorResult
@@ -791,6 +793,10 @@ namespace core
 			// stop/carriage/door grid.  ~0u means "no override"; a record whose
 			// overrides are all defaults persists none of them.
 			std::vector<uint32_t> overrides{};
+			// Ordinary and Bulkhead Door: the requirements of the controls on the
+			// two authored approach sides. Unlike Interaction point IDs, these stay
+			// associated with their side when a structural edit rebuilds the World.
+			std::array<std::vector<uint32_t>, 2> controlPermissionRequirements{};
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
@@ -1678,7 +1684,8 @@ namespace core
 		// restored; existing authored/YAML Buttons fall back to manual activation.
 		// Null on failure.
 		std::shared_ptr<const DoorSectorObject> removeSectorDoorButton(uint32_t sectorIndex,
-			uint32_t objectIndex);
+			uint32_t objectIndex,
+			std::optional<std::vector<AccessPermissionId>> resultingRequirement = std::nullopt);
 
 		// True when removeSectorDoorButton will accept the selected ordinary Door:
 		// its construction record currently carries at least one Button.
@@ -2265,6 +2272,8 @@ namespace core
 		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
 			TraversalResourceId door) const;
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+		bool canAgentOperateDoorControl(TraversalResourceId door, SectorId approach,
+			AgentId agent) const;
 		bool canAgentTraverseManualDoorNow(TraversalResourceId door, AgentId agent) const;
 		void replanAgentAfterAuthorizationRefusal(AgentId agent);
 

@@ -7,7 +7,10 @@
 #include "core/SerializationException.h"
 #include "core/Agent.h"
 #include "core/DoorSectorObject.h"
+#include "core/BulkheadDoorSectorObject.h"
+#include "core/Exceptions.h"
 #include "core/Graph.h"
+#include "core/Edge.h"
 #include "core/Path.h"
 #include "core/Vertex.h"
 #include "imgui/imgui.h"
@@ -194,6 +197,125 @@ namespace
 			"Access permission deletion did not clear the manual Door requirement");
 	}
 
+	void controlledDoorAuthorization()
+	{
+		core::World world("controlled Door permissions", 12, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+		world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto door = world.addSectorDoor(0, 0, 3, {});
+		world.finishBuild(); world.pauseSimulation();
+		auto red = world.addAccessPermission("Red control");
+		auto blue = world.addAccessPermission("Blue control");
+		std::string diagnostic;
+		require(world.setManualDoorPermissionRequirement(door.traversalResource,
+			{ red }, &diagnostic), diagnostic);
+		world.addSectorDoorButton(door.door.sector->getIndex(), door.door.index);
+		world.finishBuild(); world.pauseSimulation();
+		auto resource = world.lookupTraversalResource(door.traversalResource);
+		require(resource && resource.entity->getControls().size() == 2,
+			"protected manual Door did not gain two controls");
+		for (auto point : resource.entity->getControls())
+			require(world.getInteractionPointPermissionRequirement(point)
+				== std::vector<core::AccessPermissionId>{ red },
+				"manual Door requirement was not copied to each control");
+		require(world.getManualDoorPermissionRequirement(door.traversalResource).empty(),
+			"obsolete direct Door requirement survived control conversion");
+
+		// Routing evaluates the control on the approach side without consulting a
+		// remote live state. Once this same threshold is locally observed open, the
+		// requirement no longer blocks passage.
+		auto agentId = world.createAgent("unauthorized", front, 0, 1.5f);
+		auto agent = world.lookupAgent(agentId).entity;
+		auto graph = world.getGraph();
+		std::shared_ptr<const core::Edge> doorEdge;
+		for (auto const& edge : graph->getEdges())
+			if (edge->getTraversalResourceId() == door.traversalResource) doorEdge = edge;
+		require(doorEdge != nullptr, "controlled Door edge was unavailable");
+		auto target = doorEdge->getVertex(0)->getSector()->getIndex() == front
+			? doorEdge->getVertex(1) : doorEdge->getVertex(0);
+		core::RouteDecisionContext remote{ agent, {}, {}, nullptr, agent->getWalkSpeed(), &world };
+		require(!doorEdge->getDirectedTraversalFacts(target, remote).feasible,
+			"routing admitted an unauthorized remote Door control");
+		auto liveDoor = std::static_pointer_cast<const core::DoorSectorObject>(
+			door.door.sector->getObject(door.door.index))->getDoor();
+		liveDoor->requestOpen(); liveDoor->update(10.0f);
+		core::RouteDecisionContext local{ agent, {}, {}, world.getSector(front).get(),
+			agent->getWalkSpeed(), &world };
+		require(doorEdge->getDirectedTraversalFacts(target, local).feasible,
+			"locally observed open Door did not permit unauthorized passage");
+
+		auto controls = resource.entity->getControls();
+		require(world.resumeSimulation(), "controlled Door runtime fixture did not resume");
+		auto rejectedId = world.requestInteraction(controls.front(), agentId);
+		auto rejected = world.lookupInteractionRequest(rejectedId);
+		require(rejected && rejected.entity->getResult() == core::InteractionResult::Rejected,
+			"Door control bypassed the shared Interaction point authorization gate");
+		world.pauseSimulation();
+		require(world.setInteractionPointPermissionRequirement(controls[1],
+			{ blue }, &diagnostic), diagnostic);
+		bool refused = false;
+		try { world.removeSectorDoorButton(door.door.sector->getIndex(), door.door.index); }
+		catch (core::Exception const&) { refused = true; }
+		require(refused && world.lookupTraversalResource(door.traversalResource).entity->getControls().size() == 2,
+			"conflicting control conversion changed the Door without an explicit result");
+		auto rebuilt = world.removeSectorDoorButton(door.door.sector->getIndex(),
+			door.door.index, std::vector<core::AccessPermissionId>{ blue });
+		require(rebuilt && world.getManualDoorPermissionRequirement(
+			rebuilt->getDoor()->getTraversalResourceId())
+			== std::vector<core::AccessPermissionId>{ blue },
+			"explicit conversion result did not become the direct manual requirement");
+		auto restored = load(save(world));
+		require(restored->getManualDoorPermissionRequirement(
+			rebuilt->getDoor()->getTraversalResourceId())
+			== std::vector<core::AccessPermissionId>{ blue },
+			"converted Door requirement did not survive save/load");
+
+		core::World bulk("Bulkhead control permissions", 8, 1);
+		bulk.addRoom("Left", 0, 0, 0, 4, 1);
+		bulk.addRoom("Right", 0, 0, 4, 4, 1);
+		auto bulkhead = bulk.addSectorBulkheadDoor(0, 0, 4, CORE_SIDE_LEFT, {});
+		bulk.finishBuild(); bulk.pauseSimulation();
+		auto left = bulk.addAccessPermission("Left key");
+		auto right = bulk.addAccessPermission("Right key");
+		require(bulk.setInteractionPointPermissionRequirement(
+			bulkhead.controls[0].interactionPoint, { left }, &diagnostic), diagnostic);
+		require(bulk.setInteractionPointPermissionRequirement(
+			bulkhead.controls[1].interactionPoint, { right }, &diagnostic), diagnostic);
+		auto bulkRestored = load(save(bulk));
+		require(bulkRestored->getInteractionPointPermissionRequirement(
+			bulkhead.controls[0].interactionPoint) == std::vector<core::AccessPermissionId>{ left }
+			&& bulkRestored->getInteractionPointPermissionRequirement(
+				bulkhead.controls[1].interactionPoint) == std::vector<core::AccessPermissionId>{ right },
+			"side-specific Bulkhead Door requirements did not survive save/load");
+
+		core::World::CreateBulkheadDoorOptions options;
+		require(bulk.getSectorBulkheadDoorOptions(bulkhead.door.sector->getIndex(),
+			bulkhead.door.index, options), "Bulkhead Door options were unavailable");
+		options.controls[0] = false;
+		auto bulkObject = std::static_pointer_cast<const core::BulkheadDoorSectorObject>(
+			bulk.applySectorBulkheadDoorOptions(bulkhead.door.sector->getIndex(),
+				bulkhead.door.index, options));
+		auto surviving = bulk.lookupTraversalResource(
+			bulkObject->getDoor()->getTraversalResourceId()).entity->getControls();
+		require(surviving.size() == 1
+			&& bulk.getInteractionPointPermissionRequirement(surviving.front())
+				== std::vector<core::AccessPermissionId>{ right },
+			"deleting one Bulkhead Door control moved or deleted the other side's requirement");
+		uint32_t bulkObjectIndex = ~0u;
+		for (uint32_t index = 0; index < bulkObject->getSector()->getNumObjects(); ++index)
+			if (bulkObject->getSector()->getObject(index) == bulkObject) bulkObjectIndex = index;
+		require(bulk.getSectorBulkheadDoorOptions(bulkObject->getSector()->getIndex(),
+			bulkObjectIndex, options), "rebuilt Bulkhead Door options were unavailable");
+		options.activationMode = core::DoorActivationMode::Automatic;
+		options.controls[0] = options.controls[1] = false;
+		bulkObject = std::static_pointer_cast<const core::BulkheadDoorSectorObject>(
+			bulk.applySectorBulkheadDoorOptions(bulkObject->getSector()->getIndex(),
+				bulkObjectIndex, options));
+		require(bulk.lookupTraversalResource(bulkObject->getDoor()->getTraversalResourceId())
+			.entity->getControls().empty(),
+			"automatic Bulkhead Door retained a permission-eligible Agent control");
+	}
+
 	void malformedAuthorizationIsTransactional()
 	{
 		core::World authored("malformed source", 2, 1);
@@ -252,6 +374,7 @@ void runAccessPermissionSmokeChecks()
 {
 	authorizationAndPersistence();
 	manualDoorAuthorization();
+	controlledDoorAuthorization();
 	malformedAuthorizationIsTransactional();
 	panelCommitParticipatesInHistory();
 }

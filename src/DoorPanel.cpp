@@ -1,9 +1,11 @@
 // The Selection panel's Door branch; see include/DoorPanel.h. Extracted from
 // UI.cpp for ticket #99 so the headless smoke checks render the real panel.
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "DoorPanel.h"
 
@@ -29,6 +31,12 @@ extern std::shared_ptr<const core::SectorObject> gSelectedSectorObject;
 
 namespace
 {
+	bool pendingRequirementConflict{ false };
+	core::World const* pendingRequirementWorld{ nullptr };
+	uint32_t pendingRequirementSector{ ~0u };
+	uint32_t pendingRequirementObject{ ~0u };
+	std::vector<core::AccessPermissionId> pendingResultingRequirement;
+
 	char const* doorOpenStyleLabel(core::Door::OpenStyle style)
 	{
 		switch (style)
@@ -247,7 +255,16 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 		}
 		catch (core::Exception const& error)
 		{
-			core::addLogMessage("Door editor", 0, core::LogLevel::Error, error.getMessage());
+			if (!buttons && error.getMessage().find("different permission requirements")
+				!= std::string::npos)
+			{
+				pendingRequirementConflict = true;
+				pendingRequirementWorld = world.get();
+				pendingRequirementSector = owner->getIndex();
+				pendingRequirementObject = ownerObjectIndex;
+				pendingResultingRequirement.clear();
+			}
+			else core::addLogMessage("Door editor", 0, core::LogLevel::Error, error.getMessage());
 		}
 		catch (std::exception const& error)
 		{
@@ -255,4 +272,54 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 		}
 	}
 	ImGui::EndDisabled();
+
+	if (pendingRequirementConflict && pendingRequirementWorld == world.get())
+		ImGui::OpenPopup("Choose manual Door requirement");
+	if (ImGui::BeginPopupModal("Choose manual Door requirement", nullptr,
+		ImGuiWindowFlags_AlwaysAutoResize))
+	{
+		ImGui::TextUnformatted("The two controls have different requirements.");
+		ImGui::TextUnformatted("Choose the requirement for direct manual opening.");
+		for (auto permission : world->getAccessPermissionIds())
+		{
+			auto found = std::find(pendingResultingRequirement.begin(),
+				pendingResultingRequirement.end(), permission);
+			bool required = found != pendingResultingRequirement.end();
+			if (ImGui::Checkbox(world->getAccessPermissionName(permission).c_str(), &required))
+			{
+				if (required) pendingResultingRequirement.push_back(permission);
+				else pendingResultingRequirement.erase(found);
+			}
+		}
+		if (ImGui::Button("Convert to manual"))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			try
+			{
+				auto rebuilt = world->removeSectorDoorButton(pendingRequirementSector,
+					pendingRequirementObject, pendingResultingRequirement);
+				if (!rebuilt) throw runtime_error("Could not rebuild the Door");
+				gSelectedSectorObject = rebuilt;
+				commitDocumentEdit(std::move(undo));
+				pendingRequirementConflict = false;
+				ImGui::CloseCurrentPopup();
+			}
+			catch (core::Exception const& error)
+			{
+				core::addLogMessage("Door editor", 0, core::LogLevel::Error, error.getMessage());
+			}
+			catch (std::exception const& error)
+			{
+				core::addLogMessage("Door editor", 0, core::LogLevel::Error, error.what());
+			}
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+		{
+			pendingRequirementConflict = false;
+			pendingResultingRequirement.clear();
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
+	}
 }
