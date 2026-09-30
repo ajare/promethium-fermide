@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <array>
 #include <bitset>
 #include <vector>
@@ -669,7 +670,15 @@ namespace core
 			AccessPermissionId except = AccessPermissionId{}) const;
 		bool permissionSetNameTaken(std::string const& trimmed,
 			PermissionSetId except = PermissionSetId{}) const;
+		std::bitset<256> currentDirectAccessGrants(Agent const& agent) const;
+		std::set<PermissionSetId> currentPermissionSets(Agent const& agent) const;
 		std::bitset<256> effectiveAccessGrants(Agent const& agent) const;
+		AccessPermissionId accessPermissionNamed(std::string_view name) const;
+		PermissionSetId permissionSetNamed(std::string_view name) const;
+		bool setAgentRuntimeAccessPermissionGrant(AgentId agent,
+			AccessPermissionId permission, bool granted);
+		bool setAgentRuntimePermissionSetAssignment(AgentId agent,
+			PermissionSetId set, bool assigned);
 		std::vector<AccessPermissionId> missingInteractionPermissions(
 			InteractionPoint const& point, Agent const& agent) const;
 		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;

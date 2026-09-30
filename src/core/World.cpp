@@ -9601,7 +9601,13 @@ namespace core
 		auto bit = id.value - 1;
 		// Clear all references before releasing the slot, so a reused identity can
 		// never inherit an old grant or requirement.
-		for (auto const& [agentId, agent] : mAgents.entries()) { (void)agentId; agent->mDirectAccessGrants.reset(bit); }
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			agent->mDirectAccessGrants.reset(bit);
+			agent->mRuntimeDirectGrantAdditions.reset(bit);
+			agent->mRuntimeDirectGrantRemovals.reset(bit);
+		}
 		for (auto const& [setId, permissionSet] : mPermissionSets.entries())
 		{ (void)setId; permissionSet->mPermissions.reset(bit); }
 		for (auto const& [pointId, point] : mInteractionPoints.entries()) { (void)pointId; point->mPermissionRequirement.reset(bit); }
@@ -9661,12 +9667,100 @@ namespace core
 		return result;
 	}
 
+	bitset<256> World::currentDirectAccessGrants(Agent const& agent) const
+	{
+		return (agent.mDirectAccessGrants | agent.mRuntimeDirectGrantAdditions)
+			& ~agent.mRuntimeDirectGrantRemovals;
+	}
+
+	set<PermissionSetId> World::currentPermissionSets(Agent const& agent) const
+	{
+		auto result = agent.mPermissionSets;
+		result.insert(agent.mRuntimePermissionSetAdditions.begin(),
+			agent.mRuntimePermissionSetAdditions.end());
+		for (auto id : agent.mRuntimePermissionSetRemovals) result.erase(id);
+		return result;
+	}
+
 	bitset<256> World::effectiveAccessGrants(Agent const& agent) const
 	{
-		auto result = agent.mDirectAccessGrants;
-		for (auto id : agent.mPermissionSets)
+		auto result = currentDirectAccessGrants(agent);
+		for (auto id : currentPermissionSets(agent))
 			if (auto permissionSet = mPermissionSets.find(id)) result |= permissionSet->mPermissions;
 		return result;
+	}
+
+	AccessPermissionId World::accessPermissionNamed(string_view name) const
+	{
+		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
+			if (mAccessPermissions[bit] && mAccessPermissions[bit]->getName() == name)
+				return AccessPermissionId{ bit + 1 };
+		return {};
+	}
+
+	PermissionSetId World::permissionSetNamed(string_view name) const
+	{
+		for (auto const& [id, permissionSet] : mPermissionSets.entries())
+			if (permissionSet->getName() == name) return id;
+		return {};
+	}
+
+	bool World::setAgentRuntimeAccessPermissionGrant(AgentId agentId,
+		AccessPermissionId permission, bool granted)
+	{
+		invalidateSimulationSnapshot();
+		auto* agent = mAgents.find(agentId);
+		if (!agent || !lookupAccessPermission(permission)) return false;
+		auto const bit = permission.value - 1;
+		auto const current = currentDirectAccessGrants(*agent).test(bit);
+		if (current == granted) return false;
+		auto const effectiveBefore = effectiveAccessGrants(*agent).test(bit);
+		if (granted)
+		{
+			agent->mRuntimeDirectGrantRemovals.reset(bit);
+			agent->mRuntimeDirectGrantAdditions.set(bit,
+				!agent->mDirectAccessGrants.test(bit));
+		}
+		else
+		{
+			agent->mRuntimeDirectGrantAdditions.reset(bit);
+			agent->mRuntimeDirectGrantRemovals.set(bit,
+				agent->mDirectAccessGrants.test(bit));
+		}
+		auto const effectiveAfter = effectiveAccessGrants(*agent).test(bit);
+		if (effectiveBefore != effectiveAfter)
+			reconsiderAgentAuthorizationPath(*agent, permission, effectiveAfter);
+		return true;
+	}
+
+	bool World::setAgentRuntimePermissionSetAssignment(AgentId agentId,
+		PermissionSetId id, bool assigned)
+	{
+		invalidateSimulationSnapshot();
+		auto* agent = mAgents.find(agentId);
+		auto* permissionSet = mPermissionSets.find(id);
+		if (!agent || !permissionSet) return false;
+		auto current = currentPermissionSets(*agent);
+		if (current.contains(id) == assigned) return false;
+		auto const before = effectiveAccessGrants(*agent);
+		if (assigned)
+		{
+			agent->mRuntimePermissionSetRemovals.erase(id);
+			if (!agent->mPermissionSets.contains(id))
+				agent->mRuntimePermissionSetAdditions.insert(id);
+		}
+		else
+		{
+			agent->mRuntimePermissionSetAdditions.erase(id);
+			if (agent->mPermissionSets.contains(id))
+				agent->mRuntimePermissionSetRemovals.insert(id);
+		}
+		auto const after = effectiveAccessGrants(*agent);
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (before.test(bit) != after.test(bit))
+				reconsiderAgentAuthorizationPath(*agent,
+					AccessPermissionId{ bit + 1 }, after.test(bit));
+		return true;
 	}
 
 	vector<AccessPermissionId> World::getAgentEffectiveAccessGrants(AgentId id) const
@@ -9688,8 +9782,8 @@ namespace core
 		if (!lookupAccessPermission(permission)) throw invalid_argument("Unknown Access permission");
 		EffectiveAccessGrantSources result;
 		auto bit = permission.value - 1;
-		result.direct = agent->mDirectAccessGrants.test(bit);
-		for (auto id : agent->mPermissionSets)
+		result.direct = currentDirectAccessGrants(*agent).test(bit);
+		for (auto id : currentPermissionSets(*agent))
 			if (auto permissionSet = mPermissionSets.find(id); permissionSet && permissionSet->mPermissions.test(bit))
 				result.permissionSets.push_back(id);
 		return result;
@@ -9767,10 +9861,19 @@ namespace core
 		if (!mSimulationPaused) return reject("Permission sets can only be edited while the simulation is paused");
 		auto permissionSet = mPermissionSets.find(id); if (!permissionSet) return reject("Unknown Permission set");
 		auto permissions = permissionSet->mPermissions;
-		for (auto const& [agentId, agent] : mAgents.entries()) if (agent->mPermissionSets.erase(id))
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			auto const before = effectiveAccessGrants(*agent);
+			agent->mPermissionSets.erase(id);
+			agent->mRuntimePermissionSetAdditions.erase(id);
+			agent->mRuntimePermissionSetRemovals.erase(id);
+			auto const after = effectiveAccessGrants(*agent);
 			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
-				if (permissions.test(bit) && !effectiveAccessGrants(*agent).test(bit))
-					reconsiderAgentAuthorizationPath(*agent, AccessPermissionId{ bit + 1 }, false);
+				if (permissions.test(bit) && before.test(bit) != after.test(bit))
+					reconsiderAgentAuthorizationPath(*agent,
+						AccessPermissionId{ bit + 1 }, after.test(bit));
+		}
 		mPermissionSets.remove(id); modify(); if (diagnostic) diagnostic->clear(); return true;
 	}
 
@@ -9796,7 +9899,7 @@ namespace core
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
 			(void)agentId;
-			if (agent->mPermissionSets.contains(id))
+			if (currentPermissionSets(*agent).contains(id))
 				affectedAgents.emplace_back(agent.get(), effectiveAccessGrants(*agent).test(bit));
 		}
 		permissionSet->mPermissions.set(bit, included);

@@ -235,6 +235,14 @@ namespace core
 		// from the external Agent tag registry.
 		std::set<PermissionSetId> mPermissionSets;
 
+		// Runtime authorization overlays are current simulation state only. They
+		// express deltas from the authored initial grants and assignments, are not
+		// serialized, survive pause/resume, and disappear on Reset simulation.
+		std::bitset<256> mRuntimeDirectGrantAdditions;
+		std::bitset<256> mRuntimeDirectGrantRemovals;
+		std::set<PermissionSetId> mRuntimePermissionSetAdditions;
+		std::set<PermissionSetId> mRuntimePermissionSetRemovals;
+
 		// Agent tag assignments are World-authored references into the one
 		// attached Agent tag registry. A set makes duplicate assignment
 		// structurally impossible in memory and gives persistence a stable numeric

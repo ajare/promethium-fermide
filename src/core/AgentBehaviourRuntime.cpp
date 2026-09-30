@@ -831,6 +831,22 @@ namespace core
 			MarkerId marker;
 		};
 
+		enum class PendingAuthorizationCommandType
+		{
+			GrantAccessPermission,
+			RevokeAccessPermission,
+			AssignPermissionSet,
+			UnassignPermissionSet
+		};
+
+		struct PendingAuthorizationCommand
+		{
+			PendingAuthorizationCommandType type;
+			AgentId agent;
+			AccessPermissionId permission;
+			PermissionSetId permissionSet;
+		};
+
 		struct PendingLogMessage
 		{
 			LogLevel level{ LogLevel::Info };
@@ -849,9 +865,12 @@ namespace core
 			std::function<bool(std::string, uint64_t, std::string&)> setTimer;
 			std::function<bool(std::string const&)> cancelTimer;
 			std::function<uint64_t()> nextRandom;
+			std::function<bool(PendingAuthorizationCommandType,
+				std::string_view, std::string&)> changeAuthorization;
 			std::map<std::string, uint64_t> stagedTimers;
 			uint64_t stagedRandomState{ 0 };
 			std::vector<PendingMovementCommand> commands;
+			std::vector<PendingAuthorizationCommand> authorizationCommands;
 			std::vector<PendingLogMessage> logs;
 			// Log staging budgets for the current window. The count and byte caps
 			// are fixed before the callback runs so a message that will ultimately
@@ -1148,6 +1167,60 @@ namespace core
 				return nullptr;
 			}
 			return scope;
+		}
+
+		int changeAuthorization(lua_State* state,
+			PendingAuthorizationCommandType type, char const* operation)
+		{
+			auto* scope = activeTimerScope(state);
+			if (!scope) return 0;
+			countCommand(state, *scope);
+			int nameIndex = 0;
+			for (int index = 1; index <= lua_gettop(state); ++index)
+				if (lua_type(state, index) == LUA_TSTRING)
+				{
+					if (nameIndex != 0)
+						return luaL_error(state, "%s requires exactly one name", operation);
+					nameIndex = index;
+				}
+			if (nameIndex == 0)
+				return luaL_error(state, "%s requires a name", operation);
+			size_t length = 0;
+			auto const* text = lua_tolstring(state, nameIndex, &length);
+			std::string diagnostic;
+			auto const changed = scope->changeAuthorization(type,
+				std::string_view(text ? text : "", length), diagnostic);
+			if (!diagnostic.empty()) return luaL_error(state, "%s", diagnostic.c_str());
+			pushCommandResult(state, true, changed ? "accepted" : "no_op");
+			return 1;
+		}
+
+		int grantAccessPermission(lua_State* state)
+		{
+			return changeAuthorization(state,
+				PendingAuthorizationCommandType::GrantAccessPermission,
+				"grant_access_permission");
+		}
+
+		int revokeAccessPermission(lua_State* state)
+		{
+			return changeAuthorization(state,
+				PendingAuthorizationCommandType::RevokeAccessPermission,
+				"revoke_access_permission");
+		}
+
+		int assignPermissionSet(lua_State* state)
+		{
+			return changeAuthorization(state,
+				PendingAuthorizationCommandType::AssignPermissionSet,
+				"assign_permission_set");
+		}
+
+		int unassignPermissionSet(lua_State* state)
+		{
+			return changeAuthorization(state,
+				PendingAuthorizationCommandType::UnassignPermissionSet,
+				"unassign_permission_set");
 		}
 
 		int randomNumber(lua_State* state)
@@ -2373,6 +2446,18 @@ namespace core
 			lua_pushcclosure(lua, randomInteger, 1);
 			lua_setfield(lua, backing, "random_integer");
 			lua_pushlightuserdata(lua, &instance.scope);
+			lua_pushcclosure(lua, grantAccessPermission, 1);
+			lua_setfield(lua, backing, "grant_access_permission");
+			lua_pushlightuserdata(lua, &instance.scope);
+			lua_pushcclosure(lua, revokeAccessPermission, 1);
+			lua_setfield(lua, backing, "revoke_access_permission");
+			lua_pushlightuserdata(lua, &instance.scope);
+			lua_pushcclosure(lua, assignPermissionSet, 1);
+			lua_setfield(lua, backing, "assign_permission_set");
+			lua_pushlightuserdata(lua, &instance.scope);
+			lua_pushcclosure(lua, unassignPermissionSet, 1);
+			lua_setfield(lua, backing, "unassign_permission_set");
+			lua_pushlightuserdata(lua, &instance.scope);
 			lua_pushcclosure(lua, logMessage, 1);
 			lua_setfield(lua, backing, "log");
 			pushImmutableProxy(lua);
@@ -2394,13 +2479,15 @@ namespace core
 		}
 
 		void prepareScope(World& world, AgentId agentId, Instance& instance,
-			std::vector<PendingMovementCommand> const& pendingCommands)
+			std::vector<PendingMovementCommand> const& pendingCommands,
+			std::vector<PendingAuthorizationCommand> const& pendingAuthorizationCommands)
 		{
 			instance.scope.active = true;
 			instance.scope.movementCommandIssued = false;
 			instance.scope.commandCount = 0;
 			instance.scope.commandLimit = commandLimit;
 			instance.scope.commands.clear();
+			instance.scope.authorizationCommands.clear();
 			instance.scope.logs.clear();
 			beginLogWindow();
 			instance.scope.logsSuppressed = false;
@@ -2469,6 +2556,59 @@ namespace core
 				value = (value ^ (value >> 27)) * 0x94d049bb133111ebull;
 				return value ^ (value >> 31);
 			};
+			instance.scope.changeAuthorization = [&world, &instance, agentId,
+				&pendingAuthorizationCommands](
+				PendingAuthorizationCommandType type, std::string_view name,
+				std::string& diagnostic)
+			{
+				PendingAuthorizationCommand command{ type, agentId, {}, {} };
+				if (type == PendingAuthorizationCommandType::GrantAccessPermission
+					|| type == PendingAuthorizationCommandType::RevokeAccessPermission)
+				{
+					command.permission = world.accessPermissionNamed(name);
+					if (!command.permission)
+					{
+						diagnostic = std::format(
+							"Unknown Access permission '{}' (names are case-sensitive)", name);
+						return false;
+					}
+				}
+				else
+				{
+					command.permissionSet = world.permissionSetNamed(name);
+					if (!command.permissionSet)
+					{
+						diagnostic = std::format(
+							"Unknown Permission set '{}' (names are case-sensitive)", name);
+						return false;
+					}
+				}
+
+				bool current = command.permission
+					? world.currentDirectAccessGrants(*world.mAgents.find(agentId))
+						.test(command.permission.value - 1)
+					: world.currentPermissionSets(*world.mAgents.find(agentId))
+						.contains(command.permissionSet);
+				auto foldPrior = [&](PendingAuthorizationCommand const& prior)
+				{
+					if (prior.agent != agentId) return;
+					if (command.permission && prior.permission == command.permission)
+						current = prior.type
+							== PendingAuthorizationCommandType::GrantAccessPermission;
+					else if (command.permissionSet
+						&& prior.permissionSet == command.permissionSet)
+						current = prior.type
+							== PendingAuthorizationCommandType::AssignPermissionSet;
+				};
+				for (auto const& prior : pendingAuthorizationCommands) foldPrior(prior);
+				for (auto const& prior : instance.scope.authorizationCommands) foldPrior(prior);
+				auto const desired = type
+					== PendingAuthorizationCommandType::GrantAccessPermission
+					|| type == PendingAuthorizationCommandType::AssignPermissionSet;
+				if (current == desired) return false;
+				instance.scope.authorizationCommands.push_back(command);
+				return true;
+			};
 		}
 
 		void publishLogs(Instance const& instance)
@@ -2526,7 +2666,8 @@ namespace core
 
 		bool finishCallback(Instance& instance, std::string_view callback,
 			ProtectedCallResult const& result,
-			std::vector<PendingMovementCommand>& commands)
+			std::vector<PendingMovementCommand>& commands,
+			std::vector<PendingAuthorizationCommand>& authorizationCommands)
 		{
 			instance.scope.active = false;
 			if (result.succeeded)
@@ -2535,6 +2676,9 @@ namespace core
 				instance.randomState = instance.scope.stagedRandomState;
 				commands.insert(commands.end(), instance.scope.commands.begin(),
 					instance.scope.commands.end());
+				authorizationCommands.insert(authorizationCommands.end(),
+					instance.scope.authorizationCommands.begin(),
+					instance.scope.authorizationCommands.end());
 				publishLogs(instance);
 			}
 			else
@@ -2543,6 +2687,7 @@ namespace core
 				record(instance, AgentBehaviourRuntimeStage::Callback, callback, result);
 			}
 			instance.scope.commands.clear();
+			instance.scope.authorizationCommands.clear();
 			instance.scope.logs.clear();
 			instance.scope.stagedTimers.clear();
 			return result.succeeded;
@@ -2627,7 +2772,9 @@ namespace core
 				if (pushCallback(instance, "on_stop"))
 				{
 					std::vector<PendingMovementCommand> noCommands;
-					prepareScope(world, instance.scope.agent, instance, noCommands);
+					std::vector<PendingAuthorizationCommand> noAuthorizationCommands;
+					prepareScope(world, instance.scope.agent, instance, noCommands,
+						noAuthorizationCommands);
 					auto const reasonName = teardownReasonName(reason);
 					lua_pushlstring(lua, reasonName.data(), reasonName.size());
 					pushReadOnlyContext(world, instance);
@@ -2686,7 +2833,8 @@ namespace core
 
 		void dispatchOutcome(World& world, AgentId agentId, Instance& instance,
 			PendingOutcome const& outcome,
-			std::vector<PendingMovementCommand>& commands)
+			std::vector<PendingMovementCommand>& commands,
+			std::vector<PendingAuthorizationCommand>& authorizationCommands)
 		{
 			auto* lua = state.get();
 			auto const base = lua_gettop(lua);
@@ -2694,7 +2842,8 @@ namespace core
 			{
 				if (pushCallback(instance, "on_route_lost"))
 				{
-					prepareScope(world, agentId, instance, commands);
+					prepareScope(world, agentId, instance, commands,
+						authorizationCommands);
 					pushMarkerHandle(lua, outcome.destination);
 					auto const reason = routeLossReasonName(outcome.routeLossReason);
 					lua_pushlstring(lua, reason.data(), reason.size());
@@ -2702,18 +2851,21 @@ namespace core
 					auto const admission = admitCallback();
 					auto const result = admission.succeeded
 						? protectedCall(lua, budget, 3, 0) : admission;
-					finishCallback(instance, "on_route_lost", result, commands);
+					finishCallback(instance, "on_route_lost", result, commands,
+						authorizationCommands);
 				}
 			}
 			else if (pushCallback(instance, "on_event"))
 			{
-				prepareScope(world, agentId, instance, commands);
+				prepareScope(world, agentId, instance, commands,
+					authorizationCommands);
 				pushSemanticEvent(outcome);
 				pushContext(world, instance);
 				auto const admission = admitCallback();
 				auto const result = admission.succeeded
 					? protectedCall(lua, budget, 2, 0) : admission;
-				finishCallback(instance, "on_event", result, commands);
+				finishCallback(instance, "on_event", result, commands,
+					authorizationCommands);
 			}
 			lua_settop(lua, base);
 		}
@@ -2723,6 +2875,7 @@ namespace core
 			callbackCount = 0;
 			currentTick = world.mSimulationTick;
 			std::vector<PendingMovementCommand> commands;
+			std::vector<PendingAuthorizationCommand> authorizationCommands;
 			std::vector<AgentId> disabledAgents;
 			for (auto& [agentId, instance] : instances)
 			{
@@ -2737,7 +2890,8 @@ namespace core
 					{ return lhs.sequence < rhs.sequence; });
 				for (auto const& outcome : instance.lifecycleOutcomes)
 				{
-					dispatchOutcome(world, agentId, instance, outcome, commands);
+					dispatchOutcome(world, agentId, instance, outcome, commands,
+						authorizationCommands);
 					if (instance.disabled) break;
 				}
 				instance.lifecycleOutcomes.clear();
@@ -2749,14 +2903,16 @@ namespace core
 					auto const base = lua_gettop(lua);
 					if (pushCallback(instance, "on_start"))
 					{
-						prepareScope(world, agentId, instance, commands);
+						prepareScope(world, agentId, instance, commands,
+							authorizationCommands);
 						pushContext(world, instance);
 						lua_rawgeti(lua, LUA_REGISTRYINDEX,
 							instance.configurationReference);
 						auto const admission = admitCallback();
 						auto const result = admission.succeeded
 							? protectedCall(lua, budget, 2, 0) : admission;
-						finishCallback(instance, "on_start", result, commands);
+						finishCallback(instance, "on_start", result, commands,
+							authorizationCommands);
 					}
 					lua_settop(lua, base);
 				}
@@ -2768,7 +2924,8 @@ namespace core
 						{ return lhs.sequence < rhs.sequence; });
 					for (auto const& outcome : instance.outcomes)
 					{
-						dispatchOutcome(world, agentId, instance, outcome, commands);
+						dispatchOutcome(world, agentId, instance, outcome, commands,
+							authorizationCommands);
 						if (instance.disabled) break;
 					}
 					instance.outcomes.clear();
@@ -2787,13 +2944,15 @@ namespace core
 						auto const base = lua_gettop(lua);
 						if (pushCallback(instance, "on_timer"))
 						{
-							prepareScope(world, agentId, instance, commands);
+							prepareScope(world, agentId, instance, commands,
+								authorizationCommands);
 							lua_pushlstring(lua, name.data(), name.size());
 							pushContext(world, instance);
 							auto const admission = admitCallback();
 							auto const result = admission.succeeded
 								? protectedCall(lua, budget, 2, 0) : admission;
-							finishCallback(instance, "on_timer", result, commands);
+							finishCallback(instance, "on_timer", result, commands,
+								authorizationCommands);
 						}
 						lua_settop(lua, base);
 						if (instance.disabled) break;
@@ -2809,7 +2968,32 @@ namespace core
 
 			// Every callback above has returned and the phase marker is still None.
 			// Apply only complete successful callback batches, in stable Agent/event
-			// order, through the same validated movement seam as the C++ facade.
+			// order. Authorization is applied before movement so a move issued in the
+			// same callback sees the newly current routing constraints.
+			for (auto const& command : authorizationCommands)
+			{
+				if (std::find(disabledAgents.begin(), disabledAgents.end(), command.agent)
+					!= disabledAgents.end()) continue;
+				switch (command.type)
+				{
+				case PendingAuthorizationCommandType::GrantAccessPermission:
+					(void)world.setAgentRuntimeAccessPermissionGrant(
+						command.agent, command.permission, true);
+					break;
+				case PendingAuthorizationCommandType::RevokeAccessPermission:
+					(void)world.setAgentRuntimeAccessPermissionGrant(
+						command.agent, command.permission, false);
+					break;
+				case PendingAuthorizationCommandType::AssignPermissionSet:
+					(void)world.setAgentRuntimePermissionSetAssignment(
+						command.agent, command.permissionSet, true);
+					break;
+				case PendingAuthorizationCommandType::UnassignPermissionSet:
+					(void)world.setAgentRuntimePermissionSetAssignment(
+						command.agent, command.permissionSet, false);
+					break;
+				}
+			}
 			for (auto const& command : commands)
 			{
 				if (std::find(disabledAgents.begin(), disabledAgents.end(), command.agent)

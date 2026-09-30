@@ -156,9 +156,19 @@ with `accepted` and `status` fields. A different destination while busy reports
 `agent_busy`, and issuing more than one movement command in one callback disables
 that instance as a programming error without applying the callback's commands.
 Context capabilities expire when the callback returns, and queued movement is
-applied only after callbacks return. `context.random_integer(minimum, maximum)`
-returns an inclusive integer and `context.random_number()` returns a number in
-`[0, 1)`. Their private stream is derived from the authored World random seed,
+applied only after callbacks return. The version-1 context also exposes
+`grant_access_permission(name)`, `revoke_access_permission(name)`,
+`assign_permission_set(name)`, and `unassign_permission_set(name)` for the
+behaviour's Agent. Names resolve case-sensitively at the callback boundary;
+unknown or renamed names fail the callback with a visible runtime diagnostic.
+Each operation returns the same immutable `accepted`/`status` result shape,
+using `accepted` for a change and `no_op` when the requested current state
+already holds. Successful changes are runtime overlays: they affect routing and
+control authorization after the callback batch, survive pause/resume, never
+dirty or enter the World document, and are discarded by Reset simulation.
+`context.random_integer(minimum, maximum)` returns an inclusive integer and
+`context.random_number()` returns a number in `[0, 1)`. Their private stream is
+derived from the authored World random seed,
 Agent ID, and behaviour ID. Pause/resume retains stream position; reset, document
 reload, and registry reload recreate it. Lua's `math.random` and
 `math.randomseed` remain unavailable.
