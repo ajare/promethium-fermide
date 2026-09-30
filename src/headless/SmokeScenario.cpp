@@ -3604,6 +3604,10 @@ namespace
 	bool directionalLadderBoundsBatchesAndPreventsOpposingAdmission()
 	{
 		core::World world("Directional ladder", 4, 5);
+		// Bounded-batch fairness applies to waiters who keep their queue tickets.
+		auto waiting = world.getTraversalWaitingPolicy();
+		waiting.minimumReplanWaitTicks = MaximumSimulationTicks * 4 + 1;
+		world.setTraversalWaitingPolicy(waiting);
 		auto lower = world.addCorridor(0, 0, 3);
 		auto upper = world.addCorridor(3, 0, 3);
 		core::World::CreateLadderOptions options{ 4, false, true };
@@ -4945,6 +4949,11 @@ namespace
 	bool singleCarriageShuttleUsesTransportJourneyProtocol()
 	{
 		core::World world("Single carriage shuttle", 12, 2);
+		// This scenario observes continuous queue ownership across a vehicle cycle.
+		// Voluntary planning deliberately forfeits that ownership (#256).
+		auto waiting = world.getTraversalWaitingPolicy();
+		waiting.minimumReplanWaitTicks = MaximumSimulationTicks * 24 + 1;
+		world.setTraversalWaitingPolicy(waiting);
 		auto left = world.addRoom("Left platform", 0, 0, 0, 3, 1);
 		auto right = world.addRoom("Right platform", 0, 0, 7, 3, 1);
 		core::World::CreateShuttleOptions options{ 1, 3, { 0, 7 }, 0 };

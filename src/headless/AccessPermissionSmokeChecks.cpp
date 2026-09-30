@@ -239,6 +239,9 @@ namespace
 		require(chosenDoor(agent->getPath()) == openDoor.traversalResource,
 			"losing a relevant grant did not invalidate the current Path");
 		require(world.setAgentRuntimeAccessPermissionGrant(agentId, key, true), "Runtime grant failed");
+		require(agent->getState() == core::Agent::State::RoutePlanning && !agent->getPath(),
+			"Authorization gain calculated instead of planning");
+		world.advanceTicks(agent->getRoutePlanningRemainingTicks());
 		require(chosenDoor(agent->getPath()) == protectedDoor.traversalResource,
 			"gaining a relevant grant did not reconsider the current Path");
 		auto unchanged = agent->getPath();

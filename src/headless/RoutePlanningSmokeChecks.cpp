@@ -521,6 +521,126 @@ namespace
 		}
 	}
 
+	void voluntaryAuthorizationPlanning(float persistence, bool invalidate, bool fail,
+		bool withdrawShortcut = false)
+	{
+		core::World world("Voluntary authorization", 12, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto shortcut = world.addSectorDoor(front, 0, 3, {});
+		auto original = world.addSectorDoor(front, 0, 9, {});
+		world.addSectorMarker(back, 0, 2.5f, "Destination");
+		world.finishBuild();
+		world.pauseSimulation();
+		auto id = world.createAgent("Planner", front, 0, 2.5f);
+		auto agent = world.lookupAgent(id).entity;
+		auto key = world.addAccessPermission("Shortcut");
+		auto oldKey = world.addAccessPermission("Original");
+		require(world.setManualDoorPermissionRequirement(shortcut.traversalResource, { key }), "Requirement refused");
+		require(world.setManualDoorPermissionRequirement(original.traversalResource, { oldKey }), "Requirement refused");
+		require(world.grantAgentAccessPermission(id, oldKey), "Initial grant refused");
+		require(world.setAgentIndividualRoutePersistence(id, persistence), "Persistence refused");
+		require(world.setAgentIndividualMinimumRoutePlanningTime(id, 0.1f), "Minimum refused");
+		require(world.setAgentIndividualMaximumRoutePlanningTime(id, 0.1f), "Maximum refused");
+		require(world.resumeSimulation(), "Resume failed");
+		world.moveAgentToMarker(id, world.getMarkerIds().front());
+		world.advanceTicks(agent->getRoutePlanningRemainingTicks());
+		auto retained = agent->getPath();
+		require(bool(retained), "Initial Path missing");
+		auto position = agent->getGlobalPosition();
+		auto decisions = world.getGraph()->getRouteWorkCounts().decisions;
+		require(world.setAgentRuntimeAccessPermissionGrant(id, key, true), "Gain refused");
+		require(!agent->getPath() && agent->getState() == core::Agent::State::RoutePlanning
+			&& world.getGraph()->getRouteWorkCounts().decisions == decisions,
+			"Voluntary planning exposed or calculated a Path at entry");
+		auto total = agent->getRoutePlanningRemainingTicks();
+		world.advanceTick();
+		if (invalidate)
+			require(world.setAgentRuntimeAccessPermissionGrant(id, oldKey, false), "Candidate invalidation refused");
+		// Repeated same-destination gains must neither resample nor postpone expiry.
+		require(world.setAgentRuntimeAccessPermissionGrant(id, key, false), "Revoke refused");
+		require(world.setAgentRuntimeAccessPermissionGrant(id, key, true), "Repeated gain refused");
+		if (fail || withdrawShortcut)
+			require(world.setAgentRuntimeAccessPermissionGrant(id, key, false), "Shortcut withdrawal refused");
+		require(agent->getRoutePlanningRemainingTicks() == total - 1
+			&& agent->getRoutePlanningTotalTicks() == total, "Environmental trigger restarted planning");
+		world.consumeSimulationEvents();
+		world.advanceTicks(total - 2);
+		require(!agent->getPath() && agent->getGlobalPosition() == position, "Thinking exposed a Path or moved");
+		world.advanceTick();
+		require(agent->getGlobalPosition() == position, "Expiry moved Agent");
+		unsigned lost = 0;
+		for (auto const& event : world.consumeSimulationEvents())
+		{
+			if (event.type == core::SimulationEventType::RouteLost) ++lost;
+			require(event.type != core::SimulationEventType::MovementCancelled, "Voluntary planning cancelled destination");
+		}
+		if (fail)
+		{
+			require(lost == 1 && !agent->getPath() && agent->getState() == core::Agent::State::Idle,
+				"Failed upgrade did not publish Route loss and enter Idle");
+			world.advanceTicks(10);
+			for (auto const& event : world.consumeSimulationEvents())
+				require(event.type != core::SimulationEventType::RouteLost, "Repeated Route loss");
+		}
+		else
+		{
+			require(!lost && agent->getPath(), "Valid voluntary decision lost route");
+			require((agent->getPath() == retained) == ((persistence == 1.0f || withdrawShortcut) && !invalidate),
+				"Persistence or mandatory upgrade chose wrong Path");
+			world.advanceTick();
+			require(agent->getGlobalPosition() != position, "Chosen Path did not move next tick");
+		}
+	}
+
+	void voluntaryQueuePlanning()
+	{
+		core::World world("Voluntary queue", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		world.addSectorDoor(front, 0, 2, {});
+		world.addSectorMarker(back, 0, 6.5f, "Destination");
+		world.finishBuild();
+		auto id = world.createAgent("Waiter", front, 0, 1.375f);
+		auto agent = world.lookupAgent(id).entity;
+		world.moveAgentToMarker(id, world.getMarkerIds().front());
+		bool queued = false;
+		for (unsigned tick = 0; tick < 2000 && !queued; ++tick)
+		{
+			world.advanceTick();
+			for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+				if (request.owner == id && request.queueTicket && !request.permit) queued = true;
+		}
+		require(queued, "Queue fixture did not queue");
+		auto retained = agent->getPath();
+		auto policy = world.getTraversalWaitingPolicy();
+		policy.minimumReplanWaitTicks = 1;
+		policy.replanIntervalTicks = 1;
+		world.setTraversalWaitingPolicy(policy);
+		world.advanceTick();
+		require(agent->getState() == core::Agent::State::RoutePlanning && !agent->getPath()
+			&& agent->getRoutePlanningRemainingTicks() == agent->getRoutePlanningTotalTicks(),
+			"Queue delay did not begin a complete stationary planning interval");
+		auto position = agent->getGlobalPosition();
+		auto snapshot = world.getSimulationSnapshot();
+		require(!snapshot.agents.front().hasPath && !snapshot.agents.front().pathNodeCount
+			&& !snapshot.agents.front().hasLocomotionTask, "Private candidate leaked into public active movement");
+		require(snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(), "Queue planning retained transactions");
+		for (auto const& resource : snapshot.traversalResources)
+		{
+			require(!resource.admissionReservationCount && !resource.preparationLeaseCount
+				&& !resource.crossingLeaseCount, "Queue planning retained coordination");
+			for (auto const& lane : resource.queueLanes)
+			{
+				require(lane.queue.empty(), "Queue planning retained priority");
+				for (auto const& slot : lane.positions) require(!slot.owner, "Queue planning retained position");
+			}
+		}
+		world.advanceTicks(agent->getRoutePlanningRemainingTicks());
+		require(agent->getPath() == retained && agent->getGlobalPosition() == position,
+			"Unimproved queue Path was not retained at stationary expiry");
+	}
+
 	void editorException()
 	{
 		Fixture f;
@@ -535,6 +655,12 @@ namespace
 
 void runRoutePlanningSmokeChecks()
 {
+	voluntaryAuthorizationPlanning(0.0f, false, false);
+	voluntaryAuthorizationPlanning(1.0f, false, false);
+	voluntaryAuthorizationPlanning(1.0f, true, false);
+	voluntaryAuthorizationPlanning(1.0f, true, true);
+	voluntaryAuthorizationPlanning(0.0f, false, false, true);
+	voluntaryQueuePlanning();
 	mandatoryTopologyPlanning(false);
 	mandatoryTopologyPlanning(true);
 	assignedIdleFallbackRestoration(false);

@@ -10,6 +10,7 @@
 #include "core/Graph.h"
 #include "core/MarkerSectorObject.h"
 #include "core/Path.h"
+#include "core/Pathing.h"
 #include "core/Vertex.h"
 #include "core/World.h"
 #include "core/Coordination.h"
@@ -394,13 +395,27 @@ namespace core
 				|| agent.mState == Agent::State::AwaitingTraversalCommit);
 	}
 
-	void SimulationCoordinator::replanAgentAfterAuthorizationRefusal(AgentId id)
+	void SimulationCoordinator::replanAgentAfterAuthorizationRefusal(AgentId id, bool retainPath)
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto agent = mWorld.mAgents.find(id);
-		if (!agent || !agent->mPath.path || agent->mPath.path->nodes.empty()) return;
+		if (!agent) return;
+		if (agent->mState == Agent::State::RoutePlanning)
+		{
+			if (!retainPath) mWorld.mMovementGoals.at(id).retainedPath.reset();
+			return;
+		}
+		if (!agent->mPath.path || agent->mPath.path->nodes.empty()) return;
 		auto& goal = mWorld.mMovementGoals[id];
 		if (goal.cancelling || goal.planningDeferred) return;
+		if (retainPath)
+		{
+			if (hasCommittedMovement(*agent)) return;
+			goal.retainedPath = agent->mPath.path;
+			goal.retainedFromNode = agent->mPath.targetNode;
+			goal.voluntaryPlanningStartedTick = mWorld.getSimulationTick();
+		}
+		else goal.retainedPath.reset();
 		auto destination = agent->mPath.path->nodes.back().targetVertex;
 		if (!destination || !destination->getSector()) return;
 		goal.position = destination->getPosition();
@@ -523,6 +538,11 @@ namespace core
 				continue; // The first complete planning tick is the next tick.
 			}
 			if (agent->mState != Agent::State::RoutePlanning) continue;
+			if (goal.voluntaryPlanningStartedTick == mWorld.getSimulationTick()) continue;
+			// Invalidity permanently upgrades this episode without sampling again.
+			if (goal.retainedPath && !pathing::comparePathSuffixCosts(*agent, *mWorld.mGraph,
+				*goal.retainedPath, goal.retainedFromNode, *goal.retainedPath, goal.retainedFromNode))
+				goal.retainedPath.reset();
 			if (--agent->mRoutePlanningRemainingTicks != 0) continue;
 			agent->clearRuntimePath();
 			shared_ptr<const Vertex> target;
@@ -558,6 +578,20 @@ namespace core
 				goal.sector = SectorId{ (uint64_t)target->getSector()->getIndex() + 1 };
 			}
 			auto path = target ? mWorld.mGraph->calculatePath(agent, target) : nullptr;
+			if (target && goal.retainedPath)
+			{
+				auto costs = path ? pathing::comparePathSuffixCosts(*agent, *mWorld.mGraph,
+					*goal.retainedPath, goal.retainedFromNode, *path, 0) : std::nullopt;
+				if (!path || (costs && !mWorld.getRouteChoicePolicy().shouldReplacePath(
+					costs->first, costs->second, agent->getEffectiveRoutePersistence().value)))
+				{
+					auto retained = std::move(goal.retainedPath);
+					agent->assignPath(std::move(retained), goal.startPathing, false);
+					agent->mPath.targetNode = goal.retainedFromNode;
+					continue;
+				}
+			}
+			goal.retainedPath.reset();
 			if (target && agent->getSector() == target->getSector().get()
 				&& agent->getGlobalPosition() == target->getPosition()) continue;
 			if (path && !path->nodes.empty())

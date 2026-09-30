@@ -10507,18 +10507,30 @@ namespace core
 		mSimulationCoordinator.replanAgentAfterAuthorizationRefusal(id);
 	}
 
+	void World::beginVoluntaryRoutePlanning(AgentId id)
+	{
+		mSimulationCoordinator.replanAgentAfterAuthorizationRefusal(id, true);
+	}
+
 	void World::replanAgentsAffectedByControlRequirement(TraversalResourceId resource,
 		bitset<256> const& requirement)
 	{
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
-			if ((requirement & ~effectiveAccessGrants(*agent)).none()
-				|| !agent->mPath.path || agent->mPath.path->nodes.empty()) continue;
-			bool affected = false;
-			for (uint32_t i = agent->mPath.targetNode + 1;
-				i < agent->mPath.path->nodes.size(); ++i)
+			auto goal = mMovementGoals.find(agentId);
+			auto path = agent->mPath.path;
+			auto fromNode = agent->mPath.targetNode;
+			if (!path && goal != mMovementGoals.end())
 			{
-				auto const& edge = agent->mPath.path->nodes[i].edge;
+				path = goal->second.retainedPath;
+				fromNode = goal->second.retainedFromNode;
+			}
+			if ((requirement & ~effectiveAccessGrants(*agent)).none()
+				|| !path || path->nodes.empty()) continue;
+			bool affected = false;
+			for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
+			{
+				auto const& edge = path->nodes[i].edge;
 				if (edge && edge->getTraversalResourceId() == resource)
 				{
 					affected = true;
@@ -10532,7 +10544,15 @@ namespace core
 	void World::reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
 		bool gained)
 	{
-		if (!agent.mPath.path || agent.mPath.path->nodes.empty()
+		auto path = agent.mPath.path;
+		auto fromNode = agent.mPath.targetNode;
+		if (!path && !gained)
+			if (auto goal = mMovementGoals.find(getAgentId(&agent)); goal != mMovementGoals.end())
+			{
+				path = goal->second.retainedPath;
+				fromNode = goal->second.retainedFromNode;
+			}
+		if (!path || path->nodes.empty()
 			|| (gained && agent.mTraversalTask && agent.mTraversalTask->permit)) return;
 		auto const bit = changed.value - 1;
 		auto resourceUsesPermission = [&](TraversalResource const& resource)
@@ -10557,8 +10577,8 @@ namespace core
 			return resource && resourceUsesPermission(*resource);
 		};
 		bool currentRelevant = false;
-		for (uint32_t i = agent.mPath.targetNode + 1; i < agent.mPath.path->nodes.size(); ++i)
-			currentRelevant = currentRelevant || edgeUsesPermission(agent.mPath.path->nodes[i].edge);
+		for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
+			currentRelevant = currentRelevant || edgeUsesPermission(path->nodes[i].edge);
 		if (!gained)
 		{
 			if (currentRelevant)
@@ -10572,14 +10592,7 @@ namespace core
 			availableRouteChanged = availableRouteChanged || resourceUsesPermission(*resource);
 		}
 		if (!availableRouteChanged) return;
-		auto destination = agent.mPath.path->nodes.back().targetVertex;
-		auto alternative = mGraph->calculatePath(&agent, destination);
-		if (!alternative || alternative->nodes.empty()) return;
-		auto costs = pathing::comparePathSuffixCosts(agent, *mGraph, *agent.mPath.path,
-			agent.mPath.targetNode, *alternative, 0);
-		if (!costs || getRouteChoicePolicy().shouldReplacePath(costs->first, costs->second,
-			agent.getEffectiveRoutePersistence().value))
-			agent.assignPath(std::move(alternative), true, false);
+		beginVoluntaryRoutePlanning(getAgentId(&agent));
 	}
 
 	InteractionPointId World::createInteractionPoint(string const& name)

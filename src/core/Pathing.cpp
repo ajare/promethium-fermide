@@ -678,6 +678,7 @@ namespace core
 				{
 					auto const& source = path.nodes[i - 1].targetVertex;
 					auto const& edge = path.nodes[i].edge;
+					if (i > fromNode + 1 && blocksPathing(source)) return std::nullopt;
 					uint32_t slot;
 					if (!edge || !graphSlot(&graph, source, slot)) return std::nullopt;
 					auto const& edges = source->getEdges();

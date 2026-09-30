@@ -1636,20 +1636,7 @@ namespace core
 		if (waited < policy.minimumReplanWaitTicks
 			|| (waited - policy.minimumReplanWaitTicks) % policy.replanIntervalTicks != 0) return;
 
-		auto target = mPath.path->nodes.back().targetVertex;
-		auto alternative = mWorld->getGraph()->calculatePath(this, mTraversalTask->sourceVertex, target);
-		if (!alternative || alternative->nodes.size() < 2) return;
-		// Re-score both complete suffixes from one immutable current observation
-		// context rather than comparing the old Path's stored decision with a new one.
-		auto const costs = pathing::comparePathSuffixCosts(*this, *mWorld->getGraph(),
-			*mPath.path, mPath.targetNode, *alternative, 0);
-		if (!costs) return;
-		auto const persistence = getEffectiveRoutePersistence().value;
-		if (mWorld->getRouteChoicePolicy().shouldReplacePath(
-			costs->first, costs->second, persistence))
-		{
-			assignPath(std::move(alternative), true, false);
-		}
+		mWorld->beginVoluntaryRoutePlanning(mWorld->getAgentId(this));
 	}
 
 	void Agent::cleanupTraversal()

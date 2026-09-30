@@ -408,8 +408,8 @@ Path synchronously after the last complete planning tick; physical movement
 starts on the next tick. Pause and deactivation freeze the episode. Lua retains
 its semantic `moving` classification while runtime snapshots expose the distinct
 `RoutePlanning` state, destination Marker, and total/remaining ticks. The Agent
-Selection panel converts those ticks to seconds. Editor Path authoring and
-voluntary route reconsideration remain immediate; neither has a wall-clock result badge.
+Selection panel converts those ticks to seconds. Editor Path authoring remains immediate. Voluntary route reconsideration now
+uses the timed planning described under #256 below.
 
 ## Interruptible Route planning (#254)
 
@@ -439,6 +439,24 @@ next-tick movement. Successful same-destination replanning publishes no movement
 outcome. Failure clears intent and reports the existing Destination removed,
 Topology changed, or Unreachable reason. Authored document Path restoration stays
 immediate; pending runtime episodes are not serialized.
+
+## Voluntary Route planning (#256)
+
+Queue-delay and relevant authorization-gain triggers stop the Agent and privately
+retain its Path and historical diagnostics. The active Path is empty during
+planning; queue tickets, positions, permits and uncommitted interaction ownership
+are forfeited. At expiry, current observations score the retained suffix and a
+new Path together. Route persistence preserves the old Path unless replacement
+improves enough. Invalidating the candidate upgrades the episode to mandatory
+replanning without resampling; repeated environmental triggers do not extend it.
+Movement resumes on the tick after expiry, or failure publishes Route loss.
+
+The headless `route-planning` checks cover authorization gains, both persistence
+outcomes, successful/failed candidate invalidation, repeated triggers, stationary
+expiry and queue forfeiture. Existing transport-cycle and Ladder batch-fairness
+fixtures disable voluntary reconsideration within their observation windows:
+those assertions specifically require continuous queue membership. Default-policy
+queue traces still run deterministically, though long-wait trace digests change.
 
 ## Prerequisites
 

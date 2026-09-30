@@ -524,6 +524,10 @@ namespace core
 			bool startPathing{ true };
 			RouteLossReason planningFailureReason{ RouteLossReason::Unreachable };
 			std::optional<TopologyPathIntent> fallbackIntent;
+			// Voluntary planning owns historical evidence, never an active traversal Path.
+			std::shared_ptr<Path> retainedPath;
+			uint32_t retainedFromNode{ 0 };
+			uint64_t voluntaryPlanningStartedTick{ 0 };
 		};
 		std::map<AgentId, MovementGoal> mMovementGoals;
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
@@ -2394,6 +2398,7 @@ namespace core
 			Vector2 const& endpoint) const;
 		bool canAgentTraverseManualDoorNow(TraversalResourceId door, AgentId agent) const;
 		void replanAgentAfterAuthorizationRefusal(AgentId agent);
+		void beginVoluntaryRoutePlanning(AgentId agent);
 
 		InteractionPointId createInteractionPoint(std::string const& name);
 
