@@ -6283,6 +6283,14 @@ int main(int argc, char** argv)
 			std::cout << "PASS: wrote routing stress World and adjacent tag registry\n";
 			return 0;
 		}
+		if (argc > 1 && std::string(argv[1]) == "--agent-behaviour-checks")
+		{
+			runAgentBehaviourRegistrySmokeChecks();
+			runAgentBehaviourRuntimeSmokeChecks();
+			runAgentBehaviourWorkflowSmokeChecks();
+			std::cout << "PASS: versioned Agent behaviours\n";
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--route-planning-checks")
 		{
 			runRoutePlanningSmokeChecks();

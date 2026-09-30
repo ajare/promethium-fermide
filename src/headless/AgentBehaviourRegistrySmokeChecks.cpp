@@ -839,7 +839,7 @@ namespace
 		{
 			return "local helper = require('helpers.reload')\n"
 				"local source_revision = '" + sourceRevision + "'\n"
-				"return { api_version = 1, factory = function(configuration)\n"
+				"return { api_version = " + (sourceRevision == "v1" ? "1" : "2") + ", factory = function(configuration)\n"
 				"  if configuration.expected ~= helper.expected then error('wrong expected value') end\n"
 				"  return {\n"
 				"    on_start = function(context)\n"
@@ -994,7 +994,7 @@ namespace
 			core::AgentBehaviourReloadDiagnosticScope::Module);
 		assertRollback("require('helpers.missing')\nreturn { api_version = 1, factory = function() return {} end }\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);
-		assertRollback("return { api_version = 2, factory = function() return {} end }\n",
+		assertRollback("return { api_version = 3, factory = function() return {} end }\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);
 		assertRollback("while true do end\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);

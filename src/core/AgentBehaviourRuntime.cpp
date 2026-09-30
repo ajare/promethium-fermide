@@ -98,6 +98,7 @@ namespace core
 		{
 			std::string packageName;
 			int hostModuleReference{ LUA_NOREF };
+			int hostModuleV2Reference{ LUA_NOREF };
 			int environmentReference{ LUA_NOREF };
 			std::map<std::string, AgentBehaviourHelperSource> modules;
 			std::map<std::string, int> loadedModules;
@@ -306,9 +307,10 @@ namespace core
 				lua_touserdata(state, lua_upvalueindex(1)));
 			auto const* requestedText = luaL_checkstring(state, 1);
 			std::string const requested(requestedText);
-			if (requested == "prometheum.v1")
+			if (requested == "prometheum.v1" || requested == "prometheum.v2")
 			{
-				lua_rawgeti(state, LUA_REGISTRYINDEX, loader.hostModuleReference);
+				lua_rawgeti(state, LUA_REGISTRYINDEX, requested == "prometheum.v1"
+					? loader.hostModuleReference : loader.hostModuleV2Reference);
 				return 1;
 			}
 			if (auto loaded = loader.loadedModules.find(requested);
@@ -366,13 +368,13 @@ namespace core
 			return 1;
 		}
 
-		int createImmutableProxy(lua_State* state, bool hostModule)
+		int createImmutableProxy(lua_State* state, int apiVersion)
 		{
 			lua_newtable(state);
 			auto const backing = lua_gettop(state);
-			if (hostModule)
+			if (apiVersion)
 			{
-				lua_pushinteger(state, AgentBehaviourRuntimeAdapter::HostApiVersion);
+				lua_pushinteger(state, apiVersion);
 				lua_setfield(state, backing, "api_version");
 			}
 
@@ -432,7 +434,8 @@ namespace core
 
 			installDeterministicSandbox(state);
 
-			loader.hostModuleReference = createImmutableProxy(state, true);
+			loader.hostModuleReference = createImmutableProxy(state, 1);
+			loader.hostModuleV2Reference = createImmutableProxy(state, 2);
 			lua_pushlightuserdata(state, &loader);
 			lua_pushcclosure(state, requireDeclaredModule, 1);
 			lua_setglobal(state, "require");
@@ -680,11 +683,12 @@ namespace core
 			auto contract = exports.as<sol::table>();
 			auto apiVersion = contract.raw_get<sol::object>("api_version");
 			if (!apiVersion.is<lua_Integer>()
-				|| apiVersion.as<lua_Integer>() != HostApiVersion)
+				|| (apiVersion.as<lua_Integer>() != 1
+					&& apiVersion.as<lua_Integer>() != HostApiVersion))
 			{
 				return failure(normalizedPackage, normalizedModule,
-					chunkName + ":1: module must declare api_version = 1",
-					"module must declare API version 1 as api_version = 1");
+					chunkName + ":1: module must declare api_version = 1 or 2",
+					"module must declare API version 1 or 2 as api_version");
 			}
 			auto factoryObject = contract.raw_get<sol::object>("factory");
 			if (factoryObject.get_type() != sol::type::function)
@@ -1945,6 +1949,7 @@ namespace core
 
 		struct Instance
 		{
+			uint32_t apiVersion{ 1 };
 			AgentBehaviourAssignment assignment;
 			std::string agentName;
 			std::string behaviourName;
@@ -2172,6 +2177,7 @@ namespace core
 			instance.moduleLoader = std::make_unique<ModuleLoader>();
 			instance.moduleLoader->packageName = definition.packageName;
 			instance.moduleLoader->hostModuleReference = hostLoader.hostModuleReference;
+			instance.moduleLoader->hostModuleV2Reference = hostLoader.hostModuleV2Reference;
 			instance.moduleLoader->environmentReference = instance.environmentReference;
 			for (auto const& helper : *definition.helpers)
 				instance.moduleLoader->modules.emplace(helper.name, helper);
@@ -2201,9 +2207,10 @@ namespace core
 			lua_rawget(lua, contract);
 			auto const apiVersion = lua_isinteger(lua, -1) ? lua_tointeger(lua, -1) : 0;
 			lua_pop(lua, 1);
-			if (apiVersion != HostApiVersion)
+			if (apiVersion != 1 && apiVersion != HostApiVersion)
 				return conversionFailure(AgentBehaviourRuntimeStage::ModuleLoad,
 					"Agent behaviour module API version is invalid");
+			instance.apiVersion = static_cast<uint32_t>(apiVersion);
 			lua_pushliteral(lua, "factory");
 			lua_rawget(lua, contract);
 			if (!lua_isfunction(lua, -1))
@@ -2334,6 +2341,7 @@ namespace core
 			case Agent::State::TraversingEdge:
 			case Agent::State::AwaitingTraversalCommit: return "traversing";
 			case Agent::State::RoutePlanning:
+				return instances.at(agentId).apiVersion == 1 ? "idle" : "route_planning";
 			case Agent::State::Idle:
 			case Agent::State::MovingToVertex: return "moving";
 			}
@@ -2504,7 +2512,7 @@ namespace core
 			instance.scope.logMessageByteLimit = logMessageByteLimit;
 			instance.scope.stagedTimers = instance.timers;
 			instance.scope.stagedRandomState = instance.randomState;
-			instance.scope.inspectMove = [&world, agentId, &pendingCommands](MarkerId marker)
+			instance.scope.inspectMove = [&world, agentId, &pendingCommands, &instance](MarkerId marker)
 			{
 				auto pending = std::find_if(pendingCommands.rbegin(), pendingCommands.rend(),
 					[agentId](PendingMovementCommand const& command)
@@ -2513,7 +2521,10 @@ namespace core
 					return MovementCommandResult{ pending->type == PendingMovementCommandType::MoveTo
 						&& pending->marker == marker ? MovementCommandStatus::NoOp
 						: MovementCommandStatus::AgentBusy };
-				return world.inspectBehaviourMoveToMarker(agentId, marker);
+				auto result = world.inspectBehaviourMoveToMarker(agentId, marker);
+				if (instance.apiVersion == 1 && result.status == MovementCommandStatus::Superseded)
+					return MovementCommandResult{ MovementCommandStatus::AgentBusy };
+				return result;
 			};
 			instance.scope.inspectCancel = [&world, agentId, &pendingCommands]
 			{
@@ -3265,6 +3276,9 @@ namespace core
 
 		auto found = mImpl->instances.find(agent);
 		if (found == mImpl->instances.end() || found->second.disabled) return;
+		if (found->second.apiVersion == 1
+			&& outcome.type == Impl::OutcomeType::MovementCancelled
+			&& outcome.cancellationReason == MovementCancellationReason::Superseded) return;
 		found->second.outcomes.push_back(std::move(outcome));
 		++mImpl->observedOutcomeCount;
 		mImpl->lastObservedSequence = event.sequence;

@@ -67,7 +67,7 @@ traversal, missing files, and symlinks escaping the package are refused. The
 manifest itself must also resolve inside the package. Sources must end in `.lua`.
 Helper import names are case-sensitive dotted Lua identifiers such as
 `schedule.clock`; path separators, `..`, extensions, and the reserved
-`prometheum.v1` name are invalid.
+`prometheum.v1` and `prometheum.v2` names are invalid.
 
 Schema types are `boolean`, `integer`, `number`, `string`, `duration` (simulation
 ticks), `marker`, `list`, and `record`. Lists have exactly one child; records
@@ -83,8 +83,8 @@ YAML are not exposed.
 
 Only text Lua source is accepted; precompiled bytecode is refused. The standard
 `package` library is not enabled. The custom `require` resolves exactly the
-immutable built-in `prometheum.v1` module and logical helper names declared in
-this manifest; it never derives a filesystem path and cannot load native modules.
+immutable built-in `prometheum.v1` and `prometheum.v2` modules and logical helper
+names declared in this manifest; it never derives a filesystem path and cannot load native modules.
 Undeclared, absolute, traversal, and path-like imports are refused. I/O, OS,
 environment, filesystem, debug, coroutine, dynamic loading, entropy, and wall
 clock facilities are absent. Scripts receive only selected base operations and
@@ -119,10 +119,11 @@ suppression for the window. Logs staged by a callback that later fails are not
 published.
 
 Behaviour modules obtain the immutable versioned host boundary through
-`require("prometheum.v1")` and must return this shape:
+`require("prometheum.v2")` (API version 2) or the retained `prometheum.v1`
+(API version 1), and must return this shape:
 
 ```lua
-local prometheum = require("prometheum.v1")
+local prometheum = require("prometheum.v2")
 
 return {
   api_version = prometheum.api_version,
@@ -153,7 +154,7 @@ environment with private closures, upvalues, exports, and import cache;
 Marker handle from validated configuration; `context.cancel_movement` requests
 cancellation at the next safe boundary. Both return an immutable semantic result
 with `accepted` and `status` fields. Repeating the current destination reports
-`no_op` without restarting Route planning. An accepted replacement reports
+`no_op` without restarting Route planning. In v2 an accepted replacement reports
 `superseded` and stages one `movement_cancelled` event with reason `superseded`
 for the previous destination; explicit cancellation uses reason `explicit`.
 A committed crossing or occupied-resource journey finishes safely before the
@@ -162,7 +163,13 @@ callback disables that instance as a programming error without applying the
 callback's commands. Conflicting commands staged by separate callbacks at the
 same boundary still report `agent_busy`.
 Context capabilities expire when the callback returns, and queued movement is
-applied only after callbacks return. The version-1 context also exposes
+applied only after callbacks return. Each instance uses its module's declared
+`api_version`; a registry may mix versions and reload may migrate one module
+independently. V2 exposes `route_planning` in the semantic Agent movement state;
+v1 maps it to `idle`, rejects different-destination replacements with `agent_busy`,
+and never delivers a `superseded` cancellation. Explicit cancellation remains
+unchanged in both versions. Neither version exposes exact planning timers or
+internal deterministic random state. Both versions also expose
 `grant_access_permission(name)`, `revoke_access_permission(name)`,
 `assign_permission_set(name)`, and `unassign_permission_set(name)` for the
 behaviour's Agent. Names resolve case-sensitively at the callback boundary;
@@ -181,7 +188,8 @@ reload, and registry reload recreate it. Lua's `math.random` and
 
 `on_event` receives immutable `destination_reached` and `movement_cancelled`
 values in stable event-sequence order. Both carry `tick`, `sequence`, and an
-opaque `destination`; cancellation also carries the semantic reason `explicit`.
+opaque `destination`; cancellation also carries the semantic reason `explicit`
+(or `superseded` in v2).
 It also receives `interaction_completed` with an opaque `interaction`, display
 `name`, and `result` (`succeeded` or `succeeded_with_best_effort_failure`), and
 `interaction_failed` with the same identity/name fields and a `reason` of
@@ -204,6 +212,12 @@ no movement, timer, or random capabilities. Reasons are `unassignment`, `reset`,
 `reload`, `world_close`, `instance_failure`, and `behaviour_deletion`.
 Teardown is best-effort: an `on_stop` error is diagnosed but cannot retain the
 instance or veto the lifecycle operation.
+
+Headless compatibility coverage runs with
+`prometheum-fermide-headless --agent-behaviour-checks` (CTest `agent-behaviours`).
+It covers mixed-version commands, events, preflight and reload, v1-to-v2 source
+migration, automatic replanning and Route loss in both versions, and repeated
+trips using the bundled patrol and random-wander sources.
 
 ## World persistence
 

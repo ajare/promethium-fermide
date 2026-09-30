@@ -1,4 +1,4 @@
-local prometheum = require("prometheum.v1")
+local prometheum = require("prometheum.v2")
 
 local WAIT_TICKS = 5 * 60
 

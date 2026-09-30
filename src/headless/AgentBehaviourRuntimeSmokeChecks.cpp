@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/AgentBehaviourRegistry.h"
+#include "core/AgentBehaviourRegistryDocument.h"
 #include "core/World.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/Log.h"
@@ -63,9 +64,12 @@ namespace
 
 	void validHostContractDoesNotRunCallbacks()
 	{
-		auto result = preflight(R"lua(
-local host = require("prometheum.v1")
-if host.api_version ~= 1 then error("wrong host API") end
+		for (auto version : { 1, 2 })
+		{
+			auto result = preflight("local version = " + std::to_string(version) + R"lua(
+local host = require("prometheum.v" .. version)
+if host.api_version ~= version then error("wrong host API") end
+assert(not pcall(function() host.api_version = 3 end))
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -76,9 +80,10 @@ return {
   end
 }
 )lua");
-		require(result.loaded && result.diagnostic.empty() && result.traceback.empty(),
-			"A valid version-1 behaviour did not preflight, or an Agent callback ran: "
-				+ result.diagnostic);
+			require(result.loaded && result.diagnostic.empty() && result.traceback.empty(),
+				"A valid versioned behaviour did not preflight, or an Agent callback ran: "
+					+ result.diagnostic);
+		}
 	}
 
 	void textAndContractFailuresCarryLocationAndTraceback()
@@ -101,7 +106,7 @@ return {
 
 		for (auto const& malformed : {
 			std::string("return { factory = function() return {} end }"),
-			std::string("return { api_version = 2, factory = function() return {} end }"),
+			std::string("return { api_version = 3, factory = function() return {} end }"),
 			std::string("return { api_version = 1 }"),
 			std::string("return { api_version = 1, factory = function() return false end }"),
 			std::string("return { api_version = 1, factory = function() return { on_start = 4 } end }") })
@@ -180,7 +185,7 @@ return { api_version = 1, factory = function() return {} end }
 		require(core::AgentBehaviourHelperModule::nameIsValid(
 			"helpers.values", &nameDiagnostic),
 			"A dotted helper import name was refused");
-		for (auto const& invalidName : { "", "prometheum.v1", "/absolute",
+		for (auto const& invalidName : { "", "prometheum.v1", "prometheum.v2", "/absolute",
 			"../traversal", "helpers/file", "native.dll", "helpers..value" })
 			require(!core::AgentBehaviourHelperModule::nameIsValid(
 				invalidName, &nameDiagnostic),
@@ -852,6 +857,80 @@ return {
 			"An advanced helper dependency revision was not adopted deterministically");
 	}
 
+	void bundledMovementWorkflows()
+	{
+		TemporaryDirectory temporary;
+		auto const package = temporary.path / "bundled.behaviours";
+		std::filesystem::create_directories(package);
+		auto const resources = std::filesystem::path(__FILE__).parent_path()
+			.parent_path().parent_path() / "resources" / "test-worlds";
+		std::filesystem::copy_file(resources / "door-test-1.behaviours" / "marker-patrol.lua",
+			package / "patrol.lua");
+		std::filesystem::copy_file(resources / "new-world.behaviours" / "random-marker-wander.lua",
+			package / "wander.lua");
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		auto patrol = registry->addAgentBehaviour("Patrol", "patrol.lua", {
+			{ "first_marker", core::AgentBehaviourSchemaType::Marker },
+			{ "second_marker", core::AgentBehaviourSchemaType::Marker }
+		});
+		auto wander = registry->addAgentBehaviour("Wander", "wander.lua", {
+			{ "markers", core::AgentBehaviourSchemaType::List, {
+				{ "marker", core::AgentBehaviourSchemaType::Marker }
+			} }
+		});
+		core::World world("Bundled workflows", 10, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+		auto isolated = world.addRoom("Isolated", 1, 0, 0, 10, 1);
+		world.addSectorMarker(room, 0, 3.5f, "First");
+		world.addSectorMarker(room, 0, 6.5f, "Second");
+		world.addSectorMarker(isolated, 0, 5.5f, "Unreachable");
+		world.finishBuild();
+		auto const markers = world.getMarkerIds();
+		auto patroller = world.createAgent("Patroller", room, 0, 1.5f);
+		auto wanderer = world.createAgent("Wanderer", room, 0, 1.5f);
+		world.pauseSimulation();
+		world.attachAgentBehaviourRegistry("bundled.behaviours", registry);
+		require(world.setAgentBehaviourAssignment(patroller, patrol,
+			registry->lookupAgentBehaviour(patrol)->getRevision(), {
+				{ "first_marker", markers[0] }, { "second_marker", markers[1] }
+			}), "Could not assign bundled patrol");
+		core::AgentBehaviourConfigurationList destinations;
+		for (auto marker : markers) destinations.emplace_back(marker);
+		require(world.setAgentBehaviourAssignment(wanderer, wander,
+			registry->lookupAgentBehaviour(wander)->getRevision(), {
+				{ "markers", std::move(destinations) }
+			}), "Could not assign bundled wander");
+		require(world.resumeSimulation(), "Could not resume bundled workflows");
+		unsigned arrivals[2]{};
+		uint64_t previousTick[2]{};
+		core::MarkerId previousMarker[2]{};
+		for (unsigned tick = 0; tick < 6000 && (arrivals[0] < 4 || arrivals[1] < 4); ++tick)
+		{
+			require(world.advanceTick(), "Bundled behaviour failed during movement");
+			for (auto const& event : world.consumeSimulationEvents())
+			{
+				if (event.type != core::SimulationEventType::DestinationReached) continue;
+				auto const index = event.agent.id == patroller ? 0 : 1;
+				require(event.destinationMarker != previousMarker[index]
+					&& event.destinationMarker != markers[2],
+					"Bundled workflow repeated an arrival or reached an isolated Marker");
+				if (index == 0)
+					require(event.destinationMarker == markers[arrivals[index] % 2],
+						"Bundled patrol changed its alternating destinations");
+				if (arrivals[index] != 0)
+					require(event.tick - previousTick[index] >= (index == 0 ? 300u : 180u),
+						"Bundled workflow skipped its arrival wait");
+				previousMarker[index] = event.destinationMarker;
+				previousTick[index] = event.tick;
+				++arrivals[index];
+			}
+		}
+		require(arrivals[0] >= 4 && arrivals[1] >= 4
+			&& world.getAgentBehaviourRuntimeDiagnostics().empty(),
+			"Bundled v2 workflows did not complete repeated trips");
+	}
+
 	void planningIntentReplacement()
 	{
 		TemporaryDirectory temporary;
@@ -859,9 +938,11 @@ return {
 		std::filesystem::create_directories(package);
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
-		writeText(package / "planning.lua", R"lua(
+		std::string const source = R"lua(
+assert(require("prometheum.v1").api_version == 1)
+assert(require("prometheum.v2").api_version == 2)
 return {
-  api_version = 1,
+  api_version = version,
   factory = function(configuration)
     local cancellations = 0
     return {
@@ -870,12 +951,18 @@ return {
         context.set_timer("duplicate", 1)
       end,
       on_timer = function(name, context)
+        assert(context.agent.movement_state == (version == 1 and "idle" or "route_planning"))
+        assert(context.agent.route_planning_remaining_ticks == nil)
+        assert(context.agent.route_planning_total_ticks == nil)
+        assert(context.agent.random_state == nil and context.random_state == nil)
         if name == "duplicate" then
-          assert(context.move_to(configuration.first).status == "no_op")
+          local duplicate = context.move_to(configuration.first)
+          assert(duplicate.accepted and duplicate.status == "no_op")
           context.set_timer("replace", 1)
         elseif name == "replace" then
           local replacement = context.move_to(configuration.second)
-          assert(replacement.accepted and replacement.status == "superseded")
+          assert(replacement.accepted == (version == 2))
+          assert(replacement.status == (version == 2 and "superseded" or "agent_busy"))
           context.set_timer("cancel", 2)
         else
           assert(context.cancel_movement().accepted)
@@ -884,14 +971,20 @@ return {
       on_event = function(event, context)
         if event.type == "movement_cancelled" then
           cancellations = cancellations + 1
-          assert(event.reason == (cancellations == 1 and "superseded" or "explicit"))
-          assert(cancellations <= 2)
+          assert(event.reason == (version == 2 and cancellations == 1 and "superseded" or "explicit"))
+          assert(cancellations <= (version == 2 and 2 or 1))
         end
       end
     }
   end
 }
-)lua");
+)lua";
+		writeText(package / "planning.lua", "local version = 2\n" + source);
+		writeText(package / "legacy.lua", "local version = 1\n" + source);
+		auto legacy = registry->addAgentBehaviour("Legacy", "legacy.lua", {
+			{ "first", core::AgentBehaviourSchemaType::Marker },
+			{ "second", core::AgentBehaviourSchemaType::Marker }
+		});
 		auto behaviour = registry->addAgentBehaviour("Planning", "planning.lua", {
 			{ "first", core::AgentBehaviourSchemaType::Marker },
 			{ "second", core::AgentBehaviourSchemaType::Marker }
@@ -902,6 +995,7 @@ return {
 		world.addSectorMarker(room, 0, 6.5f, "Second");
 		world.finishBuild();
 		auto id = world.createAgent("Planner", room, 0, 1.5f);
+		auto legacyId = world.createAgent("Legacy planner", room, 0, 2.5f);
 		auto markers = world.getMarkerIds();
 		world.pauseSimulation();
 		world.attachAgentBehaviourRegistry("planning.behaviours", registry);
@@ -909,32 +1003,57 @@ return {
 			registry->lookupAgentBehaviour(behaviour)->getRevision(), {
 				{ "first", markers[0] }, { "second", markers[1] }
 			}), "Could not assign planning behaviour");
-		require(world.resumeSimulation(), "Could not resume planning behaviour");
-		world.advanceTicks(10);
-		unsigned cancellations = 0;
-		for (auto const& event : world.consumeSimulationEvents())
-			if (event.type == core::SimulationEventType::MovementCancelled)
+		require(world.setAgentBehaviourAssignment(legacyId, legacy,
+			registry->lookupAgentBehaviour(legacy)->getRevision(), {
+				{ "first", markers[0] }, { "second", markers[1] }
+			}), "Could not assign legacy planning behaviour");
+		registry->saveTo((package / "behaviours.yaml").string());
+		for (unsigned run = 0; run < 2; ++run)
+		{
+			if (run != 0)
 			{
-				require(cancellations < 2 && event.destinationMarker == markers[cancellations]
-					&& event.movementCancellationReason == (cancellations == 0
-						? core::MovementCancellationReason::Superseded : core::MovementCancellationReason::Explicit),
-					"Behaviour cancellation payload incorrect");
-				++cancellations;
+				world.pauseSimulation();
+				std::string diagnostic;
+				require(core::reloadAgentBehaviourRegistryDocument(registry, package, &diagnostic),
+					"Could not reload mixed-version registry: " + diagnostic);
 			}
-		require(cancellations == 2, "Behaviour planning replacement/cancellation did not execute");
-		require(world.getAgentBehaviourRuntimeDiagnostics().empty(),
-			"Behaviour planning semantic assertions failed");
+			require(world.resumeSimulation(), "Could not resume planning behaviour");
+			world.advanceTicks(10);
+			unsigned cancellations = 0;
+			unsigned legacyCancellations = 0;
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::MovementCancelled)
+				{
+					if (event.agent.id == legacyId)
+					{
+						require(event.destinationMarker == markers[0]
+							&& event.movementCancellationReason == core::MovementCancellationReason::Explicit,
+							"Legacy behaviour exposed supersession");
+						++legacyCancellations;
+						continue;
+					}
+					require(cancellations < 2 && event.destinationMarker == markers[cancellations]
+						&& event.movementCancellationReason == (cancellations == 0
+							? core::MovementCancellationReason::Superseded : core::MovementCancellationReason::Explicit),
+						"Behaviour cancellation payload incorrect");
+					++cancellations;
+				}
+			require(cancellations == 2 && legacyCancellations == 1,
+				"Mixed-version planning replacement/cancellation did not execute");
+			require(world.getAgentBehaviourRuntimeDiagnostics().empty(),
+				"Behaviour planning semantic assertions failed");
+		}
 	}
 
-	void routeLossAndTopologyLifecycle()
+	void routeLossAndTopologyLifecycle(int version)
 	{
 		TemporaryDirectory temporary;
 		auto const package = temporary.path / "lifecycle.behaviours";
 		std::filesystem::create_directories(package);
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
-		writeText(package / "lifecycle.lua", R"lua(
-local host = require("prometheum.v1")
+		writeText(package / "lifecycle.lua", "local version = " + std::to_string(version) + R"lua(
+local host = require("prometheum.v" .. version)
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -1190,7 +1309,8 @@ return {
         error("semantic Agent state is incomplete")
       end
       if moving then
-        if state.movement_state ~= "moving" or state.movement ~= "moving"
+        if (state.movement_state ~= "moving" and state.movement_state ~= "idle")
+            or state.movement ~= state.movement_state
             or state.destination ~= configuration.destination
             or state.destination_marker ~= configuration.destination then
           error("semantic movement state or destination is incorrect")
@@ -2691,8 +2811,10 @@ void runAgentBehaviourRuntimeSmokeChecks()
 	liveLoadsFactoriesAndCallbacksAreContained();
 	independentStartupInstancesMoveDeterministically();
 	manifestHelpersHavePrivatePerAgentGraphs();
+	bundledMovementWorkflows();
 	planningIntentReplacement();
-	routeLossAndTopologyLifecycle();
+	routeLossAndTopologyLifecycle(1);
+	routeLossAndTopologyLifecycle(2);
 	programmingErrorDisablesMovementOwnership();
 	deterministicTimersExposeOnlySemanticState();
 	activationSuspendsStateAndFreezesTimers();

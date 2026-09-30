@@ -1,4 +1,4 @@
-local prometheum = require("prometheum.v1")
+local prometheum = require("prometheum.v2")
 
 -- Simulation time runs at 60 ticks per second.
 local ARRIVAL_WAIT = 3 * 60

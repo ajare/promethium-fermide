@@ -134,7 +134,7 @@ namespace core
 			AgentBehaviourRuntimeLimits limits, bool invokeFactory);
 
 	public:
-		static constexpr uint32_t HostApiVersion{ 1 };
+		static constexpr uint32_t HostApiVersion{ 2 };
 		static constexpr size_t DefaultMemoryBudgetBytes{ 64u * 1024u * 1024u };
 		// Floor below which a scratch or live Lua state cannot reliably build its
 		// deterministic sandbox (state, selected libraries, private environment,
