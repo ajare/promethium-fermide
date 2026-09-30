@@ -7180,11 +7180,11 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		ImGui::SetTooltip("Pause the simulation to activate or deactivate an Agent");
 	}
 
+	renderAgentTagAssignmentChecklist(world, id);
 	renderAgentIndividualProperties(world, id);
 	renderAgentEffectiveProperties(world, id);
 	renderAgentAccessPermissions(world, id);
 	renderAgentRuntimeProperties(world, id);
-	renderAgentTagAssignmentChecklist(world, id);
 	renderAgentBehaviourConfigurationPanel(world, id);
 
 	if (gSelectingAgentPathDestination)

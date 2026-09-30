@@ -877,7 +877,7 @@ void renderAgentTagAssignmentChecklist(shared_ptr<core::World> const& world,
 
 	// The combo lists every tag the Agent does not have yet. Conflicting tags
 	// stay visible but disabled with the core validation diagnostic.
-	ImGui::SetNextItemWidth(-1.0f);
+	ImGui::SetNextItemWidth(256.0f);
 	ImGui::BeginDisabled(!paused);
 	if (ImGui::BeginCombo("##addAgentTagToAgent", "Add tag..."))
 	{
