@@ -251,6 +251,14 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualRoutePersistence().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualRoutePersistence(
 				agent, enabled ? optional<float>{ 0.5f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::MinimumRoutePlanningTime),
+			target->getIndividualMinimumRoutePlanningTime().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualMinimumRoutePlanningTime(
+				agent, enabled ? optional<float>{ 1.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::MaximumRoutePlanningTime),
+			target->getIndividualMaximumRoutePlanningTime().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualMaximumRoutePlanningTime(
+				agent, enabled ? optional<float>{ 3.0f } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -333,6 +341,8 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		|| target->getIndividualCrowdAversion() || target->getIndividualRiskAversion()
 		|| target->getIndividualCrowdAversion() || target->getIndividualRouteFamiliarity()
 		|| target->getIndividualCrowdAversion() || target->getIndividualRoutePersistence()
+		|| target->getIndividualCrowdAversion() || target->getIndividualMinimumRoutePlanningTime()
+		|| target->getIndividualCrowdAversion() || target->getIndividualMaximumRoutePlanningTime()
 		|| target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
@@ -554,6 +564,50 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
+	if (target->getIndividualMinimumRoutePlanningTime())
+	{
+		auto value = *target->getIndividualMinimumRoutePlanningTime();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Minimum route planning time##individual", &value, 0.01f,
+			core::AgentMinimumRoutePlanningTimeMinimum, core::AgentMinimumRoutePlanningTimeMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualMinimumRoutePlanningTime(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualMinimumRoutePlanningTime"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualMinimumRoutePlanningTime(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
+	if (target->getIndividualMaximumRoutePlanningTime())
+	{
+		auto value = *target->getIndividualMaximumRoutePlanningTime();
+		ImGui::SetNextItemWidth(PropertyWidgetWidth);
+		if (ImGui::DragFloat("Maximum route planning time##individual", &value, 0.01f,
+			core::AgentMaximumRoutePlanningTimeMinimum, core::AgentMaximumRoutePlanningTimeMaximum,
+			"%.2f", ImGuiSliderFlags_AlwaysClamp))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualMaximumRoutePlanningTime(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualMaximumRoutePlanningTime"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualMaximumRoutePlanningTime(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
@@ -729,6 +783,19 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		ImGui::Text("Route persistence: %.2f from #%s", persistence.value,
 			world->getAgentTagRegistry()->getAgentTagName(persistence.sourceTag).c_str());
 	else ImGui::TextUnformatted("Route persistence: 0.15 (default)");
+	auto const minimumPlanningTime = lookup.entity->getEffectiveMinimumRoutePlanningTime();
+	auto const maximumPlanningTime = lookup.entity->getEffectiveMaximumRoutePlanningTime();
+	auto planningTime = [&](char const* name, auto const& property)
+	{
+		if (property.individual)
+			ImGui::Text("%s: %.2f s (individual)", name, property.value);
+		else if (property.sourceTag && world->hasAttachedAgentTagRegistry())
+			ImGui::Text("%s: %.2f s from #%s", name, property.value,
+				world->getAgentTagRegistry()->getAgentTagName(property.sourceTag).c_str());
+		else ImGui::Text("%s: %.2f s (default)", name, property.value);
+	};
+	planningTime("Minimum route planning time", minimumPlanningTime);
+	planningTime("Maximum route planning time", maximumPlanningTime);
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.value);

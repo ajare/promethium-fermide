@@ -61,7 +61,9 @@ namespace core
 		CrowdAversion,
 		RiskAversion,
 		RouteFamiliarity,
-		RoutePersistence
+		RoutePersistence,
+		MinimumRoutePlanningTime,
+		MaximumRoutePlanningTime
 	};
 
 	struct AgentPropertySample
@@ -157,6 +159,22 @@ namespace core
 	struct EffectiveAgentRoutePersistence
 	{
 		float value{ 0.15f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentMinimumRoutePlanningTime
+	{
+		float value{ 1.0f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentMaximumRoutePlanningTime
+	{
+		float value{ 3.0f };
 		AgentTagId sourceTag{};
 		uint64_t propertyRevision{ 0 };
 		bool individual{ false };
@@ -265,6 +283,8 @@ namespace core
 		std::optional<float> mIndividualRiskAversion;
 		std::optional<float> mIndividualRouteFamiliarity;
 		std::optional<float> mIndividualRoutePersistence;
+		std::optional<float> mIndividualMinimumRoutePlanningTime;
+		std::optional<float> mIndividualMaximumRoutePlanningTime;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -281,6 +301,8 @@ namespace core
 		std::optional<AgentPropertySample> mRiskAversionSample;
 		std::optional<AgentPropertySample> mRouteFamiliaritySample;
 		std::optional<AgentPropertySample> mRoutePersistenceSample;
+		std::optional<AgentPropertySample> mMinimumRoutePlanningTimeSample;
+		std::optional<AgentPropertySample> mMaximumRoutePlanningTimeSample;
 
 		// Activation is authored state (#118): an activated Agent is simulated,
 		// a deactivated one keeps its authored position and route but no tick
@@ -418,6 +440,16 @@ namespace core
 			mRoutePersistenceSample = sample;
 		}
 		void clearRoutePersistenceSample() { mRoutePersistenceSample.reset(); }
+		void setMinimumRoutePlanningTimeSample(AgentPropertySample sample)
+		{
+			mMinimumRoutePlanningTimeSample = sample;
+		}
+		void clearMinimumRoutePlanningTimeSample() { mMinimumRoutePlanningTimeSample.reset(); }
+		void setMaximumRoutePlanningTimeSample(AgentPropertySample sample)
+		{
+			mMaximumRoutePlanningTimeSample = sample;
+		}
+		void clearMaximumRoutePlanningTimeSample() { mMaximumRoutePlanningTimeSample.reset(); }
 		void setIndividualColour(std::optional<AgentColour> value)
 		{ mIndividualColour = value; modify(); }
 		void setIndividualEscalatorWalkingChance(std::optional<float> value)
@@ -444,6 +476,10 @@ namespace core
 		{ mIndividualRouteFamiliarity = value; modify(); }
 		void setIndividualRoutePersistence(std::optional<float> value)
 		{ mIndividualRoutePersistence = value; modify(); }
+		void setIndividualMinimumRoutePlanningTime(std::optional<float> value)
+		{ mIndividualMinimumRoutePlanningTime = value; modify(); }
+		void setIndividualMaximumRoutePlanningTime(std::optional<float> value)
+		{ mIndividualMaximumRoutePlanningTime = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -550,6 +586,10 @@ namespace core
 		{ return mIndividualRouteFamiliarity; }
 		std::optional<float> const& getIndividualRoutePersistence() const
 		{ return mIndividualRoutePersistence; }
+		std::optional<float> const& getIndividualMinimumRoutePlanningTime() const
+		{ return mIndividualMinimumRoutePlanningTime; }
+		std::optional<float> const& getIndividualMaximumRoutePlanningTime() const
+		{ return mIndividualMaximumRoutePlanningTime; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -577,6 +617,8 @@ namespace core
 		EffectiveAgentRiskAversion getEffectiveRiskAversion() const;
 		EffectiveAgentRouteFamiliarity getEffectiveRouteFamiliarity() const;
 		EffectiveAgentRoutePersistence getEffectiveRoutePersistence() const;
+		EffectiveAgentMinimumRoutePlanningTime getEffectiveMinimumRoutePlanningTime() const;
+		EffectiveAgentMaximumRoutePlanningTime getEffectiveMaximumRoutePlanningTime() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		uint64_t getRouteJourneyIdentity(Vertex const* destination) const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const
@@ -618,6 +660,14 @@ namespace core
 		std::optional<AgentPropertySample> const& getRoutePersistenceSample() const
 		{
 			return mRoutePersistenceSample;
+		}
+		std::optional<AgentPropertySample> const& getMinimumRoutePlanningTimeSample() const
+		{
+			return mMinimumRoutePlanningTimeSample;
+		}
+		std::optional<AgentPropertySample> const& getMaximumRoutePlanningTimeSample() const
+		{
+			return mMaximumRoutePlanningTimeSample;
 		}
 
 		// Whether this Agent is simulated. Deactivation changes no authored

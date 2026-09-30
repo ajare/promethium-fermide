@@ -116,7 +116,7 @@ namespace
 			"A new registry did not start both non-reused allocators at one");
 
 		auto const registryYaml = readText(registryPath);
-		require(registryYaml.find("version: 12") != std::string::npos
+		require(registryYaml.find("version: 13") != std::string::npos
 			&& registryYaml.find("uuid: " + registry->getUuid()) != std::string::npos
 			&& registryYaml.find("nextAgentTagId: 1") != std::string::npos
 			&& registryYaml.find("nextPropertyRevision: 1") != std::string::npos
@@ -127,7 +127,7 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 28") != std::string::npos
+		require(worldYaml.find("version: 29") != std::string::npos
 			&& worldYaml.find("filename: station.tags.yaml") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-10 registry reference");
@@ -163,9 +163,9 @@ namespace
 	{
 		core::World source("Legacy", 4, 2);
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 28");
+		auto const version = yaml.find("version: 29");
 		require(version != std::string::npos, "The current World schema was not version 20");
-		yaml.replace(version, std::string("version: 28").size(), "version: 9");
+		yaml.replace(version, std::string("version: 29").size(), "version: 9");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		auto reader = core::YamlSerializer::fromString(yaml);
@@ -363,10 +363,10 @@ namespace
 		auto unsupportedRegistry = core::AgentTagRegistry::create();
 		unsupportedRegistry->saveTo(malformedRegistryPath.string());
 		auto unsupportedYaml = readText(malformedRegistryPath);
-		auto const version = unsupportedYaml.find("version: 12");
+		auto const version = unsupportedYaml.find("version: 13");
 		require(version != std::string::npos,
 			"The registry fixture did not contain schema version 10");
-		unsupportedYaml.replace(version, std::string("version: 12").size(), "version: 13");
+		unsupportedYaml.replace(version, std::string("version: 13").size(), "version: 14");
 		writeText(malformedRegistryPath, unsupportedYaml);
 		bool unsupportedRefused{ false };
 		try

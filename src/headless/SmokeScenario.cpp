@@ -109,6 +109,7 @@ void runAgentWalkSpeedSmokeChecks();
 void runEscalatorWalkingSmokeChecks();
 void runAgentHeightSmokeChecks();
 void runAgentIndividualPropertySmokeChecks();
+void runRoutePlanningTimePropertySmokeChecks();
 void runAgentPathRenderSmokeChecks();
 void runThresholdRefusalSmokeChecks();
 void runThresholdLayerOverlapSmokeChecks();
@@ -6255,6 +6256,12 @@ int main(int argc, char** argv)
 			std::cout << "PASS: wrote routing stress World and adjacent tag registry\n";
 			return 0;
 		}
+		if (argc > 1 && std::string(argv[1]) == "--route-planning-time-checks")
+		{
+			runRoutePlanningTimePropertySmokeChecks();
+			std::cout << "PASS: Route planning time properties\n";
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--routing-scale-checks")
 		{
 			runPathfindingWorkspaceSmokeChecks();
@@ -6366,6 +6373,7 @@ int main(int argc, char** argv)
 		runEscalatorWalkingSmokeChecks();
 		runAgentHeightSmokeChecks();
 		runAgentIndividualPropertySmokeChecks();
+		runRoutePlanningTimePropertySmokeChecks();
 		runAgentPathRenderSmokeChecks();
 		runShuttleDoorQuerySmokeChecks();
 		runThresholdRefusalSmokeChecks();

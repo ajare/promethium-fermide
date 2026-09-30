@@ -163,6 +163,8 @@ namespace
 	map<uint64_t, TagHeightEdit> gTagRiskAversionEdits;
 	map<uint64_t, TagHeightEdit> gTagRouteFamiliarityEdits;
 	map<uint64_t, TagHeightEdit> gTagRoutePersistenceEdits;
+	map<uint64_t, TagHeightEdit> gTagMinimumRoutePlanningTimeEdits;
+	map<uint64_t, TagHeightEdit> gTagMaximumRoutePlanningTimeEdits;
 	map<uint64_t, TagMobilityProfileEdit> gTagMobilityProfileEdits;
 	array<char, SearchBufferSize> gTagSearch{};
 	PendingAgentTagDelete gPendingAgentTagDelete;
@@ -617,6 +619,8 @@ namespace
 		auto const* risk = registry->getAgentTagRiskAversion(id);
 		auto const* familiarity = registry->getAgentTagRouteFamiliarity(id);
 		auto const* persistence = registry->getAgentTagRoutePersistence(id);
+		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
+		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		if (chance)
@@ -682,7 +686,8 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
-		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || pathingMobility)
+		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk
+			|| minimumPlanningTime || maximumPlanningTime || pathingMobility)
 			renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 		if (stairSpeed)
 		{
@@ -987,6 +992,74 @@ namespace
 			}
 		}
 
+		if (minimumPlanningTime)
+		{
+			auto& edit = gTagMinimumRoutePlanningTimeEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != minimumPlanningTime->revision)
+			{
+				edit.range = minimumPlanningTime->range;
+				edit.loadedRevision = minimumPlanningTime->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::MinimumRoutePlanningTime),
+				&edit.range.minimum, &edit.range.maximum, 0.01f,
+				core::AgentMinimumRoutePlanningTimeMinimum, core::AgentMinimumRoutePlanningTimeMaximum,
+				"Min %.2f", "Max %.2f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
+			{
+				string diagnostic;
+				if (!commitAgentTagMinimumRoutePlanningTimeEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Minimum route planning time range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
+				if (minimumPlanningTime) { edit.range = minimumPlanningTime->range; edit.loadedRevision = minimumPlanningTime->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeMinimumRoutePlanningTime"))
+			{
+				string diagnostic;
+				if (!commitAgentTagMinimumRoutePlanningTimeRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagMinimumRoutePlanningTimeEdits.erase(id.value); minimumPlanningTime = nullptr; }
+			}
+		}
+
+		if (maximumPlanningTime)
+		{
+			auto& edit = gTagMaximumRoutePlanningTimeEdits[id.value];
+			if (!edit.pending && edit.loadedRevision != maximumPlanningTime->revision)
+			{
+				edit.range = maximumPlanningTime->range;
+				edit.loadedRevision = maximumPlanningTime->revision;
+				edit.diagnostic.clear();
+			}
+			ImGui::SetNextItemWidth(256.0f);
+			if (ImGui::DragFloatRange2(propertyName(core::AgentPropertyType::MaximumRoutePlanningTime),
+				&edit.range.minimum, &edit.range.maximum, 0.01f,
+				core::AgentMaximumRoutePlanningTimeMinimum, core::AgentMaximumRoutePlanningTimeMaximum,
+				"Min %.2f", "Max %.2f", ImGuiSliderFlags_AlwaysClamp)) edit.pending = true;
+			if (edit.pending && ImGui::IsItemDeactivatedAfterEdit())
+			{
+				string diagnostic;
+				if (!commitAgentTagMaximumRoutePlanningTimeEdit(registry, id, edit.range, diagnostic)
+					&& diagnostic != "The Agent Maximum route planning time range is unchanged")
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				edit.pending = false;
+				maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
+				if (maximumPlanningTime) { edit.range = maximumPlanningTime->range; edit.loadedRevision = maximumPlanningTime->revision; }
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeMaximumRoutePlanningTime"))
+			{
+				string diagnostic;
+				if (!commitAgentTagMaximumRoutePlanningTimeRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else { gTagMaximumRoutePlanningTimeEdits.erase(id.value); maximumPlanningTime = nullptr; }
+			}
+		}
+
 		auto const* mobility = pathingMobility;
 		if (mobility)
 		{
@@ -1069,10 +1142,13 @@ namespace
 		auto const* risk = registry->getAgentTagRiskAversion(id);
 		auto const* familiarity = registry->getAgentTagRouteFamiliarity(id);
 		auto const* persistence = registry->getAgentTagRoutePersistence(id);
+		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
+		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
-			|| !crowd || !risk || !familiarity || !persistence || !mobility;
+			|| !crowd || !risk || !familiarity || !persistence
+			|| !minimumPlanningTime || !maximumPlanningTime || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -1101,7 +1177,7 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !mobility)
+			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
@@ -1181,6 +1257,22 @@ namespace
 				if (!commitAgentTagRoutePersistenceAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagRoutePersistenceEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!minimumPlanningTime && ImGui::Selectable(propertyName(core::AgentPropertyType::MinimumRoutePlanningTime)))
+			{
+				string diagnostic;
+				if (!commitAgentTagMinimumRoutePlanningTimeAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagMinimumRoutePlanningTimeEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!maximumPlanningTime && ImGui::Selectable(propertyName(core::AgentPropertyType::MaximumRoutePlanningTime)))
+			{
+				string diagnostic;
+				if (!commitAgentTagMaximumRoutePlanningTimeAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else gTagMaximumRoutePlanningTimeEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
 			if (!mobility && ImGui::Selectable(propertyName(core::AgentPropertyType::MobilityProfile)))
@@ -2473,6 +2565,54 @@ bool commitAgentTagRoutePersistenceRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Route persistence",
 		[id](auto& target, string* out) { return target.removeAgentTagRoutePersistence(id, out); });
+}
+
+bool commitAgentTagMinimumRoutePlanningTimeAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Minimum route planning time",
+		[id](auto& target, string* out) { return target.addAgentTagMinimumRoutePlanningTime(id, out); });
+}
+
+bool commitAgentTagMinimumRoutePlanningTimeEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Minimum route planning time",
+		[id, range](auto& target, string* out) { return target.setAgentTagMinimumRoutePlanningTime(id, range, out); });
+}
+
+bool commitAgentTagMinimumRoutePlanningTimeRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Minimum route planning time",
+		[id](auto& target, string* out) { return target.removeAgentTagMinimumRoutePlanningTime(id, out); });
+}
+
+bool commitAgentTagMaximumRoutePlanningTimeAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Maximum route planning time",
+		[id](auto& target, string* out) { return target.addAgentTagMaximumRoutePlanningTime(id, out); });
+}
+
+bool commitAgentTagMaximumRoutePlanningTimeEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::AgentModifierRange range, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Maximum route planning time",
+		[id, range](auto& target, string* out) { return target.setAgentTagMaximumRoutePlanningTime(id, range, out); });
+}
+
+bool commitAgentTagMaximumRoutePlanningTimeRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Maximum route planning time",
+		[id](auto& target, string* out) { return target.removeAgentTagMaximumRoutePlanningTime(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

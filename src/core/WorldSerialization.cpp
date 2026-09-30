@@ -481,7 +481,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 28);
+		serializer.writeUint32("version", 29);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -1011,7 +1011,8 @@ namespace core
 		// version 25 adds side-specific ordinary and Bulkhead Door controls, and
 		// version 26 adds Permission sets; version 27 stabilizes extensible controls;
 		// version 28 stabilizes transport landing controls.
-		if (version < 1 || version > 28)
+		// Version 29 adds sampled and individual Route planning times.
+		if (version < 1 || version > 29)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}

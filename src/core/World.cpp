@@ -292,6 +292,8 @@ namespace core
 			if (agent->getRiskAversionSample()) ++count;
 			if (agent->getRouteFamiliaritySample()) ++count;
 			if (agent->getRoutePersistenceSample()) ++count;
+			if (agent->getMinimumRoutePlanningTimeSample()) ++count;
+			if (agent->getMaximumRoutePlanningTimeSample()) ++count;
 		}
 		return count;
 	}
@@ -1147,6 +1149,8 @@ namespace core
 			AgentTagId riskAversionSource{};
 			AgentTagId routeFamiliaritySource{};
 			AgentTagId routePersistenceSource{};
+			AgentTagId minimumRoutePlanningTimeSource{};
+			AgentTagId maximumRoutePlanningTimeSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -1159,6 +1163,8 @@ namespace core
 			AgentRiskAversionProperty const* riskAversionProperty{ nullptr };
 			AgentRouteFamiliarityProperty const* routeFamiliarityProperty{ nullptr };
 			AgentRoutePersistenceProperty const* routePersistenceProperty{ nullptr };
+			AgentMinimumRoutePlanningTimeProperty const* minimumRoutePlanningTimeProperty{ nullptr };
+			AgentMaximumRoutePlanningTimeProperty const* maximumRoutePlanningTimeProperty{ nullptr };
 			for (auto const tag : agent->getAgentTagIds())
 			{
 				auto const* definition = registry.lookupAgentTag(tag);
@@ -1304,6 +1310,26 @@ namespace core
 					routePersistenceSource = tag;
 					routePersistenceProperty = property;
 				}
+				if (auto const* property = definition->getMinimumRoutePlanningTime())
+				{
+					if (minimumRoutePlanningTimeSource)
+						return reject(format(
+							"Agent '{}' inherits Minimum route planning time from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(minimumRoutePlanningTimeSource),
+							definition->getName()));
+					minimumRoutePlanningTimeSource = tag;
+					minimumRoutePlanningTimeProperty = property;
+				}
+				if (auto const* property = definition->getMaximumRoutePlanningTime())
+				{
+					if (maximumRoutePlanningTimeSource)
+						return reject(format(
+							"Agent '{}' inherits Maximum route planning time from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(maximumRoutePlanningTimeSource),
+							definition->getName()));
+					maximumRoutePlanningTimeSource = tag;
+					maximumRoutePlanningTimeProperty = property;
+				}
 				if (definition->getMobilityProfile())
 				{
 					if (mobilityProfileSource)
@@ -1435,6 +1461,16 @@ namespace core
 				routePersistenceProperty ? &routePersistenceProperty->range : nullptr,
 				routePersistenceProperty ? routePersistenceProperty->revision : 0,
 				agent->getRoutePersistenceSample(), repair.routePersistenceAction)) return false;
+			if (!inspectSample("Minimum route planning time", SampledAgentPropertyType::MinimumRoutePlanningTime,
+				minimumRoutePlanningTimeSource,
+				minimumRoutePlanningTimeProperty ? &minimumRoutePlanningTimeProperty->range : nullptr,
+				minimumRoutePlanningTimeProperty ? minimumRoutePlanningTimeProperty->revision : 0,
+				agent->getMinimumRoutePlanningTimeSample(), repair.minimumRoutePlanningTimeAction)) return false;
+			if (!inspectSample("Maximum route planning time", SampledAgentPropertyType::MaximumRoutePlanningTime,
+				maximumRoutePlanningTimeSource,
+				maximumRoutePlanningTimeProperty ? &maximumRoutePlanningTimeProperty->range : nullptr,
+				maximumRoutePlanningTimeProperty ? maximumRoutePlanningTimeProperty->revision : 0,
+				agent->getMaximumRoutePlanningTimeSample(), repair.maximumRoutePlanningTimeAction)) return false;
 
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
 			{
@@ -1491,6 +1527,16 @@ namespace core
 				repair.routePersistenceSource = routePersistenceSource;
 				repair.routePersistenceProperty = *routePersistenceProperty;
 			}
+			if (repair.minimumRoutePlanningTimeAction == AgentTagSampleRepairAction::Resample)
+			{
+				repair.minimumRoutePlanningTimeSource = minimumRoutePlanningTimeSource;
+				repair.minimumRoutePlanningTimeProperty = *minimumRoutePlanningTimeProperty;
+			}
+			if (repair.maximumRoutePlanningTimeAction == AgentTagSampleRepairAction::Resample)
+			{
+				repair.maximumRoutePlanningTimeSource = maximumRoutePlanningTimeSource;
+				repair.maximumRoutePlanningTimeProperty = *maximumRoutePlanningTimeProperty;
+			}
 			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
@@ -1501,7 +1547,9 @@ namespace core
 				|| repair.crowdAversionAction != AgentTagSampleRepairAction::None
 				|| repair.riskAversionAction != AgentTagSampleRepairAction::None
 				|| repair.routeFamiliarityAction != AgentTagSampleRepairAction::None
-				|| repair.routePersistenceAction != AgentTagSampleRepairAction::None))
+				|| repair.routePersistenceAction != AgentTagSampleRepairAction::None
+				|| repair.minimumRoutePlanningTimeAction != AgentTagSampleRepairAction::None
+				|| repair.maximumRoutePlanningTimeAction != AgentTagSampleRepairAction::None))
 			{
 				repairs->push_back(repair);
 			}
@@ -1624,6 +1672,20 @@ namespace core
 					repair.routePersistenceProperty.revision,
 					sampleAgentModifier(repair.routePersistenceProperty.range) });
 			}
+			if (repair.minimumRoutePlanningTimeAction == AgentTagSampleRepairAction::Clear)
+				agent->clearMinimumRoutePlanningTimeSample();
+			else if (repair.minimumRoutePlanningTimeAction == AgentTagSampleRepairAction::Resample)
+				agent->setMinimumRoutePlanningTimeSample({
+					SampledAgentPropertyType::MinimumRoutePlanningTime, repair.minimumRoutePlanningTimeSource,
+					repair.minimumRoutePlanningTimeProperty.revision,
+					sampleAgentModifier(repair.minimumRoutePlanningTimeProperty.range) });
+			if (repair.maximumRoutePlanningTimeAction == AgentTagSampleRepairAction::Clear)
+				agent->clearMaximumRoutePlanningTimeSample();
+			else if (repair.maximumRoutePlanningTimeAction == AgentTagSampleRepairAction::Resample)
+				agent->setMaximumRoutePlanningTimeSample({
+					SampledAgentPropertyType::MaximumRoutePlanningTime, repair.maximumRoutePlanningTimeSource,
+					repair.maximumRoutePlanningTimeProperty.revision,
+					sampleAgentModifier(repair.maximumRoutePlanningTimeProperty.range) });
 		}
 		if (!repairs.empty()) modify();
 	}
@@ -1691,6 +1753,12 @@ namespace core
 			if (agent->getRoutePersistenceSample()
 				&& agent->getRoutePersistenceSample()->sourceTag == id)
 				agent->clearRoutePersistenceSample();
+			if (agent->getMinimumRoutePlanningTimeSample()
+				&& agent->getMinimumRoutePlanningTimeSample()->sourceTag == id)
+				agent->clearMinimumRoutePlanningTimeSample();
+			if (agent->getMaximumRoutePlanningTimeSample()
+				&& agent->getMaximumRoutePlanningTimeSample()->sourceTag == id)
+				agent->clearMaximumRoutePlanningTimeSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -2030,6 +2098,70 @@ namespace core
 			if (!agent || !agent->getRoutePersistenceSample()
 				|| agent->getRoutePersistenceSample()->sourceTag != id) continue;
 			agent->clearRoutePersistenceSample();
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::addAgentTagMinimumRoutePlanningTimeSamples(AgentTagId id,
+		AgentMinimumRoutePlanningTimeProperty const& property)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->hasAgentTag(id)) continue;
+			agent->setMinimumRoutePlanningTimeSample({
+				SampledAgentPropertyType::MinimumRoutePlanningTime, id, property.revision,
+				sampleAgentModifier(property.range) });
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::clearAgentTagMinimumRoutePlanningTimeSamples(AgentTagId id)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->getMinimumRoutePlanningTimeSample()
+				|| agent->getMinimumRoutePlanningTimeSample()->sourceTag != id) continue;
+			agent->clearMinimumRoutePlanningTimeSample();
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::addAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id,
+		AgentMaximumRoutePlanningTimeProperty const& property)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->hasAgentTag(id)) continue;
+			agent->setMaximumRoutePlanningTimeSample({
+				SampledAgentPropertyType::MaximumRoutePlanningTime, id, property.revision,
+				sampleAgentModifier(property.range) });
+			changed = true;
+		}
+		if (changed) modify();
+	}
+
+	void World::clearAgentTagMaximumRoutePlanningTimeSamples(AgentTagId id)
+	{
+		invalidateSimulationSnapshot();
+		bool changed{ false };
+		for (auto& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || !agent->getMaximumRoutePlanningTimeSample()
+				|| agent->getMaximumRoutePlanningTimeSample()->sourceTag != id) continue;
+			agent->clearMaximumRoutePlanningTimeSample();
 			changed = true;
 		}
 		if (changed) modify();
@@ -8511,6 +8643,52 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualMinimumRoutePlanningTime(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentMinimumRoutePlanningTimeRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualMinimumRoutePlanningTime() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Minimum route planning time is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualMinimumRoutePlanningTime(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentIndividualMaximumRoutePlanningTime(AgentId id,
+		optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (value && !agentMaximumRoutePlanningTimeRangeIsValid({ *value, *value }, diagnostic)) return false;
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualMaximumRoutePlanningTime() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Maximum route planning time is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualMaximumRoutePlanningTime(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<MobilityProfile> value, string* diagnostic)
 	{
@@ -8891,6 +9069,18 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Route persistence is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getMinimumRoutePlanningTime() && source->getMinimumRoutePlanningTime())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Minimum route planning time is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
+			if (assignedDefinition->getMaximumRoutePlanningTime() && source->getMaximumRoutePlanningTime())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Maximum route planning time is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -8920,6 +9110,8 @@ namespace core
 		optional<AgentPropertySample> riskAversionSample;
 		optional<AgentPropertySample> routeFamiliaritySample;
 		optional<AgentPropertySample> routePersistenceSample;
+		optional<AgentPropertySample> minimumRoutePlanningTimeSample;
+		optional<AgentPropertySample> maximumRoutePlanningTimeSample;
 		if (auto const* property = definition->getWalkSpeedModifier())
 		{
 			walkSpeedSample = AgentPropertySample{
@@ -8986,6 +9178,18 @@ namespace core
 				SampledAgentPropertyType::RoutePersistence, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		if (auto const* property = definition->getMinimumRoutePlanningTime())
+		{
+			minimumRoutePlanningTimeSample = AgentPropertySample{
+				SampledAgentPropertyType::MinimumRoutePlanningTime, tag, property->revision,
+				sampleAgentModifier(property->range) };
+		}
+		if (auto const* property = definition->getMaximumRoutePlanningTime())
+		{
+			maximumRoutePlanningTimeSample = AgentPropertySample{
+				SampledAgentPropertyType::MaximumRoutePlanningTime, tag, property->revision,
+				sampleAgentModifier(property->range) };
+		}
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
@@ -8998,6 +9202,8 @@ namespace core
 		if (riskAversionSample) target->setRiskAversionSample(*riskAversionSample);
 		if (routeFamiliaritySample) target->setRouteFamiliaritySample(*routeFamiliaritySample);
 		if (routePersistenceSample) target->setRoutePersistenceSample(*routePersistenceSample);
+		if (minimumRoutePlanningTimeSample) target->setMinimumRoutePlanningTimeSample(*minimumRoutePlanningTimeSample);
+		if (maximumRoutePlanningTimeSample) target->setMaximumRoutePlanningTimeSample(*maximumRoutePlanningTimeSample);
 		modify();
 		return true;
 	}
@@ -9066,6 +9272,12 @@ namespace core
 		if (target->getRoutePersistenceSample()
 			&& target->getRoutePersistenceSample()->sourceTag == tag)
 			target->clearRoutePersistenceSample();
+		if (target->getMinimumRoutePlanningTimeSample()
+			&& target->getMinimumRoutePlanningTimeSample()->sourceTag == tag)
+			target->clearMinimumRoutePlanningTimeSample();
+		if (target->getMaximumRoutePlanningTimeSample()
+			&& target->getMaximumRoutePlanningTimeSample()->sourceTag == tag)
+			target->clearMaximumRoutePlanningTimeSample();
 		modify();
 		return true;
 	}
@@ -9082,6 +9294,8 @@ namespace core
 		optional<AgentPropertySample> const& riskAversionSample,
 		optional<AgentPropertySample> const& routeFamiliaritySample,
 		optional<AgentPropertySample> const& routePersistenceSample,
+		optional<AgentPropertySample> const& minimumRoutePlanningTimeSample,
+		optional<AgentPropertySample> const& maximumRoutePlanningTimeSample,
 		string* diagnostic) const
 	{
 		if (diagnostic) diagnostic->clear();
@@ -9096,7 +9310,7 @@ namespace core
 			if (walkSpeedSample || heightSample || stairSpeedSample || ladderSpeedSample
 				|| interactionAversionSample || effortAversionSample || waitingAversionSample
 				|| crowdAversionSample || riskAversionSample || routeFamiliaritySample
-				|| routePersistenceSample)
+				|| routePersistenceSample || minimumRoutePlanningTimeSample || maximumRoutePlanningTimeSample)
 				return reject("An untagged Agent cannot carry modifier samples");
 			return true;
 		}
@@ -9116,6 +9330,8 @@ namespace core
 		AgentTagId riskAversionSource{};
 		AgentTagId routeFamiliaritySource{};
 		AgentTagId routePersistenceSource{};
+		AgentTagId minimumRoutePlanningTimeSource{};
+		AgentTagId maximumRoutePlanningTimeSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -9128,6 +9344,8 @@ namespace core
 		AgentRiskAversionProperty const* riskAversionProperty{ nullptr };
 		AgentRouteFamiliarityProperty const* routeFamiliarityProperty{ nullptr };
 		AgentRoutePersistenceProperty const* routePersistenceProperty{ nullptr };
+		AgentMinimumRoutePlanningTimeProperty const* minimumRoutePlanningTimeProperty{ nullptr };
+		AgentMaximumRoutePlanningTimeProperty const* maximumRoutePlanningTimeProperty{ nullptr };
 		for (auto const tag : tags)
 		{
 			auto const* definition = mAgentTagRegistry->lookupAgentTag(tag);
@@ -9238,6 +9456,22 @@ namespace core
 				routePersistenceSource = tag;
 				routePersistenceProperty = property;
 			}
+			if (auto const* property = definition->getMinimumRoutePlanningTime())
+			{
+				if (minimumRoutePlanningTimeSource)
+					return reject(format("Minimum route planning time is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(minimumRoutePlanningTimeSource), definition->getName()));
+				minimumRoutePlanningTimeSource = tag;
+				minimumRoutePlanningTimeProperty = property;
+			}
+			if (auto const* property = definition->getMaximumRoutePlanningTime())
+			{
+				if (maximumRoutePlanningTimeSource)
+					return reject(format("Maximum route planning time is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(maximumRoutePlanningTimeSource), definition->getName()));
+				maximumRoutePlanningTimeSource = tag;
+				maximumRoutePlanningTimeProperty = property;
+			}
 			if (definition->getMobilityProfile())
 			{
 				if (mobilityProfileSource)
@@ -9320,7 +9554,17 @@ namespace core
 				routePersistenceSource,
 				routePersistenceProperty ? &routePersistenceProperty->range : nullptr,
 				routePersistenceProperty ? routePersistenceProperty->revision : 0,
-				routePersistenceSample);
+				routePersistenceSample)
+			&& validateSample("Minimum route planning time", SampledAgentPropertyType::MinimumRoutePlanningTime,
+				minimumRoutePlanningTimeSource,
+				minimumRoutePlanningTimeProperty ? &minimumRoutePlanningTimeProperty->range : nullptr,
+				minimumRoutePlanningTimeProperty ? minimumRoutePlanningTimeProperty->revision : 0,
+				minimumRoutePlanningTimeSample)
+			&& validateSample("Maximum route planning time", SampledAgentPropertyType::MaximumRoutePlanningTime,
+				maximumRoutePlanningTimeSource,
+				maximumRoutePlanningTimeProperty ? &maximumRoutePlanningTimeProperty->range : nullptr,
+				maximumRoutePlanningTimeProperty ? maximumRoutePlanningTimeProperty->revision : 0,
+				maximumRoutePlanningTimeSample);
 	}
 
 	bool World::restoreAgentTagAssignments(AgentId agent,
@@ -9336,6 +9580,8 @@ namespace core
 		optional<AgentPropertySample> const& riskAversionSample,
 		optional<AgentPropertySample> const& routeFamiliaritySample,
 		optional<AgentPropertySample> const& routePersistenceSample,
+		optional<AgentPropertySample> const& minimumRoutePlanningTimeSample,
+		optional<AgentPropertySample> const& maximumRoutePlanningTimeSample,
 		string* diagnostic)
 	{
 		invalidateSimulationSnapshot();
@@ -9355,7 +9601,7 @@ namespace core
 		if (!validateAgentTagAssignments(tags, walkSpeedSample, heightSample,
 			stairSpeedSample, ladderSpeedSample, interactionAversionSample, effortAversionSample,
 			waitingAversionSample, crowdAversionSample, riskAversionSample,
-			routeFamiliaritySample, routePersistenceSample, diagnostic))
+			routeFamiliaritySample, routePersistenceSample, minimumRoutePlanningTimeSample, maximumRoutePlanningTimeSample, diagnostic))
 			return false;
 
 		auto* target = mAgents.find(agent);
@@ -9370,7 +9616,9 @@ namespace core
 			&& target->getCrowdAversionSample() == crowdAversionSample
 			&& target->getRiskAversionSample() == riskAversionSample
 			&& target->getRouteFamiliaritySample() == routeFamiliaritySample
-			&& target->getRoutePersistenceSample() == routePersistenceSample) return true;
+			&& target->getRoutePersistenceSample() == routePersistenceSample
+			&& target->getMinimumRoutePlanningTimeSample() == minimumRoutePlanningTimeSample
+			&& target->getMaximumRoutePlanningTimeSample() == maximumRoutePlanningTimeSample) return true;
 
 		target->setAgentTags(tags);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
@@ -9395,6 +9643,10 @@ namespace core
 		else target->clearRouteFamiliaritySample();
 		if (routePersistenceSample) target->setRoutePersistenceSample(*routePersistenceSample);
 		else target->clearRoutePersistenceSample();
+		if (minimumRoutePlanningTimeSample) target->setMinimumRoutePlanningTimeSample(*minimumRoutePlanningTimeSample);
+		else target->clearMinimumRoutePlanningTimeSample();
+		if (maximumRoutePlanningTimeSample) target->setMaximumRoutePlanningTimeSample(*maximumRoutePlanningTimeSample);
+		else target->clearMaximumRoutePlanningTimeSample();
 		modify();
 		return true;
 	}

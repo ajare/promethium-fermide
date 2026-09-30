@@ -127,6 +127,10 @@ namespace core
 				tag->setRouteFamiliarity(*familiarity);
 			if (auto const* persistence = sourceTag->getRoutePersistence())
 				tag->setRoutePersistence(*persistence);
+			if (auto const* minimumPlanningTime = sourceTag->getMinimumRoutePlanningTime())
+				tag->setMinimumRoutePlanningTime(*minimumPlanningTime);
+			if (auto const* maximumPlanningTime = sourceTag->getMaximumRoutePlanningTime())
+				tag->setMaximumRoutePlanningTime(*maximumPlanningTime);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
 				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
@@ -176,6 +180,10 @@ namespace core
 					candidate->getRouteFamiliarity())
 				|| !optionalPropertyMatches(tag->getRoutePersistence(),
 					candidate->getRoutePersistence())
+				|| !optionalPropertyMatches(tag->getMinimumRoutePlanningTime(),
+					candidate->getMinimumRoutePlanningTime())
+				|| !optionalPropertyMatches(tag->getMaximumRoutePlanningTime(),
+					candidate->getMaximumRoutePlanningTime())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
 					candidate->getMobilityProfile())) return false;
 		}
@@ -410,6 +418,26 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getRoutePersistence();
+	}
+
+	AgentMinimumRoutePlanningTimeProperty const*
+	AgentTagRegistry::getAgentTagMinimumRoutePlanningTime(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getMinimumRoutePlanningTime();
+	}
+
+	AgentMaximumRoutePlanningTimeProperty const*
+	AgentTagRegistry::getAgentTagMaximumRoutePlanningTime(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getMaximumRoutePlanningTime();
 	}
 
 	AgentMobilityProfileProperty const*
@@ -949,6 +977,54 @@ namespace core
 					auto const* source = mTags.find(assigned);
 					if (source && source->getRoutePersistence()) return reject(std::format(
 						"Cannot add Route persistence to Agent tag #{}: Agent '{}' in World '{}' already inherits Route persistence from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::minimumRoutePlanningTimeAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (source && source->getMinimumRoutePlanningTime()) return reject(std::format(
+						"Cannot add Minimum route planning time to Agent tag #{}: Agent '{}' in World '{}' already inherits Minimum route planning time from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::maximumRoutePlanningTimeAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (source && source->getMaximumRoutePlanningTime()) return reject(std::format(
+						"Cannot add Maximum route planning time to Agent tag #{}: Agent '{}' in World '{}' already inherits Maximum route planning time from #{}",
 						target->getName(), agent->getName(), world->getName(), source->getName()));
 				}
 			}
@@ -1744,6 +1820,48 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagMinimumRoutePlanningTime(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getMinimumRoutePlanningTime()) return reject(std::format(
+			"Agent tag #{} already has Minimum route planning time", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!minimumRoutePlanningTimeAdditionIsValid(id, diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setMinimumRoutePlanningTime({ DefaultAgentMinimumRoutePlanningTimeRange, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagMinimumRoutePlanningTimeSamples(id, *tag->getMinimumRoutePlanningTime());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::addAgentTagMaximumRoutePlanningTime(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getMaximumRoutePlanningTime()) return reject(std::format(
+			"Agent tag #{} already has Maximum route planning time", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!maximumRoutePlanningTimeAdditionIsValid(id, diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setMaximumRoutePlanningTime({ DefaultAgentMaximumRoutePlanningTimeRange, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagMaximumRoutePlanningTimeSamples(id, *tag->getMaximumRoutePlanningTime());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1898,6 +2016,50 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::setAgentTagMinimumRoutePlanningTime(AgentTagId id,
+		AgentModifierRange range, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getMinimumRoutePlanningTime();
+		if (!current) return reject(std::format("Agent tag #{} has no Minimum route planning time", tag->getName()));
+		if (!agentMinimumRoutePlanningTimeRangeIsValid(range, diagnostic)) return false;
+		if (current->range == range) return reject("The Agent Minimum route planning time range is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setMinimumRoutePlanningTime({ range, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagMinimumRoutePlanningTimeSamples(id, *tag->getMinimumRoutePlanningTime());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::setAgentTagMaximumRoutePlanningTime(AgentTagId id,
+		AgentModifierRange range, std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getMaximumRoutePlanningTime();
+		if (!current) return reject(std::format("Agent tag #{} has no Maximum route planning time", tag->getName()));
+		if (!agentMaximumRoutePlanningTimeRangeIsValid(range, diagnostic)) return false;
+		if (current->range == range) return reject("The Agent Maximum route planning time range is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		uint64_t revision{ 0 };
+		try { revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		tag->setMaximumRoutePlanningTime({ range, revision });
+		for (auto* world : mLoadedWorlds)
+			if (world) world->addAgentTagMaximumRoutePlanningTimeSamples(id, *tag->getMaximumRoutePlanningTime());
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::setAgentTagMobilityProfile(AgentTagId id,
 		MobilityProfile value, std::string* diagnostic)
 	{
@@ -2026,6 +2188,40 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::removeAgentTagMinimumRoutePlanningTime(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getMinimumRoutePlanningTime()) return reject(std::format(
+			"Agent tag #{} has no Minimum route planning time", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world) world->clearAgentTagMinimumRoutePlanningTimeSamples(id);
+		tag->removeMinimumRoutePlanningTime();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagMaximumRoutePlanningTime(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getMaximumRoutePlanningTime()) return reject(std::format(
+			"Agent tag #{} has no Maximum route planning time", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world) world->clearAgentTagMaximumRoutePlanningTimeSamples(id);
+		tag->removeMaximumRoutePlanningTime();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::removeAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -2075,7 +2271,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 12);
+		serializer.writeUint32("version", 13);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -2104,9 +2300,11 @@ namespace core
 			auto const* risk = tag->getRiskAversion();
 			auto const* familiarity = tag->getRouteFamiliarity();
 			auto const* persistence = tag->getRoutePersistence();
+			auto const* minimumPlanningTime = tag->getMinimumRoutePlanningTime();
+			auto const* maximumPlanningTime = tag->getMaximumRoutePlanningTime();
 			auto const* chance = tag->getEscalatorWalkingChance();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || chance || mobility)
+			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -2148,6 +2346,8 @@ namespace core
 				if (risk) writeModifier("riskAversion", *risk);
 				if (familiarity) writeModifier("routeFamiliarity", *familiarity);
 				if (persistence) writeModifier("routePersistence", *persistence);
+				if (minimumPlanningTime) writeModifier("minimumRoutePlanningTime", *minimumPlanningTime);
+				if (maximumPlanningTime) writeModifier("maximumRoutePlanningTime", *maximumPlanningTime);
 				if (mobility)
 				{
 					serializer.beginMap("");
@@ -2168,7 +2368,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 12)
+		if (version < 1 || version > 13)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -2224,6 +2424,8 @@ namespace core
 				bool hasRiskAversion{ false };
 				bool hasRouteFamiliarity{ false };
 				bool hasRoutePersistence{ false };
+				bool hasMinimumRoutePlanningTime{ false };
+				bool hasMaximumRoutePlanningTime{ false };
 				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
@@ -2241,7 +2443,9 @@ namespace core
 						&& !(version >= 8 && type == "ladderSpeedModifier")
 						&& !(version >= 10 && type == "riskAversion")
 						&& !(version >= 11 && type == "routeFamiliarity")
-						&& !(version >= 12 && type == "routePersistence"))
+						&& !(version >= 12 && type == "routePersistence")
+						&& !(version >= 13 && type == "minimumRoutePlanningTime")
+						&& !(version >= 13 && type == "maximumRoutePlanningTime"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -2284,6 +2488,12 @@ namespace core
 					if (type == "routePersistence" && hasRoutePersistence)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Route persistence", name));
+					if (type == "minimumRoutePlanningTime" && hasMinimumRoutePlanningTime)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Minimum route planning time", name));
+					if (type == "maximumRoutePlanningTime" && hasMaximumRoutePlanningTime)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Maximum route planning time", name));
 					if (type == "mobilityProfile" && hasMobilityProfile)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Mobility profile",
@@ -2400,13 +2610,29 @@ namespace core
 							tag->setRouteFamiliarity({ range, revision });
 							hasRouteFamiliarity = true;
 						}
-						else
+						else if (type == "routePersistence")
 						{
 							if (!agentRoutePersistenceRangeIsValid(range, &rangeDiagnostic))
 								throw SerializationException(
 									"Serialized Route persistence range is invalid: " + rangeDiagnostic);
 							tag->setRoutePersistence({ range, revision });
 							hasRoutePersistence = true;
+						}
+						else if (type == "minimumRoutePlanningTime")
+						{
+							if (!agentMinimumRoutePlanningTimeRangeIsValid(range, &rangeDiagnostic))
+								throw SerializationException(
+									"Serialized Minimum route planning time range is invalid: " + rangeDiagnostic);
+							tag->setMinimumRoutePlanningTime({ range, revision });
+							hasMinimumRoutePlanningTime = true;
+						}
+						else
+						{
+							if (!agentMaximumRoutePlanningTimeRangeIsValid(range, &rangeDiagnostic))
+								throw SerializationException(
+									"Serialized Maximum route planning time range is invalid: " + rangeDiagnostic);
+							tag->setMaximumRoutePlanningTime({ range, revision });
+							hasMaximumRoutePlanningTime = true;
 						}
 					}
 					serializer.endMap();

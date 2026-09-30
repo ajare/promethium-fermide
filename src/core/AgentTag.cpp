@@ -267,6 +267,44 @@ namespace core
 		return true;
 	}
 
+	bool agentMinimumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Minimum route planning time endpoints must be finite");
+		if (range.minimum < AgentMinimumRoutePlanningTimeMinimum
+			|| range.maximum > AgentMinimumRoutePlanningTimeMaximum)
+			return reject("Minimum route planning time endpoints must be between 0.1 and 10 seconds");
+		if (range.minimum > range.maximum)
+			return reject("Minimum route planning time minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool agentMaximumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (!std::isfinite(range.minimum) || !std::isfinite(range.maximum))
+			return reject("Maximum route planning time endpoints must be finite");
+		if (range.minimum < AgentMaximumRoutePlanningTimeMinimum
+			|| range.maximum > AgentMaximumRoutePlanningTimeMaximum)
+			return reject("Maximum route planning time endpoints must be between 0.1 and 10 seconds");
+		if (range.minimum > range.maximum)
+			return reject("Maximum route planning time minimum cannot exceed its maximum");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	float sampleAgentModifier(AgentModifierRange const& range)
 	{
 		if (!(range.minimum < range.maximum)) return range.minimum;

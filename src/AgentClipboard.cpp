@@ -107,6 +107,14 @@ namespace
 			&& !core::agentRoutePersistenceRangeIsValid(
 				{ *payload.individualRoutePersistence, *payload.individualRoutePersistence },
 				&diagnostic)) return false;
+		if (payload.individualMinimumRoutePlanningTime
+			&& !core::agentMinimumRoutePlanningTimeRangeIsValid(
+				{ *payload.individualMinimumRoutePlanningTime, *payload.individualMinimumRoutePlanningTime },
+				&diagnostic)) return false;
+		if (payload.individualMaximumRoutePlanningTime
+			&& !core::agentMaximumRoutePlanningTimeRangeIsValid(
+				{ *payload.individualMaximumRoutePlanningTime, *payload.individualMaximumRoutePlanningTime },
+				&diagnostic)) return false;
 		if (payload.agentTags.empty())
 		{
 			if (payload.agentTagRegistryUuid || payload.walkSpeedModifierSample
@@ -114,7 +122,8 @@ namespace
 				|| payload.ladderSpeedModifierSample || payload.interactionAversionSample
 				|| payload.effortAversionSample || payload.waitingAversionSample
 				|| payload.crowdAversionSample || payload.riskAversionSample
-				|| payload.routeFamiliaritySample || payload.routePersistenceSample)
+				|| payload.routeFamiliaritySample || payload.routePersistenceSample
+				|| payload.minimumRoutePlanningTimeSample || payload.maximumRoutePlanningTimeSample)
 			{
 				return reject(
 					"An untagged Agent clipboard payload cannot carry registry or sample state");
@@ -176,7 +185,13 @@ namespace
 				payload.routeFamiliaritySample)
 			&& validateSample("Route persistence",
 				core::SampledAgentPropertyType::RoutePersistence,
-				payload.routePersistenceSample);
+				payload.routePersistenceSample)
+			&& validateSample("Minimum route planning time",
+				core::SampledAgentPropertyType::MinimumRoutePlanningTime,
+				payload.minimumRoutePlanningTimeSample)
+			&& validateSample("Maximum route planning time",
+				core::SampledAgentPropertyType::MaximumRoutePlanningTime,
+				payload.maximumRoutePlanningTimeSample);
 	}
 
 	bool clipboardTagStateFitsWorld(core::World const& world,
@@ -201,7 +216,7 @@ namespace
 			payload.interactionAversionSample, payload.effortAversionSample,
 			payload.waitingAversionSample, payload.crowdAversionSample,
 			payload.riskAversionSample, payload.routeFamiliaritySample,
-			payload.routePersistenceSample, &diagnostic);
+			payload.routePersistenceSample, payload.minimumRoutePlanningTimeSample, payload.maximumRoutePlanningTimeSample, &diagnostic);
 	}
 
 	AgentClipboardConfigurationValue portableValue(core::World const& world,
@@ -540,6 +555,10 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualRouteFamiliarity = lookup.entity->getIndividualRouteFamiliarity();
 	payload.routePersistenceSample = lookup.entity->getRoutePersistenceSample();
 	payload.individualRoutePersistence = lookup.entity->getIndividualRoutePersistence();
+	payload.minimumRoutePlanningTimeSample = lookup.entity->getMinimumRoutePlanningTimeSample();
+	payload.individualMinimumRoutePlanningTime = lookup.entity->getIndividualMinimumRoutePlanningTime();
+	payload.maximumRoutePlanningTimeSample = lookup.entity->getMaximumRoutePlanningTimeSample();
+	payload.individualMaximumRoutePlanningTime = lookup.entity->getIndividualMaximumRoutePlanningTime();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -646,6 +665,12 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualRoutePersistence)
 		output << YAML::Key << "routePersistence" << YAML::Value
 			<< *payload.individualRoutePersistence;
+	if (payload.individualMinimumRoutePlanningTime)
+		output << YAML::Key << "minimumRoutePlanningTime" << YAML::Value
+			<< *payload.individualMinimumRoutePlanningTime;
+	if (payload.individualMaximumRoutePlanningTime)
+		output << YAML::Key << "maximumRoutePlanningTime" << YAML::Value
+			<< *payload.individualMaximumRoutePlanningTime;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -689,7 +714,7 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 			|| payload.interactionAversionSample || payload.effortAversionSample
 			|| payload.waitingAversionSample || payload.crowdAversionSample
 			|| payload.riskAversionSample || payload.routeFamiliaritySample
-			|| payload.routePersistenceSample)
+			|| payload.routePersistenceSample || payload.minimumRoutePlanningTimeSample || payload.maximumRoutePlanningTimeSample)
 		{
 			output << YAML::Key << "propertySamples" << YAML::Value << YAML::BeginSeq;
 			auto writeSample = [&output](char const* type,
@@ -725,6 +750,10 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 				writeSample("routeFamiliarity", *payload.routeFamiliaritySample);
 			if (payload.routePersistenceSample)
 				writeSample("routePersistence", *payload.routePersistenceSample);
+			if (payload.minimumRoutePlanningTimeSample)
+				writeSample("minimumRoutePlanningTime", *payload.minimumRoutePlanningTimeSample);
+			if (payload.maximumRoutePlanningTimeSample)
+				writeSample("maximumRoutePlanningTime", *payload.maximumRoutePlanningTimeSample);
 			output << YAML::EndSeq;
 		}
 	}
@@ -913,6 +942,34 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		if (!core::agentRoutePersistenceRangeIsValid({ value, value }, &diagnostic))
 			return false;
 		payload.individualRoutePersistence = value;
+	}
+
+	if (object["minimumRoutePlanningTime"])
+	{
+		float value;
+		try { value = object["minimumRoutePlanningTime"].as<float>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Minimum route planning time must be a number";
+			return false;
+		}
+		if (!core::agentMinimumRoutePlanningTimeRangeIsValid({ value, value }, &diagnostic))
+			return false;
+		payload.individualMinimumRoutePlanningTime = value;
+	}
+
+	if (object["maximumRoutePlanningTime"])
+	{
+		float value;
+		try { value = object["maximumRoutePlanningTime"].as<float>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Maximum route planning time must be a number";
+			return false;
+		}
+		if (!core::agentMaximumRoutePlanningTimeRangeIsValid({ value, value }, &diagnostic))
+			return false;
+		payload.individualMaximumRoutePlanningTime = value;
 	}
 
 	// An absent `group` is an ungrouped Agent, which is exactly how a
@@ -1184,6 +1241,16 @@ bool readAgentClipboardObject(YAML::Node const& object,
 				sample.type = core::SampledAgentPropertyType::RoutePersistence;
 				destination = &payload.routePersistenceSample;
 			}
+			else if (type == "minimumRoutePlanningTime")
+			{
+				sample.type = core::SampledAgentPropertyType::MinimumRoutePlanningTime;
+				destination = &payload.minimumRoutePlanningTimeSample;
+			}
+			else if (type == "maximumRoutePlanningTime")
+			{
+				sample.type = core::SampledAgentPropertyType::MaximumRoutePlanningTime;
+				destination = &payload.maximumRoutePlanningTimeSample;
+			}
 			else
 			{
 				diagnostic = "Clipboard Agent property sample type is not supported";
@@ -1201,7 +1268,10 @@ bool readAgentClipboardObject(YAML::Node const& object,
 						: type == "waitingAversion" ? "Waiting aversion"
 						: type == "crowdAversion" ? "Crowd aversion"
 						: type == "riskAversion" ? "Risk aversion"
-						: type == "routeFamiliarity" ? "Route familiarity" : "Route persistence");
+						: type == "routeFamiliarity" ? "Route familiarity"
+						: type == "routePersistence" ? "Route persistence"
+						: type == "minimumRoutePlanningTime" ? "Minimum route planning time"
+						: "Maximum route planning time");
 				return false;
 			}
 			*destination = sample;
@@ -1482,6 +1552,30 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			}
 		}
 
+		if (payload.individualMinimumRoutePlanningTime)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualMinimumRoutePlanningTime(agentId,
+				payload.individualMinimumRoutePlanningTime, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Minimum route planning time could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+
+		if (payload.individualMaximumRoutePlanningTime)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualMaximumRoutePlanningTime(agentId,
+				payload.individualMaximumRoutePlanningTime, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Maximum route planning time could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+
 		if (groupName)
 		{
 			// The destination's own group when it already defines this exact
@@ -1510,7 +1604,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				payload.interactionAversionSample, payload.effortAversionSample,
 				payload.waitingAversionSample, payload.crowdAversionSample,
 				payload.riskAversionSample, payload.routeFamiliaritySample,
-				payload.routePersistenceSample, &assignDiagnostic))
+				payload.routePersistenceSample, payload.minimumRoutePlanningTimeSample, payload.maximumRoutePlanningTimeSample, &assignDiagnostic))
 			{
 				diagnostic = "The pasted Agent's tag assignments could not be restored: "
 					+ assignDiagnostic + rollBack();

@@ -26,6 +26,8 @@ namespace core
 		RiskAversion,
 		RouteFamiliarity,
 		RoutePersistence,
+		MinimumRoutePlanningTime,
+		MaximumRoutePlanningTime,
 		MobilityProfile
 	};
 
@@ -55,6 +57,8 @@ namespace core
 		case AgentPropertyType::RiskAversion: return { "Risk aversion", "Pathing" };
 		case AgentPropertyType::RouteFamiliarity: return { "Route familiarity", "Pathing" };
 		case AgentPropertyType::RoutePersistence: return { "Route persistence", "Pathing" };
+		case AgentPropertyType::MinimumRoutePlanningTime: return { "Minimum route planning time", "Pathing" };
+		case AgentPropertyType::MaximumRoutePlanningTime: return { "Maximum route planning time", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -156,6 +160,14 @@ namespace core
 	inline constexpr float AgentRoutePersistenceMaximum{ 1.0f };
 	inline constexpr AgentModifierRange DefaultAgentRoutePersistenceRange{ 0.15f, 0.15f };
 
+	inline constexpr float AgentMinimumRoutePlanningTimeMinimum{ 0.1f };
+	inline constexpr float AgentMinimumRoutePlanningTimeMaximum{ 10.0f };
+	inline constexpr AgentModifierRange DefaultAgentMinimumRoutePlanningTimeRange{ 1.0f, 1.0f };
+
+	inline constexpr float AgentMaximumRoutePlanningTimeMinimum{ 0.1f };
+	inline constexpr float AgentMaximumRoutePlanningTimeMaximum{ 10.0f };
+	inline constexpr AgentModifierRange DefaultAgentMaximumRoutePlanningTimeRange{ 3.0f, 3.0f };
+
 	struct AgentWalkSpeedModifierProperty
 	{
 		AgentModifierRange range{};
@@ -244,6 +256,22 @@ namespace core
 		bool operator==(AgentRoutePersistenceProperty const& other) const = default;
 	};
 
+	struct AgentMinimumRoutePlanningTimeProperty
+	{
+		AgentModifierRange range{ DefaultAgentMinimumRoutePlanningTimeRange };
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentMinimumRoutePlanningTimeProperty const& other) const = default;
+	};
+
+	struct AgentMaximumRoutePlanningTimeProperty
+	{
+		AgentModifierRange range{ DefaultAgentMaximumRoutePlanningTimeRange };
+		uint64_t revision{ 0 };
+
+		bool operator==(AgentMaximumRoutePlanningTimeProperty const& other) const = default;
+	};
+
 	enum class TraversalKind : uint8_t
 	{
 		Staircase,
@@ -324,6 +352,10 @@ namespace core
 		std::string* diagnostic = nullptr);
 	bool agentRoutePersistenceRangeIsValid(AgentModifierRange const& range,
 		std::string* diagnostic = nullptr);
+	bool agentMinimumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
+	bool agentMaximumRoutePlanningTimeRangeIsValid(AgentModifierRange const& range,
+		std::string* diagnostic = nullptr);
 	float sampleAgentModifier(AgentModifierRange const& range);
 
 	// A named reusable set of Agent properties. Property types are hardcoded;
@@ -353,6 +385,8 @@ namespace core
 		std::optional<AgentRiskAversionProperty> mRiskAversion;
 		std::optional<AgentRouteFamiliarityProperty> mRouteFamiliarity;
 		std::optional<AgentRoutePersistenceProperty> mRoutePersistence;
+		std::optional<AgentMinimumRoutePlanningTimeProperty> mMinimumRoutePlanningTime;
+		std::optional<AgentMaximumRoutePlanningTimeProperty> mMaximumRoutePlanningTime;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -419,6 +453,16 @@ namespace core
 			mRoutePersistence = property;
 		}
 		void removeRoutePersistence() { mRoutePersistence.reset(); }
+		void setMinimumRoutePlanningTime(AgentMinimumRoutePlanningTimeProperty property)
+		{
+			mMinimumRoutePlanningTime = property;
+		}
+		void removeMinimumRoutePlanningTime() { mMinimumRoutePlanningTime.reset(); }
+		void setMaximumRoutePlanningTime(AgentMaximumRoutePlanningTimeProperty property)
+		{
+			mMaximumRoutePlanningTime = property;
+		}
+		void removeMaximumRoutePlanningTime() { mMaximumRoutePlanningTime.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -482,6 +526,14 @@ namespace core
 		AgentRoutePersistenceProperty const* getRoutePersistence() const
 		{
 			return mRoutePersistence ? &*mRoutePersistence : nullptr;
+		}
+		AgentMinimumRoutePlanningTimeProperty const* getMinimumRoutePlanningTime() const
+		{
+			return mMinimumRoutePlanningTime ? &*mMinimumRoutePlanningTime : nullptr;
+		}
+		AgentMaximumRoutePlanningTimeProperty const* getMaximumRoutePlanningTime() const
+		{
+			return mMaximumRoutePlanningTime ? &*mMaximumRoutePlanningTime : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

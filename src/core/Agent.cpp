@@ -12,6 +12,8 @@
 #include "core/SerializationException.h"
 
 #include <algorithm>
+#include <algorithm>
+#include <algorithm>
 #include <type_traits>
 #include <variant>
 
@@ -179,6 +181,8 @@ namespace core
 			|| mIndividualRiskAversion
 			|| mIndividualRouteFamiliarity
 			|| mIndividualRoutePersistence
+			|| mIndividualMinimumRoutePlanningTime
+			|| mIndividualMaximumRoutePlanningTime
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -225,6 +229,10 @@ namespace core
 				writeFloatProperty("routeFamiliarity", *mIndividualRouteFamiliarity);
 			if (mIndividualRoutePersistence)
 				writeFloatProperty("routePersistence", *mIndividualRoutePersistence);
+			if (mIndividualMinimumRoutePlanningTime)
+				writeFloatProperty("minimumRoutePlanningTime", *mIndividualMinimumRoutePlanningTime);
+			if (mIndividualMaximumRoutePlanningTime)
+				writeFloatProperty("maximumRoutePlanningTime", *mIndividualMaximumRoutePlanningTime);
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -236,7 +244,7 @@ namespace core
 		if (mWalkSpeedModifierSample || mHeightModifierSample || mStairSpeedModifierSample
 			|| mLadderSpeedModifierSample || mInteractionAversionSample || mEffortAversionSample
 			|| mWaitingAversionSample || mCrowdAversionSample || mRiskAversionSample
-			|| mRouteFamiliaritySample || mRoutePersistenceSample)
+			|| mRouteFamiliaritySample || mRoutePersistenceSample || mMinimumRoutePlanningTimeSample || mMaximumRoutePlanningTimeSample)
 		{
 			serializer.beginArray("propertySamples");
 			auto writeSample = [&serializer](char const* type,
@@ -271,6 +279,10 @@ namespace core
 				writeSample("routeFamiliarity", *mRouteFamiliaritySample);
 			if (mRoutePersistenceSample)
 				writeSample("routePersistence", *mRoutePersistenceSample);
+			if (mMinimumRoutePlanningTimeSample)
+				writeSample("minimumRoutePlanningTime", *mMinimumRoutePlanningTimeSample);
+			if (mMaximumRoutePlanningTimeSample)
+				writeSample("maximumRoutePlanningTime", *mMaximumRoutePlanningTimeSample);
 			serializer.endArray();
 		}
 		// An activated Agent writes no `active` key at all - the same convention
@@ -335,6 +347,8 @@ namespace core
 		mIndividualRiskAversion.reset();
 		mIndividualRouteFamiliarity.reset();
 		mIndividualRoutePersistence.reset();
+		mIndividualMinimumRoutePlanningTime.reset();
+		mIndividualMaximumRoutePlanningTime.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -458,6 +472,24 @@ namespace core
 						throw SerializationException("Serialized individual Route persistence is invalid");
 					mIndividualRoutePersistence = value;
 				}
+				else if (type == "minimumRoutePlanningTime")
+				{
+					if (mIndividualMinimumRoutePlanningTime)
+						throw SerializationException("Serialized Agent contains more than one individual Minimum route planning time");
+					auto const value = serializer.readFloat("value");
+					if (!agentMinimumRoutePlanningTimeRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Minimum route planning time is invalid");
+					mIndividualMinimumRoutePlanningTime = value;
+				}
+				else if (type == "maximumRoutePlanningTime")
+				{
+					if (mIndividualMaximumRoutePlanningTime)
+						throw SerializationException("Serialized Agent contains more than one individual Maximum route planning time");
+					auto const value = serializer.readFloat("value");
+					if (!agentMaximumRoutePlanningTimeRangeIsValid({ value, value }))
+						throw SerializationException("Serialized individual Maximum route planning time is invalid");
+					mIndividualMaximumRoutePlanningTime = value;
+				}
 				else if (type == "mobilityProfile")
 				{
 					if (mIndividualMobilityProfile)
@@ -481,6 +513,8 @@ namespace core
 		mRiskAversionSample.reset();
 		mRouteFamiliaritySample.reset();
 		mRoutePersistenceSample.reset();
+		mMinimumRoutePlanningTimeSample.reset();
+		mMaximumRoutePlanningTimeSample.reset();
 		if (serializer.hasField("propertySamples"))
 		{
 			serializer.beginArray("propertySamples");
@@ -556,6 +590,18 @@ namespace core
 					sample.type = SampledAgentPropertyType::RoutePersistence;
 					destination = &mRoutePersistenceSample;
 					displayName = "Route persistence";
+				}
+				else if (type == "minimumRoutePlanningTime")
+				{
+					sample.type = SampledAgentPropertyType::MinimumRoutePlanningTime;
+					destination = &mMinimumRoutePlanningTimeSample;
+					displayName = "Minimum route planning time";
+				}
+				else if (type == "maximumRoutePlanningTime")
+				{
+					sample.type = SampledAgentPropertyType::MaximumRoutePlanningTime;
+					destination = &mMaximumRoutePlanningTimeSample;
+					displayName = "Maximum route planning time";
 				}
 				else
 				{
@@ -855,6 +901,41 @@ namespace core
 		effective.value = mRoutePersistenceSample->value;
 		effective.sourceTag = mRoutePersistenceSample->sourceTag;
 		effective.propertyRevision = mRoutePersistenceSample->propertyRevision;
+		return effective;
+	}
+
+	EffectiveAgentMinimumRoutePlanningTime Agent::getEffectiveMinimumRoutePlanningTime() const
+	{
+		EffectiveAgentMinimumRoutePlanningTime effective;
+		if (mIndividualMinimumRoutePlanningTime)
+		{
+			effective.value = *mIndividualMinimumRoutePlanningTime;
+			effective.individual = true;
+			return effective;
+		}
+		if (!mMinimumRoutePlanningTimeSample) return effective;
+		effective.value = mMinimumRoutePlanningTimeSample->value;
+		effective.sourceTag = mMinimumRoutePlanningTimeSample->sourceTag;
+		effective.propertyRevision = mMinimumRoutePlanningTimeSample->propertyRevision;
+		return effective;
+	}
+
+	EffectiveAgentMaximumRoutePlanningTime Agent::getEffectiveMaximumRoutePlanningTime() const
+	{
+		EffectiveAgentMaximumRoutePlanningTime effective;
+		if (mIndividualMaximumRoutePlanningTime)
+		{
+			effective.value = *mIndividualMaximumRoutePlanningTime;
+			effective.individual = true;
+		}
+		else if (mMaximumRoutePlanningTimeSample)
+		{
+			effective.value = mMaximumRoutePlanningTimeSample->value;
+			effective.sourceTag = mMaximumRoutePlanningTimeSample->sourceTag;
+			effective.propertyRevision = mMaximumRoutePlanningTimeSample->propertyRevision;
+		}
+		// Present a usable interval without changing either authored value or sample.
+		effective.value = std::max(effective.value, getEffectiveMinimumRoutePlanningTime().value);
 		return effective;
 	}
 

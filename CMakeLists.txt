@@ -345,6 +345,7 @@ add_executable(prometheum-fermide-headless
     src/headless/EscalatorWalkingSmokeChecks.cpp
     src/headless/AgentHeightSmokeChecks.cpp
     src/headless/AgentIndividualPropertySmokeChecks.cpp
+    src/headless/RoutePlanningTimePropertySmokeChecks.cpp
     src/headless/AgentPathRenderSmokeChecks.cpp
     src/headless/AgentBehaviourRegistrySmokeChecks.cpp
     src/headless/AgentBehaviourAssignmentSmokeChecks.cpp
@@ -535,6 +536,8 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
+    add_test(NAME route-planning-time-properties COMMAND prometheum-fermide-headless
+        --route-planning-time-checks)
     add_test(NAME serialization-checks COMMAND prometheum-fermide-headless --serialization-checks)
     add_test(NAME restoration-checks COMMAND prometheum-fermide-headless
         --restoration-benchmark "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/door-test-1.world.yaml")

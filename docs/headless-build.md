@@ -377,6 +377,22 @@ arcs each; changed observations refresh costs without changing work counts.
 Release editor/headless builds and all 59 registered tests passed. Interactive
 stress-World UI verification remains manual; the #224 generator is unchanged.
 
+## Route planning time properties (#252)
+
+Run `prometheum-fermide-headless.exe --route-planning-time-checks` (or CTest's
+`route-planning-time-properties`) for headless coverage of Minimum and Maximum
+route planning time. These Pathing properties default to 1 and 3 seconds and
+accept finite values from 0.1 through 10. Tags author sampling ranges; individual
+values override each sample independently. Effective maximum is at least the
+effective minimum, without rewriting authored endpoints or sample provenance.
+
+World schema 29 and Agent tag registry schema 13 persist these properties.
+Earlier documents and clipboard objects without them retain the defaults.
+Checks cover validation, crossed endpoints, exact sample round trips,
+reconciliation, dependency conflicts, dirty state, individual and registry
+undo/redo, and clipboard provenance. Runtime Route planning does not yet consume
+these properties.
+
 ## Prerequisites
 
 - Windows x64
