@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 #include "imgui/imgui.h"
+#include "imgui/IconsFontAwesome5.h"
 #include "core/AccessPermission.h"
 #include "core/World.h"
 #include "DocumentEdit.h"
@@ -20,6 +21,9 @@ namespace
 	array<char, core::PermissionSet::MaxNameBytes + 1> newSetName{};
 	map<uint64_t, array<char, core::PermissionSet::MaxNameBytes + 1>> editedSetNames;
 	core::PermissionSetId pendingSetDelete{};
+	core::PermissionSetId selectedAssignment{};
+	core::World const* assignmentWorld{ nullptr };
+	core::AgentId assignmentAgent{};
 
 	template<class Mutation> bool commit(shared_ptr<core::World> const& world,
 		string& diagnostic, Mutation mutation)
@@ -132,6 +136,7 @@ void resetPermissionsPanelState()
 {
 	newName.fill(0); editedNames.clear(); pendingDelete = {};
 	newSetName.fill(0); editedSetNames.clear(); pendingSetDelete = {};
+	selectedAssignment = {}; assignmentWorld = nullptr; assignmentAgent = {};
 }
 
 void renderPermissionsPanel(shared_ptr<core::World> const& world)
@@ -141,15 +146,18 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	if (ImGui::BeginTable("AccessPermissions", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp))
 	{
-		ImGui::TableSetupColumn("Name"); ImGui::TableSetupColumn("Direct grants");
-		ImGui::TableSetupColumn("Permission sets"); ImGui::TableSetupColumn("Controls / Doors");
-		ImGui::TableSetupColumn("Delete"); ImGui::TableHeadersRow();
+		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+		ImGui::TableSetupColumn("Direct grants", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn("Permission sets", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn("Controls / Doors", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthStretch, 1.0f); ImGui::TableHeadersRow();
 		for (auto id : world->getAccessPermissionIds())
 		{
 			ImGui::PushID((int)id.value); ImGui::TableNextRow(); ImGui::TableNextColumn();
 			auto [entry, inserted] = editedNames.try_emplace(id.value);
 			auto& name = entry->second;
 			if (inserted) strncpy(name.data(), world->getAccessPermissionName(id).c_str(), name.size() - 1);
+			ImGui::SetNextItemWidth(-1.0f);
 			if (ImGui::InputText("##name", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue))
 			{
 				string diagnostic;
@@ -169,6 +177,7 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		}
 		ImGui::EndTable();
 	}
+	ImGui::SetNextItemWidth(256.0f);
 	ImGui::InputText("New permission", newName.data(), newName.size()); ImGui::SameLine();
 	if (ImGui::Button("Add permission"))
 	{ string diagnostic; if (commitAccessPermissionAdd(world, newName.data(), diagnostic)) newName.fill(0); }
@@ -191,32 +200,45 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 
 	ImGui::Separator(); ImGui::TextDisabled("Permission sets (%u)", world->getPermissionSetCount());
 	ImGui::BeginDisabled(!world->isSimulationPaused());
-	for (auto setId : world->getPermissionSetIds())
+	if (ImGui::BeginTable("PermissionSets", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp))
 	{
-		ImGui::PushID(static_cast<int>(setId.value));
-		auto [entry, inserted] = editedSetNames.try_emplace(setId.value); auto& name = entry->second;
-		if (inserted) strncpy(name.data(), world->getPermissionSetName(setId).c_str(), name.size() - 1);
-		if (ImGui::InputText("##set-name", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue))
+		ImGui::TableSetupColumn("Name"); ImGui::TableSetupColumn("Agents");
+		ImGui::TableSetupColumn("Access permissions"); ImGui::TableSetupColumn("Delete");
+		ImGui::TableHeadersRow();
+		for (auto setId : world->getPermissionSetIds())
 		{
-			string diagnostic;
-			if (!commitPermissionSetRename(world, setId, name.data(), diagnostic))
-			{ name.fill(0); strncpy(name.data(), world->getPermissionSetName(setId).c_str(), name.size() - 1); }
-		}
-		ImGui::SameLine(); ImGui::TextDisabled("%u Agent(s)", world->getPermissionSetUsageCount(setId));
-		ImGui::SameLine(); if (ImGui::Button("Delete set")) pendingSetDelete = setId;
-		auto members = asSet(world->getPermissionSetPermissions(setId));
-		if (ImGui::TreeNode("Access permissions"))
-		{
-			for (auto permission : world->getAccessPermissionIds())
+			ImGui::PushID(static_cast<int>(setId.value));
+			ImGui::TableNextRow(); ImGui::TableNextColumn();
+			auto [entry, inserted] = editedSetNames.try_emplace(setId.value); auto& name = entry->second;
+			if (inserted) strncpy(name.data(), world->getPermissionSetName(setId).c_str(), name.size() - 1);
+			ImGui::SetNextItemWidth(-1.0f);
+			if (ImGui::InputText("##set-name", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue))
 			{
-				bool included = members.contains(permission);
-				if (ImGui::Checkbox(world->getAccessPermissionName(permission).c_str(), &included))
-				{ string diagnostic; commitPermissionSetMembership(world, setId, permission, included, diagnostic); }
+				string diagnostic;
+				if (!commitPermissionSetRename(world, setId, name.data(), diagnostic))
+				{ name.fill(0); strncpy(name.data(), world->getPermissionSetName(setId).c_str(), name.size() - 1); }
 			}
-			ImGui::TreePop();
+			ImGui::TableNextColumn(); ImGui::Text("%u", world->getPermissionSetUsageCount(setId));
+			ImGui::TableNextColumn();
+			auto members = asSet(world->getPermissionSetPermissions(setId));
+			if (ImGui::TreeNode("Access permissions"))
+			{
+				for (auto permission : world->getAccessPermissionIds())
+				{
+					ImGui::PushID(static_cast<int>(permission.value));
+					bool included = members.contains(permission);
+					if (ImGui::Checkbox(world->getAccessPermissionName(permission).c_str(), &included))
+					{ string diagnostic; commitPermissionSetMembership(world, setId, permission, included, diagnostic); }
+					ImGui::PopID();
+				}
+				ImGui::TreePop();
+			}
+			ImGui::TableNextColumn(); if (ImGui::Button("Delete set")) pendingSetDelete = setId;
+			ImGui::PopID();
 		}
-		ImGui::PopID();
+		ImGui::EndTable();
 	}
+	ImGui::SetNextItemWidth(256.0f);
 	ImGui::InputText("New Permission set", newSetName.data(), newSetName.size()); ImGui::SameLine();
 	if (ImGui::Button("Add Permission set"))
 	{ string diagnostic; if (commitPermissionSetAdd(world, newSetName.data(), diagnostic)) newSetName.fill(0); }
@@ -242,35 +264,115 @@ void renderAgentAccessPermissions(shared_ptr<core::World> const& world, core::Ag
 {
 	if (!world || (world->getAccessPermissionCount() == 0 && world->getPermissionSetCount() == 0)) return;
 	if (!ImGui::TreeNode("Access permissions")) return;
-	auto direct = asSet(world->getAgentDirectAccessGrants(agent));
+	if (assignmentWorld != world.get() || assignmentAgent != agent)
+	{
+		assignmentWorld = world.get(); assignmentAgent = agent; selectedAssignment = {};
+	}
 	auto assignments = world->getAgentPermissionSetAssignments(agent);
 	set<core::PermissionSetId> assigned(assignments.begin(), assignments.end());
+	if (!assigned.contains(selectedAssignment)) selectedAssignment = {};
 	ImGui::BeginDisabled(!world->isSimulationPaused());
-	if (world->getPermissionSetCount()) ImGui::TextDisabled("Permission sets");
-	for (auto setId : world->getPermissionSetIds())
+	ImGui::PushID("assigned-permission-sets");
+	ImGui::TextDisabled("Permission sets");
+	bool firstChip = true;
+	bool selectedChipFocused = false;
+	for (auto setId : assignments)
 	{
-		bool selected = assigned.contains(setId);
-		if (ImGui::Checkbox(world->getPermissionSetName(setId).c_str(), &selected))
-		{ string diagnostic; commitAgentPermissionSetAssignment(world, agent, setId, selected, diagnostic); }
-	}
-	if (world->getAccessPermissionCount()) ImGui::TextDisabled("Direct grants and effective sources");
-	for (auto id : world->getAccessPermissionIds())
-	{
-		ImGui::PushID(static_cast<int>(id.value));
-		bool selected = direct.contains(id);
-		if (ImGui::Checkbox(world->getAccessPermissionName(id).c_str(), &selected))
-		{ string diagnostic; commitAgentAccessPermissionGrant(world, agent, id, selected, diagnostic); }
-		auto sources = world->getAgentAccessGrantSources(agent, id);
-		if (sources.direct || !sources.permissionSets.empty())
+		auto label = "~" + world->getPermissionSetName(setId);
+		auto width = ImGui::CalcTextSize(label.c_str()).x
+			+ 2.0f * ImGui::GetStyle().FramePadding.x;
+		if (!firstChip && ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x
+			+ width <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
+			ImGui::SameLine();
+		firstChip = false;
+		ImGui::PushID(static_cast<int>(setId.value));
+		bool selected = selectedAssignment == setId;
+		if (selected)
 		{
-			string text = sources.direct ? "direct" : "";
-			for (auto setId : sources.permissionSets)
-			{ if (!text.empty()) text += ", "; text += world->getPermissionSetName(setId); }
-			ImGui::SameLine(); ImGui::TextDisabled("effective: %s", text.c_str());
+			ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetStyleColorVec4(ImGuiCol_Text));
+			ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
 		}
+		if (ImGui::SmallButton(label.c_str()))
+			selectedAssignment = selected ? core::PermissionSetId{} : setId;
+		if (selectedAssignment == setId && ImGui::IsItemFocused()) selectedChipFocused = true;
+		if (selected) { ImGui::PopStyleVar(); ImGui::PopStyleColor(); }
 		ImGui::PopID();
 	}
-	ImGui::EndDisabled(); ImGui::TreePop();
+	if (firstChip) ImGui::TextDisabled("No Permission sets assigned.");
+	else ImGui::TextDisabled("Select a Permission set and press Delete to remove it.");
+	if (world->isSimulationPaused() && selectedChipFocused
+		&& ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+		&& ImGui::IsKeyPressed(ImGuiKey_Delete))
+	{
+		string diagnostic;
+		commitAgentPermissionSetAssignment(world, agent, selectedAssignment, false, diagnostic);
+		selectedAssignment = {};
+	}
+	ImGui::SetNextItemWidth(256.0f);
+	if (ImGui::BeginCombo("##add", "Add Permission set..."))
+	{
+		bool anyAddable = false;
+		for (auto setId : world->getPermissionSetIds())
+		{
+			if (assigned.contains(setId)) continue;
+			anyAddable = true;
+			ImGui::PushID(static_cast<int>(setId.value));
+			if (ImGui::Selectable(("~" + world->getPermissionSetName(setId)).c_str()))
+			{ string diagnostic; commitAgentPermissionSetAssignment(world, agent, setId, true, diagnostic); }
+			ImGui::PopID();
+		}
+		if (!anyAddable) ImGui::TextDisabled("No Permission sets available to add.");
+		ImGui::EndCombo();
+	}
+	ImGui::PopID();
+
+	ImGui::PushID("individual-permissions");
+	ImGui::TextDisabled("Individual permissions");
+	auto direct = asSet(world->getAgentDirectAccessGrants(agent));
+	ImGui::SetNextItemWidth(256.0f);
+	if (ImGui::BeginCombo("##add", "Permissions..."))
+	{
+		for (auto id : world->getAccessPermissionIds())
+		{
+			ImGui::PushID(static_cast<int>(id.value));
+			bool granted = direct.contains(id);
+			if (ImGui::Checkbox(world->getAccessPermissionName(id).c_str(), &granted))
+			{ string diagnostic; commitAgentAccessPermissionGrant(world, agent, id, granted, diagnostic); }
+			ImGui::PopID();
+		}
+		if (!world->getAccessPermissionCount()) ImGui::TextDisabled("No Access permissions defined.");
+		ImGui::EndCombo();
+	}
+	for (auto id : world->getAgentDirectAccessGrants(agent))
+	{
+		ImGui::PushID(static_cast<int>(id.value));
+		ImGui::TextUnformatted(world->getAccessPermissionName(id).c_str());
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##remove"))
+		{ string diagnostic; commitAgentAccessPermissionGrant(world, agent, id, false, diagnostic); }
+		if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove individual permission");
+		ImGui::PopID();
+	}
+	ImGui::PopID();
+	ImGui::EndDisabled();
+
+	ImGui::TextDisabled("Effective permissions");
+	auto effective = world->getAgentEffectiveAccessGrants(agent);
+	if (effective.empty()) ImGui::TextDisabled("No effective permissions.");
+	for (auto id : effective)
+	{
+		auto sources = world->getAgentAccessGrantSources(agent, id);
+		string text = sources.direct ? "individual" : "";
+		for (auto setId : sources.permissionSets)
+		{
+			if (!text.empty()) text += ", ";
+			text += "~" + world->getPermissionSetName(setId);
+		}
+		ImGui::TextUnformatted(world->getAccessPermissionName(id).c_str());
+		ImGui::SameLine();
+		ImGui::TextDisabled("(%s)", text.c_str());
+	}
+	ImGui::TreePop();
 }
 
 void renderAgentRuntimeProperties(shared_ptr<core::World> const& world, core::AgentId agent)

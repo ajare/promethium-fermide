@@ -839,6 +839,7 @@ void renderAgentTagAssignmentChecklist(shared_ptr<core::World> const& world,
 	// Assigned tags only, drawn as a wrapping row of coloured chips.
 	bool anyAssigned{ false };
 	bool firstChip{ true };
+	bool selectedChipFocused{ false };
 	for (auto const tag : ids)
 	{
 		if (!agentLookup.entity->hasAgentTag(tag)) continue;
@@ -854,13 +855,15 @@ void renderAgentTagAssignmentChecklist(shared_ptr<core::World> const& world,
 		if (renderAssignedTagChip(*registry, tag, gSelectedAssignedTag == tag))
 			gSelectedAssignedTag = gSelectedAssignedTag == tag
 				? core::AgentTagId{} : tag;
+		if (gSelectedAssignedTag == tag && ImGui::IsItemFocused())
+			selectedChipFocused = true;
 	}
 
 	if (!anyAssigned) ImGui::TextDisabled("No tags assigned.");
 	else
 	{
 		ImGui::TextDisabled("Select a tag and press Delete to remove it.");
-		if (gSelectedAssignedTag
+		if (paused && gSelectedAssignedTag && selectedChipFocused
 			&& ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
 			&& ImGui::IsKeyPressed(ImGuiKey_Delete))
 		{
