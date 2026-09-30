@@ -13,6 +13,7 @@
 #include "core/Defines.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
+#include "core/PermissionSet.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/Background.h"
 #include "core/Facade.h"
@@ -483,6 +484,7 @@ namespace core
 		// Access permission identity is its fixed slot plus one. A slot is not
 		// returned to the allocator until deletion has cleared every reference.
 		std::array<std::unique_ptr<AccessPermission>, AccessPermission::Capacity> mAccessPermissions{};
+		EntityRegistry<PermissionSetId, PermissionSet> mPermissionSets;
 		std::map<InteractionPointId, std::bitset<256>> mPendingPermissionRequirements;
 
 		// Marker identity is carried by the authored Marker itself. The high-water
@@ -651,6 +653,9 @@ namespace core
 			AgentGroupId except = AgentGroupId{}) const;
 		bool accessPermissionNameTaken(std::string const& trimmed,
 			AccessPermissionId except = AccessPermissionId{}) const;
+		bool permissionSetNameTaken(std::string const& trimmed,
+			PermissionSetId except = PermissionSetId{}) const;
+		std::bitset<256> effectiveAccessGrants(Agent const& agent) const;
 		std::vector<AccessPermissionId> missingInteractionPermissions(
 			InteractionPoint const& point, Agent const& agent) const;
 		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;
@@ -917,6 +922,7 @@ namespace core
 			Vector2 position{};
 			AgentGroupId agentGroup{};
 			std::bitset<256> directAccessGrants;
+			std::set<PermissionSetId> permissionSets;
 			std::set<AgentTagId> agentTags;
 			std::optional<AgentPropertySample> walkSpeedModifierSample;
 			std::optional<AgentPropertySample> heightModifierSample;
@@ -2232,6 +2238,7 @@ namespace core
 		struct AccessPermissionUsage
 		{
 			uint32_t directAgentGrants{ 0 };
+			uint32_t permissionSetMemberships{ 0 };
 			uint32_t interactionPointRequirements{ 0 };
 			uint32_t manualDoorRequirements{ 0 };
 		};
@@ -2257,6 +2264,30 @@ namespace core
 		{ return setAgentAccessPermissionGrant(agent, permission, false, diagnostic); }
 		std::vector<AccessPermissionId> getAgentDirectAccessGrants(AgentId agent) const;
 		std::vector<AccessPermissionId> getAgentEffectiveAccessGrants(AgentId agent) const;
+
+		struct EffectiveAccessGrantSources
+		{
+			bool direct{ false };
+			std::vector<PermissionSetId> permissionSets;
+		};
+		EffectiveAccessGrantSources getAgentAccessGrantSources(AgentId agent,
+			AccessPermissionId permission) const;
+
+		uint32_t getPermissionSetCount() const;
+		std::vector<PermissionSetId> getPermissionSetIds() const;
+		EntityLookup<PermissionSet const> lookupPermissionSet(PermissionSetId id) const;
+		std::string const& getPermissionSetName(PermissionSetId id) const;
+		PermissionSetId addPermissionSet(std::string const& name);
+		bool renamePermissionSet(PermissionSetId id, std::string const& name,
+			std::string* diagnostic = nullptr);
+		uint32_t getPermissionSetUsageCount(PermissionSetId id) const;
+		bool deletePermissionSet(PermissionSetId id, std::string* diagnostic = nullptr);
+		std::vector<AccessPermissionId> getPermissionSetPermissions(PermissionSetId id) const;
+		bool setPermissionSetAccessPermission(PermissionSetId set,
+			AccessPermissionId permission, bool included, std::string* diagnostic = nullptr);
+		std::vector<PermissionSetId> getAgentPermissionSetAssignments(AgentId agent) const;
+		bool setAgentPermissionSetAssignment(AgentId agent, PermissionSetId set,
+			bool assigned, std::string* diagnostic = nullptr);
 
 		bool isInteractionPointPermissionEligible(InteractionPointId point) const;
 		bool setInteractionPointPermissionRequirement(InteractionPointId point,

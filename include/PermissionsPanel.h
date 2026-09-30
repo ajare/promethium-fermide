@@ -14,6 +14,17 @@ bool commitAccessPermissionDelete(std::shared_ptr<core::World> const& world,
 	core::AccessPermissionId id, std::string& diagnostic);
 bool commitAgentAccessPermissionGrant(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, core::AccessPermissionId permission, bool granted, std::string& diagnostic);
+core::PermissionSetId commitPermissionSetAdd(std::shared_ptr<core::World> const& world,
+	std::string const& name, std::string& diagnostic);
+bool commitPermissionSetRename(std::shared_ptr<core::World> const& world,
+	core::PermissionSetId id, std::string const& name, std::string& diagnostic);
+bool commitPermissionSetDelete(std::shared_ptr<core::World> const& world,
+	core::PermissionSetId id, std::string& diagnostic);
+bool commitPermissionSetMembership(std::shared_ptr<core::World> const& world,
+	core::PermissionSetId set, core::AccessPermissionId permission, bool included,
+	std::string& diagnostic);
+bool commitAgentPermissionSetAssignment(std::shared_ptr<core::World> const& world,
+	core::AgentId agent, core::PermissionSetId set, bool assigned, std::string& diagnostic);
 bool commitInteractionPermissionRequirement(std::shared_ptr<core::World> const& world,
 	core::InteractionPointId point, core::AccessPermissionId permission, bool required,
 	std::string& diagnostic);

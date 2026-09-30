@@ -98,6 +98,93 @@ namespace
 			"reused identity inherited an old grant");
 	}
 
+	void permissionSets()
+	{
+		core::World world("Permission sets", 3, 1);
+		auto corridor = world.addCorridor(0, 0, 3);
+		auto control = world.addSectorLightSwitch(corridor, 1);
+		world.finishBuild(); world.pauseSimulation();
+		auto agent = world.createAgent("operator", corridor, 0, 1.5f);
+		auto red = world.addAccessPermission("Red key");
+		auto blue = world.addAccessPermission("Blue key");
+		auto redSet = world.addPermissionSet("  Staff  ");
+		auto bothSet = world.addPermissionSet("Operations");
+		std::string diagnostic;
+		require(world.getPermissionSetName(redSet) == "Staff", "Permission set name was not trimmed");
+		require(world.setPermissionSetAccessPermission(redSet, red, true, &diagnostic), diagnostic);
+		require(world.setPermissionSetAccessPermission(bothSet, red, true, &diagnostic), diagnostic);
+		require(world.setPermissionSetAccessPermission(bothSet, blue, true, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(agent, redSet, true, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(agent, bothSet, true, &diagnostic), diagnostic);
+		require(world.grantAgentAccessPermission(agent, red, &diagnostic), diagnostic);
+		require(world.getAgentEffectiveAccessGrants(agent)
+			== std::vector<core::AccessPermissionId>{ red, blue },
+			"effective grants were not the union of direct and set sources");
+		auto sources = world.getAgentAccessGrantSources(agent, red);
+		require(sources.direct && sources.permissionSets
+			== std::vector<core::PermissionSetId>{ redSet, bothSet },
+			"effective grant sources were not reported in stable order");
+
+		// Removing either overlapping source must preserve the effective grant.
+		require(world.revokeAgentAccessPermission(agent, red, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(agent, redSet, false, &diagnostic), diagnostic);
+		require(world.getAgentEffectiveAccessGrants(agent)
+			== std::vector<core::AccessPermissionId>{ red, blue },
+			"removing overlapping sources removed an effective grant");
+		require(world.setInteractionPointPermissionRequirement(control.interactionPoint,
+			{ red, blue }, &diagnostic), diagnostic);
+		require(world.resumeSimulation(), "Permission set authorization fixture did not resume");
+		auto request = world.requestInteraction(control.interactionPoint, agent);
+		auto admitted = world.lookupInteractionRequest(request);
+		require(admitted && admitted.entity->getResult() == core::InteractionResult::Pending,
+			"Permission set grants did not authorize a real operation");
+		world.pauseSimulation();
+
+		auto stableId = bothSet;
+		require(world.renamePermissionSet(bothSet, "Operations team", &diagnostic), diagnostic);
+		require(world.lookupPermissionSet(stableId)
+			&& world.getPermissionSetName(stableId) == "Operations team",
+			"Permission set rename did not preserve identity");
+		auto usage = world.getAccessPermissionUsage(red);
+		require(usage.permissionSetMemberships == 2,
+			"Access permission usage omitted Permission set memberships");
+
+		auto restored = load(save(world));
+		require(restored->getPermissionSetCount() == 2
+			&& restored->getPermissionSetPermissions(stableId)
+				== std::vector<core::AccessPermissionId>{ red, blue }
+			&& restored->getAgentPermissionSetAssignments(agent)
+				== std::vector<core::PermissionSetId>{ stableId },
+			"Permission sets or assignments did not survive save/load");
+		restored->pauseSimulation();
+		require(restored->deleteAccessPermission(red, &diagnostic), diagnostic);
+		require(restored->getPermissionSetPermissions(redSet).empty()
+			&& restored->getPermissionSetPermissions(stableId)
+				== std::vector<core::AccessPermissionId>{ blue },
+			"Access permission deletion did not cascade through Permission sets");
+		require(restored->deletePermissionSet(stableId, &diagnostic), diagnostic);
+		require(restored->getAgentPermissionSetAssignments(agent).empty()
+			&& restored->lookupAccessPermission(blue),
+			"Permission set deletion did not remove assignments while preserving permissions");
+
+		// Access permission and Permission set names intentionally use separate namespaces.
+		auto sameName = restored->addPermissionSet("Blue key");
+		require(static_cast<bool>(sameName), "Permission set namespace collided with Access permissions");
+		bool duplicateRefused = false;
+		try { (void)restored->addPermissionSet("Blue key"); }
+		catch (std::invalid_argument const&) { duplicateRefused = true; }
+		require(duplicateRefused, "duplicate Permission set name was accepted");
+		require(static_cast<bool>(restored->addPermissionSet("blue key")),
+			"Permission set uniqueness was not case-sensitive");
+
+		core::World unbounded("many sets", 1, 1);
+		unbounded.addCorridor(0, 0, 1); unbounded.finishBuild(); unbounded.pauseSimulation();
+		for (int index = 0; index < 257; ++index)
+			(void)unbounded.addPermissionSet("Set " + std::to_string(index));
+		require(unbounded.getPermissionSetCount() == 257,
+			"Permission sets retained a feature-specific fixed count limit");
+	}
+
 	void manualDoorAuthorization()
 	{
 		core::World world("manual Door permissions", 12, 1);
@@ -319,9 +406,18 @@ namespace
 	void malformedAuthorizationIsTransactional()
 	{
 		core::World authored("malformed source", 2, 1);
-		authored.addCorridor(0, 0, 2); authored.finishBuild(); authored.pauseSimulation();
-		authored.addAccessPermission("Original");
-		auto yaml = save(authored);
+		auto corridor = authored.addCorridor(0, 0, 2);
+		authored.finishBuild(); authored.pauseSimulation();
+		auto agent = authored.createAgent("assigned", corridor, 0, 0.5f);
+		auto permission = authored.addAccessPermission("Original");
+		auto permissionSet = authored.addPermissionSet("Original set");
+		std::string diagnostic;
+		require(authored.setPermissionSetAccessPermission(
+			permissionSet, permission, true, &diagnostic), diagnostic);
+		require(authored.setAgentPermissionSetAssignment(
+			agent, permissionSet, true, &diagnostic), diagnostic);
+		auto validYaml = save(authored);
+		auto yaml = validYaml;
 		auto section = yaml.find("accessPermissions:");
 		auto id = yaml.find("id: 1", section);
 		require(section != std::string::npos && id != std::string::npos, "permission fixture did not serialize definitions");
@@ -340,6 +436,26 @@ namespace
 		catch (core::SerializationException const&) { refused = true; }
 		require(refused, "out-of-range serialized authorization was accepted");
 		require(save(target) == before, "refused authorization partially changed the target World");
+
+		yaml = validYaml;
+		section = yaml.find("agentPermissionSetAssignments:");
+		auto sets = yaml.find("sets:", section);
+		auto assignment = yaml.find("- 1", sets);
+		require(section != std::string::npos && sets != std::string::npos
+			&& assignment != std::string::npos,
+			"Permission set assignment fixture did not serialize references");
+		yaml.replace(assignment, std::string("- 1").size(), "- 999");
+		refused = false;
+		try
+		{
+			core::SerializationWorkData work;
+			auto reader = core::YamlSerializer::fromString(yaml); reader->deserialize();
+			target.deserialize(*reader, work);
+		}
+		catch (core::SerializationException const&) { refused = true; }
+		require(refused, "dangling serialized Permission set assignment was accepted");
+		require(save(target) == before,
+			"dangling Permission set assignment partially changed the target World");
 	}
 
 	void panelCommitParticipatesInHistory()
@@ -357,6 +473,14 @@ namespace
 		auto id = commitAccessPermissionAdd(world, "Staff", diagnostic);
 		require(id && gWorldDocumentHistory.canUndo() && world->isModified(),
 			"Permissions panel commit did not create one document edit");
+		auto permissionSet = commitPermissionSetAdd(world, "Operators", diagnostic);
+		require(static_cast<bool>(permissionSet), "Permissions panel did not add a Permission set");
+		require(commitPermissionSetMembership(world, permissionSet, id, true, diagnostic), diagnostic);
+		require(commitAgentPermissionSetAssignment(world, agent, permissionSet, true, diagnostic), diagnostic);
+		require(commitPermissionSetRename(world, permissionSet, "Operators renamed", diagnostic), diagnostic);
+		auto sources = world->getAgentAccessGrantSources(agent, id);
+		require(sources.permissionSets == std::vector<core::PermissionSetId>{ permissionSet },
+			"selected Agent panel mutations did not expose the effective set source");
 
 		ImGui::CreateContext();
 		auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(800, 600);
@@ -373,6 +497,7 @@ namespace
 void runAccessPermissionSmokeChecks()
 {
 	authorizationAndPersistence();
+	permissionSets();
 	manualDoorAuthorization();
 	controlledDoorAuthorization();
 	malformedAuthorizationIsTransactional();

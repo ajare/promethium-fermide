@@ -9474,6 +9474,8 @@ namespace core
 		auto bit = id.value - 1;
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{ (void)agentId; if (agent->mDirectAccessGrants.test(bit)) ++usage.directAgentGrants; }
+		for (auto const& [setId, permissionSet] : mPermissionSets.entries())
+		{ (void)setId; if (permissionSet->mPermissions.test(bit)) ++usage.permissionSetMemberships; }
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{ (void)pointId; if (point->mPermissionRequirement.test(bit)) ++usage.interactionPointRequirements; }
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
@@ -9495,6 +9497,8 @@ namespace core
 		// Clear all references before releasing the slot, so a reused identity can
 		// never inherit an old grant or requirement.
 		for (auto const& [agentId, agent] : mAgents.entries()) { (void)agentId; agent->mDirectAccessGrants.reset(bit); }
+		for (auto const& [setId, permissionSet] : mPermissionSets.entries())
+		{ (void)setId; permissionSet->mPermissions.reset(bit); }
 		for (auto const& [pointId, point] : mInteractionPoints.entries()) { (void)pointId; point->mPermissionRequirement.reset(bit); }
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
@@ -9528,8 +9532,11 @@ namespace core
 		auto bit = permission.value - 1;
 		if (agent->mDirectAccessGrants.test(bit) == granted)
 			return reject(granted ? "The Agent already has this direct grant" : "The Agent does not have this direct grant");
+		auto effectiveBefore = effectiveAccessGrants(*agent).test(bit);
 		agent->mDirectAccessGrants.set(bit, granted);
-		reconsiderAgentAuthorizationPath(*agent, permission, granted);
+		auto effectiveAfter = effectiveAccessGrants(*agent).test(bit);
+		if (effectiveBefore != effectiveAfter)
+			reconsiderAgentAuthorizationPath(*agent, permission, effectiveAfter);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -9546,11 +9553,173 @@ namespace core
 		return result;
 	}
 
+	bitset<256> World::effectiveAccessGrants(Agent const& agent) const
+	{
+		auto result = agent.mDirectAccessGrants;
+		for (auto id : agent.mPermissionSets)
+			if (auto permissionSet = mPermissionSets.find(id)) result |= permissionSet->mPermissions;
+		return result;
+	}
+
 	vector<AccessPermissionId> World::getAgentEffectiveAccessGrants(AgentId id) const
 	{
-		// Permission sets are a later slice; direct grants are currently the whole
-		// effective union, exposed separately so that addition remains compatible.
-		return getAgentDirectAccessGrants(id);
+		auto agent = mAgents.find(id);
+		if (!agent) throw invalid_argument("Unknown Agent");
+		auto grants = effectiveAccessGrants(*agent);
+		vector<AccessPermissionId> result;
+		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
+			if (grants.test(bit) && mAccessPermissions[bit]) result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
+	World::EffectiveAccessGrantSources World::getAgentAccessGrantSources(
+		AgentId agentId, AccessPermissionId permission) const
+	{
+		auto agent = mAgents.find(agentId);
+		if (!agent) throw invalid_argument("Unknown Agent");
+		if (!lookupAccessPermission(permission)) throw invalid_argument("Unknown Access permission");
+		EffectiveAccessGrantSources result;
+		auto bit = permission.value - 1;
+		result.direct = agent->mDirectAccessGrants.test(bit);
+		for (auto id : agent->mPermissionSets)
+			if (auto permissionSet = mPermissionSets.find(id); permissionSet && permissionSet->mPermissions.test(bit))
+				result.permissionSets.push_back(id);
+		return result;
+	}
+
+	bool World::permissionSetNameTaken(string const& name, PermissionSetId except) const
+	{
+		for (auto const& [id, permissionSet] : mPermissionSets.entries())
+			if (id != except && permissionSet->getName() == name) return true;
+		return false;
+	}
+
+	uint32_t World::getPermissionSetCount() const
+	{ return static_cast<uint32_t>(mPermissionSets.entries().size()); }
+
+	vector<PermissionSetId> World::getPermissionSetIds() const
+	{
+		vector<PermissionSetId> result;
+		for (auto const& [id, permissionSet] : mPermissionSets.entries())
+		{ (void)permissionSet; result.push_back(id); }
+		return result;
+	}
+
+	EntityLookup<PermissionSet const> World::lookupPermissionSet(PermissionSetId id) const
+	{
+		auto found = mPermissionSets.find(id);
+		return found ? EntityLookup<PermissionSet const>{ found, {} }
+			: EntityLookup<PermissionSet const>{ nullptr, format("Permission set {} is invalid or has been deleted", id.value) };
+	}
+
+	string const& World::getPermissionSetName(PermissionSetId id) const
+	{
+		auto found = lookupPermissionSet(id);
+		if (!found) throw invalid_argument(found.diagnostic);
+		return found.entity->getName();
+	}
+
+	PermissionSetId World::addPermissionSet(string const& raw)
+	{
+		if (!mSimulationPaused) throw invalid_argument("Permission sets can only be edited while the simulation is paused");
+		auto name = PermissionSet::trimName(raw);
+		string diagnostic;
+		if (!PermissionSet::nameIsValid(name, &diagnostic)) throw invalid_argument(diagnostic);
+		if (permissionSetNameTaken(name)) throw invalid_argument(format("Permission set '{}' already exists", name));
+		if (mPermissionSets.exhausted()) throw invalid_argument("This World has issued every Permission set ID and cannot create another");
+		auto id = mPermissionSets.tryAdd(PermissionSet::create(std::move(name)));
+		if (!id) throw invalid_argument("This World has issued every Permission set ID and cannot create another");
+		modify(); return *id;
+	}
+
+	bool World::renamePermissionSet(PermissionSetId id, string const& raw, string* diagnostic)
+	{
+		auto reject = [&](string value) { if (diagnostic) *diagnostic = std::move(value); return false; };
+		if (!mSimulationPaused) return reject("Permission sets can only be edited while the simulation is paused");
+		auto found = mPermissionSets.find(id); if (!found) return reject("Unknown Permission set");
+		auto name = PermissionSet::trimName(raw);
+		if (!PermissionSet::nameIsValid(name, diagnostic)) return false;
+		if (permissionSetNameTaken(name, id)) return reject(format("Permission set '{}' already exists", name));
+		if (name == found->getName()) { if (diagnostic) diagnostic->clear(); return true; }
+		found->setName(std::move(name)); modify(); if (diagnostic) diagnostic->clear(); return true;
+	}
+
+	uint32_t World::getPermissionSetUsageCount(PermissionSetId id) const
+	{
+		if (!lookupPermissionSet(id)) throw invalid_argument("Unknown Permission set");
+		uint32_t count = 0;
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{ (void)agentId; if (agent->mPermissionSets.contains(id)) ++count; }
+		return count;
+	}
+
+	bool World::deletePermissionSet(PermissionSetId id, string* diagnostic)
+	{
+		auto reject = [&](string value) { if (diagnostic) *diagnostic = std::move(value); return false; };
+		if (!mSimulationPaused) return reject("Permission sets can only be edited while the simulation is paused");
+		auto permissionSet = mPermissionSets.find(id); if (!permissionSet) return reject("Unknown Permission set");
+		auto permissions = permissionSet->mPermissions;
+		for (auto const& [agentId, agent] : mAgents.entries()) if (agent->mPermissionSets.erase(id))
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (permissions.test(bit) && !effectiveAccessGrants(*agent).test(bit))
+					reconsiderAgentAuthorizationPath(*agent, AccessPermissionId{ bit + 1 }, false);
+		mPermissionSets.remove(id); modify(); if (diagnostic) diagnostic->clear(); return true;
+	}
+
+	vector<AccessPermissionId> World::getPermissionSetPermissions(PermissionSetId id) const
+	{
+		auto permissionSet = mPermissionSets.find(id); if (!permissionSet) throw invalid_argument("Unknown Permission set");
+		vector<AccessPermissionId> result;
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (permissionSet->mPermissions.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
+	bool World::setPermissionSetAccessPermission(PermissionSetId id,
+		AccessPermissionId permission, bool included, string* diagnostic)
+	{
+		auto reject = [&](string value) { if (diagnostic) *diagnostic = std::move(value); return false; };
+		if (!mSimulationPaused) return reject("Permission sets can only be edited while the simulation is paused");
+		auto permissionSet = mPermissionSets.find(id); if (!permissionSet) return reject("Unknown Permission set");
+		auto access = lookupAccessPermission(permission); if (!access) return reject(access.diagnostic);
+		auto bit = permission.value - 1;
+		if (permissionSet->mPermissions.test(bit) == included) return reject(included ? "The Permission set already contains this Access permission" : "The Permission set does not contain this Access permission");
+		vector<pair<Agent*, bool>> affectedAgents;
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (agent->mPermissionSets.contains(id))
+				affectedAgents.emplace_back(agent.get(), effectiveAccessGrants(*agent).test(bit));
+		}
+		permissionSet->mPermissions.set(bit, included);
+		for (auto const& [agent, before] : affectedAgents)
+		{
+			auto after = effectiveAccessGrants(*agent).test(bit);
+			if (before != after) reconsiderAgentAuthorizationPath(*agent, permission, after);
+		}
+		modify(); if (diagnostic) diagnostic->clear(); return true;
+	}
+
+	vector<PermissionSetId> World::getAgentPermissionSetAssignments(AgentId id) const
+	{
+		auto agent = mAgents.find(id); if (!agent) throw invalid_argument("Unknown Agent");
+		return { agent->mPermissionSets.begin(), agent->mPermissionSets.end() };
+	}
+
+	bool World::setAgentPermissionSetAssignment(AgentId agentId, PermissionSetId id,
+		bool assigned, string* diagnostic)
+	{
+		auto reject = [&](string value) { if (diagnostic) *diagnostic = std::move(value); return false; };
+		if (!mSimulationPaused) return reject("Permission set assignments can only be edited while the simulation is paused");
+		auto agent = mAgents.find(agentId); if (!agent) return reject("Unknown Agent");
+		auto permissionSet = mPermissionSets.find(id); if (!permissionSet) return reject("Unknown Permission set");
+		if (agent->mPermissionSets.contains(id) == assigned) return reject(assigned ? "The Agent already has this Permission set" : "The Agent does not have this Permission set");
+		auto before = effectiveAccessGrants(*agent);
+		if (assigned) agent->mPermissionSets.insert(id); else agent->mPermissionSets.erase(id);
+		auto after = effectiveAccessGrants(*agent);
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (before.test(bit) != after.test(bit)) reconsiderAgentAuthorizationPath(*agent, AccessPermissionId{ bit + 1 }, after.test(bit));
+		modify(); if (diagnostic) diagnostic->clear(); return true;
 	}
 
 	bool World::isInteractionPointPermissionEligible(InteractionPointId id) const
@@ -9638,7 +9807,7 @@ namespace core
 		InteractionPoint const& point, Agent const& agent) const
 	{
 		vector<AccessPermissionId> result;
-		auto missing = point.mPermissionRequirement & ~agent.mDirectAccessGrants;
+		auto missing = point.mPermissionRequirement & ~effectiveAccessGrants(agent);
 		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
 			if (missing.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
 		return result;
@@ -9646,7 +9815,7 @@ namespace core
 
 	bool World::agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const
 	{
-		return (door.mPermissionRequirement & ~agent.mDirectAccessGrants).none();
+		return (door.mPermissionRequirement & ~effectiveAccessGrants(agent)).none();
 	}
 
 	bool World::isManualDoorPermissionEligible(TraversalResourceId id) const

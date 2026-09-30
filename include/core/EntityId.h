@@ -22,6 +22,7 @@ namespace core
 	CORE_DEFINE_ENTITY_ID(AgentId);
 	CORE_DEFINE_ENTITY_ID(AgentGroupId);
 	CORE_DEFINE_ENTITY_ID(AccessPermissionId);
+	CORE_DEFINE_ENTITY_ID(PermissionSetId);
 	CORE_DEFINE_ENTITY_ID(MarkerId);
 	CORE_DEFINE_ENTITY_ID(AgentTagId);
 	CORE_DEFINE_ENTITY_ID(AgentBehaviourId);

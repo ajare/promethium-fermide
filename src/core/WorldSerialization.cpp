@@ -404,8 +404,8 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
-		// Version 25 gives ordinary and Bulkhead Door controls stable side-specific
-		// permission requirements. Version 24 adds buttonless manual ordinary Door permission requirements.
+		// Version 26 adds Permission sets and Agent assignments. Version 25 gives
+		// ordinary and Bulkhead Door controls stable side-specific permission requirements. Version 24 adds buttonless manual ordinary Door permission requirements.
 		// Version 23 adds World-owned Access permission definitions, direct Agent
 		// grants, and Interaction point requirements. Version 17 adds the Marker
 		// properties bitfield. Version 15 renames the
@@ -432,7 +432,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 25);
+		serializer.writeUint32("version", 26);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -492,6 +492,29 @@ namespace core
 			serializer.writeUint64("id", id.value);
 			serializer.writeString("name", getAccessPermissionName(id));
 			serializer.endMap();
+		}
+		serializer.endArray();
+		serializer.beginArray("permissionSets");
+		for (auto const& [id, permissionSet] : mPermissionSets.entries())
+		{
+			serializer.beginMap("");
+			serializer.writeUint64("id", id.value);
+			serializer.writeString("name", permissionSet->getName());
+			serializer.beginArray("permissions");
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (permissionSet->mPermissions.test(bit)) serializer.writeUint64("", bit + 1);
+			serializer.endArray(); serializer.endMap();
+		}
+		serializer.endArray();
+		serializer.writeUint64("nextPermissionSetId", mPermissionSets.nextId());
+		serializer.beginArray("agentPermissionSetAssignments");
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			if (agent->mPermissionSets.empty()) continue;
+			serializer.beginMap(""); serializer.writeUint64("agent", agentId.value);
+			serializer.beginArray("sets");
+			for (auto id : agent->mPermissionSets) serializer.writeUint64("", id.value);
+			serializer.endArray(); serializer.endMap();
 		}
 		serializer.endArray();
 		serializer.beginArray("accessPermissionGrants");
@@ -902,8 +925,9 @@ namespace core
 		// adds Effort aversion, version 20 adds Risk aversion, version 21
 		// adds Route familiarity, version 22 adds Route persistence, version 23
 		// adds Access permissions, version 24 adds manual Door requirements, and
-		// version 25 adds side-specific ordinary and Bulkhead Door controls.
-		if (version < 1 || version > 25)
+		// version 25 adds side-specific ordinary and Bulkhead Door controls, and
+		// version 26 adds Permission sets.
+		if (version < 1 || version > 26)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1220,6 +1244,41 @@ namespace core
 			serializer.endArray();
 			return bits;
 		};
+
+		EntityRegistry<PermissionSetId, PermissionSet> permissionSets;
+		uint64_t highestPermissionSetId = 0;
+		if (version >= 26 && serializer.hasField("permissionSets"))
+		{
+			set<string> names;
+			serializer.beginArray("permissionSets");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				PermissionSetId id{ serializer.readUint64("id") };
+				auto raw = serializer.readString("name");
+				auto permissions = readPermissionBits("permissions");
+				serializer.endMap();
+				if (!id || permissionSets.find(id))
+					throw SerializationException("Serialized Permission set IDs must be unique and nonzero");
+				auto name = PermissionSet::trimName(raw); string reason;
+				if (name != raw || !PermissionSet::nameIsValid(name, &reason))
+					throw SerializationException("Serialized Permission set name is invalid: " + (name != raw ? string("it must be trimmed") : reason));
+				if (!names.insert(name).second)
+					throw SerializationException("Serialized Permission set names must be unique");
+				auto value = PermissionSet::create(std::move(name)); value->mPermissions = permissions;
+				if (!permissionSets.restore(id, std::move(value)))
+					throw SerializationException("Serialized Permission set could not be restored");
+				highestPermissionSetId = max(highestPermissionSetId, id.value);
+			}
+			serializer.endArray();
+		}
+		uint64_t nextPermissionSetId = highestPermissionSetId == numeric_limits<uint64_t>::max()
+			? 0 : highestPermissionSetId + 1;
+		if (version >= 26 && serializer.hasField("nextPermissionSetId"))
+			nextPermissionSetId = serializer.readUint64("nextPermissionSetId");
+		if (!permissionSets.restoreNextId(nextPermissionSetId))
+			throw SerializationException("Serialized next Permission set ID is invalid");
+
 		for (auto const& record : records)
 		{
 			if (record.type == ConstructionType::Door && !record.values.empty())
@@ -1274,6 +1333,31 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		map<AgentId, set<PermissionSetId>> serializedPermissionSetAssignments;
+		if (version >= 26 && serializer.hasField("agentPermissionSetAssignments"))
+		{
+			serializer.beginArray("agentPermissionSetAssignments");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				AgentId agent{ serializer.readUint64("agent") };
+				if (!agent || serializedPermissionSetAssignments.contains(agent))
+					throw SerializationException("Serialized Permission set assignment owners must be unique and nonzero");
+				set<PermissionSetId> assignments;
+				serializer.beginArray("sets");
+				while (serializer.nextArrayItem())
+				{
+					PermissionSetId id{ serializer.readUint64("") };
+					if (!id || !permissionSets.find(id))
+						throw SerializationException("Serialized Permission set assignment is dangling");
+					if (!assignments.insert(id).second)
+						throw SerializationException("Serialized Permission set assignments must be unique");
+				}
+				serializer.endArray(); serializer.endMap();
+				serializedPermissionSetAssignments.emplace(agent, std::move(assignments));
+			}
+			serializer.endArray();
+		}
 		set<AgentId> serializedAgentIds;
 		serializer.beginArray("agents");
 		while (serializer.nextArrayItem())
@@ -1291,6 +1375,13 @@ namespace core
 			if (!serializedAgentIds.contains(agent))
 				throw SerializationException(format(
 					"Serialized Access permission grants reference missing Agent {}", agent.value));
+		}
+		for (auto const& [agent, assignments] : serializedPermissionSetAssignments)
+		{
+			(void)assignments;
+			if (!serializedAgentIds.contains(agent))
+				throw SerializationException(format(
+					"Serialized Permission set assignments reference missing Agent {}", agent.value));
 		}
 
 		map<InteractionPointId, bitset<256>> serializedRequirements;
@@ -1407,6 +1498,7 @@ namespace core
 		// file, so it clears them here before restoring what was read.
 		mAgentGroups = {};
 		mAccessPermissions = std::move(accessPermissions);
+		mPermissionSets = std::move(permissionSets);
 		for (auto const& [id, group] : agentGroups)
 		{
 			if (!mAgentGroups.restore(id, AgentGroup::create(group)))
@@ -1567,6 +1659,13 @@ namespace core
 			if (found == pending.end())
 				throw SerializationException(format("Serialized Access permission grants name missing Agent {}", agentId.value));
 			found->agent->mDirectAccessGrants = grants;
+		}
+		for (auto const& [agentId, assignments] : serializedPermissionSetAssignments)
+		{
+			auto found = find_if(pending.begin(), pending.end(), [&](auto const& entry) { return entry.id == agentId; });
+			if (found == pending.end())
+				throw SerializationException(format("Serialized Permission set assignments name missing Agent {}", agentId.value));
+			found->agent->mPermissionSets = assignments;
 		}
 
 		// Nothing above touched the live world, so the takes-in below runs on
@@ -1794,7 +1893,10 @@ namespace core
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
+		{
 			mAccessPermissions = {};
+			mPermissionSets = {};
+		}
 		mInteractionPoints = {};
 		mInteractionRequests = {};
 		mDeviceOperations = {};
@@ -2147,7 +2249,8 @@ namespace core
 			if (!sector) continue;
 			carried.push_back(CarriedAgent{ id, agent->getName(), agent->getFlags(),
 				sector->getIndex(), sector->getLayerIndex(), agent->getGlobalPosition(),
-				agent->getAgentGroupId(), agent->mDirectAccessGrants, agent->getAgentTagIds(),
+				agent->getAgentGroupId(), agent->mDirectAccessGrants, agent->mPermissionSets,
+				agent->getAgentTagIds(),
 				agent->getWalkSpeedModifierSample(), agent->getHeightModifierSample(),
 				agent->getStairSpeedModifierSample(), agent->getLadderSpeedModifierSample(),
 				agent->getIndividualLadderSpeedModifier(), agent->getBehaviourAssignment(), agent->isActive() });
@@ -2181,6 +2284,7 @@ namespace core
 			// gone would be a dangling reference the save/load check refuses.
 			raw->setAgentGroupId(lookupAgentGroup(saved.agentGroup) ? saved.agentGroup : AgentGroupId{});
 			raw->setDirectAccessGrants(saved.directAccessGrants);
+			raw->setPermissionSets(saved.permissionSets);
 			// A replay is internal preservation, not a new assignment. Keep exactly
 			// the stable IDs captured from this World; attachment validation
 			// guarantees they still belong to its registry.

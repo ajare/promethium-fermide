@@ -231,6 +231,9 @@ namespace core
 		// Authored direct Access permission grants. Slots are World-owned and
 		// bounded, making membership deterministic and duplicate-free.
 		std::bitset<256> mDirectAccessGrants;
+		// Authored Permission set assignments. This is intentionally separate
+		// from the external Agent tag registry.
+		std::set<PermissionSetId> mPermissionSets;
 
 		// Agent tag assignments are World-authored references into the one
 		// attached Agent tag registry. A set makes duplicate assignment
@@ -337,6 +340,7 @@ namespace core
 		// judged both the Agent and the Agent group against this World.
 		void setAgentGroupId(AgentGroupId id) { mAgentGroup = id; }
 		void setDirectAccessGrants(std::bitset<256> grants) { mDirectAccessGrants = grants; }
+		void setPermissionSets(std::set<PermissionSetId> sets) { mPermissionSets = std::move(sets); }
 
 		// Assignment mutation belongs to World, which validates the Agent,
 		// registry, tag, duplicate state, and paused simulation before calling.

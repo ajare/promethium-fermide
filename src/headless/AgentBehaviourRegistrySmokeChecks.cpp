@@ -157,7 +157,7 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 25") != std::string::npos
+		require(worldYaml.find("version: 26") != std::string::npos
 			&& worldYaml.find("package: station.behaviours") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-12 registry reference");
@@ -187,9 +187,9 @@ namespace
 		core::World source("Legacy", 4, 2);
 		source.pauseSimulation();
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 25");
+		auto const version = yaml.find("version: 26");
 		require(version != std::string::npos, "The current World schema was not version 20");
-		yaml.replace(version, std::string("version: 25").size(), "version: 12");
+		yaml.replace(version, std::string("version: 26").size(), "version: 12");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		loaded->pauseSimulation();
@@ -204,8 +204,8 @@ namespace
 		// Readers cap out at their own version, so a future document is refused
 		// at the version boundary instead of dropping fields it does not know.
 		auto future = serializeWorld(source);
-		auto const futureVersion = future.find("version: 25");
-		future.replace(futureVersion, std::string("version: 25").size(), "version: 26");
+		auto const futureVersion = future.find("version: 26");
+		future.replace(futureVersion, std::string("version: 26").size(), "version: 27");
 		auto refused = std::make_shared<core::World>("Loading", 1, 1);
 		refused->pauseSimulation();
 		auto futureReader = core::YamlSerializer::fromString(future);
