@@ -6335,6 +6335,10 @@ void renderAgentView(shared_ptr<core::World> world)
 						ImGui::Text("Idle");
 						break;
 
+					case core::Agent::State::RoutePlanning:
+						ImGui::TextUnformatted("Route planning");
+						break;
+
 					case core::Agent::State::MovingToVertex:
 						ImGui::Text("Moving to Vertex");
 						break;
@@ -7262,6 +7266,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	const char* state = "Unknown";
 	switch (gSelectedAgent->getState())
 	{
+	case core::Agent::State::RoutePlanning: state = "Route planning"; break;
 	case core::Agent::State::Idle: state = "Idle"; break;
 	case core::Agent::State::MovingToVertex: state = "Moving to Vertex"; break;
 	case core::Agent::State::WaitingForTraversal: state = "Waiting for traversal"; break;

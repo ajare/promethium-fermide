@@ -535,6 +535,8 @@ namespace core
 				agent->cleanupTraversal();
 			}
 			updateInteractionResults();
+			// Expiry follows a complete stationary tick; movement starts next tick.
+			advanceRoutePlanning();
 			updateMovementGoals();
 			break;
 
@@ -575,6 +577,8 @@ namespace core
 				|| current.globalPosition != previous.globalPosition
 				|| current.state != previous.state
 				|| current.active != previous.active
+				|| current.routePlanningRemainingTicks != previous.routePlanningRemainingTicks
+				|| current.intendedDestination != previous.intendedDestination
 				|| current.hasPath != previous.hasPath
 				|| current.targetPathNode != previous.targetPathNode
 				|| current.pathNodeCount != previous.pathNodeCount
@@ -731,6 +735,7 @@ namespace core
 
 	void SimulationCoordinator::cancelTraversalForTopologyRebuild(Agent& agent)
 	{
+		if (agent.mState == Agent::State::RoutePlanning) return;
 		if (agent.mTraversalTask)
 		{
 			// A threshold crossing which has not committed still belongs to its source
@@ -798,7 +803,6 @@ namespace core
 								destination = mWorld.mGraph->getVertexForObject(object);
 					if (!destination)
 					{
-						agent->recordRouteReplanDebug(false);
 						goal->second.routeLossReason = RouteLossReason::DestinationRemoved;
 						continue;
 					}
@@ -811,7 +815,6 @@ namespace core
 					if (!intent.destinationSector
 						|| intent.destinationSector.value > mWorld.mSectors.size())
 					{
-						agent->recordRouteReplanDebug(false);
 						continue;
 					}
 					auto destinationSector = mWorld.mSectors[
@@ -820,7 +823,6 @@ namespace core
 						destinationSector.get(), intent.destinationPosition);
 				}
 				auto path = mWorld.mGraph->calculatePath(agent, destination);
-				agent->recordRouteReplanDebug(path && !path->nodes.empty());
 				if (path && !path->nodes.empty())
 				{
 					agent->assignPath(std::move(path), intent.wasPathing, false);
@@ -851,7 +853,6 @@ namespace core
 			{
 				// The destination was structurally removed or disconnected. The Agent
 				// remains safely idle; this does not invalidate otherwise usable topology.
-				agent->recordRouteReplanDebug(false);
 				if (goal != mWorld.mMovementGoals.end())
 					goal->second.routeLossReason = RouteLossReason::TopologyChanged;
 			}

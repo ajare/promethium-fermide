@@ -94,6 +94,7 @@ namespace core
 		// Assignment replacement/removal is paused-only, so it can discard both
 		// authored/manual and runtime route intent without publishing an outcome.
 		void clearAgentMovementForBehaviourEdit(AgentId agent);
+		void advanceRoutePlanning();
 		void updateMovementGoals();
 
 		// Wakes every activated Agent the World owns. A deactivated Agent is

@@ -2,7 +2,6 @@
 
 #include <string>
 #include <bitset>
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -209,7 +208,8 @@ namespace core
 			MovingToVertex,
 			WaitingForTraversal,
 			TraversingEdge,
-			AwaitingTraversalCommit
+			AwaitingTraversalCommit,
+			RoutePlanning
 		};
 
 		struct TraversalTask
@@ -231,6 +231,10 @@ namespace core
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };
+		// Independent episode stream and timer; never authored or serialized.
+		uint64_t mRoutePlanningSequence{ 0 };
+		uint64_t mRoutePlanningTotalTicks{ 0 };
+		uint64_t mRoutePlanningRemainingTicks{ 0 };
 		// Transient, Agent-local journey identity used only for stable route
 		// perception. Reset/reload starts the deterministic sequence again.
 		uint64_t mRouteJourneySequence{ 0 };
@@ -358,13 +362,6 @@ namespace core
 		// Set when locomotion stops at the outer edge of an available queue lane.
 		// +1 approaches from the left, -1 from the right, and 0 requests at the endpoint.
 		int mEarlyQueueApproachDirectionX{ 0 };
-
-		// Transient diagnostic telemetry. Route calculation remains synchronous;
-		// the renderer turns each completed replan into a grey-first-frame/result
-		// sequence without changing simulation timing or serialized state.
-		uint64_t mRouteReplanDebugSequence{ 0 };
-		bool mRouteReplanDebugFoundPath{ false };
-		std::chrono::steady_clock::time_point mRouteReplanDebugOccurredAt{};
 
 	private:
 
@@ -528,7 +525,6 @@ namespace core
 
 		void considerTraversalReplan();
 
-		void recordRouteReplanDebug(bool foundPath);
 
 		void cancelTraversal();
 
@@ -617,6 +613,8 @@ namespace core
 		EffectiveAgentRiskAversion getEffectiveRiskAversion() const;
 		EffectiveAgentRouteFamiliarity getEffectiveRouteFamiliarity() const;
 		EffectiveAgentRoutePersistence getEffectiveRoutePersistence() const;
+		uint64_t getRoutePlanningTotalTicks() const { return mRoutePlanningTotalTicks; }
+		uint64_t getRoutePlanningRemainingTicks() const { return mRoutePlanningRemainingTicks; }
 		EffectiveAgentMinimumRoutePlanningTime getEffectiveMinimumRoutePlanningTime() const;
 		EffectiveAgentMaximumRoutePlanningTime getEffectiveMaximumRoutePlanningTime() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
@@ -683,19 +681,6 @@ namespace core
 		void setActive(bool active);
 
 		State getState() const;
-
-		struct RouteReplanDebugEvent
-		{
-			uint64_t sequence{ 0 };
-			bool foundPath{ false };
-			std::chrono::steady_clock::time_point occurredAt{};
-		};
-
-		RouteReplanDebugEvent getRouteReplanDebugEvent() const
-		{
-			return { mRouteReplanDebugSequence, mRouteReplanDebugFoundPath,
-				mRouteReplanDebugOccurredAt };
-		}
 
 		bool isInQueue() const;
 

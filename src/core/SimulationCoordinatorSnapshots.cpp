@@ -46,6 +46,13 @@ namespace core
 		result.globalPosition = agent->getGlobalPosition();
 		result.active = agent->isActive();
 		result.hasPath = (bool)agent->getPath();
+		if (auto goal = mWorld.mMovementGoals.find(result.id); goal != mWorld.mMovementGoals.end())
+			result.intendedDestination = goal->second.marker;
+		if (agent->getState() == Agent::State::RoutePlanning)
+		{
+			result.routePlanningTotalTicks = agent->getRoutePlanningTotalTicks();
+			result.routePlanningRemainingTicks = agent->getRoutePlanningRemainingTicks();
+		}
 		result.targetPathNode = agent->getPathTargetNodeIndex();
 		result.pathNodeCount = result.hasPath ? (uint32_t)agent->getPath()->nodes.size() : 0;
 		result.hasLocomotionTask = agent->hasActiveLocomotionTask();
@@ -71,6 +78,9 @@ namespace core
 
 		switch (agent->getState())
 		{
+		case Agent::State::RoutePlanning:
+			result.state = AgentPathState::RoutePlanning;
+			break;
 		case Agent::State::Idle:
 			result.state = AgentPathState::Idle;
 			break;

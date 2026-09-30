@@ -1449,47 +1449,6 @@ ImU32 agentRenderColour(core::Agent const& agent, bool selected)
 
 namespace
 {
-	struct AgentReplanVisual
-	{
-		uint64_t sequence{ 0 };
-		chrono::steady_clock::time_point occurredAt{};
-		bool greyFramePending{ false };
-	};
-
-	unordered_map<core::Agent const*, AgentReplanVisual> agentReplanVisuals;
-
-	optional<ImU32> agentReplanIconColour(core::Agent const& agent)
-	{
-		auto const now = chrono::steady_clock::now();
-		constexpr auto lifetime = chrono::seconds(1);
-		erase_if(agentReplanVisuals, [&](auto const& entry)
-			{ return now - entry.second.occurredAt >= lifetime; });
-
-		auto const event = agent.getRouteReplanDebugEvent();
-		if (!event.sequence) return nullopt;
-		if (now - event.occurredAt >= lifetime)
-		{
-			agentReplanVisuals.erase(&agent);
-			return nullopt;
-		}
-
-		auto& visual = agentReplanVisuals[&agent];
-		if (visual.sequence != event.sequence || visual.occurredAt != event.occurredAt)
-		{
-			visual.sequence = event.sequence;
-			visual.occurredAt = event.occurredAt;
-			visual.greyFramePending = true;
-		}
-		if (visual.greyFramePending)
-		{
-			visual.greyFramePending = false;
-			return IM_COL32(96, 96, 96, 255);
-		}
-		return event.foundPath
-			? IM_COL32(40, 160, 72, 255)
-			: IM_COL32(200, 48, 48, 255);
-	}
-
 	void drawAgentDebugBadge(WorldDrawList* drawList, ImFont* font, char const* symbol,
 		ImU32 boxColour, float centreX, float side, float gap, float& bottom)
 	{
@@ -1538,13 +1497,11 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
 		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
 
-	// Consume replan telemetry even while Agent Debug is hidden so toggling the
-	// setting does not restart or preserve an expired wall-clock indication.
-	auto const replanColour = agentReplanIconColour(*agent);
+	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;
 
-	auto const inQueue = agent->isInQueue();
-	if (!inQueue && !replanColour) return;
+	auto const inQueue = !planning && agent->isInQueue();
+	if (!inQueue && !planning) return;
 
 	// Badge width follows the rendered Agent body, with screen-space limits that
 	// keep punctuation legible at low zoom and unobtrusive at high zoom.
@@ -1555,9 +1512,9 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	if (inQueue)
 		drawAgentDebugBadge(drawList, ImGui::GetFont(), "!",
 			IM_COL32(230, 126, 34, 255), centreX, side, gap, badgeBottom);
-	if (replanColour)
+	if (planning)
 		drawAgentDebugBadge(drawList, ImGui::GetFont(), "?",
-			*replanColour, centreX, side, gap, badgeBottom);
+			IM_COL32(96, 96, 96, 255), centreX, side, gap, badgeBottom);
 }
 
 

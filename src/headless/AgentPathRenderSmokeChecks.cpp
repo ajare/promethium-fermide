@@ -38,14 +38,6 @@ namespace
 		return false;
 	}
 
-	float textY(WorldDrawList const& list, std::string const& value)
-	{
-		for (auto const& command : list.commands())
-			if (auto text = std::get_if<WorldDrawList::Text>(&command);
-				text && text->value == value) return text->position.y;
-		throw std::runtime_error("Expected Agent debug badge text was not rendered");
-	}
-
 	bool hasSolidColour(WorldDrawList const& list, ImU32 colour)
 	{
 		for (auto const& command : list.commands())
@@ -77,8 +69,6 @@ void runAgentPathRenderSmokeChecks()
 	auto* agent = world.lookupAgent(agentId).entity;
 	auto path = graph->calculatePath(agent, source, destination);
 	require(path && path->nodes.size() >= 2, "The Path rendering fixture has no Path");
-	require(agent->getRouteReplanDebugEvent().sequence == 0,
-		"Initial Path planning was reported as replanning");
 	agent->setPath(path, false);
 
 	auto const previousSettings = gUISettings;
@@ -97,6 +87,7 @@ void runAgentPathRenderSmokeChecks()
 
 	ImGui::CreateContext();
 	auto& io = ImGui::GetIO();
+	io.IniFilename = nullptr;
 	io.DisplaySize = { 1280.0f, 720.0f };
 	io.Fonts->AddFontDefault();
 	io.Fonts->Build();
@@ -110,15 +101,13 @@ void runAgentPathRenderSmokeChecks()
 	world.replanAgentAfterAuthorizationRefusal(agentId);
 	WorldDrawList greyReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &greyReplan);
-	require(hasText(greyReplan, "?")
-		&& hasSolidColour(greyReplan, IM_COL32(96, 96, 96, 255)),
-		"The first replan frame did not render a white question mark in a grey box");
+	require(!hasText(greyReplan, "?"), "Immediate replan rendered a planning badge");
 
 	WorldDrawList successfulReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &successfulReplan);
-	require(hasText(successfulReplan, "?")
-		&& hasSolidColour(successfulReplan, IM_COL32(40, 160, 72, 255)),
-		"A successful replan did not render a green result box");
+	require(!hasText(successfulReplan, "?")
+		&& !hasSolidColour(successfulReplan, IM_COL32(40, 160, 72, 255)),
+		"A successful replan rendered the obsolete result phase");
 
 	agent->pausePathing();
 	core::InteractionBinding binding;
@@ -135,8 +124,7 @@ void runAgentPathRenderSmokeChecks()
 	require(hasText(stacked, "!")
 		&& hasSolidColour(stacked, IM_COL32(230, 126, 34, 255)),
 		"A queued Agent did not render a white exclamation mark in an orange box");
-	require(hasText(stacked, "?") && textY(stacked, "?") < textY(stacked, "!"),
-		"The replan badge was not stacked above the queue badge");
+	require(!hasText(stacked, "?"), "Queue displayed an obsolete replan badge");
 
 	auto unreachable = std::make_shared<core::Path>();
 	unreachable->nodes.push_back({ nullptr, source, 0.0f });
@@ -147,9 +135,25 @@ void runAgentPathRenderSmokeChecks()
 	renderAgent(agent, &failedGrey);
 	WorldDrawList failedReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &failedReplan);
-	require(hasText(failedReplan, "?")
-		&& hasSolidColour(failedReplan, IM_COL32(200, 48, 48, 255)),
-		"A failed replan did not render a red result box");
+	require(!hasText(failedReplan, "?")
+		&& !hasSolidColour(failedReplan, IM_COL32(200, 48, 48, 255)),
+		"A failed replan rendered the obsolete result phase");
+
+	auto const plannerId = world.createAgent("Planner", corridor, 0, 3.25f);
+	auto* planner = world.lookupAgent(plannerId).entity;
+	require(world.moveAgentToMarker(plannerId, world.getMarkerIds()[1]).accepted(), "Planning refused");
+	for (int frame = 0; frame < 3; ++frame)
+	{
+		WorldDrawList planning({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
+		renderAgent(planner, &planning);
+		require(hasText(planning, "?") && !hasText(planning, "!")
+			&& hasSolidColour(planning, IM_COL32(96, 96, 96, 255)),
+			"Route planning must render only a neutral grey question badge on every frame");
+	}
+	world.advanceTicks(planner->getRoutePlanningRemainingTicks());
+	WorldDrawList expired({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
+	renderAgent(planner, &expired);
+	require(!hasText(expired, "?"), "Planning badge survived expiry");
 
 	gUISettings.renderAgentDebug = false;
 	WorldDrawList hiddenBadges({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });

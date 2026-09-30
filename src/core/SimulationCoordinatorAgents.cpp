@@ -334,6 +334,8 @@ namespace core
 		if (!behaviourCommand && mWorld.agentBehaviourOwnsMovement(id))
 			return { MovementCommandStatus::BehaviourOwned };
 		if (!agent->isActive()) return { MovementCommandStatus::InactiveAgent };
+		if (!agent->getSector() || agent->getSector()->getType() == SectorType::Background)
+			return { MovementCommandStatus::NoOccupiableSector };
 		if (!mWorld.lookupMarker(marker)) return { MovementCommandStatus::UnknownMarker };
 		if (auto it = mWorld.mMovementGoals.find(id); it != mWorld.mMovementGoals.end())
 			return { !it->second.cancelling && it->second.marker == marker
@@ -358,12 +360,28 @@ namespace core
 				if (auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
 					object && object->getMarker()->getId() == marker)
 					target = mWorld.mGraph->getVertexForObject(object);
-		auto path = target ? mWorld.mGraph->calculatePath(agent, target) : nullptr;
 		mWorld.mMovementGoals[id] = { marker, target ? target->getPosition() : Vector2::ZERO, false,
 			target ? SectorId{ (uint64_t)target->getSector()->getIndex() + 1 } : SectorId{},
-			!path || path->nodes.empty() ? RouteLossReason::Unreachable : RouteLossReason::None,
-			behaviourCommand };
-		if (path && !path->nodes.empty()) agent->assignPath(std::move(path), true, false);
+			RouteLossReason::None, behaviourCommand };
+		auto const minimum = secondsToTicks(agent->getEffectiveMinimumRoutePlanningTime().value, mWorld.getFixedTimestep());
+		auto const maximum = secondsToTicks(agent->getEffectiveMaximumRoutePlanningTime().value, mWorld.getFixedTimestep());
+		// Episode-local SplitMix64 stream, independent of Lua and Escalators.
+		auto random = mWorld.getRandomSeed() ^ (id.value * 0xd1b54a32d192ed03ULL)
+			^ (++agent->mRoutePlanningSequence * 0x94d049bb133111ebULL);
+		auto draw = [&]()
+		{
+			auto value = (random += 0x9e3779b97f4a7c15ULL);
+			value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+			value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+			return value ^ (value >> 31);
+		};
+		auto const range = maximum - minimum + 1;
+		auto const threshold = (uint64_t{ 0 } - range) % range;
+		auto value = draw();
+		while (value < threshold) value = draw();
+		agent->mRoutePlanningTotalTicks = minimum + value % range;
+		agent->mRoutePlanningRemainingTicks = agent->mRoutePlanningTotalTicks;
+		agent->mState = Agent::State::RoutePlanning;
 		return inspected;
 	}
 
@@ -415,6 +433,34 @@ namespace core
 			if (operation->getRequesters().contains(id)) cancelDeviceOperation(operationId, id);
 	}
 
+	void SimulationCoordinator::advanceRoutePlanning()
+	{
+		for (auto& [id, goal] : mWorld.mMovementGoals)
+		{
+			auto agent = mWorld.mAgents.find(id);
+			if (!agent || !agent->isActive() || goal.cancelling
+				|| agent->mState != Agent::State::RoutePlanning) continue;
+			if (--agent->mRoutePlanningRemainingTicks != 0) continue;
+			agent->mState = Agent::State::Idle;
+			shared_ptr<const Vertex> target;
+			for (auto const& sector : mWorld.mSectors)
+				for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+					if (auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
+						object && object->getMarker()->getId() == goal.marker)
+						target = mWorld.mGraph->getVertexForObject(object);
+			if (target)
+			{
+				goal.position = target->getPosition();
+				goal.sector = SectorId{ (uint64_t)target->getSector()->getIndex() + 1 };
+			}
+			auto path = target ? mWorld.mGraph->calculatePath(agent, target) : nullptr;
+			if (target && agent->getSector() == target->getSector().get()
+				&& agent->getGlobalPosition() == target->getPosition()) continue;
+			if (path && !path->nodes.empty()) agent->assignPath(std::move(path), true, false);
+			else goal.routeLossReason = RouteLossReason::Unreachable;
+		}
+	}
+
 	void SimulationCoordinator::updateMovementGoals()
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -451,7 +497,7 @@ namespace core
 				for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
 					if (operation->getRequesters().contains(id)) cancelDeviceOperation(operationId, id);
 			}
-			else if (agent->mPath.path) { ++it; continue; }
+			else if (agent->mState == Agent::State::RoutePlanning || agent->mPath.path) { ++it; continue; }
 			SimulationEvent event;
 			event.sequence = mWorld.mNextEventSequence++;
 			event.tick = mWorld.mSimulationTick;

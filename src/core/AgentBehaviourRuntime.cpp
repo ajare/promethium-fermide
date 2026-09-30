@@ -948,6 +948,7 @@ namespace core
 			case MovementCommandStatus::AgentBusy: return "agent_busy";
 			case MovementCommandStatus::TopologyUnavailable: return "topology_unavailable";
 			case MovementCommandStatus::BehaviourOwned: return "behaviour_owned";
+			case MovementCommandStatus::NoOccupiableSector: return "no_occupiable_sector";
 			}
 			return "unknown";
 		}
@@ -2329,6 +2330,7 @@ namespace core
 			case Agent::State::WaitingForTraversal: return "waiting";
 			case Agent::State::TraversingEdge:
 			case Agent::State::AwaitingTraversalCommit: return "traversing";
+			case Agent::State::RoutePlanning:
 			case Agent::State::Idle:
 			case Agent::State::MovingToVertex: return "moving";
 			}

@@ -3,6 +3,7 @@
 namespace core {
 inline std::string metricName(AgentPathState value) { switch(value) {
 case AgentPathState::Idle: return "idle";
+case AgentPathState::RoutePlanning: return "route_planning";
 case AgentPathState::MovingToVertex: return "moving_to_vertex";
 case AgentPathState::WaitingForTraversal: return "waiting_for_traversal";
 case AgentPathState::TraversingEdge: return "traversing_edge";

@@ -63,7 +63,7 @@ void SimulationMetricsCollector::collect(SimulationSnapshot const& s, std::vecto
         "debug"
 #endif
     }});
-    for (auto state : {AgentPathState::Idle, AgentPathState::MovingToVertex, AgentPathState::WaitingForTraversal, AgentPathState::TraversingEdge, AgentPathState::AwaitingTraversalCommit}) gauge("agents", 0, {{"state", metricName(state)}});
+    for (auto state : {AgentPathState::Idle, AgentPathState::RoutePlanning, AgentPathState::MovingToVertex, AgentPathState::WaitingForTraversal, AgentPathState::TraversingEdge, AgentPathState::AwaitingTraversalCommit}) gauge("agents", 0, {{"state", metricName(state)}});
     gauge("agents_active", 0); gauge("agents_inactive", 0);
     for (auto const& a : s.agents) { gauge("agents", 1, {{"state", metricName(a.state)}}); gauge(a.active ? "agents_active" : "agents_inactive", 1); }
     std::map<SectorId, size_t> occupants;

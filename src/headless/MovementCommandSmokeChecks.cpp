@@ -60,7 +60,7 @@ namespace
 		for (auto const& event : world.consumeSimulationEvents()) reached += event.type == core::SimulationEventType::DestinationReached;
 		require(reached == 1, "Walking destination outcome missing");
 		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Already-at-destination command refused");
-		world.advanceTicks(5);
+		world.advanceTicks(world.lookupAgent(id).entity->getRoutePlanningRemainingTicks());
 		reached = 0;
 		for (auto const& event : world.consumeSimulationEvents()) reached += event.type == core::SimulationEventType::DestinationReached;
 		require(reached == 1, "Already-at-destination did not complete");
@@ -78,7 +78,7 @@ namespace
 		}
 		require(reached == 1, "Same-destination replanning lost the movement goal");
 		require(world.moveAgentToMarker(id, markers[2]).accepted(), "Unreachable destination was not accepted as intent");
-		world.advanceTick();
+		world.advanceTicks(world.lookupAgent(id).entity->getRoutePlanningRemainingTicks());
 		unsigned lost = 0;
 		for (auto const& event : world.consumeSimulationEvents()) lost += event.type == core::SimulationEventType::RouteLost;
 		require(lost == 1 && world.getSimulationSnapshot().traversalRequests.empty(), "Initial route loss leaked claims or outcome");

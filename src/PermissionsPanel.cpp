@@ -275,7 +275,19 @@ void renderAgentAccessPermissions(shared_ptr<core::World> const& world, core::Ag
 
 void renderAgentRuntimeProperties(shared_ptr<core::World> const& world, core::AgentId agent)
 {
-	if (!world || !ImGui::TreeNode("Runtime properties")) return;
+	if (!world) return;
+	for (auto const& snapshot : world->getSimulationSnapshot().agents)
+		if (snapshot.id == agent && snapshot.state == core::AgentPathState::RoutePlanning)
+		{
+			auto marker = world->lookupMarker(snapshot.intendedDestination);
+			ImGui::TextUnformatted("State: Route planning");
+			ImGui::Text("Destination: %s", marker ? marker->getName().c_str() : "<removed>");
+			ImGui::Text("Planning time: %.2f seconds total, %.2f seconds remaining",
+				snapshot.routePlanningTotalTicks * world->getFixedTimestep(),
+				snapshot.routePlanningRemainingTicks * world->getFixedTimestep());
+			break;
+		}
+	if (!ImGui::TreeNode("Runtime properties")) return;
 	ImGui::TextWrapped("Changes affect the current simulation only and are restored from authored values by Reset simulation.");
 	if (world->getAccessPermissionCount() == 0 && world->getPermissionSetCount() == 0)
 	{

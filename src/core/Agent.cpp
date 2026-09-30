@@ -669,6 +669,9 @@ namespace core
 		mResetPath.reset();
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
+		mRoutePlanningSequence = 0;
+		mRoutePlanningTotalTicks = 0;
+		mRoutePlanningRemainingTicks = 0;
 		mTraversalTask.reset();
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
@@ -1618,13 +1621,6 @@ namespace core
 		for (uint32_t i = 0; i < consumed && mPath.path; ++i) nextPathNode();
 	}
 
-	void Agent::recordRouteReplanDebug(bool foundPath)
-	{
-		++mRouteReplanDebugSequence;
-		mRouteReplanDebugFoundPath = foundPath;
-		mRouteReplanDebugOccurredAt = chrono::steady_clock::now();
-	}
-
 	void Agent::considerTraversalReplan()
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
@@ -1639,7 +1635,6 @@ namespace core
 
 		auto target = mPath.path->nodes.back().targetVertex;
 		auto alternative = mWorld->getGraph()->calculatePath(this, mTraversalTask->sourceVertex, target);
-		recordRouteReplanDebug(alternative && alternative->nodes.size() >= 2);
 		if (!alternative || alternative->nodes.size() < 2) return;
 		// Re-score both complete suffixes from one immutable current observation
 		// context rather than comparing the old Path's stored decision with a new one.
@@ -1741,6 +1736,7 @@ namespace core
 	{
 		switch (mState)
 		{
+		case State::RoutePlanning:
 		case State::Idle:
 			break;
 

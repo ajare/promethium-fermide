@@ -17,7 +17,8 @@ namespace core
 		MovingToVertex,
 		WaitingForTraversal,
 		TraversingEdge,
-		AwaitingTraversalCommit
+		AwaitingTraversalCommit,
+		RoutePlanning
 	};
 
 	struct AgentSnapshot
@@ -33,6 +34,9 @@ namespace core
 		// at whatever it held when the Agent was deactivated (#118).
 		bool active{ true };
 		bool hasPath{ false };
+		MarkerId intendedDestination{};
+		uint64_t routePlanningTotalTicks{ 0 };
+		uint64_t routePlanningRemainingTicks{ 0 };
 		uint32_t targetPathNode{ 0 };
 		uint32_t pathNodeCount{ 0 };
 		bool hasLocomotionTask{ false };
@@ -299,7 +303,7 @@ namespace core
 	enum struct MovementCommandStatus
 	{
 		Accepted, NoOp, UnknownAgent, InactiveAgent, UnknownMarker, AgentBusy,
-		TopologyUnavailable, BehaviourOwned
+		TopologyUnavailable, BehaviourOwned, NoOccupiableSector
 	};
 	enum struct RouteLossReason { None, Unreachable, TopologyChanged, DestinationRemoved };
 	enum struct MovementCancellationReason { None, Explicit };

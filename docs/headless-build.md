@@ -390,8 +390,26 @@ World schema 29 and Agent tag registry schema 13 persist these properties.
 Earlier documents and clipboard objects without them retain the defaults.
 Checks cover validation, crossed endpoints, exact sample round trips,
 reconciliation, dependency conflicts, dirty state, individual and registry
-undo/redo, and clipboard provenance. Runtime Route planning does not yet consume
-these properties.
+undo/redo, and clipboard provenance.
+
+## Initial runtime Route planning (#253)
+
+Run `prometheum-fermide-headless.exe --route-planning-checks` (CTest:
+`route-planning`) for stationary planning, inclusive upward-rounded tick
+intervals, exact expiry, delayed arrival/Route loss, cancellation, pause,
+deactivation, deterministic episode replay and Reset, persistence exclusion,
+Selection panel text, editor-immediate Paths, and grey debug badge coverage.
+
+Runtime Marker commands retain destination identity without calculating a Path.
+Each entered episode samples an inclusive whole-tick duration from effective
+Minimum/Maximum route planning time using an independent World-seed/Agent-ID
+counter stream. NoOp commands do not consume episodes. Cleanup calculates the
+Path synchronously after the last complete planning tick; physical movement
+starts on the next tick. Pause and deactivation freeze the episode. Lua retains
+its semantic `moving` classification while runtime snapshots expose the distinct
+`RoutePlanning` state, destination Marker, and total/remaining ticks. The Agent
+Selection panel converts those ticks to seconds. Editor Path authoring and
+existing replanning remain immediate; neither has a wall-clock result badge.
 
 ## Prerequisites
 

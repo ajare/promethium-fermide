@@ -245,8 +245,6 @@ namespace
 		require(restored && !restored->getPath()
 			&& restored->getState() == core::Agent::State::Idle,
 			"An unreachable restored destination did not leave its Agent idle");
-		require(restored->getRouteReplanDebugEvent().sequence == 0,
-			"Initial restoration of an unreachable destination was reported as replanning");
 		auto const& warnings = reopened->getLoadWarnings();
 		require(warnings.size() == 1
 			&& warnings.front().find("Stranded") != std::string::npos

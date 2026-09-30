@@ -864,6 +864,9 @@ namespace core
 				cancelInteraction(point->mActiveRequest);
 				continue;
 			}
+			// Initial Route planning is stationary even if an earlier independent
+			// interaction request is still waiting to be performed.
+			if (actor->getState() == Agent::State::RoutePlanning) continue;
 			if (actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach)
 			{
 				actor->moveToPosition(point->mPosition, frameTime);

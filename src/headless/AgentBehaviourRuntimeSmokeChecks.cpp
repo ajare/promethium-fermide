@@ -634,10 +634,13 @@ end }
 		world.advanceTick();
 		auto firstTick = world.getSimulationSnapshot();
 		require(firstTick.tick == 1 && firstTick.agents.size() == 2
-			&& firstTick.agents[0].hasPath && firstTick.agents[1].hasPath
-			&& firstTick.agents[0].globalPosition.x > 0.5f
-			&& firstTick.agents[1].globalPosition.x > 1.5f,
-			"on_start movement was not applied before first-tick intent and movement");
+			&& !firstTick.agents[0].hasPath && !firstTick.agents[1].hasPath
+			&& firstTick.agents[0].state == core::AgentPathState::RoutePlanning
+			&& firstTick.agents[1].state == core::AgentPathState::RoutePlanning
+			&& firstTick.agents[0].routePlanningRemainingTicks == firstTick.agents[0].routePlanningTotalTicks - 1
+			&& firstTick.agents[0].globalPosition.x == 0.5f
+			&& firstTick.agents[1].globalPosition.x == 1.5f,
+			"on_start did not enter stationary planning before the first complete tick");
 
 		std::ostringstream digest;
 		unsigned reached = 0;
@@ -1067,6 +1070,7 @@ return {
 			"Could not assign the active-unassignment fixture");
 		require(world.resumeSimulation(), "Could not start active-unassignment fixture");
 		world.advanceTick();
+		world.advanceTicks(world.lookupAgent(id).entity->getRoutePlanningRemainingTicks());
 		require(world.lookupAgent(id).entity->getPath()
 			&& world.agentBehaviourOwnsMovement(id),
 			"The active-unassignment fixture did not acquire a route");
@@ -1297,8 +1301,8 @@ return {
 			&& world.agentBehaviourOwnsMovement(first)
 			&& world.agentBehaviourOwnsMovement(second),
 			"One instance's timer limit affected another instance");
-		require(world.lookupAgent(first).entity->getPath()
-			&& world.lookupAgent(second).entity->getPath(),
+		require(world.lookupAgent(first).entity->getState() == core::Agent::State::RoutePlanning
+			&& world.lookupAgent(second).entity->getState() == core::Agent::State::RoutePlanning,
 			"Lexically ordered one-shot timers did not apply their movement commands");
 
 		unsigned reached = 0;
@@ -1451,7 +1455,7 @@ return {
 		require(!world.lookupAgent(agent).entity->getPath(),
 			"Frozen timer used elapsed deactivation ticks");
 		world.advanceTick();
-		require(world.lookupAgent(agent).entity->getPath()
+		require(world.lookupAgent(agent).entity->getState() == core::Agent::State::RoutePlanning
 			&& world.consumeAgentBehaviourRuntimeDiagnostics().empty(),
 			"Reactivation did not resume the same instance at the remaining timer duration");
 	}
@@ -1544,7 +1548,7 @@ return {
 			.entity->setState(core::DeviceOperationState::Failed);
 		world.advanceTick(); // Publish failure.
 		world.advanceTick(); // Deliver failure and its movement command.
-		require(world.lookupAgent(agent).entity->getPath()
+		require(world.lookupAgent(agent).entity->getState() == core::Agent::State::RoutePlanning
 			&& world.consumeAgentBehaviourRuntimeDiagnostics().empty(),
 			"Immutable semantic interaction outcomes were not delivered correctly");
 	}
@@ -1804,7 +1808,8 @@ return {
 			fixture.world->consumeSimulationEvents();
 			std::ostringstream digest;
 			unsigned firstReached = 0, secondReached = 0;
-			for (unsigned tick = 0; tick < 5000
+			// Four journeys now include independently sampled initial planning time.
+			for (unsigned tick = 0; tick < 6000
 				&& (firstReached < 4 || secondReached < 4); ++tick)
 			{
 				if (tick == 10)

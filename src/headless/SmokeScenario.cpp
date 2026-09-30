@@ -2,6 +2,10 @@
 #if defined(_WIN32)
 #include <Windows.h>
 #include <Psapi.h>
+#if defined(_MSC_VER)
+#include <crtdbg.h>
+#include <cstdlib>
+#endif
 #elif defined(__linux__)
 #include <unistd.h>
 #include <fstream>
@@ -63,6 +67,7 @@ void runAgentGroupTopologySmokeChecks();
 void runAgentActivationSmokeChecks();
 void runMarkerIdentitySmokeChecks();
 void runMovementCommandSmokeChecks();
+void runRoutePlanningSmokeChecks();
 void runShuttleDoorQuerySmokeChecks();
 void runShuttleDoorRenderSmokeChecks();
 void runRenderOrderSmokeChecks();
@@ -6198,6 +6203,19 @@ size_t getHeadlessPeakWorkingSetBytes()
 
 int main(int argc, char** argv)
 {
+#if defined(_WIN32)
+	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#if defined(_MSC_VER)
+	_set_error_mode(_OUT_TO_STDERR);
+	_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#ifdef _DEBUG
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+#endif
+#endif
 	if (argc > 1 && (std::string(argv[1]) == "--viewport-checks"
 		|| std::string(argv[1]) == "--render-checks"))
 	{
@@ -6254,6 +6272,14 @@ int main(int argc, char** argv)
 			if (argc != 3) throw std::invalid_argument("Usage: --write-routing-scale-world <new.world.yaml>");
 			writeRoutingScaleWorld(argv[2]);
 			std::cout << "PASS: wrote routing stress World and adjacent tag registry\n";
+			return 0;
+		}
+		if (argc > 1 && std::string(argv[1]) == "--route-planning-checks")
+		{
+			runRoutePlanningSmokeChecks();
+			runMovementCommandSmokeChecks();
+			runAgentPathRenderSmokeChecks();
+			std::cout << "PASS: Route planning\n";
 			return 0;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--route-planning-time-checks")
@@ -6329,6 +6355,7 @@ int main(int argc, char** argv)
 		runAgentActivationSmokeChecks();
 		runMarkerIdentitySmokeChecks();
 		runMovementCommandSmokeChecks();
+		runRoutePlanningSmokeChecks();
 		runRenderOrderSmokeChecks();
 		runShuttleDoorRenderSmokeChecks();
 		runDoorOpenApartRenderSmokeChecks();
