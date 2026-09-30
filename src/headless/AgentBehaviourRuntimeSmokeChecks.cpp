@@ -852,6 +852,80 @@ return {
 			"An advanced helper dependency revision was not adopted deterministically");
 	}
 
+	void planningIntentReplacement()
+	{
+		TemporaryDirectory temporary;
+		auto package = temporary.path / "planning.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeText(package / "planning.lua", R"lua(
+return {
+  api_version = 1,
+  factory = function(configuration)
+    local cancellations = 0
+    return {
+      on_start = function(context)
+        assert(context.move_to(configuration.first).status == "accepted")
+        context.set_timer("duplicate", 1)
+      end,
+      on_timer = function(name, context)
+        if name == "duplicate" then
+          assert(context.move_to(configuration.first).status == "no_op")
+          context.set_timer("replace", 1)
+        elseif name == "replace" then
+          local replacement = context.move_to(configuration.second)
+          assert(replacement.accepted and replacement.status == "superseded")
+          context.set_timer("cancel", 2)
+        else
+          assert(context.cancel_movement().accepted)
+        end
+      end,
+      on_event = function(event, context)
+        if event.type == "movement_cancelled" then
+          cancellations = cancellations + 1
+          assert(event.reason == (cancellations == 1 and "superseded" or "explicit"))
+          assert(cancellations <= 2)
+        end
+      end
+    }
+  end
+}
+)lua");
+		auto behaviour = registry->addAgentBehaviour("Planning", "planning.lua", {
+			{ "first", core::AgentBehaviourSchemaType::Marker },
+			{ "second", core::AgentBehaviourSchemaType::Marker }
+		});
+		core::World world("Behaviour planning", 10, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+		world.addSectorMarker(room, 0, 8.5f, "First");
+		world.addSectorMarker(room, 0, 6.5f, "Second");
+		world.finishBuild();
+		auto id = world.createAgent("Planner", room, 0, 1.5f);
+		auto markers = world.getMarkerIds();
+		world.pauseSimulation();
+		world.attachAgentBehaviourRegistry("planning.behaviours", registry);
+		require(world.setAgentBehaviourAssignment(id, behaviour,
+			registry->lookupAgentBehaviour(behaviour)->getRevision(), {
+				{ "first", markers[0] }, { "second", markers[1] }
+			}), "Could not assign planning behaviour");
+		require(world.resumeSimulation(), "Could not resume planning behaviour");
+		world.advanceTicks(10);
+		unsigned cancellations = 0;
+		for (auto const& event : world.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::MovementCancelled)
+			{
+				require(cancellations < 2 && event.destinationMarker == markers[cancellations]
+					&& event.movementCancellationReason == (cancellations == 0
+						? core::MovementCancellationReason::Superseded : core::MovementCancellationReason::Explicit),
+					"Behaviour cancellation payload incorrect");
+				++cancellations;
+			}
+		require(cancellations == 2, "Behaviour planning replacement/cancellation did not execute");
+		require(world.getAgentBehaviourRuntimeDiagnostics().empty(),
+			"Behaviour planning semantic assertions failed");
+	}
+
 	void routeLossAndTopologyLifecycle()
 	{
 		TemporaryDirectory temporary;
@@ -2615,6 +2689,7 @@ void runAgentBehaviourRuntimeSmokeChecks()
 	liveLoadsFactoriesAndCallbacksAreContained();
 	independentStartupInstancesMoveDeterministically();
 	manifestHelpersHavePrivatePerAgentGraphs();
+	planningIntentReplacement();
 	routeLossAndTopologyLifecycle();
 	programmingErrorDisablesMovementOwnership();
 	deterministicTimersExposeOnlySemanticState();

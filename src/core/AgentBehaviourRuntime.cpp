@@ -941,6 +941,7 @@ namespace core
 			switch (status)
 			{
 			case MovementCommandStatus::Accepted: return "accepted";
+			case MovementCommandStatus::Superseded: return "superseded";
 			case MovementCommandStatus::NoOp: return "no_op";
 			case MovementCommandStatus::UnknownAgent: return "unknown_agent";
 			case MovementCommandStatus::InactiveAgent: return "inactive_agent";
@@ -967,7 +968,8 @@ namespace core
 
 		std::string_view cancellationReasonName(MovementCancellationReason reason)
 		{
-			return reason == MovementCancellationReason::Explicit ? "explicit" : "unknown";
+			return reason == MovementCancellationReason::Explicit ? "explicit"
+				: reason == MovementCancellationReason::Superseded ? "superseded" : "unknown";
 		}
 
 		std::string_view interactionResultName(InteractionResult result)
@@ -1138,7 +1140,8 @@ namespace core
 			}
 
 			auto const result = scope->inspectMove(handle->marker);
-			if (result.status == MovementCommandStatus::Accepted)
+			if (result.status == MovementCommandStatus::Accepted
+				|| result.status == MovementCommandStatus::Superseded)
 				scope->commands.push_back({ PendingMovementCommandType::MoveTo,
 					scope->agent, handle->marker });
 			pushCommandResult(state, result.accepted(), movementStatusName(result.status));

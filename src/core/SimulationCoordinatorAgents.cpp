@@ -337,14 +337,13 @@ namespace core
 		if (!agent->getSector() || agent->getSector()->getType() == SectorType::Background)
 			return { MovementCommandStatus::NoOccupiableSector };
 		if (!mWorld.lookupMarker(marker)) return { MovementCommandStatus::UnknownMarker };
-		if (auto it = mWorld.mMovementGoals.find(id); it != mWorld.mMovementGoals.end())
-			return { !it->second.cancelling && it->second.marker == marker
-				? MovementCommandStatus::NoOp : MovementCommandStatus::AgentBusy };
-		if (agent->mPath.path || mWorld.mPausedPathIntents.contains(id) || holdsTraversalOwnership(id))
-			return { MovementCommandStatus::AgentBusy };
+		if (auto it = mWorld.mMovementGoals.find(id); it != mWorld.mMovementGoals.end()
+			&& !it->second.cancelling && it->second.marker == marker)
+			return { MovementCommandStatus::NoOp };
 		if (!mWorld.mGraph || mWorld.mTopologyDirty || !mWorld.mTopologyValid)
 			return { MovementCommandStatus::TopologyUnavailable };
-		return { MovementCommandStatus::Accepted };
+		return { behaviourCommand && mWorld.mMovementGoals.contains(id)
+			? MovementCommandStatus::Superseded : MovementCommandStatus::Accepted };
 	}
 
 	MovementCommandResult SimulationCoordinator::moveAgentToMarker(
@@ -352,8 +351,18 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto const inspected = inspectMoveAgentToMarker(id, marker, behaviourCommand);
-		if (inspected.status != MovementCommandStatus::Accepted) return inspected;
+		if (!inspected.accepted() || inspected.status == MovementCommandStatus::NoOp) return inspected;
 		auto agent = mWorld.mAgents.find(id);
+		if (auto old = mWorld.mMovementGoals.find(id); old != mWorld.mMovementGoals.end())
+		{
+			SimulationEvent event;
+			event.agent = makeAgentSnapshot(agent);
+			event.destinationMarker = old->second.marker;
+			event.type = SimulationEventType::MovementCancelled;
+			event.movementCancellationReason = old->second.cancelling
+				? MovementCancellationReason::Explicit : MovementCancellationReason::Superseded;
+			mWorld.mPendingMovementOutcomes.push_back(std::move(event));
+		}
 		shared_ptr<const Vertex> target;
 		for (auto const& sector : mWorld.mSectors)
 			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
@@ -363,6 +372,35 @@ namespace core
 		mWorld.mMovementGoals[id] = { marker, target ? target->getPosition() : Vector2::ZERO, false,
 			target ? SectorId{ (uint64_t)target->getSector()->getIndex() + 1 } : SectorId{},
 			RouteLossReason::None, behaviourCommand };
+		if (hasCommittedMovement(*agent))
+		{
+			mWorld.mMovementGoals[id].planningDeferred = true;
+			agent->mRoutePlanningTotalTicks = agent->mRoutePlanningRemainingTicks = 0;
+		}
+		else beginRoutePlanning(*agent);
+		return inspected;
+	}
+
+	bool SimulationCoordinator::hasCommittedMovement(Agent const& agent) const
+	{
+		auto const id = mWorld.getAgentId(&agent);
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+			if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
+				return true;
+		return agent.mTraversalTask && agent.mTraversalTask->destinationVertex
+			&& (agent.mTraversalTask->destinationVertex->getSector().get() != agent.getSector()
+				|| agent.mTraversalTask->edge->getTraversalResourceId())
+			&& (agent.mState == Agent::State::TraversingEdge
+				|| agent.mState == Agent::State::AwaitingTraversalCommit);
+	}
+
+	void SimulationCoordinator::beginRoutePlanning(Agent& valueAgent)
+	{
+		auto* agent = &valueAgent;
+		auto const id = mWorld.getAgentId(agent);
+		agent->clearRuntimePath();
+		releaseTraversalOwnership(id);
+		mWorld.mPausedPathIntents.erase(id);
 		auto const minimum = secondsToTicks(agent->getEffectiveMinimumRoutePlanningTime().value, mWorld.getFixedTimestep());
 		auto const maximum = secondsToTicks(agent->getEffectiveMaximumRoutePlanningTime().value, mWorld.getFixedTimestep());
 		// Episode-local SplitMix64 stream, independent of Lua and Escalators.
@@ -382,7 +420,6 @@ namespace core
 		agent->mRoutePlanningTotalTicks = minimum + value % range;
 		agent->mRoutePlanningRemainingTicks = agent->mRoutePlanningTotalTicks;
 		agent->mState = Agent::State::RoutePlanning;
-		return inspected;
 	}
 
 	MovementCommandResult SimulationCoordinator::inspectCancelAgentMovement(
@@ -438,8 +475,19 @@ namespace core
 		for (auto& [id, goal] : mWorld.mMovementGoals)
 		{
 			auto agent = mWorld.mAgents.find(id);
-			if (!agent || !agent->isActive() || goal.cancelling
-				|| agent->mState != Agent::State::RoutePlanning) continue;
+			if (!agent || !agent->isActive() || goal.cancelling) continue;
+			if (goal.planningDeferred)
+			{
+				if (hasCommittedMovement(*agent)) continue;
+				goal.planningDeferred = false;
+				agent->clearRuntimePath();
+				if (agent->getSector()
+					&& SectorId{ (uint64_t)agent->getSector()->getIndex() + 1 } == goal.sector
+					&& agent->getGlobalPosition().distanceTo(goal.position) < 0.001f) continue;
+				beginRoutePlanning(*agent);
+				continue; // The first complete planning tick is the next tick.
+			}
+			if (agent->mState != Agent::State::RoutePlanning) continue;
 			if (--agent->mRoutePlanningRemainingTicks != 0) continue;
 			agent->mState = Agent::State::Idle;
 			shared_ptr<const Vertex> target;
@@ -464,6 +512,15 @@ namespace core
 	void SimulationCoordinator::updateMovementGoals()
 	{
 		mWorld.invalidateSimulationSnapshot();
+		for (auto& event : mWorld.mPendingMovementOutcomes)
+		{
+			event.sequence = mWorld.mNextEventSequence++;
+			event.tick = mWorld.mSimulationTick;
+			event.phase = mWorld.mCurrentPhase;
+			mWorld.mAgentBehaviourRuntime->observeOutcome(event);
+			mWorld.mEvents.push_back(std::move(event));
+		}
+		mWorld.mPendingMovementOutcomes.clear();
 		for (auto it = mWorld.mMovementGoals.begin(); it != mWorld.mMovementGoals.end();)
 		{
 			auto id = it->first;
@@ -476,17 +533,7 @@ namespace core
 				// Finish an in-flight crossing and any occupied resource journey first.
 				// Transport cancellation uses the already scheduled destination stop:
 				// do not release a manifest slot or strand a passenger in a Transit.
-				bool riding = false;
-				for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
-				{
-					(void)resourceId;
-					if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end()) riding = true;
-				}
-				bool crossing = agent->mTraversalTask && agent->mTraversalTask->destinationVertex
-					&& (agent->mTraversalTask->destinationVertex->getSector().get() != agent->getSector()
-						|| agent->mTraversalTask->edge->getTraversalResourceId());
-				if (riding || (crossing && (agent->mState == Agent::State::TraversingEdge
-					|| agent->mState == Agent::State::AwaitingTraversalCommit)))
+				if (hasCommittedMovement(*agent))
 				{ ++it; continue; }
 				agent->clearRuntimePath();
 				releaseTraversalOwnership(id);
@@ -497,7 +544,7 @@ namespace core
 				for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
 					if (operation->getRequesters().contains(id)) cancelDeviceOperation(operationId, id);
 			}
-			else if (agent->mState == Agent::State::RoutePlanning || agent->mPath.path) { ++it; continue; }
+			else if (goal.planningDeferred || agent->mState == Agent::State::RoutePlanning || agent->mPath.path) { ++it; continue; }
 			SimulationEvent event;
 			event.sequence = mWorld.mNextEventSequence++;
 			event.tick = mWorld.mSimulationTick;

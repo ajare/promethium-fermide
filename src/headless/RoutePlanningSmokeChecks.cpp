@@ -219,6 +219,161 @@ namespace
 		}
 	}
 
+	void interruptions()
+	{
+		core::World world("Interruptions", 12, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
+		world.addSectorMarker(room, 0, 8.5f, "First");
+		world.addSectorMarker(room, 0, 3.5f, "Second");
+		world.finishBuild();
+		auto id = world.createAgent("Planner", room, 0, 2.375f);
+		auto* agent = world.lookupAgent(id).entity;
+		auto markers = world.getMarkerIds();
+		auto position = agent->getGlobalPosition();
+		world.moveAgentToMarker(id, markers[0]);
+		world.advanceTicks(5);
+		auto remaining = agent->getRoutePlanningRemainingTicks();
+		auto total = agent->getRoutePlanningTotalTicks();
+		require(world.moveAgentToMarker(id, markers[0]).status == core::MovementCommandStatus::NoOp
+			&& agent->getRoutePlanningRemainingTicks() == remaining
+			&& agent->getRoutePlanningTotalTicks() == total, "Duplicate intent restarted planning");
+		world.consumeSimulationEvents();
+		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Replacement refused");
+		Fixture control;
+		control.world->moveAgentToMarker(control.id, control.destination);
+		control.world->cancelAgentMovement(control.id);
+		control.world->advanceTick();
+		control.world->moveAgentToMarker(control.id, control.destination);
+		require(agent->getRoutePlanningTotalTicks() == control.agent()->getRoutePlanningTotalTicks(),
+			"Replacement did not draw a fresh episode duration");
+		require(agent->getRoutePlanningRemainingTicks() == agent->getRoutePlanningTotalTicks()
+			&& agent->getGlobalPosition() == position, "Replacement did not restart stationary planning");
+		require(world.consumeSimulationEvents().empty(), "Replacement published synchronously");
+		world.advanceTick();
+		unsigned superseded = 0;
+		for (auto const& event : world.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::MovementCancelled)
+			{
+				++superseded;
+				require(event.destinationMarker == markers[0]
+					&& event.movementCancellationReason == core::MovementCancellationReason::Superseded
+					&& event.tick == world.getSimulationTick() && event.sequence != 0,
+					"Supersession outcome payload incorrect");
+			}
+		require(superseded == 1, "Supersession outcome missing or duplicated");
+		world.cancelAgentMovement(id);
+		world.advanceTick();
+		auto snapshot = world.getSimulationSnapshot().agents.front();
+		require(snapshot.state == core::AgentPathState::Idle && !snapshot.intendedDestination
+			&& !snapshot.routePlanningRemainingTicks && !snapshot.routePlanningTotalTicks,
+			"Cancellation retained planning state");
+		unsigned cancelled = 0;
+		for (auto const& event : world.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::MovementCancelled)
+			{
+				++cancelled;
+				require(event.destinationMarker == markers[1]
+					&& event.movementCancellationReason == core::MovementCancellationReason::Explicit,
+					"Explicit cancellation payload incorrect");
+			}
+		require(cancelled == 1, "Explicit cancellation missing or duplicated");
+		world.moveAgentToMarker(id, markers[0]);
+		world.advanceTicks(agent->getRoutePlanningRemainingTicks() + 10);
+		position = agent->getGlobalPosition();
+		require(position.x != 2.375f, "Walking interruption fixture did not move");
+		world.moveAgentToMarker(id, markers[1]);
+		world.advanceTick();
+		require(agent->getState() == core::Agent::State::RoutePlanning
+			&& agent->getGlobalPosition() == position, "Stopping walking for planning snapped to a vertex");
+	}
+
+	void traversalInterruption(bool committed, bool atDestination)
+	{
+		core::World world("Traversal planning", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		world.addSectorDoor(front, 0, 2, {});
+		world.addSectorMarker(back, 0, 6.5f, "Original");
+		world.addSectorMarker(back, 0, atDestination ? 2.5f : 4.5f, "Replacement");
+		world.finishBuild();
+		auto id = world.createAgent("Walker", front, 0, committed ? 2.5f : 1.375f);
+		auto* agent = world.lookupAgent(id).entity;
+		auto markers = world.getMarkerIds();
+		world.moveAgentToMarker(id, markers[0]);
+		bool interrupted = false;
+		for (unsigned tick = 0; tick < 2000 && !interrupted; ++tick)
+		{
+			world.advanceTick();
+			for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+				if (request.owner == id && request.edgeType == core::EdgeType::Door
+					&& (committed ? agent->getState() == core::Agent::State::TraversingEdge
+						: bool(request.queueTicket) && !request.permit))
+					interrupted = true;
+		}
+		require(interrupted, "Traversal interruption boundary not reached");
+		world.consumeSimulationEvents();
+		auto position = agent->getGlobalPosition();
+		auto decisions = world.getGraph()->getRouteWorkCounts().decisions;
+		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Traversal replacement refused");
+		require(agent->getGlobalPosition() == position, "Planning snapped Agent to vertex");
+		if (committed)
+		{
+			require(agent->getState() == core::Agent::State::TraversingEdge
+				&& !agent->getRoutePlanningTotalTicks(), "Committed traversal was interrupted or drew timer");
+			for (unsigned tick = 0; tick < 20 && agent->getSector()->getIndex() == front; ++tick)
+			{
+				require(!agent->getRoutePlanningRemainingTicks(), "Deferred timer decremented or started early");
+				world.advanceTick();
+			}
+			require(agent->getSector()->getIndex() == back, "Crossing did not finish safely");
+		}
+		auto snapshot = world.getSimulationSnapshot();
+		require(snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(),
+			"Planning leaked traversal requests or permits");
+		for (auto const& resource : snapshot.traversalResources)
+		{
+			require(!resource.admissionReservationCount && !resource.occupantCount
+				&& !resource.preparationLeaseCount && !resource.crossingLeaseCount,
+				"Planning leaked resource ownership");
+			for (auto const& lane : resource.crossingLanes)
+				require(!lane.owner, "Planning leaked crossing reservation");
+			for (auto const& lane : resource.queueLanes)
+			{
+				require(lane.queue.empty(), "Planning leaked queue ticket");
+				for (auto const& slot : lane.positions)
+					require(!slot.owner, "Planning leaked queue position");
+			}
+		}
+		require(agent->getGlobalPosition() == position
+			&& world.getGraph()->getRouteWorkCounts().decisions == decisions,
+			"Stopping for planning moved Agent or calculated Path");
+		if (committed && atDestination)
+		{
+			require(agent->getState() == core::Agent::State::Idle && !agent->getRoutePlanningTotalTicks(),
+				"Crossing arrival entered planning");
+			unsigned reached = 0;
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::DestinationReached)
+				{
+					++reached;
+					require(event.destinationMarker == markers[1], "Crossing completed wrong intent");
+				}
+			require(reached == 1, "Crossing arrival outcome missing");
+		}
+		else
+			require(agent->getState() == core::Agent::State::RoutePlanning
+				&& agent->getRoutePlanningRemainingTicks() == agent->getRoutePlanningTotalTicks()
+				&& agent->getRoutePlanningTotalTicks() >= 60, "Planning did not begin at safe boundary");
+		Fixture control;
+		control.world->moveAgentToMarker(control.id, control.destination);
+		control.world->cancelAgentMovement(control.id);
+		control.world->advanceTick();
+		control.world->moveAgentToMarker(control.id, control.destination);
+		if (committed && atDestination) world.moveAgentToMarker(id, markers[0]);
+		require(agent->getRoutePlanningTotalTicks() == control.agent()->getRoutePlanningTotalTicks(),
+			"Deferred intent consumed a duration before entering planning");
+	}
+
 	void editorException()
 	{
 		Fixture f;
@@ -238,4 +393,8 @@ void runRoutePlanningSmokeChecks()
 	inclusiveEndpointsAndPersistence();
 	delayedOutcomes();
 	editorException();
+	interruptions();
+	traversalInterruption(false, false);
+	traversalInterruption(true, false);
+	traversalInterruption(true, true);
 }

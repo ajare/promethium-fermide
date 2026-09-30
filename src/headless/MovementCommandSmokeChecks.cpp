@@ -34,7 +34,7 @@ namespace
 		world.resumeSimulation();
 		require(world.moveAgentToMarker(id, markers[0]).accepted(), "Movement refused");
 		require(world.moveAgentToMarker(id, markers[0]).status == Status::NoOp, "Same destination not idempotent");
-		require(world.moveAgentToMarker(id, markers[1]).status == Status::AgentBusy, "Busy Agent replaced");
+		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Replacement refused");
 		world.advanceTicks(5);
 		world.consumeSimulationEvents();
 		require(world.cancelAgentMovement(id).accepted(), "Cancellation refused");
@@ -46,7 +46,7 @@ namespace
 			if (event.type == core::SimulationEventType::MovementCancelled)
 			{
 				++cancelled;
-				require(event.destinationMarker == markers[0]
+				require(event.destinationMarker == markers[1]
 					&& event.movementCancellationReason
 						== core::MovementCancellationReason::Explicit
 					&& event.tick != 0 && event.sequence != 0,

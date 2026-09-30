@@ -518,8 +518,10 @@ namespace core
 			SectorId sector{};
 			RouteLossReason routeLossReason{ RouteLossReason::None };
 			bool behaviourOwned{ false };
+			bool planningDeferred{ false };
 		};
 		std::map<AgentId, MovementGoal> mMovementGoals;
+		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
 		struct AgentTagRegistryReference
 		{

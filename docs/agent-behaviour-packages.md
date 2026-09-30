@@ -152,9 +152,15 @@ environment with private closures, upvalues, exports, and import cache;
 `on_start` runs once in Agent-ID order. `context.move_to` accepts only an opaque
 Marker handle from validated configuration; `context.cancel_movement` requests
 cancellation at the next safe boundary. Both return an immutable semantic result
-with `accepted` and `status` fields. A different destination while busy reports
-`agent_busy`, and issuing more than one movement command in one callback disables
-that instance as a programming error without applying the callback's commands.
+with `accepted` and `status` fields. Repeating the current destination reports
+`no_op` without restarting Route planning. An accepted replacement reports
+`superseded` and stages one `movement_cancelled` event with reason `superseded`
+for the previous destination; explicit cancellation uses reason `explicit`.
+A committed crossing or occupied-resource journey finishes safely before the
+replacement starts Route planning. Issuing more than one movement command in one
+callback disables that instance as a programming error without applying the
+callback's commands. Conflicting commands staged by separate callbacks at the
+same boundary still report `agent_busy`.
 Context capabilities expire when the callback returns, and queued movement is
 applied only after callbacks return. The version-1 context also exposes
 `grant_access_permission(name)`, `revoke_access_permission(name)`,

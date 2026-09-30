@@ -411,6 +411,17 @@ its semantic `moving` classification while runtime snapshots expose the distinct
 Selection panel converts those ticks to seconds. Editor Path authoring and
 existing replanning remain immediate; neither has a wall-clock result badge.
 
+## Interruptible Route planning (#254)
+
+The `route-planning` check also covers duplicate commands, fresh replacement
+samples, boundary-published superseded/explicit cancellation outcomes, cleared
+planning state, and Door queue/crossing interruptions without position snaps.
+Committed crossings retain their transactions and defer sampling until commit;
+arrival at the replacement Marker publishes `destination_reached` without a
+planning episode. Uncommitted traversal ownership is released before planning.
+The headless smoke suite exercises the Lua `superseded` status and cancellation
+reasons through real behaviour callbacks as well as ordinary World commands.
+
 ## Prerequisites
 
 - Windows x64

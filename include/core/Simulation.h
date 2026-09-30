@@ -303,14 +303,15 @@ namespace core
 	enum struct MovementCommandStatus
 	{
 		Accepted, NoOp, UnknownAgent, InactiveAgent, UnknownMarker, AgentBusy,
-		TopologyUnavailable, BehaviourOwned, NoOccupiableSector
+		TopologyUnavailable, BehaviourOwned, NoOccupiableSector, Superseded
 	};
 	enum struct RouteLossReason { None, Unreachable, TopologyChanged, DestinationRemoved };
-	enum struct MovementCancellationReason { None, Explicit };
+	enum struct MovementCancellationReason { None, Explicit, Superseded };
 	struct MovementCommandResult
 	{
 		MovementCommandStatus status;
-		bool accepted() const { return status == MovementCommandStatus::Accepted || status == MovementCommandStatus::NoOp; }
+		bool accepted() const { return status == MovementCommandStatus::Accepted || status == MovementCommandStatus::NoOp
+			|| status == MovementCommandStatus::Superseded; }
 	};
 
 	enum struct SimulationEventType

@@ -96,6 +96,8 @@ namespace core
 		void clearAgentMovementForBehaviourEdit(AgentId agent);
 		void advanceRoutePlanning();
 		void updateMovementGoals();
+		bool hasCommittedMovement(Agent const& agent) const;
+		void beginRoutePlanning(Agent& agent);
 
 		// Wakes every activated Agent the World owns. A deactivated Agent is
 		// not simulated (#118), so waking must not restart its locomotion.

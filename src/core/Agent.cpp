@@ -1286,6 +1286,7 @@ namespace core
 		mEarlyQueueApproachDirectionX = 0;
 		mPath.path = nullptr;
 		mPath.targetNode = 0;
+		mRoutePlanningTotalTicks = mRoutePlanningRemainingTicks = 0;
 		mState = State::Idle;
 	}
 

@@ -2044,6 +2044,7 @@ namespace core
 		if (!preserveBehaviourRuntime)
 		{
 			mMovementGoals.clear();
+			mPendingMovementOutcomes.clear();
 			mSimulationTick = 0;
 			mNextEventSequence = 1;
 		}
