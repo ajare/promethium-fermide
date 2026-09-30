@@ -291,11 +291,11 @@ A named, World-owned authorization that may be required to operate a protected I
 _Avoid_: Traversal permit, which authorizes one specific transition at runtime
 
 **Permission requirement**:
-The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation.
+The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation. Adding a requirement that an Agent on an affected Path does not satisfy immediately replans that Path; if no Path remains, it is cleared.
 _Avoid_: Permission set, which grants Access permissions to an Agent
 
 **Permission grant**:
-An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes affect its current grants until the simulation is reset. A changed effective grant invalidates any affected Path.
+An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes affect its current grants until the simulation is reset. Losing an effective grant immediately replans any affected Path and clears it if no Path remains; gaining one uses ordinary Route persistence.
 _Avoid_: Traversal permit, Permission requirement
 
 **Permission set**:

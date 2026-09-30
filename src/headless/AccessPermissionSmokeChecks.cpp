@@ -241,22 +241,18 @@ namespace
 		require(world.grantAgentAccessPermission(agentId, unrelated, &diagnostic), diagnostic);
 		require(agent->getPath() == unchanged, "an unrelated grant disturbed the current Path");
 
-		// Make that Path stale by protecting the Door after selection. The runtime
-		// gate must refuse opening it and replan onto the other Door.
+		// Adding a requirement which the Agent does not satisfy immediately
+		// invalidates the affected Path and replans onto the other Door.
 		require(world.setManualDoorPermissionRequirement(protectedDoor.traversalResource,
 			{}, &diagnostic), diagnostic);
 		require(world.revokeAgentAccessPermission(agentId, key, &diagnostic), diagnostic);
 		agent->setPath(graph->calculatePath(agent, frontVertex, backVertex), true);
 		require(world.setManualDoorPermissionRequirement(protectedDoor.traversalResource,
 			{ key }, &diagnostic), diagnostic);
-		require(world.resumeSimulation(), "stale-Path fixture did not resume");
-		world.advanceTicks(180);
+		require(chosenDoor(agent->getPath()) == openDoor.traversalResource,
+			"adding a manual Door requirement did not immediately replan the affected Path");
 		auto door = std::static_pointer_cast<const core::DoorSectorObject>(
 			protectedDoor.door.sector->getObject(protectedDoor.door.index))->getDoor();
-		require(door->isClosed(), "stale unauthorized Path opened the protected Door");
-		require(chosenDoor(agent->getPath()) == openDoor.traversalResource,
-			"runtime authorization refusal did not invoke replanning");
-		world.pauseSimulation();
 
 		auto localAgentId = world.createAgent("local observer", front, 0, 2.5f);
 		auto localAgent = world.lookupAgent(localAgentId).entity;
@@ -282,6 +278,94 @@ namespace
 		require(restored->deleteAccessPermission(key, &diagnostic), diagnostic);
 		require(restored->getManualDoorPermissionRequirement(protectedDoor.traversalResource).empty(),
 			"Access permission deletion did not clear the manual Door requirement");
+	}
+
+	void unavailableAuthorizationChangeClearsAffectedPath()
+	{
+		core::World world("unavailable authorization route", 3, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 3, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 3, 1);
+		auto door = world.addSectorDoor(0, 0, 1, {});
+		uint32_t frontMarker, backMarker;
+		world.addSectorMarker(front, 0, 0.5f, &frontMarker);
+		world.addSectorMarker(back, 0, 0.5f, &backMarker);
+		world.finishBuild(); world.pauseSimulation();
+		auto blockedId = world.createAgent("blocked by requirement", front, 0, 0.5f);
+		auto revokedId = world.createAgent("blocked by grant loss", front, 0, 0.5f);
+		auto blocked = world.lookupAgent(blockedId).entity;
+		auto revoked = world.lookupAgent(revokedId).entity;
+		auto key = world.addAccessPermission("Only route key");
+		std::string diagnostic;
+		require(world.grantAgentAccessPermission(revokedId, key, &diagnostic), diagnostic);
+		auto graph = world.getGraph();
+		auto start = graph->getVertexByIdentifier(frontMarker);
+		auto destination = graph->getVertexByIdentifier(backMarker);
+		blocked->setPath(graph->calculatePath(blocked, start, destination), true);
+		revoked->setPath(graph->calculatePath(revoked, start, destination), true);
+		require(blocked->getPath() && revoked->getPath(),
+			"authorization fixtures did not start with a Path");
+
+		require(world.setManualDoorPermissionRequirement(door.traversalResource,
+			{ key }, &diagnostic), diagnostic);
+		require(!blocked->getPath(),
+			"adding an unsatisfied requirement did not clear a Path with no alternative");
+		require(static_cast<bool>(revoked->getPath()),
+			"adding a satisfied requirement cleared an authorized Path");
+		require(world.revokeAgentAccessPermission(revokedId, key, &diagnostic), diagnostic);
+		require(!revoked->getPath(),
+			"losing a required grant did not clear a Path with no alternative");
+	}
+
+	void interactionRequirementImmediatelyReplansAffectedPath()
+	{
+		core::World world("Interaction requirement replanning", 12, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto protectedDoor = world.addSectorDoor(0, 0, 3, {});
+		auto alternateDoor = world.addSectorDoor(0, 0, 9, {});
+		uint32_t frontMarker, backMarker;
+		world.addSectorMarker(front, 0, 2.5f, &frontMarker);
+		world.addSectorMarker(back, 0, 2.5f, &backMarker);
+		world.finishBuild(); world.pauseSimulation();
+		world.addSectorDoorButton(protectedDoor.door.sector->getIndex(),
+			protectedDoor.door.index);
+		world.finishBuild(); world.pauseSimulation();
+		auto agentId = world.createAgent("blocked by requirement", front, 0, 2.5f);
+		auto revokedId = world.createAgent("blocked by grant loss", front, 0, 2.5f);
+		auto agent = world.lookupAgent(agentId).entity;
+		auto revoked = world.lookupAgent(revokedId).entity;
+		auto graph = world.getGraph();
+		auto chosenDoor = [](std::shared_ptr<core::Path> const& path)
+		{
+			if (!path) return core::TraversalResourceId{};
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getType() == core::EdgeType::Door)
+					return node.edge->getTraversalResourceId();
+			return core::TraversalResourceId{};
+		};
+		auto start = graph->getVertexByIdentifier(frontMarker);
+		auto destination = graph->getVertexByIdentifier(backMarker);
+		agent->setPath(graph->calculatePath(agent, start, destination), true);
+		revoked->setPath(graph->calculatePath(revoked, start, destination), true);
+		require(chosenDoor(agent->getPath()) == protectedDoor.traversalResource
+			&& chosenDoor(revoked->getPath()) == protectedDoor.traversalResource,
+			"controlled Door was not on the initial Paths");
+		auto key = world.addAccessPermission("Control key");
+		std::string diagnostic;
+		require(world.grantAgentAccessPermission(revokedId, key, &diagnostic), diagnostic);
+		auto resource = world.lookupTraversalResource(protectedDoor.traversalResource);
+		require(resource && resource.entity->getControls().size() == 2,
+			"controlled Door did not expose both Interaction points");
+		for (auto point : resource.entity->getControls())
+			require(world.setInteractionPointPermissionRequirement(point,
+				{ key }, &diagnostic), diagnostic);
+		require(chosenDoor(agent->getPath()) == alternateDoor.traversalResource,
+			"adding an Interaction point requirement did not immediately replan the affected Path");
+		require(chosenDoor(revoked->getPath()) == protectedDoor.traversalResource,
+			"adding a satisfied Interaction point requirement disturbed an authorized Path");
+		require(world.revokeAgentAccessPermission(revokedId, key, &diagnostic), diagnostic);
+		require(chosenDoor(revoked->getPath()) == alternateDoor.traversalResource,
+			"losing an Interaction point grant did not immediately replan the affected Path");
 	}
 
 	void controlledDoorAuthorization()
@@ -570,6 +654,8 @@ void runAccessPermissionSmokeChecks()
 	authorizationAndPersistence();
 	permissionSets();
 	manualDoorAuthorization();
+	unavailableAuthorizationChangeClearsAffectedPath();
+	interactionRequirementImmediatelyReplansAffectedPath();
 	controlledDoorAuthorization();
 	malformedAuthorizationIsTransactional();
 	extensibleControlRequirementsPersistIndependently();

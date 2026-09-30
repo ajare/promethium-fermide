@@ -687,6 +687,8 @@ namespace core
 		std::vector<AccessPermissionId> missingInteractionPermissions(
 			InteractionPoint const& point, Agent const& agent) const;
 		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;
+		void replanAgentsAffectedByControlRequirement(TraversalResourceId resource,
+			std::bitset<256> const& requirement);
 		void reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
 			bool gained);
 

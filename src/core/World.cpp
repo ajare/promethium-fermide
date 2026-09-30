@@ -9964,6 +9964,15 @@ namespace core
 		}
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
 		point->mPermissionRequirement = next;
+		for (auto const& [resourceId, resource] : mTraversalResources.entries())
+		{
+			bool usesPoint = find(resource->mControls.begin(), resource->mControls.end(), id)
+				!= resource->mControls.end();
+			if (!usesPoint)
+				usesPoint = any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
+					[id](auto const& stop) { return stop.callControl == id; });
+			if (usesPoint) replanAgentsAffectedByControlRequirement(resourceId, next);
+		}
 		if (auto authored = mAuthoredControlRequirements.find(id);
 			authored != mAuthoredControlRequirements.end()
 			&& authored->second.constructionRecord < mConstructionRecords.size())
@@ -10108,6 +10117,7 @@ namespace core
 		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
 			if (next.test(bit)) record->values.push_back(static_cast<uint32_t>(bit + 1));
 		resource->mDoor->mPermissionRequirement = next;
+		replanAgentsAffectedByControlRequirement(id, next);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -10232,11 +10242,33 @@ namespace core
 		}
 	}
 
+	void World::replanAgentsAffectedByControlRequirement(TraversalResourceId resource,
+		bitset<256> const& requirement)
+	{
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			if ((requirement & ~effectiveAccessGrants(*agent)).none()
+				|| !agent->mPath.path || agent->mPath.path->nodes.empty()) continue;
+			bool affected = false;
+			for (uint32_t i = agent->mPath.targetNode + 1;
+				i < agent->mPath.path->nodes.size(); ++i)
+			{
+				auto const& edge = agent->mPath.path->nodes[i].edge;
+				if (edge && edge->getTraversalResourceId() == resource)
+				{
+					affected = true;
+					break;
+				}
+			}
+			if (affected) replanAgentAfterAuthorizationRefusal(agentId);
+		}
+	}
+
 	void World::reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
 		bool gained)
 	{
 		if (!agent.mPath.path || agent.mPath.path->nodes.empty()
-			|| (agent.mTraversalTask && agent.mTraversalTask->permit)) return;
+			|| (gained && agent.mTraversalTask && agent.mTraversalTask->permit)) return;
 		auto const bit = changed.value - 1;
 		auto resourceUsesPermission = [&](TraversalResource const& resource)
 		{
@@ -10255,46 +10287,29 @@ namespace core
 		};
 		auto edgeUsesPermission = [&](shared_ptr<const Edge> const& edge)
 		{
-			if (!edge || (edge->getType() != EdgeType::Door
-				&& edge->getType() != EdgeType::BulkheadDoor
-				&& edge->getType() != EdgeType::Ladder
-				&& edge->getType() != EdgeType::ForceBridge
-				&& edge->getType() != EdgeType::Lift
-				&& edge->getType() != EdgeType::LiftMount)) return false;
+			if (!edge) return false;
 			auto resource = mTraversalResources.find(edge->getTraversalResourceId());
 			return resource && resourceUsesPermission(*resource);
 		};
 		bool currentRelevant = false;
 		for (uint32_t i = agent.mPath.targetNode + 1; i < agent.mPath.path->nodes.size(); ++i)
 			currentRelevant = currentRelevant || edgeUsesPermission(agent.mPath.path->nodes[i].edge);
-		if (!gained && !currentRelevant) return;
-		if (gained)
-		{
-			bool availableRouteChanged = false;
-			for (auto const& [resourceId, resource] : mTraversalResources.entries())
-			{
-				(void)resourceId;
-				availableRouteChanged = availableRouteChanged || resourceUsesPermission(*resource);
-			}
-			if (!availableRouteChanged) return;
-		}
-		auto destination = agent.mPath.path->nodes.back().targetVertex;
-		auto alternative = mGraph->calculatePath(&agent, destination);
-		if (!alternative || alternative->nodes.empty())
-		{
-			if (!gained)
-			{
-				agent.clearRuntimePath();
-				auto goal = mMovementGoals.find(getAgentId(&agent));
-				if (goal != mMovementGoals.end()) goal->second.routeLossReason = RouteLossReason::Unreachable;
-			}
-			return;
-		}
 		if (!gained)
 		{
-			agent.assignPath(std::move(alternative), true, false);
+			if (currentRelevant)
+				replanAgentAfterAuthorizationRefusal(getAgentId(&agent));
 			return;
 		}
+		bool availableRouteChanged = false;
+		for (auto const& [resourceId, resource] : mTraversalResources.entries())
+		{
+			(void)resourceId;
+			availableRouteChanged = availableRouteChanged || resourceUsesPermission(*resource);
+		}
+		if (!availableRouteChanged) return;
+		auto destination = agent.mPath.path->nodes.back().targetVertex;
+		auto alternative = mGraph->calculatePath(&agent, destination);
+		if (!alternative || alternative->nodes.empty()) return;
 		auto costs = pathing::comparePathSuffixCosts(agent, *mGraph, *agent.mPath.path,
 			agent.mPath.targetNode, *alternative, 0);
 		if (!costs || getRouteChoicePolicy().shouldReplacePath(costs->first, costs->second,
