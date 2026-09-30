@@ -945,7 +945,7 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 }
 
 
-void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* layer */, LayerRenderStyle style, bool /* selected */, WorldDrawList* drawList)
+void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* layer */, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	core::Vector2 bounds0, bounds1;
 	button->getFullShape(bounds0, bounds1);
@@ -966,6 +966,12 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	else
 	{
 		drawList->AddRect({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
+	}
+	if (selected)
+	{
+		ImVec2 topLeft{ min(bounds0.x, bounds1.x), min(bounds0.y, bounds1.y) };
+		ImVec2 bottomRight{ max(bounds0.x, bounds1.x), max(bounds0.y, bounds1.y) };
+		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
 }
 
