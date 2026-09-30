@@ -3,6 +3,7 @@
 #include "core/ObservationRevision.h"
 
 #include <array>
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -128,6 +129,7 @@ namespace core
 		float mReach{ 0.25f };
 		uint64_t mDurationTicks{ 1 };
 		std::vector<InteractionBinding> mBindings;
+		std::bitset<256> mPermissionRequirement;
 		std::vector<InteractionRequestId> mQueue;
 		InteractionRequestId mActiveRequest;
 		uint64_t mInteractionTicksRemaining{ 0 };
@@ -215,6 +217,7 @@ namespace core
 		InteractionPointId mPoint;
 		AgentId mActor;
 		InteractionResult mResult{ InteractionResult::Pending };
+		std::vector<AccessPermissionId> mMissingPermissions;
 		std::vector<std::pair<DeviceOperationId, InteractionBindingRequirement>> mOperations;
 
 		InteractionRequest(InteractionPointId point, AgentId actor)
@@ -228,6 +231,7 @@ namespace core
 		InteractionPointId getPoint() const { return mPoint; }
 		AgentId getActor() const { return mActor; }
 		InteractionResult getResult() const { return mResult; }
+		std::vector<AccessPermissionId> const& getMissingPermissions() const { return mMissingPermissions; }
 		std::vector<std::pair<DeviceOperationId, InteractionBindingRequirement>> const& getOperations() const { return mOperations; }
 	};
 

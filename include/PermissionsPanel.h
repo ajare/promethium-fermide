@@ -1,0 +1,25 @@
+#pragma once
+
+#include <memory>
+#include <string>
+#include "core/EntityId.h"
+
+namespace core { class World; }
+
+core::AccessPermissionId commitAccessPermissionAdd(std::shared_ptr<core::World> const& world,
+	std::string const& name, std::string& diagnostic);
+bool commitAccessPermissionRename(std::shared_ptr<core::World> const& world,
+	core::AccessPermissionId id, std::string const& name, std::string& diagnostic);
+bool commitAccessPermissionDelete(std::shared_ptr<core::World> const& world,
+	core::AccessPermissionId id, std::string& diagnostic);
+bool commitAgentAccessPermissionGrant(std::shared_ptr<core::World> const& world,
+	core::AgentId agent, core::AccessPermissionId permission, bool granted, std::string& diagnostic);
+bool commitInteractionPermissionRequirement(std::shared_ptr<core::World> const& world,
+	core::InteractionPointId point, core::AccessPermissionId permission, bool required,
+	std::string& diagnostic);
+
+void renderPermissionsPanel(std::shared_ptr<core::World> const& world);
+void renderAgentAccessPermissions(std::shared_ptr<core::World> const& world, core::AgentId agent);
+void renderInteractionPermissionRequirements(std::shared_ptr<core::World> const& world,
+	core::InteractionPointId point);
+void resetPermissionsPanelState();

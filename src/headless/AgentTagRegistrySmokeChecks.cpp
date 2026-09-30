@@ -127,7 +127,7 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 22") != std::string::npos
+		require(worldYaml.find("version: 23") != std::string::npos
 			&& worldYaml.find("filename: station.tags.yaml") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-10 registry reference");
@@ -163,9 +163,9 @@ namespace
 	{
 		core::World source("Legacy", 4, 2);
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 22");
+		auto const version = yaml.find("version: 23");
 		require(version != std::string::npos, "The current World schema was not version 20");
-		yaml.replace(version, std::string("version: 22").size(), "version: 9");
+		yaml.replace(version, std::string("version: 23").size(), "version: 9");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		auto reader = core::YamlSerializer::fromString(yaml);

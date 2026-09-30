@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <bitset>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -227,6 +228,10 @@ namespace core
 		// capacity or traversal decision.
 		AgentGroupId mAgentGroup{};
 
+		// Authored direct Access permission grants. Slots are World-owned and
+		// bounded, making membership deterministic and duplicate-free.
+		std::bitset<256> mDirectAccessGrants;
+
 		// Agent tag assignments are World-authored references into the one
 		// attached Agent tag registry. A set makes duplicate assignment
 		// structurally impossible in memory and gives persistence a stable numeric
@@ -331,6 +336,7 @@ namespace core
 		// Assignment belongs to World::setAgentGroup, which has already
 		// judged both the Agent and the Agent group against this World.
 		void setAgentGroupId(AgentGroupId id) { mAgentGroup = id; }
+		void setDirectAccessGrants(std::bitset<256> grants) { mDirectAccessGrants = grants; }
 
 		// Assignment mutation belongs to World, which validates the Agent,
 		// registry, tag, duplicate state, and paused simulation before calling.

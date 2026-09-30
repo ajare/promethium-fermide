@@ -104,6 +104,7 @@ namespace core
 		result.point = request.getPoint();
 		result.actor = request.getActor();
 		result.result = request.getResult();
+		result.missingPermissions = request.getMissingPermissions();
 		for (auto const& [operation, requirement] : request.getOperations())
 		{
 			(void)requirement;

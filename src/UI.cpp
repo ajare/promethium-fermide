@@ -30,6 +30,7 @@
 #include "DocumentEdit.h"
 #include "DoorPanel.h"
 #include "AgentGroupsPanel.h"
+#include "PermissionsPanel.h"
 #include "AgentGroupAssignmentPanel.h"
 #include "AgentTagAssignmentPanel.h"
 #include "AgentBehaviourAssignmentPanel.h"
@@ -2321,6 +2322,7 @@ namespace
 		gLayerNameEdits.clear();
 		gLevelNameEdits.clear();
 		resetAgentGroupsPanelState();
+		resetPermissionsPanelState();
 		resetAgentTagAssignmentPanelState();
 		resetTagsPanelState();
 		resetBehavioursPanelState();
@@ -5546,6 +5548,8 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
 	shared_ptr<const core::SectorObject> object)
 {
+	if (auto button = dynamic_pointer_cast<const core::Button>(object->_getObject()))
+		renderInteractionPermissionRequirements(world, button->getInteractionPointId());
 	uint32_t bridgeSector, bridgeObject;
 	if (world->isBulkheadDoorOwnedControl(object, &bridgeSector, &bridgeObject))
 	{
@@ -7119,6 +7123,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 
 	renderAgentIndividualProperties(world, id);
 	renderAgentEffectiveProperties(world, id);
+	renderAgentAccessPermissions(world, id);
 	renderAgentTagAssignmentChecklist(world, id);
 	renderAgentBehaviourConfigurationPanel(world, id);
 
@@ -7535,6 +7540,11 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		(void)renderBehavioursPanel(world, gWorldFilepath,
 			[] { return chooseAgentBehaviourRegistryPath(); });
 		ImGui::PopID();
+	}
+
+	if (ImGui::CollapsingHeader("Permissions"))
+	{
+		renderPermissionsPanel(world);
 	}
 
 	if (ImGui::CollapsingHeader("Objects"))

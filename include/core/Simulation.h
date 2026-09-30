@@ -60,6 +60,7 @@ namespace core
 		InteractionPointId point;
 		AgentId actor;
 		InteractionResult result{ InteractionResult::Pending };
+		std::vector<AccessPermissionId> missingPermissions;
 		std::vector<DeviceOperationId> operations;
 	};
 

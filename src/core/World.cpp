@@ -7634,6 +7634,10 @@ namespace core
 			throw;
 		}
 
+		for (auto const& [id, requirement] : mPendingPermissionRequirements)
+			if (auto point = mInteractionPoints.find(id)) point->mPermissionRequirement = requirement;
+		mPendingPermissionRequirements.clear();
+
 		auto const& graphLog = mGraph->getBuildLog();
 		mBuildLog.insert(mBuildLog.end(), graphLog.begin(), graphLog.end());
 	}
@@ -9314,6 +9318,204 @@ namespace core
 	// SimulationCoordinator (ADR 0004). World keeps the registries
 	// (ADR 0001) and forwards every entry point, so no caller outside World
 	// names the coordinator.
+
+	bool World::accessPermissionNameTaken(string const& name, AccessPermissionId except) const
+	{
+		for (size_t i = 0; i < mAccessPermissions.size(); ++i)
+			if (mAccessPermissions[i] && i + 1 != except.value
+				&& mAccessPermissions[i]->getName() == name) return true;
+		return false;
+	}
+
+	uint32_t World::getAccessPermissionCount() const
+	{
+		return static_cast<uint32_t>(count_if(mAccessPermissions.begin(), mAccessPermissions.end(),
+			[](auto const& value) { return value != nullptr; }));
+	}
+
+	vector<AccessPermissionId> World::getAccessPermissionIds() const
+	{
+		vector<AccessPermissionId> result;
+		for (size_t i = 0; i < mAccessPermissions.size(); ++i)
+			if (mAccessPermissions[i]) result.push_back(AccessPermissionId{ i + 1 });
+		return result;
+	}
+
+	EntityLookup<AccessPermission const> World::lookupAccessPermission(AccessPermissionId id) const
+	{
+		if (id.value && id.value <= mAccessPermissions.size() && mAccessPermissions[id.value - 1])
+			return { mAccessPermissions[id.value - 1].get(), {} };
+		return { nullptr, format("Access permission {} is invalid or has been deleted", id.value) };
+	}
+
+	string const& World::getAccessPermissionName(AccessPermissionId id) const
+	{
+		auto found = lookupAccessPermission(id);
+		if (!found) throw invalid_argument(found.diagnostic);
+		return found.entity->getName();
+	}
+
+	bool World::canAddAccessPermission(string const& raw, string* diagnostic) const
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Access permissions can only be edited while the simulation is paused");
+		auto name = AccessPermission::trimName(raw);
+		if (!AccessPermission::nameIsValid(name, diagnostic)) return false;
+		if (accessPermissionNameTaken(name)) return reject(format("Access permission '{}' already exists", name));
+		if (getAccessPermissionCount() == AccessPermission::Capacity)
+			return reject("A World cannot define more than 256 Access permissions");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	AccessPermissionId World::addAccessPermission(string const& raw)
+	{
+		string diagnostic;
+		if (!canAddAccessPermission(raw, &diagnostic)) throw invalid_argument(diagnostic);
+		for (size_t i = 0; i < mAccessPermissions.size(); ++i) if (!mAccessPermissions[i])
+		{
+			mAccessPermissions[i] = AccessPermission::create(AccessPermission::trimName(raw));
+			modify();
+			return AccessPermissionId{ i + 1 };
+		}
+		throw invalid_argument("A World cannot define more than 256 Access permissions");
+	}
+
+	bool World::renameAccessPermission(AccessPermissionId id, string const& raw, string* diagnostic)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Access permissions can only be edited while the simulation is paused");
+		auto found = lookupAccessPermission(id);
+		if (!found) return reject(found.diagnostic);
+		auto name = AccessPermission::trimName(raw);
+		if (!AccessPermission::nameIsValid(name, diagnostic)) return false;
+		if (accessPermissionNameTaken(name, id)) return reject(format("Access permission '{}' already exists", name));
+		if (name == found.entity->getName()) { if (diagnostic) diagnostic->clear(); return true; }
+		mAccessPermissions[id.value - 1]->setName(std::move(name));
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	World::AccessPermissionUsage World::getAccessPermissionUsage(AccessPermissionId id) const
+	{
+		if (!lookupAccessPermission(id)) throw invalid_argument("Unknown Access permission");
+		AccessPermissionUsage usage;
+		auto bit = id.value - 1;
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{ (void)agentId; if (agent->mDirectAccessGrants.test(bit)) ++usage.directAgentGrants; }
+		for (auto const& [pointId, point] : mInteractionPoints.entries())
+		{ (void)pointId; if (point->mPermissionRequirement.test(bit)) ++usage.interactionPointRequirements; }
+		return usage;
+	}
+
+	bool World::deleteAccessPermission(AccessPermissionId id, string* diagnostic)
+	{
+		if (!mSimulationPaused)
+		{ if (diagnostic) *diagnostic = "Access permissions can only be edited while the simulation is paused"; return false; }
+		auto found = lookupAccessPermission(id);
+		if (!found) { if (diagnostic) *diagnostic = found.diagnostic; return false; }
+		auto bit = id.value - 1;
+		// Clear all references before releasing the slot, so a reused identity can
+		// never inherit an old grant or requirement.
+		for (auto const& [agentId, agent] : mAgents.entries()) { (void)agentId; agent->mDirectAccessGrants.reset(bit); }
+		for (auto const& [pointId, point] : mInteractionPoints.entries()) { (void)pointId; point->mPermissionRequirement.reset(bit); }
+		mAccessPermissions[bit].reset();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentAccessPermissionGrant(AgentId agentId, AccessPermissionId permission,
+		bool granted, string* diagnostic)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Access permission grants can only be edited while the simulation is paused");
+		auto agent = mAgents.find(agentId);
+		if (!agent) return reject(format("Agent {} is invalid", agentId.value));
+		auto permissionLookup = lookupAccessPermission(permission);
+		if (!permissionLookup) return reject(permissionLookup.diagnostic);
+		auto bit = permission.value - 1;
+		if (agent->mDirectAccessGrants.test(bit) == granted)
+			return reject(granted ? "The Agent already has this direct grant" : "The Agent does not have this direct grant");
+		agent->mDirectAccessGrants.set(bit, granted);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	vector<AccessPermissionId> World::getAgentDirectAccessGrants(AgentId id) const
+	{
+		auto agent = mAgents.find(id);
+		if (!agent) throw invalid_argument("Unknown Agent");
+		vector<AccessPermissionId> result;
+		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
+			if (agent->mDirectAccessGrants.test(bit) && mAccessPermissions[bit])
+				result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
+	vector<AccessPermissionId> World::getAgentEffectiveAccessGrants(AgentId id) const
+	{
+		// Permission sets are a later slice; direct grants are currently the whole
+		// effective union, exposed separately so that addition remains compatible.
+		return getAgentDirectAccessGrants(id);
+	}
+
+	bool World::isInteractionPointPermissionEligible(InteractionPointId id) const
+	{
+		auto point = mInteractionPoints.find(id);
+		if (!point || !point->mSector) return false;
+		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
+		{
+			return binding.command.type == DeviceCommandType::SelectLiftDestination
+				|| binding.command.type == DeviceCommandType::SelectShuttleDestination;
+		});
+	}
+
+	bool World::setInteractionPointPermissionRequirement(InteractionPointId id,
+		vector<AccessPermissionId> const& permissions, string* diagnostic)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Permission requirements can only be edited while the simulation is paused");
+		auto point = mInteractionPoints.find(id);
+		if (!point) return reject(format("Interaction point {} is invalid", id.value));
+		if (!isInteractionPointPermissionEligible(id)) return reject("This Interaction point is not eligible for an Access permission requirement");
+		bitset<256> next;
+		for (auto permission : permissions)
+		{
+			auto found = lookupAccessPermission(permission);
+			if (!found) return reject(found.diagnostic);
+			auto bit = permission.value - 1;
+			if (next.test(bit)) return reject(format("Access permission {} appears more than once", permission.value));
+			next.set(bit);
+		}
+		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
+		point->mPermissionRequirement = next;
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	vector<AccessPermissionId> World::getInteractionPointPermissionRequirement(InteractionPointId id) const
+	{
+		auto point = mInteractionPoints.find(id);
+		if (!point) throw invalid_argument("Unknown Interaction point");
+		vector<AccessPermissionId> result;
+		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
+			if (point->mPermissionRequirement.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
+	vector<AccessPermissionId> World::missingInteractionPermissions(
+		InteractionPoint const& point, Agent const& agent) const
+	{
+		vector<AccessPermissionId> result;
+		auto missing = point.mPermissionRequirement & ~agent.mDirectAccessGrants;
+		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
+			if (missing.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
 
 	InteractionPointId World::createInteractionPoint(string const& name)
 	{

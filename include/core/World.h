@@ -2,6 +2,7 @@
 
 #include <string>
 #include <array>
+#include <bitset>
 #include <vector>
 #include <set>
 #include <memory>
@@ -11,6 +12,7 @@
 
 #include "core/Defines.h"
 #include "core/AgentGroup.h"
+#include "core/AccessPermission.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/Background.h"
 #include "core/Facade.h"
@@ -476,6 +478,11 @@ namespace core
 		// and across save/load, which restores each group under its own ID.
 		EntityRegistry<AgentGroupId, AgentGroup> mAgentGroups;
 
+		// Access permission identity is its fixed slot plus one. A slot is not
+		// returned to the allocator until deletion has cleared every reference.
+		std::array<std::unique_ptr<AccessPermission>, AccessPermission::Capacity> mAccessPermissions{};
+		std::map<InteractionPointId, std::bitset<256>> mPendingPermissionRequirements;
+
 		// Marker identity is carried by the authored Marker itself. The high-water
 		// mark remains after deletion, so an identity is never issued twice.
 		uint64_t mNextMarkerId{ 1 };
@@ -640,6 +647,10 @@ namespace core
 		// it already carries is not its own collision.
 		bool agentGroupNameTaken(std::string const& trimmed,
 			AgentGroupId except = AgentGroupId{}) const;
+		bool accessPermissionNameTaken(std::string const& trimmed,
+			AccessPermissionId except = AccessPermissionId{}) const;
+		std::vector<AccessPermissionId> missingInteractionPermissions(
+			InteractionPoint const& point, Agent const& agent) const;
 
 		bool markerNameTaken(std::string const& trimmed,
 			MarkerId except = MarkerId{}) const;
@@ -896,6 +907,7 @@ namespace core
 			uint32_t layer{ 0 };
 			Vector2 position{};
 			AgentGroupId agentGroup{};
+			std::bitset<256> directAccessGrants;
 			std::set<AgentTagId> agentTags;
 			std::optional<AgentPropertySample> walkSpeedModifierSample;
 			std::optional<AgentPropertySample> heightModifierSample;
@@ -2206,6 +2218,41 @@ namespace core
 		// and the reason for the refusal exactly as the caller can read it back
 		// through `diagnostic`.
 		bool deleteAgentGroup(AgentGroupId id, std::string* diagnostic = nullptr);
+
+		struct AccessPermissionUsage
+		{
+			uint32_t directAgentGrants{ 0 };
+			uint32_t interactionPointRequirements{ 0 };
+		};
+
+		uint32_t getAccessPermissionCount() const;
+		std::vector<AccessPermissionId> getAccessPermissionIds() const;
+		EntityLookup<AccessPermission const> lookupAccessPermission(AccessPermissionId id) const;
+		std::string const& getAccessPermissionName(AccessPermissionId id) const;
+		bool canAddAccessPermission(std::string const& name, std::string* diagnostic = nullptr) const;
+		AccessPermissionId addAccessPermission(std::string const& name);
+		bool renameAccessPermission(AccessPermissionId id, std::string const& name,
+			std::string* diagnostic = nullptr);
+		AccessPermissionUsage getAccessPermissionUsage(AccessPermissionId id) const;
+		bool deleteAccessPermission(AccessPermissionId id, std::string* diagnostic = nullptr);
+
+		bool setAgentAccessPermissionGrant(AgentId agent, AccessPermissionId permission,
+			bool granted, std::string* diagnostic = nullptr);
+		bool grantAgentAccessPermission(AgentId agent, AccessPermissionId permission,
+			std::string* diagnostic = nullptr)
+		{ return setAgentAccessPermissionGrant(agent, permission, true, diagnostic); }
+		bool revokeAgentAccessPermission(AgentId agent, AccessPermissionId permission,
+			std::string* diagnostic = nullptr)
+		{ return setAgentAccessPermissionGrant(agent, permission, false, diagnostic); }
+		std::vector<AccessPermissionId> getAgentDirectAccessGrants(AgentId agent) const;
+		std::vector<AccessPermissionId> getAgentEffectiveAccessGrants(AgentId agent) const;
+
+		bool isInteractionPointPermissionEligible(InteractionPointId point) const;
+		bool setInteractionPointPermissionRequirement(InteractionPointId point,
+			std::vector<AccessPermissionId> const& permissions,
+			std::string* diagnostic = nullptr);
+		std::vector<AccessPermissionId> getInteractionPointPermissionRequirement(
+			InteractionPointId point) const;
 
 		InteractionPointId createInteractionPoint(std::string const& name);
 

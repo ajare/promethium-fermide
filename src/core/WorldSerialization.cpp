@@ -379,7 +379,9 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
-		// Version 17 adds the Marker properties bitfield. Version 15 renames the
+		// Version 23 adds World-owned Access permission definitions, direct Agent
+		// grants, and Interaction point requirements. Version 17 adds the Marker
+		// properties bitfield. Version 15 renames the
 		// vertical-position schema fields from Deck to Level. Version 14 adds the
 		// authored deterministic random seed and recursive
 		// List/Record behaviour configuration values. Version 13 adds typed
@@ -403,7 +405,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 22);
+		serializer.writeUint32("version", 23);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -455,6 +457,43 @@ namespace core
 			serializer.endMap();
 		}
 		serializer.endArray();
+
+		serializer.beginArray("accessPermissions");
+		for (auto id : getAccessPermissionIds())
+		{
+			serializer.beginMap("");
+			serializer.writeUint64("id", id.value);
+			serializer.writeString("name", getAccessPermissionName(id));
+			serializer.endMap();
+		}
+		serializer.endArray();
+		serializer.beginArray("accessPermissionGrants");
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			if (agent->mDirectAccessGrants.none()) continue;
+			serializer.beginMap("");
+			serializer.writeUint64("agent", agentId.value);
+			serializer.beginArray("permissions");
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (agent->mDirectAccessGrants.test(bit)) serializer.writeUint64("", bit + 1);
+			serializer.endArray();
+			serializer.endMap();
+		}
+		serializer.endArray();
+		serializer.beginArray("interactionPermissionRequirements");
+		for (auto const& [pointId, point] : mInteractionPoints.entries())
+		{
+			if (point->mPermissionRequirement.none()) continue;
+			serializer.beginMap("");
+			serializer.writeUint64("interactionPoint", pointId.value);
+			serializer.beginArray("permissions");
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (point->mPermissionRequirement.test(bit)) serializer.writeUint64("", bit + 1);
+			serializer.endArray();
+			serializer.endMap();
+		}
+		serializer.endArray();
+
 		serializer.writeUint64("nextMarkerId", mNextMarkerId);
 		// The allocator's high-water mark travels with the groups it issued.
 		// The live {id, name} entries cannot express it between them: deleting
@@ -802,8 +841,9 @@ namespace core
 		// 15 renames vertical-position fields from Deck to Level, version 17 adds
 		// Marker properties, version 18 adds Interaction aversion, version 19
 		// adds Effort aversion, version 20 adds Risk aversion, version 21
-		// adds Route familiarity, and version 22 adds Route persistence.
-		if (version < 1 || version > 22)
+		// adds Route familiarity, version 22 adds Route persistence, and version 23
+		// adds Access permissions.
+		if (version < 1 || version > 23)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -878,9 +918,21 @@ namespace core
 		{
 			throw SerializationException(dimensionDiagnostic);
 		}
-		mLevelNames.clear();
+		// Construction-record decoding validates Layer indexes through mLayers.
+		// Expose the prospective size while parsing, but roll it back on every
+		// refusal so malformed authorization data cannot partially alter the World.
+		struct LayerResizeRollback
+		{
+			vector<shared_ptr<Layer>>& target;
+			vector<shared_ptr<Layer>> previous;
+			bool active{ true };
+			~LayerResizeRollback() { if (active) target = std::move(previous); }
+		} layerResizeRollback{ mLayers, mLayers };
+		mLayers.resize(layerCount);
+
+		vector<string> levelNames;
 		for (uint32_t level = 0; level < levelsHigh; ++level)
-			mLevelNames.push_back(format("Level {}", level));
+			levelNames.push_back(format("Level {}", level));
 		if (serializer.hasField("levelNames"))
 		{
 			serializer.beginArray("levelNames");
@@ -890,16 +942,15 @@ namespace core
 				if (index >= levelsHigh) throw SerializationException("Too many Level names");
 				auto name = serializer.readString("");
 				if (name.empty()) throw SerializationException("Level name cannot be empty");
-				mLevelNames[index++] = std::move(name);
+				levelNames[index++] = std::move(name);
 			}
 			serializer.endArray();
 			if (index != levelsHigh) throw SerializationException("Too few Level names");
 		}
-		mLayers.resize(layerCount);
-		mLayerNames.resize(layerCount);
+		vector<string> layerNames(layerCount);
 		for (uint32_t i = 0; i < layerCount; ++i)
 		{
-			mLayerNames[i] = defaultLayerName(i);
+			layerNames[i] = defaultLayerName(i);
 		}
 		if (serializer.hasField("layerNames"))
 		{
@@ -911,7 +962,7 @@ namespace core
 				{
 					throw SerializationException("layerNames array is longer than the layer count");
 				}
-				mLayerNames[index++] = serializer.readString("");
+				layerNames[index++] = serializer.readString("");
 			}
 			serializer.endArray();
 			if (index != layerCount)
@@ -1064,6 +1115,103 @@ namespace core
 				: highestAgentGroupId + 1;
 		}
 
+		array<unique_ptr<AccessPermission>, AccessPermission::Capacity> accessPermissions{};
+		if (version >= 23 && serializer.hasField("accessPermissions"))
+		{
+			set<string> names;
+			serializer.beginArray("accessPermissions");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				auto id = serializer.readUint64("id");
+				auto raw = serializer.readString("name");
+				serializer.endMap();
+				if (id == 0 || id > AccessPermission::Capacity)
+					throw SerializationException("Serialized Access permission ID is out of range");
+				if (accessPermissions[id - 1])
+					throw SerializationException("Serialized Access permission IDs must be unique");
+				auto name = AccessPermission::trimName(raw);
+				string reason;
+				if (name != raw || !AccessPermission::nameIsValid(name, &reason))
+					throw SerializationException("Serialized Access permission name is invalid: "
+						+ (name != raw ? string("it must be trimmed") : reason));
+				if (!names.insert(name).second)
+					throw SerializationException("Serialized Access permission names must be unique");
+				accessPermissions[id - 1] = AccessPermission::create(std::move(name));
+			}
+			serializer.endArray();
+		}
+
+		auto readPermissionBits = [&](char const* field)
+		{
+			bitset<256> bits;
+			serializer.beginArray(field);
+			while (serializer.nextArrayItem())
+			{
+				auto id = serializer.readUint64("");
+				if (id == 0 || id > AccessPermission::Capacity)
+					throw SerializationException("Serialized Access permission reference is out of range");
+				if (!accessPermissions[id - 1])
+					throw SerializationException("Serialized Access permission reference is dangling");
+				if (bits.test(id - 1))
+					throw SerializationException("Serialized Access permission references must be unique");
+				bits.set(id - 1);
+			}
+			serializer.endArray();
+			return bits;
+		};
+		map<AgentId, bitset<256>> serializedGrants;
+		if (version >= 23 && serializer.hasField("accessPermissionGrants"))
+		{
+			serializer.beginArray("accessPermissionGrants");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				AgentId agent{ serializer.readUint64("agent") };
+				if (!agent || serializedGrants.contains(agent))
+					throw SerializationException("Serialized Access permission grant owners must be nonzero and unique");
+				auto bits = readPermissionBits("permissions");
+				serializer.endMap();
+				serializedGrants.emplace(agent, bits);
+			}
+			serializer.endArray();
+		}
+		set<AgentId> serializedAgentIds;
+		serializer.beginArray("agents");
+		while (serializer.nextArrayItem())
+		{
+			serializer.beginMap("");
+			AgentId id{ serializer.readUint64("id") };
+			serializer.endMap();
+			if (!id || !serializedAgentIds.insert(id).second)
+				throw SerializationException("Serialized Agent IDs must be unique and nonzero");
+		}
+		serializer.endArray();
+		for (auto const& [agent, grants] : serializedGrants)
+		{
+			(void)grants;
+			if (!serializedAgentIds.contains(agent))
+				throw SerializationException(format(
+					"Serialized Access permission grants reference missing Agent {}", agent.value));
+		}
+
+		map<InteractionPointId, bitset<256>> serializedRequirements;
+		if (version >= 23 && serializer.hasField("interactionPermissionRequirements"))
+		{
+			serializer.beginArray("interactionPermissionRequirements");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				InteractionPointId point{ serializer.readUint64("interactionPoint") };
+				if (!point || serializedRequirements.contains(point))
+					throw SerializationException("Serialized Interaction point requirements must have unique nonzero owners");
+				auto bits = readPermissionBits("permissions");
+				serializer.endMap();
+				serializedRequirements.emplace(point, bits);
+			}
+			serializer.endArray();
+		}
+
 		// Replay once into a disposable World before touching this one. Besides
 		// ordinary topology validation, this proves that every removal's identity
 		// names the Marker in the referenced object slot. Legacy removals acquire
@@ -1089,6 +1237,15 @@ namespace core
 				candidate.applyConstructionRecord(record);
 			}
 			candidate.finishBuild();
+			for (auto const& [pointId, requirement] : serializedRequirements)
+			{
+				(void)requirement;
+				if (!candidate.mInteractionPoints.find(pointId)
+					|| !candidate.isInteractionPointPermissionEligible(pointId))
+					throw SerializationException(format(
+						"Serialized Access permission requirement has invalid or ineligible Interaction point {}",
+						pointId.value));
+			}
 		}
 		catch (SerializationException const&) { throw; }
 		catch (exception const& error)
@@ -1096,6 +1253,9 @@ namespace core
 			throw SerializationException(string("Invalid World construction: ") + error.what());
 		}
 
+		layerResizeRollback.active = false;
+		mLevelNames = std::move(levelNames);
+		mLayerNames = std::move(layerNames);
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;
@@ -1111,6 +1271,7 @@ namespace core
 		// it and must carry the authored groups across. A load starts from the
 		// file, so it clears them here before restoring what was read.
 		mAgentGroups = {};
+		mAccessPermissions = std::move(accessPermissions);
 		for (auto const& [id, group] : agentGroups)
 		{
 			if (!mAgentGroups.restore(id, AgentGroup::create(group)))
@@ -1146,6 +1307,13 @@ namespace core
 		}
 		mDeserializingConstruction = false;
 		mConstructionRecords = std::move(records);
+		for (auto const& [pointId, requirement] : serializedRequirements)
+		{
+			auto point = mInteractionPoints.find(pointId);
+			if (!point || !isInteractionPointPermissionEligible(pointId))
+				throw SerializationException(format("Serialized Access permission requirement has invalid or ineligible Interaction point {}", pointId.value));
+			point->mPermissionRequirement = requirement;
+		}
 
 		// Every Agent is read and judged before any of them is taken in, so a
 		// refusal in the read - an Agent assigned to an Agent group this file
@@ -1258,6 +1426,13 @@ namespace core
 		}
 		serializer.endArray();
 		serializer.endMap();
+		for (auto const& [agentId, grants] : serializedGrants)
+		{
+			auto found = find_if(pending.begin(), pending.end(), [&](auto const& entry) { return entry.id == agentId; });
+			if (found == pending.end())
+				throw SerializationException(format("Serialized Access permission grants name missing Agent {}", agentId.value));
+			found->agent->mDirectAccessGrants = grants;
+		}
 
 		// Nothing above touched the live world, so the takes-in below runs on
 		// input that has already been judged.
@@ -1469,6 +1644,13 @@ namespace core
 		// clearing here would silently drop the user's group definitions on a Layer
 		// deletion or a Room resize. The one path that must start from the file -
 		// deserializeImpl - clears them itself before restoring.
+		mPendingPermissionRequirements.clear();
+		if (preserveBehaviourRuntime)
+			for (auto const& [id, point] : mInteractionPoints.entries())
+				if (point->mPermissionRequirement.any())
+					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
+		else
+			mAccessPermissions = {};
 		mInteractionPoints = {};
 		mInteractionRequests = {};
 		mDeviceOperations = {};
@@ -1800,7 +1982,7 @@ namespace core
 			if (!sector) continue;
 			carried.push_back(CarriedAgent{ id, agent->getName(), agent->getFlags(),
 				sector->getIndex(), sector->getLayerIndex(), agent->getGlobalPosition(),
-				agent->getAgentGroupId(), agent->getAgentTagIds(),
+				agent->getAgentGroupId(), agent->mDirectAccessGrants, agent->getAgentTagIds(),
 				agent->getWalkSpeedModifierSample(), agent->getHeightModifierSample(),
 				agent->getStairSpeedModifierSample(), agent->getLadderSpeedModifierSample(),
 				agent->getIndividualLadderSpeedModifier(), agent->getBehaviourAssignment(), agent->isActive() });
@@ -1833,6 +2015,7 @@ namespace core
 			// World still owns the group: an Agent pointing at a group that is
 			// gone would be a dangling reference the save/load check refuses.
 			raw->setAgentGroupId(lookupAgentGroup(saved.agentGroup) ? saved.agentGroup : AgentGroupId{});
+			raw->setDirectAccessGrants(saved.directAccessGrants);
 			// A replay is internal preservation, not a new assignment. Keep exactly
 			// the stable IDs captured from this World; attachment validation
 			// guarantees they still belong to its registry.

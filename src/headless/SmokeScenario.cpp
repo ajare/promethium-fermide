@@ -85,6 +85,7 @@ void runAgentTagMobilityProfileSmokeChecks();
 void runMobilityProfileRoutingSmokeChecks();
 void runRestoredPathMobilitySmokeChecks();
 void runInteractionMobilitySmokeChecks();
+void runAccessPermissionSmokeChecks();
 void runInteractionPointGeometrySmokeChecks();
 void runDoorPreflightSmokeChecks();
 void runNonFiniteTimingSmokeChecks();
@@ -6341,6 +6342,7 @@ int main(int argc, char** argv)
 		runMobilityProfileRoutingSmokeChecks();
 		runRestoredPathMobilitySmokeChecks();
 		runInteractionMobilitySmokeChecks();
+		runAccessPermissionSmokeChecks();
 		runInteractionPointGeometrySmokeChecks();
 		runDoorPreflightSmokeChecks();
 		runNonFiniteTimingSmokeChecks();

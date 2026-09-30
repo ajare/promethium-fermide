@@ -936,7 +936,7 @@ namespace
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 22") != std::string::npos
+		require(yaml.find("version: 23") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -1002,7 +1002,7 @@ namespace
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 22", "version: 14");
+		replaceAll("version: 23", "version: 14");
 		replaceAll("levelsHigh", "decksHigh");
 		replaceAll("levelIndex", "deckIndex");
 		replaceAll("topLevelHeight", "topDeckHeight");
@@ -3632,7 +3632,7 @@ agents: []
 			("A Lift stop style override was refused: " + diagnostic).c_str());
 
 		auto const yaml = serialize(authored);
-		require(yaml.find("version: 22") != std::string::npos,
+		require(yaml.find("version: 23") != std::string::npos,
 			"A map with authored Door styles was not written at the current schema version");
 		require(yaml.find("version: 6") == std::string::npos,
 			"A map with authored Door styles still carries version 6");
@@ -3717,7 +3717,7 @@ agents: []
 			"A legacy Shuttle-owned Door");
 
 		// The current reader still refuses anything above its own ceiling.
-		auto const futureYaml = std::string("version: 23")
+		auto const futureYaml = std::string("version: 24")
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

@@ -307,7 +307,7 @@ void runAgentIndividualPropertySmokeChecks()
 		&& diagnostic.find("invalid Mobility use") != std::string::npos,
 		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 22") != std::string::npos
+	require(yaml.find("version: 23") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("ladderSpeedModifier") != std::string::npos

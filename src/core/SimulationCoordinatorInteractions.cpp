@@ -206,6 +206,22 @@ namespace core
 		{
 			return {};
 		}
+		auto const missing = mWorld.missingInteractionPermissions(*point, *actor);
+		if (!missing.empty())
+		{
+			auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(pointId, actorId)));
+			auto request = mWorld.mInteractionRequests.find(id);
+			request->mResult = InteractionResult::Rejected;
+			request->mMissingPermissions = missing;
+			SimulationEvent event;
+			event.sequence = mWorld.mNextEventSequence++;
+			event.tick = mWorld.mSimulationTick;
+			event.type = SimulationEventType::InteractionRequestAdded;
+			event.phase = mWorld.mCurrentPhase;
+			event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
+			mWorld.mEvents.push_back(std::move(event));
+			return id;
+		}
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
 			if (request->mActor == actorId && request->mResult == InteractionResult::Pending)
@@ -255,9 +271,26 @@ namespace core
 		// deactivated Agent may not start one (#118, #192), and a
 		// Buttons-forbidden Agent may not operate a control at all (#193).
 		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor)
+			|| !point->mSector
 			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 		{
 			return {};
+		}
+		auto const missing = mWorld.missingInteractionPermissions(*point, *actor);
+		if (!missing.empty())
+		{
+			auto id = mWorld.mInteractionRequests.add(unique_ptr<InteractionRequest>(new InteractionRequest(pointId, actorId)));
+			auto request = mWorld.mInteractionRequests.find(id);
+			request->mResult = InteractionResult::Rejected;
+			request->mMissingPermissions = missing;
+			SimulationEvent event;
+			event.sequence = mWorld.mNextEventSequence++;
+			event.tick = mWorld.mSimulationTick;
+			event.type = SimulationEventType::InteractionRequestAdded;
+			event.phase = mWorld.mCurrentPhase;
+			event.interactionRequest = makeInteractionRequestSnapshot(id, *request);
+			mWorld.mEvents.push_back(std::move(event));
+			return id;
 		}
 		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
 		{
