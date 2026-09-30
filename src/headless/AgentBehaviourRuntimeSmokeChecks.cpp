@@ -931,6 +931,65 @@ return {
 			"Bundled v2 workflows did not complete repeated trips");
 	}
 
+	void planningIgnoresBehaviourRandomConsumption()
+	{
+		TemporaryDirectory temporary;
+		auto package = temporary.path / "random-noise.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeText(package / "noise.lua", R"lua(
+return {
+  api_version = 2,
+  factory = function(configuration)
+    return {
+      on_start = function(context) context.set_timer("noise", 1) end,
+      on_timer = function(name, context)
+        for i = 1, configuration.draws do
+          context.random_integer(1, 1000)
+          context.random_number()
+        end
+        context.set_timer("noise", 1)
+      end
+    }
+  end
+}
+)lua");
+		auto behaviour = registry->addAgentBehaviour("Noise", "noise.lua", {
+			{ "draws", core::AgentBehaviourSchemaType::Integer }
+		});
+		registry->saveTo((package / "behaviours.yaml").string());
+		auto run = [&](int draws)
+		{
+			core::World world("Random isolation", 10, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+			world.addSectorMarker(room, 0, 8.5f, "Destination");
+			world.finishBuild();
+			auto planner = world.createAgent("Planner", room, 0, 1.5f);
+			auto noise = world.createAgent("Noise", room, 0, 2.5f);
+			world.pauseSimulation();
+			world.attachAgentBehaviourRegistry("random-noise.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(noise, behaviour,
+				registry->lookupAgentBehaviour(behaviour)->getRevision(), {{ "draws", int64_t(draws) }}),
+				"Could not assign random-noise behaviour");
+			require(world.resumeSimulation(), "Could not resume random isolation fixture");
+			std::vector<uint64_t> trace;
+			for (unsigned episode = 0; episode < 16; ++episode)
+			{
+				require(world.moveAgentToMarker(planner, world.getMarkerIds().front()).accepted(),
+					"Random isolation planning refused");
+				trace.push_back(world.lookupAgent(planner).entity->getRoutePlanningTotalTicks());
+				world.advanceTicks(5);
+				world.cancelAgentMovement(planner);
+				world.advanceTick();
+				world.consumeSimulationEvents();
+			}
+			require(world.getAgentBehaviourRuntimeDiagnostics().empty(), "Random-noise behaviour failed");
+			return trace;
+		};
+		require(run(0) == run(37), "Lua random consumption changed the planning stream");
+	}
+
 	void planningIntentReplacement()
 	{
 		TemporaryDirectory temporary;
@@ -2813,6 +2872,7 @@ void runAgentBehaviourRuntimeSmokeChecks()
 	manifestHelpersHavePrivatePerAgentGraphs();
 	bundledMovementWorkflows();
 	planningIntentReplacement();
+	planningIgnoresBehaviourRandomConsumption();
 	routeLossAndTopologyLifecycle(1);
 	routeLossAndTopologyLifecycle(2);
 	programmingErrorDisablesMovementOwnership();

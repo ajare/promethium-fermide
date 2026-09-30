@@ -1500,7 +1500,7 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;
 
-	auto const inQueue = !planning && agent->isInQueue();
+	auto const inQueue = agent->isInQueue();
 	if (!inQueue && !planning) return;
 
 	// Badge width follows the rendered Agent body, with screen-space limits that

@@ -38,6 +38,14 @@ namespace
 		return false;
 	}
 
+	ImVec2 textPosition(WorldDrawList const& list, std::string const& value)
+	{
+		for (auto const& command : list.commands())
+			if (auto text = std::get_if<WorldDrawList::Text>(&command);
+				text && text->value == value) return text->position;
+		throw std::runtime_error("Missing badge text: " + value);
+	}
+
 	bool hasSolidColour(WorldDrawList const& list, ImU32 colour)
 	{
 		for (auto const& command : list.commands())
@@ -145,18 +153,45 @@ void runAgentPathRenderSmokeChecks()
 	auto const plannerId = world.createAgent("Planner", corridor, 0, 3.25f);
 	auto* planner = world.lookupAgent(plannerId).entity;
 	require(world.moveAgentToMarker(plannerId, world.getMarkerIds()[1]).accepted(), "Planning refused");
-	for (int frame = 0; frame < 3; ++frame)
+	auto const planningPosition = planner->getGlobalPosition();
+	for (uint64_t frame = 0; frame < planner->getRoutePlanningTotalTicks(); ++frame)
 	{
 		WorldDrawList planning({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 		renderAgent(planner, &planning);
 		require(hasText(planning, "?") && !hasText(planning, "!")
 			&& hasSolidColour(planning, IM_COL32(96, 96, 96, 255)),
 			"Route planning must render only a neutral grey question badge on every frame");
+		gUISettings.renderAgentDebug = false;
+		WorldDrawList hidden({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
+		renderAgent(planner, &hidden);
+		require(!hasText(hidden, "?"), "Planning badge ignored Agent Debug gating");
+		gUISettings.renderAgentDebug = true;
+		world.advanceTick();
+		require(planner->getGlobalPosition() == planningPosition, "Badge lifetime fixture moved during planning");
 	}
-	world.advanceTicks(planner->getRoutePlanningRemainingTicks());
 	WorldDrawList expired({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(planner, &expired);
 	require(!hasText(expired, "?"), "Planning badge survived expiry");
+
+	// Planning forfeits queues, so the badge stack must collapse immediately
+	// from the queue badge to one planning badge at the same body-relative slot.
+	planner->pausePathing();
+	require(world.requestInteraction(point, plannerId).value != 0 && planner->isInQueue(),
+		"Queue-to-planning fixture did not queue");
+	WorldDrawList queued({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
+	renderAgent(planner, &queued);
+	world.replanAgentAfterAuthorizationRefusal(plannerId);
+	WorldDrawList thinking({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
+	renderAgent(planner, &thinking);
+	require(hasText(queued, "!") && !hasText(thinking, "!") && hasText(thinking, "?")
+		&& textPosition(thinking, "?").y == textPosition(queued, "!").y,
+		"Queue/planning badge stack retained a stale badge or gap");
+	require(world.cancelAgentMovement(plannerId).accepted(), "Planning cancellation refused");
+	world.advanceTick();
+	require(planner->getState() == core::Agent::State::Idle, "Cancellation did not exit planning");
+	WorldDrawList cancelled({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
+	renderAgent(planner, &cancelled);
+	require(!hasText(cancelled, "?"), "Planning badge survived cancellation state exit");
 
 	gUISettings.renderAgentDebug = false;
 	WorldDrawList hiddenBadges({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });

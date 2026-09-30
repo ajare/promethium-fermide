@@ -102,6 +102,18 @@ _Avoid_: Route observation, topology knowledge
 An Agent property from 0 through 1 that sets the minimum proportional perceived-cost improvement required before voluntarily replacing a still-valid Path. Its default is 0.15; hard Path invalidation bypasses it.
 _Avoid_: Route lock, forbidden traversal
 
+**Route planning**:
+A transient movement state in which an Agent remains stationary and retains its destination intent for a sampled interval of simulation time, then calculates and selects a Path at interval completion. Pause and deactivation freeze the interval; a Route-planning Agent is otherwise active, and successful active movement resumes on the following tick.
+_Avoid_: Background planning, completed replan
+
+**Minimum route planning time**:
+An Agent property from 0.1 through 10 seconds that sets the inclusive lower bound of each Route planning interval, with a default of 1 second. Each episode samples uniformly between the effective bounds rounded upward to whole simulation ticks.
+_Avoid_: Route calculation time
+
+**Maximum route planning time**:
+An Agent property from 0.1 through 10 seconds that sets the inclusive upper bound of each Route planning interval, with a default of 3 seconds. An effective maximum below the effective minimum is treated as equal to that minimum without changing either authored property.
+_Avoid_: Route calculation timeout
+
 **Marker**:
 A named, World-owned authored point in a Location with stable identity and a set of Marker properties. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename. Agent behaviours cannot choose arbitrary Vertices as destinations.
 _Avoid_: Vertex, destination vertex
@@ -291,11 +303,11 @@ A named, World-owned authorization that may be required to operate a protected I
 _Avoid_: Traversal permit, which authorizes one specific transition at runtime
 
 **Permission requirement**:
-The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation. Adding a requirement that an Agent on an affected Path does not satisfy immediately replans that Path; if no Path remains, it is cleared.
+The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation. Adding a requirement that an Agent on an affected Path does not satisfy requires Route planning; failure to find a replacement Path produces Route loss.
 _Avoid_: Permission set, which grants Access permissions to an Agent
 
 **Permission grant**:
-An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes made through the Agent Selection panel or an Agent behaviour affect its current grants until the simulation is reset. Losing an effective grant immediately replans any affected Path and clears it if no Path remains; gaining one uses ordinary Route persistence.
+An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes made through the Agent Selection panel or an Agent behaviour affect its current grants until the simulation is reset. Losing an effective grant requires Route planning for an affected Path; gaining one uses voluntary Route planning and ordinary Route persistence.
 _Avoid_: Traversal permit, Permission requirement
 
 **Permission set**:

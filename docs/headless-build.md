@@ -405,8 +405,7 @@ Each entered episode samples an inclusive whole-tick duration from effective
 Minimum/Maximum route planning time using an independent World-seed/Agent-ID
 counter stream. NoOp commands do not consume episodes. Cleanup calculates the
 Path synchronously after the last complete planning tick; physical movement
-starts on the next tick. Pause and deactivation freeze the episode. Lua retains
-its semantic `moving` classification while runtime snapshots expose the distinct
+starts on the next tick. Pause and deactivation freeze the episode. API v1 reports `idle` during planning and v2 reports `route_planning`, while runtime snapshots expose the distinct
 `RoutePlanning` state, destination Marker, and total/remaining ticks. The Agent
 Selection panel converts those ticks to seconds. Editor Path authoring remains immediate. Voluntary route reconsideration now
 uses the timed planning described under #256 below.
@@ -457,6 +456,37 @@ expiry and queue forfeiture. Existing transport-cycle and Ladder batch-fairness
 fixtures disable voluntary reconsideration within their observation windows:
 those assertions specifically require continuous queue membership. Default-policy
 queue traces still run deterministically, though long-wait trace digests change.
+
+## Route planning integration (#258)
+
+The finalized workflow and compatibility contract are documented in
+[Route planning](route-planning.md). `route-planning` additionally checks mixed
+initial/voluntary/mandatory episodes over repeated Reset, property random-stream
+noise, pause/resume and deactivation/reactivation; active Agent group membership
+and `pf_agents_active`; and byte-identical World/clipboard output while planning,
+including privately retained candidates. `agent-behaviours` compares planning
+samples with and without unrelated Lua random draws.
+
+The same `route-planning` target exercises the actual editor Agent renderer and
+Selection panel headlessly: no OS window, graphics device, dialogs, or human input.
+Command-stream assertions cover every planning tick, Agent Debug toggling, success,
+failure, cancellation state exit, and the queue-to-planning badge stack transition.
+Entering planning releases queues, so normal runtime states have one badge rather
+than simultaneous queue/planning badges; the renderer independently stacks any
+reported badges without a wall-clock cache. UI checks also cover effective-property
+normalization in `route-planning-time-properties`. `render-checks` covers the wider
+World canvas command stream. These automated interactive-surface checks are not a
+claim of manual visual verification in a running editor.
+
+Run both Debug and Release full builds and `ctest --output-on-failure` as described
+below. The complete suite includes old/new document, tag registry, clipboard,
+mixed-version behaviour reload, metrics, coordination and rendering regressions.
+No test needs an interactive confirmation or message box.
+
+Integration validation on Windows/MSVC: complete Debug and Release builds passed,
+including the editor; all 67 CTest tests passed in each configuration (approximately
+479 seconds Debug, 42 seconds Release). `git diff --check` passed. No manual editor
+session was used.
 
 ## Prerequisites
 

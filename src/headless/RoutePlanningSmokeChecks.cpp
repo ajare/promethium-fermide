@@ -2,7 +2,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "AgentClipboard.h"
 #include "PermissionsPanel.h"
+#include "core/SimulationMetricsCollector.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "core/Agent.h"
@@ -49,6 +51,21 @@ namespace
 			require(world->resumeSimulation(), "Resume failed");
 		}
 	};
+
+	std::string document(core::World& world)
+	{
+		auto writer = core::YamlSerializer::toString();
+		core::SerializationWorkData work;
+		work.markSerializedUnmodified = false;
+		world.serialize(*writer, work);
+		writer->serialize();
+		return writer->getSerializedString();
+	}
+
+	std::string clipboard(core::World& world, core::AgentId id)
+	{
+		return makeAgentClipboardText(makeAgentClipboardPayload(world, id, "Copy"), false);
+	}
 
 	void mandatoryTopologyPlanning(bool removeDestination)
 	{
@@ -287,6 +304,65 @@ namespace
 		require(f.agent()->getRoutePlanningTotalTicks() == first.front(), "Reset during episode did not reset stream");
 	}
 
+	void mixedEpisodesAndObservation()
+	{
+		Fixture f;
+		f.world->pauseSimulation();
+		auto group = f.world->addAgentGroup("Planners");
+		require(f.world->setAgentGroup(f.id, group), "Group assignment refused");
+		require(f.world->resumeSimulation(), "Resume refused");
+		core::SimulationMetricsCollector metrics(*f.world);
+		std::vector<uint64_t> baseline;
+		for (unsigned run = 0; run < 3; ++run)
+		{
+			if (run)
+			{
+				f.world->resetSimulation();
+				require(f.world->resumeSimulation(), "Reset resume refused");
+			}
+			std::vector<uint64_t> trace;
+			for (unsigned episode = 0; episode < 12; ++episode)
+			{
+				// Interleave initial, voluntary and mandatory episodes without moving.
+				if (episode % 3 == 0)
+				{
+					f.world->cancelAgentMovement(f.id);
+					require(f.world->moveAgentToMarker(f.id, f.destination).accepted(), "Initial intent refused");
+				}
+				else if (episode % 3 == 1) f.world->beginVoluntaryRoutePlanning(f.id);
+				else f.world->replanAgentAfterAuthorizationRefusal(f.id);
+				auto position = f.agent()->getGlobalPosition();
+				auto total = f.agent()->getRoutePlanningTotalTicks();
+				require(total >= 60 && total <= 180, "Mixed episode omitted planning");
+				trace.push_back(total);
+				f.world->advanceTick();
+				if (run)
+				{
+					// Vary unrelated property randomness and freeze/resume between ticks.
+					for (unsigned draw = 0; draw < episode + run; ++draw)
+						(void)core::sampleAgentModifier({ 0.5f, 1.5f });
+					f.world->pauseSimulation();
+					require(!f.world->advanceTick(), "Paused planning advanced");
+					require(f.world->setAgentActive(f.id, false) && f.world->resumeSimulation(), "Deactivate failed");
+					f.world->advanceTicks(5 + run);
+					require(f.agent()->getRoutePlanningRemainingTicks() == total - 1, "Frozen episode advanced");
+					f.world->pauseSimulation();
+					require(f.world->setAgentActive(f.id, true) && f.world->resumeSimulation(), "Reactivate failed");
+				}
+				metrics.refresh();
+				require(f.world->getAgentGroupMemberCount(group) == 1 && f.world->isAgentGroupActive(group)
+					&& metrics.snapshot().families.at("pf_agents_active").samples.at({}).value == 1,
+					"Stationary planning Agent was not counted as active");
+				f.world->advanceTicks(total - 1);
+				require(f.agent()->getPath() && f.agent()->getGlobalPosition() == position,
+					"Mixed episode failed or moved before completion");
+				f.world->consumeSimulationEvents();
+			}
+			if (!run) baseline = trace;
+			else require(trace == baseline, "Reset, unrelated draws or freezing changed mixed planning stream");
+		}
+	}
+
 	void inclusiveEndpointsAndPersistence()
 	{
 		Fixture f;
@@ -303,6 +379,7 @@ namespace
 			return writer->getSerializedString();
 		};
 		auto const baseline = serialize();
+		auto const baselineClipboard = clipboard(*f.world, f.id);
 		std::set<uint64_t> sampled;
 		for (unsigned i = 0; i < 64; ++i)
 		{
@@ -310,6 +387,8 @@ namespace
 			sampled.insert(f.agent()->getRoutePlanningTotalTicks());
 			f.world->advanceTick();
 			require(serialize() == baseline, "Planning intent, timer or stream entered persistence");
+			require(clipboard(*f.world, f.id) == baselineClipboard,
+				"Planning intent, timer or stream entered clipboard");
 			f.world->cancelAgentMovement(f.id); f.world->advanceTick();
 			f.world->consumeSimulationEvents();
 		}
@@ -549,12 +628,17 @@ namespace
 		require(bool(retained), "Initial Path missing");
 		auto position = agent->getGlobalPosition();
 		auto decisions = world.getGraph()->getRouteWorkCounts().decisions;
+		// Runtime Path retention must not change the authored document or clipboard.
+		auto const authored = document(world);
+		auto const copied = clipboard(world, id);
 		require(world.setAgentRuntimeAccessPermissionGrant(id, key, true), "Gain refused");
 		require(!agent->getPath() && agent->getState() == core::Agent::State::RoutePlanning
 			&& world.getGraph()->getRouteWorkCounts().decisions == decisions,
 			"Voluntary planning exposed or calculated a Path at entry");
 		auto total = agent->getRoutePlanningRemainingTicks();
 		world.advanceTick();
+		require(document(world) == authored && clipboard(world, id) == copied,
+			"Private candidate or planning runtime state entered document/clipboard");
 		if (invalidate)
 			require(world.setAgentRuntimeAccessPermissionGrant(id, oldKey, false), "Candidate invalidation refused");
 		// Repeated same-destination gains must neither resample nor postpone expiry.
@@ -669,6 +753,7 @@ void runRoutePlanningSmokeChecks()
 	traversalInterruption(true, false, true);
 	boundariesAndPresentation();
 	streamsAndReset();
+	mixedEpisodesAndObservation();
 	inclusiveEndpointsAndPersistence();
 	delayedOutcomes();
 	editorException();

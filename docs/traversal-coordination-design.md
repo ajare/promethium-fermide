@@ -174,9 +174,9 @@ Agents will approach resources, queue at reserved positions, operate required co
 - Edge costs include base traversal time and stable estimates for preparation, vehicle position, current schedule, and queue length.
 - Temporarily unavailable resources remain valid route choices when service is expected.
 - Hard rejection, disabled infrastructure, task cancellation, or repeated local-goal failure triggers replanning.
-- After a minimum wait, an agent periodically compares the current estimated arrival time with alternatives. It replans only when an alternative is better by a configurable margin.
-- Agents do not replan while holding an active admission or crossing permit.
-- A compatible replan at the same immediate resource updates the existing request and retains queue priority. A change in origin, direction, or eligibility cancels the old request and creates a fresh queue entry.
+- After a minimum wait, an Agent periodically enters voluntary Route planning. At expiry it compares current perceived costs and applies Route persistence to the privately retained Path and an alternative.
+- Committed traversal finishes before Route planning starts; uncommitted ownership is released at entry.
+- Runtime Route planning forfeits queue priority even if it resumes the same Path. Compatible immediate editor Path replacement remains a separate authoring operation; it is not the runtime planning workflow. See [Route planning](route-planning.md).
 - Required interaction points are not inserted as ordinary vertices into the main destination path. A traversal task creates a temporary route to the assigned control when preparation is required.
 - An edge is unavailable when none of its applicable controls can be reached by an eligible operator.
 
@@ -208,7 +208,7 @@ Agents will approach resources, queue at reserved positions, operate required co
 - UI toggles may remain but must resolve to an explicit desired-state command.
 - Device commands return typed, queryable, cancellable operation handles instead of accepting arbitrary completion callbacks.
 - Operation states include pending, running, succeeded, failed, and cancelled. Request outcomes distinguish temporary busy or blocked conditions from permanent rejection and execution failure.
-- Temporary outcomes wait or retry with deterministic backoff. Execution failures have a bounded retry count. Permanent rejection triggers immediate cleanup and replanning.
+- Temporary outcomes wait or retry with deterministic backoff. Execution failures have a bounded retry count. Permanent rejection triggers immediate cleanup and timed Route planning.
 - One interaction point may issue several commands. Bindings declare each command required or best-effort. Interaction succeeds only when every required command succeeds.
 - Conflicting commands that violate an active safety requirement are rejected immediately rather than queued for later execution.
 
