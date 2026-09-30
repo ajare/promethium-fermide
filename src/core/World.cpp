@@ -10504,19 +10504,7 @@ namespace core
 
 	void World::replanAgentAfterAuthorizationRefusal(AgentId id)
 	{
-		auto agent = mAgents.find(id);
-		if (!agent || !agent->mPath.path || agent->mPath.path->nodes.empty()) return;
-		auto destination = agent->mPath.path->nodes.back().targetVertex;
-		agent->cancelTraversal();
-		auto alternative = mGraph->calculatePath(agent, destination);
-		if (alternative && !alternative->nodes.empty())
-			agent->assignPath(std::move(alternative), true, false);
-		else
-		{
-			agent->clearRuntimePath();
-			auto goal = mMovementGoals.find(id);
-			if (goal != mMovementGoals.end()) goal->second.routeLossReason = RouteLossReason::Unreachable;
-		}
+		mSimulationCoordinator.replanAgentAfterAuthorizationRefusal(id);
 	}
 
 	void World::replanAgentsAffectedByControlRequirement(TraversalResourceId resource,

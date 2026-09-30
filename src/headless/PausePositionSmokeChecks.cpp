@@ -74,6 +74,7 @@ namespace
 		require(agent->getGlobalPosition() == beforePause,
 			"Pausing moved an Agent back to the start of the stairs");
 		require(world->resumeSimulation(), "Paused stair traversal could not resume");
+		world->advanceTicks(agent->getRoutePlanningRemainingTicks());
 		auto previousDistance = distanceBeforeResume;
 		bool continued = false;
 		for (unsigned tick = 0; tick < 30; ++tick)
@@ -150,6 +151,7 @@ namespace
 			require(agent->getGlobalPosition() == position, "Paused Agent moved on update");
 			require(world.resumeSimulation(), "Walking Agent could not resume");
 			require(agent->getGlobalPosition() == position, "Resume moved the Agent backwards");
+			world.advanceTicks(agent->getRoutePlanningRemainingTicks());
 			require(world.advanceTicks(30), "Resumed World refused ticks");
 			require(agent->getGlobalPosition().x > position.x,
 				"Resumed Agent walked back toward its old source Marker");

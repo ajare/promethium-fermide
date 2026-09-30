@@ -1941,7 +1941,13 @@ namespace core
 				resolveAgentBehaviourRegistry(behaviourRegistry);
 		}
 		if (wasModified) markModified();
-		if (wasPaused) pauseSimulation();
+		// Restored authored Paths are immediate, not mandatory runtime replans.
+		// Reconstruction has no live traversal ownership to tear down.
+		if (wasPaused)
+		{
+			mSimulationPaused = true;
+			mSimulationCoordinator.publishTopologyEvent(SimulationEventType::SimulationPaused);
+		}
 	}
 
 	void World::markSaved()
@@ -2422,7 +2428,11 @@ namespace core
 				agent->getAgentTagIds(),
 				agent->getWalkSpeedModifierSample(), agent->getHeightModifierSample(),
 				agent->getStairSpeedModifierSample(), agent->getLadderSpeedModifierSample(),
-				agent->getIndividualLadderSpeedModifier(), agent->getBehaviourAssignment(), agent->isActive() });
+				agent->getIndividualLadderSpeedModifier(), agent->getBehaviourAssignment(), agent->isActive(),
+				agent->mRoutePlanningSequence, agent->mRoutePlanningTotalTicks,
+				agent->mRoutePlanningRemainingTicks,
+				agent->mIndividualMinimumRoutePlanningTime, agent->mIndividualMaximumRoutePlanningTime,
+				agent->mMinimumRoutePlanningTimeSample, agent->mMaximumRoutePlanningTimeSample });
 		}
 		return carried;
 	}
@@ -2467,6 +2477,15 @@ namespace core
 			if (saved.ladderSpeedModifierSample)
 				raw->setLadderSpeedModifierSample(*saved.ladderSpeedModifierSample);
 			raw->setIndividualLadderSpeedModifier(saved.individualLadderSpeedModifier);
+			// Structural replay is not Reset: keep the pending episode and its stream.
+			raw->mRoutePlanningSequence = saved.routePlanningSequence;
+			raw->mRoutePlanningTotalTicks = saved.routePlanningTotalTicks;
+			raw->mRoutePlanningRemainingTicks = saved.routePlanningRemainingTicks;
+			if (saved.routePlanningRemainingTicks) raw->mState = Agent::State::RoutePlanning;
+			raw->mIndividualMinimumRoutePlanningTime = saved.individualMinimumRoutePlanningTime;
+			raw->mIndividualMaximumRoutePlanningTime = saved.individualMaximumRoutePlanningTime;
+			raw->mMinimumRoutePlanningTimeSample = saved.minimumRoutePlanningTimeSample;
+			raw->mMaximumRoutePlanningTimeSample = saved.maximumRoutePlanningTimeSample;
 			if (saved.behaviourAssignment)
 				raw->mBehaviourAssignment = *saved.behaviourAssignment;
 			_getSector(sector->getIndex())->mAgents.insert(raw);

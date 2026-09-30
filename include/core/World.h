@@ -432,8 +432,10 @@ namespace core
 		// replays it onto the rebuilt graph.
 		struct TopologyPathIntent
 		{
+			MarkerId destinationMarker{};
 			SectorId destinationSector;
 			Vector2 destinationPosition;
+			Vector2 destinationLocalPosition;
 			bool wasPathing{ false };
 			// A continuous stair crossing can resume from its physical pause position
 			// instead of walking back to the edge's source Vertex.
@@ -519,6 +521,9 @@ namespace core
 			RouteLossReason routeLossReason{ RouteLossReason::None };
 			bool behaviourOwned{ false };
 			bool planningDeferred{ false };
+			bool startPathing{ true };
+			RouteLossReason planningFailureReason{ RouteLossReason::Unreachable };
+			std::optional<TopologyPathIntent> fallbackIntent;
 		};
 		std::map<AgentId, MovementGoal> mMovementGoals;
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
@@ -978,6 +983,13 @@ namespace core
 			std::optional<float> individualLadderSpeedModifier;
 			std::optional<AgentBehaviourAssignment> behaviourAssignment;
 			bool active{ true };
+			uint64_t routePlanningSequence{ 0 };
+			uint64_t routePlanningTotalTicks{ 0 };
+			uint64_t routePlanningRemainingTicks{ 0 };
+			std::optional<float> individualMinimumRoutePlanningTime;
+			std::optional<float> individualMaximumRoutePlanningTime;
+			std::optional<AgentPropertySample> minimumRoutePlanningTimeSample;
+			std::optional<AgentPropertySample> maximumRoutePlanningTimeSample;
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried

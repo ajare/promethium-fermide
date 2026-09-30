@@ -72,7 +72,7 @@ Agents can be created with `World::createAgent()` and resolved with `lookupAgent
 
 The graphical application continues to call `World::update(elapsedSeconds)`. That method accumulates render-frame time and advances only complete fixed ticks, so frame rate no longer determines simulation progress or operation completion.
 
-Runtime structural changes use `pauseSimulation()`, the existing construction/configuration APIs, `rebuildTraversalTopology()`, and `resumeSimulation()`. Pausing freezes tick advancement, cancels active edge transactions at a safe source boundary, releases their queues, positions, permits, leases, and admission reservations, and retains destination intent. Graph construction and traversal-resource validation happen against a candidate graph; only a successful candidate replaces the active graph. A failed candidate leaves the simulation paused, keeps the previous graph installed, and exposes its diagnostic through the snapshot and `getTopologyDiagnostic()`. Successful rebuilds replan retained destinations against the replacement graph. Structural APIs reject edits outside this paused protocol after the initial build.
+Runtime structural changes use `pauseSimulation()`, the existing construction/configuration APIs, `rebuildTraversalTopology()`, and `resumeSimulation()`. Pausing freezes tick advancement, cancels active edge transactions at a safe source boundary, releases their queues, positions, permits, leases, and admission reservations, and retains destination intent. Graph construction and traversal-resource validation happen against a candidate graph; only a successful candidate replaces the active graph. A failed candidate leaves the simulation paused, keeps the previous graph installed, and exposes its diagnostic through the snapshot and `getTopologyDiagnostic()`. Successful rebuilds retain destinations for timed Route planning against the replacement graph; an episode already in progress keeps its total and remaining ticks. Structural APIs reject edits outside this paused protocol after the initial build.
 
 ## Follow-the-leader queues (#172)
 
@@ -409,7 +409,7 @@ starts on the next tick. Pause and deactivation freeze the episode. Lua retains
 its semantic `moving` classification while runtime snapshots expose the distinct
 `RoutePlanning` state, destination Marker, and total/remaining ticks. The Agent
 Selection panel converts those ticks to seconds. Editor Path authoring and
-existing replanning remain immediate; neither has a wall-clock result badge.
+voluntary route reconsideration remain immediate; neither has a wall-clock result badge.
 
 ## Interruptible Route planning (#254)
 
@@ -421,6 +421,24 @@ arrival at the replacement Marker publishes `destination_reached` without a
 planning episode. Uncommitted traversal ownership is released before planning.
 The headless smoke suite exercises the Lua `superseded` status and cancellation
 reasons through real behaviour callbacks as well as ordinary World commands.
+
+## Mandatory automatic Route planning (#255)
+
+Topology restoration and authorization loss/refusal enter timed Route planning
+rather than calculating a replacement Path immediately. Committed movement
+finishes at a safe boundary first; stale requests, permits, queue claims,
+reservations and interaction ownership are released before planning. Rebuilding
+again preserves the sampled episode and destination intent. At expiry, Marker
+destinations resolve by identity, and non-Marker destinations resolve from the
+retained Sector and local position against the current graph.
+
+The `route-planning` and headless smoke checks cover repeated rebuilds, delayed
+Marker removal and disconnected-route failure, assigned-idle fallback restoration,
+Door queue/crossing cleanup, authorization changes, exactly-once Route loss, and
+next-tick movement. Successful same-destination replanning publishes no movement
+outcome. Failure clears intent and reports the existing Destination removed,
+Topology changed, or Unreachable reason. Authored document Path restoration stays
+immediate; pending runtime episodes are not serialized.
 
 ## Prerequisites
 

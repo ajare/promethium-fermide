@@ -101,7 +101,8 @@ void runAgentPathRenderSmokeChecks()
 	world.replanAgentAfterAuthorizationRefusal(agentId);
 	WorldDrawList greyReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &greyReplan);
-	require(!hasText(greyReplan, "?"), "Immediate replan rendered a planning badge");
+	require(hasText(greyReplan, "?"), "Mandatory replan omitted its planning badge");
+	world.advanceTicks(agent->getRoutePlanningRemainingTicks());
 
 	WorldDrawList successfulReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &successfulReplan);
@@ -133,6 +134,8 @@ void runAgentPathRenderSmokeChecks()
 	world.replanAgentAfterAuthorizationRefusal(agentId);
 	WorldDrawList failedGrey({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &failedGrey);
+	require(hasText(failedGrey, "?"), "Failed replan revealed its result before expiry");
+	world.advanceTicks(agent->getRoutePlanningRemainingTicks());
 	WorldDrawList failedReplan({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });
 	renderAgent(agent, &failedReplan);
 	require(!hasText(failedReplan, "?")

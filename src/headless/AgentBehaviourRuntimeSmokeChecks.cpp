@@ -987,6 +987,8 @@ return {
 			require(world.resumeSimulation(), "Could not start topology lifecycle fixture");
 			world.consumeSimulationEvents();
 			world.advanceTicks(5);
+			// Invalidate an installed Path, not the behaviour's initial planning episode.
+			world.advanceTicks(world.lookupAgent(id).entity->getRoutePlanningRemainingTicks());
 			world.consumeSimulationEvents();
 			world.pauseSimulation();
 			if (disconnect)

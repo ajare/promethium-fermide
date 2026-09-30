@@ -394,6 +394,34 @@ namespace core
 				|| agent.mState == Agent::State::AwaitingTraversalCommit);
 	}
 
+	void SimulationCoordinator::replanAgentAfterAuthorizationRefusal(AgentId id)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		auto agent = mWorld.mAgents.find(id);
+		if (!agent || !agent->mPath.path || agent->mPath.path->nodes.empty()) return;
+		auto& goal = mWorld.mMovementGoals[id];
+		if (goal.cancelling || goal.planningDeferred) return;
+		auto destination = agent->mPath.path->nodes.back().targetVertex;
+		if (!destination || !destination->getSector()) return;
+		goal.position = destination->getPosition();
+		goal.sector = SectorId{ (uint64_t)destination->getSector()->getIndex() + 1 };
+		goal.startPathing = agent->mState != Agent::State::Idle;
+		goal.planningFailureReason = RouteLossReason::Unreachable;
+		if (!goal.marker)
+			for (uint32_t i = 0; i < destination->getSector()->getNumObjects(); ++i)
+				if (auto object = dynamic_pointer_cast<MarkerSectorObject>(destination->getSector()->getObject(i));
+					object && mWorld.mGraph->getVertexForObject(object) == destination)
+					goal.marker = object->getMarker()->getId();
+		if (!goal.marker)
+		{
+			goal.fallbackIntent.emplace();
+			goal.fallbackIntent->destinationSector = SectorId{ (uint64_t)destination->getSector()->getIndex() + 1 };
+			goal.fallbackIntent->destinationLocalPosition = destination->getPosition() - destination->getSector()->getPosition();
+		}
+		if (hasCommittedMovement(*agent)) goal.planningDeferred = true;
+		else beginRoutePlanning(*agent);
+	}
+
 	void SimulationCoordinator::beginRoutePlanning(Agent& valueAgent)
 	{
 		auto* agent = &valueAgent;
@@ -401,6 +429,13 @@ namespace core
 		agent->clearRuntimePath();
 		releaseTraversalOwnership(id);
 		mWorld.mPausedPathIntents.erase(id);
+		vector<InteractionRequestId> interactions;
+		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
+			if (request->getActor() == id && request->getResult() == InteractionResult::Pending)
+				interactions.push_back(requestId);
+		for (auto requestId : interactions) cancelInteraction(requestId);
+		for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+			if (operation->getRequesters().contains(id)) cancelDeviceOperation(operationId, id);
 		auto const minimum = secondsToTicks(agent->getEffectiveMinimumRoutePlanningTime().value, mWorld.getFixedTimestep());
 		auto const maximum = secondsToTicks(agent->getEffectiveMaximumRoutePlanningTime().value, mWorld.getFixedTimestep());
 		// Episode-local SplitMix64 stream, independent of Lua and Escalators.
@@ -489,13 +524,34 @@ namespace core
 			}
 			if (agent->mState != Agent::State::RoutePlanning) continue;
 			if (--agent->mRoutePlanningRemainingTicks != 0) continue;
-			agent->mState = Agent::State::Idle;
+			agent->clearRuntimePath();
 			shared_ptr<const Vertex> target;
 			for (auto const& sector : mWorld.mSectors)
 				for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
 					if (auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
 						object && object->getMarker()->getId() == goal.marker)
 						target = mWorld.mGraph->getVertexForObject(object);
+			if (!goal.marker && goal.fallbackIntent)
+			{
+				auto const& intent = *goal.fallbackIntent;
+				if (intent.destinationSector && intent.destinationSector.value <= mWorld.mSectors.size())
+				{
+					auto sector = mWorld.mSectors[(size_t)intent.destinationSector.value - 1];
+					if (sector)
+					{
+						try
+						{
+							target = mWorld.mGraph->getClosestVertexInSector(sector.get(),
+								sector->getPosition() + intent.destinationLocalPosition);
+						}
+						catch (GraphException const&)
+						{
+							// A retained Sector can lose all graph vertices during editing.
+							// Resolve that loss only now, at the episode's expiry.
+						}
+					}
+				}
+			}
 			if (target)
 			{
 				goal.position = target->getPosition();
@@ -504,8 +560,27 @@ namespace core
 			auto path = target ? mWorld.mGraph->calculatePath(agent, target) : nullptr;
 			if (target && agent->getSector() == target->getSector().get()
 				&& agent->getGlobalPosition() == target->getPosition()) continue;
-			if (path && !path->nodes.empty()) agent->assignPath(std::move(path), true, false);
-			else goal.routeLossReason = RouteLossReason::Unreachable;
+			if (path && !path->nodes.empty())
+			{
+				agent->assignPath(std::move(path), goal.startPathing, false);
+				if (goal.startPathing && goal.fallbackIntent && goal.fallbackIntent->resumeContinuousTraversal)
+				{
+					auto const& intent = *goal.fallbackIntent;
+					for (uint32_t node = 1; node < agent->mPath.path->nodes.size(); ++node)
+					{
+						auto const& edge = agent->mPath.path->nodes[node].edge;
+						auto const& targetVertex = agent->mPath.path->nodes[node].targetVertex;
+						if (!edge || !targetVertex || edge->getType() != intent.traversalEdgeType
+							|| targetVertex->getPosition().distanceTo(intent.traversalDestinationPosition) > 0.001f) continue;
+						auto source = edge->getOtherVertex(targetVertex);
+						if (!source || source->getPosition().distanceTo(intent.traversalSourcePosition) > 0.001f) continue;
+						agent->mPath.targetNode = node - 1;
+						agent->mState = Agent::State::WaitingForTraversal;
+						break;
+					}
+				}
+			}
+			else goal.routeLossReason = goal.planningFailureReason;
 		}
 	}
 
@@ -553,12 +628,12 @@ namespace core
 			event.destinationMarker = goal.marker;
 			event.type = goal.cancelling ? SimulationEventType::MovementCancelled
 				: goal.routeLossReason == RouteLossReason::None
-					&& mWorld.lookupMarker(goal.marker) && agent->getSector()
+					&& (!goal.marker || mWorld.lookupMarker(goal.marker)) && agent->getSector()
 					&& SectorId{ (uint64_t)agent->getSector()->getIndex() + 1 } == goal.sector
 					&& agent->getGlobalPosition().distanceTo(goal.position) < 0.001f
 					? SimulationEventType::DestinationReached : SimulationEventType::RouteLost;
 			if (event.type == SimulationEventType::RouteLost)
-				event.routeLossReason = !mWorld.lookupMarker(goal.marker)
+				event.routeLossReason = goal.marker && !mWorld.lookupMarker(goal.marker)
 					? RouteLossReason::DestinationRemoved
 					: goal.routeLossReason == RouteLossReason::None
 						? RouteLossReason::TopologyChanged : goal.routeLossReason;

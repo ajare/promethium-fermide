@@ -780,7 +780,9 @@ namespace core
 	void SimulationCoordinator::restorePausedPathIntents()
 	{
 		mWorld.invalidateSimulationSnapshot();
-		for (auto const& [id, intent] : mWorld.mPausedPathIntents)
+		auto intents = std::move(mWorld.mPausedPathIntents);
+		mWorld.mPausedPathIntents.clear();
+		for (auto const& [id, intent] : intents)
 		{
 			auto agent = mWorld.mAgents.find(id);
 			// A deactivated Agent is not simulated (#118): its retained route must
@@ -788,74 +790,15 @@ namespace core
 			// so reactivation later does not resurrect a route the pause had
 			// already torn down.
 			if (!agent || !agent->isActive() || !agent->getSector()) continue;
-			auto goal = mWorld.mMovementGoals.find(id);
-			try
-			{
-				shared_ptr<const Vertex> destination;
-				if (goal != mWorld.mMovementGoals.end())
-				{
-					// Marker identity survives structural replay. Re-resolve its new graph
-					// vertex rather than restoring a stale Sector/position pair.
-					for (auto const& sector : mWorld.mSectors)
-						for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
-							if (auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
-								object && object->getMarker()->getId() == goal->second.marker)
-								destination = mWorld.mGraph->getVertexForObject(object);
-					if (!destination)
-					{
-						goal->second.routeLossReason = RouteLossReason::DestinationRemoved;
-						continue;
-					}
-					goal->second.position = destination->getPosition();
-					goal->second.sector = SectorId{
-						(uint64_t)destination->getSector()->getIndex() + 1 };
-				}
-				else
-				{
-					if (!intent.destinationSector
-						|| intent.destinationSector.value > mWorld.mSectors.size())
-					{
-						continue;
-					}
-					auto destinationSector = mWorld.mSectors[
-						(size_t)intent.destinationSector.value - 1];
-					destination = mWorld.mGraph->getClosestVertexInSector(
-						destinationSector.get(), intent.destinationPosition);
-				}
-				auto path = mWorld.mGraph->calculatePath(agent, destination);
-				if (path && !path->nodes.empty())
-				{
-					agent->assignPath(std::move(path), intent.wasPathing, false);
-					if (intent.wasPathing && intent.resumeContinuousTraversal)
-					{
-						for (uint32_t node = 1; node < agent->mPath.path->nodes.size(); ++node)
-						{
-							auto const& edge = agent->mPath.path->nodes[node].edge;
-							auto const& target = agent->mPath.path->nodes[node].targetVertex;
-							if (!edge || !target || edge->getType() != intent.traversalEdgeType
-								|| target->getPosition().distanceTo(
-									intent.traversalDestinationPosition) > 0.001f) continue;
-							auto const source = edge->getOtherVertex(target);
-							if (!source || source->getPosition().distanceTo(
-								intent.traversalSourcePosition) > 0.001f) continue;
-							agent->mPath.targetNode = node - 1;
-							agent->mState = Agent::State::WaitingForTraversal;
-							break;
-						}
-					}
-					if (goal != mWorld.mMovementGoals.end())
-						goal->second.routeLossReason = RouteLossReason::None;
-				}
-				else if (goal != mWorld.mMovementGoals.end())
-					goal->second.routeLossReason = RouteLossReason::TopologyChanged;
-			}
-			catch (Exception const&)
-			{
-				// The destination was structurally removed or disconnected. The Agent
-				// remains safely idle; this does not invalidate otherwise usable topology.
-				if (goal != mWorld.mMovementGoals.end())
-					goal->second.routeLossReason = RouteLossReason::TopologyChanged;
-			}
+			if (agent->mState == Agent::State::RoutePlanning) continue;
+			auto& goal = mWorld.mMovementGoals[id];
+			if (goal.cancelling) continue;
+			if (!goal.marker) goal.marker = intent.destinationMarker;
+			goal.startPathing = intent.wasPathing;
+			goal.planningFailureReason = RouteLossReason::TopologyChanged;
+			goal.fallbackIntent = intent;
+			goal.planningDeferred = false;
+			beginRoutePlanning(*agent);
 		}
 		mWorld.mPausedPathIntents.clear();
 	}
@@ -871,9 +814,14 @@ namespace core
 				if (destination && destination->getSector())
 				{
 					auto& intent = mWorld.mPausedPathIntents[id];
+					for (uint32_t i = 0; i < destination->getSector()->getNumObjects(); ++i)
+						if (auto object = dynamic_pointer_cast<MarkerSectorObject>(destination->getSector()->getObject(i));
+							object && mWorld.mGraph->getVertexForObject(object) == destination)
+							intent.destinationMarker = object->getMarker()->getId();
 					intent.destinationSector = SectorId{
 						(uint64_t)destination->getSector()->getIndex() + 1 };
 					intent.destinationPosition = destination->getPosition();
+					intent.destinationLocalPosition = destination->getPosition() - destination->getSector()->getPosition();
 					intent.wasPathing = agent->mState != Agent::State::Idle;
 					intent.routeDiagnostics = pathing::getRouteDiagnostics(*agent->mPath.path);
 					if (agent->mState == Agent::State::TraversingEdge && agent->mTraversalTask

@@ -1549,6 +1549,8 @@ namespace core
 		{
 			mWorld->allocateTraversalRequest(mTraversalTask->request,
 				mTraversalTask->edge, mTraversalTask->destinationVertex);
+			// Authorization refusal can release this task and enter Route planning.
+			if (!mTraversalTask) return;
 			requestLookup = mWorld->lookupTraversalRequest(mTraversalTask->request);
 		}
 		// A resource allocation initiated while processing another agent may have

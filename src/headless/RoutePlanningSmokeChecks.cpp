@@ -50,6 +50,142 @@ namespace
 		}
 	};
 
+	void mandatoryTopologyPlanning(bool removeDestination)
+	{
+		Fixture f;
+		f.fixedDuration();
+		require(f.world->moveAgentToMarker(f.id, f.destination).accepted(), "Command refused");
+		f.world->advanceTicks(f.agent()->getRoutePlanningRemainingTicks() + 10);
+		f.world->consumeSimulationEvents();
+		f.world->pauseSimulation();
+		require(f.world->rebuildTraversalTopology(), "Mandatory rebuild failed");
+		auto const position = f.agent()->getGlobalPosition();
+		auto const total = f.agent()->getRoutePlanningTotalTicks();
+		require(f.agent()->getState() == core::Agent::State::RoutePlanning && total == 7
+			&& !f.agent()->getPath() && f.world->getGraph()->getRouteWorkCounts().decisions == 0,
+			"Topology restoration calculated immediately");
+		require(f.world->resumeSimulation(), "Resume failed");
+		f.world->advanceTicks(2);
+		f.world->pauseSimulation();
+		if (removeDestination)
+			require(f.world->removeSectorMarker(0, 0), "Destination removal failed");
+		else
+			require(f.world->renameMarker(f.destination, "Renamed destination"), "Rename failed");
+		require(f.world->rebuildTraversalTopology(), "Repeated rebuild failed");
+		require(f.agent()->getState() == core::Agent::State::RoutePlanning
+			&& f.agent()->getRoutePlanningRemainingTicks() == total - 2
+			&& f.agent()->getRoutePlanningTotalTicks() == total
+			&& f.world->getSimulationSnapshot().agents.front().intendedDestination == f.destination,
+			"Structural replay lost destination identity or restarted the timer");
+		require(f.world->resumeSimulation(), "Repeated resume failed");
+		f.world->advanceTicks(total - 3);
+		for (auto const& event : f.world->consumeSimulationEvents())
+			require(event.type != core::SimulationEventType::RouteLost
+				&& event.type != core::SimulationEventType::MovementCancelled
+				&& event.type != core::SimulationEventType::DestinationReached,
+				"Mandatory planning published an early behaviour outcome");
+		require(f.agent()->getGlobalPosition() == position && !f.agent()->getPath()
+			&& f.world->getGraph()->getRouteWorkCounts().decisions == 0,
+			"Mandatory planning moved or calculated before expiry");
+		f.world->advanceTick();
+		unsigned lost = 0;
+		for (auto const& event : f.world->consumeSimulationEvents())
+		{
+			require(event.type != core::SimulationEventType::MovementCancelled, "Automatic replan cancelled intent");
+			if (event.type == core::SimulationEventType::RouteLost)
+			{
+				++lost;
+				require(event.routeLossReason == core::RouteLossReason::DestinationRemoved,
+					"Removed destination reported wrong reason");
+			}
+		}
+		require(f.agent()->getGlobalPosition() == position, "Expiry moved the Agent");
+		if (removeDestination)
+		{
+			auto snapshot = f.world->getSimulationSnapshot();
+			require(lost == 1 && f.agent()->getState() == core::Agent::State::Idle
+				&& !snapshot.agents.front().intendedDestination && !f.agent()->getPath()
+				&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(),
+				"Failed mandatory replan retained intent or ownership");
+			f.world->advanceTicks(20);
+			for (auto const& event : f.world->consumeSimulationEvents())
+				require(event.type != core::SimulationEventType::RouteLost, "Duplicate Route loss");
+		}
+		else
+		{
+			require(!lost && f.agent()->getPath()
+				&& f.agent()->getState() == core::Agent::State::MovingToVertex,
+				"Successful replan did not install an active Path");
+			f.world->advanceTick();
+			require(f.agent()->getGlobalPosition() != position, "Movement did not resume on the next tick");
+		}
+	}
+
+	void assignedIdleFallbackRestoration(bool disconnect)
+	{
+		core::World world("Fallback restoration", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		world.addSectorDoor(front, 0, 6, {});
+		world.finishBuild();
+		auto id = world.createAgent("Idle planner", front, 0, 1.5f);
+		auto* agent = world.lookupAgent(id).entity;
+		std::shared_ptr<const core::Vertex> destination;
+		for (auto const& vertex : world.getGraph()->getVertices())
+			if (vertex->getSector()->getIndex() == back) destination = vertex;
+		require(bool(destination), "Fallback fixture has no destination");
+		auto const targetPosition = destination->getPosition();
+		auto path = world.getGraph()->calculatePath(agent, destination);
+		require(path && !path->nodes.empty(), "Fallback fixture has no Path");
+		agent->setPath(path, false);
+		world.pauseSimulation();
+		require(world.rebuildTraversalTopology(), "Fallback rebuild failed");
+		require(agent->getState() == core::Agent::State::RoutePlanning && !agent->getPath(),
+			"Assigned-idle Path was restored immediately");
+		require(world.resumeSimulation(), "Fallback resume failed");
+		world.advanceTicks(2);
+		auto remaining = agent->getRoutePlanningRemainingTicks();
+		auto total = agent->getRoutePlanningTotalTicks();
+		world.pauseSimulation();
+		if (disconnect) require(world.removeSectorDoor(front, 0), "Fallback Door removal failed");
+		require(world.rebuildTraversalTopology() && world.resumeSimulation(), "Fallback repeated rebuild failed");
+		agent = world.lookupAgent(id).entity;
+		require(agent->getRoutePlanningRemainingTicks() == remaining
+			&& agent->getRoutePlanningTotalTicks() == total, "Fallback timer restarted");
+		world.consumeSimulationEvents();
+		auto position = agent->getGlobalPosition();
+		world.advanceTicks(remaining - 1);
+		for (auto const& event : world.consumeSimulationEvents())
+			require(event.type != core::SimulationEventType::RouteLost, "Topology failure was published early");
+		world.advanceTick();
+		if (disconnect)
+		{
+			unsigned lost = 0;
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::RouteLost)
+				{
+					++lost;
+					require(event.routeLossReason == core::RouteLossReason::TopologyChanged,
+						"Fallback failure did not report Topology changed");
+				}
+			require(lost == 1 && !agent->getPath() && agent->getState() == core::Agent::State::Idle,
+				"Disconnected fallback did not fail at expiry");
+			return;
+		}
+		require(agent->getPath() && agent->getState() == core::Agent::State::Idle
+			&& agent->getPath()->nodes.back().targetVertex != destination
+			&& agent->getPath()->nodes.back().targetVertex->getPosition() == targetPosition
+			&& agent->getPath()->nodes.back().targetVertex->getSector()->getIndex() == back,
+			"Fallback did not resolve an assigned-idle Path against the current graph");
+		world.advanceTicks(10);
+		require(agent->getGlobalPosition() == position, "Assigned-idle restoration started movement");
+		for (auto const& event : world.consumeSimulationEvents())
+			require(event.type != core::SimulationEventType::RouteLost
+				&& event.type != core::SimulationEventType::MovementCancelled
+				&& event.type != core::SimulationEventType::DestinationReached,
+				"Successful fallback restoration published a movement outcome");
+	}
+
 	void boundariesAndPresentation()
 	{
 		Fixture f;
@@ -287,7 +423,7 @@ namespace
 			&& agent->getGlobalPosition() == position, "Stopping walking for planning snapped to a vertex");
 	}
 
-	void traversalInterruption(bool committed, bool atDestination)
+	void traversalInterruption(bool committed, bool atDestination, bool mandatory = false)
 	{
 		core::World world("Traversal planning", 8, 2);
 		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
@@ -314,7 +450,8 @@ namespace
 		world.consumeSimulationEvents();
 		auto position = agent->getGlobalPosition();
 		auto decisions = world.getGraph()->getRouteWorkCounts().decisions;
-		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Traversal replacement refused");
+		if (mandatory) world.replanAgentAfterAuthorizationRefusal(id);
+		else require(world.moveAgentToMarker(id, markers[1]).accepted(), "Traversal replacement refused");
 		require(agent->getGlobalPosition() == position, "Planning snapped Agent to vertex");
 		if (committed)
 		{
@@ -372,6 +509,16 @@ namespace
 		if (committed && atDestination) world.moveAgentToMarker(id, markers[0]);
 		require(agent->getRoutePlanningTotalTicks() == control.agent()->getRoutePlanningTotalTicks(),
 			"Deferred intent consumed a duration before entering planning");
+		if (mandatory)
+		{
+			world.advanceTicks(agent->getRoutePlanningRemainingTicks());
+			require(bool(agent->getPath()), "Mandatory traversal replan did not restore a Path");
+			for (auto const& event : world.consumeSimulationEvents())
+				require(event.type != core::SimulationEventType::MovementCancelled
+					&& event.type != core::SimulationEventType::RouteLost
+					&& event.type != core::SimulationEventType::DestinationReached,
+					"Same-destination mandatory replan published a behaviour outcome");
+		}
 	}
 
 	void editorException()
@@ -388,6 +535,12 @@ namespace
 
 void runRoutePlanningSmokeChecks()
 {
+	mandatoryTopologyPlanning(false);
+	mandatoryTopologyPlanning(true);
+	assignedIdleFallbackRestoration(false);
+	assignedIdleFallbackRestoration(true);
+	traversalInterruption(false, false, true);
+	traversalInterruption(true, false, true);
 	boundariesAndPresentation();
 	streamsAndReset();
 	inclusiveEndpointsAndPersistence();
