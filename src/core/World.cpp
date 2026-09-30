@@ -2436,6 +2436,19 @@ namespace core
 			throw WorldException(this, format("{} - Physical control count must be [1,2] for a controlled ForceBridge, not {}", caller, options.controlCount));
 		if (!options.extensible && (options.controlCount != 0 || !options.startExtended))
 			throw WorldException(this, format("{} - A non-extensible ForceBridge must be permanently extended and have no controls", caller));
+		for (size_t side = 0; side < 2; ++side)
+		{
+			bool const hasControl = options.extensible && (options.controlCount > 1
+				|| (options.controlCount == 1 && static_cast<int>(side) == options.fromSide));
+			if (!hasControl && !options.controlPermissionRequirements[side].empty())
+				throw WorldException(this, format("{} - A Force Bridge permission requirement requires a control on that side", caller));
+			set<AccessPermissionId> seen;
+			for (auto permission : options.controlPermissionRequirements[side])
+				if (!permission || permission.value > AccessPermission::Capacity
+					|| (!mDeserializingConstruction && !lookupAccessPermission(permission))
+					|| !seen.insert(permission).second)
+					throw WorldException(this, format("{} - Invalid or duplicate Access permission requirement", caller));
+		}
 	}
 
 	void World::validateSectorLadderOptions(string const& caller, CreateLadderOptions const& options) const
@@ -2443,6 +2456,17 @@ namespace core
 		if (options.directionalBatchLimit == 0)
 		{
 			throw WorldException(this, format("{} - Ladder directional batch limit must be positive.", caller));
+		}
+		for (auto const& requirement : options.controlPermissionRequirements)
+		{
+			if (!options.extensible && !requirement.empty())
+				throw WorldException(this, format("{} - A Ladder permission requirement requires an extensible Ladder", caller));
+			set<AccessPermissionId> seen;
+			for (auto permission : requirement)
+				if (!permission || permission.value > AccessPermission::Capacity
+					|| (!mDeserializingConstruction && !lookupAccessPermission(permission))
+					|| !seen.insert(permission).second)
+					throw WorldException(this, format("{} - Invalid or duplicate Access permission requirement", caller));
 		}
 	}
 
@@ -3690,7 +3714,7 @@ namespace core
 			{ Vector2{ (float)x + 0.5f, (float)y0 },
 				Vector2{ (float)x + 0.5f, (float)y1 } });
 		ladder->configureTraversal(traversalResource);
-		auto registerExtensionControl = [&](CreateObjectResult& control)
+		auto registerExtensionControl = [&](CreateObjectResult& control, size_t endpoint)
 		{
 			auto object = control.sector->_getObject(control.index);
 			DeviceCommand command;
@@ -3700,6 +3724,9 @@ namespace core
 			auto point = createPhysicalControlInteractionPoint("Ladder extension control",
 				control, (float)object->getCellY(), 0.15f, getFixedTimestep(),
 				{ { command, InteractionBindingRequirement::Required } });
+			if (auto interaction = mInteractionPoints.find(point))
+				for (auto permission : options.controlPermissionRequirements[endpoint])
+					interaction->mPermissionRequirement.set(permission.value - 1);
 			addTraversalControl(traversalResource, point);
 		};
 
@@ -3712,11 +3739,11 @@ namespace core
 			};
 			createdControls[CORE_LADDER_ENDPOINT_LOW] = _createLadderButton(
 				foreSector0, x, y0, inwardSide(foreSector0), 0, nullptr, true);
-			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW]);
+			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 			createdControls[CORE_LADDER_ENDPOINT_HIGH] = _createLadderButton(
 				foreSector1, x, y1, inwardSide(foreSector1), 0, nullptr, true);
-			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH]);
+			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 		}
 
 		CreateLadderResult result{
@@ -3728,6 +3755,10 @@ namespace core
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = options.levelsHigh; record.d = options.directionalBatchLimit;
 		record.p = options.extensible; record.q = options.startExtended;
+		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+			for (auto permission : options.controlPermissionRequirements[endpoint])
+				record.controlPermissionRequirements[endpoint].push_back(
+					static_cast<uint32_t>(permission.value));
 		recordConstruction(std::move(record));
 		return result;
 	}
@@ -6817,6 +6848,9 @@ namespace core
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
 					createdControls[0], (float)y, CORE_AGENT_MAX_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
+				if (auto interaction = mInteractionPoints.find(point))
+					for (auto permission : options.controlPermissionRequirements[options.fromSide])
+						interaction->mPermissionRequirement.set(permission.value - 1);
 				addTraversalControl(traversalResource, point);
 			}
 			if (options.controlCount > 1)
@@ -6826,6 +6860,9 @@ namespace core
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
 					createdControls[1], (float)y, CORE_AGENT_MAX_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
+				if (auto interaction = mInteractionPoints.find(point))
+					for (auto permission : options.controlPermissionRequirements[1 - options.fromSide])
+						interaction->mPermissionRequirement.set(permission.value - 1);
 				addTraversalControl(traversalResource, point);
 			}
 		}
@@ -6843,6 +6880,10 @@ namespace core
 		record.a = sectorIndex; record.b = levelIndex; record.c = xOffset; record.d = options.width;
 		record.i = options.fromSide; record.p = options.extensible; record.q = options.startExtended;
 		record.e = options.controlCount;
+		for (size_t side = 0; side < 2; ++side)
+			for (auto permission : options.controlPermissionRequirements[side])
+				record.controlPermissionRequirements[side].push_back(
+					static_cast<uint32_t>(permission.value));
 		recordConstruction(std::move(record));
 		return result;
 	}
@@ -6975,7 +7016,7 @@ namespace core
 			{ Vector2{ (float)x + 0.5f, (float)y0 },
 				Vector2{ (float)x + 0.5f, (float)y1 } });
 		ladder->configureTraversal(traversalResource);
-		auto registerExtensionControl = [&](CreateObjectResult& control)
+		auto registerExtensionControl = [&](CreateObjectResult& control, size_t endpoint)
 		{
 			auto object = control.sector->_getObject(control.index);
 			DeviceCommand command;
@@ -6985,6 +7026,9 @@ namespace core
 			auto point = createPhysicalControlInteractionPoint("Ladder extension control",
 				control, (float)object->getCellY(), 0.15f, getFixedTimestep(),
 				{ { command, InteractionBindingRequirement::Required } });
+			if (auto interaction = mInteractionPoints.find(point))
+				for (auto permission : options.controlPermissionRequirements[endpoint])
+					interaction->mPermissionRequirement.set(permission.value - 1);
 			addTraversalControl(traversalResource, point);
 		};
 
@@ -7012,13 +7056,13 @@ namespace core
 			// Lower
 			createdControls[CORE_LADDER_ENDPOINT_LOW] = _createLadderButton(
 				ladderObject.sector, x, y0, side, 0, nullptr, true);
-			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW]);
+			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 
 			// Upper
 			createdControls[CORE_LADDER_ENDPOINT_HIGH] = _createLadderButton(
 				ladderObject.sector, x, y1, side, 0, nullptr, true);
-			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH]);
+			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 
 		}
 		else
@@ -7038,6 +7082,10 @@ namespace core
 		record.a = sectorIndex; record.b = levelIndex; record.c = xOffset;
 		record.d = options.levelsHigh; record.e = options.directionalBatchLimit;
 		record.p = options.extensible; record.q = options.startExtended;
+		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+			for (auto permission : options.controlPermissionRequirements[endpoint])
+				record.controlPermissionRequirements[endpoint].push_back(
+					static_cast<uint32_t>(permission.value));
 		recordConstruction(std::move(record));
 		return result;
 	}
@@ -9752,34 +9800,54 @@ namespace core
 		}
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
 		point->mPermissionRequirement = next;
-		// Generated Door controls also persist the requirement against their
-		// authored approach side. Interaction point IDs are replay-order handles
-		// and cannot safely identify a side after one sibling control is removed.
+		// Generated controls also persist the requirement against their stable
+		// authored side or endpoint. Interaction point IDs are replay-order handles
+		// and cannot safely identify a control after a structural rebuild.
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
 			(void)resourceId;
-			if (!resource->mDoor || find(resource->mControls.begin(), resource->mControls.end(), id)
-				== resource->mControls.end()) continue;
-			size_t side = 0;
-			if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource->mDoor))
-				side = point->mSector == SectorId{ static_cast<uint64_t>(bulkhead->getSideSector(CORE_SIDE_RIGHT)->getIndex()) + 1 } ? 1 : 0;
-			else
-				side = point->mSector == SectorId{ static_cast<uint64_t>(resource->mDoor->getBackSector()->getIndex()) + 1 } ? 1 : 0;
+			auto control = find(resource->mControls.begin(), resource->mControls.end(), id);
+			if (control == resource->mControls.end()) continue;
+			size_t side = static_cast<size_t>(distance(resource->mControls.begin(), control));
+			if (resource->mDoor)
+			{
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource->mDoor))
+					side = point->mSector == SectorId{ static_cast<uint64_t>(bulkhead->getSideSector(CORE_SIDE_RIGHT)->getIndex()) + 1 } ? 1 : 0;
+				else side = point->mSector == SectorId{ static_cast<uint64_t>(resource->mDoor->getBackSector()->getIndex()) + 1 } ? 1 : 0;
+			}
+			else if (resource->mForceBridge)
+				side = side == 0 ? resource->mForceBridge->getFromSide()
+					: 1 - resource->mForceBridge->getFromSide();
 			for (auto& record : mConstructionRecords)
 			{
 				bool matches = false;
-				if (record.type == ConstructionType::Door)
+				if (record.type == ConstructionType::Door && resource->mDoor)
 					matches = record.layer == resource->mDoor->getFrontLayer()
 						&& record.a == static_cast<uint32_t>(resource->mDoor->getPosition().y)
 						&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().x)
 						&& record.c == resource->mDoor->getCellsWide();
-				else if (record.type == ConstructionType::BulkheadDoor)
+				else if (record.type == ConstructionType::BulkheadDoor && resource->mDoor)
 					matches = record.a == resource->mDoor->getFrontLayer()
 						&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().y)
 						&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
 							== static_cast<uint32_t>(round(resource->mDoor->getPosition().x
 								+ resource->mDoor->getSize().x * 0.5f));
-				if (!matches) continue;
+				else if (record.type == ConstructionType::ForceBridge && resource->mForceBridge
+					&& record.a < mSectors.size())
+					matches = mSectors[record.a]->getCellX() + record.c
+						== static_cast<uint32_t>(resource->mForceBridge->getPosition().x)
+						&& mSectors[record.a]->getCellY() + record.b
+						== static_cast<uint32_t>(resource->mForceBridge->getPosition().y);
+				else if (record.type == ConstructionType::Ladder && resource->mLadder)
+					matches = record.b == static_cast<uint32_t>(resource->mLadder->getPosition().x)
+						&& record.a == static_cast<uint32_t>(resource->mLadder->getPosition().y);
+				else if (record.type == ConstructionType::SectorLadder && resource->mLadder
+					&& record.a < mSectors.size())
+					matches = mSectors[record.a]->getCellX() + record.c
+						== static_cast<uint32_t>(resource->mLadder->getPosition().x)
+						&& mSectors[record.a]->getCellY() + record.b
+						== static_cast<uint32_t>(resource->mLadder->getPosition().y);
+				if (!matches || side >= 2) continue;
 				record.controlPermissionRequirements[side].clear();
 				for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
 					if (next.test(bit)) record.controlPermissionRequirements[side].push_back(
@@ -9903,6 +9971,21 @@ namespace core
 		return false;
 	}
 
+	bool World::canAgentOperateExtensibleControl(TraversalResourceId resourceId,
+		SectorId approach, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !resource->mExtensible || !agent) return false;
+		for (auto pointId : resource->mControls)
+		{
+			auto point = mInteractionPoints.find(pointId);
+			if (point && point->mSector == approach
+				&& missingInteractionPermissions(*point, *agent).empty()) return true;
+		}
+		return false;
+	}
+
 	bool World::canAgentTraverseManualDoorNow(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
@@ -9937,8 +10020,7 @@ namespace core
 		auto const bit = changed.value - 1;
 		auto resourceUsesPermission = [&](TraversalResource const& resource)
 		{
-			if (!resource.mDoor) return false;
-			if (resource.mDoor->mPermissionRequirement.test(bit)) return true;
+			if (resource.mDoor && resource.mDoor->mPermissionRequirement.test(bit)) return true;
 			for (auto pointId : resource.mControls)
 			{
 				auto point = mInteractionPoints.find(pointId);
@@ -9949,7 +10031,9 @@ namespace core
 		auto edgeUsesPermission = [&](shared_ptr<const Edge> const& edge)
 		{
 			if (!edge || (edge->getType() != EdgeType::Door
-				&& edge->getType() != EdgeType::BulkheadDoor)) return false;
+				&& edge->getType() != EdgeType::BulkheadDoor
+				&& edge->getType() != EdgeType::Ladder
+				&& edge->getType() != EdgeType::ForceBridge)) return false;
 			auto resource = mTraversalResources.find(edge->getTraversalResourceId());
 			return resource && resourceUsesPermission(*resource);
 		};

@@ -8,6 +8,7 @@
 #include "core/Agent.h"
 #include "core/Vertex.h"
 #include "core/Exceptions.h"
+#include "core/World.h"
 
 
 namespace core
@@ -78,6 +79,17 @@ namespace core
 			facts.exclusionReason = RouteExclusionReason::PreparationSide;
 			return facts;
 		}
+		auto const locallyObserved = source && source->getSector().get()
+			== context.observationSector;
+		if (mForceBridge->isExtensible() && !(locallyObserved && mForceBridge->isExtended())
+			&& context.world && context.agent
+			&& !context.world->canAgentOperateExtensibleControl(
+				mForceBridge->getTraversalResourceId(), sourceSector,
+				context.world->getAgentId(context.agent)))
+		{
+			facts.exclusionReason = RouteExclusionReason::Permission;
+			return facts;
+		}
 
 		facts.feasible = true;
 		auto& c = facts.components;
@@ -87,8 +99,6 @@ namespace core
 		c.riskUnits = distance * context.policy.forceBridgeRiskPerUnit;
 		if (mForceBridge->isExtensible())
 		{
-			auto const locallyObserved = source && source->getSector().get()
-				== context.observationSector;
 			auto const preparation = mForceBridge->getExtendRetractTime();
 			if (locallyObserved)
 			{

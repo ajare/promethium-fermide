@@ -458,6 +458,44 @@ namespace
 			"dangling Permission set assignment partially changed the target World");
 	}
 
+	void extensibleControlRequirementsPersistIndependently()
+	{
+		core::World world("extensible permissions", 10, 3);
+		auto bridgeRoom = world.addRoom("Bridge", 0, 0, 0, 6, 2);
+		world.addSectorWalkway(bridgeRoom, 1, 0);
+		world.addSectorWalkway(bridgeRoom, 1, 3);
+		auto bridge = world.addSectorForceBridge(bridgeRoom, 1, 1,
+			{ 2, CORE_SIDE_LEFT, true, false, 2 });
+		auto ladderRoom = world.addRoom("Ladder", 0, 0, 7, 3, 2);
+		world.addSectorWalkway(ladderRoom, 1, 1);
+		auto ladder = world.addRoomLadder(ladderRoom, 0, 1, { 0, true, false });
+		world.finishBuild(); world.pauseSimulation();
+		auto left = world.addAccessPermission("Bridge left");
+		auto right = world.addAccessPermission("Bridge right");
+		auto low = world.addAccessPermission("Ladder low");
+		auto high = world.addAccessPermission("Ladder high");
+		std::string diagnostic;
+		require(world.setInteractionPointPermissionRequirement(
+			bridge.controls[0].interactionPoint, { left }, &diagnostic), diagnostic);
+		require(world.setInteractionPointPermissionRequirement(
+			bridge.controls[1].interactionPoint, { right }, &diagnostic), diagnostic);
+		require(world.setInteractionPointPermissionRequirement(
+			ladder.controls[0].interactionPoint, { low }, &diagnostic), diagnostic);
+		require(world.setInteractionPointPermissionRequirement(
+			ladder.controls[1].interactionPoint, { high }, &diagnostic), diagnostic);
+
+		auto restored = load(save(world));
+		require(restored->getInteractionPointPermissionRequirement(
+			bridge.controls[0].interactionPoint) == std::vector<core::AccessPermissionId>{ left }
+			&& restored->getInteractionPointPermissionRequirement(
+				bridge.controls[1].interactionPoint) == std::vector<core::AccessPermissionId>{ right }
+			&& restored->getInteractionPointPermissionRequirement(
+				ladder.controls[0].interactionPoint) == std::vector<core::AccessPermissionId>{ low }
+			&& restored->getInteractionPointPermissionRequirement(
+				ladder.controls[1].interactionPoint) == std::vector<core::AccessPermissionId>{ high },
+			"extensible control requirements did not persist independently");
+	}
+
 	void panelCommitParticipatesInHistory()
 	{
 		auto world = std::make_shared<core::World>("panel", 2, 1);
@@ -501,5 +539,6 @@ void runAccessPermissionSmokeChecks()
 	manualDoorAuthorization();
 	controlledDoorAuthorization();
 	malformedAuthorizationIsTransactional();
+	extensibleControlRequirementsPersistIndependently();
 	panelCommitParticipatesInHistory();
 }

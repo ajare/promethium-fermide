@@ -256,7 +256,17 @@ namespace core
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
 			serializer.writeUint32("levelsHigh", record.c); serializer.writeBool("extensible", record.p);
 			serializer.writeBool("startExtended", record.q);
-			serializer.writeUint32("directionalBatchLimit", record.d); break;
+			serializer.writeUint32("directionalBatchLimit", record.d);
+			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				if (!record.controlPermissionRequirements[endpoint].empty())
+				{
+					serializer.beginArray(endpoint == 0 ? "lowControlPermissionRequirement"
+						: "highControlPermissionRequirement");
+					for (auto permission : record.controlPermissionRequirements[endpoint])
+						serializer.writeUint64("", permission);
+					serializer.endArray();
+				}
+			break;
 		case ConstructionType::Stairwell:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -355,12 +365,32 @@ namespace core
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); serializer.writeUint32("width", record.d);
 			serializer.writeString("fromSide", sideName(record.i)); serializer.writeBool("extensible", record.p);
-			serializer.writeBool("startExtended", record.q); serializer.writeUint32("controlCount", record.e); break;
+			serializer.writeBool("startExtended", record.q); serializer.writeUint32("controlCount", record.e);
+			for (size_t side = 0; side < 2; ++side)
+				if (!record.controlPermissionRequirements[side].empty())
+				{
+					serializer.beginArray(side == 0 ? "leftControlPermissionRequirement"
+						: "rightControlPermissionRequirement");
+					for (auto permission : record.controlPermissionRequirements[side])
+						serializer.writeUint64("", permission);
+					serializer.endArray();
+				}
+			break;
 		case ConstructionType::SectorLadder:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); serializer.writeUint32("levelsHigh", record.d);
 			serializer.writeBool("extensible", record.p); serializer.writeBool("startExtended", record.q);
-			serializer.writeUint32("directionalBatchLimit", record.e); break;
+			serializer.writeUint32("directionalBatchLimit", record.e);
+			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				if (!record.controlPermissionRequirements[endpoint].empty())
+				{
+					serializer.beginArray(endpoint == 0 ? "lowControlPermissionRequirement"
+						: "highControlPermissionRequirement");
+					for (auto permission : record.controlPermissionRequirements[endpoint])
+						serializer.writeUint64("", permission);
+					serializer.endArray();
+				}
+			break;
 		case ConstructionType::PlatformLift:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); serializer.writeUint32("cellsWide", record.d);
@@ -404,6 +434,7 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
+		// Version 27 gives extensible Ladder and Force Bridge controls stable requirements.
 		// Version 26 adds Permission sets and Agent assignments. Version 25 gives
 		// ordinary and Bulkhead Door controls stable side-specific permission requirements. Version 24 adds buttonless manual ordinary Door permission requirements.
 		// Version 23 adds World-owned Access permission definitions, direct Agent
@@ -432,7 +463,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 26);
+		serializer.writeUint32("version", 27);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -696,6 +727,14 @@ namespace core
 			}
 			serializer.endArray();
 		};
+		auto readControlRequirement = [&](size_t slot, char const* field)
+		{
+			if (version < 27 || !serializer.hasField(field)) return;
+			serializer.beginArray(field);
+			while (serializer.nextArrayItem())
+				record.controlPermissionRequirements[slot].push_back(serializer.readUint32(""));
+			serializer.endArray();
+		};
 		auto readRenamedUint32 = [&](char const* field, char const* legacyField)
 		{
 			return serializer.readUint32(serializer.hasField(field) ? field : legacyField);
@@ -725,7 +764,9 @@ namespace core
 			record.c = readRenamedUint32("levelsHigh", "decksHigh"); record.p = serializer.readBool("extensible");
 			record.q = serializer.readBool("startExtended");
 			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
-			record.d = serializer.readUint32("directionalBatchLimit"); break;
+			record.d = serializer.readUint32("directionalBatchLimit");
+			readControlRequirement(0, "lowControlPermissionRequirement");
+			readControlRequirement(1, "highControlPermissionRequirement"); break;
 		case ConstructionType::Stairwell:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -836,13 +877,17 @@ namespace core
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("width");
 			record.i = readSide("fromSide"); record.p = serializer.readBool("extensible");
-			record.q = serializer.readBool("startExtended"); record.e = serializer.readUint32("controlCount"); break;
+			record.q = serializer.readBool("startExtended"); record.e = serializer.readUint32("controlCount");
+			readControlRequirement(0, "leftControlPermissionRequirement");
+			readControlRequirement(1, "rightControlPermissionRequirement"); break;
 		case ConstructionType::SectorLadder:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = readRenamedUint32("levelsHigh", "decksHigh");
 			record.p = serializer.readBool("extensible"); record.q = serializer.readBool("startExtended");
 			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
-			record.e = serializer.readUint32("directionalBatchLimit"); break;
+			record.e = serializer.readUint32("directionalBatchLimit");
+			readControlRequirement(0, "lowControlPermissionRequirement");
+			readControlRequirement(1, "highControlPermissionRequirement"); break;
 		case ConstructionType::PlatformLift:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("cellsWide");
@@ -926,8 +971,8 @@ namespace core
 		// adds Route familiarity, version 22 adds Route persistence, version 23
 		// adds Access permissions, version 24 adds manual Door requirements, and
 		// version 25 adds side-specific ordinary and Bulkhead Door controls, and
-		// version 26 adds Permission sets.
-		if (version < 1 || version > 26)
+		// version 26 adds Permission sets; version 27 stabilizes extensible controls.
+		if (version < 1 || version > 27)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1297,14 +1342,28 @@ namespace core
 				}
 			}
 			if (record.type != ConstructionType::Door
-				&& record.type != ConstructionType::BulkheadDoor) continue;
-			bool const controls[2]{ record.p, record.q };
-			auto const mode = record.type == ConstructionType::Door ? record.i : record.j;
+				&& record.type != ConstructionType::BulkheadDoor
+				&& record.type != ConstructionType::Ladder
+				&& record.type != ConstructionType::SectorLadder
+				&& record.type != ConstructionType::ForceBridge) continue;
+			bool controls[2]{};
+			if (record.type == ConstructionType::Door || record.type == ConstructionType::BulkheadDoor)
+			{
+				controls[0] = record.p; controls[1] = record.q;
+				auto const mode = record.type == ConstructionType::Door ? record.i : record.j;
+				if (mode != static_cast<int32_t>(DoorActivationMode::RemoteControlled))
+					controls[0] = controls[1] = false;
+			}
+			else if (record.type == ConstructionType::ForceBridge && record.p)
+			{
+				if (record.e > 0) controls[record.i] = true;
+				if (record.e > 1) controls[1 - record.i] = true;
+			}
+			else if (record.p) controls[0] = controls[1] = true;
 			for (size_t side = 0; side < 2; ++side)
 			{
-				if (!record.controlPermissionRequirements[side].empty()
-					&& (!controls[side] || mode != static_cast<int32_t>(DoorActivationMode::RemoteControlled)))
-					throw SerializationException("A Door control requirement belongs only to an Agent-operated control");
+				if (!record.controlPermissionRequirements[side].empty() && !controls[side])
+					throw SerializationException("A control requirement belongs only to an Agent-operated control");
 				bitset<256> seen;
 				for (auto id : record.controlPermissionRequirements[side])
 				{
@@ -1881,15 +1940,17 @@ namespace core
 		mPendingPermissionRequirements.clear();
 		if (preserveBehaviourRuntime)
 		{
-			set<InteractionPointId> authoredDoorControls;
+			set<InteractionPointId> authoredResourceControls;
 			for (auto const& [resourceId, resource] : mTraversalResources.entries())
 			{
 				(void)resourceId;
-				if (!resource->mDoor || resource->mLiftCoordinator || resource->mShuttle) continue;
-				authoredDoorControls.insert(resource->mControls.begin(), resource->mControls.end());
+				bool const authoredDoor = resource->mDoor
+					&& !resource->mLiftCoordinator && !resource->mShuttle;
+				if (!authoredDoor && !resource->mExtensible) continue;
+				authoredResourceControls.insert(resource->mControls.begin(), resource->mControls.end());
 			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
-				if (point->mPermissionRequirement.any() && !authoredDoorControls.contains(id))
+				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id))
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
@@ -1976,9 +2037,14 @@ namespace core
 			addRoom(record.name, record.a, record.b, record.c, record.d, record.e, record.x);
 			break;
 		case ConstructionType::Ladder:
-			addLadder(transitLayer(record), record.a, record.b,
-				{ record.c, record.p, record.q, record.d });
+		{
+			CreateLadderOptions options{ record.c, record.p, record.q, record.d };
+			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				for (auto permission : record.controlPermissionRequirements[endpoint])
+					options.controlPermissionRequirements[endpoint].push_back(AccessPermissionId{ permission });
+			addLadder(transitLayer(record), record.a, record.b, options);
 			break;
+		}
 		case ConstructionType::Stairwell:
 			addStairwell(transitLayer(record), record.a, record.b,
 				{ record.c, record.i, record.d, record.e });
@@ -2036,12 +2102,23 @@ namespace core
 			addSectorLightSwitch(record.a, record.b);
 			break;
 		case ConstructionType::ForceBridge:
-			addSectorForceBridge(record.a, record.b, record.c,
-				{ record.d, record.i, record.p, record.q, record.e });
+		{
+			CreateForceBridgeOptions options{ record.d, record.i, record.p, record.q, record.e };
+			for (size_t side = 0; side < 2; ++side)
+				for (auto permission : record.controlPermissionRequirements[side])
+					options.controlPermissionRequirements[side].push_back(AccessPermissionId{ permission });
+			addSectorForceBridge(record.a, record.b, record.c, options);
 			break;
+		}
 		case ConstructionType::SectorLadder:
-			addSectorLadder(record.a, record.b, record.c,
-				{ record.d, record.p, record.q, record.e });
+		{
+			CreateLadderOptions options{ record.d, record.p, record.q, record.e };
+			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				for (auto permission : record.controlPermissionRequirements[endpoint])
+					options.controlPermissionRequirements[endpoint].push_back(AccessPermissionId{ permission });
+			addSectorLadder(record.a, record.b, record.c, options);
+			break;
+		}
 			break;
 		case ConstructionType::PlatformLift:
 			addSectorPlatformLift(record.a, record.b, record.c,
@@ -3518,6 +3595,10 @@ namespace core
 			if (producerIndex++ != sectorIndex) continue;
 			if (record.type != ConstructionType::Ladder) return false;
 			options = { record.c, record.p, record.q, record.d };
+			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				for (auto permission : record.controlPermissionRequirements[endpoint])
+					options.controlPermissionRequirements[endpoint].push_back(
+						AccessPermissionId{ permission });
 			return true;
 		}
 		return false;
@@ -3568,6 +3649,15 @@ namespace core
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.levelsHigh;
 			found->p = plan.options.extensible; found->q = plan.options.startExtended;
 			found->d = plan.options.directionalBatchLimit;
+			if (!plan.options.extensible) found->controlPermissionRequirements = {};
+			else for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				if (!plan.options.controlPermissionRequirements[endpoint].empty())
+				{
+					found->controlPermissionRequirements[endpoint].clear();
+					for (auto permission : plan.options.controlPermissionRequirements[endpoint])
+						found->controlPermissionRequirements[endpoint].push_back(
+							static_cast<uint32_t>(permission.value));
+				}
 		}
 
 		// Replay Locations before Transits regardless of the order they were
@@ -3611,6 +3701,12 @@ namespace core
 		LadderEditPlan plan;
 		plan.sectorIndex = sectorIndex; plan.x = x; plan.y = y;
 		plan.levelsHigh = options.levelsHigh; plan.options = options;
+		CreateLadderOptions authored{};
+		if (getLadderOptions(sectorIndex, authored))
+			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+				if (plan.options.controlPermissionRequirements[endpoint].empty())
+					plan.options.controlPermissionRequirements[endpoint]
+						= authored.controlPermissionRequirements[endpoint];
 		if (sectorIndex >= mSectors.size() || !dynamic_pointer_cast<const LadderTransit>(mSectors[sectorIndex]))
 		{ plan.diagnostic = "Only Ladders can be edited"; return plan; }
 		auto ladder = dynamic_pointer_cast<const LadderTransit>(mSectors[sectorIndex]);
@@ -5225,6 +5321,10 @@ namespace core
 			});
 		if (source == mConstructionRecords.end()) return false;
 		options = { source->d, source->p, source->q, source->e };
+		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+			for (auto permission : source->controlPermissionRequirements[endpoint])
+				options.controlPermissionRequirements[endpoint].push_back(
+					AccessPermissionId{ permission });
 		return true;
 	}
 
@@ -5254,6 +5354,15 @@ namespace core
 		found->p = options.extensible;
 		found->q = options.extensible ? options.startExtended : true;
 		found->e = options.directionalBatchLimit;
+		if (!options.extensible) found->controlPermissionRequirements = {};
+		else for (size_t endpoint = 0; endpoint < 2; ++endpoint)
+			if (!options.controlPermissionRequirements[endpoint].empty())
+			{
+				found->controlPermissionRequirements[endpoint].clear();
+				for (auto permission : options.controlPermissionRequirements[endpoint])
+					found->controlPermissionRequirements[endpoint].push_back(
+						static_cast<uint32_t>(permission.value));
+			}
 		string diagnostic;
 		if (!normalizeRoomLadderRecords(records, diagnostic)) throw WorldException(this, diagnostic);
 		auto x = object->getCellX(), y = object->getCellY();
@@ -5325,6 +5434,10 @@ namespace core
 			});
 		if (found == mConstructionRecords.end()) return false;
 		options = { found->d, found->i, found->p, found->q, found->e };
+		for (size_t side = 0; side < 2; ++side)
+			for (auto permission : found->controlPermissionRequirements[side])
+				options.controlPermissionRequirements[side].push_back(
+					AccessPermissionId{ permission });
 		return true;
 	}
 
@@ -5354,6 +5467,19 @@ namespace core
 		if (found == records.end()) throw WorldException(this, "The Force Bridge has no authored definition");
 		found->d = options.width; found->i = options.fromSide; found->p = options.extensible;
 		found->q = options.startExtended; found->e = options.controlCount;
+		for (size_t side = 0; side < 2; ++side)
+		{
+			bool const retained = options.extensible && (options.controlCount > 1
+				|| (options.controlCount == 1 && static_cast<int>(side) == options.fromSide));
+			if (!retained) found->controlPermissionRequirements[side].clear();
+			else if (!options.controlPermissionRequirements[side].empty())
+			{
+				found->controlPermissionRequirements[side].clear();
+				for (auto permission : options.controlPermissionRequirements[side])
+					found->controlPermissionRequirements[side].push_back(
+						static_cast<uint32_t>(permission.value));
+			}
+		}
 		auto x = object->getCellX(), y = object->getCellY();
 		rebuildFromConstructionRecords(std::move(records));
 		auto rebuilt = _getSector(sectorIndex);

@@ -829,6 +829,31 @@ namespace core
 				continue;
 			}
 			auto actor = mWorld.mAgents.find(request->mActor);
+			if (actor)
+			{
+				auto missing = mWorld.missingInteractionPermissions(*point, *actor);
+				if (!missing.empty())
+				{
+					auto requestId = point->mActiveRequest;
+					request->mResult = InteractionResult::Rejected;
+					request->mMissingPermissions = std::move(missing);
+					detachInteractionRequester(*request);
+					point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), requestId), point->mQueue.end());
+					point->mActiveRequest = {};
+					point->mInteractionTicksRemaining = 0;
+					SimulationEvent event;
+					event.sequence = mWorld.mNextEventSequence++;
+					event.tick = mWorld.mSimulationTick;
+					event.type = SimulationEventType::InteractionRequestChanged;
+					event.phase = mWorld.mCurrentPhase;
+					event.interactionRequest = makeInteractionRequestSnapshot(requestId, *request);
+					event.interactionName = point->getName();
+					mWorld.mAgentBehaviourRuntime->observeOutcome(event);
+					mWorld.mEvents.push_back(std::move(event));
+					mWorld.replanAgentAfterAuthorizationRefusal(request->mActor);
+					continue;
+				}
+			}
 			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
 				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 			{

@@ -85,8 +85,26 @@ namespace core
 				? static_cast<LadderEdge const&>(edge).mLadder
 				: static_cast<LadderMountEdge const&>(edge).mLadder;
 			result.mobilityKind = TraversalKind::Ladder;
-			if (result.type == EdgeType::Ladder) result.observed = visibleEntry(EdgeType::LadderMount);
+			SectorId approachSector = sourceSector;
+			if (result.type == EdgeType::Ladder)
+			{
+				result.observed = visibleEntry(EdgeType::LadderMount);
+				for (auto const& adjacent : source->getEdges())
+					if (adjacent->getType() == EdgeType::LadderMount)
+					{
+						auto approach = adjacent->getOtherVertex(source)->getSector();
+						if (approach) approachSector = SectorId{
+							static_cast<uint64_t>(approach->getIndex()) + 1 };
+						break;
+					}
+			}
 			extension(*ladder);
+			if (result.type == EdgeType::Ladder && ladder->isExtensible()
+				&& !(result.observed && result.extended) && context.world && context.agent
+				&& !context.world->canAgentOperateExtensibleControl(
+					ladder->getTraversalResourceId(), approachSector,
+					context.world->getAgentId(context.agent)))
+				result.exclusion = RouteExclusionReason::Permission;
 			if (result.type == EdgeType::LadderMount && ladder->isExtensible()
 				&& source->getType() != VertexType::Ladder && !ladder->hasExtensionControlInSector(sourceSector))
 				result.exclusion = RouteExclusionReason::PreparationSide;
@@ -98,6 +116,12 @@ namespace core
 			extension(*bridge);
 			if (bridge->isExtensible() && (!bridge->hasExtensionControlInSector(sourceSector)
 				|| !bridge->canPrepareFromPosition(source->getPosition().x))) result.exclusion = RouteExclusionReason::PreparationSide;
+			else if (bridge->isExtensible() && !(result.observed && result.extended)
+				&& context.world && context.agent
+				&& !context.world->canAgentOperateExtensibleControl(
+					bridge->getTraversalResourceId(), sourceSector,
+					context.world->getAgentId(context.agent)))
+				result.exclusion = RouteExclusionReason::Permission;
 			break;
 		}
 		case EdgeType::Lift: case EdgeType::LiftMount:

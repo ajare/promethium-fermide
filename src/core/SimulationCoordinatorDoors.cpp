@@ -247,9 +247,18 @@ namespace core
 			}
 			return selected;
 		};
-		if (!controlFor(*request))
+		auto requestControl = controlFor(*request);
+		if (!requestControl)
 		{
 			denyTraversalRequest(requestId, TraversalFailureReason::NoReachableControl);
+			return;
+		}
+		auto actor = mWorld.mAgents.find(request->mOwner);
+		auto point = mWorld.mInteractionPoints.find(requestControl);
+		if (!actor || !point || !mWorld.missingInteractionPermissions(*point, *actor).empty())
+		{
+			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
 			return;
 		}
 
@@ -294,7 +303,7 @@ namespace core
 				&& candidate->mState == TraversalRequestState::Pending && controlFor(*candidate)
 				&& (!selected || candidateId < selected)) selected = candidateId;
 		if (selected != requestId) return;
-		auto interactionId = requestInteractionForTraversal(controlFor(*request), request->mOwner);
+		auto interactionId = requestInteractionForTraversal(requestControl, request->mOwner);
 		if (!interactionId) return;
 		auto interaction = mWorld.mInteractionRequests.find(interactionId);
 		if (!interaction || interaction->mOperations.empty())

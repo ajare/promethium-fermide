@@ -120,6 +120,8 @@ namespace core
 			bool extensible{ true };  // implies controlled
 			bool startExtended{ true };
 			uint32_t controlCount{ 1 };
+			// Indexed by physical side: left, then right.
+			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 		};
 
 		struct CreateForceBridgeResult
@@ -135,6 +137,8 @@ namespace core
 			bool extensible;  // implies controlled
 			bool startExtended;
 			uint32_t directionalBatchLimit{ 4 };
+			// Indexed by endpoint: low, then high.
+			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 		};
 
 		struct CreateLadderResult
@@ -2305,6 +2309,8 @@ namespace core
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
 		bool canAgentOperateDoorControl(TraversalResourceId door, SectorId approach,
 			AgentId agent) const;
+		bool canAgentOperateExtensibleControl(TraversalResourceId resource,
+			SectorId approach, AgentId agent) const;
 		bool canAgentTraverseManualDoorNow(TraversalResourceId door, AgentId agent) const;
 		void replanAgentAfterAuthorizationRefusal(AgentId agent);
 

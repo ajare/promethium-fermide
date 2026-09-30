@@ -7,6 +7,7 @@
 #include "core/Vertex.h"
 #include "core/Agent.h"
 #include "core/Exceptions.h"
+#include "core/World.h"
 
 
 namespace core
@@ -66,6 +67,32 @@ namespace core
 			return facts;
 		}
 		auto const source = getOtherVertex(targetVertex);
+		SectorId sourceSector;
+		bool locallyObserved = false;
+		if (source)
+		{
+			sourceSector = SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 };
+			for (auto const& edge : source->getEdges())
+				if (edge->getType() == EdgeType::LadderMount)
+				{
+					auto approach = edge->getOtherVertex(source)->getSector();
+					if (approach)
+					{
+						sourceSector = SectorId{ static_cast<uint64_t>(approach->getIndex()) + 1 };
+						if (approach.get() == context.observationSector) locallyObserved = true;
+					}
+					break;
+				}
+		}
+		if (mLadder->isExtensible() && !(locallyObserved && mLadder->isExtended())
+			&& context.world && context.agent
+			&& !context.world->canAgentOperateExtensibleControl(
+				mLadder->getTraversalResourceId(), sourceSector,
+				context.world->getAgentId(context.agent)))
+		{
+			facts.exclusionReason = RouteExclusionReason::Permission;
+			return facts;
+		}
 		auto const rise = getDirectedRise(*targetVertex);
 		auto const distance = getLength();
 		auto const speed = context.climbSpeed > 0.0f
@@ -82,13 +109,6 @@ namespace core
 
 		if (mLadder->isExtensible())
 		{
-			bool locallyObserved = false;
-			if (context.observationSector)
-				for (auto const& edge : source->getEdges())
-					if (edge->getType() == EdgeType::LadderMount
-						&& edge->getOtherVertex(source)->getSector().get()
-							== context.observationSector)
-					{ locallyObserved = true; break; }
 			auto const preparation = mLadder->getExtendRetractTime();
 			if (locallyObserved)
 			{
