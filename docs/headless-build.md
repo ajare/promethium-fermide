@@ -488,6 +488,26 @@ including the editor; all 67 CTest tests passed in each configuration (approxima
 479 seconds Debug, 42 seconds Release). `git diff --check` passed. No manual editor
 session was used.
 
+## Ordinary Lift destination permission authoring (#260)
+
+`access-permissions` (or `--access-permission-checks`) covers the public World
+queries and paused-only mutations, panel-commit undo/redo, YAML and binary round
+trips, legacy unrestricted defaults, transactional malformed-data rejection,
+rename/delete usage, and Stop retention through Lift and Location edits and
+Sector reindexing. Deleted Stops and recreated Lifts start unrestricted.
+Headless ImGui checks render the destination table, readable requirements, None,
+and the prominent **NOT YET ENFORCED** warning without a window or dialogs.
+
+World schema 30 persists ordinary Lift requirements per destination Stop; all
+listed Access permissions will be required, using direct and Permission set
+grants. This milestone deliberately changes neither routing nor runtime
+selection authorization. Shuttle and Platform lift destination authoring and
+all enforcement remain follow-up work.
+
+Validation on Windows/MSVC: full Debug and Release builds (including the editor)
+and all 68 CTest tests passed in each configuration; `git diff --check` passed.
+No manual editor session was used.
+
 ## Prerequisites
 
 - Windows x64

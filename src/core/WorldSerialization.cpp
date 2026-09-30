@@ -300,7 +300,16 @@ namespace core
 			writeLandingRequirements("landingControlPermissionRequirements"); serializer.writeUint32("capacity", record.d);
 			serializer.writeFloat("minimumDwellSeconds", record.x);
 			serializer.writeFloat("maximumBoardingSeconds", record.y);
-			serializer.writeUint32("initialStop", record.g); break;
+			serializer.writeUint32("initialStop", record.g);
+			serializer.beginArray("destinationPermissionRequirements");
+			for (auto const& requirement : record.destinationPermissionRequirements)
+			{
+				serializer.beginMap("");
+				serializer.beginArray("permissions");
+				for (auto id : requirement) serializer.writeUint32("", id);
+				serializer.endArray(); serializer.endMap();
+			}
+			serializer.endArray(); break;
 		case ConstructionType::Shuttle:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -451,6 +460,7 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
+		// Version 30 adds authoring-only ordinary Lift destination requirements.
 		// Version 28 gives transport landing controls stable per-landing requirements.
 		// Version 27 gives extensible Ladder and Force Bridge controls stable requirements.
 		// Version 26 adds Permission sets and Agent assignments. Version 25 gives
@@ -481,7 +491,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 29);
+		serializer.writeUint32("version", 30);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -818,6 +828,22 @@ namespace core
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("cellsWide"); record.e = readRenamedUint32("levelsHigh", "decksHigh");
 			readStops(); readStopDoorOpenStyles("stopDoorOpenStyles", "Lift stop");
+			if (version >= 30 && serializer.hasField("destinationPermissionRequirements"))
+			{
+				serializer.beginArray("destinationPermissionRequirements");
+				while (serializer.nextArrayItem())
+				{
+					record.destinationPermissionRequirements.emplace_back();
+					serializer.beginMap(""); serializer.beginArray("permissions");
+					while (serializer.nextArrayItem())
+						record.destinationPermissionRequirements.back().push_back(serializer.readUint32(""));
+					serializer.endArray(); serializer.endMap();
+				}
+				serializer.endArray();
+				if (!record.destinationPermissionRequirements.empty()
+					&& record.destinationPermissionRequirements.size() != record.values.size())
+					throw SerializationException("Lift destination requirements must match the served Stops");
+			}
 			readLandingRequirements("landingControlPermissionRequirements"); record.d = serializer.readUint32("capacity");
 			record.x = serializer.readFloat("minimumDwellSeconds");
 			record.y = serializer.readFloat("maximumBoardingSeconds");
@@ -1011,8 +1037,9 @@ namespace core
 		// version 25 adds side-specific ordinary and Bulkhead Door controls, and
 		// version 26 adds Permission sets; version 27 stabilizes extensible controls;
 		// version 28 stabilizes transport landing controls.
+		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 29 adds sampled and individual Route planning times.
-		if (version < 1 || version > 29)
+		if (version < 1 || version > 30)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1385,6 +1412,17 @@ namespace core
 				|| record.type == ConstructionType::Shuttle
 				|| record.type == ConstructionType::PlatformLift)
 			{
+				for (auto const& requirement : record.destinationPermissionRequirements)
+				{
+					set<uint32_t> seen;
+					for (auto id : requirement)
+					{
+						if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
+							throw SerializationException("Serialized Lift destination requirement is dangling");
+						if (!seen.insert(id).second)
+							throw SerializationException("Serialized Lift destination requirement contains a duplicate");
+					}
+				}
 				for (auto const& requirement : record.landingControlPermissionRequirements)
 				{
 					bitset<256> seen;
@@ -2371,6 +2409,12 @@ namespace core
 			// takes its override with it.
 			auto const oldOffsets = found->values;
 			auto const oldStyles = found->overrides;
+			auto const oldRequirements = found->destinationPermissionRequirements;
+			found->destinationPermissionRequirements.assign(plan.stopOffsets.size(), {});
+			for (size_t i = 0; i < plan.stopOffsets.size(); ++i)
+				for (size_t j = 0; j < oldOffsets.size(); ++j)
+					if (oldY + oldOffsets[j] == plan.y + plan.stopOffsets[i] && j < oldRequirements.size())
+						found->destinationPermissionRequirements[i] = oldRequirements[j];
 			found->values = plan.stopOffsets;
 			found->overrides.assign(plan.stopOffsets.size(), ~0u);
 			for (size_t i = 0; i < plan.stopOffsets.size(); ++i)
@@ -4373,6 +4417,16 @@ namespace core
 						return da == db ? a < b : da < db;
 					});
 					source.g = (uint32_t)distance(stops.begin(), nearest);
+					if (!source.destinationPermissionRequirements.empty())
+					{
+						auto const originalRequirements = source.destinationPermissionRequirements;
+						source.destinationPermissionRequirements.clear();
+						for (auto offset : stops)
+						{
+							auto index = distance(originalStops.begin(), find(originalStops.begin(), originalStops.end(), offset));
+							source.destinationPermissionRequirements.push_back(originalRequirements[index]);
+						}
+					}
 					source.values = std::move(stops);
 				}
 				else if (source.type == ConstructionType::Shuttle)

@@ -4,6 +4,7 @@
 
 #include "core/World.h"
 #include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
 #include "core/SerializationException.h"
 #include "core/Agent.h"
 #include "core/DoorSectorObject.h"
@@ -14,6 +15,7 @@
 #include "core/Path.h"
 #include "core/Vertex.h"
 #include "imgui/imgui.h"
+#include "imgui_internal.h"
 #include "PermissionsPanel.h"
 #include "DocumentEdit.h"
 
@@ -663,6 +665,139 @@ namespace
 			"Access permission deletion left a Lift landing requirement");
 	}
 
+	void liftDestinationAuthoring()
+	{
+		auto world = std::make_shared<core::World>("destination authoring", 10, 3);
+		auto unrelated = world->addRoom("Unrelated", 1, 0, 0, 2, 1);
+		for (uint32_t level = 0; level < 3; ++level) world->addCorridor(level, 0, 10);
+		core::World::CreateLiftOptions options;
+		options.cellsWide = 2; options.stopOffsets = { 0, 1, 2 };
+		auto lift = world->addLift(1, 0, 8, options);
+		auto sector = lift.lift.sector->getIndex();
+		world->finishBuild(); world->pauseSimulation();
+		auto red = world->addAccessPermission("Red key");
+		auto blue = world->addAccessPermission("Blue key");
+		require(world->getLiftDestinationLevels(sector) == std::vector<uint32_t>{ 0, 1, 2 }, "Destination Levels missing");
+		for (uint32_t stop = 0; stop < 3; ++stop)
+			require(world->getLiftDestinationPermissionRequirement(sector, stop).empty(), "New Stop is restricted");
+		std::string diagnostic;
+		auto unrestricted = save(*world);
+		require(world->setLiftDestinationPermissionRequirement(sector, 0, {}, &diagnostic)
+			&& save(*world) == unrestricted, "Empty no-op changed authored data");
+		gWorldDocumentHistory.clear();
+		require(commitLiftDestinationPermissionRequirement(world, sector, 2, red, true, diagnostic), diagnostic);
+		require(commitLiftDestinationPermissionRequirement(world, sector, 2, blue, true, diagnostic), diagnostic);
+		require(gWorldDocumentHistory.undoCount() == 2, "Destination edits bypass document history");
+		auto restore = [&](DocumentSnapshot const& snapshot) { world = load(snapshot.yaml); world->pauseSimulation(); return true; };
+		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination undo failed");
+		require(world->getLiftDestinationPermissionRequirement(sector, 2) == std::vector<core::AccessPermissionId>{ red }, "Undo lost destination requirement");
+		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination redo failed");
+		auto expected = std::vector<core::AccessPermissionId>{ red, blue };
+		require(world->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Redo lost destination requirement");
+		require(world->renameAccessPermission(red, "Renamed key", &diagnostic), diagnostic);
+		require(world->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Rename changed identity");
+		require(world->getAccessPermissionUsage(red).liftDestinationRequirements == 1, "Usage omitted destination");
+		auto before = save(*world);
+		require(!world->setLiftDestinationPermissionRequirement(sector, 2, { red, red }, &diagnostic)
+			&& !world->setLiftDestinationPermissionRequirement(sector, 2, { core::AccessPermissionId{ 256 } }, &diagnostic)
+			&& !world->setLiftDestinationPermissionRequirement(sector, 3, {}, &diagnostic)
+			&& !world->setLiftDestinationPermissionRequirement(0, 0, {}, &diagnostic)
+			&& save(*world) == before, "Invalid destination edit was not transactional");
+		require(world->resumeSimulation(), "Destination fixture did not resume");
+		require(!world->setLiftDestinationPermissionRequirement(sector, 2, {}, &diagnostic), "Running destination edit accepted");
+		world->pauseSimulation();
+
+		ImGui::CreateContext();
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.DisplaySize = ImVec2(1000, 700);
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(950, 650)); ImGui::Begin("Lift Selection");
+		ImGui::LogToBuffer();
+		renderLiftDestinationPermissions(world, sector);
+		std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+		require(text.find("Destination permissions") != std::string::npos
+			&& text.find("NOT YET ENFORCED") != std::string::npos
+			&& text.find("None") != std::string::npos
+			&& text.find("Renamed key") != std::string::npos
+			&& text.find("Blue key") != std::string::npos, "Lift Selection omitted requirements or milestone warning");
+		ImGui::LogFinish(); ImGui::End(); ImGui::Render(); ImGui::DestroyContext();
+
+		auto yaml = save(*world);
+		auto restored = load(yaml);
+		require(restored->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Destination YAML round trip failed");
+		core::SerializationWorkData binaryWork;
+		auto binaryWriter = core::BinarySerializer::toString();
+		world->serialize(*binaryWriter, binaryWork); binaryWriter->serialize();
+		auto binaryReader = core::BinarySerializer::fromString(binaryWriter->getSerializedString());
+		binaryReader->deserialize();
+		core::World binaryWorld("binary target", 1, 1);
+		require(binaryWorld.deserialize(*binaryReader, binaryWork)
+			&& binaryWorld.getLiftDestinationPermissionRequirement(sector, 2) == expected, "Destination binary round trip failed");
+		// Old Worlds have no destination field and remain unrestricted.
+		auto legacy = YAML::Load(yaml);
+		legacy["version"] = 29;
+		for (auto record : legacy["construction"]) record.remove("destinationPermissionRequirements");
+		require(load(YAML::Dump(legacy))->getLiftDestinationPermissionRequirement(sector, 2).empty(), "Older World is restricted");
+
+		for (auto replacement : {
+			"[{permissions: []}, {permissions: []}, {permissions: [999]}]",
+			"[{permissions: []}, {permissions: []}, {permissions: [0]}]",
+			"[{permissions: []}, {permissions: []}, {permissions: [1, 1]}]",
+			"[{permissions: []}, {permissions: []}, {permissions: broken}]",
+			"[{permissions: [1]}]", "broken", "{}" })
+		{
+			auto malformed = YAML::Load(yaml);
+			for (auto record : malformed["construction"])
+				if (record["destinationPermissionRequirements"])
+					record["destinationPermissionRequirements"] = YAML::Load(replacement);
+			auto unchanged = save(*restored);
+			bool refused = false;
+			try
+			{
+				core::SerializationWorkData work;
+				auto reader = core::YamlSerializer::fromString(YAML::Dump(malformed)); reader->deserialize();
+				restored->deserialize(*reader, work);
+			}
+			catch (core::SerializationException const&) { refused = true; }
+			require(refused && save(*restored) == unchanged, "Malformed destination mutated target World");
+		}
+
+		// Deleting a landing Location also removes its Stop and remaps retained requirements.
+		restored->pauseSimulation();
+		require(restored->setLiftDestinationPermissionRequirement(sector, 1, { red }, &diagnostic), diagnostic);
+		auto landingPlan = restored->planRemoveLocation(2);
+		require(landingPlan.valid, landingPlan.diagnostic); restored->applyLocationEdit(landingPlan);
+		require(restored->getLiftDestinationLevels(sector - 1) == std::vector<uint32_t>{ 0, 2 }
+			&& restored->getLiftDestinationPermissionRequirement(sector - 1, 1) == expected
+			&& restored->getAccessPermissionUsage(red).liftDestinationRequirements == 1,
+			"Landing deletion lost retained requirements or retained a deleted Stop requirement");
+		require(load(save(*restored))->getLiftDestinationPermissionRequirement(sector - 1, 1) == expected,
+			"Landing deletion produced malformed destination data");
+
+		// Unrelated deletion reindexes Sectors without changing destination identity.
+		auto locationPlan = world->planRemoveLocation(unrelated);
+		require(locationPlan.valid, locationPlan.diagnostic); world->applyLocationEdit(locationPlan);
+		--sector;
+		require(world->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Sector reindexing lost requirements");
+		// Removing a restricted earlier Stop reindexes the retained destination; recreation is unrestricted.
+		require(world->setLiftDestinationPermissionRequirement(sector, 1, { red }, &diagnostic), diagnostic);
+		auto plan = world->planRemoveLiftStop(sector, 1);
+		require(plan.valid, plan.diagnostic); world->applyLiftEdit(plan);
+		require(world->getLiftDestinationLevels(sector) == std::vector<uint32_t>{ 0, 2 }
+			&& world->getLiftDestinationPermissionRequirement(sector, 1) == expected, "Retained Stop lost requirement after reindexing");
+		plan = world->planResizeLift(sector, 8, 0, 2, 3);
+		require(plan.valid, plan.diagnostic); world->applyLiftEdit(plan);
+		require(world->getLiftDestinationLevels(sector) == std::vector<uint32_t>{ 0, 1, 2 }
+			&& world->getLiftDestinationPermissionRequirement(sector, 1).empty()
+			&& world->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Recreated Stop inherited a requirement");
+		require(world->deleteAccessPermission(red, &diagnostic), diagnostic);
+		require(world->getLiftDestinationPermissionRequirement(sector, 2) == std::vector<core::AccessPermissionId>{ blue }, "Deletion left destination reference");
+		plan = world->planRemoveLift(sector); require(plan.valid, plan.diagnostic); world->applyLiftEdit(plan);
+		require(world->getAccessPermissionUsage(blue).liftDestinationRequirements == 0, "Deleted transport retained usage");
+		lift = world->addLift(1, 0, 8, options); world->finishBuild(); world->pauseSimulation();
+		require(world->getLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 2).empty(), "Recreated Lift inherited requirements");
+		gWorldDocumentHistory.clear();
+	}
+
 	void runtimePropertiesPanelChangesCurrentAuthorizationOnly()
 	{
 		auto world = std::make_shared<core::World>("runtime properties panel", 2, 1);
@@ -695,6 +830,7 @@ namespace
 		ImGui::CreateContext();
 		auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(800, 600);
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		io.IniFilename = nullptr;
 		ImGui::NewFrame(); ImGui::Begin("Runtime properties test");
 		ImGui::SetNextItemOpen(true);
 		renderAgentRuntimeProperties(world, agent);
@@ -741,6 +877,7 @@ namespace
 		ImGui::CreateContext();
 		auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(800, 600);
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		io.IniFilename = nullptr;
 		ImGui::NewFrame(); ImGui::Begin("Permissions test");
 		renderPermissionsPanel(world);
 		renderAgentAccessPermissions(world, agent);
@@ -761,6 +898,7 @@ void runAccessPermissionSmokeChecks()
 	malformedAuthorizationIsTransactional();
 	extensibleControlRequirementsPersistIndependently();
 	transportLandingRequirementsPersist();
+	liftDestinationAuthoring();
 	runtimePropertiesPanelChangesCurrentAuthorizationOnly();
 	panelCommitParticipatesInHistory();
 }

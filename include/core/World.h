@@ -858,12 +858,15 @@ namespace core
 			std::array<std::vector<uint32_t>, 2> controlPermissionRequirements{};
 			// Lift/Platform lift: stop order. Shuttle: fixed stop/carriage/door grid.
 			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
+			// Ordinary Lift destination requirements, parallel to values (Stops).
+			std::vector<std::vector<uint32_t>> destinationPermissionRequirements{};
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
 		};
 
+		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex) const;
 		std::vector<ConstructionRecord> mConstructionRecords;
 		bool mDeserializingConstruction{ false };
 
@@ -2316,6 +2319,7 @@ namespace core
 			uint32_t permissionSetMemberships{ 0 };
 			uint32_t interactionPointRequirements{ 0 };
 			uint32_t manualDoorRequirements{ 0 };
+			uint32_t liftDestinationRequirements{ 0 };
 		};
 
 		uint32_t getAccessPermissionCount() const;
@@ -2375,6 +2379,13 @@ namespace core
 			bool assigned, std::string* diagnostic = nullptr);
 
 		bool isInteractionPointPermissionEligible(InteractionPointId point) const;
+		// Authoring only: destination requirements are not yet enforced.
+		std::vector<uint32_t> getLiftDestinationLevels(uint32_t sectorIndex) const;
+		std::vector<AccessPermissionId> getLiftDestinationPermissionRequirement(
+			uint32_t sectorIndex, uint32_t stopIndex) const;
+		bool setLiftDestinationPermissionRequirement(uint32_t sectorIndex, uint32_t stopIndex,
+			std::vector<AccessPermissionId> const& permissions, std::string* diagnostic = nullptr);
+
 		bool setInteractionPointPermissionRequirement(InteractionPointId point,
 			std::vector<AccessPermissionId> const& permissions,
 			std::string* diagnostic = nullptr);

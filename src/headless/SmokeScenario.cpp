@@ -6291,6 +6291,12 @@ int main(int argc, char** argv)
 			std::cout << "PASS: versioned Agent behaviours\n";
 			return 0;
 		}
+		if (argc > 1 && std::string(argv[1]) == "--access-permission-checks")
+		{
+			runAccessPermissionSmokeChecks();
+			std::cout << "Access permission checks: PASS\n";
+			return 0;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--route-planning-checks")
 		{
 			runRoutePlanningSmokeChecks();

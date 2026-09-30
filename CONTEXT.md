@@ -299,12 +299,16 @@ The authority that owns admission, queueing, capacity, reservations, and permits
 _Avoid_: Traversal controller, device controller
 
 **Access permission**:
-A named, World-owned authorization that may be required to operate a protected Interaction point or manually open an ordinary Door. It retains its identity when renamed; deleting it removes it from every requirement, Permission set, and Agent. An Agent may receive an Access permission directly or through an assigned Permission set.
+A named, World-owned authorization that may be required to operate a protected Interaction point, manually open an ordinary Door, select a Lift destination, or enter a protected Location. It retains its identity when renamed; deleting it removes it from every requirement, Permission set, and Agent. An Agent may receive an Access permission directly or through an assigned Permission set.
 _Avoid_: Traversal permit, which authorizes one specific transition at runtime
 
 **Permission requirement**:
 The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation. Adding a requirement that an Agent on an affected Path does not satisfy requires Route planning; failure to find a replacement Path produces Route loss.
 _Avoid_: Permission set, which grants Access permissions to an Agent
+
+**Lift destination permission requirement**:
+The World-owned set of Access permissions required to select one destination Stop of an ordinary Lift, shared by every car and boarding origin. Every member is required, using direct and Permission set grants; an empty requirement is unrestricted, and this operation requirement is distinct from permission to pass through an already usable resource.
+_Avoid_: Landing control requirement, which protects calling the Lift rather than selecting its destination
 
 **Location permission requirement**:
 The set of Access permissions an Agent must hold to enter or use the vertices of a Room or Corridor; every member is required and an empty requirement allows every Agent. It does not apply to Facades and never prevents an Agent from leaving a Location it already occupies.

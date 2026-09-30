@@ -39,4 +39,8 @@ void renderInteractionPermissionRequirements(std::shared_ptr<core::World> const&
 	core::InteractionPointId point);
 void renderManualDoorPermissionRequirements(std::shared_ptr<core::World> const& world,
 	core::TraversalResourceId door);
+bool commitLiftDestinationPermissionRequirement(std::shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, uint32_t stopIndex, core::AccessPermissionId permission, bool required,
+	std::string& diagnostic);
+void renderLiftDestinationPermissions(std::shared_ptr<core::World> const& world, uint32_t sectorIndex);
 void resetPermissionsPanelState();

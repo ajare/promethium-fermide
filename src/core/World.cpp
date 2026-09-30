@@ -9830,6 +9830,66 @@ namespace core
 		return true;
 	}
 
+	World::ConstructionRecord const* World::findLiftDestinationRecord(uint32_t sectorIndex) const
+	{
+		uint32_t index = 0;
+		for (auto const& record : mConstructionRecords)
+		{
+			if (!constructionTypeCreatesSector(record.type)) continue;
+			if (index++ == sectorIndex)
+				return record.type == ConstructionType::Lift ? &record : nullptr;
+		}
+		return nullptr;
+	}
+
+	vector<uint32_t> World::getLiftDestinationLevels(uint32_t sectorIndex) const
+	{
+		auto record = findLiftDestinationRecord(sectorIndex);
+		if (!record) throw invalid_argument("Unknown ordinary Lift");
+		auto levels = record->values;
+		for (auto& level : levels) level += record->a;
+		return levels;
+	}
+
+	vector<AccessPermissionId> World::getLiftDestinationPermissionRequirement(
+		uint32_t sectorIndex, uint32_t stopIndex) const
+	{
+		auto record = findLiftDestinationRecord(sectorIndex);
+		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown Lift destination Stop");
+		vector<AccessPermissionId> result;
+		if (stopIndex < record->destinationPermissionRequirements.size())
+			for (auto id : record->destinationPermissionRequirements[stopIndex]) result.push_back(AccessPermissionId{ id });
+		return result;
+	}
+
+	bool World::setLiftDestinationPermissionRequirement(uint32_t sectorIndex, uint32_t stopIndex,
+		vector<AccessPermissionId> const& permissions, string* diagnostic)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Destination permissions can only be edited while the simulation is paused");
+		auto record = findLiftDestinationRecord(sectorIndex);
+		if (!record || stopIndex >= record->values.size()) return reject("Unknown Lift destination Stop");
+		vector<uint32_t> next;
+		for (auto id : permissions)
+		{
+			auto found = lookupAccessPermission(id);
+			if (!found) return reject(found.diagnostic);
+			if (find(next.begin(), next.end(), id.value) != next.end()) return reject("Duplicate Access permission");
+			next.push_back(static_cast<uint32_t>(id.value));
+		}
+		sort(next.begin(), next.end());
+		auto& requirements = mConstructionRecords[record - mConstructionRecords.data()].destinationPermissionRequirements;
+		if (requirements.empty() && next.empty()) { if (diagnostic) diagnostic->clear(); return true; }
+		if (requirements.empty()) requirements.resize(record->values.size());
+		if (requirements[stopIndex] != next)
+		{
+			requirements[stopIndex] = std::move(next);
+			modify();
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	World::AccessPermissionUsage World::getAccessPermissionUsage(AccessPermissionId id) const
 	{
 		if (!lookupAccessPermission(id)) throw invalid_argument("Unknown Access permission");
@@ -9847,6 +9907,10 @@ namespace core
 			if (resource->mDoor && resource->mDoor->mPermissionRequirement.test(bit))
 				++usage.manualDoorRequirements;
 		}
+		for (auto const& record : mConstructionRecords)
+			for (auto const& requirement : record.destinationPermissionRequirements)
+				if (find(requirement.begin(), requirement.end(), id.value) != requirement.end())
+					++usage.liftDestinationRequirements;
 		return usage;
 	}
 
@@ -9883,6 +9947,9 @@ namespace core
 				requirement.erase(remove(requirement.begin(), requirement.end(), id.value),
 					requirement.end());
 			for (auto& requirement : record.landingControlPermissionRequirements)
+				requirement.erase(remove(requirement.begin(), requirement.end(), id.value),
+					requirement.end());
+			for (auto& requirement : record.destinationPermissionRequirements)
 				requirement.erase(remove(requirement.begin(), requirement.end(), id.value),
 					requirement.end());
 		}

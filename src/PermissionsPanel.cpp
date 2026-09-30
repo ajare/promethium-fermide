@@ -132,6 +132,63 @@ bool commitManualDoorPermissionRequirement(shared_ptr<core::World> const& world,
 	});
 }
 
+bool commitLiftDestinationPermissionRequirement(shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, uint32_t stopIndex, core::AccessPermissionId permission, bool required,
+	string& diagnostic)
+{
+	return commit(world, diagnostic, [&]
+	{
+		auto values = world->getLiftDestinationPermissionRequirement(sectorIndex, stopIndex);
+		auto found = find(values.begin(), values.end(), permission);
+		if (required && found == values.end()) values.push_back(permission);
+		else if (!required && found != values.end()) values.erase(found);
+		else return false;
+		return world->setLiftDestinationPermissionRequirement(sectorIndex, stopIndex, values, &diagnostic);
+	});
+}
+
+void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint32_t sectorIndex)
+{
+	if (!world) return;
+	ImGui::TextUnformatted("Destination permissions");
+	ImGui::TextWrapped("Authoring only - destination permissions are NOT YET ENFORCED.");
+	ImGui::TextWrapped("All listed Access permissions will be required, from direct or Permission set grants.");
+	auto levels = world->getLiftDestinationLevels(sectorIndex);
+	if (!ImGui::BeginTable("Destination permissions", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
+	ImGui::TableSetupColumn("Level"); ImGui::TableSetupColumn("Permissions"); ImGui::TableSetupColumn("Required (all)");
+	ImGui::TableHeadersRow();
+	for (uint32_t stop = 0; stop < levels.size(); ++stop)
+	{
+		ImGui::PushID(static_cast<int>(stop));
+		auto required = asSet(world->getLiftDestinationPermissionRequirement(sectorIndex, stop));
+		string summary;
+		for (auto id : required)
+		{
+			if (!summary.empty()) summary += ", ";
+			summary += world->getAccessPermissionName(id);
+		}
+		if (summary.empty()) summary = "None";
+		ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::Text("%u", levels[stop]);
+		ImGui::TableNextColumn();
+		ImGui::BeginDisabled(!world->isSimulationPaused());
+		if (ImGui::BeginCombo("##permissions", summary.c_str()))
+		{
+			for (auto id : world->getAccessPermissionIds())
+				if (ImGui::Selectable(world->getAccessPermissionName(id).c_str(), required.contains(id), ImGuiSelectableFlags_DontClosePopups))
+				{
+					string diagnostic;
+					commitLiftDestinationPermissionRequirement(world, sectorIndex, stop, id, !required.contains(id), diagnostic);
+				}
+			if (!world->getAccessPermissionCount()) ImGui::TextDisabled("No Access permissions defined");
+			ImGui::EndCombo();
+		}
+		ImGui::EndDisabled();
+		ImGui::TableNextColumn(); ImGui::TextWrapped("%s", summary.c_str());
+		ImGui::PopID();
+	}
+	ImGui::EndTable();
+}
+
 void resetPermissionsPanelState()
 {
 	newName.fill(0); editedNames.clear(); pendingDelete = {};
@@ -149,7 +206,7 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 3.0f);
 		ImGui::TableSetupColumn("Direct grants", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 		ImGui::TableSetupColumn("Permission sets", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-		ImGui::TableSetupColumn("Controls / Doors", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn("Controls / Doors / Destinations", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 		ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthStretch, 1.0f); ImGui::TableHeadersRow();
 		for (auto id : world->getAccessPermissionIds())
 		{
@@ -170,8 +227,8 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 			auto usage = world->getAccessPermissionUsage(id);
 			ImGui::TableNextColumn(); ImGui::Text("%u", usage.directAgentGrants);
 			ImGui::TableNextColumn(); ImGui::Text("%u", usage.permissionSetMemberships);
-			ImGui::TableNextColumn(); ImGui::Text("%u / %u", usage.interactionPointRequirements,
-				usage.manualDoorRequirements);
+			ImGui::TableNextColumn(); ImGui::Text("%u / %u / %u", usage.interactionPointRequirements,
+				usage.manualDoorRequirements, usage.liftDestinationRequirements);
 			ImGui::TableNextColumn(); if (ImGui::Button("Delete")) pendingDelete = id;
 			ImGui::PopID();
 		}
@@ -189,9 +246,9 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		{
 			auto usage = world->getAccessPermissionUsage(pendingDelete);
 			ImGui::Text("Delete '%s'?", world->getAccessPermissionName(pendingDelete).c_str());
-			ImGui::Text("This clears %u direct Agent grants, membership in %u Permission sets, %u Interaction point requirements, and %u manual Door requirements.",
+			ImGui::Text("This clears %u direct Agent grants, membership in %u Permission sets, %u Interaction point requirements, %u manual Door requirements, and %u Lift destination requirements.",
 				usage.directAgentGrants, usage.permissionSetMemberships,
-				usage.interactionPointRequirements, usage.manualDoorRequirements);
+				usage.interactionPointRequirements, usage.manualDoorRequirements, usage.liftDestinationRequirements);
 			if (ImGui::Button("Delete")) { string diagnostic; auto deleted = pendingDelete; commitAccessPermissionDelete(world, pendingDelete, diagnostic); editedNames.erase(deleted.value); pendingDelete = {}; ImGui::CloseCurrentPopup(); }
 			ImGui::SameLine(); if (ImGui::Button("Cancel")) { pendingDelete = {}; ImGui::CloseCurrentPopup(); }
 			ImGui::EndPopup();

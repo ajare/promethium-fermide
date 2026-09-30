@@ -538,6 +538,7 @@ if(BUILD_TESTING)
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
     add_test(NAME agent-behaviours COMMAND prometheum-fermide-headless --agent-behaviour-checks)
+    add_test(NAME access-permissions COMMAND prometheum-fermide-headless --access-permission-checks)
     add_test(NAME route-planning COMMAND prometheum-fermide-headless --route-planning-checks)
     add_test(NAME route-planning-time-properties COMMAND prometheum-fermide-headless
         --route-planning-time-checks)
