@@ -190,6 +190,8 @@ namespace core
 			// (OpenApart for a Lift).  The Lift's topology stays fixed; only the
 			// authored style varies per stop.
 			std::vector<uint32_t> stopDoorOpenStyles{};
+			// Per-stop landing call requirements, parallel to stopOffsets.
+			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
 		};
 
 		struct CreateLiftResult
@@ -228,6 +230,8 @@ namespace core
 			// Shuttle).  The Shuttle's topology stays fixed; only the authored
 			// style varies per Door.
 			std::vector<uint32_t> doorOpenStyles{};
+			// Per physical landing control, using the same fixed grid as doorOpenStyles.
+			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
 		};
 
 		struct CreateShuttleResult
@@ -490,6 +494,12 @@ namespace core
 		std::array<std::unique_ptr<AccessPermission>, AccessPermission::Capacity> mAccessPermissions{};
 		EntityRegistry<PermissionSetId, PermissionSet> mPermissionSets;
 		std::map<InteractionPointId, std::bitset<256>> mPendingPermissionRequirements;
+		struct AuthoredControlRequirement
+		{
+			size_t constructionRecord{ 0 };
+			size_t slot{ 0 };
+		};
+		std::map<InteractionPointId, AuthoredControlRequirement> mAuthoredControlRequirements;
 
 		// Marker identity is carried by the authored Marker itself. The high-water
 		// mark remains after deletion, so an identity is never issued twice.
@@ -806,6 +816,8 @@ namespace core
 			// two authored approach sides. Unlike Interaction point IDs, these stay
 			// associated with their side when a structural edit rebuilds the World.
 			std::array<std::vector<uint32_t>, 2> controlPermissionRequirements{};
+			// Lift/Platform lift: stop order. Shuttle: fixed stop/carriage/door grid.
+			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
@@ -2311,6 +2323,10 @@ namespace core
 			AgentId agent) const;
 		bool canAgentOperateExtensibleControl(TraversalResourceId resource,
 			SectorId approach, AgentId agent) const;
+		bool canAgentOperateTransportLandingControl(TraversalResourceId resource,
+			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
+		bool isTransportLocallyBoardable(TraversalResourceId resource,
+			Vector2 const& endpoint) const;
 		bool canAgentTraverseManualDoorNow(TraversalResourceId door, AgentId agent) const;
 		void replanAgentAfterAuthorizationRefusal(AgentId agent);
 

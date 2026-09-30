@@ -222,6 +222,20 @@ namespace core
 			}
 			throw SerializationException("Cannot serialize an unknown Door opening style");
 		};
+		auto writeLandingRequirements = [&](char const* field)
+		{
+			if (record.landingControlPermissionRequirements.empty()) return;
+			serializer.beginArray(field);
+			for (auto const& requirement : record.landingControlPermissionRequirements)
+			{
+				serializer.beginMap("");
+				serializer.beginArray("permissions");
+				for (auto permission : requirement) serializer.writeUint64("", permission);
+				serializer.endArray();
+				serializer.endMap();
+			}
+			serializer.endArray();
+		};
 		auto writeStopDoorOpenStyles = [&](char const* field)
 		{
 			// Only overrides that differ from the generated default are persisted,
@@ -282,7 +296,8 @@ namespace core
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
 			serializer.writeUint32("cellsWide", record.c); serializer.writeUint32("levelsHigh", record.e);
-			writeStops(); writeStopDoorOpenStyles("stopDoorOpenStyles"); serializer.writeUint32("capacity", record.d);
+			writeStops(); writeStopDoorOpenStyles("stopDoorOpenStyles");
+			writeLandingRequirements("landingControlPermissionRequirements"); serializer.writeUint32("capacity", record.d);
 			serializer.writeFloat("minimumDwellSeconds", record.x);
 			serializer.writeFloat("maximumBoardingSeconds", record.y);
 			serializer.writeUint32("initialStop", record.g); break;
@@ -292,6 +307,7 @@ namespace core
 			serializer.writeUint32("cellsWide", record.c); serializer.writeUint32("numCars", record.d);
 			serializer.writeUint32("carWidth", record.e); writeStops();
 			writeStopDoorOpenStyles("doorOpenStyles");
+			writeLandingRequirements("landingControlPermissionRequirements");
 			serializer.writeUint32("initialStop", record.f); serializer.writeUint32("capacityPerCarriage", record.g);
 			serializer.writeUint32("doorMask", record.h ? record.h : (1u << 1));
 			serializer.writeFloat("minimumDwellSeconds", record.x);
@@ -394,7 +410,8 @@ namespace core
 		case ConstructionType::PlatformLift:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); serializer.writeUint32("cellsWide", record.d);
-			writeStops(); serializer.writeUint32("capacity", record.e);
+			writeStops(); writeLandingRequirements("landingControlPermissionRequirements");
+			serializer.writeUint32("capacity", record.e);
 			serializer.writeFloat("stopDurationSeconds", record.z); break;
 		case ConstructionType::Walkway:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
@@ -434,6 +451,7 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
+		// Version 28 gives transport landing controls stable per-landing requirements.
 		// Version 27 gives extensible Ladder and Force Bridge controls stable requirements.
 		// Version 26 adds Permission sets and Agent assignments. Version 25 gives
 		// ordinary and Bulkhead Door controls stable side-specific permission requirements. Version 24 adds buttonless manual ordinary Door permission requirements.
@@ -463,7 +481,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 27);
+		serializer.writeUint32("version", 28);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -706,6 +724,23 @@ namespace core
 			while (serializer.nextArrayItem()) record.values.push_back(serializer.readUint32());
 			serializer.endArray();
 		};
+		auto readLandingRequirements = [&](char const* field)
+		{
+			if (version < 28 || !serializer.hasField(field)) return;
+			serializer.beginArray(field);
+			while (serializer.nextArrayItem())
+			{
+				record.landingControlPermissionRequirements.emplace_back();
+				serializer.beginMap("");
+				serializer.beginArray("permissions");
+				while (serializer.nextArrayItem())
+					record.landingControlPermissionRequirements.back().push_back(
+						serializer.readUint32(""));
+				serializer.endArray();
+				serializer.endMap();
+			}
+			serializer.endArray();
+		};
 		auto readStopDoorOpenStyles = [&](char const* field, char const* ownerLabel)
 		{
 			// A transport record written before per-Door styles existed simply has
@@ -782,7 +817,8 @@ namespace core
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("cellsWide"); record.e = readRenamedUint32("levelsHigh", "decksHigh");
-			readStops(); readStopDoorOpenStyles("stopDoorOpenStyles", "Lift stop"); record.d = serializer.readUint32("capacity");
+			readStops(); readStopDoorOpenStyles("stopDoorOpenStyles", "Lift stop");
+			readLandingRequirements("landingControlPermissionRequirements"); record.d = serializer.readUint32("capacity");
 			record.x = serializer.readFloat("minimumDwellSeconds");
 			record.y = serializer.readFloat("maximumBoardingSeconds");
 			record.g = serializer.readUint32("initialStop"); break;
@@ -792,6 +828,7 @@ namespace core
 			record.c = serializer.readUint32("cellsWide"); record.d = serializer.readUint32("numCars");
 			record.e = serializer.readUint32("carWidth"); readStops();
 			readStopDoorOpenStyles("doorOpenStyles", "Shuttle");
+			readLandingRequirements("landingControlPermissionRequirements");
 			record.f = serializer.readUint32("initialStop"); record.g = serializer.readUint32("capacityPerCarriage");
 			record.h = serializer.readUint32("doorMask", true, 1u << 1);
 			record.x = serializer.readFloat("minimumDwellSeconds");
@@ -891,7 +928,8 @@ namespace core
 		case ConstructionType::PlatformLift:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("cellsWide");
-			readStops(); record.e = serializer.readUint32("capacity");
+			readStops(); readLandingRequirements("landingControlPermissionRequirements");
+			record.e = serializer.readUint32("capacity");
 			// Legacy timing fields remain accepted for old maps, but PlatformLift now
 			// has one independent per-stop duration.
 			record.x = serializer.readFloat("minimumDwellSeconds", true, CORE_LIFT_DOOR_PAUSE_TIME);
@@ -971,8 +1009,9 @@ namespace core
 		// adds Route familiarity, version 22 adds Route persistence, version 23
 		// adds Access permissions, version 24 adds manual Door requirements, and
 		// version 25 adds side-specific ordinary and Bulkhead Door controls, and
-		// version 26 adds Permission sets; version 27 stabilizes extensible controls.
-		if (version < 1 || version > 27)
+		// version 26 adds Permission sets; version 27 stabilizes extensible controls;
+		// version 28 stabilizes transport landing controls.
+		if (version < 1 || version > 28)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1339,6 +1378,23 @@ namespace core
 					if (seen.test(id - 1))
 						throw SerializationException("Serialized Door permission requirement contains a duplicate");
 					seen.set(id - 1);
+				}
+			}
+			if (record.type == ConstructionType::Lift
+				|| record.type == ConstructionType::Shuttle
+				|| record.type == ConstructionType::PlatformLift)
+			{
+				for (auto const& requirement : record.landingControlPermissionRequirements)
+				{
+					bitset<256> seen;
+					for (auto id : requirement)
+					{
+						if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
+							throw SerializationException("Serialized transport landing requirement is dangling");
+						if (seen.test(id - 1))
+							throw SerializationException("Serialized transport landing requirement contains a duplicate");
+						seen.set(id - 1);
+					}
 				}
 			}
 			if (record.type != ConstructionType::Door
@@ -1950,7 +2006,8 @@ namespace core
 				authoredResourceControls.insert(resource->mControls.begin(), resource->mControls.end());
 			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
-				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id))
+				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id)
+					&& !mAuthoredControlRequirements.contains(id))
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
@@ -1958,6 +2015,7 @@ namespace core
 			mAccessPermissions = {};
 			mPermissionSets = {};
 		}
+		mAuthoredControlRequirements.clear();
 		mInteractionPoints = {};
 		mInteractionRequests = {};
 		mDeviceOperations = {};
@@ -2053,15 +2111,31 @@ namespace core
 			addStaircase(transitLayer(record), record.a, record.b, { record.c, record.i, record.x });
 			break;
 		case ConstructionType::Lift:
-			addLift(transitLayer(record), record.a, record.b,
-				{ record.c, record.values, record.d, record.x, record.y, record.g, record.e,
-					CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides });
+		{
+			CreateLiftOptions options{ record.c, record.values, record.d, record.x, record.y,
+				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides };
+			for (auto const& requirement : record.landingControlPermissionRequirements)
+			{
+				options.landingControlPermissionRequirements.emplace_back();
+				for (auto permission : requirement)
+					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
+			}
+			addLift(transitLayer(record), record.a, record.b, options);
 			break;
+		}
 		case ConstructionType::Shuttle:
-			addShuttle(transitLayer(record), record.a, record.b, record.c,
-				{ record.d, record.e, record.values, record.f, record.g, record.x, record.y,
-					record.p, record.h ? record.h : (1u << 1), record.overrides });
+		{
+			CreateShuttleOptions options{ record.d, record.e, record.values, record.f,
+				record.g, record.x, record.y, record.p, record.h ? record.h : (1u << 1), record.overrides };
+			for (auto const& requirement : record.landingControlPermissionRequirements)
+			{
+				options.landingControlPermissionRequirements.emplace_back();
+				for (auto permission : requirement)
+					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
+			}
+			addShuttle(transitLayer(record), record.a, record.b, record.c, options);
 			break;
+		}
 		case ConstructionType::Door:
 		{
 			auto created = addSectorDoor(doorLayer(record), record.a, record.b,
@@ -2121,9 +2195,18 @@ namespace core
 		}
 			break;
 		case ConstructionType::PlatformLift:
-			addSectorPlatformLift(record.a, record.b, record.c,
-				{ record.d, record.values, record.e, record.x, record.y, 0, 0, record.z });
+		{
+			CreateLiftOptions options{ record.d, record.values, record.e, record.x,
+				record.y, 0, 0, record.z };
+			for (auto const& requirement : record.landingControlPermissionRequirements)
+			{
+				options.landingControlPermissionRequirements.emplace_back();
+				for (auto permission : requirement)
+					options.landingControlPermissionRequirements.back().push_back(AccessPermissionId{ permission });
+			}
+			addSectorPlatformLift(record.a, record.b, record.c, options);
 			break;
+		}
 		case ConstructionType::Walkway:
 			addSectorWalkway(record.a, record.b, record.c);
 			break;
@@ -5572,6 +5655,13 @@ namespace core
 		options.minimumDwellSeconds = found->x;
 		options.maximumBoardingSeconds = found->y;
 		options.platformStopDurationSeconds = found->z;
+		for (auto const& requirement : found->landingControlPermissionRequirements)
+		{
+			options.landingControlPermissionRequirements.emplace_back();
+			for (auto permission : requirement)
+				options.landingControlPermissionRequirements.back().push_back(
+					AccessPermissionId{ permission });
+		}
 		return true;
 	}
 
@@ -5612,6 +5702,14 @@ namespace core
 			found->values = plan.options.stopOffsets;
 			sort(found->values.begin(), found->values.end());
 			found->values.erase(unique(found->values.begin(), found->values.end()), found->values.end());
+			found->landingControlPermissionRequirements.clear();
+			for (auto const& requirement : plan.options.landingControlPermissionRequirements)
+			{
+				found->landingControlPermissionRequirements.emplace_back();
+				for (auto permission : requirement)
+					found->landingControlPermissionRequirements.back().push_back(
+						static_cast<uint32_t>(permission.value));
+			}
 		}
 		try
 		{

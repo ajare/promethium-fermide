@@ -137,6 +137,15 @@ namespace core
 				&& context.agent->getSector() && result.observed
 				&& std::abs(context.agent->getGlobalPosition().y - source->getPosition().y) <= 0.5f)
 				result.lift = context.agent->observeLiftAccess(edge.getTraversalResourceId(), source->getPosition());
+			auto const routeAgent = context.world && context.agent
+				? context.world->getAgentId(context.agent) : AgentId{};
+			if (result.type == EdgeType::LiftMount && lift->isOpenPlatformLift()
+				&& result.boarding && routeAgent
+				&& !(result.observed && context.world->isTransportLocallyBoardable(
+					edge.getTraversalResourceId(), source->getPosition()))
+				&& !context.world->canAgentOperateTransportLandingControl(
+					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
+				result.exclusion = RouteExclusionReason::Permission;
 			break;
 		}
 		case EdgeType::ShuttleMount:
@@ -187,6 +196,14 @@ namespace core
 				&& !result.open && context.world && context.agent
 				&& !context.world->canAgentOperateDoorControl(door.getTraversalResourceId(),
 					sourceSector, context.world->getAgentId(context.agent)))
+				result.exclusion = RouteExclusionReason::Permission;
+			auto const routeAgent = context.world && context.agent
+				? context.world->getAgentId(context.agent) : AgentId{};
+			if (result.boarding && (result.lift || result.shuttle) && routeAgent
+				&& !(result.observed && context.world->isTransportLocallyBoardable(
+					edge.getTraversalResourceId(), source->getPosition()))
+				&& !context.world->canAgentOperateTransportLandingControl(
+					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
 			if (door.getActivationMode() == DoorActivationMode::Manual) result.activation = 1;
 			else if (door.getActivationMode() == DoorActivationMode::RemoteControlled) result.activation = 2;

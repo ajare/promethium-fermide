@@ -496,6 +496,39 @@ namespace
 			"extensible control requirements did not persist independently");
 	}
 
+	void transportLandingRequirementsPersist()
+	{
+		core::World world("protected lift", 10, 2);
+		world.addCorridor(0, 0, 10);
+		world.addCorridor(1, 0, 10);
+		world.finishBuild(); world.pauseSimulation();
+		auto key = world.addAccessPermission("Lift key");
+		core::World::CreateLiftOptions options;
+		options.cellsWide = 2; options.stopOffsets = { 0, 1 };
+		options.landingControlPermissionRequirements = { { key }, {} };
+		auto created = world.addLift(1, 0, 8, options);
+		world.finishBuild(); world.pauseSimulation();
+		require(world.getInteractionPointPermissionRequirement(
+			created.doors[0].controls[0].interactionPoint) == std::vector<core::AccessPermissionId>{ key },
+			"Lift landing requirement was not applied");
+		require(world.getInteractionPointPermissionRequirement(
+			created.doors[1].controls[0].interactionPoint).empty(),
+			"independent Lift landing inherited a sibling requirement");
+		require(!world.isInteractionPointPermissionEligible(created.interiorSelector),
+			"onboard Lift destination selector became permission-eligible");
+
+		auto restored = load(save(world));
+		require(restored->getInteractionPointPermissionRequirement(
+			created.doors[0].controls[0].interactionPoint) == std::vector<core::AccessPermissionId>{ key },
+			"Lift landing requirement did not survive save/load");
+		restored->pauseSimulation();
+		std::string diagnostic;
+		require(restored->deleteAccessPermission(key, &diagnostic), diagnostic);
+		require(restored->getInteractionPointPermissionRequirement(
+			created.doors[0].controls[0].interactionPoint).empty(),
+			"Access permission deletion left a Lift landing requirement");
+	}
+
 	void panelCommitParticipatesInHistory()
 	{
 		auto world = std::make_shared<core::World>("panel", 2, 1);
@@ -540,5 +573,6 @@ void runAccessPermissionSmokeChecks()
 	controlledDoorAuthorization();
 	malformedAuthorizationIsTransactional();
 	extensibleControlRequirementsPersistIndependently();
+	transportLandingRequirementsPersist();
 	panelCommitParticipatesInHistory();
 }

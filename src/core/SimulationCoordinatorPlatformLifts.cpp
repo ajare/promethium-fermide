@@ -124,7 +124,11 @@ namespace core
 				++resource.mRouteQueueEpoch;
 				resource.mLiftTripIntents[request->mOwner] = { origin, destination, mWorld.mSimulationTick };
 			}
-			if (!request->mPreparationRequested)
+			auto const opportunisticBoarding = mWorld.isTransportLocallyBoardable(
+				request->mResource, request->mSourceEndpoint)
+				&& !mWorld.canAgentOperateTransportLandingControl(request->mResource,
+					request->mSourceSector, request->mSourceEndpoint, request->mOwner);
+			if (!request->mPreparationRequested && !opportunisticBoarding)
 			{
 				auto control = resource.mLiftStops[origin].callControl;
 				if (!control) { denyTraversalRequest(requestId, TraversalFailureReason::NoReachableControl); return; }
@@ -137,9 +141,10 @@ namespace core
 				return;
 			}
 			auto operation = mWorld.mDeviceOperations.find(request->mPreparationOperation);
-			if (!operation || operation->mState == DeviceOperationState::Pending
-				|| operation->mState == DeviceOperationState::Running) return;
-			if (operation->mState != DeviceOperationState::Succeeded)
+			if (request->mPreparationRequested && (!operation
+				|| operation->mState == DeviceOperationState::Pending
+				|| operation->mState == DeviceOperationState::Running)) return;
+			if (request->mPreparationRequested && operation->mState != DeviceOperationState::Succeeded)
 			{ denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed); return; }
 
 			// Calling the platform establishes logical priority; after the physical

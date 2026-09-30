@@ -2510,6 +2510,17 @@ namespace core
 		{
 			throw WorldException(this, format("{} - Lift timing requires finite values with 0 <= minimum dwell <= maximum boarding time.", caller));
 		}
+		if (!options.landingControlPermissionRequirements.empty()
+			&& options.landingControlPermissionRequirements.size() != options.stopOffsets.size())
+			throw WorldException(this, format("{} - Lift landing requirements must be parallel to its stops.", caller));
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			set<AccessPermissionId> seen;
+			for (auto permission : requirement)
+				if (!permission || !seen.insert(permission).second
+					|| (!mDeserializingConstruction && !lookupAccessPermission(permission)))
+					throw WorldException(this, format("{} - Invalid or duplicate Lift landing Access permission requirement.", caller));
+		}
 	}
 
 	void World::validateShuttleOptions(string const& caller, CreateShuttleOptions const& options) const
@@ -2543,6 +2554,19 @@ namespace core
 			|| !isFiniteTiming(options.maximumBoardingSeconds)
 			|| options.maximumBoardingSeconds < options.minimumDwellSeconds)
 			throw WorldException(this, format("{} - Shuttle timing requires finite values with 0 <= minimum dwell <= maximum boarding time.", caller));
+		auto const landingSlots = options.stopOffsets.size() * options.numCars
+			* SimulationCoordinator::shuttleDoorOffsets(options.carWidth, options.doorMask).size();
+		if (!options.landingControlPermissionRequirements.empty()
+			&& options.landingControlPermissionRequirements.size() != landingSlots)
+			throw WorldException(this, format("{} - Shuttle landing requirements must use its fixed landing grid.", caller));
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			set<AccessPermissionId> seen;
+			for (auto permission : requirement)
+				if (!permission || !seen.insert(permission).second
+					|| (!mDeserializingConstruction && !lookupAccessPermission(permission)))
+					throw WorldException(this, format("{} - Invalid or duplicate Shuttle landing Access permission requirement.", caller));
+		}
 	}
 
 	shared_ptr<const Layer> World::getLayer(uint32_t layerIndex) const
@@ -4261,6 +4285,10 @@ namespace core
 			auto point = createPhysicalControlInteractionPoint("Lift landing call", control,
 				(float)(y + options.stopOffsets[i]), 0.15f, getFixedTimestep(),
 				{ { call, InteractionBindingRequirement::Required } });
+			if (i < options.landingControlPermissionRequirements.size())
+				for (auto permission : options.landingControlPermissionRequirements[i])
+					mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
+			mAuthoredControlRequirements[point] = { mConstructionRecords.size(), i };
 			landing->mControls.push_back(point);
 			liftResource->mLiftStops[i].callControl = point;
 
@@ -4286,6 +4314,13 @@ namespace core
 		// state: record them so save/load and later rebuilds replay them, the
 		// way the Shuttle path records its doorOpenStyles.
 		record.overrides = options.stopDoorOpenStyles;
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			record.landingControlPermissionRequirements.emplace_back();
+			for (auto permission : requirement)
+				record.landingControlPermissionRequirements.back().push_back(
+					static_cast<uint32_t>(permission.value));
+		}
 		recordConstruction(std::move(record));
 		return liftRes;
 	}
@@ -4506,6 +4541,10 @@ namespace core
 				auto point = createPhysicalControlInteractionPoint("Shuttle landing call", control,
 					(float)y, 0.15f, getFixedTimestep(),
 					{ { call, InteractionBindingRequirement::Required } });
+				if (doorIndex < options.landingControlPermissionRequirements.size())
+					for (auto permission : options.landingControlPermissionRequirements[doorIndex])
+						mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
+				mAuthoredControlRequirements[point] = { mConstructionRecords.size(), doorIndex };
 				landing->mControls.push_back(point);
 				if (!shuttleResource->mLiftStops[stop].callControl)
 					shuttleResource->mLiftStops[stop].callControl = point;
@@ -4537,6 +4576,13 @@ namespace core
 		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
 		record.values = options.stopOffsets;
 		record.overrides = options.doorOpenStyles;
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			record.landingControlPermissionRequirements.emplace_back();
+			for (auto permission : requirement)
+				record.landingControlPermissionRequirements.back().push_back(
+					static_cast<uint32_t>(permission.value));
+		}
 		recordConstruction(std::move(record));
 		return shuttleRes;
 	}
@@ -7336,6 +7382,10 @@ namespace core
 			auto callPoint = createPhysicalControlInteractionPoint("Platform lift landing call",
 				buttonResult, stops[i].globalPosition, 0.15f, getFixedTimestep(),
 				{ { call, InteractionBindingRequirement::Required } });
+			if (i < options.landingControlPermissionRequirements.size())
+				for (auto permission : options.landingControlPermissionRequirements[i])
+					mInteractionPoints.find(callPoint)->mPermissionRequirement.set(permission.value - 1);
+			mAuthoredControlRequirements[callPoint] = { mConstructionRecords.size(), i };
 			resource->mLiftStops[i].callControl = callPoint;
 
 			DeviceCommand select;
@@ -7355,6 +7405,13 @@ namespace core
 		record.d = options.cellsWide; record.e = options.capacity;
 		record.z = options.platformStopDurationSeconds;
 		record.values = options.stopOffsets;
+		for (auto const& requirement : options.landingControlPermissionRequirements)
+		{
+			record.landingControlPermissionRequirements.emplace_back();
+			for (auto permission : requirement)
+				record.landingControlPermissionRequirements.back().push_back(
+					static_cast<uint32_t>(permission.value));
+		}
 		recordConstruction(std::move(record));
 		return liftRes;
 	}
@@ -9561,6 +9618,9 @@ namespace core
 			for (auto& requirement : record.controlPermissionRequirements)
 				requirement.erase(remove(requirement.begin(), requirement.end(), id.value),
 					requirement.end());
+			for (auto& requirement : record.landingControlPermissionRequirements)
+				requirement.erase(remove(requirement.begin(), requirement.end(), id.value),
+					requirement.end());
 		}
 		mAccessPermissions[bit].reset();
 		modify();
@@ -9800,6 +9860,19 @@ namespace core
 		}
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
 		point->mPermissionRequirement = next;
+		if (auto authored = mAuthoredControlRequirements.find(id);
+			authored != mAuthoredControlRequirements.end()
+			&& authored->second.constructionRecord < mConstructionRecords.size())
+		{
+			auto& requirements = mConstructionRecords[authored->second.constructionRecord]
+				.landingControlPermissionRequirements;
+			if (requirements.size() <= authored->second.slot)
+				requirements.resize(authored->second.slot + 1);
+			auto& stored = requirements[authored->second.slot];
+			stored.clear();
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+		}
 		// Generated controls also persist the requirement against their stable
 		// authored side or endpoint. Interaction point IDs are replay-order handles
 		// and cannot safely identify a control after a structural rebuild.
@@ -9986,6 +10059,49 @@ namespace core
 		return false;
 	}
 
+	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !agent) return false;
+		if (resource->mLiftCoordinator)
+		{
+			for (auto pointId : resource->mControls)
+			{
+				auto point = mInteractionPoints.find(pointId);
+				if (point) return missingInteractionPermissions(*point, *agent).empty();
+			}
+			return false;
+		}
+		if (!resource->mLift && !resource->mShuttle) return false;
+		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
+		if (stop >= resource->mLiftStops.size()) return false;
+		auto point = mInteractionPoints.find(resource->mLiftStops[stop].callControl);
+		(void)approach;
+		return point && missingInteractionPermissions(*point, *agent).empty();
+	}
+
+	bool World::isTransportLocallyBoardable(TraversalResourceId resourceId,
+		Vector2 const& endpoint) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (!resource) return false;
+		if (resource->mLiftCoordinator)
+		{
+			auto coordinator = mTraversalResources.find(resource->mLiftCoordinator);
+			return coordinator && resource->mDoor && resource->mDoor->isOpen()
+				&& !coordinator->mLiftMoving
+				&& coordinator->mLiftCurrentStop == resource->mLiftStopIndex
+				&& coordinator->mLiftStopPhase == LiftStopPhase::Boarding;
+		}
+		if (!resource->mLift && !resource->mShuttle) return false;
+		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
+		return stop < resource->mLiftStops.size() && !resource->mLiftMoving
+			&& resource->mLiftCurrentStop == stop
+			&& resource->mLiftStopPhase == LiftStopPhase::Boarding;
+	}
+
 	bool World::canAgentTraverseManualDoorNow(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
@@ -10026,6 +10142,11 @@ namespace core
 				auto point = mInteractionPoints.find(pointId);
 				if (point && point->mPermissionRequirement.test(bit)) return true;
 			}
+			for (auto const& stop : resource.mLiftStops)
+			{
+				auto point = mInteractionPoints.find(stop.callControl);
+				if (point && point->mPermissionRequirement.test(bit)) return true;
+			}
 			return false;
 		};
 		auto edgeUsesPermission = [&](shared_ptr<const Edge> const& edge)
@@ -10033,7 +10154,9 @@ namespace core
 			if (!edge || (edge->getType() != EdgeType::Door
 				&& edge->getType() != EdgeType::BulkheadDoor
 				&& edge->getType() != EdgeType::Ladder
-				&& edge->getType() != EdgeType::ForceBridge)) return false;
+				&& edge->getType() != EdgeType::ForceBridge
+				&& edge->getType() != EdgeType::Lift
+				&& edge->getType() != EdgeType::LiftMount)) return false;
 			auto resource = mTraversalResources.find(edge->getTraversalResourceId());
 			return resource && resourceUsesPermission(*resource);
 		};

@@ -635,7 +635,11 @@ namespace core
 			++coordinator.mRouteQueueEpoch;
 			coordinator.mLiftTripIntents[request->mOwner] = { stop, desiredStop, mWorld.mSimulationTick };
 		}
-		if (!request->mPreparationRequested)
+		bool const opportunisticBoarding = mWorld.isTransportLocallyBoardable(
+			request->mResource, request->mSourceEndpoint)
+			&& !mWorld.canAgentOperateTransportLandingControl(request->mResource,
+				request->mSourceSector, request->mSourceEndpoint, request->mOwner);
+		if (!request->mPreparationRequested && !opportunisticBoarding)
 		{
 			if (edgeResource.mControls.empty())
 			{
@@ -667,9 +671,10 @@ namespace core
 			edgeResource.mPreparationOperator = {};
 			refreshQueuePositions(edgeResource);
 		}
-		if (!operation || operation->mState == DeviceOperationState::Pending
-			|| operation->mState == DeviceOperationState::Running) return;
-		if (operation->mState != DeviceOperationState::Succeeded)
+		if (request->mPreparationRequested && (!operation
+			|| operation->mState == DeviceOperationState::Pending
+			|| operation->mState == DeviceOperationState::Running)) return;
+		if (request->mPreparationRequested && operation->mState != DeviceOperationState::Succeeded)
 		{
 			denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
 			return;
