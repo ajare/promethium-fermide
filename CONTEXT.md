@@ -306,6 +306,10 @@ _Avoid_: Traversal permit, which authorizes one specific transition at runtime
 The set of Access permissions required for a protected operation. An Agent satisfies the requirement only when it has every member; an empty requirement allows every Agent. A requirement restricts operating a control, not using a resource that is already locally observed to be usable without that operation. Adding a requirement that an Agent on an affected Path does not satisfy requires Route planning; failure to find a replacement Path produces Route loss.
 _Avoid_: Permission set, which grants Access permissions to an Agent
 
+**Location permission requirement**:
+The set of Access permissions an Agent must hold to enter or use the vertices of a Room or Corridor; every member is required and an empty requirement allows every Agent. It does not apply to Facades and never prevents an Agent from leaving a Location it already occupies.
+_Avoid_: Permission requirement, which authorizes a protected operation
+
 **Permission grant**:
 An Access permission conferred directly on an Agent or through an assigned Permission set. Authored grants determine the Agent's initial grants; runtime changes made through the Agent Selection panel or an Agent behaviour affect its current grants until the simulation is reset. Losing an effective grant requires Route planning for an affected Path; gaining one uses voluntary Route planning and ordinary Route persistence.
 _Avoid_: Traversal permit, Permission requirement

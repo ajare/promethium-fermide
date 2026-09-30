@@ -10,3 +10,4 @@ Access permission requirements belong to Agent-operated Interaction points, with
 - Lift, Shuttle, and Platform lift onboard destination selectors remain ineligible for requirements; landing controls may be protected.
 - Routing excludes a journey when the Agent would need to perform an operation it cannot authorize, but may admit locally observed opportunistic use without relying on remote live state.
 - Preventing unauthorized passage through an already usable resource would require a separate threshold-level access rule.
+- ADR 0016 adds an independent Location permission requirement for passage into Rooms and Corridors; it does not turn control requirements into passage restrictions.
