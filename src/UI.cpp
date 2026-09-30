@@ -2287,6 +2287,8 @@ namespace
 	bool gOpenNewWorldPopup{ false };
 	bool gOpenFileErrorPopup{ false };
 	string gFileError;
+	bool gOpenWorldLoadWarningsPopup{ false };
+	vector<string> gWorldLoadWarnings;
 	char gNewWorldName[128]{ "Untitled" };
 	int gNewWorldWidth{ 48 };
 	int gNewWorldLevels{ 6 };
@@ -2529,6 +2531,7 @@ namespace
 			clearDocumentState();
 			gWorldDocumentHistory.markSaved();
 			setWorldPaused(world, true);
+			presentWorldLoadWarnings(world->getLoadWarnings());
 			core::addLogMessage("File", 0, core::LogLevel::Info,
 				"Opened World from " + gWorldFilepath);
 		}
@@ -3047,6 +3050,8 @@ namespace
 			}
 			ImGui::EndPopup();
 		}
+
+		renderWorldLoadWarningsPopup();
 
 		if (gOpenFileErrorPopup)
 		{
@@ -4155,6 +4160,43 @@ namespace
 		catch (core::Exception const& error) { reportClipboardError(error.getMessage()); }
 		catch (std::exception const& error) { reportClipboardError(error.what()); }
 	}
+}
+
+void presentWorldLoadWarnings(vector<string> warnings)
+{
+	gWorldLoadWarnings = std::move(warnings);
+	gOpenWorldLoadWarningsPopup = !gWorldLoadWarnings.empty();
+	for (auto const& warning : gWorldLoadWarnings)
+		core::addLogMessage("File", 0, core::LogLevel::Warning, warning);
+}
+
+void renderWorldLoadWarningsPopup()
+{
+	if (gOpenWorldLoadWarningsPopup)
+	{
+		ImGui::OpenPopup("World loaded with warnings");
+		gOpenWorldLoadWarningsPopup = false;
+	}
+	ImGui::SetNextWindowSize(ImVec2(640.0f, 240.0f), ImGuiCond_Appearing);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 160.0f),
+		ImVec2(800.0f, 500.0f));
+	if (!ImGui::BeginPopupModal("World loaded with warnings")) return;
+
+	ImGui::TextWrapped("The World was opened, but some saved Agent destinations could not be restored:");
+	ImGui::Spacing();
+	for (auto const& warning : gWorldLoadWarnings)
+	{
+		ImGui::Bullet();
+		ImGui::SameLine();
+		ImGui::TextWrapped("%s", warning.c_str());
+	}
+	ImGui::Spacing();
+	if (ImGui::Button("OK"))
+	{
+		gWorldLoadWarnings.clear();
+		ImGui::CloseCurrentPopup();
+	}
+	ImGui::EndPopup();
 }
 
 bool requestApplicationClose(shared_ptr<core::World>& world)

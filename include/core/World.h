@@ -761,6 +761,11 @@ namespace core
 		// reconciliation has supplied every effective routing property (#221).
 		std::map<AgentId, RestoredPathIntent> mPendingRestoredPathIntents;
 
+		// Non-fatal document-load diagnostics. These are transient editor feedback,
+		// never authored World data. An unreachable saved destination leaves its
+		// Agent idle instead of making the entire document malformed.
+		std::vector<std::string> mLoadWarnings;
+
 		Log mBuildLog;
 
 		// Authored facade operations are the persistence boundary. Replaying them
@@ -1508,6 +1513,9 @@ namespace core
 		std::shared_ptr<const Graph> getGraph() const;
 
 		Log const& getBuildLog() const;
+
+		std::vector<std::string> const& getLoadWarnings() const
+		{ return mLoadWarnings; }
 
 		// Sector types
 		// A Corridor is a Location, so it may sit on any Layer.  The Layer-less form
@@ -2456,6 +2464,10 @@ namespace core
 		EntityRemovalResult removeTraversalResource(TraversalResourceId id);
 
 		EntityLookup<TraversalRequest const> lookupTraversalRequest(TraversalRequestId id) const;
+
+		// True while the Agent owns logical membership in any simulation queue.
+		// Pending work without a Queue ticket or queue entry does not count.
+		bool isAgentInQueue(AgentId id) const;
 
 		RouteChoicePolicy const& getRouteChoicePolicy() const { return mRouteChoicePolicy; }
 		void setRouteChoicePolicy(RouteChoicePolicy policy) { mRouteChoicePolicy = policy; }

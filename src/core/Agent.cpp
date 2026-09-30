@@ -888,6 +888,11 @@ namespace core
 		return mState;
 	}
 
+	bool Agent::isInQueue() const
+	{
+		return mWorld && mWorld->isAgentInQueue(mWorld->getAgentId(this));
+	}
+
 	string Agent::getDescription() const
 	{
 		return format("Agent: {}", getName());
@@ -1532,6 +1537,13 @@ namespace core
 		for (uint32_t i = 0; i < consumed && mPath.path; ++i) nextPathNode();
 	}
 
+	void Agent::recordRouteReplanDebug(bool foundPath)
+	{
+		++mRouteReplanDebugSequence;
+		mRouteReplanDebugFoundPath = foundPath;
+		mRouteReplanDebugOccurredAt = chrono::steady_clock::now();
+	}
+
 	void Agent::considerTraversalReplan()
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
@@ -1546,6 +1558,7 @@ namespace core
 
 		auto target = mPath.path->nodes.back().targetVertex;
 		auto alternative = mWorld->getGraph()->calculatePath(this, mTraversalTask->sourceVertex, target);
+		recordRouteReplanDebug(alternative && alternative->nodes.size() >= 2);
 		if (!alternative || alternative->nodes.size() < 2) return;
 		// Re-score both complete suffixes from one immutable current observation
 		// context rather than comparing the old Path's stored decision with a new one.

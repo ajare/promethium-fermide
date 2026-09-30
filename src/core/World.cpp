@@ -8177,6 +8177,11 @@ namespace core
 		return mSimulationCoordinator.holdsTraversalOwnership(id);
 	}
 
+	bool World::isAgentInQueue(AgentId id) const
+	{
+		return mSimulationCoordinator.isAgentInQueue(id);
+	}
+
 	void World::releaseAgentFromResource(TraversalResource& resource, AgentId id)
 	{
 		invalidateSimulationSnapshot();
@@ -10252,6 +10257,7 @@ namespace core
 		auto destination = agent->mPath.path->nodes.back().targetVertex;
 		agent->cancelTraversal();
 		auto alternative = mGraph->calculatePath(agent, destination);
+		agent->recordRouteReplanDebug(alternative && !alternative->nodes.empty());
 		if (alternative && !alternative->nodes.empty())
 			agent->assignPath(std::move(alternative), true, false);
 		else
@@ -10329,6 +10335,7 @@ namespace core
 		if (!availableRouteChanged) return;
 		auto destination = agent.mPath.path->nodes.back().targetVertex;
 		auto alternative = mGraph->calculatePath(&agent, destination);
+		agent.recordRouteReplanDebug(alternative && !alternative->nodes.empty());
 		if (!alternative || alternative->nodes.empty()) return;
 		auto costs = pathing::comparePathSuffixCosts(agent, *mGraph, *agent.mPath.path,
 			agent.mPath.targetNode, *alternative, 0);

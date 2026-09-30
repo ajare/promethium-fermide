@@ -116,6 +116,10 @@ namespace core
 		// (ticket #57).
 		bool holdsTraversalOwnership(AgentId id) const;
 
+		// Queue membership is diagnostic state: a Queue ticket, an Interaction
+		// point queue entry, or a serialized transport-confirmation queue entry.
+		bool isAgentInQueue(AgentId id) const;
+
 		void releaseAgentFromResource(TraversalResource& resource, AgentId id);
 
 		void releaseTraversalOwnership(AgentId id);

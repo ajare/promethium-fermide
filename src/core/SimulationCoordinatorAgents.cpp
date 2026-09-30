@@ -216,6 +216,39 @@ namespace core
 		return false;
 	}
 
+	bool SimulationCoordinator::isAgentInQueue(AgentId id) const
+	{
+		if (!id) return false;
+
+		for (auto const& [requestId, request] : mWorld.mTraversalRequests.entries())
+		{
+			(void)requestId;
+			if (request->mOwner == id && request->mQueueTicket) return true;
+		}
+
+		for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
+		{
+			(void)pointId;
+			for (auto requestId : point->mQueue)
+			{
+				auto request = mWorld.mInteractionRequests.find(requestId);
+				if (request && request->mActor == id
+					&& request->mResult == InteractionResult::Pending) return true;
+			}
+		}
+
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)resourceId;
+			for (auto requestId : resource->mLiftConfirmationQueue)
+			{
+				auto request = mWorld.mTraversalRequests.find(requestId);
+				if (request && request->mOwner == id) return true;
+			}
+		}
+		return false;
+	}
+
 	void SimulationCoordinator::releaseAgentFromResource(TraversalResource& resource, AgentId id)
 	{
 		mWorld.invalidateSimulationSnapshot();

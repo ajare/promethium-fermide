@@ -2,6 +2,9 @@
 #include <cassert>
 #include <cfloat>
 #include <algorithm>
+#include <chrono>
+#include <optional>
+#include <unordered_map>
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -1444,6 +1447,62 @@ ImU32 agentRenderColour(core::Agent const& agent, bool selected)
 	return ImU32(ImColor(colour.r, colour.g, colour.b));
 }
 
+namespace
+{
+	struct AgentReplanVisual
+	{
+		uint64_t sequence{ 0 };
+		chrono::steady_clock::time_point occurredAt{};
+		bool greyFramePending{ false };
+	};
+
+	unordered_map<core::Agent const*, AgentReplanVisual> agentReplanVisuals;
+
+	optional<ImU32> agentReplanIconColour(core::Agent const& agent)
+	{
+		auto const now = chrono::steady_clock::now();
+		constexpr auto lifetime = chrono::seconds(1);
+		erase_if(agentReplanVisuals, [&](auto const& entry)
+			{ return now - entry.second.occurredAt >= lifetime; });
+
+		auto const event = agent.getRouteReplanDebugEvent();
+		if (!event.sequence) return nullopt;
+		if (now - event.occurredAt >= lifetime)
+		{
+			agentReplanVisuals.erase(&agent);
+			return nullopt;
+		}
+
+		auto& visual = agentReplanVisuals[&agent];
+		if (visual.sequence != event.sequence || visual.occurredAt != event.occurredAt)
+		{
+			visual.sequence = event.sequence;
+			visual.occurredAt = event.occurredAt;
+			visual.greyFramePending = true;
+		}
+		if (visual.greyFramePending)
+		{
+			visual.greyFramePending = false;
+			return IM_COL32(96, 96, 96, 255);
+		}
+		return event.foundPath
+			? IM_COL32(40, 160, 72, 255)
+			: IM_COL32(200, 48, 48, 255);
+	}
+
+	void drawAgentDebugBadge(WorldDrawList* drawList, ImFont* font, char const* symbol,
+		ImU32 boxColour, float centreX, float side, float gap, float& bottom)
+	{
+		ImVec2 const minimum{ centreX - side * 0.5f, bottom - side };
+		ImVec2 const maximum{ centreX + side * 0.5f, bottom };
+		drawList->AddRectFilled(minimum, maximum, boxColour);
+		auto const textSize = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0.0f, symbol);
+		drawList->AddText({ centreX - textSize.x * 0.5f,
+			minimum.y + (side - textSize.y) * 0.5f }, IM_COL32_WHITE, symbol);
+		bottom = minimum.y - gap;
+	}
+}
+
 void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 {
 	auto bounds = agent->getBounds();
@@ -1479,47 +1538,26 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
 		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
 
-	if (gUISettings.renderAgentDebug)
-	{
-		ImU32 textColour = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.65f));
+	// Consume replan telemetry even while Agent Debug is hidden so toggling the
+	// setting does not restart or preserve an expired wall-clock indication.
+	auto const replanColour = agentReplanIconColour(*agent);
+	if (!gUISettings.renderAgentDebug) return;
 
-		switch (agent->getState())
-		{
-		case core::Agent::State::Idle:
-			drawList->AddText({ pos0.x, pos0.y - 13 }, textColour, "IDL");
-			break;
+	auto const inQueue = agent->isInQueue();
+	if (!inQueue && !replanColour) return;
 
-		case core::Agent::State::MovingToVertex:
-			drawList->AddText({ pos0.x, pos0.y - 13 }, textColour, "MTV");
-			break;
-
-		case core::Agent::State::WaitingForTraversal:
-			drawList->AddText({ pos0.x, pos0.y - 13 }, textColour, "WTP");
-			break;
-
-		case core::Agent::State::TraversingEdge:
-			drawList->AddText({ pos0.x, pos0.y - 13 }, textColour, "TRE");
-			break;
-
-		case core::Agent::State::AwaitingTraversalCommit:
-			drawList->AddText({ pos0.x, pos0.y - 13 }, textColour, "ATC");
-			break;
-
-		default:
-			drawList->AddText({ pos0.x, pos0.y - 13 }, textColour, "???");
-			break;
-		}
-
-		auto agentPath = agent->getPath();
-
-		if (agentPath)
-		{
-			auto targetNodeIndex = agent->getPathTargetNodeIndex();
-
-			auto pathDebug = format("{}/{}", targetNodeIndex, agentPath->nodes.size());
-			drawList->AddText({ pos0.x, pos0.y - 26 }, textColour, pathDebug.c_str());
-		}
-	}
+	// Badge width follows the rendered Agent body, with screen-space limits that
+	// keep punctuation legible at low zoom and unobtrusive at high zoom.
+	auto const side = clamp(availableWidth, 14.0f, 24.0f);
+	auto const gap = clamp(side * 0.12f, 1.0f, 3.0f);
+	auto const centreX = (pos0.x + pos1.x) * 0.5f;
+	float badgeBottom = min(pos0.y, pos1.y) - gap;
+	if (inQueue)
+		drawAgentDebugBadge(drawList, ImGui::GetFont(), "!",
+			IM_COL32(230, 126, 34, 255), centreX, side, gap, badgeBottom);
+	if (replanColour)
+		drawAgentDebugBadge(drawList, ImGui::GetFont(), "?",
+			*replanColour, centreX, side, gap, badgeBottom);
 }
 
 

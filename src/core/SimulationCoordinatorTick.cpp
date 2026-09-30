@@ -798,6 +798,7 @@ namespace core
 								destination = mWorld.mGraph->getVertexForObject(object);
 					if (!destination)
 					{
+						agent->recordRouteReplanDebug(false);
 						goal->second.routeLossReason = RouteLossReason::DestinationRemoved;
 						continue;
 					}
@@ -808,13 +809,18 @@ namespace core
 				else
 				{
 					if (!intent.destinationSector
-						|| intent.destinationSector.value > mWorld.mSectors.size()) continue;
+						|| intent.destinationSector.value > mWorld.mSectors.size())
+					{
+						agent->recordRouteReplanDebug(false);
+						continue;
+					}
 					auto destinationSector = mWorld.mSectors[
 						(size_t)intent.destinationSector.value - 1];
 					destination = mWorld.mGraph->getClosestVertexInSector(
 						destinationSector.get(), intent.destinationPosition);
 				}
 				auto path = mWorld.mGraph->calculatePath(agent, destination);
+				agent->recordRouteReplanDebug(path && !path->nodes.empty());
 				if (path && !path->nodes.empty())
 				{
 					agent->assignPath(std::move(path), intent.wasPathing, false);
@@ -845,6 +851,7 @@ namespace core
 			{
 				// The destination was structurally removed or disconnected. The Agent
 				// remains safely idle; this does not invalidate otherwise usable topology.
+				agent->recordRouteReplanDebug(false);
 				if (goal != mWorld.mMovementGoals.end())
 					goal->second.routeLossReason = RouteLossReason::TopologyChanged;
 			}

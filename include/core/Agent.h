@@ -2,6 +2,7 @@
 
 #include <string>
 #include <bitset>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -336,6 +337,13 @@ namespace core
 		// +1 approaches from the left, -1 from the right, and 0 requests at the endpoint.
 		int mEarlyQueueApproachDirectionX{ 0 };
 
+		// Transient diagnostic telemetry. Route calculation remains synchronous;
+		// the renderer turns each completed replan into a grey-first-frame/result
+		// sequence without changing simulation timing or serialized state.
+		uint64_t mRouteReplanDebugSequence{ 0 };
+		bool mRouteReplanDebugFoundPath{ false };
+		std::chrono::steady_clock::time_point mRouteReplanDebugOccurredAt{};
+
 	private:
 
 		bool childrenModified() const override;
@@ -484,6 +492,8 @@ namespace core
 
 		void considerTraversalReplan();
 
+		void recordRouteReplanDebug(bool foundPath);
+
 		void cancelTraversal();
 
 		bool moveToVertexOffset(int dim, float offset, float frameTime);
@@ -623,6 +633,21 @@ namespace core
 		void setActive(bool active);
 
 		State getState() const;
+
+		struct RouteReplanDebugEvent
+		{
+			uint64_t sequence{ 0 };
+			bool foundPath{ false };
+			std::chrono::steady_clock::time_point occurredAt{};
+		};
+
+		RouteReplanDebugEvent getRouteReplanDebugEvent() const
+		{
+			return { mRouteReplanDebugSequence, mRouteReplanDebugFoundPath,
+				mRouteReplanDebugOccurredAt };
+		}
+
+		bool isInQueue() const;
 
 		std::string getDescription() const;
 

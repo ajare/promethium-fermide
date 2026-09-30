@@ -1178,8 +1178,10 @@ namespace
 			"    localY: 0\n", "Background position");
 
 		// Sector 0 is Room A and sector 2 is Room D: both hold route vertices,
-		// but no Door joins the pairs, so the saved route cannot be rebuilt.
-		rejects("agents:\n"
+		// but no Door joins the pairs. This is valid Route loss rather than malformed
+		// document data: load the Agent idle and retain a warning for the editor.
+		core::World stranded("stranded", 2, 2);
+		auto reader = core::YamlSerializer::fromString(head + "agents:\n"
 			"  - id: 1\n"
 			"    agent:\n"
 			"      name: Stranded agent\n"
@@ -1191,7 +1193,16 @@ namespace
 			"      destinationSector: 2\n"
 			"      destinationLocalX: 1.5\n"
 			"      destinationLocalY: 0\n"
-			"      active: false\n", "unreachable destination");
+			"      active: false\n");
+		reader->deserialize();
+		require(stranded.deserialize(*reader, workData),
+			"A World with an unreachable saved destination did not load");
+		auto* strandedAgent = stranded.lookupAgent(core::AgentId{ 1 }).entity;
+		require(strandedAgent && !strandedAgent->getPath()
+			&& strandedAgent->getState() == core::Agent::State::Idle,
+			"An unreachable saved destination did not restore its Agent idle");
+		require(stranded.getLoadWarnings().size() == 1,
+			"An unreachable saved destination did not produce one load warning");
 	}
 
 	void legacyWorldYamlStillLoads()

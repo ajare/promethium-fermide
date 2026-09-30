@@ -1837,8 +1837,9 @@ namespace core
 			try { rebuildRestoredAgentPaths(); }
 			catch (...)
 			{
-				// Preserve the existing all-or-nothing Agent restoration contract when
-				// a persisted destination is malformed or no longer reachable.
+				// Preserve all-or-nothing restoration for malformed Agent data. An
+				// ordinary unreachable destination is a non-fatal load warning handled
+				// by rebuildRestoredAgentPaths().
 				for (auto const& [id, agent] : mAgents.entries())
 				{
 					(void)id;
@@ -1874,14 +1875,19 @@ namespace core
 			if (!agent)
 				throw SerializationException("Restored path intent refers to a missing Agent");
 			if (!intent.destination)
-				throw SerializationException(format(
-					"Restored Agent '{}' path has no destination", agent->getName()));
+			{
+				mLoadWarnings.push_back(format(
+					"Agent '{}' was loaded idle because its saved destination no longer has a routing vertex.",
+					agent->getName()));
+				continue;
+			}
 			auto path = mGraph->calculatePath(agent, intent.destination);
 			if (!path || path->nodes.empty())
 			{
-				throw SerializationException(format(
-					"Restored Agent '{}' path destination is unreachable under its effective routing profile",
+				mLoadWarnings.push_back(format(
+					"Agent '{}' was loaded idle because its saved destination is unreachable under its effective routing profile.",
 					agent->getName()));
+				continue;
 			}
 			rebuilt.push_back({ agent, std::move(path), intent.active });
 		}
@@ -2059,6 +2065,7 @@ namespace core
 		mTopologyDiagnostic.clear();
 		if (!preserveBehaviourRuntime) mPausedPathIntents.clear();
 		mPendingRestoredPathIntents.clear();
+		mLoadWarnings.clear();
 		mBuildLog.clear();
 	}
 

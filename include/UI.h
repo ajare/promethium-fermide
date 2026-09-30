@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "core/World.h"
 #include "core/Graph.h"
@@ -37,6 +39,11 @@ MouseButtonStatus getMouseButtonStatus();
 void initializeRecentFiles(std::filesystem::path const& filepath);
 
 void handleShortcuts(std::shared_ptr<core::World>& world);
+
+// Queues and renders the non-fatal diagnostics produced while loading a World.
+// Public seams let headless editor checks exercise the real modal.
+void presentWorldLoadWarnings(std::vector<std::string> warnings);
+void renderWorldLoadWarningsPopup();
 
 // Returns true when the application may close immediately. A modified document
 // instead opens the existing save/discard/cancel confirmation and returns false.

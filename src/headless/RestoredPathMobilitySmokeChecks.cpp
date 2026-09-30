@@ -211,6 +211,48 @@ namespace
 			"The restored Path did not fall back to the Staircase");
 		require(untraversableEdgeCount(restored, *path) == 0,
 			"A restored Path holds an edge the loaded Agent cannot traverse");
+		require(reopened->getLoadWarnings().empty(),
+			"A reachable restored destination produced a load warning");
+	}
+
+	// An unreachable saved destination is valid route-loss state, not malformed
+	// World data. The World opens, leaves the Agent idle, and reports the loss to
+	// the editor without pretending initial restoration was a replan.
+	void unreachableSavedDestinationLoadsIdleWithWarning()
+	{
+		TemporaryDirectory temporary;
+		core::World world("Unreachable restored path", 8, 1);
+		auto const sourceSector = world.addCorridor(0, 0, 8);
+		auto const targetSector = world.addCorridor(1, 0, 0, 8, 1);
+		uint32_t sourceIdentifier = 0;
+		uint32_t targetIdentifier = 0;
+		world.addSectorMarker(sourceSector, 0, 1.5f, &sourceIdentifier);
+		world.addSectorMarker(targetSector, 0, 6.5f, &targetIdentifier);
+		world.finishBuild();
+		auto const id = world.createAgent("Stranded", sourceSector, 0, 1.5f);
+		auto* agent = world.lookupAgent(id).entity;
+		auto path = std::make_shared<core::Path>();
+		path->nodes.push_back({ nullptr,
+			world.getGraph()->getVertexByIdentifier(sourceIdentifier), 0.0f });
+		path->nodes.push_back({ nullptr,
+			world.getGraph()->getVertexByIdentifier(targetIdentifier), 0.0f });
+		agent->setPath(path, true);
+		auto const document = temporary.path / "unreachable.world.yaml";
+		world.saveTo(document.string());
+
+		auto reopened = core::loadWorldDocument(document);
+		auto* restored = reopened->lookupAgent(id).entity;
+		require(restored && !restored->getPath()
+			&& restored->getState() == core::Agent::State::Idle,
+			"An unreachable restored destination did not leave its Agent idle");
+		require(restored->getRouteReplanDebugEvent().sequence == 0,
+			"Initial restoration of an unreachable destination was reported as replanning");
+		auto const& warnings = reopened->getLoadWarnings();
+		require(warnings.size() == 1
+			&& warnings.front().find("Stranded") != std::string::npos
+			&& warnings.front().find("unreachable") != std::string::npos,
+			"The unreachable restored destination did not produce an Agent-specific warning");
+
 	}
 
 	// The restored Path is the Agent's intent, not merely a route: an active one
@@ -304,6 +346,7 @@ void runRestoredPathMobilitySmokeChecks()
 {
 	savedIntentWaitsForRegistryResolution();
 	tagSuppliedProfileIsHonouredByTheRestoredPath();
+	unreachableSavedDestinationLoadsIdleWithWarning();
 	restoredActivePathReachesTheMarkerByTheStaircase();
 	restoredInactivePathKeepsItsDestinationWithoutStarting();
 	resetSimulationRebuildsThePermittedRoute();
