@@ -173,6 +173,17 @@ namespace core
 				denyTraversalRequest(requestId);
 				return;
 			}
+			if (request->mEdgeType == EdgeType::Door
+				&& resource->mDoorActivationMode == DoorActivationMode::Manual
+				&& !resource->mDoor->isOpen())
+			{
+				auto actor = mWorld.mAgents.find(request->mOwner);
+				if (!actor || !mWorld.agentSatisfiesDoorPermission(*resource->mDoor, *actor))
+				{
+					denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+					return;
+				}
+			}
 			if (!request->mPreparationLease)
 			{
 				request->mPreparationLease = acquireDoorOpenLease(*resource,

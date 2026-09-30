@@ -19,6 +19,7 @@
 #include "core/SectorObject.h"
 
 #include "DocumentEdit.h"
+#include "PermissionsPanel.h"
 #include "UISettings.h"
 
 using namespace std;
@@ -195,6 +196,8 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 	if (!world->isSimulationPaused())
 		ImGui::TextDisabled("Pause simulation to change the opening style.");
 	ImGui::EndDisabled();
+
+	renderManualDoorPermissionRequirements(world, door->getTraversalResourceId());
 
 	ImGui::Separator();
 	// Resolve the selected Door's index in its owning Sector once: both the

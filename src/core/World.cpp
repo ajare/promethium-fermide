@@ -31,6 +31,7 @@
 #include "core/MarkerSectorObject.h"
 #include "core/WalkwaySectorObject.h"
 #include "core/PlatformLift.h"
+#include "core/BulkheadDoor.h"
 #include "core/Exceptions.h"
 
 
@@ -5498,6 +5499,10 @@ namespace core
 		{
 			throw WorldException(this, "This Door already has Door Buttons on both sides");
 		}
+		// Migrating a direct Door requirement onto side-specific controls belongs to
+		// the controlled-Door slice. Until then, never silently discard or weaken it.
+		if (!source->values.empty())
+			throw WorldException(this, "Clear the manual Door permission requirement before adding Buttons");
 
 		// The edit is all-or-nothing: every side that still lacks a Button must
 		// have space for one before either side is created.
@@ -5579,7 +5584,8 @@ namespace core
 					&& record.b == doorObject->getCellX()
 					&& record.c == door->getCellsWide();
 			});
-		return source != mConstructionRecords.end() && !(source->p && source->q);
+		return source != mConstructionRecords.end() && source->values.empty()
+			&& !(source->p && source->q);
 	}
 
 	bool World::canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
@@ -9406,6 +9412,12 @@ namespace core
 		{ (void)agentId; if (agent->mDirectAccessGrants.test(bit)) ++usage.directAgentGrants; }
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{ (void)pointId; if (point->mPermissionRequirement.test(bit)) ++usage.interactionPointRequirements; }
+		for (auto const& [resourceId, resource] : mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (resource->mDoor && resource->mDoor->mPermissionRequirement.test(bit))
+				++usage.manualDoorRequirements;
+		}
 		return usage;
 	}
 
@@ -9420,6 +9432,15 @@ namespace core
 		// never inherit an old grant or requirement.
 		for (auto const& [agentId, agent] : mAgents.entries()) { (void)agentId; agent->mDirectAccessGrants.reset(bit); }
 		for (auto const& [pointId, point] : mInteractionPoints.entries()) { (void)pointId; point->mPermissionRequirement.reset(bit); }
+		for (auto const& [resourceId, resource] : mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (resource->mDoor) resource->mDoor->mPermissionRequirement.reset(bit);
+		}
+		for (auto& record : mConstructionRecords)
+			if (record.type == ConstructionType::Door)
+				record.values.erase(remove(record.values.begin(), record.values.end(), id.value),
+					record.values.end());
 		mAccessPermissions[bit].reset();
 		modify();
 		if (diagnostic) diagnostic->clear();
@@ -9439,6 +9460,7 @@ namespace core
 		if (agent->mDirectAccessGrants.test(bit) == granted)
 			return reject(granted ? "The Agent already has this direct grant" : "The Agent does not have this direct grant");
 		agent->mDirectAccessGrants.set(bit, granted);
+		reconsiderAgentAuthorizationPath(*agent, permission, granted);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -9515,6 +9537,159 @@ namespace core
 		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
 			if (missing.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
 		return result;
+	}
+
+	bool World::agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const
+	{
+		return (door.mPermissionRequirement & ~agent.mDirectAccessGrants).none();
+	}
+
+	bool World::isManualDoorPermissionEligible(TraversalResourceId id) const
+	{
+		auto resource = mTraversalResources.find(id);
+		return resource && resource->mDoor
+			&& !dynamic_pointer_cast<BulkheadDoor>(resource->mDoor)
+			&& !resource->mLiftCoordinator && !resource->mShuttle
+			&& resource->mDoorActivationMode == DoorActivationMode::Manual
+			&& resource->mControls.empty();
+	}
+
+	bool World::setManualDoorPermissionRequirement(TraversalResourceId id,
+		vector<AccessPermissionId> const& permissions, string* diagnostic)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Permission requirements can only be edited while the simulation is paused");
+		if (!isManualDoorPermissionEligible(id))
+			return reject("This Door is not a buttonless manual ordinary Door");
+		bitset<256> next;
+		for (auto permission : permissions)
+		{
+			auto found = lookupAccessPermission(permission);
+			if (!found) return reject(found.diagnostic);
+			if (next.test(permission.value - 1))
+				return reject(format("Access permission {} appears more than once", permission.value));
+			next.set(permission.value - 1);
+		}
+		auto resource = mTraversalResources.find(id);
+		if (resource->mDoor->mPermissionRequirement == next)
+		{ if (diagnostic) diagnostic->clear(); return true; }
+		auto door = resource->mDoor;
+		auto record = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
+			[&](ConstructionRecord const& value)
+			{
+				return value.type == ConstructionType::Door
+					&& value.layer == door->getFrontLayer()
+					&& value.a == static_cast<uint32_t>(door->getPosition().y)
+					&& value.b == static_cast<uint32_t>(door->getPosition().x)
+					&& value.c == door->getCellsWide();
+			});
+		if (record == mConstructionRecords.rend())
+			return reject("The selected Door no longer has an authored definition");
+		record->values.clear();
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (next.test(bit)) record->values.push_back(static_cast<uint32_t>(bit + 1));
+		resource->mDoor->mPermissionRequirement = next;
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	vector<AccessPermissionId> World::getManualDoorPermissionRequirement(
+		TraversalResourceId id) const
+	{
+		auto resource = mTraversalResources.find(id);
+		if (!resource || !resource->mDoor) throw invalid_argument("Unknown Door");
+		vector<AccessPermissionId> result;
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (resource->mDoor->mPermissionRequirement.test(bit))
+				result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
+	bool World::canAgentOpenManualDoor(TraversalResourceId doorId, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		auto agent = mAgents.find(agentId);
+		return resource && resource->mDoor && agent
+			&& agentSatisfiesDoorPermission(*resource->mDoor, *agent);
+	}
+
+	bool World::canAgentTraverseManualDoorNow(TraversalResourceId doorId, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		if (!resource || !resource->mDoor
+			|| resource->mDoorActivationMode != DoorActivationMode::Manual
+			|| resource->mDoor->isOpen()) return true;
+		return canAgentOpenManualDoor(doorId, agentId);
+	}
+
+	void World::replanAgentAfterAuthorizationRefusal(AgentId id)
+	{
+		auto agent = mAgents.find(id);
+		if (!agent || !agent->mPath.path || agent->mPath.path->nodes.empty()) return;
+		auto destination = agent->mPath.path->nodes.back().targetVertex;
+		agent->cancelTraversal();
+		auto alternative = mGraph->calculatePath(agent, destination);
+		if (alternative && !alternative->nodes.empty())
+			agent->assignPath(std::move(alternative), true, false);
+		else
+		{
+			agent->clearRuntimePath();
+			auto goal = mMovementGoals.find(id);
+			if (goal != mMovementGoals.end()) goal->second.routeLossReason = RouteLossReason::Unreachable;
+		}
+	}
+
+	void World::reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
+		bool gained)
+	{
+		if (!agent.mPath.path || agent.mPath.path->nodes.empty()
+			|| (agent.mTraversalTask && agent.mTraversalTask->permit)) return;
+		auto const bit = changed.value - 1;
+		auto edgeUsesPermission = [&](shared_ptr<const Edge> const& edge)
+		{
+			if (!edge || edge->getType() != EdgeType::Door) return false;
+			auto resource = mTraversalResources.find(edge->getTraversalResourceId());
+			return resource && resource->mDoor
+				&& resource->mDoor->mPermissionRequirement.test(bit);
+		};
+		bool currentRelevant = false;
+		for (uint32_t i = agent.mPath.targetNode + 1; i < agent.mPath.path->nodes.size(); ++i)
+			currentRelevant = currentRelevant || edgeUsesPermission(agent.mPath.path->nodes[i].edge);
+		if (!gained && !currentRelevant) return;
+		if (gained)
+		{
+			bool availableRouteChanged = false;
+			for (auto const& [resourceId, resource] : mTraversalResources.entries())
+			{
+				(void)resourceId;
+				availableRouteChanged = availableRouteChanged || (resource->mDoor
+					&& resource->mDoor->mPermissionRequirement.test(bit));
+			}
+			if (!availableRouteChanged) return;
+		}
+		auto destination = agent.mPath.path->nodes.back().targetVertex;
+		auto alternative = mGraph->calculatePath(&agent, destination);
+		if (!alternative || alternative->nodes.empty())
+		{
+			if (!gained)
+			{
+				agent.clearRuntimePath();
+				auto goal = mMovementGoals.find(getAgentId(&agent));
+				if (goal != mMovementGoals.end()) goal->second.routeLossReason = RouteLossReason::Unreachable;
+			}
+			return;
+		}
+		if (!gained)
+		{
+			agent.assignPath(std::move(alternative), true, false);
+			return;
+		}
+		auto costs = pathing::comparePathSuffixCosts(agent, *mGraph, *agent.mPath.path,
+			agent.mPath.targetNode, *alternative, 0);
+		if (!costs || getRouteChoicePolicy().shouldReplacePath(costs->first, costs->second,
+			agent.getEffectiveRoutePersistence().value))
+			agent.assignPath(std::move(alternative), true, false);
 	}
 
 	InteractionPointId World::createInteractionPoint(string const& name)

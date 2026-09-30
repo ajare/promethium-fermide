@@ -651,6 +651,9 @@ namespace core
 			AccessPermissionId except = AccessPermissionId{}) const;
 		std::vector<AccessPermissionId> missingInteractionPermissions(
 			InteractionPoint const& point, Agent const& agent) const;
+		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;
+		void reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
+			bool gained);
 
 		bool markerNameTaken(std::string const& trimmed,
 			MarkerId except = MarkerId{}) const;
@@ -2223,6 +2226,7 @@ namespace core
 		{
 			uint32_t directAgentGrants{ 0 };
 			uint32_t interactionPointRequirements{ 0 };
+			uint32_t manualDoorRequirements{ 0 };
 		};
 
 		uint32_t getAccessPermissionCount() const;
@@ -2253,6 +2257,16 @@ namespace core
 			std::string* diagnostic = nullptr);
 		std::vector<AccessPermissionId> getInteractionPointPermissionRequirement(
 			InteractionPointId point) const;
+
+		bool isManualDoorPermissionEligible(TraversalResourceId door) const;
+		bool setManualDoorPermissionRequirement(TraversalResourceId door,
+			std::vector<AccessPermissionId> const& permissions,
+			std::string* diagnostic = nullptr);
+		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
+			TraversalResourceId door) const;
+		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+		bool canAgentTraverseManualDoorNow(TraversalResourceId door, AgentId agent) const;
+		void replanAgentAfterAuthorizationRefusal(AgentId agent);
 
 		InteractionPointId createInteractionPoint(std::string const& name);
 

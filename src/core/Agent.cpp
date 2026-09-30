@@ -1445,6 +1445,16 @@ namespace core
 
 		auto requestLookup = mWorld->lookupTraversalRequest(mTraversalTask->request);
 		if (!requestLookup) return;
+		// A Path may predate an authorization change. Repeat the manual Door
+		// opening check at the threshold, while still allowing passage through a
+		// Door which is locally open and needs no operation.
+		if (mTraversalTask->edge->getType() == EdgeType::Door
+			&& !mWorld->canAgentTraverseManualDoorNow(
+				mTraversalTask->edge->getTraversalResourceId(), mWorld->getAgentId(this)))
+		{
+			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+			return;
+		}
 		if (requestLookup.entity->getState() == TraversalRequestState::Pending)
 		{
 			mWorld->allocateTraversalRequest(mTraversalTask->request,

@@ -305,6 +305,12 @@ namespace core
 				serializer.writeString("preButtonActivation",
 					activationName(record.preButtonActivationMode));
 			}
+			if (!record.values.empty())
+			{
+				serializer.beginArray("permissionRequirement");
+				for (auto permission : record.values) serializer.writeUint64("", permission);
+				serializer.endArray();
+			}
 			break;
 		case ConstructionType::Window:
 		{
@@ -379,6 +385,7 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
+		// Version 24 adds buttonless manual ordinary Door permission requirements.
 		// Version 23 adds World-owned Access permission definitions, direct Agent
 		// grants, and Interaction point requirements. Version 17 adds the Marker
 		// properties bitfield. Version 15 renames the
@@ -405,7 +412,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 23);
+		serializer.writeUint32("version", 24);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -726,7 +733,14 @@ namespace core
 			record.preButtonActivationMode = serializer.hasField("preButtonActivation")
 				? readActivation("preButtonActivation") : -1;
 			record.x = serializer.readFloat("holdOpenSeconds"); record.d = serializer.readUint32("crossingLanes");
-			record.j = readOpenStyle("openStyle"); break;
+			record.j = readOpenStyle("openStyle");
+			if (version >= 24 && serializer.hasField("permissionRequirement"))
+			{
+				serializer.beginArray("permissionRequirement");
+				while (serializer.nextArrayItem()) record.values.push_back(serializer.readUint32(""));
+				serializer.endArray();
+			}
+			break;
 		case ConstructionType::Window:
 		{
 			static char const* states[] = { "open", "opening", "closed", "closing", "broken", "frosted", "frosting", "unfrosting", "tinted", "tinting", "untinting" };
@@ -841,9 +855,9 @@ namespace core
 		// 15 renames vertical-position fields from Deck to Level, version 17 adds
 		// Marker properties, version 18 adds Interaction aversion, version 19
 		// adds Effort aversion, version 20 adds Risk aversion, version 21
-		// adds Route familiarity, version 22 adds Route persistence, and version 23
-		// adds Access permissions.
-		if (version < 1 || version > 23)
+		// adds Route familiarity, version 22 adds Route persistence, version 23
+		// adds Access permissions, and version 24 adds manual Door requirements.
+		if (version < 1 || version > 24)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1160,6 +1174,23 @@ namespace core
 			serializer.endArray();
 			return bits;
 		};
+		for (auto const& record : records)
+		{
+			if (record.type != ConstructionType::Door || record.values.empty()) continue;
+			if (record.i != static_cast<int32_t>(DoorActivationMode::Manual)
+				|| record.p || record.q)
+				throw SerializationException("A Door permission requirement belongs only to a buttonless manual ordinary Door");
+			bitset<256> seen;
+			for (auto id : record.values)
+			{
+				if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
+					throw SerializationException("Serialized Door permission requirement is dangling");
+				if (seen.test(id - 1))
+					throw SerializationException("Serialized Door permission requirement contains a duplicate");
+				seen.set(id - 1);
+			}
+		}
+
 		map<AgentId, bitset<256>> serializedGrants;
 		if (version >= 23 && serializer.hasField("accessPermissionGrants"))
 		{
@@ -1751,11 +1782,19 @@ namespace core
 					record.p, record.h ? record.h : (1u << 1), record.overrides });
 			break;
 		case ConstructionType::Door:
-			addSectorDoor(doorLayer(record), record.a, record.b,
+		{
+			auto created = addSectorDoor(doorLayer(record), record.a, record.b,
 				{ record.c, static_cast<Door::Height>(record.e), { record.p, record.q },
 					static_cast<DoorActivationMode>(record.i), record.x, record.d,
 					static_cast<Door::OpenStyle>(record.j) });
+			if (!record.values.empty())
+			{
+				auto resource = mTraversalResources.find(created.traversalResource);
+				for (auto permission : record.values)
+					resource->mDoor->mPermissionRequirement.set(permission - 1);
+			}
 			break;
+		}
 		case ConstructionType::Window:
 			addSectorWindow(record.a, record.b, record.c, record.d, record.e,
 				{ record.p, static_cast<Window::State>(record.i), static_cast<Window::Style>(record.j) });

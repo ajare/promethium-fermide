@@ -80,6 +80,21 @@ bool commitInteractionPermissionRequirement(shared_ptr<core::World> const& world
 	});
 }
 
+bool commitManualDoorPermissionRequirement(shared_ptr<core::World> const& world,
+	core::TraversalResourceId door, core::AccessPermissionId permission, bool required,
+	string& diagnostic)
+{
+	return commit(world, diagnostic, [&]
+	{
+		auto values = world->getManualDoorPermissionRequirement(door);
+		auto found = find(values.begin(), values.end(), permission);
+		if (required && found == values.end()) values.push_back(permission);
+		else if (!required && found != values.end()) values.erase(found);
+		else { diagnostic = required ? "The permission is already required" : "The permission is not required"; return false; }
+		return world->setManualDoorPermissionRequirement(door, values, &diagnostic);
+	});
+}
+
 void resetPermissionsPanelState() { newName.fill(0); editedNames.clear(); pendingDelete = {}; }
 
 void renderPermissionsPanel(shared_ptr<core::World> const& world)
@@ -90,7 +105,7 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 	if (ImGui::BeginTable("AccessPermissions", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp))
 	{
 		ImGui::TableSetupColumn("Name"); ImGui::TableSetupColumn("Agents");
-		ImGui::TableSetupColumn("Controls"); ImGui::TableSetupColumn("Delete"); ImGui::TableHeadersRow();
+		ImGui::TableSetupColumn("Controls / Doors"); ImGui::TableSetupColumn("Delete"); ImGui::TableHeadersRow();
 		for (auto id : world->getAccessPermissionIds())
 		{
 			ImGui::PushID((int)id.value); ImGui::TableNextRow(); ImGui::TableNextColumn();
@@ -108,7 +123,8 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 			}
 			auto usage = world->getAccessPermissionUsage(id);
 			ImGui::TableNextColumn(); ImGui::Text("%u", usage.directAgentGrants);
-			ImGui::TableNextColumn(); ImGui::Text("%u", usage.interactionPointRequirements);
+			ImGui::TableNextColumn(); ImGui::Text("%u / %u", usage.interactionPointRequirements,
+				usage.manualDoorRequirements);
 			ImGui::TableNextColumn(); if (ImGui::Button("Delete")) pendingDelete = id;
 			ImGui::PopID();
 		}
@@ -125,8 +141,9 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		{
 			auto usage = world->getAccessPermissionUsage(pendingDelete);
 			ImGui::Text("Delete '%s'?", world->getAccessPermissionName(pendingDelete).c_str());
-			ImGui::Text("This clears %u direct Agent grants and %u Interaction point requirements.",
-				usage.directAgentGrants, usage.interactionPointRequirements);
+			ImGui::Text("This clears %u direct Agent grants, %u Interaction point requirements, and %u manual Door requirements.",
+				usage.directAgentGrants, usage.interactionPointRequirements,
+				usage.manualDoorRequirements);
 			if (ImGui::Button("Delete")) { string diagnostic; auto deleted = pendingDelete; commitAccessPermissionDelete(world, pendingDelete, diagnostic); editedNames.erase(deleted.value); pendingDelete = {}; ImGui::CloseCurrentPopup(); }
 			ImGui::SameLine(); if (ImGui::Button("Cancel")) { pendingDelete = {}; ImGui::CloseCurrentPopup(); }
 			ImGui::EndPopup();
@@ -163,6 +180,24 @@ void renderInteractionPermissionRequirements(shared_ptr<core::World> const& worl
 		bool selected = required.contains(id);
 		if (ImGui::Checkbox(world->getAccessPermissionName(id).c_str(), &selected))
 		{ string diagnostic; commitInteractionPermissionRequirement(world, point, id, selected, diagnostic); }
+	}
+	ImGui::EndDisabled();
+	if (world->getAccessPermissionCount() == 0) ImGui::TextDisabled("No Access permissions defined");
+	ImGui::TreePop();
+}
+
+void renderManualDoorPermissionRequirements(shared_ptr<core::World> const& world,
+	core::TraversalResourceId door)
+{
+	if (!world || !world->isManualDoorPermissionEligible(door)) return;
+	if (!ImGui::TreeNode("Required Access permissions")) return;
+	auto required = asSet(world->getManualDoorPermissionRequirement(door));
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	for (auto id : world->getAccessPermissionIds())
+	{
+		bool selected = required.contains(id);
+		if (ImGui::Checkbox(world->getAccessPermissionName(id).c_str(), &selected))
+		{ string diagnostic; commitManualDoorPermissionRequirement(world, door, id, selected, diagnostic); }
 	}
 	ImGui::EndDisabled();
 	if (world->getAccessPermissionCount() == 0) ImGui::TextDisabled("No Access permissions defined");

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bitset>
 #include <cstdint>
 #include <memory>
 
@@ -31,6 +32,9 @@ namespace core
 		float mHoldOpenTime{ CORE_DOOR_STAY_OPEN_TIME };
 		uint32_t mOpenLeaseCount{ 0 };
 		bool mObstructed{ false };
+		// A buttonless manual ordinary Door owns the authorization for its implicit
+		// opening interaction. It is shared by both directed graph edges.
+		std::bitset<256> mPermissionRequirement;
 
 	protected:
 		Door(float x, float y, float width, float height, uint32_t cellsWide,
@@ -63,6 +67,7 @@ namespace core
 		uint32_t getOpenLeaseCount() const { return mOpenLeaseCount; }
 		void setObstructed(bool obstructed) { mObstructed = obstructed; }
 		bool isObstructed() const { return mObstructed; }
+		std::bitset<256> const& getPermissionRequirement() const { return mPermissionRequirement; }
 
 		// Typed device operations call these commands; no callback/action queue exists.
 		bool requestOpen();

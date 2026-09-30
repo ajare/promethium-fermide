@@ -151,6 +151,14 @@ namespace core
 			result.open = (result.observed || door.getActivationMode() == DoorActivationMode::Unavailable) && door.isOpen();
 			if (door.getActivationMode() == DoorActivationMode::Unavailable && !result.open && !result.lift && !result.shuttle)
 				result.exclusion = RouteExclusionReason::Control;
+			// The Door's live state is usable only when this threshold is local. A
+			// remote protected Door therefore remains infeasible for an unauthorized
+			// Agent even if another Agent currently has it open.
+			if (result.type == EdgeType::Door && door.getActivationMode() == DoorActivationMode::Manual
+				&& !result.open && context.world && context.agent
+				&& !context.world->canAgentOpenManualDoor(door.getTraversalResourceId(),
+					context.world->getAgentId(context.agent)))
+				result.exclusion = RouteExclusionReason::Permission;
 			if (door.getActivationMode() == DoorActivationMode::Manual) result.activation = 1;
 			else if (door.getActivationMode() == DoorActivationMode::RemoteControlled) result.activation = 2;
 			if (result.observed && context.agent && !result.lift && !result.shuttle)

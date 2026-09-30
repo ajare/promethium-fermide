@@ -5,6 +5,11 @@
 #include "core/World.h"
 #include "core/YamlSerializer.h"
 #include "core/SerializationException.h"
+#include "core/Agent.h"
+#include "core/DoorSectorObject.h"
+#include "core/Graph.h"
+#include "core/Path.h"
+#include "core/Vertex.h"
 #include "imgui/imgui.h"
 #include "PermissionsPanel.h"
 #include "DocumentEdit.h"
@@ -90,6 +95,105 @@ namespace
 			"reused identity inherited an old grant");
 	}
 
+	void manualDoorAuthorization()
+	{
+		core::World world("manual Door permissions", 12, 1);
+		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto protectedDoor = world.addSectorDoor(0, 0, 3, {});
+		auto openDoor = world.addSectorDoor(0, 0, 9, {});
+		uint32_t frontMarker, backMarker;
+		world.addSectorMarker(front, 0, 2.5f, &frontMarker);
+		world.addSectorMarker(back, 0, 2.5f, &backMarker);
+		world.finishBuild(); world.pauseSimulation();
+		auto agentId = world.createAgent("walker", front, 0, 2.5f);
+		auto agent = world.lookupAgent(agentId).entity;
+		auto key = world.addAccessPermission("Door key");
+		std::string diagnostic;
+		require(world.setManualDoorPermissionRequirement(protectedDoor.traversalResource,
+			{ key }, &diagnostic), diagnostic);
+		require(world.isManualDoorPermissionEligible(protectedDoor.traversalResource),
+			"buttonless manual Door was not permission-eligible");
+
+		auto graph = world.getGraph();
+		auto frontVertex = graph->getVertexByIdentifier(frontMarker);
+		auto backVertex = graph->getVertexByIdentifier(backMarker);
+		auto chosenDoor = [](std::shared_ptr<core::Path> const& path)
+		{
+			if (!path) return core::TraversalResourceId{};
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getType() == core::EdgeType::Door)
+					return node.edge->getTraversalResourceId();
+			return core::TraversalResourceId{};
+		};
+		require(chosenDoor(graph->calculatePath(agent, frontVertex, backVertex))
+			== openDoor.traversalResource,
+			"unauthorized shorter Door was assigned a finite route cost");
+		require(world.grantAgentAccessPermission(agentId, key, &diagnostic), diagnostic);
+		require(chosenDoor(graph->calculatePath(agent, frontVertex, backVertex))
+			== protectedDoor.traversalResource,
+			"authorized Agent did not select the protected Door");
+		require(chosenDoor(graph->calculatePath(agent, backVertex, frontVertex))
+			== protectedDoor.traversalResource,
+			"Door requirement was not bidirectional");
+
+		// Relevant losses hard-replan, gains use ordinary persistence, and a grant
+		// which appears in no Door requirement leaves the Path object untouched.
+		agent->setPath(graph->calculatePath(agent, frontVertex, backVertex), true);
+		require(world.revokeAgentAccessPermission(agentId, key, &diagnostic), diagnostic);
+		require(chosenDoor(agent->getPath()) == openDoor.traversalResource,
+			"losing a relevant grant did not invalidate the current Path");
+		require(world.grantAgentAccessPermission(agentId, key, &diagnostic), diagnostic);
+		require(chosenDoor(agent->getPath()) == protectedDoor.traversalResource,
+			"gaining a relevant grant did not reconsider the current Path");
+		auto unrelated = world.addAccessPermission("Unrelated");
+		auto unchanged = agent->getPath();
+		require(world.grantAgentAccessPermission(agentId, unrelated, &diagnostic), diagnostic);
+		require(agent->getPath() == unchanged, "an unrelated grant disturbed the current Path");
+
+		// Make that Path stale by protecting the Door after selection. The runtime
+		// gate must refuse opening it and replan onto the other Door.
+		require(world.setManualDoorPermissionRequirement(protectedDoor.traversalResource,
+			{}, &diagnostic), diagnostic);
+		require(world.revokeAgentAccessPermission(agentId, key, &diagnostic), diagnostic);
+		agent->setPath(graph->calculatePath(agent, frontVertex, backVertex), true);
+		require(world.setManualDoorPermissionRequirement(protectedDoor.traversalResource,
+			{ key }, &diagnostic), diagnostic);
+		require(world.resumeSimulation(), "stale-Path fixture did not resume");
+		world.advanceTicks(180);
+		auto door = std::static_pointer_cast<const core::DoorSectorObject>(
+			protectedDoor.door.sector->getObject(protectedDoor.door.index))->getDoor();
+		require(door->isClosed(), "stale unauthorized Path opened the protected Door");
+		require(chosenDoor(agent->getPath()) == openDoor.traversalResource,
+			"runtime authorization refusal did not invoke replanning");
+		world.pauseSimulation();
+
+		auto localAgentId = world.createAgent("local observer", front, 0, 2.5f);
+		auto localAgent = world.lookupAgent(localAgentId).entity;
+		door->requestOpen(); door->update(10.0f);
+		require(chosenDoor(graph->calculatePath(localAgent, frontVertex, backVertex))
+			== protectedDoor.traversalResource,
+			"unauthorized Agent could not use a locally observed open Door");
+		core::RouteDecisionContext remote{ localAgent, {}, {}, nullptr, localAgent->getWalkSpeed(), &world };
+		for (auto const& edge : graph->getEdges())
+			if (edge->getTraversalResourceId() == protectedDoor.traversalResource)
+				require(!edge->getDirectedTraversalFacts(edge->getVertex(1), remote).feasible,
+					"route search consulted remote live Door state");
+
+		world.pauseSimulation();
+		auto yaml = save(world);
+		auto restored = load(yaml);
+		require(restored->getManualDoorPermissionRequirement(protectedDoor.traversalResource)
+			== std::vector<core::AccessPermissionId>{ key },
+			"manual Door requirement did not persist");
+		auto usage = restored->getAccessPermissionUsage(key);
+		require(usage.manualDoorRequirements == 1, "manual Door usage count is wrong");
+		restored->pauseSimulation();
+		require(restored->deleteAccessPermission(key, &diagnostic), diagnostic);
+		require(restored->getManualDoorPermissionRequirement(protectedDoor.traversalResource).empty(),
+			"Access permission deletion did not clear the manual Door requirement");
+	}
+
 	void malformedAuthorizationIsTransactional()
 	{
 		core::World authored("malformed source", 2, 1);
@@ -119,7 +223,9 @@ namespace
 	void panelCommitParticipatesInHistory()
 	{
 		auto world = std::make_shared<core::World>("panel", 2, 1);
-		auto corridor = world->addCorridor(0, 0, 2);
+		auto corridor = world->addRoom("Front", 0, 0, 0, 2, 1);
+		world->addRoom("Back", 1, 0, 0, 2, 1);
+		auto door = world->addSectorDoor(0, 0, 0, {});
 		auto control = world->addSectorLightSwitch(corridor, 1);
 		world->finishBuild(); world->pauseSimulation();
 		auto agent = world->createAgent("agent", corridor, 0, 0.5f);
@@ -137,6 +243,7 @@ namespace
 		renderPermissionsPanel(world);
 		renderAgentAccessPermissions(world, agent);
 		renderInteractionPermissionRequirements(world, control.interactionPoint);
+		renderManualDoorPermissionRequirements(world, door.traversalResource);
 		ImGui::End(); ImGui::Render(); ImGui::DestroyContext();
 	}
 }
@@ -144,6 +251,7 @@ namespace
 void runAccessPermissionSmokeChecks()
 {
 	authorizationAndPersistence();
+	manualDoorAuthorization();
 	malformedAuthorizationIsTransactional();
 	panelCommitParticipatesInHistory();
 }

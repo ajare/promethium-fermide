@@ -7,6 +7,7 @@
 #include "core/Vertex.h"
 #include "core/Agent.h"
 #include "core/Exceptions.h"
+#include "core/World.h"
 
 
 namespace core
@@ -62,8 +63,20 @@ namespace core
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
 		// Runtime keeps an ordinary Door crossing in place for six 1/60-second ticks.
-		return thresholdRouteFacts(*this, *mDoor, target, context, 6.0f / 60.0f,
+		auto facts = thresholdRouteFacts(*this, *mDoor, target, context, 6.0f / 60.0f,
 			CORE_DOOR_OPEN_CLOSE_TIME);
+		auto source = getOtherVertex(target);
+		auto const locallyOpen = source && source->getSector().get() == context.observationSector
+			&& mDoor->isOpen();
+		if (facts.feasible && mDoor->getActivationMode() == DoorActivationMode::Manual
+			&& !locallyOpen && context.world && context.agent
+			&& !context.world->canAgentOpenManualDoor(mDoor->getTraversalResourceId(),
+				context.world->getAgentId(context.agent)))
+		{
+			facts.feasible = false;
+			facts.exclusionReason = RouteExclusionReason::Permission;
+		}
+		return facts;
 	}
 
 	bool DoorEdge::requiresButton() const

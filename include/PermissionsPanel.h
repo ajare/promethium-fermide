@@ -17,9 +17,14 @@ bool commitAgentAccessPermissionGrant(std::shared_ptr<core::World> const& world,
 bool commitInteractionPermissionRequirement(std::shared_ptr<core::World> const& world,
 	core::InteractionPointId point, core::AccessPermissionId permission, bool required,
 	std::string& diagnostic);
+bool commitManualDoorPermissionRequirement(std::shared_ptr<core::World> const& world,
+	core::TraversalResourceId door, core::AccessPermissionId permission, bool required,
+	std::string& diagnostic);
 
 void renderPermissionsPanel(std::shared_ptr<core::World> const& world);
 void renderAgentAccessPermissions(std::shared_ptr<core::World> const& world, core::AgentId agent);
 void renderInteractionPermissionRequirements(std::shared_ptr<core::World> const& world,
 	core::InteractionPointId point);
+void renderManualDoorPermissionRequirements(std::shared_ptr<core::World> const& world,
+	core::TraversalResourceId door);
 void resetPermissionsPanelState();
