@@ -181,6 +181,7 @@ namespace core
 		AgentId mRequester;
 		std::set<AgentId> mRequesters;
 		DeviceCommand mCommand;
+		std::vector<AccessPermissionId> mMissingPermissions;
 		bool mHasCommand{ false };
 		bool mActivated{ false };
 		DeviceOperationState mState{ DeviceOperationState::Pending };
@@ -204,6 +205,7 @@ namespace core
 		AgentId getRequester() const { return mRequester; }
 		std::set<AgentId> const& getRequesters() const { return mRequesters; }
 		DeviceCommand const& getCommand() const { return mCommand; }
+		std::vector<AccessPermissionId> const& getMissingPermissions() const { return mMissingPermissions; }
 		bool hasCommand() const { return mHasCommand; }
 		DeviceOperationState getState() const { return mState; }
 		void setState(DeviceOperationState state) { ++observationRevision; mState = state; }

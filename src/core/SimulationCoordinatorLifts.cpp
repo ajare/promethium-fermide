@@ -944,6 +944,12 @@ namespace core
 			auto interactionId = requestInteractionForTraversal(coordinator.mLiftSelector, request->mOwner);
 			if (!interactionId) return;
 			auto interaction = mWorld.mInteractionRequests.find(interactionId);
+			if (interaction && interaction->mResult == InteractionResult::Rejected)
+			{
+				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
+				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+				return;
+			}
 			request->mPreparationRequested = true;
 			if (interaction && !interaction->mOperations.empty())
 				request->mPreparationOperation = interaction->mOperations.front().first;

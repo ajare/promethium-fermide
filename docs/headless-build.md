@@ -488,7 +488,7 @@ including the editor; all 67 CTest tests passed in each configuration (approxima
 479 seconds Debug, 42 seconds Release). `git diff --check` passed. No manual editor
 session was used.
 
-## Ordinary Lift destination permission authoring (#260)
+## Ordinary Lift destination permissions (#260, #261)
 
 `access-permissions` (or `--access-permission-checks`) covers the public World
 queries and paused-only mutations, panel-commit undo/redo, YAML and binary round
@@ -496,17 +496,26 @@ trips, legacy unrestricted defaults, transactional malformed-data rejection,
 rename/delete usage, and Stop retention through Lift and Location edits and
 Sector reindexing. Deleted Stops and recreated Lifts start unrestricted.
 Headless ImGui checks render the destination table, readable requirements, None,
-and the prominent **NOT YET ENFORCED** warning without a window or dialogs.
+and the intermediate-feature caveat without a window or dialogs.
 
-World schema 30 persists ordinary Lift requirements per destination Stop; all
-listed Access permissions will be required, using direct and Permission set
-grants. This milestone deliberately changes neither routing nor runtime
-selection authorization. Shuttle and Platform lift destination authoring and
-all enforcement remain follow-up work.
+World schema 30 persists ordinary Lift requirements per destination Stop. #261
+requires every listed Access permission for Agent-attributed selection commands,
+using current direct and Permission set grants, including commands bound through
+alternate Interaction points. Agentless commands bypass Agent authorization.
+Routing tests cover rejection, missing-permission diagnostics, unrestricted
+journeys past protected intermediate Stops, alternatives, Route loss, remote
+observation exclusion, and completed locally observed piggyback journeys without
+unauthorized selection. Destination requirements do not constrain disembarking
+or replace landing-call requirements.
 
-Validation on Windows/MSVC: full Debug and Release builds (including the editor)
-and all 68 CTest tests passed in each configuration; `git diff --check` passed.
-No manual editor session was used.
+This is an intermediate feature for stable authorization, not completion of
+#259: dynamic authorization remains follow-up work. Shuttle and Platform lift
+destination requirements remain outside this milestone.
+
+Validation for #261 on Windows/MSVC: full Debug and Release builds (including
+the editor), all 67 non-GUI CTest tests in each configuration
+(`ctest --test-dir build-windows -C <configuration> -LE gui --output-on-failure`),
+and `git diff --check` passed. No manual editor session was used.
 
 ## Prerequisites
 

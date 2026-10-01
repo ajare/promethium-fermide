@@ -10406,6 +10406,9 @@ namespace core
 	{
 		vector<AccessPermissionId> result;
 		auto missing = point.mPermissionRequirement & ~effectiveAccessGrants(agent);
+		for (auto const& binding : point.mBindings)
+			for (auto permission : missingLiftDestinationPermissions(binding.command, getAgentId(&agent)))
+				missing.set(permission.value - 1);
 		for (size_t bit = 0; bit < mAccessPermissions.size(); ++bit)
 			if (missing.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
 		return result;
@@ -10515,6 +10518,60 @@ namespace core
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
+	}
+
+	vector<AccessPermissionId> World::missingLiftDestinationPermissions(
+		DeviceCommand const& command, AgentId agentId) const
+	{
+		vector<AccessPermissionId> result;
+		if (!agentId || command.type != DeviceCommandType::SelectLiftDestination) return result;
+		auto resource = mTraversalResources.find(command.traversalResource);
+		if (!resource || !resource->mLift || resource->mOpenPlatformLift
+			|| command.stopIndex >= resource->mLiftStops.size()) return result;
+		auto agent = mAgents.find(agentId);
+		auto grants = agent ? effectiveAccessGrants(*agent) : bitset<256>{};
+		for (auto permission : getLiftDestinationPermissionRequirement(
+			static_cast<uint32_t>(resource->mLiftSector.value - 1), command.stopIndex))
+			if (!grants.test(permission.value - 1)) result.push_back(permission);
+		return result;
+	}
+
+	bool World::canAgentUseLiftJourney(TraversalResourceId resourceId,
+		Vector2 const& origin, Vector2 const& destination, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (resource && resource->mLiftCoordinator)
+		{
+			resourceId = resource->mLiftCoordinator;
+			resource = mTraversalResources.find(resourceId);
+		}
+		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return true;
+		auto stop = mSimulationCoordinator.findLiftStop(*resource, destination);
+		DeviceCommand command;
+		command.type = DeviceCommandType::SelectLiftDestination;
+		command.traversalResource = resourceId;
+		command.stopIndex = stop;
+		if (missingLiftDestinationPermissions(command, agentId).empty()) return true;
+		auto agent = mAgents.find(agentId);
+		if (!agent || !agent->getSector()) return false;
+		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
+			!= resource->mOccupants.end();
+		// Only an open, boardable car at this Agent's landing reveals a usable
+		// shared journey. Never consult a remote car's live destination requests.
+		if (!local)
+		{
+			auto originStop = mSimulationCoordinator.findLiftStop(*resource, origin);
+			if (originStop < resource->mLiftStops.size())
+			{
+				auto const& landing = resource->mLiftStops[originStop];
+				local = landing.locationSector.value == agent->getSector()->getIndex() + 1
+					&& std::abs(agent->getGlobalPosition().y - landing.globalPosition) <= 0.5f
+					&& isTransportLocallyBoardable(landing.landingResource, origin);
+			}
+		}
+		return local && stop < resource->mLiftStopRequestOwners.size()
+			&& (!resource->mLiftStopRequestOwners[stop].empty()
+				|| (!resource->mLiftMoving && resource->mLiftCurrentStop == stop));
 	}
 
 	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,

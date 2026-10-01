@@ -157,9 +157,10 @@ namespace core
 
 	DeviceOperationId SimulationCoordinator::findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester)
 	{
+		auto missing = mWorld.missingLiftDestinationPermissions(command, requester);
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (operation->mHasCommand && operation->mCommand == command
+			if (missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
 			{
 				operation->mRequesters.insert(requester);
@@ -176,7 +177,18 @@ namespace core
 			: command.type == DeviceCommandType::CallShuttle ? "Call shuttle"
 			: command.type == DeviceCommandType::SelectShuttleDestination ? "Select shuttle destination"
 				: "Device command";
+		if (!missing.empty())
+		{
+			name += ": missing Access permissions";
+			for (auto permission : missing) name += format(" {}", permission.value);
+		}
 		auto id = mWorld.mDeviceOperations.add(unique_ptr<DeviceOperation>(new DeviceOperation(name, requester, command)));
+		if (!missing.empty())
+		{
+			auto operation = mWorld.mDeviceOperations.find(id);
+			operation->mMissingPermissions = std::move(missing);
+			operation->mState = DeviceOperationState::Rejected;
+		}
 		SimulationEvent event;
 		event.sequence = mWorld.mNextEventSequence++;
 		event.tick = mWorld.mSimulationTick;

@@ -2403,6 +2403,10 @@ namespace core
 			AgentId agent) const;
 		bool canAgentOperateExtensibleControl(TraversalResourceId resource,
 			SectorId approach, AgentId agent) const;
+		std::vector<AccessPermissionId> missingLiftDestinationPermissions(
+			DeviceCommand const& command, AgentId agent) const;
+		bool canAgentUseLiftJourney(TraversalResourceId resource, Vector2 const& origin,
+			Vector2 const& destination, AgentId agent) const;
 		bool canAgentOperateTransportLandingControl(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
 		bool isTransportLocallyBoardable(TraversalResourceId resource,
