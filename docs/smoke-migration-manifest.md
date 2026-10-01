@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the three-module pilot gate #283 (parent #278). Each source
+Snapshot after the World structure migration #284 (parent #278). Each source
 below has exactly one current compilation/execution owner; all assertions inside
 it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -16,6 +16,13 @@ or invoked by the legacy aggregate. CTest executes it only as `smoke-simulation`
 as `render/walls`. Neither the legacy aggregate nor `--render-checks` invokes
 it anymore; its domain CTest owner is `smoke-render`. All other Render checks
 remain legacy-owned for follow-up migration.
+
+#284 migrates the core-only Layer, Sector, Background, Window, Facade,
+zero-sized Location, and threshold-layer topology groups to `smoke/world`, with
+stable registrations under `smoke-world`. The editor-dependent Background and
+Facade panel checks and renderer-dependent Facade checks remain legacy-owned for
+their dedicated migrations. The legacy aggregate and `--render-checks` no longer
+invoke the migrated core Window checks.
 
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Existing overlapping legacy CTest selections are unchanged.
@@ -55,10 +62,10 @@ Paths in the table are relative to `src/headless/`.
 | `AgentTagRegistrySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentTagReloadSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentWalkSpeedSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `BackgroundCascadeDeleteSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `BackgroundPaintSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `BackgroundPlacementSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `BackgroundSectorSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/world/BackgroundCascadeDelete.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/BackgroundPaint.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/BackgroundPlacement.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/BackgroundSector.cpp` | module-owned | `pf-smoke-world` |
 | `BackgroundSelectionPanelSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DocumentHistorySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DoorOpenApartRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -67,12 +74,12 @@ Paths in the table are relative to `src/headless/`.
 | `DoorPanelScopeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DoorPreflightSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DoorTwoSidedButtonSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `EditorLayerSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/world/Layers.cpp` | module-owned | `pf-smoke-world` |
 | `EscalatorWalkingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `FacadeDrawOrderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `FacadeEditorSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `FacadeRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `FacadeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/world/Facades.cpp` | module-owned | `pf-smoke-world` |
 | `GraphicsStartupSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `InteractionMobilitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `InteractionPointGeometrySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -103,7 +110,7 @@ Paths in the table are relative to `src/headless/`.
 | `ShuttleRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `SimulationStepTimingChecks.cpp` | module-owned (retained standalone) | `pf-simulation-step-timing-checks` |
 | `StairRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `ThresholdLayerOverlapSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/world/ThresholdLayerOverlap.cpp` | module-owned | `pf-smoke-world` |
 | `ThresholdRefusalSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ThresholdRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `TransportLandingAdherenceSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -111,13 +118,13 @@ Paths in the table are relative to `src/headless/`.
 | `ViewportDragScrollSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ViewportZoomSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/render/Walls.cpp` | module-owned | `pf-smoke-render` |
-| `WindowIntoBackgroundSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `WindowLayerSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `WindowMultiBackgroundSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/world/WindowIntoBackground.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/WindowLayers.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/WindowMultiBackground.cpp` | module-owned | `pf-smoke-world` |
 | `WorldRenderLifetimeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `WorldRenderSlotChecks.cpp` | module-owned (retained standalone) | `pf-world-render-slot-checks` |
 | `WorldTeardownSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `ZeroSizeLocationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
 | `SmokeScenario.cpp` (all inline aggregate checks) | legacy-owned | `prometheum-fermide-headless` |
 | `InteractionApiCompileCheck.cpp` (compile-only contract) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/simulation/Observation.cpp` | module-owned | `pf-smoke-simulation` |
@@ -148,6 +155,9 @@ Neither legacy entry point executes the migrated checks.
 
 - `RenderGuiStubs.cpp` and `support/ImGuiContext.cpp`: reusable CPU-only support,
   compiled by `pf-headless-render-support`, not independent checks.
+- `smoke/world/Main.cpp`: explicit World registry, not extra coverage.
+- `smoke/tests/WorldContract.cmake`: World CLI and arbitrary-working-directory
+  contract (`harness;core`, not smoke coverage).
 - `smoke/persistence/Main.cpp`: explicit Persistence registry, not extra coverage.
 - `smoke/tests/PersistenceContract.cmake`: Persistence CLI, external working
   directory, and concurrent invocation contract (`harness;core`, not smoke).

@@ -335,9 +335,6 @@ add_executable(prometheum-fermide-headless
     src/TagsPanel.cpp
     src/BehavioursPanel.cpp
     src/AgentClipboard.cpp
-    src/headless/BackgroundPaintSmokeChecks.cpp
-    src/headless/BackgroundPlacementSmokeChecks.cpp
-    src/headless/BackgroundCascadeDeleteSmokeChecks.cpp
     src/headless/BackgroundSelectionPanelSmokeChecks.cpp
     src/headless/AgentGroupSmokeChecks.cpp
     src/headless/AgentGroupAssignmentSmokeChecks.cpp
@@ -384,12 +381,9 @@ add_executable(prometheum-fermide-headless
     src/headless/AgentBehaviourSchemaReconciliationSmokeChecks.cpp
     src/headless/AgentBehaviourRuntimeSmokeChecks.cpp
     src/headless/AgentBehaviourWorkflowSmokeChecks.cpp
-    src/headless/BackgroundSectorSmokeChecks.cpp
-    src/headless/EditorLayerSmokeChecks.cpp
     src/headless/DoorOpenApartRenderSmokeChecks.cpp
     src/headless/DoorOpenLeftRenderSmokeChecks.cpp
     src/headless/DoorOpenRightRenderSmokeChecks.cpp
-    src/headless/FacadeSmokeChecks.cpp
     src/headless/FacadeEditorSmokeChecks.cpp
     src/headless/FacadeRenderSmokeChecks.cpp
     src/headless/FacadeDrawOrderSmokeChecks.cpp
@@ -416,15 +410,10 @@ add_executable(prometheum-fermide-headless
     src/headless/SmokeScenario.cpp
     src/headless/MetricsChecks.cpp
     src/headless/ThresholdRefusalSmokeChecks.cpp
-    src/headless/ThresholdLayerOverlapSmokeChecks.cpp
     src/headless/ViewportCullingSmokeChecks.cpp
     src/headless/ViewportDragScrollSmokeChecks.cpp
     src/headless/ViewportZoomSmokeChecks.cpp
     src/headless/WorldRenderLifetimeSmokeChecks.cpp
-    src/headless/WindowLayerSmokeChecks.cpp
-    src/headless/WindowIntoBackgroundSmokeChecks.cpp
-    src/headless/WindowMultiBackgroundSmokeChecks.cpp
-    src/headless/ZeroSizeLocationSmokeChecks.cpp
 )
 target_compile_features(prometheum-fermide-headless PRIVATE cxx_std_20)
 target_include_directories(prometheum-fermide-headless PRIVATE "${PF_INCLUDE_DIR}/imgui")

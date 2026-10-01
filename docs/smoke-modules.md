@@ -1,11 +1,12 @@
 # Independent smoke modules
 
-The pilots own Simulation Observation (#280), Render walls (#281), and Persistence
-serializer/document formats (#282). Other domain checks remain legacy-owned; see
-the [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no
-longer runs migrated checks, `--render-checks` no longer runs walls, and
-`--serialization-checks` runs only the remaining serialization checks. Use CTest
-for combined coverage.
+The independent modules currently own Simulation Observation (#280), Render walls
+(#281), Persistence serializer/document formats (#282), and core World structure
+and Sector checks (#284). Other domain checks remain legacy-owned; see the
+[ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
+runs migrated checks, `--render-checks` no longer runs migrated walls or core
+Window checks, and `--serialization-checks` runs only the remaining serialization
+checks. Use CTest for combined coverage.
 
 ```sh
 cmake -S . -B build-linux -DBUILD_TESTING=ON -DPF_BUILD_GUI=OFF
@@ -69,6 +70,29 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## World structure and Sector module (#284)
+
+```sh
+cmake --build build-linux --target pf-smoke-world --parallel
+build-linux/bin/x64/Release/pf-smoke-world --list
+build-linux/bin/x64/Release/pf-smoke-world --check facades
+ctest --test-dir build-linux -R '^smoke-world(-contract)?$' --output-on-failure
+```
+
+The World module owns eleven core-only groups for Layer queries, Background type,
+placement, paint-flow contracts and cascade deletion, Window layer and Background
+relationships, Facades, zero-sized Location refusal, and adjacent-Layer threshold
+topology. These groups link only smoke support and production core. Their former
+sources and invocations were removed from the legacy aggregate, including the two
+core Window groups formerly reached by `--render-checks`.
+
+Editor-dependent Background selection and Facade authoring fragments remain in
+the editor tier, while Facade drawing remains in the render tier; neither tier is
+linked by `pf-smoke-world`. `smoke-world-contract` runs the complete module and
+every named selection from an external empty working directory and verifies that
+no working-directory files are created. Both tests are headless and require no
+ImGui context, renderer, platform backend, graphics window, or dialog support.
 
 ## Render pilot (#281)
 

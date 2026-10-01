@@ -65,6 +65,31 @@ pf_add_smoke_module(pf-smoke-simulation
     TIMEOUT 30
 )
 
+pf_add_smoke_module(pf-smoke-world
+    NAME world
+    SOURCES
+        world/Main.cpp
+        world/BackgroundSector.cpp
+        world/BackgroundPaint.cpp
+        world/BackgroundPlacement.cpp
+        world/BackgroundCascadeDelete.cpp
+        world/Layers.cpp
+        world/WindowLayers.cpp
+        world/WindowIntoBackground.cpp
+        world/WindowMultiBackground.cpp
+        world/Facades.cpp
+        world/ZeroSizeLocations.cpp
+        world/ThresholdLayerOverlap.cpp
+    LIBRARIES prometheum-fermide-core
+    LABELS core
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-world-contract COMMAND ${CMAKE_COMMAND}
+    "-DWORLD=$<TARGET_FILE:pf-smoke-world>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/WorldContract.cmake")
+set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core" TIMEOUT 30)
+
 pf_add_smoke_module(pf-smoke-persistence
     NAME persistence
     SOURCES persistence/Main.cpp persistence/Formats.cpp
