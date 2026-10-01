@@ -609,17 +609,17 @@ namespace
 
 void behaviour_smoke::registerRegistryEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "hotReloadIsAtomicAcrossSourceHelpersAndDependentWorlds", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/hotReloadIsAtomicAcrossSourceHelpersAndDependentWorlds", [](smoke::Context const& context)
 	{
 		EditorState state;
 		hotReloadIsAtomicAcrossSourceHelpersAndDependentWorlds(context);
 	} });
-	checks.push_back({ "recoverDetachAndReplaceUsedRegistrySafely", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/recoverDetachAndReplaceUsedRegistrySafely", [](smoke::Context const& context)
 	{
 		EditorState state;
 		recoverDetachAndReplaceUsedRegistrySafely(context);
 	} });
-	checks.push_back({ "packageContainmentAndLifecycle", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/packageContainmentAndLifecycle", [](smoke::Context const& context)
 	{
 		EditorState state;
 		packageContainmentAndLifecycle(context);

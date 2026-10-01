@@ -179,12 +179,12 @@ namespace routing_smoke
 {
 	void registerPlanningTimeEditor(std::vector<smoke::Check>& checks)
 	{
-		checks.push_back({ "individualHistory", [](smoke::Context const&)
+		checks.push_back({ "routing/individualHistory", [](smoke::Context const&)
 		{
 			EditorState state;
 			individualHistory();
 		} });
-		checks.push_back({ "historyAndClipboard", [](smoke::Context const&)
+		checks.push_back({ "routing/historyAndClipboard", [](smoke::Context const&)
 		{
 			EditorState state;
 			historyAndClipboard();

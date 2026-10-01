@@ -24,7 +24,6 @@ function(invoke status expected)
     endif()
 endfunction()
 
-
 set(core_names
     staircasePathSpansOuterCellEdges
     staircaseCanUseForeRoomEndpoints
@@ -69,15 +68,10 @@ set(core_names
     liftCrossingsReduced
 )
 
-set(editor_names propertyWorkflows)
-
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${TRANSPORTS}")
         set(module transports)
-    else()
-        set(binary "${EDITOR}")
-        set(module transports-editor)
     endif()
     set(names ${${tier}_names})
     list(LENGTH names count)
@@ -96,18 +90,15 @@ if(artifacts)
     message(FATAL_ERROR "Transports wrote working-directory files: ${artifacts}")
 endif()
 
-# Both dependency tiers run concurrently, with eight instances of each.
+# Run eight concurrent invocations to expose fixed-path collisions.
 # A shared empty cwd and OS temp parent expose any fixed-path collisions.
 set(project "${work}/concurrent")
 file(MAKE_DIRECTORY "${project}")
 file(WRITE "${project}/CTestTestfile.cmake" "")
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${TRANSPORTS}")
         set(module transports)
-    else()
-        set(binary "${EDITOR}")
-        set(module transports-editor)
     endif()
     list(LENGTH ${tier}_names count)
     foreach(index RANGE 1 8)

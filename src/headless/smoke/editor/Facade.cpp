@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "State.h"
 // The editor surface for Facades, for ticket #47.
 //
 // The panel and the palette tray are not reachable headlessly, so these checks
@@ -102,6 +104,8 @@ namespace
 // the Room's placement rule - and the release adds through addFacade. An
 // occupied rectangle refuses before anything is built; a free one lands as an
 // occupiable, selectable Facade with walkable ground.
+namespace
+{
 void theFacadeCreationFlowPlacesAnOccupiableSelectableSector()
 {
 	core::World world("Creation flow", 12, 3);
@@ -665,19 +669,21 @@ void theDeletionPlansDoNotCrossTypes()
 		"The refused plans left an invalid topology: " + world.getTopologyDiagnostic());
 }
 
-void runFacadeEditorSmokeChecks()
+}
+
+void editor_smoke::registerFacade(std::vector<smoke::Check>& checks)
 {
-	theFacadeCreationFlowPlacesAnOccupiableSelectableSector();
-	facadePlacementFollowsTheRoomRules();
-	aFacadeColourEditPersistsThroughTheConstructionRecord();
-	aFacadeRecolourTouchesNothingButItsOwnFacade();
-	aRecolourIsRefusedForAnythingWhichIsNotAFacade();
-	wallCommandsRefuseAFacadeWithAClearDiagnostic();
-	theSelectionPanelShowsNoWallAffordancesForAFacade();
-	theCanvasDropTargetsAcceptAFacade();
-	theFacadeDeletionPlanNamesItsAgentsAndHostedObjects();
-	anEmptyFacadeDeletesWithoutConfirmation();
-	applyingAFacadeDeleteRemovesItAndLeavesTheRestStanding();
-	aFacadeCanBeResizedAndMovedLikeARoom();
-	theDeletionPlansDoNotCrossTypes();
+	checks.push_back({ "facade/theFacadeCreationFlowPlacesAnOccupiableSelectableSector", [](smoke::Context const&) { State state; theFacadeCreationFlowPlacesAnOccupiableSelectableSector(); } });
+	checks.push_back({ "facade/facadePlacementFollowsTheRoomRules", [](smoke::Context const&) { State state; facadePlacementFollowsTheRoomRules(); } });
+	checks.push_back({ "facade/aFacadeColourEditPersistsThroughTheConstructionRecord", [](smoke::Context const&) { State state; aFacadeColourEditPersistsThroughTheConstructionRecord(); } });
+	checks.push_back({ "facade/aFacadeRecolourTouchesNothingButItsOwnFacade", [](smoke::Context const&) { State state; aFacadeRecolourTouchesNothingButItsOwnFacade(); } });
+	checks.push_back({ "facade/aRecolourIsRefusedForAnythingWhichIsNotAFacade", [](smoke::Context const&) { State state; aRecolourIsRefusedForAnythingWhichIsNotAFacade(); } });
+	checks.push_back({ "facade/wallCommandsRefuseAFacadeWithAClearDiagnostic", [](smoke::Context const&) { State state; wallCommandsRefuseAFacadeWithAClearDiagnostic(); } });
+	checks.push_back({ "facade/theSelectionPanelShowsNoWallAffordancesForAFacade", [](smoke::Context const&) { State state; theSelectionPanelShowsNoWallAffordancesForAFacade(); } });
+	checks.push_back({ "facade/theCanvasDropTargetsAcceptAFacade", [](smoke::Context const&) { State state; theCanvasDropTargetsAcceptAFacade(); } });
+	checks.push_back({ "facade/theFacadeDeletionPlanNamesItsAgentsAndHostedObjects", [](smoke::Context const&) { State state; theFacadeDeletionPlanNamesItsAgentsAndHostedObjects(); } });
+	checks.push_back({ "facade/anEmptyFacadeDeletesWithoutConfirmation", [](smoke::Context const&) { State state; anEmptyFacadeDeletesWithoutConfirmation(); } });
+	checks.push_back({ "facade/applyingAFacadeDeleteRemovesItAndLeavesTheRestStanding", [](smoke::Context const&) { State state; applyingAFacadeDeleteRemovesItAndLeavesTheRestStanding(); } });
+	checks.push_back({ "facade/aFacadeCanBeResizedAndMovedLikeARoom", [](smoke::Context const&) { State state; aFacadeCanBeResizedAndMovedLikeARoom(); } });
+	checks.push_back({ "facade/theDeletionPlansDoNotCrossTypes", [](smoke::Context const&) { State state; theDeletionPlansDoNotCrossTypes(); } });
 }

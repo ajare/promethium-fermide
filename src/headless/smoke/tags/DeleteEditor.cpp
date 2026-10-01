@@ -364,31 +364,31 @@ namespace
 
 void tag_smoke::registerDeleteEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "filteringAndAggregateLoadedUsage",
+	checks.push_back({ "tags/filteringAndAggregateLoadedUsage",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			filteringAndAggregateLoadedUsage();
 		} });
-	checks.push_back({ "unusedDeletionIsImmediateAndUndoable",
+	checks.push_back({ "tags/unusedDeletionIsImmediateAndUndoable",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			unusedDeletionIsImmediateAndUndoable();
 		} });
-	checks.push_back({ "usedDeletionConfirmsCascadesAndRestoresAtomically",
+	checks.push_back({ "tags/usedDeletionConfirmsCascadesAndRestoresAtomically",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			usedDeletionConfirmsCascadesAndRestoresAtomically();
 		} });
-	checks.push_back({ "runningDependentWorldRefusesWithoutPartialMutation",
+	checks.push_back({ "tags/runningDependentWorldRefusesWithoutPartialMutation",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			runningDependentWorldRefusesWithoutPartialMutation();
 		} });
-	checks.push_back({ "closedWorldRetainingDeletedIdIsRefused",
+	checks.push_back({ "tags/closedWorldRetainingDeletedIdIsRefused",
 		[](smoke::Context const& context)
 		{
 			EditorState state;

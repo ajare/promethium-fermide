@@ -368,37 +368,37 @@ namespace
 
 void tag_smoke::registerClipboardEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "payloadCarriesRegistryAssignmentsAndExactSamples",
+	checks.push_back({ "tags/payloadCarriesRegistryAssignmentsAndExactSamples",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			payloadCarriesRegistryAssignmentsAndExactSamples();
 		} });
-	checks.push_back({ "sameRegistryPasteRestoresExactStateAsOneEdit",
+	checks.push_back({ "tags/sameRegistryPasteRestoresExactStateAsOneEdit",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			sameRegistryPasteRestoresExactStateAsOneEdit();
 		} });
-	checks.push_back({ "differentAndAbsentRegistryPasteAreRefusedAtomically",
+	checks.push_back({ "tags/differentAndAbsentRegistryPasteAreRefusedAtomically",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			differentAndAbsentRegistryPasteAreRefusedAtomically();
 		} });
-	checks.push_back({ "untaggedAgentsRemainPortableAcrossRegistryBoundaries",
+	checks.push_back({ "tags/untaggedAgentsRemainPortableAcrossRegistryBoundaries",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			untaggedAgentsRemainPortableAcrossRegistryBoundaries();
 		} });
-	checks.push_back({ "cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments",
+	checks.push_back({ "tags/cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments();
 		} });
-	checks.push_back({ "incompleteTaggedPayloadsAreNotSilentlyDowngraded",
+	checks.push_back({ "tags/incompleteTaggedPayloadsAreNotSilentlyDowngraded",
 		[](smoke::Context const&)
 		{
 			EditorState state;

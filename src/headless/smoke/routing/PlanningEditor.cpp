@@ -243,37 +243,37 @@ namespace routing_smoke
 {
 	void registerPlanningEditor(std::vector<smoke::Check>& checks)
 	{
-		checks.push_back({ "voluntaryAuthorizationUpgrade", [](smoke::Context const&)
+		checks.push_back({ "routing/voluntaryAuthorizationUpgrade", [](smoke::Context const&)
 		{
 			EditorState state;
 			voluntaryAuthorizationPlanning(0.0f, false, false);
 		} });
-		checks.push_back({ "voluntaryAuthorizationPersistence", [](smoke::Context const&)
+		checks.push_back({ "routing/voluntaryAuthorizationPersistence", [](smoke::Context const&)
 		{
 			EditorState state;
 			voluntaryAuthorizationPlanning(1.0f, false, false);
 		} });
-		checks.push_back({ "voluntaryAuthorizationInvalidation", [](smoke::Context const&)
+		checks.push_back({ "routing/voluntaryAuthorizationInvalidation", [](smoke::Context const&)
 		{
 			EditorState state;
 			voluntaryAuthorizationPlanning(1.0f, true, false);
 		} });
-		checks.push_back({ "voluntaryAuthorizationRouteLoss", [](smoke::Context const&)
+		checks.push_back({ "routing/voluntaryAuthorizationRouteLoss", [](smoke::Context const&)
 		{
 			EditorState state;
 			voluntaryAuthorizationPlanning(1.0f, true, true);
 		} });
-		checks.push_back({ "voluntaryAuthorizationWithdrawnShortcut", [](smoke::Context const&)
+		checks.push_back({ "routing/voluntaryAuthorizationWithdrawnShortcut", [](smoke::Context const&)
 		{
 			EditorState state;
 			voluntaryAuthorizationPlanning(0.0f, false, false, true);
 		} });
-		checks.push_back({ "boundariesAndPresentation", [](smoke::Context const&)
+		checks.push_back({ "routing/boundariesAndPresentation", [](smoke::Context const&)
 		{
 			EditorState state;
 			boundariesAndPresentation();
 		} });
-		checks.push_back({ "inclusiveEndpointsAndPersistence", [](smoke::Context const&)
+		checks.push_back({ "routing/inclusiveEndpointsAndPersistence", [](smoke::Context const&)
 		{
 			EditorState state;
 			inclusiveEndpointsAndPersistence();

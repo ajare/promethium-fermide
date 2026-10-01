@@ -286,6 +286,6 @@ namespace
 
 void agent_smoke::registerHeightEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "heightRangeEditsAreSingleExactTransactions", [](smoke::Context const&) { EditorState state; rangeEditsAreSingleExactTransactions(); } });
-	checks.push_back({ "heightChangesOnlyBoundsAndRendering", [](smoke::Context const&) { EditorState state; heightChangesOnlyBoundsAndRendering(); } });
+	checks.push_back({ "agent/heightRangeEditsAreSingleExactTransactions", [](smoke::Context const&) { EditorState state; rangeEditsAreSingleExactTransactions(); } });
+	checks.push_back({ "agent/heightChangesOnlyBoundsAndRendering", [](smoke::Context const&) { EditorState state; heightChangesOnlyBoundsAndRendering(); } });
 }

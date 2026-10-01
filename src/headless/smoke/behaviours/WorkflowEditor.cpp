@@ -364,12 +364,12 @@ end }
 
 void behaviour_smoke::registerWorkflowEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "persistenceHistoryMigrationAndReplacementAreAtomic", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/persistenceHistoryMigrationAndReplacementAreAtomic", [](smoke::Context const& context)
 	{
 		EditorState state;
 		persistenceHistoryMigrationAndReplacementAreAtomic(context);
 	} });
-	checks.push_back({ "realPanelsRenderPausedRunningAndDiagnosticStates", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/realPanelsRenderPausedRunningAndDiagnosticStates", [](smoke::Context const& context)
 	{
 		EditorState state;
 		realPanelsRenderPausedRunningAndDiagnosticStates(context);

@@ -247,5 +247,5 @@ namespace
 
 void agent_smoke::registerGroupTopologyEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "anEditSurvivesUndoAndRedo", [](smoke::Context const&) { EditorState state; anEditSurvivesUndoAndRedo(); } });
+	checks.push_back({ "agent/anEditSurvivesUndoAndRedo", [](smoke::Context const&) { EditorState state; anEditSurvivesUndoAndRedo(); } });
 }

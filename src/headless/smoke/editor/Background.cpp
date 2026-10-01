@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "State.h"
 // The Selection panel's Background branch, for ticket #39.
 //
 // The panel itself is not reachable headlessly, so these checks mirror what it
@@ -206,6 +208,8 @@ namespace
 
 // What the panel prints for a selected Background: name, sector index, Layer,
 // position, size, and the colour its colour widget starts from.
+namespace
+{
 void thePanelReadsTheSelectedBackground()
 {
 	core::World world("Panel readouts", 12, 3);
@@ -433,13 +437,15 @@ void aDeleteWithNoDependentWindowsNeedsNoConfirmation()
 		+ consequencesToString(plan.consequences));
 }
 
-void runBackgroundSelectionPanelSmokeChecks()
+}
+
+void editor_smoke::registerBackground(std::vector<smoke::Check>& checks)
 {
-	thePanelReadsTheSelectedBackground();
-	aPanelColourEditRoundTripsThroughSerialisation();
-	theColourEditCarriesNoAlphaChannel();
-	aRecolourTouchesNothingButItsOwnBackground();
-	aRecolourIsRefusedForAnythingWhichIsNotABackground();
-	thePanelDeleteNamesEveryDependentWindow();
-	aDeleteWithNoDependentWindowsNeedsNoConfirmation();
+	checks.push_back({ "background/thePanelReadsTheSelectedBackground", [](smoke::Context const&) { State state; thePanelReadsTheSelectedBackground(); } });
+	checks.push_back({ "background/aPanelColourEditRoundTripsThroughSerialisation", [](smoke::Context const&) { State state; aPanelColourEditRoundTripsThroughSerialisation(); } });
+	checks.push_back({ "background/theColourEditCarriesNoAlphaChannel", [](smoke::Context const&) { State state; theColourEditCarriesNoAlphaChannel(); } });
+	checks.push_back({ "background/aRecolourTouchesNothingButItsOwnBackground", [](smoke::Context const&) { State state; aRecolourTouchesNothingButItsOwnBackground(); } });
+	checks.push_back({ "background/aRecolourIsRefusedForAnythingWhichIsNotABackground", [](smoke::Context const&) { State state; aRecolourIsRefusedForAnythingWhichIsNotABackground(); } });
+	checks.push_back({ "background/thePanelDeleteNamesEveryDependentWindow", [](smoke::Context const&) { State state; thePanelDeleteNamesEveryDependentWindow(); } });
+	checks.push_back({ "background/aDeleteWithNoDependentWindowsNeedsNoConfirmation", [](smoke::Context const&) { State state; aDeleteWithNoDependentWindowsNeedsNoConfirmation(); } });
 }

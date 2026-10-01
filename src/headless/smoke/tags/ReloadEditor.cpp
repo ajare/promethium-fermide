@@ -318,25 +318,25 @@ namespace
 
 void tag_smoke::registerReloadEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "externalSaveConflictAndDirtyReloadAreRefused",
+	checks.push_back({ "tags/externalSaveConflictAndDirtyReloadAreRefused",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			externalSaveConflictAndDirtyReloadAreRefused(context);
 		} });
-	checks.push_back({ "successfulReloadReconcilesAllWorldsAndClearsRegistryHistory",
+	checks.push_back({ "tags/successfulReloadReconcilesAllWorldsAndClearsRegistryHistory",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			successfulReloadReconcilesAllWorldsAndClearsRegistryHistory(context);
 		} });
-	checks.push_back({ "reloadFailuresAreAtomic",
+	checks.push_back({ "tags/reloadFailuresAreAtomic",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			reloadFailuresAreAtomic(context);
 		} });
-	checks.push_back({ "unreferencedRegistryLifetimeFollowsDirtyState",
+	checks.push_back({ "tags/unreferencedRegistryLifetimeFollowsDirtyState",
 		[](smoke::Context const& context)
 		{
 			EditorState state;

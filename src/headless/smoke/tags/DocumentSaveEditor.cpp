@@ -399,49 +399,49 @@ namespace
 
 void tag_smoke::registerDocumentSaveEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "worldSaveWritesRegistryFirstAndCleansIndependently",
+	checks.push_back({ "tags/worldSaveWritesRegistryFirstAndCleansIndependently",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			worldSaveWritesRegistryFirstAndCleansIndependently(context);
 		} });
-	checks.push_back({ "registryFailureBlocksWorldAndPreservesDirtyState",
+	checks.push_back({ "tags/registryFailureBlocksWorldAndPreservesDirtyState",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			registryFailureBlocksWorldAndPreservesDirtyState(context);
 		} });
-	checks.push_back({ "saveAllCompletesRegistryPhaseBeforeAnyWorld",
+	checks.push_back({ "tags/saveAllCompletesRegistryPhaseBeforeAnyWorld",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			saveAllCompletesRegistryPhaseBeforeAnyWorld(context);
 		} });
-	checks.push_back({ "sameDirectorySaveAsRetainsRegistryReference",
+	checks.push_back({ "tags/sameDirectorySaveAsRetainsRegistryReference",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			sameDirectorySaveAsRetainsRegistryReference(context);
 		} });
-	checks.push_back({ "crossDirectorySaveAsCopiesEquivalentIndependentRegistry",
+	checks.push_back({ "tags/crossDirectorySaveAsCopiesEquivalentIndependentRegistry",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			crossDirectorySaveAsCopiesEquivalentIndependentRegistry(context);
 		} });
-	checks.push_back({ "binaryRoundTripAndBidirectionalConversionRetainRegistry",
+	checks.push_back({ "tags/binaryRoundTripAndBidirectionalConversionRetainRegistry",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			binaryRoundTripAndBidirectionalConversionRetainRegistry(context);
 		} });
-	checks.push_back({ "registryCollisionLeavesSourceAndDestinationUnchanged",
+	checks.push_back({ "tags/registryCollisionLeavesSourceAndDestinationUnchanged",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			registryCollisionLeavesSourceAndDestinationUnchanged(context);
 		} });
-	checks.push_back({ "closePromptNamesOnlyTheDirtyDocumentKinds",
+	checks.push_back({ "tags/closePromptNamesOnlyTheDirtyDocumentKinds",
 		[](smoke::Context const& context)
 		{
 			EditorState state;

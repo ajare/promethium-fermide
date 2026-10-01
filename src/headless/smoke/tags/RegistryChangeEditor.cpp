@@ -263,19 +263,19 @@ namespace
 
 void tag_smoke::registerRegistryChangeEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "unusedRegistryChangesAreDirectAndUndoable",
+	checks.push_back({ "tags/unusedRegistryChangesAreDirectAndUndoable",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			unusedRegistryChangesAreDirectAndUndoable(context);
 		} });
-	checks.push_back({ "directSwitchWithAssignmentsIsRefusedTransactionally",
+	checks.push_back({ "tags/directSwitchWithAssignmentsIsRefusedTransactionally",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			directSwitchWithAssignmentsIsRefusedTransactionally(context);
 		} });
-	checks.push_back({ "confirmedSwitchClearsEverythingAndCancellationDoesNothing",
+	checks.push_back({ "tags/confirmedSwitchClearsEverythingAndCancellationDoesNothing",
 		[](smoke::Context const& context)
 		{
 			EditorState state;

@@ -223,6 +223,6 @@ namespace
 
 void agent_smoke::registerWalkSpeedEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "walkSpeedRangeEditsResampleOnceAndRestoreExactSamples", [](smoke::Context const&) { EditorState state; rangeEditsResampleOnceAndRestoreExactSamples(); } });
-	checks.push_back({ "walkSpeedSelectionReportsSampleAndSource", [](smoke::Context const&) { EditorState state; selectionReportsSampleAndSource(); } });
+	checks.push_back({ "agent/walkSpeedRangeEditsResampleOnceAndRestoreExactSamples", [](smoke::Context const&) { EditorState state; rangeEditsResampleOnceAndRestoreExactSamples(); } });
+	checks.push_back({ "agent/walkSpeedSelectionReportsSampleAndSource", [](smoke::Context const&) { EditorState state; selectionReportsSampleAndSource(); } });
 }

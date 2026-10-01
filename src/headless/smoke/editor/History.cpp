@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "State.h"
 // Independent editor history, dirty-state, and saved-state checks for #127.
 
 #include "DocumentHistory.h"
@@ -88,7 +90,7 @@ namespace
 	}
 }
 
-void runDocumentHistorySmokeChecks()
+void editor_smoke::registerHistory(std::vector<smoke::Check>& checks)
 {
-	independentHistoriesDoNotLeakCommandsOrState();
+	checks.push_back({ "history/independentHistoriesDoNotLeakCommandsOrState", [](smoke::Context const&) { State state; independentHistoriesDoNotLeakCommandsOrState(); } });
 }

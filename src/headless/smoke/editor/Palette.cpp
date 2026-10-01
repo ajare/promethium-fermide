@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "State.h"
 // Palette tray layout and placement checks, for tickets #54 and #41.
 //
 // The tray geometry lives in PaletteLayout.h and is derived from the slot
@@ -253,16 +255,16 @@ namespace
 	}
 }
 
-void runPaletteTraySmokeChecks()
+void editor_smoke::registerPalette(std::vector<smoke::Check>& checks)
 {
-	everySlotFitsInsideTheTray();
-	roomLadderAndPlatformLiftFitInsideTheTray();
-	rowsAreContiguous();
-	noTwoSlotsOverlap();
-	sectorLabelsFitAndAreCentred();
-	dragInsideTheCanvasKeepsTheRequestedPosition();
-	dragPastAnEdgeStopsAtThatEdge();
-	trayAlwaysOverlapsTheCanvas();
-	aCanvasSmallerThanTheTrayClipsTheTray();
-	paddingAndGapsAreTheGrip();
+	checks.push_back({ "palette/everySlotFitsInsideTheTray", [](smoke::Context const&) { State state; everySlotFitsInsideTheTray(); } });
+	checks.push_back({ "palette/roomLadderAndPlatformLiftFitInsideTheTray", [](smoke::Context const&) { State state; roomLadderAndPlatformLiftFitInsideTheTray(); } });
+	checks.push_back({ "palette/rowsAreContiguous", [](smoke::Context const&) { State state; rowsAreContiguous(); } });
+	checks.push_back({ "palette/noTwoSlotsOverlap", [](smoke::Context const&) { State state; noTwoSlotsOverlap(); } });
+	checks.push_back({ "palette/sectorLabelsFitAndAreCentred", [](smoke::Context const&) { State state; sectorLabelsFitAndAreCentred(); } });
+	checks.push_back({ "palette/dragInsideTheCanvasKeepsTheRequestedPosition", [](smoke::Context const&) { State state; dragInsideTheCanvasKeepsTheRequestedPosition(); } });
+	checks.push_back({ "palette/dragPastAnEdgeStopsAtThatEdge", [](smoke::Context const&) { State state; dragPastAnEdgeStopsAtThatEdge(); } });
+	checks.push_back({ "palette/trayAlwaysOverlapsTheCanvas", [](smoke::Context const&) { State state; trayAlwaysOverlapsTheCanvas(); } });
+	checks.push_back({ "palette/aCanvasSmallerThanTheTrayClipsTheTray", [](smoke::Context const&) { State state; aCanvasSmallerThanTheTrayClipsTheTray(); } });
+	checks.push_back({ "palette/paddingAndGapsAreTheGrip", [](smoke::Context const&) { State state; paddingAndGapsAreTheGrip(); } });
 }

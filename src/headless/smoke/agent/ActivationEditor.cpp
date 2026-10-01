@@ -114,5 +114,5 @@ namespace
 
 void agent_smoke::registerActivationEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "clipboardCarriesActivation", [](smoke::Context const&) { EditorState state; clipboardCarriesActivation(); } });
+	checks.push_back({ "agent/clipboardCarriesActivation", [](smoke::Context const&) { EditorState state; clipboardCarriesActivation(); } });
 }

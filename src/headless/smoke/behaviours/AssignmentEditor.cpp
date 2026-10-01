@@ -297,17 +297,17 @@ namespace
 
 void behaviour_smoke::registerAssignmentEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "assignEditClearUndoRedoAndPersistence", [](smoke::Context const&)
+	checks.push_back({ "behaviours/assignEditClearUndoRedoAndPersistence", [](smoke::Context const&)
 	{
 		EditorState state;
 		assignEditClearUndoRedoAndPersistence();
 	} });
-	checks.push_back({ "compositeSchedulesValidatePersistAndUndo", [](smoke::Context const&)
+	checks.push_back({ "behaviours/compositeSchedulesValidatePersistAndUndo", [](smoke::Context const&)
 	{
 		EditorState state;
 		compositeSchedulesValidatePersistAndUndo();
 	} });
-	checks.push_back({ "markerDeletionReportsEveryReferenceAndPanelIsBalanced", [](smoke::Context const&)
+	checks.push_back({ "behaviours/markerDeletionReportsEveryReferenceAndPanelIsBalanced", [](smoke::Context const&)
 	{
 		EditorState state;
 		markerDeletionReportsEveryReferenceAndPanelIsBalanced();

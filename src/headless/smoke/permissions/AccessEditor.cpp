@@ -120,13 +120,13 @@ namespace
 
 void permission_smoke::registerAccessEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "runtimePropertiesPanelChangesCurrentAuthorizationOnly",
+	checks.push_back({ "permissions/runtimePropertiesPanelChangesCurrentAuthorizationOnly",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			runtimePropertiesPanelChangesCurrentAuthorizationOnly();
 		} });
-	checks.push_back({ "panelCommitParticipatesInHistory",
+	checks.push_back({ "permissions/panelCommitParticipatesInHistory",
 		[](smoke::Context const&)
 		{
 			EditorState state;

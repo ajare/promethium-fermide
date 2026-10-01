@@ -882,20 +882,20 @@ namespace
 
 void agent_smoke::registerGroupClipboardEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId", [](smoke::Context const&) { EditorState state; aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId(); } });
-	checks.push_back({ "aCopiedUngroupedAgentCarriesNoAgentGroup", [](smoke::Context const&) { EditorState state; aCopiedUngroupedAgentCarriesNoAgentGroup(); } });
-	checks.push_back({ "aLegacyPayloadWithoutAnAgentGroupStillPastes", [](smoke::Context const&) { EditorState state; aLegacyPayloadWithoutAnAgentGroupStillPastes(); } });
-	checks.push_back({ "aClipboardAgentGroupThatIsNotANameIsRefused", [](smoke::Context const&) { EditorState state; aClipboardAgentGroupThatIsNotANameIsRefused(); } });
-	checks.push_back({ "aPasteReusesTheDestinationGroupOfTheSameExactName", [](smoke::Context const&) { EditorState state; aPasteReusesTheDestinationGroupOfTheSameExactName(); } });
-	checks.push_back({ "aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively", [](smoke::Context const&) { EditorState state; aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively(); } });
-	checks.push_back({ "aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit", [](smoke::Context const&) { EditorState state; aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit(); } });
-	checks.push_back({ "armingADeferredPlacementWritesNothing", [](smoke::Context const&) { EditorState state; armingADeferredPlacementWritesNothing(); } });
-	checks.push_back({ "cancellingADeferredPasteLeavesNothingBehind", [](smoke::Context const&) { EditorState state; cancellingADeferredPasteLeavesNothingBehind(); } });
-	checks.push_back({ "aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry", [](smoke::Context const&) { EditorState state; aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry(); } });
-	checks.push_back({ "anInvalidClipboardAgentGroupNameIsRefusedWhole", [](smoke::Context const&) { EditorState state; anInvalidClipboardAgentGroupNameIsRefusedWhole(); } });
-	checks.push_back({ "undoTakesThePastedAgentAndItsNewGroupTogether", [](smoke::Context const&) { EditorState state; undoTakesThePastedAgentAndItsNewGroupTogether(); } });
-	checks.push_back({ "undoOfAReusingPasteLeavesTheDestinationGroupAlone", [](smoke::Context const&) { EditorState state; undoOfAReusingPasteLeavesTheDestinationGroupAlone(); } });
-	checks.push_back({ "cuttingAGroupedAgentLeavesItsSourceGroupDefined", [](smoke::Context const&) { EditorState state; cuttingAGroupedAgentLeavesItsSourceGroupDefined(); } });
-	checks.push_back({ "authorizationIsPreservedOnlyInTheOriginatingWorld", [](smoke::Context const&) { EditorState state; authorizationIsPreservedOnlyInTheOriginatingWorld(); } });
-	checks.push_back({ "anAgentCopiedBetweenWorldsJoinsTheDestinationGroup", [](smoke::Context const&) { EditorState state; anAgentCopiedBetweenWorldsJoinsTheDestinationGroup(); } });
+	checks.push_back({ "agent/aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId", [](smoke::Context const&) { EditorState state; aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId(); } });
+	checks.push_back({ "agent/aCopiedUngroupedAgentCarriesNoAgentGroup", [](smoke::Context const&) { EditorState state; aCopiedUngroupedAgentCarriesNoAgentGroup(); } });
+	checks.push_back({ "agent/aLegacyPayloadWithoutAnAgentGroupStillPastes", [](smoke::Context const&) { EditorState state; aLegacyPayloadWithoutAnAgentGroupStillPastes(); } });
+	checks.push_back({ "agent/aClipboardAgentGroupThatIsNotANameIsRefused", [](smoke::Context const&) { EditorState state; aClipboardAgentGroupThatIsNotANameIsRefused(); } });
+	checks.push_back({ "agent/aPasteReusesTheDestinationGroupOfTheSameExactName", [](smoke::Context const&) { EditorState state; aPasteReusesTheDestinationGroupOfTheSameExactName(); } });
+	checks.push_back({ "agent/aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively", [](smoke::Context const&) { EditorState state; aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively(); } });
+	checks.push_back({ "agent/aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit", [](smoke::Context const&) { EditorState state; aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit(); } });
+	checks.push_back({ "agent/armingADeferredPlacementWritesNothing", [](smoke::Context const&) { EditorState state; armingADeferredPlacementWritesNothing(); } });
+	checks.push_back({ "agent/cancellingADeferredPasteLeavesNothingBehind", [](smoke::Context const&) { EditorState state; cancellingADeferredPasteLeavesNothingBehind(); } });
+	checks.push_back({ "agent/aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry", [](smoke::Context const&) { EditorState state; aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry(); } });
+	checks.push_back({ "agent/anInvalidClipboardAgentGroupNameIsRefusedWhole", [](smoke::Context const&) { EditorState state; anInvalidClipboardAgentGroupNameIsRefusedWhole(); } });
+	checks.push_back({ "agent/undoTakesThePastedAgentAndItsNewGroupTogether", [](smoke::Context const&) { EditorState state; undoTakesThePastedAgentAndItsNewGroupTogether(); } });
+	checks.push_back({ "agent/undoOfAReusingPasteLeavesTheDestinationGroupAlone", [](smoke::Context const&) { EditorState state; undoOfAReusingPasteLeavesTheDestinationGroupAlone(); } });
+	checks.push_back({ "agent/cuttingAGroupedAgentLeavesItsSourceGroupDefined", [](smoke::Context const&) { EditorState state; cuttingAGroupedAgentLeavesItsSourceGroupDefined(); } });
+	checks.push_back({ "agent/authorizationIsPreservedOnlyInTheOriginatingWorld", [](smoke::Context const&) { EditorState state; authorizationIsPreservedOnlyInTheOriginatingWorld(); } });
+	checks.push_back({ "agent/anAgentCopiedBetweenWorldsJoinsTheDestinationGroup", [](smoke::Context const&) { EditorState state; anAgentCopiedBetweenWorldsJoinsTheDestinationGroup(); } });
 }

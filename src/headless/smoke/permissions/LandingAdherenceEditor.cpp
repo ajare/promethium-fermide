@@ -85,19 +85,19 @@ namespace
 
 void permission_smoke::registerLandingAdherenceEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "landingProfileHistoryAndDisplayLift",
+	checks.push_back({ "permissions/landingProfileHistoryAndDisplayLift",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			landingProfileHistoryAndDisplay(0);
 		} });
-	checks.push_back({ "landingProfileHistoryAndDisplayPlatform",
+	checks.push_back({ "permissions/landingProfileHistoryAndDisplayPlatform",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			landingProfileHistoryAndDisplay(1);
 		} });
-	checks.push_back({ "landingProfileHistoryAndDisplayShuttle",
+	checks.push_back({ "permissions/landingProfileHistoryAndDisplayShuttle",
 		[](smoke::Context const&)
 		{
 			EditorState state;

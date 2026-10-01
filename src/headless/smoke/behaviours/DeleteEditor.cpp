@@ -203,17 +203,17 @@ namespace
 
 void behaviour_smoke::registerDeleteEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "unusedDeletesDirectly", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/unusedDeletesDirectly", [](smoke::Context const& context)
 	{
 		EditorState state;
 		unusedDeletesDirectly(context);
 	} });
-	checks.push_back({ "usedDeletionListsCancelsAndCoordinates", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/usedDeletionListsCancelsAndCoordinates", [](smoke::Context const& context)
 	{
 		EditorState state;
 		usedDeletionListsCancelsAndCoordinates(context);
 	} });
-	checks.push_back({ "failedParticipantLeavesEverythingUnchanged", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/failedParticipantLeavesEverythingUnchanged", [](smoke::Context const& context)
 	{
 		EditorState state;
 		failedParticipantLeavesEverythingUnchanged(context);

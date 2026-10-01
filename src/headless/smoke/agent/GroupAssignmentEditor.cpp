@@ -1,3 +1,4 @@
+#include "ImGuiContext.h"
 // Migrated from AgentGroupAssignmentSmokeChecks.cpp (#285); editor dependency tier.
 #include <algorithm>
 #include <bit>
@@ -104,12 +105,12 @@ namespace
 
 	struct ImGuiGuard
 	{
+		headless::ScopedImGuiContext context;
 		// Everything the clipboard was handed, one entry per logged window.
 		std::vector<std::string> clipboardWrites;
 
 		ImGuiGuard()
 		{
-			ImGui::CreateContext();
 			auto& io = ImGui::GetIO();
 			io.IniFilename = nullptr;
 			io.LogFilename = nullptr;
@@ -121,7 +122,6 @@ namespace
 			io.GetClipboardTextFn = &readCapturedClipboardText;
 			io.ClipboardUserData = &clipboardWrites;
 		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
 	};
 
 	// One frame of the Group cell, drawn inside a table the way the Agents
@@ -654,10 +654,10 @@ namespace
 
 void agent_smoke::registerGroupAssignmentEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "anAssignedAgentFollowsItsGroupRename", [](smoke::Context const&) { EditorState state; anAssignedAgentFollowsItsGroupRename(); } });
-	checks.push_back({ "aMissingAssignmentFieldLoadsAsNoGroup", [](smoke::Context const&) { EditorState state; aMissingAssignmentFieldLoadsAsNoGroup(); } });
-	checks.push_back({ "assignmentEditsRunAlongsideTheSimulationAndCommitOneUndoEach", [](smoke::Context const&) { EditorState state; assignmentEditsRunAlongsideTheSimulationAndCommitOneUndoEach(); } });
-	checks.push_back({ "theGroupCellLabelShowsTheAssignment", [](smoke::Context const&) { EditorState state; theGroupCellLabelShowsTheAssignment(); } });
-	checks.push_back({ "theGroupCellRendersWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theGroupCellRendersWithoutLeakingImGuiState(); } });
-	checks.push_back({ "agentGroupNamesCarryingHashPairsReachTheScreenInFull", [](smoke::Context const&) { EditorState state; agentGroupNamesCarryingHashPairsReachTheScreenInFull(); } });
+	checks.push_back({ "agent/anAssignedAgentFollowsItsGroupRename", [](smoke::Context const&) { EditorState state; anAssignedAgentFollowsItsGroupRename(); } });
+	checks.push_back({ "agent/aMissingAssignmentFieldLoadsAsNoGroup", [](smoke::Context const&) { EditorState state; aMissingAssignmentFieldLoadsAsNoGroup(); } });
+	checks.push_back({ "agent/assignmentEditsRunAlongsideTheSimulationAndCommitOneUndoEach", [](smoke::Context const&) { EditorState state; assignmentEditsRunAlongsideTheSimulationAndCommitOneUndoEach(); } });
+	checks.push_back({ "agent/theGroupCellLabelShowsTheAssignment", [](smoke::Context const&) { EditorState state; theGroupCellLabelShowsTheAssignment(); } });
+	checks.push_back({ "agent/theGroupCellRendersWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theGroupCellRendersWithoutLeakingImGuiState(); } });
+	checks.push_back({ "agent/agentGroupNamesCarryingHashPairsReachTheScreenInFull", [](smoke::Context const&) { EditorState state; agentGroupNamesCarryingHashPairsReachTheScreenInFull(); } });
 }

@@ -253,7 +253,7 @@ namespace
 
 void agent_smoke::registerGroupIdAllocationEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo", [](smoke::Context const&) { EditorState state; theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo(); } });
-	checks.push_back({ "undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity", [](smoke::Context const&) { EditorState state; undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity(); } });
-	checks.push_back({ "anExhaustedWorldRefusesThePanelSeamAndCommitsNothing", [](smoke::Context const&) { EditorState state; anExhaustedWorldRefusesThePanelSeamAndCommitsNothing(); } });
+	checks.push_back({ "agent/theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo", [](smoke::Context const&) { EditorState state; theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo(); } });
+	checks.push_back({ "agent/undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity", [](smoke::Context const&) { EditorState state; undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity(); } });
+	checks.push_back({ "agent/anExhaustedWorldRefusesThePanelSeamAndCommitsNothing", [](smoke::Context const&) { EditorState state; anExhaustedWorldRefusesThePanelSeamAndCommitsNothing(); } });
 }

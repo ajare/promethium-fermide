@@ -348,31 +348,31 @@ namespace
 
 void tag_smoke::registerRegistryEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "savedWorldCreatesAndReopensAdjacentRegistry",
+	checks.push_back({ "tags/savedWorldCreatesAndReopensAdjacentRegistry",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			savedWorldCreatesAndReopensAdjacentRegistry(context);
 		} });
-	checks.push_back({ "selectionEnforcesBasenameExtensionAndDirectory",
+	checks.push_back({ "tags/selectionEnforcesBasenameExtensionAndDirectory",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			selectionEnforcesBasenameExtensionAndDirectory(context);
 		} });
-	checks.push_back({ "tagNamesIdentityOrderingAndNoOpEdits",
+	checks.push_back({ "tags/tagNamesIdentityOrderingAndNoOpEdits",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			tagNamesIdentityOrderingAndNoOpEdits(context);
 		} });
-	checks.push_back({ "tagsPersistAndDeletedIdsAreNeverReused",
+	checks.push_back({ "tags/tagsPersistAndDeletedIdsAreNeverReused",
 		[](smoke::Context const& context)
 		{
 			EditorState state;
 			tagsPersistAndDeletedIdsAreNeverReused(context);
 		} });
-	checks.push_back({ "registryDirtyStateAndCloseWarningStayIndependent",
+	checks.push_back({ "tags/registryDirtyStateAndCloseWarningStayIndependent",
 		[](smoke::Context const& context)
 		{
 			EditorState state;

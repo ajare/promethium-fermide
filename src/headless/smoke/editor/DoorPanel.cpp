@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "State.h"
 // Door panel disabled-scope balance checks, for ticket #99.
 //
 // Selecting a Door leaked an ImGui disabled scope: the opening-style
@@ -44,9 +46,9 @@ namespace
 
 	struct ImGuiGuard
 	{
+		headless::ScopedImGuiContext context;
 		ImGuiGuard()
 		{
-			ImGui::CreateContext();
 			auto& io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(800.0f, 600.0f);
 			// NewFrame() installs GetDefaultFont(), which reads Fonts[0]; a fresh
@@ -54,7 +56,6 @@ namespace
 			io.Fonts->AddFontDefault();
 			io.Fonts->Build();
 		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
 	};
 
 	std::shared_ptr<const core::SectorObject> doorObjectAt(
@@ -234,11 +235,10 @@ namespace
 	}
 }
 
-void runDoorPanelScopeSmokeChecks()
+void editor_smoke::registerDoorPanel(std::vector<smoke::Check>& checks)
 {
-	ImGuiGuard guard;
-	checkOrdinaryDoor();
-	checkExistingButtonsCanBeRemoved();
-	checkLiftOwnedDoor();
-	checkShuttleOwnedDoor();
+	checks.push_back({ "doorpanel/checkOrdinaryDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkOrdinaryDoor(); } });
+	checks.push_back({ "doorpanel/checkExistingButtonsCanBeRemoved", [](smoke::Context const&) { State state; ImGuiGuard guard; checkExistingButtonsCanBeRemoved(); } });
+	checks.push_back({ "doorpanel/checkLiftOwnedDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkLiftOwnedDoor(); } });
+	checks.push_back({ "doorpanel/checkShuttleOwnedDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkShuttleOwnedDoor(); } });
 }

@@ -92,7 +92,7 @@ namespace
 
 void permission_smoke::registerAdherenceEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "historyAndClipboard",
+	checks.push_back({ "permissions/historyAndClipboard",
 		[](smoke::Context const&)
 		{
 			EditorState state;

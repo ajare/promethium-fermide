@@ -326,6 +326,7 @@ endforeach()
 # checks, and headless editor tiers. No platform backend or dialogs.
 add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
+    src/DoorPanel.cpp
     src/AgentGroupsPanel.cpp
     src/AgentGroupAssignmentPanel.cpp
     src/AgentClipboard.cpp
@@ -372,18 +373,11 @@ endif()
 pf_apply_high_analysis(pf-routing-population-support)
 
 add_executable(prometheum-fermide-headless
-    # Other panel checks remain legacy-owned until their migration tickets.
-    src/DoorPanel.cpp
-    src/headless/BackgroundSelectionPanelSmokeChecks.cpp
-    src/headless/DoorPanelScopeSmokeChecks.cpp
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
-    src/headless/DocumentHistorySmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
-    src/headless/FacadeEditorSmokeChecks.cpp
     src/headless/GraphicsStartupSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
-    src/headless/PaletteTraySmokeChecks.cpp
     src/headless/RoutingTools.cpp
     src/headless/WorldTeardownSmokeChecks.cpp
     src/headless/SerializationSmokeChecks.cpp
@@ -425,7 +419,6 @@ if(PF_BUILD_GUI)
         src/WorldRenderSystem.cpp
         src/Main.cpp
         src/UI.cpp
-        src/DoorPanel.cpp
         ${PF_IMGUI_SOURCES}
     )
     target_compile_features(editor PRIVATE cxx_std_20)

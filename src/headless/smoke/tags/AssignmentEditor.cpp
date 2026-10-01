@@ -201,19 +201,19 @@ namespace
 
 void tag_smoke::registerAssignmentEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "newAndPalettePlacedAgentsRemainUntagged",
+	checks.push_back({ "tags/newAndPalettePlacedAgentsRemainUntagged",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			newAndPalettePlacedAgentsRemainUntagged();
 		} });
-	checks.push_back({ "editorCommitsOneWorldUndoEntryPerAcceptedEdit",
+	checks.push_back({ "tags/editorCommitsOneWorldUndoEntryPerAcceptedEdit",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			editorCommitsOneWorldUndoEntryPerAcceptedEdit();
 		} });
-	checks.push_back({ "selectionPanelRendersAssignedChipsWithoutLeakingDisabledState",
+	checks.push_back({ "tags/selectionPanelRendersAssignedChipsWithoutLeakingDisabledState",
 		[](smoke::Context const&)
 		{
 			EditorState state;

@@ -57,13 +57,8 @@ void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
 void runPausePositionSmokeChecks();
 void runMarkerIdentitySmokeChecks();
-void runBackgroundSelectionPanelSmokeChecks();
-void runDoorPanelScopeSmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
-void runDocumentHistorySmokeChecks();
 void runNonFiniteTimingSmokeChecks();
-void runFacadeEditorSmokeChecks();
-void runPaletteTraySmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
 void runWorldTeardownSmokeChecks();
@@ -4100,14 +4095,9 @@ int main(int argc, char** argv)
 		runPausePositionSmokeChecks();
 		runMarkerIdentitySmokeChecks();
 
-		runBackgroundSelectionPanelSmokeChecks();
-		runDoorPanelScopeSmokeChecks();
 		runDoorTwoSidedButtonSmokeChecks();
-		runDocumentHistorySmokeChecks();
 		runNonFiniteTimingSmokeChecks();
 
-		runFacadeEditorSmokeChecks();
-		runPaletteTraySmokeChecks();
 
 		runWorldTeardownSmokeChecks();
 

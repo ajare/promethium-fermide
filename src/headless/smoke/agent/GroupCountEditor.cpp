@@ -1,3 +1,4 @@
+#include "ImGuiContext.h"
 // Migrated from AgentGroupCountSmokeChecks.cpp (#285); editor dependency tier.
 #include <bit>
 #include <cctype>
@@ -136,9 +137,9 @@ namespace
 
 	struct ImGuiGuard
 	{
+		headless::ScopedImGuiContext context;
 		ImGuiGuard()
 		{
-			ImGui::CreateContext();
 			auto& io = ImGui::GetIO();
 			io.IniFilename = nullptr;
 			io.LogFilename = nullptr;
@@ -146,7 +147,6 @@ namespace
 			io.Fonts->AddFontDefault();
 			io.Fonts->Build();
 		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
 	};
 
 	void resetUndoHistory()
@@ -444,10 +444,10 @@ namespace
 
 void agent_smoke::registerGroupCountEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "anEmptyGroupCountsZero", [](smoke::Context const&) { EditorState state; anEmptyGroupCountsZero(); } });
-	checks.push_back({ "aRenameLeavesTheCountAlone", [](smoke::Context const&) { EditorState state; aRenameLeavesTheCountAlone(); } });
-	checks.push_back({ "countsReturnFromARestoredUndoSnapshot", [](smoke::Context const&) { EditorState state; countsReturnFromARestoredUndoSnapshot(); } });
-	checks.push_back({ "theGroupsTableDeclaresAnAgentsColumn", [](smoke::Context const&) { EditorState state; theGroupsTableDeclaresAnAgentsColumn(); } });
-	checks.push_back({ "theCountColumnRendersWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theCountColumnRendersWithoutLeakingImGuiState(); } });
-	checks.push_back({ "theCountCellShowsTheLiveCount", [](smoke::Context const&) { EditorState state; theCountCellShowsTheLiveCount(); } });
+	checks.push_back({ "agent/anEmptyGroupCountsZero", [](smoke::Context const&) { EditorState state; anEmptyGroupCountsZero(); } });
+	checks.push_back({ "agent/aRenameLeavesTheCountAlone", [](smoke::Context const&) { EditorState state; aRenameLeavesTheCountAlone(); } });
+	checks.push_back({ "agent/countsReturnFromARestoredUndoSnapshot", [](smoke::Context const&) { EditorState state; countsReturnFromARestoredUndoSnapshot(); } });
+	checks.push_back({ "agent/theGroupsTableDeclaresAnAgentsColumn", [](smoke::Context const&) { EditorState state; theGroupsTableDeclaresAnAgentsColumn(); } });
+	checks.push_back({ "agent/theCountColumnRendersWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theCountColumnRendersWithoutLeakingImGuiState(); } });
+	checks.push_back({ "agent/theCountCellShowsTheLiveCount", [](smoke::Context const&) { EditorState state; theCountCellShowsTheLiveCount(); } });
 }

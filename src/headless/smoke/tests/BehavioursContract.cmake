@@ -24,7 +24,6 @@ function(invoke status expected)
     endif()
 endfunction()
 
-
 set(core_names
     savedWorldCreatesAndReopensAdjacentPackage
     olderWorldWithoutReferenceStillLoads
@@ -66,30 +65,10 @@ set(core_names
     unknownAndRenamedAuthorizationNamesAreDiagnosed
 )
 
-set(editor_names
-    hotReloadIsAtomicAcrossSourceHelpersAndDependentWorlds
-    recoverDetachAndReplaceUsedRegistrySafely
-    packageContainmentAndLifecycle
-    assignEditClearUndoRedoAndPersistence
-    compositeSchedulesValidatePersistAndUndo
-    markerDeletionReportsEveryReferenceAndPanelIsBalanced
-    clipboardPreservesAndResolvesDeliberately
-    saveAsCopiesWholePackageAndRollsBackFailures
-    unusedDeletesDirectly
-    usedDeletionListsCancelsAndCoordinates
-    failedParticipantLeavesEverythingUnchanged
-    reconcilesAndMigratesAcrossLoadedWorlds
-    persistenceHistoryMigrationAndReplacementAreAtomic
-    realPanelsRenderPausedRunningAndDiagnosticStates
-)
-
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${BEHAVIOURS}")
         set(module behaviours)
-    else()
-        set(binary "${EDITOR}")
-        set(module behaviours-editor)
     endif()
     set(names ${${tier}_names})
     list(LENGTH names count)
@@ -108,18 +87,15 @@ if(artifacts)
     message(FATAL_ERROR "Behaviours wrote working-directory files: ${artifacts}")
 endif()
 
-# Both dependency tiers run concurrently, with eight instances of each.
+# Run eight concurrent invocations to expose fixed-path collisions.
 # A shared empty cwd and OS temp parent expose any fixed-path collisions.
 set(project "${work}/concurrent")
 file(MAKE_DIRECTORY "${project}")
 file(WRITE "${project}/CTestTestfile.cmake" "")
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${BEHAVIOURS}")
         set(module behaviours)
-    else()
-        set(binary "${EDITOR}")
-        set(module behaviours-editor)
     endif()
     list(LENGTH ${tier}_names count)
     foreach(index RANGE 1 8)

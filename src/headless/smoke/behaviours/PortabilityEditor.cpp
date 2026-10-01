@@ -264,12 +264,12 @@ namespace
 
 void behaviour_smoke::registerPortabilityEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "clipboardPreservesAndResolvesDeliberately", [](smoke::Context const&)
+	checks.push_back({ "behaviours/clipboardPreservesAndResolvesDeliberately", [](smoke::Context const&)
 	{
 		EditorState state;
 		clipboardPreservesAndResolvesDeliberately();
 	} });
-	checks.push_back({ "saveAsCopiesWholePackageAndRollsBackFailures", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/saveAsCopiesWholePackageAndRollsBackFailures", [](smoke::Context const& context)
 	{
 		EditorState state;
 		saveAsCopiesWholePackageAndRollsBackFailures(context);

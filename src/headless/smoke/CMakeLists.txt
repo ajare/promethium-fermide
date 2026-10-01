@@ -86,31 +86,10 @@ pf_add_smoke_module(pf-smoke-agent
     TIMEOUT 30
 )
 
-pf_add_smoke_module(pf-smoke-agent-editor
-    NAME agent-editor
-    SOURCES
-        agent/EditorMain.cpp
-        agent/ActivationEditor.cpp
-        agent/GroupEditor.cpp
-        agent/GroupAssignmentEditor.cpp
-        agent/GroupCountEditor.cpp
-        agent/GroupDeleteEditor.cpp
-        agent/GroupIdAllocationEditor.cpp
-        agent/GroupTopologyEditor.cpp
-        agent/GroupClipboardEditor.cpp
-        agent/ColourEditor.cpp
-        agent/WalkSpeedEditor.cpp
-        agent/HeightEditor.cpp
-    LIBRARIES pf-agent-editing pf-headless-render-support
-    LABELS editor
-    TIMEOUT 30
-)
-
 add_test(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
     "-DAGENT=$<TARGET_FILE:pf-smoke-agent>"
-    "-DEDITOR=$<TARGET_FILE:pf-smoke-agent-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentContract.cmake")
-set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 60)
+set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core" TIMEOUT 60)
 
 pf_add_smoke_module(pf-smoke-agent-tags
     NAME agent-tags
@@ -125,28 +104,10 @@ pf_add_smoke_module(pf-smoke-agent-tags
     TIMEOUT 30
 )
 
-pf_add_smoke_module(pf-smoke-agent-tags-editor
-    NAME agent-tags-editor
-    SOURCES
-        tags/EditorMain.cpp
-        tags/RegistryEditor.cpp
-        tags/AssignmentEditor.cpp
-        tags/RegistryChangeEditor.cpp
-        tags/DocumentSaveEditor.cpp
-        tags/ReloadEditor.cpp
-        tags/DeleteEditor.cpp
-        tags/CoordinationEditor.cpp
-        tags/ClipboardEditor.cpp
-    LIBRARIES pf-agent-editing pf-headless-render-support
-    LABELS editor
-    TIMEOUT 30
-)
-
 add_test(NAME smoke-agent-tags-contract COMMAND ${CMAKE_COMMAND}
     "-DTAGS=$<TARGET_FILE:pf-smoke-agent-tags>"
-    "-DEDITOR=$<TARGET_FILE:pf-smoke-agent-tags-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TagsContract.cmake")
-set_tests_properties(smoke-agent-tags-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 90)
+set_tests_properties(smoke-agent-tags-contract PROPERTIES LABELS "harness;core" TIMEOUT 90)
 
 pf_add_smoke_module(pf-smoke-behaviours
     NAME behaviours
@@ -170,26 +131,10 @@ pf_add_smoke_module(pf-smoke-behaviours
     TIMEOUT 30
 )
 
-pf_add_smoke_module(pf-smoke-behaviours-editor
-    NAME behaviours-editor
-    SOURCES
-        behaviours/EditorMain.cpp
-        behaviours/RegistryEditor.cpp
-        behaviours/AssignmentEditor.cpp
-        behaviours/PortabilityEditor.cpp
-        behaviours/DeleteEditor.cpp
-        behaviours/SchemaReconciliationEditor.cpp
-        behaviours/WorkflowEditor.cpp
-    LIBRARIES pf-agent-editing pf-headless-render-support
-    LABELS editor
-    TIMEOUT 30
-)
-
 add_test(NAME smoke-behaviours-contract COMMAND ${CMAKE_COMMAND}
     "-DBEHAVIOURS=$<TARGET_FILE:pf-smoke-behaviours>"
-    "-DEDITOR=$<TARGET_FILE:pf-smoke-behaviours-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/BehavioursContract.cmake")
-set_tests_properties(smoke-behaviours-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 90)
+set_tests_properties(smoke-behaviours-contract PROPERTIES LABELS "harness;core" TIMEOUT 90)
 
 pf_add_smoke_module(pf-smoke-permissions
     NAME permissions
@@ -208,24 +153,10 @@ pf_add_smoke_module(pf-smoke-permissions
     TIMEOUT 60
 )
 
-pf_add_smoke_module(pf-smoke-permissions-editor
-    NAME permissions-editor
-    SOURCES
-        permissions/EditorMain.cpp
-        permissions/DestinationEditor.cpp
-        permissions/AccessEditor.cpp
-        permissions/AdherenceEditor.cpp
-        permissions/LandingAdherenceEditor.cpp
-    LIBRARIES pf-agent-editing pf-headless-render-support
-    LABELS editor
-    TIMEOUT 30
-)
-
 add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
     "-DPERMISSIONS=$<TARGET_FILE:pf-smoke-permissions>"
-    "-DEDITOR=$<TARGET_FILE:pf-smoke-permissions-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PermissionsContract.cmake")
-set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 180)
+set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core" TIMEOUT 180)
 
 pf_add_smoke_module(pf-smoke-transports
     NAME transports
@@ -245,19 +176,10 @@ pf_add_smoke_module(pf-smoke-transports
     TIMEOUT 120
 )
 
-pf_add_smoke_module(pf-smoke-transports-editor
-    NAME transports-editor
-    SOURCES transports/EscalatorsEditor.cpp
-    LIBRARIES pf-agent-editing pf-headless-render-support
-    LABELS editor
-    TIMEOUT 30
-)
-
 add_test(NAME smoke-transports-contract COMMAND ${CMAKE_COMMAND}
     "-DTRANSPORTS=$<TARGET_FILE:pf-smoke-transports>"
-    "-DEDITOR=$<TARGET_FILE:pf-smoke-transports-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TransportsContract.cmake")
-set_tests_properties(smoke-transports-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 300)
+set_tests_properties(smoke-transports-contract PROPERTIES LABELS "harness;core" TIMEOUT 300)
 
 pf_add_smoke_module(pf-smoke-routing
     NAME routing
@@ -280,22 +202,10 @@ pf_add_smoke_module(pf-smoke-routing
     TIMEOUT 120
 )
 
-pf_add_smoke_module(pf-smoke-routing-editor
-    NAME routing-editor
-    SOURCES
-        routing/EditorMain.cpp
-        routing/PlanningEditor.cpp
-        routing/PlanningTimeEditor.cpp
-    LIBRARIES pf-agent-editing pf-headless-render-support
-    LABELS editor
-    TIMEOUT 30
-)
-
 add_test(NAME smoke-routing-contract COMMAND ${CMAKE_COMMAND}
     "-DROUTING=$<TARGET_FILE:pf-smoke-routing>"
-    "-DEDITOR=$<TARGET_FILE:pf-smoke-routing-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoutingContract.cmake")
-set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 300)
+set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core" TIMEOUT 300)
 
 pf_add_smoke_module(pf-smoke-world
     NAME world
@@ -369,3 +279,54 @@ add_test(NAME smoke-harness-contract COMMAND ${CMAKE_COMMAND}
     "-DSIMULATION=$<TARGET_FILE:pf-smoke-simulation>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/Contract.cmake")
 set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIMEOUT 30)
+
+pf_add_smoke_module(pf-smoke-editor
+    NAME editor
+    SOURCES
+        editor/Main.cpp editor/State.cpp editor/Isolation.cpp
+        agent/ActivationEditor.cpp
+        agent/GroupEditor.cpp
+        agent/GroupAssignmentEditor.cpp
+        agent/GroupCountEditor.cpp
+        agent/GroupDeleteEditor.cpp
+        agent/GroupIdAllocationEditor.cpp
+        agent/GroupTopologyEditor.cpp
+        agent/GroupClipboardEditor.cpp
+        agent/ColourEditor.cpp
+        agent/WalkSpeedEditor.cpp
+        agent/HeightEditor.cpp
+        tags/RegistryEditor.cpp
+        tags/AssignmentEditor.cpp
+        tags/RegistryChangeEditor.cpp
+        tags/DocumentSaveEditor.cpp
+        tags/ReloadEditor.cpp
+        tags/DeleteEditor.cpp
+        tags/CoordinationEditor.cpp
+        tags/ClipboardEditor.cpp
+        behaviours/RegistryEditor.cpp
+        behaviours/AssignmentEditor.cpp
+        behaviours/PortabilityEditor.cpp
+        behaviours/DeleteEditor.cpp
+        behaviours/SchemaReconciliationEditor.cpp
+        behaviours/WorkflowEditor.cpp
+        permissions/DestinationEditor.cpp
+        permissions/AccessEditor.cpp
+        permissions/AdherenceEditor.cpp
+        permissions/LandingAdherenceEditor.cpp
+        transports/EscalatorsEditor.cpp
+        routing/PlanningEditor.cpp
+        routing/PlanningTimeEditor.cpp
+        editor/Background.cpp
+        editor/Facade.cpp
+        editor/DoorPanel.cpp
+        editor/Palette.cpp
+        editor/History.cpp
+    LIBRARIES pf-agent-editing pf-headless-render-support
+    LABELS editor
+    TIMEOUT 60
+)
+
+add_test(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
+    "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/EditorContract.cmake")
+set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TIMEOUT 180)

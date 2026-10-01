@@ -7,7 +7,8 @@ properties (#286), Agent tags and coordinated documents (#287), and Agent
 behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
 Access permissions and Interaction points (#290), Route planning and movement (#291),
 Transit/transport runtime checks (#292), and pathfinding scale and perceived
-route costs (#293), and the complete Render module (#294).
+route costs (#293), the complete Render module (#294), and the cross-domain
+Editor module (#295).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
@@ -76,6 +77,65 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Complete cross-domain Editor module (#295)
+
+```sh
+cmake --build build-linux --target pf-smoke-editor --parallel
+build-linux/bin/x64/Release/pf-smoke-editor --list
+build-linux/bin/x64/Release/pf-smoke-editor --check agent/clipboardCarriesActivation
+ctest --test-dir build-linux -R '^smoke-editor' --output-on-failure
+```
+
+`pf-smoke-editor` replaces all six former `*-editor` targets. It owns 164
+individually selectable checks: 57 Agent, 38 tag, 14 Behaviour, nine Permissions,
+nine Routing, one Transports, seven Background, 13 Facade, four Door panel, ten
+palette, one Document history, and one shared-state isolation regression.
+Selectors retain scenario names with a domain prefix (for example
+`permissions/destinationAuthoringShuttle`). The historical migration sections
+below describe the original tiers and validation; their old Editor target names
+are superseded by this module and its prefixed selectors.
+
+The module links real production editing, rendering, and CPU ImGui libraries.
+DoorPanel now compiles once in `pf-agent-editing`, shared with the GUI. No platform
+backend, native dialog, HTTP library, or graphics window is linked. World, Agent,
+Behaviour and Permissions core targets retain core-only linkage. Background,
+Facade, palette and history checks retain their existing production API/helper
+assertions; Door panel checks render the actual production panel.
+
+Every registration scopes a fresh ini/log-disabled ImGui context and common
+Editor state. Nested panel contexts restore the caller context. Pending group,
+tag and behaviour confirmations, World history, logs, write-failure injection,
+and tileset fixtures are cleared on entry/exit; UI settings, selections and icon
+font pointers are restored. A normal/exceptional-unwind regression verifies
+context and history isolation. Confirmations and clipboard capture remain
+in-process, with no required user input.
+
+All five remaining legacy Editor sources and calls are removed. Domain Editor
+fragments keep their cohesive source files but have one compilation/execution
+owner and one explicit runner. Core contracts no longer execute Editor checks;
+`smoke-editor-contract` verifies the exact 164-name inventory, every selection,
+misuse, full execution and eight simultaneous runs from an empty directory with
+DISPLAY/WAYLAND_DISPLAY unset and no working-directory output.
+
+### #295 Linux validation
+
+- GUI-enabled Release default build passes; all 81 CTest entries pass (one
+  optional vendored GUI test skips without a display). All 80 non-aggregate
+  entries also pass with `-j 6`; the legacy aggregate runs separately to avoid
+  its pre-existing temporary-path overlap with serialization.
+- Fresh GUI-disabled Release builds only `pf-smoke-editor`; both Editor CTests
+  pass. The actual link contains only its checks, production editing/render/core,
+  CPU ImGui, YAML/Lua and headless support, not other smoke modules or legacy code.
+- Fresh GUI-disabled Debug with `PF_HIGH_ANALYSIS=ON` builds Editor, World, Agent,
+  tags, Behaviours, Permissions and legacy headless. All 12 focused module and
+  contract tests pass in parallel, including the complete Editor contract.
+  Debug legacy aggregate and serialization also pass sequentially.
+- Mechanical comparison preserves every original assertion expression in the
+  five migrated legacy sources. Actual core link commands remain Editor-free.
+- Existing elevated-analysis warnings remain non-fatal. No formatter is
+  configured; `git diff --check` is the whitespace check. Windows validation
+  remains separately tracked in #279.
 
 ## Transports module (#292)
 

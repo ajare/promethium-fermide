@@ -274,8 +274,8 @@ namespace
 
 void agent_smoke::registerColourEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "assignmentAndPropertyAdditionConflictsAreAtomic", [](smoke::Context const&) { EditorState state; assignmentAndPropertyAdditionConflictsAreAtomic(); } });
-	checks.push_back({ "editorCommitsRevisionedColourAndUndoRedoExactly", [](smoke::Context const&) { EditorState state; editorCommitsRevisionedColourAndUndoRedoExactly(); } });
-	checks.push_back({ "conflictingColourRedoIsRefusedAtomically", [](smoke::Context const&) { EditorState state; conflictingColourRedoIsRefusedAtomically(); } });
-	checks.push_back({ "effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold", [](smoke::Context const&) { EditorState state; effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold(); } });
+	checks.push_back({ "agent/assignmentAndPropertyAdditionConflictsAreAtomic", [](smoke::Context const&) { EditorState state; assignmentAndPropertyAdditionConflictsAreAtomic(); } });
+	checks.push_back({ "agent/editorCommitsRevisionedColourAndUndoRedoExactly", [](smoke::Context const&) { EditorState state; editorCommitsRevisionedColourAndUndoRedoExactly(); } });
+	checks.push_back({ "agent/conflictingColourRedoIsRefusedAtomically", [](smoke::Context const&) { EditorState state; conflictingColourRedoIsRefusedAtomically(); } });
+	checks.push_back({ "agent/effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold", [](smoke::Context const&) { EditorState state; effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold(); } });
 }

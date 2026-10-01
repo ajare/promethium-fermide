@@ -1,3 +1,4 @@
+#include "ImGuiContext.h"
 // Migrated from AgentGroupSmokeChecks.cpp (#285); editor dependency tier.
 #include <bit>
 #include <cstdint>
@@ -51,9 +52,9 @@ namespace
 
 	struct ImGuiGuard
 	{
+		headless::ScopedImGuiContext context;
 		ImGuiGuard()
 		{
-			ImGui::CreateContext();
 			auto& io = ImGui::GetIO();
 			io.IniFilename = nullptr;
 			io.LogFilename = nullptr;
@@ -61,7 +62,6 @@ namespace
 			io.Fonts->AddFontDefault();
 			io.Fonts->Build();
 		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
 	};
 
 	void resetUndoHistory()
@@ -193,6 +193,6 @@ namespace
 
 void agent_smoke::registerGroupEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach", [](smoke::Context const&) { EditorState state; groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach(); } });
-	checks.push_back({ "theAgentGroupsPanelRendersWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theAgentGroupsPanelRendersWithoutLeakingImGuiState(); } });
+	checks.push_back({ "agent/groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach", [](smoke::Context const&) { EditorState state; groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach(); } });
+	checks.push_back({ "agent/theAgentGroupsPanelRendersWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theAgentGroupsPanelRendersWithoutLeakingImGuiState(); } });
 }

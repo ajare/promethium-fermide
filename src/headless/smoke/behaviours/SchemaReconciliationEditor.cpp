@@ -271,7 +271,7 @@ namespace
 
 void behaviour_smoke::registerSchemaReconciliationEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "reconcilesAndMigratesAcrossLoadedWorlds", [](smoke::Context const& context)
+	checks.push_back({ "behaviours/reconcilesAndMigratesAcrossLoadedWorlds", [](smoke::Context const& context)
 	{
 		EditorState state;
 		reconcilesAndMigratesAcrossLoadedWorlds(context);

@@ -1,26 +1,15 @@
 #pragma once
 
-#include <memory>
-
-#include "DocumentEdit.h"
+#include "../editor/State.h"
 #include "TagsPanel.h"
 
 namespace permission_smoke
 {
+	using EditorState = editor_smoke::State;
+
 	struct RegistryHistoryScope
 	{
 		std::shared_ptr<core::AgentTagRegistry> registry;
 		~RegistryHistoryScope() { forgetAgentTagRegistryDocument(registry); }
-	};
-
-	struct EditorState
-	{
-		static void reset()
-		{
-			resetTagsPanelState();
-			gWorldDocumentHistory.clear();
-		}
-		EditorState() { reset(); }
-		~EditorState() { reset(); }
 	};
 }

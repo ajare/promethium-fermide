@@ -24,7 +24,6 @@ function(invoke status expected)
     endif()
 endfunction()
 
-
 set(core_names
     olderWorldWithoutReferenceStillLoads
     canonicalFilesShareOneInstanceAndDirectoriesRemainDistinct
@@ -41,54 +40,10 @@ set(core_names
     mobilityProfileRegistryAndAssignment
 )
 
-set(editor_names
-    savedWorldCreatesAndReopensAdjacentRegistry
-    selectionEnforcesBasenameExtensionAndDirectory
-    tagNamesIdentityOrderingAndNoOpEdits
-    tagsPersistAndDeletedIdsAreNeverReused
-    registryDirtyStateAndCloseWarningStayIndependent
-    newAndPalettePlacedAgentsRemainUntagged
-    editorCommitsOneWorldUndoEntryPerAcceptedEdit
-    selectionPanelRendersAssignedChipsWithoutLeakingDisabledState
-    unusedRegistryChangesAreDirectAndUndoable
-    directSwitchWithAssignmentsIsRefusedTransactionally
-    confirmedSwitchClearsEverythingAndCancellationDoesNothing
-    worldSaveWritesRegistryFirstAndCleansIndependently
-    registryFailureBlocksWorldAndPreservesDirtyState
-    saveAllCompletesRegistryPhaseBeforeAnyWorld
-    sameDirectorySaveAsRetainsRegistryReference
-    crossDirectorySaveAsCopiesEquivalentIndependentRegistry
-    binaryRoundTripAndBidirectionalConversionRetainRegistry
-    registryCollisionLeavesSourceAndDestinationUnchanged
-    closePromptNamesOnlyTheDirtyDocumentKinds
-    externalSaveConflictAndDirtyReloadAreRefused
-    successfulReloadReconcilesAllWorldsAndClearsRegistryHistory
-    reloadFailuresAreAtomic
-    unreferencedRegistryLifetimeFollowsDirtyState
-    filteringAndAggregateLoadedUsage
-    unusedDeletionIsImmediateAndUndoable
-    usedDeletionConfirmsCascadesAndRestoresAtomically
-    runningDependentWorldRefusesWithoutPartialMutation
-    closedWorldRetainingDeletedIdIsRefused
-    oneEditUpdatesAndRestoresTwoWorlds
-    runningDependencyDisablesEveryDefinitionEdit
-    crossWorldConflictIsRejectedBeforeMutation
-    closingParticipantInvalidatesIncompleteHistory
-    payloadCarriesRegistryAssignmentsAndExactSamples
-    sameRegistryPasteRestoresExactStateAsOneEdit
-    differentAndAbsentRegistryPasteAreRefusedAtomically
-    untaggedAgentsRemainPortableAcrossRegistryBoundaries
-    cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments
-    incompleteTaggedPayloadsAreNotSilentlyDowngraded
-)
-
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${TAGS}")
         set(module agent-tags)
-    else()
-        set(binary "${EDITOR}")
-        set(module agent-tags-editor)
     endif()
     set(names ${${tier}_names})
     list(LENGTH names count)
@@ -107,18 +62,15 @@ if(artifacts)
     message(FATAL_ERROR "Agent tags wrote working-directory files: ${artifacts}")
 endif()
 
-# Both dependency tiers run concurrently, with eight instances of each.
+# Run eight concurrent invocations to expose fixed-path collisions.
 # A shared empty cwd and OS temp parent expose any fixed-path collisions.
 set(project "${work}/concurrent")
 file(MAKE_DIRECTORY "${project}")
 file(WRITE "${project}/CTestTestfile.cmake" "")
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${TAGS}")
         set(module agent-tags)
-    else()
-        set(binary "${EDITOR}")
-        set(module agent-tags-editor)
     endif()
     list(LENGTH ${tier}_names count)
     foreach(index RANGE 1 8)

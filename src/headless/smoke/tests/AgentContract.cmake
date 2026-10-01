@@ -1,4 +1,4 @@
-# Both Agent tiers must work without saved ImGui layout or a desktop session.
+# Core Agent checks work without a desktop session.
 if(WIN32)
     set(temp "$ENV{TEMP}")
 else()
@@ -74,66 +74,6 @@ set(agent_checks
     individualPropertiesOverrideTagPropertiesAndPersist
 )
 
-set(agent-editor_checks
-    groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach
-    theAgentGroupsPanelRendersWithoutLeakingImGuiState
-    anAssignedAgentFollowsItsGroupRename
-    aMissingAssignmentFieldLoadsAsNoGroup
-    assignmentEditsRunAlongsideTheSimulationAndCommitOneUndoEach
-    theGroupCellLabelShowsTheAssignment
-    theGroupCellRendersWithoutLeakingImGuiState
-    agentGroupNamesCarryingHashPairsReachTheScreenInFull
-    anEmptyGroupCountsZero
-    aRenameLeavesTheCountAlone
-    countsReturnFromARestoredUndoSnapshot
-    theGroupsTableDeclaresAnAgentsColumn
-    theCountColumnRendersWithoutLeakingImGuiState
-    theCountCellShowsTheLiveCount
-    deletingAnOccupiedGroupReturnsEveryMemberToNoGroup
-    aDeletionMarksTheDocumentAndLeavesTheTopologyAlone
-    aDeletedGroupStaysDeletedThroughASaveAndReopen
-    onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany
-    anEmptyGroupDeletesOnTheSpotThroughThePanelSeam
-    anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet
-    cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory
-    confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit
-    confirmingWithNothingArmedDeletesNothing
-    aRefusedDeleteCommitsNothingThroughThePanelSeam
-    theConfirmationReachesTheScreenAsAModal
-    everyGroupRowCarriesItsOwnDeleteControl
-    theGroupsWithDeleteRenderWithoutLeakingImGuiState
-    undoRestoresTheGroupCompletelyAndRedoRemovesItAgain
-    theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo
-    undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity
-    anExhaustedWorldRefusesThePanelSeamAndCommitsNothing
-    anEditSurvivesUndoAndRedo
-    clipboardCarriesActivation
-    aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId
-    aCopiedUngroupedAgentCarriesNoAgentGroup
-    aLegacyPayloadWithoutAnAgentGroupStillPastes
-    aClipboardAgentGroupThatIsNotANameIsRefused
-    aPasteReusesTheDestinationGroupOfTheSameExactName
-    aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively
-    aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit
-    armingADeferredPlacementWritesNothing
-    cancellingADeferredPasteLeavesNothingBehind
-    aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry
-    anInvalidClipboardAgentGroupNameIsRefusedWhole
-    undoTakesThePastedAgentAndItsNewGroupTogether
-    undoOfAReusingPasteLeavesTheDestinationGroupAlone
-    cuttingAGroupedAgentLeavesItsSourceGroupDefined
-    authorizationIsPreservedOnlyInTheOriginatingWorld
-    anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
-    assignmentAndPropertyAdditionConflictsAreAtomic
-    editorCommitsRevisionedColourAndUndoRedoExactly
-    conflictingColourRedoIsRefusedAtomically
-    effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold
-    walkSpeedRangeEditsResampleOnceAndRestoreExactSamples
-    walkSpeedSelectionReportsSampleAndSource
-    heightRangeEditsAreSingleExactTransactions
-    heightChangesOnlyBoundsAndRendering
-)
-
 function(invoke status expected)
     execute_process(COMMAND "${executable}" ${ARGN}
         WORKING_DIRECTORY "${work}" RESULT_VARIABLE result
@@ -150,12 +90,8 @@ function(invoke status expected)
     endif()
 endfunction()
 
-foreach(module IN ITEMS agent agent-editor)
-    if(module STREQUAL "agent")
-        set(executable "${AGENT}")
-    else()
-        set(executable "${EDITOR}")
-    endif()
+foreach(module IN ITEMS agent)
+    set(executable "${AGENT}")
     set(checks ${${module}_checks})
     list(LENGTH checks count)
     string(JOIN "\n" listed ${checks})

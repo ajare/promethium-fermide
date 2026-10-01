@@ -1,3 +1,4 @@
+#include "ImGuiContext.h"
 // Migrated from AgentGroupDeleteSmokeChecks.cpp (#285); editor dependency tier.
 #include <cstdint>
 #include <algorithm>
@@ -173,9 +174,9 @@ namespace
 
 	struct ImGuiGuard
 	{
+		headless::ScopedImGuiContext context;
 		ImGuiGuard()
 		{
-			ImGui::CreateContext();
 			auto& io = ImGui::GetIO();
 			io.IniFilename = nullptr;
 			io.LogFilename = nullptr;
@@ -183,7 +184,6 @@ namespace
 			io.Fonts->AddFontDefault();
 			io.Fonts->Build();
 		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
 	};
 
 	// Called from inside a frame, in the same ID scope the panel uses: is the
@@ -986,18 +986,18 @@ namespace
 
 void agent_smoke::registerGroupDeleteEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "deletingAnOccupiedGroupReturnsEveryMemberToNoGroup", [](smoke::Context const&) { EditorState state; deletingAnOccupiedGroupReturnsEveryMemberToNoGroup(); } });
-	checks.push_back({ "aDeletionMarksTheDocumentAndLeavesTheTopologyAlone", [](smoke::Context const&) { EditorState state; aDeletionMarksTheDocumentAndLeavesTheTopologyAlone(); } });
-	checks.push_back({ "aDeletedGroupStaysDeletedThroughASaveAndReopen", [](smoke::Context const&) { EditorState state; aDeletedGroupStaysDeletedThroughASaveAndReopen(); } });
-	checks.push_back({ "onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany", [](smoke::Context const&) { EditorState state; onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany(); } });
-	checks.push_back({ "anEmptyGroupDeletesOnTheSpotThroughThePanelSeam", [](smoke::Context const&) { EditorState state; anEmptyGroupDeletesOnTheSpotThroughThePanelSeam(); } });
-	checks.push_back({ "anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet", [](smoke::Context const&) { EditorState state; anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet(); } });
-	checks.push_back({ "cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory", [](smoke::Context const&) { EditorState state; cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory(); } });
-	checks.push_back({ "confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit", [](smoke::Context const&) { EditorState state; confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit(); } });
-	checks.push_back({ "confirmingWithNothingArmedDeletesNothing", [](smoke::Context const&) { EditorState state; confirmingWithNothingArmedDeletesNothing(); } });
-	checks.push_back({ "aRefusedDeleteCommitsNothingThroughThePanelSeam", [](smoke::Context const&) { EditorState state; aRefusedDeleteCommitsNothingThroughThePanelSeam(); } });
-	checks.push_back({ "theConfirmationReachesTheScreenAsAModal", [](smoke::Context const&) { EditorState state; theConfirmationReachesTheScreenAsAModal(); } });
-	checks.push_back({ "everyGroupRowCarriesItsOwnDeleteControl", [](smoke::Context const&) { EditorState state; everyGroupRowCarriesItsOwnDeleteControl(); } });
-	checks.push_back({ "theGroupsWithDeleteRenderWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theGroupsWithDeleteRenderWithoutLeakingImGuiState(); } });
-	checks.push_back({ "undoRestoresTheGroupCompletelyAndRedoRemovesItAgain", [](smoke::Context const&) { EditorState state; undoRestoresTheGroupCompletelyAndRedoRemovesItAgain(); } });
+	checks.push_back({ "agent/deletingAnOccupiedGroupReturnsEveryMemberToNoGroup", [](smoke::Context const&) { EditorState state; deletingAnOccupiedGroupReturnsEveryMemberToNoGroup(); } });
+	checks.push_back({ "agent/aDeletionMarksTheDocumentAndLeavesTheTopologyAlone", [](smoke::Context const&) { EditorState state; aDeletionMarksTheDocumentAndLeavesTheTopologyAlone(); } });
+	checks.push_back({ "agent/aDeletedGroupStaysDeletedThroughASaveAndReopen", [](smoke::Context const&) { EditorState state; aDeletedGroupStaysDeletedThroughASaveAndReopen(); } });
+	checks.push_back({ "agent/onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany", [](smoke::Context const&) { EditorState state; onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany(); } });
+	checks.push_back({ "agent/anEmptyGroupDeletesOnTheSpotThroughThePanelSeam", [](smoke::Context const&) { EditorState state; anEmptyGroupDeletesOnTheSpotThroughThePanelSeam(); } });
+	checks.push_back({ "agent/anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet", [](smoke::Context const&) { EditorState state; anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet(); } });
+	checks.push_back({ "agent/cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory", [](smoke::Context const&) { EditorState state; cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory(); } });
+	checks.push_back({ "agent/confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit", [](smoke::Context const&) { EditorState state; confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit(); } });
+	checks.push_back({ "agent/confirmingWithNothingArmedDeletesNothing", [](smoke::Context const&) { EditorState state; confirmingWithNothingArmedDeletesNothing(); } });
+	checks.push_back({ "agent/aRefusedDeleteCommitsNothingThroughThePanelSeam", [](smoke::Context const&) { EditorState state; aRefusedDeleteCommitsNothingThroughThePanelSeam(); } });
+	checks.push_back({ "agent/theConfirmationReachesTheScreenAsAModal", [](smoke::Context const&) { EditorState state; theConfirmationReachesTheScreenAsAModal(); } });
+	checks.push_back({ "agent/everyGroupRowCarriesItsOwnDeleteControl", [](smoke::Context const&) { EditorState state; everyGroupRowCarriesItsOwnDeleteControl(); } });
+	checks.push_back({ "agent/theGroupsWithDeleteRenderWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theGroupsWithDeleteRenderWithoutLeakingImGuiState(); } });
+	checks.push_back({ "agent/undoRestoresTheGroupCompletelyAndRedoRemovesItAgain", [](smoke::Context const&) { EditorState state; undoRestoresTheGroupCompletelyAndRedoRemovesItAgain(); } });
 }

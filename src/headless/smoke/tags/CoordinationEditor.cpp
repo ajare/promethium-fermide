@@ -268,25 +268,25 @@ namespace
 
 void tag_smoke::registerCoordinationEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "oneEditUpdatesAndRestoresTwoWorlds",
+	checks.push_back({ "tags/oneEditUpdatesAndRestoresTwoWorlds",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			oneEditUpdatesAndRestoresTwoWorlds();
 		} });
-	checks.push_back({ "runningDependencyDisablesEveryDefinitionEdit",
+	checks.push_back({ "tags/runningDependencyDisablesEveryDefinitionEdit",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			runningDependencyDisablesEveryDefinitionEdit();
 		} });
-	checks.push_back({ "crossWorldConflictIsRejectedBeforeMutation",
+	checks.push_back({ "tags/crossWorldConflictIsRejectedBeforeMutation",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			crossWorldConflictIsRejectedBeforeMutation();
 		} });
-	checks.push_back({ "closingParticipantInvalidatesIncompleteHistory",
+	checks.push_back({ "tags/closingParticipantInvalidatesIncompleteHistory",
 		[](smoke::Context const&)
 		{
 			EditorState state;

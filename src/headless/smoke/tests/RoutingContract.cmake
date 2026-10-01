@@ -24,7 +24,6 @@ function(invoke status expected)
     endif()
 endfunction()
 
-
 set(core_names
     voluntaryQueuePlanning
     mandatoryTopologyPlanning
@@ -99,25 +98,10 @@ set(core_names
     forceBridgeUsesWalkingExposureAndApproachControls
 )
 
-set(editor_names
-    voluntaryAuthorizationUpgrade
-    voluntaryAuthorizationPersistence
-    voluntaryAuthorizationInvalidation
-    voluntaryAuthorizationRouteLoss
-    voluntaryAuthorizationWithdrawnShortcut
-    boundariesAndPresentation
-    inclusiveEndpointsAndPersistence
-    individualHistory
-    historyAndClipboard
-)
-
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${ROUTING}")
         set(module routing)
-    else()
-        set(binary "${EDITOR}")
-        set(module routing-editor)
     endif()
     set(names ${${tier}_names})
     list(LENGTH names count)
@@ -141,18 +125,15 @@ if(artifacts)
     message(FATAL_ERROR "Routing wrote working-directory files: ${artifacts}")
 endif()
 
-# Both dependency tiers run concurrently, with eight instances of each.
+# Run eight concurrent invocations to expose fixed-path collisions.
 # A shared empty cwd and OS temp parent expose any fixed-path collisions.
 set(project "${work}/concurrent")
 file(MAKE_DIRECTORY "${project}")
 file(WRITE "${project}/CTestTestfile.cmake" "")
-foreach(tier IN ITEMS core editor)
+foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${ROUTING}")
         set(module routing)
-    else()
-        set(binary "${EDITOR}")
-        set(module routing-editor)
     endif()
     list(LENGTH ${tier}_names count)
     foreach(index RANGE 1 8)

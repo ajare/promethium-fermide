@@ -330,19 +330,19 @@ namespace
 
 void permission_smoke::registerDestinationEditor(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "destinationAuthoringLift",
+	checks.push_back({ "permissions/destinationAuthoringLift",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			liftDestinationAuthoring(false, false);
 		} });
-	checks.push_back({ "destinationAuthoringPlatform",
+	checks.push_back({ "permissions/destinationAuthoringPlatform",
 		[](smoke::Context const&)
 		{
 			EditorState state;
 			liftDestinationAuthoring(true, false);
 		} });
-	checks.push_back({ "destinationAuthoringShuttle",
+	checks.push_back({ "permissions/destinationAuthoringShuttle",
 		[](smoke::Context const&)
 		{
 			EditorState state;

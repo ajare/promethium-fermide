@@ -1,3 +1,5 @@
+#include "../editor/Checks.h"
+#include "../editor/State.h"
 #include "Smoke.h"
 #include "EscalatorFixture.h"
 #include "TagsPanel.h"
@@ -69,18 +71,12 @@ namespace
 
 	void properties(smoke::Context const&)
 	{
-		struct State
-		{
-			static void reset() { resetTagsPanelState(); gWorldDocumentHistory.clear(); }
-			State() { reset(); }
-			~State() { reset(); }
-		} state;
+		editor_smoke::State state;
 		propertyWorkflows();
 	}
-	constexpr smoke::Check checks[] = { { "propertyWorkflows", properties } };
 }
 
-int main(int argc, char** argv)
+void editor_smoke::registerEscalators(std::vector<smoke::Check>& checks)
 {
-	return smoke::main("transports-editor", checks, argc, argv);
+	checks.push_back({ "transports/propertyWorkflows", properties });
 }
