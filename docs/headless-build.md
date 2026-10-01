@@ -555,10 +555,10 @@ all 67 non-GUI CTest tests in each configuration, focused permission checks, and
 ## Shuttle destination permissions (#264)
 
 Shuttles reuse the destination requirement APIs, schema-30 field, panel commits,
-usage reporting, and authorization rules established for Lifts. Their existing
-destination piggyback tests retain the pre-integration behavior pending the
-separate Shuttle Permission adherence ticket; #269 is deliberately limited to
-ordinary Lifts. Historical
+usage reporting, and authorization rules established for Lifts. Under #271,
+destination piggyback journeys require explicit Permission adherence false when
+the passenger lacks the destination requirement; this qualifies #264's earlier
+unconditional piggyback expectation without changing that parent issue. Historical
 `LiftDestination` API names now cover all three transports; destination positions
 are absolute x coordinates for Shuttles. Selection displays each Stop and its
 position without Agent debug visibility. Requirements follow retained Stop
@@ -629,9 +629,8 @@ adherence becomes true and require established Route loss, and change adherence
 only after boarding to verify that the accepted request, ride, and safe exit
 survive. Existing dynamic grant/requirement tests continue to cover alternatives,
 no-route outcomes, accepted requests, and changes before and after boarding.
-Landing-call requirements remain independent. #270 extends the destination rule
-to Platform lifts; Shuttle destination adherence remains assigned to its separate
-integration ticket.
+Landing-call requirements remain independent. #270 and #271 extend the destination
+rule to Platform lifts and Shuttles respectively.
 
 ## Platform lift destination Permission adherence (#270)
 
@@ -654,8 +653,32 @@ The shared public World/simulation scenarios cover mandatory ground and optional
 Walkway requirements, explicit true and false values, direct/set grants, real
 selection commands, stale Paths and Route loss, alternatives, pre-boarding and
 onboard changes, accepted requests, and completed exits. This qualifies #263's
-unconditional piggyback expectation without changing that parent issue. Shuttle
-destination adherence remains outside this ticket.
+unconditional piggyback expectation without changing that parent issue. #271
+extends the same rule to Shuttles.
+
+## Shuttle destination Permission adherence (#271)
+
+Shuttle destination scenarios now require an unauthorized opportunistic passenger
+to have effective Permission adherence false. An adhering unauthorized Agent
+declines a protected destination before boarding even when another Agent has made
+the shared Stop request; effective direct and Permission set grants satisfy the
+all-required requirement. Neither adherence value authorizes the passenger's own
+protected selection command, and landing-call requirements remain independent.
+
+Route capture and boarding admission evaluate the current effective property,
+grants, and shared destination requirement. Admission resolves the Shuttle journey
+resource so coupled Carriages, distinct Stop positions, Door reassignment, and all
+boarding origins use one requirement. Once boarding commits, later adherence,
+grant, or requirement changes do not cancel the accepted request or prevent safe
+disembarkation. Mobility, capacity, queues, safety, and local-observation rules
+remain unchanged.
+
+The shared public World/simulation scenarios cover explicit true and false values,
+direct/set grants, real selection commands, stale Paths and Route loss,
+alternative and no-route outcomes, changes before and after boarding, accepted
+requests, completed exits, two coupled Carriages, and journeys from multiple
+origins. This qualifies #264's unconditional piggyback expectation without
+changing that parent issue.
 
 ## Prerequisites
 

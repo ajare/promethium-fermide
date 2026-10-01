@@ -730,7 +730,7 @@ namespace
 		auto riderId = world.createAgent("piggyback rider", riderOrigin, 0, shuttle ? 1.5f : 7.0f);
 		auto operatorId = world.createAgent("destination operator", ground, 0, 7.0f);
 		// Destination piggybacking is intentional only for an explicitly
-		// non-adhering passenger (#269); default-true passengers decline it.
+		// non-adhering passenger; default-true passengers decline it.
 		require(world.setAgentIndividualPermissionAdherence(riderId, false, &diagnostic), diagnostic);
 		auto rider = world.lookupAgent(riderId).entity;
 		require(!rider->getEffectivePermissionAdherence().value,
@@ -818,24 +818,20 @@ namespace
 					+ std::to_string(resource.liftCurrentStop) + " position " + std::to_string(rider->getGlobalPosition().y));
 		require(!graph->calculatePath(world.lookupAgent(remoteId).entity, target),
 			"Remote Agent relied on another landing's live shared Stop request");
-		// The same local accepted Lift or Platform lift journey is declined by an
-		// adhering unauthorized passenger, while effective direct and Permission
-		// set grants admit it. Shuttle integration has a separate ticket.
-		if (!shuttle)
-		{
-			world.pauseSimulation();
-			auto adheringId = world.createAgent("adhering destination observer", riderOrigin, 0, 6.0f);
-			auto adhering = world.lookupAgent(adheringId).entity;
-			require(adhering->getEffectivePermissionAdherence().value
-				&& !graph->calculatePath(adhering, target),
-				"Adhering Agent accepted a protected destination piggyback journey");
-			require(world.grantAgentAccessPermission(adheringId, red, &diagnostic), diagnostic);
-			require(world.setAgentPermissionSetAssignment(adheringId, set, true, &diagnostic), diagnostic);
-			require(static_cast<bool>(graph->calculatePath(adhering, target)),
-				"Effective direct and Permission set grants did not admit the protected destination");
-			require(world.removeAgent(adheringId).removed, "Destination observer removal failed");
-			require(world.resumeSimulation(), "Destination adherence fixture did not resume");
-		}
+		// The same local accepted journey is declined by an adhering unauthorized
+		// passenger, while effective direct and Permission set grants admit it.
+		world.pauseSimulation();
+		auto adheringId = world.createAgent("adhering destination observer", riderOrigin, 0, 6.0f);
+		auto adhering = world.lookupAgent(adheringId).entity;
+		require(adhering->getEffectivePermissionAdherence().value
+			&& !graph->calculatePath(adhering, target),
+			"Adhering Agent accepted a protected destination piggyback journey");
+		require(world.grantAgentAccessPermission(adheringId, red, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(adheringId, set, true, &diagnostic), diagnostic);
+		require(static_cast<bool>(graph->calculatePath(adhering, target)),
+			"Effective direct and Permission set grants did not admit the protected destination");
+		require(world.removeAgent(adheringId).removed, "Destination observer removal failed");
+		require(world.resumeSimulation(), "Destination adherence fixture did not resume");
 		world.consumeSimulationEvents();
 		if (authorizationChange == 5)
 		{
@@ -898,7 +894,8 @@ namespace
 		{
 			if (event.type == core::SimulationEventType::RouteLost && event.agent.id == riderId)
 				riderDiagnostic += " route lost " + event.diagnostic;
-			require(!shuttle || event.type != core::SimulationEventType::RouteLost,
+			require(!shuttle || event.type != core::SimulationEventType::RouteLost
+				|| (authorizationChange == 5 && event.agent.id == riderId),
 				"Accepted shared Shuttle journey produced Route loss");
 			if (event.type == core::SimulationEventType::DeviceOperationAdded)
 				require(event.deviceOperation.requester != riderId
@@ -1520,7 +1517,7 @@ void runAccessPermissionSmokeChecks()
 	liftDestinationEnforcement(4);
 	liftDestinationEnforcement(5);
 	for (unsigned change = 0; change < 6; ++change) liftDestinationEnforcement(change, true);
-	for (unsigned change = 0; change < 4; ++change) liftDestinationEnforcement(change, false, true);
+	for (unsigned change = 0; change < 6; ++change) liftDestinationEnforcement(change, false, true);
 	changingLiftDestinationAuthorization(true);
 	changingLiftDestinationAuthorization(false, true);
 	liftDestinationAlternative();
