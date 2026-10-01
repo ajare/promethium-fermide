@@ -55,8 +55,7 @@ foreach(check IN ITEMS paths failed-paths)
     endif()
 endforeach()
 
-invoke("${SIMULATION}" 0 "^observation\n$" --list)
-invoke("${SIMULATION}" 0 "^PASS simulation observation\nSUMMARY simulation pass=1 fail=0 skip=0\n$")
+# The full Simulation inventory belongs to SimulationContract.cmake.
 invoke("${SIMULATION}" 0 "^PASS simulation observation\nSUMMARY simulation pass=1 fail=0 skip=0\n$" --check observation)
 invoke("${SIMULATION}" 2 "" --check absent)
 file(REMOVE_RECURSE "${work}")

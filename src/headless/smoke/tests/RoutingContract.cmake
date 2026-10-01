@@ -96,6 +96,7 @@ set(core_names
     defaultAgentAvoidsACompetitiveLadderShortcut
     riskAversionChangesPreferenceWithoutChangingFeasibility
     forceBridgeUsesWalkingExposureAndApproachControls
+    inferredPathSourceDoesNotMakeAgentDoubleBack
 )
 
 foreach(tier IN ITEMS core)

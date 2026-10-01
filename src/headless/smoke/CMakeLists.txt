@@ -59,11 +59,24 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-simulation
     NAME simulation
-    SOURCES simulation/Main.cpp simulation/Observation.cpp
+    SOURCES
+        simulation/Main.cpp simulation/Observation.cpp
+        simulation/Ticking.cpp
+        simulation/Traversal.cpp
+        simulation/Interactions.cpp
+        simulation/Doors.cpp
+        simulation/DoorQueues.cpp
+        simulation/CrossingBands.cpp
+        simulation/Scale.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
     TIMEOUT 30
 )
+
+add_test(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
+    "-DSIMULATION=$<TARGET_FILE:pf-smoke-simulation>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SimulationContract.cmake")
+set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 120)
 
 pf_add_smoke_module(pf-smoke-agent
     NAME agent
@@ -171,6 +184,9 @@ pf_add_smoke_module(pf-smoke-transports
         transports/Deletion.cpp
         transports/DoorQueries.cpp
         transports/Boarding.cpp
+        transports/Ladders.cpp
+        transports/ForceBridges.cpp
+        transports/LayerJourney.cpp
     LIBRARIES pf-lift-boarding-support
     LABELS core
     TIMEOUT 120
@@ -188,6 +204,7 @@ pf_add_smoke_module(pf-smoke-routing
         routing/Planning.cpp
         routing/PlanningTime.cpp
         routing/Movement.cpp
+        routing/PathSource.cpp
         routing/RestoredPaths.cpp
         routing/IsolatedSectors.cpp
         routing/Mobility.cpp
@@ -222,6 +239,10 @@ pf_add_smoke_module(pf-smoke-world
         world/Facades.cpp
         world/ZeroSizeLocations.cpp
         world/ThresholdLayerOverlap.cpp
+        world/ObjectEditing.cpp
+        world/FloorsAndWalls.cpp
+        world/Topology.cpp
+        world/LayerDeletion.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
     TIMEOUT 30

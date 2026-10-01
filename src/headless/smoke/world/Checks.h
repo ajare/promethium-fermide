@@ -1,4 +1,11 @@
 #pragma once
+#include "Smoke.h"
+#include <vector>
+
+void registerObjectEditing(std::vector<smoke::Check>& checks);
+void registerFloorsAndWalls(std::vector<smoke::Check>& checks);
+void registerTopology(std::vector<smoke::Check>& checks);
+void registerLayerDeletion(std::vector<smoke::Check>& checks);
 
 void runBackgroundSectorSmokeChecks();
 void runBackgroundPaintSmokeChecks();

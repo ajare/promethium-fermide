@@ -10,6 +10,7 @@ namespace routing_smoke
 	void registerPlanningTime(std::vector<smoke::Check>& checks);
 	void registerPlanningTimeEditor(std::vector<smoke::Check>& checks);
 	void registerMovement(std::vector<smoke::Check>& checks);
+	void registerPathSource(std::vector<smoke::Check>& checks);
 	void registerRestoredPaths(std::vector<smoke::Check>& checks);
 	void registerIsolatedSectors(std::vector<smoke::Check>& checks);
 	void registerMobility(std::vector<smoke::Check>& checks);

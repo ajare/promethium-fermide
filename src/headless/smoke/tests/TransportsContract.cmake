@@ -66,6 +66,18 @@ set(core_names
     liftBoardingReduced
     liftCrossingsFull
     liftCrossingsReduced
+    roomLadderEditingCalculatesAndMaintainsWalkwayEndpoints
+    finiteCapacityLadderSerializesAdmissionAndClimbsAtConfiguredSpeed
+    ladderQueuePositionsPreferAgentApproachSide
+    ladderAdmissionsMaintainPhysicalSpacing
+    extensibleLadderUsesDesiredStateAndLeases
+    directionalLadderBoundsBatchesAndPreventsOpposingAdmission
+    forceBridgeObjectEditingIsAtomic
+    forceBridgeWalkwayDeletionUpdatesItsDestination
+    forceBridgePreparationUsesNearControl
+    extendedForceBridgeAllowsConcurrentTwoWayTraffic
+    extensibleForceBridgeCompletesThroughPhysicalControl
+    runThreeLayerTransitJourney
 )
 
 foreach(tier IN ITEMS core)

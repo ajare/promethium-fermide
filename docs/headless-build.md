@@ -764,7 +764,14 @@ msbuild build\headless.vcxproj /m /p:Configuration=Release /p:Platform=x64
 bin\x64\Release\prometheum-fermide-headless.exe
 ```
 
-World `headless.vcxproj` automatically builds its `core.vcxproj` project reference. A successful run prints scale observations followed by a `PASS` line and returns exit code 0. The representative run advances 500 active agents alongside 32 resources twice and compares deterministic event/snapshot digests. A 1,000-agent stretch run records elapsed time and process working-set memory. These observations are deliberately informational rather than machine-dependent performance thresholds; both runs still enforce ownership and capacity invariants. A failed assertion prints a `FAIL` line and returns a nonzero exit code.
+These legacy invocations now run only the remaining unmigrated checks; they no
+longer run central product scenarios or print scale observations. Use the CMake
+module targets and CTest commands in [smoke modules](smoke-modules.md) for combined
+coverage. Simulation's `--check runScaledWorld` advances 500 active Agents alongside
+32 resources for 60 ticks twice (metrics off/on) and compares event/snapshot
+digests, then verifies the 1,000-Agent stretch case. Ownership and capacity
+invariants remain enforced without benchmark timing or memory output. Each module
+prints named PASS/FAIL records and a summary, returning nonzero on any failure.
 
 ## Build the complete solution
 

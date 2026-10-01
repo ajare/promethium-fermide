@@ -15,5 +15,6 @@ int main(int argc, char** argv)
 	routing_smoke::registerLiftRouteCost(checks);
 	routing_smoke::registerShuttleRouteCost(checks);
 	routing_smoke::registerLadderForceBridgeRouteCost(checks);
+	routing_smoke::registerPathSource(checks);
 	return smoke::main("routing", checks, argc, argv);
 }

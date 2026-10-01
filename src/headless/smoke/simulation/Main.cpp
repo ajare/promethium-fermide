@@ -1,5 +1,5 @@
 #include "Observation.h"
-#include "Smoke.h"
+#include "Checks.h"
 
 namespace
 {
@@ -7,13 +7,17 @@ namespace
 	{
 		runSimulationObservationSmokeChecks();
 	}
-
-	constexpr smoke::Check checks[] = {
-		{ "observation", observation },
-	};
 }
 
 int main(int argc, char** argv)
 {
+	std::vector<smoke::Check> checks = { { "observation", observation } };
+	registerTicking(checks);
+	registerTraversal(checks);
+	registerInteractions(checks);
+	registerDoors(checks);
+	registerDoorQueues(checks);
+	registerCrossingBands(checks);
+	registerScale(checks);
 	return smoke::main("simulation", checks, argc, argv);
 }

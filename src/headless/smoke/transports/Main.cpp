@@ -12,5 +12,8 @@ int main(int argc, char** argv)
 	registerDeletion(checks);
 	registerDoorQueries(checks);
 	registerBoarding(checks);
+	registerLadders(checks);
+	registerForceBridges(checks);
+	registerLayerJourney(checks);
 	return smoke::main("transports", checks, argc, argv);
 }

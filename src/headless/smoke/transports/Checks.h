@@ -14,3 +14,6 @@ void registerEscalators(std::vector<smoke::Check>& checks);
 void registerDeletion(std::vector<smoke::Check>& checks);
 void registerDoorQueries(std::vector<smoke::Check>& checks);
 void registerBoarding(std::vector<smoke::Check>& checks);
+void registerLadders(std::vector<smoke::Check>& checks);
+void registerForceBridges(std::vector<smoke::Check>& checks);
+void registerLayerJourney(std::vector<smoke::Check>& checks);

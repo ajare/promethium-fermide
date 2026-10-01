@@ -8,7 +8,8 @@ behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
 Access permissions and Interaction points (#290), Route planning and movement (#291),
 Transit/transport runtime checks (#292), and pathfinding scale and perceived
 route costs (#293), the complete Render module (#294), and the cross-domain
-Editor module (#295), and complete World-document Persistence (#296–#297).
+Editor module (#295), complete World-document Persistence (#296–#297), and
+remaining central inline scenarios (#298).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
@@ -47,9 +48,12 @@ uses only CPU-side ImGui contexts, without platform or GPU backends.
 
 ## Narrow support and ownership
 
-`src/headless/smoke/support` supplies failure handling, CLI/reporting, process
-setup, required fixture lookup, and an RAII temporary root. It has no production,
-ImGui, editor, renderer, or HTTP dependencies. Checks use `Context::fixture()`
+`pf-smoke-support` (`src/headless/smoke/support/Smoke.*`) supplies failure handling,
+CLI/reporting, process setup, required fixture lookup, and an RAII temporary root.
+The harness library has no production, ImGui, editor, renderer, or HTTP dependencies.
+Opt-in `PathFixture.h` and `SimulationTrace.h` provide narrow core-only Path
+construction and snapshot/event canonicalization mechanics for migrated scenarios;
+they are not included by the harness. Checks use `Context::fixture()`
 with a repository-relative file path; the root is provided by CMake, never the
 working directory. They write only beneath `Context::temporaryRoot()`. Each
 invocation atomically creates its own randomly named directory beneath the OS
@@ -67,15 +71,71 @@ All new smoke module/harness/test targets exist only with `BUILD_TESTING=ON`; th
 in the default build. Existing standalone and legacy target policies are unchanged.
 
 Simulation links only the production core, its YAML/Lua dependencies, and smoke
-support. Its only check translation unit is `simulation/Observation.cpp`; building
+support. Its check translation units now cover Observation, Ticking, Traversal,
+Interactions, Doors, DoorQueues, CrossingBands and Scale; building
 `pf-smoke-simulation` never builds the legacy checks or synthetic harness probe.
 CTest `smoke-simulation` has `smoke;core` labels, is parallel-safe, and has a
-30-second timeout (observed Release runtime about 0.02 seconds). The synthetic
+30-second timeout (observed Release runtime about 0.3 seconds under load). The synthetic
 harness contract test has `harness;core` labels so it does not duplicate domain
 smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Central scenario decomposition (#298)
+
+```sh
+cmake --build build-linux --target pf-smoke-world pf-smoke-routing \
+  pf-smoke-transports pf-smoke-simulation --parallel 4
+ctest --test-dir build-linux \
+  -R '^smoke-(world|routing|transports|simulation)(-contract)?$' \
+  --output-on-failure -j 4
+build-linux/bin/x64/Release/pf-smoke-simulation --check runScaledWorld
+build-linux/bin/x64/Release/pf-smoke-world --check runMiddleLayerDeletion
+```
+
+The remaining 56 inline scenarios are 60 individually selectable registrations:
+11 World, one Routing, 12 Transports and 36 Simulation. The complete module
+inventories are respectively 22, 72, 53 and 37. The
+[manifest](smoke-migration-manifest.md#central-scenario-decomposition-298)
+maps every original scenario and parameter variant to its source and owner.
+Door/queue/Interaction coordination belongs to Simulation; Ladder/Force Bridge
+and deep Lift journeys belong to Transports. World owns structural edits and
+Layer deletion; Routing owns inferred Path-source choice. Scenario-specific
+World builders stay local, and repeated-run determinism checks stay beside the
+behavior they protect. Existing Persistence coverage is unchanged.
+
+The central runner contains no product scenarios. It only dispatches remaining
+unmigrated suites/tools and retains process/memory helpers until their follow-up
+tickets. No migrated scenario is compiled or run there. CTest, not the legacy
+aggregate, provides combined coverage. The scale scenario preserves its
+500/1,000-Agent workloads, metrics-on/off comparisons and ownership/capacity
+assertions, without benchmark timing or working-set output. Queue-chain failure
+now correctly fails its harness registration (the old `main` returned `false`,
+which incorrectly signaled exit status zero).
+
+Validation on Linux:
+
+- Full GUI-enabled Release build; all 80 CTest entries passed sequentially and at
+  `-j 8`, apart from the explicitly skipped optional vendored GUI capability test.
+- GUI-disabled Debug with `PF_HIGH_ANALYSIS=ON`: all four affected modules,
+  Persistence and legacy headless build; all 11 relevant module/contract/legacy
+  tests pass. Tests run with DISPLAY and WAYLAND_DISPLAY unset.
+- Fresh GUI-disabled Release builds of each affected module compile only that
+  module's smoke sources; link commands contain only core, YAML/Lua and explicit
+  support libraries, not another module, legacy executable, ImGui, render or HTTP.
+  All four run directly from `/tmp`.
+- CLI contracts verify exact inventories, every selection, misuse and empty
+  external working directories; Simulation, Routing and Transports also exercise
+  eight concurrent full invocations.
+- Mechanical comparison preserves 73 moved function/struct bodies byte-for-byte.
+  Only Scale's informational measurement fields/sampling are removed. All four
+  queue trace digests and the overflow digest match the pre-migration executable;
+  representative event/snapshot digests remain `13886706955275287569` and
+  `7023572238893341247`.
+- Formatting is checked with `git diff --check`; no formatter is configured.
+  Existing aggregate-initializer/high-analysis warnings remain non-fatal.
+  Windows execution is not claimed; runners retain the shared no-dialog setup.
 
 ## Complete cross-domain Editor module (#295)
 

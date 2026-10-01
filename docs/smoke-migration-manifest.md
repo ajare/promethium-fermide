@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the cross-domain Editor migration #295 (parent #278). Each
+Snapshot after central scenario decomposition #298 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -88,9 +88,8 @@ registry-history and Selection assertions are independent Editor peers for all
 three transport kinds. Mixed destination authoring/history/persistence scenarios
 remain coherent Editor checks. All 549 original assertion call sites are retained.
 The old sources, declarations, calls, and `access-permissions` CTest entry are
-removed; `--access-permission-checks` returns 2 with migration guidance. Remaining
-inline Interaction scenarios and the compile-only API contract remain legacy-owned
-for their separate follow-up tickets.
+removed; `--access-permission-checks` returns 2 with migration guidance. Inline Interaction scenarios subsequently migrate in #298 below; the
+compile-only API contract remains legacy-owned for its separate follow-up ticket.
 
 #291 migrates all seven Route planning, planning-time property, movement-command,
 Mobility profile, restored Path, isolated-Sector pathing, and Agent Path rendering
@@ -106,7 +105,7 @@ and invocations are removed, including the dedicated restored-Path invocation.
 The two empty planning CTest entries are retired; `--route-planning-checks`,
 `--route-planning-time-checks`, and `--restored-path-checks` return 2 with guidance.
 Route-cost, workspace, and scale checks subsequently migrate in #293 below;
-inline checks remain with their existing owners for separate tickets.
+remaining inline checks migrate in #298 below.
 
 #293 migrates the six workspace and perceived route-cost sources into 31
 individual Routing registrations (71 core registrations in total). Context resolves
@@ -311,7 +310,22 @@ source lists and dependency tiers are unchanged.
 | `WorldRenderSlotChecks.cpp` | module-owned (retained standalone) | `pf-world-render-slot-checks` |
 | `WorldTeardownSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
-| `SmokeScenario.cpp` (remaining inline aggregate checks after Agent identity extraction) | legacy-owned | `prometheum-fermide-headless` |
+| `SmokeScenario.cpp` | dispatch/platform helpers only; no product scenarios | `prometheum-fermide-headless` |
+| `smoke/world/ObjectEditing.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/FloorsAndWalls.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/Topology.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/LayerDeletion.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/routing/PathSource.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/simulation/Ticking.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Traversal.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Interactions.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Doors.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/DoorQueues.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/CrossingBands.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Scale.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/transports/Ladders.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/ForceBridges.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/LayerJourney.cpp` | module-owned | `pf-smoke-transports` |
 | `InteractionApiCompileCheck.cpp` (compile-only contract) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/simulation/Observation.cpp` | module-owned | `pf-smoke-simulation` |
 
@@ -480,6 +494,106 @@ Persistence has 80 registrations; Render has 83. Both contract tests enumerate
 every selector and run eight concurrent full invocations from an empty external
 working directory. The complete Release CTest run also verifies the unchanged
 coordinated-document checks.
+
+## Central scenario decomposition (#298)
+
+All 56 remaining product scenarios leave `SmokeScenario.cpp`, with 60 explicit
+registrations in their owning modules. Source paths below are relative to
+`smoke/`. A selector is the original function name unless variants are listed.
+Every original scenario is mapped exactly once here; helpers are not extra checks.
+
+World owns structural authoring, Floor/Wall edits, topology rebuild and Layer
+deletion/compaction. Routing owns inferred Path-source selection. Transports owns
+Ladder and Force Bridge authoring/admission/leases and the three-Layer Lift journey.
+Simulation owns fixed ticks, phases, ordinary traversal, Interaction outcomes,
+Door/Bulkhead/Window coordination, queue and crossing-band behavior, and scale.
+Determinism assertions stay with the scenario whose outcome they compare, rather
+than becoming a central scenario library. Existing Persistence scenarios and
+serialization/replay assertions retain their owners unchanged.
+
+| Original scenario | Owner/source | Selector variants (otherwise original name) |
+| --- | --- | --- |
+| `markerPlacementEnforcesPaletteCoreRules` | `world/ObjectEditing.cpp` (`pf-smoke-world`) | — |
+| `corridorDoorPlacementEnforcesPaletteRules` | `world/ObjectEditing.cpp` (`pf-smoke-world`) | — |
+| `objectMoveValidatesAndRebuildsOnceCommitted` | `world/ObjectEditing.cpp` (`pf-smoke-world`) | — |
+| `windowResizeUsesWindowPlacementRules` | `world/ObjectEditing.cpp` (`pf-smoke-world`) | — |
+| `doorResizeRespectsDoorPlacementRules` | `world/ObjectEditing.cpp` (`pf-smoke-world`) | — |
+| `sharedLocationWallsCanBeOpenedAndRestored` | `world/FloorsAndWalls.cpp` (`pf-smoke-world`) | — |
+| `walkwayEditingEnforcesPlacementMovementAndOccupancyRules` | `world/FloorsAndWalls.cpp` (`pf-smoke-world`) | — |
+| `deletingWalkwayPreservesUnrelatedRoomDoor` | `world/FloorsAndWalls.cpp` (`pf-smoke-world`) | — |
+| `pausedTopologyRebuildIsAtomicAndCleansOwnership` | `world/Topology.cpp` (`pf-smoke-world`) | — |
+| `traversalGeometryPolicyIsWorldOwned` | `world/Topology.cpp` (`pf-smoke-world`) | — |
+| `runMiddleLayerDeletion` | `world/LayerDeletion.cpp` (`pf-smoke-world`) | — |
+| `inferredPathSourceDoesNotMakeAgentDoubleBack` | `routing/PathSource.cpp` (`pf-smoke-routing`) | — |
+| `accumulatedRenderTimeAdvancesWholeTicksOnly` | `simulation/Ticking.cpp` (`pf-smoke-simulation`) | — |
+| `runOrdinaryPathScenario` | `simulation/Ticking.cpp` (`pf-smoke-simulation`) | — |
+| `ordinaryTraversalCommitsOnlyAtDestination` | `simulation/Traversal.cpp` (`pf-smoke-simulation`) | — |
+| `deniedTraversalCannotBeCrossed` | `simulation/Traversal.cpp` (`pf-smoke-simulation`) | — |
+| `cancellationReleasesPermitWithoutCommitting` | `simulation/Traversal.cpp` (`pf-smoke-simulation`) | — |
+| `typedLightingInteractionCoalescesAndCancelsByRequester` | `simulation/Interactions.cpp` (`pf-smoke-simulation`) | — |
+| `repeatedInteractionsRetireTerminalRecords` | `simulation/Interactions.cpp` (`pf-smoke-simulation`) | — |
+| `interactionBindingAggregationIsMeaningful` | `simulation/Interactions.cpp` (`pf-smoke-simulation`) | — |
+| `singleAgentDoorJourney` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | `singleAgentDoorJourneyManual`, `singleAgentDoorJourneyAutomatic` |
+| `automaticBulkheadSensesNearbyNonTraveller` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `bulkheadAndWindowThresholdsUseTraversalResources` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `agentsPressUpcomingDoorButtonsWhilePassing` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `remoteDoorUsesOnePhysicalOperatorAndSharedOperation` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `remoteDoorWithoutReachableControlIsUnavailable` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `wideDoorLanesAndGracefulDisableAreSafe` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `doorLeasesAndSensorObservationsPreventUnsafeClosure` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `unavailableDoorRejectsTraversal` | `simulation/Doors.cpp` (`pf-smoke-simulation`) | — |
+| `fairDoorQueuesServeBothSidesInStableOrder` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | — |
+| `queueChainsFollowWithoutCompressing` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | `queueChainsFollowWithoutCompressingDefaultLeft`, `queueChainsFollowWithoutCompressingDefaultRight`, `queueChainsFollowWithoutCompressingWideLeft`, `queueChainsFollowWithoutCompressingWideRight` |
+| `overflowingQueueAlwaysHasWalkableTailTargets` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | — |
+| `queuePositionsPreferObjectProximityThenAgentProximity` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | — |
+| `doorQueueRequestsBeforeOccupiedTail` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | — |
+| `queuedCancellationReleasesAndAdvancesPositions` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | — |
+| `resilientWaitingRetainsPriorityAndExpiresPermits` | `simulation/DoorQueues.cpp` (`pf-smoke-simulation`) | — |
+| `doorCrossingBandPredicateShape` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `doorVertexCarriesCrossingWidth` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `crossingWidthGrantsHeadOfQueueBeforeCentre` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `narrowDoorBandArrivalGrantsAtCentreTolerance` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `bandArrivalCrossesWideDoorFromStandingPosition` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `bandArrivalComposesWithEarlyStopForContendedDoor` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `bandArrivalLeavesNonCrossingAgentsUnaffected` | `simulation/CrossingBands.cpp` (`pf-smoke-simulation`) | — |
+| `runScaledWorld` | `simulation/Scale.cpp` (`pf-smoke-simulation`) | — |
+| `roomLadderEditingCalculatesAndMaintainsWalkwayEndpoints` | `transports/Ladders.cpp` (`pf-smoke-transports`) | — |
+| `finiteCapacityLadderSerializesAdmissionAndClimbsAtConfiguredSpeed` | `transports/Ladders.cpp` (`pf-smoke-transports`) | — |
+| `ladderQueuePositionsPreferAgentApproachSide` | `transports/Ladders.cpp` (`pf-smoke-transports`) | — |
+| `ladderAdmissionsMaintainPhysicalSpacing` | `transports/Ladders.cpp` (`pf-smoke-transports`) | — |
+| `extensibleLadderUsesDesiredStateAndLeases` | `transports/Ladders.cpp` (`pf-smoke-transports`) | — |
+| `directionalLadderBoundsBatchesAndPreventsOpposingAdmission` | `transports/Ladders.cpp` (`pf-smoke-transports`) | — |
+| `forceBridgeObjectEditingIsAtomic` | `transports/ForceBridges.cpp` (`pf-smoke-transports`) | — |
+| `forceBridgeWalkwayDeletionUpdatesItsDestination` | `transports/ForceBridges.cpp` (`pf-smoke-transports`) | — |
+| `forceBridgePreparationUsesNearControl` | `transports/ForceBridges.cpp` (`pf-smoke-transports`) | — |
+| `extendedForceBridgeAllowsConcurrentTwoWayTraffic` | `transports/ForceBridges.cpp` (`pf-smoke-transports`) | — |
+| `extensibleForceBridgeCompletesThroughPhysicalControl` | `transports/ForceBridges.cpp` (`pf-smoke-transports`) | — |
+| `runThreeLayerTransitJourney` | `transports/LayerJourney.cpp` (`pf-smoke-transports`) | — |
+
+The queue-chain variants retain both separations (default and 0.8) and both
+approach directions, each with repeated trace comparison. A failed queue assertion
+now throws through the harness instead of returning `false` (exit status zero)
+from the old `main`. Each check boundary reports failure and continues its module.
+The 500-Agent/32-resource/60-tick workload still compares metrics-disabled and
+metrics-enabled event/snapshot digests, followed by the 1,000-Agent stretch case.
+Only informational wall-clock/working-set sampling and printed digest reports are
+removed; no elapsed-time threshold or product assertion changes.
+
+`support/PathFixture.h` constructs the same two-node Path for World, Simulation
+and Transports; `support/SimulationTrace.h` retains the exact snapshot/event
+canonicalization used by Layer deletion, the deep Transit journey and ordinary
+Path determinism. These are narrow shared mechanics, not scenario registrations
+or World builders. `simulation/InteractionResults.h` locally shares terminal-event
+observation between Interaction and Door safety checks. Builders, assertions and
+scenario-specific trace types remain in their owning translation units.
+
+World now has 22 checks, Routing 72, Transports 53, and Simulation 37.
+Their public CLI contracts enumerate every selector and run each from an empty
+external directory; Simulation also gains eight concurrent full invocations.
+The central runner retains only dispatch to unmigrated suites/tools and platform
+memory/process helpers. It no longer defines or invokes any extracted scenario;
+compatibility orchestration, tool separation, remaining standalone source
+migrations and compile-only target work are deliberately not part of #298.
 
 ## Support and non-smoke code
 
