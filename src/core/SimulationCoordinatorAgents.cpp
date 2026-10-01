@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -372,7 +373,8 @@ namespace core
 					target = mWorld.mGraph->getVertexForObject(object);
 		mWorld.mMovementGoals[id] = { marker, target ? target->getPosition() : Vector2::ZERO, false,
 			target ? SectorId{ (uint64_t)target->getSector()->getIndex() + 1 } : SectorId{},
-			RouteLossReason::None, behaviourCommand };
+			RouteLossReason::None, behaviourCommand, false, true, RouteLossReason::Unreachable,
+			std::nullopt, nullptr };
 		if (hasCommittedMovement(*agent))
 		{
 			mWorld.mMovementGoals[id].planningDeferred = true;

@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <queue>
 
 #include "core/Defines.h"
@@ -427,12 +428,12 @@ namespace core
 				}
 				// The inferred-source approach is part of both perceived movement and
 				// objective estimated duration, even though it has no Graph Edge.
-				EvaluatedRouteCost sourceCost{ workspace.scores[slot], workspace.durations[slot] };
+				EvaluatedRouteCost sourceCost{ workspace.scores[slot], workspace.durations[slot], {} };
 				sourceCost.components.movement = workspace.scores[slot];
 				nodes.push_back({ nullptr, vertices[slot], workspace.scores[slot],
 					workspace.durations[slot], sourceCost });
 				std::reverse(nodes.begin(), nodes.end());
-				return std::make_shared<Path>(Path{ std::move(nodes) });
+				return std::make_shared<Path>(Path{ std::move(nodes), std::nullopt });
 			}
 
 			template<typename EffectiveProperty>
@@ -873,7 +874,7 @@ namespace core
 			for (uint32_t i = 0; i < path.nodes.size(); ++i)
 			{
 				auto const& node = path.nodes[i];
-				PathVertexExplanation vertex{ i, node.targetVertex, i + 1 == path.nodes.size() };
+				PathVertexExplanation vertex{ i, node.targetVertex, i + 1 == path.nodes.size(), false, {} };
 				if (vertex.target || !node.targetVertex)
 				{
 					result.vertices.push_back(std::move(vertex));

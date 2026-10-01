@@ -41,6 +41,7 @@ case MovementCommandStatus::UnknownMarker: return "unknown_marker";
 case MovementCommandStatus::AgentBusy: return "agent_busy";
 case MovementCommandStatus::TopologyUnavailable: return "topology_unavailable";
 case MovementCommandStatus::BehaviourOwned: return "behaviour_owned";
+case MovementCommandStatus::NoOccupiableSector: return "no_occupiable_sector";
 } return "unknown"; }
 inline std::string metricName(RouteLossReason value) { switch(value) {
 case RouteLossReason::None: return "none";
