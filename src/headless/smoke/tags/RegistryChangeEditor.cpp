@@ -1,9 +1,11 @@
+#include "Checks.h"
+#include "EditorState.h"
+#include "TemporaryDirectory.h"
 // Safe Agent tag registry detach/switch workflow checks for #140.
 
 #include "TagsPanel.h"
 #include "DocumentEdit.h"
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -18,29 +20,11 @@
 
 namespace
 {
+	using tag_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		TemporaryDirectory()
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-registry-change-" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	std::string readText(std::filesystem::path const& path)
 	{
@@ -94,7 +78,8 @@ namespace
 		core::AgentId firstAgent{};
 		core::AgentId secondAgent{};
 
-		explicit Fixture(bool assignTags)
+		explicit Fixture(smoke::Context const& context, bool assignTags)
+			: temporary(context)
 		{
 			auto source = core::AgentTagRegistry::create();
 			sourceTag = source->addAgentTag("source");
@@ -127,9 +112,9 @@ namespace
 		}
 	};
 
-	void unusedRegistryChangesAreDirectAndUndoable()
+	void unusedRegistryChangesAreDirectAndUndoable(smoke::Context const& context)
 	{
-		Fixture fixture(false);
+		Fixture fixture(context, false);
 		auto& world = fixture.world;
 		auto const sourceUuid = fixture.sourceRegistry->getUuid();
 		auto const sourceText = readText(fixture.sourcePath);
@@ -169,9 +154,9 @@ namespace
 			"Undo did not reattach the directly detached registry");
 	}
 
-	void directSwitchWithAssignmentsIsRefusedTransactionally()
+	void directSwitchWithAssignmentsIsRefusedTransactionally(smoke::Context const& context)
 	{
-		Fixture fixture(true);
+		Fixture fixture(context, true);
 		gWorldDocumentHistory.clear();
 		auto const before = serializeWorld(*fixture.world);
 		auto const source = fixture.world->getAgentTagRegistry();
@@ -189,9 +174,9 @@ namespace
 			"A refused direct registry switch changed state or created undo history");
 	}
 
-	void confirmedSwitchClearsEverythingAndCancellationDoesNothing()
+	void confirmedSwitchClearsEverythingAndCancellationDoesNothing(smoke::Context const& context)
 	{
-		Fixture fixture(true);
+		Fixture fixture(context, true);
 		gWorldDocumentHistory.clear();
 		auto const before = serializeWorld(*fixture.world);
 		auto const sourceUuid = fixture.sourceRegistry->getUuid();
@@ -276,11 +261,24 @@ namespace
 	}
 }
 
-void runAgentTagRegistryChangeSmokeChecks()
+void tag_smoke::registerRegistryChangeEditor(std::vector<smoke::Check>& checks)
 {
-	unusedRegistryChangesAreDirectAndUndoable();
-	directSwitchWithAssignmentsIsRefusedTransactionally();
-	confirmedSwitchClearsEverythingAndCancellationDoesNothing();
-	cancelPendingAgentTagRegistryChange();
-	gWorldDocumentHistory.clear();
+	checks.push_back({ "unusedRegistryChangesAreDirectAndUndoable",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			unusedRegistryChangesAreDirectAndUndoable(context);
+		} });
+	checks.push_back({ "directSwitchWithAssignmentsIsRefusedTransactionally",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			directSwitchWithAssignmentsIsRefusedTransactionally(context);
+		} });
+	checks.push_back({ "confirmedSwitchClearsEverythingAndCancellationDoesNothing",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			confirmedSwitchClearsEverythingAndCancellationDoesNothing(context);
+		} });
 }

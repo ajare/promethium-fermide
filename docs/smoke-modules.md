@@ -3,7 +3,8 @@
 The independent modules currently own Simulation Observation (#280), Render walls
 (#281), Persistence serializer/document formats (#282), core World structure
 and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
-properties (#286). Other domain checks remain legacy-owned; see the
+properties (#286), and Agent tags and coordinated documents (#287).
+Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
 Window checks, and `--serialization-checks` runs only the remaining serialization
@@ -159,6 +160,67 @@ has one execution owner.
   from an empty directory. No source fixtures or existing untracked files change.
 - `git diff --check` passes; no repository formatter is configured. Existing
   high-analysis diagnostics remain warnings. Windows execution remains #279.
+
+## Agent tag modules (#287)
+
+```sh
+cmake --build build-linux --target pf-smoke-agent-tags pf-smoke-agent-tags-editor --parallel
+build-linux/bin/x64/Release/pf-smoke-agent-tags --list
+build-linux/bin/x64/Release/pf-smoke-agent-tags-editor --check oneEditUpdatesAndRestoresTwoWorlds
+ctest --test-dir build-linux -R '^smoke-agent-tags' -j 3 --output-on-failure
+```
+
+The ten former Agent tag sources now have 51 individual registrations:
+
+- `pf-smoke-agent-tags` / `smoke-agent-tags` (`smoke;core`) owns 13 checks for
+  external registry identity, canonical sharing, transactional refusal, assignment,
+  persistence, reconciliation, and Mobility profile inheritance. It links only
+  smoke support and production core (including YAML/Lua).
+- `pf-smoke-agent-tags-editor` / `smoke-agent-tags-editor` (`smoke;editor`) owns
+  38 checks for registry editing and selection, assignments, clipboard, deletion,
+  detach/switch, reload, coordinated multi-World transactions and undo/redo,
+  dependency-ordered saves, Save As, and dirty-document prompt text. Mixed checks
+  retain their complete scenarios and assertions in this tier. It reuses the
+  production editing and CPU-only rendering support libraries, without native
+  dialogs, HTTP, SDL/OpenGL, platform backends, or a graphics window.
+
+Both targets are independently buildable, with direct 30-second CTest entries.
+The legacy sources, declarations, and invocations are removed, including tag
+coverage formerly reached by `--coordinated-document-checks`. Use CTest for
+combined coverage; that legacy selection now covers Agent behaviour portability.
+
+Every filesystem fixture uses a distinct directory below the harness Context's
+unique temporary root, including multiple fixtures within one check. Context
+cleans the files on success or exception. Editor registrations reset tag-panel
+state, pending confirmations, World undo history, and write-failure injection on
+entry and exit. The Selection checklist uses scoped CPU ImGui with ini/log files
+disabled and in-process clipboard capture. Confirmations are answered directly
+through production seams, never through native dialogs or user input.
+
+`smoke-agent-tags-contract` verifies exact listings, every individual selection,
+misuse status codes, no output files in an external empty working directory, and
+eight concurrent full invocations of each tier sharing that working directory.
+
+### #287 Linux validation
+
+- Release, GUI enabled: the full default build and all 82 CTest entries pass
+  sequentially. The 81 entries excluding the legacy aggregate also pass with
+  `-j 6`; the aggregate runs separately because of the pre-existing legacy
+  save-transaction temporary-path overlap described under #282.
+- A clean GUI-disabled Release build of `pf-smoke-agent-tags` compiles only its
+  own runner/checks and smoke support among headless sources. Its link command
+  contains only smoke support, core, YAML, and Lua. All 13 checks pass.
+- A clean GUI-disabled Debug build with `PF_HIGH_ANALYSIS=ON` builds both tag
+  tiers. All three focused CTest entries pass concurrently, including every
+  single-check selection and eight concurrent full invocations per tier. Editor
+  linkage contains only its own checks, headless support, editing, render, core,
+  YAML, Lua, and CPU ImGui libraries. Existing elevated-analysis warnings remain.
+- Mechanical assertion comparison confirms all 380 original `require` call
+  sites remain in their new owners (one shared deserialization helper is copied
+  into both tiers). No migrated definition or invocation remains in legacy code.
+- `git diff --check` passes; no repository formatter is configured. New checks
+  create no windows, native dialogs, system clipboard interactions, or ini/log
+  files. Windows runtime validation remains the separate #279 ticket.
 
 ## World structure and Sector module (#284)
 

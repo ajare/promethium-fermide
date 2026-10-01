@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the individual Agent property migration #286 (parent #278). Each
+Snapshot after the Agent tag migration #287 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -42,6 +42,16 @@ editor history, Selection-panel text, or real CPU-side rendering; those mixed
 scenarios are editor-owned as coherent checks. The four old sources, declarations,
 and calls were removed from the legacy aggregate.
 
+#287 migrates all ten `AgentTag*SmokeChecks.cpp` sources into `smoke/tags`:
+13 individually selectable core checks in `pf-smoke-agent-tags` and 38 Editor
+checks in `pf-smoke-agent-tags-editor`. Registry and assignment sources are split
+by dependency; coherent scenarios that assert panel eligibility, document history,
+clipboard, reload, or coordinated save workflows belong to Editor. Every original
+assertion is retained, including multi-World and external-registry assertions.
+Temporary fixtures use distinct subdirectories of the invocation's unique Context
+root. The legacy aggregate and `--coordinated-document-checks` no longer execute
+any migrated tag checks; the latter retains Agent behaviour portability only.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Existing overlapping legacy CTest selections are unchanged.
 
@@ -79,16 +89,18 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/agent/HeightEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/IndividualProperties.cpp` | module-owned | `pf-smoke-agent` |
 | `AgentPathRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagAssignmentSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagClipboardSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagCoordinationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagDeleteSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagDocumentSaveSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagMobilityProfileSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagReconciliationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagRegistryChangeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagRegistrySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentTagReloadSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/tags/Assignment.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/AssignmentEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/ClipboardEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/CoordinationEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/DeleteEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/DocumentSaveEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/MobilityProfile.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/Reconciliation.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/RegistryChangeEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/Registry.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/RegistryEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
+| `smoke/tags/ReloadEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
 | `smoke/agent/WalkSpeed.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/WalkSpeedEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/world/BackgroundCascadeDelete.cpp` | module-owned | `pf-smoke-world` |
@@ -181,6 +193,14 @@ continue through `--serialization-checks` (also the existing legacy aggregate).
 Neither legacy entry point executes the migrated checks.
 
 ## Support and non-smoke code
+
+- `smoke/tags/Main.cpp` and `EditorMain.cpp`: explicit per-tier Agent tag registries.
+  `Checks.h` declares registration functions; `TemporaryDirectory.h` allocates
+  distinct Context-owned fixture directories; `EditorState.h` resets tag panel,
+  pending confirmation, World history, and transactional failure-injection state.
+- `smoke/tests/TagsContract.cmake`: exact listings, every single-check selection,
+  CLI misuse, external empty working directory, and eight concurrent invocations
+  of each tier; owned by `smoke-agent-tags-contract` (`harness;core;editor`).
 
 - `smoke/agent/Main.cpp` and `EditorMain.cpp`: explicit per-tier Agent registries.
   `Checks.h` declares registration functions; `EditorState.h` resets panel and

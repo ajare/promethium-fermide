@@ -112,6 +112,42 @@ add_test(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentContract.cmake")
 set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 60)
 
+pf_add_smoke_module(pf-smoke-agent-tags
+    NAME agent-tags
+    SOURCES
+        tags/Main.cpp
+        tags/Registry.cpp
+        tags/Assignment.cpp
+        tags/Reconciliation.cpp
+        tags/MobilityProfile.cpp
+    LIBRARIES prometheum-fermide-core
+    LABELS core
+    TIMEOUT 30
+)
+
+pf_add_smoke_module(pf-smoke-agent-tags-editor
+    NAME agent-tags-editor
+    SOURCES
+        tags/EditorMain.cpp
+        tags/RegistryEditor.cpp
+        tags/AssignmentEditor.cpp
+        tags/RegistryChangeEditor.cpp
+        tags/DocumentSaveEditor.cpp
+        tags/ReloadEditor.cpp
+        tags/DeleteEditor.cpp
+        tags/CoordinationEditor.cpp
+        tags/ClipboardEditor.cpp
+    LIBRARIES pf-agent-editing pf-headless-render-support
+    LABELS editor
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-agent-tags-contract COMMAND ${CMAKE_COMMAND}
+    "-DTAGS=$<TARGET_FILE:pf-smoke-agent-tags>"
+    "-DEDITOR=$<TARGET_FILE:pf-smoke-agent-tags-editor>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TagsContract.cmake")
+set_tests_properties(smoke-agent-tags-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 90)
+
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES

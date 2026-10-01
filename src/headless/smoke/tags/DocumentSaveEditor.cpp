@@ -1,9 +1,11 @@
+#include "Checks.h"
+#include "EditorState.h"
+#include "TemporaryDirectory.h"
 // Dependency-ordered saves and independent cross-directory Save As copies,
 // tickets #142 and #144.
 
 #include "TagsPanel.h"
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -16,33 +18,13 @@
 #include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
-void runAgentTagDocumentSaveSmokeChecks();
-
 namespace
 {
+	using tag_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		TemporaryDirectory()
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-document-save-" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code error;
-			std::filesystem::remove_all(path, error);
-		}
-	};
 
 	std::string readFile(std::filesystem::path const& path)
 	{
@@ -81,9 +63,10 @@ namespace
 		DocumentHistory worldHistory;
 		core::AgentTagId tag{};
 
-		explicit SavedFixture(std::string const& stem,
+		explicit SavedFixture(smoke::Context const& context, std::string const& stem,
 			std::string const& worldSuffix = ".world.yaml")
-			: worldPath(temporary.path / (stem + worldSuffix)),
+			: temporary(context),
+			worldPath(temporary.path / (stem + worldSuffix)),
 			registryPath(temporary.path / (stem + ".tags.yaml")),
 			world(std::make_shared<core::World>(stem, 8, 2))
 		{
@@ -129,9 +112,9 @@ namespace
 		}
 	};
 
-	void worldSaveWritesRegistryFirstAndCleansIndependently()
+	void worldSaveWritesRegistryFirstAndCleansIndependently(smoke::Context const& context)
 	{
-		SavedFixture fixture("single");
+		SavedFixture fixture(context, "single");
 		fixture.editModifier(1.1f);
 		std::string diagnostic;
 		require(saveWorldDocument(fixture.target(), &diagnostic), diagnostic);
@@ -150,9 +133,9 @@ namespace
 			"The saved modifier definition and dependent samples did not round-trip cleanly");
 	}
 
-	void registryFailureBlocksWorldAndPreservesDirtyState()
+	void registryFailureBlocksWorldAndPreservesDirtyState(smoke::Context const& context)
 	{
-		SavedFixture fixture("failure");
+		SavedFixture fixture(context, "failure");
 		auto const worldOnDisk = readFile(fixture.worldPath);
 		auto const registryOnDisk = readFile(fixture.registryPath);
 		fixture.editModifier(1.1f);
@@ -172,10 +155,10 @@ namespace
 			"A registry failure cleared a registry or World dirty marker");
 	}
 
-	void saveAllCompletesRegistryPhaseBeforeAnyWorld()
+	void saveAllCompletesRegistryPhaseBeforeAnyWorld(smoke::Context const& context)
 	{
-		SavedFixture first("first", ".world");
-		SavedFixture second("second");
+		SavedFixture first(context, "first", ".world");
+		SavedFixture second(context, "second");
 		first.editModifier(1.1f);
 		second.editModifier(1.2f);
 		auto const firstWorldOnDisk = readFile(first.worldPath);
@@ -204,9 +187,9 @@ namespace
 			"Save All wrote a World before every dirty registry had succeeded");
 	}
 
-	void sameDirectorySaveAsRetainsRegistryReference()
+	void sameDirectorySaveAsRetainsRegistryReference(smoke::Context const& context)
 	{
-		SavedFixture fixture("same-directory");
+		SavedFixture fixture(context, "same-directory");
 		auto const sourceRegistry = fixture.registry;
 		auto const sourceUuid = sourceRegistry->getUuid();
 		auto const sourceFilename = fixture.world->getAgentTagRegistryFilename();
@@ -227,9 +210,9 @@ namespace
 			"A same-directory Save As did not reopen against the shared source registry");
 	}
 
-	void crossDirectorySaveAsCopiesEquivalentIndependentRegistry()
+	void crossDirectorySaveAsCopiesEquivalentIndependentRegistry(smoke::Context const& context)
 	{
-		SavedFixture fixture("cross-directory");
+		SavedFixture fixture(context, "cross-directory");
 		std::string diagnostic;
 		auto const retired = commitAgentTagAdd(fixture.registry, "retired", diagnostic);
 		require(static_cast<bool>(retired), diagnostic);
@@ -300,9 +283,9 @@ namespace
 			"Editing the copied registry affected the original registry or World");
 	}
 
-	void binaryRoundTripAndBidirectionalConversionRetainRegistry()
+	void binaryRoundTripAndBidirectionalConversionRetainRegistry(smoke::Context const& context)
 	{
-		SavedFixture fixture("binary-source", ".world");
+		SavedFixture fixture(context, "binary-source", ".world");
 		auto const sourceRegistry = fixture.registry;
 		auto const sourceUuid = sourceRegistry->getUuid();
 		std::string diagnostic;
@@ -340,9 +323,9 @@ namespace
 			"YAML-to-binary conversion lost meaningful World or registry state");
 	}
 
-	void registryCollisionLeavesSourceAndDestinationUnchanged()
+	void registryCollisionLeavesSourceAndDestinationUnchanged(smoke::Context const& context)
 	{
-		SavedFixture fixture("collision");
+		SavedFixture fixture(context, "collision");
 		std::string diagnostic;
 		require(commitAgentTagRename(fixture.registry, fixture.tag,
 			"commuters", diagnostic), diagnostic);
@@ -391,9 +374,9 @@ namespace
 			"A registry collision changed source disk, document, reference, or dirty state");
 	}
 
-	void closePromptNamesOnlyTheDirtyDocumentKinds()
+	void closePromptNamesOnlyTheDirtyDocumentKinds(smoke::Context const& context)
 	{
-		SavedFixture fixture("prompt");
+		SavedFixture fixture(context, "prompt");
 		std::string diagnostic;
 		require(commitAgentTagRename(fixture.registry, fixture.tag,
 			"commuters", diagnostic), diagnostic);
@@ -414,14 +397,54 @@ namespace
 	}
 }
 
-void runAgentTagDocumentSaveSmokeChecks()
+void tag_smoke::registerDocumentSaveEditor(std::vector<smoke::Check>& checks)
 {
-	worldSaveWritesRegistryFirstAndCleansIndependently();
-	registryFailureBlocksWorldAndPreservesDirtyState();
-	saveAllCompletesRegistryPhaseBeforeAnyWorld();
-	sameDirectorySaveAsRetainsRegistryReference();
-	crossDirectorySaveAsCopiesEquivalentIndependentRegistry();
-	binaryRoundTripAndBidirectionalConversionRetainRegistry();
-	registryCollisionLeavesSourceAndDestinationUnchanged();
-	closePromptNamesOnlyTheDirtyDocumentKinds();
+	checks.push_back({ "worldSaveWritesRegistryFirstAndCleansIndependently",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			worldSaveWritesRegistryFirstAndCleansIndependently(context);
+		} });
+	checks.push_back({ "registryFailureBlocksWorldAndPreservesDirtyState",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			registryFailureBlocksWorldAndPreservesDirtyState(context);
+		} });
+	checks.push_back({ "saveAllCompletesRegistryPhaseBeforeAnyWorld",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			saveAllCompletesRegistryPhaseBeforeAnyWorld(context);
+		} });
+	checks.push_back({ "sameDirectorySaveAsRetainsRegistryReference",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			sameDirectorySaveAsRetainsRegistryReference(context);
+		} });
+	checks.push_back({ "crossDirectorySaveAsCopiesEquivalentIndependentRegistry",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			crossDirectorySaveAsCopiesEquivalentIndependentRegistry(context);
+		} });
+	checks.push_back({ "binaryRoundTripAndBidirectionalConversionRetainRegistry",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			binaryRoundTripAndBidirectionalConversionRetainRegistry(context);
+		} });
+	checks.push_back({ "registryCollisionLeavesSourceAndDestinationUnchanged",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			registryCollisionLeavesSourceAndDestinationUnchanged(context);
+		} });
+	checks.push_back({ "closePromptNamesOnlyTheDirtyDocumentKinds",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			closePromptNamesOnlyTheDirtyDocumentKinds(context);
+		} });
 }

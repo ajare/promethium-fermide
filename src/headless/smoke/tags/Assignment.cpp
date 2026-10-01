@@ -1,10 +1,7 @@
+#include "Checks.h"
+#include "TemporaryDirectory.h"
 // Property-free Agent tag assignments, ticket #131.
 
-#include "AgentTagAssignmentPanel.h"
-#include "AgentClipboard.h"
-#include "DocumentEdit.h"
-
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -17,9 +14,6 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
-
 #include "core/Agent.h"
 #include "core/AgentTagRegistry.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -28,27 +22,11 @@
 
 namespace
 {
+	using tag_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-		TemporaryDirectory()
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-tag-assignments-" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	std::string serializeWorld(core::World const& world)
 	{
@@ -148,29 +126,6 @@ namespace
 			"Assignment without a registry was not refused atomically");
 	}
 
-	void newAndPalettePlacedAgentsRemainUntagged()
-	{
-		Fixture fixture;
-		fixture.world->pauseSimulation();
-		std::string diagnostic;
-		require(fixture.world->assignAgentTag(fixture.alice, fixture.crew, &diagnostic),
-			"The fixture Agent could not be tagged");
-
-		auto const normal = fixture.world->createAgent("Bob", fixture.corridor, 0, 2.5f);
-		require(fixture.world->getAgentTags(normal).empty(),
-			"Normal Agent creation copied an existing Agent's tags");
-
-		gWorldDocumentHistory.clear();
-		core::AgentId placed{};
-		auto const sector = fixture.world->getSector(fixture.corridor);
-		require(commitAgentPlacement(fixture.world,
-			AgentClipboardPayload{ "Palette Agent", 0, true, std::nullopt },
-			sector, 0, 3.5f, placed, diagnostic),
-			"The palette-equivalent Agent placement failed: " + diagnostic);
-		require(placed && fixture.world->getAgentTags(placed).empty(),
-			"A palette-placed Agent did not start untagged");
-	}
-
 	void assignmentsSerializeInNumericOrderAndRejectMalformedInput()
 	{
 		Fixture fixture;
@@ -211,9 +166,9 @@ namespace
 			"Serialized assignments without a registry reference were accepted");
 	}
 
-	void saveReopenAndUnknownTagValidationUseStableIds()
+	void saveReopenAndUnknownTagValidationUseStableIds(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		TemporaryDirectory temporary{ context };
 		Fixture fixture;
 		fixture.world->pauseSimulation();
 		std::string diagnostic;
@@ -249,123 +204,23 @@ namespace
 		require(unknownRefused, "A serialized assignment to an unknown tag was accepted");
 	}
 
-	void editorCommitsOneWorldUndoEntryPerAcceptedEdit()
-	{
-		Fixture fixture;
-		fixture.world->pauseSimulation();
-		gWorldDocumentHistory.clear();
-		std::string diagnostic;
-
-		require(commitAgentTagAssignment(fixture.world, fixture.alice,
-			fixture.crew, true, diagnostic), "The editor seam refused the first assignment");
-		require(commitAgentTagAssignment(fixture.world, fixture.alice,
-			fixture.night, true, diagnostic), "The editor seam refused the second assignment");
-		require(gWorldDocumentHistory.undoCount() == 2,
-			"Two accepted assignment edits did not commit two World undo entries");
-		require(!commitAgentTagAssignment(fixture.world, fixture.alice,
-			fixture.crew, true, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == 2,
-			"A duplicate assignment committed a World undo entry");
-
-		auto current = captureDocumentSnapshot(fixture.world);
-		std::shared_ptr<core::World> restored;
-		auto restore = [&](DocumentSnapshot const& target)
-		{
-			restored = deserializeWorld(target.yaml);
-			restored->resolveAgentTagRegistry(fixture.registry);
-			return true;
-		};
-		require(gWorldDocumentHistory.undo(std::move(current), restore),
-			"Undo refused the accepted Agent tag assignment");
-		fixture.world = restored;
-		require(fixture.world->getAgentTags(fixture.alice)
-			== std::set<core::AgentTagId>{ fixture.crew },
-			"Undo did not remove exactly the last assigned tag");
-
-		current = captureDocumentSnapshot(fixture.world);
-		require(gWorldDocumentHistory.redo(std::move(current), restore),
-			"Redo refused the Agent tag assignment");
-		fixture.world = restored;
-		require(fixture.world->getAgentTags(fixture.alice)
-			== std::set<core::AgentTagId>{ fixture.crew, fixture.night },
-			"Redo did not restore the two-tag assignment set");
-
-		fixture.world->pauseSimulation();
-		auto const entriesBeforeRemoval = gWorldDocumentHistory.undoCount();
-		require(commitAgentTagAssignment(fixture.world, fixture.alice,
-			fixture.crew, false, diagnostic)
-			&& gWorldDocumentHistory.undoCount() == entriesBeforeRemoval + 1
-			&& fixture.world->getAgentTags(fixture.alice)
-				== std::set<core::AgentTagId>{ fixture.night },
-			"Removing an assigned tag did not commit exactly one World undo entry");
-	}
-
-	void captureClipboardText(void* userData, char const* text)
-	{
-		if (auto* writes = static_cast<std::vector<std::string>*>(userData))
-			writes->emplace_back(text ? text : "");
-	}
-
-	char const* readCapturedClipboardText(void*) { return nullptr; }
-
-	void selectionPanelRendersAssignedChipsWithoutLeakingDisabledState()
-	{
-		Fixture fixture;
-		fixture.world->pauseSimulation();
-		std::string diagnostic;
-		require(fixture.world->assignAgentTag(fixture.alice, fixture.crew, &diagnostic),
-			"The checklist fixture could not assign its removable tag");
-
-		ImGui::CreateContext();
-		auto& io = ImGui::GetIO();
-		io.DisplaySize = ImVec2(800.0f, 600.0f);
-		io.Fonts->AddFontDefault();
-		io.Fonts->Build();
-		std::vector<std::string> clipboardWrites;
-		io.SetClipboardTextFn = &captureClipboardText;
-		io.GetClipboardTextFn = &readCapturedClipboardText;
-		io.ClipboardUserData = &clipboardWrites;
-
-		for (bool paused : { true, false })
-		{
-			if (paused) fixture.world->pauseSimulation();
-			else require(fixture.world->resumeSimulation(),
-				"The checklist fixture could not resume simulation");
-
-			clipboardWrites.clear();
-			ImGui::NewFrame();
-			ImGui::Begin("Selection");
-			ImGui::LogToClipboard();
-			auto const disabledDepth = GImGui->DisabledStackSize;
-			renderAgentTagAssignmentChecklist(fixture.world, fixture.alice);
-			require(GImGui->DisabledStackSize == disabledDepth,
-				"The Agent tag checklist leaked a disabled scope");
-			ImGui::End();
-			ImGui::Render();
-
-			std::string visible;
-			for (auto const& text : clipboardWrites) visible += text;
-			require(visible.find("Agent tags") != std::string::npos
-				&& visible.find("#crew") != std::string::npos
-				&& visible.find("Add tag...") != std::string::npos,
-				"The Selection panel did not present the assigned tag chip and add-tag combo");
-			require(visible.find("#night-shift") == std::string::npos,
-				"The Selection panel listed an unassigned tag outside the add-tag combo");
-			require(fixture.world->getAgentTags(fixture.alice)
-				== std::set<core::AgentTagId>{ fixture.crew },
-				"Merely rendering the tag chips changed its assigned tag");
-		}
-		ImGui::DestroyContext();
-	}
 }
 
-void runAgentTagAssignmentSmokeChecks()
+void tag_smoke::registerAssignment(std::vector<smoke::Check>& checks)
 {
-	assignmentsAreUniquePausedOnlyAndTransactional();
-	newAndPalettePlacedAgentsRemainUntagged();
-	assignmentsSerializeInNumericOrderAndRejectMalformedInput();
-	saveReopenAndUnknownTagValidationUseStableIds();
-	editorCommitsOneWorldUndoEntryPerAcceptedEdit();
-	selectionPanelRendersAssignedChipsWithoutLeakingDisabledState();
-	gWorldDocumentHistory.clear();
+	checks.push_back({ "assignmentsAreUniquePausedOnlyAndTransactional",
+		[](smoke::Context const&)
+		{
+			assignmentsAreUniquePausedOnlyAndTransactional();
+		} });
+	checks.push_back({ "assignmentsSerializeInNumericOrderAndRejectMalformedInput",
+		[](smoke::Context const&)
+		{
+			assignmentsSerializeInNumericOrderAndRejectMalformedInput();
+		} });
+	checks.push_back({ "saveReopenAndUnknownTagValidationUseStableIds",
+		[](smoke::Context const& context)
+		{
+			saveReopenAndUnknownTagValidationUseStableIds(context);
+		} });
 }

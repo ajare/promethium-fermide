@@ -1,8 +1,10 @@
+#include "Checks.h"
+#include "EditorState.h"
+#include "TemporaryDirectory.h"
 // Transactional external Agent tag registry reload and lifecycle checks, #143.
 
 #include "TagsPanel.h"
 
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -18,34 +20,13 @@
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
 
-void runAgentTagReloadSmokeChecks();
-
 namespace
 {
+	using tag_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		explicit TemporaryDirectory(std::string const& purpose)
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-tag-reload-" + purpose + "-"
-					+ std::to_string(std::chrono::steady_clock::now()
-						.time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	std::string serializeRegistry(core::AgentTagRegistry const& registry)
 	{
@@ -94,8 +75,8 @@ namespace
 		core::AgentId firstAgent{};
 		core::AgentId secondAgent{};
 
-		explicit SharedFixture(std::string const& purpose)
-			: temporary(purpose)
+		explicit SharedFixture(smoke::Context const& context, std::string const& purpose)
+			: temporary(context, purpose)
 			, firstPath(temporary.path / "first.world.yaml")
 			, secondPath(temporary.path / "second.world.yaml")
 			, registryPath(temporary.path / "first.tags.yaml")
@@ -144,9 +125,9 @@ namespace
 		}
 	};
 
-	void externalSaveConflictAndDirtyReloadAreRefused()
+	void externalSaveConflictAndDirtyReloadAreRefused(smoke::Context const& context)
 	{
-		SharedFixture fixture("save-conflict");
+		SharedFixture fixture(context, "save-conflict");
 		fixture.writeExternalRange(1.2f);
 		std::string diagnostic;
 		require(commitAgentTagRename(fixture.registry, fixture.tag,
@@ -171,9 +152,9 @@ namespace
 			"A refused save or dirty reload changed state or history");
 	}
 
-	void successfulReloadReconcilesAllWorldsAndClearsRegistryHistory()
+	void successfulReloadReconcilesAllWorldsAndClearsRegistryHistory(smoke::Context const& context)
 	{
-		SharedFixture fixture("success");
+		SharedFixture fixture(context, "success");
 		auto& registryHistory = agentTagRegistryDocumentHistory(fixture.registry);
 		require(registryHistory.undoCount() > 0 && !registryHistory.isModified(),
 			"The successful reload fixture needs saved but non-empty history");
@@ -209,10 +190,10 @@ namespace
 		gWorldDocumentHistory.clear();
 	}
 
-	void reloadFailuresAreAtomic()
+	void reloadFailuresAreAtomic(smoke::Context const& context)
 	{
 		{
-			SharedFixture fixture("running");
+			SharedFixture fixture(context, "running");
 			fixture.writeExternalRange(1.1f);
 			require(fixture.second->resumeSimulation(),
 				"Could not run a dependent World for the refusal check");
@@ -234,7 +215,7 @@ namespace
 				"A pause refusal changed registry, World, or history state");
 		}
 		{
-			SharedFixture fixture("malformed");
+			SharedFixture fixture(context, "malformed");
 			auto const registryBefore = serializeRegistry(*fixture.registry);
 			auto const firstBefore = serializeWorld(*fixture.first);
 			auto const secondBefore = serializeWorld(*fixture.second);
@@ -257,7 +238,7 @@ namespace
 				"Malformed reload changed registry, Worlds, dirtiness, or history");
 		}
 		{
-			SharedFixture fixture("invalid-agent");
+			SharedFixture fixture(context, "invalid-agent");
 			auto external = core::AgentTagRegistry::loadFrom(
 				fixture.registryPath.string());
 			std::string diagnostic;
@@ -283,9 +264,9 @@ namespace
 		}
 	}
 
-	void unreferencedRegistryLifetimeFollowsDirtyState()
+	void unreferencedRegistryLifetimeFollowsDirtyState(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary("unload");
+		TemporaryDirectory temporary(context, "unload");
 		auto const worldPath = temporary.path / "world.world.yaml";
 		auto const registryPath = temporary.path / "world.tags.yaml";
 		auto world = std::make_shared<core::World>("Lifecycle", 6, 2);
@@ -335,10 +316,30 @@ namespace
 	}
 }
 
-void runAgentTagReloadSmokeChecks()
+void tag_smoke::registerReloadEditor(std::vector<smoke::Check>& checks)
 {
-	externalSaveConflictAndDirtyReloadAreRefused();
-	successfulReloadReconcilesAllWorldsAndClearsRegistryHistory();
-	reloadFailuresAreAtomic();
-	unreferencedRegistryLifetimeFollowsDirtyState();
+	checks.push_back({ "externalSaveConflictAndDirtyReloadAreRefused",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			externalSaveConflictAndDirtyReloadAreRefused(context);
+		} });
+	checks.push_back({ "successfulReloadReconcilesAllWorldsAndClearsRegistryHistory",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			successfulReloadReconcilesAllWorldsAndClearsRegistryHistory(context);
+		} });
+	checks.push_back({ "reloadFailuresAreAtomic",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			reloadFailuresAreAtomic(context);
+		} });
+	checks.push_back({ "unreferencedRegistryLifetimeFollowsDirtyState",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			unreferencedRegistryLifetimeFollowsDirtyState(context);
+		} });
 }

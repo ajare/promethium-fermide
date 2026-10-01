@@ -357,22 +357,12 @@ add_executable(prometheum-fermide-headless
     src/headless/DoorPanelScopeSmokeChecks.cpp
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/DocumentHistorySmokeChecks.cpp
-    src/headless/AgentTagRegistrySmokeChecks.cpp
-    src/headless/AgentTagMobilityProfileSmokeChecks.cpp
     src/headless/MobilityProfileRoutingSmokeChecks.cpp
     src/headless/RestoredPathMobilitySmokeChecks.cpp
     src/headless/InteractionMobilitySmokeChecks.cpp
     src/headless/InteractionPointGeometrySmokeChecks.cpp
     src/headless/DoorPreflightSmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
-    src/headless/AgentTagRegistryChangeSmokeChecks.cpp
-    src/headless/AgentTagDocumentSaveSmokeChecks.cpp
-    src/headless/AgentTagReloadSmokeChecks.cpp
-    src/headless/AgentTagAssignmentSmokeChecks.cpp
-    src/headless/AgentTagDeleteSmokeChecks.cpp
-    src/headless/AgentTagCoordinationSmokeChecks.cpp
-    src/headless/AgentTagReconciliationSmokeChecks.cpp
-    src/headless/AgentTagClipboardSmokeChecks.cpp
     src/headless/EscalatorWalkingSmokeChecks.cpp
     src/headless/RoutePlanningTimePropertySmokeChecks.cpp
     src/headless/PermissionAdherenceSmokeChecks.cpp

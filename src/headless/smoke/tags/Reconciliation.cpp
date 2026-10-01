@@ -1,6 +1,7 @@
+#include "Checks.h"
+#include "TemporaryDirectory.h"
 // Closed-World Agent tag registry reconciliation, ticket #138.
 
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -20,34 +21,13 @@
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
 
-void runAgentTagReconciliationSmokeChecks();
-
 namespace
 {
+	using tag_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		explicit TemporaryDirectory(std::string const& purpose)
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-tag-reconciliation-" + purpose + "-"
-					+ std::to_string(std::chrono::steady_clock::now()
-						.time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	std::string serializeWorld(core::World const& world)
 	{
@@ -83,9 +63,9 @@ namespace
 		if (!output) throw std::runtime_error("Could not write reconciliation fixture");
 	}
 
-	void validClosedWorldEvolutionIsReconciled()
+	void validClosedWorldEvolutionIsReconciled(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary("valid");
+		TemporaryDirectory temporary(context, "valid");
 		auto const worldPath = temporary.path / "station.world.yaml";
 		auto const evolverPath = temporary.path / "evolver.world.yaml";
 		auto source = std::make_shared<core::World>("Closed station", 10, 3);
@@ -216,8 +196,8 @@ namespace
 		core::AgentTagId primary{};
 		core::AgentTagId secondary{};
 
-		explicit RefusalFixture(std::string const& purpose)
-			: temporary(purpose)
+		explicit RefusalFixture(smoke::Context const& context, std::string const& purpose)
+			: temporary(context, purpose)
 			, worldPath(temporary.path / "closed.world.yaml")
 			, registryPath(temporary.path / "closed.tags.yaml")
 		{
@@ -299,17 +279,17 @@ namespace
 		}
 	};
 
-	void unknownAndDeletedTagsAreRefused()
+	void unknownAndDeletedTagsAreRefused(smoke::Context const& context)
 	{
 		{
-			RefusalFixture fixture("unknown");
+			RefusalFixture fixture(context, "unknown");
 			auto document = fixture.worldYaml();
 			document["agents"][0]["agent"]["tags"].push_back(9999);
 			fixture.writeWorld(document);
 			fixture.expectRefusal({ "Alice", "9999" });
 		}
 		{
-			RefusalFixture fixture("deleted");
+			RefusalFixture fixture(context, "deleted");
 			std::string diagnostic;
 			require(fixture.registry->deleteAgentTag(fixture.primary, &diagnostic), diagnostic);
 			fixture.registry->saveTo(fixture.registryPath.string());
@@ -317,10 +297,10 @@ namespace
 		}
 	}
 
-	void inheritedConflictAndWrongSourceAreRefused()
+	void inheritedConflictAndWrongSourceAreRefused(smoke::Context const& context)
 	{
 		{
-			RefusalFixture fixture("conflict");
+			RefusalFixture fixture(context, "conflict");
 			std::string diagnostic;
 			require(fixture.registry->addAgentTagWalkSpeedModifier(
 				fixture.secondary, &diagnostic), diagnostic);
@@ -328,7 +308,7 @@ namespace
 			fixture.expectRefusal({ "Alice", "Walk speed modifier", "#primary", "#secondary" });
 		}
 		{
-			RefusalFixture fixture("wrong-source");
+			RefusalFixture fixture(context, "wrong-source");
 			auto document = fixture.worldYaml();
 			document["agents"][0]["agent"]["propertySamples"][0]["sourceTag"]
 				= fixture.secondary.value;
@@ -337,10 +317,10 @@ namespace
 		}
 	}
 
-	void invalidCurrentRevisionValuesAreRefused()
+	void invalidCurrentRevisionValuesAreRefused(smoke::Context const& context)
 	{
 		{
-			RefusalFixture fixture("non-finite");
+			RefusalFixture fixture(context, "non-finite");
 			auto document = fixture.worldYaml();
 			document["agents"][0]["agent"]["propertySamples"][0]["value"]
 				= std::numeric_limits<float>::quiet_NaN();
@@ -348,7 +328,7 @@ namespace
 			fixture.expectRefusal({ "Alice", "non-finite", "Walk speed modifier", "#primary" });
 		}
 		{
-			RefusalFixture fixture("out-of-range");
+			RefusalFixture fixture(context, "out-of-range");
 			auto document = fixture.worldYaml();
 			document["agents"][0]["agent"]["propertySamples"][0]["value"] = 1.2f;
 			fixture.writeWorld(document);
@@ -358,10 +338,26 @@ namespace
 	}
 }
 
-void runAgentTagReconciliationSmokeChecks()
+void tag_smoke::registerReconciliation(std::vector<smoke::Check>& checks)
 {
-	validClosedWorldEvolutionIsReconciled();
-	unknownAndDeletedTagsAreRefused();
-	inheritedConflictAndWrongSourceAreRefused();
-	invalidCurrentRevisionValuesAreRefused();
+	checks.push_back({ "validClosedWorldEvolutionIsReconciled",
+		[](smoke::Context const& context)
+		{
+			validClosedWorldEvolutionIsReconciled(context);
+		} });
+	checks.push_back({ "unknownAndDeletedTagsAreRefused",
+		[](smoke::Context const& context)
+		{
+			unknownAndDeletedTagsAreRefused(context);
+		} });
+	checks.push_back({ "inheritedConflictAndWrongSourceAreRefused",
+		[](smoke::Context const& context)
+		{
+			inheritedConflictAndWrongSourceAreRefused(context);
+		} });
+	checks.push_back({ "invalidCurrentRevisionValuesAreRefused",
+		[](smoke::Context const& context)
+		{
+			invalidCurrentRevisionValuesAreRefused(context);
+		} });
 }

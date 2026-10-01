@@ -69,8 +69,6 @@ void runBackgroundSelectionPanelSmokeChecks();
 void runDoorPanelScopeSmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
 void runDocumentHistorySmokeChecks();
-void runAgentTagRegistrySmokeChecks();
-void runAgentTagMobilityProfileSmokeChecks();
 void runMobilityProfileRoutingSmokeChecks();
 void runRestoredPathMobilitySmokeChecks();
 void runInteractionMobilitySmokeChecks();
@@ -85,14 +83,6 @@ void runAgentBehaviourDeleteSmokeChecks();
 void runAgentBehaviourSchemaReconciliationSmokeChecks();
 void runAgentBehaviourRuntimeSmokeChecks();
 void runAgentBehaviourWorkflowSmokeChecks();
-void runAgentTagRegistryChangeSmokeChecks();
-void runAgentTagDocumentSaveSmokeChecks();
-void runAgentTagReloadSmokeChecks();
-void runAgentTagAssignmentSmokeChecks();
-void runAgentTagDeleteSmokeChecks();
-void runAgentTagCoordinationSmokeChecks();
-void runAgentTagReconciliationSmokeChecks();
-void runAgentTagClipboardSmokeChecks();
 void runEscalatorWalkingSmokeChecks();
 void runRoutePlanningTimePropertySmokeChecks();
 void runAgentPathRenderSmokeChecks();
@@ -6262,7 +6252,6 @@ int main(int argc, char** argv)
 		if (argc > 1 && std::string(argv[1]) == "--coordinated-document-checks")
 		{
 			runAgentBehaviourPortabilitySmokeChecks();
-			runAgentTagDocumentSaveSmokeChecks();
 			return 0;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
@@ -6308,8 +6297,6 @@ int main(int argc, char** argv)
 		runDoorPanelScopeSmokeChecks();
 		runDoorTwoSidedButtonSmokeChecks();
 		runDocumentHistorySmokeChecks();
-		runAgentTagRegistrySmokeChecks();
-		runAgentTagMobilityProfileSmokeChecks();
 		runMobilityProfileRoutingSmokeChecks();
 		runRestoredPathMobilitySmokeChecks();
 		runInteractionMobilitySmokeChecks();
@@ -6324,14 +6311,6 @@ int main(int argc, char** argv)
 		runAgentBehaviourSchemaReconciliationSmokeChecks();
 		runAgentBehaviourRuntimeSmokeChecks();
 		runAgentBehaviourWorkflowSmokeChecks();
-		runAgentTagRegistryChangeSmokeChecks();
-		runAgentTagDocumentSaveSmokeChecks();
-		runAgentTagReloadSmokeChecks();
-		runAgentTagAssignmentSmokeChecks();
-		runAgentTagDeleteSmokeChecks();
-		runAgentTagCoordinationSmokeChecks();
-		runAgentTagReconciliationSmokeChecks();
-		runAgentTagClipboardSmokeChecks();
 		runEscalatorWalkingSmokeChecks();
 		runRoutePlanningTimePropertySmokeChecks();
 		runAgentPathRenderSmokeChecks();

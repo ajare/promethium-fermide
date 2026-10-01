@@ -1,10 +1,12 @@
+#include "Checks.h"
+#include "EditorState.h"
+#include "TemporaryDirectory.h"
 // Safe cross-World Agent tag deletion, ticket #141. The checks exercise
 // confirmation, property-sample cleanup, exact coordinated undo/redo, atomic
 // refusal, and the closed-World stale-ID failure through public workflows.
 
 #include "TagsPanel.h"
 
-#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -18,10 +20,9 @@
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
 
-void runAgentTagDeleteSmokeChecks();
-
 namespace
 {
+	using tag_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
@@ -46,26 +47,6 @@ namespace
 		writer->serialize();
 		return writer->getSerializedString();
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		TemporaryDirectory()
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-tag-delete-"
-					+ std::to_string(std::chrono::steady_clock::now()
-						.time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	struct Fixture
 	{
@@ -317,9 +298,9 @@ namespace
 			"A refused shared deletion partially mutated documents, dirty state, or history");
 	}
 
-	void closedWorldRetainingDeletedIdIsRefused()
+	void closedWorldRetainingDeletedIdIsRefused(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		TemporaryDirectory temporary{ context };
 		auto const closedPath = temporary.path / "closed.world.yaml";
 		auto const editorPath = temporary.path / "editor.world.yaml";
 		auto const registryPath = temporary.path / "closed.tags.yaml";
@@ -381,11 +362,36 @@ namespace
 	}
 }
 
-void runAgentTagDeleteSmokeChecks()
+void tag_smoke::registerDeleteEditor(std::vector<smoke::Check>& checks)
 {
-	filteringAndAggregateLoadedUsage();
-	unusedDeletionIsImmediateAndUndoable();
-	usedDeletionConfirmsCascadesAndRestoresAtomically();
-	runningDependentWorldRefusesWithoutPartialMutation();
-	closedWorldRetainingDeletedIdIsRefused();
+	checks.push_back({ "filteringAndAggregateLoadedUsage",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			filteringAndAggregateLoadedUsage();
+		} });
+	checks.push_back({ "unusedDeletionIsImmediateAndUndoable",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			unusedDeletionIsImmediateAndUndoable();
+		} });
+	checks.push_back({ "usedDeletionConfirmsCascadesAndRestoresAtomically",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			usedDeletionConfirmsCascadesAndRestoresAtomically();
+		} });
+	checks.push_back({ "runningDependentWorldRefusesWithoutPartialMutation",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			runningDependentWorldRefusesWithoutPartialMutation();
+		} });
+	checks.push_back({ "closedWorldRetainingDeletedIdIsRefused",
+		[](smoke::Context const& context)
+		{
+			EditorState state;
+			closedWorldRetainingDeletedIdIsRefused(context);
+		} });
 }

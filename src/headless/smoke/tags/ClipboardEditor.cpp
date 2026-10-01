@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "EditorState.h"
 // Same-registry Agent tag copy, cut and paste checks for ticket #139.
 // Tagged payloads carry stable registry identity, complete assignments and exact
 // modifier sample provenance. Untagged payloads remain registry-independent.
@@ -18,8 +20,6 @@
 #include "core/Sector.h"
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
-
-void runAgentTagClipboardSmokeChecks();
 
 namespace
 {
@@ -366,12 +366,42 @@ namespace
 	}
 }
 
-void runAgentTagClipboardSmokeChecks()
+void tag_smoke::registerClipboardEditor(std::vector<smoke::Check>& checks)
 {
-	payloadCarriesRegistryAssignmentsAndExactSamples();
-	sameRegistryPasteRestoresExactStateAsOneEdit();
-	differentAndAbsentRegistryPasteAreRefusedAtomically();
-	untaggedAgentsRemainPortableAcrossRegistryBoundaries();
-	cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments();
-	incompleteTaggedPayloadsAreNotSilentlyDowngraded();
+	checks.push_back({ "payloadCarriesRegistryAssignmentsAndExactSamples",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			payloadCarriesRegistryAssignmentsAndExactSamples();
+		} });
+	checks.push_back({ "sameRegistryPasteRestoresExactStateAsOneEdit",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			sameRegistryPasteRestoresExactStateAsOneEdit();
+		} });
+	checks.push_back({ "differentAndAbsentRegistryPasteAreRefusedAtomically",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			differentAndAbsentRegistryPasteAreRefusedAtomically();
+		} });
+	checks.push_back({ "untaggedAgentsRemainPortableAcrossRegistryBoundaries",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			untaggedAgentsRemainPortableAcrossRegistryBoundaries();
+		} });
+	checks.push_back({ "cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			cuttingATaggedAgentLeavesSharedTagsAndOtherAssignments();
+		} });
+	checks.push_back({ "incompleteTaggedPayloadsAreNotSilentlyDowngraded",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			incompleteTaggedPayloadsAreNotSilentlyDowngraded();
+		} });
 }

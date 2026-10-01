@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "EditorState.h"
 // Coordinated shared-registry definition edits, ticket #137. This is the
 // dedicated two-World headless scenario: one edit updates both dependent
 // Worlds, and registry undo/redo restores the complete shared transaction.
@@ -15,8 +17,6 @@
 #include "core/World.h"
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
-
-void runAgentTagCoordinationSmokeChecks();
 
 namespace
 {
@@ -266,10 +266,30 @@ namespace
 	}
 }
 
-void runAgentTagCoordinationSmokeChecks()
+void tag_smoke::registerCoordinationEditor(std::vector<smoke::Check>& checks)
 {
-	oneEditUpdatesAndRestoresTwoWorlds();
-	runningDependencyDisablesEveryDefinitionEdit();
-	crossWorldConflictIsRejectedBeforeMutation();
-	closingParticipantInvalidatesIncompleteHistory();
+	checks.push_back({ "oneEditUpdatesAndRestoresTwoWorlds",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			oneEditUpdatesAndRestoresTwoWorlds();
+		} });
+	checks.push_back({ "runningDependencyDisablesEveryDefinitionEdit",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			runningDependencyDisablesEveryDefinitionEdit();
+		} });
+	checks.push_back({ "crossWorldConflictIsRejectedBeforeMutation",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			crossWorldConflictIsRejectedBeforeMutation();
+		} });
+	checks.push_back({ "closingParticipantInvalidatesIncompleteHistory",
+		[](smoke::Context const&)
+		{
+			EditorState state;
+			closingParticipantInvalidatesIncompleteHistory();
+		} });
 }
