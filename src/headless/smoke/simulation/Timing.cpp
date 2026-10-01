@@ -23,6 +23,8 @@
 //   * zero duration and equal minimum/maximum windows stay valid
 //   * an enormous finite duration saturates instead of converting out of range
 
+#include "Checks.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <functional>
@@ -44,8 +46,6 @@
 #include "core/Simulation.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
-
-void runNonFiniteTimingSmokeChecks();
 
 namespace
 {
@@ -633,15 +633,24 @@ namespace
 	}
 }
 
-void runNonFiniteTimingSmokeChecks()
+void registerTiming(std::vector<smoke::Check>& checks)
 {
-	nonFiniteDoorHoldOpenIsRefused();
-	nonFiniteBulkheadHoldOpenIsRefused();
-	nonFiniteLiftTimingIsRefused();
-	nonFiniteShuttleTimingIsRefused();
-	nonFinitePlatformLiftStopDurationIsRefused();
-	nonFiniteCoordinationResourceTimingsAreRefused();
-	replayedNonFiniteTimingsAreRefused();
-	zeroAndEqualTimingsRemainValid();
-	enormousFiniteTimingSaturates();
+	checks.push_back({ "nonFiniteDoorHoldOpenIsRefused", [](smoke::Context const&)
+		{ nonFiniteDoorHoldOpenIsRefused(); } });
+	checks.push_back({ "nonFiniteBulkheadHoldOpenIsRefused", [](smoke::Context const&)
+		{ nonFiniteBulkheadHoldOpenIsRefused(); } });
+	checks.push_back({ "nonFiniteLiftTimingIsRefused", [](smoke::Context const&)
+		{ nonFiniteLiftTimingIsRefused(); } });
+	checks.push_back({ "nonFiniteShuttleTimingIsRefused", [](smoke::Context const&)
+		{ nonFiniteShuttleTimingIsRefused(); } });
+	checks.push_back({ "nonFinitePlatformLiftStopDurationIsRefused", [](smoke::Context const&)
+		{ nonFinitePlatformLiftStopDurationIsRefused(); } });
+	checks.push_back({ "nonFiniteCoordinationResourceTimingsAreRefused", [](smoke::Context const&)
+		{ nonFiniteCoordinationResourceTimingsAreRefused(); } });
+	checks.push_back({ "replayedNonFiniteTimingsAreRefused", [](smoke::Context const&)
+		{ replayedNonFiniteTimingsAreRefused(); } });
+	checks.push_back({ "zeroAndEqualTimingsRemainValid", [](smoke::Context const&)
+		{ zeroAndEqualTimingsRemainValid(); } });
+	checks.push_back({ "enormousFiniteTimingSaturates", [](smoke::Context const&)
+		{ enormousFiniteTimingSaturates(); } });
 }

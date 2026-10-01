@@ -61,6 +61,9 @@ pf_add_smoke_module(pf-smoke-simulation
     NAME simulation
     SOURCES
         simulation/Main.cpp simulation/Observation.cpp
+        simulation/Pause.cpp
+        simulation/Timing.cpp
+        simulation/Teardown.cpp
         simulation/Ticking.cpp
         simulation/Traversal.cpp
         simulation/Interactions.cpp
@@ -68,15 +71,15 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
-    LIBRARIES prometheum-fermide-core
+    LIBRARIES prometheum-fermide-core pf-pause-position-support
     LABELS core
-    TIMEOUT 30
+    TIMEOUT 60
 )
 
 add_test(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
     "-DSIMULATION=$<TARGET_FILE:pf-smoke-simulation>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SimulationContract.cmake")
-set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 120)
+set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 240)
 
 pf_add_smoke_module(pf-smoke-agent
     NAME agent

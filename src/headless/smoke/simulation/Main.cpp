@@ -12,6 +12,9 @@ namespace
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks = { { "observation", observation } };
+	registerPause(checks);
+	registerTiming(checks);
+	registerTeardown(checks);
 	registerTicking(checks);
 	registerTraversal(checks);
 	registerInteractions(checks);

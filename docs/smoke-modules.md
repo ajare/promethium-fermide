@@ -9,7 +9,8 @@ Access permissions and Interaction points (#290), Route planning and movement (#
 Transit/transport runtime checks (#292), and pathfinding scale and perceived
 route costs (#293), the complete Render module (#294), and the cross-domain
 Editor module (#295), complete World-document Persistence (#296–#297), and
-remaining central inline scenarios (#298).
+remaining central inline scenarios (#298), and the complete Simulation lifecycle
+and robustness coverage (#299).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
@@ -60,8 +61,10 @@ invocation atomically creates its own randomly named directory beneath the OS
 temporary directory, even when concurrent processes run the same check. Cleanup
 is best-effort on scope exit, on both pass and failure; crashes/forced termination
 can leave directories behind. Failed artifacts are not intentionally retained.
-Simulation Observation builds its Worlds in memory and requires no disk fixtures.
-The harness probe exercises fixture lookup and temporary file cleanup.
+Simulation Observation builds its Worlds in memory. Pause-position checks resolve
+both checked-in stair fixtures through `Context::fixture()`; all other Simulation
+checks build their Worlds in memory. The harness probe exercises fixture lookup and
+temporary file cleanup.
 
 `pf_add_smoke_module` takes explicit `SOURCES`, `LIBRARIES`, `NAME`, `LABELS`, and
 `TIMEOUT`. It rejects source ownership shared with another module or the legacy
@@ -70,17 +73,45 @@ analysis warnings, links the narrow support, and registers one direct CTest entr
 All new smoke module/harness/test targets exist only with `BUILD_TESTING=ON`; they are
 in the default build. Existing standalone and legacy target policies are unchanged.
 
-Simulation links only the production core, its YAML/Lua dependencies, and smoke
-support. Its check translation units now cover Observation, Ticking, Traversal,
-Interactions, Doors, DoorQueues, CrossingBands and Scale; building
-`pf-smoke-simulation` never builds the legacy checks or synthetic harness probe.
-CTest `smoke-simulation` has `smoke;core` labels, is parallel-safe, and has a
-30-second timeout (observed Release runtime about 0.3 seconds under load). The synthetic
+Simulation links only the production core, its YAML/Lua dependencies, smoke
+support, and the core-only pause-position assertion support shared with the retained
+manual reproduction command. Its check translation units cover Observation, Pause,
+Timing, Teardown, Ticking, Traversal, Interactions, Doors, DoorQueues, CrossingBands
+and Scale; building `pf-smoke-simulation` never builds the legacy checks or synthetic
+harness probe. CTest `smoke-simulation` has `smoke;core` labels, is parallel-safe,
+and has a 60-second timeout. The synthetic
 harness contract test has `harness;core` labels so it does not duplicate domain
 smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Complete Simulation lifecycle module (#299)
+
+```sh
+cmake --build build-linux --target pf-smoke-simulation --parallel
+build-linux/bin/x64/Release/pf-smoke-simulation --list
+build-linux/bin/x64/Release/pf-smoke-simulation --check pauseOnStaircasePreservesPosition
+ctest --test-dir build-linux -R '^smoke-simulation(-contract)?$' --output-on-failure -j 2
+```
+
+Simulation has 55 stable, individually selectable registrations. The 18 additions
+cover five pause-position cases, nine timing validation/boundary groups, and four
+World teardown/topology-replacement lifetime groups. The existing `observation`
+registration and all fixed-tick, phase, traversal, Door, queue, crossing-band,
+scale, and repeated-run determinism assertions remain unchanged.
+
+Pause-position assertions compile once in `pf-pause-position-support`: Simulation
+owns their only smoke registration, while the legacy `--pause-position-repro`
+manual diagnostic continues to reuse them until dedicated tool ticket #304. The
+non-finite timing and teardown sources, aggregate calls, and direct legacy source
+ownership are removed. The retired `--world-teardown-smoke` selection returns 2
+with migration guidance rather than executing duplicate coverage.
+
+`smoke-simulation-contract` checks the exact 55-name inventory, every individual
+selector, misuse, empty external working-directory execution, and eight concurrent
+full invocations. The module remains core-only: no Editor, renderer, ImGui, HTTP,
+platform backend, window, dialog, or interactive input dependency is linked.
 
 ## Central scenario decomposition (#298)
 

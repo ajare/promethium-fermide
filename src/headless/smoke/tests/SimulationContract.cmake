@@ -26,6 +26,24 @@ endfunction()
 
 set(core_names
     observation
+    clearPausedPathDoesNotResume
+    pauseTraversingEdgePreservesPosition
+    pauseMovingToVertexPreservesPosition
+    pauseOnStaircasePreservesPosition
+    pauseOnStairwellPreservesPosition
+    nonFiniteDoorHoldOpenIsRefused
+    nonFiniteBulkheadHoldOpenIsRefused
+    nonFiniteLiftTimingIsRefused
+    nonFiniteShuttleTimingIsRefused
+    nonFinitePlatformLiftStopDurationIsRefused
+    nonFiniteCoordinationResourceTimingsAreRefused
+    replayedNonFiniteTimingsAreRefused
+    zeroAndEqualTimingsRemainValid
+    enormousFiniteTimingSaturates
+    builtWorldReleasesGraphAndSectorOwnership
+    unbuiltWorldReleasesSectorOwnership
+    doorThresholdDoesNotRetainSectors
+    topologyRebuildReleasesPreviousGraph
     accumulatedRenderTimeAdvancesWholeTicksOnly
     runOrdinaryPathScenario
     ordinaryTraversalCommitsOnlyAtDestination

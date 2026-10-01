@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after central scenario decomposition #298 (parent #278). Each
+Snapshot after complete Simulation lifecycle migration #299 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -265,12 +265,12 @@ source lists and dependency tiers are unchanged.
 | `MetricsChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/routing/Mobility.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/Movement.cpp` | module-owned | `pf-smoke-routing` |
-| `NonFiniteTimingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/simulation/Timing.cpp` | module-owned | `pf-smoke-simulation` |
 | `OccupantPackingChecks.cpp` | module-owned (retained standalone) | `pf-occupant-packing-checks` |
 | `smoke/transports/Deletion.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/editor/Palette.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/routing/Workspace.cpp` | module-owned | `pf-smoke-routing` |
-| `PausePositionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/simulation/Pause.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/permissions/Adherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/AdherenceEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/render/DrawOrder.cpp` | module-owned | `pf-smoke-render` |
@@ -308,7 +308,7 @@ source lists and dependency tiers are unchanged.
 | `smoke/world/WindowMultiBackground.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/render/Lifetime.cpp` | module-owned | `pf-smoke-render` |
 | `WorldRenderSlotChecks.cpp` | module-owned (retained standalone) | `pf-world-render-slot-checks` |
-| `WorldTeardownSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/simulation/Teardown.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
 | `SmokeScenario.cpp` | dispatch/platform helpers only; no product scenarios | `prometheum-fermide-headless` |
 | `smoke/world/ObjectEditing.cpp` | module-owned | `pf-smoke-world` |
@@ -595,6 +595,40 @@ memory/process helpers. It no longer defines or invokes any extracted scenario;
 compatibility orchestration, tool separation, remaining standalone source
 migrations and compile-only target work are deliberately not part of #298.
 
+## Complete Simulation lifecycle migration (#299)
+
+The three remaining legacy Simulation suites move into the core-only
+`pf-smoke-simulation` module as 18 explicit registrations. Together with the 37
+existing checks, Simulation now owns 55 stable selectors.
+
+| Former legacy group | Module source | Selectable checks |
+| --- | --- | ---: |
+| Pause position | `smoke/simulation/Pause.cpp` | 5 |
+| Non-finite and boundary timing | `smoke/simulation/Timing.cpp` | 9 |
+| World teardown and topology replacement | `smoke/simulation/Teardown.cpp` | 4 |
+
+Pause registers Path clearing, both ordinary walking states, Staircase traversal,
+and Stairwell traversal independently. Timing registers each Door/transport/API/
+replay validation family and both valid-boundary groups independently. Teardown
+registers built and unbuilt World destruction, Door threshold ownership, and stale
+Graph replacement independently. All original assertions remain in their moved
+or shared bodies; the stable `observation` group and existing repeated-run
+Simulation determinism assertions remain owned by the same module.
+
+`NonFiniteTimingSmokeChecks.cpp`, `WorldTeardownSmokeChecks.cpp`, and their legacy
+aggregate calls are removed. Pause-position assertions compile once in
+`support/PausePosition.cpp`; the five Simulation registrations are their sole
+smoke owner, while the explicit legacy reproduction command reuses the support
+without becoming another smoke execution path. The old teardown CLI selection
+returns migration guidance. `SimulationStepTimingChecks.cpp` remains an independent
+standalone check for #302 and is not consolidated solely for naming consistency.
+
+The exact 55-selector contract executes every check independently and performs
+eight simultaneous complete invocations from an empty external directory.
+Simulation links only smoke support, pause support, production core, YAML, and Lua;
+there are no Editor, renderer, ImGui, HTTP, graphics, dialog, or interactive-input
+dependencies.
+
 ## Support and non-smoke code
 
 - `smoke/editor/Main.cpp`: the sole cross-domain Editor registry. The former
@@ -639,8 +673,11 @@ migrations and compile-only target work are deliberately not part of #298.
   owned by `smoke-transports-contract` (`harness;core`).
 - `support/LiftBoarding.cpp`: shared assertion helpers compiled once by
   `pf-lift-boarding-support`, not an additional CTest execution owner.
+- `support/PausePosition.cpp`: shared pause-position assertion/reproduction
+  mechanics compiled once by `pf-pause-position-support`. Simulation owns their
+  only smoke registrations; the legacy executable reuses them only for the
+  explicit `--pause-position-repro` diagnostic pending #304.
 - `LiftBoardingSmokeChecks.cpp` owns only the legacy Lift reproduction commands;
-  `PausePositionSmokeChecks.cpp` also owns the pause-position reproduction;
   `RoutingTools.cpp` owns the restoration benchmark and routing-scale World
   generator; `MetricsChecks.cpp` also owns metrics serving.
   These remain legacy-owned until their dedicated tool extraction tickets.

@@ -13,6 +13,8 @@
 //     Sector <-> SectorObject cycle
 //   * a Door's threshold references do not retain its Sectors either
 
+#include "Checks.h"
+
 #include <memory>
 #include <stdexcept>
 
@@ -148,10 +150,14 @@ namespace
 	}
 }
 
-void runWorldTeardownSmokeChecks()
+void registerTeardown(std::vector<smoke::Check>& checks)
 {
-	builtWorldReleasesGraphAndSectorOwnership();
-	unbuiltWorldReleasesSectorOwnership();
-	doorThresholdDoesNotRetainSectors();
-	topologyRebuildReleasesPreviousGraph();
+	checks.push_back({ "builtWorldReleasesGraphAndSectorOwnership", [](smoke::Context const&)
+		{ builtWorldReleasesGraphAndSectorOwnership(); } });
+	checks.push_back({ "unbuiltWorldReleasesSectorOwnership", [](smoke::Context const&)
+		{ unbuiltWorldReleasesSectorOwnership(); } });
+	checks.push_back({ "doorThresholdDoesNotRetainSectors", [](smoke::Context const&)
+		{ doorThresholdDoesNotRetainSectors(); } });
+	checks.push_back({ "topologyRebuildReleasesPreviousGraph", [](smoke::Context const&)
+		{ topologyRebuildReleasesPreviousGraph(); } });
 }

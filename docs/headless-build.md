@@ -1,7 +1,8 @@
 # Headless simulation smoke scenario
 
-Simulation Observation, Render walls, and Persistence serializer/document formats
-now run in the independently buildable [`pf-smoke-*` modules](smoke-modules.md),
+The complete Simulation lifecycle suite, Render coverage, and Persistence
+serialization/document coverage now run in independently buildable
+[`pf-smoke-*` modules](smoke-modules.md),
 not the legacy aggregate below. The complete serialization/restoration suite now
 runs in `pf-smoke-persistence`, with rendering-policy assertions in `pf-smoke-render`.
 `--serialization-checks` returns 2 with migration guidance. The explicit

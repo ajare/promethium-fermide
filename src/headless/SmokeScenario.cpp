@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include "PausePosition.h"
 #include "core/Coordination.h"
 
 #ifdef _MSC_VER
@@ -28,14 +29,10 @@
 
 void runLiftCrossingRepro(char const* filename);
 void runLiftBoardingRepro(char const* filename);
-void runPausePositionRepro(char const* filename);
-void runPausePositionSmokeChecks();
 void runMarkerIdentitySmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
-void runNonFiniteTimingSmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
-void runWorldTeardownSmokeChecks();
 void runGraphicsStartupSmokeChecks();
 
 static_assert(!std::is_convertible_v<core::DeviceOperationId, core::TraversalResourceId>);
@@ -182,8 +179,8 @@ int main(int argc, char** argv)
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
 		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")
 		{
-			if (std::string(argv[2]) == "minimal") runPausePositionSmokeChecks();
-			else runPausePositionRepro(argv[2]);
+			if (std::string(argv[2]) == "minimal") pause_position::runAll();
+			else pause_position::runRepro(argv[2]);
 			return 0;
 		}
 		if (argc == 3 && std::string(argv[1]) == "--lift-crossing-repro")
@@ -198,8 +195,8 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--world-teardown-smoke")
 		{
-			runWorldTeardownSmokeChecks();
-			return 0;
+			std::cerr << "World teardown checks moved to smoke-simulation; use CTest.\n";
+			return 2;
 		}
 		if (graphicsStartupOnly)
 		{
@@ -209,11 +206,8 @@ int main(int argc, char** argv)
 
 		// Only unmigrated external suites remain here. Domain scenarios are
 		// registered directly with their owning modules, not called twice.
-		runPausePositionSmokeChecks();
 		runMarkerIdentitySmokeChecks();
 		runDoorTwoSidedButtonSmokeChecks();
-		runNonFiniteTimingSmokeChecks();
-		runWorldTeardownSmokeChecks();
 
 		std::cout << "PASS: remaining legacy checks; migrated scenarios run through domain CTests\n";
 		return 0;

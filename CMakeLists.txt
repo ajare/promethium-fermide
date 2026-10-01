@@ -350,6 +350,18 @@ else()
 endif()
 pf_apply_high_analysis(pf-agent-editing)
 
+# Shared pause-position assertions used by module-owned checks and the manual
+# reproduction command retained until its dedicated tool migration.
+add_library(pf-pause-position-support STATIC src/headless/support/PausePosition.cpp)
+target_include_directories(pf-pause-position-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
+target_link_libraries(pf-pause-position-support PUBLIC prometheum-fermide-core)
+if(MSVC)
+    target_compile_options(pf-pause-position-support PRIVATE /W3 /permissive-)
+else()
+    target_compile_options(pf-pause-position-support PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-pause-position-support)
+
 # Shared assertions for module-owned boarding checks and file-driven legacy tools.
 add_library(pf-lift-boarding-support STATIC src/headless/support/LiftBoarding.cpp)
 target_include_directories(pf-lift-boarding-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
@@ -384,13 +396,10 @@ pf_apply_high_analysis(pf-restoration-support)
 
 add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
-    src/headless/NonFiniteTimingSmokeChecks.cpp
     src/headless/GraphicsStartupSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
     src/headless/RoutingTools.cpp
-    src/headless/WorldTeardownSmokeChecks.cpp
-    src/headless/PausePositionSmokeChecks.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
     src/headless/MetricsChecks.cpp
@@ -403,7 +412,8 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing pf-lift-boarding-support pf-routing-population-support pf-restoration-support)
+    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing
+    pf-pause-position-support pf-lift-boarding-support pf-routing-population-support pf-restoration-support)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)

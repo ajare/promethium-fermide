@@ -2,6 +2,9 @@
 #include "Smoke.h"
 #include <vector>
 
+void registerPause(std::vector<smoke::Check>& checks);
+void registerTiming(std::vector<smoke::Check>& checks);
+void registerTeardown(std::vector<smoke::Check>& checks);
 void registerTicking(std::vector<smoke::Check>& checks);
 void registerTraversal(std::vector<smoke::Check>& checks);
 void registerInteractions(std::vector<smoke::Check>& checks);

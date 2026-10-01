@@ -1,3 +1,5 @@
+#include "PausePosition.h"
+
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -10,7 +12,7 @@
 #include "core/Path.h"
 #include "core/World.h"
 
-namespace
+namespace pause_position
 {
 	void require(bool value, char const* message)
 	{
@@ -19,13 +21,13 @@ namespace
 
 	std::filesystem::path testWorld(char const* name)
 	{
-		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
+		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path().parent_path()
 			/ "resources" / "test-worlds" / name;
 	}
 
-	void pauseOnStairsPreservesPosition(char const* filename, core::EdgeType edgeType)
+	void pauseOnStairsPreservesPosition(std::filesystem::path const& filename, core::EdgeType edgeType)
 	{
-		auto world = core::loadWorldDocument(testWorld(filename));
+		auto world = core::loadWorldDocument(filename);
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		std::shared_ptr<core::Path> path;
 		std::shared_ptr<const core::Edge> stair;
@@ -161,40 +163,42 @@ namespace
 			&& agent->getGlobalPosition().distanceTo({ 4.5f, 0.0f }) < 0.001f,
 			"Paused Agent failed to reach its original destination after resuming");
 	}
-}
 
-void runPausePositionSmokeChecks()
-{
-	clearPausedPathDoesNotResume();
-	pauseWalkingAgent(true);
-	pauseWalkingAgent(false);
-	pauseOnStairsPreservesPosition("staircase-test-1.world.yaml", core::EdgeType::Staircase);
-	pauseOnStairsPreservesPosition("stairwell-test-1.world.yaml", core::EdgeType::Stairwell);
-}
-
-// Optional full-document reproduction, independent of the bundled fixture's
-// location. Re-load each time so pause does not alter the next sampled run.
-void runPausePositionRepro(char const* filename)
-{
-	for (uint64_t ticks = 30; ticks <= 1800; ticks += 30)
+	void runAll()
 	{
-		auto world = core::loadWorldDocument(filename);
-		require(world->resumeSimulation() && world->advanceTicks(ticks),
-			"Pause repro could not run World");
-		auto before = world->getSimulationSnapshot();
-		world->pauseSimulation();
-		auto after = world->getSimulationSnapshot();
-		bool moved = false;
-		for (size_t i = 0; i < before.agents.size(); ++i)
+		clearPausedPathDoesNotResume();
+		pauseWalkingAgent(true);
+		pauseWalkingAgent(false);
+		pauseOnStairsPreservesPosition(testWorld("staircase-test-1.world.yaml"),
+			core::EdgeType::Staircase);
+		pauseOnStairsPreservesPosition(testWorld("stairwell-test-1.world.yaml"),
+			core::EdgeType::Stairwell);
+	}
+
+	// Optional full-document reproduction, independent of the bundled fixture's
+	// location. Re-load each time so pause does not alter the next sampled run.
+	void runRepro(char const* filename)
+	{
+		for (uint64_t ticks = 30; ticks <= 1800; ticks += 30)
 		{
-			auto const& a = before.agents[i];
-			auto const& b = after.agents[i];
-			if (a.globalPosition.distanceTo(b.globalPosition) <= 1.0f) continue;
-			std::cerr << "Pause at tick " << ticks << ": " << a.name << " ("
-				<< a.globalPosition.x << ',' << a.globalPosition.y << ") -> ("
-				<< b.globalPosition.x << ',' << b.globalPosition.y << ")\n";
-			moved = true;
+			auto world = core::loadWorldDocument(filename);
+			require(world->resumeSimulation() && world->advanceTicks(ticks),
+				"Pause repro could not run World");
+			auto before = world->getSimulationSnapshot();
+			world->pauseSimulation();
+			auto after = world->getSimulationSnapshot();
+			bool moved = false;
+			for (size_t i = 0; i < before.agents.size(); ++i)
+			{
+				auto const& a = before.agents[i];
+				auto const& b = after.agents[i];
+				if (a.globalPosition.distanceTo(b.globalPosition) <= 1.0f) continue;
+				std::cerr << "Pause at tick " << ticks << ": " << a.name << " ("
+					<< a.globalPosition.x << ',' << a.globalPosition.y << ") -> ("
+					<< b.globalPosition.x << ',' << b.globalPosition.y << ")\n";
+				moved = true;
+			}
+			require(!moved, "Pausing moved Agents by more than one unit");
 		}
-		require(!moved, "Pausing moved Agents by more than one unit");
 	}
 }
