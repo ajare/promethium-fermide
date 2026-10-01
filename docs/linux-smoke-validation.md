@@ -6,33 +6,35 @@ unset, Render and Editor checks use CPU-only ImGui, and Startup deliberately use
 an unavailable SDL driver and rejects abnormal child termination. **Windows
 validation is not claimed here; it remains delegated to #279.**
 
-## Complete gate
+## Incremental smoke validation
 
-From the repository root:
+From the repository root, select a required build configuration and one or more
+smoke-test sets:
 
 ```sh
-scripts/validate_linux_smoke.sh
+scripts/validate_linux_smoke.sh --config Release routing simulation
+scripts/validate_linux_smoke.sh --config Debug world
+scripts/validate_linux_smoke.sh --config Release all
 ```
 
-The optional first argument selects the (ignored) build root. Parallelism defaults
-to `nproc` and can be limited with `PF_VALIDATION_JOBS`. The script performs fresh
-Debug and Release builds with `PF_BUILD_GUI=ON` and `OFF`; the Debug/headless
-quadrant also enables `PF_HIGH_ANALYSIS`. It then runs the complete GUI-enabled
-Release CTest inventory sequentially and in parallel.
+List the command arguments and available test sets without configuring a build:
 
-Every configured `pf-smoke-*` target is built directly. Each module exercises
-`--list`, one `--check`, and a timed complete run. Startup is exercised only in
-the GUI-enabled tree. The five dedicated tools execute bounded real workflows:
-World generation and one restoration cycle, one metrics tick on an ephemeral
-port, both Lift reproduction modes, and the minimal pause-position reproduction.
-The four retained standalone checks and the compile-only contract are also built
-and exercised directly.
+```sh
+scripts/validate_linux_smoke.sh --list
+```
 
-The gate writes observational timings to
-`build-linux-validation/evidence/runtimes-ms.tsv`. It additionally records a fresh
-World-module build, an immediate no-op build, and a rebuild after touching only
-`smoke/world/MarkerIdentity.cpp`; the original source timestamp is restored even
-on failure. Timings are evidence, not pass/fail thresholds.
+The script incrementally configures its existing
+`build-linux-validation/<debug|release>` tree, builds only the selected
+`pf-smoke-*` targets, and runs their direct CTest entries. Use `--build-dir path`
+to select another persistent build tree. GUI support remains enabled so the
+Startup set and its editor subprocess are available from the same tree. Displays
+are unset for every run.
+
+Parallelism defaults to `nproc` and can be limited with `PF_VALIDATION_JOBS`:
+
+```sh
+PF_VALIDATION_JOBS=4 scripts/validate_linux_smoke.sh --config Release all
+```
 
 ## Focused build helpers
 

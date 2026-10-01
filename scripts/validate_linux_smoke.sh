@@ -1,132 +1,152 @@
 #!/usr/bin/env bash
-# Complete, headless Linux release gate for the modular smoke architecture (#306).
+# Incrementally build and run selected Linux smoke-test modules.
 set -euo pipefail
 
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+JOBS="${PF_VALIDATION_JOBS:-$(nproc)}"
+SMOKE_TESTS=(
+    agent
+    agent-tags
+    behaviours
+    editor
+    metrics
+    permissions
+    persistence
+    render
+    routing
+    simulation
+    startup
+    transports
+    world
+)
+
+print_usage() {
+    cat <<EOF
+Usage: $(basename "$0") --config Debug|Release [--build-dir path] TEST [TEST ...]
+       $(basename "$0") --list
+
+Incrementally configures, builds, and runs the selected Linux smoke-test sets.
+Use "all" to select every test set.
+
+Arguments:
+  --config Debug|Release  Required build configuration.
+  --build-dir path        Build directory. Defaults to
+                          build-linux-validation/<debug|release>.
+  --list                  List these arguments and the available test sets.
+  --help                  Show this help.
+
+Environment:
+  PF_VALIDATION_JOBS      Parallel build and test jobs. Defaults to nproc.
+
+Available smoke-test sets:
+EOF
+    printf '  %s\n' "${SMOKE_TESTS[@]}"
+    printf '  all\n'
+}
+
+usage_error() {
+    printf 'ERROR: %s\n\n' "$1" >&2
+    print_usage >&2
+    exit 2
+}
+
 if [[ "$(uname -s)" != Linux ]]; then
-    echo "ERROR: this validation gate is Linux-only; Windows validation is delegated to #279." >&2
+    echo "ERROR: this validation command is Linux-only." >&2
     exit 2
 fi
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_ROOT="${1:-$ROOT/build-linux-validation}"
-JOBS="${PF_VALIDATION_JOBS:-$(nproc)}"
-EVIDENCE="$BUILD_ROOT/evidence"
-mkdir -p "$EVIDENCE"
+CONFIG=""
+BUILD_DIR=""
+LIST_ONLY=0
+SELECTED=()
+
+while (( $# > 0 )); do
+    case "$1" in
+        --config)
+            (( $# >= 2 )) || usage_error "--config requires Debug or Release."
+            CONFIG="$2"
+            shift 2
+            ;;
+        --build-dir)
+            (( $# >= 2 )) || usage_error "--build-dir requires a path."
+            BUILD_DIR="$2"
+            shift 2
+            ;;
+        --list|--help|-h)
+            LIST_ONLY=1
+            shift
+            ;;
+        --*)
+            usage_error "unknown argument: $1"
+            ;;
+        *)
+            SELECTED+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if (( LIST_ONLY )); then
+    (( ${#SELECTED[@]} == 0 )) || usage_error "--list does not accept test sets."
+    [[ -z "$CONFIG" ]] || usage_error "--list does not accept --config."
+    [[ -z "$BUILD_DIR" ]] || usage_error "--list does not accept --build-dir."
+    print_usage
+    exit 0
+fi
+
+[[ "$CONFIG" == Debug || "$CONFIG" == Release ]] || \
+    usage_error "--config must be specified as Debug or Release."
+(( ${#SELECTED[@]} > 0 )) || usage_error "specify at least one smoke-test set."
+
+contains_test() {
+    local candidate="$1"
+    local test
+    for test in "${SMOKE_TESTS[@]}"; do
+        [[ "$candidate" == "$test" ]] && return 0
+    done
+    return 1
+}
+
+if [[ " ${SELECTED[*]} " == *" all "* ]]; then
+    (( ${#SELECTED[@]} == 1 )) || usage_error '"all" cannot be combined with other test sets.'
+    SELECTED=("${SMOKE_TESTS[@]}")
+fi
+
+UNIQUE=()
+for test in "${SELECTED[@]}"; do
+    contains_test "$test" || usage_error "unknown smoke-test set: $test"
+    if [[ " ${UNIQUE[*]} " != *" $test "* ]]; then
+        UNIQUE+=("$test")
+    fi
+done
+SELECTED=("${UNIQUE[@]}")
+
+if [[ -z "$BUILD_DIR" ]]; then
+    BUILD_DIR="$ROOT/build-linux-validation/${CONFIG,,}"
+elif [[ "$BUILD_DIR" != /* ]]; then
+    BUILD_DIR="$ROOT/$BUILD_DIR"
+fi
+
 unset DISPLAY WAYLAND_DISPLAY
 
-run_timed() {
-    local label="$1"
-    shift
-    local start end
-    start="$(date +%s%N)"
-    "$@"
-    end="$(date +%s%N)"
-    printf '%s\t%d\n' "$label" "$(((end - start) / 1000000))" >> "$EVIDENCE/runtimes-ms.tsv"
-}
+# Reconfiguration is incremental: an existing CMake cache and all compatible
+# objects are retained. GUI support is enabled so every listed set, including
+# Startup's editor subprocess test, is available from the same build tree.
+cmake -S "$ROOT" -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE="$CONFIG" \
+    -DBUILD_TESTING=ON \
+    -DPF_BUILD_GUI=ON
 
-configure_and_build() {
-    local name="$1" config="$2" gui="$3" analysis="$4"
-    local directory="$BUILD_ROOT/$name"
-    cmake --fresh -S "$ROOT" -B "$directory" -DCMAKE_BUILD_TYPE="$config" \
-        -DBUILD_TESTING=ON -DPF_BUILD_GUI="$gui" -DPF_HIGH_ANALYSIS="$analysis" \
-        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-    cmake --build "$directory" --parallel "$JOBS"
-}
-
-: > "$EVIDENCE/runtimes-ms.tsv"
-printf 'command\tmilliseconds\n' >> "$EVIDENCE/runtimes-ms.tsv"
-
-# The Debug/no-GUI quadrant also supplies the elevated-analysis build.
-configure_and_build release-gui Release ON OFF
-configure_and_build release-headless Release OFF OFF
-configure_and_build debug-gui Debug ON OFF
-configure_and_build debug-headless-analysis Debug OFF ON
-
-release_gui="$BUILD_ROOT/release-gui"
-release_headless="$BUILD_ROOT/release-headless"
-debug_gui="$BUILD_ROOT/debug-gui"
-debug_headless="$BUILD_ROOT/debug-headless-analysis"
-
-ctest --test-dir "$release_gui" --output-on-failure
-ctest --test-dir "$release_gui" --output-on-failure -j "$JOBS"
-
-modules=(agent agent-tags behaviours editor metrics permissions persistence render routing simulation transports world)
-for module in "${modules[@]}"; do
-    target="pf-smoke-$module"
-    cmake --build "$release_headless" --target "$target" --parallel "$JOBS"
-    executable="$release_headless/bin/x64/Release/$target"
-    selector="$($executable --list | head -n 1)"
-    "$executable" --check "$selector"
-    run_timed "$target" "$executable"
+TARGETS=()
+REGEX_PARTS=()
+for test in "${SELECTED[@]}"; do
+    TARGETS+=("pf-smoke-$test")
+    REGEX_PARTS+=("$test")
 done
-# Generated link commands must contain only the owning module's check objects.
-python3 - "$release_headless" "${modules[@]}" <<'PY'
-import pathlib
-import sys
 
-root = pathlib.Path(sys.argv[1]) / "src/headless/smoke/CMakeFiles"
-modules = sys.argv[2:]
-for module in modules:
-    text = (root / f"pf-smoke-{module}.dir/link.txt").read_text(encoding="utf-8")
-    unexpected = [other for other in modules if other != module and f"pf-smoke-{other}.dir/" in text]
-    if unexpected:
-        raise SystemExit(f"pf-smoke-{module} links check objects from: {', '.join(unexpected)}")
-print("PASS module link ownership: no module links another module's check objects")
-PY
+cmake --build "$BUILD_DIR" --config "$CONFIG" \
+    --target "${TARGETS[@]}" --parallel "$JOBS"
 
-cmake --build "$release_gui" --target pf-smoke-startup --parallel "$JOBS"
-startup="$release_gui/bin/x64/Release/pf-smoke-startup"
-"$startup" --check graphicsInitializationFailure
-run_timed pf-smoke-startup "$startup"
-
-# The five dedicated tools exercise real bounded workflows, not only --help.
-tools=(pf-restoration-benchmark pf-generate-routing-world pf-metrics-server pf-lift-repro pf-pause-position-repro)
-for target in "${tools[@]}"; do
-    cmake --build "$release_headless" --target "$target" --parallel "$JOBS"
-    "$release_headless/bin/x64/Release/$target" --help >/dev/null
-done
-temporary="$(mktemp -d -t pf-306-tools-XXXXXX)"
-cleanup() {
-    if [[ -n "${source:-}" && -f "$temporary/MarkerIdentity.cpp" ]]; then
-        touch -r "$temporary/MarkerIdentity.cpp" "$source"
-    fi
-    rm -rf -- "$temporary"
-}
-trap cleanup EXIT
-"$release_headless/bin/x64/Release/pf-generate-routing-world" "$temporary/routing.world.yaml"
-"$release_headless/bin/x64/Release/pf-restoration-benchmark" "$temporary/routing.world.yaml" 1
-"$release_headless/bin/x64/Release/pf-metrics-server" --port 0 --ticks 1
-lift_fixture="$ROOT/resources/test-worlds/lift-test-1.world.yaml"
-"$release_headless/bin/x64/Release/pf-lift-repro" crossing "$lift_fixture"
-"$release_headless/bin/x64/Release/pf-lift-repro" boarding "$lift_fixture"
-"$release_headless/bin/x64/Release/pf-pause-position-repro" minimal
-
-standalone=(pf-simulation-step-timing-checks pf-occupant-packing-checks pf-world-render-slot-checks pf-sector-tileset-checks)
-for target in "${standalone[@]}"; do
-    cmake --build "$release_headless" --target "$target" --parallel "$JOBS"
-done
-"$release_headless/pf-simulation-step-timing-checks"
-"$release_headless/pf-occupant-packing-checks"
-"$release_headless/pf-world-render-slot-checks"
-"$release_headless/pf-sector-tileset-checks" \
-    "$ROOT/resources/textures/sectors.tileset.yaml"
-cmake --build "$release_headless" --target pf-compile-contracts --parallel "$JOBS"
-
-# Record a fresh direct build, a no-op build, and a representative touched-check rebuild.
-rebuild="$BUILD_ROOT/rebuild-world"
-cmake --fresh -S "$ROOT" -B "$rebuild" -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_TESTING=ON -DPF_BUILD_GUI=OFF -DPF_HIGH_ANALYSIS=OFF
-run_timed clean-pf-smoke-world cmake --build "$rebuild" --target pf-smoke-world --parallel "$JOBS"
-run_timed noop-pf-smoke-world cmake --build "$rebuild" --target pf-smoke-world --parallel "$JOBS"
-source="$ROOT/src/headless/smoke/world/MarkerIdentity.cpp"
-stamp="$temporary/MarkerIdentity.cpp"
-cp --preserve=timestamps -- "$source" "$stamp"
-touch "$source"
-run_timed touched-pf-smoke-world cmake --build "$rebuild" --target pf-smoke-world --parallel "$JOBS"
-touch -r "$stamp" "$source"
-source=""
-
-python3 "$ROOT/scripts/tests/smoke_ownership.py" "$ROOT" \
-    "$ROOT/src/headless/smoke/CMakeLists.txt" "$ROOT/docs/smoke-migration-manifest.md"
-git -C "$ROOT" diff --check
-printf 'PASS Linux modular smoke validation; evidence: %s\n' "$EVIDENCE"
+regex="$(IFS='|'; printf '%s' "${REGEX_PARTS[*]}")"
+ctest --test-dir "$BUILD_DIR" --build-config "$CONFIG" \
+    -R "^smoke-($regex)$" --parallel "$JOBS" --output-on-failure
