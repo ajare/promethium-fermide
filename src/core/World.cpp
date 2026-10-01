@@ -9883,7 +9883,19 @@ namespace core
 		if (requirements.empty()) requirements.resize(record->values.size());
 		if (requirements[stopIndex] != next)
 		{
+			auto previous = requirements[stopIndex];
 			requirements[stopIndex] = std::move(next);
+			for (auto const& [agentId, agent] : mAgents.entries())
+			{
+				for (auto id : requirements[stopIndex])
+					if (find(previous.begin(), previous.end(), id) == previous.end()
+						&& !effectiveAccessGrants(*agent).test(id - 1))
+						reconsiderAgentAuthorizationPath(*agent, AccessPermissionId{ id }, false);
+				for (auto id : previous)
+					if (find(requirements[stopIndex].begin(), requirements[stopIndex].end(), id)
+						== requirements[stopIndex].end())
+						beginVoluntaryRoutePlanning(agentId);
+			}
 			modify();
 		}
 		if (diagnostic) diagnostic->clear();
@@ -9921,6 +9933,7 @@ namespace core
 		auto found = lookupAccessPermission(id);
 		if (!found) { if (diagnostic) *diagnostic = found.diagnostic; return false; }
 		auto bit = id.value - 1;
+		bool destinationRoutesChanged = getAccessPermissionUsage(id).liftDestinationRequirements != 0;
 		// Clear all references before releasing the slot, so a reused identity can
 		// never inherit an old grant or requirement.
 		for (auto const& [agentId, agent] : mAgents.entries())
@@ -9954,6 +9967,12 @@ namespace core
 					requirement.end());
 		}
 		mAccessPermissions[bit].reset();
+		if (destinationRoutesChanged)
+			for (auto const& [agentId, agent] : mAgents.entries())
+			{
+				(void)agent;
+				beginVoluntaryRoutePlanning(agentId);
+			}
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -10687,6 +10706,10 @@ namespace core
 				auto point = mInteractionPoints.find(pointId);
 				if (point && point->mPermissionRequirement.test(bit)) return true;
 			}
+			if (gained && resource.mLift && !resource.mOpenPlatformLift)
+				if (auto record = findLiftDestinationRecord(static_cast<uint32_t>(resource.mLiftSector.value - 1)))
+					for (auto const& requirement : record->destinationPermissionRequirements)
+						if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()) return true;
 			for (auto const& stop : resource.mLiftStops)
 			{
 				auto point = mInteractionPoints.find(stop.callControl);
@@ -10702,7 +10725,24 @@ namespace core
 		};
 		bool currentRelevant = false;
 		for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
-			currentRelevant = currentRelevant || edgeUsesPermission(path->nodes[i].edge);
+		{
+			auto const& node = path->nodes[i];
+			currentRelevant = currentRelevant || edgeUsesPermission(node.edge);
+			if (gained || !node.edge) continue;
+			auto resource = mTraversalResources.find(node.edge->getTraversalResourceId());
+			// Only the alighting edge identifies the selected destination. Passing
+			// an intermediate Stop or boarding must not require its permissions.
+			if (!resource || !resource->mLiftCoordinator) continue;
+			auto source = path->nodes[i - 1].targetVertex;
+			if (!source || !source->getSector() || isLocationLike(source->getSector()->getType())) continue;
+			auto lift = mTraversalResources.find(resource->mLiftCoordinator);
+			if (!lift || !lift->mLift || lift->mOpenPlatformLift) continue;
+			auto requirement = getLiftDestinationPermissionRequirement(
+				static_cast<uint32_t>(lift->mLiftSector.value - 1), resource->mLiftStopIndex);
+			if (find(requirement.begin(), requirement.end(), changed) != requirement.end()
+				&& !canAgentUseLiftJourney(resource->mLiftCoordinator, agent.getGlobalPosition(),
+					source->getPosition(), getAgentId(&agent))) currentRelevant = true;
+		}
 		if (!gained)
 		{
 			if (currentRelevant)

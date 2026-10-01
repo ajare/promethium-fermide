@@ -151,8 +151,7 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 {
 	if (!world) return;
 	ImGui::TextUnformatted("Destination permissions");
-	ImGui::TextWrapped("Intermediate feature: destination authorization and routing are enforced for stable grants. Dynamic authorization is not yet complete.");
-	ImGui::TextWrapped("All listed Access permissions will be required, from direct or Permission set grants.");
+	ImGui::TextWrapped("All listed Access permissions are required to select this destination, from direct or Permission set grants. Accepted shared journeys and disembarking remain available after permission loss.");
 	auto levels = world->getLiftDestinationLevels(sectorIndex);
 	if (!ImGui::BeginTable("Destination permissions", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("Level"); ImGui::TableSetupColumn("Permissions"); ImGui::TableSetupColumn("Required (all)");

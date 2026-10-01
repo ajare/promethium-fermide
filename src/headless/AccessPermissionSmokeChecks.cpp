@@ -663,7 +663,7 @@ namespace
 			"Access permission deletion left a Lift landing requirement");
 	}
 
-	void liftDestinationEnforcement()
+	void liftDestinationEnforcement(unsigned authorizationChange = 0)
 	{
 		core::World world("destination enforcement", 16, 3);
 		auto ground = world.addCorridor(0, 0, 16);
@@ -762,6 +762,37 @@ namespace
 			"Remote Agent relied on another landing's live shared Stop request");
 		world.consumeSimulationEvents();
 		rider->setPath(shared, true);
+		if (authorizationChange)
+		{
+			// Both passengers must have boarded before changing authorization;
+			// the operator's accepted selection is now a shared Stop request.
+			for (unsigned tick = 0; tick < 1200
+				&& (operatorAgent->getSector() != lift.lift.sector.get() || rider->getSector() != lift.lift.sector.get()); ++tick)
+				world.advanceTicks(1);
+			require(operatorAgent->getSector() == lift.lift.sector.get() && rider->getSector() == lift.lift.sector.get(),
+				"Shared passengers did not board before authorization change");
+			if (authorizationChange == 1)
+			{
+				require(world.setAgentRuntimeAccessPermissionGrant(operatorId, red, false), "Onboard runtime revoke failed");
+				require(world.setAgentRuntimePermissionSetAssignment(operatorId, set, false), "Onboard set revoke failed");
+			}
+			else
+			{
+				world.pauseSimulation();
+				if (authorizationChange == 2)
+				{
+					auto extra = world.addAccessPermission("Tightened destination");
+					require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1,
+						{ red, blue, extra }, &diagnostic), diagnostic);
+				}
+				else
+				{
+					require(world.revokeAgentAccessPermission(operatorId, red, &diagnostic), diagnostic);
+					require(world.setPermissionSetAccessPermission(set, blue, false, &diagnostic), diagnostic);
+				}
+				require(world.resumeSimulation(), "Tightened onboard requirement did not resume");
+			}
+		}
 		world.advanceTicks(6000);
 		for (auto const& event : world.consumeSimulationEvents())
 			if (event.type == core::SimulationEventType::DeviceOperationAdded)
@@ -769,7 +800,9 @@ namespace
 					|| event.deviceOperation.command.type != core::DeviceCommandType::SelectLiftDestination,
 					"Piggyback rider attempted a protected destination selection");
 		require(rider->getSector()->getIndex() == middle && !rider->getPath(),
-			"Unauthorized rider did not complete shared journey and disembark");
+			"Unauthorized rider did not complete shared journey and disembark: " + std::to_string(authorizationChange));
+		require(operatorAgent->getSector()->getIndex() == middle && !operatorAgent->getPath(),
+			"Operator did not disembark after accepted selection");
 	}
 
 	void liftDestinationAlternative()
@@ -807,6 +840,81 @@ namespace
 		world.resumeSimulation(); world.advanceTicks(6000);
 		require(agent->getSector()->getIndex() == upper && !agent->getPath(),
 			"Alternative unrestricted destination journey did not complete");
+	}
+
+	void changingLiftDestinationAuthorization()
+	{
+		// Exercise each grant source and authored requirement edits against both
+		// a replacement Path and Route loss, before any selection is accepted.
+		for (bool alternative : { false, true })
+		for (unsigned change = 0; change < 6; ++change)
+		{
+			core::World world("changing destination", 20, 2);
+			auto ground = world.addCorridor(0, 0, 20);
+			auto upper = world.addCorridor(1, 0, 20);
+			uint32_t from, to;
+			world.addSectorMarker(ground, 0, 1.0f, &from);
+			world.addSectorMarker(upper, 0, 1.0f, &to);
+			core::World::CreateLiftOptions options;
+			options.cellsWide = 2; options.stopOffsets = { 0, 1 };
+			auto lift = world.addLift(1, 0, 4, options);
+			core::TraversalResourceId other;
+			if (alternative) other = world.addLift(1, 0, 16, options).traversalResource;
+			world.finishBuild(); world.pauseSimulation();
+			auto key = world.addAccessPermission("Destination key");
+			auto unrelated = world.addAccessPermission("Unrelated key");
+			auto set = world.addPermissionSet("Operators");
+			auto id = world.createAgent("rider", ground, 0, 1.0f);
+			auto agent = world.lookupAgent(id).entity;
+			std::string diagnostic;
+			require(world.setAgentIndividualRoutePersistence(id, 1.0f, &diagnostic), diagnostic);
+			require(world.setPermissionSetAccessPermission(set, key, true, &diagnostic), diagnostic);
+			if (change < 2) require(world.grantAgentAccessPermission(id, key, &diagnostic), diagnostic);
+			else if (change < 5) require(world.setAgentPermissionSetAssignment(id, set, true, &diagnostic), diagnostic);
+			if (change != 5) require(world.setLiftDestinationPermissionRequirement(
+				lift.lift.sector->getIndex(), 1, { key }, &diagnostic), diagnostic);
+			auto graph = world.getGraph();
+			auto path = graph->calculatePath(agent, graph->getVertexByIdentifier(from), graph->getVertexByIdentifier(to));
+			require(static_cast<bool>(path), "Initially authorized Lift Path missing");
+			agent->setPath(path, true);
+			require(world.setAgentRuntimeAccessPermissionGrant(id, unrelated, true), "Unrelated grant failed");
+			require(agent->getPath() == path, "Unrelated grant disturbed Lift Path");
+			switch (change)
+			{
+			case 0: require(world.revokeAgentAccessPermission(id, key, &diagnostic), diagnostic); break;
+			case 1: require(world.setAgentRuntimeAccessPermissionGrant(id, key, false), "Runtime revoke failed"); break;
+			case 2: require(world.setAgentPermissionSetAssignment(id, set, false, &diagnostic), diagnostic); break;
+			case 3: require(world.setAgentRuntimePermissionSetAssignment(id, set, false), "Runtime set removal failed"); break;
+			case 4: require(world.setPermissionSetAccessPermission(set, key, false, &diagnostic), diagnostic); break;
+			case 5: require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1, { key }, &diagnostic), diagnostic); break;
+			}
+			require(agent->getState() == core::Agent::State::RoutePlanning && !agent->getPath(),
+				"Destination authorization loss did not invalidate Path: " + std::to_string(change));
+			require(world.resumeSimulation(), "Changing authorization fixture did not resume");
+			world.advanceTicks(agent->getRoutePlanningRemainingTicks());
+			if (!alternative)
+			{
+				bool lost = false;
+				for (auto const& event : world.consumeSimulationEvents())
+					lost |= event.type == core::SimulationEventType::RouteLost
+						&& event.routeLossReason == core::RouteLossReason::Unreachable;
+				require(lost && !agent->getPath(), "Destination loss without alternative did not produce Route loss");
+				continue;
+			}
+			auto uses = [](std::shared_ptr<core::Path> const& value, core::TraversalResourceId resource)
+			{
+				if (value) for (auto const& node : value->nodes)
+					if (node.edge && node.edge->getTraversalResourceId() == resource) return true;
+				return false;
+			};
+			require(uses(agent->getPath(), other), "Authorization loss did not select alternative Lift");
+			require(world.setAgentRuntimeAccessPermissionGrant(id, key, true), "Runtime gain failed");
+			require(agent->getState() == core::Agent::State::RoutePlanning, "Destination gain did not plan voluntarily");
+			world.advanceTicks(agent->getRoutePlanningRemainingTicks());
+			require(uses(agent->getPath(), other), "Destination gain ignored Route persistence");
+			world.advanceTicks(6000);
+			require(agent->getSector()->getIndex() == upper && !agent->getPath(), "Replacement journey did not complete");
+		}
 	}
 
 	void liftDestinationAuthoring()
@@ -859,12 +967,13 @@ namespace
 		renderLiftDestinationPermissions(world, sector);
 		std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
 		require(text.find("Destination permissions") != std::string::npos
-			&& text.find("Intermediate feature") != std::string::npos
-			&& text.find("Dynamic authorization is not yet complete") != std::string::npos
+			&& text.find("Accepted shared journeys") != std::string::npos
+			&& text.find("Intermediate feature") == std::string::npos
+			&& text.find("Dynamic authorization is not yet complete") == std::string::npos
 			&& text.find("NOT YET ENFORCED") == std::string::npos
 			&& text.find("None") != std::string::npos
 			&& text.find("Renamed key") != std::string::npos
-			&& text.find("Blue key") != std::string::npos, "Lift Selection omitted requirements or milestone warning");
+			&& text.find("Blue key") != std::string::npos, "Lift Selection omitted requirements or authorization explanation");
 		ImGui::LogFinish(); ImGui::End(); ImGui::Render(); ImGui::DestroyContext();
 
 		auto yaml = save(*world);
@@ -1046,7 +1155,11 @@ void runAccessPermissionSmokeChecks()
 	transportLandingRequirementsPersist();
 	liftDestinationAuthoring();
 	liftDestinationEnforcement();
+	liftDestinationEnforcement(1);
+	liftDestinationEnforcement(2);
+	liftDestinationEnforcement(3);
 	liftDestinationAlternative();
+	changingLiftDestinationAuthorization();
 	runtimePropertiesPanelChangesCurrentAuthorizationOnly();
 	panelCommitParticipatesInHistory();
 }

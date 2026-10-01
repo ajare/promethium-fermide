@@ -442,15 +442,30 @@ namespace core
 		auto* agent = &valueAgent;
 		auto const id = mWorld.getAgentId(agent);
 		agent->clearRuntimePath();
-		releaseTraversalOwnership(id);
+		// Pause/resume replans from the passenger's current position. Keep an
+		// accepted ordinary Lift journey alive while doing so: dropping its
+		// manifest and shared Stop request would retroactively revoke selection
+		// when the author tightens destination requirements while paused.
+		bool acceptedLiftJourney = false;
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (resource->mLift && !resource->mOpenPlatformLift
+				&& find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
+				acceptedLiftJourney = true;
+		}
+		if (!acceptedLiftJourney)
+		{
+			releaseTraversalOwnership(id);
+			vector<InteractionRequestId> interactions;
+			for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
+				if (request->getActor() == id && request->getResult() == InteractionResult::Pending)
+					interactions.push_back(requestId);
+			for (auto requestId : interactions) cancelInteraction(requestId);
+			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+				if (operation->getRequesters().contains(id)) cancelDeviceOperation(operationId, id);
+		}
 		mWorld.mPausedPathIntents.erase(id);
-		vector<InteractionRequestId> interactions;
-		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
-			if (request->getActor() == id && request->getResult() == InteractionResult::Pending)
-				interactions.push_back(requestId);
-		for (auto requestId : interactions) cancelInteraction(requestId);
-		for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
-			if (operation->getRequesters().contains(id)) cancelDeviceOperation(operationId, id);
 		auto const minimum = secondsToTicks(agent->getEffectiveMinimumRoutePlanningTime().value, mWorld.getFixedTimestep());
 		auto const maximum = secondsToTicks(agent->getEffectiveMaximumRoutePlanningTime().value, mWorld.getFixedTimestep());
 		// Episode-local SplitMix64 stream, independent of Lua and Escalators.
