@@ -101,6 +101,19 @@ namespace core
 				allocateLiftTraversal(requestId, *resource);
 				return;
 			}
+			// Repeat the route-time policy at admission so a Path created before a
+			// property, grant, or requirement edit cannot start opportunistic use.
+			// Once a permit has been granted this method is no longer entered, so an
+			// Agent already crossing or climbing is allowed to finish safely.
+			if (resource->mExtensible && resource->mExtensible->isExtended()
+				&& (resource->mForceBridge || resource->mLadder)
+				&& !mWorld.agentAdheresToExtensiblePermission(request->mResource,
+					request->mSourceSector, request->mSourceEndpoint, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+				return;
+			}
 			if (resource->mExtensible && !resource->mExtensible->isExtended())
 			{
 				allocateExtensiblePreparation(requestId, *resource);

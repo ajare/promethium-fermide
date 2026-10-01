@@ -10661,18 +10661,82 @@ namespace core
 	}
 
 	bool World::canAgentOperateExtensibleControl(TraversalResourceId resourceId,
-		SectorId approach, AgentId agentId) const
+		SectorId approach, Vector2 const& approachPosition, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !resource->mExtensible || !agent) return false;
+		auto applicable = [&](InteractionPoint const& point)
+		{
+			if (point.mSector != approach) return false;
+			// A Room may contain both controls. Keep the opposite endpoint's
+			// requirement out of this operation rather than treating every control
+			// in the shared Sector as one combined requirement.
+			if (resource->mForceBridge)
+			{
+				auto const middle = resource->mForceBridge->getPosition().x
+					+ resource->mForceBridge->getSize().x * 0.5f;
+				return (point.mPosition.x > middle) == (approachPosition.x > middle);
+			}
+			if (resource->mLadder)
+			{
+				// Ladder geometry extends above the upper landing for handholds; use
+				// the logical landing midpoint rather than the rendered object's centre.
+				auto const lower = resource->mLadder->getPosition().y
+					- CORE_LADDER_HEIGHT_OFF_GROUND;
+				auto const middle = lower
+					+ static_cast<float>(resource->mLadder->getLevelsHigh() - 1) * 0.5f;
+				return (point.mPosition.y > middle) == (approachPosition.y > middle);
+			}
+			return true;
+		};
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
-			if (point && point->mSector == approach
+			if (point && applicable(*point)
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
+	}
+
+	bool World::agentAdheresToExtensiblePermission(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& approachPosition, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !agent) return false;
+		if ((!resource->mForceBridge && !resource->mLadder)
+			|| !resource->mExtensible || !resource->mExtensible->isExtended()) return true;
+		if (!agent->getEffectivePermissionAdherence().value) return true;
+
+		// If no control applies on this approach there is no approach-side
+		// permission requirement to adhere to. Existing preparation-side and
+		// availability rules still decide whether traversal is physically possible.
+		bool applicableControl = false;
+		for (auto pointId : resource->mControls)
+		{
+			auto point = mInteractionPoints.find(pointId);
+			if (!point || point->mSector != approach) continue;
+			bool applicable = true;
+			if (resource->mForceBridge)
+			{
+				auto const middle = resource->mForceBridge->getPosition().x
+					+ resource->mForceBridge->getSize().x * 0.5f;
+				applicable = (point->mPosition.x > middle) == (approachPosition.x > middle);
+			}
+			else if (resource->mLadder)
+			{
+				auto const lower = resource->mLadder->getPosition().y
+					- CORE_LADDER_HEIGHT_OFF_GROUND;
+				auto const middle = lower
+					+ static_cast<float>(resource->mLadder->getLevelsHigh() - 1) * 0.5f;
+				applicable = (point->mPosition.y > middle) == (approachPosition.y > middle);
+			}
+			if (!applicable) continue;
+			applicableControl = true;
+			if (missingInteractionPermissions(*point, *agent).empty()) return true;
+		}
+		return !applicableControl;
 	}
 
 	vector<AccessPermissionId> World::missingLiftDestinationPermissions(

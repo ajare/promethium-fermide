@@ -84,11 +84,15 @@ namespace core
 					break;
 				}
 		}
-		if (mLadder->isExtensible() && !(locallyObserved && mLadder->isExtended())
-			&& context.world && context.agent
-			&& !context.world->canAgentOperateExtensibleControl(
-				mLadder->getTraversalResourceId(), sourceSector,
-				context.world->getAgentId(context.agent)))
+		if (mLadder->isExtensible() && context.world && context.agent
+			&& ((locallyObserved && mLadder->isExtended()
+				&& !context.world->agentAdheresToExtensiblePermission(
+					mLadder->getTraversalResourceId(), sourceSector,
+					source->getPosition(), context.world->getAgentId(context.agent)))
+				|| (!(locallyObserved && mLadder->isExtended())
+					&& !context.world->canAgentOperateExtensibleControl(
+						mLadder->getTraversalResourceId(), sourceSector,
+						source->getPosition(), context.world->getAgentId(context.agent)))))
 		{
 			facts.exclusionReason = RouteExclusionReason::Permission;
 			return facts;

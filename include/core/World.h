@@ -2413,8 +2413,15 @@ namespace core
 		// are compatible with the Agent's effective property and grants.
 		bool agentAdheresToDoorPermission(TraversalResourceId door, SectorId approach,
 			AgentId agent) const;
+		// Extensible controls are approach-specific even when both endpoints are in
+		// one Location. The position distinguishes the physical side or endpoint.
 		bool canAgentOperateExtensibleControl(TraversalResourceId resource,
-			SectorId approach, AgentId agent) const;
+			SectorId approach, Vector2 const& approachPosition, AgentId agent) const;
+		// Permission adherence governs opportunistic use of a locally observed,
+		// already-extended Force Bridge or extensible Ladder. It never authorizes
+		// operating the controls themselves.
+		bool agentAdheresToExtensiblePermission(TraversalResourceId resource,
+			SectorId approach, Vector2 const& approachPosition, AgentId agent) const;
 		std::vector<AccessPermissionId> missingLiftDestinationPermissions(
 			DeviceCommand const& command, AgentId agent) const;
 		bool canAgentUseLiftJourney(TraversalResourceId resource, Vector2 const& origin,

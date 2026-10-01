@@ -81,11 +81,15 @@ namespace core
 		}
 		auto const locallyObserved = source && source->getSector().get()
 			== context.observationSector;
-		if (mForceBridge->isExtensible() && !(locallyObserved && mForceBridge->isExtended())
-			&& context.world && context.agent
-			&& !context.world->canAgentOperateExtensibleControl(
-				mForceBridge->getTraversalResourceId(), sourceSector,
-				context.world->getAgentId(context.agent)))
+		if (mForceBridge->isExtensible() && context.world && context.agent
+			&& ((locallyObserved && mForceBridge->isExtended()
+				&& !context.world->agentAdheresToExtensiblePermission(
+					mForceBridge->getTraversalResourceId(), sourceSector,
+					source->getPosition(), context.world->getAgentId(context.agent)))
+				|| (!(locallyObserved && mForceBridge->isExtended())
+					&& !context.world->canAgentOperateExtensibleControl(
+						mForceBridge->getTraversalResourceId(), sourceSector,
+						source->getPosition(), context.world->getAgentId(context.agent)))))
 		{
 			facts.exclusionReason = RouteExclusionReason::Permission;
 			return facts;

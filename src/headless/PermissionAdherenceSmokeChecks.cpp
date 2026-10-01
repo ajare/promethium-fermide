@@ -9,6 +9,8 @@
 #include "TagsPanel.h"
 #include "core/Agent.h"
 #include "core/AgentTagRegistry.h"
+#include "core/Edge.h"
+#include "core/RouteCost.h"
 #include "core/SerializationWorkData.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
@@ -131,6 +133,85 @@ namespace
 			"Legacy documents did not receive default-true Permission adherence");
 	}
 
+	void extensibleResourceApproachesAndGrants()
+	{
+		core::World world("Extensible adherence", 12, 3);
+		auto bridgeRoom = world.addRoom("Bridge", 0, 0, 0, 6, 2);
+		world.addSectorWalkway(bridgeRoom, 1, 0);
+		world.addSectorWalkway(bridgeRoom, 1, 3);
+		auto bridge = world.addSectorForceBridge(bridgeRoom, 1, 1,
+			{ 2, CORE_SIDE_LEFT, true, true, 2 });
+		auto ladderRoom = world.addRoom("Ladder", 0, 0, 7, 3, 2);
+		world.addSectorWalkway(ladderRoom, 1, 1);
+		auto ladder = world.addRoomLadder(ladderRoom, 0, 1, { 0, true, true });
+		world.finishBuild(); world.pauseSimulation();
+
+		auto left = world.addAccessPermission("Bridge left");
+		auto low = world.addAccessPermission("Ladder low");
+		std::string diagnostic;
+		require(world.setInteractionPointPermissionRequirement(
+			bridge.controls[0].interactionPoint, { left }, &diagnostic), diagnostic);
+		require(world.setInteractionPointPermissionRequirement(
+			ladder.controls[0].interactionPoint, { low }, &diagnostic), diagnostic);
+		auto leftAgent = world.createAgent("Bridge walker", bridgeRoom, 1, 0.5f);
+		auto ladderAgent = world.createAgent("Ladder climber", ladderRoom, 0, 1.5f);
+		auto bridgeSector = core::SectorId{ static_cast<uint64_t>(bridgeRoom) + 1 };
+		auto ladderSector = core::SectorId{ static_cast<uint64_t>(ladderRoom) + 1 };
+
+		require(!world.agentAdheresToExtensiblePermission(bridge.traversalResource,
+			bridgeSector, { 0.5f, 1.0f }, leftAgent),
+			"Default adherence admitted a protected extended Force Bridge");
+		auto* bridgeWalker = world.lookupAgent(leftAgent).entity;
+		auto const policy = world.getRouteChoicePolicy();
+		core::RouteDecisionContext bridgeContext{ bridgeWalker, policy.baselineProfile, policy,
+			bridgeWalker->getSector(), bridgeWalker->getWalkSpeed(), &world,
+			bridgeWalker->getClimbSpeed() };
+		std::shared_ptr<const core::Edge> bridgeEdge;
+		std::shared_ptr<const core::Vertex> bridgeRight;
+		for (auto const& edge : world.getGraph()->getEdges())
+			if (edge->getTraversalResourceId() == bridge.traversalResource)
+			{
+				bridgeEdge = edge;
+				bridgeRight = edge->getVertex(0)->getPosition().x
+					> edge->getVertex(1)->getPosition().x ? edge->getVertex(0) : edge->getVertex(1);
+				break;
+			}
+		require(bridgeEdge && !bridgeEdge->getDirectedTraversalFacts(
+			bridgeRight, bridgeContext).feasible,
+			"Route planning admitted a protected extended Force Bridge");
+		require(world.agentAdheresToExtensiblePermission(bridge.traversalResource,
+			bridgeSector, { 3.5f, 1.0f }, leftAgent),
+			"A far-side Force Bridge restriction contaminated the unrestricted approach");
+		require(!world.canAgentOperateExtensibleControl(bridge.traversalResource,
+			bridgeSector, { 0.5f, 1.0f }, leftAgent),
+			"An unauthorized Agent could operate a Force Bridge control");
+		require(world.setAgentIndividualPermissionAdherence(leftAgent, false, &diagnostic), diagnostic);
+		require(world.agentAdheresToExtensiblePermission(bridge.traversalResource,
+			bridgeSector, { 0.5f, 1.0f }, leftAgent)
+			&& !world.canAgentOperateExtensibleControl(bridge.traversalResource,
+				bridgeSector, { 0.5f, 1.0f }, leftAgent),
+			"Disabled adherence authorized a protected Force Bridge operation");
+		require(bridgeEdge->getDirectedTraversalFacts(bridgeRight, bridgeContext).feasible,
+			"Route planning did not preserve opportunistic Force Bridge use");
+		require(world.setAgentAccessPermissionGrant(leftAgent, left, true, &diagnostic), diagnostic);
+		require(world.canAgentOperateExtensibleControl(bridge.traversalResource,
+			bridgeSector, { 0.5f, 1.0f }, leftAgent),
+			"A direct grant did not authorize the applicable Force Bridge control");
+
+		require(!world.agentAdheresToExtensiblePermission(ladder.traversalResource,
+			ladderSector, { 8.5f, 0.0f }, ladderAgent),
+			"Default adherence admitted a protected extended Ladder");
+		require(world.agentAdheresToExtensiblePermission(ladder.traversalResource,
+			ladderSector, { 8.5f, 1.0f }, ladderAgent),
+			"A low Ladder restriction contaminated the unrestricted high approach");
+		auto set = world.addPermissionSet("Ladder users");
+		require(world.setPermissionSetAccessPermission(set, low, true, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(ladderAgent, set, true, &diagnostic), diagnostic);
+		require(world.agentAdheresToExtensiblePermission(ladder.traversalResource,
+			ladderSector, { 8.5f, 0.0f }, ladderAgent),
+			"A Permission set grant did not satisfy an extensible Ladder requirement");
+	}
+
 	void historyAndClipboard()
 	{
 		Fixture f;
@@ -180,4 +261,5 @@ void runPermissionAdherenceSmokeChecks()
 	defaultsOverridesAndCompatibility();
 	persistenceCopyAndLegacyDefaults();
 	historyAndClipboard();
+	extensibleResourceApproachesAndGrants();
 }

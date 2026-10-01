@@ -100,10 +100,15 @@ namespace core
 			}
 			extension(*ladder);
 			if (result.type == EdgeType::Ladder && ladder->isExtensible()
-				&& !(result.observed && result.extended) && context.world && context.agent
-				&& !context.world->canAgentOperateExtensibleControl(
-					ladder->getTraversalResourceId(), approachSector,
-					context.world->getAgentId(context.agent)))
+				&& context.world && context.agent
+				&& ((result.observed && result.extended
+					&& !context.world->agentAdheresToExtensiblePermission(
+						ladder->getTraversalResourceId(), approachSector, source->getPosition(),
+						context.world->getAgentId(context.agent)))
+					|| (!(result.observed && result.extended)
+						&& !context.world->canAgentOperateExtensibleControl(
+							ladder->getTraversalResourceId(), approachSector, source->getPosition(),
+							context.world->getAgentId(context.agent)))))
 				result.exclusion = RouteExclusionReason::Permission;
 			if (result.type == EdgeType::LadderMount && ladder->isExtensible()
 				&& source->getType() != VertexType::Ladder && !ladder->hasExtensionControlInSector(sourceSector))
@@ -116,11 +121,15 @@ namespace core
 			extension(*bridge);
 			if (bridge->isExtensible() && (!bridge->hasExtensionControlInSector(sourceSector)
 				|| !bridge->canPrepareFromPosition(source->getPosition().x))) result.exclusion = RouteExclusionReason::PreparationSide;
-			else if (bridge->isExtensible() && !(result.observed && result.extended)
-				&& context.world && context.agent
-				&& !context.world->canAgentOperateExtensibleControl(
-					bridge->getTraversalResourceId(), sourceSector,
-					context.world->getAgentId(context.agent)))
+			else if (bridge->isExtensible() && context.world && context.agent
+				&& ((result.observed && result.extended
+					&& !context.world->agentAdheresToExtensiblePermission(
+						bridge->getTraversalResourceId(), sourceSector, source->getPosition(),
+						context.world->getAgentId(context.agent)))
+					|| (!(result.observed && result.extended)
+						&& !context.world->canAgentOperateExtensibleControl(
+							bridge->getTraversalResourceId(), sourceSector, source->getPosition(),
+							context.world->getAgentId(context.agent)))))
 				result.exclusion = RouteExclusionReason::Permission;
 			break;
 		}
