@@ -211,6 +211,15 @@ bool commitAgentTagMaximumRoutePlanningTimeEdit(
 bool commitAgentTagMaximumRoutePlanningTimeRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
+bool commitAgentTagPermissionAdherenceAdd(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
+bool commitAgentTagPermissionAdherenceEdit(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	bool value, std::string& diagnostic);
+bool commitAgentTagPermissionAdherenceRemove(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
 bool commitAgentTagMobilityProfileAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);

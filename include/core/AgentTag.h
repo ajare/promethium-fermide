@@ -28,6 +28,7 @@ namespace core
 		RoutePersistence,
 		MinimumRoutePlanningTime,
 		MaximumRoutePlanningTime,
+		PermissionAdherence,
 		MobilityProfile
 	};
 
@@ -59,6 +60,7 @@ namespace core
 		case AgentPropertyType::RoutePersistence: return { "Route persistence", "Pathing" };
 		case AgentPropertyType::MinimumRoutePlanningTime: return { "Minimum route planning time", "Pathing" };
 		case AgentPropertyType::MaximumRoutePlanningTime: return { "Maximum route planning time", "Pathing" };
+		case AgentPropertyType::PermissionAdherence: return { "Permission adherence", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -316,6 +318,13 @@ namespace core
 		return true;
 	}
 
+	struct AgentPermissionAdherenceProperty
+	{
+		bool value{ true };
+		uint64_t revision{ 0 };
+		bool operator==(AgentPermissionAdherenceProperty const&) const = default;
+	};
+
 	struct AgentMobilityProfileProperty
 	{
 		MobilityProfile value{};
@@ -387,6 +396,7 @@ namespace core
 		std::optional<AgentRoutePersistenceProperty> mRoutePersistence;
 		std::optional<AgentMinimumRoutePlanningTimeProperty> mMinimumRoutePlanningTime;
 		std::optional<AgentMaximumRoutePlanningTimeProperty> mMaximumRoutePlanningTime;
+		std::optional<AgentPermissionAdherenceProperty> mPermissionAdherence;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -463,6 +473,9 @@ namespace core
 			mMaximumRoutePlanningTime = property;
 		}
 		void removeMaximumRoutePlanningTime() { mMaximumRoutePlanningTime.reset(); }
+		void setPermissionAdherence(AgentPermissionAdherenceProperty property)
+		{ mPermissionAdherence = property; }
+		void removePermissionAdherence() { mPermissionAdherence.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -534,6 +547,10 @@ namespace core
 		AgentMaximumRoutePlanningTimeProperty const* getMaximumRoutePlanningTime() const
 		{
 			return mMaximumRoutePlanningTime ? &*mMaximumRoutePlanningTime : nullptr;
+		}
+		AgentPermissionAdherenceProperty const* getPermissionAdherence() const
+		{
+			return mPermissionAdherence ? &*mPermissionAdherence : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

@@ -179,6 +179,14 @@ namespace core
 		bool individual{ false };
 	};
 
+	struct EffectiveAgentPermissionAdherence
+	{
+		bool value{ true };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
 	struct EffectiveAgentMobilityProfile
 	{
 		MobilityProfile value{};
@@ -289,6 +297,7 @@ namespace core
 		std::optional<float> mIndividualRoutePersistence;
 		std::optional<float> mIndividualMinimumRoutePlanningTime;
 		std::optional<float> mIndividualMaximumRoutePlanningTime;
+		std::optional<bool> mIndividualPermissionAdherence;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -477,6 +486,8 @@ namespace core
 		{ mIndividualMinimumRoutePlanningTime = value; modify(); }
 		void setIndividualMaximumRoutePlanningTime(std::optional<float> value)
 		{ mIndividualMaximumRoutePlanningTime = value; modify(); }
+		void setIndividualPermissionAdherence(std::optional<bool> value)
+		{ mIndividualPermissionAdherence = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -586,6 +597,8 @@ namespace core
 		{ return mIndividualMinimumRoutePlanningTime; }
 		std::optional<float> const& getIndividualMaximumRoutePlanningTime() const
 		{ return mIndividualMaximumRoutePlanningTime; }
+		std::optional<bool> const& getIndividualPermissionAdherence() const
+		{ return mIndividualPermissionAdherence; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -617,6 +630,7 @@ namespace core
 		uint64_t getRoutePlanningRemainingTicks() const { return mRoutePlanningRemainingTicks; }
 		EffectiveAgentMinimumRoutePlanningTime getEffectiveMinimumRoutePlanningTime() const;
 		EffectiveAgentMaximumRoutePlanningTime getEffectiveMaximumRoutePlanningTime() const;
+		EffectiveAgentPermissionAdherence getEffectivePermissionAdherence() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		uint64_t getRouteJourneyIdentity(Vertex const* destination) const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const

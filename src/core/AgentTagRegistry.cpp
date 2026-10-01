@@ -131,6 +131,8 @@ namespace core
 				tag->setMinimumRoutePlanningTime(*minimumPlanningTime);
 			if (auto const* maximumPlanningTime = sourceTag->getMaximumRoutePlanningTime())
 				tag->setMaximumRoutePlanningTime(*maximumPlanningTime);
+			if (auto const* adherence = sourceTag->getPermissionAdherence())
+				tag->setPermissionAdherence(*adherence);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
 				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
@@ -184,6 +186,8 @@ namespace core
 					candidate->getMinimumRoutePlanningTime())
 				|| !optionalPropertyMatches(tag->getMaximumRoutePlanningTime(),
 					candidate->getMaximumRoutePlanningTime())
+				|| !optionalPropertyMatches(tag->getPermissionAdherence(),
+					candidate->getPermissionAdherence())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
 					candidate->getMobilityProfile())) return false;
 		}
@@ -438,6 +442,16 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getMaximumRoutePlanningTime();
+	}
+
+	AgentPermissionAdherenceProperty const*
+	AgentTagRegistry::getAgentTagPermissionAdherence(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getPermissionAdherence();
 	}
 
 	AgentMobilityProfileProperty const*
@@ -1025,6 +1039,30 @@ namespace core
 					auto const* source = mTags.find(assigned);
 					if (source && source->getMaximumRoutePlanningTime()) return reject(std::format(
 						"Cannot add Maximum route planning time to Agent tag #{}: Agent '{}' in World '{}' already inherits Maximum route planning time from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::permissionAdherenceAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (source && source->getPermissionAdherence()) return reject(std::format(
+						"Cannot add Permission adherence to Agent tag #{}: Agent '{}' in World '{}' already inherits Permission adherence from #{}",
 						target->getName(), agent->getName(), world->getName(), source->getName()));
 				}
 			}
@@ -1862,6 +1900,68 @@ namespace core
 		return true;
 	}
 
+	bool AgentTagRegistry::addAgentTagPermissionAdherence(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getPermissionAdherence()) return reject(std::format(
+			"Agent tag #{} already has Permission adherence", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!permissionAdherenceAdditionIsValid(id, diagnostic)) return false;
+		try { tag->setPermissionAdherence({ true, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::setAgentTagPermissionAdherence(AgentTagId id, bool value,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getPermissionAdherence();
+		if (!current) return reject(std::format("Agent tag #{} has no Permission adherence", tag->getName()));
+		if (current->value == value) return reject("The Agent Permission adherence is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		try { tag->setPermissionAdherence({ value, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id) && !agent->getIndividualPermissionAdherence())
+				{
+					if (value) world->replanAgentAfterAuthorizationRefusal(agentId);
+					else world->beginVoluntaryRoutePlanning(agentId);
+				}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::removeAgentTagPermissionAdherence(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getPermissionAdherence()) return reject(std::format(
+			"Agent tag #{} has no Permission adherence", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		auto const adherenceChanged = !tag->getPermissionAdherence()->value;
+		tag->removePermissionAdherence();
+		if (adherenceChanged)
+			for (auto* world : mLoadedWorlds) if (world)
+				for (auto const& [agentId, agent] : world->mAgents.entries())
+					if (agent && agent->hasAgentTag(id) && !agent->getIndividualPermissionAdherence())
+						world->replanAgentAfterAuthorizationRefusal(agentId);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool AgentTagRegistry::addAgentTagMobilityProfile(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -2271,7 +2371,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 13);
+		serializer.writeUint32("version", 14);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -2303,8 +2403,9 @@ namespace core
 			auto const* minimumPlanningTime = tag->getMinimumRoutePlanningTime();
 			auto const* maximumPlanningTime = tag->getMaximumRoutePlanningTime();
 			auto const* chance = tag->getEscalatorWalkingChance();
+			auto const* adherence = tag->getPermissionAdherence();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || mobility)
+			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || adherence || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -2348,6 +2449,14 @@ namespace core
 				if (persistence) writeModifier("routePersistence", *persistence);
 				if (minimumPlanningTime) writeModifier("minimumRoutePlanningTime", *minimumPlanningTime);
 				if (maximumPlanningTime) writeModifier("maximumRoutePlanningTime", *maximumPlanningTime);
+				if (adherence)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "permissionAdherence");
+					serializer.writeUint64("revision", adherence->revision);
+					serializer.writeBool("value", adherence->value);
+					serializer.endMap();
+				}
 				if (mobility)
 				{
 					serializer.beginMap("");
@@ -2368,7 +2477,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 13)
+		if (version < 1 || version > 14)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -2426,6 +2535,7 @@ namespace core
 				bool hasRoutePersistence{ false };
 				bool hasMinimumRoutePlanningTime{ false };
 				bool hasMaximumRoutePlanningTime{ false };
+				bool hasPermissionAdherence{ false };
 				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
@@ -2445,7 +2555,8 @@ namespace core
 						&& !(version >= 11 && type == "routeFamiliarity")
 						&& !(version >= 12 && type == "routePersistence")
 						&& !(version >= 13 && type == "minimumRoutePlanningTime")
-						&& !(version >= 13 && type == "maximumRoutePlanningTime"))
+						&& !(version >= 13 && type == "maximumRoutePlanningTime")
+						&& !(version >= 14 && type == "permissionAdherence"))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -2494,6 +2605,9 @@ namespace core
 					if (type == "maximumRoutePlanningTime" && hasMaximumRoutePlanningTime)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Maximum route planning time", name));
+					if (type == "permissionAdherence" && hasPermissionAdherence)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Permission adherence", name));
 					if (type == "mobilityProfile" && hasMobilityProfile)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Mobility profile",
@@ -2517,6 +2631,11 @@ namespace core
 							serializer.readUint8("b") };
 						tag->setColour({ colour, revision });
 						hasColour = true;
+					}
+					else if (type == "permissionAdherence")
+					{
+						tag->setPermissionAdherence({ serializer.readBool("value"), revision });
+						hasPermissionAdherence = true;
 					}
 					else if (type == "mobilityProfile")
 					{

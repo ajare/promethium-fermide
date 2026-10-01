@@ -707,7 +707,7 @@ namespace core
 			InteractionPoint const& point, Agent const& agent) const;
 		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;
 		void replanAgentsAffectedByControlRequirement(TraversalResourceId resource,
-			std::bitset<256> const& requirement);
+			std::bitset<256> const& previous, std::bitset<256> const& next);
 		void reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
 			bool gained);
 
@@ -2154,6 +2154,8 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMaximumRoutePlanningTime(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualPermissionAdherence(AgentId agent,
+			std::optional<bool> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
 			std::optional<MobilityProfile> value, std::string* diagnostic = nullptr);
 
@@ -2405,6 +2407,11 @@ namespace core
 			TraversalResourceId door) const;
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
 		bool canAgentOperateDoorControl(TraversalResourceId door, SectorId approach,
+			AgentId agent) const;
+		// Permission adherence is willingness, not authorization: this checks only
+		// whether an ordinary Door's applicable approach-side control requirements
+		// are compatible with the Agent's effective property and grants.
+		bool agentAdheresToDoorPermission(TraversalResourceId door, SectorId approach,
 			AgentId agent) const;
 		bool canAgentOperateExtensibleControl(TraversalResourceId resource,
 			SectorId approach, AgentId agent) const;

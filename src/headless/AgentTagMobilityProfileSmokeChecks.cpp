@@ -58,7 +58,7 @@ void runAgentTagMobilityProfileSmokeChecks()
 	require(registry->getAgentTagMobilityProfile(tag)->value == profile,
 		"A ternary Mobility profile did not round-trip in memory");
 	auto const serialized = serialize(*registry);
-	require(serialized.find("version: 13") != std::string::npos
+	require(serialized.find("version: 14") != std::string::npos
 		&& serialized.find("onlyIfNoOtherOption") != std::string::npos,
 		"A ternary Mobility profile was not serialized explicitly");
 

@@ -202,6 +202,10 @@ namespace core
 				&& !context.world->canAgentOperateDoorControl(door.getTraversalResourceId(),
 					sourceSector, context.world->getAgentId(context.agent)))
 				result.exclusion = RouteExclusionReason::Permission;
+			if (result.type == EdgeType::Door && result.open && context.world && context.agent
+				&& !context.world->agentAdheresToDoorPermission(door.getTraversalResourceId(),
+					sourceSector, context.world->getAgentId(context.agent)))
+				result.exclusion = RouteExclusionReason::Permission;
 			auto const routeAgent = context.world && context.agent
 				? context.world->getAgentId(context.agent) : AgentId{};
 			// A Lift body is segmented at intermediate Stops. Test the actual

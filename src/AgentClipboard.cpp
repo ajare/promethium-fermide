@@ -559,6 +559,7 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualMinimumRoutePlanningTime = lookup.entity->getIndividualMinimumRoutePlanningTime();
 	payload.maximumRoutePlanningTimeSample = lookup.entity->getMaximumRoutePlanningTimeSample();
 	payload.individualMaximumRoutePlanningTime = lookup.entity->getIndividualMaximumRoutePlanningTime();
+	payload.individualPermissionAdherence = lookup.entity->getIndividualPermissionAdherence();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -671,6 +672,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualMaximumRoutePlanningTime)
 		output << YAML::Key << "maximumRoutePlanningTime" << YAML::Value
 			<< *payload.individualMaximumRoutePlanningTime;
+	if (payload.individualPermissionAdherence)
+		output << YAML::Key << "permissionAdherence" << YAML::Value
+			<< *payload.individualPermissionAdherence;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -970,6 +974,16 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		if (!core::agentMaximumRoutePlanningTimeRangeIsValid({ value, value }, &diagnostic))
 			return false;
 		payload.individualMaximumRoutePlanningTime = value;
+	}
+
+	if (object["permissionAdherence"])
+	{
+		try { payload.individualPermissionAdherence = object["permissionAdherence"].as<bool>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Permission adherence must be a boolean";
+			return false;
+		}
 	}
 
 	// An absent `group` is an ungrouped Agent, which is exactly how a
@@ -1571,6 +1585,18 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				payload.individualMaximumRoutePlanningTime, &propertyDiagnostic))
 			{
 				diagnostic = "The pasted Agent's Maximum route planning time could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+
+		if (payload.individualPermissionAdherence)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualPermissionAdherence(agentId,
+				payload.individualPermissionAdherence, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Permission adherence could not be restored: "
 					+ propertyDiagnostic + rollBack();
 				return false;
 			}

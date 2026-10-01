@@ -346,6 +346,7 @@ add_executable(prometheum-fermide-headless
     src/headless/AgentHeightSmokeChecks.cpp
     src/headless/AgentIndividualPropertySmokeChecks.cpp
     src/headless/RoutePlanningTimePropertySmokeChecks.cpp
+    src/headless/PermissionAdherenceSmokeChecks.cpp
     src/headless/RoutePlanningSmokeChecks.cpp
     src/headless/AgentPathRenderSmokeChecks.cpp
     src/headless/AgentBehaviourRegistrySmokeChecks.cpp

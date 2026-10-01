@@ -22,6 +22,7 @@
 #include "DocumentEdit.h"
 
 void runAccessPermissionSmokeChecks();
+void runPermissionAdherenceSmokeChecks();
 
 namespace
 {
@@ -273,9 +274,19 @@ namespace
 		auto localAgentId = world.createAgent("local observer", front, 0, 2.5f);
 		auto localAgent = world.lookupAgent(localAgentId).entity;
 		door->requestOpen(); door->update(10.0f);
+		require(localAgent->getEffectivePermissionAdherence().value,
+			"Permission adherence was not default true");
+		require(!world.agentAdheresToDoorPermission(protectedDoor.traversalResource,
+			core::SectorId{ static_cast<uint64_t>(front) + 1 }, localAgentId),
+			"Open manual Door adherence did not detect the unsatisfied requirement");
+		require(chosenDoor(graph->calculatePath(localAgent, frontVertex, backVertex))
+			== openDoor.traversalResource,
+			"default Permission adherence admitted an unauthorized open manual Door");
+		world.pauseSimulation();
+		require(world.setAgentIndividualPermissionAdherence(localAgentId, false, &diagnostic), diagnostic);
 		require(chosenDoor(graph->calculatePath(localAgent, frontVertex, backVertex))
 			== protectedDoor.traversalResource,
-			"unauthorized Agent could not use a locally observed open Door");
+			"disabled Permission adherence did not preserve opportunistic open-Door passage");
 		core::RouteDecisionContext remote{ localAgent, {}, {}, nullptr, localAgent->getWalkSpeed(), &world };
 		for (auto const& edge : graph->getEdges())
 			if (edge->getTraversalResourceId() == protectedDoor.traversalResource)
@@ -447,8 +458,9 @@ namespace
 			"obsolete direct Door requirement survived control conversion");
 
 		// Routing evaluates the control on the approach side without consulting a
-		// remote live state. Once this same threshold is locally observed open, the
-		// requirement no longer blocks passage.
+		// remote live state. A locally observed open threshold remains permission-
+		// based passage for an adhering Agent, while disabling adherence restores
+		// opportunistic use.
 		auto agentId = world.createAgent("unauthorized", front, 0, 1.5f);
 		auto agent = world.lookupAgent(agentId).entity;
 		auto graph = world.getGraph();
@@ -466,8 +478,11 @@ namespace
 		liveDoor->requestOpen(); liveDoor->update(10.0f);
 		core::RouteDecisionContext local{ agent, {}, {}, world.getSector(front).get(),
 			agent->getWalkSpeed(), &world };
+		require(!doorEdge->getDirectedTraversalFacts(target, local).feasible,
+			"default Permission adherence admitted an unauthorized open controlled Door");
+		require(world.setAgentIndividualPermissionAdherence(agentId, false, &diagnostic), diagnostic);
 		require(doorEdge->getDirectedTraversalFacts(target, local).feasible,
-			"locally observed open Door did not permit unauthorized passage");
+			"disabled Permission adherence did not permit opportunistic open-Door passage");
 
 		auto controls = resource.entity->getControls();
 		require(world.resumeSimulation(), "controlled Door runtime fixture did not resume");
@@ -1460,4 +1475,5 @@ void runAccessPermissionSmokeChecks()
 	changingLiftDestinationAuthorization();
 	runtimePropertiesPanelChangesCurrentAuthorizationOnly();
 	panelCommitParticipatesInHistory();
+	runPermissionAdherenceSmokeChecks();
 }

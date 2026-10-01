@@ -259,6 +259,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualMaximumRoutePlanningTime().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMaximumRoutePlanningTime(
 				agent, enabled ? optional<float>{ 3.0f } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::PermissionAdherence),
+			target->getIndividualPermissionAdherence().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualPermissionAdherence(
+				agent, enabled ? optional<bool>{ true } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -343,6 +347,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		|| target->getIndividualCrowdAversion() || target->getIndividualRoutePersistence()
 		|| target->getIndividualCrowdAversion() || target->getIndividualMinimumRoutePlanningTime()
 		|| target->getIndividualCrowdAversion() || target->getIndividualMaximumRoutePlanningTime()
+		|| target->getIndividualPermissionAdherence().has_value()
 		|| target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
@@ -608,6 +613,25 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
+	if (target->getIndividualPermissionAdherence())
+	{
+		auto value = *target->getIndividualPermissionAdherence();
+		if (ImGui::Checkbox("Permission adherence##individual", &value))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualPermissionAdherence(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualPermissionAdherence"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualPermissionAdherence(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
@@ -796,6 +820,14 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	};
 	planningTime("Minimum route planning time", minimumPlanningTime);
 	planningTime("Maximum route planning time", maximumPlanningTime);
+
+	auto const adherence = lookup.entity->getEffectivePermissionAdherence();
+	if (adherence.individual)
+		ImGui::Text("Permission adherence: %s (individual)", adherence.value ? "true" : "false");
+	else if (adherence.sourceTag && world->hasAttachedAgentTagRegistry())
+		ImGui::Text("Permission adherence: %s from #%s", adherence.value ? "true" : "false",
+			world->getAgentTagRegistry()->getAgentTagName(adherence.sourceTag).c_str());
+	else ImGui::TextUnformatted("Permission adherence: true (default)");
 
 	auto const mobility = lookup.entity->getEffectiveMobilityProfile();
 	auto const mobilitySummary = mobilityProfileSummary(mobility.value);

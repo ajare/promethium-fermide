@@ -134,6 +134,7 @@ struct AgentClipboardPayload
 	std::optional<float> individualMinimumRoutePlanningTime;
 	std::optional<core::AgentPropertySample> maximumRoutePlanningTimeSample;
 	std::optional<float> individualMaximumRoutePlanningTime;
+	std::optional<bool> individualPermissionAdherence;
 
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.
 	// Marker configuration values have already been replaced by names.

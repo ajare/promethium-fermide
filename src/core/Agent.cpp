@@ -183,6 +183,7 @@ namespace core
 			|| mIndividualRoutePersistence
 			|| mIndividualMinimumRoutePlanningTime
 			|| mIndividualMaximumRoutePlanningTime
+			|| mIndividualPermissionAdherence.has_value()
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -233,6 +234,12 @@ namespace core
 				writeFloatProperty("minimumRoutePlanningTime", *mIndividualMinimumRoutePlanningTime);
 			if (mIndividualMaximumRoutePlanningTime)
 				writeFloatProperty("maximumRoutePlanningTime", *mIndividualMaximumRoutePlanningTime);
+			if (mIndividualPermissionAdherence)
+			{
+				beginProperty("permissionAdherence");
+				serializer.writeBool("value", *mIndividualPermissionAdherence);
+				serializer.endMap();
+			}
 			if (mIndividualMobilityProfile)
 			{
 				beginProperty("mobilityProfile");
@@ -349,6 +356,7 @@ namespace core
 		mIndividualRoutePersistence.reset();
 		mIndividualMinimumRoutePlanningTime.reset();
 		mIndividualMaximumRoutePlanningTime.reset();
+		mIndividualPermissionAdherence.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -489,6 +497,12 @@ namespace core
 					if (!agentMaximumRoutePlanningTimeRangeIsValid({ value, value }))
 						throw SerializationException("Serialized individual Maximum route planning time is invalid");
 					mIndividualMaximumRoutePlanningTime = value;
+				}
+				else if (type == "permissionAdherence")
+				{
+					if (mIndividualPermissionAdherence)
+						throw SerializationException("Serialized Agent contains more than one individual Permission adherence");
+					mIndividualPermissionAdherence = serializer.readBool("value");
 				}
 				else if (type == "mobilityProfile")
 				{
@@ -695,6 +709,21 @@ namespace core
 				if (definition)
 					if (auto const* property = definition->getEscalatorWalkingChance())
 						return { property->value, tag };
+			}
+		return {};
+	}
+
+	EffectiveAgentPermissionAdherence Agent::getEffectivePermissionAdherence() const
+	{
+		if (mIndividualPermissionAdherence)
+			return { *mIndividualPermissionAdherence, {}, 0, true };
+		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
+			for (auto const tag : mAgentTags)
+			{
+				auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag);
+				if (definition)
+					if (auto const* property = definition->getPermissionAdherence())
+						return { property->value, tag, property->revision, false };
 			}
 		return {};
 	}

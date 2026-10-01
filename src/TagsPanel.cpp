@@ -621,6 +621,7 @@ namespace
 		auto const* persistence = registry->getAgentTagRoutePersistence(id);
 		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
 		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
+		auto const* adherence = registry->getAgentTagPermissionAdherence(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		if (chance)
@@ -687,7 +688,7 @@ namespace
 		}
 
 		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk
-			|| minimumPlanningTime || maximumPlanningTime || pathingMobility)
+			|| minimumPlanningTime || maximumPlanningTime || adherence || pathingMobility)
 			renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 		if (stairSpeed)
 		{
@@ -1060,6 +1061,25 @@ namespace
 			}
 		}
 
+		if (adherence)
+		{
+			auto value = adherence->value;
+			if (ImGui::Checkbox(propertyName(core::AgentPropertyType::PermissionAdherence), &value))
+			{
+				string diagnostic;
+				if (!commitAgentTagPermissionAdherenceEdit(registry, id, value, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removePermissionAdherence"))
+			{
+				string diagnostic;
+				if (!commitAgentTagPermissionAdherenceRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else adherence = nullptr;
+			}
+		}
+
 		auto const* mobility = pathingMobility;
 		if (mobility)
 		{
@@ -1144,11 +1164,12 @@ namespace
 		auto const* persistence = registry->getAgentTagRoutePersistence(id);
 		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
 		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
+		auto const* adherence = registry->getAgentTagPermissionAdherence(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
 			|| !crowd || !risk || !familiarity || !persistence
-			|| !minimumPlanningTime || !maximumPlanningTime || !mobility;
+			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility;
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -1177,7 +1198,7 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !mobility)
+			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
@@ -1273,6 +1294,13 @@ namespace
 				if (!commitAgentTagMaximumRoutePlanningTimeAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagMaximumRoutePlanningTimeEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!adherence && ImGui::Selectable(propertyName(core::AgentPropertyType::PermissionAdherence)))
+			{
+				string diagnostic;
+				if (!commitAgentTagPermissionAdherenceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				ImGui::CloseCurrentPopup();
 			}
 			if (!mobility && ImGui::Selectable(propertyName(core::AgentPropertyType::MobilityProfile)))
@@ -2613,6 +2641,30 @@ bool commitAgentTagMaximumRoutePlanningTimeRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Maximum route planning time",
 		[id](auto& target, string* out) { return target.removeAgentTagMaximumRoutePlanningTime(id, out); });
+}
+
+bool commitAgentTagPermissionAdherenceAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Permission adherence",
+		[id](auto& target, string* out) { return target.addAgentTagPermissionAdherence(id, out); });
+}
+
+bool commitAgentTagPermissionAdherenceEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, bool value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Permission adherence",
+		[id, value](auto& target, string* out) { return target.setAgentTagPermissionAdherence(id, value, out); });
+}
+
+bool commitAgentTagPermissionAdherenceRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Permission adherence",
+		[id](auto& target, string* out) { return target.removeAgentTagPermissionAdherence(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

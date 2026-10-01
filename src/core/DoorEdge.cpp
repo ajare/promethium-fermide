@@ -76,6 +76,18 @@ namespace core
 			facts.feasible = false;
 			facts.exclusionReason = RouteExclusionReason::Permission;
 		}
+		// An open Door needs no operation, but an adhering Agent still declines
+		// permission-based passage when every applicable approach-side control is
+		// protected by requirements it does not satisfy.
+		if (facts.feasible && locallyOpen && context.world && context.agent && source
+			&& !context.world->agentAdheresToDoorPermission(
+				mDoor->getTraversalResourceId(),
+				SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 },
+				context.world->getAgentId(context.agent)))
+		{
+			facts.feasible = false;
+			facts.exclusionReason = RouteExclusionReason::Permission;
+		}
 		return facts;
 	}
 

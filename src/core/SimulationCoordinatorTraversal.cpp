@@ -168,6 +168,13 @@ namespace core
 			{
 				return; // deactivation cleanup denies waiters after active lanes drain
 			}
+			if (resource->mDoor->isOpen()
+				&& !mWorld.agentAdheresToDoorPermission(request->mResource,
+					request->mSourceSector, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				return;
+			}
 			if (resource->mDoorActivationMode == DoorActivationMode::Unavailable)
 			{
 				denyTraversalRequest(requestId);

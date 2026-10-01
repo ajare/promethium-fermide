@@ -1151,6 +1151,7 @@ namespace core
 			AgentTagId routePersistenceSource{};
 			AgentTagId minimumRoutePlanningTimeSource{};
 			AgentTagId maximumRoutePlanningTimeSource{};
+			AgentTagId permissionAdherenceSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -1329,6 +1330,15 @@ namespace core
 							definition->getName()));
 					maximumRoutePlanningTimeSource = tag;
 					maximumRoutePlanningTimeProperty = property;
+				}
+				if (definition->getPermissionAdherence())
+				{
+					if (permissionAdherenceSource)
+						return reject(format(
+							"Agent '{}' inherits Permission adherence from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(permissionAdherenceSource),
+							definition->getName()));
+					permissionAdherenceSource = tag;
 				}
 				if (definition->getMobilityProfile())
 				{
@@ -1717,8 +1727,8 @@ namespace core
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
-			(void)agentId;
 			if (!agent || !agent->hasAgentTag(id)) continue;
+			auto const adherenceBefore = agent->getEffectivePermissionAdherence().value;
 			agent->removeAgentTag(id);
 			if (agent->getWalkSpeedModifierSample()
 				&& agent->getWalkSpeedModifierSample()->sourceTag == id)
@@ -1759,6 +1769,12 @@ namespace core
 			if (agent->getMaximumRoutePlanningTimeSample()
 				&& agent->getMaximumRoutePlanningTimeSample()->sourceTag == id)
 				agent->clearMaximumRoutePlanningTimeSample();
+			auto const adherenceAfter = agent->getEffectivePermissionAdherence().value;
+			if (adherenceBefore != adherenceAfter)
+			{
+				if (adherenceAfter) replanAgentAfterAuthorizationRefusal(agentId);
+				else beginVoluntaryRoutePlanning(agentId);
+			}
 			changed = true;
 		}
 		if (changed) modify();
@@ -1769,8 +1785,8 @@ namespace core
 		invalidateSimulationSnapshot();
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
-			(void)agentId;
 			if (!agent) continue;
+			auto const adherenceBefore = agent->getEffectivePermissionAdherence().value;
 			agent->setAgentTags({});
 			agent->clearWalkSpeedModifierSample();
 			agent->clearHeightModifierSample();
@@ -1780,6 +1796,12 @@ namespace core
 			agent->clearEffortAversionSample();
 			agent->clearWaitingAversionSample();
 			agent->clearCrowdAversionSample();
+			auto const adherenceAfter = agent->getEffectivePermissionAdherence().value;
+			if (adherenceBefore != adherenceAfter)
+			{
+				if (adherenceAfter) replanAgentAfterAuthorizationRefusal(agentId);
+				else beginVoluntaryRoutePlanning(agentId);
+			}
 		}
 	}
 
@@ -8689,6 +8711,35 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualPermissionAdherence(AgentId id,
+		optional<bool> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualPermissionAdherence() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Permission adherence is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		auto const before = lookup.entity->getEffectivePermissionAdherence().value;
+		lookup.entity->setIndividualPermissionAdherence(value);
+		auto const after = lookup.entity->getEffectivePermissionAdherence().value;
+		if (before != after)
+		{
+			if (after) replanAgentAfterAuthorizationRefusal(id);
+			else beginVoluntaryRoutePlanning(id);
+		}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<MobilityProfile> value, string* diagnostic)
 	{
@@ -9081,6 +9132,12 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Maximum route planning time is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getPermissionAdherence() && source->getPermissionAdherence())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Permission adherence is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -9190,6 +9247,7 @@ namespace core
 				SampledAgentPropertyType::MaximumRoutePlanningTime, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
@@ -9204,6 +9262,12 @@ namespace core
 		if (routePersistenceSample) target->setRoutePersistenceSample(*routePersistenceSample);
 		if (minimumRoutePlanningTimeSample) target->setMinimumRoutePlanningTimeSample(*minimumRoutePlanningTimeSample);
 		if (maximumRoutePlanningTimeSample) target->setMaximumRoutePlanningTimeSample(*maximumRoutePlanningTimeSample);
+		auto const adherenceAfter = target->getEffectivePermissionAdherence().value;
+		if (adherenceBefore != adherenceAfter)
+		{
+			if (adherenceAfter) replanAgentAfterAuthorizationRefusal(agent);
+			else beginVoluntaryRoutePlanning(agent);
+		}
 		modify();
 		return true;
 	}
@@ -9238,6 +9302,7 @@ namespace core
 		invalidateSimulationSnapshot();
 		if (!canRemoveAgentTag(agent, tag, diagnostic)) return false;
 		auto* target = mAgents.find(agent);
+		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
 		target->removeAgentTag(tag);
 		if (target->getWalkSpeedModifierSample()
 			&& target->getWalkSpeedModifierSample()->sourceTag == tag)
@@ -9278,6 +9343,12 @@ namespace core
 		if (target->getMaximumRoutePlanningTimeSample()
 			&& target->getMaximumRoutePlanningTimeSample()->sourceTag == tag)
 			target->clearMaximumRoutePlanningTimeSample();
+		auto const adherenceAfter = target->getEffectivePermissionAdherence().value;
+		if (adherenceBefore != adherenceAfter)
+		{
+			if (adherenceAfter) replanAgentAfterAuthorizationRefusal(agent);
+			else beginVoluntaryRoutePlanning(agent);
+		}
 		modify();
 		return true;
 	}
@@ -9332,6 +9403,7 @@ namespace core
 		AgentTagId routePersistenceSource{};
 		AgentTagId minimumRoutePlanningTimeSource{};
 		AgentTagId maximumRoutePlanningTimeSource{};
+		AgentTagId permissionAdherenceSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -9471,6 +9543,13 @@ namespace core
 						mAgentTagRegistry->getAgentTagName(maximumRoutePlanningTimeSource), definition->getName()));
 				maximumRoutePlanningTimeSource = tag;
 				maximumRoutePlanningTimeProperty = property;
+			}
+			if (definition->getPermissionAdherence())
+			{
+				if (permissionAdherenceSource)
+					return reject(format("Permission adherence is inherited from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(permissionAdherenceSource), definition->getName()));
+				permissionAdherenceSource = tag;
 			}
 			if (definition->getMobilityProfile())
 			{
@@ -10352,6 +10431,7 @@ namespace core
 			next.set(bit);
 		}
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
+		auto const previous = point->mPermissionRequirement;
 		point->mPermissionRequirement = next;
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
@@ -10360,7 +10440,7 @@ namespace core
 			if (!usesPoint)
 				usesPoint = any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
 					[id](auto const& stop) { return stop.callControl == id; });
-			if (usesPoint) replanAgentsAffectedByControlRequirement(resourceId, next);
+			if (usesPoint) replanAgentsAffectedByControlRequirement(resourceId, previous, next);
 		}
 		if (auto authored = mAuthoredControlRequirements.find(id);
 			authored != mAuthoredControlRequirements.end()
@@ -10493,6 +10573,7 @@ namespace core
 		auto resource = mTraversalResources.find(id);
 		if (resource->mDoor->mPermissionRequirement == next)
 		{ if (diagnostic) diagnostic->clear(); return true; }
+		auto const previous = resource->mDoor->mPermissionRequirement;
 		auto door = resource->mDoor;
 		auto record = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
 			[&](ConstructionRecord const& value)
@@ -10509,7 +10590,7 @@ namespace core
 		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
 			if (next.test(bit)) record->values.push_back(static_cast<uint32_t>(bit + 1));
 		resource->mDoor->mPermissionRequirement = next;
-		replanAgentsAffectedByControlRequirement(id, next);
+		replanAgentsAffectedByControlRequirement(id, previous, next);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -10544,10 +10625,39 @@ namespace core
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
-			if (point && point->mSector == approach)
-				return missingInteractionPermissions(*point, *agent).empty();
+			if (point && point->mSector == approach
+				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
+	}
+
+	bool World::agentAdheresToDoorPermission(TraversalResourceId doorId,
+		SectorId approach, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !resource->mDoor || !agent) return false;
+		// This slice applies only to ordinary Doors. Transport and Bulkhead Door
+		// adherence remain separate resource slices.
+		if (dynamic_pointer_cast<BulkheadDoor>(resource->mDoor)
+			|| resource->mLiftCoordinator || resource->mShuttle) return true;
+		if (!agent->getEffectivePermissionAdherence().value) return true;
+		if (resource->mDoorActivationMode == DoorActivationMode::Manual)
+			return agentSatisfiesDoorPermission(*resource->mDoor, *agent);
+		if (resource->mDoorActivationMode != DoorActivationMode::RemoteControlled)
+			return true;
+
+		bool applicableControl{ false };
+		for (auto pointId : resource->mControls)
+		{
+			auto point = mInteractionPoints.find(pointId);
+			if (!point || point->mSector != approach) continue;
+			applicableControl = true;
+			if (missingInteractionPermissions(*point, *agent).empty()) return true;
+		}
+		// No approach-side control means there is no applicable requirement to
+		// adhere to; requirements on the opposite side are deliberately ignored.
+		return !applicableControl;
 	}
 
 	bool World::canAgentOperateExtensibleControl(TraversalResourceId resourceId,
@@ -10691,10 +10801,22 @@ namespace core
 	}
 
 	void World::replanAgentsAffectedByControlRequirement(TraversalResourceId resource,
-		bitset<256> const& requirement)
+		bitset<256> const& previous, bitset<256> const& next)
 	{
 		for (auto const& [agentId, agent] : mAgents.entries())
 		{
+			auto const grants = effectiveAccessGrants(*agent);
+			auto const satisfiedBefore = (previous & ~grants).none();
+			auto const satisfiedAfter = (next & ~grants).none();
+			if (satisfiedBefore == satisfiedAfter) continue;
+			if (satisfiedAfter)
+			{
+				// Loosening a requirement may reveal a preferable alternate route,
+				// but does not invalidate the Agent's current Path.
+				beginVoluntaryRoutePlanning(agentId);
+				continue;
+			}
+
 			auto goal = mMovementGoals.find(agentId);
 			auto path = agent->mPath.path;
 			auto fromNode = agent->mPath.targetNode;
@@ -10703,19 +10825,16 @@ namespace core
 				path = goal->second.retainedPath;
 				fromNode = goal->second.retainedFromNode;
 			}
-			if ((requirement & ~effectiveAccessGrants(*agent)).none()
-				|| !path || path->nodes.empty()) continue;
-			bool affected = false;
+			if (!path || path->nodes.empty()) continue;
 			for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
 			{
 				auto const& edge = path->nodes[i].edge;
 				if (edge && edge->getTraversalResourceId() == resource)
 				{
-					affected = true;
+					replanAgentAfterAuthorizationRefusal(agentId);
 					break;
 				}
 			}
-			if (affected) replanAgentAfterAuthorizationRefusal(agentId);
 		}
 	}
 

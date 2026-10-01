@@ -70,6 +70,10 @@ _Avoid_: Edge weight, actual travel time
 An Agent property from 0.5 through 1.5 that multiplies physical and estimated movement speed on stationary Staircases and Stairwells. Its neutral default is 1; it does not alter Ladder speed or moving Escalator belt speed.
 _Avoid_: Walk speed modifier, effort aversion
 
+**Permission adherence**:
+A boolean Agent property expressing whether the Agent is willing to use an already usable resource when it does not satisfy the applicable permission requirements for operating that resource from its approach side. Its default is true. It changes route and traversal choices but grants no Access permission and does not create a physical authorization barrier. Enforcement currently covers ordinary manual and control-operated Doors; other resource slices remain to be implemented.
+_Avoid_: Access permission, Location permission requirement
+
 **Interaction aversion**:
 An Agent property from 0 through 3 that weights the perceived inconvenience of Door activation and threshold interaction. Its neutral default is 1; it changes route preference, not whether an interaction is possible.
 _Avoid_: Mobility profile, interaction capability

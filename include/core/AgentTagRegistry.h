@@ -79,6 +79,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool maximumRoutePlanningTimeAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool permissionAdherenceAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		bool mobilityProfileAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		void registerWorld(World& world);
@@ -133,6 +135,8 @@ namespace core
 		AgentMinimumRoutePlanningTimeProperty const* getAgentTagMinimumRoutePlanningTime(
 			AgentTagId id) const;
 		AgentMaximumRoutePlanningTimeProperty const* getAgentTagMaximumRoutePlanningTime(
+			AgentTagId id) const;
+		AgentPermissionAdherenceProperty const* getAgentTagPermissionAdherence(
 			AgentTagId id) const;
 		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
@@ -272,6 +276,13 @@ namespace core
 		bool setAgentTagMaximumRoutePlanningTime(AgentTagId id, AgentModifierRange range,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagMaximumRoutePlanningTime(AgentTagId id,
+			std::string* diagnostic = nullptr);
+
+		bool addAgentTagPermissionAdherence(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool setAgentTagPermissionAdherence(AgentTagId id, bool value,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagPermissionAdherence(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagMobilityProfile(AgentTagId id,
