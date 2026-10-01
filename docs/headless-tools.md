@@ -8,6 +8,8 @@ cmake -S . -B build-tools -DPF_BUILD_GUI=OFF -DBUILD_TESTING=OFF
 cmake --build build-tools --target pf-restoration-benchmark
 cmake --build build-tools --target pf-generate-routing-world
 cmake --build build-tools --target pf-metrics-server
+cmake --build build-tools --target pf-lift-repro
+cmake --build build-tools --target pf-pause-position-repro
 ```
 
 Executables are in `build-tools/bin/x64/Release` (or `Debug`), with `.exe` on
@@ -40,6 +42,32 @@ Each cycle prints the existing `restoration-cycle=`, `reload-ms=`, `reset-ms=`,
 not pass/fail thresholds; peak working set remains unavailable (reported as 0)
 on Linux. `PF_RESTORATION_TIMING=1` enables nested production phase timings.
 Input documents and their registries are not rewritten.
+
+## Lift reproductions
+
+```sh
+pf-lift-repro crossing lift-test-1.world.yaml
+pf-lift-repro boarding lift-test-1.world.yaml
+```
+
+`crossing` verifies the full fixture and its two-Agent reduction, reporting any
+boarding grant outside the Lift landing Door's crossing band. `boarding` verifies
+the full fixture and its five-Agent opposing-direction reduction, requiring Lift
+demand to drain and each reduced journey to finish. Both preserve the former
+`--lift-crossing-repro` and `--lift-stall-repro` workflows without linking a
+smoke runner.
+
+## Pause-position reproduction
+
+```sh
+pf-pause-position-repro minimal
+pf-pause-position-repro document.world.yaml
+```
+
+`minimal` runs the existing in-memory walking, Path-clear, Staircase, and
+Stairwell diagnostics using the checked-in fixtures. A World path runs the
+existing sampled full-document diagnostic, reloading and pausing it every 30
+ticks from tick 30 through 1,800. Neither mode modifies its fixtures.
 
 ## Routing-scale World generator
 
@@ -77,9 +105,10 @@ routes, exposition, security, and GUI behavior.
 ## Migration and validation
 
 The old `prometheum-fermide-headless --restoration-benchmark`,
-`--write-routing-scale-world`, and `--metrics*` service selections now return
-**2** with guidance to these tools. They never start a benchmark or server.
-Reproduction commands are unchanged (separate ticket #304).
+`--write-routing-scale-world`, `--metrics*`, `--lift-crossing-repro`,
+`--lift-stall-repro`, and `--pause-position-repro` selections now return **2**
+with guidance to these tools. The legacy smoke runner never executes a tool
+workflow.
 
 With testing enabled, Python 3 runs the bounded, headless subprocess/HTTP contract:
 
@@ -87,8 +116,9 @@ With testing enabled, Python 3 runs the bounded, headless subprocess/HTTP contra
 ctest --test-dir build-linux -R '^headless-tools-contract$' --output-on-failure
 ```
 
-It checks valid and malformed CLI calls, generation/registry preservation,
-restoration reports, missing/malformed documents, HTTP health and metrics,
-occupied-port failure, and bounded shutdown, using unique temporary directories.
-The Routing, Persistence, and Metrics smoke modules retain ownership of their
-existing behavioral checks.
+It checks valid and malformed CLI calls, Lift and pause-position reproductions,
+generation/registry preservation, restoration reports, missing/malformed
+documents, HTTP health and metrics, occupied-port failure, and bounded shutdown,
+using unique temporary directories. The Transports, Simulation, Routing,
+Persistence, and Metrics smoke modules retain ownership of their existing
+behavioral checks.

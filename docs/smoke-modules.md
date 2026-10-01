@@ -151,11 +151,11 @@ registration and all fixed-tick, phase, traversal, Door, queue, crossing-band,
 scale, and repeated-run determinism assertions remain unchanged.
 
 Pause-position assertions compile once in `pf-pause-position-support`: Simulation
-owns their only smoke registration, while the legacy `--pause-position-repro`
-manual diagnostic continues to reuse them until dedicated tool ticket #304. The
-non-finite timing and teardown sources, aggregate calls, and direct legacy source
-ownership are removed. The retired `--world-teardown-smoke` selection returns 2
-with migration guidance rather than executing duplicate coverage.
+owns their only smoke registration, while `pf-pause-position-repro` reuses them
+for the standalone minimal and file-backed diagnostics. The non-finite timing and
+teardown sources, aggregate calls, and direct legacy source ownership are removed.
+The retired `--world-teardown-smoke` selection returns 2 with migration guidance
+rather than executing duplicate coverage.
 
 `smoke-simulation-contract` checks the exact 55-name inventory, every individual
 selector, misuse, empty external working-directory execution, and eight concurrent
@@ -298,9 +298,10 @@ ctest --test-dir build-linux -R '^smoke-(transports|render)' -j 3 --output-on-fa
   leaf exclusion, plain shaft, and composable carriage-image assertions. CPU-only
   ImGui disables ini/log files; viewport and tileset state is cleaned on exit.
 - Four full/reduced boarding/crossing checks load `lift-test-1.world.yaml` through
-  Context, independently of the working directory. The legacy file-driven
-  reproduction CLI remains separate, sharing compiled assertions rather than
-  duplicating check bodies. Its former two CTest entries are retired.
+  Context, independently of the working directory. The standalone
+  `pf-lift-repro` tool provides the file-driven crossing and boarding diagnostics,
+  sharing compiled assertions rather than duplicating check bodies. Its former
+  two smoke CTest entries are retired.
 - Escalator Lua packages live beneath the unique Context temporary root.
   `smoke-transports-contract` checks exact listings, all individual selectors,
   misuse, empty-directory operation, and eight concurrent runs of each tier.

@@ -714,13 +714,16 @@ with migration guidance.
   `pf-lift-boarding-support`, not an additional CTest execution owner.
 - `support/PausePosition.cpp`: shared pause-position assertion/reproduction
   mechanics compiled once by `pf-pause-position-support`. Simulation owns their
-  only smoke registrations; the legacy executable reuses them only for the
-  explicit `--pause-position-repro` diagnostic pending #304.
-- `LiftBoardingSmokeChecks.cpp` owns only the legacy Lift reproduction commands;
-  these remain legacy-owned pending #304.
-- `tools/RestorationBenchmark.cpp`, `tools/GenerateRoutingWorld.cpp`, and
-  `tools/MetricsServer.cpp` own independent executables (#303), with no smoke
-  check linkage. Legacy selections return 2 with migration guidance.
+  only smoke registrations; `tools/PausePositionRepro.cpp` reuses the mechanics
+  for the standalone minimal and file-backed diagnostic (#304).
+- `support/LiftBoarding.cpp`: shared Lift assertion/reproduction mechanics
+  compiled once by `pf-lift-boarding-support`. Transports owns the smoke
+  registrations; `tools/LiftRepro.cpp` owns the standalone crossing and boarding
+  diagnostic contract (#304). No Lift repro source is compiled by a smoke runner.
+- `tools/RestorationBenchmark.cpp`, `tools/GenerateRoutingWorld.cpp`,
+  `tools/MetricsServer.cpp`, `tools/LiftRepro.cpp`, and
+  `tools/PausePositionRepro.cpp` own independent executables (#303/#304), with no
+  smoke-check linkage. Legacy selections return 2 with migration guidance.
   `headless-tools-contract` verifies their [command contracts](headless-tools.md).
 - `support/Restoration.cpp`: shared public load/reset workload and assertions,
   compiled once by `pf-restoration-support`. Persistence owns smoke execution;

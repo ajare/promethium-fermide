@@ -350,8 +350,8 @@ else()
 endif()
 pf_apply_high_analysis(pf-agent-editing)
 
-# Shared pause-position assertions used by module-owned checks and the manual
-# reproduction command retained until its dedicated tool migration.
+# Shared pause-position assertions used by module-owned checks and the standalone
+# reproduction tool.
 add_library(pf-pause-position-support STATIC src/headless/support/PausePosition.cpp)
 target_include_directories(pf-pause-position-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-pause-position-support PUBLIC prometheum-fermide-core)
@@ -362,7 +362,7 @@ else()
 endif()
 pf_apply_high_analysis(pf-pause-position-support)
 
-# Shared assertions for module-owned boarding checks and file-driven legacy tools.
+# Shared assertions for module-owned boarding checks and the standalone Lift tool.
 add_library(pf-lift-boarding-support STATIC src/headless/support/LiftBoarding.cpp)
 target_include_directories(pf-lift-boarding-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-lift-boarding-support PUBLIC prometheum-fermide-core)
@@ -418,12 +418,15 @@ if(MSVC)
 endif()
 pf_add_headless_tool(pf-metrics-server src/headless/tools/MetricsServer.cpp)
 target_link_libraries(pf-metrics-server PRIVATE pf-metrics)
+pf_add_headless_tool(pf-lift-repro src/headless/tools/LiftRepro.cpp)
+target_link_libraries(pf-lift-repro PRIVATE pf-lift-boarding-support)
+pf_add_headless_tool(pf-pause-position-repro src/headless/tools/PausePositionRepro.cpp)
+target_link_libraries(pf-pause-position-repro PRIVATE pf-pause-position-support)
 
 add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
-    src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
 )
 target_compile_features(prometheum-fermide-headless PRIVATE cxx_std_20)
@@ -434,8 +437,7 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-headless-render-support pf-agent-editing
-    pf-pause-position-support pf-lift-boarding-support)
+    pf-headless-render-support pf-agent-editing)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
 else()
@@ -513,7 +515,10 @@ if(BUILD_TESTING)
         "$<TARGET_FILE:pf-restoration-benchmark>"
         "$<TARGET_FILE:pf-generate-routing-world>"
         "$<TARGET_FILE:pf-metrics-server>"
-        "$<TARGET_FILE:prometheum-fermide-headless>")
+        "$<TARGET_FILE:pf-lift-repro>"
+        "$<TARGET_FILE:pf-pause-position-repro>"
+        "$<TARGET_FILE:prometheum-fermide-headless>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
     set_tests_properties(headless-tools-contract PROPERTIES TIMEOUT 180 LABELS "tools;headless")
 endif()
 if(BUILD_TESTING)
@@ -559,6 +564,6 @@ if(BUILD_TESTING)
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
     # Serialization and restoration smoke coverage is owned by smoke-persistence.
-    # Benchmark, routing World generation and metrics service have standalone tools.
-    # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
+    # Benchmarks, generators, services, and reproduction workflows have standalone tools.
+    # Lift regressions remain owned by smoke-transports.
 endif()

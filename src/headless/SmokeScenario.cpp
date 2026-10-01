@@ -13,11 +13,8 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-#include "PausePosition.h"
 #include "core/Coordination.h"
 
-void runLiftCrossingRepro(char const* filename);
-void runLiftBoardingRepro(char const* filename);
 void runMarkerIdentitySmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
 
@@ -111,21 +108,20 @@ int main(int argc, char** argv)
 			std::cerr << "Use pf-metrics-server --help.\n";
 			return 2;
 		}
-		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")
+		if (argc > 1 && std::string(argv[1]) == "--pause-position-repro")
 		{
-			if (std::string(argv[2]) == "minimal") pause_position::runAll();
-			else pause_position::runRepro(argv[2]);
-			return 0;
+			std::cerr << "Use pf-pause-position-repro <minimal|world>.\n";
+			return 2;
 		}
-		if (argc == 3 && std::string(argv[1]) == "--lift-crossing-repro")
+		if (argc > 1 && std::string(argv[1]) == "--lift-crossing-repro")
 		{
-			runLiftCrossingRepro(argv[2]);
-			return 0;
+			std::cerr << "Use pf-lift-repro crossing <world>.\n";
+			return 2;
 		}
-		if (argc == 3 && std::string(argv[1]) == "--lift-stall-repro")
+		if (argc > 1 && std::string(argv[1]) == "--lift-stall-repro")
 		{
-			runLiftBoardingRepro(argv[2]);
-			return 0;
+			std::cerr << "Use pf-lift-repro boarding <world>.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--world-teardown-smoke")
 		{
