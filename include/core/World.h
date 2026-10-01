@@ -858,7 +858,7 @@ namespace core
 			std::array<std::vector<uint32_t>, 2> controlPermissionRequirements{};
 			// Lift/Platform lift: stop order. Shuttle: fixed stop/carriage/door grid.
 			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
-			// Lift and Platform lift destination requirements, parallel to values (Stops).
+			// Lift, Platform lift, and Shuttle requirements, parallel to values (Stops).
 			std::vector<std::vector<uint32_t>> destinationPermissionRequirements{};
 			void retainDestinationRequirements(std::vector<uint32_t> const& stops);
 			// Marker / RemoveMarker: stable World-local identity. Marker also
@@ -2321,7 +2321,7 @@ namespace core
 			uint32_t permissionSetMemberships{ 0 };
 			uint32_t interactionPointRequirements{ 0 };
 			uint32_t manualDoorRequirements{ 0 };
-			uint32_t liftDestinationRequirements{ 0 };
+			uint32_t liftDestinationRequirements{ 0 }; // Includes Platform lifts and Shuttles.
 		};
 
 		uint32_t getAccessPermissionCount() const;
@@ -2381,7 +2381,9 @@ namespace core
 			bool assigned, std::string* diagnostic = nullptr);
 
 		bool isInteractionPointPermissionEligible(InteractionPointId point) const;
-		// Omit objectIndex for an enclosed Lift; specify the room object for a Platform lift.
+		// Shared transport destination API (historical Lift names). Omit objectIndex
+		// for a Lift or Shuttle; specify the Room object for a Platform lift.
+		// Positions are absolute Levels for Lifts and absolute x positions for Shuttles.
 		std::vector<uint32_t> getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		std::vector<AccessPermissionId> getLiftDestinationPermissionRequirement(
 			uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex = ~0u) const;

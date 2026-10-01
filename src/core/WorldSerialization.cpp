@@ -324,7 +324,8 @@ namespace core
 			serializer.writeUint32("doorMask", record.h ? record.h : (1u << 1));
 			serializer.writeFloat("minimumDwellSeconds", record.x);
 			serializer.writeFloat("maximumBoardingSeconds", record.y);
-			serializer.writeBool("allowPartialLandings", record.p); break;
+			serializer.writeBool("allowPartialLandings", record.p);
+			writeDestinationRequirements(); break;
 		case ConstructionType::Door:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -860,6 +861,7 @@ namespace core
 			record.c = serializer.readUint32("cellsWide"); record.d = serializer.readUint32("numCars");
 			record.e = serializer.readUint32("carWidth"); readStops();
 			readStopDoorOpenStyles("doorOpenStyles", "Shuttle");
+			readDestinationRequirements();
 			readLandingRequirements("landingControlPermissionRequirements");
 			record.f = serializer.readUint32("initialStop"); record.g = serializer.readUint32("capacityPerCarriage");
 			record.h = serializer.readUint32("doorMask", true, 1u << 1);
@@ -3369,6 +3371,8 @@ namespace core
 			// newly added carriage or door position therefore hold no override,
 			// and the Doors generated there use the Shuttle's OpenUp default.
 			auto const oldOffsets = found->values;
+			auto const oldRequirements = found->destinationPermissionRequirements;
+			found->destinationPermissionRequirements.assign(plan.stopOffsets.size(), {});
 			auto const oldStyles = found->overrides;
 			auto const oldBaseX = found->b;
 			auto const oldCars = found->d;
@@ -3401,6 +3405,8 @@ namespace core
 					if (same) { source = j; break; }
 				}
 				if (source >= oldOffsets.size()) continue;
+				if (source < oldRequirements.size())
+					found->destinationPermissionRequirements[i] = oldRequirements[source];
 				for (uint32_t car = 0; car < cars; ++car)
 				{
 					if (car >= oldCars) break;
@@ -4480,6 +4486,7 @@ namespace core
 						return da == db ? a < b : da < db;
 					});
 					source.f = (uint32_t)distance(stops.begin(), nearest);
+					source.retainDestinationRequirements(stops);
 					source.values = std::move(stops);
 				}
 				else if (source.type == ConstructionType::PlatformLift)

@@ -206,7 +206,7 @@ namespace core
 				? context.world->getAgentId(context.agent) : AgentId{};
 			// A Lift body is segmented at intermediate Stops. Test the actual
 			// disembark destination, not each segment passed on the way there.
-			if (!result.boarding && result.lift && routeAgent
+			if (!result.boarding && (result.lift || result.shuttle) && routeAgent
 				&& !context.world->canAgentUseLiftJourney(edge.getTraversalResourceId(),
 					context.agent->getGlobalPosition(), source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;

@@ -547,6 +547,32 @@ Validation on Windows/MSVC: full Debug and Release builds including the editor,
 all 67 non-GUI CTest tests in each configuration, focused permission checks, and
 `git diff --check` passed. Shuttle destination permissions remain out of scope.
 
+## Shuttle destination permissions (#264)
+
+Shuttles reuse the destination requirement APIs, schema-30 field, panel commits,
+usage reporting, and authorization rules established for Lifts. Historical
+`LiftDestination` API names now cover all three transports; destination positions
+are absolute x coordinates for Shuttles. Selection displays each Stop and its
+position without Agent debug visibility. Requirements follow retained Stop
+identity through vehicle edits, Stop reindexing, and supporting Location removal;
+recreated Stops and transports start unrestricted.
+
+`access-permissions` runs the shared command, authoring, persistence/history,
+and dynamic authorization checks with Shuttle fixtures. Two coupled Carriages
+board from separate Locations and share one protected destination; unauthorized
+passengers complete locally observed accepted journeys and disembark after
+runtime or authored revocation and paused requirement tightening. Other checks
+cover missing-permission diagnostics, partial direct/Permission set grants,
+remote observation exclusion, a second boarding Stop, completed journeys past
+protected intermediate Stops, walking alternatives/Route loss, voluntary gains
+with Route persistence, and Reset restoring authored grants. Headless ImGui
+verification checks Stop/x labels, summaries, None defaults, and the accepted
+journey explanation. No OS windows, dialogs, or manual UI session are used.
+
+Validation on Windows/MSVC: complete Debug and Release builds including the
+editor, focused permission checks, all 67 non-GUI CTest tests in each
+configuration, and `git diff --check` passed.
+
 ## Prerequisites
 
 - Windows x64

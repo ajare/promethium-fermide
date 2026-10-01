@@ -9848,7 +9848,7 @@ namespace core
 		{
 			if (!constructionTypeCreatesSector(record.type)) continue;
 			if (index++ == sectorIndex)
-				return record.type == ConstructionType::Lift ? &record : nullptr;
+				return record.type == ConstructionType::Lift || record.type == ConstructionType::Shuttle ? &record : nullptr;
 		}
 		return nullptr;
 	}
@@ -9869,10 +9869,11 @@ namespace core
 	vector<uint32_t> World::getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex) const
 	{
 		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
-		if (!record) throw invalid_argument("Unknown Lift or Platform lift");
+		if (!record) throw invalid_argument("Unknown Lift, Platform lift, or Shuttle");
 		auto levels = record->values;
 		for (auto& level : levels) level += record->type == ConstructionType::Lift
-			? record->a : mSectors[sectorIndex]->getCellY() + record->b;
+			? record->a : record->type == ConstructionType::Shuttle ? record->b
+			: mSectors[sectorIndex]->getCellY() + record->b;
 		return levels;
 	}
 
@@ -9880,7 +9881,7 @@ namespace core
 		uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex) const
 	{
 		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
-		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown Lift destination Stop");
+		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown transport destination Stop");
 		vector<AccessPermissionId> result;
 		if (stopIndex < record->destinationPermissionRequirements.size())
 			for (auto id : record->destinationPermissionRequirements[stopIndex]) result.push_back(AccessPermissionId{ id });
@@ -9893,7 +9894,7 @@ namespace core
 		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
 		if (!mSimulationPaused) return reject("Destination permissions can only be edited while the simulation is paused");
 		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
-		if (!record || stopIndex >= record->values.size()) return reject("Unknown Lift destination Stop");
+		if (!record || stopIndex >= record->values.size()) return reject("Unknown transport destination Stop");
 		vector<uint32_t> next;
 		for (auto id : permissions)
 		{
@@ -10568,9 +10569,10 @@ namespace core
 		DeviceCommand const& command, AgentId agentId) const
 	{
 		vector<AccessPermissionId> result;
-		if (!agentId || command.type != DeviceCommandType::SelectLiftDestination) return result;
+		if (!agentId || (command.type != DeviceCommandType::SelectLiftDestination
+			&& command.type != DeviceCommandType::SelectShuttleDestination)) return result;
 		auto resource = mTraversalResources.find(command.traversalResource);
-		if (!resource || !resource->mLift
+		if (!resource || (!resource->mLift && !resource->mShuttle)
 			|| command.stopIndex >= resource->mLiftStops.size()) return result;
 		auto agent = mAgents.find(agentId);
 		auto grants = agent ? effectiveAccessGrants(*agent) : bitset<256>{};
@@ -10585,13 +10587,14 @@ namespace core
 		Vector2 const& origin, Vector2 const& destination, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(resourceId);
+		auto destinationStop = resource && resource->mLiftCoordinator ? resource->mLiftStopIndex : ~0u;
 		if (resource && resource->mLiftCoordinator)
 		{
 			resourceId = resource->mLiftCoordinator;
 			resource = mTraversalResources.find(resourceId);
 		}
-		if (!resource || !resource->mLift) return true;
-		auto stop = mSimulationCoordinator.findLiftStop(*resource, destination);
+		if (!resource || (!resource->mLift && !resource->mShuttle)) return true;
+		auto stop = destinationStop != ~0u ? destinationStop : mSimulationCoordinator.findLiftStop(*resource, destination);
 		DeviceCommand command;
 		command.type = DeviceCommandType::SelectLiftDestination;
 		command.traversalResource = resourceId;
@@ -10603,7 +10606,13 @@ namespace core
 			!= resource->mOccupants.end();
 		// Only an open, boardable car at this Agent's landing reveals a usable
 		// shared journey. Never consult a remote car's live destination requests.
-		if (!local)
+		if (!local && resource->mShuttle)
+			local = any_of(resource->mShuttleDoors.begin(), resource->mShuttleDoors.end(), [&](auto const& door)
+			{
+				return door.locationSector.value == agent->getSector()->getIndex() + 1
+					&& isTransportLocallyBoardable(door.landingResource, origin);
+			});
+		if (!local && !resource->mShuttle)
 		{
 			auto originStop = mSimulationCoordinator.findLiftStop(*resource, origin);
 			if (originStop < resource->mLiftStops.size())
@@ -10732,7 +10741,7 @@ namespace core
 				auto point = mInteractionPoints.find(pointId);
 				if (point && point->mPermissionRequirement.test(bit)) return true;
 			}
-			if (gained && resource.mLift)
+			if (gained && (resource.mLift || resource.mShuttle))
 				if (auto record = findLiftDestinationRecord(resource))
 					for (auto const& requirement : record->destinationPermissionRequirements)
 						if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()) return true;
@@ -10771,12 +10780,12 @@ namespace core
 			}
 			else if (isLocationLike(source->getSector()->getType())) continue;
 			auto lift = mTraversalResources.find(liftId);
-			if (!lift || !lift->mLift) continue;
+			if (!lift || (!lift->mLift && !lift->mShuttle)) continue;
 			auto record = findLiftDestinationRecord(*lift);
 			if (!record || stop >= record->destinationPermissionRequirements.size()) continue;
 			auto const& requirement = record->destinationPermissionRequirements[stop];
 			if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()
-				&& !canAgentUseLiftJourney(liftId, agent.getGlobalPosition(),
+				&& !canAgentUseLiftJourney(node.edge->getTraversalResourceId(), agent.getGlobalPosition(),
 					source->getPosition(), getAgentId(&agent))) currentRelevant = true;
 		}
 		if (!gained)

@@ -10,6 +10,7 @@
 #include "imgui/IconsFontAwesome5.h"
 #include "core/AccessPermission.h"
 #include "core/World.h"
+#include "core/Sector.h"
 #include "DocumentEdit.h"
 
 using namespace std;
@@ -153,8 +154,9 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 	ImGui::TextUnformatted("Destination permissions");
 	ImGui::TextWrapped("All listed Access permissions are required to select this destination, from direct or Permission set grants. Accepted shared journeys and disembarking remain available after permission loss.");
 	auto levels = world->getLiftDestinationLevels(sectorIndex, objectIndex);
+	auto shuttle = world->getSector(sectorIndex)->getType() == core::SectorType::Shuttle;
 	if (!ImGui::BeginTable("Destination permissions", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
-	ImGui::TableSetupColumn("Level"); ImGui::TableSetupColumn("Permissions"); ImGui::TableSetupColumn("Required (all)");
+	ImGui::TableSetupColumn("Stop / position"); ImGui::TableSetupColumn("Permissions"); ImGui::TableSetupColumn("Required (all)");
 	ImGui::TableHeadersRow();
 	for (uint32_t stop = 0; stop < levels.size(); ++stop)
 	{
@@ -167,7 +169,7 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 			summary += world->getAccessPermissionName(id);
 		}
 		if (summary.empty()) summary = "None";
-		ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::Text("%u", levels[stop]);
+		ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::Text("Stop %u: %s %u", stop, shuttle ? "x" : "Level", levels[stop]);
 		ImGui::TableNextColumn();
 		ImGui::BeginDisabled(!world->isSimulationPaused());
 		if (ImGui::BeginCombo("##permissions", summary.c_str()))
@@ -245,7 +247,7 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		{
 			auto usage = world->getAccessPermissionUsage(pendingDelete);
 			ImGui::Text("Delete '%s'?", world->getAccessPermissionName(pendingDelete).c_str());
-			ImGui::Text("This clears %u direct Agent grants, membership in %u Permission sets, %u Interaction point requirements, %u manual Door requirements, and %u Lift destination requirements.",
+			ImGui::Text("This clears %u direct Agent grants, membership in %u Permission sets, %u Interaction point requirements, %u manual Door requirements, and %u transport destination requirements.",
 				usage.directAgentGrants, usage.permissionSetMemberships,
 				usage.interactionPointRequirements, usage.manualDoorRequirements, usage.liftDestinationRequirements);
 			if (ImGui::Button("Delete")) { string diagnostic; auto deleted = pendingDelete; commitAccessPermissionDelete(world, pendingDelete, diagnostic); editedNames.erase(deleted.value); pendingDelete = {}; ImGui::CloseCurrentPopup(); }
