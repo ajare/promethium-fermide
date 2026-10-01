@@ -322,28 +322,37 @@ foreach(target IN ITEMS pf-render pf-headless-render-support)
     pf_apply_high_analysis(${target})
 endforeach()
 
-add_executable(prometheum-fermide-headless
-    # Panels remain legacy-owned until their own migration tickets.
+# Production Agent editing seams, shared by the GUI, legacy checks, and the
+# headless Agent editor tier. No renderer, platform backend, or dialogs.
+add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
-    src/DoorPanel.cpp
     src/AgentGroupsPanel.cpp
-    src/PermissionsPanel.cpp
     src/AgentGroupAssignmentPanel.cpp
+    src/AgentClipboard.cpp
+)
+target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu)
+target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
+target_compile_definitions(pf-agent-editing PRIVATE
+    $<$<CONFIG:Debug>:_DEBUG>
+    $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
+)
+if(MSVC)
+    target_compile_options(pf-agent-editing PRIVATE /W3 /permissive-)
+else()
+    target_compile_options(pf-agent-editing PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-agent-editing)
+
+add_executable(prometheum-fermide-headless
+    # Other panel checks remain legacy-owned until their migration tickets.
+    src/DoorPanel.cpp
+    src/PermissionsPanel.cpp
     src/AgentTagAssignmentPanel.cpp
     src/AgentBehaviourAssignmentPanel.cpp
     src/MarkerPanel.cpp
     src/TagsPanel.cpp
     src/BehavioursPanel.cpp
-    src/AgentClipboard.cpp
     src/headless/BackgroundSelectionPanelSmokeChecks.cpp
-    src/headless/AgentGroupSmokeChecks.cpp
-    src/headless/AgentGroupAssignmentSmokeChecks.cpp
-    src/headless/AgentGroupCountSmokeChecks.cpp
-    src/headless/AgentGroupDeleteSmokeChecks.cpp
-    src/headless/AgentGroupIdAllocationSmokeChecks.cpp
-    src/headless/AgentGroupClipboardSmokeChecks.cpp
-    src/headless/AgentGroupTopologySmokeChecks.cpp
-    src/headless/AgentActivationSmokeChecks.cpp
     src/headless/AccessPermissionSmokeChecks.cpp
     src/headless/DoorPanelScopeSmokeChecks.cpp
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
@@ -423,7 +432,7 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-metrics httplib::httplib pf-headless-render-support)
+    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)
@@ -448,17 +457,13 @@ if(PF_BUILD_GUI)
         src/WorldRenderSystem.cpp
         src/Main.cpp
         src/UI.cpp
-        src/DocumentEdit.cpp
         src/DoorPanel.cpp
-        src/AgentGroupsPanel.cpp
         src/PermissionsPanel.cpp
-        src/AgentGroupAssignmentPanel.cpp
         src/AgentTagAssignmentPanel.cpp
         src/AgentBehaviourAssignmentPanel.cpp
         src/MarkerPanel.cpp
         src/TagsPanel.cpp
         src/BehavioursPanel.cpp
-        src/AgentClipboard.cpp
         ${PF_IMGUI_SOURCES}
     )
     target_compile_features(editor PRIVATE cxx_std_20)
@@ -474,7 +479,7 @@ if(PF_BUILD_GUI)
         target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     target_link_libraries(editor PRIVATE
-        pf-render pf-metrics libglew_static nfd::nfd
+        pf-render pf-metrics pf-agent-editing libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
         Willpower.Application ext::mpp-helper
     )

@@ -1,29 +1,4 @@
-// Agent group identity, naming, ordering, persistence, and undo, for ticket #109.
-//
-// Everything here crosses the two seams that matter: the public World
-// authoring API, and a complete World serialize/deserialize round trip. The
-// registry behind the API is never inspected, and the YAML is only read as a
-// whole document - never asserted against incidental formatting.
-//
-// What gets pinned down:
-//
-//   the World owns each group under a stable, monotonically allocated ID,
-//   and hands out no way to change a group around its own validation
-//   names arrive trimmed, blank and overlong names are refused with a reason,
-//   and uniqueness is case-sensitive
-//   groups enumerate in creation order, before and after a rename
-//   a refused create or rename changes nothing at all
-//   version 9 carries the ordered IDs and names through save/load; versions
-//   below 9 load with no groups, and a reader capped at 8 refuses 9 instead
-//   of quietly dropping the groups
-//   malformed version-9 input refuses the whole file and leaves the target
-//   World holding exactly what it held before
-//   adding and renaming work while the simulation runs, mark the document
-//   modified, and commit exactly one undoable document edit each; a refused
-//   or cancelled edit commits none
-//   the real panel renders inside a CPU-side ImGui context without leaking a
-//   disabled scope, paused or running
-
+// Migrated from AgentGroupSmokeChecks.cpp (#285); core dependency tier.
 #include <bit>
 #include <cstdint>
 #include <cstring>
@@ -33,19 +8,13 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
-
 #include "core/AgentGroup.h"
 #include "core/World.h"
 #include "core/EntityId.h"
 #include "core/Exceptions.h"
 #include "core/SerializationException.h"
 #include "core/YamlSerializer.h"
-
-#include "AgentGroupsPanel.h"
-#include "DocumentEdit.h"
+#include "Checks.h"
 
 namespace
 {
@@ -119,24 +88,6 @@ namespace
 		world.addCorridor(0, 0, 8);
 		world.addRoom("Depot", 0, 2, 0, 4, 1);
 		world.finishBuild();
-	}
-
-	struct ImGuiGuard
-	{
-		ImGuiGuard()
-		{
-			ImGui::CreateContext();
-			auto& io = ImGui::GetIO();
-			io.DisplaySize = ImVec2(800.0f, 600.0f);
-			io.Fonts->AddFontDefault();
-			io.Fonts->Build();
-		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
-
-	void resetUndoHistory()
-	{
-		gWorldDocumentHistory.clear();
 	}
 
 	// ---------------------------------------------------------------- checks
@@ -469,140 +420,15 @@ namespace
 				("A refused load left partial Agent group state behind: " + what).c_str());
 		}
 	}
-
-	// The editor's own commit path, with the simulation live: one accepted
-	// operation is one undo entry, one refused operation is none, and neither
-	// pauses the world nor touches its topology.
-	void groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach()
-	{
-		resetUndoHistory();
-		resetAgentGroupsPanelState();
-
-		auto const world = std::make_shared<core::World>("Group edits", 12, 3);
-		buildWorld(*world);
-		require(!world->isSimulationPaused(),
-			"The test World started paused, so it proved nothing about running edits");
-
-		// Let the world actually run, then come back to the document clean so
-		// "marked modified" means this operation did it.
-		world->advanceTick();
-		world->advanceTick();
-		world->markUnmodified();
-		require(!world->isModified(), "The test World did not come back clean");
-
-		auto const topologyBefore = world->getTopologyGeneration();
-		std::string diagnostic;
-
-		auto const added = commitAgentGroupAdd(world, "  Response team  ", diagnostic);
-		require(added.value != 0,
-			("Adding an Agent group through the panel seam failed: " + diagnostic).c_str());
-		require(world->getAgentGroupName(added) == "Response team",
-			"The panel seam did not trim the new Agent group name");
-		require(world->isModified(),
-			"Adding an Agent group did not mark the document modified");
-		require(gWorldDocumentHistory.undoCount() == 1,
-			"Adding an Agent group did not commit exactly one undoable document edit");
-		require(!gWorldDocumentHistory.canRedo(), "Adding an Agent group produced a redo entry");
-		require(!world->isSimulationPaused(),
-			"Adding an Agent group paused the simulation");
-		require(world->getTopologyGeneration() == topologyBefore,
-			"Adding an Agent group rebuilt the traversal topology");
-
-		require(commitAgentGroupRename(world, added, "Response", diagnostic),
-			("Renaming an Agent group through the panel seam failed: " + diagnostic).c_str());
-		require(gWorldDocumentHistory.undoCount() == 2,
-			"Renaming an Agent group did not commit exactly one undoable document edit");
-
-		// Refused operations leave the history exactly where it was.
-		require(!commitAgentGroupAdd(world, "Response", diagnostic),
-			"A duplicate Agent group name was accepted through the panel seam");
-		require(gWorldDocumentHistory.undoCount() == 2,
-			"A refused Agent group add committed an undo entry");
-
-		require(!commitAgentGroupRename(world, core::AgentGroupId{ 4242 }, "Ghost", diagnostic),
-			"Renaming an unknown Agent group succeeded through the panel seam");
-		require(gWorldDocumentHistory.undoCount() == 2,
-			"A refused Agent group rename committed an undo entry");
-
-		require(!commitAgentGroupAdd(world, "   ", diagnostic),
-			"A blank Agent group name was accepted through the panel seam");
-		require(gWorldDocumentHistory.undoCount() == 2,
-			"A blank Agent group add committed an undo entry");
-
-		// Undo is a snapshot restore, so the entries themselves are the
-		// history: the newest holds the state before the rename, the oldest
-		// the state before the group existed at all.
-		require(gWorldDocumentHistory.undoCount() == 2, "The undo stack is not the two edits made");
-		auto const beforeRename = loadWorld(gWorldDocumentHistory.undoEntries().back().yaml);
-		require(beforeRename->getAgentGroupCount() == 1
-			&& beforeRename->getAgentGroupName(added) == "Response team",
-			"The undo snapshot did not hold the state before the rename");
-		auto const beforeAdd = loadWorld(gWorldDocumentHistory.undoEntries().front().yaml);
-		require(beforeAdd->getAgentGroupCount() == 0,
-			"The oldest undo snapshot still carried the added Agent group");
-
-		// And the live World is where the redo would take it.
-		require(world->getAgentGroupName(added) == "Response",
-			"The live World did not hold the renamed Agent group");
-	}
-
-	// The real panel, rendered for real. What matters here is that it leaves no
-	// ImGui state behind: a leaked disabled scope once dimmed the rest of the
-	// editor for every frame.
-	void theAgentGroupsPanelRendersWithoutLeakingImGuiState()
-	{
-		ImGuiGuard guard;
-
-		auto const shared = std::make_shared<core::World>("Group panel", 12, 3);
-		buildWorld(*shared);
-		shared->addAgentGroup("Alpha");
-		shared->addAgentGroup("Bravo");
-
-		for (bool const paused : { true, false })
-		{
-			if (paused) shared->pauseSimulation();
-			else if (shared->isSimulationPaused()) shared->resumeSimulation();
-
-			ImGui::NewFrame();
-			ImGui::Begin("World");
-
-			auto const depthOnEntry = GImGui->DisabledStackSize;
-			auto const flagsOnEntry = GImGui->CurrentItemFlags;
-			auto const alphaOnEntry = GImGui->Style.Alpha;
-
-			renderAgentGroupsPanel(shared);
-
-			require(GImGui->DisabledStackSize == depthOnEntry,
-				"The Agent groups panel left a disabled scope open");
-			require(GImGui->CurrentItemFlags == flagsOnEntry,
-				"The Agent groups panel changed the current item flags");
-			// Compared as bits, not as floats: the question is whether the value
-			// is exactly the one stored, which is what "unchanged" means here
-			// and what -Wfloat-equal objects to otherwise.
-			require(std::bit_cast<uint32_t>(GImGui->Style.Alpha)
-				== std::bit_cast<uint32_t>(alphaOnEntry),
-				"The Agent groups panel changed the global alpha");
-
-			ImGui::End();
-
-			// The frame has to complete, which is where ImGui's own end-frame
-			// checks would fire on an unbalanced window.
-			ImGui::Render();
-		}
-	}
 }
 
-void runAgentGroupSmokeChecks()
+void agent_smoke::registerGroup(std::vector<smoke::Check>& checks)
 {
-	resetAgentGroupsPanelState();
-	agentGroupsHaveStableIdsAndEnumerateInCreationOrder();
-	agentGroupNamesAreTrimmedValidatedAndCaseSensitive();
-	renamingAnAgentGroupKeepsItsPlaceAndFailsAtomically();
-	agentGroupsRoundTripThroughSaveAndLoad();
-	preVersionNineDocumentsLoadWithNoAgentGroups();
-	aVersionEightReaderRefusesVersionNineRatherThanDroppingGroups();
-	malformedAgentGroupInputRefusesTheFileWithoutPartialState();
-	groupEditsRunAlongsideTheSimulationAndCommitOneUndoEach();
-	theAgentGroupsPanelRendersWithoutLeakingImGuiState();
-	resetAgentGroupsPanelState();
+	checks.push_back({ "agentGroupsHaveStableIdsAndEnumerateInCreationOrder", [](smoke::Context const&) { agentGroupsHaveStableIdsAndEnumerateInCreationOrder(); } });
+	checks.push_back({ "agentGroupNamesAreTrimmedValidatedAndCaseSensitive", [](smoke::Context const&) { agentGroupNamesAreTrimmedValidatedAndCaseSensitive(); } });
+	checks.push_back({ "renamingAnAgentGroupKeepsItsPlaceAndFailsAtomically", [](smoke::Context const&) { renamingAnAgentGroupKeepsItsPlaceAndFailsAtomically(); } });
+	checks.push_back({ "agentGroupsRoundTripThroughSaveAndLoad", [](smoke::Context const&) { agentGroupsRoundTripThroughSaveAndLoad(); } });
+	checks.push_back({ "preVersionNineDocumentsLoadWithNoAgentGroups", [](smoke::Context const&) { preVersionNineDocumentsLoadWithNoAgentGroups(); } });
+	checks.push_back({ "aVersionEightReaderRefusesVersionNineRatherThanDroppingGroups", [](smoke::Context const&) { aVersionEightReaderRefusesVersionNineRatherThanDroppingGroups(); } });
+	checks.push_back({ "malformedAgentGroupInputRefusesTheFileWithoutPartialState", [](smoke::Context const&) { malformedAgentGroupInputRefusesTheFileWithoutPartialState(); } });
 }

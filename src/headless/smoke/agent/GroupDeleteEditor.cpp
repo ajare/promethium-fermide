@@ -1,39 +1,4 @@
-// Deleting Agent groups, for ticket #112.
-//
-// The hazard this whole file circles is a stale reference: a group removed
-// while Agents still carry its ID. Such a World cannot even be saved and
-// read back - the file format refuses an assignment to a group the document
-// never defines - so the deletion has to take the assignments with it, in the
-// same step, and must be undoable as one step afterwards.
-//
-// What gets pinned down:
-//
-//   World::deleteAgentGroup is the sole mutation boundary: every Agent
-//   carrying the deleted AgentGroupId is returned to no Agent group before
-//   the group itself is removed, and the whole thing is judged before a
-//   single field is written
-//   an unknown or empty AgentGroupId is refused with a diagnostic that names
-//   it, and the World is left exactly as it was found
-//   a deleted AgentGroupId is never issued again, so an old reference can
-//   never come back pointing at a different group
-//   the saved document after a deletion carries neither the group nor any
-//   assignment to it, and a reload agrees
-//   an empty group deletes on the spot with no confirmation asked; an
-//   occupied group arms a confirmation whose text carries the authoritative
-//   member count read off the World
-//   cancelling changes no group, no assignment, no count, no dirty state and
-//   no undo history - the underlying no-op contract, checked as a whole
-//   confirming performs the group removal and every assignment clearing as
-//   exactly one document edit, and every former member's Group cell reads
-//   `<none>`
-//   the confirmation really reaches the screen as a modal, and a dismissal
-//   that was never answered is a cancel rather than a half-armed request
-//   deletion is available with the simulation running, leaves the runtime
-//   snapshot and events alone at the tick it happens, and does not disturb
-//   the movement of the Agents that were its members
-//   undo restores the group's identity, creation-order position, name,
-//   assignments and count; redo removes them again
-
+// Migrated from AgentGroupDeleteSmokeChecks.cpp (#285); editor dependency tier.
 #include <cstdint>
 #include <algorithm>
 #include <memory>
@@ -41,10 +6,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
-
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/EntityId.h"
@@ -53,10 +16,11 @@
 #include "core/Simulation.h"
 #include "core/Vertex.h"
 #include "core/YamlSerializer.h"
-
 #include "AgentGroupAssignmentPanel.h"
 #include "AgentGroupsPanel.h"
 #include "DocumentEdit.h"
+#include "Checks.h"
+#include "EditorState.h"
 
 namespace
 {
@@ -213,6 +177,8 @@ namespace
 		{
 			ImGui::CreateContext();
 			auto& io = ImGui::GetIO();
+			io.IniFilename = nullptr;
+			io.LogFilename = nullptr;
 			io.DisplaySize = ImVec2(800.0f, 600.0f);
 			io.Fonts->AddFontDefault();
 			io.Fonts->Build();
@@ -329,35 +295,6 @@ namespace
 		resetAgentGroupsPanelState();
 	}
 
-	// ---------------------------------------------------------------- checks
-
-	// An empty group is the simple case, and it has to be simple: the group
-	// goes, and nothing else moves.
-	void anEmptyGroupDeletesAndLeavesEveryOtherGroupAlone()
-	{
-		core::World world("Empty delete", 12, 3);
-		auto const fixture = buildFixture(world);
-		auto const before = groupSummary(world);
-		require(before.find("Alpha") != std::string::npos
-			&& before.find("Delta") != std::string::npos,
-			"The fixture did not start with the two empty groups: " + before);
-
-		std::string diagnostic;
-		require(world.canDeleteAgentGroup(fixture.alpha, &diagnostic),
-			("Deleting an empty Agent group was refused: " + diagnostic).c_str());
-		require(world.deleteAgentGroup(fixture.alpha, &diagnostic),
-			("Deleting an empty Agent group failed: " + diagnostic).c_str());
-
-		require(world.getAgentGroupCount() == 2,
-			"The World still reports three Agent groups after deleting one: "
-			+ groupSummary(world));
-		require(!world.lookupAgentGroup(fixture.alpha),
-			"The deleted Agent group is still resolvable through the World");
-		require(groupSummary(world) == "2:Crew=4;3:Delta=0;",
-			"Deleting an empty Agent group disturbed the others: " + groupSummary(world));
-		requireNoDanglingAssignment(world, "after an empty group delete");
-	}
-
 	// The occupied case, which is the one that can go wrong. Every member is
 	// read back off the Agent itself - not off the group, which is gone - and
 	// every one of them is on no group afterwards, whichever Layer it sits on.
@@ -395,63 +332,6 @@ namespace
 		require(groupSummary(world) == "1:Alpha=0;3:Delta=0;",
 			"The surviving groups are not the two empty ones: " + groupSummary(world));
 		requireNoDanglingAssignment(world, "after an occupied group delete");
-	}
-
-	// An ID this World never issued is refused, and the refusal says which
-	// ID. Nothing is written on the way out, so "atomically" has a concrete
-	// meaning here: the whole summary is what it was before the call.
-	void anUnknownGroupIdIsRefusedAtomicallyWithADiagnostic()
-	{
-		core::World world("Unknown delete", 12, 3);
-		auto const fixture = buildFixture(world);
-		auto const before = groupSummary(world);
-		auto const beforeAssignments = assignmentSummary(world);
-		auto const beforeIds = world.getAgentGroupIds();
-
-		std::string diagnostic;
-		require(!world.canDeleteAgentGroup(core::AgentGroupId{ 4242 }, &diagnostic),
-			"Deleting an Agent group this World never issued succeeded");
-		require(diagnostic.find("4242") != std::string::npos,
-			("The unknown-group refusal did not name the group: " + diagnostic).c_str());
-		require(!world.deleteAgentGroup(core::AgentGroupId{ 4242 }, &diagnostic),
-			"World.deleteAgentGroup accepted a group it does not own");
-		require(diagnostic.find("4242") != std::string::npos,
-			("The refused delete did not name the unknown group: " + diagnostic).c_str());
-
-		// The null handle names no group either, so there is nothing for it
-		// to delete; refusing it keeps a success meaning a deletion happened.
-		require(!world.canDeleteAgentGroup(core::AgentGroupId{}, &diagnostic),
-			"Deleting the empty AgentGroupId was treated as a deletion");
-		require(!world.deleteAgentGroup(core::AgentGroupId{}, &diagnostic),
-			"World.deleteAgentGroup accepted the empty AgentGroupId");
-		require(!diagnostic.empty(),
-			"The empty-AgentGroupId refusal came back without a reason");
-
-		require(groupSummary(world) == before,
-			"A refused delete changed the groups: " + groupSummary(world));
-		require(assignmentSummary(world) == beforeAssignments,
-			"A refused delete cleared an assignment it had no business touching");
-		require(world.getAgentGroupIds() == beforeIds,
-			"A refused delete disturbed the Agent group list");
-	}
-
-	// A deleted AgentGroupId is never handed out again, so a reference that
-	// somehow survived could never silently come to mean a different group.
-	void aDeletedAgentGroupIdIsNeverIssuedAgain()
-	{
-		core::World world("Id reuse", 12, 3);
-		auto const fixture = buildFixture(world);
-
-		std::string diagnostic;
-		require(world.deleteAgentGroup(fixture.crew, &diagnostic),
-			("Deleting the occupied Agent group failed: " + diagnostic).c_str());
-
-		auto const replacement = world.addAgentGroup("Replacement");
-		require(replacement != fixture.crew,
-			"A new Agent group was issued the deleted group's AgentGroupId");
-		require(replacement.value > fixture.crew.value,
-			"The new Agent group's AgentGroupId did not come after the deleted one");
-		requireNoDanglingAssignment(world, "after reissuing Agent group IDs");
 	}
 
 	// Grouping is editor metadata, not topology: deleting a group marks the
@@ -1027,140 +907,6 @@ namespace
 		}
 	}
 
-	// A deterministic walk whose trace is the tick, the topology generation,
-	// every Agent's position and state, and every event the run published.
-	// Two runs that differ only in whether the middle of the walk deleted the
-	// Agents' group must produce the same trace, which is what "deletion does
-	// not alter Agent movement or other simulation state" means concretely.
-	std::string walkWithOptionalMidRunDelete(bool deleteMidRun)
-	{
-		core::World world("Delete walk", 12, 3);
-		auto const corridor = world.addCorridor(0, 0, 12);
-		uint32_t destinationIdentifier{ 0x44454c31u };
-		world.addSectorMarker(corridor, 0, 11.5f, &destinationIdentifier);
-		world.finishBuild();
-
-		auto const crew = world.addAgentGroup("Crew");
-		auto const walker = world.createAgent("Walker", corridor, 0, 0.5f);
-		auto const companion = world.createAgent("Companion", corridor, 0, 1.5f);
-		assign(world, walker, crew);
-		assign(world, companion, crew);
-
-		auto* agent = world.lookupAgent(walker).entity;
-		auto const destination = world.getGraph()->getVertexByIdentifier(destinationIdentifier);
-		require(destination != nullptr, "The walk destination vertex is missing");
-		auto path = world.getGraph()->calculatePath(agent, destination);
-		require(path && !path->nodes.empty(), "The walk route could not be calculated");
-		agent->setPath(std::move(path), true);
-
-		for (uint32_t tick = 0; tick < 30; ++tick) world.advanceTick();
-
-		auto const* walkingAgent = world.lookupAgent(walker).entity;
-		auto const positionBeforeDelete = walkingAgent->getGlobalPosition();
-		require(!world.isSimulationPaused(),
-			"The test World was paused before the delete, so running was never tested");
-
-		if (deleteMidRun)
-		{
-			std::string diagnostic;
-			require(world.deleteAgentGroup(crew, &diagnostic),
-				("Deleting an Agent group mid-run failed: " + diagnostic).c_str());
-			require(!world.isSimulationPaused(),
-				"Deleting an Agent group paused a running simulation");
-		}
-
-		for (uint32_t tick = 0; tick < 90; ++tick) world.advanceTick();
-
-		require(world.lookupAgent(walker).entity->getGlobalPosition()
-			.distanceTo(positionBeforeDelete) > 0.01f,
-			"The walking Agent did not move after the delete, so the comparison proved nothing");
-
-		std::ostringstream out;
-		out.precision(6);
-		out << std::fixed;
-
-		auto const snapshot = world.getSimulationSnapshot();
-		out << "tick=" << snapshot.tick
-			<< " paused=" << snapshot.paused
-			<< " topology=" << snapshot.topologyGeneration << "\n";
-		for (auto const& entry : snapshot.agents)
-		{
-			out << "agent " << entry.id.value << ' ' << entry.name
-				<< " sector=" << entry.sectorId.value
-				<< " local=" << entry.localPosition.x << ',' << entry.localPosition.y
-				<< " global=" << entry.globalPosition.x << ',' << entry.globalPosition.y
-				<< " state=" << static_cast<int>(entry.state)
-				<< " hasPath=" << entry.hasPath
-				<< " node=" << entry.targetPathNode << '/' << entry.pathNodeCount
-				<< " loco=" << entry.hasLocomotionTask
-				<< " request=" << entry.traversalRequest.value
-				<< " permit=" << entry.traversalPermit.value
-				<< " interaction=" << entry.interactionRequest.value << "\n";
-		}
-		for (auto const& event : world.consumeSimulationEvents())
-		{
-			out << "event " << event.sequence << ':' << event.tick
-				<< ':' << static_cast<int>(event.type)
-				<< ':' << static_cast<int>(event.phase) << "\n";
-		}
-		return out.str();
-	}
-
-	// Deleting while the world runs changes nothing about the world. The
-	// Agents that were the group's members carry on walking exactly as if the
-	// group had never existed, because grouping was never part of their run.
-	void deletingWhileTheSimulationRunsLeavesTheRunAlone()
-	{
-		auto const withoutDelete = walkWithOptionalMidRunDelete(false);
-		auto const withDelete = walkWithOptionalMidRunDelete(true);
-
-		require(!withoutDelete.empty() && !withDelete.empty(),
-			"The movement traces came back empty, so the comparison proved nothing");
-		require(withoutDelete == withDelete,
-			"Deleting an Agent group while the simulation ran changed Agent movement, "
-			"the runtime snapshot, or the published events:\n"
-			+ withoutDelete + "\nvs\n" + withDelete);
-	}
-
-	// The snapshot at the instant of the deletion, and the snapshot a moment
-	// later, are the same document: the deletion wrote nothing into the
-	// runtime state it shares with the simulation.
-	void theRuntimeSnapshotIsTheSameAcrossTheDeletion()
-	{
-		core::World world("Snapshot across delete", 12, 3);
-		auto const fixture = buildFixture(world);
-		for (uint32_t tick = 0; tick < 12; ++tick) world.advanceTick();
-
-		auto const render = [](core::SimulationSnapshot const& snapshot)
-		{
-			std::ostringstream out;
-			out.precision(6);
-			out << std::fixed;
-			out << "tick=" << snapshot.tick
-				<< " paused=" << snapshot.paused
-				<< " topology=" << snapshot.topologyGeneration << "\n";
-			for (auto const& entry : snapshot.agents)
-			{
-				out << entry.id.value << ' ' << entry.name
-					<< " sector=" << entry.sectorId.value
-					<< " global=" << entry.globalPosition.x << ',' << entry.globalPosition.y
-					<< " state=" << static_cast<int>(entry.state) << "\n";
-			}
-			return out.str();
-		};
-
-		auto const before = render(world.getSimulationSnapshot());
-
-		std::string diagnostic;
-		require(world.deleteAgentGroup(fixture.crew, &diagnostic),
-			("Deleting the occupied Agent group failed: " + diagnostic).c_str());
-
-		auto const after = render(world.getSimulationSnapshot());
-		require(before == after,
-			"The runtime snapshot changed across an Agent group deletion:\n"
-			+ before + "\nvs\n" + after);
-	}
-
 	// Undo brings back everything the deletion took: the same AgentGroupId,
 	// the same place in the creation order, the same name, the same Agents
 	// assigned, and therefore the same count. Redo takes all of it back
@@ -1238,27 +984,20 @@ namespace
 	}
 }
 
-void runAgentGroupDeleteSmokeChecks()
+void agent_smoke::registerGroupDeleteEditor(std::vector<smoke::Check>& checks)
 {
-	resetAgentGroupsPanelState();
-	anEmptyGroupDeletesAndLeavesEveryOtherGroupAlone();
-	deletingAnOccupiedGroupReturnsEveryMemberToNoGroup();
-	anUnknownGroupIdIsRefusedAtomicallyWithADiagnostic();
-	aDeletedAgentGroupIdIsNeverIssuedAgain();
-	aDeletionMarksTheDocumentAndLeavesTheTopologyAlone();
-	aDeletedGroupStaysDeletedThroughASaveAndReopen();
-	onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany();
-	anEmptyGroupDeletesOnTheSpotThroughThePanelSeam();
-	anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet();
-	cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory();
-	confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit();
-	confirmingWithNothingArmedDeletesNothing();
-	aRefusedDeleteCommitsNothingThroughThePanelSeam();
-	theConfirmationReachesTheScreenAsAModal();
-	everyGroupRowCarriesItsOwnDeleteControl();
-	theGroupsWithDeleteRenderWithoutLeakingImGuiState();
-	deletingWhileTheSimulationRunsLeavesTheRunAlone();
-	theRuntimeSnapshotIsTheSameAcrossTheDeletion();
-	undoRestoresTheGroupCompletelyAndRedoRemovesItAgain();
-	resetAgentGroupsPanelState();
+	checks.push_back({ "deletingAnOccupiedGroupReturnsEveryMemberToNoGroup", [](smoke::Context const&) { EditorState state; deletingAnOccupiedGroupReturnsEveryMemberToNoGroup(); } });
+	checks.push_back({ "aDeletionMarksTheDocumentAndLeavesTheTopologyAlone", [](smoke::Context const&) { EditorState state; aDeletionMarksTheDocumentAndLeavesTheTopologyAlone(); } });
+	checks.push_back({ "aDeletedGroupStaysDeletedThroughASaveAndReopen", [](smoke::Context const&) { EditorState state; aDeletedGroupStaysDeletedThroughASaveAndReopen(); } });
+	checks.push_back({ "onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany", [](smoke::Context const&) { EditorState state; onlyAnOccupiedGroupNeedsConfirmingAndSaysHowMany(); } });
+	checks.push_back({ "anEmptyGroupDeletesOnTheSpotThroughThePanelSeam", [](smoke::Context const&) { EditorState state; anEmptyGroupDeletesOnTheSpotThroughThePanelSeam(); } });
+	checks.push_back({ "anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet", [](smoke::Context const&) { EditorState state; anOccupiedGroupWaitsForAnAnswerAndHasChangedNothingYet(); } });
+	checks.push_back({ "cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory", [](smoke::Context const&) { EditorState state; cancellingChangesNoGroupAssignmentCountDirtyStateOrHistory(); } });
+	checks.push_back({ "confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit", [](smoke::Context const&) { EditorState state; confirmingDeletesTheGroupAndItsAssignmentsAsOneEdit(); } });
+	checks.push_back({ "confirmingWithNothingArmedDeletesNothing", [](smoke::Context const&) { EditorState state; confirmingWithNothingArmedDeletesNothing(); } });
+	checks.push_back({ "aRefusedDeleteCommitsNothingThroughThePanelSeam", [](smoke::Context const&) { EditorState state; aRefusedDeleteCommitsNothingThroughThePanelSeam(); } });
+	checks.push_back({ "theConfirmationReachesTheScreenAsAModal", [](smoke::Context const&) { EditorState state; theConfirmationReachesTheScreenAsAModal(); } });
+	checks.push_back({ "everyGroupRowCarriesItsOwnDeleteControl", [](smoke::Context const&) { EditorState state; everyGroupRowCarriesItsOwnDeleteControl(); } });
+	checks.push_back({ "theGroupsWithDeleteRenderWithoutLeakingImGuiState", [](smoke::Context const&) { EditorState state; theGroupsWithDeleteRenderWithoutLeakingImGuiState(); } });
+	checks.push_back({ "undoRestoresTheGroupCompletelyAndRedoRemovesItAgain", [](smoke::Context const&) { EditorState state; undoRestoresTheGroupCompletelyAndRedoRemovesItAgain(); } });
 }

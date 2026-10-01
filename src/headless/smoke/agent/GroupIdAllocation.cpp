@@ -1,45 +1,10 @@
-// Agent group ID allocation across a reload, for ticket #123.
-//
-// An AgentGroupId is promised to be stable, monotonically allocated and never
-// reused, with zero held back as the null handle (EntityId.h, ADR 0006). The
-// version-9 document persisted the live {id, name} pairs and nothing else, so
-// the allocator's high-water mark died with the World that held it: delete
-// the highest group, save, reopen, and the next group inherited the deleted
-// identity. Push the other way - a document whose highest ID is the top of the
-// range - and the allocator wrapped onto zero, which is falsey to
-// canSetAgentGroup and rejected outright as a group ID on the next open.
-//
-// What gets pinned down:
-//
-//   a fresh World allocates from 1, and every ID it hands out is live and
-//   comes after the last
-//   the save carries the allocator's mark, so a reopened World continues
-//   from where the writer got to rather than from its survivors
-//   delete -> save/reopen -> add never reissues the deleted ID
-//   delete -> undo/redo -> add never reissues it either, because a snapshot
-//   is a document and carries the same mark
-//   undoing a delete restores the group without dragging the allocator back
-//   down to its identity
-//   a document with every group deleted still keeps the allocator ahead
-//   sparse IDs keep the allocator above the highest live ID
-//   a document at the top of the range loads as exhausted: it never hands out
-//   the null handle, and it saves and reopens as exhausted
-//   an explicit zero mark reads as exhaustion, never as a group with ID zero
-//   a mark that runs backwards against the groups in the same file is refused
-//   with a diagnostic naming both numbers, and the refusal leaves the live
-//   World, its groups and its own allocator exactly as they were
-//   documents written before the mark existed still load, and get a safe next
-//   ID derived from the groups they do carry
-//   through the panel seam an exhausted World refuses the add, says why,
-//   and commits nothing to the undo history
-
+// Migrated from AgentGroupIdAllocationSmokeChecks.cpp (#285); core dependency tier.
 #include <cstdint>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
-
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/EntityId.h"
@@ -47,9 +12,7 @@
 #include "core/Sector.h"
 #include "core/SerializationException.h"
 #include "core/YamlSerializer.h"
-
-#include "AgentGroupsPanel.h"
-#include "DocumentEdit.h"
+#include "Checks.h"
 
 namespace
 {
@@ -208,38 +171,6 @@ namespace
 		world.finishBuild();
 	}
 
-	void resetUndoHistory()
-	{
-		gWorldDocumentHistory.clear();
-	}
-
-	// The editor's own undo and redo, the same shape as UI.cpp's
-	// restoreDocumentSnapshot(): the live state crosses to the other stack and
-	// the newest snapshot on the source stack becomes the live World.
-	void stepDocument(std::shared_ptr<core::World>& world, bool redo)
-	{
-		auto const current = captureDocumentSnapshot(world);
-		require(current.has_value(), "The live document could not be captured");
-
-		std::shared_ptr<core::World> loaded;
-		auto restore = [&loaded](DocumentSnapshot const& target)
-		{
-			loaded = loadWorld(target.yaml);
-			loaded->markModified();
-			return true;
-		};
-		auto const restored = redo
-			? gWorldDocumentHistory.redo(current, restore)
-			: gWorldDocumentHistory.undo(current, restore);
-		require(restored, redo ? "There is no redo entry to restore"
-			: "There is no undo entry to restore");
-		world = std::move(loaded);
-		resetAgentGroupsPanelState();
-	}
-
-	void undoDocument(std::shared_ptr<core::World>& world) { stepDocument(world, false); }
-	void redoDocument(std::shared_ptr<core::World>& world) { stepDocument(world, true); }
-
 	// A document whose allocator has nothing left to give: two live groups and
 	// a mark of zero, which is what an exhausted save writes.
 	std::string exhaustedDocument()
@@ -366,75 +297,6 @@ namespace
 		require(mark == 3,
 			"The saved allocator mark is not one past the highest ID ever issued: "
 				+ std::to_string(mark));
-	}
-
-	// Undo and redo travel as serialized documents, so the mark that fixes
-	// save/reopen has to fix them too. Delete, undo, redo, add: the added
-	// group must not land on the deleted identity.
-	void theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo()
-	{
-		resetUndoHistory();
-		auto world = std::make_shared<core::World>("Undo and redo", 12, 3);
-		buildWorld(*world);
-
-		std::string diagnostic;
-		auto const kept = commitAgentGroupAdd(world, "Kept", diagnostic);
-		require(static_cast<bool>(kept), "The panel refused the first Agent group: " + diagnostic);
-		auto const deleted = commitAgentGroupAdd(world, "Deleted", diagnostic);
-		require(static_cast<bool>(deleted), "The panel refused the second Agent group: " + diagnostic);
-		require(commitAgentGroupDelete(world, deleted, diagnostic),
-			"The panel refused the Agent group delete: " + diagnostic);
-
-		undoDocument(world);
-		require(world->getAgentGroupCount() == 2,
-			"Undo did not bring the deleted Agent group back: " + groupSummary(*world));
-		redoDocument(world);
-		require(groupSummary(*world) == "1:Kept;",
-			"Redo did not take the Agent group away again: " + groupSummary(*world));
-
-		auto const replacement = commitAgentGroupAdd(world, "Replacement", diagnostic);
-		require(static_cast<bool>(replacement),
-			"The panel refused an Agent group added after undo and redo: " + diagnostic);
-		require(replacement != deleted && replacement.value > deleted.value,
-			"An Agent group added after undo and redo inherited the deleted identity: "
-				+ std::to_string(replacement.value));
-		require(replacement.value == 3,
-			"The Agent group added after undo and redo did not continue from the mark: "
-				+ std::to_string(replacement.value));
-		requireNoNullAgentGroupId(*world, "after undo and redo");
-		resetUndoHistory();
-	}
-
-	// The other half of the same round trip: undo puts the group back with its
-	// own identity, and the allocator still has to be standing above it.
-	void undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity()
-	{
-		resetUndoHistory();
-		auto world = std::make_shared<core::World>("Undo restore", 12, 3);
-		buildWorld(*world);
-
-		std::string diagnostic;
-		require(static_cast<bool>(commitAgentGroupAdd(world, "Kept", diagnostic)),
-			"The panel refused the first Agent group: " + diagnostic);
-		auto const deleted = commitAgentGroupAdd(world, "Deleted", diagnostic);
-		require(static_cast<bool>(deleted), "The panel refused the second Agent group: " + diagnostic);
-		require(commitAgentGroupDelete(world, deleted, diagnostic),
-			"The panel refused the Agent group delete: " + diagnostic);
-
-		undoDocument(world);
-		require(static_cast<bool>(world->lookupAgentGroup(deleted)),
-			"Undo did not restore the deleted Agent group");
-
-		auto const next = commitAgentGroupAdd(world, "Next", diagnostic);
-		require(static_cast<bool>(next),
-			"The panel refused an Agent group added after undoing a delete: " + diagnostic);
-		require(next != deleted && next.value > deleted.value,
-			"An Agent group added after an undo inherited the restored identity: "
-				+ std::to_string(next.value));
-		require(next.value == 3,
-			"The Agent group added after an undo did not continue from the mark: "
-				+ std::to_string(next.value));
-		resetUndoHistory();
 	}
 
 	// An empty group list says nothing about where the allocator got to, which
@@ -666,46 +528,19 @@ namespace
 			"A document with no Agent group section did not start allocating at 1: "
 				+ std::to_string(first.value));
 	}
-
-	// The panel's own seam: an exhausted World refuses the add, says why,
-	// and commits nothing - no group, no dirty state, no undo entry.
-	void anExhaustedWorldRefusesThePanelSeamAndCommitsNothing()
-	{
-		resetUndoHistory();
-		auto world = loadWorld(exhaustedDocument());
-		auto const before = groupSummary(*world);
-		world->markSaved();
-		auto const historyBefore = gWorldDocumentHistory.undoCount();
-
-		std::string diagnostic;
-		auto const refused = commitAgentGroupAdd(world, "Too many", diagnostic);
-		require(!static_cast<bool>(refused),
-			"The panel created an Agent group in an exhausted World");
-		require(!diagnostic.empty(), "The panel refused an Agent group without a diagnostic");
-		require(gWorldDocumentHistory.undoCount() == historyBefore,
-			"A refused Agent group still reached the undo history");
-		require(groupSummary(*world) == before,
-			"A refused Agent group changed the World: " + groupSummary(*world));
-		resetUndoHistory();
-	}
 }
 
-void runAgentGroupIdAllocationSmokeChecks()
+void agent_smoke::registerGroupIdAllocation(std::vector<smoke::Check>& checks)
 {
-	resetAgentGroupsPanelState();
-	aFreshWorldIssuesLiveIdsInOrder();
-	theHighestDeletedAgentGroupIdIsNotReissuedAcrossASaveAndReopen();
-	theSaveCarriesTheAllocatorMark();
-	theHighestDeletedAgentGroupIdIsNotReissuedAcrossUndoAndRedo();
-	undoingADeleteKeepsTheAllocatorAboveTheRestoredIdentity();
-	aDocumentWithEveryAgentGroupDeletedStillKeepsTheAllocatorAhead();
-	sparseAgentGroupIdsKeepTheAllocatorAboveTheHighestLiveId();
-	aDocumentAtTheTopOfTheRangeLoadsExhaustedRatherThanWrappingToZero();
-	anExplicitZeroMarkReadsAsExhaustionNotAsAGroupId();
-	aMarkThatRunsBackwardsAgainstItsGroupsIsRefused();
-	aRefusedMarkLeavesTheLiveWorldAndItsGroupsAlone();
-	aDocumentWithoutTheAllocatorFieldStillLoadsAndDerivesASafeNextId();
-	aDocumentWithNoAgentGroupSectionStartsTheAllocationFresh();
-	anExhaustedWorldRefusesThePanelSeamAndCommitsNothing();
-	resetAgentGroupsPanelState();
+	checks.push_back({ "aFreshWorldIssuesLiveIdsInOrder", [](smoke::Context const&) { aFreshWorldIssuesLiveIdsInOrder(); } });
+	checks.push_back({ "theHighestDeletedAgentGroupIdIsNotReissuedAcrossASaveAndReopen", [](smoke::Context const&) { theHighestDeletedAgentGroupIdIsNotReissuedAcrossASaveAndReopen(); } });
+	checks.push_back({ "theSaveCarriesTheAllocatorMark", [](smoke::Context const&) { theSaveCarriesTheAllocatorMark(); } });
+	checks.push_back({ "aDocumentWithEveryAgentGroupDeletedStillKeepsTheAllocatorAhead", [](smoke::Context const&) { aDocumentWithEveryAgentGroupDeletedStillKeepsTheAllocatorAhead(); } });
+	checks.push_back({ "sparseAgentGroupIdsKeepTheAllocatorAboveTheHighestLiveId", [](smoke::Context const&) { sparseAgentGroupIdsKeepTheAllocatorAboveTheHighestLiveId(); } });
+	checks.push_back({ "aDocumentAtTheTopOfTheRangeLoadsExhaustedRatherThanWrappingToZero", [](smoke::Context const&) { aDocumentAtTheTopOfTheRangeLoadsExhaustedRatherThanWrappingToZero(); } });
+	checks.push_back({ "anExplicitZeroMarkReadsAsExhaustionNotAsAGroupId", [](smoke::Context const&) { anExplicitZeroMarkReadsAsExhaustionNotAsAGroupId(); } });
+	checks.push_back({ "aMarkThatRunsBackwardsAgainstItsGroupsIsRefused", [](smoke::Context const&) { aMarkThatRunsBackwardsAgainstItsGroupsIsRefused(); } });
+	checks.push_back({ "aRefusedMarkLeavesTheLiveWorldAndItsGroupsAlone", [](smoke::Context const&) { aRefusedMarkLeavesTheLiveWorldAndItsGroupsAlone(); } });
+	checks.push_back({ "aDocumentWithoutTheAllocatorFieldStillLoadsAndDerivesASafeNextId", [](smoke::Context const&) { aDocumentWithoutTheAllocatorFieldStillLoadsAndDerivesASafeNextId(); } });
+	checks.push_back({ "aDocumentWithNoAgentGroupSectionStartsTheAllocationFresh", [](smoke::Context const&) { aDocumentWithNoAgentGroupSectionStartsTheAllocationFresh(); } });
 }

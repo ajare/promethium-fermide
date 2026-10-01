@@ -1,35 +1,4 @@
-// Live Agent group membership counts, for ticket #111.
-//
-// A count is asked through the public World API and answered from the
-// World's own authoritative state: the Agents themselves, each carrying
-// the Agent group ID it was assigned. Nothing here reads a counter, because
-// there is none - not on the group, not in the panel, not in the file. That
-// is the whole design, and most of what these checks pin down.
-//
-// What gets pinned down:
-//
-//   a count covers every World-owned Agent carrying the group's ID,
-//   whichever Layer and Sector it sits in and whichever movement state it is
-//   in - idle, walking, or held waiting at a Door it cannot open
-//   ungrouped Agents and the members of other groups are never counted, and
-//   an empty group counts zero rather than going missing
-//   a count is current the moment an assignment is made: assigning,
-//   reassigning and clearing each move it by exactly one, with no refresh
-//   step for a caller to remember and nothing to make the number settle
-//   renaming a group leaves its count alone, because the count follows the
-//   ID and the name is only a label read back through the World
-//   removing an Agent takes it out of its group's count, so a count cannot
-//   outlive a member the World no longer has
-//   the serialized document carries group definitions and per-Agent
-//   assignments only: no count-shaped field exists anywhere in them, so no
-//   written-down number can go stale, and a round trip rebuilds every count
-//   from the memberships that came back
-//   an undo snapshot restores the memberships and the counts with them, and
-//   carries no count data of its own either
-//   the real Groups table declares the Agents column and renders inside a
-//   CPU-side ImGui context without leaking a disabled scope, paused or
-//   running
-
+// Migrated from AgentGroupCountSmokeChecks.cpp (#285); core dependency tier.
 #include <bit>
 #include <cctype>
 #include <cstdint>
@@ -38,10 +7,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-#include "imgui/imgui.h"
-#include "imgui/imgui_internal.h"
-
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/Edge.h"
@@ -53,9 +18,7 @@
 #include "core/Simulation.h"
 #include "core/Vertex.h"
 #include "core/YamlSerializer.h"
-
-#include "AgentGroupsPanel.h"
-#include "DocumentEdit.h"
+#include "Checks.h"
 
 namespace
 {
@@ -83,16 +46,6 @@ namespace
 		require(reader != nullptr, "The serialised World could not be read back");
 		require(loaded->deserialize(*reader, workData), "The World did not reload");
 		return loaded;
-	}
-
-	// Loads over a World that already exists, which is how the editor's
-	// undo restores a snapshot: the snapshot's document replaces the live one.
-	void restoreInto(core::World& target, std::string const& yaml)
-	{
-		core::SerializationWorkData workData;
-		auto reader = core::YamlSerializer::fromString(yaml);
-		reader->deserialize();
-		require(target.deserialize(*reader, workData), "The World did not reload");
 	}
 
 	// Every Agent the World owns, read off the spatial index, so a check
@@ -216,24 +169,6 @@ namespace
 		}
 	}
 
-	struct ImGuiGuard
-	{
-		ImGuiGuard()
-		{
-			ImGui::CreateContext();
-			auto& io = ImGui::GetIO();
-			io.DisplaySize = ImVec2(800.0f, 600.0f);
-			io.Fonts->AddFontDefault();
-			io.Fonts->Build();
-		}
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
-
-	void resetUndoHistory()
-	{
-		gWorldDocumentHistory.clear();
-	}
-
 	// A two-Storey world with two Locations on each Layer, so a group's
 	// members are genuinely spread out and a count has to reach all of them.
 	struct CountingWorldLayout
@@ -331,32 +266,6 @@ namespace
 			"The test world did not place every Agent the count is meant to cover");
 	}
 
-	// An empty group is a group that counts zero, not a group with no number.
-	// A freshly defined group and a group whose last member has just gone both
-	// read as zero, and the column shows it.
-	void anEmptyGroupCountsZero()
-	{
-		core::World world("Empty group", 12, 3);
-		auto const layout = buildCountingWorldLayout(world);
-
-		auto const crew = world.addAgentGroup("Crew");
-		require(world.getAgentGroupMemberCount(crew) == 0,
-			"A newly defined Agent group did not count zero members");
-		require(agentGroupMemberCountLabel(world, crew) == "0",
-			"The Agents column did not show zero for an empty Agent group");
-
-		auto const agent = world.createAgent("Only member", layout.frontCorridor, 0, 1.0f);
-		assign(world, agent, crew);
-		require(world.getAgentGroupMemberCount(crew) == 1,
-			"The first member of an empty group was not counted");
-
-		assign(world, agent, {});
-		require(world.getAgentGroupMemberCount(crew) == 0,
-			"Clearing the last member left the group counting something");
-		require(agentGroupMemberCountLabel(world, crew) == "0",
-			"The Agents column did not return to zero once the group was emptied");
-	}
-
 	// Assigning, reassigning and clearing each move the numbers by exactly
 	// one, and do it before anything else is asked.
 	void countsTrackAssignReassignAndClearImmediately()
@@ -409,52 +318,6 @@ namespace
 			"Assigning an unknown Agent succeeded");
 		require(allCounts(world) == "Crew=0;Night shift=1;",
 			"A refused assignment moved the counts: " + allCounts(world));
-	}
-
-	// A rename moves a label and nothing else. The count rides on the ID, so
-	// the number a group shows is undisturbed by what it is called.
-	void aRenameLeavesTheCountAlone()
-	{
-		core::World world("Count rename", 12, 3);
-		auto const layout = buildCountingWorldLayout(world);
-
-		auto const crew = world.addAgentGroup("Crew");
-		auto const nightShift = world.addAgentGroup("Night shift");
-		assign(world, world.createAgent("One", layout.frontCorridor, 0, 1.0f), crew);
-		assign(world, world.createAgent("Two", layout.frontRoom, 0, 1.0f), crew);
-		assign(world, world.createAgent("Three", layout.backRoom, 0, 1.0f), crew);
-		assign(world, world.createAgent("Four", layout.backCorridor, 0, 1.0f), nightShift);
-
-		auto const before = allCounts(world);
-		require(before == "Crew=3;Night shift=1;",
-			"The rename fixture is not what the check expects: " + before);
-
-		std::string diagnostic;
-		require(world.renameAgentGroup(crew, "Facilities team", &diagnostic),
-			("Renaming a populated Agent group was refused: " + diagnostic).c_str());
-
-		require(world.getAgentGroupMemberCount(crew) == 3,
-			"Renaming an Agent group changed its count");
-		require(world.getAgentGroupMemberCount(nightShift) == 1,
-			"Renaming one Agent group changed another's count");
-		require(agentGroupMemberCountLabel(world, crew) == "3",
-			"The Agents column's count did not survive a rename of its group");
-
-		// Renaming back, and renaming the other group too, still moves no
-		// number.
-		require(world.renameAgentGroup(crew, "Crew", &diagnostic)
-			&& world.renameAgentGroup(nightShift, "Graveyard", &diagnostic),
-			("A follow-up rename was refused: " + diagnostic).c_str());
-		require(world.getAgentGroupMemberCount(crew) == 3
-			&& world.getAgentGroupMemberCount(nightShift) == 1,
-			"A second rename changed a count: " + allCounts(world));
-
-		// A refused rename changes nothing either - counts included.
-		require(!world.renameAgentGroup(crew, "Graveyard", &diagnostic),
-			"A rename onto a name another group holds was accepted");
-		require(world.getAgentGroupMemberCount(crew) == 3
-			&& world.getAgentGroupMemberCount(nightShift) == 1,
-			"A refused rename moved a count: " + allCounts(world));
 	}
 
 	// Movement is not membership. Agents sent walking, held waiting at a Door
@@ -667,205 +530,14 @@ namespace
 		require(loaded->getAgentGroupMemberCount(crew) == 3,
 			"A count stopped tracking after a load: " + allCounts(*loaded));
 	}
-
-	// The undo snapshot is the other restoration path. A snapshot holds the
-	// memberships, not the counts; restoring one brings the counts back as a
-	// consequence of the memberships, not as a remembered number.
-	void countsReturnFromARestoredUndoSnapshot()
-	{
-		resetUndoHistory();
-
-		auto const world = std::make_shared<core::World>("Count undo", 12, 3);
-		auto const layout = buildCountingWorldLayout(*world);
-
-		auto const crew = world->addAgentGroup("Crew");
-		auto const nightShift = world->addAgentGroup("Night shift");
-		auto const alpha = world->createAgent("Alpha", layout.frontCorridor, 0, 1.0f);
-		auto const beta = world->createAgent("Beta", layout.backRoom, 0, 1.0f);
-		assign(*world, alpha, crew);
-
-		require(allCounts(*world) == "Crew=1;Night shift=0;",
-			"The undo fixture is not what the check expects: " + allCounts(*world));
-
-		// Snapshot this state, then move both Agents about.
-		auto const snapshot = captureDocumentSnapshot(world);
-		require(snapshot.has_value(), "The undo snapshot could not be captured");
-
-		assign(*world, beta, crew);
-		assign(*world, alpha, nightShift);
-		require(world->getAgentGroupMemberCount(crew) == 1
-			&& world->getAgentGroupMemberCount(nightShift) == 1,
-			"The live counts before the restore are wrong: " + allCounts(*world));
-
-		// The snapshot carries no count data either - only the definitions
-		// and the assignments, which is exactly what restoring needs.
-		requireNoCountShapedKeys(snapshot->yaml, "agentGroups");
-		requireNoCountShapedKeys(snapshot->yaml, "agents");
-
-		// Restoring is a load of the snapshot's document over the live
-		// World, which is how the editor's undo works.
-		restoreInto(*world, snapshot->yaml);
-		require(world->getAgentGroupMemberCount(crew) == 1,
-			"Restoring the snapshot did not rebuild the group's count: "
-			+ allCounts(*world));
-		require(world->getAgentGroupMemberCount(nightShift) == 0,
-			"Restoring the snapshot left the other group counting a member: "
-			+ allCounts(*world));
-		require(world->getAgentGroup(alpha) == crew,
-			"Restoring the snapshot did not restore the assignment the count reads");
-		require(!world->getAgentGroup(beta),
-			"Restoring the snapshot left an Agent assigned that was unassigned before");
-
-		// And the restored World counts live from here on.
-		assign(*world, beta, nightShift);
-		require(world->getAgentGroupMemberCount(nightShift) == 1,
-			"A restored World stopped counting: " + allCounts(*world));
-	}
-
-	// The panel's own column list is what the table is built from. Active is
-	// immediately after the group name, followed by Agents and Delete.
-	void theGroupsTableDeclaresAnAgentsColumn()
-	{
-		auto const& columns = agentGroupsPanelColumns();
-		require(columns.size() == 4,
-			("The Groups table does not have Name, Active, Agents and Delete columns; it has "
-				+ std::to_string(columns.size())).c_str());
-		require(columns[0] == "Name",
-			"The Groups table's first column is not the name column");
-		require(columns[1] == "Active",
-			"The Groups table's second column is not the Active toggle");
-		require(columns[2] == "Agents",
-			"The Groups table's count column is not called Agents");
-		require(columns[3] == "Delete",
-			"The Groups table's fourth column is not the Delete column");
-	}
-
-	// The real panel, rendered for real, with the count column in it. What
-	// matters is that rendering counts leaves no ImGui state behind: a
-	// leaked disabled scope once dimmed the rest of the editor for every
-	// frame.
-	void theCountColumnRendersWithoutLeakingImGuiState()
-	{
-		ImGuiGuard guard;
-
-		auto const shared = std::make_shared<core::World>("Count panel", 12, 3);
-		auto const layout = buildCountingWorldLayout(*shared);
-		auto const crew = shared->addAgentGroup("Crew");
-		auto const nightShift = shared->addAgentGroup("Night shift");
-		shared->addAgentGroup("Unstaffed");
-		assign(*shared, shared->createAgent("One", layout.frontCorridor, 0, 1.0f), crew);
-		assign(*shared, shared->createAgent("Two", layout.backRoom, 0, 1.0f), crew);
-		assign(*shared, shared->createAgent("Three", layout.backCorridor, 0, 1.0f), nightShift);
-
-		for (bool const paused : { true, false })
-		{
-			if (paused) shared->pauseSimulation();
-			else if (shared->isSimulationPaused()) shared->resumeSimulation();
-
-			ImGui::NewFrame();
-			ImGui::Begin("World");
-
-			auto const depthOnEntry = GImGui->DisabledStackSize;
-			auto const flagsOnEntry = GImGui->CurrentItemFlags;
-			auto const alphaOnEntry = GImGui->Style.Alpha;
-
-			renderAgentGroupsPanel(shared);
-
-			require(GImGui->DisabledStackSize == depthOnEntry,
-				"The Agent groups panel left a disabled scope open");
-			require(GImGui->CurrentItemFlags == flagsOnEntry,
-				"The Agent groups panel changed the current item flags");
-			// Compared as bits, not as floats: the question is whether the value
-			// is exactly the one stored, which is what "unchanged" means here
-			// and what -Wfloat-equal objects to otherwise.
-			require(std::bit_cast<uint32_t>(GImGui->Style.Alpha)
-				== std::bit_cast<uint32_t>(alphaOnEntry),
-				"The Agent groups panel changed the global alpha");
-			// Merely drawing the counts changed nothing about them.
-			require(allCounts(*shared) == "Crew=2;Night shift=1;Unstaffed=0;",
-				"Rendering the counts changed them: " + allCounts(*shared));
-
-			ImGui::End();
-
-			// The frame has to complete, which is where ImGui's own end-frame
-			// checks would fire on an unbalanced window.
-			ImGui::Render();
-		}
-	}
-
-	// The count cell on its own, rendered inside a two-column table built the
-	// way the Groups table builds its own, and checked against the numbers it
-	// has to show as membership changes underneath it.
-	void theCountCellShowsTheLiveCount()
-	{
-		ImGuiGuard guard;
-
-		core::World world("Count cell", 12, 3);
-		auto const layout = buildCountingWorldLayout(world);
-		auto const crew = world.addAgentGroup("Crew");
-		auto const empty = world.addAgentGroup("Unstaffed");
-
-		require(agentGroupMemberCountLabel(world, crew) == "0",
-			"A new group's cell does not read zero before its first member");
-		require(agentGroupMemberCountLabel(world, empty) == "0",
-			"An empty group's cell does not read zero");
-
-		assign(world, world.createAgent("One", layout.frontCorridor, 0, 1.0f), crew);
-		require(agentGroupMemberCountLabel(world, crew) == "1",
-			"A cell does not show one member after one assignment");
-
-		assign(world, world.createAgent("Two", layout.backRoom, 0, 1.0f), crew);
-		require(agentGroupMemberCountLabel(world, crew) == "2",
-			"A cell does not show two members after a second assignment");
-
-		ImGui::NewFrame();
-		ImGui::Begin("World");
-
-		ImGuiTableFlags const flags =
-			ImGuiTableFlags_SizingStretchSame |
-			ImGuiTableFlags_BordersOuter |
-			ImGuiTableFlags_BordersV;
-		require(ImGui::BeginTable("AgentGroups", 2, flags),
-			"The test Groups table could not be opened");
-		ImGui::TableSetupColumn("Name");
-		ImGui::TableSetupColumn("Agents");
-		ImGui::TableHeadersRow();
-
-		ImGui::TableNextRow();
-		ImGui::PushID(crew.value);
-		ImGui::TableSetColumnIndex(1);
-
-		auto const depthOnEntry = GImGui->DisabledStackSize;
-		auto const flagsOnEntry = GImGui->CurrentItemFlags;
-
-		renderAgentGroupMemberCountCell(world, crew);
-
-		require(GImGui->DisabledStackSize == depthOnEntry,
-			"The Agents count cell left a disabled scope open");
-		require(GImGui->CurrentItemFlags == flagsOnEntry,
-			"The Agents count cell changed the current item flags");
-		require(agentGroupMemberCountLabel(world, crew) == "2",
-			"Merely rendering the count cell changed the count");
-
-		ImGui::PopID();
-		ImGui::EndTable();
-		ImGui::End();
-		ImGui::Render();
-	}
 }
 
-void runAgentGroupCountSmokeChecks()
+void agent_smoke::registerGroupCount(std::vector<smoke::Check>& checks)
 {
-	aCountCoversEveryLayerAndSector();
-	anEmptyGroupCountsZero();
-	countsTrackAssignReassignAndClearImmediately();
-	aRenameLeavesTheCountAlone();
-	movementNeverChangesACount();
-	aRemovedAgentLeavesTheCount();
-	countingAnUnknownGroupIsRefused();
-	countsReturnFromASaveLoadWithoutStoredCountData();
-	countsReturnFromARestoredUndoSnapshot();
-	theGroupsTableDeclaresAnAgentsColumn();
-	theCountColumnRendersWithoutLeakingImGuiState();
-	theCountCellShowsTheLiveCount();
+	checks.push_back({ "aCountCoversEveryLayerAndSector", [](smoke::Context const&) { aCountCoversEveryLayerAndSector(); } });
+	checks.push_back({ "countsTrackAssignReassignAndClearImmediately", [](smoke::Context const&) { countsTrackAssignReassignAndClearImmediately(); } });
+	checks.push_back({ "movementNeverChangesACount", [](smoke::Context const&) { movementNeverChangesACount(); } });
+	checks.push_back({ "aRemovedAgentLeavesTheCount", [](smoke::Context const&) { aRemovedAgentLeavesTheCount(); } });
+	checks.push_back({ "countingAnUnknownGroupIsRefused", [](smoke::Context const&) { countingAnUnknownGroupIsRefused(); } });
+	checks.push_back({ "countsReturnFromASaveLoadWithoutStoredCountData", [](smoke::Context const&) { countsReturnFromASaveLoadWithoutStoredCountData(); } });
 }

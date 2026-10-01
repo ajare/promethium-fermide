@@ -56,14 +56,6 @@ void runLiftCrossingRepro(char const* filename);
 void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
 void runPausePositionSmokeChecks();
-void runAgentGroupSmokeChecks();
-void runAgentGroupAssignmentSmokeChecks();
-void runAgentGroupCountSmokeChecks();
-void runAgentGroupDeleteSmokeChecks();
-void runAgentGroupIdAllocationSmokeChecks();
-void runAgentGroupClipboardSmokeChecks();
-void runAgentGroupTopologySmokeChecks();
-void runAgentActivationSmokeChecks();
 void runMarkerIdentitySmokeChecks();
 void runMovementCommandSmokeChecks();
 void runRoutePlanningSmokeChecks();
@@ -130,7 +122,6 @@ void runWorldTeardownSmokeChecks();
 void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
 
-static_assert(!std::is_convertible_v<core::AgentId, core::InteractionPointId>);
 static_assert(!std::is_convertible_v<core::DeviceOperationId, core::TraversalResourceId>);
 
 namespace
@@ -280,48 +271,6 @@ namespace
 		}
 		world.update(halfTick);
 		return world.getSimulationTick() == 1;
-	}
-
-	bool worldOwnsTypedEntitiesAndInvalidatesHandles()
-	{
-		core::World world("Ownership check", 3, 2);
-		auto corridor = world.addCorridor(0, 0, 2);
-		world.finishBuild();
-
-		auto agentId = world.createAgent("Owned idle agent", corridor, 0, 0.5f);
-		auto pointId = world.createInteractionPoint("Light switch");
-		auto operationId = world.createDeviceOperation("Turn lights on", agentId);
-		auto resourceId = world.createTraversalResource("Ordinary passage");
-
-		auto snapshot = world.getSimulationSnapshot();
-		if (snapshot.agents.size() != 1 || snapshot.agents.front().id != agentId
-			|| snapshot.interactionPoints.size() != 1 || snapshot.interactionPoints.front().id != pointId
-			|| snapshot.deviceOperations.size() != 1 || snapshot.deviceOperations.front().id != operationId
-			|| snapshot.deviceOperations.front().requester != agentId
-			|| snapshot.traversalResources.size() != 1 || snapshot.traversalResources.front().id != resourceId)
-		{
-			return false;
-		}
-
-		if (!world.removeAgent(agentId)
-			|| world.lookupAgent(agentId)
-			|| world.lookupAgent(agentId).diagnostic.empty()
-			|| world.lookupDeviceOperation(operationId)
-			|| world.lookupDeviceOperation(operationId).diagnostic.empty())
-		{
-			return false;
-		}
-		if (!world.removeInteractionPoint(pointId) || !world.removeTraversalResource(resourceId))
-		{
-			return false;
-		}
-
-		world.advanceTick();
-		auto afterRemoval = world.getSimulationSnapshot();
-		return afterRemoval.agents.empty()
-			&& afterRemoval.interactionPoints.empty()
-			&& afterRemoval.deviceOperations.empty()
-			&& afterRemoval.traversalResources.empty();
 	}
 
 	std::shared_ptr<core::Path> twoNodePath(std::shared_ptr<const core::Vertex> source,
@@ -6351,14 +6300,6 @@ int main(int argc, char** argv)
 
 		runSerializationSmokeChecks();
 		runPausePositionSmokeChecks();
-		runAgentGroupSmokeChecks();
-		runAgentGroupAssignmentSmokeChecks();
-		runAgentGroupCountSmokeChecks();
-		runAgentGroupDeleteSmokeChecks();
-		runAgentGroupIdAllocationSmokeChecks();
-		runAgentGroupClipboardSmokeChecks();
-		runAgentGroupTopologySmokeChecks();
-		runAgentActivationSmokeChecks();
 		runMarkerIdentitySmokeChecks();
 		runMovementCommandSmokeChecks();
 		runRoutePlanningSmokeChecks();
@@ -6479,11 +6420,6 @@ int main(int argc, char** argv)
 		if (!accumulatedRenderTimeAdvancesWholeTicksOnly())
 		{
 			std::cerr << "FAIL: render-time accumulation did not advance exactly one whole tick\n";
-			return 1;
-		}
-		if (!worldOwnsTypedEntitiesAndInvalidatesHandles())
-		{
-			std::cerr << "FAIL: typed world ownership or handle invalidation failed\n";
 			return 1;
 		}
 		if (!inferredPathSourceDoesNotMakeAgentDoubleBack())

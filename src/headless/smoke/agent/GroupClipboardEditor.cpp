@@ -1,43 +1,4 @@
-// Agent groups through copy, cut and paste, for ticket #113.
-//
-// The hazard this file circles is an ID crossing a document boundary. An
-// AgentGroupId is a receipt for one World's registry; handed to another
-// World it names nothing, or worse, something else. So the clipboard
-// carries the Agent group by name (ADR 0006), and the destination resolves
-// that name when the paste lands: reuse the group it already defines, or
-// make one.
-//
-// The other hazard is a placement that never lands. A pasted Agent falls from
-// the cursor and may be cancelled on the way down, and a paste whose group
-// name turns out to be unusable should fail while the cursor is still where
-// the user put it. Neither may leave an Agent, a group, or an undo entry
-// behind.
-//
-// What gets pinned down:
-//
-//   a copied Agent's payload carries its Agent group by name and its
-//   World-local AgentGroupId nowhere
-//   an ungrouped Agent's payload says nothing about a group at all, for a
-//   copy and for a cut alike
-//   a payload written before grouping existed - no `group` key - still
-//   reads, and pastes an ungrouped Agent
-//   a payload whose `group` is not a name is refused with a diagnostic,
-//   not read as some other value
-//   a paste reuses the destination's own group when it already defines
-//   that exact name, and matches case-sensitively
-//   a paste creates a missing group and assigns the Agent to it as one
-//   document edit
-//   arming a deferred placement writes nothing, and cancelling it leaves
-//   nothing to land
-//   a placement that fails creates neither Agent nor group and commits no
-//   undo entry
-//   an unusable group name is refused whole: not truncated to fit, not
-//   quietly dropped, not half created
-//   undo takes the pasted Agent and the group the paste made together, and
-//   redo brings both back with the assignment
-//   a cut takes the Agent and leaves its source Agent group defined, with
-//   the other members still assigned
-
+// Migrated from AgentGroupClipboardSmokeChecks.cpp (#285); editor dependency tier.
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -45,9 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
 #include <yaml-cpp/yaml.h>
-
 #include "core/Agent.h"
 #include "core/AgentGroup.h"
 #include "core/World.h"
@@ -56,9 +15,10 @@
 #include "core/SerializationWorkData.h"
 #include "core/Simulation.h"
 #include "core/YamlSerializer.h"
-
 #include "AgentClipboard.h"
 #include "DocumentEdit.h"
+#include "Checks.h"
+#include "EditorState.h"
 
 namespace
 {
@@ -920,22 +880,22 @@ namespace
 	}
 }
 
-void runAgentGroupClipboardSmokeChecks()
+void agent_smoke::registerGroupClipboardEditor(std::vector<smoke::Check>& checks)
 {
-	aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId();
-	aCopiedUngroupedAgentCarriesNoAgentGroup();
-	aLegacyPayloadWithoutAnAgentGroupStillPastes();
-	aClipboardAgentGroupThatIsNotANameIsRefused();
-	aPasteReusesTheDestinationGroupOfTheSameExactName();
-	aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively();
-	aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit();
-	armingADeferredPlacementWritesNothing();
-	cancellingADeferredPasteLeavesNothingBehind();
-	aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry();
-	anInvalidClipboardAgentGroupNameIsRefusedWhole();
-	undoTakesThePastedAgentAndItsNewGroupTogether();
-	undoOfAReusingPasteLeavesTheDestinationGroupAlone();
-	cuttingAGroupedAgentLeavesItsSourceGroupDefined();
-	authorizationIsPreservedOnlyInTheOriginatingWorld();
-	anAgentCopiedBetweenWorldsJoinsTheDestinationGroup();
+	checks.push_back({ "aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId", [](smoke::Context const&) { EditorState state; aCopiedAgentCarriesItsAgentGroupByNameAndNoLocalId(); } });
+	checks.push_back({ "aCopiedUngroupedAgentCarriesNoAgentGroup", [](smoke::Context const&) { EditorState state; aCopiedUngroupedAgentCarriesNoAgentGroup(); } });
+	checks.push_back({ "aLegacyPayloadWithoutAnAgentGroupStillPastes", [](smoke::Context const&) { EditorState state; aLegacyPayloadWithoutAnAgentGroupStillPastes(); } });
+	checks.push_back({ "aClipboardAgentGroupThatIsNotANameIsRefused", [](smoke::Context const&) { EditorState state; aClipboardAgentGroupThatIsNotANameIsRefused(); } });
+	checks.push_back({ "aPasteReusesTheDestinationGroupOfTheSameExactName", [](smoke::Context const&) { EditorState state; aPasteReusesTheDestinationGroupOfTheSameExactName(); } });
+	checks.push_back({ "aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively", [](smoke::Context const&) { EditorState state; aPasteMatchesAnAgentGroupNameExactlyAndCaseSensitively(); } });
+	checks.push_back({ "aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit", [](smoke::Context const&) { EditorState state; aPasteCreatesAMissingAgentGroupAndAssignsInTheSameEdit(); } });
+	checks.push_back({ "armingADeferredPlacementWritesNothing", [](smoke::Context const&) { EditorState state; armingADeferredPlacementWritesNothing(); } });
+	checks.push_back({ "cancellingADeferredPasteLeavesNothingBehind", [](smoke::Context const&) { EditorState state; cancellingADeferredPasteLeavesNothingBehind(); } });
+	checks.push_back({ "aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry", [](smoke::Context const&) { EditorState state; aFailedPlacementCreatesNoAgentNoGroupAndNoUndoEntry(); } });
+	checks.push_back({ "anInvalidClipboardAgentGroupNameIsRefusedWhole", [](smoke::Context const&) { EditorState state; anInvalidClipboardAgentGroupNameIsRefusedWhole(); } });
+	checks.push_back({ "undoTakesThePastedAgentAndItsNewGroupTogether", [](smoke::Context const&) { EditorState state; undoTakesThePastedAgentAndItsNewGroupTogether(); } });
+	checks.push_back({ "undoOfAReusingPasteLeavesTheDestinationGroupAlone", [](smoke::Context const&) { EditorState state; undoOfAReusingPasteLeavesTheDestinationGroupAlone(); } });
+	checks.push_back({ "cuttingAGroupedAgentLeavesItsSourceGroupDefined", [](smoke::Context const&) { EditorState state; cuttingAGroupedAgentLeavesItsSourceGroupDefined(); } });
+	checks.push_back({ "authorizationIsPreservedOnlyInTheOriginatingWorld", [](smoke::Context const&) { EditorState state; authorizationIsPreservedOnlyInTheOriginatingWorld(); } });
+	checks.push_back({ "anAgentCopiedBetweenWorldsJoinsTheDestinationGroup", [](smoke::Context const&) { EditorState state; anAgentCopiedBetweenWorldsJoinsTheDestinationGroup(); } });
 }

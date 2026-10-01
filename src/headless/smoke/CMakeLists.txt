@@ -65,6 +65,46 @@ pf_add_smoke_module(pf-smoke-simulation
     TIMEOUT 30
 )
 
+pf_add_smoke_module(pf-smoke-agent
+    NAME agent
+    SOURCES
+        agent/Main.cpp
+        agent/Identity.cpp
+        agent/Activation.cpp
+        agent/Group.cpp
+        agent/GroupAssignment.cpp
+        agent/GroupCount.cpp
+        agent/GroupDelete.cpp
+        agent/GroupIdAllocation.cpp
+        agent/GroupTopology.cpp
+    LIBRARIES prometheum-fermide-core
+    LABELS core
+    TIMEOUT 30
+)
+
+pf_add_smoke_module(pf-smoke-agent-editor
+    NAME agent-editor
+    SOURCES
+        agent/EditorMain.cpp
+        agent/ActivationEditor.cpp
+        agent/GroupEditor.cpp
+        agent/GroupAssignmentEditor.cpp
+        agent/GroupCountEditor.cpp
+        agent/GroupDeleteEditor.cpp
+        agent/GroupIdAllocationEditor.cpp
+        agent/GroupTopologyEditor.cpp
+        agent/GroupClipboardEditor.cpp
+    LIBRARIES pf-agent-editing
+    LABELS editor
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
+    "-DAGENT=$<TARGET_FILE:pf-smoke-agent>"
+    "-DEDITOR=$<TARGET_FILE:pf-smoke-agent-editor>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentContract.cmake")
+set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 60)
+
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES

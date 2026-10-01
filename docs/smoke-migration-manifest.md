@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the World structure migration #284 (parent #278). Each source
+Snapshot after the Agent migration #285 (parent #278). Each source
 below has exactly one current compilation/execution owner; all assertions inside
 it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -24,6 +24,16 @@ Facade panel checks and renderer-dependent Facade checks remain legacy-owned for
 their dedicated migrations. The legacy aggregate and `--render-checks` no longer
 invoke the migrated core Window checks.
 
+#285 migrates all eight Agent activation/Agent group sources into `smoke/agent`,
+plus `worldOwnsTypedEntitiesAndInvalidatesHandles` and the Agent ID type assertion
+from `SmokeScenario.cpp`. Each of the 101 former named checks is registered
+individually, plus `identity`: 53 registrations in `pf-smoke-agent` (core) and
+49 in `pf-smoke-agent-editor` (editor). Checks that assert panel labels, undo
+history, or clipboard behavior belong to the editor tier, including scenarios
+that combine those assertions with World API assertions. Core translation units
+contain none of those dependencies. All old sources, declarations, and calls
+were removed; neither tier calls the legacy aggregate.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Existing overlapping legacy CTest selections are unchanged.
 
@@ -32,7 +42,9 @@ Paths in the table are relative to `src/headless/`.
 | Check source | Ownership | Target |
 | --- | --- | --- |
 | `AccessPermissionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentActivationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/agent/Identity.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `AgentBehaviourAssignmentSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentBehaviourDeleteSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentBehaviourPortabilitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -41,13 +53,19 @@ Paths in the table are relative to `src/headless/`.
 | `AgentBehaviourSchemaReconciliationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentBehaviourWorkflowSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentColourSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupAssignmentSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupClipboardSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupCountSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupDeleteSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupIdAllocationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentGroupTopologySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/agent/GroupAssignment.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupAssignmentEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/GroupClipboardEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/GroupCount.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupCountEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/GroupDelete.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupDeleteEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/GroupIdAllocation.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupIdAllocationEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/Group.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/GroupTopology.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupTopologyEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `AgentHeightSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentIndividualPropertySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentPathRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -125,7 +143,7 @@ Paths in the table are relative to `src/headless/`.
 | `WorldRenderSlotChecks.cpp` | module-owned (retained standalone) | `pf-world-render-slot-checks` |
 | `WorldTeardownSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
-| `SmokeScenario.cpp` (all inline aggregate checks) | legacy-owned | `prometheum-fermide-headless` |
+| `SmokeScenario.cpp` (remaining inline aggregate checks after Agent identity extraction) | legacy-owned | `prometheum-fermide-headless` |
 | `InteractionApiCompileCheck.cpp` (compile-only contract) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/simulation/Observation.cpp` | module-owned | `pf-smoke-simulation` |
 
@@ -152,6 +170,17 @@ continue through `--serialization-checks` (also the existing legacy aggregate).
 Neither legacy entry point executes the migrated checks.
 
 ## Support and non-smoke code
+
+- `smoke/agent/Main.cpp` and `EditorMain.cpp`: explicit per-tier Agent registries.
+  `Checks.h` declares registration functions; `EditorState.h` resets panel and
+  document-history state before and after each editor check, including failures.
+- `smoke/tests/AgentContract.cmake`: exact registries, every single-check selection,
+  misuse, external empty working directory, and absence of working-directory
+  output; owned by `smoke-agent-contract` (`harness;core;editor`).
+- `src/DocumentEdit.cpp`, `src/AgentGroupsPanel.cpp`,
+  `src/AgentGroupAssignmentPanel.cpp`, and `src/AgentClipboard.cpp`: production
+  seams compiled once in `pf-agent-editing`, shared by the GUI, remaining legacy
+  checks, and Agent editor tier. Not smoke-check sources.
 
 - `RenderGuiStubs.cpp` and `support/ImGuiContext.cpp`: reusable CPU-only support,
   compiled by `pf-headless-render-support`, not independent checks.

@@ -1,34 +1,4 @@
-// Agent activation and deactivation, for tickets #118 and #192.
-//
-// An activated Agent is simulated; a deactivated one keeps its authored
-// position and route but no tick acts on it. Activation is authored state
-// like the Agent group assignment: it crosses save/load, reset, topology
-// replays and the clipboard, and the only place the simulation itself ever
-// sees it is the point where a tick decides whose turn it is.
-//
-// Everything here drives the public World API and a real tick pipeline;
-// the registries behind the API are never inspected, and the YAML is read
-// as a whole document - never asserted against incidental formatting.
-//
-// What gets pinned down:
-//
-//   every Agent starts activated, and so does every Agent loaded from a
-//   document that predates the field
-//   activating or deactivating is refused while the simulation runs - with
-//   a reason, and changing nothing - and an unknown Agent is refused too
-//   a deactivated Agent does not move or wake; the route a pause tore down
-//   is not replayed onto it, and reactivating it later does not resurrect
-//   that route
-//   reactivating while the simulation is still paused puts the Agent back
-//   under the simulation: its retained route replays and it walks
-//   the flag crosses a whole-document save/load, a reset, an undoable
-//   object-move replay, and the Agent clipboard
-//   an Agent document that never carried the field loads activated, and a
-//   clipboard payload that never carried it reads activated
-//   a deactivated Agent is refused new interaction work and never walks to
-//   or presses a control; a request already queued when it is deactivated is
-//   cancelled so the queue behind it drains
-
+// Migrated from AgentActivationSmokeChecks.cpp (#285); core dependency tier.
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -36,17 +6,14 @@
 #include <string>
 #include <utility>
 #include <vector>
-
 #include <yaml-cpp/yaml.h>
-
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/EntityId.h"
 #include "core/Sector.h"
 #include "core/Simulation.h"
 #include "core/YamlSerializer.h"
-
-#include "AgentClipboard.h"
+#include "Checks.h"
 
 namespace
 {
@@ -429,59 +396,6 @@ namespace
 			"An object-move replay deactivated an activated Agent");
 	}
 
-	// The clipboard envelope around a hand-written `object` map body, the
-	// same envelope makeAgentClipboardText writes.
-	std::string clipboardTextWithObjectBody(std::string const& body)
-	{
-		return "prometheumClipboard:\n  version: 1\n  operation: copy\n  type: Agent\n"
-			"  object:\n" + body;
-	}
-
-	void clipboardCarriesActivation()
-	{
-		WalkFixture fixture;
-		std::string diagnostic;
-
-		fixture.world.pauseSimulation();
-		require(fixture.world.setAgentActive(fixture.second, false, &diagnostic),
-			"The deactivation was refused: " + diagnostic);
-
-		auto const payload = makeAgentClipboardPayload(fixture.world, fixture.second, "Parked copy");
-		require(!payload.active, "A copied deactivated Agent's payload stayed activated");
-		auto const text = makeAgentClipboardText(payload, false);
-		require(text.find("active") != std::string::npos,
-			"A deactivated Agent's clipboard text does not mention activation");
-
-		auto const parsed = YAML::Load(text);
-		AgentClipboardPayload read;
-		require(readAgentClipboardObject(parsed["prometheumClipboard"]["object"], read, diagnostic),
-			"The clipboard text did not parse: " + diagnostic);
-		require(!read.active, "A parsed payload lost the deactivation");
-
-		// No `active` key - the shape every payload written before activation
-		// existed has - reads back activated.
-		AgentClipboardPayload legacy{ "Legacy", 0, true, std::nullopt };
-		auto const legacyText = makeAgentClipboardText(legacy, false);
-		require(legacyText.find("active") == std::string::npos,
-			"An activated Agent's clipboard text mentions activation");
-		AgentClipboardPayload legacyRead;
-		require(readAgentClipboardObject(
-			YAML::Load(legacyText)["prometheumClipboard"]["object"], legacyRead, diagnostic),
-			"The legacy clipboard text did not parse: " + diagnostic);
-		require(legacyRead.active, "A payload without the activation key did not read as activated");
-
-		// A present key of the wrong shape is refused, not coerced: a
-		// silently-activated paste of a parked Agent would start simulating
-		// someone the author had parked.
-		auto const malformedText = clipboardTextWithObjectBody(
-			"    name: Broken\n    flags: 0\n    active: [not, a, bool]\n");
-		AgentClipboardPayload malformedRead;
-		require(!readAgentClipboardObject(
-			YAML::Load(malformedText)["prometheumClipboard"]["object"], malformedRead, diagnostic),
-			"A non-boolean activation was read instead of refused");
-		require(!diagnostic.empty(), "A refused clipboard payload gave no reason");
-	}
-
 	// Ticket #192: a deactivated Agent is not simulated, so a direct interaction
 	// request must not admit it in the first place and a request that slipped in
 	// before deactivation must not move or press it.
@@ -584,17 +498,16 @@ namespace
 	}
 }
 
-void runAgentActivationSmokeChecks()
+void agent_smoke::registerActivation(std::vector<smoke::Check>& checks)
 {
-	everyAgentStartsActivated();
-	activationIsRefusedWhileTheSimulationRuns();
-	deactivatedAgentsAreNotSimulated();
-	reactivationWhilePausedPutsTheAgentBackUnderTheSimulation();
-	wakingSkipsDeactivatedAgents();
-	groupsToggleTheirCurrentMembersEnMasse();
-	activationSurvivesSerializationAndReset();
-	activationSurvivesTopologyEdits();
-	clipboardCarriesActivation();
-	inactiveAgentsAreRefusedInteractionRequests();
-	queuedInteractionsAreCancelledByDeactivation();
+	checks.push_back({ "everyAgentStartsActivated", [](smoke::Context const&) { everyAgentStartsActivated(); } });
+	checks.push_back({ "activationIsRefusedWhileTheSimulationRuns", [](smoke::Context const&) { activationIsRefusedWhileTheSimulationRuns(); } });
+	checks.push_back({ "deactivatedAgentsAreNotSimulated", [](smoke::Context const&) { deactivatedAgentsAreNotSimulated(); } });
+	checks.push_back({ "reactivationWhilePausedPutsTheAgentBackUnderTheSimulation", [](smoke::Context const&) { reactivationWhilePausedPutsTheAgentBackUnderTheSimulation(); } });
+	checks.push_back({ "wakingSkipsDeactivatedAgents", [](smoke::Context const&) { wakingSkipsDeactivatedAgents(); } });
+	checks.push_back({ "groupsToggleTheirCurrentMembersEnMasse", [](smoke::Context const&) { groupsToggleTheirCurrentMembersEnMasse(); } });
+	checks.push_back({ "activationSurvivesSerializationAndReset", [](smoke::Context const&) { activationSurvivesSerializationAndReset(); } });
+	checks.push_back({ "activationSurvivesTopologyEdits", [](smoke::Context const&) { activationSurvivesTopologyEdits(); } });
+	checks.push_back({ "inactiveAgentsAreRefusedInteractionRequests", [](smoke::Context const&) { inactiveAgentsAreRefusedInteractionRequests(); } });
+	checks.push_back({ "queuedInteractionsAreCancelledByDeactivation", [](smoke::Context const&) { queuedInteractionsAreCancelledByDeactivation(); } });
 }

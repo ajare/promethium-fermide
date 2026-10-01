@@ -1,34 +1,4 @@
-// Topology edits carry Agent group assignments, for ticket #122.
-//
-// Almost every structural edit in the World is a reset and replay: the live
-// world is torn down with resetForDeserialization(), the authored construction
-// records are replayed against the empty World, and the Agents that were
-// standing there are put back by hand. Each of those hand-restorations kept the
-// Agent's name, flags, Layer and position and quietly dropped its Agent group,
-// so moving a Room, deleting a Layer, removing a Door or a Window, moving an
-// object, or editing a Background returned every surviving Agent to no Agent
-// group at all. The group definitions stayed; the membership did not.
-//
-// Every check here drives a real edit through the public World API and reads
-// the result back through the public assignment seam. Two things are asserted
-// each time, before and after: the Agent group each Agent carries, and the live
-// member count each group reports. A count is derived from the expectation
-// rather than from the World, so a member that survives but stops counting -
-// and a member that counts but lost its assignment - both fail.
-//
-// The seven reset/replay paths covered are the plain construction-record
-// replay (a Lift rebuilt on its own records), Layer deletion, Door removal,
-// Window removal, object movement, Location editing and Background editing.
-// Each one carries at least one grouped Agent and one Agent in no group, so no
-// check can pass by assigning everyone or by leaving everyone unassigned. An
-// Agent an edit is meant to destroy is checked too: it goes away and stops
-// being counted, which is the difference between a restoration and a hoard.
-//
-// The last two checks leave the edit behind and keep going: the document is
-// saved and reopened, and the editor's own undo and redo is driven over it,
-// because an assignment that only survives in the live World would be lost
-// the first time the user saved or pressed Ctrl+Z.
-
+// Migrated from AgentGroupTopologySmokeChecks.cpp (#285); core dependency tier.
 #include <algorithm>
 #include <cstdint>
 #include <memory>
@@ -36,15 +6,13 @@
 #include <string>
 #include <utility>
 #include <vector>
-
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/EntityId.h"
 #include "core/Exceptions.h"
 #include "core/Sector.h"
 #include "core/YamlSerializer.h"
-
-#include "DocumentEdit.h"
+#include "Checks.h"
 
 namespace
 {
@@ -219,34 +187,6 @@ namespace
 	{
 		require(world.lookupAgent(agent).entity != nullptr,
 			"An Agent the edit was meant to keep is gone " + when + ": " + text(agent));
-	}
-
-	// The editor's own undo and redo, the same shape as UI.cpp's
-	// restoreDocumentSnapshot(): the live state crosses to the other stack and
-	// the newest snapshot on the source stack becomes the live World.
-	void restoreDocument(std::shared_ptr<core::World>& world, bool redo)
-	{
-		auto const current = captureDocumentSnapshot(world);
-		require(current.has_value(), "The live document could not be captured");
-
-		std::shared_ptr<core::World> loaded;
-		auto restore = [&loaded](DocumentSnapshot const& target)
-		{
-			loaded = loadWorld(target.yaml);
-			loaded->markModified();
-			return true;
-		};
-		auto const restored = redo
-			? gWorldDocumentHistory.redo(current, restore)
-			: gWorldDocumentHistory.undo(current, restore);
-		require(restored, redo ? "There is no redo entry to restore"
-			: "There is no undo entry to restore");
-		world = std::move(loaded);
-	}
-
-	void resetUndoHistory()
-	{
-		gWorldDocumentHistory.clear();
 	}
 
 	// ---------------------------------------------------------------- checks
@@ -506,57 +446,16 @@ namespace
 		expectAssignments(*reopened, expectedOf(crew), bothGroups(crew),
 			"after saving and reopening the edited World");
 	}
-
-	// The editor's undo and redo over a topology edit. The snapshot taken
-	// before the edit is what undo restores, so both sides of the history have
-	// to agree with the live World about every assignment.
-	void anEditSurvivesUndoAndRedo()
-	{
-		resetUndoHistory();
-		auto world = std::make_shared<core::World>("Undo and redo", 12, 3);
-		while (world->getLayerCount() < 2) world->addLayer();
-		auto const frontRoom = world->addRoom("Front room", 0, 0, 0, 4, 1);
-		auto const backRoom = world->addRoom("Back room", 1, 0, 0, 4, 1);
-		world->finishBuild();
-
-		auto const crew = authorCrew(*world, frontRoom, backRoom);
-		world->pauseSimulation();
-
-		auto const snapshot = captureDocumentSnapshot(world);
-		require(snapshot.has_value(), "The editor snapshot before the edit could not be captured");
-		auto const plan = world->planResizeLocation(frontRoom, 6, 0, 4, 1);
-		require(plan.valid, "The Location move plan was refused: " + plan.diagnostic);
-		world->applyLocationEdit(plan);
-		commitDocumentEdit(snapshot);
-		require(gWorldDocumentHistory.undoCount() == 1, "The topology edit did not commit one undo entry");
-		require(!gWorldDocumentHistory.canRedo(), "The topology edit produced a redo entry");
-		expectAssignments(*world, expectedOf(crew), bothGroups(crew),
-			"after the edit, before undoing it");
-
-		restoreDocument(world, false);
-		requireHere(*world, crew.crewFront, "after undoing the edit");
-		requireHere(*world, crew.ungrouped, "after undoing the edit");
-		expectAssignments(*world, expectedOf(crew), bothGroups(crew),
-			"after undoing the topology edit");
-
-		restoreDocument(world, true);
-		requireHere(*world, crew.crewFront, "after redoing the edit");
-		requireHere(*world, crew.ungrouped, "after redoing the edit");
-		expectAssignments(*world, expectedOf(crew), bothGroups(crew),
-			"after redoing the topology edit");
-		resetUndoHistory();
-	}
 }
 
-void runAgentGroupTopologySmokeChecks()
+void agent_smoke::registerGroupTopology(std::vector<smoke::Check>& checks)
 {
-	aPlainConstructionRecordReplayKeepsEveryAssignment();
-	layerDeletionKeepsSurvivorsAndStopsCountingTheGone();
-	doorRemovalKeepsEveryAssignment();
-	windowRemovalKeepsEveryAssignment();
-	objectMovementKeepsEveryAssignment();
-	locationEditingKeepsEveryAssignment();
-	backgroundEditingKeepsEveryAssignment();
-	anEditSurvivesSavingAndReopening();
-	anEditSurvivesUndoAndRedo();
+	checks.push_back({ "aPlainConstructionRecordReplayKeepsEveryAssignment", [](smoke::Context const&) { aPlainConstructionRecordReplayKeepsEveryAssignment(); } });
+	checks.push_back({ "layerDeletionKeepsSurvivorsAndStopsCountingTheGone", [](smoke::Context const&) { layerDeletionKeepsSurvivorsAndStopsCountingTheGone(); } });
+	checks.push_back({ "doorRemovalKeepsEveryAssignment", [](smoke::Context const&) { doorRemovalKeepsEveryAssignment(); } });
+	checks.push_back({ "windowRemovalKeepsEveryAssignment", [](smoke::Context const&) { windowRemovalKeepsEveryAssignment(); } });
+	checks.push_back({ "objectMovementKeepsEveryAssignment", [](smoke::Context const&) { objectMovementKeepsEveryAssignment(); } });
+	checks.push_back({ "locationEditingKeepsEveryAssignment", [](smoke::Context const&) { locationEditingKeepsEveryAssignment(); } });
+	checks.push_back({ "backgroundEditingKeepsEveryAssignment", [](smoke::Context const&) { backgroundEditingKeepsEveryAssignment(); } });
+	checks.push_back({ "anEditSurvivesSavingAndReopening", [](smoke::Context const&) { anEditSurvivesSavingAndReopening(); } });
 }

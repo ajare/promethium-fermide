@@ -1,8 +1,8 @@
 # Independent smoke modules
 
 The independent modules currently own Simulation Observation (#280), Render walls
-(#281), Persistence serializer/document formats (#282), and core World structure
-and Sector checks (#284). Other domain checks remain legacy-owned; see the
+(#281), Persistence serializer/document formats (#282), core World structure
+and Sector checks (#284), and Agent identity, activation, and Agent groups (#285). Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
 Window checks, and `--serialization-checks` runs only the remaining serialization
@@ -70,6 +70,69 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Agent module (#285)
+
+The Agent module has two independently buildable/runnable dependency tiers:
+
+```sh
+cmake --build build-linux --target pf-smoke-agent pf-smoke-agent-editor --parallel
+build-linux/bin/x64/Release/pf-smoke-agent --list
+build-linux/bin/x64/Release/pf-smoke-agent --check identity
+build-linux/bin/x64/Release/pf-smoke-agent-editor --check clipboardCarriesActivation
+ctest --test-dir build-linux -R '^smoke-agent' -j 3 --output-on-failure
+```
+
+- `pf-smoke-agent` / `smoke-agent` (`smoke;core`) owns 53 registrations:
+  typed Agent identity and handle invalidation, activation, Agent group identity,
+  naming, persistence, assignment, counts, deletion, ID allocation, and topology.
+  It links only smoke support, production core, YAML, and Lua. Building it does
+  not compile any editor, ImGui, renderer, HTTP, legacy, or other module checks.
+- `pf-smoke-agent-editor` / `smoke-agent-editor` (`smoke;editor`) owns 49
+  registrations for panel labels and interactions, clipboard, and document
+  history, including mixed World/panel scenarios. It links the actual production
+  `pf-agent-editing` seams and CPU ImGui, not application-global stubs, renderer,
+  SDL/OpenGL, native dialogs, or HTTP. Both domain tests have 30-second timeouts.
+- The eight mixed legacy files were physically split. Their 101 named checks
+  are individual registrations, not eight fail-fast suite wrappers. The inline
+  ownership check moved from `SmokeScenario.cpp` as `identity`. None of these
+  checks remains compiled or invoked by the legacy aggregate. Helpers remain
+  local to their domain translation units, outside the narrow smoke support.
+
+Editor checks reset panel/document-history state before and after each check,
+including exceptional exit. ImGui contexts disable ini/log files. The hash-name
+click check fixes its in-memory window geometry before capturing cell positions;
+otherwise first-frame auto-fit moves the cell between capture and click when no
+saved `imgui.ini` exists. Clipboard text capture stays in process, and deletion
+confirmation tests render only CPU-side ImGui data and answer programmatically:
+no desktop window, native dialog, system clipboard, or user input is needed.
+
+`smoke-agent-contract` verifies exact listings, every individual selection, misuse
+exit codes, and no files written in an external empty working directory. The
+shared `smoke-harness-contract` covers multi-failure continuation. A direct
+fault-injection experiment also replaced the first two registrations in each
+Agent runner with throwing checks: both returned 1, reported both failures, and
+ran the remaining checks (`agent pass=51 fail=2`, `agent-editor pass=47 fail=2`).
+The injections were removed and both ordinary binaries rebuilt and revalidated.
+
+### #285 Linux validation
+
+- Release, GUI enabled: full default build (including the GUI sharing the new
+  production library), all 79 CTest entries sequentially, and all 78 non-aggregate
+  entries with `-j 6` pass. The aggregate runs separately to avoid the documented
+  pre-existing legacy temporary-path collision with serialization checks.
+- Debug, GUI disabled, `PF_HIGH_ANALYSIS=ON`: all project targets build and all
+  33 project tests pass (excluding vendored `^willpower_` tests).
+- A clean GUI-disabled Release build of `pf-smoke-agent` produces only its own
+  runner/check objects and smoke support among headless sources. Its actual link
+  command contains only smoke support, core, YAML, and Lua. Editor-tier linkage
+  adds only `pf-agent-editing` and CPU ImGui; no other check sources are compiled.
+- Mechanical comparison verifies all 101 moved named check bodies are unchanged
+  except deterministic ImGui geometry setup; the inline identity body is retained.
+  Focused contracts pass in Release and Debug, including all single selections
+  from an empty directory. No source fixtures or existing untracked files change.
+- `git diff --check` passes; no repository formatter is configured. Existing
+  high-analysis diagnostics remain warnings. Windows execution remains #279.
 
 ## World structure and Sector module (#284)
 
