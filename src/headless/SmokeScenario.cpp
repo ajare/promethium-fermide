@@ -51,7 +51,6 @@
 #pragma comment(lib, "Psapi.lib")
 #endif
 
-void runSerializationSmokeChecks();
 void runLiftCrossingRepro(char const* filename);
 void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
@@ -4056,7 +4055,11 @@ int main(int argc, char** argv)
 			std::cerr << "Restored Path checks moved to smoke-routing; use CTest.\n";
 			return 2;
 		}
-		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
+		if (argc > 1 && std::string(argv[1]) == "--serialization-checks")
+		{
+			std::cerr << "Serialization checks moved to smoke-persistence and smoke-render; use CTest.\n";
+			return 2;
+		}
 		if (argc > 1 && std::string(argv[1]) == "--coordinated-document-checks")
 		{
 			std::cerr << "Coordinated document checks moved to smoke-agent-tags-editor and smoke-behaviours-editor; use CTest.\n";
@@ -4091,7 +4094,6 @@ int main(int argc, char** argv)
 			return 0;
 		}
 
-		runSerializationSmokeChecks();
 		runPausePositionSmokeChecks();
 		runMarkerIdentitySmokeChecks();
 

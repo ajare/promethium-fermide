@@ -372,6 +372,16 @@ else()
 endif()
 pf_apply_high_analysis(pf-routing-population-support)
 
+add_library(pf-restoration-support STATIC src/headless/support/Restoration.cpp)
+target_include_directories(pf-restoration-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
+target_link_libraries(pf-restoration-support PUBLIC prometheum-fermide-core)
+if(MSVC)
+    target_compile_options(pf-restoration-support PRIVATE /W3 /permissive-)
+else()
+    target_compile_options(pf-restoration-support PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-restoration-support)
+
 add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
@@ -380,7 +390,6 @@ add_executable(prometheum-fermide-headless
     src/headless/MarkerIdentitySmokeChecks.cpp
     src/headless/RoutingTools.cpp
     src/headless/WorldTeardownSmokeChecks.cpp
-    src/headless/SerializationSmokeChecks.cpp
     src/headless/PausePositionSmokeChecks.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
@@ -394,7 +403,7 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing pf-lift-boarding-support pf-routing-population-support)
+    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing pf-lift-boarding-support pf-routing-population-support pf-restoration-support)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)
@@ -510,9 +519,8 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
-    add_test(NAME serialization-checks COMMAND prometheum-fermide-headless --serialization-checks)
-    add_test(NAME restoration-checks COMMAND prometheum-fermide-headless
-        --restoration-benchmark "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/door-test-1.world.yaml")
+    # Serialization and restoration smoke coverage is owned by smoke-persistence.
+    # --restoration-benchmark remains an explicit, unregistered diagnostic tool.
     # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
     add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 

@@ -31,7 +31,70 @@ set(names yaml-primitives binary-contract yaml-file transactional-bytes
     transactional-late-failure transactional-predictable-path
     transactional-symlink-target transactional-symlink-temp transactional-permissions
     transactional-concurrent save-dirty-state serializable-modification-state
-    recent-documents-restart recent-documents-missing)
+    recent-documents-restart recent-documents-missing
+    worldRoundTripsAuthoredStateAndAgents
+    legacyWorldYamlStillLoads
+    legacyVersion3WorldYamlStillLoadsWithDefaultLayers
+    version4WorldYamlStillLoads
+    layerFieldsAcceptLegacyNamesAndIndices
+    agentRestoreRejectsMalformedPositions
+    agentRestoreRejectsBackgroundAndUnreachableDestination
+    worldLayerNamesRoundTrip
+    addedLayersAppendToTheBackAndRoundTrip
+    layerCountIsCappedAtCoreMaxLayers
+    oversizedWorldDimensionsAreRefusedBeforeCellAccess
+    levelsHaveNamesLimitsAndCascadingDeletion
+    deletingAMiddleLayerCompactsTheLayersAboveIt
+    deletingTheFrontLayerRemovesTransitsOneLayerBehind
+    layerDeletionPreservesAuthoredRecordDependencies
+    layerDeletionKeepsAtLeastTwoLayers
+    locationEditsArePlannedAndAppliedAtomically
+    editedShuttleRoundTripsWithoutSchemaChanges
+    physicalControlsPreferDistinctWallPositions
+    platformLiftStopDurationRoundTrips
+    enclosedLiftsSupportMultiLevelRooms
+    stopDerivingAddLiftRejectsInvalidLayerIndex
+    stairwellSectorsAreCanvasSelectable
+    staircasesConnectAdjacentCorridorsAndRoundTrip
+    laddersCanBeValidatedEditedAndDeleted
+    stairwellsCanBeValidatedEditedAndDeleted
+    stairwellEditsReplayLocationsBeforeTransits
+    stairwellEditsReplayWalkwaysBeforeTransits
+    ladderEditsReplayLocationsBeforeTransits
+    staircaseEditsReplayLocationsBeforeTransits
+    bulkheadDoorsSupportIndependentObjectEditing
+    doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted
+    doorHeightPersistsAndIsLimitedToRooms
+    doorOpenLeftPersistsThroughEveryEditorPath
+    doorOpenRightPersistsThroughEveryEditorPath
+    doorOpenApartPersistsThroughEveryEditorPath
+    liftDoorsDefaultToOpenApartWhileOtherDoorsKeepOpenUp
+    doorStyleMapsAdvanceTheSchemaVersionAndLegacySixStillLoads
+    liftStopDoorStyleOverridesArePerStopAndPersist
+    liftCreationStopDoorStylesAreAuthoredAndPersist
+    liftShortStopDoorStyleVectorEditPreservesEarlierOverrides
+    liftCarKeepsItsShaftRelativeLevelWhenExtendedDownward
+    liftDoorStylesFollowStopsWhenTheLiftMovesOrResizes
+    liftDoorStylesReconcileWhenStopsChange
+    shuttleDoorStyleOverridesAreIndividualAndPersist
+    shuttleDoorStylesSurviveShuttleMovement
+    shuttleDoorStylesReconcileWhenStopsChange
+    shuttleDoorStylesReconcileWhenCarriageAndDoorLayoutChanges
+    shuttleVehicleEditsRejectZeroValuedFields
+    layerHelperApiIsConsistentWithLayerCount
+    graphConstructionWalksEveryAdjacentLayerPair
+    thresholdsAndTransitsPairTheirOwnAdjacentLayerPair
+    doorAndWindowRemovalWorksOnDeepLayerPairs
+    shuttleDoorCandidatesAreFoundOnTheShuttleLayer
+    candidateReplayIncludesAllLayers
+    liftEditsUseTheLiftsOwnLayer
+    shuttleEditsUseTheShuttlesOwnLayer
+    shuttleDeletionRemovesWindowsOverTheShuttleItself
+    ladderEditsUseTheLaddersOwnLayer
+    stairwellEditsUseTheStairwellsOwnLayer
+    staircaseEditsReturnTheStaircaseOwnLayer
+    restorationPreservesStatePathsAndLifetimes
+)
 set(posix_names transactional-symlink-target transactional-symlink-temp transactional-permissions)
 list(LENGTH names passes)
 set(skips 0)

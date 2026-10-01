@@ -8,12 +8,11 @@ behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
 Access permissions and Interaction points (#290), Route planning and movement (#291),
 Transit/transport runtime checks (#292), and pathfinding scale and perceived
 route costs (#293), the complete Render module (#294), and the cross-domain
-Editor module (#295).
+Editor module (#295), and complete World-document Persistence (#296–#297).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
-with migration guidance, and `--serialization-checks` runs only the remaining serialization
-checks. Use CTest for combined coverage.
+with migration guidance, as does `--serialization-checks`. Use CTest for combined coverage.
 
 ```sh
 cmake -S . -B build-linux -DBUILD_TESTING=ON -DPF_BUILD_GUI=OFF
@@ -767,7 +766,7 @@ source dependencies remain unchanged.
 cmake --build build-linux --target pf-smoke-persistence --parallel
 build-linux/bin/x64/Release/pf-smoke-persistence --list
 build-linux/bin/x64/Release/pf-smoke-persistence --check world-document-formats
-ctest --test-dir build-linux -R '^(smoke-persistence.*|serialization-checks)$' --output-on-failure
+ctest --test-dir build-linux -R '^smoke-persistence' --output-on-failure
 ```
 
 Persistence has 18 individually selectable checks in cohesive source groups:
@@ -785,8 +784,8 @@ Persistence has 18 individually selectable checks in cohesive source groups:
 The original seven pilot selectors remain; ten former legacy checks and the
 extracted `document-paths` selector extend the inventory. POSIX symlink and
 permission checks report explicit capability skips on Windows, rather than
-silently disappearing. World/domain restoration and compatibility checks remain
-legacy-owned for #297; this ticket does not migrate them.
+silently disappearing. World/domain restoration and compatibility checks were
+subsequently migrated by #297 below.
 
 All generated files and recent-document paths live beneath the invocation's
 unique Context root. Transaction checks use separate subdirectories so file-count
@@ -809,6 +808,45 @@ it directly as `smoke-persistence`, labelled `smoke;core`, with a 30-second time
 `smoke-persistence-contract` checks listing, every single-check selection, misuse,
 fixture resolution from an external empty directory, no working-directory output,
 and eight concurrent complete invocations. It is labelled `harness;core`.
+
+## Complete World-document Persistence (#297)
+
+Persistence now has **80** individually selectable checks. The 61 remaining core
+serialization scenarios move to `WorldDocuments.cpp`, `AgentRestoration.cpp`,
+`Layers.cpp`, `DomainReplay.cpp`, `DoorDocuments.cpp`, `LiftDocuments.cpp`,
+`ShuttleDocuments.cpp`, and `DeepLayerReplay.cpp`. Compatibility versions,
+round-trip state, malformed Agent restoration, construction replay, and authored
+Door/transport properties keep their original assertions and public APIs.
+
+Two rendering-only scenarios and the rendering-policy prefixes of three mixed
+scenarios move to Render's `SerializationRendering.cpp` (five new selectors;
+Render now has 83). Core Persistence includes no Render/UI headers and links only
+smoke support, core/YAML/Lua, and compiled restoration support. The old oversized
+serialization source, aggregate invocation, and CTest selection are removed.
+
+`restorationPreservesStatePathsAndLifetimes` performs the former restoration CTest's
+five cycles through the public load/reset APIs, preserving binary authored-state
+and Path digests, deterministic traces, pause/dirty state, registry identity, and
+World/Graph/Sector release assertions. `pf-restoration-support` compiles this
+workload once; the explicit legacy benchmark reuses it with timing/memory reporting,
+while smoke emits only harness records. The old `restoration-checks` CTest is
+retired. The fixture resolves through Context, not the working directory.
+
+Coordinated multi-World documents, registry recovery, dependency-ordered saves,
+Save As, and undo/redo already belong to the Editor module from #287/#288/#295.
+They retain their existing production document/history API seams and are not
+copied into core Persistence. No production implementation changes are needed.
+
+Linux validation: full GUI-enabled Release build; all 79 CTest entries pass
+sequentially and at `-j 8` (one optional vendored GUI test skips without a display). A fresh
+GUI-disabled Persistence-only build and its full CLI/concurrency contract pass.
+Debug with `PF_HIGH_ANALYSIS=ON` builds Persistence, Render, and legacy headless;
+all five focused tests pass. Contracts verify exact inventories, every selector,
+and eight concurrent invocations from an empty external directory. All 646 former
+serialization assertion calls and all nine restoration assertion calls are
+preserved exactly once. `git diff --check` is the formatting check; no repository
+formatter is configured. Tests run without DISPLAY/WAYLAND_DISPLAY and need no
+windows, native dialogs, or user input. Windows execution remains #279.
 
 ## Three-module architecture gate (#283)
 

@@ -33,6 +33,7 @@ namespace render_smoke
 			"Render check did not restore its ImGui context");
 	}
 
+	void registerSerializationRendering(std::vector<smoke::Check>& checks);
 	void registerDrawOrder(std::vector<smoke::Check>& checks);
 	void registerDoorOpenApart(std::vector<smoke::Check>& checks);
 	void registerDoorOpenLeft(std::vector<smoke::Check>& checks);

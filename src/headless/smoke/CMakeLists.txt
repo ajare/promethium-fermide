@@ -242,7 +242,16 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/DocumentSaves.cpp
         persistence/MalformedInput.cpp
         persistence/RecentDocuments.cpp
-    LIBRARIES prometheum-fermide-core
+        persistence/WorldDocuments.cpp
+        persistence/AgentRestoration.cpp
+        persistence/Layers.cpp
+        persistence/DomainReplay.cpp
+        persistence/DoorDocuments.cpp
+        persistence/LiftDocuments.cpp
+        persistence/ShuttleDocuments.cpp
+        persistence/DeepLayerReplay.cpp
+        persistence/Restoration.cpp
+    LIBRARIES prometheum-fermide-core pf-restoration-support
     LABELS core
     TIMEOUT 30
 )
@@ -256,6 +265,7 @@ pf_add_smoke_module(pf-smoke-render
     NAME render
     SOURCES
         render/Main.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp
+        render/SerializationRendering.cpp
         render/DrawOrder.cpp
         render/DoorOpenApart.cpp
         render/DoorOpenLeft.cpp

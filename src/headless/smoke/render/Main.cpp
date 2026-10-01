@@ -23,5 +23,6 @@ int main(int argc, char** argv)
 	render_smoke::registerViewportZoom(checks);
 	render_smoke::registerLifetime(checks);
 	render_smoke::registerDoorButtons(checks);
+	render_smoke::registerSerializationRendering(checks);
 	return smoke::main("render", checks, argc, argv);
 }

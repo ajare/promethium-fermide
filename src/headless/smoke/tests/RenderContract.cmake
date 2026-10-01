@@ -106,6 +106,11 @@ set(names
     nestedApertureSeesTheRenderedWorld
     nestedScopesRestoreThePreviousWorld
     backButtonRendersAsOutlineOnly
+    onlyTheSelectedLayerIsDrawn
+    transitsOnTheLayerBehindAreOnlyDrawnThroughApertures
+    stairwellSectorsAreCanvasSelectableRendering
+    staircasesConnectAdjacentCorridorsAndRoundTripRendering
+    laddersCanBeValidatedEditedAndDeletedRendering
 )
 list(LENGTH names count)
 string(JOIN "\n" listing ${names})

@@ -281,7 +281,9 @@ source lists and dependency tiers are unchanged.
 | `smoke/routing/PlanningTime.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/PlanningTimeEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `SectorTilesetChecks.cpp` | module-owned (retained standalone) | `pf-sector-tileset-checks` |
-| `SerializationSmokeChecks.cpp` (remaining World/domain checks after #282/#296 below) | legacy-owned | `prometheum-fermide-headless` |
+| `SerializationSmokeChecks.cpp` | removed; all scenarios mapped under #282/#296/#297 below | — |
+| `smoke/persistence/{WorldDocuments,AgentRestoration,Layers,DomainReplay,DoorDocuments,LiftDocuments,ShuttleDocuments,DeepLayerReplay,Restoration}.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/SerializationRendering.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/TransactionalWrites.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/DocumentPaths.cpp` | module-owned | `pf-smoke-persistence` |
@@ -331,9 +333,8 @@ cleanup ownership, function signatures, and the assertion helper changed.
 
 `checked-in-world` is additional fixture-resolution coverage using
 `resources/Office.world.yaml`. #296 further splits these pilot groups as described
-below. Remaining World restoration, compatibility and domain/editor checks retain
-legacy ownership and continue through `--serialization-checks` (also the existing
-legacy aggregate). Neither legacy entry point executes the migrated checks.
+below. #297 completes the remaining World restoration, compatibility and domain
+migration; neither legacy entry point executes migrated checks.
 
 ## Persistence infrastructure extraction (#296)
 
@@ -377,6 +378,108 @@ retains all 734 `require` call sites across the original legacy suite and pilot
 (normalizing only recent-document paths), with one definition and registration
 for each of the ten transferred functions. #297's World/domain migration is not
 part of this change.
+
+## Complete World-document Persistence (#297)
+
+All 63 remaining legacy serialization functions are removed with their runner.
+The following 61 core scenarios keep their function names as Persistence selectors.
+Sources below are under `smoke/persistence`; together with the #282/#296 tables,
+this accounts for every former serialization scenario once.
+
+| Original function / Persistence selector | Source |
+| --- | --- |
+| `worldRoundTripsAuthoredStateAndAgents` | `WorldDocuments.cpp` |
+| `legacyWorldYamlStillLoads` | `WorldDocuments.cpp` |
+| `legacyVersion3WorldYamlStillLoadsWithDefaultLayers` | `WorldDocuments.cpp` |
+| `version4WorldYamlStillLoads` | `WorldDocuments.cpp` |
+| `layerFieldsAcceptLegacyNamesAndIndices` | `WorldDocuments.cpp` |
+| `agentRestoreRejectsMalformedPositions` | `AgentRestoration.cpp` |
+| `agentRestoreRejectsBackgroundAndUnreachableDestination` | `AgentRestoration.cpp` |
+| `worldLayerNamesRoundTrip` | `Layers.cpp` |
+| `addedLayersAppendToTheBackAndRoundTrip` | `Layers.cpp` |
+| `layerCountIsCappedAtCoreMaxLayers` | `Layers.cpp` |
+| `oversizedWorldDimensionsAreRefusedBeforeCellAccess` | `Layers.cpp` |
+| `levelsHaveNamesLimitsAndCascadingDeletion` | `Layers.cpp` |
+| `deletingAMiddleLayerCompactsTheLayersAboveIt` | `Layers.cpp` |
+| `deletingTheFrontLayerRemovesTransitsOneLayerBehind` | `Layers.cpp` |
+| `layerDeletionPreservesAuthoredRecordDependencies` | `Layers.cpp` |
+| `layerDeletionKeepsAtLeastTwoLayers` | `Layers.cpp` |
+| `locationEditsArePlannedAndAppliedAtomically` | `DomainReplay.cpp` |
+| `editedShuttleRoundTripsWithoutSchemaChanges` | `DomainReplay.cpp` |
+| `physicalControlsPreferDistinctWallPositions` | `DomainReplay.cpp` |
+| `platformLiftStopDurationRoundTrips` | `DomainReplay.cpp` |
+| `enclosedLiftsSupportMultiLevelRooms` | `DomainReplay.cpp` |
+| `stopDerivingAddLiftRejectsInvalidLayerIndex` | `DomainReplay.cpp` |
+| `stairwellSectorsAreCanvasSelectable` | `DomainReplay.cpp` |
+| `staircasesConnectAdjacentCorridorsAndRoundTrip` | `DomainReplay.cpp` |
+| `laddersCanBeValidatedEditedAndDeleted` | `DomainReplay.cpp` |
+| `stairwellsCanBeValidatedEditedAndDeleted` | `DomainReplay.cpp` |
+| `stairwellEditsReplayLocationsBeforeTransits` | `DomainReplay.cpp` |
+| `stairwellEditsReplayWalkwaysBeforeTransits` | `DomainReplay.cpp` |
+| `ladderEditsReplayLocationsBeforeTransits` | `DomainReplay.cpp` |
+| `staircaseEditsReplayLocationsBeforeTransits` | `DomainReplay.cpp` |
+| `bulkheadDoorsSupportIndependentObjectEditing` | `DoorDocuments.cpp` |
+| `doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted` | `DoorDocuments.cpp` |
+| `doorHeightPersistsAndIsLimitedToRooms` | `DoorDocuments.cpp` |
+| `doorOpenLeftPersistsThroughEveryEditorPath` | `DoorDocuments.cpp` |
+| `doorOpenRightPersistsThroughEveryEditorPath` | `DoorDocuments.cpp` |
+| `doorOpenApartPersistsThroughEveryEditorPath` | `DoorDocuments.cpp` |
+| `liftDoorsDefaultToOpenApartWhileOtherDoorsKeepOpenUp` | `DoorDocuments.cpp` |
+| `doorStyleMapsAdvanceTheSchemaVersionAndLegacySixStillLoads` | `DoorDocuments.cpp` |
+| `liftStopDoorStyleOverridesArePerStopAndPersist` | `LiftDocuments.cpp` |
+| `liftCreationStopDoorStylesAreAuthoredAndPersist` | `LiftDocuments.cpp` |
+| `liftShortStopDoorStyleVectorEditPreservesEarlierOverrides` | `LiftDocuments.cpp` |
+| `liftCarKeepsItsShaftRelativeLevelWhenExtendedDownward` | `LiftDocuments.cpp` |
+| `liftDoorStylesFollowStopsWhenTheLiftMovesOrResizes` | `LiftDocuments.cpp` |
+| `liftDoorStylesReconcileWhenStopsChange` | `LiftDocuments.cpp` |
+| `shuttleDoorStyleOverridesAreIndividualAndPersist` | `ShuttleDocuments.cpp` |
+| `shuttleDoorStylesSurviveShuttleMovement` | `ShuttleDocuments.cpp` |
+| `shuttleDoorStylesReconcileWhenStopsChange` | `ShuttleDocuments.cpp` |
+| `shuttleDoorStylesReconcileWhenCarriageAndDoorLayoutChanges` | `ShuttleDocuments.cpp` |
+| `shuttleVehicleEditsRejectZeroValuedFields` | `ShuttleDocuments.cpp` |
+| `layerHelperApiIsConsistentWithLayerCount` | `DeepLayerReplay.cpp` |
+| `graphConstructionWalksEveryAdjacentLayerPair` | `DeepLayerReplay.cpp` |
+| `thresholdsAndTransitsPairTheirOwnAdjacentLayerPair` | `DeepLayerReplay.cpp` |
+| `doorAndWindowRemovalWorksOnDeepLayerPairs` | `DeepLayerReplay.cpp` |
+| `shuttleDoorCandidatesAreFoundOnTheShuttleLayer` | `DeepLayerReplay.cpp` |
+| `candidateReplayIncludesAllLayers` | `DeepLayerReplay.cpp` |
+| `liftEditsUseTheLiftsOwnLayer` | `DeepLayerReplay.cpp` |
+| `shuttleEditsUseTheShuttlesOwnLayer` | `DeepLayerReplay.cpp` |
+| `shuttleDeletionRemovesWindowsOverTheShuttleItself` | `DeepLayerReplay.cpp` |
+| `ladderEditsUseTheLaddersOwnLayer` | `DeepLayerReplay.cpp` |
+| `stairwellEditsUseTheStairwellsOwnLayer` | `DeepLayerReplay.cpp` |
+| `staircaseEditsReturnTheStaircaseOwnLayer` | `DeepLayerReplay.cpp` |
+
+Three rows have explicitly split ownership, with no assertion duplication:
+`stairwellSectorsAreCanvasSelectable`,
+`staircasesConnectAdjacentCorridorsAndRoundTrip`, and
+`laddersCanBeValidatedEditedAndDeleted` retain their core geometry/replay assertions
+above. Their leading canvas/render-policy assertions live in
+`smoke/render/SerializationRendering.cpp`, registered under the original name
+plus `Rendering`. The two entirely rendering-only former scenarios
+`onlyTheSelectedLayerIsDrawn` and
+`transitsOnTheLayerBehindAreOnlyDrawnThroughApertures` live in that same Render
+source under their original selectors. This preserves all 646 legacy assertion
+call sites exactly once while keeping Persistence free of editor/render headers.
+
+The former `restoration-checks` CTest workload (five cycles) is now
+`persistence/restorationPreservesStatePathsAndLifetimes`, registered through
+`smoke/persistence/Restoration.cpp`. Its nine assertions compile once in
+`support/Restoration.cpp`, retaining public document-load/reset, registry,
+snapshot, serialization, and weak-reference seams. The explicit benchmark in
+`RoutingTools.cpp` reuses that workload with optional timing/memory output; it is
+not separately registered as smoke coverage. The `serialization-checks` and
+`restoration-checks` CTest entries are removed, and `--serialization-checks`
+returns 2 with migration guidance rather than silently succeeding.
+
+Coordinated documents remain exclusively in their already-migrated Editor sources
+(`tags/CoordinationEditor.cpp`, registry-change/history/save workflows,
+and Behaviour portability/reconciliation). #297 does not duplicate or replace
+those public API checks. See #287/#288 and the Editor ownership entries above.
+Persistence has 80 registrations; Render has 83. Both contract tests enumerate
+every selector and run eight concurrent full invocations from an empty external
+working directory. The complete Release CTest run also verifies the unchanged
+coordinated-document checks.
 
 ## Support and non-smoke code
 
@@ -427,6 +530,9 @@ part of this change.
   `RoutingTools.cpp` owns the restoration benchmark and routing-scale World
   generator; `MetricsChecks.cpp` also owns metrics serving.
   These remain legacy-owned until their dedicated tool extraction tickets.
+- `support/Restoration.cpp`: shared public load/reset workload and assertions,
+  compiled once by `pf-restoration-support`. Persistence owns smoke execution;
+  `RoutingTools.cpp` reuses it only for the explicit reporting benchmark.
 - `support/RoutingPopulation.cpp`: shared deterministic population workload and
   assertions, compiled once by `pf-routing-population-support`. Only explicit
   tools enable its export and timing/memory reporting; no extra CTest owner.

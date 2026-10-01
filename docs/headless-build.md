@@ -2,8 +2,10 @@
 
 Simulation Observation, Render walls, and Persistence serializer/document formats
 now run in the independently buildable [`pf-smoke-*` modules](smoke-modules.md),
-not the legacy aggregate below. `--serialization-checks` retains only the
-unmigrated serialization checks; use `pf-smoke-persistence` for the extracted group.
+not the legacy aggregate below. The complete serialization/restoration suite now
+runs in `pf-smoke-persistence`, with rendering-policy assertions in `pf-smoke-render`.
+`--serialization-checks` returns 2 with migration guidance. The explicit
+`--restoration-benchmark` tool remains available but is not a smoke CTest owner.
 Use CTest for combined coverage during the incremental migration; see the
 [ownership manifest](smoke-migration-manifest.md).
 
