@@ -60,6 +60,19 @@ function(pf_apply_high_analysis target)
     endif()
 endfunction()
 
+# The shared policy for headless verification targets. Keeping this separate
+# from GUI and tool policies lets standalone checks remain independently built
+# while receiving the same diagnostics as modular smoke targets.
+function(pf_apply_headless_verification_policy target)
+    target_compile_features(${target} PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W3 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    pf_apply_high_analysis(${target})
+endfunction()
+
 set(PF_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(PF_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin/x64/$<CONFIG>")
 
@@ -259,6 +272,18 @@ set_target_properties(prometheum-fermide-core PROPERTIES
     OUTPUT_NAME "prometheum-fermide-core"
 )
 
+# Compile-only public API contracts have a dedicated object target instead of
+# being hidden inside a runnable smoke executable. Building the default target
+# or pf-compile-contracts therefore fails as soon as a contract is violated.
+add_library(pf-interaction-api-compile-contract OBJECT
+    src/headless/InteractionApiCompileCheck.cpp
+)
+target_include_directories(pf-interaction-api-compile-contract PRIVATE "${PF_INCLUDE_DIR}")
+pf_apply_headless_verification_policy(pf-interaction-api-compile-contract)
+add_custom_target(pf-compile-contracts ALL
+    DEPENDS pf-interaction-api-compile-contract
+)
+
 # Standalone authored-World generator (no GUI dependency).
 add_executable(pf-generate-world scripts/generate_new_world.cpp)
 target_link_libraries(pf-generate-world PRIVATE prometheum-fermide-core)
@@ -425,7 +450,6 @@ target_link_libraries(pf-pause-position-repro PRIVATE pf-pause-position-support)
 
 add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
-    src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
     src/headless/SmokeScenario.cpp
 )
@@ -535,32 +559,40 @@ if(BUILD_TESTING)
     set_tests_properties(world-generator-cli PROPERTIES TIMEOUT 180)
 endif()
 if(BUILD_TESTING)
+    # These checks deliberately remain direct executables rather than being
+    # absorbed by a smoke module. They share its compile policy and CTest
+    # labels, but retain focused build/run entry points.
     add_executable(pf-simulation-step-timing-checks src/headless/SimulationStepTimingChecks.cpp)
-    target_compile_features(pf-simulation-step-timing-checks PRIVATE cxx_std_20)
     target_include_directories(pf-simulation-step-timing-checks PRIVATE "${PF_INCLUDE_DIR}")
-    pf_apply_high_analysis(pf-simulation-step-timing-checks)
+    pf_apply_headless_verification_policy(pf-simulation-step-timing-checks)
     add_test(NAME simulation-step-timing COMMAND pf-simulation-step-timing-checks)
+    set_tests_properties(simulation-step-timing PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
 
     add_executable(pf-occupant-packing-checks src/headless/OccupantPackingChecks.cpp)
-    target_compile_features(pf-occupant-packing-checks PRIVATE cxx_std_20)
     target_include_directories(pf-occupant-packing-checks PRIVATE "${PF_INCLUDE_DIR}")
-    pf_apply_high_analysis(pf-occupant-packing-checks)
+    pf_apply_headless_verification_policy(pf-occupant-packing-checks)
     add_test(NAME occupant-packing COMMAND pf-occupant-packing-checks)
+    set_tests_properties(occupant-packing PROPERTIES
+        LABELS "smoke;standalone;core" TIMEOUT 30)
 
     add_executable(pf-world-render-slot-checks src/headless/WorldRenderSlotChecks.cpp)
-    target_compile_features(pf-world-render-slot-checks PRIVATE cxx_std_20)
     target_include_directories(pf-world-render-slot-checks PRIVATE "${PF_INCLUDE_DIR}")
-    pf_apply_high_analysis(pf-world-render-slot-checks)
+    pf_apply_headless_verification_policy(pf-world-render-slot-checks)
     add_test(NAME world-render-slots COMMAND pf-world-render-slot-checks)
+    set_tests_properties(world-render-slots PROPERTIES
+        LABELS "smoke;standalone;render" TIMEOUT 30)
 
     add_executable(pf-sector-tileset-checks
         src/headless/SectorTilesetChecks.cpp
     )
-    target_compile_features(pf-sector-tileset-checks PRIVATE cxx_std_20)
     target_include_directories(pf-sector-tileset-checks PRIVATE "${PF_INCLUDE_DIR}" "${PF_INCLUDE_DIR}/imgui")
     target_link_libraries(pf-sector-tileset-checks PRIVATE pf-render)
+    pf_apply_headless_verification_policy(pf-sector-tileset-checks)
     add_test(NAME sector-tileset COMMAND pf-sector-tileset-checks
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
+    set_tests_properties(sector-tileset PROPERTIES
+        LABELS "smoke;standalone;render" TIMEOUT 30)
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
     # Serialization and restoration smoke coverage is owned by smoke-persistence.

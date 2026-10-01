@@ -1,11 +1,12 @@
 # Smoke migration ownership manifest
 
-Snapshot after graphics Startup smoke migration #301 (parent #278). Each
+Snapshot after standalone tool extraction #304 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
-independent target. The four pre-existing standalone checks are retained as-is,
-not migrated into the new harness. Future batches must update this table and
+independent target. `compile-contract-owned` names an object-only build target.
+The four pre-existing standalone checks retain direct targets rather than being
+migrated into the new harness. Future batches must update this table and
 remove the old source **and invocation** when transferring ownership.
 
 Simulation Observation was migrated in #280. Its stable registered check
@@ -327,7 +328,7 @@ source lists and dependency tiers are unchanged.
 | `smoke/transports/Ladders.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/transports/ForceBridges.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/transports/LayerJourney.cpp` | module-owned | `pf-smoke-transports` |
-| `InteractionApiCompileCheck.cpp` (compile-only contract) | legacy-owned | `prometheum-fermide-headless` |
+| `InteractionApiCompileCheck.cpp` (compile-only contract) | compile-contract-owned | `pf-interaction-api-compile-contract` (`pf-compile-contracts`) |
 | `smoke/simulation/Observation.cpp` | module-owned | `pf-smoke-simulation` |
 
 ## Persistence pilot extraction (#282)
@@ -621,8 +622,11 @@ aggregate calls are removed. Pause-position assertions compile once in
 `support/PausePosition.cpp`; the five Simulation registrations are their sole
 smoke owner, while the explicit legacy reproduction command reuses the support
 without becoming another smoke execution path. The old teardown CLI selection
-returns migration guidance. `SimulationStepTimingChecks.cpp` remains an independent
-standalone check for #302 and is not consolidated solely for naming consistency.
+returns migration guidance. `SimulationStepTimingChecks.cpp` remains an independent standalone check for
+#302 and is not consolidated solely for naming consistency. Along with
+`OccupantPackingChecks.cpp`, `WorldRenderSlotChecks.cpp`, and
+`SectorTilesetChecks.cpp`, it keeps a direct executable target while receiving the
+shared C++20, warning, elevated-analysis, timeout, and labelled CTest policy.
 
 The exact 55-selector contract executes every check independently and performs
 eight simultaneous complete invocations from an empty external directory.
@@ -734,6 +738,15 @@ with migration guidance.
 - `scripts/generate_new_world.cpp` and `scripts/tests/world_generator_cli.cmake`
   remain with the existing `pf-generate-world` target and generator CTest entries.
   Vendored dependency tests are outside this migration.
+- `InteractionApiCompileCheck.cpp`: an object-only public API contract owned by
+  `pf-interaction-api-compile-contract`; `pf-compile-contracts` includes it in the
+  default build, so a violated static assertion fails compilation without a
+  runnable smoke owner.
+- `SimulationStepTimingChecks.cpp`, `OccupantPackingChecks.cpp`,
+  `WorldRenderSlotChecks.cpp`, and `SectorTilesetChecks.cpp`: retained direct,
+  headless standalone executables. Their CTest labels include `smoke;standalone`
+  plus `core` or `render`; they use the same warnings and elevated analysis as
+  modular smoke targets.
 
 This is source-level ownership, not a promised future taxonomy: mixed dependency
 sources still need splitting before their follow-up domain migrations.

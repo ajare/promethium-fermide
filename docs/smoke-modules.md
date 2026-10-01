@@ -72,7 +72,8 @@ temporary file cleanup.
 executable and rejects executable dependencies. It applies ordinary and elevated
 analysis warnings, links the narrow support, and registers one direct CTest entry.
 All new smoke module/harness/test targets exist only with `BUILD_TESTING=ON`; they are
-in the default build. Existing standalone and legacy target policies are unchanged.
+in the default build. Existing standalone checks retain their direct targets rather
+than being folded into modules solely to make their names uniform.
 
 Simulation links only the production core, its YAML/Lua dependencies, smoke
 support, and the core-only pause-position assertion support shared with the retained
@@ -86,6 +87,25 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Compile-only contracts and retained standalone checks (#302)
+
+`pf-interaction-api-compile-contract` is an object-only target for the typed
+Interaction API static assertions. It has no runnable product: build it directly,
+or build the default `pf-compile-contracts` target, to make an incompatible public
+API fail compilation without coupling the contract to the legacy executable.
+
+```sh
+cmake --build build-linux --target pf-compile-contracts --parallel
+```
+
+`pf-simulation-step-timing-checks`, `pf-occupant-packing-checks`,
+`pf-world-render-slot-checks`, and `pf-sector-tileset-checks` remain independently
+buildable and runnable executables. Their CTest entries are labelled
+`smoke;standalone;core` or `smoke;standalone;render`, have a 30-second timeout, and
+use the same C++20, ordinary warning, and `PF_HIGH_ANALYSIS` policy as smoke
+modules. They remain direct checks—not domain-module registrations—and run without
+windows, dialogs, or interactive input.
 
 ## Startup module (#301)
 

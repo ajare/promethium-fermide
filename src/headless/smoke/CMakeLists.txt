@@ -1,13 +1,7 @@
 # New smoke modules live here; legacy checks remain in the root until migrated.
 # No source globbing: each module explicitly owns its runner and check sources.
 function(pf_smoke_target_policy target)
-    target_compile_features(${target} PRIVATE cxx_std_20)
-    if(MSVC)
-        target_compile_options(${target} PRIVATE /W3 /permissive-)
-    else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    pf_apply_high_analysis(${target})
+    pf_apply_headless_verification_policy(${target})
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
 endfunction()
 
