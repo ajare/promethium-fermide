@@ -148,6 +148,20 @@ bool commitLiftDestinationPermissionRequirement(shared_ptr<core::World> const& w
 	});
 }
 
+bool commitClearLiftDestinationPermissionRequirement(shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, uint32_t stopIndex, string& diagnostic, uint32_t objectIndex)
+{
+	return commit(world, diagnostic, [&]
+	{
+		if (world->getLiftDestinationPermissionRequirement(sectorIndex, stopIndex, objectIndex).empty())
+		{
+			diagnostic = "The destination permission requirement is already empty";
+			return false;
+		}
+		return world->setLiftDestinationPermissionRequirement(sectorIndex, stopIndex, {}, &diagnostic, objectIndex);
+	});
+}
+
 void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint32_t sectorIndex, uint32_t objectIndex)
 {
 	if (!world) return;
@@ -155,8 +169,9 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 	ImGui::TextWrapped("All listed Access permissions are required to select this destination, from direct or Permission set grants. Accepted shared journeys and disembarking remain available after permission loss.");
 	auto levels = world->getLiftDestinationLevels(sectorIndex, objectIndex);
 	auto shuttle = world->getSector(sectorIndex)->getType() == core::SectorType::Shuttle;
-	if (!ImGui::BeginTable("Destination permissions", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
-	ImGui::TableSetupColumn("Stop / position"); ImGui::TableSetupColumn("Permissions"); ImGui::TableSetupColumn("Required (all)");
+	if (!ImGui::BeginTable("Destination permissions", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
+	ImGui::TableSetupColumn("Stop / position"); ImGui::TableSetupColumn("Add / remove permissions");
+	ImGui::TableSetupColumn("Required (all)"); ImGui::TableSetupColumn("Clear");
 	ImGui::TableHeadersRow();
 	for (uint32_t stop = 0; stop < levels.size(); ++stop)
 	{
@@ -185,6 +200,14 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 		}
 		ImGui::EndDisabled();
 		ImGui::TableNextColumn(); ImGui::TextWrapped("%s", summary.c_str());
+		ImGui::TableNextColumn();
+		ImGui::BeginDisabled(!world->isSimulationPaused() || required.empty());
+		if (ImGui::Button("Clear"))
+		{
+			string diagnostic;
+			commitClearLiftDestinationPermissionRequirement(world, sectorIndex, stop, diagnostic, objectIndex);
+		}
+		ImGui::EndDisabled();
 		ImGui::PopID();
 	}
 	ImGui::EndTable();

@@ -1081,6 +1081,11 @@ namespace
 		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination redo failed");
 		auto expected = std::vector<core::AccessPermissionId>{ red, blue };
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Redo lost destination requirement");
+		require(commitClearLiftDestinationPermissionRequirement(world, sector, 2, diagnostic, object), diagnostic);
+		require(world->getLiftDestinationPermissionRequirement(sector, 2, object).empty(), "Clear retained destination permissions");
+		require(gWorldDocumentHistory.undoCount() == 3, "Destination clear bypassed document history");
+		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination clear undo failed");
+		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Destination clear undo lost requirements");
 		require(world->renameAccessPermission(red, "Renamed key", &diagnostic), diagnostic);
 		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Rename changed identity");
 		require(world->getAccessPermissionUsage(red).liftDestinationRequirements == 1, "Usage omitted destination");
@@ -1107,6 +1112,8 @@ namespace
 			&& text.find("Dynamic authorization is not yet complete") == std::string::npos
 			&& text.find("NOT YET ENFORCED") == std::string::npos
 			&& text.find("None") != std::string::npos
+			&& text.find("Add / remove permissions") != std::string::npos
+			&& text.find("Clear") != std::string::npos
 			&& text.find("Renamed key") != std::string::npos
 			&& text.find("Blue key") != std::string::npos
 			&& (!shuttle || (text.find("Stop 0: x 4") != std::string::npos
