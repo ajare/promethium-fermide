@@ -23,6 +23,7 @@
 
 void runAccessPermissionSmokeChecks();
 void runPermissionAdherenceSmokeChecks();
+void runTransportLandingAdherenceSmokeChecks();
 
 namespace
 {
@@ -1476,4 +1477,5 @@ void runAccessPermissionSmokeChecks()
 	runtimePropertiesPanelChangesCurrentAuthorizationOnly();
 	panelCommitParticipatesInHistory();
 	runPermissionAdherenceSmokeChecks();
+	runTransportLandingAdherenceSmokeChecks();
 }

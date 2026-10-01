@@ -298,6 +298,10 @@ namespace core
 				if (foundThreshold) break;
 			}
 			if (!foundThreshold) continue;
+			// Reassignment within an access zone must respect the selected Door's
+			// landing requirement, not only the Door named by the original Path.
+			if (!mWorld.agentAdheresToTransportLandingPermission(door.landingResource,
+				request->mSourceSector, threshold, request->mOwner)) continue;
 			auto distance = agent->getGlobalPosition().distanceTo(threshold);
 			if (!selected || distance < selectedDistance - 0.001f
 				|| (abs(distance - selectedDistance) <= 0.001f

@@ -2428,6 +2428,11 @@ namespace core
 			Vector2 const& destination, AgentId agent) const;
 		bool canAgentOperateTransportLandingControl(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
+		// Landing willingness only: destination selection and physical boarding
+		// availability remain independent, and this is never an alighting gate.
+		bool agentAdheresToTransportLandingPermission(TraversalResourceId resource,
+			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
+		bool isAgentTransportOccupant(TraversalResourceId resource, AgentId agent) const;
 		bool isTransportLocallyBoardable(TraversalResourceId resource,
 			Vector2 const& endpoint) const;
 		bool canAgentTraverseManualDoorNow(TraversalResourceId door, AgentId agent) const;

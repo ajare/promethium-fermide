@@ -71,7 +71,7 @@ An Agent property from 0.5 through 1.5 that multiplies physical and estimated mo
 _Avoid_: Walk speed modifier, effort aversion
 
 **Permission adherence**:
-A boolean Agent property expressing whether the Agent is willing to use an already usable resource when it does not satisfy the applicable permission requirements for operating that resource from its approach side. Its default is true. It changes route and traversal choices but grants no Access permission and does not create a physical authorization barrier. Enforcement currently covers ordinary manual and control-operated Doors, extended Force Bridges, and extended extensible Ladders; other resource slices remain to be implemented.
+A boolean Agent property expressing whether the Agent is willing to use an already usable resource when it does not satisfy the applicable permission requirements for operating that resource from its approach side. Its default is true. It changes route and traversal choices but grants no Access permission and does not create a physical authorization barrier. It applies to ordinary manual and control-operated Doors, extended Force Bridges, extended extensible Ladders, and Lift, Platform lift, and Shuttle landing requirements; it does not prevent an already-boarded passenger from disembarking.
 _Avoid_: Access permission, Location permission requirement
 
 **Interaction aversion**:

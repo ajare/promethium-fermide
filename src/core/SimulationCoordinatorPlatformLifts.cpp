@@ -116,6 +116,15 @@ namespace core
 				return;
 			}
 
+			// The virtual boundary reservation above is the committed boarding
+			// boundary, even though this traversal request is still Pending.
+			if (!mWorld.agentAdheresToTransportLandingPermission(request->mResource,
+				request->mSourceSector, request->mSourceEndpoint, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+				return;
+			}
 			if (!request->mQueueTicket)
 			{
 				request->mQueueTicket = QueueTicketId{ mWorld.mNextQueueTicketValue++ };

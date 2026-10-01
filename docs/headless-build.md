@@ -573,6 +573,39 @@ Validation on Windows/MSVC: complete Debug and Release builds including the
 editor, focused permission checks, all 67 non-GUI CTest tests in each
 configuration, and `git diff --check` passed.
 
+## Transport landing Permission adherence (#268)
+
+`access-permissions` includes `TransportLandingAdherenceSmokeChecks.cpp` for
+Lift, Platform lift, and Shuttle landing requirements, without authoring any
+destination Permission requirements. Effective Permission adherence true requires
+landing authorization even when the vehicle is locally boardable; false retains
+locally observed opportunities but never authorizes a protected call or assumes
+future assistance. A different Level in the same Room is not a local landing
+observation. Direct and Permission set grants combine with all-required semantics;
+an unrestricted landing does not inherit another Stop's requirements.
+
+Planning and runtime admission enforce the same willingness. Shuttle Door
+reassignment also filters the selected landing. Already-granted crossings and
+Platform lift virtual-boundary transfers finish safely; onboard continuations and
+alighting are not new admissions. Existing grant/property/requirement replanning
+conventions remain in use, including accepted shared Stop requests.
+
+Tests cover inherited and individual values, the real Selection effective-property
+display, registry undo/redo, loaded-profile journeys, unauthorized call rejection,
+remote observations, stale Paths, alternative transport/walking Paths and Route
+loss, pre-boarding grant loss and requirement tightening, changes during boarding
+and riding, and safe exits for
+both the changing passenger and another passenger sharing the journey. No OS
+window, clipboard access, or manual editor interaction is required.
+
+Landing authorization remains distinct from destination selection. Protected
+destination Permission adherence integration belongs to the separate
+transport-specific integration tickets, not this landing slice.
+
+Validation on Windows/MSVC: complete Debug and Release builds including the
+editor, all 67 non-GUI CTest tests in each configuration, and `git diff --check`
+passed. No manual editor session was used.
+
 ## Prerequisites
 
 - Windows x64

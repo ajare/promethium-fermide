@@ -386,8 +386,16 @@ namespace core
 	{
 		auto const id = mWorld.getAgentId(&agent);
 		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
 			if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 				return true;
+			// Platform boarding walks through a virtual boundary before a permit
+			// is granted. Authorization changes must not interrupt that transfer.
+			if (resource->mOpenPlatformLift)
+				for (auto requestId : resource->mVirtualBoundaryOwners)
+					if (auto request = mWorld.mTraversalRequests.find(requestId);
+						request && request->mOwner == id) return true;
+		}
 		return agent.mTraversalTask && agent.mTraversalTask->destinationVertex
 			&& (agent.mTraversalTask->destinationVertex->getSector().get() != agent.getSector()
 				|| agent.mTraversalTask->edge->getTraversalResourceId())

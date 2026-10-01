@@ -153,10 +153,20 @@ namespace core
 				&& !context.world->canAgentUseLiftJourney(edge.getTraversalResourceId(),
 					context.agent->getGlobalPosition(), source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
+			// Platform passengers share their Room's Sector. After a paused edit,
+			// source inference may include the co-located mount adapter again;
+			// continuing an onboard journey is not a new landing admission.
+			bool const continuingPlatformJourney = routeAgent && lift->isOpenPlatformLift()
+				&& std::abs(context.agent->getGlobalPosition().y - source->getPosition().y) <= 0.5f
+				&& context.world->isAgentTransportOccupant(edge.getTraversalResourceId(), routeAgent);
 			if (result.type == EdgeType::LiftMount && lift->isOpenPlatformLift()
-				&& result.boarding && routeAgent
-				&& !(result.observed && context.world->isTransportLocallyBoardable(
-					edge.getTraversalResourceId(), source->getPosition()))
+				&& result.boarding && routeAgent && !continuingPlatformJourney
+				&& !(result.observed
+					&& std::abs(context.agent->getGlobalPosition().y - source->getPosition().y) <= 0.5f
+					&& context.world->isTransportLocallyBoardable(
+					edge.getTraversalResourceId(), source->getPosition())
+					&& context.world->agentAdheresToTransportLandingPermission(
+						edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				&& !context.world->canAgentOperateTransportLandingControl(
 					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
@@ -224,8 +234,12 @@ namespace core
 					context.agent->getGlobalPosition(), source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
 			if (result.boarding && (result.lift || result.shuttle) && routeAgent
-				&& !(result.observed && context.world->isTransportLocallyBoardable(
-					edge.getTraversalResourceId(), source->getPosition()))
+				&& !(result.observed
+					&& std::abs(context.agent->getGlobalPosition().y - source->getPosition().y) <= 0.5f
+					&& context.world->isTransportLocallyBoardable(
+					edge.getTraversalResourceId(), source->getPosition())
+					&& context.world->agentAdheresToTransportLandingPermission(
+						edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				&& !context.world->canAgentOperateTransportLandingControl(
 					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;

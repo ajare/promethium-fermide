@@ -10813,7 +10813,8 @@ namespace core
 			for (auto pointId : resource->mControls)
 			{
 				auto point = mInteractionPoints.find(pointId);
-				if (point) return missingInteractionPermissions(*point, *agent).empty();
+				if (point && point->mSector == approach
+					&& missingInteractionPermissions(*point, *agent).empty()) return true;
 			}
 			return false;
 		}
@@ -10821,8 +10822,25 @@ namespace core
 		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
 		if (stop >= resource->mLiftStops.size()) return false;
 		auto point = mInteractionPoints.find(resource->mLiftStops[stop].callControl);
-		(void)approach;
-		return point && missingInteractionPermissions(*point, *agent).empty();
+		return point && point->mSector == approach
+			&& missingInteractionPermissions(*point, *agent).empty();
+	}
+
+	bool World::agentAdheresToTransportLandingPermission(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
+	{
+		auto agent = mAgents.find(agentId);
+		return agent && (!agent->getEffectivePermissionAdherence().value
+			|| canAgentOperateTransportLandingControl(resourceId, approach, endpoint, agentId));
+	}
+
+	bool World::isAgentTransportOccupant(TraversalResourceId resourceId, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (resource && resource->mLiftCoordinator)
+			resource = mTraversalResources.find(resource->mLiftCoordinator);
+		return agentId && resource && (resource->mLift || resource->mShuttle)
+			&& find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId) != resource->mOccupants.end();
 	}
 
 	bool World::isTransportLocallyBoardable(TraversalResourceId resourceId,

@@ -611,6 +611,15 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto request = mWorld.mTraversalRequests.find(requestId);
 		if (!request || request->mState != TraversalRequestState::Pending) return;
+		// Pending admission is still a future boarding choice. Granted crossings
+		// never re-enter this allocator; riding and alighting use separate paths.
+		if (!mWorld.agentAdheresToTransportLandingPermission(request->mResource,
+			request->mSourceSector, request->mSourceEndpoint, request->mOwner))
+		{
+			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+			return;
+		}
 		// Shuttle boarding cannot overlap disembarkation at the aligned stop,
 		// even if a request reaches allocation during a phase transition.
 		if (coordinator.mShuttle
