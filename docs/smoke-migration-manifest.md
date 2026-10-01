@@ -1,16 +1,21 @@
 # Smoke migration ownership manifest
 
-Snapshot for #280 (parent #278). Each source below has exactly one current
+Snapshot after #281 (parent #278). Each source below has exactly one current
 compilation/execution owner; all assertions inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
 independent target. The four pre-existing standalone checks are retained as-is,
 not migrated into the new harness. Future batches must update this table and
 remove the old source **and invocation** when transferring ownership.
 
-Only Simulation Observation is migrated in #280. Its stable registered check
+Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was
 `src/headless/SimulationObservationSmokeChecks.cpp`. It is no longer compiled
 or invoked by the legacy aggregate. CTest executes it only as `smoke-simulation`.
+#281 migrates `WallRenderSmokeChecks.cpp` to `smoke/render/Walls.cpp`, registered
+as `render/walls`. Neither the legacy aggregate nor `--render-checks` invokes
+it anymore; its domain CTest owner is `smoke-render`. All other Render checks
+remain legacy-owned for follow-up migration.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Existing overlapping legacy CTest selections are unchanged.
 
@@ -103,7 +108,7 @@ Paths in the table are relative to `src/headless/`.
 | `ViewportCullingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ViewportDragScrollSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ViewportZoomSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `WallRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/Walls.cpp` | module-owned | `pf-smoke-render` |
 | `WindowIntoBackgroundSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `WindowLayerSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `WindowMultiBackgroundSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -117,7 +122,11 @@ Paths in the table are relative to `src/headless/`.
 
 ## Support and non-smoke code
 
-- `RenderGuiStubs.cpp`: legacy rendering support, not an independent check.
+- `RenderGuiStubs.cpp` and `support/ImGuiContext.cpp`: reusable CPU-only support,
+  compiled by `pf-headless-render-support`, not independent checks.
+- `smoke/render/Main.cpp`: explicit Render registry, not extra coverage.
+- `smoke/tests/RenderContract.cmake`: public Render CLI contract and no-output-file
+  verification, executed by `smoke-render-contract` (harness, not smoke coverage).
 - `smoke/simulation/Main.cpp`: explicit Simulation registry, not extra coverage.
 - `smoke/support/Smoke.cpp`: harness mechanics only, owned by `pf-smoke-support`.
 - `smoke/tests/Probe.cpp`: synthetic harness contract checks, owned by

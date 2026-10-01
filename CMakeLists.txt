@@ -284,13 +284,46 @@ else()
 endif()
 pf_apply_high_analysis(pf-metrics)
 
-add_executable(prometheum-fermide-headless
-    # The real renderer, linked headless so #49 can exercise renderSector's
-    # actual draw-call order. ImGui is compiled CPU-side only; the GUI-owned
-    # globals are stubbed in RenderGuiStubs.cpp. The Door panel is compiled in
-    # too (#99) so its disabled-scope balance is checked against the real panel.
+# CPU-only ImGui and production canvas support are compiled once and reused
+# by the editor, legacy checks, and independent Render smoke modules.
+add_library(pf-imgui-cpu STATIC
+    src/imgui/imgui.cpp
+    src/imgui/imgui_draw.cpp
+    src/imgui/imgui_tables.cpp
+    src/imgui/imgui_widgets.cpp
+)
+target_include_directories(pf-imgui-cpu PUBLIC "${PF_INCLUDE_DIR}" "${PF_INCLUDE_DIR}/imgui")
+target_compile_features(pf-imgui-cpu PUBLIC cxx_std_20)
+
+add_library(pf-render STATIC
     src/Render.cpp
     src/WorldDrawList.cpp
+    src/SectorTileset.cpp
+    src/ObjectTileset.cpp
+)
+target_link_libraries(pf-render PUBLIC prometheum-fermide-core pf-imgui-cpu)
+
+# Application globals are deliberately separate from production rendering:
+# the GUI supplies real ones; CPU-only consumers opt into these stubs. Object
+# linkage supplies globals even when a check only references renderer functions.
+add_library(pf-headless-render-support OBJECT
+    src/headless/RenderGuiStubs.cpp
+    src/headless/support/ImGuiContext.cpp
+)
+target_include_directories(pf-headless-render-support PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
+target_link_libraries(pf-headless-render-support PUBLIC pf-render)
+foreach(target IN ITEMS pf-render pf-headless-render-support)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W3 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    pf_apply_high_analysis(${target})
+endforeach()
+
+add_executable(prometheum-fermide-headless
+    # Panels remain legacy-owned until their own migration tickets.
     src/DocumentEdit.cpp
     src/DoorPanel.cpp
     src/AgentGroupsPanel.cpp
@@ -302,12 +335,6 @@ add_executable(prometheum-fermide-headless
     src/TagsPanel.cpp
     src/BehavioursPanel.cpp
     src/AgentClipboard.cpp
-    src/imgui/imgui.cpp
-    src/imgui/imgui_draw.cpp
-    src/imgui/imgui_tables.cpp
-    src/imgui/imgui_widgets.cpp
-    src/SectorTileset.cpp
-    src/ObjectTileset.cpp
     src/headless/BackgroundPaintSmokeChecks.cpp
     src/headless/BackgroundPlacementSmokeChecks.cpp
     src/headless/BackgroundCascadeDeleteSmokeChecks.cpp
@@ -380,7 +407,6 @@ add_executable(prometheum-fermide-headless
     src/headless/ShuttleRouteCostSmokeChecks.cpp
     src/headless/LadderForceBridgeRouteCostSmokeChecks.cpp
     src/headless/WorldTeardownSmokeChecks.cpp
-    src/headless/RenderGuiStubs.cpp
     src/headless/RenderOrderSmokeChecks.cpp
     src/headless/SerializationSmokeChecks.cpp
     src/headless/PausePositionSmokeChecks.cpp
@@ -391,7 +417,6 @@ add_executable(prometheum-fermide-headless
     src/headless/MetricsChecks.cpp
     src/headless/ThresholdRefusalSmokeChecks.cpp
     src/headless/ThresholdLayerOverlapSmokeChecks.cpp
-    src/headless/WallRenderSmokeChecks.cpp
     src/headless/ViewportCullingSmokeChecks.cpp
     src/headless/ViewportDragScrollSmokeChecks.cpp
     src/headless/ViewportZoomSmokeChecks.cpp
@@ -408,7 +433,8 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
-target_link_libraries(prometheum-fermide-headless PRIVATE pf-metrics httplib::httplib)
+target_link_libraries(prometheum-fermide-headless PRIVATE
+    pf-metrics httplib::httplib pf-headless-render-support)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)
@@ -422,15 +448,16 @@ set_target_properties(prometheum-fermide-headless PROPERTIES
 
 if(PF_BUILD_GUI)
     file(GLOB PF_IMGUI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/*.cpp")
+    list(REMOVE_ITEM PF_IMGUI_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_draw.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_tables.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/imgui_widgets.cpp")
     add_executable(editor
         src/Helpers.cpp
-        src/SectorTileset.cpp
-        src/ObjectTileset.cpp
-        src/WorldDrawList.cpp
         src/ApplicationResources.cpp
         src/WorldRenderSystem.cpp
         src/Main.cpp
-        src/Render.cpp
         src/UI.cpp
         src/DocumentEdit.cpp
         src/DoorPanel.cpp
@@ -458,7 +485,7 @@ if(PF_BUILD_GUI)
         target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     target_link_libraries(editor PRIVATE
-        pf-metrics libglew_static nfd::nfd
+        pf-render pf-metrics libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
         Willpower.Application ext::mpp-helper
     )
@@ -526,17 +553,10 @@ if(BUILD_TESTING)
 
     add_executable(pf-sector-tileset-checks
         src/headless/SectorTilesetChecks.cpp
-        src/SectorTileset.cpp
-        src/ObjectTileset.cpp
-        src/WorldDrawList.cpp
-        src/imgui/imgui.cpp
-        src/imgui/imgui_draw.cpp
-        src/imgui/imgui_tables.cpp
-        src/imgui/imgui_widgets.cpp
     )
     target_compile_features(pf-sector-tileset-checks PRIVATE cxx_std_20)
     target_include_directories(pf-sector-tileset-checks PRIVATE "${PF_INCLUDE_DIR}" "${PF_INCLUDE_DIR}/imgui")
-    target_link_libraries(pf-sector-tileset-checks PRIVATE ${PF_YAML_TARGET})
+    target_link_libraries(pf-sector-tileset-checks PRIVATE pf-render)
     add_test(NAME sector-tileset COMMAND pf-sector-tileset-checks
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 

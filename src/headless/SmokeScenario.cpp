@@ -70,7 +70,6 @@ void runRoutePlanningSmokeChecks();
 void runShuttleDoorQuerySmokeChecks();
 void runShuttleDoorRenderSmokeChecks();
 void runRenderOrderSmokeChecks();
-void runWallRenderSmokeChecks();
 void runDoorOpenApartRenderSmokeChecks();
 void runDoorOpenLeftRenderSmokeChecks();
 void runDoorOpenRightRenderSmokeChecks();
@@ -6233,7 +6232,6 @@ int main(int argc, char** argv)
 			if (std::string(argv[1]) == "--render-checks")
 			{
 				runRenderOrderSmokeChecks();
-				runWallRenderSmokeChecks();
 				runDoorOpenApartRenderSmokeChecks();
 				runDoorOpenLeftRenderSmokeChecks();
 				runDoorOpenRightRenderSmokeChecks();
@@ -6434,7 +6432,6 @@ int main(int argc, char** argv)
 		runFacadeEditorSmokeChecks();
 		runPaletteTraySmokeChecks();
 		runOnboardAgentDeletionSmokeChecks();
-		runWallRenderSmokeChecks();
 		runViewportCullingSmokeChecks();
 		runViewportDragScrollSmokeChecks();
 		runViewportZoomSmokeChecks();

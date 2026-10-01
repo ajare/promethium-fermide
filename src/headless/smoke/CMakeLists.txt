@@ -65,6 +65,19 @@ pf_add_smoke_module(pf-smoke-simulation
     TIMEOUT 30
 )
 
+pf_add_smoke_module(pf-smoke-render
+    NAME render
+    SOURCES render/Main.cpp render/Walls.cpp
+    LIBRARIES pf-headless-render-support
+    LABELS render
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-render-contract COMMAND ${CMAKE_COMMAND}
+    "-DRENDER=$<TARGET_FILE:pf-smoke-render>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RenderContract.cmake")
+set_tests_properties(smoke-render-contract PROPERTIES LABELS "harness;render" TIMEOUT 30)
+
 # Synthetic outcomes exercise harness mechanics, never production smoke coverage.
 add_executable(pf-smoke-harness-probe tests/Probe.cpp)
 target_link_libraries(pf-smoke-harness-probe PRIVATE pf-smoke-support)

@@ -42,6 +42,8 @@
 #include <vector>
 
 #include "imgui/imgui.h"
+#include "ImGuiContext.h"
+#include "Walls.h"
 
 #include "Render.h"
 #include "core/World.h"
@@ -62,14 +64,6 @@ namespace
 	// The colour Render.cpp strokes a Location's floor, ceiling, and walls with.
 	ImU32 const kWallColour = ImU32(ImColor(0, 0, 0));
 	ImColor const kRoomColour(192, 192, 255);
-
-	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
-	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
 
 	// The viewport-qualified draw list: the plain form needs a current window,
 	// which headless never has.
@@ -488,7 +482,7 @@ void runWallRenderSmokeChecks()
 {
 	try
 	{
-		ImGuiGuard imgui;
+		headless::ScopedImGuiContext imgui;
 
 		checkWallSpanRule();
 		checkEqualRoomsOpenCompletely();
