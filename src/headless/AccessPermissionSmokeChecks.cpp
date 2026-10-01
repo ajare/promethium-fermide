@@ -818,10 +818,10 @@ namespace
 					+ std::to_string(resource.liftCurrentStop) + " position " + std::to_string(rider->getGlobalPosition().y));
 		require(!graph->calculatePath(world.lookupAgent(remoteId).entity, target),
 			"Remote Agent relied on another landing's live shared Stop request");
-		// The same local accepted ordinary Lift journey is declined by an adhering
-		// unauthorized passenger, while effective direct and Permission set grants
-		// admit it. Platform lift and Shuttle integration have separate tickets.
-		if (!platform && !shuttle)
+		// The same local accepted Lift or Platform lift journey is declined by an
+		// adhering unauthorized passenger, while effective direct and Permission
+		// set grants admit it. Shuttle integration has a separate ticket.
+		if (!shuttle)
 		{
 			world.pauseSimulation();
 			auto adheringId = world.createAgent("adhering destination observer", riderOrigin, 0, 6.0f);
@@ -1384,11 +1384,19 @@ namespace
 		select.type = core::DeviceCommandType::SelectLiftDestination;
 		select.traversalResource = lift.traversalResource; select.stopIndex = 0;
 		require(world.missingLiftDestinationPermissions(select, id).empty(), "Authored grants did not authorize ground");
+		require(world.agentAdheresToLiftDestinationPermission(lift.traversalResource, 0, id),
+			"Direct and Permission set grants did not satisfy mandatory-ground adherence");
 		auto authored = save(world);
 		require(world.setAgentRuntimeAccessPermissionGrant(id, red, false), "Runtime revoke failed");
 		require(world.setAgentRuntimePermissionSetAssignment(id, set, false), "Runtime set revoke failed");
 		require(world.missingLiftDestinationPermissions(select, id) == std::vector<core::AccessPermissionId>{ red, blue }
 			&& save(world) == authored, "Runtime grants leaked into authored Platform authorization");
+		require(!world.agentAdheresToLiftDestinationPermission(lift.traversalResource, 0, id),
+			"Adhering unauthorized Agent accepted the protected mandatory ground destination");
+		require(world.setAgentIndividualPermissionAdherence(id, false, &diagnostic), diagnostic);
+		require(world.agentAdheresToLiftDestinationPermission(lift.traversalResource, 0, id),
+			"Non-adhering Agent declined the protected mandatory ground destination");
+		require(world.setAgentIndividualPermissionAdherence(id, true, &diagnostic), diagnostic);
 		world.resetSimulation();
 		require(world.missingLiftDestinationPermissions(select, id).empty(), "Reset failed to restore Platform authorization");
 		require(world.setAgentRuntimeAccessPermissionGrant(id, red, false), "Runtime revoke failed");
@@ -1511,7 +1519,7 @@ void runAccessPermissionSmokeChecks()
 	liftDestinationEnforcement(3);
 	liftDestinationEnforcement(4);
 	liftDestinationEnforcement(5);
-	for (unsigned change = 0; change < 4; ++change) liftDestinationEnforcement(change, true);
+	for (unsigned change = 0; change < 6; ++change) liftDestinationEnforcement(change, true);
 	for (unsigned change = 0; change < 4; ++change) liftDestinationEnforcement(change, false, true);
 	changingLiftDestinationAuthorization(true);
 	changingLiftDestinationAuthorization(false, true);

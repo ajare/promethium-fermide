@@ -125,6 +125,19 @@ namespace core
 				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
 				return;
 			}
+			// Recheck destination willingness before joining the boarding queue. The
+			// shared Platform lift destination requirement applies at every origin,
+			// and a stale Path cannot bypass a grant, requirement, or effective-
+			// adherence change. A committed virtual-boundary transfer above is not
+			// reconsidered, and occupants continue through the branch below.
+			if (!request->mQueueTicket
+				&& !mWorld.agentAdheresToLiftDestinationPermission(request->mResource,
+					destination, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+				return;
+			}
 			if (!request->mQueueTicket)
 			{
 				request->mQueueTicket = QueueTicketId{ mWorld.mNextQueueTicketValue++ };

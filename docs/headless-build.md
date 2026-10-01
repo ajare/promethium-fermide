@@ -536,11 +536,11 @@ Paths/Route loss, voluntary gains and Route persistence, and Reset simulation.
 Accepted shared journeys survive revocation and paused requirement edits.
 
 The existing destination query, mutation, panel-commit and table APIs accept an
-optional Room object index for Platform lifts. Their existing destination
-piggyback tests retain the pre-integration behavior pending the separate Platform
-lift Permission adherence ticket; #269 is deliberately limited to ordinary Lifts.
-Mandatory ground and selected
-Walkway Stops use the same per-destination requirements and schema-30 field as
+optional Room object index for Platform lifts. Under #270, destination piggyback
+journeys now require explicit Permission adherence false when the passenger lacks
+the destination requirement; the earlier #263 expectations are qualified rather
+than changed retroactively. Mandatory ground and selected Walkway Stops use the
+same per-destination requirements and schema-30 field as
 ordinary Lifts; landing-call requirements remain independent. Tests cover YAML
 and binary round trips, old-World defaults, malformed-input rollback, history,
 rename/delete usage, unrelated settings and Sector reindexing, optional Stop
@@ -629,8 +629,33 @@ adherence becomes true and require established Route loss, and change adherence
 only after boarding to verify that the accepted request, ride, and safe exit
 survive. Existing dynamic grant/requirement tests continue to cover alternatives,
 no-route outcomes, accepted requests, and changes before and after boarding.
-Landing-call requirements remain independent. Platform lift and Shuttle
-destination adherence remain assigned to their separate integration tickets.
+Landing-call requirements remain independent. #270 extends the destination rule
+to Platform lifts; Shuttle destination adherence remains assigned to its separate
+integration ticket.
+
+## Platform lift destination Permission adherence (#270)
+
+Platform lift destination scenarios now follow the ordinary Lift integration:
+an unauthorized Agent with effective Permission adherence true declines a
+protected destination before boarding even when another Agent has already made
+the shared Stop request. An explicitly non-adhering Agent may use that locally
+observed journey but remains unable to issue the protected selection. Effective
+direct and Permission set grants continue to use all-required semantics.
+
+Route capture and open-platform admission independently evaluate the current
+effective property, grants, and the World-owned destination requirement. The
+admission check occurs before queueing and before the virtual-boundary transfer;
+once that transfer is committed, or the Agent is already riding, requirement,
+grant, and adherence changes do not cancel the accepted journey or block a safe
+exit. Landing-call requirements, Mobility, capacity, queues, and local
+observation remain independent.
+
+The shared public World/simulation scenarios cover mandatory ground and optional
+Walkway requirements, explicit true and false values, direct/set grants, real
+selection commands, stale Paths and Route loss, alternatives, pre-boarding and
+onboard changes, accepted requests, and completed exits. This qualifies #263's
+unconditional piggyback expectation without changing that parent issue. Shuttle
+destination adherence remains outside this ticket.
 
 ## Prerequisites
 

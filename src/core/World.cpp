@@ -10815,9 +10815,9 @@ namespace core
 		}
 		if (!resource || (!resource->mLift && !resource->mShuttle)
 			|| destinationStop >= resource->mLiftStops.size()) return false;
-		// #269 integrates ordinary enclosed Lifts. Platform lift and Shuttle
-		// destination adherence remain transport-specific follow-up work.
-		if (resource->mShuttle || resource->mOpenPlatformLift) return true;
+		// #269 and #270 integrate ordinary enclosed Lifts and Platform lifts.
+		// Shuttle destination adherence remains transport-specific follow-up work.
+		if (resource->mShuttle) return true;
 		if (find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end()) return true;
 		auto agent = mAgents.find(agentId);
