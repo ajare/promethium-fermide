@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after Metrics smoke migration #300 (parent #278). Each
+Snapshot after graphics Startup smoke migration #301 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -254,7 +254,7 @@ source lists and dependency tiers are unchanged.
 | `smoke/editor/Facade.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/render/Facades.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/world/Facades.cpp` | module-owned | `pf-smoke-world` |
-| `GraphicsStartupSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/startup/Startup.cpp` | module-owned | `pf-smoke-startup` (GUI-enabled builds) |
 | `smoke/permissions/InteractionMobility.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/InteractionGeometry.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/routing/IsolatedSectors.cpp` | module-owned | `pf-smoke-routing` |
@@ -645,6 +645,25 @@ loopback ports. CTest owns direct execution through `smoke-metrics`, labelled
 implementation is isolated in `MetricsService.cpp` pending its dedicated tool
 extraction in #303; it is not a smoke registration.
 
+## Graphics Startup smoke module (#301)
+
+The graphics-initialization subprocess check moves from
+`GraphicsStartupSmokeChecks.cpp` to `smoke/startup/Startup.cpp`, registered as
+`graphicsInitializationFailure` in `pf-smoke-startup`. The module launches the
+required `editor` product with an unavailable SDL video driver and accepts only a
+normal non-zero exit. A signal, Windows abort/crash code, timeout, launch failure,
+zero exit, or missing/non-executable child product fails the check; required
+products never become skips.
+
+The target and its two CTest entries exist only with `PF_BUILD_GUI=ON`, preventing
+impossible registration where the optional GUI capability is disabled. The target
+depends on `editor`, embeds its built path for direct execution, and permits an
+explicit `PF_GUI_EXECUTABLE` override for the missing-product contract. Both tests
+are labelled for GUI graphics subprocess behavior and use `RUN_SERIAL` because the
+child writes the production startup log. The old `graphics-startup-failure` entry
+and aggregate source ownership are removed; `--graphics-startup-smoke` returns 2
+with migration guidance.
+
 ## Support and non-smoke code
 
 - `smoke/editor/Main.cpp`: the sole cross-domain Editor registry. The former
@@ -677,6 +696,9 @@ extraction in #303; it is not a smoke registration.
   selection, tileset and CPU ImGui isolation, not extra domain coverage.
 - `smoke/tests/RenderContract.cmake`: public Render CLI contract and no-output-file
   verification, executed by `smoke-render-contract` (harness, not smoke coverage).
+- `smoke/startup/Main.cpp` and `Checks.h`: the GUI-capability-gated Startup registry.
+- `smoke/tests/StartupContract.cmake`: Startup CLI, controlled child failure, and
+  required-child failure contract; owned by serialized `smoke-startup-contract`.
 - `smoke/simulation/Main.cpp`: explicit Simulation registry, not extra coverage.
 - `smoke/support/Smoke.cpp`: harness mechanics only, owned by `pf-smoke-support`.
 - `smoke/tests/Probe.cpp`: synthetic harness contract checks, owned by

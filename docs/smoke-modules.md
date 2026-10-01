@@ -10,7 +10,8 @@ Transit/transport runtime checks (#292), and pathfinding scale and perceived
 route costs (#293), the complete Render module (#294), and the cross-domain
 Editor module (#295), complete World-document Persistence (#296–#297), and
 remaining central inline scenarios (#298), the complete Simulation lifecycle
-and robustness coverage (#299), and Metrics verification (#300).
+and robustness coverage (#299), Metrics verification (#300), and graphics
+Startup subprocess verification (#301).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
@@ -85,6 +86,31 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Startup module (#301)
+
+```sh
+cmake -S . -B build-linux -DBUILD_TESTING=ON -DPF_BUILD_GUI=ON
+cmake --build build-linux --target pf-smoke-startup --parallel
+build-linux/bin/x64/Release/pf-smoke-startup --list
+build-linux/bin/x64/Release/pf-smoke-startup --check graphicsInitializationFailure
+ctest --test-dir build-linux -R '^smoke-startup(-contract)?$' --output-on-failure
+```
+
+`pf-smoke-startup` owns the GUI graphics-initialization subprocess check. It
+launches the required `editor` child with an intentionally unavailable SDL video
+driver and requires a normal non-zero exit; signals, abort/crash exit codes,
+timeouts, launch failures, and a missing child product are failures. The child
+uses the editor output directory and has no display variables, so no window,
+dialog, or input can block automation.
+
+Startup is registered only when `PF_BUILD_GUI=ON`; GUI-disabled configurations
+therefore do not advertise an impossible test or target. Building Startup directly
+builds its required editor child. `smoke-startup` and `smoke-startup-contract` are
+labelled `startup;graphics;subprocess;gui` and run serially because the production
+child uses its shared startup log. The contract checks exact CLI behavior from an
+empty directory and verifies explicitly that a missing required child fails rather
+than skips. The old aggregate switch returns migration guidance.
 
 ## Metrics module (#300)
 

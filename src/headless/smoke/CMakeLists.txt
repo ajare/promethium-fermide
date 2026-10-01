@@ -94,6 +94,30 @@ add_test(NAME smoke-metrics-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/MetricsContract.cmake")
 set_tests_properties(smoke-metrics-contract PROPERTIES LABELS "harness;metrics;http" TIMEOUT 60)
 
+# Startup owns a real GUI subprocess and therefore only exists when its required
+# optional GUI capability and child product can be built. Both CTest entries are
+# serialized because the child writes the application's shared startup log.
+if(PF_BUILD_GUI)
+    pf_add_smoke_module(pf-smoke-startup
+        NAME startup
+        SOURCES startup/Main.cpp startup/Startup.cpp
+        LABELS "startup;graphics;subprocess;gui"
+        TIMEOUT 40
+    )
+    target_compile_definitions(pf-smoke-startup PRIVATE
+        "PF_STARTUP_GUI_EXECUTABLE=\"$<TARGET_FILE:editor>\"")
+    add_dependencies(pf-smoke-startup editor)
+    set_tests_properties(smoke-startup PROPERTIES RUN_SERIAL TRUE)
+
+    add_test(NAME smoke-startup-contract COMMAND ${CMAKE_COMMAND}
+        "-DSTARTUP=$<TARGET_FILE:pf-smoke-startup>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/StartupContract.cmake")
+    set_tests_properties(smoke-startup-contract PROPERTIES
+        LABELS "harness;startup;graphics;subprocess;gui"
+        TIMEOUT 120
+        RUN_SERIAL TRUE)
+endif()
+
 pf_add_smoke_module(pf-smoke-agent
     NAME agent
     SOURCES

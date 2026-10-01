@@ -396,7 +396,6 @@ pf_apply_high_analysis(pf-restoration-support)
 
 add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
-    src/headless/GraphicsStartupSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
     src/headless/RoutingTools.cpp
@@ -532,16 +531,4 @@ if(BUILD_TESTING)
     # Serialization and restoration smoke coverage is owned by smoke-persistence.
     # --restoration-benchmark remains an explicit, unregistered diagnostic tool.
     # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
-
-    if(PF_BUILD_GUI)
-        # Ticket #59: the GUI must exit with a controlled non-zero code when
-        # graphics initialisation fails, never via SIGABRT. Run from the GUI
-        # output directory so the app's relative log/resource paths resolve
-        # inside the build tree.
-        add_test(NAME graphics-startup-failure
-            COMMAND prometheum-fermide-headless --graphics-startup-smoke)
-        set_tests_properties(graphics-startup-failure PROPERTIES
-            ENVIRONMENT "PF_GUI_EXECUTABLE=$<TARGET_FILE:editor>"
-            WORKING_DIRECTORY "$<TARGET_FILE_DIR:editor>")
-    endif()
 endif()

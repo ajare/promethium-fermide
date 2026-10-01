@@ -27,5 +27,5 @@ executable, not the working directory. Invalid or missing assets produce a
 controlled startup error. The GL texture is deleted before the GL context.
 Headless rendering without an installed texture retains the primitive fallback.
 
-Run `ctest --test-dir build-linux -R 'sector-tileset|headless-smoke|graphics-startup-failure' --output-on-failure`
+Run `ctest --test-dir build-linux -R 'sector-tileset|headless-smoke|smoke-startup' --output-on-failure`
 after building the GUI, headless and `pf-sector-tileset-checks` targets.

@@ -33,7 +33,6 @@ void runMarkerIdentitySmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
-void runGraphicsStartupSmokeChecks();
 
 static_assert(!std::is_convertible_v<core::DeviceOperationId, core::TraversalResourceId>);
 
@@ -100,9 +99,6 @@ int main(int argc, char** argv)
 		std::cerr << "Render and viewport checks moved to smoke-render; use CTest.\n";
 		return 2;
 	}
-	bool const graphicsStartupOnly = argc > 1
-		&& std::string(argv[1]) == "--graphics-startup-smoke";
-
 	try
 	{
 		if (argc > 1 && std::string(argv[1]) == "--restoration-benchmark")
@@ -201,10 +197,10 @@ int main(int argc, char** argv)
 			std::cerr << "World teardown checks moved to smoke-simulation; use CTest.\n";
 			return 2;
 		}
-		if (graphicsStartupOnly)
+		if (argc > 1 && std::string(argv[1]) == "--graphics-startup-smoke")
 		{
-			runGraphicsStartupSmokeChecks();
-			return 0;
+			std::cerr << "Graphics startup checks moved to smoke-startup; use CTest.\n";
+			return 2;
 		}
 
 		// Only unmigrated external suites remain here. Domain scenarios are
