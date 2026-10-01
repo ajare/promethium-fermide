@@ -130,6 +130,70 @@ it directly as `smoke-persistence`, labelled `smoke;core`, with a 30-second time
 fixture resolution from an external empty directory, no working-directory output,
 and eight concurrent complete invocations. It is labelled `harness;core`.
 
+## Three-module architecture gate (#283)
+
+Validated on Linux with GCC 15 on 1 October 2026. This is the gate for the
+representative Simulation, Render, and Persistence pilots; it does not migrate
+any additional checks.
+
+- Three clean Release, GUI-disabled build trees each built one direct target:
+  `pf-smoke-simulation` in 83.40 seconds, `pf-smoke-render` in 89.90 seconds,
+  and `pf-smoke-persistence` in 82.69 seconds (`--parallel 4`). The resulting
+  build trees contained only their own pilot check object: `Observation.cpp.o`,
+  `Walls.cpp.o`, or `Formats.cpp.o`, respectively. The other two pilot check
+  objects were absent in each tree.
+- Generated link commands confirmed the intended tiers. Simulation and
+  Persistence contain their runner/check objects and link only smoke support,
+  production core, YAML, and Lua. Render contains its runner/check objects and
+  headless-render support objects, then links smoke support, production render,
+  production core, YAML, Lua, and CPU ImGui. None links the legacy executable,
+  editor panels, metrics/HTTP, SDL, OpenGL, or another pilot executable.
+- Launching the three clean Release executables simultaneously returned zero
+  for all three in 35 ms wall time. The summaries reported `1/0/0` for
+  Simulation, `1/0/0` for Render, and `7/0/0` for Persistence
+  (pass/fail/skip). A direct concurrent Debug CTest run with `-j 3` also passed
+  all three in 0.12 seconds.
+- A clean Debug, GUI-disabled build with `PF_HIGH_ANALYSIS=ON` built all three
+  targets in 67.43 seconds (`--parallel 4`). Exported commands confirmed the
+  elevated flags on `Observation.cpp`, `Walls.cpp`, and `Formats.cpp`; the
+  three executables then passed concurrently. The warnings emitted are the
+  existing diagnostics that analysis mode is designed to expose, not errors.
+- A pre-pilot worktree at `0a72e8a` built the original aggregate after applying
+  only the behavior-preserving GCC 15 `MobilityProfile` initializer spelling
+  already committed by #280. The original aggregate (including Observation),
+  `--render-checks`, and `--serialization-checks` each returned zero. The
+  migrated modules also returned zero. Mechanical extraction comparison found
+  all original assertions unchanged: 16 of 16 Simulation `require` calls,
+  35 of 35 Render calls, and 43 of 43 Persistence calls matched after
+  whitespace and helper-qualification normalization. Render's scoped CPU-only
+  ImGui context and Persistence's Context-owned paths change lifecycle/isolation,
+  not the asserted outcomes.
+- `git diff --check` passes; no repository formatter is configured. All runs
+  were headless. Render created only a CPU-side ImGui context and no platform
+  or graphics backend, and none of the pilots can display a dialog.
+
+The clean-build commands used the following pattern, with a separate build
+path and corresponding target for each pilot:
+
+```sh
+cmake -S . -B /tmp/pf-283-simulation -DCMAKE_BUILD_TYPE=Release \
+  -DPF_BUILD_GUI=OFF -DBUILD_TESTING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build /tmp/pf-283-simulation --target pf-smoke-simulation --parallel 4
+
+cmake -S . -B /tmp/pf-283-high -DCMAKE_BUILD_TYPE=Debug \
+  -DPF_BUILD_GUI=OFF -DBUILD_TESTING=ON -DPF_HIGH_ANALYSIS=ON \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build /tmp/pf-283-high \
+  --target pf-smoke-simulation pf-smoke-render pf-smoke-persistence --parallel 4
+ctest --test-dir /tmp/pf-283-high \
+  -R '^smoke-(simulation|render|persistence)$' -j 3 --output-on-failure
+```
+
+The elapsed times are observations rather than thresholds. Link evidence came
+from each target's generated `link.txt`; compilation isolation came from the
+objects actually produced and the clean build logs, not from
+`compile_commands.json` (which describes all configured targets).
+
 ## #282 Linux validation
 
 Validated with GCC 15:

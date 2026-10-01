@@ -1,7 +1,8 @@
 # Smoke migration ownership manifest
 
-Snapshot after #281 (parent #278). Each source below has exactly one current
-compilation/execution owner; all assertions inside it belong to that owner.
+Snapshot after the three-module pilot gate #283 (parent #278). Each source
+below has exactly one current compilation/execution owner; all assertions inside
+it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
 independent target. The four pre-existing standalone checks are retained as-is,
 not migrated into the new harness. Future batches must update this table and
