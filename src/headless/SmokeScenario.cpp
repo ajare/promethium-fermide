@@ -76,13 +76,7 @@ void runAccessPermissionSmokeChecks();
 void runInteractionPointGeometrySmokeChecks();
 void runDoorPreflightSmokeChecks();
 void runNonFiniteTimingSmokeChecks();
-void runAgentBehaviourRegistrySmokeChecks();
-void runAgentBehaviourAssignmentSmokeChecks();
-void runAgentBehaviourPortabilitySmokeChecks();
-void runAgentBehaviourDeleteSmokeChecks();
-void runAgentBehaviourSchemaReconciliationSmokeChecks();
 void runAgentBehaviourRuntimeSmokeChecks();
-void runAgentBehaviourWorkflowSmokeChecks();
 void runEscalatorWalkingSmokeChecks();
 void runRoutePlanningTimePropertySmokeChecks();
 void runAgentPathRenderSmokeChecks();
@@ -6204,9 +6198,7 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--agent-behaviour-checks")
 		{
-			runAgentBehaviourRegistrySmokeChecks();
 			runAgentBehaviourRuntimeSmokeChecks();
-			runAgentBehaviourWorkflowSmokeChecks();
 			std::cout << "PASS: versioned Agent behaviours\n";
 			return 0;
 		}
@@ -6251,8 +6243,8 @@ int main(int argc, char** argv)
 		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]) == "--coordinated-document-checks")
 		{
-			runAgentBehaviourPortabilitySmokeChecks();
-			return 0;
+			std::cerr << "Coordinated document checks moved to smoke-agent-tags-editor and smoke-behaviours-editor; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
@@ -6304,13 +6296,7 @@ int main(int argc, char** argv)
 		runInteractionPointGeometrySmokeChecks();
 		runDoorPreflightSmokeChecks();
 		runNonFiniteTimingSmokeChecks();
-		runAgentBehaviourRegistrySmokeChecks();
-		runAgentBehaviourAssignmentSmokeChecks();
-		runAgentBehaviourPortabilitySmokeChecks();
-		runAgentBehaviourDeleteSmokeChecks();
-		runAgentBehaviourSchemaReconciliationSmokeChecks();
 		runAgentBehaviourRuntimeSmokeChecks();
-		runAgentBehaviourWorkflowSmokeChecks();
 		runEscalatorWalkingSmokeChecks();
 		runRoutePlanningTimePropertySmokeChecks();
 		runAgentPathRenderSmokeChecks();

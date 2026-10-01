@@ -1,8 +1,11 @@
+#include "Checks.h"
+#include "TemporaryDirectory.h"
+#include "EditorState.h"
+#include "ImGuiContext.h"
 // Coordinated used Agent behaviour deletion, ticket #162.
 
 #include "BehavioursPanel.h"
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -14,28 +17,14 @@
 #include "core/World.h"
 #include "imgui/imgui.h"
 
-void runAgentBehaviourDeleteSmokeChecks();
 
 namespace
 {
+	using behaviour_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path = std::filesystem::temp_directory_path()
-			/ ("promethium-fermide-behaviour-delete-"
-				+ std::to_string(std::chrono::steady_clock::now()
-					.time_since_epoch().count()));
-		TemporaryDirectory() { std::filesystem::create_directories(path); }
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	void write(std::filesystem::path const& path, std::string const& text)
 	{
@@ -56,7 +45,7 @@ namespace
 		core::AgentBehaviourId used{ 1 };
 		core::AgentBehaviourId unused{ 2 };
 
-		Fixture()
+		Fixture(smoke::Context const& context) : temporary(context)
 		{
 			std::filesystem::create_directories(package);
 			write(package / "simple.lua",
@@ -108,9 +97,9 @@ namespace
 		}
 	};
 
-	void unusedDeletesDirectly()
+	void unusedDeletesDirectly(smoke::Context const& context)
 	{
-		Fixture fixture;
+		Fixture fixture{ context };
 		auto& history = agentBehaviourRegistryDocumentHistory(fixture.registry);
 		auto const before = history.undoCount();
 		requestAgentBehaviourDelete(fixture.registry, fixture.unused);
@@ -120,12 +109,12 @@ namespace
 			"Unused behaviour was not one immediate registry edit");
 	}
 
-	void usedDeletionListsCancelsAndCoordinates()
+	void usedDeletionListsCancelsAndCoordinates(smoke::Context const& context)
 	{
-		Fixture fixture;
+		Fixture fixture{ context };
 		// Render the real extracted panel headlessly with the delete controls and
 		// modal path present; inspection itself must remain state-free.
-		ImGui::CreateContext();
+		headless::ScopedImGuiContext imgui;
 		auto& io = ImGui::GetIO();
 		io.IniFilename = nullptr;
 		io.DisplaySize = ImVec2(800, 600);
@@ -139,7 +128,6 @@ namespace
 			"Rendering deletion controls edited a document");
 		ImGui::End();
 		ImGui::Render();
-		ImGui::DestroyContext();
 
 		auto const text = agentBehaviourDeleteConfirmationText(
 			*fixture.registry, fixture.used);
@@ -191,9 +179,9 @@ namespace
 			"Coordinated redo did not restore deletion: " + diagnostic);
 	}
 
-	void failedParticipantLeavesEverythingUnchanged()
+	void failedParticipantLeavesEverythingUnchanged(smoke::Context const& context)
 	{
-		Fixture fixture;
+		Fixture fixture{ context };
 		require(fixture.second->resumeSimulation(), "Could not run failure participant");
 		auto const registryUndo
 			= agentBehaviourRegistryDocumentHistory(fixture.registry).undoCount();
@@ -213,9 +201,21 @@ namespace
 	}
 }
 
-void runAgentBehaviourDeleteSmokeChecks()
+void behaviour_smoke::registerDeleteEditor(std::vector<smoke::Check>& checks)
 {
-	unusedDeletesDirectly();
-	usedDeletionListsCancelsAndCoordinates();
-	failedParticipantLeavesEverythingUnchanged();
+	checks.push_back({ "unusedDeletesDirectly", [](smoke::Context const& context)
+	{
+		EditorState state;
+		unusedDeletesDirectly(context);
+	} });
+	checks.push_back({ "usedDeletionListsCancelsAndCoordinates", [](smoke::Context const& context)
+	{
+		EditorState state;
+		usedDeletionListsCancelsAndCoordinates(context);
+	} });
+	checks.push_back({ "failedParticipantLeavesEverythingUnchanged", [](smoke::Context const& context)
+	{
+		EditorState state;
+		failedParticipantLeavesEverythingUnchanged(context);
+	} });
 }

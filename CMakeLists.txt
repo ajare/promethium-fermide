@@ -332,6 +332,8 @@ add_library(pf-agent-editing STATIC
     src/AgentTagAssignmentPanel.cpp
     src/TagsPanel.cpp
     src/BehavioursPanel.cpp
+    src/AgentBehaviourAssignmentPanel.cpp
+    src/MarkerPanel.cpp
 )
 target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu)
 target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
@@ -350,8 +352,6 @@ add_executable(prometheum-fermide-headless
     # Other panel checks remain legacy-owned until their migration tickets.
     src/DoorPanel.cpp
     src/PermissionsPanel.cpp
-    src/AgentBehaviourAssignmentPanel.cpp
-    src/MarkerPanel.cpp
     src/headless/BackgroundSelectionPanelSmokeChecks.cpp
     src/headless/AccessPermissionSmokeChecks.cpp
     src/headless/DoorPanelScopeSmokeChecks.cpp
@@ -369,13 +369,7 @@ add_executable(prometheum-fermide-headless
     src/headless/TransportLandingAdherenceSmokeChecks.cpp
     src/headless/RoutePlanningSmokeChecks.cpp
     src/headless/AgentPathRenderSmokeChecks.cpp
-    src/headless/AgentBehaviourRegistrySmokeChecks.cpp
-    src/headless/AgentBehaviourAssignmentSmokeChecks.cpp
-    src/headless/AgentBehaviourPortabilitySmokeChecks.cpp
-    src/headless/AgentBehaviourDeleteSmokeChecks.cpp
-    src/headless/AgentBehaviourSchemaReconciliationSmokeChecks.cpp
     src/headless/AgentBehaviourRuntimeSmokeChecks.cpp
-    src/headless/AgentBehaviourWorkflowSmokeChecks.cpp
     src/headless/DoorOpenApartRenderSmokeChecks.cpp
     src/headless/DoorOpenLeftRenderSmokeChecks.cpp
     src/headless/DoorOpenRightRenderSmokeChecks.cpp
@@ -445,8 +439,6 @@ if(PF_BUILD_GUI)
         src/UI.cpp
         src/DoorPanel.cpp
         src/PermissionsPanel.cpp
-        src/AgentBehaviourAssignmentPanel.cpp
-        src/MarkerPanel.cpp
         ${PF_IMGUI_SOURCES}
     )
     target_compile_features(editor PRIVATE cxx_std_20)
@@ -546,8 +538,6 @@ if(BUILD_TESTING)
     add_test(NAME serialization-checks COMMAND prometheum-fermide-headless --serialization-checks)
     add_test(NAME restoration-checks COMMAND prometheum-fermide-headless
         --restoration-benchmark "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/door-test-1.world.yaml")
-    add_test(NAME coordinated-document-checks COMMAND prometheum-fermide-headless
-        --coordinated-document-checks)
     add_test(NAME viewport-checks COMMAND prometheum-fermide-headless --viewport-checks)
     add_test(NAME render-checks COMMAND prometheum-fermide-headless --render-checks)
     add_test(NAME lift-boarding-regression COMMAND prometheum-fermide-headless

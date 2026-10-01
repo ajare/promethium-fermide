@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Agent tag migration #287 (parent #278). Each
+Snapshot after the Agent behaviour authoring migration #288 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -50,10 +50,24 @@ clipboard, reload, or coordinated save workflows belong to Editor. Every origina
 assertion is retained, including multi-World and external-registry assertions.
 Temporary fixtures use distinct subdirectories of the invocation's unique Context
 root. The legacy aggregate and `--coordinated-document-checks` no longer execute
-any migrated tag checks; the latter retains Agent behaviour portability only.
+any migrated tag checks. #288 also removes the remaining behaviour portability
+owner from that legacy selection.
+
+#288 migrates six Agent behaviour authoring sources into `smoke/behaviours`:
+12 individually selectable core checks in `pf-smoke-behaviours` and 14 editor
+checks in `pf-smoke-behaviours-editor`. Registry, assignment, and Workflow are
+physically split by dependency. Portability, coordinated deletion, schema
+reconciliation, and scenarios asserting document history or panels use the editor
+tier. All 243 original assertion call sites are preserved. Temporary packages
+live below Context-owned invocation roots; each fixture gets its own directory.
+The old sources, declarations, and calls are removed. Runtime checks remain
+legacy-owned, including `--agent-behaviour-checks`. The now-empty
+`coordinated-document-checks` CTest entry is removed; its legacy CLI selection
+returns 2 with directions to the independent editor modules rather than silently
+running unrelated checks.
 
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
-follow-up work. Existing overlapping legacy CTest selections are unchanged.
+follow-up work. Other overlapping legacy CTest selections are unchanged.
 
 Paths in the table are relative to `src/headless/`.
 
@@ -63,13 +77,16 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/agent/Identity.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
-| `AgentBehaviourAssignmentSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentBehaviourDeleteSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentBehaviourPortabilitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentBehaviourRegistrySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/behaviours/Registry.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/Assignment.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/Workflow.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RegistryEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
+| `smoke/behaviours/AssignmentEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
+| `smoke/behaviours/PortabilityEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
+| `smoke/behaviours/DeleteEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
+| `smoke/behaviours/SchemaReconciliationEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
+| `smoke/behaviours/WorkflowEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
 | `AgentBehaviourRuntimeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentBehaviourSchemaReconciliationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentBehaviourWorkflowSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ColourEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/GroupAssignment.cpp` | module-owned | `pf-smoke-agent` |

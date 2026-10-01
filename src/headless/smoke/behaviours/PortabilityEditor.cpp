@@ -1,10 +1,13 @@
+#include "Checks.h"
+#include "TemporaryDirectory.h"
+#include "EditorState.h"
+#include "ImGuiContext.h"
 // Agent behaviour clipboard and Save As portability checks for #163.
 
 #include "AgentClipboard.h"
 #include "DocumentEdit.h"
 #include "TagsPanel.h"
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -21,27 +24,14 @@
 #include "core/TransactionalFileWriter.h"
 #include "core/YamlSerializer.h"
 
-void runAgentBehaviourPortabilitySmokeChecks();
 
 namespace
 {
+	using behaviour_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path = std::filesystem::temp_directory_path()
-			/ ("promethium-behaviour-portability-" + std::to_string(
-				std::chrono::steady_clock::now().time_since_epoch().count()));
-		TemporaryDirectory() { std::filesystem::create_directories(path); }
-		~TemporaryDirectory()
-		{
-			std::error_code error;
-			std::filesystem::remove_all(path, error);
-		}
-	};
 
 	void writeFile(std::filesystem::path const& path, std::string const& text)
 	{
@@ -186,9 +176,9 @@ namespace
 			"Malformed behaviour clipboard payload was accepted");
 	}
 
-	void saveAsCopiesWholePackageAndRollsBackFailures()
+	void saveAsCopiesWholePackageAndRollsBackFailures(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		TemporaryDirectory temporary{ context };
 		auto sourceDirectory = temporary.path / "source";
 		std::filesystem::create_directory(sourceDirectory);
 		auto worldPath = sourceDirectory / "station.world";
@@ -272,8 +262,16 @@ namespace
 	}
 }
 
-void runAgentBehaviourPortabilitySmokeChecks()
+void behaviour_smoke::registerPortabilityEditor(std::vector<smoke::Check>& checks)
 {
-	clipboardPreservesAndResolvesDeliberately();
-	saveAsCopiesWholePackageAndRollsBackFailures();
+	checks.push_back({ "clipboardPreservesAndResolvesDeliberately", [](smoke::Context const&)
+	{
+		EditorState state;
+		clipboardPreservesAndResolvesDeliberately();
+	} });
+	checks.push_back({ "saveAsCopiesWholePackageAndRollsBackFailures", [](smoke::Context const& context)
+	{
+		EditorState state;
+		saveAsCopiesWholePackageAndRollsBackFailures(context);
+	} });
 }

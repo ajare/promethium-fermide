@@ -1,3 +1,7 @@
+#include "Checks.h"
+#include "TemporaryDirectory.h"
+#include "EditorState.h"
+#include "ImGuiContext.h"
 // Typed authored Agent behaviour assignment checks for #149.
 
 #include <memory>
@@ -11,10 +15,10 @@
 #include "core/YamlSerializer.h"
 #include "imgui/imgui.h"
 
-void runAgentBehaviourAssignmentSmokeChecks();
 
 namespace
 {
+	using behaviour_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
@@ -137,42 +141,6 @@ namespace
 			"Assignment clear failed");
 	}
 
-	void validationAndPausedGateAreAtomic()
-	{
-		Fixture fixture;
-		std::string diagnostic;
-		auto const revision = fixture.registry->lookupAgentBehaviour(fixture.behaviour)->getRevision();
-		auto valid = fixture.configuration();
-		auto before = serialize(*fixture.world);
-		auto expectRefused = [&](core::AgentBehaviourId behaviour, uint64_t candidateRevision,
-			core::AgentBehaviourConfiguration configuration, std::string const& field)
-		{
-			require(!fixture.world->setAgentBehaviourAssignment(fixture.first, behaviour,
-				candidateRevision, configuration, &diagnostic)
-				&& diagnostic.find(field) != std::string::npos
-				&& serialize(*fixture.world) == before,
-				"Malformed configuration was not refused atomically with a field diagnostic");
-		};
-		auto missing = valid; missing.erase("count");
-		expectRefused(fixture.behaviour, revision, missing, "count");
-		auto unknown = valid; unknown["ghost"] = true;
-		expectRefused(fixture.behaviour, revision, unknown, "ghost");
-		auto wrong = valid; wrong["count"] = 1.0;
-		expectRefused(fixture.behaviour, revision, wrong, "count");
-		auto badMarker = valid; badMarker["destination"] = core::MarkerId{ 999 };
-		expectRefused(fixture.behaviour, revision, badMarker, "destination");
-		expectRefused(core::AgentBehaviourId{ 999 }, revision, valid, "999");
-		expectRefused(fixture.behaviour, revision + 1, valid, "revision");
-
-		fixture.world->finishBuild();
-		require(fixture.world->resumeSimulation(), "Fixture could not run");
-		require(!fixture.world->setAgentBehaviourAssignment(fixture.first,
-			fixture.behaviour, revision, valid, &diagnostic)
-			&& diagnostic.find("Pause") != std::string::npos,
-			"Running assignment was accepted");
-		fixture.world->pauseSimulation();
-	}
-
 	void compositeSchedulesValidatePersistAndUndo()
 	{
 		Fixture fixture;
@@ -281,7 +249,7 @@ namespace
 			&& diagnostic.find("schedule[0].destination") != std::string::npos,
 			"Nested Marker dependency diagnostics omitted the schedule path");
 
-		ImGui::CreateContext();
+		headless::ScopedImGuiContext imgui;
 		auto& io = ImGui::GetIO();
 		io.IniFilename = nullptr;
 		io.DisplaySize = ImVec2(800, 600);
@@ -292,7 +260,6 @@ namespace
 		renderAgentBehaviourConfigurationPanel(fixture.world, fixture.first);
 		ImGui::End();
 		ImGui::Render();
-		ImGui::DestroyContext();
 	}
 
 	void markerDeletionReportsEveryReferenceAndPanelIsBalanced()
@@ -313,7 +280,7 @@ namespace
 			&& fixture.world->lookupMarker(fixture.marker),
 			"Referenced Marker deletion was not refused with every Agent and field");
 
-		ImGui::CreateContext();
+		headless::ScopedImGuiContext imgui;
 		auto& io = ImGui::GetIO();
 		io.IniFilename = nullptr;
 		io.DisplaySize = ImVec2(800, 600);
@@ -325,14 +292,24 @@ namespace
 		renderAgentBehaviourConfigurationPanel(fixture.world, fixture.first);
 		ImGui::End();
 		ImGui::Render();
-		ImGui::DestroyContext();
 	}
 }
 
-void runAgentBehaviourAssignmentSmokeChecks()
+void behaviour_smoke::registerAssignmentEditor(std::vector<smoke::Check>& checks)
 {
-	assignEditClearUndoRedoAndPersistence();
-	validationAndPausedGateAreAtomic();
-	compositeSchedulesValidatePersistAndUndo();
-	markerDeletionReportsEveryReferenceAndPanelIsBalanced();
+	checks.push_back({ "assignEditClearUndoRedoAndPersistence", [](smoke::Context const&)
+	{
+		EditorState state;
+		assignEditClearUndoRedoAndPersistence();
+	} });
+	checks.push_back({ "compositeSchedulesValidatePersistAndUndo", [](smoke::Context const&)
+	{
+		EditorState state;
+		compositeSchedulesValidatePersistAndUndo();
+	} });
+	checks.push_back({ "markerDeletionReportsEveryReferenceAndPanelIsBalanced", [](smoke::Context const&)
+	{
+		EditorState state;
+		markerDeletionReportsEveryReferenceAndPanelIsBalanced();
+	} });
 }

@@ -1,6 +1,9 @@
+#include "Checks.h"
+#include "TemporaryDirectory.h"
+#include "EditorState.h"
+#include "ImGuiContext.h"
 // Shared Agent behaviour schema reconciliation, ticket #160.
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -17,28 +20,14 @@
 #include "core/AgentTagRegistryDocument.h"
 #include "core/World.h"
 
-void runAgentBehaviourSchemaReconciliationSmokeChecks();
 
 namespace
 {
+	using behaviour_smoke::TemporaryDirectory;
 	void require(bool condition, std::string const& message)
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path = std::filesystem::temp_directory_path()
-			/ ("promethium-fermide-behaviour-schema-"
-				+ std::to_string(std::chrono::steady_clock::now()
-					.time_since_epoch().count()));
-		TemporaryDirectory() { std::filesystem::create_directories(path); }
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	void writeText(std::filesystem::path const& path, std::string const& text)
 	{
@@ -106,9 +95,9 @@ namespace
 		return { { "schedule", core::AgentBehaviourConfigurationList{ entry } } };
 	}
 
-	void reconcilesAndMigratesAcrossLoadedWorlds()
+	void reconcilesAndMigratesAcrossLoadedWorlds(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		TemporaryDirectory temporary{ context };
 		auto const package = temporary.path / "shared.behaviours";
 		auto const manifest = package / "behaviours.yaml";
 		std::filesystem::create_directories(package);
@@ -280,7 +269,11 @@ namespace
 	}
 }
 
-void runAgentBehaviourSchemaReconciliationSmokeChecks()
+void behaviour_smoke::registerSchemaReconciliationEditor(std::vector<smoke::Check>& checks)
 {
-	reconcilesAndMigratesAcrossLoadedWorlds();
+	checks.push_back({ "reconcilesAndMigratesAcrossLoadedWorlds", [](smoke::Context const& context)
+	{
+		EditorState state;
+		reconcilesAndMigratesAcrossLoadedWorlds(context);
+	} });
 }

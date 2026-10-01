@@ -3,7 +3,8 @@
 The independent modules currently own Simulation Observation (#280), Render walls
 (#281), Persistence serializer/document formats (#282), core World structure
 and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
-properties (#286), and Agent tags and coordinated documents (#287).
+properties (#286), Agent tags and coordinated documents (#287), and Agent
+behaviour registry and authoring (#288).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
@@ -187,7 +188,8 @@ The ten former Agent tag sources now have 51 individual registrations:
 Both targets are independently buildable, with direct 30-second CTest entries.
 The legacy sources, declarations, and invocations are removed, including tag
 coverage formerly reached by `--coordinated-document-checks`. Use CTest for
-combined coverage; that legacy selection now covers Agent behaviour portability.
+combined coverage. #288 removes the remaining behaviour portability checks and
+retires that legacy selection (exit 2 with directions to the independent modules).
 
 Every filesystem fixture uses a distinct directory below the harness Context's
 unique temporary root, including multiple fixtures within one check. Context
@@ -221,6 +223,68 @@ eight concurrent full invocations of each tier sharing that working directory.
 - `git diff --check` passes; no repository formatter is configured. New checks
   create no windows, native dialogs, system clipboard interactions, or ini/log
   files. Windows runtime validation remains the separate #279 ticket.
+
+## Behaviours module (#288)
+
+```sh
+cmake --build build-linux --target pf-smoke-behaviours pf-smoke-behaviours-editor --parallel
+build-linux/bin/x64/Release/pf-smoke-behaviours --list
+build-linux/bin/x64/Release/pf-smoke-behaviours --check definitionsPersistWithSchemasRevisionsAndModulePaths
+build-linux/bin/x64/Release/pf-smoke-behaviours-editor --check reconcilesAndMigratesAcrossLoadedWorlds
+ctest --test-dir build-linux -R '^smoke-behaviours' -j 3 --output-on-failure
+```
+
+The six former registry, assignment, portability, deletion, schema reconciliation,
+and Workflow sources now register 26 checks individually, retaining their original
+function names as stable selectors:
+
+- `pf-smoke-behaviours` / `smoke-behaviours` (`smoke;core`) owns 12 registry,
+  assignment-validation, and deterministic Workflow checks. It links only smoke
+  support, production core, YAML, and Lua. No editor or rendering dependencies
+  enter its check sources or link command.
+- `pf-smoke-behaviours-editor` / `smoke-behaviours-editor` (`smoke;editor`) owns
+  14 checks for coordinated registry recovery/reload, assignment authoring,
+  clipboard/package portability, deletion, schema reconciliation, document history,
+  and actual panel rendering. Mixed scenarios retain all their assertions together
+  in this tier. Both domain CTest entries have 30-second timeouts.
+
+The editor tier reuses production `pf-agent-editing` and headless render support.
+Agent behaviour assignment and Marker panels now compile once in the shared editing
+library rather than separately in GUI and legacy targets. Editor checks reset
+panel state, pending confirmations, document history, logs, and write-failure
+injection on entry and exit. Rendering uses scoped CPU-only ImGui contexts with
+ini/log files disabled. Confirmations are answered through production seams:
+no native dialogs, desktop windows, platform backends, or user input are needed.
+
+Every temporary package lives in a distinct fixture directory under the invocation's
+atomically reserved Context root, cleaned on success or exception. The contract
+test verifies exact listings, every individual selection, misuse exit codes, no
+working-directory output, and eight concurrent full invocations per tier.
+
+All six original sources and legacy declarations/calls are removed. The runtime
+source is intentionally unchanged and remains legacy-owned; the existing
+`--agent-behaviour-checks` selection now runs runtime checks only. The empty
+`coordinated-document-checks` CTest registration is removed, and its old CLI
+selection returns 2 with a migration diagnostic. Use CTest for combined coverage.
+
+### #288 Linux validation
+
+- Release, GUI enabled: full default build and all 84 CTest entries pass
+  sequentially; all 83 non-aggregate entries pass with `-j 6`. The aggregate runs
+  separately from legacy serialization to avoid their pre-existing temporary-path
+  overlap.
+- Clean Release, GUI disabled: building `pf-smoke-behaviours` alone produces only
+  its runner, Registry, Assignment, Workflow, and smoke-support headless objects.
+  Its link command contains only support, production core, YAML, and Lua. All
+  12 checks pass.
+- Clean Debug, GUI disabled, `PF_HIGH_ANALYSIS=ON`: both Behaviours targets build
+  and all three focused CTest entries pass concurrently, including individual
+  selection and concurrent invocations. Existing elevated-analysis warnings remain.
+- Mechanical comparison confirms every one of the 243 original assertion call
+  sites is retained. Stable lists contain 12 core and 14 editor checks, each with
+  one owner. No migrated invocation remains in the legacy executable.
+- `git diff --check` passes; no repository formatter is configured. Windows
+  runtime validation remains the separate #279 ticket.
 
 ## World structure and Sector module (#284)
 
