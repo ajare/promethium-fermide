@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Permissions migration #290 (parent #278). Each
+Snapshot after the Routing migration #291 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -14,7 +14,7 @@ is `simulation/observation`; its old path was
 or invoked by the legacy aggregate. CTest executes it only as `smoke-simulation`.
 #281 migrates `WallRenderSmokeChecks.cpp` to `smoke/render/Walls.cpp`, registered
 as `render/walls`. Neither the legacy aggregate nor `--render-checks` invokes
-it anymore; its domain CTest owner is `smoke-render`. All other Render checks
+it anymore; its domain CTest owner is `smoke-render`. Agent Path rendering moves in #291; other Render checks
 remain legacy-owned for follow-up migration.
 
 #284 migrates the core-only Layer, Sector, Background, Window, Facade,
@@ -92,6 +92,22 @@ removed; `--access-permission-checks` returns 2 with migration guidance. Remaini
 inline Interaction scenarios and the compile-only API contract remain legacy-owned
 for their separate follow-up tickets.
 
+#291 migrates all seven Route planning, planning-time property, movement-command,
+Mobility profile, restored Path, isolated-Sector pathing, and Agent Path rendering
+sources. `pf-smoke-routing` owns 40 individual core registrations;
+`pf-smoke-routing-editor` owns nine coherent scenarios asserting clipboard,
+Selection presentation, or document/registry history. `pf-smoke-render` owns
+`agentPaths`, including Path lines and planning/queue badges. All 347 original
+assertion call sites are retained; the Lift cancellation determinism assertion is
+instantiated independently for each of its four original boundary values.
+Restoration files live in per-check directories below the Context temporary root.
+No check reads fixtures from the working directory. The old sources, declarations,
+and invocations are removed, including the dedicated restored-Path invocation.
+The two empty planning CTest entries are retired; `--route-planning-checks`,
+`--route-planning-time-checks`, and `--restored-path-checks` return 2 with guidance.
+Route-cost, workspace, scale, and inline checks remain with their existing owners
+for their separate tickets.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Other overlapping legacy CTest selections are unchanged.
 
@@ -143,7 +159,7 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/agent/Height.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/HeightEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/IndividualProperties.cpp` | module-owned | `pf-smoke-agent` |
-| `AgentPathRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/AgentPaths.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/tags/Assignment.cpp` | module-owned | `pf-smoke-agent-tags` |
 | `smoke/tags/AssignmentEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
 | `smoke/tags/ClipboardEditor.cpp` | module-owned | `pf-smoke-agent-tags-editor` |
@@ -179,14 +195,14 @@ Paths in the table are relative to `src/headless/`.
 | `GraphicsStartupSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/permissions/InteractionMobility.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/InteractionGeometry.cpp` | module-owned | `pf-smoke-permissions` |
-| `IsolatedSectorPathingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/IsolatedSectors.cpp` | module-owned | `pf-smoke-routing` |
 | `LadderForceBridgeRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `LiftBoardingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `LiftRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `MarkerIdentitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `MetricsChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `MobilityProfileRoutingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `MovementCommandSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/Mobility.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/Movement.cpp` | module-owned | `pf-smoke-routing` |
 | `NonFiniteTimingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `OccupantPackingChecks.cpp` | module-owned (retained standalone) | `pf-occupant-packing-checks` |
 | `OnboardAgentDeletionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -196,9 +212,11 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/permissions/Adherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/AdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
 | `RenderOrderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `RestoredPathMobilitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `RoutePlanningSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `RoutePlanningTimePropertySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/RestoredPaths.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/Planning.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/PlanningEditor.cpp` | module-owned | `pf-smoke-routing-editor` |
+| `smoke/routing/PlanningTime.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/PlanningTimeEditor.cpp` | module-owned | `pf-smoke-routing-editor` |
 | `SectorTilesetChecks.cpp` | module-owned (retained standalone) | `pf-sector-tileset-checks` |
 | `SerializationSmokeChecks.cpp` (remaining checks after the format extraction below) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |

@@ -356,13 +356,8 @@ add_executable(prometheum-fermide-headless
     src/headless/DoorPanelScopeSmokeChecks.cpp
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/DocumentHistorySmokeChecks.cpp
-    src/headless/MobilityProfileRoutingSmokeChecks.cpp
-    src/headless/RestoredPathMobilitySmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
     src/headless/EscalatorWalkingSmokeChecks.cpp
-    src/headless/RoutePlanningTimePropertySmokeChecks.cpp
-    src/headless/RoutePlanningSmokeChecks.cpp
-    src/headless/AgentPathRenderSmokeChecks.cpp
     src/headless/DoorOpenApartRenderSmokeChecks.cpp
     src/headless/DoorOpenLeftRenderSmokeChecks.cpp
     src/headless/DoorOpenRightRenderSmokeChecks.cpp
@@ -371,9 +366,7 @@ add_executable(prometheum-fermide-headless
     src/headless/FacadeDrawOrderSmokeChecks.cpp
     src/headless/GraphicsStartupSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
-    src/headless/IsolatedSectorPathingSmokeChecks.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
-    src/headless/MovementCommandSmokeChecks.cpp
     src/headless/OnboardAgentDeletionSmokeChecks.cpp
     src/headless/PaletteTraySmokeChecks.cpp
     src/headless/PathfindingWorkspaceSmokeChecks.cpp
@@ -521,9 +514,6 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
-    add_test(NAME route-planning COMMAND prometheum-fermide-headless --route-planning-checks)
-    add_test(NAME route-planning-time-properties COMMAND prometheum-fermide-headless
-        --route-planning-time-checks)
     add_test(NAME serialization-checks COMMAND prometheum-fermide-headless --serialization-checks)
     add_test(NAME restoration-checks COMMAND prometheum-fermide-headless
         --restoration-benchmark "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/door-test-1.world.yaml")

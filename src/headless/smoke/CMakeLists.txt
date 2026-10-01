@@ -227,6 +227,38 @@ add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PermissionsContract.cmake")
 set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 180)
 
+pf_add_smoke_module(pf-smoke-routing
+    NAME routing
+    SOURCES
+        routing/Main.cpp
+        routing/Planning.cpp
+        routing/PlanningTime.cpp
+        routing/Movement.cpp
+        routing/RestoredPaths.cpp
+        routing/IsolatedSectors.cpp
+        routing/Mobility.cpp
+    LIBRARIES prometheum-fermide-core
+    LABELS core
+    TIMEOUT 30
+)
+
+pf_add_smoke_module(pf-smoke-routing-editor
+    NAME routing-editor
+    SOURCES
+        routing/EditorMain.cpp
+        routing/PlanningEditor.cpp
+        routing/PlanningTimeEditor.cpp
+    LIBRARIES pf-agent-editing pf-headless-render-support
+    LABELS editor
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-routing-contract COMMAND ${CMAKE_COMMAND}
+    "-DROUTING=$<TARGET_FILE:pf-smoke-routing>"
+    "-DEDITOR=$<TARGET_FILE:pf-smoke-routing-editor>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoutingContract.cmake")
+set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 90)
+
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES
@@ -267,7 +299,7 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 
 pf_add_smoke_module(pf-smoke-render
     NAME render
-    SOURCES render/Main.cpp render/Walls.cpp
+    SOURCES render/Main.cpp render/Walls.cpp render/AgentPaths.cpp
     LIBRARIES pf-headless-render-support
     LABELS render
     TIMEOUT 30

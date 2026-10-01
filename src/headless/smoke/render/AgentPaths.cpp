@@ -1,3 +1,6 @@
+#include "AgentPaths.h"
+#include "ImGuiContext.h"
+
 #include "Render.h"
 #include "UISettings.h"
 
@@ -12,8 +15,6 @@
 
 extern core::Agent* gSelectedAgent;
 extern UISettings gUISettings;
-
-void runAgentPathRenderSmokeChecks();
 
 namespace
 {
@@ -56,7 +57,7 @@ namespace
 	}
 }
 
-void runAgentPathRenderSmokeChecks()
+void agentPaths(smoke::Context const&)
 {
 	core::World world("Agent Path Render", 16, 1);
 	auto const corridor = world.addCorridor(0, 0, 15);
@@ -79,8 +80,12 @@ void runAgentPathRenderSmokeChecks()
 	require(path && path->nodes.size() >= 2, "The Path rendering fixture has no Path");
 	agent->setPath(path, false);
 
-	auto const previousSettings = gUISettings;
-	auto* const previousSelection = gSelectedAgent;
+	struct RenderState
+	{
+		UISettings settings = gUISettings;
+		core::Agent* selection = gSelectedAgent;
+		~RenderState() { gSelectedAgent = selection; gUISettings = settings; }
+	} state;
 	gUISettings = UISettings{};
 	gUISettings.visibleLayer = 0;
 	gUISettings.renderAgentDebug = true;
@@ -93,7 +98,7 @@ void runAgentPathRenderSmokeChecks()
 	require(lineCount(visible) >= 2,
 		"Agent debug did not render the selected Agent's calculated Path");
 
-	ImGui::CreateContext();
+	headless::ScopedImGuiContext context;
 	auto& io = ImGui::GetIO();
 	io.IniFilename = nullptr;
 	io.DisplaySize = { 1280.0f, 720.0f };
@@ -201,7 +206,6 @@ void runAgentPathRenderSmokeChecks()
 	gUISettings.renderAgentDebug = true;
 
 	ImGui::EndFrame();
-	ImGui::DestroyContext();
 
 	// Restore a valid Path for the selected-Path pause check below.
 	agent->setPath(path, false);
@@ -226,6 +230,4 @@ void runAgentPathRenderSmokeChecks()
 	require(unselected.commands().empty(),
 		"A calculated Path rendered without a selected Agent");
 
-	gSelectedAgent = previousSelection;
-	gUISettings = previousSettings;
 }

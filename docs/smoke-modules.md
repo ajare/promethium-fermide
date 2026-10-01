@@ -5,7 +5,7 @@ The independent modules currently own Simulation Observation (#280), Render wall
 and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
 properties (#286), Agent tags and coordinated documents (#287), and Agent
 behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
-Access permissions and Interaction points (#290).
+Access permissions and Interaction points (#290), and Route planning and movement (#291).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
@@ -411,6 +411,71 @@ follow-up tickets rather than extending #290.
 - Mechanical comparison preserves all 549 original `require` assertion calls
   (whitespace normalized). `git diff --check` passes; no repository formatter is
   configured. Windows execution remains the separate #279 ticket.
+
+## Routing modules (#291)
+
+```sh
+cmake --build build-linux --target pf-smoke-routing pf-smoke-routing-editor pf-smoke-render --parallel
+build-linux/bin/x64/Release/pf-smoke-routing --list
+build-linux/bin/x64/Release/pf-smoke-routing --check ordinaryCommands
+build-linux/bin/x64/Release/pf-smoke-routing-editor --check boundariesAndPresentation
+build-linux/bin/x64/Release/pf-smoke-render --check agentPaths
+ctest --test-dir build-linux -R '^smoke-(routing|render)' -j 4 --output-on-failure
+```
+
+Seven former legacy sources now have 50 individually selectable registrations:
+
+- `pf-smoke-routing` / `smoke-routing` (`smoke;core`) owns 40 checks for planning
+  timers, deterministic streams, deferred outcomes, interruptions, topology and
+  assigned-idle restoration, queue planning, planning-time properties, movement
+  commands, Mobility constraints, saved Paths, and isolated-Sector pathing.
+  It links only smoke support, production core, YAML, and Lua.
+- `pf-smoke-routing-editor` / `smoke-routing-editor` (`smoke;editor`) owns nine
+  mixed scenarios using clipboard serialization, Selection-panel presentation,
+  or World/registry history. Complete original scenarios remain together so their
+  timer, persistence, authorization, and clipboard assertions stay unchanged.
+  It reuses production editing and headless rendering support, not native UI.
+- `pf-smoke-render` gains `agentPaths`: selected Path geometry and planning/queue
+  badge appearance, lifetime, stacking, and debug gating. Its UI settings and
+  selection are restored even on failure. ImGui contexts are CPU-only and scoped,
+  with ini/log output disabled. No graphics window or dialog is created.
+
+All three domain tests have 30-second timeouts. Every parameterized planning
+variant and Lift cancellation boundary has a stable selector; cancellation still
+compares two journeys for determinism. Original assertion call sites are retained
+(347 total, with shared fixture helpers copied where dependency tiers split).
+Editor checks reset tag-panel and World-history state on entry and exit.
+
+Restoration fixtures use distinct per-check directories below the harness's
+unique invocation root, cleaned on success or failure. Other fixtures are built
+in memory; no source or working-directory fixture lookup is required. The Routing
+contract checks exact listings, every selection, misuse, no files in an external
+empty working directory, and eight concurrent invocations of each tier. Render's
+contract now also selects `agentPaths` independently.
+
+The seven legacy files, declarations, and calls are removed. The empty planning
+CTest entries are retired; the old planning, planning-time, and restored-Path CLI
+selections return 2 with migration guidance. Route-cost, workspace, scale, and
+inline checks are unchanged and remain outside this ticket.
+
+### #291 Linux validation
+
+- Release, GUI enabled: full default build and all 86 CTest entries pass
+  sequentially. All 85 non-aggregate entries pass with `-j 6`; the aggregate runs
+  separately from legacy serialization to avoid their existing fixed-path overlap.
+- Clean Release, GUI disabled: building only `pf-smoke-routing` compiles just its
+  runner/six check sources and smoke support among headless sources. Its actual
+  link command contains only support, production core, YAML, and Lua. All 40
+  checks pass; no editor, renderer, ImGui, legacy, or other module checks compile.
+- Clean Debug, GUI disabled, `PF_HIGH_ANALYSIS=ON`: both Routing targets and
+  Render build; all five focused domain/contract tests pass concurrently,
+  including every selection and concurrent invocation checks. Existing
+  elevated-analysis diagnostics remain warnings.
+- Both original planning CLI selections passed before extraction. Mechanical
+  comparison confirms all 347 assertion call sites remain, normalizing whitespace
+  and expanding the four cancellation boundary values. No migrated legacy symbol
+  remains. `git diff --check` passes; no repository formatter is configured.
+  Windows runtime validation remains the separate #279 ticket.
 
 ## World structure and Sector module (#284)
 

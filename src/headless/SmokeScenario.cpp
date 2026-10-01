@@ -57,8 +57,6 @@ void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
 void runPausePositionSmokeChecks();
 void runMarkerIdentitySmokeChecks();
-void runMovementCommandSmokeChecks();
-void runRoutePlanningSmokeChecks();
 void runShuttleDoorQuerySmokeChecks();
 void runShuttleDoorRenderSmokeChecks();
 void runRenderOrderSmokeChecks();
@@ -69,12 +67,8 @@ void runBackgroundSelectionPanelSmokeChecks();
 void runDoorPanelScopeSmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
 void runDocumentHistorySmokeChecks();
-void runMobilityProfileRoutingSmokeChecks();
-void runRestoredPathMobilitySmokeChecks();
 void runNonFiniteTimingSmokeChecks();
 void runEscalatorWalkingSmokeChecks();
-void runRoutePlanningTimePropertySmokeChecks();
-void runAgentPathRenderSmokeChecks();
 void runFacadeRenderSmokeChecks();
 void runFacadeDrawOrderSmokeChecks();
 void runFacadeEditorSmokeChecks();
@@ -83,7 +77,6 @@ void runOnboardAgentDeletionSmokeChecks();
 void runViewportCullingSmokeChecks();
 void runViewportDragScrollSmokeChecks();
 void runViewportZoomSmokeChecks();
-void runIsolatedSectorPathingSmokeChecks();
 void runPathfindingWorkspaceSmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
@@ -6202,17 +6195,13 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--route-planning-checks")
 		{
-			runRoutePlanningSmokeChecks();
-			runMovementCommandSmokeChecks();
-			runAgentPathRenderSmokeChecks();
-			std::cout << "PASS: Route planning\n";
-			return 0;
+			std::cerr << "Route planning checks moved to smoke-routing, smoke-routing-editor and smoke-render; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--route-planning-time-checks")
 		{
-			runRoutePlanningTimePropertySmokeChecks();
-			std::cout << "PASS: Route planning time properties\n";
-			return 0;
+			std::cerr << "Route planning checks moved to smoke-routing, smoke-routing-editor and smoke-render; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--routing-scale-checks")
 		{
@@ -6228,9 +6217,8 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--restored-path-checks")
 		{
-			runRestoredPathMobilitySmokeChecks();
-			std::cout << "PASS: restored Path profiles\n";
-			return 0;
+			std::cerr << "Restored Path checks moved to smoke-routing; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--serialization-checks") { runSerializationSmokeChecks(); return 0; }
 		if (argc > 1 && std::string(argv[1]) == "--coordinated-document-checks")
@@ -6270,8 +6258,6 @@ int main(int argc, char** argv)
 		runSerializationSmokeChecks();
 		runPausePositionSmokeChecks();
 		runMarkerIdentitySmokeChecks();
-		runMovementCommandSmokeChecks();
-		runRoutePlanningSmokeChecks();
 		runRenderOrderSmokeChecks();
 		runShuttleDoorRenderSmokeChecks();
 		runDoorOpenApartRenderSmokeChecks();
@@ -6281,12 +6267,8 @@ int main(int argc, char** argv)
 		runDoorPanelScopeSmokeChecks();
 		runDoorTwoSidedButtonSmokeChecks();
 		runDocumentHistorySmokeChecks();
-		runMobilityProfileRoutingSmokeChecks();
-		runRestoredPathMobilitySmokeChecks();
 		runNonFiniteTimingSmokeChecks();
 		runEscalatorWalkingSmokeChecks();
-		runRoutePlanningTimePropertySmokeChecks();
-		runAgentPathRenderSmokeChecks();
 		runShuttleDoorQuerySmokeChecks();
 		runFacadeRenderSmokeChecks();
 		runFacadeDrawOrderSmokeChecks();
@@ -6297,7 +6279,6 @@ int main(int argc, char** argv)
 		runViewportDragScrollSmokeChecks();
 		runViewportZoomSmokeChecks();
 		runWorldRenderLifetimeSmokeChecks();
-		runIsolatedSectorPathingSmokeChecks();
 		runPathfindingWorkspaceSmokeChecks();
 		runLadderForceBridgeRouteCostSmokeChecks();
 		runThresholdRouteCostSmokeChecks();

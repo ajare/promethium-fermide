@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -370,14 +371,49 @@ namespace
 	}
 }
 
-void runMovementCommandSmokeChecks()
+namespace routing_smoke
 {
-	ordinaryCommands();
-	cancelDoorCrossing();
-	initialWaypointBeforeLiftCallIsSkipped();
-	liftCallIsPressedWhilePassing();
-	liftPassengerWalksToExitAlignment();
-	shuttleCallIsPressedWhilePassing();
-	for (unsigned boundary = 0; boundary < 4; ++boundary)
-		require(cancelLiftJourney(boundary) == cancelLiftJourney(boundary), "Cancellation was not deterministic");
+	void registerMovement(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "ordinaryCommands", [](smoke::Context const&)
+		{
+			ordinaryCommands();
+		} });
+		checks.push_back({ "cancelDoorCrossing", [](smoke::Context const&)
+		{
+			cancelDoorCrossing();
+		} });
+		checks.push_back({ "initialWaypointBeforeLiftCallIsSkipped", [](smoke::Context const&)
+		{
+			initialWaypointBeforeLiftCallIsSkipped();
+		} });
+		checks.push_back({ "liftCallIsPressedWhilePassing", [](smoke::Context const&)
+		{
+			liftCallIsPressedWhilePassing();
+		} });
+		checks.push_back({ "liftPassengerWalksToExitAlignment", [](smoke::Context const&)
+		{
+			liftPassengerWalksToExitAlignment();
+		} });
+		checks.push_back({ "shuttleCallIsPressedWhilePassing", [](smoke::Context const&)
+		{
+			shuttleCallIsPressedWhilePassing();
+		} });
+		checks.push_back({ "cancelLiftJourney0", [](smoke::Context const&)
+		{
+			require(cancelLiftJourney(0) == cancelLiftJourney(0), "Cancellation was not deterministic");
+		} });
+		checks.push_back({ "cancelLiftJourney1", [](smoke::Context const&)
+		{
+			require(cancelLiftJourney(1) == cancelLiftJourney(1), "Cancellation was not deterministic");
+		} });
+		checks.push_back({ "cancelLiftJourney2", [](smoke::Context const&)
+		{
+			require(cancelLiftJourney(2) == cancelLiftJourney(2), "Cancellation was not deterministic");
+		} });
+		checks.push_back({ "cancelLiftJourney3", [](smoke::Context const&)
+		{
+			require(cancelLiftJourney(3) == cancelLiftJourney(3), "Cancellation was not deterministic");
+		} });
+	}
 }

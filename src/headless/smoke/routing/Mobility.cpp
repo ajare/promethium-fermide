@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -8,8 +9,6 @@
 #include "core/Edge.h"
 #include "core/MobilityProfile.h"
 #include "core/World.h"
-
-void runMobilityProfileRoutingSmokeChecks();
 
 namespace
 {
@@ -50,7 +49,7 @@ namespace
 	};
 }
 
-void runMobilityProfileRoutingSmokeChecks()
+static void mobilityProfileConstraints()
 {
 	auto registry = core::AgentTagRegistry::create();
 	auto const tag = registry->addAgentTag("restricted");
@@ -87,4 +86,15 @@ void runMobilityProfileRoutingSmokeChecks()
 		"A last-resort traversal was not excluded only from the first routing pass");
 	require(!core::agentForbidsEdge(nullptr, buttonOperated, core::TraversalKind::Staircase),
 		"A route without an Agent unexpectedly acquired Mobility restrictions");
+}
+
+namespace routing_smoke
+{
+	void registerMobility(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "mobilityProfileConstraints", [](smoke::Context const&)
+		{
+			mobilityProfileConstraints();
+		} });
+	}
 }

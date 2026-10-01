@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Saved-Path restoration under the effective Mobility profile, for ticket #194.
 //
 // A World records each Agent's route intent as an authored Path, restored from
@@ -21,7 +22,6 @@
 //   an equivalent individual Mobility profile (available during Agent
 //   deserialization, ADR 0012) gives the same permitted restored route
 
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <memory>
@@ -38,8 +38,6 @@
 #include "core/World.h"
 #include "core/YamlSerializer.h"
 
-void runRestoredPathMobilitySmokeChecks();
-
 namespace
 {
 	void require(bool condition, std::string const& message)
@@ -47,22 +45,6 @@ namespace
 		if (!condition) throw std::runtime_error(message);
 	}
 
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-		TemporaryDirectory()
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-restored-path-" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	core::MobilityProfile ladderRestriction()
 	{
@@ -162,13 +144,14 @@ namespace
 	// A referenced registry is resolved after the World YAML. The saved route
 	// intent must remain unevaluated in that interval rather than briefly becoming
 	// a permissive or stale Path (#221).
-	void savedIntentWaitsForRegistryResolution()
+	void savedIntentWaitsForRegistryResolution(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		Fixture fixture(true);
 		fixture.authorRoute(true);
-		fixture.save(temporary.path);
-		auto const worldPath = temporary.path / "restored.world.yaml";
+		fixture.save(directory);
+		auto const worldPath = directory / "restored.world.yaml";
 
 		auto restored = std::make_shared<core::World>("Loading", 1, 1);
 		auto serializer = core::YamlSerializer::fromFile(worldPath.string());
@@ -189,18 +172,19 @@ namespace
 
 	// The core regression: after load, the restored Path must be the one the
 	// effective (here tag-supplied) profile permits.
-	void tagSuppliedProfileIsHonouredByTheRestoredPath()
+	void tagSuppliedProfileIsHonouredByTheRestoredPath(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		Fixture fixture(true);
 		auto authored = fixture.authorRoute(true);
 		require(edgeKindCount(*authored, core::EdgeType::Ladder) == 0
 			&& edgeKindCount(*authored, core::EdgeType::Staircase) > 0
 			&& untraversableEdgeCount(fixture.agent(), *authored) == 0,
 			"The authored route did not avoid its forbidden Ladder");
-		fixture.save(temporary.path);
+		fixture.save(directory);
 
-		auto reopened = core::loadWorldDocument(temporary.path / "restored.world.yaml");
+		auto reopened = core::loadWorldDocument(directory / "restored.world.yaml");
 		auto* restored = reopened->lookupAgent(fixture.id).entity;
 		require(restored, "The reopened World lost the fixture Agent");
 		auto path = restored->getPath();
@@ -218,9 +202,10 @@ namespace
 	// An unreachable saved destination is valid route-loss state, not malformed
 	// World data. The World opens, leaves the Agent idle, and reports the loss to
 	// the editor without pretending initial restoration was a replan.
-	void unreachableSavedDestinationLoadsIdleWithWarning()
+	void unreachableSavedDestinationLoadsIdleWithWarning(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		core::World world("Unreachable restored path", 8, 1);
 		auto const sourceSector = world.addCorridor(0, 0, 8);
 		auto const targetSector = world.addCorridor(1, 0, 0, 8, 1);
@@ -237,7 +222,7 @@ namespace
 		path->nodes.push_back({ nullptr,
 			world.getGraph()->getVertexByIdentifier(targetIdentifier), 0.0f });
 		agent->setPath(path, true);
-		auto const document = temporary.path / "unreachable.world.yaml";
+		auto const document = directory / "unreachable.world.yaml";
 		world.saveTo(document.string());
 
 		auto reopened = core::loadWorldDocument(document);
@@ -255,14 +240,15 @@ namespace
 
 	// The restored Path is the Agent's intent, not merely a route: an active one
 	// still starts and carries the Agent to the upper Marker by the Staircase.
-	void restoredActivePathReachesTheMarkerByTheStaircase()
+	void restoredActivePathReachesTheMarkerByTheStaircase(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		Fixture fixture(true);
 		fixture.authorRoute(true);
-		fixture.save(temporary.path);
+		fixture.save(directory);
 
-		auto reopened = core::loadWorldDocument(temporary.path / "restored.world.yaml");
+		auto reopened = core::loadWorldDocument(directory / "restored.world.yaml");
 		auto* agent = reopened->lookupAgent(fixture.id).entity;
 		require(agent && agent->getState() == core::Agent::State::MovingToVertex,
 			"The restored active Path did not start");
@@ -279,14 +265,15 @@ namespace
 
 	// The active flag is part of the intent too: an inactive restored Path keeps
 	// its destination without starting itself.
-	void restoredInactivePathKeepsItsDestinationWithoutStarting()
+	void restoredInactivePathKeepsItsDestinationWithoutStarting(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		Fixture fixture(true);
 		fixture.authorRoute(false);
-		fixture.save(temporary.path);
+		fixture.save(directory);
 
-		auto reopened = core::loadWorldDocument(temporary.path / "restored.world.yaml");
+		auto reopened = core::loadWorldDocument(directory / "restored.world.yaml");
 		auto* restored = reopened->lookupAgent(fixture.id).entity;
 		auto path = restored->getPath();
 		require(path && path->nodes.size() > 1, "The inactive restored Path was dropped");
@@ -299,14 +286,15 @@ namespace
 
 	// Reset replays through the same deserialize/resolve ordering, so it must
 	// rebuild the same permitted route rather than re-expose the forbidden one.
-	void resetSimulationRebuildsThePermittedRoute()
+	void resetSimulationRebuildsThePermittedRoute(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		Fixture fixture(true);
 		fixture.authorRoute(true);
-		fixture.save(temporary.path);
+		fixture.save(directory);
 
-		auto reopened = core::loadWorldDocument(temporary.path / "restored.world.yaml");
+		auto reopened = core::loadWorldDocument(directory / "restored.world.yaml");
 		reopened->resetSimulation();
 		auto* restored = reopened->lookupAgent(fixture.id).entity;
 		auto path = restored->getPath();
@@ -321,14 +309,15 @@ namespace
 
 	// An individual profile is available during Agent deserialization, so it must
 	// yield the same permitted route as the tag-supplied one (ADR 0012).
-	void individualProfileGivesTheSamePermittedRestoredRoute()
+	void individualProfileGivesTheSamePermittedRestoredRoute(smoke::Context const& context)
 	{
-		TemporaryDirectory temporary;
+		auto const directory = context.temporaryRoot() / __func__;
+		std::filesystem::create_directories(directory);
 		Fixture fixture(false);
 		fixture.authorRoute(true);
-		fixture.save(temporary.path);
+		fixture.save(directory);
 
-		auto reopened = core::loadWorldDocument(temporary.path / "restored.world.yaml");
+		auto reopened = core::loadWorldDocument(directory / "restored.world.yaml");
 		auto* restored = reopened->lookupAgent(fixture.id).entity;
 		auto path = restored->getPath();
 		require(path && path->nodes.size() > 1, "The individual-profile Agent lost its Path");
@@ -340,13 +329,37 @@ namespace
 	}
 }
 
-void runRestoredPathMobilitySmokeChecks()
+namespace routing_smoke
 {
-	savedIntentWaitsForRegistryResolution();
-	tagSuppliedProfileIsHonouredByTheRestoredPath();
-	unreachableSavedDestinationLoadsIdleWithWarning();
-	restoredActivePathReachesTheMarkerByTheStaircase();
-	restoredInactivePathKeepsItsDestinationWithoutStarting();
-	resetSimulationRebuildsThePermittedRoute();
-	individualProfileGivesTheSamePermittedRestoredRoute();
+	void registerRestoredPaths(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "savedIntentWaitsForRegistryResolution", [](smoke::Context const& context)
+		{
+			savedIntentWaitsForRegistryResolution(context);
+		} });
+		checks.push_back({ "tagSuppliedProfileIsHonouredByTheRestoredPath", [](smoke::Context const& context)
+		{
+			tagSuppliedProfileIsHonouredByTheRestoredPath(context);
+		} });
+		checks.push_back({ "unreachableSavedDestinationLoadsIdleWithWarning", [](smoke::Context const& context)
+		{
+			unreachableSavedDestinationLoadsIdleWithWarning(context);
+		} });
+		checks.push_back({ "restoredActivePathReachesTheMarkerByTheStaircase", [](smoke::Context const& context)
+		{
+			restoredActivePathReachesTheMarkerByTheStaircase(context);
+		} });
+		checks.push_back({ "restoredInactivePathKeepsItsDestinationWithoutStarting", [](smoke::Context const& context)
+		{
+			restoredInactivePathKeepsItsDestinationWithoutStarting(context);
+		} });
+		checks.push_back({ "resetSimulationRebuildsThePermittedRoute", [](smoke::Context const& context)
+		{
+			resetSimulationRebuildsThePermittedRoute(context);
+		} });
+		checks.push_back({ "individualProfileGivesTheSamePermittedRestoredRoute", [](smoke::Context const& context)
+		{
+			individualProfileGivesTheSamePermittedRestoredRoute(context);
+		} });
+	}
 }

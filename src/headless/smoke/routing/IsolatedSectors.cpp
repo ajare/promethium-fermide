@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <stdexcept>
 #include <string>
 
@@ -172,11 +173,29 @@ namespace
 	}
 }
 
-void runIsolatedSectorPathingSmokeChecks()
+namespace routing_smoke
 {
-	roomRoutesStayOnConnectedFloor();
-	roomRoutesCannotStartAcrossAWalkwayGap();
-	queuedClimbersReachTheMountBeforeClimbing();
-	pathingAcrossAnOpenSharedWallFindsAPath();
-	pathingFromAnIsolatedLocationReturnsNoPath();
+	void registerIsolatedSectors(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "roomRoutesStayOnConnectedFloor", [](smoke::Context const&)
+		{
+			roomRoutesStayOnConnectedFloor();
+		} });
+		checks.push_back({ "roomRoutesCannotStartAcrossAWalkwayGap", [](smoke::Context const&)
+		{
+			roomRoutesCannotStartAcrossAWalkwayGap();
+		} });
+		checks.push_back({ "queuedClimbersReachTheMountBeforeClimbing", [](smoke::Context const&)
+		{
+			queuedClimbersReachTheMountBeforeClimbing();
+		} });
+		checks.push_back({ "pathingAcrossAnOpenSharedWallFindsAPath", [](smoke::Context const&)
+		{
+			pathingAcrossAnOpenSharedWallFindsAPath();
+		} });
+		checks.push_back({ "pathingFromAnIsolatedLocationReturnsNoPath", [](smoke::Context const&)
+		{
+			pathingFromAnIsolatedLocationReturnsNoPath();
+		} });
+	}
 }
