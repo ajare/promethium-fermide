@@ -25,6 +25,7 @@
 #include <cmath>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -218,9 +219,9 @@ namespace
 		auto* agent = world.lookupAgent(id).entity;
 		auto path = std::make_shared<core::Path>();
 		path->nodes.push_back({ nullptr,
-			world.getGraph()->getVertexByIdentifier(sourceIdentifier), 0.0f });
+			world.getGraph()->getVertexByIdentifier(sourceIdentifier), 0.0f, std::nullopt, std::nullopt });
 		path->nodes.push_back({ nullptr,
-			world.getGraph()->getVertexByIdentifier(targetIdentifier), 0.0f });
+			world.getGraph()->getVertexByIdentifier(targetIdentifier), 0.0f, std::nullopt, std::nullopt });
 		agent->setPath(path, true);
 		auto const document = directory / "unreachable.world.yaml";
 		world.saveTo(document.string());

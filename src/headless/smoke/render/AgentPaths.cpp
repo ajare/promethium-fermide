@@ -5,6 +5,7 @@
 #include "UISettings.h"
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -141,8 +142,8 @@ void agentPaths(smoke::Context const&)
 	require(!hasText(stacked, "?"), "Queue displayed an obsolete replan badge");
 
 	auto unreachable = std::make_shared<core::Path>();
-	unreachable->nodes.push_back({ nullptr, source, 0.0f });
-	unreachable->nodes.push_back({ nullptr, isolated, 0.0f });
+	unreachable->nodes.push_back({ nullptr, source, 0.0f, std::nullopt, std::nullopt });
+	unreachable->nodes.push_back({ nullptr, isolated, 0.0f, std::nullopt, std::nullopt });
 	agent->setPath(unreachable, false);
 	world.replanAgentAfterAuthorizationRefusal(agentId);
 	WorldDrawList failedGrey({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });

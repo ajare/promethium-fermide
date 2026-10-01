@@ -344,7 +344,8 @@ namespace
 			auto after = graph->getSourceIndexStatistics();
 			require(after.candidatesExamined - before.candidatesExamined <= 40,
 				"Unrelated Markers increased source candidate work");
-			require(after.intervalsExamined - before.intervalsExamined <= 40 * std::bit_width(count + 4),
+			require(after.intervalsExamined - before.intervalsExamined
+				<= 40u * static_cast<uint64_t>(std::bit_width(count + 4)),
 				"Unrelated segments caused linear interval work");
 			require(after.containingIntervals - before.containingIntervals == 10,
 				"Source seeding omitted or duplicated containing intervals");
