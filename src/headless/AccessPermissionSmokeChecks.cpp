@@ -729,7 +729,12 @@ namespace
 		auto remoteId = world.createAgent("remote observer", upper, platform ? 2 : 0, 7.0f);
 		auto riderId = world.createAgent("piggyback rider", riderOrigin, 0, shuttle ? 1.5f : 7.0f);
 		auto operatorId = world.createAgent("destination operator", ground, 0, 7.0f);
+		// Destination piggybacking is intentional only for an explicitly
+		// non-adhering passenger (#269); default-true passengers decline it.
+		require(world.setAgentIndividualPermissionAdherence(riderId, false, &diagnostic), diagnostic);
 		auto rider = world.lookupAgent(riderId).entity;
+		require(!rider->getEffectivePermissionAdherence().value,
+			"Piggyback fixture did not apply non-adhering profile");
 		auto graph = world.getGraph();
 		auto start = graph->getVertexByIdentifier(startMarker);
 		auto target = graph->getVertexByIdentifier(middleMarker);
@@ -813,9 +818,33 @@ namespace
 					+ std::to_string(resource.liftCurrentStop) + " position " + std::to_string(rider->getGlobalPosition().y));
 		require(!graph->calculatePath(world.lookupAgent(remoteId).entity, target),
 			"Remote Agent relied on another landing's live shared Stop request");
+		// The same local accepted ordinary Lift journey is declined by an adhering
+		// unauthorized passenger, while effective direct and Permission set grants
+		// admit it. Platform lift and Shuttle integration have separate tickets.
+		if (!platform && !shuttle)
+		{
+			world.pauseSimulation();
+			auto adheringId = world.createAgent("adhering destination observer", riderOrigin, 0, 6.0f);
+			auto adhering = world.lookupAgent(adheringId).entity;
+			require(adhering->getEffectivePermissionAdherence().value
+				&& !graph->calculatePath(adhering, target),
+				"Adhering Agent accepted a protected destination piggyback journey");
+			require(world.grantAgentAccessPermission(adheringId, red, &diagnostic), diagnostic);
+			require(world.setAgentPermissionSetAssignment(adheringId, set, true, &diagnostic), diagnostic);
+			require(static_cast<bool>(graph->calculatePath(adhering, target)),
+				"Effective direct and Permission set grants did not admit the protected destination");
+			require(world.removeAgent(adheringId).removed, "Destination observer removal failed");
+			require(world.resumeSimulation(), "Destination adherence fixture did not resume");
+		}
 		world.consumeSimulationEvents();
+		if (authorizationChange == 5)
+		{
+			world.pauseSimulation();
+			require(world.setAgentIndividualPermissionAdherence(riderId, true, &diagnostic), diagnostic);
+			require(world.resumeSimulation(), "Pre-boarding adherence change did not resume");
+		}
 		rider->setPath(shared, true);
-		if (authorizationChange)
+		if (authorizationChange && authorizationChange != 5)
 		{
 			// Both passengers must have boarded before changing authorization;
 			// the operator's accepted selection is now a shared Stop request.
@@ -847,7 +876,9 @@ namespace
 			else
 			{
 				world.pauseSimulation();
-				if (authorizationChange == 2)
+				if (authorizationChange == 4)
+					require(world.setAgentIndividualPermissionAdherence(riderId, true, &diagnostic), diagnostic);
+				else if (authorizationChange == 2)
 				{
 					auto extra = world.addAccessPermission("Tightened destination");
 					require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1,
@@ -862,8 +893,11 @@ namespace
 			}
 		}
 		world.advanceTicks(shuttle ? 18000 : 6000);
+		std::string riderDiagnostic;
 		for (auto const& event : world.consumeSimulationEvents())
 		{
+			if (event.type == core::SimulationEventType::RouteLost && event.agent.id == riderId)
+				riderDiagnostic += " route lost " + event.diagnostic;
 			require(!shuttle || event.type != core::SimulationEventType::RouteLost,
 				"Accepted shared Shuttle journey produced Route loss");
 			if (event.type == core::SimulationEventType::DeviceOperationAdded)
@@ -871,13 +905,20 @@ namespace
 					|| event.deviceOperation.command.type != select.type,
 					"Piggyback rider attempted a protected destination selection");
 		}
-		require(rider->getSector()->getIndex() == middle && !rider->getPath()
+		for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+			if (request.owner == riderId) riderDiagnostic += " / " + request.diagnostic
+				+ " state " + std::to_string(static_cast<int>(request.state));
+		if (authorizationChange == 5)
+			require(rider->getSector()->getIndex() == riderOrigin && !rider->getPath()
+				&& riderDiagnostic.find("route lost") != std::string::npos,
+				"Pre-boarding adherence change bypassed destination admission" + riderDiagnostic);
+		else require(rider->getSector()->getIndex() == middle && !rider->getPath()
 			&& std::abs(rider->getGlobalPosition().y - (shuttle ? 0.0f : 1.0f)) < 0.01f,
 			"Unauthorized rider did not complete shared journey and disembark: " + std::to_string(authorizationChange)
 			+ " platform " + std::to_string(platform) + " shuttle " + std::to_string(shuttle)
 			+ " sector " + std::to_string(rider->getSector()->getIndex()) + " x " + std::to_string(rider->getGlobalPosition().x)
 			+ " y " + std::to_string(rider->getGlobalPosition().y)
-			+ " state " + std::to_string(static_cast<int>(rider->getState())));
+			+ " state " + std::to_string(static_cast<int>(rider->getState())) + riderDiagnostic);
 		std::string journeyDiagnostic;
 		for (auto const& resource : world.getSimulationSnapshot().traversalResources)
 			if (resource.id == lift.traversalResource)
@@ -1468,6 +1509,8 @@ void runAccessPermissionSmokeChecks()
 	liftDestinationEnforcement(1);
 	liftDestinationEnforcement(2);
 	liftDestinationEnforcement(3);
+	liftDestinationEnforcement(4);
+	liftDestinationEnforcement(5);
 	for (unsigned change = 0; change < 4; ++change) liftDestinationEnforcement(change, true);
 	for (unsigned change = 0; change < 4; ++change) liftDestinationEnforcement(change, false, true);
 	changingLiftDestinationAuthorization(true);

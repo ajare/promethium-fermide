@@ -10778,6 +10778,8 @@ namespace core
 		if (!agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end();
+		if (!agentAdheresToLiftDestinationPermission(resourceId, stop, agentId)) return false;
+		if (local) return true;
 		// Only an open, boardable car at this Agent's landing reveals a usable
 		// shared journey. Never consult a remote car's live destination requests.
 		if (!local && resource->mShuttle)
@@ -10800,6 +10802,34 @@ namespace core
 		return local && stop < resource->mLiftStopRequestOwners.size()
 			&& (!resource->mLiftStopRequestOwners[stop].empty()
 				|| (!resource->mLiftMoving && resource->mLiftCurrentStop == stop));
+	}
+
+	bool World::agentAdheresToLiftDestinationPermission(TraversalResourceId resourceId,
+		uint32_t destinationStop, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (resource && resource->mLiftCoordinator)
+		{
+			resourceId = resource->mLiftCoordinator;
+			resource = mTraversalResources.find(resourceId);
+		}
+		if (!resource || (!resource->mLift && !resource->mShuttle)
+			|| destinationStop >= resource->mLiftStops.size()) return false;
+		// #269 integrates ordinary enclosed Lifts. Platform lift and Shuttle
+		// destination adherence remain transport-specific follow-up work.
+		if (resource->mShuttle || resource->mOpenPlatformLift) return true;
+		if (find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
+			!= resource->mOccupants.end()) return true;
+		auto agent = mAgents.find(agentId);
+		if (!agent) return false;
+		DeviceCommand command;
+		command.type = resource->mShuttle
+			? DeviceCommandType::SelectShuttleDestination
+			: DeviceCommandType::SelectLiftDestination;
+		command.traversalResource = resourceId;
+		command.stopIndex = destinationStop;
+		return missingLiftDestinationPermissions(command, agentId).empty()
+			|| !agent->getEffectivePermissionAdherence().value;
 	}
 
 	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,

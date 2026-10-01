@@ -505,8 +505,10 @@ alternate Interaction points. Agentless commands bypass Agent authorization.
 Routing tests cover rejection, missing-permission diagnostics, unrestricted
 journeys past protected intermediate Stops, alternatives, Route loss, remote
 observation exclusion, and completed locally observed piggyback journeys without
-unauthorized selection. Destination requirements do not constrain disembarking
-or replace landing-call requirements.
+unauthorized selection. Under #269 those opportunistic ordinary Lift passengers
+explicitly use Permission adherence false; default-true unauthorized passengers
+decline the same accepted journey before boarding. Destination requirements do
+not constrain disembarking or replace landing-call requirements.
 
 Dynamic authorization checks cover direct and runtime grant loss, Permission set
 assignment and membership changes, and requirement tightening before selection,
@@ -534,7 +536,10 @@ Paths/Route loss, voluntary gains and Route persistence, and Reset simulation.
 Accepted shared journeys survive revocation and paused requirement edits.
 
 The existing destination query, mutation, panel-commit and table APIs accept an
-optional Room object index for Platform lifts. Mandatory ground and selected
+optional Room object index for Platform lifts. Their existing destination
+piggyback tests retain the pre-integration behavior pending the separate Platform
+lift Permission adherence ticket; #269 is deliberately limited to ordinary Lifts.
+Mandatory ground and selected
 Walkway Stops use the same per-destination requirements and schema-30 field as
 ordinary Lifts; landing-call requirements remain independent. Tests cover YAML
 and binary round trips, old-World defaults, malformed-input rollback, history,
@@ -550,7 +555,10 @@ all 67 non-GUI CTest tests in each configuration, focused permission checks, and
 ## Shuttle destination permissions (#264)
 
 Shuttles reuse the destination requirement APIs, schema-30 field, panel commits,
-usage reporting, and authorization rules established for Lifts. Historical
+usage reporting, and authorization rules established for Lifts. Their existing
+destination piggyback tests retain the pre-integration behavior pending the
+separate Shuttle Permission adherence ticket; #269 is deliberately limited to
+ordinary Lifts. Historical
 `LiftDestination` API names now cover all three transports; destination positions
 are absolute x coordinates for Shuttles. Selection displays each Stop and its
 position without Agent debug visibility. Requirements follow retained Stop
@@ -605,6 +613,24 @@ transport-specific integration tickets, not this landing slice.
 Validation on Windows/MSVC: complete Debug and Release builds including the
 editor, all 67 non-GUI CTest tests in each configuration, and `git diff --check`
 passed. No manual editor session was used.
+
+## Ordinary Lift destination Permission adherence (#269)
+
+The ordinary Lift destination scenarios now make opportunistic passengers
+explicitly use Permission adherence false. An unauthorized Agent with effective
+adherence true declines the same locally observed accepted Stop request before
+boarding; effective direct and Permission set grants satisfy the all-required
+destination requirement. Destination selection commands retain their independent
+current-grant authorization checks for both adherence values.
+
+Route capture and boarding admission both evaluate the current effective value,
+grants, and shared destination requirement. Tests reinstall a stale Path after
+adherence becomes true and require established Route loss, and change adherence
+only after boarding to verify that the accepted request, ride, and safe exit
+survive. Existing dynamic grant/requirement tests continue to cover alternatives,
+no-route outcomes, accepted requests, and changes before and after boarding.
+Landing-call requirements remain independent. Platform lift and Shuttle
+destination adherence remain assigned to their separate integration tickets.
 
 ## Prerequisites
 

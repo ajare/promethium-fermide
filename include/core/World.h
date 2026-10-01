@@ -2426,6 +2426,10 @@ namespace core
 			DeviceCommand const& command, AgentId agent) const;
 		bool canAgentUseLiftJourney(TraversalResourceId resource, Vector2 const& origin,
 			Vector2 const& destination, AgentId agent) const;
+		// Destination willingness only. Non-adherence never authorizes selection;
+		// occupants are always allowed to complete an accepted journey.
+		bool agentAdheresToLiftDestinationPermission(TraversalResourceId resource,
+			uint32_t destinationStop, AgentId agent) const;
 		bool canAgentOperateTransportLandingControl(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
 		// Landing willingness only: destination selection and physical boarding

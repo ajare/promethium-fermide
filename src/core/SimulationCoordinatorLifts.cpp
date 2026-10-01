@@ -633,8 +633,22 @@ namespace core
 			denyTraversalRequest(requestId);
 			return;
 		}
+		// Recheck destination willingness immediately before joining the boarding
+		// queue. This deliberately uses the journey resource (not this origin
+		// landing resource), so every car and boarding origin observes the one
+		// shared destination requirement. A stale Path cannot bypass a
+		// grant, requirement, or effective-adherence change.
 		if (!request->mQueueTicket)
 		{
+			auto journeyResource = edgeResource.mLiftCoordinator
+				? edgeResource.mLiftCoordinator : request->mResource;
+			if (!mWorld.agentAdheresToLiftDestinationPermission(journeyResource,
+				desiredStop, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+				return;
+			}
 			// Lift and shuttle passengers use the same landing-door queue. Shuttle
 			// assignments may later move the ticket to another Door in the same
 			// access zone without changing its logical priority.
