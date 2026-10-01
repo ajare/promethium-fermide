@@ -11,5 +11,8 @@ int main(int argc, char** argv)
 	agent_smoke::registerGroupTopologyEditor(checks);
 	agent_smoke::registerActivationEditor(checks);
 	agent_smoke::registerGroupClipboardEditor(checks);
+	agent_smoke::registerColourEditor(checks);
+	agent_smoke::registerWalkSpeedEditor(checks);
+	agent_smoke::registerHeightEditor(checks);
 	return smoke::main("agent-editor", checks, argc, argv);
 }

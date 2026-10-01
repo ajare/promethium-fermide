@@ -323,12 +323,15 @@ foreach(target IN ITEMS pf-render pf-headless-render-support)
 endforeach()
 
 # Production Agent editing seams, shared by the GUI, legacy checks, and the
-# headless Agent editor tier. No renderer, platform backend, or dialogs.
+# headless Agent editor tier. No platform backend or dialogs.
 add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
     src/AgentGroupsPanel.cpp
     src/AgentGroupAssignmentPanel.cpp
     src/AgentClipboard.cpp
+    src/AgentTagAssignmentPanel.cpp
+    src/TagsPanel.cpp
+    src/BehavioursPanel.cpp
 )
 target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu)
 target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
@@ -347,11 +350,8 @@ add_executable(prometheum-fermide-headless
     # Other panel checks remain legacy-owned until their migration tickets.
     src/DoorPanel.cpp
     src/PermissionsPanel.cpp
-    src/AgentTagAssignmentPanel.cpp
     src/AgentBehaviourAssignmentPanel.cpp
     src/MarkerPanel.cpp
-    src/TagsPanel.cpp
-    src/BehavioursPanel.cpp
     src/headless/BackgroundSelectionPanelSmokeChecks.cpp
     src/headless/AccessPermissionSmokeChecks.cpp
     src/headless/DoorPanelScopeSmokeChecks.cpp
@@ -373,11 +373,7 @@ add_executable(prometheum-fermide-headless
     src/headless/AgentTagCoordinationSmokeChecks.cpp
     src/headless/AgentTagReconciliationSmokeChecks.cpp
     src/headless/AgentTagClipboardSmokeChecks.cpp
-    src/headless/AgentColourSmokeChecks.cpp
-    src/headless/AgentWalkSpeedSmokeChecks.cpp
     src/headless/EscalatorWalkingSmokeChecks.cpp
-    src/headless/AgentHeightSmokeChecks.cpp
-    src/headless/AgentIndividualPropertySmokeChecks.cpp
     src/headless/RoutePlanningTimePropertySmokeChecks.cpp
     src/headless/PermissionAdherenceSmokeChecks.cpp
     src/headless/TransportLandingAdherenceSmokeChecks.cpp
@@ -459,11 +455,8 @@ if(PF_BUILD_GUI)
         src/UI.cpp
         src/DoorPanel.cpp
         src/PermissionsPanel.cpp
-        src/AgentTagAssignmentPanel.cpp
         src/AgentBehaviourAssignmentPanel.cpp
         src/MarkerPanel.cpp
-        src/TagsPanel.cpp
-        src/BehavioursPanel.cpp
         ${PF_IMGUI_SOURCES}
     )
     target_compile_features(editor PRIVATE cxx_std_20)

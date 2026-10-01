@@ -13,6 +13,10 @@ namespace agent_smoke
 	void registerGroupIdAllocation(std::vector<smoke::Check>& checks);
 	void registerGroupTopology(std::vector<smoke::Check>& checks);
 	void registerActivation(std::vector<smoke::Check>& checks);
+	void registerColour(std::vector<smoke::Check>& checks);
+	void registerWalkSpeed(std::vector<smoke::Check>& checks);
+	void registerHeight(std::vector<smoke::Check>& checks);
+	void registerIndividualProperties(std::vector<smoke::Check>& checks);
 	void registerGroupEditor(std::vector<smoke::Check>& checks);
 	void registerGroupAssignmentEditor(std::vector<smoke::Check>& checks);
 	void registerGroupCountEditor(std::vector<smoke::Check>& checks);
@@ -21,4 +25,7 @@ namespace agent_smoke
 	void registerGroupTopologyEditor(std::vector<smoke::Check>& checks);
 	void registerActivationEditor(std::vector<smoke::Check>& checks);
 	void registerGroupClipboardEditor(std::vector<smoke::Check>& checks);
+	void registerColourEditor(std::vector<smoke::Check>& checks);
+	void registerWalkSpeedEditor(std::vector<smoke::Check>& checks);
+	void registerHeightEditor(std::vector<smoke::Check>& checks);
 }

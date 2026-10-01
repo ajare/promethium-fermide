@@ -2,7 +2,8 @@
 
 The independent modules currently own Simulation Observation (#280), Render walls
 (#281), Persistence serializer/document formats (#282), core World structure
-and Sector checks (#284), and Agent identity, activation, and Agent groups (#285). Other domain checks remain legacy-owned; see the
+and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
+properties (#286). Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
 Window checks, and `--serialization-checks` runs only the remaining serialization
@@ -83,17 +84,19 @@ build-linux/bin/x64/Release/pf-smoke-agent-editor --check clipboardCarriesActiva
 ctest --test-dir build-linux -R '^smoke-agent' -j 3 --output-on-failure
 ```
 
-- `pf-smoke-agent` / `smoke-agent` (`smoke;core`) owns 53 registrations:
+- `pf-smoke-agent` / `smoke-agent` (`smoke;core`) owns 63 registrations:
   typed Agent identity and handle invalidation, activation, Agent group identity,
-  naming, persistence, assignment, counts, deletion, ID allocation, and topology.
+  naming, persistence, assignment, counts, deletion, ID allocation, topology,
+  Colour, Walk speed, Height, and individual-property precedence/persistence.
   It links only smoke support, production core, YAML, and Lua. Building it does
   not compile any editor, ImGui, renderer, HTTP, legacy, or other module checks.
-- `pf-smoke-agent-editor` / `smoke-agent-editor` (`smoke;editor`) owns 49
-  registrations for panel labels and interactions, clipboard, and document
-  history, including mixed World/panel scenarios. It links the actual production
-  `pf-agent-editing` seams and CPU ImGui, not application-global stubs, renderer,
-  SDL/OpenGL, native dialogs, or HTTP. Both domain tests have 30-second timeouts.
-- The eight mixed legacy files were physically split. Their 101 named checks
+- `pf-smoke-agent-editor` / `smoke-agent-editor` (`smoke;editor`) owns 57
+  registrations for panel labels and interactions, clipboard, document history,
+  and the migrated property checks that exercise Selection text or real CPU-side
+  rendering. It links the actual production `pf-agent-editing`, Render, and
+  CPU-ImGui seams, but no platform backend, SDL/OpenGL, native dialogs, or HTTP.
+  Both domain tests have 30-second timeouts.
+- The eight #285 mixed legacy files were physically split. Their 101 named checks
   are individual registrations, not eight fail-fast suite wrappers. The inline
   ownership check moved from `SmokeScenario.cpp` as `identity`. None of these
   checks remains compiled or invoked by the legacy aggregate. Helpers remain
@@ -114,6 +117,29 @@ fault-injection experiment also replaced the first two registrations in each
 Agent runner with throwing checks: both returned 1, reported both failures, and
 ran the remaining checks (`agent pass=51 fail=2`, `agent-editor pass=47 fail=2`).
 The injections were removed and both ordinary binaries rebuilt and revalidated.
+
+#286 adds 18 individually selectable property checks. Core registration files
+have no editor, ImGui, or renderer includes and `pf-smoke-agent` still links only
+smoke support and production core. Checks using tag editor transactions, Selection
+panel output, or real CPU-side rendering live in `pf-smoke-agent-editor`. The old
+four legacy sources and aggregate calls no longer exist, so each migrated check
+has one execution owner.
+
+### #286 Linux validation
+
+- A clean GUI-disabled Release build of `pf-smoke-agent` compiles no editor,
+  ImGui, renderer, or migrated editor-check objects; its link command contains
+  only smoke support, production core, YAML, and Lua. All 63 checks pass.
+- The Release GUI-enabled default build and all 79 CTest entries pass
+  sequentially. The 78 tests excluding the legacy aggregate also pass with
+  `-j 6`; the focused Agent tests and exact-list/selection contract pass.
+- A clean Debug GUI-disabled `PF_HIGH_ANALYSIS=ON` build of both Agent tiers
+  succeeds and all three Agent CTest entries pass concurrently. Elevated-analysis
+  output contains existing project diagnostics, with no new build failure.
+- Mechanical comparison found every original assertion in the four migrated
+  sources in the new owners. `git diff --check` passes; no repository formatter
+  is configured. The editor checks use only scoped CPU-side ImGui contexts and
+  produce no ini/log files, windows, native dialogs, or required user input.
 
 ### #285 Linux validation
 

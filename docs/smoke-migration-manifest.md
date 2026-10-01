@@ -1,8 +1,8 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Agent migration #285 (parent #278). Each source
-below has exactly one current compilation/execution owner; all assertions inside
-it belong to that owner.
+Snapshot after the individual Agent property migration #286 (parent #278). Each
+source below has exactly one current compilation/execution owner; all assertions
+inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
 independent target. The four pre-existing standalone checks are retained as-is,
 not migrated into the new harness. Future batches must update this table and
@@ -34,6 +34,14 @@ that combine those assertions with World API assertions. Core translation units
 contain none of those dependencies. All old sources, declarations, and calls
 were removed; neither tier calls the legacy aggregate.
 
+#286 migrates the Colour, Walk speed, Height, and individual-property sources
+into the existing Agent tiers as 18 individually selectable checks: 10 core
+registrations and eight editor registrations. Registry, World, precedence, and
+persistence assertions are core-owned unless a scenario also uses production
+editor history, Selection-panel text, or real CPU-side rendering; those mixed
+scenarios are editor-owned as coherent checks. The four old sources, declarations,
+and calls were removed from the legacy aggregate.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Existing overlapping legacy CTest selections are unchanged.
 
@@ -52,7 +60,8 @@ Paths in the table are relative to `src/headless/`.
 | `AgentBehaviourRuntimeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentBehaviourSchemaReconciliationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentBehaviourWorkflowSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentColourSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/ColourEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/GroupAssignment.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/GroupAssignmentEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/GroupClipboardEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
@@ -66,8 +75,9 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/agent/GroupEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/GroupTopology.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/GroupTopologyEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
-| `AgentHeightSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentIndividualPropertySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/agent/Height.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/HeightEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
+| `smoke/agent/IndividualProperties.cpp` | module-owned | `pf-smoke-agent` |
 | `AgentPathRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentTagAssignmentSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentTagClipboardSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -79,7 +89,8 @@ Paths in the table are relative to `src/headless/`.
 | `AgentTagRegistryChangeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentTagRegistrySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `AgentTagReloadSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `AgentWalkSpeedSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/agent/WalkSpeed.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/WalkSpeedEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/world/BackgroundCascadeDelete.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/BackgroundPaint.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/BackgroundPlacement.cpp` | module-owned | `pf-smoke-world` |

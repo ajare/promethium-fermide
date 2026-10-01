@@ -1,3 +1,4 @@
+// Migrated from AgentIndividualPropertySmokeChecks.cpp (#286); core dependency tier.
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -9,7 +10,8 @@
 #include "core/World.h"
 #include "core/YamlSerializer.h"
 
-void runAgentIndividualPropertySmokeChecks();
+
+#include "Checks.h"
 
 namespace
 {
@@ -29,7 +31,7 @@ namespace
 	}
 }
 
-void runAgentIndividualPropertySmokeChecks()
+void individualPropertiesOverrideTagPropertiesAndPersist()
 {
 	core::RouteChoicePolicy persistencePolicy;
 	persistencePolicy.minimumSwitchGainSeconds = 2.0f;
@@ -371,4 +373,9 @@ void runAgentIndividualPropertySmokeChecks()
 	require(!world->setAgentIndividualHeightModifier(id, 0.9f, &diagnostic)
 		&& diagnostic.find("Pause") != std::string::npos,
 		"An individual Agent property changed while simulation was running");
+}
+
+void agent_smoke::registerIndividualProperties(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({ "individualPropertiesOverrideTagPropertiesAndPersist", [](smoke::Context const&) { individualPropertiesOverrideTagPropertiesAndPersist(); } });
 }

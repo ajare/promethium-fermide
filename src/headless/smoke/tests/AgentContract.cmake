@@ -62,6 +62,16 @@ set(agent_checks
     activationSurvivesTopologyEdits
     inactiveAgentsAreRefusedInteractionRequests
     queuedInteractionsAreCancelledByDeactivation
+    colourIsUniqueRevisionedAndPersisted
+    displayColourIsRandomAtCreationBackfilledAndPersisted
+    closedWorldConflictsAreRejectedWhenTheRegistryIsResolved
+    walkSpeedRangesAreBoundedRevisionedAndPersisted
+    walkSpeedIndependentAndFixedSamplesPersistAcrossLoadAndReset
+    walkSpeedInheritedConflictsAreRefusedAtomically
+    movementRouteTimeAndExplicitSpeedsUseTheRightObservations
+    heightRangesAreBoundedRevisionedAndPersisted
+    heightAssignmentPersistenceAndConflictsMatchOtherProperties
+    individualPropertiesOverrideTagPropertiesAndPersist
 )
 
 set(agent-editor_checks
@@ -114,6 +124,14 @@ set(agent-editor_checks
     cuttingAGroupedAgentLeavesItsSourceGroupDefined
     authorizationIsPreservedOnlyInTheOriginatingWorld
     anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
+    assignmentAndPropertyAdditionConflictsAreAtomic
+    editorCommitsRevisionedColourAndUndoRedoExactly
+    conflictingColourRedoIsRefusedAtomically
+    effectiveInspectionAndRealRenderingUseInheritedFallbackAndGold
+    walkSpeedRangeEditsResampleOnceAndRestoreExactSamples
+    walkSpeedSelectionReportsSampleAndSource
+    heightRangeEditsAreSingleExactTransactions
+    heightChangesOnlyBoundsAndRendering
 )
 
 function(invoke status expected)

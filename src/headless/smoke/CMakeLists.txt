@@ -77,6 +77,10 @@ pf_add_smoke_module(pf-smoke-agent
         agent/GroupDelete.cpp
         agent/GroupIdAllocation.cpp
         agent/GroupTopology.cpp
+        agent/Colour.cpp
+        agent/WalkSpeed.cpp
+        agent/Height.cpp
+        agent/IndividualProperties.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
     TIMEOUT 30
@@ -94,7 +98,10 @@ pf_add_smoke_module(pf-smoke-agent-editor
         agent/GroupIdAllocationEditor.cpp
         agent/GroupTopologyEditor.cpp
         agent/GroupClipboardEditor.cpp
-    LIBRARIES pf-agent-editing
+        agent/ColourEditor.cpp
+        agent/WalkSpeedEditor.cpp
+        agent/HeightEditor.cpp
+    LIBRARIES pf-agent-editing pf-headless-render-support
     LABELS editor
     TIMEOUT 30
 )
