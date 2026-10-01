@@ -281,8 +281,13 @@ source lists and dependency tiers are unchanged.
 | `smoke/routing/PlanningTime.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/PlanningTimeEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `SectorTilesetChecks.cpp` | module-owned (retained standalone) | `pf-sector-tileset-checks` |
-| `SerializationSmokeChecks.cpp` (remaining checks after the format extraction below) | legacy-owned | `prometheum-fermide-headless` |
+| `SerializationSmokeChecks.cpp` (remaining World/domain checks after #282/#296 below) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/TransactionalWrites.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DocumentPaths.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DocumentSaves.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/MalformedInput.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/RecentDocuments.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/transports/DoorQueries.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/render/Transports.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/routing/ShuttleRouteCost.cpp` | module-owned | `pf-smoke-routing` |
@@ -325,10 +330,53 @@ cleanup ownership, function signatures, and the assertion helper changed.
 | `malformedValuesAndInvalidUsageThrowUsefulErrors` | `yaml-errors` |
 
 `checked-in-world` is additional fixture-resolution coverage using
-`resources/Office.world.yaml`. All remaining serialization, save-transaction,
-World restoration, editor, and recent-file checks retain legacy ownership and
-continue through `--serialization-checks` (also the existing legacy aggregate).
-Neither legacy entry point executes the migrated checks.
+`resources/Office.world.yaml`. #296 further splits these pilot groups as described
+below. Remaining World restoration, compatibility and domain/editor checks retain
+legacy ownership and continue through `--serialization-checks` (also the existing
+legacy aggregate). Neither legacy entry point executes the migrated checks.
+
+## Persistence infrastructure extraction (#296)
+
+Ten more functions leave `SerializationSmokeChecks.cpp`, including their legacy
+runner calls. All 43 original `require` call sites remain; recent-document path
+expectations now use the Context root instead of literal `/tmp` filenames.
+
+| Original function | Persistence check | Source |
+| --- | --- | --- |
+| `lateWriteFailurePreservesThePreviousSaveFile` | `transactional-late-failure` | `TransactionalWrites.cpp` |
+| `saveNeverTouchesAPredictableTemporaryPath` | `transactional-predictable-path` | `TransactionalWrites.cpp` |
+| `saveThroughSymlinkUpdatesItsTarget` | `transactional-symlink-target` | `TransactionalWrites.cpp` |
+| `saveNeverFollowsASymlinkedTemporaryPath` | `transactional-symlink-temp` | `TransactionalWrites.cpp` |
+| `savePreservesExistingFilePermissions` | `transactional-permissions` | `TransactionalWrites.cpp` |
+| `concurrentSavesCommitOnlyCompleteDocuments` | `transactional-concurrent` | `TransactionalWrites.cpp` |
+| `failedSavePreservesUnsavedChangesState` | `save-dirty-state` | `DocumentSaves.cpp` |
+| `serializableTracksModificationState` | `serializable-modification-state` | `DocumentSaves.cpp` |
+| `recentFilesPersistAcrossStartup` | `recent-documents-restart` | `RecentDocuments.cpp` |
+| `missingRecentFilesCanBeRemovedPersistently` | `recent-documents-missing` | `RecentDocuments.cpp` |
+
+The existing pilot selectors remain, without duplicate registrations:
+`transactional-bytes` moves to `TransactionalWrites.cpp`, `yaml-errors` to
+`MalformedInput.cpp`, and `world-document-formats` to `DocumentSaves.cpp`.
+The latter's suffix, Save As and base-path assertions are extracted once into
+`DocumentPaths.cpp` as `document-paths`. Primitive YAML, binary contract (including
+invalid binary envelopes/types), YAML file and fixture checks stay in `Formats.cpp`.
+This gives 18 selectable checks. The three POSIX-only symlink/permission checks
+remain listed on Windows and report an explicit capability skip there.
+
+All writes and recent-document references use Context-owned absolute temporary
+paths; fixture reads use `Context::fixture()`. No check changes the working
+directory or opens a UI/dialog. `WriteFailure.h` scopes fault-injection reset even
+when a check throws. `RecentFiles` is reused from the existing production core;
+no editor dependency or duplicate production compilation is introduced.
+
+Verification: full Release build, 81 CTest entries sequentially and at `-j 8`,
+fresh GUI-disabled Persistence-only build, and Debug/high-analysis Persistence
+and affected legacy tests pass. The contract selects every check from an empty
+external directory and runs eight full invocations concurrently. Source comparison
+retains all 734 `require` call sites across the original legacy suite and pilot
+(normalizing only recent-document paths), with one definition and registration
+for each of the ten transferred functions. #297's World/domain migration is not
+part of this change.
 
 ## Support and non-smoke code
 

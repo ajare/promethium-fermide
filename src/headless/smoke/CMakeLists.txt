@@ -234,7 +234,14 @@ set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core" TIMEO
 
 pf_add_smoke_module(pf-smoke-persistence
     NAME persistence
-    SOURCES persistence/Main.cpp persistence/Formats.cpp
+    SOURCES
+        persistence/Main.cpp
+        persistence/Formats.cpp
+        persistence/TransactionalWrites.cpp
+        persistence/DocumentPaths.cpp
+        persistence/DocumentSaves.cpp
+        persistence/MalformedInput.cpp
+        persistence/RecentDocuments.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
     TIMEOUT 30

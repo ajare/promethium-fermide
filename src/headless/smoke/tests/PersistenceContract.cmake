@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.21)
+
 # Exercise the public CLI outside both source and build trees.
 if(WIN32)
     set(temp "$ENV{TEMP}")
@@ -25,12 +27,28 @@ function(invoke status expected)
 endfunction()
 
 set(names yaml-primitives binary-contract yaml-file transactional-bytes
-    world-document-formats yaml-errors checked-in-world)
+    world-document-formats yaml-errors checked-in-world document-paths
+    transactional-late-failure transactional-predictable-path
+    transactional-symlink-target transactional-symlink-temp transactional-permissions
+    transactional-concurrent save-dirty-state serializable-modification-state
+    recent-documents-restart recent-documents-missing)
+set(posix_names transactional-symlink-target transactional-symlink-temp transactional-permissions)
+list(LENGTH names passes)
+set(skips 0)
+if(WIN32)
+    list(LENGTH posix_names skips)
+    math(EXPR passes "${passes} - ${skips}")
+endif()
+set(summary "SUMMARY persistence pass=${passes} fail=0 skip=${skips}")
 string(JOIN "\n" listing ${names})
 invoke(0 "^${listing}\n$" --list)
-invoke(0 "SUMMARY persistence pass=7 fail=0 skip=0\n$")
+invoke(0 "${summary}\n$")
 foreach(name IN LISTS names)
-    invoke(0 "^PASS persistence ${name}\nSUMMARY persistence pass=1 fail=0 skip=0\n$" --check "${name}")
+    if(WIN32 AND name IN_LIST posix_names)
+        invoke(0 "^SKIP persistence ${name}: [^\n]+\nSUMMARY persistence pass=0 fail=0 skip=1\n$" --check "${name}")
+    else()
+        invoke(0 "^PASS persistence ${name}\nSUMMARY persistence pass=1 fail=0 skip=0\n$" --check "${name}")
+    endif()
 endforeach()
 foreach(arguments IN ITEMS "--bogus" "--check" "--check;absent" "--list;extra" "--check;yaml-file;extra")
     invoke(2 "" ${arguments})
@@ -48,7 +66,7 @@ file(WRITE "${project}/CTestTestfile.cmake" "")
 foreach(index RANGE 1 8)
     file(APPEND "${project}/CTestTestfile.cmake"
         "add_test(persistence-${index} \"${PERSISTENCE}\")\n"
-        "set_tests_properties(persistence-${index} PROPERTIES TIMEOUT 15 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY persistence pass=7 fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL persistence\")\n")
+        "set_tests_properties(persistence-${index} PROPERTIES TIMEOUT 15 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"${summary}\" FAIL_REGULAR_EXPRESSION \"FAIL persistence\")\n")
 endforeach()
 find_program(ctest NAMES ctest REQUIRED)
 execute_process(COMMAND "${ctest}" --test-dir "${project}" -j 8 --output-on-failure

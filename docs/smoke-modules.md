@@ -761,7 +761,7 @@ of working-directory output from an external temporary directory. It is labelled
 `harness;render`, not duplicate domain smoke coverage. Simulation's library and
 source dependencies remain unchanged.
 
-## Persistence pilot (#282)
+## Persistence infrastructure (#282, #296)
 
 ```sh
 cmake --build build-linux --target pf-smoke-persistence --parallel
@@ -770,19 +770,38 @@ build-linux/bin/x64/Release/pf-smoke-persistence --check world-document-formats
 ctest --test-dir build-linux -R '^(smoke-persistence.*|serialization-checks)$' --output-on-failure
 ```
 
-`persistence/Formats.cpp` owns the coherent YAML/binary serializer contract and
-World document-format group extracted from the oversized legacy serialization
-suite: primitive encoding, malformed input, file round trips, transactional
-opaque bytes, exact suffix dispatch, and format conversion. The six migrated
-checks retain their assertions. A seventh check loads the checked-in
-`resources/Office.world.yaml` through `Context::fixture()`; it fails rather than
-skips if the fixture is missing. No fixture is modified.
+Persistence has 18 individually selectable checks in cohesive source groups:
 
-All generated files live beneath the invocation's unique Context root. The
-opaque-byte and World-document checks use separate subdirectories so existing
-file-count and transaction-cleanup assertions retain their meaning. Context
-cleanup also runs after assertion failures. The remaining legacy serialization
-checks are intentionally not migrated or made concurrent by this ticket.
+- `Formats.cpp`: YAML primitives, binary encoding/invalid envelopes, YAML file
+  round trips, and the checked-in World fixture.
+- `TransactionalWrites.cpp`: opaque bytes, late failure, predictable temporary
+  paths, symlink targets and temporary links, permissions, and concurrent saves.
+- `DocumentPaths.cpp`: exact suffix validation, Save As and base-path rules.
+- `DocumentSaves.cpp`: binary/YAML conversion and dispatch, transactional dirty
+  state, and Serializable modification tracking.
+- `MalformedInput.cpp`: malformed YAML diagnostics and invalid serializer usage.
+- `RecentDocuments.cpp`: restart ordering/deduplication and persistent pruning.
+
+The original seven pilot selectors remain; ten former legacy checks and the
+extracted `document-paths` selector extend the inventory. POSIX symlink and
+permission checks report explicit capability skips on Windows, rather than
+silently disappearing. World/domain restoration and compatibility checks remain
+legacy-owned for #297; this ticket does not migrate them.
+
+All generated files and recent-document paths live beneath the invocation's
+unique Context root. Transaction checks use separate subdirectories so file-count
+and cleanup assertions retain their meaning. Context cleanup and fault-injection
+reset also run after assertion failures. The checked-in `resources/Office.world.yaml`
+uses `Context::fixture()` and fails rather than skips if missing. No fixture is
+modified, working directory changed, or dialog opened.
+
+#296 validation on Linux: all 18 checks and their CLI/concurrency contract pass;
+full Release build and all 81 CTest entries pass sequentially and at `-j 8`.
+A fresh GUI-disabled build compiles only Persistence checks and core/support
+libraries. Debug with `PF_HIGH_ANALYSIS=ON` builds Persistence and the affected
+legacy executable; Persistence, its contract, `serialization-checks`, and
+`headless-smoke` pass. Assertion comparison and `git diff --check` pass (no
+repository formatter is configured). Windows was not executed locally.
 
 Persistence links only smoke support and the production core (plus its YAML/Lua
 dependencies), with no editor, renderer, ImGui, or HTTP dependency. CTest invokes
