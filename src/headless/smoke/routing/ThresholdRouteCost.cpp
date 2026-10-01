@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <cmath>
 #include <filesystem>
 #include "core/AgentTagRegistryDocument.h"
@@ -17,10 +18,9 @@ namespace
 		if (!value) throw std::runtime_error(message);
 	}
 
-	void actualPositionChoosesManualAlternative()
+	void actualPositionChoosesManualAlternative(smoke::Context const& smokeContext)
 	{
-		auto const fixture = std::filesystem::path(__FILE__).parent_path()
-			/ "fixtures/threshold-route-cost.world.yaml";
+		auto const fixture = smokeContext.fixture("src/headless/fixtures/threshold-route-cost.world.yaml");
 		auto world = core::loadWorldDocument(fixture);
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		require(agent != nullptr, "Realistic-pathing fixture has no Agent");
@@ -205,10 +205,14 @@ namespace
 	}
 }
 
-void runThresholdRouteCostSmokeChecks()
+
+namespace routing_smoke
 {
-	actualPositionChoosesManualAlternative();
-	walkingAndBulkhead();
-	observedQueue();
-	thresholdChoices();
+	void registerThresholdRouteCost(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "actualPositionChoosesManualAlternative", [](smoke::Context const& smokeContext) { actualPositionChoosesManualAlternative(smokeContext); } });
+		checks.push_back({ "walkingAndBulkhead", [](smoke::Context const&) { walkingAndBulkhead(); } });
+		checks.push_back({ "observedQueue", [](smoke::Context const&) { observedQueue(); } });
+		checks.push_back({ "thresholdChoices", [](smoke::Context const&) { thresholdChoices(); } });
+	}
 }

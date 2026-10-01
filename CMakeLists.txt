@@ -360,6 +360,17 @@ else()
 endif()
 pf_apply_high_analysis(pf-lift-boarding-support)
 
+# Shared population workload; benchmark/export entry points remain legacy tools.
+add_library(pf-routing-population-support STATIC src/headless/support/RoutingPopulation.cpp)
+target_include_directories(pf-routing-population-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
+target_link_libraries(pf-routing-population-support PUBLIC prometheum-fermide-core)
+if(MSVC)
+    target_compile_options(pf-routing-population-support PRIVATE /W3 /permissive-)
+else()
+    target_compile_options(pf-routing-population-support PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-routing-population-support)
+
 add_executable(prometheum-fermide-headless
     # Other panel checks remain legacy-owned until their migration tickets.
     src/DoorPanel.cpp
@@ -378,12 +389,7 @@ add_executable(prometheum-fermide-headless
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
     src/headless/PaletteTraySmokeChecks.cpp
-    src/headless/PathfindingWorkspaceSmokeChecks.cpp
-    src/headless/ThresholdRouteCostSmokeChecks.cpp
-    src/headless/StairRouteCostSmokeChecks.cpp
-    src/headless/LiftRouteCostSmokeChecks.cpp
-    src/headless/ShuttleRouteCostSmokeChecks.cpp
-    src/headless/LadderForceBridgeRouteCostSmokeChecks.cpp
+    src/headless/RoutingTools.cpp
     src/headless/WorldTeardownSmokeChecks.cpp
     src/headless/RenderOrderSmokeChecks.cpp
     src/headless/SerializationSmokeChecks.cpp
@@ -404,7 +410,7 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing pf-lift-boarding-support)
+    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing pf-lift-boarding-support pf-routing-population-support)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)

@@ -11,7 +11,7 @@ file(MAKE_DIRECTORY "${work}")
 function(invoke status expected)
     execute_process(COMMAND "${binary}" ${ARGN}
         WORKING_DIRECTORY "${work}" RESULT_VARIABLE result
-        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 60)
+        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 120)
     if(NOT "${result}" STREQUAL "${status}")
         message(FATAL_ERROR "${ARGN}: expected ${status}, got ${result}\n${out}\n${err}")
     endif()
@@ -66,6 +66,37 @@ set(core_names
     pathingAcrossAnOpenSharedWallFindsAPath
     pathingFromAnIsolatedLocationReturnsNoPath
     mobilityProfileConstraints
+    costContract
+    capturedInputsMatchEagerProviders
+    localDemandWorkIsBounded
+    bundledRoutesMatchReference
+    reusedWorkspaceIsStableAndDoesNotGrow
+    lowerBoundsAreUniversalAndBounded
+    doorObservationEpochsIgnoreTicks
+    sourceInferenceMatchesOpenIntervalReference
+    sourceIndexWorkIsLocal
+    sourceIndexesFollowWalkwayEdits
+    uncertainRoutesSurviveWorldReset
+    populationRouting
+    actualPositionChoosesManualAlternative
+    walkingAndBulkhead
+    observedQueue
+    thresholdChoices
+    stationaryStaircaseIsDirectionalAndPhysical
+    stairSpeedCanReverseRouteChoice
+    effortAversionCanReverseRouteChoiceWithoutChangingSpeed
+    multiFlightStairwellAccumulatesEveryFlight
+    enclosedLiftSeparatesAccessFromRide
+    transportQueueSnapshotsAreEventDriven
+    waitingAversionReversesWaitingChoiceWithoutChangingTiming
+    crowdAversionReversesWaitingChoiceWithoutChangingTiming
+    platformLiftUsesSlowerFiniteService
+    shuttleRouteCosts
+    ladderCostsPhysicalClimbingEffortMountingAndRisk
+    extensibleLadderUsesLocalStateAndRemoteExpectation
+    defaultAgentAvoidsACompetitiveLadderShortcut
+    riskAversionChangesPreferenceWithoutChangingFeasibility
+    forceBridgeUsesWalkingExposureAndApproachControls
 )
 
 set(editor_names
@@ -92,7 +123,12 @@ foreach(tier IN ITEMS core editor)
     list(LENGTH names count)
     string(JOIN "\n" listing ${names})
     invoke(0 "^${listing}\n$" --list)
-    invoke(0 "SUMMARY ${module} pass=${count} fail=0 skip=0\n$")
+    set(records "")
+    foreach(name IN LISTS names)
+        string(APPEND records "PASS ${module} ${name}\n")
+    endforeach()
+    # Smoke output must not contain informational benchmark records.
+    invoke(0 "^${records}SUMMARY ${module} pass=${count} fail=0 skip=0\n$")
     foreach(name IN LISTS names)
         invoke(0 "^PASS ${module} ${name}\nSUMMARY ${module} pass=1 fail=0 skip=0\n$" --check "${name}")
     endforeach()
@@ -122,12 +158,12 @@ foreach(tier IN ITEMS core editor)
     foreach(index RANGE 1 8)
         file(APPEND "${project}/CTestTestfile.cmake"
             "add_test(${module}-${index} \"${binary}\")\n"
-            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 60 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
+            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 120 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
     endforeach()
 endforeach()
 find_program(ctest NAMES ctest REQUIRED)
 execute_process(COMMAND "${ctest}" --test-dir "${project}" -j 8 --output-on-failure
-    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 120)
+    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 240)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Concurrent Routing invocations failed: ${result}\n${out}\n${err}")
 endif()

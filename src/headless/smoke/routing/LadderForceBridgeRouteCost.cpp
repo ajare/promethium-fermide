@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -20,15 +21,10 @@ namespace
 		if (!value) throw std::runtime_error(message);
 	}
 
-	std::filesystem::path testWorld(char const* name)
-	{
-		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
-			/ "resources" / "test-worlds" / name;
-	}
 
-	void ladderCostsPhysicalClimbingEffortMountingAndRisk()
+	void ladderCostsPhysicalClimbingEffortMountingAndRisk(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("ladder-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/ladder-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		auto const policy = world->getRouteChoicePolicy();
@@ -82,9 +78,9 @@ namespace
 		require(checked, "Ladder fixture has no permanent Ladder body edge");
 	}
 
-	void extensibleLadderUsesLocalStateAndRemoteExpectation()
+	void extensibleLadderUsesLocalStateAndRemoteExpectation(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("ladder-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/ladder-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		auto const policy = world->getRouteChoicePolicy();
@@ -294,11 +290,15 @@ namespace
 	}
 }
 
-void runLadderForceBridgeRouteCostSmokeChecks()
+
+namespace routing_smoke
 {
-	ladderCostsPhysicalClimbingEffortMountingAndRisk();
-	extensibleLadderUsesLocalStateAndRemoteExpectation();
-	defaultAgentAvoidsACompetitiveLadderShortcut();
-	riskAversionChangesPreferenceWithoutChangingFeasibility();
-	forceBridgeUsesWalkingExposureAndApproachControls();
+	void registerLadderForceBridgeRouteCost(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "ladderCostsPhysicalClimbingEffortMountingAndRisk", [](smoke::Context const& smokeContext) { ladderCostsPhysicalClimbingEffortMountingAndRisk(smokeContext); } });
+		checks.push_back({ "extensibleLadderUsesLocalStateAndRemoteExpectation", [](smoke::Context const& smokeContext) { extensibleLadderUsesLocalStateAndRemoteExpectation(smokeContext); } });
+		checks.push_back({ "defaultAgentAvoidsACompetitiveLadderShortcut", [](smoke::Context const&) { defaultAgentAvoidsACompetitiveLadderShortcut(); } });
+		checks.push_back({ "riskAversionChangesPreferenceWithoutChangingFeasibility", [](smoke::Context const&) { riskAversionChangesPreferenceWithoutChangingFeasibility(); } });
+		checks.push_back({ "forceBridgeUsesWalkingExposureAndApproachControls", [](smoke::Context const&) { forceBridgeUsesWalkingExposureAndApproachControls(); } });
+	}
 }

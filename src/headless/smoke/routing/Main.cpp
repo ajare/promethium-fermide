@@ -9,5 +9,11 @@ int main(int argc, char** argv)
 	routing_smoke::registerRestoredPaths(checks);
 	routing_smoke::registerIsolatedSectors(checks);
 	routing_smoke::registerMobility(checks);
+	routing_smoke::registerWorkspace(checks);
+	routing_smoke::registerThresholdRouteCost(checks);
+	routing_smoke::registerStairRouteCost(checks);
+	routing_smoke::registerLiftRouteCost(checks);
+	routing_smoke::registerShuttleRouteCost(checks);
+	routing_smoke::registerLadderForceBridgeRouteCost(checks);
 	return smoke::main("routing", checks, argc, argv);
 }

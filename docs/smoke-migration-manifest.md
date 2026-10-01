@@ -105,8 +105,19 @@ No check reads fixtures from the working directory. The old sources, declaration
 and invocations are removed, including the dedicated restored-Path invocation.
 The two empty planning CTest entries are retired; `--route-planning-checks`,
 `--route-planning-time-checks`, and `--restored-path-checks` return 2 with guidance.
-Route-cost, workspace, scale, and inline checks remain with their existing owners
-for their separate tickets.
+Route-cost, workspace, and scale checks subsequently migrate in #293 below;
+inline checks remain with their existing owners for separate tickets.
+
+#293 migrates the six workspace and perceived route-cost sources into 31
+individual Routing registrations (71 core registrations in total). Context resolves
+all checked-in World fixtures; no source-location or working-directory lookup
+remains. Original workloads, reference oracles, Path digests, and all 241 assertion
+call sites remain in their new owners, including explicit tool assertions.
+`RoutingTools.cpp` retains only the restoration benchmark and World export command.
+The population workload/assertions compile once in `pf-routing-population-support`,
+shared by Routing and the export tool; smoke does not export, sample memory, or
+report benchmark timings. Legacy aggregate calls and suite declarations are removed;
+`--routing-scale-checks` and `--shuttle-route-checks` return 2 with migration guidance.
 
 #292 migrates 26 inline Transit/transport scenarios from `SmokeScenario.cpp`
 into Stairs, Occupants, PlatformLifts, Lifts, and Shuttles, retaining byte-identical
@@ -220,9 +231,9 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/permissions/InteractionMobility.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/InteractionGeometry.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/routing/IsolatedSectors.cpp` | module-owned | `pf-smoke-routing` |
-| `LadderForceBridgeRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/LadderForceBridgeRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/transports/Boarding.cpp` | module-owned | `pf-smoke-transports` |
-| `LiftRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/LiftRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `MarkerIdentitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `MetricsChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/routing/Mobility.cpp` | module-owned | `pf-smoke-routing` |
@@ -231,7 +242,7 @@ Paths in the table are relative to `src/headless/`.
 | `OccupantPackingChecks.cpp` | module-owned (retained standalone) | `pf-occupant-packing-checks` |
 | `smoke/transports/Deletion.cpp` | module-owned | `pf-smoke-transports` |
 | `PaletteTraySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `PathfindingWorkspaceSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/Workspace.cpp` | module-owned | `pf-smoke-routing` |
 | `PausePositionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/permissions/Adherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/AdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
@@ -246,12 +257,12 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/transports/DoorQueries.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/render/Transports.cpp` | module-owned | `pf-smoke-render` |
-| `ShuttleRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/ShuttleRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `SimulationStepTimingChecks.cpp` | module-owned (retained standalone) | `pf-simulation-step-timing-checks` |
-| `StairRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/StairRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/world/ThresholdLayerOverlap.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/permissions/Refusal.cpp` | module-owned | `pf-smoke-permissions` |
-| `ThresholdRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/routing/ThresholdRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/permissions/LandingAdherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/LandingAdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
 | `ViewportCullingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -345,9 +356,12 @@ Neither legacy entry point executes the migrated checks.
   `pf-lift-boarding-support`, not an additional CTest execution owner.
 - `LiftBoardingSmokeChecks.cpp` owns only the legacy Lift reproduction commands;
   `PausePositionSmokeChecks.cpp` also owns the pause-position reproduction;
-  `PathfindingWorkspaceSmokeChecks.cpp` also owns the restoration benchmark and
-  routing-scale World generator; `MetricsChecks.cpp` also owns metrics serving.
+  `RoutingTools.cpp` owns the restoration benchmark and routing-scale World
+  generator; `MetricsChecks.cpp` also owns metrics serving.
   These remain legacy-owned until their dedicated tool extraction tickets.
+- `support/RoutingPopulation.cpp`: shared deterministic population workload and
+  assertions, compiled once by `pf-routing-population-support`. Only explicit
+  tools enable its export and timing/memory reporting; no extra CTest owner.
 - `scripts/generate_new_world.cpp` and `scripts/tests/world_generator_cli.cmake`
   remain with the existing `pf-generate-world` target and generator CTest entries.
   Vendored dependency tests are outside this migration.

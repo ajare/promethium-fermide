@@ -6,7 +6,8 @@ and Sector checks (#284), Agent identity, activation, and Agent groups (#285), a
 properties (#286), Agent tags and coordinated documents (#287), and Agent
 behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
 Access permissions and Interaction points (#290), Route planning and movement (#291),
-and Transit/transport runtime checks (#292).
+Transit/transport runtime checks (#292), and pathfinding scale and perceived
+route costs (#293).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
@@ -464,6 +465,69 @@ follow-up tickets rather than extending #290.
   (whitespace normalized). `git diff --check` passes; no repository formatter is
   configured. Windows execution remains the separate #279 ticket.
 
+## Routing scale and perceived route costs (#293)
+
+```sh
+cmake --build build-linux --target pf-smoke-routing --parallel
+build-linux/bin/x64/Release/pf-smoke-routing --check populationRouting
+build-linux/bin/x64/Release/pf-smoke-routing --check capturedInputsMatchEagerProviders
+build-linux/bin/x64/Release/pf-smoke-routing --check actualPositionChoosesManualAlternative
+ctest --test-dir build-linux -R '^smoke-routing' -j 3 --output-on-failure
+```
+
+Routing adds 31 individual registrations to the 40 from #291:
+
+| Source in `smoke/routing` | Checks | Responsibility |
+| --- | ---: | --- |
+| `Workspace.cpp` | 12 | Workspace reuse, reference Dijkstra, captured facts, source indexes, lower bounds, local demand, observation epochs, reset and population scale |
+| `ThresholdRouteCost.cpp` | 4 | Actual-position Paths, walking/Bulkhead facts, observed queues, Door alternatives |
+| `StairRouteCost.cpp` | 4 | Directed physical stair costs, speed/effort preferences, multi-flight Stairwells |
+| `LiftRouteCost.cpp` | 5 | Admission/ride separation, queue epochs, waiting/crowd preferences, Platform lifts |
+| `ShuttleRouteCost.cpp` | 1 | Complete short/long journey, capacity, dwell, local crowd and preview scenario |
+| `LadderForceBridgeRouteCost.cpp` | 5 | Physical climbing, local/remote deployment, speed/risk preferences and Force Bridge controls |
+
+All required checked-in Worlds resolve through `Context::fixture()`, including the
+threshold regression fixture. Every single selector and eight concurrent complete
+invocations run from an external empty working directory in the Routing contract.
+Missing fixtures fail rather than skip. Core timeout is 120 seconds; the contract
+has 300 seconds for Debug/concurrent workloads. Editor ownership is unchanged.
+
+Smoke preserves the original workloads and assertions, including 1,000 Agents,
+2,040 population vertices, cold/warm/reset/fresh Path digests, allocation bounds,
+reference oracles, and all preference and physical-duration outcomes. There are
+no elapsed-time pass/fail thresholds. Informational benchmark output is removed
+from smoke, which emits only harness records. The restoration benchmark and
+`--write-routing-scale-world` remain explicit legacy tools in `RoutingTools.cpp`.
+Population construction/assertions compile once in `pf-routing-population-support`;
+only the export tool enables file output and timing/memory reporting. The Routing
+module links only that support, smoke support, and production core/YAML/Lua, not
+legacy tooling or other modules' checks. No production routing code changes.
+
+The six legacy sources and suite calls are removed. `--routing-scale-checks` and
+`--shuttle-route-checks` return 2 with migration guidance; use CTest for combined
+coverage. The benchmark/export CLI remains compatible and is not registered as a
+Routing smoke check.
+
+### #293 Linux validation
+
+- GUI-enabled Release default build and all 87 CTest entries pass sequentially;
+  all 86 non-aggregate entries also pass with `-j 6`, avoiding the documented
+  legacy aggregate/serialization temporary-path overlap.
+- Clean GUI-disabled Release builds only `pf-smoke-routing` and passes all 71
+  core checks. Actual objects and link commands contain only Routing, the two
+  support libraries, and core/YAML/Lua; no editor, renderer, ImGui, HTTP, legacy
+  checks, or other module checks compile.
+- Clean GUI-disabled Debug with `PF_HIGH_ANALYSIS=ON` builds Routing, Routing
+  Editor, and legacy headless. All three Routing tests pass concurrently (about
+  75 seconds), including exact listings, all selectors and concurrent execution.
+  Legacy aggregate, serialization, rendering and restoration tests also pass.
+- Explicit export of the population World and adjacent tag registry, followed
+  by two restoration benchmark cycles, passes from an external working directory.
+  Retired smoke selections return 2. All 241 original assertion call sites remain
+  in the migrated checks/shared workload/explicit tools (whitespace normalized).
+- `git diff --check` passes; no formatter is configured. Checks use no graphics
+  backends, windows, dialogs or interactive input. Windows runtime remains #279.
+
 ## Routing modules (#291)
 
 ```sh
@@ -508,7 +572,8 @@ contract now also selects `agentPaths` independently.
 The seven legacy files, declarations, and calls are removed. The empty planning
 CTest entries are retired; the old planning, planning-time, and restored-Path CLI
 selections return 2 with migration guidance. Route-cost, workspace, scale, and
-inline checks are unchanged and remain outside this ticket.
+inline checks remain outside #291; route-cost, workspace and scale checks
+subsequently migrate in #293 above.
 
 ### #291 Linux validation
 

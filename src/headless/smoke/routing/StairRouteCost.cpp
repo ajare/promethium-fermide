@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -20,15 +21,10 @@ namespace
 		if (!value) throw std::runtime_error(message);
 	}
 
-	std::filesystem::path testWorld(char const* name)
-	{
-		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
-			/ "resources" / "test-worlds" / name;
-	}
 
-	void stationaryStaircaseIsDirectionalAndPhysical()
+	void stationaryStaircaseIsDirectionalAndPhysical(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("staircase-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/staircase-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		auto configured = world->getRouteChoicePolicy();
@@ -114,9 +110,9 @@ namespace
 		return {};
 	}
 
-	void stairSpeedCanReverseRouteChoice()
+	void stairSpeedCanReverseRouteChoice(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("staircase-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/staircase-test-1.world.yaml"));
 		world->pauseSimulation();
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
@@ -151,9 +147,9 @@ namespace
 		require(reversed, "Stair speed modifier did not reverse any competing route choice");
 	}
 
-	void effortAversionCanReverseRouteChoiceWithoutChangingSpeed()
+	void effortAversionCanReverseRouteChoiceWithoutChangingSpeed(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("staircase-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/staircase-test-1.world.yaml"));
 		world->pauseSimulation();
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
@@ -206,9 +202,9 @@ namespace
 		}
 	}
 
-	void multiFlightStairwellAccumulatesEveryFlight()
+	void multiFlightStairwellAccumulatesEveryFlight(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("stairwell-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/stairwell-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		auto const policy = world->getRouteChoicePolicy();
@@ -265,10 +261,14 @@ namespace
 	}
 }
 
-void runStairRouteCostSmokeChecks()
+
+namespace routing_smoke
 {
-	stationaryStaircaseIsDirectionalAndPhysical();
-	stairSpeedCanReverseRouteChoice();
-	effortAversionCanReverseRouteChoiceWithoutChangingSpeed();
-	multiFlightStairwellAccumulatesEveryFlight();
+	void registerStairRouteCost(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "stationaryStaircaseIsDirectionalAndPhysical", [](smoke::Context const& smokeContext) { stationaryStaircaseIsDirectionalAndPhysical(smokeContext); } });
+		checks.push_back({ "stairSpeedCanReverseRouteChoice", [](smoke::Context const& smokeContext) { stairSpeedCanReverseRouteChoice(smokeContext); } });
+		checks.push_back({ "effortAversionCanReverseRouteChoiceWithoutChangingSpeed", [](smoke::Context const& smokeContext) { effortAversionCanReverseRouteChoiceWithoutChangingSpeed(smokeContext); } });
+		checks.push_back({ "multiFlightStairwellAccumulatesEveryFlight", [](smoke::Context const& smokeContext) { multiFlightStairwellAccumulatesEveryFlight(smokeContext); } });
+	}
 }

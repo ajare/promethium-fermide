@@ -269,9 +269,15 @@ pf_add_smoke_module(pf-smoke-routing
         routing/RestoredPaths.cpp
         routing/IsolatedSectors.cpp
         routing/Mobility.cpp
-    LIBRARIES prometheum-fermide-core
+        routing/Workspace.cpp
+        routing/ThresholdRouteCost.cpp
+        routing/StairRouteCost.cpp
+        routing/LiftRouteCost.cpp
+        routing/ShuttleRouteCost.cpp
+        routing/LadderForceBridgeRouteCost.cpp
+    LIBRARIES prometheum-fermide-core pf-routing-population-support
     LABELS core
-    TIMEOUT 30
+    TIMEOUT 120
 )
 
 pf_add_smoke_module(pf-smoke-routing-editor
@@ -289,7 +295,7 @@ add_test(NAME smoke-routing-contract COMMAND ${CMAKE_COMMAND}
     "-DROUTING=$<TARGET_FILE:pf-smoke-routing>"
     "-DEDITOR=$<TARGET_FILE:pf-smoke-routing-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoutingContract.cmake")
-set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 90)
+set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 300)
 
 pf_add_smoke_module(pf-smoke-world
     NAME world

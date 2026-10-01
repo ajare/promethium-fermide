@@ -73,14 +73,8 @@ void runPaletteTraySmokeChecks();
 void runViewportCullingSmokeChecks();
 void runViewportDragScrollSmokeChecks();
 void runViewportZoomSmokeChecks();
-void runPathfindingWorkspaceSmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
-void runThresholdRouteCostSmokeChecks();
-void runStairRouteCostSmokeChecks();
-void runLiftRouteCostSmokeChecks();
-void runShuttleRouteCostSmokeChecks();
-void runLadderForceBridgeRouteCostSmokeChecks();
 void runWorldTeardownSmokeChecks();
 void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
@@ -4084,15 +4078,13 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--routing-scale-checks")
 		{
-			runPathfindingWorkspaceSmokeChecks();
-			std::cout << "PASS: population routing\n";
-			return 0;
+			std::cerr << "Routing scale checks moved to smoke-routing; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--shuttle-route-checks")
 		{
-			runShuttleRouteCostSmokeChecks();
-			std::cout << "PASS: Shuttle route costs\n";
-			return 0;
+			std::cerr << "Shuttle route-cost checks moved to smoke-routing; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--restored-path-checks")
 		{
@@ -4155,12 +4147,6 @@ int main(int argc, char** argv)
 		runViewportDragScrollSmokeChecks();
 		runViewportZoomSmokeChecks();
 		runWorldRenderLifetimeSmokeChecks();
-		runPathfindingWorkspaceSmokeChecks();
-		runLadderForceBridgeRouteCostSmokeChecks();
-		runThresholdRouteCostSmokeChecks();
-		runStairRouteCostSmokeChecks();
-		runLiftRouteCostSmokeChecks();
-		runShuttleRouteCostSmokeChecks();
 		runWorldTeardownSmokeChecks();
 
 		auto const deepJourney = runThreeLayerTransitJourney();

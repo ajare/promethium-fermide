@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -20,15 +21,10 @@ namespace
 		if (!value) throw std::runtime_error(message);
 	}
 
-	std::filesystem::path testWorld(char const* name)
-	{
-		return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()
-			/ "resources" / "test-worlds" / name;
-	}
 
-	void enclosedLiftSeparatesAccessFromRide()
+	void enclosedLiftSeparatesAccessFromRide(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("lift-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/lift-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 		auto const policy = world->getRouteChoicePolicy();
@@ -193,9 +189,9 @@ namespace
 			"Crowd aversion changed objective device or queue timing");
 	}
 
-	void platformLiftUsesSlowerFiniteService()
+	void platformLiftUsesSlowerFiniteService(smoke::Context const& smokeContext)
 	{
-		auto world = core::loadWorldDocument(testWorld("platformlift-test-1.world.yaml"));
+		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/platformlift-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 19 }).entity;
 		auto const policy = world->getRouteChoicePolicy();
@@ -232,11 +228,15 @@ namespace
 	}
 }
 
-void runLiftRouteCostSmokeChecks()
+
+namespace routing_smoke
 {
-	enclosedLiftSeparatesAccessFromRide();
-	transportQueueSnapshotsAreEventDriven();
-	waitingAversionReversesWaitingChoiceWithoutChangingTiming();
-	crowdAversionReversesWaitingChoiceWithoutChangingTiming();
-	platformLiftUsesSlowerFiniteService();
+	void registerLiftRouteCost(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "enclosedLiftSeparatesAccessFromRide", [](smoke::Context const& smokeContext) { enclosedLiftSeparatesAccessFromRide(smokeContext); } });
+		checks.push_back({ "transportQueueSnapshotsAreEventDriven", [](smoke::Context const&) { transportQueueSnapshotsAreEventDriven(); } });
+		checks.push_back({ "waitingAversionReversesWaitingChoiceWithoutChangingTiming", [](smoke::Context const&) { waitingAversionReversesWaitingChoiceWithoutChangingTiming(); } });
+		checks.push_back({ "crowdAversionReversesWaitingChoiceWithoutChangingTiming", [](smoke::Context const&) { crowdAversionReversesWaitingChoiceWithoutChangingTiming(); } });
+		checks.push_back({ "platformLiftUsesSlowerFiniteService", [](smoke::Context const& smokeContext) { platformLiftUsesSlowerFiniteService(smokeContext); } });
+	}
 }

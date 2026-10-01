@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -23,7 +24,7 @@ namespace
 	}
 }
 
-void runShuttleRouteCostSmokeChecks()
+static void shuttleRouteCosts()
 {
 	core::World world("Shuttle route costs", 70, 2);
 	auto platform = world.addRoom("Parallel walking", 0, 0, 0, 70, 1);
@@ -147,4 +148,12 @@ void runShuttleRouteCostSmokeChecks()
 	auto preview = graph->calculatePath(nullptr, source, far);
 	require(preview && preview->nodes.back().objectiveDurationSeconds.has_value(),
 		"Shuttle preview lost objective duration");
+}
+
+namespace routing_smoke
+{
+	void registerShuttleRouteCost(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "shuttleRouteCosts", [](smoke::Context const&) { shuttleRouteCosts(); } });
+	}
 }

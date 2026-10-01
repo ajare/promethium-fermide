@@ -1,13 +1,10 @@
+#include "Checks.h"
+#include "RoutingPopulation.h"
 #include <bit>
-#include <chrono>
-#include <iostream>
 #include "core/Defines.h"
-#include "core/AgentTagRegistry.h"
 #include <filesystem>
 #include <limits>
 #include "core/AgentTagRegistryDocument.h"
-#include "core/BinarySerializer.h"
-#include "core/SerializationWorkData.h"
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -24,8 +21,6 @@
 #include "core/Vertex.h"
 #include "core/World.h"
 
-size_t getHeadlessWorkingSetBytes();
-size_t getHeadlessPeakWorkingSetBytes();
 
 namespace core
 {
@@ -130,13 +125,12 @@ namespace
 		}
 	}
 
-	void bundledRoutesMatchReference()
+	void bundledRoutesMatchReference(smoke::Context const& smokeContext)
 	{
-		auto const root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
 		for (auto const* filename : { "lift-test-1.world.yaml", "shuttle-test-1.world.yaml",
 			"stairwell-test-1.world.yaml", "staircase-test-1.world.yaml" })
 		{
-			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / filename);
+			auto world = core::loadWorldDocument(smokeContext.fixture(std::filesystem::path("resources/test-worlds") / filename));
 			auto graph = world->getGraph();
 			core::Agent agent("Reference walker");
 			core::RouteDecisionContext const context{ &agent, {}, {}, nullptr,
@@ -224,12 +218,11 @@ namespace
 		require(actual == expected, "Process-global Edge IDs changed perceived costs after a World reset");
 	}
 
-	void sourceInferenceMatchesOpenIntervalReference()
+	void sourceInferenceMatchesOpenIntervalReference(smoke::Context const& smokeContext)
 	{
-		auto root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
 		for (auto name : { "forcebridge-test-1.world.yaml", "staircase-test-1.world.yaml", "platformlift-test-1.world.yaml" })
 		{
-			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / name);
+			auto world = core::loadWorldDocument(smokeContext.fixture(std::filesystem::path("resources/test-worlds") / name));
 			auto graph = world->getGraph();
 			for (auto const& origin : graph->getVertices())
 			{
@@ -359,13 +352,6 @@ namespace
 				"Warm queries rebuilt source topology or grew scratch");
 			core::GraphSourceIndexTestAccess::checkIntervals(*graph, agent->getSector(), agent->getGlobalPosition());
 			core::GraphSourceIndexTestAccess::checkOverlappingIntervals(*graph);
-			std::cout << "source-index markers=" << count << " bytes=" << after.bytes
-				<< " build-ms=" << after.buildSeconds * 1000
-				<< " selection-ms=" << (after.selectionSeconds - before.selectionSeconds) * 1000
-				<< " seeding-ms=" << (after.seedingSeconds - before.seedingSeconds) * 1000
-				<< " arc-scoring-ms=" << (after.arcScoringSeconds - before.arcScoringSeconds) * 1000
-				<< " candidates=" << after.candidatesExamined - before.candidatesExamined
-				<< " intervals=" << after.intervalsExamined - before.intervalsExamined << '\n';
 		}
 	}
 
@@ -425,15 +411,14 @@ namespace
 			&& workspace.getScratchAllocationCount() == allocations, "Demand cache repeated work or grew scratch");
 	}
 
-	void capturedInputsMatchEagerProviders()
+	void capturedInputsMatchEagerProviders(smoke::Context const& smokeContext)
 	{
-		auto const root = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path();
 		for (auto const* filename : { "lift-test-1.world.yaml", "shuttle-test-1.world.yaml",
 			"stairwell-test-1.world.yaml", "staircase-test-1.world.yaml", "ladder-test-1.world.yaml",
 			"forcebridge-test-1.world.yaml", "platformlift-test-1.world.yaml", "bulkhead-test-1.world.yaml",
 			"door-test-1.world.yaml" })
 		{
-			auto world = core::loadWorldDocument(root / "resources" / "test-worlds" / filename);
+			auto world = core::loadWorldDocument(smokeContext.fixture(std::filesystem::path("resources/test-worlds") / filename));
 			auto graph = world->getGraph();
 			auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
 			if (agent && !agent->getSector()) agent = nullptr;
@@ -511,25 +496,13 @@ namespace
 			for (int pass = 0; pass < 2; ++pass)
 			{
 				before = graph->getRouteWorkCounts();
-				auto const builds = graph->getRouteLowerBoundBuildCount(), hits = graph->getRouteLowerBoundHitCount();
 				auto const allocations = graph->getScratchAllocationCount();
-				auto const start = std::chrono::steady_clock::now();
 				for (uint32_t i = 0; i < 1000; ++i)
 				{
 					auto destination = destinations[mode == 0 ? 501 : mode == 1 ? 999 : i];
 					require(graph->calculatePath(agent, source, destination) != nullptr, "Demand workload lost route");
 				}
-				after = graph->getRouteWorkCounts();
-				auto const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 				require(!pass || graph->getScratchAllocationCount() == allocations, "Demand workloads grew warmed scratch");
-				std::cout << "routing-demand workload=" << (mode == 0 ? "local" : mode == 1 ? "long" : "distinct")
-					<< " pass=" << pass << " paths/s=" << 1000 / seconds
-					<< " evaluated=" << after.evaluatedArcs - before.evaluatedArcs
-					<< " expanded=" << after.expandedVertices - before.expandedVertices
-					<< " prepared=" << after.preparedArcs - before.preparedArcs
-					<< " lower-builds=" << graph->getRouteLowerBoundBuildCount() - builds
-					<< " lower-hits=" << graph->getRouteLowerBoundHitCount() - hits
-					<< " scratch-growth=" << graph->getScratchAllocationCount() - allocations << '\n';
 			}
 		}
 	}
@@ -553,23 +526,15 @@ namespace
 		core::PathfindingWorkspace demand;
 		demand.beginRouteDecision(*world.getGraph(), frozen);
 		auto emptyCosts = eagerCosts(*world.getGraph(), frozen);
-		auto benchmark = [&](char const* label)
+		auto repeatedObservedPaths = [&]()
 		{
 			auto const graph = world.getGraph();
-			auto const before = graph->getRouteWorkCounts();
-			auto const started = std::chrono::steady_clock::now();
 			for (int i = 0; i < 1000; ++i)
 				require(graph->calculatePath(observer, graph->getVertexByIdentifier(destination)) != nullptr,
 					"Observed demand route disappeared");
-			auto const after = graph->getRouteWorkCounts();
-			std::cout << "routing-observations " << label << " paths/s="
-				<< 1000 / std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
-				<< " evaluated=" << after.evaluatedArcs - before.evaluatedArcs
-				<< " prepared=" << after.preparedArcs - before.preparedArcs
-				<< " expanded=" << after.expandedVertices - before.expandedVertices << '\n';
 		};
-		benchmark("cold");
-		benchmark("unchanged");
+		repeatedObservedPaths();
+		repeatedObservedPaths();
 		world.advanceTicks(3);
 		for (int observer = 0; observer < 20; ++observer)
 		{
@@ -598,7 +563,7 @@ namespace
 		for (size_t i = 0; i < emptyCosts.size(); ++i)
 			if (emptyCosts[i] && queuedCosts[i] && emptyCosts[i]->perceivedCost != queuedCosts[i]->perceivedCost) changed = true;
 		require(changed, "New decision reused stale local observations");
-		benchmark("changed");
+		repeatedObservedPaths();
 		auto const queuedEpoch = resource->getDoorRouteObservationEpoch();
 		require(queuedEpoch > emptyEpoch, "Door observation did not publish its changed queue");
 		(void)world.observeAccessZoneDensity(door.traversalResource, sector);
@@ -704,158 +669,6 @@ namespace
 			"Topology invalidation retained stale bounds or evictions grew warmed scratch");
 	}
 
-	uint64_t populationRoutingRun(std::filesystem::path const& output = {}, bool verifyReset = true)
-	{
-		auto const registryPath = output.empty() ? std::filesystem::path{}
-			: core::defaultAgentTagRegistryPath(output);
-		if (!output.empty())
-			require(!std::filesystem::exists(output) && !std::filesystem::exists(registryPath),
-				"Refusing to overwrite a routing stress World or tag registry");
-		core::World world("Population routing", 512, 4);
-		std::vector<uint32_t> sectors;
-		std::vector<uint32_t> markers;
-		for (uint32_t level = 0; level < 4; ++level)
-		{
-			auto sector = world.addCorridor(level, 0, 512);
-			sectors.push_back(sector);
-			for (uint32_t x = 0; x < 500; ++x)
-			{
-				uint32_t marker;
-				world.addSectorMarker(sector, 0, x + 0.5f,
-					"Population marker " + std::to_string(level * 512 + x), &marker);
-				markers.push_back(marker);
-			}
-		}
-		for (uint32_t level = 0; level < 3; ++level)
-		{
-			world.addStaircase(1, level, 10 + level * 10, { 2, CORE_SIDE_RIGHT, 0.0f });
-			world.addStaircase(1, level, 60 + level * 10, { 2, CORE_SIDE_RIGHT, 0.5f });
-		}
-		world.addLadder(1, 0, 110, { 4, false, true });
-		world.addLift(1, 0, 510, 2, 4);
-		world.finishBuild();
-		world.pauseSimulation();
-		auto registry = core::AgentTagRegistry::create();
-		world.attachAgentTagRegistry(output.empty() ? "population.tags.yaml" : registryPath.filename().string(), registry);
-		auto tag = registry->addAgentTag("shared-route");
-		require(registry->addAgentTagEffortAversion(tag), "Could not add population tag property");
-		require(registry->setAgentTagEffortAversion(tag, { 2.0f, 2.0f }), "Could not set population tag property");
-		std::vector<core::Agent*> agents;
-		for (uint32_t index = 0; index < 1000; ++index)
-		{
-			auto id = world.createAgent("Population walker", sectors[index % 4], 0, (index % 512) + 0.5f);
-			if (index % 3 == 1)
-				require(world.assignAgentTag(id, tag), "Could not assign population tag");
-			if (index % 3 == 2)
-			{
-				require(world.setAgentIndividualEffortAversion(id, (index % 301) / 100.0f), "Could not set population effort");
-				require(world.setAgentIndividualWalkSpeedModifier(id, 0.8f + (index % 401) / 1000.0f), "Could not set population speed");
-				require(world.setAgentIndividualRiskAversion(id, (index % 301) / 100.0f), "Could not set population risk");
-				require(world.setAgentIndividualWaitingAversion(id, 0.5f + (index % 251) / 100.0f), "Could not set population waiting");
-				require(world.setAgentIndividualRouteFamiliarity(id, (index % 101) / 100.0f), "Could not set population familiarity");
-			}
-			agents.push_back(world.lookupAgent(id).entity);
-		}
-		auto graph = world.getGraph();
-		uint64_t expected = 0;
-		uint64_t allocations = 0;
-		auto const memoryBeforeRouting = getHeadlessWorkingSetBytes();
-		constexpr uint32_t destinations[]{ 601, 1243, 1981, 17 };
-		std::array<core::MarkerId, 4> destinationIds;
-		std::array<std::shared_ptr<const core::Vertex>, 4> targets;
-		for (size_t index = 0; index < targets.size(); ++index)
-		{
-			targets[index] = graph->getVertexByIdentifier(markers[destinations[index]]);
-			auto marker = std::dynamic_pointer_cast<core::Marker>(targets[index]->getObject());
-			require(marker != nullptr, "Population destination is not a Marker");
-			destinationIds[index] = marker->getMarkerId();
-		}
-		for (uint32_t pass = 0; pass < (output.empty() && verifyReset ? 3u : 2u); ++pass)
-		{
-			if (pass == 2)
-			{
-				std::vector<core::AgentId> ids;
-				for (auto agent : agents) ids.push_back(world.getAgentId(agent));
-				world.resetSimulation();
-				graph = world.getGraph();
-				targets = {};
-				for (auto const& vertex : graph->getVertices())
-				{
-					auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
-					if (!marker) continue;
-					for (size_t index = 0; index < targets.size(); ++index)
-						if (marker->getMarkerId() == destinationIds[index]) targets[index] = vertex;
-				}
-				for (auto const& target : targets) require(target != nullptr, "Reset lost a destination Marker");
-				for (size_t index = 0; index < ids.size(); ++index)
-					agents[index] = world.lookupAgent(ids[index]).entity;
-			}
-			auto start = std::chrono::steady_clock::now();
-			uint64_t hash = 1469598103934665603ULL;
-			uint32_t traversalKinds = 0;
-			for (uint32_t index = 0; index < agents.size(); ++index)
-			{
-				auto const& target = targets[index % targets.size()];
-				// Include real source inference and virtual floor-edge splitting,
-				// not just the cheaper explicit-Vertex diagnostic query.
-				auto path = graph->calculatePath(agents[index], target);
-				require(path != nullptr, "Population route was unreachable");
-				for (auto const& node : path->nodes)
-				{
-					if (node.edge) traversalKinds |= 1u << static_cast<uint32_t>(node.edge->getType());
-					hash = (hash ^ node.targetVertex->getSearchIndex()) * 1099511628211ULL;
-					hash = (hash ^ std::bit_cast<uint32_t>(node.cumulativePerceivedCost)) * 1099511628211ULL;
-				}
-			}
-			for (auto kind : { core::EdgeType::Lift, core::EdgeType::Ladder, core::EdgeType::Staircase })
-				require((traversalKinds & (1u << static_cast<uint32_t>(kind))) != 0,
-					"Population routes did not exercise a mixed set of traversal modes");
-			auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-			std::cout << "routing-population agents=" << agents.size()
-				<< " vertices=" << graph->getVertices().size() << ' ' << (pass == 2 ? "reset" : pass ? "warm" : "cold")
-				<< " paths/s=" << 1000 / seconds << " scratch-bytes=" << graph->getPathfindingScratchBytes()
-				<< " working-set-MiB=" << getHeadlessWorkingSetBytes() / (1024.0 * 1024.0)
-				<< " before-routing-MiB=" << memoryBeforeRouting / (1024.0 * 1024.0)
-				<< " evaluated-arcs=" << graph->getRouteWorkCounts().evaluatedArcs
-				<< " prepared-arcs=" << graph->getRouteWorkCounts().preparedArcs
-				<< " expanded=" << graph->getRouteWorkCounts().expandedVertices
-				<< " preparation-ms=" << graph->getRouteWorkCounts().preparationSeconds * 1000
-				<< " lower-bound-builds=" << graph->getRouteLowerBoundBuildCount()
-				<< " lower-bound-hits=" << graph->getRouteLowerBoundHitCount()
-				<< " source-index-bytes=" << graph->getSourceIndexStatistics().bytes
-				<< " source-selection-ms=" << graph->getSourceIndexStatistics().selectionSeconds * 1000
-				<< " source-seeding-ms=" << graph->getSourceIndexStatistics().seedingSeconds * 1000
-				<< " digest=" << hash << '\n';
-			if (!pass) { expected = hash; allocations = graph->getScratchAllocationCount(); }
-			else if (pass == 1)
-			{
-				require(hash == expected, "Population warm Path digest changed");
-				require(allocations == graph->getScratchAllocationCount(), "Population warm scratch grew");
-				require(graph->getRouteLowerBoundBuildCount() == 4
-					&& graph->getRouteLowerBoundHitCount() >= 1996,
-					"Population did not share target bounds across exact individual profiles");
-			}
-			else require(hash == expected, "World reset changed the population Path digest");
-		}
-		require(graph->getDirectedFactsBuildCount() == 1, "Population rebuilt immutable directed geometry");
-		if (!output.empty())
-		{
-			registry->saveTo(registryPath.string());
-			for (uint32_t index = 0; index < agents.size(); ++index)
-			{
-				auto const& target = targets[index % targets.size()];
-				auto path = graph->calculatePath(agents[index], target);
-				require(path != nullptr, "Exported population Agent has no destination Path");
-				agents[index]->setPath(path, true);
-			}
-			world.saveTo(output.string());
-			auto reopened = core::loadWorldDocument(output);
-			require(reopened->getSimulationSnapshot().agents.size() == agents.size()
-				&& reopened->getGraph()->getVertices().size() == graph->getVertices().size(),
-				"Exported routing stress World did not round-trip with its tag registry");
-		}
-		return expected;
-	}
 
 	void reusedWorkspaceIsStableAndDoesNotGrow()
 	{
@@ -1008,124 +821,30 @@ namespace
 	}
 }
 
-void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles)
+namespace
 {
-	using Clock = std::chrono::steady_clock;
-	auto authored = [](core::World const& world)
+	void populationRouting()
 	{
-		auto output = core::BinarySerializer::toString();
-		core::SerializationWorkData work;
-		work.markSerializedUnmodified = false;
-		world.serialize(*output, work);
-		output->serialize();
-		return output->getSerializedString();
-	};
-	auto paths = [](core::World const& world)
-	{
-		std::vector<PathDigest> result;
-		for (auto const& snapshot : world.getSimulationSnapshot().agents)
-		{
-			PathDigest route;
-			auto const path = world.lookupAgent(snapshot.id).entity->getPath();
-			if (path) for (auto const& node : path->nodes)
-				route.emplace_back(node.targetVertex->getSearchIndex(),
-					std::bit_cast<uint32_t>(node.cumulativePerceivedCost));
-			result.push_back(std::move(route));
-		}
-		return result;
-	};
-	auto trace = [](core::World& world)
-	{
-		uint64_t hash = 1469598103934665603ULL;
-		auto mix = [&](uint64_t value) { hash = (hash ^ value) * 1099511628211ULL; };
-		world.resumeSimulation();
-		for (unsigned tick = 0; tick < 30; ++tick)
-		{
-			world.update(1.0f / 60.0f);
-			for (auto const& agent : world.getSimulationSnapshot().agents)
-			{
-				mix(agent.id.value);
-				mix(std::bit_cast<uint32_t>(agent.globalPosition.x));
-				mix(std::bit_cast<uint32_t>(agent.globalPosition.y));
-				mix(static_cast<uint64_t>(agent.state));
-				mix(agent.active);
-				mix(agent.targetPathNode);
-			}
-		}
-		return hash;
-	};
-	std::string expectedAuthored;
-	std::vector<PathDigest> expectedPaths;
-	uint64_t expectedTrace = 0;
-	for (unsigned cycle = 0; cycle < cycles; ++cycle)
-	{
-		auto start = Clock::now();
-		auto world = core::loadWorldDocument(input);
-		auto reloadMs = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-		if (cycle == 0)
-		{
-			expectedAuthored = authored(*world);
-			expectedPaths = paths(*world);
-		}
-		require(authored(*world) == expectedAuthored && paths(*world) == expectedPaths,
-			"Reload changed authored state or restored Paths");
-		auto const replay = trace(*world);
-		if (cycle == 0) expectedTrace = replay;
-		require(replay == expectedTrace, "Reload changed simulation trace");
-		if (cycle % 2) world->pauseSimulation();
-		if (cycle % 2) world->markModified();
-		else world->markSaved();
-		auto const paused = world->isSimulationPaused();
-		auto const modified = world->isModified();
-		auto const tags = world->getAgentTagRegistry();
-		auto const behaviours = world->getAgentBehaviourRegistry();
-		std::weak_ptr<core::Graph const> oldGraph = world->getGraph();
-		std::weak_ptr<core::Sector const> oldSector;
-		if (world->getNumSectors()) oldSector = world->getSector(0);
-		start = Clock::now();
-		world->resetSimulation();
-		auto resetMs = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-		require(oldGraph.expired() && oldSector.expired(), "Reset retained superseded Graph or Sector");
-		require(world->isSimulationPaused() == paused && world->isModified() == modified,
-			"Reset changed paused or dirty state");
-		require(world->getAgentTagRegistry() == tags && world->getAgentBehaviourRegistry() == behaviours,
-			"Reset replaced registry references");
-		require(authored(*world) == expectedAuthored, "Reset changed authored state");
-		// Pausing intentionally detaches Paths into retained destination intents.
-		world->resumeSimulation();
-		require(paths(*world) == expectedPaths, "Reset changed restored Paths");
-		require(trace(*world) == expectedTrace, "Reset changed simulation trace");
-		std::cout << "restoration-cycle=" << cycle << " reload-ms=" << reloadMs
-			<< " reset-ms=" << resetMs << " working-set-MiB="
-			<< getHeadlessWorkingSetBytes() / (1024.0 * 1024.0)
-			<< " peak-working-set-MiB=" << getHeadlessPeakWorkingSetBytes() / (1024.0 * 1024.0) << '\n';
-		oldGraph = world->getGraph();
-		if (world->getNumSectors()) oldSector = world->getSector(0);
-		std::weak_ptr<core::World> oldWorld = world;
-		world.reset();
-		require(oldWorld.expired() && oldGraph.expired() && oldSector.expired(),
-			"Reload retained World, Graph or Sector");
+		auto const first = routing_support::populationRoutingRun();
+		require(first == routing_support::populationRoutingRun({}, false), "Fresh population Path digest changed");
 	}
 }
 
-void writeRoutingScaleWorld(std::filesystem::path const& output)
+namespace routing_smoke
 {
-	(void)populationRoutingRun(output);
-}
-
-void runPathfindingWorkspaceSmokeChecks()
-{
-	costContract();
-	capturedInputsMatchEagerProviders();
-	localDemandWorkIsBounded();
-	bundledRoutesMatchReference();
-	reusedWorkspaceIsStableAndDoesNotGrow();
-	lowerBoundsAreUniversalAndBounded();
-	doorObservationEpochsIgnoreTicks();
-	sourceInferenceMatchesOpenIntervalReference();
-	sourceIndexWorkIsLocal();
-	sourceIndexesFollowWalkwayEdits();
-	uncertainRoutesSurviveWorldReset();
-	auto const first = populationRoutingRun();
-	require(first == populationRoutingRun({}, false), "Fresh population Path digest changed");
+	void registerWorkspace(std::vector<smoke::Check>& checks)
+	{
+		checks.push_back({ "costContract", [](smoke::Context const&) { costContract(); } });
+		checks.push_back({ "capturedInputsMatchEagerProviders", [](smoke::Context const& smokeContext) { capturedInputsMatchEagerProviders(smokeContext); } });
+		checks.push_back({ "localDemandWorkIsBounded", [](smoke::Context const&) { localDemandWorkIsBounded(); } });
+		checks.push_back({ "bundledRoutesMatchReference", [](smoke::Context const& smokeContext) { bundledRoutesMatchReference(smokeContext); } });
+		checks.push_back({ "reusedWorkspaceIsStableAndDoesNotGrow", [](smoke::Context const&) { reusedWorkspaceIsStableAndDoesNotGrow(); } });
+		checks.push_back({ "lowerBoundsAreUniversalAndBounded", [](smoke::Context const&) { lowerBoundsAreUniversalAndBounded(); } });
+		checks.push_back({ "doorObservationEpochsIgnoreTicks", [](smoke::Context const&) { doorObservationEpochsIgnoreTicks(); } });
+		checks.push_back({ "sourceInferenceMatchesOpenIntervalReference", [](smoke::Context const& smokeContext) { sourceInferenceMatchesOpenIntervalReference(smokeContext); } });
+		checks.push_back({ "sourceIndexWorkIsLocal", [](smoke::Context const&) { sourceIndexWorkIsLocal(); } });
+		checks.push_back({ "sourceIndexesFollowWalkwayEdits", [](smoke::Context const&) { sourceIndexesFollowWalkwayEdits(); } });
+		checks.push_back({ "uncertainRoutesSurviveWorldReset", [](smoke::Context const&) { uncertainRoutesSurviveWorldReset(); } });
+		checks.push_back({ "populationRouting", [](smoke::Context const&) { populationRouting(); } });
+	}
 }
