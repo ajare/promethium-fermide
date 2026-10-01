@@ -266,7 +266,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
-				agent, enabled ? optional<core::MobilityProfile>{ {} } : nullopt, out); });
+				agent, enabled ? optional<core::MobilityProfile>{ core::MobilityProfile{} } : nullopt, out); });
 		ImGui::EndCombo();
 	}
 

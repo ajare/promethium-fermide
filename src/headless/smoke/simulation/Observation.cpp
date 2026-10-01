@@ -1,3 +1,6 @@
+#include "Observation.h"
+#include "Smoke.h"
+
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -10,10 +13,7 @@
 
 namespace
 {
-	void require(bool value, char const* message)
-	{
-		if (!value) throw std::runtime_error(message);
-	}
+	using smoke::require;
 
 	std::string serialize(core::World const& world)
 	{

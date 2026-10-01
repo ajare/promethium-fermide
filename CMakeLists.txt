@@ -383,7 +383,6 @@ add_executable(prometheum-fermide-headless
     src/headless/RenderGuiStubs.cpp
     src/headless/RenderOrderSmokeChecks.cpp
     src/headless/SerializationSmokeChecks.cpp
-    src/headless/SimulationObservationSmokeChecks.cpp
     src/headless/PausePositionSmokeChecks.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/ShuttleDoorQuerySmokeChecks.cpp
@@ -490,6 +489,9 @@ if(PF_BUILD_GUI)
 endif()
 
 include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(src/headless/smoke)
+endif()
 if(BUILD_TESTING)
     foreach(seed IN ITEMS 0 1 42 2026)
         add_test(NAME world-generator-${seed} COMMAND pf-generate-world

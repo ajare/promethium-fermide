@@ -52,7 +52,6 @@
 #endif
 
 void runSerializationSmokeChecks();
-void runSimulationObservationSmokeChecks();
 void runLiftCrossingRepro(char const* filename);
 void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
@@ -6366,7 +6365,6 @@ int main(int argc, char** argv)
 		}
 
 		runSerializationSmokeChecks();
-		runSimulationObservationSmokeChecks();
 		runPausePositionSmokeChecks();
 		runAgentGroupSmokeChecks();
 		runAgentGroupAssignmentSmokeChecks();
