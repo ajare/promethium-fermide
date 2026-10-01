@@ -9,8 +9,8 @@ Access permissions and Interaction points (#290), Route planning and movement (#
 Transit/transport runtime checks (#292), and pathfinding scale and perceived
 route costs (#293), the complete Render module (#294), and the cross-domain
 Editor module (#295), complete World-document Persistence (#296–#297), and
-remaining central inline scenarios (#298), and the complete Simulation lifecycle
-and robustness coverage (#299).
+remaining central inline scenarios (#298), the complete Simulation lifecycle
+and robustness coverage (#299), and Metrics verification (#300).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
@@ -85,6 +85,30 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Metrics module (#300)
+
+```sh
+cmake --build build-linux --target pf-smoke-metrics --parallel
+build-linux/bin/x64/Release/pf-smoke-metrics --list
+build-linux/bin/x64/Release/pf-smoke-metrics --check metrics
+ctest --test-dir build-linux -R '^smoke-metrics(-contract)?$' --output-on-failure
+```
+
+`pf-smoke-metrics` owns the existing formatting, HTTP endpoint, concurrent scrape,
+collector lifecycle, resource-label and cardinality assertions as one coherent
+`metrics` registration. It links `pf-metrics`, cpp-httplib, production core and
+the narrow smoke harness; no unrelated smoke module gains HTTP support. The
+legacy `--metrics-checks` selection returns 2 with migration guidance and the old
+`metrics-smoke` aggregate CTest entry is removed. Metrics service operation remains
+separate from smoke registration in `MetricsService.cpp` pending dedicated tool
+extraction under #303.
+
+CTest invokes the module directly as `smoke-metrics`, labelled
+`smoke;metrics;http`, with a 30-second timeout. `smoke-metrics-contract` verifies
+the exact listing, focused selection, misuse, an empty external working directory,
+and eight concurrent complete invocations using ephemeral loopback ports. All
+execution is headless and uses no graphics backend, window, dialog, or input.
 
 ## Complete Simulation lifecycle module (#299)
 

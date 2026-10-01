@@ -107,8 +107,9 @@ then format outside that lock. The endpoint uses pinned MIT cpp-httplib in the
 separate `pf-metrics` library. The collector also catches observation failures so
 they cannot interrupt simulation.
 
-`src/headless/MetricsChecks.cpp` checks exposition escaping, non-finite values,
-normalized family collisions, HTTP routing/content type, port conflicts,
+`src/headless/smoke/metrics/Metrics.cpp` checks exposition escaping, non-finite
+values, normalized family collisions, HTTP routing/content type, port conflicts,
 concurrent scrapes, lifecycle counters, and tick sampling across a multi-tick
-update. The 500-Agent scale smoke compares event/snapshot digests with and without
-a collector. Run `ctest --test-dir build-linux -R 'headless-smoke|metrics-smoke' --output-on-failure`.
+update through the standard smoke-module interface. The 500-Agent scale smoke
+compares event/snapshot digests with and without a collector. Run
+`ctest --test-dir build-linux -R '^smoke-(metrics|simulation)' --output-on-failure`.

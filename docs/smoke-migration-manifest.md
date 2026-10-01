@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after complete Simulation lifecycle migration #299 (parent #278). Each
+Snapshot after Metrics smoke migration #300 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -262,7 +262,7 @@ source lists and dependency tiers are unchanged.
 | `smoke/transports/Boarding.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/routing/LiftRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `MarkerIdentitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `MetricsChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/metrics/Metrics.cpp` | module-owned | `pf-smoke-metrics` |
 | `smoke/routing/Mobility.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/Movement.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/simulation/Timing.cpp` | module-owned | `pf-smoke-simulation` |
@@ -629,6 +629,22 @@ Simulation links only smoke support, pause support, production core, YAML, and L
 there are no Editor, renderer, ImGui, HTTP, graphics, dialog, or interactive-input
 dependencies.
 
+## Metrics smoke module (#300)
+
+The formatting, endpoint, concurrent scrape, lifecycle, resource-label and
+cardinality assertions from `MetricsChecks.cpp` move together to
+`smoke/metrics/Metrics.cpp`, registered as `metrics` in `pf-smoke-metrics`.
+Their assertion expressions and observable HTTP expectations are unchanged.
+The module is the sole smoke owner and links HTTP support explicitly; the old
+aggregate source, call, and `metrics-smoke` CTest entry are removed.
+
+`smoke-metrics-contract` verifies listing, focused selection, misuse, external
+working-directory cleanliness, and eight concurrent runs using ephemeral
+loopback ports. CTest owns direct execution through `smoke-metrics`, labelled
+`smoke;metrics;http`, with a 30-second timeout. The retained metrics service
+implementation is isolated in `MetricsService.cpp` pending its dedicated tool
+extraction in #303; it is not a smoke registration.
+
 ## Support and non-smoke code
 
 - `smoke/editor/Main.cpp`: the sole cross-domain Editor registry. The former
@@ -679,7 +695,7 @@ dependencies.
   explicit `--pause-position-repro` diagnostic pending #304.
 - `LiftBoardingSmokeChecks.cpp` owns only the legacy Lift reproduction commands;
   `RoutingTools.cpp` owns the restoration benchmark and routing-scale World
-  generator; `MetricsChecks.cpp` also owns metrics serving.
+  generator; `MetricsService.cpp` owns only metrics serving.
   These remain legacy-owned until their dedicated tool extraction tickets.
 - `support/Restoration.cpp`: shared public load/reset workload and assertions,
   compiled once by `pf-restoration-support`. Persistence owns smoke execution;

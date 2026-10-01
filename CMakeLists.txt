@@ -402,7 +402,7 @@ add_executable(prometheum-fermide-headless
     src/headless/RoutingTools.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
-    src/headless/MetricsChecks.cpp
+    src/headless/MetricsService.cpp
 )
 target_compile_features(prometheum-fermide-headless PRIVATE cxx_std_20)
 target_include_directories(prometheum-fermide-headless PRIVATE "${PF_INCLUDE_DIR}/imgui")
@@ -532,7 +532,6 @@ if(BUILD_TESTING)
     # Serialization and restoration smoke coverage is owned by smoke-persistence.
     # --restoration-benchmark remains an explicit, unregistered diagnostic tool.
     # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
-    add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 
     if(PF_BUILD_GUI)
         # Ticket #59: the GUI must exit with a controlled non-zero code when

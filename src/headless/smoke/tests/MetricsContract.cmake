@@ -1,0 +1,58 @@
+# Exercise the public Metrics CLI outside both source and build trees.
+if(WIN32)
+    set(temp "$ENV{TEMP}")
+else()
+    set(temp "/tmp")
+endif()
+string(RANDOM LENGTH 20 ALPHABET 0123456789abcdef suffix)
+set(work "${temp}/pf-metrics-contract-${suffix}")
+file(MAKE_DIRECTORY "${work}")
+
+function(invoke status expected)
+    execute_process(COMMAND "${METRICS}" ${ARGN}
+        WORKING_DIRECTORY "${work}" RESULT_VARIABLE result
+        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 30)
+    if(NOT "${result}" STREQUAL "${status}")
+        message(FATAL_ERROR "${ARGN}: expected ${status}, got ${result}\n${out}\n${err}")
+    endif()
+    if(status EQUAL 2)
+        if(NOT out STREQUAL "" OR NOT err MATCHES "^ERROR metrics:")
+            message(FATAL_ERROR "Unexpected misuse output: ${out} / ${err}")
+        endif()
+    elseif(NOT err STREQUAL "" OR NOT out MATCHES "${expected}")
+        message(FATAL_ERROR "Unexpected result: ${out} / ${err}")
+    endif()
+endfunction()
+
+invoke(0 "^metrics\n$" --list)
+invoke(0 "^PASS metrics metrics\nSUMMARY metrics pass=1 fail=0 skip=0\n$")
+invoke(0 "^PASS metrics metrics\nSUMMARY metrics pass=1 fail=0 skip=0\n$" --check metrics)
+foreach(arguments IN ITEMS "--bogus" "--check" "--check;absent" "--list;extra" "--check;metrics;extra")
+    invoke(2 "" ${arguments})
+endforeach()
+file(GLOB artifacts "${work}/*" "${work}/.*")
+if(artifacts)
+    message(FATAL_ERROR "Metrics smoke wrote working-directory files: ${artifacts}")
+endif()
+
+# Ephemeral loopback ports and invocation-local state must permit concurrency.
+set(project "${work}/concurrent")
+file(MAKE_DIRECTORY "${project}")
+file(WRITE "${project}/CTestTestfile.cmake" "")
+foreach(index RANGE 1 8)
+    file(APPEND "${project}/CTestTestfile.cmake"
+        "add_test(metrics-${index} \"${METRICS}\")\n"
+        "set_tests_properties(metrics-${index} PROPERTIES TIMEOUT 30 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY metrics pass=1 fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL metrics\")\n")
+endforeach()
+find_program(ctest NAMES ctest REQUIRED)
+execute_process(COMMAND "${ctest}" --test-dir "${project}" -j 8 --output-on-failure
+    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 60)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Concurrent Metrics invocations failed: ${result}\n${out}\n${err}")
+endif()
+file(REMOVE_RECURSE "${project}")
+file(GLOB artifacts "${work}/*" "${work}/.*")
+if(artifacts)
+    message(FATAL_ERROR "Concurrent Metrics smoke wrote working-directory files: ${artifacts}")
+endif()
+file(REMOVE_RECURSE "${work}")

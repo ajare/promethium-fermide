@@ -81,6 +81,19 @@ add_test(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SimulationContract.cmake")
 set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 240)
 
+pf_add_smoke_module(pf-smoke-metrics
+    NAME metrics
+    SOURCES metrics/Main.cpp metrics/Metrics.cpp
+    LIBRARIES pf-metrics httplib::httplib
+    LABELS "metrics;http"
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-metrics-contract COMMAND ${CMAKE_COMMAND}
+    "-DMETRICS=$<TARGET_FILE:pf-smoke-metrics>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/MetricsContract.cmake")
+set_tests_properties(smoke-metrics-contract PROPERTIES LABELS "harness;metrics;http" TIMEOUT 60)
+
 pf_add_smoke_module(pf-smoke-agent
     NAME agent
     SOURCES

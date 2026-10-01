@@ -1,12 +1,13 @@
 # Headless simulation smoke scenario
 
-The complete Simulation lifecycle suite, Render coverage, and Persistence
-serialization/document coverage now run in independently buildable
-[`pf-smoke-*` modules](smoke-modules.md),
+The complete Simulation lifecycle suite, Render coverage, Persistence
+serialization/document coverage, and Metrics verification now run in independently
+buildable [`pf-smoke-*` modules](smoke-modules.md),
 not the legacy aggregate below. The complete serialization/restoration suite now
 runs in `pf-smoke-persistence`, with rendering-policy assertions in `pf-smoke-render`.
-`--serialization-checks` returns 2 with migration guidance. The explicit
-`--restoration-benchmark` tool remains available but is not a smoke CTest owner.
+`--serialization-checks` and `--metrics-checks` return 2 with migration guidance.
+The explicit `--restoration-benchmark` and metrics service operations remain
+available but are not smoke CTest owners.
 Use CTest for combined coverage during the incremental migration; see the
 [ownership manifest](smoke-migration-manifest.md).
 

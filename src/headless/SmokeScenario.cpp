@@ -60,7 +60,6 @@ namespace
 	}
 }
 
-void runMetricsChecks();
 int runMetricsEndpoint(int argc, char** argv);
 
 size_t getHeadlessWorkingSetBytes()
@@ -175,7 +174,11 @@ int main(int argc, char** argv)
 			std::cerr << "Coordinated document checks moved to smoke-agent-tags-editor and smoke-behaviours-editor; use CTest.\n";
 			return 2;
 		}
-		if (argc > 1 && std::string(argv[1]) == "--metrics-checks") { runMetricsChecks(); return 0; }
+		if (argc > 1 && std::string(argv[1]) == "--metrics-checks")
+		{
+			std::cerr << "Metrics checks moved to smoke-metrics; use CTest.\n";
+			return 2;
+		}
 		if (argc > 1 && std::string(argv[1]).starts_with("--metrics")) return runMetricsEndpoint(argc, argv);
 		if (argc == 3 && std::string(argv[1]) == "--pause-position-repro")
 		{

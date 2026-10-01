@@ -1,22 +1,18 @@
+#include "Checks.h"
 #include "core/World.h"
-#include "core/AgentTagRegistryDocument.h"
 #include "metrics/MetricsHttpServer.h"
 #include "metrics/PrometheusTextFormatter.h"
 #include <httplib.h>
 #include <atomic>
-#include <csignal>
-#include <iostream>
-#include <thread>
-#include <stdexcept>
-#include <source_location>
 #include <limits>
+#include <source_location>
+#include <stdexcept>
+#include <thread>
 
 namespace {
 void require(bool value, std::source_location location = std::source_location::current()) { if (!value) throw std::runtime_error("Metrics check failed at line " + std::to_string(location.line())); }
-volatile std::sig_atomic_t stopping = 0;
-void stop(int) { stopping = 1; }
 }
-void runMetricsChecks() {
+void runMetricsChecks(smoke::Context const&) {
     core::MetricsRegistry exact;
     exact.add("pf_count", core::MetricType::Counter, {}, 2);
     require(metrics::PrometheusTextFormatter::format(exact) == "# HELP pf_count_total pf_count simulation metric\n# TYPE pf_count_total counter\npf_count_total 2\n");
@@ -131,31 +127,4 @@ void runMetricsChecks() {
     }
     require(series <= core::MetricsRegistry::maxSeries);
     server.stop();
-}
-int runMetricsEndpoint(int argc, char** argv) {
-    int port = 9464; bool detail = false;
-    std::string worldPath;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg(argv[i]);
-        if (arg == "--metrics-port" && i + 1 < argc) port = std::stoi(argv[++i]);
-        else if (arg == "--metrics-detail=sector,queue") detail = true;
-        else if (arg == "--metrics-world" && i + 1 < argc) worldPath = argv[++i];
-        else if (arg != "--metrics") throw std::invalid_argument("Unknown metrics option: " + arg);
-    }
-    auto ownedWorld = worldPath.empty() ? std::make_shared<core::World>("Metrics endpoint", 8, 2) : core::loadWorldDocument(worldPath);
-    auto& world = *ownedWorld;
-    if (worldPath.empty()) { world.addRoom("Room", 0, 0, 0, 8, 1); world.finishBuild(); }
-    core::SimulationMetricsCollector collector(world, detail);
-    world.setSimulationObserver(&collector);
-    metrics::MetricsHttpServer server(collector);
-    if (!server.start(port)) std::cerr << server.diagnostic() << '\n';
-    else std::cout << "Metrics: http://127.0.0.1:" << server.port() << "/metrics (Ctrl-C to stop)\n" << std::flush;
-    std::signal(SIGINT, stop); std::signal(SIGTERM, stop);
-    while (!stopping) {
-        if (!world.advanceTick()) collector.refresh();
-        world.consumeSimulationEvents();
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
-    world.setSimulationObserver(nullptr);
-    return 0;
 }
