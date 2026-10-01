@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // Tickets #16, #25 and #26: rendering order for multi-layer Worlds.
 //
 // The viewport paints the selected Layer solid and whole. The Layer directly
@@ -1768,29 +1770,30 @@ namespace
 	}
 }
 
-void runRenderOrderSmokeChecks()
+
+void render_smoke::registerDrawOrder(std::vector<smoke::Check>& checks)
 {
-	theDepotCarriesEveryClippedTransitBehindALayerOfLocations();
-	aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations();
-	aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen();
-	aTransitIsNotPaintedFromAnyOtherLayer();
-	onlyALandingLocationOpensOntoATransit();
-	aTransitOnlyOpensOntoTheLayerInFrontOfIt();
-	aLiftLandingDoorwayIsItsOwnThreshold();
-	aShuttleOpensThroughItsOwnCarriageDoors();
-	aStaircaseIsPaintedAcrossTheLocationsInView();
-	aStaircaseUsesThePlainShaftSurface();
-	aLiftCarUsesItsObjectImage();
-	theOverlayNeverLeaksSolidGeometryOrAgents();
-	theSelectedLayerPaintsItselfWhole();
-	theOverlayOutlinesTheWholeLayerBehind();
-	layerDetailsDrawTheirSurfaceBeforeApertures();
-	aClearWindowShowsItsBackgroundsOwnColour();
-	aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay();
-	aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay();
-	adjacentBackgroundsMeetWithoutASeam();
-	aSelectedBackgroundStillTakesTheSelectionHighlight();
-	aMultiBackgroundApertureCompositesEachBackgroundClipped();
-	aMultiBackgroundApertureSpansEveryBackgroundAndSkipsNone();
-	theRenderSnapshotIsDeterministic();
+	checks.push_back({ "theDepotCarriesEveryClippedTransitBehindALayerOfLocations", isolated<[](smoke::Context const&) { theDepotCarriesEveryClippedTransitBehindALayerOfLocations(); }> });
+	checks.push_back({ "aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations", isolated<[](smoke::Context const&) { aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations(); }> });
+	checks.push_back({ "aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen", isolated<[](smoke::Context const&) { aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen(); }> });
+	checks.push_back({ "aTransitIsNotPaintedFromAnyOtherLayer", isolated<[](smoke::Context const&) { aTransitIsNotPaintedFromAnyOtherLayer(); }> });
+	checks.push_back({ "onlyALandingLocationOpensOntoATransit", isolated<[](smoke::Context const&) { onlyALandingLocationOpensOntoATransit(); }> });
+	checks.push_back({ "aTransitOnlyOpensOntoTheLayerInFrontOfIt", isolated<[](smoke::Context const&) { aTransitOnlyOpensOntoTheLayerInFrontOfIt(); }> });
+	checks.push_back({ "aLiftLandingDoorwayIsItsOwnThreshold", isolated<[](smoke::Context const&) { aLiftLandingDoorwayIsItsOwnThreshold(); }> });
+	checks.push_back({ "aShuttleOpensThroughItsOwnCarriageDoors", isolated<[](smoke::Context const&) { aShuttleOpensThroughItsOwnCarriageDoors(); }> });
+	checks.push_back({ "aStaircaseIsPaintedAcrossTheLocationsInView", isolated<[](smoke::Context const&) { aStaircaseIsPaintedAcrossTheLocationsInView(); }> });
+	checks.push_back({ "aStaircaseUsesThePlainShaftSurface", isolated<[](smoke::Context const&) { aStaircaseUsesThePlainShaftSurface(); }> });
+	checks.push_back({ "aLiftCarUsesItsObjectImage", isolated<[](smoke::Context const&) { aLiftCarUsesItsObjectImage(); }> });
+	checks.push_back({ "theOverlayNeverLeaksSolidGeometryOrAgents", isolated<[](smoke::Context const&) { theOverlayNeverLeaksSolidGeometryOrAgents(); }> });
+	checks.push_back({ "theSelectedLayerPaintsItselfWhole", isolated<[](smoke::Context const&) { theSelectedLayerPaintsItselfWhole(); }> });
+	checks.push_back({ "theOverlayOutlinesTheWholeLayerBehind", isolated<[](smoke::Context const&) { theOverlayOutlinesTheWholeLayerBehind(); }> });
+	checks.push_back({ "layerDetailsDrawTheirSurfaceBeforeApertures", isolated<[](smoke::Context const&) { layerDetailsDrawTheirSurfaceBeforeApertures(); }> });
+	checks.push_back({ "aClearWindowShowsItsBackgroundsOwnColour", isolated<[](smoke::Context const&) { aClearWindowShowsItsBackgroundsOwnColour(); }> });
+	checks.push_back({ "aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay", isolated<[](smoke::Context const&) { aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay(); }> });
+	checks.push_back({ "aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay", isolated<[](smoke::Context const&) { aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay(); }> });
+	checks.push_back({ "adjacentBackgroundsMeetWithoutASeam", isolated<[](smoke::Context const&) { adjacentBackgroundsMeetWithoutASeam(); }> });
+	checks.push_back({ "aSelectedBackgroundStillTakesTheSelectionHighlight", isolated<[](smoke::Context const&) { aSelectedBackgroundStillTakesTheSelectionHighlight(); }> });
+	checks.push_back({ "aMultiBackgroundApertureCompositesEachBackgroundClipped", isolated<[](smoke::Context const&) { aMultiBackgroundApertureCompositesEachBackgroundClipped(); }> });
+	checks.push_back({ "aMultiBackgroundApertureSpansEveryBackgroundAndSkipsNone", isolated<[](smoke::Context const&) { aMultiBackgroundApertureSpansEveryBackgroundAndSkipsNone(); }> });
+	checks.push_back({ "theRenderSnapshotIsDeterministic", isolated<[](smoke::Context const&) { theRenderSnapshotIsDeterministic(); }> });
 }

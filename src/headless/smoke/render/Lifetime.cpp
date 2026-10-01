@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // World render lifetime, for ticket #199.
 //
 // renderWorld() used to publish the rendered document to a process-global
@@ -53,11 +55,7 @@ namespace
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
+	using ImGuiGuard = headless::ScopedImGuiContext;
 
 	// A viewport covering the whole fixture, unzoomed and unscrolled.
 	void setViewport()
@@ -240,11 +238,47 @@ void nestedScopesRestoreThePreviousWorld()
 	}
 }
 
-void runWorldRenderLifetimeSmokeChecks()
+
+namespace
 {
-	renderedWorldIsDestroyedOnFinalRelease();
-	earlyReturnDoesNotRetainTheWorld();
-	closedWorldUnregistersFromItsRegistry();
-	nestedApertureSeesTheRenderedWorld();
-	nestedScopesRestoreThePreviousWorld();
+	void scopedContextRestoresStateAfterFailure(smoke::Context const& context)
+	{
+		auto* previous = ImGui::GetCurrentContext();
+		gUISettings.worldZoom = 1.75f;
+		{
+			headless::ScopedImGuiContext nested;
+			require(ImGui::GetCurrentContext() != previous, "Scoped context reused its caller's context");
+			require(ImGui::GetIO().IniFilename == nullptr && ImGui::GetIO().LogFilename == nullptr,
+				"Headless context permits persistent ImGui output");
+		}
+		require(ImGui::GetCurrentContext() == previous, "Normal scope did not restore the caller's context");
+
+		bool caught = false;
+		try
+		{
+			render_smoke::isolated<[](smoke::Context const&)
+			{
+				gUISettings.worldZoom = 3.0f;
+				headless::ScopedImGuiContext nested;
+				throw std::runtime_error("expected render failure");
+			}>(context);
+		}
+		catch (std::runtime_error const&)
+		{
+			caught = true;
+		}
+		require(caught, "Render failure did not propagate to the registered-check boundary");
+		require(ImGui::GetCurrentContext() == previous, "Exceptional scope did not restore the caller's context");
+		require(gUISettings.worldZoom == 1.75f, "Exceptional render check leaked UI settings");
+	}
+}
+
+void render_smoke::registerLifetime(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({ "scopedContextRestoresStateAfterFailure", isolated<scopedContextRestoresStateAfterFailure> });
+	checks.push_back({ "renderedWorldIsDestroyedOnFinalRelease", isolated<[](smoke::Context const&) { renderedWorldIsDestroyedOnFinalRelease(); }> });
+	checks.push_back({ "earlyReturnDoesNotRetainTheWorld", isolated<[](smoke::Context const&) { earlyReturnDoesNotRetainTheWorld(); }> });
+	checks.push_back({ "closedWorldUnregistersFromItsRegistry", isolated<[](smoke::Context const&) { closedWorldUnregistersFromItsRegistry(); }> });
+	checks.push_back({ "nestedApertureSeesTheRenderedWorld", isolated<[](smoke::Context const&) { nestedApertureSeesTheRenderedWorld(); }> });
+	checks.push_back({ "nestedScopesRestoreThePreviousWorld", isolated<[](smoke::Context const&) { nestedScopesRestoreThePreviousWorld(); }> });
 }

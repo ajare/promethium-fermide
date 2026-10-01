@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // The real renderer's OpenLeft Door passes, for ticket #82.
 //
 // An OpenLeft Door's leaf slides toward decreasing world X: its right edge
@@ -70,11 +72,7 @@ namespace
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
+	using ImGuiGuard = headless::ScopedImGuiContext;
 
 	// The same transforms transformPosition() applies, recomputed against the
 	// current viewport settings so the checks can predict screen coordinates.
@@ -354,19 +352,13 @@ namespace
 	}
 }
 
-void runDoorOpenLeftRenderSmokeChecks()
+
+void render_smoke::registerDoorOpenLeft(std::vector<smoke::Check>& checks)
 {
-	// Closed: the leaf fills the whole aperture; nothing behind shows through.
-	checkSolidPass(0.0f);
-	checkWireframePass(0.0f);
-
-	// Partial: the leaf has slid left, the back Sector is revealed from the
-	// right edge to the leaf's right edge.
-	checkSolidPass(0.5f);
-	checkWireframePass(0.5f);
-
-	// Fully open: the leaf has slid off the aperture's left jamb; the back
-	// Sector's clip covers the whole aperture, and no leaf geometry remains.
-	checkFullyOpenSolidPass();
-	checkFullyOpenWireframePass();
+	checks.push_back({ "doorOpenLeftSolidPassClosed", isolated<[](smoke::Context const&) { checkSolidPass(0.0f); }> });
+	checks.push_back({ "doorOpenLeftWireframePassClosed", isolated<[](smoke::Context const&) { checkWireframePass(0.0f); }> });
+	checks.push_back({ "doorOpenLeftSolidPassHalfOpen", isolated<[](smoke::Context const&) { checkSolidPass(0.5f); }> });
+	checks.push_back({ "doorOpenLeftWireframePassHalfOpen", isolated<[](smoke::Context const&) { checkWireframePass(0.5f); }> });
+	checks.push_back({ "doorOpenLeftFullyOpenSolidPass", isolated<[](smoke::Context const&) { checkFullyOpenSolidPass(); }> });
+	checks.push_back({ "doorOpenLeftFullyOpenWireframePass", isolated<[](smoke::Context const&) { checkFullyOpenWireframePass(); }> });
 }

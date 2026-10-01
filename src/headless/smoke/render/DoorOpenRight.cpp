@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // The real renderer's OpenRight Door passes, for ticket #83.
 //
 // An OpenRight Door's leaf slides toward increasing world X: its left edge
@@ -70,11 +72,7 @@ namespace
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
+	using ImGuiGuard = headless::ScopedImGuiContext;
 
 	// The same transforms transformPosition() applies, recomputed against the
 	// current viewport settings so the checks can predict screen coordinates.
@@ -354,19 +352,13 @@ namespace
 	}
 }
 
-void runDoorOpenRightRenderSmokeChecks()
+
+void render_smoke::registerDoorOpenRight(std::vector<smoke::Check>& checks)
 {
-	// Closed: the leaf fills the whole aperture; nothing behind shows through.
-	checkSolidPass(0.0f);
-	checkWireframePass(0.0f);
-
-	// Partial: the leaf has slid right, the back Sector is revealed from the
-	// aperture's left edge to the leaf's left edge.
-	checkSolidPass(0.5f);
-	checkWireframePass(0.5f);
-
-	// Fully open: the leaf has slid off the aperture's right jamb; the back
-	// Sector's clip covers the whole aperture, and no leaf geometry remains.
-	checkFullyOpenSolidPass();
-	checkFullyOpenWireframePass();
+	checks.push_back({ "doorOpenRightSolidPassClosed", isolated<[](smoke::Context const&) { checkSolidPass(0.0f); }> });
+	checks.push_back({ "doorOpenRightWireframePassClosed", isolated<[](smoke::Context const&) { checkWireframePass(0.0f); }> });
+	checks.push_back({ "doorOpenRightSolidPassHalfOpen", isolated<[](smoke::Context const&) { checkSolidPass(0.5f); }> });
+	checks.push_back({ "doorOpenRightWireframePassHalfOpen", isolated<[](smoke::Context const&) { checkWireframePass(0.5f); }> });
+	checks.push_back({ "doorOpenRightFullyOpenSolidPass", isolated<[](smoke::Context const&) { checkFullyOpenSolidPass(); }> });
+	checks.push_back({ "doorOpenRightFullyOpenWireframePass", isolated<[](smoke::Context const&) { checkFullyOpenWireframePass(); }> });
 }

@@ -337,7 +337,19 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 
 pf_add_smoke_module(pf-smoke-render
     NAME render
-    SOURCES render/Main.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp
+    SOURCES
+        render/Main.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp
+        render/DrawOrder.cpp
+        render/DoorOpenApart.cpp
+        render/DoorOpenLeft.cpp
+        render/DoorOpenRight.cpp
+        render/Facades.cpp
+        render/FacadeDrawOrder.cpp
+        render/ViewportCulling.cpp
+        render/ViewportDragScroll.cpp
+        render/ViewportZoom.cpp
+        render/Lifetime.cpp
+        render/DoorButtons.cpp
     LIBRARIES pf-headless-render-support
     LABELS render
     TIMEOUT 30

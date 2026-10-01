@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -24,7 +26,7 @@ namespace
 	}
 }
 
-void runViewportZoomSmokeChecks()
+void viewportZoom()
 {
 	auto const previousSettings = gUISettings;
 
@@ -74,4 +76,9 @@ void runViewportZoomSmokeChecks()
 	require(std::find(visible.begin(), visible.end(), world->getSector(ground))
 		== visible.end(), "2x culling retained a Sector below the scaled viewport");
 	gUISettings = previousSettings;
+}
+
+void render_smoke::registerViewportZoom(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({ "viewportZoom", isolated<[](smoke::Context const&) { viewportZoom(); }> });
 }

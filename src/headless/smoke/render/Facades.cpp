@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // Facade flat-colour rendering, for ticket #46.
 //
 // A Facade renders as a solid colour exactly like a Background (ADR 0003).
@@ -412,12 +414,13 @@ namespace
 	}
 }
 
-void runFacadeRenderSmokeChecks()
+
+void render_smoke::registerFacades(std::vector<smoke::Check>& checks)
 {
-	flatColourRuleNamesFacadeAndBackgroundOnly();
-	solidPassFillsTheFacadeWithItsOwnColour();
-	wireframePassOutlinesTheFacadeNeverFills();
-	facadeFillIsUnchangedWhenLightsAreOff();
-	aWindowIntoAFacadeShowsFlatColourObjectsAndAgents();
-	aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground();
+	checks.push_back({ "flatColourRuleNamesFacadeAndBackgroundOnly", isolated<[](smoke::Context const&) { flatColourRuleNamesFacadeAndBackgroundOnly(); }> });
+	checks.push_back({ "solidPassFillsTheFacadeWithItsOwnColour", isolated<[](smoke::Context const&) { solidPassFillsTheFacadeWithItsOwnColour(); }> });
+	checks.push_back({ "wireframePassOutlinesTheFacadeNeverFills", isolated<[](smoke::Context const&) { wireframePassOutlinesTheFacadeNeverFills(); }> });
+	checks.push_back({ "facadeFillIsUnchangedWhenLightsAreOff", isolated<[](smoke::Context const&) { facadeFillIsUnchangedWhenLightsAreOff(); }> });
+	checks.push_back({ "aWindowIntoAFacadeShowsFlatColourObjectsAndAgents", isolated<[](smoke::Context const&) { aWindowIntoAFacadeShowsFlatColourObjectsAndAgents(); }> });
+	checks.push_back({ "aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground", isolated<[](smoke::Context const&) { aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground(); }> });
 }

@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // Vertical viewport culling, for ticket #58.
 //
 // The bounds query that feeds every render pass converted its upper Y bound
@@ -76,11 +78,7 @@ namespace
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
+	using ImGuiGuard = headless::ScopedImGuiContext;
 
 	// A three-level-tall viewport at the origin, scrolled vertically by
 	// scrollY pixels. The visible world band is [scrollY, scrollY + height].
@@ -399,16 +397,15 @@ void renderPassesDrawOnlyTheSelectionWhole()
 		"Invalid selection generated render passes");
 }
 
-void runViewportCullingSmokeChecks()
+
+void render_smoke::registerViewportCulling(std::vector<smoke::Check>& checks)
 {
-	auto const savedSettings = gUISettings;
-	emptyCellsDoNotRevealDeeperLayers();
-	nestedWindowsKeepTheirScissors();
-	nestedOpenDoorsRevealTheBackLayer();
-	renderPassesDrawOnlyTheSelectionWhole();
-	subLevelHeightViewportExcludesLevelTwo();
-	verticalOffsetTracksTheVisibleOrigin();
-	fullyScrolledTopLevelIsVisible();
-	renderPassPaintsScrolledInSectorOnly();
-	gUISettings = savedSettings;
+	checks.push_back({ "emptyCellsDoNotRevealDeeperLayers", isolated<[](smoke::Context const&) { emptyCellsDoNotRevealDeeperLayers(); }> });
+	checks.push_back({ "nestedWindowsKeepTheirScissors", isolated<[](smoke::Context const&) { nestedWindowsKeepTheirScissors(); }> });
+	checks.push_back({ "nestedOpenDoorsRevealTheBackLayer", isolated<[](smoke::Context const&) { nestedOpenDoorsRevealTheBackLayer(); }> });
+	checks.push_back({ "renderPassesDrawOnlyTheSelectionWhole", isolated<[](smoke::Context const&) { renderPassesDrawOnlyTheSelectionWhole(); }> });
+	checks.push_back({ "subLevelHeightViewportExcludesLevelTwo", isolated<[](smoke::Context const&) { subLevelHeightViewportExcludesLevelTwo(); }> });
+	checks.push_back({ "verticalOffsetTracksTheVisibleOrigin", isolated<[](smoke::Context const&) { verticalOffsetTracksTheVisibleOrigin(); }> });
+	checks.push_back({ "fullyScrolledTopLevelIsVisible", isolated<[](smoke::Context const&) { fullyScrolledTopLevelIsVisible(); }> });
+	checks.push_back({ "renderPassPaintsScrolledInSectorOnly", isolated<[](smoke::Context const&) { renderPassPaintsScrolledInSectorOnly(); }> });
 }

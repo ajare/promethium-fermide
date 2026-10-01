@@ -57,26 +57,16 @@ void runLiftBoardingRepro(char const* filename);
 void runPausePositionRepro(char const* filename);
 void runPausePositionSmokeChecks();
 void runMarkerIdentitySmokeChecks();
-void runRenderOrderSmokeChecks();
-void runDoorOpenApartRenderSmokeChecks();
-void runDoorOpenLeftRenderSmokeChecks();
-void runDoorOpenRightRenderSmokeChecks();
 void runBackgroundSelectionPanelSmokeChecks();
 void runDoorPanelScopeSmokeChecks();
 void runDoorTwoSidedButtonSmokeChecks();
 void runDocumentHistorySmokeChecks();
 void runNonFiniteTimingSmokeChecks();
-void runFacadeRenderSmokeChecks();
-void runFacadeDrawOrderSmokeChecks();
 void runFacadeEditorSmokeChecks();
 void runPaletteTraySmokeChecks();
-void runViewportCullingSmokeChecks();
-void runViewportDragScrollSmokeChecks();
-void runViewportZoomSmokeChecks();
 void writeRoutingScaleWorld(std::filesystem::path const& output);
 void runRestorationBenchmark(std::filesystem::path const& input, unsigned cycles);
 void runWorldTeardownSmokeChecks();
-void runWorldRenderLifetimeSmokeChecks();
 void runGraphicsStartupSmokeChecks();
 
 static_assert(!std::is_convertible_v<core::DeviceOperationId, core::TraversalResourceId>);
@@ -4004,28 +3994,8 @@ int main(int argc, char** argv)
 	if (argc > 1 && (std::string(argv[1]) == "--viewport-checks"
 		|| std::string(argv[1]) == "--render-checks"))
 	{
-		try
-		{
-			runViewportCullingSmokeChecks();
-			if (std::string(argv[1]) == "--render-checks")
-			{
-				runRenderOrderSmokeChecks();
-				runDoorOpenApartRenderSmokeChecks();
-				runDoorOpenLeftRenderSmokeChecks();
-				runDoorOpenRightRenderSmokeChecks();
-				runFacadeRenderSmokeChecks();
-				runFacadeDrawOrderSmokeChecks();
-
-				runViewportZoomSmokeChecks();
-				runWorldRenderLifetimeSmokeChecks();
-			}
-		}
-		catch (std::exception const& error)
-		{
-			std::cerr << error.what() << '\n';
-			return 1;
-		}
-		return 0;
+		std::cerr << "Render and viewport checks moved to smoke-render; use CTest.\n";
+		return 2;
 	}
 	bool const graphicsStartupOnly = argc > 1
 		&& std::string(argv[1]) == "--graphics-startup-smoke";
@@ -4129,24 +4099,16 @@ int main(int argc, char** argv)
 		runSerializationSmokeChecks();
 		runPausePositionSmokeChecks();
 		runMarkerIdentitySmokeChecks();
-		runRenderOrderSmokeChecks();
 
-		runDoorOpenApartRenderSmokeChecks();
-		runDoorOpenLeftRenderSmokeChecks();
-		runDoorOpenRightRenderSmokeChecks();
 		runBackgroundSelectionPanelSmokeChecks();
 		runDoorPanelScopeSmokeChecks();
 		runDoorTwoSidedButtonSmokeChecks();
 		runDocumentHistorySmokeChecks();
 		runNonFiniteTimingSmokeChecks();
-		runFacadeRenderSmokeChecks();
-		runFacadeDrawOrderSmokeChecks();
+
 		runFacadeEditorSmokeChecks();
 		runPaletteTraySmokeChecks();
-		runViewportCullingSmokeChecks();
-		runViewportDragScrollSmokeChecks();
-		runViewportZoomSmokeChecks();
-		runWorldRenderLifetimeSmokeChecks();
+
 		runWorldTeardownSmokeChecks();
 
 		auto const deepJourney = runThreeLayerTransitJourney();

@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // Viewport edge-scrolling checks. These exercise the pure geometry used by
 // World-content drags without requiring a graphical window or synthetic input.
 
@@ -70,10 +72,11 @@ namespace
 	}
 }
 
-void runViewportDragScrollSmokeChecks()
+
+void render_smoke::registerViewportDragScroll(std::vector<smoke::Check>& checks)
 {
-	theMiddleOfTheCanvasDoesNotScroll();
-	approachingEachBorderScrollsInTheExpectedDirection();
-	scrollingAcceleratesTowardTheBorderAndStaysBoundedOutside();
-	anOutsidePointerContinuesAtTheNearestCanvasEdge();
+	checks.push_back({ "theMiddleOfTheCanvasDoesNotScroll", isolated<[](smoke::Context const&) { theMiddleOfTheCanvasDoesNotScroll(); }> });
+	checks.push_back({ "approachingEachBorderScrollsInTheExpectedDirection", isolated<[](smoke::Context const&) { approachingEachBorderScrollsInTheExpectedDirection(); }> });
+	checks.push_back({ "scrollingAcceleratesTowardTheBorderAndStaysBoundedOutside", isolated<[](smoke::Context const&) { scrollingAcceleratesTowardTheBorderAndStaysBoundedOutside(); }> });
+	checks.push_back({ "anOutsidePointerContinuesAtTheNearestCanvasEdge", isolated<[](smoke::Context const&) { anOutsidePointerContinuesAtTheNearestCanvasEdge(); }> });
 }

@@ -7,11 +7,11 @@ properties (#286), Agent tags and coordinated documents (#287), and Agent
 behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
 Access permissions and Interaction points (#290), Route planning and movement (#291),
 Transit/transport runtime checks (#292), and pathfinding scale and perceived
-route costs (#293).
+route costs (#293), and the complete Render module (#294).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
-runs migrated checks, `--render-checks` no longer runs migrated walls or core
-Window checks, and `--serialization-checks` runs only the remaining serialization
+runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
+with migration guidance, and `--serialization-checks` runs only the remaining serialization
 checks. Use CTest for combined coverage.
 
 ```sh
@@ -616,6 +616,60 @@ linked by `pf-smoke-world`. `smoke-world-contract` runs the complete module and
 every named selection from an external empty working directory and verifies that
 no working-directory files are created. Both tests are headless and require no
 ImGui context, renderer, platform backend, graphics window, or dialog support.
+
+## Complete Render module (#294)
+
+```sh
+cmake --build build-linux --target pf-smoke-render --parallel
+build-linux/bin/x64/Release/pf-smoke-render --list
+build-linux/bin/x64/Release/pf-smoke-render --check nestedWindowsKeepTheirScissors
+ctest --test-dir build-linux -R '^smoke-(render|render-contract|world|simulation)$' -j 4 --output-on-failure
+```
+
+Render owns 78 stable selectors: existing Wall, Agent Path and Shuttle checks,
+plus draw order, Window/Background composition, Door opening styles and back-side
+Button visibility, Facades, viewport culling/drag/zoom, and render lifetime.
+Named scenarios and Door width/open-state variants are individually selectable.
+Core two-sided Door Button checks remain legacy-owned; standalone Render-slot and
+tileset executables and mixed Editor checks are intentionally unchanged.
+
+All registrations reuse `pf-headless-render-support`, `pf-render` and CPU ImGui.
+The module-local boundary supplies clean UI settings and selection, clears tileset
+fixtures, and scopes an ini/log-disabled ImGui context for every check. Local
+contexts use the shared compiled guard rather than raw Create/Destroy calls.
+Cleanup restores caller settings, selection and context even on failure; a new
+lifetime regression exercises nested normal and exceptional unwinding. Render
+links no graphics backend, platform window, native dialog, HTTP or Editor library.
+Production rendering and simulation behavior are unchanged.
+
+The legacy aggregate no longer compiles or calls these checks. Its retired
+`--render-checks` and `--viewport-checks` selections return 2 with migration
+guidance; compatibility subprocess dispatch remains a separate ticket. CTest owns
+Render through `smoke-render` (30-second timeout). The contract tests exact listing,
+all 78 selections, misuse, full execution, and eight concurrent invocations from
+an external empty directory, with DISPLAY/WAYLAND_DISPLAY unset and no output files.
+
+### #294 Linux validation
+
+- GUI-enabled Release default build succeeds. All 85 CTest entries pass
+  sequentially (one optional vendored GUI test skips without a display); the 84
+  non-aggregate entries also pass with `-j 6`. The legacy aggregate runs separately
+  from parallel serialization to avoid their pre-existing fixed-path overlap.
+- Clean GUI-disabled Release builds only `pf-smoke-render` and passes direct and
+  CTest execution. Actual objects and link command contain only Render checks,
+  module state, smoke/headless support, production rendering/core, YAML/Lua and
+  CPU ImGui: no legacy, Editor, HTTP, graphics backend or other module checks.
+- Clean GUI-disabled Debug with `PF_HIGH_ANALYSIS=ON` builds Render, Simulation,
+  World and legacy headless. Render and its full CLI/concurrency contract pass
+  concurrently with Simulation, World and its contract (five tests). Legacy
+  aggregate and serialization also pass sequentially. Existing elevated-analysis
+  warnings remain non-fatal.
+- Mechanical comparison retains all 366 original assertion call sites across
+  the ten moved sources and split two-sided Button source, including core checks
+  left in their original owner. Direct Render reports `pass=78 fail=0 skip=0`;
+  observed runtime is about 0.05 seconds Release / 0.13 seconds Debug.
+- `git diff --check` passes; no repository formatter is configured. Project checks
+  are CPU-only; no Windows execution is claimed (tracked in #279).
 
 ## Render pilot (#281)
 

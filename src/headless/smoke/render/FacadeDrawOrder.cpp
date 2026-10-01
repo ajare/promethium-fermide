@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // The real renderSector() draw-call order for a Facade hosting thresholds,
 // for ticket #49.
 //
@@ -109,11 +111,7 @@ namespace
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
+	using ImGuiGuard = headless::ScopedImGuiContext;
 
 	// A two-Layer scene: a Room on Layer 1, a Facade directly in front of it
 	// on Layer 0 (Layers are numbered front-to-back), carrying one Window and
@@ -261,9 +259,10 @@ void wireframePassOutlinesFacadeBeforeThresholds()
 	});
 }
 
-void runFacadeDrawOrderSmokeChecks()
+
+void render_smoke::registerFacadeDrawOrder(std::vector<smoke::Check>& checks)
 {
-	facadeFillPrecedesThresholdApertures();
-	facadeFillCoversTheWholeFacadeSurface();
-	wireframePassOutlinesFacadeBeforeThresholds();
+	checks.push_back({ "facadeFillPrecedesThresholdApertures", isolated<[](smoke::Context const&) { facadeFillPrecedesThresholdApertures(); }> });
+	checks.push_back({ "facadeFillCoversTheWholeFacadeSurface", isolated<[](smoke::Context const&) { facadeFillCoversTheWholeFacadeSurface(); }> });
+	checks.push_back({ "wireframePassOutlinesFacadeBeforeThresholds", isolated<[](smoke::Context const&) { wireframePassOutlinesFacadeBeforeThresholds(); }> });
 }

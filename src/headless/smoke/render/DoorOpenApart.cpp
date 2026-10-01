@@ -1,3 +1,5 @@
+#include "Checks.h"
+#include "ImGuiContext.h"
 // The real renderer's OpenApart Door passes, for ticket #84.
 //
 // An OpenApart Door is one logical Door that renders as two equal leaves split at
@@ -72,11 +74,7 @@ namespace
 
 	// ImGui without a renderer: contexts are CPU-side only, nothing reaches a
 	// window or the GPU.
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
+	using ImGuiGuard = headless::ScopedImGuiContext;
 
 	// The same transforms transformPosition() applies, recomputed against the
 	// current viewport settings so the checks can predict screen coordinates.
@@ -472,27 +470,17 @@ namespace
 	}
 }
 
-void runDoorOpenApartRenderSmokeChecks()
+
+void render_smoke::registerDoorOpenApart(std::vector<smoke::Check>& checks)
 {
-	// Closed: the leaves meet at the midpoint as one visible centre seam; the
-	// exposed gap is zero-width.
-	checkSolidPass(2, 0.0f);
-	checkWireframePass(2, 0.0f);
-
-	// Partial: the leaves have separated, keeping their inner edges visible, and
-	// the centred gap has grown to half the aperture.
-	checkSolidPass(2, 0.5f);
-	checkWireframePass(2, 0.5f);
-
-	// Fully open: both leaves have slid out of the aperture, so no leaf geometry
-	// or seam remains, and the gap is the whole aperture.
-	checkSolidPass(2, 1.0f);
-	checkWireframePass(2, 1.0f);
-
-	// A one-cell Door splits at a fractional midpoint, so OpenApart needs no
-	// minimum authored width.
-	checkSolidPass(1, 0.0f);
-	checkSolidPass(1, 0.5f);
-	checkSolidPass(1, 1.0f);
-	checkWireframePass(1, 0.5f);
+	checks.push_back({ "doorOpenApartSolidPassWidth2Closed", isolated<[](smoke::Context const&) { checkSolidPass(2, 0.0f); }> });
+	checks.push_back({ "doorOpenApartWireframePassWidth2Closed", isolated<[](smoke::Context const&) { checkWireframePass(2, 0.0f); }> });
+	checks.push_back({ "doorOpenApartSolidPassWidth2HalfOpen", isolated<[](smoke::Context const&) { checkSolidPass(2, 0.5f); }> });
+	checks.push_back({ "doorOpenApartWireframePassWidth2HalfOpen", isolated<[](smoke::Context const&) { checkWireframePass(2, 0.5f); }> });
+	checks.push_back({ "doorOpenApartSolidPassWidth2FullyOpen", isolated<[](smoke::Context const&) { checkSolidPass(2, 1.0f); }> });
+	checks.push_back({ "doorOpenApartWireframePassWidth2FullyOpen", isolated<[](smoke::Context const&) { checkWireframePass(2, 1.0f); }> });
+	checks.push_back({ "doorOpenApartSolidPassWidth1Closed", isolated<[](smoke::Context const&) { checkSolidPass(1, 0.0f); }> });
+	checks.push_back({ "doorOpenApartSolidPassWidth1HalfOpen", isolated<[](smoke::Context const&) { checkSolidPass(1, 0.5f); }> });
+	checks.push_back({ "doorOpenApartSolidPassWidth1FullyOpen", isolated<[](smoke::Context const&) { checkSolidPass(1, 1.0f); }> });
+	checks.push_back({ "doorOpenApartWireframePassWidth1HalfOpen", isolated<[](smoke::Context const&) { checkWireframePass(1, 0.5f); }> });
 }

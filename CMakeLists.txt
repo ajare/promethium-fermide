@@ -379,28 +379,18 @@ add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/DocumentHistorySmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
-    src/headless/DoorOpenApartRenderSmokeChecks.cpp
-    src/headless/DoorOpenLeftRenderSmokeChecks.cpp
-    src/headless/DoorOpenRightRenderSmokeChecks.cpp
     src/headless/FacadeEditorSmokeChecks.cpp
-    src/headless/FacadeRenderSmokeChecks.cpp
-    src/headless/FacadeDrawOrderSmokeChecks.cpp
     src/headless/GraphicsStartupSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
     src/headless/PaletteTraySmokeChecks.cpp
     src/headless/RoutingTools.cpp
     src/headless/WorldTeardownSmokeChecks.cpp
-    src/headless/RenderOrderSmokeChecks.cpp
     src/headless/SerializationSmokeChecks.cpp
     src/headless/PausePositionSmokeChecks.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
     src/headless/MetricsChecks.cpp
-    src/headless/ViewportCullingSmokeChecks.cpp
-    src/headless/ViewportDragScrollSmokeChecks.cpp
-    src/headless/ViewportZoomSmokeChecks.cpp
-    src/headless/WorldRenderLifetimeSmokeChecks.cpp
 )
 target_compile_features(prometheum-fermide-headless PRIVATE cxx_std_20)
 target_include_directories(prometheum-fermide-headless PRIVATE "${PF_INCLUDE_DIR}/imgui")
@@ -530,8 +520,6 @@ if(BUILD_TESTING)
     add_test(NAME serialization-checks COMMAND prometheum-fermide-headless --serialization-checks)
     add_test(NAME restoration-checks COMMAND prometheum-fermide-headless
         --restoration-benchmark "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/door-test-1.world.yaml")
-    add_test(NAME viewport-checks COMMAND prometheum-fermide-headless --viewport-checks)
-    add_test(NAME render-checks COMMAND prometheum-fermide-headless --render-checks)
     # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
     add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 

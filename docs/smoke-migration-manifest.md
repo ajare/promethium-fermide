@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Transports migration #292 (parent #278). Each
+Snapshot after the Render migration #294 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -14,14 +14,14 @@ is `simulation/observation`; its old path was
 or invoked by the legacy aggregate. CTest executes it only as `smoke-simulation`.
 #281 migrates `WallRenderSmokeChecks.cpp` to `smoke/render/Walls.cpp`, registered
 as `render/walls`. Neither the legacy aggregate nor `--render-checks` invokes
-it anymore; its domain CTest owner is `smoke-render`. Agent Path rendering moves in #291; other Render checks
-remain legacy-owned for follow-up migration.
+it anymore; its domain CTest owner is `smoke-render`. Agent Path rendering moved
+in #291, Shuttle rendering in #292, and remaining Render checks in #294.
 
 #284 migrates the core-only Layer, Sector, Background, Window, Facade,
 zero-sized Location, and threshold-layer topology groups to `smoke/world`, with
 stable registrations under `smoke-world`. The editor-dependent Background and
-Facade panel checks and renderer-dependent Facade checks remain legacy-owned for
-their dedicated migrations. The legacy aggregate and `--render-checks` no longer
+Facade panel checks remain legacy-owned for their dedicated migration;
+renderer-dependent Facade checks migrated in #294. The legacy aggregate and `--render-checks` no longer
 invoke the migrated core Window checks.
 
 #285 migrates all eight Agent activation/Agent group sources into `smoke/agent`,
@@ -142,6 +142,21 @@ follow-up work. Other overlapping legacy CTest selections are unchanged.
 
 Paths in the table are relative to `src/headless/`.
 
+#294 completes Render with 78 stable registrations. Ten legacy sources move to
+`smoke/render`: draw order (including Window/Background composition), three Door
+opening styles, Facade rendering/order, viewport culling/drag/zoom, and render
+lifetime. Named scenarios and Door width/open-state variants are individually
+selectable; the four existing Wall, Agent Path and Shuttle selectors stay stable.
+A new lifetime regression verifies scoped context restoration on success/failure.
+
+Only `backButtonRendersAsOutlineOnly` moves from the mixed two-sided Door Button
+source; core authoring, persistence and traversal checks remain legacy-owned.
+All 366 original assertion call sites across affected sources remain in their
+respective owners. Legacy Render/viewport declarations, calls and CTest entries
+are removed; those CLI switches return 2 with migration guidance pending the
+separate compatibility-dispatch ticket. Existing standalone Render-slot/tileset
+executables and Editor-owned checks retain their owners.
+
 | Check source | Ownership | Target |
 | --- | --- | --- |
 | `smoke/permissions/Access.cpp` | module-owned | `pf-smoke-permissions` |
@@ -209,12 +224,13 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/world/BackgroundSector.cpp` | module-owned | `pf-smoke-world` |
 | `BackgroundSelectionPanelSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DocumentHistorySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `DoorOpenApartRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `DoorOpenLeftRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `DoorOpenRightRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/DoorOpenApart.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DoorOpenLeft.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DoorOpenRight.cpp` | module-owned | `pf-smoke-render` |
 | `DoorPanelScopeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/permissions/Preflight.cpp` | module-owned | `pf-smoke-permissions` |
-| `DoorTwoSidedButtonSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `DoorTwoSidedButtonSmokeChecks.cpp` (core only) | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/DoorButtons.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/world/Layers.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/transports/Escalators.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/transports/EscalatorsEditor.cpp` | module-owned | `pf-smoke-transports-editor` |
@@ -223,9 +239,9 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/transports/PlatformLifts.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/transports/Lifts.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/transports/Shuttles.cpp` | module-owned | `pf-smoke-transports` |
-| `FacadeDrawOrderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/FacadeDrawOrder.cpp` | module-owned | `pf-smoke-render` |
 | `FacadeEditorSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `FacadeRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/Facades.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/world/Facades.cpp` | module-owned | `pf-smoke-world` |
 | `GraphicsStartupSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/permissions/InteractionMobility.cpp` | module-owned | `pf-smoke-permissions` |
@@ -246,7 +262,7 @@ Paths in the table are relative to `src/headless/`.
 | `PausePositionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/permissions/Adherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/AdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
-| `RenderOrderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/DrawOrder.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/routing/RestoredPaths.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/Planning.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/PlanningEditor.cpp` | module-owned | `pf-smoke-routing-editor` |
@@ -265,14 +281,14 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/routing/ThresholdRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/permissions/LandingAdherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/LandingAdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
-| `ViewportCullingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `ViewportDragScrollSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `ViewportZoomSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/ViewportCulling.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/ViewportDragScroll.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/ViewportZoom.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/Walls.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/world/WindowIntoBackground.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/WindowLayers.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/WindowMultiBackground.cpp` | module-owned | `pf-smoke-world` |
-| `WorldRenderLifetimeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/render/Lifetime.cpp` | module-owned | `pf-smoke-render` |
 | `WorldRenderSlotChecks.cpp` | module-owned (retained standalone) | `pf-world-render-slot-checks` |
 | `WorldTeardownSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
@@ -340,6 +356,8 @@ Neither legacy entry point executes the migrated checks.
 - `smoke/tests/PersistenceContract.cmake`: Persistence CLI, external working
   directory, and concurrent invocation contract (`harness;core`, not smoke).
 - `smoke/render/Main.cpp`: explicit Render registry, not extra coverage.
+- `smoke/render/State.cpp` and `Checks.h`: module-local per-registration UI,
+  selection, tileset and CPU ImGui isolation, not extra domain coverage.
 - `smoke/tests/RenderContract.cmake`: public Render CLI contract and no-output-file
   verification, executed by `smoke-render-contract` (harness, not smoke coverage).
 - `smoke/simulation/Main.cpp`: explicit Simulation registry, not extra coverage.

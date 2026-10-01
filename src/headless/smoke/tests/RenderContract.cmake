@@ -24,16 +24,125 @@ function(invoke status expected)
     endif()
 endfunction()
 
-invoke(0 "^walls\nagentPaths\ncarriageDoors\ncarriageImages\n$" --list)
-invoke(0 "^PASS render walls\nPASS render agentPaths\nPASS render carriageDoors\nPASS render carriageImages\nSUMMARY render pass=4 fail=0 skip=0\n$")
-foreach(name IN ITEMS walls agentPaths carriageDoors carriageImages)
+# No display server is available to these CPU-side checks.
+unset(ENV{DISPLAY})
+unset(ENV{WAYLAND_DISPLAY})
+set(names
+    walls
+    agentPaths
+    carriageDoors
+    carriageImages
+    theDepotCarriesEveryClippedTransitBehindALayerOfLocations
+    aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
+    aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen
+    aTransitIsNotPaintedFromAnyOtherLayer
+    onlyALandingLocationOpensOntoATransit
+    aTransitOnlyOpensOntoTheLayerInFrontOfIt
+    aLiftLandingDoorwayIsItsOwnThreshold
+    aShuttleOpensThroughItsOwnCarriageDoors
+    aStaircaseIsPaintedAcrossTheLocationsInView
+    aStaircaseUsesThePlainShaftSurface
+    aLiftCarUsesItsObjectImage
+    theOverlayNeverLeaksSolidGeometryOrAgents
+    theSelectedLayerPaintsItselfWhole
+    theOverlayOutlinesTheWholeLayerBehind
+    layerDetailsDrawTheirSurfaceBeforeApertures
+    aClearWindowShowsItsBackgroundsOwnColour
+    aBackgroundFillsSolidAndIsOutlinedOnlyByTheOverlay
+    aBackgroundBehindTheSelectionIsOutlinedWholeByTheOverlay
+    adjacentBackgroundsMeetWithoutASeam
+    aSelectedBackgroundStillTakesTheSelectionHighlight
+    aMultiBackgroundApertureCompositesEachBackgroundClipped
+    aMultiBackgroundApertureSpansEveryBackgroundAndSkipsNone
+    theRenderSnapshotIsDeterministic
+    doorOpenApartSolidPassWidth2Closed
+    doorOpenApartWireframePassWidth2Closed
+    doorOpenApartSolidPassWidth2HalfOpen
+    doorOpenApartWireframePassWidth2HalfOpen
+    doorOpenApartSolidPassWidth2FullyOpen
+    doorOpenApartWireframePassWidth2FullyOpen
+    doorOpenApartSolidPassWidth1Closed
+    doorOpenApartSolidPassWidth1HalfOpen
+    doorOpenApartSolidPassWidth1FullyOpen
+    doorOpenApartWireframePassWidth1HalfOpen
+    doorOpenLeftSolidPassClosed
+    doorOpenLeftWireframePassClosed
+    doorOpenLeftSolidPassHalfOpen
+    doorOpenLeftWireframePassHalfOpen
+    doorOpenLeftFullyOpenSolidPass
+    doorOpenLeftFullyOpenWireframePass
+    doorOpenRightSolidPassClosed
+    doorOpenRightWireframePassClosed
+    doorOpenRightSolidPassHalfOpen
+    doorOpenRightWireframePassHalfOpen
+    doorOpenRightFullyOpenSolidPass
+    doorOpenRightFullyOpenWireframePass
+    flatColourRuleNamesFacadeAndBackgroundOnly
+    solidPassFillsTheFacadeWithItsOwnColour
+    wireframePassOutlinesTheFacadeNeverFills
+    facadeFillIsUnchangedWhenLightsAreOff
+    aWindowIntoAFacadeShowsFlatColourObjectsAndAgents
+    aWindowCannotLookHalfIntoAFacadeAndHalfIntoABackground
+    facadeFillPrecedesThresholdApertures
+    facadeFillCoversTheWholeFacadeSurface
+    wireframePassOutlinesFacadeBeforeThresholds
+    emptyCellsDoNotRevealDeeperLayers
+    nestedWindowsKeepTheirScissors
+    nestedOpenDoorsRevealTheBackLayer
+    renderPassesDrawOnlyTheSelectionWhole
+    subLevelHeightViewportExcludesLevelTwo
+    verticalOffsetTracksTheVisibleOrigin
+    fullyScrolledTopLevelIsVisible
+    renderPassPaintsScrolledInSectorOnly
+    theMiddleOfTheCanvasDoesNotScroll
+    approachingEachBorderScrollsInTheExpectedDirection
+    scrollingAcceleratesTowardTheBorderAndStaysBoundedOutside
+    anOutsidePointerContinuesAtTheNearestCanvasEdge
+    viewportZoom
+    scopedContextRestoresStateAfterFailure
+    renderedWorldIsDestroyedOnFinalRelease
+    earlyReturnDoesNotRetainTheWorld
+    closedWorldUnregistersFromItsRegistry
+    nestedApertureSeesTheRenderedWorld
+    nestedScopesRestoreThePreviousWorld
+    backButtonRendersAsOutlineOnly
+)
+list(LENGTH names count)
+string(JOIN "\n" listing ${names})
+invoke(0 "^${listing}\n$" --list)
+set(expected "^")
+foreach(name IN LISTS names)
+    string(APPEND expected "PASS render ${name}\n")
     invoke(0 "^PASS render ${name}\nSUMMARY render pass=1 fail=0 skip=0\n$" --check "${name}")
 endforeach()
+string(APPEND expected "SUMMARY render pass=${count} fail=0 skip=0\n$")
+invoke(0 "${expected}")
 foreach(arguments IN ITEMS "--bogus" "--check" "--check;absent" "--list;extra" "--check;walls;extra")
     invoke(2 "" ${arguments})
 endforeach()
 file(GLOB artifacts "${work}/*" "${work}/.*")
 if(artifacts)
     message(FATAL_ERROR "CPU-only rendering wrote working-directory files: ${artifacts}")
+endif()
+# A private CTest project launches concurrent independent processes portably.
+# They all share a cwd and OS temp parent; only their Context roots differ.
+set(project "${work}/concurrent")
+file(MAKE_DIRECTORY "${project}")
+file(WRITE "${project}/CTestTestfile.cmake" "")
+foreach(index RANGE 1 8)
+    file(APPEND "${project}/CTestTestfile.cmake"
+        "add_test(render-${index} \"${RENDER}\")\n"
+        "set_tests_properties(render-${index} PROPERTIES TIMEOUT 15 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY render pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL render\")\n")
+endforeach()
+find_program(ctest NAMES ctest REQUIRED)
+execute_process(COMMAND "${ctest}" --test-dir "${project}" -j 8 --output-on-failure
+    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 30)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Concurrent Render invocations failed: ${result}\n${out}\n${err}")
+endif()
+file(REMOVE_RECURSE "${project}")
+file(GLOB artifacts "${work}/*" "${work}/.*")
+if(artifacts)
+    message(FATAL_ERROR "Concurrent Render wrote working-directory files: ${artifacts}")
 endif()
 file(REMOVE_RECURSE "${work}")
