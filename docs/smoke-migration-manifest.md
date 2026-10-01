@@ -112,7 +112,8 @@ individual Routing registrations (71 core registrations in total). Context resol
 all checked-in World fixtures; no source-location or working-directory lookup
 remains. Original workloads, reference oracles, Path digests, and all 241 assertion
 call sites remain in their new owners, including explicit tool assertions.
-`RoutingTools.cpp` retains only the restoration benchmark and World export command.
+The restoration benchmark and World export command now have standalone tool
+entry points under `src/headless/tools/` (#303).
 The population workload/assertions compile once in `pf-routing-population-support`,
 shared by Routing and the export tool; smoke does not export, sample memory, or
 report benchmark timings. Legacy aggregate calls and suite declarations are removed;
@@ -481,7 +482,7 @@ The former `restoration-checks` CTest workload (five cycles) is now
 `smoke/persistence/Restoration.cpp`. Its nine assertions compile once in
 `support/Restoration.cpp`, retaining public document-load/reset, registry,
 snapshot, serialization, and weak-reference seams. The explicit benchmark in
-`RoutingTools.cpp` reuses that workload with optional timing/memory output; it is
+`tools/RestorationBenchmark.cpp` reuses that workload with optional timing/memory output; it is
 not separately registered as smoke coverage. The `serialization-checks` and
 `restoration-checks` CTest entries are removed, and `--serialization-checks`
 returns 2 with migration guidance rather than silently succeeding.
@@ -641,9 +642,9 @@ aggregate source, call, and `metrics-smoke` CTest entry are removed.
 `smoke-metrics-contract` verifies listing, focused selection, misuse, external
 working-directory cleanliness, and eight concurrent runs using ephemeral
 loopback ports. CTest owns direct execution through `smoke-metrics`, labelled
-`smoke;metrics;http`, with a 30-second timeout. The retained metrics service
-implementation is isolated in `MetricsService.cpp` pending its dedicated tool
-extraction in #303; it is not a smoke registration.
+`smoke;metrics;http`, with a 30-second timeout. The metrics service now lives in
+`tools/MetricsServer.cpp`, built independently as `pf-metrics-server` (#303);
+it is not a smoke registration.
 
 ## Graphics Startup smoke module (#301)
 
@@ -716,12 +717,14 @@ with migration guidance.
   only smoke registrations; the legacy executable reuses them only for the
   explicit `--pause-position-repro` diagnostic pending #304.
 - `LiftBoardingSmokeChecks.cpp` owns only the legacy Lift reproduction commands;
-  `RoutingTools.cpp` owns the restoration benchmark and routing-scale World
-  generator; `MetricsService.cpp` owns only metrics serving.
-  These remain legacy-owned until their dedicated tool extraction tickets.
+  these remain legacy-owned pending #304.
+- `tools/RestorationBenchmark.cpp`, `tools/GenerateRoutingWorld.cpp`, and
+  `tools/MetricsServer.cpp` own independent executables (#303), with no smoke
+  check linkage. Legacy selections return 2 with migration guidance.
+  `headless-tools-contract` verifies their [command contracts](headless-tools.md).
 - `support/Restoration.cpp`: shared public load/reset workload and assertions,
   compiled once by `pf-restoration-support`. Persistence owns smoke execution;
-  `RoutingTools.cpp` reuses it only for the explicit reporting benchmark.
+  `tools/RestorationBenchmark.cpp` reuses it only for the explicit reporting benchmark.
 - `support/RoutingPopulation.cpp`: shared deterministic population workload and
   assertions, compiled once by `pf-routing-population-support`. Only explicit
   tools enable its export and timing/memory reporting; no extra CTest owner.

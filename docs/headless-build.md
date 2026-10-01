@@ -7,8 +7,8 @@ not the legacy aggregate below. The complete serialization/restoration suite now
 runs in `pf-smoke-persistence`, with rendering-policy assertions in `pf-smoke-render`.
 `--serialization-checks`, `--metrics-checks`, and `--graphics-startup-smoke`
 return 2 with migration guidance. Startup is registered only in GUI-enabled builds.
-The explicit `--restoration-benchmark` and metrics service operations remain
-available but are not smoke CTest owners.
+Benchmark, routing-scale World generation, and metrics serving use independent
+[headless tools](headless-tools.md); legacy service/tool selections return 2.
 Use CTest for combined coverage during the incremental migration; see the
 [ownership manifest](smoke-migration-manifest.md).
 
@@ -323,7 +323,7 @@ unchanged simulation event/snapshot digests.
 To generate an editor-loadable fixture and its adjacent tag registry:
 
 ```bat
-prometheum-fermide-headless.exe --write-routing-scale-world routing-scale.world.yaml
+pf-generate-routing-world.exe routing-scale.world.yaml
 ```
 
 The command refuses existing output files, assigns varied destinations, and
@@ -721,7 +721,7 @@ git submodule update --init --recursive
 
 ## Reset and reload profiling
 
-Run `prometheum-fermide-headless.exe --restoration-benchmark <world>` for five
+Run `pf-restoration-benchmark.exe <world>` for five
 load/run/reset/run/release cycles with authored-state, Path, trace and lifetime
 checks. Set `PF_RESTORATION_TIMING=1` for nested phase timings. This measures
 restoration separately from routing throughput and fixture generation; timings

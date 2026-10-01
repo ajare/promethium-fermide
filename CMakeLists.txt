@@ -373,7 +373,7 @@ else()
 endif()
 pf_apply_high_analysis(pf-lift-boarding-support)
 
-# Shared population workload; benchmark/export entry points remain legacy tools.
+# Shared population workload for routing checks and the standalone World generator.
 add_library(pf-routing-population-support STATIC src/headless/support/RoutingPopulation.cpp)
 target_include_directories(pf-routing-population-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-routing-population-support PUBLIC prometheum-fermide-core)
@@ -394,14 +394,37 @@ else()
 endif()
 pf_apply_high_analysis(pf-restoration-support)
 
+# Purpose-specific tools deliberately do not link any smoke runner or checks.
+function(pf_add_headless_tool target)
+    add_executable(${target} ${ARGN})
+    target_compile_features(${target} PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W3 /permissive-)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    pf_apply_high_analysis(${target})
+    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
+endfunction()
+pf_add_headless_tool(pf-restoration-benchmark
+    src/headless/tools/RestorationBenchmark.cpp src/headless/tools/ProcessMemory.cpp)
+target_link_libraries(pf-restoration-benchmark PRIVATE pf-restoration-support)
+pf_add_headless_tool(pf-generate-routing-world
+    src/headless/tools/GenerateRoutingWorld.cpp src/headless/tools/ProcessMemory.cpp)
+target_link_libraries(pf-generate-routing-world PRIVATE pf-routing-population-support)
+if(MSVC)
+    target_link_libraries(pf-restoration-benchmark PRIVATE Psapi)
+    target_link_libraries(pf-generate-routing-world PRIVATE Psapi)
+endif()
+pf_add_headless_tool(pf-metrics-server src/headless/tools/MetricsServer.cpp)
+target_link_libraries(pf-metrics-server PRIVATE pf-metrics)
+
 add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
-    src/headless/RoutingTools.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
-    src/headless/MetricsService.cpp
 )
 target_compile_features(prometheum-fermide-headless PRIVATE cxx_std_20)
 target_include_directories(prometheum-fermide-headless PRIVATE "${PF_INCLUDE_DIR}/imgui")
@@ -411,11 +434,10 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing
-    pf-pause-position-support pf-lift-boarding-support pf-routing-population-support pf-restoration-support)
+    pf-headless-render-support pf-agent-editing
+    pf-pause-position-support pf-lift-boarding-support)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
-    target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)
 else()
     target_compile_options(prometheum-fermide-headless PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -485,6 +507,14 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(src/headless/smoke)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME headless-tools-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_tools.py"
+        "$<TARGET_FILE:pf-restoration-benchmark>"
+        "$<TARGET_FILE:pf-generate-routing-world>"
+        "$<TARGET_FILE:pf-metrics-server>"
+        "$<TARGET_FILE:prometheum-fermide-headless>")
+    set_tests_properties(headless-tools-contract PROPERTIES TIMEOUT 180 LABELS "tools;headless")
 endif()
 if(BUILD_TESTING)
     foreach(seed IN ITEMS 0 1 42 2026)
@@ -529,6 +559,6 @@ if(BUILD_TESTING)
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
     # Serialization and restoration smoke coverage is owned by smoke-persistence.
-    # --restoration-benchmark remains an explicit, unregistered diagnostic tool.
+    # Benchmark, routing World generation and metrics service have standalone tools.
     # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
 endif()

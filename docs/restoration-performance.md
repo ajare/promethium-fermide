@@ -5,8 +5,8 @@
 Use an optimized build for timings (not Debug):
 
 ```text
-cmake --build build-windows --config Release --target prometheum-fermide-headless editor --parallel
-prometheum-fermide-headless.exe --write-routing-scale-world routing-scale.world.yaml
+cmake --build build-windows --config Release --target pf-generate-routing-world pf-restoration-benchmark editor --parallel
+pf-generate-routing-world.exe routing-scale.world.yaml
 ```
 
 Keep the adjacent tag registry. Generation, which includes routing and an export
@@ -17,13 +17,13 @@ In PowerShell, with the executable's directory on PATH:
 
 ```powershell
 $env:PF_RESTORATION_TIMING = '1'
-prometheum-fermide-headless.exe --restoration-benchmark routing-scale.world.yaml 2>&1 |
+pf-restoration-benchmark.exe routing-scale.world.yaml 2>&1 |
     Tee-Object restoration.log
 Remove-Item Env:PF_RESTORATION_TIMING
 ```
 
 The command performs five load/run/reset/run/release cycles. An optional final
-argument selects 1–1,000 cycles (for example, `--restoration-benchmark
+argument selects 1–1,000 cycles (for example, `pf-restoration-benchmark
 routing-scale.world.yaml 20`). `restoration-cycle`
 reports end-to-end latency, current process working set and lifetime peak working
 set (peak currently available on Windows; zero means unavailable elsewhere).

@@ -126,9 +126,8 @@ collector lifecycle, resource-label and cardinality assertions as one coherent
 `metrics` registration. It links `pf-metrics`, cpp-httplib, production core and
 the narrow smoke harness; no unrelated smoke module gains HTTP support. The
 legacy `--metrics-checks` selection returns 2 with migration guidance and the old
-`metrics-smoke` aggregate CTest entry is removed. Metrics service operation remains
-separate from smoke registration in `MetricsService.cpp` pending dedicated tool
-extraction under #303.
+`metrics-smoke` aggregate CTest entry is removed. Metrics service operation is now owned by the independent
+`pf-metrics-server` tool; see [tool contracts](headless-tools.md).
 
 CTest invokes the module directly as `smoke-metrics`, labelled
 `smoke;metrics;http`, with a 30-second timeout. `smoke-metrics-contract` verifies
@@ -187,8 +186,8 @@ World builders stay local, and repeated-run determinism checks stay beside the
 behavior they protect. Existing Persistence coverage is unchanged.
 
 The central runner contains no product scenarios. It only dispatches remaining
-unmigrated suites/tools and retains process/memory helpers until their follow-up
-tickets. No migrated scenario is compiled or run there. CTest, not the legacy
+unmigrated suites/reproduction tools; benchmark memory helpers now live in
+`tools/ProcessMemory.cpp`. No migrated scenario is compiled or run there. CTest, not the legacy
 aggregate, provides combined coverage. The scale scenario preserves its
 500/1,000-Agent workloads, metrics-on/off comparisons and ownership/capacity
 assertions, without benchmark timing or working-set output. Queue-chain failure
@@ -696,8 +695,8 @@ Smoke preserves the original workloads and assertions, including 1,000 Agents,
 2,040 population vertices, cold/warm/reset/fresh Path digests, allocation bounds,
 reference oracles, and all preference and physical-duration outcomes. There are
 no elapsed-time pass/fail thresholds. Informational benchmark output is removed
-from smoke, which emits only harness records. The restoration benchmark and
-`--write-routing-scale-world` remain explicit legacy tools in `RoutingTools.cpp`.
+from smoke, which emits only harness records. The restoration benchmark and World generator now live in independent
+`pf-restoration-benchmark` and `pf-generate-routing-world` tools (#303).
 Population construction/assertions compile once in `pf-routing-population-support`;
 only the export tool enables file output and timing/memory reporting. The Routing
 module links only that support, smoke support, and production core/YAML/Lua, not
@@ -705,8 +704,8 @@ legacy tooling or other modules' checks. No production routing code changes.
 
 The six legacy sources and suite calls are removed. `--routing-scale-checks` and
 `--shuttle-route-checks` return 2 with migration guidance; use CTest for combined
-coverage. The benchmark/export CLI remains compatible and is not registered as a
-Routing smoke check.
+coverage. The benchmark/export operations are not registered as Routing smoke checks;
+#303 replaces the legacy CLI with [standalone tools](headless-tools.md).
 
 ### #293 Linux validation
 
@@ -969,7 +968,7 @@ serialization source, aggregate invocation, and CTest selection are removed.
 five cycles through the public load/reset APIs, preserving binary authored-state
 and Path digests, deterministic traces, pause/dirty state, registry identity, and
 World/Graph/Sector release assertions. `pf-restoration-support` compiles this
-workload once; the explicit legacy benchmark reuses it with timing/memory reporting,
+workload once; the standalone benchmark reuses it with timing/memory reporting,
 while smoke emits only harness records. The old `restoration-checks` CTest is
 retired. The fixture resolves through Context, not the working directory.
 

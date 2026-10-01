@@ -7,17 +7,18 @@ to an untrusted network. No metrics history is written to disk.
 ## Run
 
 ```sh
-prometheum-fermide-headless --metrics --metrics-port 9464
+pf-metrics-server --port 9464
 curl http://127.0.0.1:9464/metrics
 curl http://127.0.0.1:9464/healthz
 ```
 
-The headless metrics mode runs until SIGINT/SIGTERM. Without arguments, the normal
-smoke suite still runs and exits. The default metrics World contains one empty
-Room. To observe an authored document (including its Agent behaviours):
+The standalone server runs until SIGINT/SIGTERM; `--ticks N` bounds automation.
+Bind failure exits 1 immediately. See the [CLI contract](headless-tools.md).
+The default metrics World contains one empty Room. To observe an authored
+document (including its Agent behaviours):
 
 ```sh
-prometheum-fermide-headless --metrics --metrics-world resources/test-worlds/lift-test-1.world.yaml
+pf-metrics-server --world resources/test-worlds/lift-test-1.world.yaml
 ```
 
 In the GUI, use **View → Metrics** to toggle the endpoint and edit its port.
@@ -51,9 +52,9 @@ Shuttle carriages, and access zones are also always labelled. Physical Lift
 positions and Stop indexes are therefore available in default mode. No label ever
 contains an Agent identity.
 
-`--metrics-detail=sector,queue` additionally enables named Sector, interaction
-point, and queue-position detail in either executable. The registry caps
-exposition at 4096 samples (including histogram expansion). New series beyond the
+`--detail=sector,queue` in the server (`--metrics-detail=sector,queue` in the GUI)
+additionally enables named Sector, interaction point, and queue-position detail.
+The registry caps exposition at 4096 samples (including histogram expansion). New series beyond the
 cap are omitted. Existing counters remain cumulative. Detail mode is intended for
 small Worlds; default cardinality grows with authored resources and their bounded
 Stops, carriages, and access zones, but never with the number of Agents.
