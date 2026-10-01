@@ -65,6 +65,19 @@ pf_add_smoke_module(pf-smoke-simulation
     TIMEOUT 30
 )
 
+pf_add_smoke_module(pf-smoke-persistence
+    NAME persistence
+    SOURCES persistence/Main.cpp persistence/Formats.cpp
+    LIBRARIES prometheum-fermide-core
+    LABELS core
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-persistence-contract COMMAND ${CMAKE_COMMAND}
+    "-DPERSISTENCE=$<TARGET_FILE:pf-smoke-persistence>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PersistenceContract.cmake")
+set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core" TIMEOUT 60)
+
 pf_add_smoke_module(pf-smoke-render
     NAME render
     SOURCES render/Main.cpp render/Walls.cpp

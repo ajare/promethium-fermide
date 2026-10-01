@@ -95,7 +95,8 @@ Paths in the table are relative to `src/headless/`.
 | `RoutePlanningSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `RoutePlanningTimePropertySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `SectorTilesetChecks.cpp` | module-owned (retained standalone) | `pf-sector-tileset-checks` |
-| `SerializationSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `SerializationSmokeChecks.cpp` (remaining checks after the format extraction below) | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |
 | `ShuttleDoorQuerySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ShuttleDoorRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ShuttleRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -120,10 +121,35 @@ Paths in the table are relative to `src/headless/`.
 | `InteractionApiCompileCheck.cpp` (compile-only contract) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/simulation/Observation.cpp` | module-owned | `pf-smoke-simulation` |
 
+## Persistence pilot extraction (#282)
+
+The following functions moved out of `SerializationSmokeChecks.cpp` into
+`smoke/persistence/Formats.cpp`; their definitions and legacy runner calls were
+removed together. Existing assertions are unchanged; only temporary-path setup,
+cleanup ownership, function signatures, and the assertion helper changed.
+
+| Original function | Persistence check |
+| --- | --- |
+| `stringYamlRoundTripsPrimitiveValues` | `yaml-primitives` |
+| `binarySerializerHonoursTheSerializerContract` | `binary-contract` |
+| `fileYamlRoundTrips` | `yaml-file` |
+| `transactionalWriterPreservesOpaqueBytes` | `transactional-bytes` |
+| `worldDocumentsUseTheirExactSuffixFormat` | `world-document-formats` |
+| `malformedValuesAndInvalidUsageThrowUsefulErrors` | `yaml-errors` |
+
+`checked-in-world` is additional fixture-resolution coverage using
+`resources/Office.world.yaml`. All remaining serialization, save-transaction,
+World restoration, editor, and recent-file checks retain legacy ownership and
+continue through `--serialization-checks` (also the existing legacy aggregate).
+Neither legacy entry point executes the migrated checks.
+
 ## Support and non-smoke code
 
 - `RenderGuiStubs.cpp` and `support/ImGuiContext.cpp`: reusable CPU-only support,
   compiled by `pf-headless-render-support`, not independent checks.
+- `smoke/persistence/Main.cpp`: explicit Persistence registry, not extra coverage.
+- `smoke/tests/PersistenceContract.cmake`: Persistence CLI, external working
+  directory, and concurrent invocation contract (`harness;core`, not smoke).
 - `smoke/render/Main.cpp`: explicit Render registry, not extra coverage.
 - `smoke/tests/RenderContract.cmake`: public Render CLI contract and no-output-file
   verification, executed by `smoke-render-contract` (harness, not smoke coverage).

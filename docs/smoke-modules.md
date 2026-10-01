@@ -1,9 +1,11 @@
 # Independent smoke modules
 
-The pilots own Simulation Observation (#280) and Render walls (#281). Other
-domain checks remain legacy-owned; see the [ownership manifest](smoke-migration-manifest.md).
-The legacy aggregate no longer runs either migrated check, and `--render-checks`
-no longer runs walls. Use CTest for combined coverage.
+The pilots own Simulation Observation (#280), Render walls (#281), and Persistence
+serializer/document formats (#282). Other domain checks remain legacy-owned; see
+the [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no
+longer runs migrated checks, `--render-checks` no longer runs walls, and
+`--serialization-checks` runs only the remaining serialization checks. Use CTest
+for combined coverage.
 
 ```sh
 cmake -S . -B build-linux -DBUILD_TESTING=ON -DPF_BUILD_GUI=OFF
@@ -97,6 +99,65 @@ CTest invokes `pf-smoke-render` directly as `smoke-render`, labelled
 of working-directory output from an external temporary directory. It is labelled
 `harness;render`, not duplicate domain smoke coverage. Simulation's library and
 source dependencies remain unchanged.
+
+## Persistence pilot (#282)
+
+```sh
+cmake --build build-linux --target pf-smoke-persistence --parallel
+build-linux/bin/x64/Release/pf-smoke-persistence --list
+build-linux/bin/x64/Release/pf-smoke-persistence --check world-document-formats
+ctest --test-dir build-linux -R '^(smoke-persistence.*|serialization-checks)$' --output-on-failure
+```
+
+`persistence/Formats.cpp` owns the coherent YAML/binary serializer contract and
+World document-format group extracted from the oversized legacy serialization
+suite: primitive encoding, malformed input, file round trips, transactional
+opaque bytes, exact suffix dispatch, and format conversion. The six migrated
+checks retain their assertions. A seventh check loads the checked-in
+`resources/Office.world.yaml` through `Context::fixture()`; it fails rather than
+skips if the fixture is missing. No fixture is modified.
+
+All generated files live beneath the invocation's unique Context root. The
+opaque-byte and World-document checks use separate subdirectories so existing
+file-count and transaction-cleanup assertions retain their meaning. Context
+cleanup also runs after assertion failures. The remaining legacy serialization
+checks are intentionally not migrated or made concurrent by this ticket.
+
+Persistence links only smoke support and the production core (plus its YAML/Lua
+dependencies), with no editor, renderer, ImGui, or HTTP dependency. CTest invokes
+it directly as `smoke-persistence`, labelled `smoke;core`, with a 30-second timeout.
+`smoke-persistence-contract` checks listing, every single-check selection, misuse,
+fixture resolution from an external empty directory, no working-directory output,
+and eight concurrent complete invocations. It is labelled `harness;core`.
+
+## #282 Linux validation
+
+Validated with GCC 15:
+
+- Release, GUI enabled: full default build and all 74 CTest tests pass
+  sequentially. The 73 tests excluding the legacy aggregate also pass with
+  `-j 6`, and `headless-smoke` passes separately.
+- The unrestricted parallel run exposed an existing fixed-path collision:
+  `headless-smoke` and `serialization-checks` both execute the unchanged legacy
+  save-transaction checks under `/tmp/pf-save-transaction-smoke`. The aggregate
+  failed opening its temporary file while the selected suite removed that root.
+  This is outside the extracted group; no global serialization or unrelated
+  legacy migration was added to hide it.
+- Debug, GUI disabled, `PF_HIGH_ANALYSIS=ON`: the changed targets and other pilot
+  targets build, all 28 project tests pass sequentially (excluding vendored
+  `^willpower_` tests), and the 27 non-aggregate project tests pass with `-j 6`.
+- A fresh GUI-disabled Release directory builds `pf-smoke-persistence` alone
+  (84.52 seconds locally). The only headless objects are its runner, Formats,
+  and Smoke support; no legacy, Render, Simulation-check, editor, or ImGui
+  sources compile. Its link command contains only smoke support, core, YAML,
+  and Lua libraries. A subsequent no-op build compiles nothing.
+- Persistence and its public CLI/concurrency contract pass in all three builds,
+  including eight simultaneous invocations from an external working directory.
+  Direct Release execution is about 0.01 seconds (observations, not thresholds).
+- Mechanical comparison confirms all six moved checks' original assertion
+  statements are identical and none retain a legacy definition or runner call.
+  `git diff --check` passes; no repository formatter is configured. Windows
+  execution remains tracked separately in #279.
 
 ## #281 Linux validation
 
