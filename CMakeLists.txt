@@ -349,6 +349,17 @@ else()
 endif()
 pf_apply_high_analysis(pf-agent-editing)
 
+# Shared assertions for module-owned boarding checks and file-driven legacy tools.
+add_library(pf-lift-boarding-support STATIC src/headless/support/LiftBoarding.cpp)
+target_include_directories(pf-lift-boarding-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
+target_link_libraries(pf-lift-boarding-support PUBLIC prometheum-fermide-core)
+if(MSVC)
+    target_compile_options(pf-lift-boarding-support PRIVATE /W3 /permissive-)
+else()
+    target_compile_options(pf-lift-boarding-support PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-lift-boarding-support)
+
 add_executable(prometheum-fermide-headless
     # Other panel checks remain legacy-owned until their migration tickets.
     src/DoorPanel.cpp
@@ -357,7 +368,6 @@ add_executable(prometheum-fermide-headless
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/DocumentHistorySmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
-    src/headless/EscalatorWalkingSmokeChecks.cpp
     src/headless/DoorOpenApartRenderSmokeChecks.cpp
     src/headless/DoorOpenLeftRenderSmokeChecks.cpp
     src/headless/DoorOpenRightRenderSmokeChecks.cpp
@@ -367,7 +377,6 @@ add_executable(prometheum-fermide-headless
     src/headless/GraphicsStartupSmokeChecks.cpp
     src/headless/InteractionApiCompileCheck.cpp
     src/headless/MarkerIdentitySmokeChecks.cpp
-    src/headless/OnboardAgentDeletionSmokeChecks.cpp
     src/headless/PaletteTraySmokeChecks.cpp
     src/headless/PathfindingWorkspaceSmokeChecks.cpp
     src/headless/ThresholdRouteCostSmokeChecks.cpp
@@ -380,8 +389,6 @@ add_executable(prometheum-fermide-headless
     src/headless/SerializationSmokeChecks.cpp
     src/headless/PausePositionSmokeChecks.cpp
     src/headless/LiftBoardingSmokeChecks.cpp
-    src/headless/ShuttleDoorQuerySmokeChecks.cpp
-    src/headless/ShuttleDoorRenderSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
     src/headless/MetricsChecks.cpp
     src/headless/ViewportCullingSmokeChecks.cpp
@@ -397,7 +404,7 @@ target_compile_definitions(prometheum-fermide-headless PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing)
+    pf-metrics httplib::httplib pf-headless-render-support pf-agent-editing pf-lift-boarding-support)
 if(MSVC)
     target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
     target_link_libraries(prometheum-fermide-headless PRIVATE Psapi)
@@ -519,10 +526,7 @@ if(BUILD_TESTING)
         --restoration-benchmark "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/door-test-1.world.yaml")
     add_test(NAME viewport-checks COMMAND prometheum-fermide-headless --viewport-checks)
     add_test(NAME render-checks COMMAND prometheum-fermide-headless --render-checks)
-    add_test(NAME lift-boarding-regression COMMAND prometheum-fermide-headless
-        --lift-stall-repro "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
-    add_test(NAME lift-crossing-regression COMMAND prometheum-fermide-headless
-        --lift-crossing-repro "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
+    # Lift regressions now belong to smoke-transports; reproduction CLI remains legacy-only.
     add_test(NAME metrics-smoke COMMAND prometheum-fermide-headless --metrics-checks)
 
     if(PF_BUILD_GUI)

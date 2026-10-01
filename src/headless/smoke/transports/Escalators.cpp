@@ -1,4 +1,5 @@
-#include "TagsPanel.h"
+#include "Checks.h"
+#include "EscalatorFixture.h"
 
 #include <algorithm>
 #include <cmath>
@@ -19,187 +20,9 @@
 #include "core/World.h"
 #include "core/YamlSerializer.h"
 
-void runEscalatorWalkingSmokeChecks();
 
 namespace
 {
-	void require(bool ok, std::string const& message)
-	{
-		if (!ok) throw std::runtime_error("Escalator walking: " + message);
-	}
-
-	std::string serialize(core::Serializable const& object)
-	{
-		auto writer = core::YamlSerializer::toString();
-		core::SerializationWorkData work;
-		work.markSerializedUnmodified = false;
-		object.serialize(*writer, work);
-		writer->serialize();
-		return writer->getSerializedString();
-	}
-
-	void load(core::Serializable& object, std::string const& yaml)
-	{
-		auto reader = core::YamlSerializer::fromString(yaml);
-		reader->deserialize();
-		core::SerializationWorkData work;
-		require(object.deserialize(*reader, work), "deserialize failed");
-	}
-
-	struct Fixture
-	{
-		std::shared_ptr<core::AgentTagRegistry> registry = core::AgentTagRegistry::create();
-		core::World world{ "Escalator walkers", 10, 2 };
-		core::AgentTagId tag;
-		core::AgentId id;
-		uint32_t origin;
-		std::shared_ptr<const core::Edge> edge;
-		std::shared_ptr<const core::Vertex> target;
-
-		Fixture(float chance, float speed = 0.75f)
-		{
-			tag = registry->addAgentTag("walkers");
-			if (chance >= 0)
-			{
-				require(registry->addAgentTagEscalatorWalkingChance(tag), "add property");
-				if (chance != 0) require(registry->setAgentTagEscalatorWalkingChance(tag, chance), "set chance");
-			}
-			require(registry->addAgentTagWalkSpeedModifier(tag)
-				&& registry->setAgentTagWalkSpeedModifier(tag, { 1.2f, 1.2f }), "walk modifier");
-			world.attachAgentTagRegistry("walking.tags.yaml", registry);
-			auto const bottom = world.addCorridor(0, 0, 8);
-			auto const top = world.addCorridor(1, 0, 8);
-			world.addStaircase(1, 0, 0, 4, CORE_SIDE_RIGHT, speed);
-			world.addStaircase(1, 0, 4, 4, CORE_SIDE_RIGHT, 0.0f);
-			world.finishBuild();
-			world.pauseSimulation();
-			origin = speed < 0 ? top : bottom;
-			id = world.createAgent("Walker", origin, 0, 0.5f);
-			require(world.assignAgentTag(id, tag), "assign tag");
-			refreshEdge(speed);
-		}
-
-		void refreshEdge(float speed)
-		{
-			for (auto const& candidate : world.getGraph()->getEdges())
-				if (candidate->getType() == core::EdgeType::Staircase
-					&& candidate->getTraversalSpeed(nullptr) > 0) edge = candidate;
-			require(bool(edge), "missing edge");
-			auto low = edge->getVertex(0)->getPosition().y < edge->getVertex(1)->getPosition().y
-				? edge->getVertex(0) : edge->getVertex(1);
-			auto high = edge->getOtherVertex(low);
-			target = speed < 0 ? low : high;
-		}
-
-		core::Agent* agent() { return world.lookupAgent(id).entity; }
-
-		core::DirectedTraversalFacts routeFacts(std::shared_ptr<const core::Vertex> destination)
-		{
-			auto profile = world.getRouteChoicePolicy().baselineProfile;
-			profile.escalatorWalkingChance = agent()->getEffectiveEscalatorWalkingChance().value;
-			core::RouteDecisionContext const context{ agent(), profile,
-				world.getRouteChoicePolicy(), agent()->getSector(), agent()->getWalkSpeed(),
-				&world, agent()->getClimbSpeed(), false, 0, 0,
-				agent()->getEffectiveMobilityProfile().value };
-			return edge->getDirectedTraversalFacts(std::move(destination), context);
-		}
-
-		void route(bool observations)
-		{
-			// Return by the separate stationary Staircase, not against moving steps.
-			if (agent()->getGlobalPosition().y == target->getPosition().y)
-			{
-				auto back = world.getGraph()->calculatePath(agent(), edge->getOtherVertex(target));
-				require(bool(back), "missing return path");
-				agent()->setPath(back, true);
-				require(world.resumeSimulation(), "resume return");
-				for (int i = 0; i < 5000 && agent()->getPath(); ++i)
-				{
-					tick(1);
-					require(!agent()->getActiveEscalatorWalking(), "stationary Staircase gained decision");
-				}
-				require(!agent()->getPath(), "return did not finish");
-				world.pauseSimulation();
-			}
-			if (observations)
-				for (int i = 0; i < 20; ++i)
-				{
-					(void)world.getGraph()->calculatePath(agent(), target);
-					(void)world.getSimulationSnapshot();
-					(void)edge->getTraversalSpeed(agent());
-				}
-			require(!agent()->getActiveEscalatorWalking(), "decision before admission");
-			auto path = world.getGraph()->calculatePath(agent(), target);
-			require(bool(path), "missing path");
-			agent()->setPath(path, true);
-		}
-
-		void tick(int subdivisions)
-		{
-			for (int i = 0; i < subdivisions; ++i)
-				world.update(core::World::getFixedTimestep() / subdivisions);
-		}
-	};
-
-	void propertyWorkflows()
-	{
-		Fixture fixture(0);
-		auto& registry = fixture.registry;
-		auto tag = fixture.tag;
-		std::string diagnostic;
-		auto const before = serialize(*registry);
-		for (float invalid : { -0.1f, 1.1f, std::numeric_limits<float>::infinity(),
-			-std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
-			require(!registry->setAgentTagEscalatorWalkingChance(tag, invalid, &diagnostic)
-				&& !diagnostic.empty() && serialize(*registry) == before, "invalid chance changed state");
-		for (auto invalid : { "-0.1", "1.1", ".inf", "-.inf", ".nan" })
-		{
-			auto malformed = YAML::Load(before);
-			malformed["tags"][0]["properties"][0]["value"] = YAML::Load(invalid);
-			bool refused = false;
-			try { load(*registry, YAML::Dump(malformed)); }
-			catch (std::exception const&) { refused = true; }
-			require(refused && serialize(*registry) == before, "invalid persisted chance accepted");
-		}
-		{
-			auto malformed = YAML::Load(before);
-			malformed["tags"][0]["properties"].push_back(
-				YAML::Clone(malformed["tags"][0]["properties"][0]));
-			bool refused = false;
-			try { load(*registry, YAML::Dump(malformed)); }
-			catch (std::exception const&) { refused = true; }
-			require(refused && serialize(*registry) == before, "duplicate chance accepted");
-		}
-		for (float value : { 1.0f, 0.0f })
-		{
-			require(commitAgentTagEscalatorWalkingChanceEdit(registry, tag, value, diagnostic), diagnostic);
-			auto reopened = core::AgentTagRegistry::create();
-			load(*reopened, serialize(*registry));
-			require(reopened->getAgentTagEscalatorWalkingChance(tag)->value == value, "endpoint round-trip");
-			require(core::AgentTagRegistry::copyWithNewUuid(*registry)->hasEquivalentDefinitions(*registry), "copy lost property");
-			require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic), diagnostic);
-			require(fixture.agent()->getEffectiveEscalatorWalkingChance().value == 1.0f - value, "undo value");
-			require(restoreAgentTagRegistrySnapshot(registry, true, &diagnostic), diagnostic);
-			require(fixture.agent()->getEffectiveEscalatorWalkingChance().value == value, "redo value");
-		}
-		auto const other = registry->addAgentTag("other");
-		require(registry->addAgentTagEscalatorWalkingChance(other), "second property");
-		require(!fixture.world.assignAgentTag(fixture.id, other, &diagnostic), "assignment conflict accepted");
-		require(registry->removeAgentTagEscalatorWalkingChance(other)
-			&& fixture.world.assignAgentTag(fixture.id, other), "assign empty tag");
-		require(!registry->addAgentTagEscalatorWalkingChance(other, &diagnostic), "addition conflict accepted");
-		auto replacement = core::AgentTagRegistry::create();
-		load(*replacement, serialize(*registry));
-		require(replacement->addAgentTagEscalatorWalkingChance(other), "replacement property");
-		require(!registry->replaceDefinitionsFrom(std::move(*replacement), &diagnostic), "reload conflict accepted");
-		require(commitAgentTagEscalatorWalkingChanceRemove(registry, tag, diagnostic), diagnostic);
-		require(!fixture.agent()->getEffectiveEscalatorWalkingChance().sourceTag, "removal retained inheritance");
-		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic), diagnostic);
-		require(fixture.agent()->getEffectiveEscalatorWalkingChance().sourceTag == tag, "undo removal");
-		require(registry->deleteAgentTag(tag), "delete tag");
-		require(fixture.agent()->getEffectiveEscalatorWalkingChance().value == 0, "delete default");
-	}
-
 	struct Run
 	{
 		std::vector<bool> decisions;
@@ -254,20 +77,17 @@ namespace
 		return run;
 	}
 
-	void luaRandomnessIsIndependent()
+	void luaRandomnessIsIndependent(smoke::Context const& context)
 	{
 		struct TemporaryPackage
 		{
-			std::filesystem::path path = std::filesystem::temp_directory_path()
-				/ ("escalator-walking-" + std::to_string(
-					std::chrono::steady_clock::now().time_since_epoch().count()))
-				/ "noise.behaviours";
+			std::filesystem::path path;
 			~TemporaryPackage()
 			{
 				std::error_code ignored;
 				std::filesystem::remove_all(path.parent_path(), ignored);
 			}
-		} package;
+		} package{ context.temporaryRoot() / "escalator-walking" / "noise.behaviours" };
 		std::filesystem::create_directories(package.path);
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package.path / "behaviours.yaml").string());
@@ -440,10 +260,9 @@ return {
 	}
 }
 
-void runEscalatorWalkingSmokeChecks()
+void registerEscalators(std::vector<smoke::Check>& checks)
 {
-	propertyWorkflows();
-	routeChoiceFactsAndLocalCongestion();
-	movementAndReplay();
-	luaRandomnessIsIndependent();
+	checks.push_back({ "routeChoiceFactsAndLocalCongestion", [](smoke::Context const&) { routeChoiceFactsAndLocalCongestion(); } });
+	checks.push_back({ "movementAndReplay", [](smoke::Context const&) { movementAndReplay(); } });
+	checks.push_back({ "luaRandomnessIsIndependent", [](smoke::Context const& context) { luaRandomnessIsIndependent(context); } });
 }

@@ -1,3 +1,5 @@
+#include "Transports.h"
+#include "ImGuiContext.h"
 // Shuttle carriage Door rendering on the Shuttle's own Layer.
 //
 // Landing Doors are authored on the Layer in front of a Shuttle and registered
@@ -22,6 +24,17 @@ extern UISettings gUISettings;
 
 namespace
 {
+	struct RenderState
+	{
+		UISettings previous = gUISettings;
+		~RenderState()
+		{
+			clearObjectTileset();
+			clearSectorTileset();
+			gUISettings = previous;
+		}
+	};
+
 	void require(bool condition, char const* message)
 	{
 		if (!condition) throw std::runtime_error(message);
@@ -32,11 +45,6 @@ namespace
 	ImU32 const kShuttleColour = ImU32(ImColor(128, 128, 192));
 	ImColor const kTransitColour(210, 210, 210);
 
-	struct ImGuiGuard
-	{
-		ImGuiGuard() { ImGui::CreateContext(); }
-		~ImGuiGuard() { ImGui::DestroyContext(); }
-	};
 
 	int firstVertexOfColour(ImDrawList const* drawList, ImU32 colour)
 	{
@@ -65,7 +73,7 @@ namespace
 
 	void carriageDoorsAreWireframesAboveTheCarriage()
 	{
-		ImGuiGuard imgui;
+		headless::ScopedImGuiContext imgui;
 		core::World world("Shuttle Door rendering", 16, 2);
 		auto const shuttleSector = buildShuttleSector(world);
 
@@ -145,8 +153,14 @@ namespace
 	}
 }
 
-void runShuttleDoorRenderSmokeChecks()
+void carriageDoors(smoke::Context const&)
 {
+	RenderState state;
 	carriageDoorsAreWireframesAboveTheCarriage();
+}
+
+void carriageImages(smoke::Context const&)
+{
+	RenderState state;
 	shuttleUsesAPlainShaftAndComposableCarriageImages();
 }

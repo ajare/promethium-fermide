@@ -227,6 +227,38 @@ add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PermissionsContract.cmake")
 set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 180)
 
+pf_add_smoke_module(pf-smoke-transports
+    NAME transports
+    SOURCES
+        transports/Main.cpp
+        transports/Stairs.cpp
+        transports/Occupants.cpp
+        transports/PlatformLifts.cpp
+        transports/Lifts.cpp
+        transports/Shuttles.cpp
+        transports/Escalators.cpp
+        transports/Deletion.cpp
+        transports/DoorQueries.cpp
+        transports/Boarding.cpp
+    LIBRARIES pf-lift-boarding-support
+    LABELS core
+    TIMEOUT 120
+)
+
+pf_add_smoke_module(pf-smoke-transports-editor
+    NAME transports-editor
+    SOURCES transports/EscalatorsEditor.cpp
+    LIBRARIES pf-agent-editing pf-headless-render-support
+    LABELS editor
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-transports-contract COMMAND ${CMAKE_COMMAND}
+    "-DTRANSPORTS=$<TARGET_FILE:pf-smoke-transports>"
+    "-DEDITOR=$<TARGET_FILE:pf-smoke-transports-editor>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TransportsContract.cmake")
+set_tests_properties(smoke-transports-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 300)
+
 pf_add_smoke_module(pf-smoke-routing
     NAME routing
     SOURCES
@@ -299,7 +331,7 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 
 pf_add_smoke_module(pf-smoke-render
     NAME render
-    SOURCES render/Main.cpp render/Walls.cpp render/AgentPaths.cpp
+    SOURCES render/Main.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp
     LIBRARIES pf-headless-render-support
     LABELS render
     TIMEOUT 30

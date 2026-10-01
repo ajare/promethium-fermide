@@ -1,6 +1,7 @@
 #include "Walls.h"
 #include "Smoke.h"
 #include "AgentPaths.h"
+#include "Transports.h"
 
 namespace
 {
@@ -12,6 +13,8 @@ namespace
 	constexpr smoke::Check checks[] = {
 		{ "walls", walls },
 		{ "agentPaths", agentPaths },
+		{ "carriageDoors", carriageDoors },
+		{ "carriageImages", carriageImages },
 	};
 }
 

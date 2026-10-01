@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Independent-optionality checks for World::isShuttleOwnedDoor, ticket #104.
 //
 // The query's outputs - Shuttle sector, stop, carriage, and compacted Door
@@ -281,9 +282,9 @@ namespace
 	}
 }
 
-void runShuttleDoorQuerySmokeChecks()
+void registerDoorQueries(std::vector<smoke::Check>& checks)
 {
-	checkShuttleDoorOutputsAreIndependent();
-	checkLiftOwnedDoorIsNotShuttleOwned();
-	checkOrdinaryDoorIsNotShuttleOwned();
+	checks.push_back({ "checkShuttleDoorOutputsAreIndependent", [](smoke::Context const&) { checkShuttleDoorOutputsAreIndependent(); } });
+	checks.push_back({ "checkLiftOwnedDoorIsNotShuttleOwned", [](smoke::Context const&) { checkLiftOwnedDoorIsNotShuttleOwned(); } });
+	checks.push_back({ "checkOrdinaryDoorIsNotShuttleOwned", [](smoke::Context const&) { checkOrdinaryDoorIsNotShuttleOwned(); } });
 }

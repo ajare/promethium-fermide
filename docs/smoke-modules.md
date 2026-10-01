@@ -5,7 +5,8 @@ The independent modules currently own Simulation Observation (#280), Render wall
 and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
 properties (#286), Agent tags and coordinated documents (#287), and Agent
 behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
-Access permissions and Interaction points (#290), and Route planning and movement (#291).
+Access permissions and Interaction points (#290), Route planning and movement (#291),
+and Transit/transport runtime checks (#292).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
@@ -74,6 +75,57 @@ smoke coverage. Both use the same warning and high-analysis policy.
 
 Domain-specific World builders stay with their module. Do not add editor/render
 helpers to core support or make modules depend on other modules' check sources.
+
+## Transports module (#292)
+
+```sh
+cmake --build build-linux --target pf-smoke-transports pf-smoke-transports-editor pf-smoke-render --parallel
+build-linux/bin/x64/Release/pf-smoke-transports --list
+build-linux/bin/x64/Release/pf-smoke-transports --check liftBoardingReduced
+ctest --test-dir build-linux -R '^smoke-(transports|render)' -j 3 --output-on-failure
+```
+
+- `pf-smoke-transports` / `smoke-transports` owns 41 individually selectable
+  core checks: Staircases and Stairwells, Platform lifts, Lifts, Shuttles,
+  occupant clearance/order/re-spacing, boarding, Door queries, Escalator walking,
+  and onboard Agent deletion. It links only smoke support, boarding assertion
+  support, and production core/YAML/Lua. The timeout is 120 seconds.
+- `pf-smoke-transports-editor` owns the coherent Escalator property workflow
+  that asserts production registry undo/redo. It uses the existing headless
+  editing libraries, resets editor state on success/failure, and has a 30-second
+  timeout. Core runtime checks have no editor dependency.
+- Render owns `carriageDoors` and `carriageImages`, preserving wireframe ordering,
+  leaf exclusion, plain shaft, and composable carriage-image assertions. CPU-only
+  ImGui disables ini/log files; viewport and tileset state is cleaned on exit.
+- Four full/reduced boarding/crossing checks load `lift-test-1.world.yaml` through
+  Context, independently of the working directory. The legacy file-driven
+  reproduction CLI remains separate, sharing compiled assertions rather than
+  duplicating check bodies. Its former two CTest entries are retired.
+- Escalator Lua packages live beneath the unique Context temporary root.
+  `smoke-transports-contract` checks exact listings, all individual selectors,
+  misuse, empty-directory operation, and eight concurrent runs of each tier.
+  Transport permission checks remain owned by #290; movement checks by #291;
+  perceived route-cost migration remains #293.
+
+### #292 Linux validation
+
+- GUI-enabled Release default build and all 87 CTest entries pass sequentially;
+  all 86 excluding the legacy aggregate also pass with `-j 6` (avoiding its
+  pre-existing shared temporary-path collision). Both reproduction commands
+  continue to work independently of the module CLI.
+- A fresh GUI-disabled Release build of only `pf-smoke-transports` passes CTest.
+  Its only headless objects are its ten runner/check files, smoke support, and
+  boarding support; its link includes no editor, renderer, ImGui, HTTP, or other
+  module checks.
+- Debug with `PF_HIGH_ANALYSIS=ON`: Transports, Transports Editor, Render, and
+  legacy headless targets build; all five focused CTest entries pass, including
+  selection and concurrent-invocation contracts. Legacy aggregate, render, and
+  serialization tests also pass. The full Debug default build hits the existing
+  vendored non-Windows `vld.h` failure; relevant project targets build directly.
+- All 26 extracted inline scenario bodies remain byte-identical. All 135 original
+  `require` call sites in Escalator, deletion, Door-query, and transport-render
+  sources remain intact; boarding helper assertions are unchanged. No production
+  simulation code changes. `git diff --check` passes; no formatter is configured.
 
 ## Agent module (#285)
 

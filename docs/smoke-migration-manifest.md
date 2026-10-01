@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Routing migration #291 (parent #278). Each
+Snapshot after the Transports migration #292 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -108,6 +108,24 @@ The two empty planning CTest entries are retired; `--route-planning-checks`,
 Route-cost, workspace, scale, and inline checks remain with their existing owners
 for their separate tickets.
 
+#292 migrates 26 inline Transit/transport scenarios from `SmokeScenario.cpp`
+into Stairs, Occupants, PlatformLifts, Lifts, and Shuttles, retaining byte-identical
+scenario bodies and their timing limits. Escalator walking, onboard Agent deletion
+(including the climbing lease case), and Shuttle Door queries each retain their
+named scenarios and assertions. `pf-smoke-transports` owns 41 individual checks;
+the coherent Escalator property/history workflow belongs to the independently
+buildable `pf-smoke-transports-editor`. The two Shuttle Door rendering scenarios
+belong to Render (`carriageDoors`, `carriageImages`). The former standalone sources,
+declarations, and aggregate/render invocations are removed.
+
+Four full/reduced Lift boarding/crossing checks resolve the checked-in World via
+Context. Their sole domain CTest owner is now `smoke-transports`; the two legacy
+regression CTest entries are removed. `support/LiftBoarding.cpp` compiles shared
+assertions once in `pf-lift-boarding-support`; the legacy file-driven reproduction
+wrappers remain outside the module interface until their dedicated tool ticket.
+Permission/adherence checks migrated in #290 and movement checks migrated in #291
+keep those owners. Route costs remain legacy-owned for #293.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Other overlapping legacy CTest selections are unchanged.
 
@@ -187,7 +205,13 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/permissions/Preflight.cpp` | module-owned | `pf-smoke-permissions` |
 | `DoorTwoSidedButtonSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/Layers.cpp` | module-owned | `pf-smoke-world` |
-| `EscalatorWalkingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/transports/Escalators.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/EscalatorsEditor.cpp` | module-owned | `pf-smoke-transports-editor` |
+| `smoke/transports/Stairs.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Occupants.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/PlatformLifts.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Lifts.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Shuttles.cpp` | module-owned | `pf-smoke-transports` |
 | `FacadeDrawOrderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `FacadeEditorSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `FacadeRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -197,7 +221,7 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/permissions/InteractionGeometry.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/routing/IsolatedSectors.cpp` | module-owned | `pf-smoke-routing` |
 | `LadderForceBridgeRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `LiftBoardingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/transports/Boarding.cpp` | module-owned | `pf-smoke-transports` |
 | `LiftRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `MarkerIdentitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `MetricsChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -205,7 +229,7 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/routing/Movement.cpp` | module-owned | `pf-smoke-routing` |
 | `NonFiniteTimingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `OccupantPackingChecks.cpp` | module-owned (retained standalone) | `pf-occupant-packing-checks` |
-| `OnboardAgentDeletionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/transports/Deletion.cpp` | module-owned | `pf-smoke-transports` |
 | `PaletteTraySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `PathfindingWorkspaceSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `PausePositionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -220,8 +244,8 @@ Paths in the table are relative to `src/headless/`.
 | `SectorTilesetChecks.cpp` | module-owned (retained standalone) | `pf-sector-tileset-checks` |
 | `SerializationSmokeChecks.cpp` (remaining checks after the format extraction below) | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |
-| `ShuttleDoorQuerySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `ShuttleDoorRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/transports/DoorQueries.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/render/Transports.cpp` | module-owned | `pf-smoke-render` |
 | `ShuttleRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `SimulationStepTimingChecks.cpp` | module-owned (retained standalone) | `pf-simulation-step-timing-checks` |
 | `StairRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -312,7 +336,14 @@ Neither legacy entry point executes the migrated checks.
 - `smoke/tests/Probe.cpp`: synthetic harness contract checks, owned by
   `pf-smoke-harness-probe`; CTest owns their execution through
   `smoke-harness-contract`, not as domain smoke coverage.
-- `LiftBoardingSmokeChecks.cpp` also owns the Lift reproduction commands;
+- `smoke/transports/Main.cpp` and `Checks.h`: explicit core registry;
+  `EscalatorFixture.h`: module-local fixture shared by core and editor tiers.
+- `smoke/tests/TransportsContract.cmake`: exact registries, individual selection,
+  CLI misuse, empty working directory, and eight concurrent invocations per tier;
+  owned by `smoke-transports-contract` (`harness;core;editor`).
+- `support/LiftBoarding.cpp`: shared assertion helpers compiled once by
+  `pf-lift-boarding-support`, not an additional CTest execution owner.
+- `LiftBoardingSmokeChecks.cpp` owns only the legacy Lift reproduction commands;
   `PausePositionSmokeChecks.cpp` also owns the pause-position reproduction;
   `PathfindingWorkspaceSmokeChecks.cpp` also owns the restoration benchmark and
   routing-scale World generator; `MetricsChecks.cpp` also owns metrics serving.

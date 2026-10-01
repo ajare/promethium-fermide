@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Ticket #57: deleting an Agent which is riding a Lift must not leak its slot.
 //
 // The editor deletes a selected Agent by calling clearPath() and then
@@ -371,11 +372,11 @@ namespace
 	}
 }
 
-void runOnboardAgentDeletionSmokeChecks()
+void registerDeletion(std::vector<smoke::Check>& checks)
 {
-	deletingARiderOfAMovingLiftFreesItsSlot();
-	theReleasedSlotCarriesTheNextPassenger();
-	deletingAQueuedWaiterLeavesTheQueueClean();
-	theLiftKeepsServingAfterItsRiderIsDeleted();
-	deletingAClimberReleasesTheExtensionLease();
+	checks.push_back({ "deletingARiderOfAMovingLiftFreesItsSlot", [](smoke::Context const&) { deletingARiderOfAMovingLiftFreesItsSlot(); } });
+	checks.push_back({ "theReleasedSlotCarriesTheNextPassenger", [](smoke::Context const&) { theReleasedSlotCarriesTheNextPassenger(); } });
+	checks.push_back({ "deletingAQueuedWaiterLeavesTheQueueClean", [](smoke::Context const&) { deletingAQueuedWaiterLeavesTheQueueClean(); } });
+	checks.push_back({ "theLiftKeepsServingAfterItsRiderIsDeleted", [](smoke::Context const&) { theLiftKeepsServingAfterItsRiderIsDeleted(); } });
+	checks.push_back({ "deletingAClimberReleasesTheExtensionLease", [](smoke::Context const&) { deletingAClimberReleasesTheExtensionLease(); } });
 }
