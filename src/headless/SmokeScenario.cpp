@@ -71,15 +71,10 @@ void runDoorTwoSidedButtonSmokeChecks();
 void runDocumentHistorySmokeChecks();
 void runMobilityProfileRoutingSmokeChecks();
 void runRestoredPathMobilitySmokeChecks();
-void runInteractionMobilitySmokeChecks();
-void runAccessPermissionSmokeChecks();
-void runInteractionPointGeometrySmokeChecks();
-void runDoorPreflightSmokeChecks();
 void runNonFiniteTimingSmokeChecks();
 void runEscalatorWalkingSmokeChecks();
 void runRoutePlanningTimePropertySmokeChecks();
 void runAgentPathRenderSmokeChecks();
-void runThresholdRefusalSmokeChecks();
 void runFacadeRenderSmokeChecks();
 void runFacadeDrawOrderSmokeChecks();
 void runFacadeEditorSmokeChecks();
@@ -6202,9 +6197,8 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--access-permission-checks")
 		{
-			runAccessPermissionSmokeChecks();
-			std::cout << "Access permission checks: PASS\n";
-			return 0;
+			std::cerr << "Access permission checks moved to smoke-permissions and smoke-permissions-editor; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--route-planning-checks")
 		{
@@ -6289,16 +6283,11 @@ int main(int argc, char** argv)
 		runDocumentHistorySmokeChecks();
 		runMobilityProfileRoutingSmokeChecks();
 		runRestoredPathMobilitySmokeChecks();
-		runInteractionMobilitySmokeChecks();
-		runAccessPermissionSmokeChecks();
-		runInteractionPointGeometrySmokeChecks();
-		runDoorPreflightSmokeChecks();
 		runNonFiniteTimingSmokeChecks();
 		runEscalatorWalkingSmokeChecks();
 		runRoutePlanningTimePropertySmokeChecks();
 		runAgentPathRenderSmokeChecks();
 		runShuttleDoorQuerySmokeChecks();
-		runThresholdRefusalSmokeChecks();
 		runFacadeRenderSmokeChecks();
 		runFacadeDrawOrderSmokeChecks();
 		runFacadeEditorSmokeChecks();

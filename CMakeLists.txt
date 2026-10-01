@@ -322,8 +322,8 @@ foreach(target IN ITEMS pf-render pf-headless-render-support)
     pf_apply_high_analysis(${target})
 endforeach()
 
-# Production Agent editing seams, shared by the GUI, legacy checks, and the
-# headless Agent editor tier. No platform backend or dialogs.
+# Production Agent and permission editing seams, shared by the GUI, legacy
+# checks, and headless editor tiers. No platform backend or dialogs.
 add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
     src/AgentGroupsPanel.cpp
@@ -334,6 +334,7 @@ add_library(pf-agent-editing STATIC
     src/BehavioursPanel.cpp
     src/AgentBehaviourAssignmentPanel.cpp
     src/MarkerPanel.cpp
+    src/PermissionsPanel.cpp
 )
 target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu)
 target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
@@ -351,22 +352,15 @@ pf_apply_high_analysis(pf-agent-editing)
 add_executable(prometheum-fermide-headless
     # Other panel checks remain legacy-owned until their migration tickets.
     src/DoorPanel.cpp
-    src/PermissionsPanel.cpp
     src/headless/BackgroundSelectionPanelSmokeChecks.cpp
-    src/headless/AccessPermissionSmokeChecks.cpp
     src/headless/DoorPanelScopeSmokeChecks.cpp
     src/headless/DoorTwoSidedButtonSmokeChecks.cpp
     src/headless/DocumentHistorySmokeChecks.cpp
     src/headless/MobilityProfileRoutingSmokeChecks.cpp
     src/headless/RestoredPathMobilitySmokeChecks.cpp
-    src/headless/InteractionMobilitySmokeChecks.cpp
-    src/headless/InteractionPointGeometrySmokeChecks.cpp
-    src/headless/DoorPreflightSmokeChecks.cpp
     src/headless/NonFiniteTimingSmokeChecks.cpp
     src/headless/EscalatorWalkingSmokeChecks.cpp
     src/headless/RoutePlanningTimePropertySmokeChecks.cpp
-    src/headless/PermissionAdherenceSmokeChecks.cpp
-    src/headless/TransportLandingAdherenceSmokeChecks.cpp
     src/headless/RoutePlanningSmokeChecks.cpp
     src/headless/AgentPathRenderSmokeChecks.cpp
     src/headless/DoorOpenApartRenderSmokeChecks.cpp
@@ -397,7 +391,6 @@ add_executable(prometheum-fermide-headless
     src/headless/ShuttleDoorRenderSmokeChecks.cpp
     src/headless/SmokeScenario.cpp
     src/headless/MetricsChecks.cpp
-    src/headless/ThresholdRefusalSmokeChecks.cpp
     src/headless/ViewportCullingSmokeChecks.cpp
     src/headless/ViewportDragScrollSmokeChecks.cpp
     src/headless/ViewportZoomSmokeChecks.cpp
@@ -437,7 +430,6 @@ if(PF_BUILD_GUI)
         src/Main.cpp
         src/UI.cpp
         src/DoorPanel.cpp
-        src/PermissionsPanel.cpp
         ${PF_IMGUI_SOURCES}
     )
     target_compile_features(editor PRIVATE cxx_std_20)
@@ -529,7 +521,6 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
-    add_test(NAME access-permissions COMMAND prometheum-fermide-headless --access-permission-checks)
     add_test(NAME route-planning COMMAND prometheum-fermide-headless --route-planning-checks)
     add_test(NAME route-planning-time-properties COMMAND prometheum-fermide-headless
         --route-planning-time-checks)

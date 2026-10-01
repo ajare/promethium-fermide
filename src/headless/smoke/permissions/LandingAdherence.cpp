@@ -1,11 +1,9 @@
+#include "Checks.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
 
-#include "AgentTagAssignmentPanel.h"
-#include "DocumentEdit.h"
-#include "TagsPanel.h"
 #include "core/Agent.h"
 #include "core/AgentTagRegistry.h"
 #include "core/Graph.h"
@@ -13,37 +11,12 @@
 #include "core/Vertex.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
-#include "imgui/imgui.h"
-
-void runTransportLandingAdherenceSmokeChecks();
 
 namespace
 {
-	void require(bool value, std::string const& message)
-	{ if (!value) throw std::runtime_error(message); }
+	void require(bool condition, std::string const& message)
+	{ if (!condition) throw std::runtime_error(message); }
 
-	void checkEffectiveDisplay(std::shared_ptr<core::World> const& world, core::AgentId id,
-		std::string const& expected)
-	{
-		auto previous = ImGui::GetCurrentContext();
-		ImGui::CreateContext();
-		auto& io = ImGui::GetIO();
-		io.IniFilename = nullptr;
-		io.DisplaySize = ImVec2(1200, 900);
-		io.Fonts->AddFontDefault(); io.Fonts->Build();
-		std::string visible;
-		io.ClipboardUserData = &visible;
-		io.SetClipboardTextFn = [](void* data, char const* text) { *static_cast<std::string*>(data) += text; };
-		io.GetClipboardTextFn = [](void*) -> char const* { return ""; };
-		ImGui::NewFrame(); ImGui::Begin("Selection");
-		ImGui::LogToClipboard();
-		renderAgentEffectiveProperties(world, id);
-		ImGui::End(); ImGui::Render();
-		ImGui::DestroyContext(); ImGui::SetCurrentContext(previous);
-		require(visible.find(expected) != std::string::npos, "Effective display disagreed with transport boarding profile");
-	}
-
-	// No destination requirements: every decision here concerns the landing.
 	void landingJourney(unsigned kind, unsigned change)
 	{
 		// 0: inherited opportunism; 1: stale Path; 2/3: revoke riding/boarding;
@@ -101,15 +74,8 @@ namespace
 		auto remoteId = world->createAgent("Remote observer", upper, kind == 1 ? 1 : 0, 7.0f);
 		auto tag = registry->addAgentTag("opportunist");
 		require(world->assignAgentTag(id, tag, &diagnostic), diagnostic);
-		require(commitAgentTagPermissionAdherenceAdd(registry, tag, diagnostic), diagnostic);
-		require(commitAgentTagPermissionAdherenceEdit(registry, tag, false, diagnostic), diagnostic);
-		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic), diagnostic);
-		require(world->lookupAgent(id).entity->getEffectivePermissionAdherence().value,
-			"Undo did not restore adhering boarding profile");
-		require(restoreAgentTagRegistrySnapshot(registry, true, &diagnostic), diagnostic);
-		agent = world->lookupAgent(id).entity;
-		require(!agent->getEffectivePermissionAdherence().value, "Redo did not restore opportunistic boarding profile");
-		if (change == 0) checkEffectiveDisplay(world, id, "Permission adherence: false from #opportunist");
+		require(registry->addAgentTagPermissionAdherence(tag, &diagnostic), diagnostic);
+		require(registry->setAgentTagPermissionAdherence(tag, false, &diagnostic), diagnostic);
 		require(world->setAgentIndividualPermissionAdherence(remoteId, false, &diagnostic), diagnostic);
 		auto operatorId = world->createAgent("Landing operator", ground, 0, 7.0f);
 		require(world->grantAgentAccessPermission(operatorId, red, &diagnostic), diagnostic);
@@ -144,7 +110,6 @@ namespace
 		require(world->setAgentIndividualPermissionAdherence(id, true, &diagnostic), diagnostic);
 		require(agent->getEffectivePermissionAdherence().individual && !graph->calculatePath(agent, start, target),
 			"Individual adherence did not override inherited boarding choice");
-		if (change == 0) checkEffectiveDisplay(world, id, "Permission adherence: true (individual)");
 		require(world->grantAgentAccessPermission(id, red, &diagnostic), diagnostic);
 		require(!graph->calculatePath(agent, start, target), "Partial grants bypassed all-required landing semantics");
 		auto set = world->addPermissionSet("Landing operators");
@@ -278,8 +243,8 @@ namespace
 			require(!loadedAgent->getPath() && loadedAgent->getGlobalPosition().distanceTo(loadedTarget->getPosition()) < 0.01f,
 				"Persisted profile did not complete opportunistic transport journey");
 		}
-		forgetAgentTagRegistryDocument(registry);
 	}
+
 	void landingAlternatives(unsigned kind)
 	{
 		core::World world("Landing alternatives", kind == 2 ? 256 : 20, 2);
@@ -347,11 +312,141 @@ namespace
 	}
 }
 
-void runTransportLandingAdherenceSmokeChecks()
+void permission_smoke::registerLandingAdherence(std::vector<smoke::Check>& checks)
 {
-	for (unsigned kind = 0; kind < 3; ++kind)
-	{
-		for (unsigned change = 0; change < 8; ++change) landingJourney(kind, change);
-		landingAlternatives(kind);
-	}
+	checks.push_back({ "landingJourneyLift0",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 0);
+		} });
+	checks.push_back({ "landingJourneyLift1",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 1);
+		} });
+	checks.push_back({ "landingJourneyLift2",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 2);
+		} });
+	checks.push_back({ "landingJourneyLift3",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 3);
+		} });
+	checks.push_back({ "landingJourneyLift4",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 4);
+		} });
+	checks.push_back({ "landingJourneyLift5",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 5);
+		} });
+	checks.push_back({ "landingJourneyLift6",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 6);
+		} });
+	checks.push_back({ "landingJourneyLift7",
+		[](smoke::Context const&)
+		{
+			landingJourney(0, 7);
+		} });
+	checks.push_back({ "landingAlternativesLift",
+		[](smoke::Context const&)
+		{
+			landingAlternatives(0);
+		} });
+	checks.push_back({ "landingJourneyPlatform0",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 0);
+		} });
+	checks.push_back({ "landingJourneyPlatform1",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 1);
+		} });
+	checks.push_back({ "landingJourneyPlatform2",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 2);
+		} });
+	checks.push_back({ "landingJourneyPlatform3",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 3);
+		} });
+	checks.push_back({ "landingJourneyPlatform4",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 4);
+		} });
+	checks.push_back({ "landingJourneyPlatform5",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 5);
+		} });
+	checks.push_back({ "landingJourneyPlatform6",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 6);
+		} });
+	checks.push_back({ "landingJourneyPlatform7",
+		[](smoke::Context const&)
+		{
+			landingJourney(1, 7);
+		} });
+	checks.push_back({ "landingAlternativesPlatform",
+		[](smoke::Context const&)
+		{
+			landingAlternatives(1);
+		} });
+	checks.push_back({ "landingJourneyShuttle0",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 0);
+		} });
+	checks.push_back({ "landingJourneyShuttle1",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 1);
+		} });
+	checks.push_back({ "landingJourneyShuttle2",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 2);
+		} });
+	checks.push_back({ "landingJourneyShuttle3",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 3);
+		} });
+	checks.push_back({ "landingJourneyShuttle4",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 4);
+		} });
+	checks.push_back({ "landingJourneyShuttle5",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 5);
+		} });
+	checks.push_back({ "landingJourneyShuttle6",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 6);
+		} });
+	checks.push_back({ "landingJourneyShuttle7",
+		[](smoke::Context const&)
+		{
+			landingJourney(2, 7);
+		} });
+	checks.push_back({ "landingAlternativesShuttle",
+		[](smoke::Context const&)
+		{
+			landingAlternatives(2);
+		} });
 }

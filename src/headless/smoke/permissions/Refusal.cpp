@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Threshold refusal audit, for ticket #31.
 //
 // The rule this pins down: no threshold of any kind may touch a Background,
@@ -343,18 +344,66 @@ namespace
 	}
 }
 
-void runThresholdRefusalSmokeChecks()
+void permission_smoke::registerRefusal(std::vector<smoke::Check>& checks)
 {
-	doorRefusesABackgroundBehindIt();
-	doorRefusesToBeAuthoredInABackground();
-	bulkheadDoorRefusesABackgroundOnEitherSide();
-	ladderRefusesABackgroundLanding();
-	ladderRefusesABackgroundInItsShaft();
-	roomLadderRefusesABackgroundHost();
-	stairwellRefusesABackgroundLanding();
-	staircaseRefusesABackgroundLanding();
-	liftRefusesABackgroundLanding();
-	shuttleRefusesABackgroundLanding();
-	windowMayLookIntoABackground();
-	windowExceptionStaysLookingOnly();
+	checks.push_back({ "doorRefusesABackgroundBehindIt",
+		[](smoke::Context const&)
+		{
+			doorRefusesABackgroundBehindIt();
+		} });
+	checks.push_back({ "doorRefusesToBeAuthoredInABackground",
+		[](smoke::Context const&)
+		{
+			doorRefusesToBeAuthoredInABackground();
+		} });
+	checks.push_back({ "bulkheadDoorRefusesABackgroundOnEitherSide",
+		[](smoke::Context const&)
+		{
+			bulkheadDoorRefusesABackgroundOnEitherSide();
+		} });
+	checks.push_back({ "ladderRefusesABackgroundLanding",
+		[](smoke::Context const&)
+		{
+			ladderRefusesABackgroundLanding();
+		} });
+	checks.push_back({ "ladderRefusesABackgroundInItsShaft",
+		[](smoke::Context const&)
+		{
+			ladderRefusesABackgroundInItsShaft();
+		} });
+	checks.push_back({ "roomLadderRefusesABackgroundHost",
+		[](smoke::Context const&)
+		{
+			roomLadderRefusesABackgroundHost();
+		} });
+	checks.push_back({ "stairwellRefusesABackgroundLanding",
+		[](smoke::Context const&)
+		{
+			stairwellRefusesABackgroundLanding();
+		} });
+	checks.push_back({ "staircaseRefusesABackgroundLanding",
+		[](smoke::Context const&)
+		{
+			staircaseRefusesABackgroundLanding();
+		} });
+	checks.push_back({ "liftRefusesABackgroundLanding",
+		[](smoke::Context const&)
+		{
+			liftRefusesABackgroundLanding();
+		} });
+	checks.push_back({ "shuttleRefusesABackgroundLanding",
+		[](smoke::Context const&)
+		{
+			shuttleRefusesABackgroundLanding();
+		} });
+	checks.push_back({ "windowMayLookIntoABackground",
+		[](smoke::Context const&)
+		{
+			windowMayLookIntoABackground();
+		} });
+	checks.push_back({ "windowExceptionStaysLookingOnly",
+		[](smoke::Context const&)
+		{
+			windowExceptionStaysLookingOnly();
+		} });
 }

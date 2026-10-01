@@ -498,7 +498,19 @@ session was used.
 
 ## Ordinary Lift destination permissions (#260–#262)
 
-`access-permissions` (or `--access-permission-checks`) covers the public World
+After #290, build and run permission coverage independently:
+
+```sh
+cmake --build build-linux --target pf-smoke-permissions pf-smoke-permissions-editor --parallel
+ctest --test-dir build-linux -R '^smoke-permissions' -j 3 --output-on-failure
+```
+
+Use `--list` and `--check <name>` on either executable for focused runs. The old
+`--access-permission-checks` selection is retired pending compatibility dispatch;
+it returns 2 with migration guidance. See [smoke modules](smoke-modules.md) for
+ownership, dependency tiers, CLI contracts, and Linux validation.
+
+`smoke-permissions` and `smoke-permissions-editor` cover the public World
 queries and paused-only mutations, panel-commit undo/redo, YAML and binary round
 trips, legacy unrestricted defaults, transactional malformed-data rejection,
 rename/delete usage, and Stop retention through Lift and Location edits and
@@ -535,7 +547,7 @@ and `git diff --check` passed. No manual editor session was used.
 
 ## Platform lift destination permissions (#263)
 
-`access-permissions` now runs the shared Lift authorization scenarios with
+The Permissions modules run the shared Lift authorization scenarios with
 Platform lift-specific Room and Walkway fixtures. Coverage includes all-required
 direct/Permission set combinations, actual rejected and accepted selections,
 missing-permission diagnostics, local piggyback journeys, remote observation
@@ -573,7 +585,7 @@ position without Agent debug visibility. Requirements follow retained Stop
 identity through vehicle edits, Stop reindexing, and supporting Location removal;
 recreated Stops and transports start unrestricted.
 
-`access-permissions` runs the shared command, authoring, persistence/history,
+The Permissions modules run the shared command, authoring, persistence/history,
 and dynamic authorization checks with Shuttle fixtures. Two coupled Carriages
 board from separate Locations and share one protected destination; unauthorized
 passengers complete locally observed accepted journeys and disembark after
@@ -591,7 +603,7 @@ configuration, and `git diff --check` passed.
 
 ## Transport landing Permission adherence (#268)
 
-`access-permissions` includes `TransportLandingAdherenceSmokeChecks.cpp` for
+`smoke-permissions` owns `smoke/permissions/LandingAdherence.cpp` for
 Lift, Platform lift, and Shuttle landing requirements, without authoring any
 destination Permission requirements. Effective Permission adherence true requires
 landing authorization even when the vehicle is locally boardable; false retains

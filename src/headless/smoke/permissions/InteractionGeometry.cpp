@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Interaction point geometry validation, for ticket #197.
 //
 // An interaction point is a physical control. Its position, reach, and press
@@ -36,8 +37,6 @@
 #include "core/Coordination.h"
 #include "core/Graph.h"
 #include "core/World.h"
-
-void runInteractionPointGeometrySmokeChecks();
 
 namespace
 {
@@ -293,11 +292,31 @@ namespace
 	}
 }
 
-void runInteractionPointGeometrySmokeChecks()
+void permission_smoke::registerInteractionGeometry(std::vector<smoke::Check>& checks)
 {
-	nonFiniteGeometryIsRefused();
-	zeroReachAndZeroDurationAreAccepted();
-	hugeFiniteDurationSaturates();
-	finiteReachGatesDirectInteraction();
-	finiteReachGatesThePassingButton();
+	checks.push_back({ "nonFiniteGeometryIsRefused",
+		[](smoke::Context const&)
+		{
+			nonFiniteGeometryIsRefused();
+		} });
+	checks.push_back({ "zeroReachAndZeroDurationAreAccepted",
+		[](smoke::Context const&)
+		{
+			zeroReachAndZeroDurationAreAccepted();
+		} });
+	checks.push_back({ "hugeFiniteDurationSaturates",
+		[](smoke::Context const&)
+		{
+			hugeFiniteDurationSaturates();
+		} });
+	checks.push_back({ "finiteReachGatesDirectInteraction",
+		[](smoke::Context const&)
+		{
+			finiteReachGatesDirectInteraction();
+		} });
+	checks.push_back({ "finiteReachGatesThePassingButton",
+		[](smoke::Context const&)
+		{
+			finiteReachGatesThePassingButton();
+		} });
 }

@@ -4,7 +4,8 @@ The independent modules currently own Simulation Observation (#280), Render wall
 (#281), Persistence serializer/document formats (#282), core World structure
 and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
 properties (#286), Agent tags and coordinated documents (#287), and Agent
-behaviour registry and authoring (#288), and Agent behaviour runtime (#289).
+behaviour registry and authoring (#288), Agent behaviour runtime (#289), and
+Access permissions and Interaction points (#290).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
@@ -336,6 +337,80 @@ non-contract stdout records.
   one owner. No migrated invocation remains in the legacy executable.
 - `git diff --check` passes; no repository formatter is configured. Windows
   runtime validation remains the separate #279 ticket.
+
+## Permissions modules (#290)
+
+```sh
+cmake --build build-linux --target pf-smoke-permissions pf-smoke-permissions-editor --parallel
+build-linux/bin/x64/Release/pf-smoke-permissions --list
+build-linux/bin/x64/Release/pf-smoke-permissions --check authorizationAndPersistence
+build-linux/bin/x64/Release/pf-smoke-permissions-editor --check destinationAuthoringShuttle
+ctest --test-dir build-linux -R '^smoke-permissions' -j 3 --output-on-failure
+```
+
+Seven former legacy sources now have 97 individually selectable registrations:
+
+- `pf-smoke-permissions` / `smoke-permissions` (`smoke;core`) owns 88 checks for
+  Access permissions, Permission sets, manual and controlled Door authorization,
+  destination authorization, Permission adherence, transport landing adherence,
+  Interaction point mobility/geometry, Door preflight, and threshold refusals.
+  It links only smoke support, production core, YAML, and Lua. No editor, renderer,
+  ImGui, HTTP, legacy, or other module checks compile when building this target.
+- `pf-smoke-permissions-editor` / `smoke-permissions-editor` (`smoke;editor`) owns
+  nine checks for destination authoring/history/persistence, runtime property and
+  Permission panels, adherence clipboard/history, and landing-profile history and
+  Selection text for Lift, Platform lift, and Shuttle fixtures. It reuses
+  `pf-agent-editing` and headless render support. `PermissionsPanel.cpp` now compiles
+  once in the production editing library shared with the GUI and legacy target.
+
+The former cross-file suite calls are replaced by peer registrations in each
+runner. Core landing journeys use public registry mutations; their Editor peers
+own the former undo/redo and display assertions, without duplicating journey
+checks or introducing UI hooks into core checks. Public World, Graph, snapshots,
+Events, serialization, and simulation ticks remain the assertion seams. All 549
+original assertion call sites are retained. Mixed destination authoring checks
+keep their history and persistence assertions together in the Editor tier.
+
+Destination enforcement selectors end in `Lift0`–`Lift5`, `Platform0`–`Platform5`,
+or `Shuttle0`–`Shuttle5`: unchanged authorization, onboard runtime revoke, onboard
+requirement tightening, onboard authored revoke, onboard adherence change, and
+pre-boarding adherence change. Landing journey selectors use the same transport
+names with variants 0–7: inherited opportunism, stale Path, revoke riding, revoke
+boarding, revoke before boarding, tighten before boarding, tighten riding, and
+enable adherence riding. Alternatives have separate selectors for each transport.
+
+All checks use in-memory Worlds. Editor checks reset panel/history state and scope
+registry history and CPU ImGui contexts, including exceptional exits. Ini/log
+files are disabled, clipboard capture stays in process, and there are no platform
+backends, graphics windows, native dialogs, or required user input. The contract
+checks exact listings, every single selection, misuse status codes, no files in
+an external empty working directory, and eight simultaneous runs of each tier.
+Core and Editor CTest timeouts are 60 and 30 seconds; the contract has 180 seconds
+for Debug and concurrent execution.
+
+The seven old sources, declarations, and invocations are removed from legacy
+compilation/execution. The empty `access-permissions` CTest entry is retired;
+`--access-permission-checks` returns 2 with migration guidance. Inline scenarios,
+compile-only API contracts, and compatibility dispatch remain in their separate
+follow-up tickets rather than extending #290.
+
+### #290 Linux validation
+
+- Release, GUI enabled: full default build and all 85 CTest entries pass
+  sequentially. All 84 non-aggregate entries pass with `-j 6`; the aggregate runs
+  separately from legacy serialization because of their existing fixed-path
+  overlap. The original Access permission selection passed before extraction.
+- Clean Release, GUI disabled: building only `pf-smoke-permissions` produces only
+  its runner/eight check objects and smoke support among headless sources. Its
+  actual link command contains only support, production core, YAML, and Lua.
+  Direct execution passes all 88 checks.
+- Clean Debug, GUI disabled, `PF_HIGH_ANALYSIS=ON`: both targets build and all
+  three focused CTest entries pass concurrently, including every single selection
+  and eight concurrent full runs per tier. Existing elevated-analysis warnings
+  remain. Observed focused CTest time was about 77 seconds (Release: 19 seconds).
+- Mechanical comparison preserves all 549 original `require` assertion calls
+  (whitespace normalized). `git diff --check` passes; no repository formatter is
+  configured. Windows execution remains the separate #279 ticket.
 
 ## World structure and Sector module (#284)
 

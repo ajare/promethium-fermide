@@ -191,6 +191,42 @@ add_test(NAME smoke-behaviours-contract COMMAND ${CMAKE_COMMAND}
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/BehavioursContract.cmake")
 set_tests_properties(smoke-behaviours-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 90)
 
+pf_add_smoke_module(pf-smoke-permissions
+    NAME permissions
+    SOURCES
+        permissions/Main.cpp
+        permissions/Access.cpp
+        permissions/Destinations.cpp
+        permissions/Adherence.cpp
+        permissions/LandingAdherence.cpp
+        permissions/InteractionMobility.cpp
+        permissions/InteractionGeometry.cpp
+        permissions/Preflight.cpp
+        permissions/Refusal.cpp
+    LIBRARIES prometheum-fermide-core
+    LABELS core
+    TIMEOUT 60
+)
+
+pf_add_smoke_module(pf-smoke-permissions-editor
+    NAME permissions-editor
+    SOURCES
+        permissions/EditorMain.cpp
+        permissions/DestinationEditor.cpp
+        permissions/AccessEditor.cpp
+        permissions/AdherenceEditor.cpp
+        permissions/LandingAdherenceEditor.cpp
+    LIBRARIES pf-agent-editing pf-headless-render-support
+    LABELS editor
+    TIMEOUT 30
+)
+
+add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
+    "-DPERMISSIONS=$<TARGET_FILE:pf-smoke-permissions>"
+    "-DEDITOR=$<TARGET_FILE:pf-smoke-permissions-editor>"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PermissionsContract.cmake")
+set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core;editor" TIMEOUT 180)
+
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES

@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Interaction points and the effective Mobility profile, for ticket #193.
 //
 // Buttons is a capability rather than a traversal kind (ADR 0011): an Agent
@@ -32,8 +33,6 @@
 #include "core/AgentTagRegistry.h"
 #include "core/MobilityProfile.h"
 #include "core/World.h"
-
-void runInteractionMobilitySmokeChecks();
 
 namespace
 {
@@ -193,8 +192,16 @@ namespace
 	}
 }
 
-void runInteractionMobilitySmokeChecks()
+void permission_smoke::registerInteractionMobility(std::vector<smoke::Check>& checks)
 {
-	interactionRequestsHonourEffectiveButtonsRestriction();
-	queuedInteractionIsCancelledByPausedProfileEdit();
+	checks.push_back({ "interactionRequestsHonourEffectiveButtonsRestriction",
+		[](smoke::Context const&)
+		{
+			interactionRequestsHonourEffectiveButtonsRestriction();
+		} });
+	checks.push_back({ "queuedInteractionIsCancelledByPausedProfileEdit",
+		[](smoke::Context const&)
+		{
+			queuedInteractionIsCancelledByPausedProfileEdit();
+		} });
 }

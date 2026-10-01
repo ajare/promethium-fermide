@@ -1,3 +1,4 @@
+#include "Checks.h"
 // Door option and placement preflight, for ticket #196.
 //
 // validateSectorDoorOptions() checked a Door's height and hold-open time but
@@ -32,8 +33,6 @@
 #include "core/Simulation.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
-
-void runDoorPreflightSmokeChecks();
 
 namespace
 {
@@ -292,13 +291,41 @@ namespace
 	}
 }
 
-void runDoorPreflightSmokeChecks()
+void permission_smoke::registerPreflight(std::vector<smoke::Check>& checks)
 {
-	zeroWidthDoorIsRefused();
-	overWideCrossingLanesAreRefused();
-	replayedZeroWidthDoorIsRefused();
-	replayedOverWideCrossingLanesAreRefused();
-	honestDoorRecordStillLoads();
-	validDoorGeometryCarriesTheRightLaneCount();
-	wideDoorStillCrosses();
+	checks.push_back({ "zeroWidthDoorIsRefused",
+		[](smoke::Context const&)
+		{
+			zeroWidthDoorIsRefused();
+		} });
+	checks.push_back({ "overWideCrossingLanesAreRefused",
+		[](smoke::Context const&)
+		{
+			overWideCrossingLanesAreRefused();
+		} });
+	checks.push_back({ "replayedZeroWidthDoorIsRefused",
+		[](smoke::Context const&)
+		{
+			replayedZeroWidthDoorIsRefused();
+		} });
+	checks.push_back({ "replayedOverWideCrossingLanesAreRefused",
+		[](smoke::Context const&)
+		{
+			replayedOverWideCrossingLanesAreRefused();
+		} });
+	checks.push_back({ "honestDoorRecordStillLoads",
+		[](smoke::Context const&)
+		{
+			honestDoorRecordStillLoads();
+		} });
+	checks.push_back({ "validDoorGeometryCarriesTheRightLaneCount",
+		[](smoke::Context const&)
+		{
+			validDoorGeometryCarriesTheRightLaneCount();
+		} });
+	checks.push_back({ "wideDoorStillCrosses",
+		[](smoke::Context const&)
+		{
+			wideDoorStillCrosses();
+		} });
 }

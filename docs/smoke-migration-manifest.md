@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Agent behaviour runtime migration #289 (parent #278). Each
+Snapshot after the Permissions migration #290 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -77,6 +77,21 @@ source, declaration, aggregate call, and dedicated call are removed. The empty
 `agent-behaviours` CTest entry is retired; `--agent-behaviour-checks` returns 2 with
 directions to the independent modules.
 
+#290 migrates all seven Access permission, Permission adherence, transport landing
+adherence, Interaction point mobility/geometry, Door preflight, and threshold
+refusal sources into `smoke/permissions`. There are 88 selectable core checks in
+`pf-smoke-permissions` and nine Editor checks in `pf-smoke-permissions-editor`.
+The former Access runner's calls into adherence suites are now explicit peer
+registrations. Transport kinds and landing/destination change variants each have
+stable selectors. Core journeys set tag properties through the registry API;
+registry-history and Selection assertions are independent Editor peers for all
+three transport kinds. Mixed destination authoring/history/persistence scenarios
+remain coherent Editor checks. All 549 original assertion call sites are retained.
+The old sources, declarations, calls, and `access-permissions` CTest entry are
+removed; `--access-permission-checks` returns 2 with migration guidance. Remaining
+inline Interaction scenarios and the compile-only API contract remain legacy-owned
+for their separate follow-up tickets.
+
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Other overlapping legacy CTest selections are unchanged.
 
@@ -84,7 +99,10 @@ Paths in the table are relative to `src/headless/`.
 
 | Check source | Ownership | Target |
 | --- | --- | --- |
-| `AccessPermissionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/permissions/Access.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/Destinations.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/DestinationEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
+| `smoke/permissions/AccessEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
 | `smoke/agent/Identity.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
@@ -150,7 +168,7 @@ Paths in the table are relative to `src/headless/`.
 | `DoorOpenLeftRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DoorOpenRightRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `DoorPanelScopeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `DoorPreflightSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/permissions/Preflight.cpp` | module-owned | `pf-smoke-permissions` |
 | `DoorTwoSidedButtonSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/Layers.cpp` | module-owned | `pf-smoke-world` |
 | `EscalatorWalkingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -159,8 +177,8 @@ Paths in the table are relative to `src/headless/`.
 | `FacadeRenderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/Facades.cpp` | module-owned | `pf-smoke-world` |
 | `GraphicsStartupSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `InteractionMobilitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `InteractionPointGeometrySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/permissions/InteractionMobility.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/InteractionGeometry.cpp` | module-owned | `pf-smoke-permissions` |
 | `IsolatedSectorPathingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `LadderForceBridgeRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `LiftBoardingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -175,7 +193,8 @@ Paths in the table are relative to `src/headless/`.
 | `PaletteTraySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `PathfindingWorkspaceSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `PausePositionSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `PermissionAdherenceSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/permissions/Adherence.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/AdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
 | `RenderOrderSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `RestoredPathMobilitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `RoutePlanningSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
@@ -189,9 +208,10 @@ Paths in the table are relative to `src/headless/`.
 | `SimulationStepTimingChecks.cpp` | module-owned (retained standalone) | `pf-simulation-step-timing-checks` |
 | `StairRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `smoke/world/ThresholdLayerOverlap.cpp` | module-owned | `pf-smoke-world` |
-| `ThresholdRefusalSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/permissions/Refusal.cpp` | module-owned | `pf-smoke-permissions` |
 | `ThresholdRouteCostSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
-| `TransportLandingAdherenceSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/permissions/LandingAdherence.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/LandingAdherenceEditor.cpp` | module-owned | `pf-smoke-permissions-editor` |
 | `ViewportCullingSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ViewportDragScrollSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
 | `ViewportZoomSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
