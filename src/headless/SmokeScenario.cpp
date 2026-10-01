@@ -1,155 +1,221 @@
-#define NOMINMAX
-#if defined(_WIN32)
-#include <Windows.h>
-#if defined(_MSC_VER)
-#include <crtdbg.h>
-#include <cstdlib>
-#endif
-#endif
+// Compatibility only: no production or smoke-check linkage.
+#include "CompatibilityModules.h"
 
-#include <cstdint>
-#include <exception>
+#include <cerrno>
+#include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
-#include "core/Coordination.h"
+#include <vector>
 
-void runMarkerIdentitySmokeChecks();
-void runDoorTwoSidedButtonSmokeChecks();
+#ifdef _WIN32
+#define NOMINMAX
+#include <Windows.h>
+#else
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
+#endif
 
-static_assert(!std::is_convertible_v<core::DeviceOperationId, core::TraversalResourceId>);
+namespace
+{
+	using Command = std::vector<std::string>;
+	using Commands = std::vector<Command>;
+
+	std::filesystem::path executableDirectory()
+	{
+#ifdef _WIN32
+		std::vector<wchar_t> buffer(32768);
+		auto size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+		if (!size || size == buffer.size()) throw std::runtime_error("Cannot locate compatibility executable");
+		return std::filesystem::path(std::wstring(buffer.data(), size)).parent_path();
+#else
+		return std::filesystem::read_symlink("/proc/self/exe").parent_path();
+#endif
+	}
+
+#ifdef _WIN32
+	// CommandLineToArgv/CRT quoting, including embedded quotes and trailing slashes.
+	std::wstring quote(std::wstring const& value)
+	{
+		std::wstring result = L"\"";
+		size_t slashes = 0;
+		for (auto ch : value)
+		{
+			if (ch == L'\\') { ++slashes; continue; }
+			result.append(ch == L'"' ? 2 * slashes + 1 : slashes, L'\\');
+			slashes = 0;
+			result += ch;
+		}
+		result.append(2 * slashes, L'\\');
+		return result + L'"';
+	}
+#endif
+
+	int run(std::filesystem::path const& directory, Command const& command)
+	{
+		auto path = directory / command.front();
+#ifdef _WIN32
+		path += ".exe";
+#endif
+		std::cout << "RUN " << command.front() << std::endl;
+		if (!std::filesystem::is_regular_file(path))
+		{
+			std::cerr << "ERROR " << command.front() << ": missing executable " << path << '\n';
+			return 127;
+		}
+#ifdef _WIN32
+		std::wstring line = quote(path.wstring());
+		for (size_t i = 1; i < command.size(); ++i)
+			line += L" " + quote(std::filesystem::path(command[i]).wstring());
+		STARTUPINFOW startup{};
+		startup.cb = sizeof(startup);
+		PROCESS_INFORMATION process{};
+		if (!CreateProcessW(path.c_str(), line.data(), nullptr, nullptr, TRUE, 0,
+			nullptr, nullptr, &startup, &process))
+		{
+			std::cerr << "ERROR " << command.front() << ": launch failed, Windows error " << GetLastError() << '\n';
+			return 126;
+		}
+		CloseHandle(process.hThread);
+		auto waited = WaitForSingleObject(process.hProcess, INFINITE);
+		DWORD status = 0;
+		bool queried = GetExitCodeProcess(process.hProcess, &status) != 0;
+		CloseHandle(process.hProcess);
+		if (waited != WAIT_OBJECT_0 || !queried) throw std::runtime_error("Cannot wait for child");
+		if (status >= 0x80000000UL)
+		{
+			std::cerr << "ERROR " << command.front() << ": abnormal termination, Windows status " << status << '\n';
+			return 1;
+		}
+		int code = status <= 255 ? static_cast<int>(status) : 1;
+#else
+		std::string executable = path.string();
+		std::vector<char*> args{ executable.data() };
+		for (size_t i = 1; i < command.size(); ++i) args.push_back(const_cast<char*>(command[i].c_str()));
+		args.push_back(nullptr);
+		pid_t child;
+		int error = posix_spawn(&child, executable.c_str(), nullptr, nullptr, args.data(), environ);
+		if (error)
+		{
+			std::cerr << "ERROR " << command.front() << ": launch failed: " << std::strerror(error) << '\n';
+			return error == ENOENT ? 127 : 126;
+		}
+		int status;
+		pid_t waited;
+		do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+		if (waited < 0) throw std::runtime_error("Cannot wait for child");
+		if (WIFSIGNALED(status))
+		{
+			std::cerr << "ERROR " << command.front() << ": abnormal termination, signal " << WTERMSIG(status) << '\n';
+			return 128 + WTERMSIG(status);
+		}
+		if (!WIFEXITED(status)) throw std::runtime_error("Unexpected child status");
+		int code = WEXITSTATUS(status);
+#endif
+		if (code) std::cerr << "FAIL " << command.front() << ": exit " << code << '\n';
+		else std::cout << "PASS " << command.front() << std::endl;
+		return code;
+	}
+
+	Commands select(int argc, char** argv)
+	{
+		if (argc == 1)
+		{
+			Commands commands;
+			for (auto name : compatibilityModules) commands.push_back({ name });
+			return commands;
+		}
+		std::string option = argv[1];
+		static std::map<std::string, Commands> const selections{
+			{ "--viewport-checks", {{ "pf-smoke-render" }} },
+			{ "--render-checks", {{ "pf-smoke-render" }} },
+			{ "--agent-behaviour-checks", {{ "pf-smoke-behaviours" }, { "pf-smoke-editor" }} },
+			{ "--access-permission-checks", {{ "pf-smoke-permissions" }, { "pf-smoke-editor" }} },
+			{ "--route-planning-checks", {{ "pf-smoke-routing" }, { "pf-smoke-editor" }, { "pf-smoke-render" }} },
+			{ "--route-planning-time-checks", {{ "pf-smoke-routing" }, { "pf-smoke-editor" }, { "pf-smoke-render" }} },
+			{ "--routing-scale-checks", {{ "pf-smoke-routing" }} },
+			{ "--shuttle-route-checks", {{ "pf-smoke-routing" }} },
+			{ "--restored-path-checks", {{ "pf-smoke-routing" }} },
+			{ "--serialization-checks", {{ "pf-smoke-persistence" }, { "pf-smoke-render" }} },
+			{ "--coordinated-document-checks", {{ "pf-smoke-editor" }} },
+			{ "--metrics-checks", {{ "pf-smoke-metrics" }} },
+			{ "--world-teardown-smoke", {{ "pf-smoke-simulation" }} },
+			{ "--graphics-startup-smoke", {{ "pf-smoke-startup" }} }
+		};
+		if (auto found = selections.find(option); found != selections.end())
+		{
+			if (argc != 2) throw std::invalid_argument("Smoke selections accept no extra arguments");
+			return found->second;
+		}
+		Command tool;
+		if (option == "--restoration-benchmark") tool = { "pf-restoration-benchmark" };
+		else if (option == "--write-routing-scale-world") tool = { "pf-generate-routing-world" };
+		else if (option == "--pause-position-repro") tool = { "pf-pause-position-repro" };
+		else if (option == "--lift-crossing-repro") tool = { "pf-lift-repro", "crossing" };
+		else if (option == "--lift-stall-repro") tool = { "pf-lift-repro", "boarding" };
+		else if (option.starts_with("--metrics"))
+		{
+			tool = { "pf-metrics-server" };
+			for (int i = 1; i < argc; ++i)
+			{
+				std::string arg = argv[i];
+				if (arg == "--metrics") continue;
+				if (arg == "--metrics-port" || arg == "--metrics-world")
+				{
+					tool.push_back(arg == "--metrics-port" ? "--port" : "--world");
+					if (++i == argc) throw std::invalid_argument("Missing metrics option value");
+					tool.push_back(argv[i]);
+				}
+				else if (arg == "--metrics-detail=sector,queue") tool.push_back("--detail=sector,queue");
+				else tool.push_back(arg); // Dedicated tool validates remaining arguments.
+			}
+			return { tool };
+		}
+		else throw std::invalid_argument("Unknown legacy option: " + option);
+		for (int i = 2; i < argc; ++i) tool.push_back(argv[i]);
+		return { tool };
+	}
+}
 
 int main(int argc, char** argv)
 {
-#if defined(_WIN32)
+#ifdef _WIN32
 	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-#if defined(_MSC_VER)
-	_set_error_mode(_OUT_TO_STDERR);
-	_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-#ifdef _DEBUG
-	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
-	_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
 #endif
-#endif
-#endif
-	if (argc > 1 && (std::string(argv[1]) == "--viewport-checks"
-		|| std::string(argv[1]) == "--render-checks"))
-	{
-		std::cerr << "Render and viewport checks moved to smoke-render; use CTest.\n";
-		return 2;
-	}
 	try
 	{
-		if (argc > 1 && std::string(argv[1]) == "--restoration-benchmark")
+		if (argc == 2 && std::string(argv[1]) == "--help")
 		{
-			std::cerr << "Use pf-restoration-benchmark <world> [cycles].\n";
-			return 2;
+			std::cout << "Usage: prometheum-fermide-headless [legacy-option [tool arguments]]\n"
+				"Deprecated compatibility dispatcher. Prefer pf-smoke-* modules, dedicated tools, or CTest.\n"
+				"No arguments runs all configured smoke modules sequentially.\n";
+			return 0;
 		}
-		if (argc > 1 && std::string(argv[1]) == "--write-routing-scale-world")
+		auto commands = select(argc, argv);
+		std::cerr << "DEPRECATED: use";
+		for (auto const& command : commands) std::cerr << ' ' << command.front();
+		std::cerr << " directly (or CTest for smoke coverage).\n";
+		auto directory = executableDirectory();
+		int result = 0;
+		for (auto const& command : commands)
 		{
-			std::cerr << "Use pf-generate-routing-world <new.world.yaml>.\n";
-			return 2;
+			int code = run(directory, command);
+			if (!result) result = code; // Continue coverage, preserve first failure in stable order.
 		}
-		if (argc > 1 && std::string(argv[1]) == "--agent-behaviour-checks")
-		{
-			std::cerr << "Agent behaviour checks moved to smoke-behaviours and smoke-behaviours-editor; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--access-permission-checks")
-		{
-			std::cerr << "Access permission checks moved to smoke-permissions and smoke-permissions-editor; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--route-planning-checks")
-		{
-			std::cerr << "Route planning checks moved to smoke-routing, smoke-routing-editor and smoke-render; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--route-planning-time-checks")
-		{
-			std::cerr << "Route planning checks moved to smoke-routing, smoke-routing-editor and smoke-render; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--routing-scale-checks")
-		{
-			std::cerr << "Routing scale checks moved to smoke-routing; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--shuttle-route-checks")
-		{
-			std::cerr << "Shuttle route-cost checks moved to smoke-routing; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--restored-path-checks")
-		{
-			std::cerr << "Restored Path checks moved to smoke-routing; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--serialization-checks")
-		{
-			std::cerr << "Serialization checks moved to smoke-persistence and smoke-render; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--coordinated-document-checks")
-		{
-			std::cerr << "Coordinated document checks moved to smoke-agent-tags-editor and smoke-behaviours-editor; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--metrics-checks")
-		{
-			std::cerr << "Metrics checks moved to smoke-metrics; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]).starts_with("--metrics"))
-		{
-			std::cerr << "Use pf-metrics-server --help.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--pause-position-repro")
-		{
-			std::cerr << "Use pf-pause-position-repro <minimal|world>.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--lift-crossing-repro")
-		{
-			std::cerr << "Use pf-lift-repro crossing <world>.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--lift-stall-repro")
-		{
-			std::cerr << "Use pf-lift-repro boarding <world>.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--world-teardown-smoke")
-		{
-			std::cerr << "World teardown checks moved to smoke-simulation; use CTest.\n";
-			return 2;
-		}
-		if (argc > 1 && std::string(argv[1]) == "--graphics-startup-smoke")
-		{
-			std::cerr << "Graphics startup checks moved to smoke-startup; use CTest.\n";
-			return 2;
-		}
-
-		// Only unmigrated external suites remain here. Domain scenarios are
-		// registered directly with their owning modules, not called twice.
-		runMarkerIdentitySmokeChecks();
-		runDoorTwoSidedButtonSmokeChecks();
-
-		std::cout << "PASS: remaining legacy checks; migrated scenarios run through domain CTests\n";
-		return 0;
+		return result;
 	}
-	catch (std::exception const& exception)
+	catch (std::invalid_argument const& error)
 	{
-		std::cerr << "FAIL: headless smoke scenario threw: " << exception.what() << '\n';
-		return 1;
+		std::cerr << "ERROR compatibility: " << error.what() << "; use --help\n";
+		return 2;
 	}
-	catch (...)
+	catch (std::exception const& error)
 	{
-		std::cerr << "FAIL: headless smoke scenario threw an unknown exception\n";
+		std::cerr << "ERROR compatibility: " << error.what() << '\n';
 		return 1;
 	}
 }

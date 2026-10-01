@@ -448,29 +448,9 @@ target_link_libraries(pf-lift-repro PRIVATE pf-lift-boarding-support)
 pf_add_headless_tool(pf-pause-position-repro src/headless/tools/PausePositionRepro.cpp)
 target_link_libraries(pf-pause-position-repro PRIVATE pf-pause-position-support)
 
-add_executable(prometheum-fermide-headless
-    src/headless/DoorTwoSidedButtonSmokeChecks.cpp
-    src/headless/MarkerIdentitySmokeChecks.cpp
-    src/headless/SmokeScenario.cpp
-)
-target_compile_features(prometheum-fermide-headless PRIVATE cxx_std_20)
-target_include_directories(prometheum-fermide-headless PRIVATE "${PF_INCLUDE_DIR}/imgui")
-target_compile_definitions(prometheum-fermide-headless PRIVATE
-    _CONSOLE
-    $<$<CONFIG:Debug>:_DEBUG>
-    $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
-)
-target_link_libraries(prometheum-fermide-headless PRIVATE
-    pf-headless-render-support pf-agent-editing)
-if(MSVC)
-    target_compile_options(prometheum-fermide-headless PRIVATE /W3 /permissive-)
-else()
-    target_compile_options(prometheum-fermide-headless PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-pf_apply_high_analysis(prometheum-fermide-headless)
-set_target_properties(prometheum-fermide-headless PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
-)
+# Deliberately no linked libraries: all compatibility work happens in children.
+pf_add_headless_tool(prometheum-fermide-headless src/headless/SmokeScenario.cpp)
+target_include_directories(prometheum-fermide-headless PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 if(PF_BUILD_GUI)
     file(GLOB PF_IMGUI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/*.cpp")
@@ -531,9 +511,33 @@ if(PF_BUILD_GUI)
 endif()
 
 include(CTest)
+# Compatibility remains runnable with BUILD_TESTING=OFF. Direct module targets
+# never depend on the compatibility target, other modules, or standalone tools.
 if(BUILD_TESTING)
     add_subdirectory(src/headless/smoke)
+else()
+    add_subdirectory(src/headless/smoke EXCLUDE_FROM_ALL)
+endif()
+get_property(PF_COMPATIBILITY_MODULES GLOBAL PROPERTY PF_SMOKE_MODULE_TARGETS)
+list(SORT PF_COMPATIBILITY_MODULES)
+set(PF_COMPATIBILITY_HEADER "#pragma once\ninline constexpr char const* compatibilityModules[] = {\n")
+foreach(module IN LISTS PF_COMPATIBILITY_MODULES)
+    string(APPEND PF_COMPATIBILITY_HEADER "    \"${module}\",\n")
+endforeach()
+string(APPEND PF_COMPATIBILITY_HEADER "};\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/CompatibilityModules.h"
+    CONTENT "${PF_COMPATIBILITY_HEADER}")
+add_dependencies(prometheum-fermide-headless ${PF_COMPATIBILITY_MODULES}
+    pf-restoration-benchmark pf-generate-routing-world pf-metrics-server
+    pf-lift-repro pf-pause-position-repro pf-compile-contracts)
+if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    pf_add_headless_tool(pf-compatibility-probe src/headless/CompatibilityProbe.cpp)
+    add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_compatibility.py"
+        "$<TARGET_FILE:prometheum-fermide-headless>"
+        "$<TARGET_FILE:pf-compatibility-probe>" ${PF_COMPATIBILITY_MODULES})
+    set_tests_properties(headless-compatibility-contract PROPERTIES TIMEOUT 60 LABELS "harness;headless")
     add_test(NAME headless-tools-contract COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_tools.py"
         "$<TARGET_FILE:pf-restoration-benchmark>"
@@ -541,7 +545,6 @@ if(BUILD_TESTING)
         "$<TARGET_FILE:pf-metrics-server>"
         "$<TARGET_FILE:pf-lift-repro>"
         "$<TARGET_FILE:pf-pause-position-repro>"
-        "$<TARGET_FILE:prometheum-fermide-headless>"
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
     set_tests_properties(headless-tools-contract PROPERTIES TIMEOUT 180 LABELS "tools;headless")
 endif()
@@ -594,8 +597,5 @@ if(BUILD_TESTING)
     set_tests_properties(sector-tileset PROPERTIES
         LABELS "smoke;standalone;render" TIMEOUT 30)
 
-    add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
-    # Serialization and restoration smoke coverage is owned by smoke-persistence.
-    # Benchmarks, generators, services, and reproduction workflows have standalone tools.
-    # Lift regressions remain owned by smoke-transports.
+    # No compatibility aggregate CTest: each module owns its coverage directly.
 endif()

@@ -17,6 +17,8 @@ namespace
 	void thresholdLayerOverlap(smoke::Context const&) { runThresholdLayerOverlapSmokeChecks(); }
 
 	constexpr smoke::Check existingChecks[] = {
+		{ "marker-identity", [](smoke::Context const&) { runMarkerIdentitySmokeChecks(); } },
+		{ "two-sided-buttons", [](smoke::Context const&) { runDoorTwoSidedButtonSmokeChecks(); } },
 		{ "layers", layers },
 		{ "background-sector", backgroundSector },
 		{ "background-paint", backgroundPaint },

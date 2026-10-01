@@ -1,3 +1,4 @@
+#include "Checks.h"
 #include <memory>
 #include <stdexcept>
 #include <string>

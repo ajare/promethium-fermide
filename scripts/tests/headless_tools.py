@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.request
 
-benchmark, generator, service, lift, pause, legacy, lift_fixture = sys.argv[1:]
+benchmark, generator, service, lift, pause, lift_fixture = sys.argv[1:]
 
 
 def run(exe, args, code=0, diagnostic=None):
@@ -44,13 +44,6 @@ for args in (["--port", "0", "--port", "0"], ["--ticks", "1", "--ticks", "1"],
              ["--world", "x", "--world", "x"], ["--detail=sector,queue"] * 2,
              ["--detail=sector"], ["--metrics"]):
     run(service, args, 2, "Usage:")
-for option, replacement in (("--restoration-benchmark", "pf-restoration-benchmark"),
-                            ("--write-routing-scale-world", "pf-generate-routing-world"),
-                            ("--metrics", "pf-metrics-server"),
-                            ("--lift-crossing-repro", "pf-lift-repro crossing"),
-                            ("--lift-stall-repro", "pf-lift-repro boarding"),
-                            ("--pause-position-repro", "pf-pause-position-repro")):
-    run(legacy, [option], 2, replacement)
 
 with tempfile.TemporaryDirectory(prefix="pf-tools-") as temporary:
     root = pathlib.Path(temporary)

@@ -3,16 +3,19 @@
 The complete Simulation lifecycle suite, Render coverage, Persistence
 serialization/document coverage, Metrics verification, and GUI graphics Startup
 verification now run in independently buildable [`pf-smoke-*` modules](smoke-modules.md),
-not the legacy aggregate below. The complete serialization/restoration suite now
+launched by the [dispatch-only compatibility executable](headless-compatibility.md).
+The historical scenario descriptions below remain reference material; use the
+module and compatibility documents for current target/CLI contracts.
+The complete serialization/restoration suite now
 runs in `pf-smoke-persistence`, with rendering-policy assertions in `pf-smoke-render`.
 `--serialization-checks`, `--metrics-checks`, and `--graphics-startup-smoke`
-return 2 with migration guidance. Startup is registered only in GUI-enabled builds.
-Benchmark, routing-scale World generation, and metrics serving use independent
-[headless tools](headless-tools.md); legacy service/tool selections return 2.
-Use CTest for combined coverage during the incremental migration; see the
+dispatch those modules with deprecation guidance. Startup is registered only in
+GUI-enabled builds. Benchmark, routing-scale World generation, and metrics serving
+use independent [headless tools](headless-tools.md); legacy service/tool selections
+dispatch them as children. Use CTest for direct, nonduplicated coverage; see the
 [ownership manifest](smoke-migration-manifest.md).
 
-The `core` target builds the shared simulation as `prometheum-fermide-core.lib`. Both the `headless` and `editor` projects reference that static library, so simulation sources are compiled once per configuration instead of being duplicated in each executable. The `headless` target builds deterministic smoke scenarios without SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
+The `prometheum-fermide-core` target builds the shared simulation library. Domain modules and the editor share production libraries; the compatibility executable itself links none of them. Core smoke modules need no SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
 
 ## Walking and threshold route costs (#206)
 

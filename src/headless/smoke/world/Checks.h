@@ -7,6 +7,8 @@ void registerFloorsAndWalls(std::vector<smoke::Check>& checks);
 void registerTopology(std::vector<smoke::Check>& checks);
 void registerLayerDeletion(std::vector<smoke::Check>& checks);
 
+void runMarkerIdentitySmokeChecks();
+void runDoorTwoSidedButtonSmokeChecks();
 void runBackgroundSectorSmokeChecks();
 void runBackgroundPaintSmokeChecks();
 void runBackgroundPlacementSmokeChecks();

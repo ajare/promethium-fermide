@@ -1,4 +1,4 @@
-# New smoke modules live here; legacy checks remain in the root until migrated.
+# Each smoke check has one module owner; compatibility only launches executables.
 # No source globbing: each module explicitly owns its runner and check sources.
 function(pf_smoke_target_policy target)
     pf_apply_headless_verification_policy(${target})
@@ -43,6 +43,7 @@ function(pf_add_smoke_module target)
             message(FATAL_ERROR "Smoke modules cannot link executable ${dependency}")
         endif()
     endforeach()
+    set_property(GLOBAL APPEND PROPERTY PF_SMOKE_MODULE_TARGETS ${target})
     add_executable(${target} ${MODULE_SOURCES})
     target_link_libraries(${target} PRIVATE pf-smoke-support ${MODULE_LIBRARIES})
     pf_smoke_target_policy(${target})
@@ -262,6 +263,8 @@ pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES
         world/Main.cpp
+        world/MarkerIdentity.cpp
+        world/TwoSidedButtons.cpp
         world/BackgroundSector.cpp
         world/BackgroundPaint.cpp
         world/BackgroundPlacement.cpp

@@ -12,10 +12,10 @@ Editor module (#295), complete World-document Persistence (#296–#297), and
 remaining central inline scenarios (#298), the complete Simulation lifecycle
 and robustness coverage (#299), Metrics verification (#300), and graphics
 Startup subprocess verification (#301).
-Other domain checks remain legacy-owned; see the
-[ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
-runs migrated checks, `--render-checks` and `--viewport-checks` now return 2
-with migration guidance, as does `--serialization-checks`. Use CTest for combined coverage.
+The last Marker identity and two-sided Door Button suites belong to World (#305);
+see the [ownership manifest](smoke-migration-manifest.md). The legacy executable
+is now a [dispatch-only compatibility orchestrator](headless-compatibility.md).
+Use direct modules or CTest for coverage without deprecation warnings.
 
 ```sh
 cmake -S . -B build-linux -DBUILD_TESTING=ON -DPF_BUILD_GUI=OFF
@@ -71,8 +71,9 @@ temporary file cleanup.
 `TIMEOUT`. It rejects source ownership shared with another module or the legacy
 executable and rejects executable dependencies. It applies ordinary and elevated
 analysis warnings, links the narrow support, and registers one direct CTest entry.
-All new smoke module/harness/test targets exist only with `BUILD_TESTING=ON`; they are
-in the default build. Existing standalone checks retain their direct targets rather
+With `BUILD_TESTING=ON`, smoke targets are in the default build and registered
+with CTest. With testing off, modules remain buildable for compatibility dispatch
+but their subdirectory is excluded from the default build unless required. Existing standalone checks retain their direct targets rather
 than being folded into modules solely to make their names uniform.
 
 Simulation links only the production core, its YAML/Lua dependencies, smoke

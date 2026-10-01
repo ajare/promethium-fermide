@@ -19,6 +19,7 @@
 //     device command either Button issues is an open
 // Rendering coverage now belongs to smoke/render/DoorButtons.cpp (#294).
 
+#include "Checks.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

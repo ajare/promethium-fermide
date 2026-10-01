@@ -106,9 +106,10 @@ routes, exposition, security, and GUI behavior.
 
 The old `prometheum-fermide-headless --restoration-benchmark`,
 `--write-routing-scale-world`, `--metrics*`, `--lift-crossing-repro`,
-`--lift-stall-repro`, and `--pause-position-repro` selections now return **2**
-with guidance to these tools. The legacy smoke runner never executes a tool
-workflow.
+`--lift-stall-repro`, and `--pause-position-repro` selections now launch the
+corresponding tool as a subprocess with deprecation guidance. See the
+[compatibility contract](headless-compatibility.md) for argument translation and
+exit handling. No tool runs as part of the no-argument smoke aggregate.
 
 With testing enabled, Python 3 runs the bounded, headless subprocess/HTTP contract:
 

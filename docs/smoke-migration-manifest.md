@@ -242,7 +242,7 @@ source lists and dependency tiers are unchanged.
 | `smoke/render/DoorOpenRight.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/DoorPanel.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/permissions/Preflight.cpp` | module-owned | `pf-smoke-permissions` |
-| `DoorTwoSidedButtonSmokeChecks.cpp` (core only) | legacy-owned | `prometheum-fermide-headless` |
+| `DoorTwoSidedButtonSmokeChecks.cpp` (core only) | `world/TwoSidedButtons.cpp` (#305) | `pf-smoke-world` |
 | `smoke/render/DoorButtons.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/world/Layers.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/transports/Escalators.cpp` | module-owned | `pf-smoke-transports` |
@@ -263,7 +263,7 @@ source lists and dependency tiers are unchanged.
 | `smoke/routing/LadderForceBridgeRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/transports/Boarding.cpp` | module-owned | `pf-smoke-transports` |
 | `smoke/routing/LiftRouteCost.cpp` | module-owned | `pf-smoke-routing` |
-| `MarkerIdentitySmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `MarkerIdentitySmokeChecks.cpp` | `world/MarkerIdentity.cpp` (#305) | `pf-smoke-world` |
 | `smoke/metrics/Metrics.cpp` | module-owned | `pf-smoke-metrics` |
 | `smoke/routing/Mobility.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/Movement.cpp` | module-owned | `pf-smoke-routing` |

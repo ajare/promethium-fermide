@@ -1,7 +1,7 @@
 #include "Checks.h"
 // Rendering half of the two-sided Door Button checks (#125, #195).
 // Core authoring, persistence and traversal checks remain in
-// DoorTwoSidedButtonSmokeChecks.cpp; this module owns only visible geometry.
+// world/TwoSidedButtons.cpp; this module owns only visible geometry.
 //   * the back-side Button renders as an outline only - including when its
 //     own Layer is the one drawn solid - while the front-side Button fills
 //   * visibility is judged from the WorldDrawList command stream under its
