@@ -471,8 +471,9 @@ The finalized workflow and compatibility contract are documented in
 initial/voluntary/mandatory episodes over repeated Reset, property random-stream
 noise, pause/resume and deactivation/reactivation; active Agent group membership
 and `pf_agents_active`; and byte-identical World/clipboard output while planning,
-including privately retained candidates. `agent-behaviours` compares planning
-samples with and without unrelated Lua random draws.
+including privately retained candidates. `smoke-behaviours` compares planning
+samples with and without unrelated Lua random draws (select
+`pf-smoke-behaviours --check planningIgnoresBehaviourRandomConsumption`).
 
 The same `route-planning` target exercises the actual editor Agent renderer and
 Selection panel headlessly: no OS window, graphics device, dialogs, or human input.

@@ -38,6 +38,32 @@ set(core_names
     unsavedWorldDocumentRefusesManagedOperations
     validationAndPausedGateAreAtomic
     completeWorkflowReplaysIdentically
+    validHostContractDoesNotRunCallbacks
+    textAndContractFailuresCarryLocationAndTraceback
+    prohibitedHostSurfacesAreAbsent
+    customLoaderIsReservedAndImmutable
+    registryRetainsLoadedAndErrorStatus
+    scratchExecutionIsBudgeted
+    insufficientMemoryBudgetsAreRejectedOrContained
+    liveLoadsFactoriesAndCallbacksAreContained
+    independentStartupInstancesMoveDeterministically
+    manifestHelpersHavePrivatePerAgentGraphs
+    bundledMovementWorkflows
+    planningIntentReplacement
+    routeLossAndTopologyLifecycleV1
+    routeLossAndTopologyLifecycleV2
+    programmingErrorDisablesMovementOwnership
+    activationSuspendsStateAndFreezesTimers
+    interactionOutcomesAreImmutableSemanticValues
+    teardownIsReadOnlyAndBestEffort
+    deterministicTimersExposeOnlySemanticState
+    configuredSchedulesAndRandomStreamsReplay
+    boundedStormsAndFailuresReplayDeterministically
+    planningIgnoresBehaviourRandomConsumption
+    tableIterationAndIdentityReplayDeterministically
+    steadyStateBoundariesReuseSharedSources
+    runtimeAuthorizationUsesTransientOverlays
+    unknownAndRenamedAuthorizationNamesAreDiagnosed
 )
 
 set(editor_names

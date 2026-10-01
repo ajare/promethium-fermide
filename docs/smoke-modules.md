@@ -4,7 +4,7 @@ The independent modules currently own Simulation Observation (#280), Render wall
 (#281), Persistence serializer/document formats (#282), core World structure
 and Sector checks (#284), Agent identity, activation, and Agent groups (#285), and individual Agent
 properties (#286), Agent tags and coordinated documents (#287), and Agent
-behaviour registry and authoring (#288).
+behaviour registry and authoring (#288), and Agent behaviour runtime (#289).
 Other domain checks remain legacy-owned; see the
 [ownership manifest](smoke-migration-manifest.md). The legacy aggregate no longer
 runs migrated checks, `--render-checks` no longer runs migrated walls or core
@@ -224,7 +224,7 @@ eight concurrent full invocations of each tier sharing that working directory.
   create no windows, native dialogs, system clipboard interactions, or ini/log
   files. Windows runtime validation remains the separate #279 ticket.
 
-## Behaviours module (#288)
+## Behaviours module (#288, #289)
 
 ```sh
 cmake --build build-linux --target pf-smoke-behaviours pf-smoke-behaviours-editor --parallel
@@ -238,8 +238,8 @@ The six former registry, assignment, portability, deletion, schema reconciliatio
 and Workflow sources now register 26 checks individually, retaining their original
 function names as stable selectors:
 
-- `pf-smoke-behaviours` / `smoke-behaviours` (`smoke;core`) owns 12 registry,
-  assignment-validation, and deterministic Workflow checks. It links only smoke
+- `pf-smoke-behaviours` / `smoke-behaviours` (`smoke;core`) owns 38 registry,
+  assignment-validation, deterministic Workflow, and runtime checks. It links only smoke
   support, production core, YAML, and Lua. No editor or rendering dependencies
   enter its check sources or link command.
 - `pf-smoke-behaviours-editor` / `smoke-behaviours-editor` (`smoke;editor`) owns
@@ -261,11 +261,62 @@ atomically reserved Context root, cleaned on success or exception. The contract
 test verifies exact listings, every individual selection, misuse exit codes, no
 working-directory output, and eight concurrent full invocations per tier.
 
-All six original sources and legacy declarations/calls are removed. The runtime
-source is intentionally unchanged and remains legacy-owned; the existing
-`--agent-behaviour-checks` selection now runs runtime checks only. The empty
-`coordinated-document-checks` CTest registration is removed, and its old CLI
-selection returns 2 with a migration diagnostic. Use CTest for combined coverage.
+All six original authoring sources and legacy declarations/calls are removed.
+#289 also removes the runtime source and both legacy runtime invocations. The
+empty `agent-behaviours` and `coordinated-document-checks` CTest registrations are
+removed; their old CLI selections return 2 with migration diagnostics. Use CTest
+for combined coverage.
+
+### Runtime groups (#289)
+
+The former 2,890-line runtime suite is physically split by responsibility. All
+26 original runtime invocations are individually listed and selectable; both
+Route-loss API versions have explicit selectors. The editor tier is unchanged.
+
+| Source in `smoke/behaviours` | Checks | Responsibility |
+| --- | ---: | --- |
+| `RuntimePreflight.cpp` | 5 | Versioned contracts, diagnostics, sandbox surfaces, loader, registry status |
+| `RuntimeContainment.cpp` | 3 | Scratch/live instruction and allocation budgets, protected recovery |
+| `RuntimeInstances.cpp` | 2 | Independent startup state, immutable configuration, private helper graphs |
+| `RuntimeMovement.cpp` | 4 | Bundled workflows, intent replacement, Route loss and topology (v1/v2) |
+| `RuntimeCallbacks.cpp` | 4 | Movement ownership, activation, interaction payloads, best-effort teardown |
+| `RuntimeScheduling.cpp` | 2 | Timer ordering, semantic state, configured schedules and seeded replay |
+| `RuntimeFailures.cpp` | 1 | Callback/command storms, failure scope, bounded transactional logging |
+| `RuntimeDeterminism.cpp` | 2 | Independent planning random streams, stable Lua iteration and identity output |
+| `RuntimeScale.cpp` | 1 | Steady-state source-size scaling with 200 Agents |
+| `RuntimeAuthorization.cpp` | 2 | Transient Permission grants and renamed-name diagnostics |
+
+```sh
+build-linux/bin/x64/Release/pf-smoke-behaviours --check routeLossAndTopologyLifecycleV2
+build-linux/bin/x64/Release/pf-smoke-behaviours --check steadyStateBoundariesReuseSharedSources
+```
+
+Replay helpers stay local to their owning responsibility. Runtime fixtures use
+Context-owned temporary directories, and bundled Lua sources resolve through
+`Context::fixture()`, never the working directory or source-file location. The
+scale threshold, sample sizes, replay digests, and all original assertions are
+unchanged. Scale timings remain in failure diagnostics rather than introducing
+non-contract stdout records.
+
+### #289 Linux validation
+
+- Release, GUI enabled: full default build and all 83 CTest entries pass
+  sequentially; all 82 non-aggregate entries pass with `-j 6`. The aggregate runs
+  separately from legacy serialization because of their existing path overlap.
+- Clean Release, GUI disabled: building `pf-smoke-behaviours` alone compiles only
+  its checks/runner and smoke support among headless sources, and links only
+  support, production core, YAML, and Lua. Direct execution passes all 38 checks.
+- Clean Debug, GUI disabled, `PF_HIGH_ANALYSIS=ON`: both Behaviours targets build
+  and all three focused CTest entries pass concurrently. The contract verifies
+  exact listings, every selection, misuse, no working-directory output, and
+  eight concurrent full invocations per tier. Existing analysis warnings remain.
+- The pre-migration runtime selection and migrated runner both pass. Mechanical
+  comparison preserves all 250 original `require` call sites and all 50 embedded
+  Lua fixtures byte-for-byte (assertion whitespace normalized). No runtime source
+  or invocation remains in legacy linkage; the retired CLI selection returns 2.
+- `git diff --check` passes; no repository formatter is configured. Runtime checks
+  link no editor/rendering code and cannot create windows or native dialogs.
+  Windows runtime validation remains #279.
 
 ### #288 Linux validation
 

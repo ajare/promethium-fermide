@@ -369,7 +369,6 @@ add_executable(prometheum-fermide-headless
     src/headless/TransportLandingAdherenceSmokeChecks.cpp
     src/headless/RoutePlanningSmokeChecks.cpp
     src/headless/AgentPathRenderSmokeChecks.cpp
-    src/headless/AgentBehaviourRuntimeSmokeChecks.cpp
     src/headless/DoorOpenApartRenderSmokeChecks.cpp
     src/headless/DoorOpenLeftRenderSmokeChecks.cpp
     src/headless/DoorOpenRightRenderSmokeChecks.cpp
@@ -530,7 +529,6 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/textures/sectors.tileset.yaml")
 
     add_test(NAME headless-smoke COMMAND prometheum-fermide-headless)
-    add_test(NAME agent-behaviours COMMAND prometheum-fermide-headless --agent-behaviour-checks)
     add_test(NAME access-permissions COMMAND prometheum-fermide-headless --access-permission-checks)
     add_test(NAME route-planning COMMAND prometheum-fermide-headless --route-planning-checks)
     add_test(NAME route-planning-time-properties COMMAND prometheum-fermide-headless

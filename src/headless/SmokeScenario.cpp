@@ -76,7 +76,6 @@ void runAccessPermissionSmokeChecks();
 void runInteractionPointGeometrySmokeChecks();
 void runDoorPreflightSmokeChecks();
 void runNonFiniteTimingSmokeChecks();
-void runAgentBehaviourRuntimeSmokeChecks();
 void runEscalatorWalkingSmokeChecks();
 void runRoutePlanningTimePropertySmokeChecks();
 void runAgentPathRenderSmokeChecks();
@@ -6198,9 +6197,8 @@ int main(int argc, char** argv)
 		}
 		if (argc > 1 && std::string(argv[1]) == "--agent-behaviour-checks")
 		{
-			runAgentBehaviourRuntimeSmokeChecks();
-			std::cout << "PASS: versioned Agent behaviours\n";
-			return 0;
+			std::cerr << "Agent behaviour checks moved to smoke-behaviours and smoke-behaviours-editor; use CTest.\n";
+			return 2;
 		}
 		if (argc > 1 && std::string(argv[1]) == "--access-permission-checks")
 		{
@@ -6296,7 +6294,6 @@ int main(int argc, char** argv)
 		runInteractionPointGeometrySmokeChecks();
 		runDoorPreflightSmokeChecks();
 		runNonFiniteTimingSmokeChecks();
-		runAgentBehaviourRuntimeSmokeChecks();
 		runEscalatorWalkingSmokeChecks();
 		runRoutePlanningTimePropertySmokeChecks();
 		runAgentPathRenderSmokeChecks();

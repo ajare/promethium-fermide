@@ -155,6 +155,16 @@ pf_add_smoke_module(pf-smoke-behaviours
         behaviours/Registry.cpp
         behaviours/Assignment.cpp
         behaviours/Workflow.cpp
+        behaviours/RuntimePreflight.cpp
+        behaviours/RuntimeContainment.cpp
+        behaviours/RuntimeInstances.cpp
+        behaviours/RuntimeMovement.cpp
+        behaviours/RuntimeCallbacks.cpp
+        behaviours/RuntimeScheduling.cpp
+        behaviours/RuntimeFailures.cpp
+        behaviours/RuntimeDeterminism.cpp
+        behaviours/RuntimeScale.cpp
+        behaviours/RuntimeAuthorization.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
     TIMEOUT 30

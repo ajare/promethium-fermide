@@ -213,8 +213,10 @@ no movement, timer, or random capabilities. Reasons are `unassignment`, `reset`,
 Teardown is best-effort: an `on_stop` error is diagnosed but cannot retain the
 instance or veto the lifecycle operation.
 
-Headless compatibility coverage runs with
-`prometheum-fermide-headless --agent-behaviour-checks` (CTest `agent-behaviours`).
+Headless compatibility coverage runs with `pf-smoke-behaviours` and
+`pf-smoke-behaviours-editor` (CTest `smoke-behaviours` and
+`smoke-behaviours-editor`). Use `--list` and `--check <name>` for individual
+scenarios; the legacy `--agent-behaviour-checks` selection is retired (#289).
 It covers mixed-version commands, events, preflight and reload, v1-to-v2 source
 migration, automatic replanning and Route loss in both versions, and repeated
 trips using the bundled patrol and random-wander sources.

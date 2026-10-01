@@ -1,6 +1,6 @@
 # Smoke migration ownership manifest
 
-Snapshot after the Agent behaviour authoring migration #288 (parent #278). Each
+Snapshot after the Agent behaviour runtime migration #289 (parent #278). Each
 source below has exactly one current compilation/execution owner; all assertions
 inside it belong to that owner.
 `legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
@@ -60,11 +60,22 @@ physically split by dependency. Portability, coordinated deletion, schema
 reconciliation, and scenarios asserting document history or panels use the editor
 tier. All 243 original assertion call sites are preserved. Temporary packages
 live below Context-owned invocation roots; each fixture gets its own directory.
-The old sources, declarations, and calls are removed. Runtime checks remain
-legacy-owned, including `--agent-behaviour-checks`. The now-empty
+The old sources, declarations, and calls are removed. The now-empty
 `coordinated-document-checks` CTest entry is removed; its legacy CLI selection
 returns 2 with directions to the independent editor modules rather than silently
 running unrelated checks.
+
+#289 completes runtime ownership in `pf-smoke-behaviours`: the oversized
+`AgentBehaviourRuntimeSmokeChecks.cpp` is split into ten responsibility-based
+translation units below, registering all 26 original invocations independently
+(38 core checks total). Route-loss versions are selectable as
+`routeLossAndTopologyLifecycleV1` and `routeLossAndTopologyLifecycleV2`; all other
+selectors retain the original scenario names. Determinism, callbacks, scheduling,
+failure containment, and scale assertions are retained. Runtime package files use
+Context-owned directories and bundled sources use Context fixture lookup. The old
+source, declaration, aggregate call, and dedicated call are removed. The empty
+`agent-behaviours` CTest entry is retired; `--agent-behaviour-checks` returns 2 with
+directions to the independent modules.
 
 The legacy aggregate is not yet a compatibility orchestrator; converting it is
 follow-up work. Other overlapping legacy CTest selections are unchanged.
@@ -86,7 +97,16 @@ Paths in the table are relative to `src/headless/`.
 | `smoke/behaviours/DeleteEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
 | `smoke/behaviours/SchemaReconciliationEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
 | `smoke/behaviours/WorkflowEditor.cpp` | module-owned | `pf-smoke-behaviours-editor` |
-| `AgentBehaviourRuntimeSmokeChecks.cpp` | legacy-owned | `prometheum-fermide-headless` |
+| `smoke/behaviours/RuntimePreflight.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeContainment.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeInstances.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeMovement.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeCallbacks.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeScheduling.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeFailures.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeDeterminism.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeScale.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeAuthorization.cpp` | module-owned | `pf-smoke-behaviours` |
 | `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ColourEditor.cpp` | module-owned | `pf-smoke-agent-editor` |
 | `smoke/agent/GroupAssignment.cpp` | module-owned | `pf-smoke-agent` |
@@ -210,6 +230,14 @@ continue through `--serialization-checks` (also the existing legacy aggregate).
 Neither legacy entry point executes the migrated checks.
 
 ## Support and non-smoke code
+
+- `smoke/behaviours/Main.cpp` and `EditorMain.cpp`: explicit per-tier registries.
+  `Checks.h` declares registrations; `TemporaryDirectory.h` reserves Context-owned
+  fixture directories; `RuntimeFixtures.h` writes runtime package text;
+  `EditorState.h` resets editor state. These helpers do not own extra checks.
+- `smoke/tests/BehavioursContract.cmake`: exact listings, every selection, misuse,
+  external empty working directory, and eight concurrent invocations per tier;
+  owned by `smoke-behaviours-contract` (`harness;core;editor`).
 
 - `smoke/tags/Main.cpp` and `EditorMain.cpp`: explicit per-tier Agent tag registries.
   `Checks.h` declares registration functions; `TemporaryDirectory.h` allocates

@@ -2,9 +2,10 @@
 
 Ticket #164 closes the Agent behaviour feature with one public-facade workflow and
 an explicit prerequisite coverage map. The automated workflow is
-`src/headless/AgentBehaviourWorkflowSmokeChecks.cpp`; it uses the real fixed-tick
-pipeline, Lua 5.4/sol2 adapter, registry package, World persistence, document
-history, and extracted ImGui panels. It does not inspect Lua stacks, command
+now split between `src/headless/smoke/behaviours/Workflow.cpp` and
+`WorkflowEditor.cpp` (#288); it uses the real fixed-tick pipeline, Lua 5.4/sol2
+adapter, registry package, World persistence, document history, and extracted
+ImGui panels. It does not inspect Lua stacks, command
 queues, callback containers, graph internals, or traversal coordination state.
 
 ## Deterministic workflow
@@ -27,7 +28,7 @@ instance-local failure isolation, reset, unchanged external-source reload, and
 resume. Public simulation events are consumed independently after Lua observes
 them. Reset and reload recreate instances from authored configuration.
 
-The same executable also verifies current World round trips (including the
+The Behaviours editor runner also verifies current World round trips (including the
 version-11 Marker identity boundary), direct version-11 loading, deterministic
 version-10 unnamed Marker migration, version-1 registry round trips, unsupported
 version refusal, malformed World/registry refusal, assignment undo/redo, and
@@ -42,8 +43,13 @@ native dialogs.
 ## Parent-spec prerequisite map
 
 The final workflow intentionally composes the public contracts below rather than
-duplicating every adversarial fixture. These closed prerequisite checks run in
-the same `headless-smoke` executable:
+duplicating every adversarial fixture. The table records the original prerequisite
+suite names. After #288/#289, all `AgentBehaviour*` checks below run in the
+independent `smoke-behaviours` and `smoke-behaviours-editor` CTest entries, not
+`headless-smoke`. `MarkerIdentitySmokeChecks` and `MovementCommandSmokeChecks`
+remain legacy-owned. See the [ownership manifest](smoke-migration-manifest.md)
+and [runtime group map](smoke-modules.md#runtime-groups-289) for current files
+and individual selectors:
 
 | Parent behaviour | Prerequisite check |
 |---|---|
