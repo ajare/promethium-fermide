@@ -5,16 +5,18 @@ set -u
 CONFIG="Release"
 BUILD_DIR="build-linux"
 BUILD_GUI="ON"
+HIGH_ANALYSIS="OFF"
 
 print_usage() {
     cat <<EOF
-Usage: $(basename "$0") [--config Debug|Release] [--build-dir path] [--no-gui]
+Usage: $(basename "$0") [--config Debug|Release] [--build-dir path] [--no-gui] [--high-analysis]
 
-  --config     Build configuration. Defaults to Release.
-  --build-dir  CMake build directory. Defaults to build-linux.
-  --gui        Build the graphical application (default).
-  --no-gui     Build only the core and headless application.
-  --help       Show this help message.
+  --config        Build configuration. Defaults to Release.
+  --build-dir     CMake build directory. Defaults to build-linux.
+  --gui           Build the graphical application (default).
+  --no-gui        Build only the core and headless application.
+  --high-analysis Enable elevated diagnostics for project targets.
+  --help          Show this help message.
 EOF
 }
 
@@ -42,6 +44,10 @@ while (( $# > 0 )); do
             ;;
         --no-gui)
             BUILD_GUI="OFF"
+            shift
+            ;;
+        --high-analysis)
+            HIGH_ANALYSIS="ON"
             shift
             ;;
         --help|-h)
@@ -74,6 +80,9 @@ if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
     if [[ "$BUILD_GUI" == "OFF" ]]; then
         fresh_arguments+=(--no-gui)
     fi
+    if [[ "$HIGH_ANALYSIS" == "ON" ]]; then
+        fresh_arguments+=(--high-analysis)
+    fi
     "$SCRIPT_DIR/build_from_scratch.sh" "${fresh_arguments[@]}"
     exit $?
 fi
@@ -84,7 +93,8 @@ if ! command -v cmake >/dev/null 2>&1; then
 fi
 
 echo "Checking CMake build files..."
-cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$CONFIG" -DPF_BUILD_GUI="$BUILD_GUI"
+cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$CONFIG" \
+    -DBUILD_TESTING=ON -DPF_BUILD_GUI="$BUILD_GUI" -DPF_HIGH_ANALYSIS="$HIGH_ANALYSIS"
 result=$?
 if (( result != 0 )); then
     echo "Build failed with exit code $result." >&2

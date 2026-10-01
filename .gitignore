@@ -8,6 +8,7 @@ obj/
 cmake-build*/
 build-windows/
 build-linux/
+build-linux-validation/
 out/
 
 # OS/editor files

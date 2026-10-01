@@ -1,14 +1,192 @@
 # Smoke migration ownership manifest
 
-Snapshot after standalone tool extraction #304 (parent #278). Each
-source below has exactly one current compilation/execution owner; all assertions
-inside it belong to that owner.
-`legacy-owned` means `prometheum-fermide-headless`. `module-owned` names the
-independent target. `compile-contract-owned` names an object-only build target.
-The four pre-existing standalone checks retain direct targets rather than being
-migrated into the new harness. Future batches must update this table and
-remove the old source **and invocation** when transferring ownership.
+Final Linux ownership snapshot after #305/#306 (parent #278). Each current
+smoke-check source below has exactly one compilation/execution owner; all
+assertions inside it belong to that owner. `module-owned` names an independent
+smoke target and `retained standalone` names one of the four pre-existing direct
+checks. The compatibility executable owns no smoke checks. Historical migration
+sections retain their contemporary wording, including transitional `legacy-owned`
+and “returns 2” descriptions; those are not current invocations. Future changes
+must update the authoritative table and remove the old source **and invocation**
+when transferring ownership.
 
+## Current exactly-once ownership (#306)
+
+This table is the authoritative current inventory. The `smoke-ownership-audit`
+CTest compares it with every check translation unit and its explicit CMake owner;
+configuration fails on duplicate module source ownership, and the audit fails on
+any missing, stale, duplicate, or mismatched manifest row. Runner, state, harness,
+support, tool, compatibility, and compile-only sources are listed separately below
+because they do not own smoke-check execution.
+
+<!-- current-ownership-begin -->
+| Current check source | Ownership | Target |
+| --- | --- | --- |
+| `OccupantPackingChecks.cpp` | retained standalone | `pf-occupant-packing-checks` |
+| `SectorTilesetChecks.cpp` | retained standalone | `pf-sector-tileset-checks` |
+| `SimulationStepTimingChecks.cpp` | retained standalone | `pf-simulation-step-timing-checks` |
+| `WorldRenderSlotChecks.cpp` | retained standalone | `pf-world-render-slot-checks` |
+| `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/ColourEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/Group.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupAssignment.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupAssignmentEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/GroupClipboardEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/GroupCount.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupCountEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/GroupDelete.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupDeleteEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/GroupEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/GroupIdAllocation.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupIdAllocationEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/GroupTopology.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/GroupTopologyEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/Height.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/HeightEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/Identity.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/IndividualProperties.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/WalkSpeed.cpp` | module-owned | `pf-smoke-agent` |
+| `smoke/agent/WalkSpeedEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/behaviours/Assignment.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/AssignmentEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/behaviours/DeleteEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/behaviours/PortabilityEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/behaviours/Registry.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RegistryEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/behaviours/RuntimeAuthorization.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeCallbacks.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeContainment.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeDeterminism.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeFailures.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeInstances.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeMovement.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimePreflight.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeScale.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeScheduling.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/SchemaReconciliationEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/behaviours/Workflow.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/WorkflowEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/Background.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/DoorPanel.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/Facade.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/History.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/Isolation.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/Palette.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/metrics/Metrics.cpp` | module-owned | `pf-smoke-metrics` |
+| `smoke/permissions/Access.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/AccessEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/permissions/Adherence.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/AdherenceEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/permissions/DestinationEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/permissions/Destinations.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/InteractionGeometry.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/InteractionMobility.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/LandingAdherence.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/LandingAdherenceEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/permissions/Preflight.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/permissions/Refusal.cpp` | module-owned | `pf-smoke-permissions` |
+| `smoke/persistence/AgentRestoration.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DeepLayerReplay.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DocumentPaths.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DocumentSaves.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DomainReplay.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/DoorDocuments.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/Formats.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/Layers.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/LiftDocuments.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/MalformedInput.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/RecentDocuments.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/Restoration.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/ShuttleDocuments.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/TransactionalWrites.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/WorldDocuments.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/AgentPaths.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DoorButtons.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DoorOpenApart.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DoorOpenLeft.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DoorOpenRight.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/DrawOrder.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/FacadeDrawOrder.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/Facades.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/Lifetime.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/SerializationRendering.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/Transports.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/ViewportCulling.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/ViewportDragScroll.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/ViewportZoom.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/render/Walls.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/routing/IsolatedSectors.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/LadderForceBridgeRouteCost.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/LiftRouteCost.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/Mobility.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/Movement.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/PathSource.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/Planning.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/PlanningEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/routing/PlanningTime.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/PlanningTimeEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/routing/RestoredPaths.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/ShuttleRouteCost.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/StairRouteCost.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/ThresholdRouteCost.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/routing/Workspace.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/simulation/CrossingBands.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/DoorQueues.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Doors.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Interactions.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Observation.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Pause.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Scale.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Teardown.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Ticking.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Timing.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Traversal.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/startup/Startup.cpp` | module-owned | `pf-smoke-startup` |
+| `smoke/tags/Assignment.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/AssignmentEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/ClipboardEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/CoordinationEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/DeleteEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/DocumentSaveEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/MobilityProfile.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/Reconciliation.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/Registry.cpp` | module-owned | `pf-smoke-agent-tags` |
+| `smoke/tags/RegistryChangeEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/RegistryEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/tags/ReloadEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/transports/Boarding.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Deletion.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/DoorQueries.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Escalators.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/EscalatorsEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/transports/ForceBridges.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Ladders.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/LayerJourney.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Lifts.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Occupants.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/PlatformLifts.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Shuttles.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/transports/Stairs.cpp` | module-owned | `pf-smoke-transports` |
+| `smoke/world/BackgroundCascadeDelete.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/BackgroundPaint.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/BackgroundPlacement.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/BackgroundSector.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/Facades.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/FloorsAndWalls.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/LayerDeletion.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/Layers.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/MarkerIdentity.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/ObjectEditing.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/ThresholdLayerOverlap.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/Topology.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/TwoSidedButtons.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/WindowIntoBackground.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/WindowLayers.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/WindowMultiBackground.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
+<!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was
 `src/headless/SimulationObservationSmokeChecks.cpp`. It is no longer compiled
@@ -161,8 +339,9 @@ executables and Editor-owned checks retain their owners.
 #295 consolidates all six extracted Editor tiers into `pf-smoke-editor` and
 migrates the remaining Background, Facade, Door panel, palette and Document
 history checks. There are 164 explicit registrations, including a new shared-state
-isolation regression. Earlier migration descriptions above record the former
-tiers; the table below is the current ownership authority. Selectors now prefix
+isolation regression. Earlier migration descriptions above record the former tiers; the table below
+is their historical migration mapping. The #306 table at the top is the current
+ownership authority. Selectors now prefix
 scenario names with `agent/`, `tags/`, `behaviours/`, `permissions/`, `routing/`,
 `transports/`, `background/`, `facade/`, `doorpanel/`, `palette/`, or `history/`.
 No migrated Editor source or invocation remains in the legacy aggregate.

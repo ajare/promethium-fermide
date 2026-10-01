@@ -15,7 +15,14 @@ Startup subprocess verification (#301).
 The last Marker identity and two-sided Door Button suites belong to World (#305);
 see the [ownership manifest](smoke-migration-manifest.md). The legacy executable
 is now a [dispatch-only compatibility orchestrator](headless-compatibility.md).
-Use direct modules or CTest for coverage without deprecation warnings.
+Use direct modules or CTest for coverage without deprecation warnings. The
+complete active Linux matrix is documented in
+[Linux modular smoke validation](linux-smoke-validation.md).
+
+The ticket-by-ticket sections below preserve migration history. Statements that a
+legacy selection “returns 2” describe its transitional state before #305; those
+legacy forms are now compatibility examples that dispatch the listed direct
+module/tool with deprecation guidance. They are not active test invocations.
 
 ```sh
 cmake -S . -B build-linux -DBUILD_TESTING=ON -DPF_BUILD_GUI=OFF

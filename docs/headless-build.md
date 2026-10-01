@@ -13,7 +13,13 @@ dispatch those modules with deprecation guidance. Startup is registered only in
 GUI-enabled builds. Benchmark, routing-scale World generation, and metrics serving
 use independent [headless tools](headless-tools.md); legacy service/tool selections
 dispatch them as children. Use CTest for direct, nonduplicated coverage; see the
-[ownership manifest](smoke-migration-manifest.md).
+[ownership manifest](smoke-migration-manifest.md) and the active
+[Linux validation procedure](linux-smoke-validation.md).
+
+This document retains historical scenario descriptions. Any command below that
+uses `prometheum-fermide-headless --...` is explicitly a compatibility example,
+not the active invocation; the current direct module/tool replacements are in the
+linked documents.
 
 The `prometheum-fermide-core` target builds the shared simulation library. Domain modules and the editor share production libraries; the compatibility executable itself links none of them. Core smoke modules need no SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
 
@@ -50,8 +56,7 @@ explicit directed facts; there is no combined Edge-weight compatibility path.
 `ShuttleRouteCostSmokeChecks.cpp` covers actual stop-distance/speed ride time,
 per-departure dwell (including intermediate service), one boarding charge,
 capacity-dependent missed service, local queue observations, remote-state
-isolation, independent aversions, and short/long walking alternatives. Run it
-alone with `prometheum-fermide-headless.exe --shuttle-route-checks`.
+isolation, independent aversions, and short/long walking alternatives.
 
 Landing Doors charge boarding/alighting and interaction; Shuttle body arcs never
 repeat admission. Travel between Doors at the same Stop is walking, not a ride.
@@ -62,6 +67,10 @@ reachable from the connected access zone once, regardless of its Door count.
 Local observations replace these queue/crowding expectations, but never inspect
 remote vehicle position, passenger manifests, or scheduled requests. Alighting
 does not pay another service wait. Null-Agent previews retain authored facts.
+
+The historical compatibility example is
+`prometheum-fermide-headless.exe --shuttle-route-checks`; the active command is
+`pf-smoke-routing --check shuttleRouteCosts`.
 
 The distance crossover fixture uses an Agent with a 0.8 Walk speed modifier:
 the current default Shuttle speed equals neutral walking speed, so a neutral
@@ -278,8 +287,10 @@ active.
 
 ## Population routing (#224)
 
-Run `prometheum-fermide-headless.exe --routing-scale-checks` for independent
-reference-Dijkstra checks, source-inference boundary checks, and a generated
+Run `pf-smoke-routing --check populationRouting` for the active modular check.
+The old `prometheum-fermide-headless.exe --routing-scale-checks` form is a
+compatibility example. The check covers independent reference-Dijkstra checks,
+source-inference boundary checks, and a generated
 mixed population: 1,000 Agents, 2,040 Vertices, four Levels, stationary
 Staircases, Escalators, a Ladder, and a Lift. Profiles include defaults,
 shared-tag properties, and unquantised individual properties. Timed batches
@@ -369,7 +380,8 @@ and bytes. Source-index `arcScoringSeconds` now measures relaxation/scoring time
 snapshot preparation has its own timer. Lower-bound construction remains a
 separately counted whole-Graph operation on target-cache misses.
 
-Run `--routing-scale-checks` for the measurements. One Windows/MSVC Release run
+The historical measurements below came from the legacy `--routing-scale-checks`
+selection; use `pf-smoke-routing --check populationRouting` now. One Windows/MSVC Release run
 recorded the following 1,000-query batches (timings are not portable limits):
 
 | Workload | Cold Paths/s | Warm Paths/s | Evaluated arcs/batch | Expanded vertices/batch | Prepared arcs/batch |
@@ -394,8 +406,8 @@ stress-World UI verification remains manual; the #224 generator is unchanged.
 
 ## Route planning time properties (#252)
 
-Run `prometheum-fermide-headless.exe --route-planning-time-checks` (or CTest's
-`route-planning-time-properties`) for headless coverage of Minimum and Maximum
+Run `pf-smoke-routing` (or CTest's `smoke-routing`) for headless coverage of
+Minimum and Maximum
 route planning time. These Pathing properties default to 1 and 3 seconds and
 accept finite values from 0.1 through 10. Tags author sampling ranges; individual
 values override each sample independently. Effective maximum is at least the
@@ -409,8 +421,8 @@ undo/redo, and clipboard provenance.
 
 ## Initial runtime Route planning (#253)
 
-Run `prometheum-fermide-headless.exe --route-planning-checks` (CTest:
-`route-planning`) for stationary planning, inclusive upward-rounded tick
+Run `pf-smoke-routing` (CTest: `smoke-routing`) for stationary planning,
+inclusive upward-rounded tick
 intervals, exact expiry, delayed arrival/Route loss, cancellation, pause,
 deactivation, deterministic episode replay and Reset, persistence exclusion,
 Selection panel text, editor-immediate Paths, and grey debug badge coverage.
@@ -513,9 +525,9 @@ cmake --build build-linux --target pf-smoke-permissions pf-smoke-permissions-edi
 ctest --test-dir build-linux -R '^smoke-permissions' -j 3 --output-on-failure
 ```
 
-Use `--list` and `--check <name>` on either executable for focused runs. The old
-`--access-permission-checks` selection is retired pending compatibility dispatch;
-it returns 2 with migration guidance. See [smoke modules](smoke-modules.md) for
+Use `--list` and `--check <name>` on either executable for focused runs. The old `--access-permission-checks` form is a compatibility example that
+now dispatches Permissions and Editor with deprecation guidance. See
+[smoke modules](smoke-modules.md) for
 ownership, dependency tiers, CLI contracts, and Linux validation.
 
 `smoke-permissions` and `smoke-permissions-editor` cover the public World
@@ -732,19 +744,20 @@ are informational. See [reset/reload measurements and reproduction](restoration-
 for the binary-versus-YAML experiment, root cause, before/after distributions,
 memory observations and remaining manual editor check.
 
-## CMake build
+## CMake build (Windows compatibility example)
 
-Configure a 64-bit Visual Studio build tree:
+Windows execution remains delegated to #279; this section documents commands but
+makes no #306 validation claim. Configure a 64-bit Visual Studio build tree:
 
 ```bat
 cmake -S . -B out\build -A x64
 ```
 
-Build and run only the headless smoke scenario:
+Build and run a direct smoke module:
 
 ```bat
-cmake --build out\build --config Debug --target prometheum-fermide-headless
-out\build\bin\x64\Debug\prometheum-fermide-headless.exe
+cmake --build out\build --config Debug --target pf-smoke-simulation
+out\build\bin\x64\Debug\pf-smoke-simulation.exe
 ```
 
 Build all targets and run the registered CTest smoke test:
@@ -756,24 +769,11 @@ ctest --test-dir out\build -C Debug --output-on-failure
 
 Use `Release` instead of `Debug` for an optimized build. CMake places final executables and libraries in `bin\x64\<Configuration>` within its build directory (for example, `out\build\bin\x64\Debug`). CMake fetches and statically links the graphical dependencies, then copies only `prometheum-fermide.ini` beside `editor.exe`.
 
-## Build and run only the headless scenario with MSBuild
-
-```bat
-msbuild build\headless.vcxproj /m /p:Configuration=Debug /p:Platform=x64
-bin\x64\Debug\prometheum-fermide-headless.exe
-```
-
-Use `Release` in both paths to build and run the optimized configuration:
-
-```bat
-msbuild build\headless.vcxproj /m /p:Configuration=Release /p:Platform=x64
-bin\x64\Release\prometheum-fermide-headless.exe
-```
-
-These legacy invocations now run only the remaining unmigrated checks; they no
-longer run central product scenarios or print scale observations. Use the CMake
-module targets and CTest commands in [smoke modules](smoke-modules.md) for combined
-coverage. Simulation's `--check runScaledWorld` advances 500 active Agents alongside
+The `prometheum-fermide-headless` executable is retained only as the
+[compatibility orchestrator](headless-compatibility.md). Its no-argument form
+dispatches all configured modules; selected legacy forms dispatch their current
+module or tool and print deprecation guidance. CTest and direct `pf-smoke-*`
+targets are the active, nonduplicated validation entry points. Simulation's `--check runScaledWorld` advances 500 active Agents alongside
 32 resources for 60 ticks twice (metrics off/on) and compares event/snapshot
 digests, then verifies the 1,000-Agent stretch case. Ownership and capacity
 invariants remain enforced without benchmark timing or memory output. Each module

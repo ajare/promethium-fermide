@@ -233,6 +233,19 @@ endif()
 # prometheum-fermide target links it yet; this only keeps the imported library
 # ready for future integration.
 add_subdirectory(ext/willpower)
+# Willpower's Debug configuration enables its MSVC-only Visual Leak Detector
+# macro on every platform. Undefine it after dependency-provided definitions so
+# supported Linux Debug builds do not attempt to include the Windows-only vld.h.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    foreach(target IN ITEMS
+            Willpower.Common Willpower.Geometry Willpower.Collide
+            Willpower.Wayfinder Willpower.Application WillPower.Viz)
+        if(TARGET ${target})
+            target_compile_options(${target} PRIVATE
+                $<$<CONFIG:Debug>:-UWP_USE_MEMLEAK_TRACKING>)
+        endif()
+    endforeach()
+endif()
 
 execute_process(COMMAND git describe --always --dirty
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -532,6 +545,12 @@ add_dependencies(prometheum-fermide-headless ${PF_COMPATIBILITY_MODULES}
     pf-lift-repro pf-pause-position-repro pf-compile-contracts)
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME smoke-ownership-audit COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/smoke_ownership.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/smoke/CMakeLists.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/docs/smoke-migration-manifest.md")
+    set_tests_properties(smoke-ownership-audit PROPERTIES LABELS "harness;ownership" TIMEOUT 30)
     pf_add_headless_tool(pf-compatibility-probe src/headless/CompatibilityProbe.cpp)
     add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_compatibility.py"
