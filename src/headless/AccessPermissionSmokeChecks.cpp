@@ -8,6 +8,8 @@
 #include "core/SerializationException.h"
 #include "core/Agent.h"
 #include "core/DoorSectorObject.h"
+#include "core/WalkwaySectorObject.h"
+#include "core/LiftSectorObject.h"
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/Exceptions.h"
 #include "core/Graph.h"
@@ -663,28 +665,41 @@ namespace
 			"Access permission deletion left a Lift landing requirement");
 	}
 
-	void liftDestinationEnforcement(unsigned authorizationChange = 0)
+	core::World::CreateLiftResult permissionLift(core::World& world, bool platform,
+		uint32_t room, uint32_t x, core::World::CreateLiftOptions options)
+	{
+		if (!platform) return world.addLift(1, 0, x, options);
+		options.cellsWide = 1;
+		options.platformStopDurationSeconds = 20.0f;
+		auto created = world.addSectorPlatformLift(room, 0, x, options);
+		return { created.lift, {}, created.traversalResource, created.interiorSelector };
+	}
+
+	void liftDestinationEnforcement(unsigned authorizationChange = 0, bool platform = false)
 	{
 		core::World world("destination enforcement", 16, 3);
-		auto ground = world.addCorridor(0, 0, 16);
-		auto middle = world.addCorridor(1, 0, 16);
-		auto upper = world.addCorridor(2, 0, 16);
+		auto ground = platform ? world.addRoom("Platform room", 0, 0, 0, 16, 3) : world.addCorridor(0, 0, 16);
+		auto middle = platform ? ground : world.addCorridor(1, 0, 16);
+		auto upper = platform ? ground : world.addCorridor(2, 0, 16);
+		if (platform) for (uint32_t y = 1; y < 3; ++y)
+			for (uint32_t x = 0; x < 16; ++x) world.addSectorWalkway(ground, y, x);
 		uint32_t startMarker, middleMarker, upperMarker;
 		world.addSectorMarker(ground, 0, 7.0f, &startMarker);
-		world.addSectorMarker(middle, 0, 7.0f, &middleMarker);
-		world.addSectorMarker(upper, 0, 7.0f, &upperMarker);
+		world.addSectorMarker(middle, platform ? 1 : 0, 7.0f, &middleMarker);
+		world.addSectorMarker(upper, platform ? 2 : 0, 7.0f, &upperMarker);
 		core::World::CreateLiftOptions options;
 		options.cellsWide = 2; options.stopOffsets = { 0, 1, 2 };
 		options.minimumDwellSeconds = 20.0f;
 		options.maximumBoardingSeconds = 30.0f;
-		auto lift = world.addLift(1, 0, 8, options);
+		auto lift = permissionLift(world, platform, ground, 8, options);
+		auto object = platform ? lift.lift.index : ~0u;
 		world.finishBuild(); world.pauseSimulation();
 		auto red = world.addAccessPermission("Destination red");
 		auto blue = world.addAccessPermission("Destination blue");
 		std::string diagnostic;
 		require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1,
-			{ red, blue }, &diagnostic), diagnostic);
-		auto remoteId = world.createAgent("remote observer", upper, 0, 7.0f);
+			{ red, blue }, &diagnostic, object), diagnostic);
+		auto remoteId = world.createAgent("remote observer", upper, platform ? 2 : 0, 7.0f);
 		auto riderId = world.createAgent("piggyback rider", ground, 0, 7.0f);
 		auto operatorId = world.createAgent("destination operator", ground, 0, 7.0f);
 		auto rider = world.lookupAgent(riderId).entity;
@@ -699,6 +714,9 @@ namespace
 		select.type = core::DeviceCommandType::SelectLiftDestination;
 		select.traversalResource = lift.traversalResource;
 		select.stopIndex = 1;
+		require(world.missingLiftDestinationPermissions(select, {}).empty(), "Agentless selection did not bypass authorization");
+		require(world.missingLiftDestinationPermissions(select, core::AgentId{ 99999 })
+			== std::vector<core::AccessPermissionId>{ red, blue }, "Invalid Agent attribution bypassed authorization");
 		auto point = world.createInteractionPoint("alternate destination entry point",
 			core::SectorId{ ground + 1 }, { 7.0f, 0.0f }, 0.25f, world.getFixedTimestep(),
 			{ { select, core::InteractionBindingRequirement::Required } });
@@ -727,7 +745,12 @@ namespace
 		require(world.setPermissionSetAccessPermission(set, blue, true, &diagnostic), diagnostic);
 		require(world.setAgentPermissionSetAssignment(operatorId, set, true, &diagnostic), diagnostic);
 		world.resumeSimulation();
-		require(static_cast<bool>(world.requestInteraction(lift.doors[0].controls[0].interactionPoint, riderId)),
+		core::DeviceCommand call;
+		call.type = core::DeviceCommandType::CallLift;
+		call.traversalResource = lift.traversalResource; call.stopIndex = 0;
+		auto landing = world.createInteractionPoint("Independent landing call", core::SectorId{ ground + 1 },
+			{ 7.0f, 0.0f }, 0.25f, world.getFixedTimestep(), { { call, core::InteractionBindingRequirement::Required } });
+		require(static_cast<bool>(world.requestInteraction(landing, riderId)),
 			"Independent unrestricted landing call was refused");
 		world.advanceTicks(180);
 		require(world.setAgentRuntimeAccessPermissionGrant(operatorId, red, false), "Runtime grant removal failed");
@@ -766,10 +789,18 @@ namespace
 		{
 			// Both passengers must have boarded before changing authorization;
 			// the operator's accepted selection is now a shared Stop request.
-			for (unsigned tick = 0; tick < 1200
-				&& (operatorAgent->getSector() != lift.lift.sector.get() || rider->getSector() != lift.lift.sector.get()); ++tick)
-				world.advanceTicks(1);
-			require(operatorAgent->getSector() == lift.lift.sector.get() && rider->getSector() == lift.lift.sector.get(),
+			auto bothOnboard = [&]
+			{
+				for (auto const& resource : world.getSimulationSnapshot().traversalResources)
+					if (resource.id == lift.traversalResource)
+						return std::any_of(resource.capacityPositions.begin(), resource.capacityPositions.end(),
+							[&](auto const& position) { return position.occupant == operatorId; })
+							&& std::any_of(resource.capacityPositions.begin(), resource.capacityPositions.end(),
+								[&](auto const& position) { return position.occupant == riderId; });
+				return false;
+			};
+			for (unsigned tick = 0; tick < 1200 && !bothOnboard(); ++tick) world.advanceTicks(1);
+			require(bothOnboard(),
 				"Shared passengers did not board before authorization change");
 			if (authorizationChange == 1)
 			{
@@ -783,7 +814,7 @@ namespace
 				{
 					auto extra = world.addAccessPermission("Tightened destination");
 					require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1,
-						{ red, blue, extra }, &diagnostic), diagnostic);
+						{ red, blue, extra }, &diagnostic, object), diagnostic);
 				}
 				else
 				{
@@ -799,9 +830,13 @@ namespace
 				require(event.deviceOperation.requester != riderId
 					|| event.deviceOperation.command.type != core::DeviceCommandType::SelectLiftDestination,
 					"Piggyback rider attempted a protected destination selection");
-		require(rider->getSector()->getIndex() == middle && !rider->getPath(),
-			"Unauthorized rider did not complete shared journey and disembark: " + std::to_string(authorizationChange));
-		require(operatorAgent->getSector()->getIndex() == middle && !operatorAgent->getPath(),
+		require(rider->getSector()->getIndex() == middle && !rider->getPath()
+			&& std::abs(rider->getGlobalPosition().y - 1.0f) < 0.01f,
+			"Unauthorized rider did not complete shared journey and disembark: " + std::to_string(authorizationChange)
+			+ " platform " + std::to_string(platform) + " y " + std::to_string(rider->getGlobalPosition().y)
+			+ " state " + std::to_string(static_cast<int>(rider->getState())));
+		require(operatorAgent->getSector()->getIndex() == middle && !operatorAgent->getPath()
+			&& std::abs(operatorAgent->getGlobalPosition().y - 1.0f) < 0.01f,
 			"Operator did not disembark after accepted selection");
 	}
 
@@ -842,7 +877,7 @@ namespace
 			"Alternative unrestricted destination journey did not complete");
 	}
 
-	void changingLiftDestinationAuthorization()
+	void changingLiftDestinationAuthorization(bool platform = false)
 	{
 		// Exercise each grant source and authored requirement edits against both
 		// a replacement Path and Route loss, before any selection is accepted.
@@ -850,16 +885,18 @@ namespace
 		for (unsigned change = 0; change < 6; ++change)
 		{
 			core::World world("changing destination", 20, 2);
-			auto ground = world.addCorridor(0, 0, 20);
-			auto upper = world.addCorridor(1, 0, 20);
+			auto ground = platform ? world.addRoom("Platform room", 0, 0, 0, 20, 2) : world.addCorridor(0, 0, 20);
+			auto upper = platform ? ground : world.addCorridor(1, 0, 20);
+			if (platform) for (uint32_t x = 0; x < 20; ++x) world.addSectorWalkway(ground, 1, x);
 			uint32_t from, to;
 			world.addSectorMarker(ground, 0, 1.0f, &from);
-			world.addSectorMarker(upper, 0, 1.0f, &to);
+			world.addSectorMarker(upper, platform ? 1 : 0, 1.0f, &to);
 			core::World::CreateLiftOptions options;
 			options.cellsWide = 2; options.stopOffsets = { 0, 1 };
-			auto lift = world.addLift(1, 0, 4, options);
+			auto lift = permissionLift(world, platform, ground, 4, options);
+			auto object = platform ? lift.lift.index : ~0u;
 			core::TraversalResourceId other;
-			if (alternative) other = world.addLift(1, 0, 16, options).traversalResource;
+			if (alternative) other = permissionLift(world, platform, ground, 16, options).traversalResource;
 			world.finishBuild(); world.pauseSimulation();
 			auto key = world.addAccessPermission("Destination key");
 			auto unrelated = world.addAccessPermission("Unrelated key");
@@ -872,7 +909,7 @@ namespace
 			if (change < 2) require(world.grantAgentAccessPermission(id, key, &diagnostic), diagnostic);
 			else if (change < 5) require(world.setAgentPermissionSetAssignment(id, set, true, &diagnostic), diagnostic);
 			if (change != 5) require(world.setLiftDestinationPermissionRequirement(
-				lift.lift.sector->getIndex(), 1, { key }, &diagnostic), diagnostic);
+				lift.lift.sector->getIndex(), 1, { key }, &diagnostic, object), diagnostic);
 			auto graph = world.getGraph();
 			auto path = graph->calculatePath(agent, graph->getVertexByIdentifier(from), graph->getVertexByIdentifier(to));
 			require(static_cast<bool>(path), "Initially authorized Lift Path missing");
@@ -886,7 +923,7 @@ namespace
 			case 2: require(world.setAgentPermissionSetAssignment(id, set, false, &diagnostic), diagnostic); break;
 			case 3: require(world.setAgentRuntimePermissionSetAssignment(id, set, false), "Runtime set removal failed"); break;
 			case 4: require(world.setPermissionSetAccessPermission(set, key, false, &diagnostic), diagnostic); break;
-			case 5: require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1, { key }, &diagnostic), diagnostic); break;
+			case 5: require(world.setLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 1, { key }, &diagnostic, object), diagnostic); break;
 			}
 			require(agent->getState() == core::Agent::State::RoutePlanning && !agent->getPath(),
 				"Destination authorization loss did not invalidate Path: " + std::to_string(change));
@@ -913,50 +950,59 @@ namespace
 			world.advanceTicks(agent->getRoutePlanningRemainingTicks());
 			require(uses(agent->getPath(), other), "Destination gain ignored Route persistence");
 			world.advanceTicks(6000);
-			require(agent->getSector()->getIndex() == upper && !agent->getPath(), "Replacement journey did not complete");
+			require(agent->getSector()->getIndex() == upper && !agent->getPath()
+				&& std::abs(agent->getGlobalPosition().y - 1.0f) < 0.01f, "Replacement journey did not complete");
 		}
 	}
 
-	void liftDestinationAuthoring()
+	void liftDestinationAuthoring(bool platform = false)
 	{
 		auto world = std::make_shared<core::World>("destination authoring", 10, 3);
 		auto unrelated = world->addRoom("Unrelated", 1, 0, 0, 2, 1);
-		for (uint32_t level = 0; level < 3; ++level) world->addCorridor(level, 0, 10);
+		uint32_t room = 0;
+		if (platform)
+		{
+			room = world->addRoom("Platform room", 0, 0, 0, 10, 3);
+			for (uint32_t level = 1; level < 3; ++level)
+				for (uint32_t x = 0; x < 10; ++x) world->addSectorWalkway(room, level, x);
+		}
+		else for (uint32_t level = 0; level < 3; ++level) world->addCorridor(level, 0, 10);
 		core::World::CreateLiftOptions options;
-		options.cellsWide = 2; options.stopOffsets = { 0, 1, 2 };
-		auto lift = world->addLift(1, 0, 8, options);
+		options.cellsWide = platform ? 1 : 2; options.stopOffsets = { 0, 1, 2 };
+		auto lift = permissionLift(*world, platform, room, 8, options);
 		auto sector = lift.lift.sector->getIndex();
+		auto object = platform ? lift.lift.index : ~0u;
 		world->finishBuild(); world->pauseSimulation();
 		auto red = world->addAccessPermission("Red key");
 		auto blue = world->addAccessPermission("Blue key");
-		require(world->getLiftDestinationLevels(sector) == std::vector<uint32_t>{ 0, 1, 2 }, "Destination Levels missing");
+		require(world->getLiftDestinationLevels(sector, object) == std::vector<uint32_t>{ 0, 1, 2 }, "Destination Levels missing");
 		for (uint32_t stop = 0; stop < 3; ++stop)
-			require(world->getLiftDestinationPermissionRequirement(sector, stop).empty(), "New Stop is restricted");
+			require(world->getLiftDestinationPermissionRequirement(sector, stop, object).empty(), "New Stop is restricted");
 		std::string diagnostic;
 		auto unrestricted = save(*world);
-		require(world->setLiftDestinationPermissionRequirement(sector, 0, {}, &diagnostic)
+		require(world->setLiftDestinationPermissionRequirement(sector, 0, {}, &diagnostic, object)
 			&& save(*world) == unrestricted, "Empty no-op changed authored data");
 		gWorldDocumentHistory.clear();
-		require(commitLiftDestinationPermissionRequirement(world, sector, 2, red, true, diagnostic), diagnostic);
-		require(commitLiftDestinationPermissionRequirement(world, sector, 2, blue, true, diagnostic), diagnostic);
+		require(commitLiftDestinationPermissionRequirement(world, sector, 2, red, true, diagnostic, object), diagnostic);
+		require(commitLiftDestinationPermissionRequirement(world, sector, 2, blue, true, diagnostic, object), diagnostic);
 		require(gWorldDocumentHistory.undoCount() == 2, "Destination edits bypass document history");
 		auto restore = [&](DocumentSnapshot const& snapshot) { world = load(snapshot.yaml); world->pauseSimulation(); return true; };
 		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination undo failed");
-		require(world->getLiftDestinationPermissionRequirement(sector, 2) == std::vector<core::AccessPermissionId>{ red }, "Undo lost destination requirement");
+		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == std::vector<core::AccessPermissionId>{ red }, "Undo lost destination requirement");
 		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save(*world)), restore), "Destination redo failed");
 		auto expected = std::vector<core::AccessPermissionId>{ red, blue };
-		require(world->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Redo lost destination requirement");
+		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Redo lost destination requirement");
 		require(world->renameAccessPermission(red, "Renamed key", &diagnostic), diagnostic);
-		require(world->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Rename changed identity");
+		require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Rename changed identity");
 		require(world->getAccessPermissionUsage(red).liftDestinationRequirements == 1, "Usage omitted destination");
 		auto before = save(*world);
-		require(!world->setLiftDestinationPermissionRequirement(sector, 2, { red, red }, &diagnostic)
-			&& !world->setLiftDestinationPermissionRequirement(sector, 2, { core::AccessPermissionId{ 256 } }, &diagnostic)
-			&& !world->setLiftDestinationPermissionRequirement(sector, 3, {}, &diagnostic)
+		require(!world->setLiftDestinationPermissionRequirement(sector, 2, { red, red }, &diagnostic, object)
+			&& !world->setLiftDestinationPermissionRequirement(sector, 2, { core::AccessPermissionId{ 256 } }, &diagnostic, object)
+			&& !world->setLiftDestinationPermissionRequirement(sector, 3, {}, &diagnostic, object)
 			&& !world->setLiftDestinationPermissionRequirement(0, 0, {}, &diagnostic)
 			&& save(*world) == before, "Invalid destination edit was not transactional");
 		require(world->resumeSimulation(), "Destination fixture did not resume");
-		require(!world->setLiftDestinationPermissionRequirement(sector, 2, {}, &diagnostic), "Running destination edit accepted");
+		require(!world->setLiftDestinationPermissionRequirement(sector, 2, {}, &diagnostic, object), "Running destination edit accepted");
 		world->pauseSimulation();
 
 		ImGui::CreateContext();
@@ -964,7 +1010,7 @@ namespace
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		ImGui::NewFrame(); ImGui::SetNextWindowSize(ImVec2(950, 650)); ImGui::Begin("Lift Selection");
 		ImGui::LogToBuffer();
-		renderLiftDestinationPermissions(world, sector);
+		renderLiftDestinationPermissions(world, sector, object);
 		std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
 		require(text.find("Destination permissions") != std::string::npos
 			&& text.find("Accepted shared journeys") != std::string::npos
@@ -978,7 +1024,7 @@ namespace
 
 		auto yaml = save(*world);
 		auto restored = load(yaml);
-		require(restored->getLiftDestinationPermissionRequirement(sector, 2) == expected, "Destination YAML round trip failed");
+		require(restored->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Destination YAML round trip failed");
 		core::SerializationWorkData binaryWork;
 		auto binaryWriter = core::BinarySerializer::toString();
 		world->serialize(*binaryWriter, binaryWork); binaryWriter->serialize();
@@ -986,12 +1032,12 @@ namespace
 		binaryReader->deserialize();
 		core::World binaryWorld("binary target", 1, 1);
 		require(binaryWorld.deserialize(*binaryReader, binaryWork)
-			&& binaryWorld.getLiftDestinationPermissionRequirement(sector, 2) == expected, "Destination binary round trip failed");
+			&& binaryWorld.getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Destination binary round trip failed");
 		// Old Worlds have no destination field and remain unrestricted.
 		auto legacy = YAML::Load(yaml);
 		legacy["version"] = 29;
 		for (auto record : legacy["construction"]) record.remove("destinationPermissionRequirements");
-		require(load(YAML::Dump(legacy))->getLiftDestinationPermissionRequirement(sector, 2).empty(), "Older World is restricted");
+		require(load(YAML::Dump(legacy))->getLiftDestinationPermissionRequirement(sector, 2, object).empty(), "Older World is restricted");
 
 		for (auto replacement : {
 			"[{permissions: []}, {permissions: []}, {permissions: [999]}]",
@@ -1014,6 +1060,67 @@ namespace
 			}
 			catch (core::SerializationException const&) { refused = true; }
 			require(refused && save(*restored) == unchanged, "Malformed destination mutated target World");
+		}
+
+		if (platform)
+		{
+			auto locatePlatform = [&]
+			{
+				for (uint32_t i = 0; i < world->getSector(sector)->getNumObjects(); ++i)
+					if (std::dynamic_pointer_cast<const core::LiftSectorObject>(world->getSector(sector)->getObject(i))) return i;
+				throw std::runtime_error("Platform object missing");
+			};
+			// Ground is a destination too, independently of the landing call.
+			require(world->setLiftDestinationPermissionRequirement(sector, 0, { blue }, &diagnostic, object), diagnostic);
+			require(world->setLiftDestinationPermissionRequirement(sector, 1, { red }, &diagnostic, object), diagnostic);
+			auto locationPlan = world->planRemoveLocation(unrelated);
+			require(locationPlan.valid, locationPlan.diagnostic); world->applyLocationEdit(locationPlan); --sector;
+			require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Platform sector reindex lost requirement");
+			core::World::CreateLiftOptions settings;
+			require(world->getPlatformLiftOptions(sector, object, settings), "Platform options missing");
+			settings.capacity = 1; settings.platformStopDurationSeconds = 4.0f;
+			auto edit = world->planPlatformLiftEdit(sector, object, settings);
+			require(edit.valid, edit.diagnostic); world->applyPlatformLiftEdit(edit);
+			require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Platform settings lost requirement");
+			settings.stopOffsets = { 0, 2 };
+			edit = world->planPlatformLiftEdit(sector, object, settings);
+			require(edit.valid, edit.diagnostic); world->applyPlatformLiftEdit(edit);
+			require(world->getLiftDestinationPermissionRequirement(sector, 1, object) == expected, "Platform retained Stop lost requirement");
+			settings.stopOffsets = { 0, 1, 2 };
+			edit = world->planPlatformLiftEdit(sector, object, settings);
+			require(edit.valid, edit.diagnostic); world->applyPlatformLiftEdit(edit);
+			require(world->getLiftDestinationPermissionRequirement(sector, 1, object).empty(), "Recreated Platform Stop inherited requirement");
+			// Removing a supporting Walkway removes only that optional Stop.
+			uint32_t walkway = ~0u;
+			for (uint32_t i = 0; i < world->getSector(sector)->getNumObjects(); ++i)
+			{
+				auto candidate = world->getSector(sector)->getObject(i);
+				if (std::dynamic_pointer_cast<const core::WalkwaySectorObject>(candidate)
+					&& candidate->getCellX() == 8 && candidate->getCellY() == 1) walkway = i;
+			}
+			require(walkway != ~0u, "Supporting Walkway missing");
+			require(world->removeSectorWalkway(sector, walkway), "Walkway removal failed");
+			require(world->getLiftDestinationLevels(sector, object) == std::vector<uint32_t>{ 0, 2 }
+				&& world->getLiftDestinationPermissionRequirement(sector, 1, object) == expected, "Walkway deletion lost retained destination");
+			world->addSectorWalkway(sector, 1, 8);
+			object = locatePlatform();
+			edit = world->planPlatformLiftEdit(sector, object, settings);
+			require(edit.valid, edit.diagnostic); world->applyPlatformLiftEdit(edit);
+			require(world->getLiftDestinationPermissionRequirement(sector, 1, object).empty()
+				&& world->getLiftDestinationPermissionRequirement(sector, 0, object) == std::vector<core::AccessPermissionId>{ blue },
+				"Walkway recreation inherited requirement or lost mandatory ground requirement");
+			require(load(save(*world))->getLiftDestinationPermissionRequirement(sector, 2, object) == expected, "Structural edit persistence failed");
+			require(world->deleteAccessPermission(red, &diagnostic), diagnostic);
+			require(world->getLiftDestinationPermissionRequirement(sector, 2, object) == std::vector<core::AccessPermissionId>{ blue }, "Platform deletion cleanup failed");
+			edit = world->planRemovePlatformLift(sector, object);
+			require(edit.valid, edit.diagnostic); world->applyPlatformLiftEdit(edit);
+			require(world->getAccessPermissionUsage(blue).liftDestinationRequirements == 0, "Deleted Platform retained usage");
+			auto recreated = world->addSectorPlatformLift(sector, 0, 8, options);
+			world->finishBuild(); world->pauseSimulation();
+			for (uint32_t stop = 0; stop < 3; ++stop)
+				require(world->getLiftDestinationPermissionRequirement(sector, stop, recreated.lift.index).empty(), "Recreated Platform is restricted");
+			gWorldDocumentHistory.clear();
+			return;
 		}
 
 		// Deleting a landing Location also removes its Stop and remaps retained requirements.
@@ -1051,6 +1158,48 @@ namespace
 		lift = world->addLift(1, 0, 8, options); world->finishBuild(); world->pauseSimulation();
 		require(world->getLiftDestinationPermissionRequirement(lift.lift.sector->getIndex(), 2).empty(), "Recreated Lift inherited requirements");
 		gWorldDocumentHistory.clear();
+	}
+
+	void platformDestinationResetAndIntermediateJourney()
+	{
+		core::World world("Platform Reset", 10, 3);
+		auto room = world.addRoom("Room", 0, 0, 0, 10, 3);
+		for (uint32_t y = 1; y < 3; ++y)
+			for (uint32_t x = 0; x < 10; ++x) world.addSectorWalkway(room, y, x);
+		uint32_t top;
+		world.addSectorMarker(room, 2, 1.0f, &top);
+		core::World::CreateLiftOptions options; options.stopOffsets = { 0, 1, 2 };
+		auto lift = world.addSectorPlatformLift(room, 0, 8, options);
+		world.finishBuild(); world.pauseSimulation();
+		auto red = world.addAccessPermission("Red");
+		auto blue = world.addAccessPermission("Blue");
+		auto set = world.addPermissionSet("Card");
+		auto id = world.createAgent("Rider", room, 0, 1.0f);
+		std::string diagnostic;
+		require(world.setLiftDestinationPermissionRequirement(room, 0, { red, blue }, &diagnostic, lift.lift.index), diagnostic);
+		require(world.setLiftDestinationPermissionRequirement(room, 1, { red, blue }, &diagnostic, lift.lift.index), diagnostic);
+		require(world.grantAgentAccessPermission(id, red, &diagnostic), diagnostic);
+		require(world.setPermissionSetAccessPermission(set, blue, true, &diagnostic), diagnostic);
+		require(world.setAgentPermissionSetAssignment(id, set, true, &diagnostic), diagnostic);
+		core::DeviceCommand select;
+		select.type = core::DeviceCommandType::SelectLiftDestination;
+		select.traversalResource = lift.traversalResource; select.stopIndex = 0;
+		require(world.missingLiftDestinationPermissions(select, id).empty(), "Authored grants did not authorize ground");
+		auto authored = save(world);
+		require(world.setAgentRuntimeAccessPermissionGrant(id, red, false), "Runtime revoke failed");
+		require(world.setAgentRuntimePermissionSetAssignment(id, set, false), "Runtime set revoke failed");
+		require(world.missingLiftDestinationPermissions(select, id) == std::vector<core::AccessPermissionId>{ red, blue }
+			&& save(world) == authored, "Runtime grants leaked into authored Platform authorization");
+		world.resetSimulation();
+		require(world.missingLiftDestinationPermissions(select, id).empty(), "Reset failed to restore Platform authorization");
+		require(world.setAgentRuntimeAccessPermissionGrant(id, red, false), "Runtime revoke failed");
+		require(world.setAgentRuntimePermissionSetAssignment(id, set, false), "Runtime set revoke failed");
+		auto rider = world.lookupAgent(id).entity;
+		world.resumeSimulation();
+		require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Upper Platform destination refused");
+		world.advanceTicks(6000);
+		require(!rider->getPath() && std::abs(rider->getGlobalPosition().y - 2.0f) < 0.01f,
+			"Unauthorized passenger did not travel past protected intermediate Platform Stop");
 	}
 
 	void runtimePropertiesPanelChangesCurrentAuthorizationOnly()
@@ -1154,10 +1303,14 @@ void runAccessPermissionSmokeChecks()
 	extensibleControlRequirementsPersistIndependently();
 	transportLandingRequirementsPersist();
 	liftDestinationAuthoring();
+	liftDestinationAuthoring(true);
+	platformDestinationResetAndIntermediateJourney();
 	liftDestinationEnforcement();
 	liftDestinationEnforcement(1);
 	liftDestinationEnforcement(2);
 	liftDestinationEnforcement(3);
+	for (unsigned change = 0; change < 4; ++change) liftDestinationEnforcement(change, true);
+	changingLiftDestinationAuthorization(true);
 	liftDestinationAlternative();
 	changingLiftDestinationAuthorization();
 	runtimePropertiesPanelChangesCurrentAuthorizationOnly();

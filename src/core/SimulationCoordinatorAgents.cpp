@@ -443,14 +443,14 @@ namespace core
 		auto const id = mWorld.getAgentId(agent);
 		agent->clearRuntimePath();
 		// Pause/resume replans from the passenger's current position. Keep an
-		// accepted ordinary Lift journey alive while doing so: dropping its
+		// accepted Lift or Platform lift journey alive while doing so: dropping its
 		// manifest and shared Stop request would retroactively revoke selection
 		// when the author tightens destination requirements while paused.
 		bool acceptedLiftJourney = false;
 		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 		{
 			(void)resourceId;
-			if (resource->mLift && !resource->mOpenPlatformLift
+			if (resource->mLift
 				&& find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 				acceptedLiftJourney = true;
 		}

@@ -523,6 +523,30 @@ the editor), all 67 non-GUI CTest tests in each configuration
 (`ctest --test-dir build-windows -C <configuration> -LE gui --output-on-failure`),
 and `git diff --check` passed. No manual editor session was used.
 
+## Platform lift destination permissions (#263)
+
+`access-permissions` now runs the shared Lift authorization scenarios with
+Platform lift-specific Room and Walkway fixtures. Coverage includes all-required
+direct/Permission set combinations, actual rejected and accepted selections,
+missing-permission diagnostics, local piggyback journeys, remote observation
+exclusion, protected intermediate Stops, grant loss and tightening, alternate
+Paths/Route loss, voluntary gains and Route persistence, and Reset simulation.
+Accepted shared journeys survive revocation and paused requirement edits.
+
+The existing destination query, mutation, panel-commit and table APIs accept an
+optional Room object index for Platform lifts. Mandatory ground and selected
+Walkway Stops use the same per-destination requirements and schema-30 field as
+ordinary Lifts; landing-call requirements remain independent. Tests cover YAML
+and binary round trips, old-World defaults, malformed-input rollback, history,
+rename/delete usage, unrelated settings and Sector reindexing, optional Stop
+removal/recreation, supporting Walkway removal/recreation, and transport deletion.
+The headless ImGui table verification requires no window, Agent debug overlay,
+dialog, or manual input; no manual editor session is claimed.
+
+Validation on Windows/MSVC: full Debug and Release builds including the editor,
+all 67 non-GUI CTest tests in each configuration, focused permission checks, and
+`git diff --check` passed. Shuttle destination permissions remain out of scope.
+
 ## Prerequisites
 
 - Windows x64

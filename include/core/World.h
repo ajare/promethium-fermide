@@ -858,15 +858,17 @@ namespace core
 			std::array<std::vector<uint32_t>, 2> controlPermissionRequirements{};
 			// Lift/Platform lift: stop order. Shuttle: fixed stop/carriage/door grid.
 			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
-			// Ordinary Lift destination requirements, parallel to values (Stops).
+			// Lift and Platform lift destination requirements, parallel to values (Stops).
 			std::vector<std::vector<uint32_t>> destinationPermissionRequirements{};
+			void retainDestinationRequirements(std::vector<uint32_t> const& stops);
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
 		};
 
-		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex) const;
+		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
+		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
 		std::vector<ConstructionRecord> mConstructionRecords;
 		bool mDeserializingConstruction{ false };
 
@@ -2379,12 +2381,13 @@ namespace core
 			bool assigned, std::string* diagnostic = nullptr);
 
 		bool isInteractionPointPermissionEligible(InteractionPointId point) const;
-		// Authoring only: destination requirements are not yet enforced.
-		std::vector<uint32_t> getLiftDestinationLevels(uint32_t sectorIndex) const;
+		// Omit objectIndex for an enclosed Lift; specify the room object for a Platform lift.
+		std::vector<uint32_t> getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		std::vector<AccessPermissionId> getLiftDestinationPermissionRequirement(
-			uint32_t sectorIndex, uint32_t stopIndex) const;
+			uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex = ~0u) const;
 		bool setLiftDestinationPermissionRequirement(uint32_t sectorIndex, uint32_t stopIndex,
-			std::vector<AccessPermissionId> const& permissions, std::string* diagnostic = nullptr);
+			std::vector<AccessPermissionId> const& permissions, std::string* diagnostic = nullptr,
+			uint32_t objectIndex = ~0u);
 
 		bool setInteractionPointPermissionRequirement(InteractionPointId point,
 			std::vector<AccessPermissionId> const& permissions,

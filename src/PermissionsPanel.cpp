@@ -134,32 +134,32 @@ bool commitManualDoorPermissionRequirement(shared_ptr<core::World> const& world,
 
 bool commitLiftDestinationPermissionRequirement(shared_ptr<core::World> const& world,
 	uint32_t sectorIndex, uint32_t stopIndex, core::AccessPermissionId permission, bool required,
-	string& diagnostic)
+	string& diagnostic, uint32_t objectIndex)
 {
 	return commit(world, diagnostic, [&]
 	{
-		auto values = world->getLiftDestinationPermissionRequirement(sectorIndex, stopIndex);
+		auto values = world->getLiftDestinationPermissionRequirement(sectorIndex, stopIndex, objectIndex);
 		auto found = find(values.begin(), values.end(), permission);
 		if (required && found == values.end()) values.push_back(permission);
 		else if (!required && found != values.end()) values.erase(found);
 		else return false;
-		return world->setLiftDestinationPermissionRequirement(sectorIndex, stopIndex, values, &diagnostic);
+		return world->setLiftDestinationPermissionRequirement(sectorIndex, stopIndex, values, &diagnostic, objectIndex);
 	});
 }
 
-void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint32_t sectorIndex)
+void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint32_t sectorIndex, uint32_t objectIndex)
 {
 	if (!world) return;
 	ImGui::TextUnformatted("Destination permissions");
 	ImGui::TextWrapped("All listed Access permissions are required to select this destination, from direct or Permission set grants. Accepted shared journeys and disembarking remain available after permission loss.");
-	auto levels = world->getLiftDestinationLevels(sectorIndex);
+	auto levels = world->getLiftDestinationLevels(sectorIndex, objectIndex);
 	if (!ImGui::BeginTable("Destination permissions", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) return;
 	ImGui::TableSetupColumn("Level"); ImGui::TableSetupColumn("Permissions"); ImGui::TableSetupColumn("Required (all)");
 	ImGui::TableHeadersRow();
 	for (uint32_t stop = 0; stop < levels.size(); ++stop)
 	{
 		ImGui::PushID(static_cast<int>(stop));
-		auto required = asSet(world->getLiftDestinationPermissionRequirement(sectorIndex, stop));
+		auto required = asSet(world->getLiftDestinationPermissionRequirement(sectorIndex, stop, objectIndex));
 		string summary;
 		for (auto id : required)
 		{
@@ -176,7 +176,7 @@ void renderLiftDestinationPermissions(shared_ptr<core::World> const& world, uint
 				if (ImGui::Selectable(world->getAccessPermissionName(id).c_str(), required.contains(id), ImGuiSelectableFlags_DontClosePopups))
 				{
 					string diagnostic;
-					commitLiftDestinationPermissionRequirement(world, sectorIndex, stop, id, !required.contains(id), diagnostic);
+					commitLiftDestinationPermissionRequirement(world, sectorIndex, stop, id, !required.contains(id), diagnostic, objectIndex);
 				}
 			if (!world->getAccessPermissionCount()) ImGui::TextDisabled("No Access permissions defined");
 			ImGui::EndCombo();

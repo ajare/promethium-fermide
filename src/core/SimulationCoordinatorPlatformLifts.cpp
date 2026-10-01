@@ -213,6 +213,14 @@ namespace core
 
 		if (!resource.mLiftPassengerDestinations.contains(request->mOwner))
 		{
+			// An accepted Stop request is shared service, not a new selection.
+			// Unauthorized passengers may ride it without operating the selector.
+			if (!resource.mLiftStopRequestOwners[destination].empty())
+			{
+				addLiftStopRequest(resource, destination, request->mOwner);
+				resource.mLiftPassengerDestinations[request->mOwner] = destination;
+				return;
+			}
 			if (!request->mPreparationRequested)
 			{
 				if (destination >= resource.mControls.size()) { denyTraversalRequest(requestId); return; }
@@ -222,6 +230,12 @@ namespace core
 				auto interactionId = requestInteractionForTraversal(resource.mLiftSelector, request->mOwner);
 				if (!interactionId) return;
 				auto interaction = mWorld.mInteractionRequests.find(interactionId);
+				if (interaction && interaction->mResult == InteractionResult::Rejected)
+				{
+					requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::PreparationFailed);
+					denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+					return;
+				}
 				request->mPreparationRequested = true;
 				if (interaction && !interaction->mOperations.empty())
 					request->mPreparationOperation = interaction->mOperations.front().first;

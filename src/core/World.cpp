@@ -9830,8 +9830,19 @@ namespace core
 		return true;
 	}
 
-	World::ConstructionRecord const* World::findLiftDestinationRecord(uint32_t sectorIndex) const
+	World::ConstructionRecord const* World::findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex) const
 	{
+		if (objectIndex != ~0u)
+		{
+			if (sectorIndex >= mSectors.size() || objectIndex >= mSectors[sectorIndex]->getNumObjects()) return nullptr;
+			auto object = dynamic_pointer_cast<const LiftSectorObject>(mSectors[sectorIndex]->getObject(objectIndex));
+			if (!object) return nullptr;
+			for (auto const& record : mConstructionRecords)
+				if (record.type == ConstructionType::PlatformLift && record.a == sectorIndex
+					&& record.c + mSectors[sectorIndex]->getCellX() == object->getCellX()
+					&& record.b + mSectors[sectorIndex]->getCellY() == object->getCellY()) return &record;
+			return nullptr;
+		}
 		uint32_t index = 0;
 		for (auto const& record : mConstructionRecords)
 		{
@@ -9842,19 +9853,33 @@ namespace core
 		return nullptr;
 	}
 
-	vector<uint32_t> World::getLiftDestinationLevels(uint32_t sectorIndex) const
+	World::ConstructionRecord const* World::findLiftDestinationRecord(TraversalResource const& resource) const
 	{
-		auto record = findLiftDestinationRecord(sectorIndex);
-		if (!record) throw invalid_argument("Unknown ordinary Lift");
+		auto sector = static_cast<uint32_t>(resource.mLiftSector.value - 1);
+		if (!resource.mOpenPlatformLift) return findLiftDestinationRecord(sector);
+		if (sector >= mSectors.size()) return nullptr;
+		for (uint32_t i = 0; i < mSectors[sector]->getNumObjects(); ++i)
+		{
+			auto object = dynamic_pointer_cast<const LiftSectorObject>(mSectors[sector]->getObject(i));
+			if (object && object->getLift() == resource.mLift) return findLiftDestinationRecord(sector, i);
+		}
+		return nullptr;
+	}
+
+	vector<uint32_t> World::getLiftDestinationLevels(uint32_t sectorIndex, uint32_t objectIndex) const
+	{
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
+		if (!record) throw invalid_argument("Unknown Lift or Platform lift");
 		auto levels = record->values;
-		for (auto& level : levels) level += record->a;
+		for (auto& level : levels) level += record->type == ConstructionType::Lift
+			? record->a : mSectors[sectorIndex]->getCellY() + record->b;
 		return levels;
 	}
 
 	vector<AccessPermissionId> World::getLiftDestinationPermissionRequirement(
-		uint32_t sectorIndex, uint32_t stopIndex) const
+		uint32_t sectorIndex, uint32_t stopIndex, uint32_t objectIndex) const
 	{
-		auto record = findLiftDestinationRecord(sectorIndex);
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
 		if (!record || stopIndex >= record->values.size()) throw invalid_argument("Unknown Lift destination Stop");
 		vector<AccessPermissionId> result;
 		if (stopIndex < record->destinationPermissionRequirements.size())
@@ -9863,11 +9888,11 @@ namespace core
 	}
 
 	bool World::setLiftDestinationPermissionRequirement(uint32_t sectorIndex, uint32_t stopIndex,
-		vector<AccessPermissionId> const& permissions, string* diagnostic)
+		vector<AccessPermissionId> const& permissions, string* diagnostic, uint32_t objectIndex)
 	{
 		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
 		if (!mSimulationPaused) return reject("Destination permissions can only be edited while the simulation is paused");
-		auto record = findLiftDestinationRecord(sectorIndex);
+		auto record = findLiftDestinationRecord(sectorIndex, objectIndex);
 		if (!record || stopIndex >= record->values.size()) return reject("Unknown Lift destination Stop");
 		vector<uint32_t> next;
 		for (auto id : permissions)
@@ -10545,13 +10570,14 @@ namespace core
 		vector<AccessPermissionId> result;
 		if (!agentId || command.type != DeviceCommandType::SelectLiftDestination) return result;
 		auto resource = mTraversalResources.find(command.traversalResource);
-		if (!resource || !resource->mLift || resource->mOpenPlatformLift
+		if (!resource || !resource->mLift
 			|| command.stopIndex >= resource->mLiftStops.size()) return result;
 		auto agent = mAgents.find(agentId);
 		auto grants = agent ? effectiveAccessGrants(*agent) : bitset<256>{};
-		for (auto permission : getLiftDestinationPermissionRequirement(
-			static_cast<uint32_t>(resource->mLiftSector.value - 1), command.stopIndex))
-			if (!grants.test(permission.value - 1)) result.push_back(permission);
+		auto record = findLiftDestinationRecord(*resource);
+		if (record && command.stopIndex < record->destinationPermissionRequirements.size())
+			for (auto permission : record->destinationPermissionRequirements[command.stopIndex])
+				if (!grants.test(permission - 1)) result.push_back(AccessPermissionId{ permission });
 		return result;
 	}
 
@@ -10564,7 +10590,7 @@ namespace core
 			resourceId = resource->mLiftCoordinator;
 			resource = mTraversalResources.find(resourceId);
 		}
-		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return true;
+		if (!resource || !resource->mLift) return true;
 		auto stop = mSimulationCoordinator.findLiftStop(*resource, destination);
 		DeviceCommand command;
 		command.type = DeviceCommandType::SelectLiftDestination;
@@ -10585,7 +10611,7 @@ namespace core
 				auto const& landing = resource->mLiftStops[originStop];
 				local = landing.locationSector.value == agent->getSector()->getIndex() + 1
 					&& std::abs(agent->getGlobalPosition().y - landing.globalPosition) <= 0.5f
-					&& isTransportLocallyBoardable(landing.landingResource, origin);
+					&& isTransportLocallyBoardable(resource->mOpenPlatformLift ? resourceId : landing.landingResource, origin);
 			}
 		}
 		return local && stop < resource->mLiftStopRequestOwners.size()
@@ -10706,8 +10732,8 @@ namespace core
 				auto point = mInteractionPoints.find(pointId);
 				if (point && point->mPermissionRequirement.test(bit)) return true;
 			}
-			if (gained && resource.mLift && !resource.mOpenPlatformLift)
-				if (auto record = findLiftDestinationRecord(static_cast<uint32_t>(resource.mLiftSector.value - 1)))
+			if (gained && resource.mLift)
+				if (auto record = findLiftDestinationRecord(resource))
 					for (auto const& requirement : record->destinationPermissionRequirements)
 						if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()) return true;
 			for (auto const& stop : resource.mLiftStops)
@@ -10732,15 +10758,25 @@ namespace core
 			auto resource = mTraversalResources.find(node.edge->getTraversalResourceId());
 			// Only the alighting edge identifies the selected destination. Passing
 			// an intermediate Stop or boarding must not require its permissions.
-			if (!resource || !resource->mLiftCoordinator) continue;
+			if (!resource) continue;
 			auto source = path->nodes[i - 1].targetVertex;
-			if (!source || !source->getSector() || isLocationLike(source->getSector()->getType())) continue;
-			auto lift = mTraversalResources.find(resource->mLiftCoordinator);
-			if (!lift || !lift->mLift || lift->mOpenPlatformLift) continue;
-			auto requirement = getLiftDestinationPermissionRequirement(
-				static_cast<uint32_t>(lift->mLiftSector.value - 1), resource->mLiftStopIndex);
-			if (find(requirement.begin(), requirement.end(), changed) != requirement.end()
-				&& !canAgentUseLiftJourney(resource->mLiftCoordinator, agent.getGlobalPosition(),
+			if (!source || !source->getSector()) continue;
+			auto liftId = resource->mLiftCoordinator;
+			auto stop = resource->mLiftStopIndex;
+			if (resource->mOpenPlatformLift)
+			{
+				if (node.edge->getType() != EdgeType::LiftMount || !node.targetVertex->getObject()) continue;
+				liftId = node.edge->getTraversalResourceId();
+				stop = mSimulationCoordinator.findLiftStop(*resource, source->getPosition());
+			}
+			else if (isLocationLike(source->getSector()->getType())) continue;
+			auto lift = mTraversalResources.find(liftId);
+			if (!lift || !lift->mLift) continue;
+			auto record = findLiftDestinationRecord(*lift);
+			if (!record || stop >= record->destinationPermissionRequirements.size()) continue;
+			auto const& requirement = record->destinationPermissionRequirements[stop];
+			if (find(requirement.begin(), requirement.end(), changed.value) != requirement.end()
+				&& !canAgentUseLiftJourney(liftId, agent.getGlobalPosition(),
 					source->getPosition(), getAgentId(&agent))) currentRelevant = true;
 		}
 		if (!gained)

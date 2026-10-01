@@ -236,6 +236,17 @@ namespace core
 			}
 			serializer.endArray();
 		};
+		auto writeDestinationRequirements = [&]
+		{
+			serializer.beginArray("destinationPermissionRequirements");
+			for (auto const& requirement : record.destinationPermissionRequirements)
+			{
+				serializer.beginMap(""); serializer.beginArray("permissions");
+				for (auto id : requirement) serializer.writeUint32("", id);
+				serializer.endArray(); serializer.endMap();
+			}
+			serializer.endArray();
+		};
 		auto writeStopDoorOpenStyles = [&](char const* field)
 		{
 			// Only overrides that differ from the generated default are persisted,
@@ -301,15 +312,7 @@ namespace core
 			serializer.writeFloat("minimumDwellSeconds", record.x);
 			serializer.writeFloat("maximumBoardingSeconds", record.y);
 			serializer.writeUint32("initialStop", record.g);
-			serializer.beginArray("destinationPermissionRequirements");
-			for (auto const& requirement : record.destinationPermissionRequirements)
-			{
-				serializer.beginMap("");
-				serializer.beginArray("permissions");
-				for (auto id : requirement) serializer.writeUint32("", id);
-				serializer.endArray(); serializer.endMap();
-			}
-			serializer.endArray(); break;
+			writeDestinationRequirements(); break;
 		case ConstructionType::Shuttle:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -421,7 +424,8 @@ namespace core
 			serializer.writeUint32("xOffset", record.c); serializer.writeUint32("cellsWide", record.d);
 			writeStops(); writeLandingRequirements("landingControlPermissionRequirements");
 			serializer.writeUint32("capacity", record.e);
-			serializer.writeFloat("stopDurationSeconds", record.z); break;
+			serializer.writeFloat("stopDurationSeconds", record.z);
+			writeDestinationRequirements(); break;
 		case ConstructionType::Walkway:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); break;
@@ -751,6 +755,23 @@ namespace core
 			}
 			serializer.endArray();
 		};
+		auto readDestinationRequirements = [&]
+		{
+			if (version < 30 || !serializer.hasField("destinationPermissionRequirements")) return;
+			serializer.beginArray("destinationPermissionRequirements");
+			while (serializer.nextArrayItem())
+			{
+				record.destinationPermissionRequirements.emplace_back();
+				serializer.beginMap(""); serializer.beginArray("permissions");
+				while (serializer.nextArrayItem())
+					record.destinationPermissionRequirements.back().push_back(serializer.readUint32(""));
+				serializer.endArray(); serializer.endMap();
+			}
+			serializer.endArray();
+			if (!record.destinationPermissionRequirements.empty()
+				&& record.destinationPermissionRequirements.size() != record.values.size())
+				throw SerializationException("Lift destination requirements must match the served Stops");
+		};
 		auto readStopDoorOpenStyles = [&](char const* field, char const* ownerLabel)
 		{
 			// A transport record written before per-Door styles existed simply has
@@ -828,22 +849,7 @@ namespace core
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("cellsWide"); record.e = readRenamedUint32("levelsHigh", "decksHigh");
 			readStops(); readStopDoorOpenStyles("stopDoorOpenStyles", "Lift stop");
-			if (version >= 30 && serializer.hasField("destinationPermissionRequirements"))
-			{
-				serializer.beginArray("destinationPermissionRequirements");
-				while (serializer.nextArrayItem())
-				{
-					record.destinationPermissionRequirements.emplace_back();
-					serializer.beginMap(""); serializer.beginArray("permissions");
-					while (serializer.nextArrayItem())
-						record.destinationPermissionRequirements.back().push_back(serializer.readUint32(""));
-					serializer.endArray(); serializer.endMap();
-				}
-				serializer.endArray();
-				if (!record.destinationPermissionRequirements.empty()
-					&& record.destinationPermissionRequirements.size() != record.values.size())
-					throw SerializationException("Lift destination requirements must match the served Stops");
-			}
+			readDestinationRequirements();
 			readLandingRequirements("landingControlPermissionRequirements"); record.d = serializer.readUint32("capacity");
 			record.x = serializer.readFloat("minimumDwellSeconds");
 			record.y = serializer.readFloat("maximumBoardingSeconds");
@@ -961,7 +967,9 @@ namespace core
 			record.x = serializer.readFloat("minimumDwellSeconds", true, CORE_LIFT_DOOR_PAUSE_TIME);
 			record.y = serializer.readFloat("maximumBoardingSeconds", true,
 				CORE_PLATFORM_LIFT_STOP_DURATION);
-			record.z = serializer.readFloat("stopDurationSeconds", true, record.y); break;
+			record.z = serializer.readFloat("stopDurationSeconds", true, record.y);
+			readDestinationRequirements();
+			break;
 		case ConstructionType::Walkway:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); break;
@@ -4502,6 +4510,7 @@ namespace core
 						}
 						continue;
 					}
+					source.retainDestinationRequirements(supported);
 					source.values = std::move(supported);
 				}
 				else if (source.type == ConstructionType::Stairwell)
@@ -4960,6 +4969,7 @@ namespace core
 				diagnostic = "No eligible Walkway exists above this PlatformLift position";
 				return false;
 			}
+			found->retainDestinationRequirements({ 0, lowest });
 			found->values = { 0, lowest };
 			found->b = 0;
 			found->c = plan.x - room->getCellX();
@@ -5161,7 +5171,10 @@ namespace core
 				else
 				{
 					auto updated = record;
-					updated.values.erase(remove(updated.values.begin(), updated.values.end(), sourceLevel), updated.values.end());
+					auto stops = updated.values;
+					stops.erase(remove(stops.begin(), stops.end(), sourceLevel), stops.end());
+					updated.retainDestinationRequirements(stops);
+					updated.values = std::move(stops);
 					reconciled.push_back(std::move(updated));
 					ConstructionRecord tombstone{ ConstructionType::ObjectTombstone };
 					tombstone.a = owner->getIndex(); reconciled.push_back(std::move(tombstone));
@@ -5747,6 +5760,16 @@ namespace core
 		return true;
 	}
 
+	void World::ConstructionRecord::retainDestinationRequirements(vector<uint32_t> const& stops)
+	{
+		if (destinationPermissionRequirements.empty()) return;
+		vector<vector<uint32_t>> retained(stops.size());
+		for (size_t i = 0; i < stops.size(); ++i)
+			for (size_t j = 0; j < values.size() && j < destinationPermissionRequirements.size(); ++j)
+				if (stops[i] == values[j]) retained[i] = destinationPermissionRequirements[j];
+		destinationPermissionRequirements = std::move(retained);
+	}
+
 	bool World::preparePlatformLiftEdit(PlatformLiftEditPlan const& plan,
 		vector<ConstructionRecord>& records, string& diagnostic) const
 	{
@@ -5781,9 +5804,11 @@ namespace core
 			found->x = plan.options.minimumDwellSeconds;
 			found->y = plan.options.maximumBoardingSeconds;
 			found->z = plan.options.platformStopDurationSeconds;
-			found->values = plan.options.stopOffsets;
-			sort(found->values.begin(), found->values.end());
-			found->values.erase(unique(found->values.begin(), found->values.end()), found->values.end());
+			auto stops = plan.options.stopOffsets;
+			sort(stops.begin(), stops.end());
+			stops.erase(unique(stops.begin(), stops.end()), stops.end());
+			found->retainDestinationRequirements(stops);
+			found->values = std::move(stops);
 			found->landingControlPermissionRequirements.clear();
 			for (auto const& requirement : plan.options.landingControlPermissionRequirements)
 			{
@@ -5985,7 +6010,10 @@ namespace core
 			else
 			{
 				auto updated = record;
-				updated.values.erase(remove(updated.values.begin(), updated.values.end(), supportLevel), updated.values.end());
+				auto stops = updated.values;
+				stops.erase(remove(stops.begin(), stops.end(), supportLevel), stops.end());
+				updated.retainDestinationRequirements(stops);
+				updated.values = std::move(stops);
 				platformUpdates.emplace(recordIndex, std::move(updated));
 			}
 		}

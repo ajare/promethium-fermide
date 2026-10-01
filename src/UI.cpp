@@ -5918,6 +5918,7 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	ImGui::Text("Layer: %s", layerLabel(world, room->getLayerIndex()).c_str());
 	ImGui::Text("Position: %u, %u", object->getCellX(), object->getCellY());
 	ImGui::Text("Car y: %.2f", platformLift->getPosition().y);
+	renderLiftDestinationPermissions(world, room->getIndex(), objectIndex);
 
 	static core::World const* editedWorld = nullptr;
 	static core::SectorObject const* editedObject = nullptr;

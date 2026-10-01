@@ -140,6 +140,11 @@ namespace core
 			auto const routeAgent = context.world && context.agent
 				? context.world->getAgentId(context.agent) : AgentId{};
 			if (result.type == EdgeType::LiftMount && lift->isOpenPlatformLift()
+				&& !result.boarding && routeAgent
+				&& !context.world->canAgentUseLiftJourney(edge.getTraversalResourceId(),
+					context.agent->getGlobalPosition(), source->getPosition(), routeAgent))
+				result.exclusion = RouteExclusionReason::Permission;
+			if (result.type == EdgeType::LiftMount && lift->isOpenPlatformLift()
 				&& result.boarding && routeAgent
 				&& !(result.observed && context.world->isTransportLocallyBoardable(
 					edge.getTraversalResourceId(), source->getPosition()))
