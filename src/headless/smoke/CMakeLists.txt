@@ -197,13 +197,16 @@ pf_add_smoke_module(pf-smoke-behaviours
         behaviours/RuntimeAuthorization.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
-    TIMEOUT 30
+    TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,60,30>"
 )
 
 add_test(NAME smoke-behaviours-contract COMMAND ${CMAKE_COMMAND}
     "-DBEHAVIOURS=$<TARGET_FILE:pf-smoke-behaviours>"
+    "-DRUN_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,60,15>"
+    "-DPARALLEL_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,120,45>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/BehavioursContract.cmake")
-set_tests_properties(smoke-behaviours-contract PROPERTIES LABELS "harness;core" TIMEOUT 90)
+set_tests_properties(smoke-behaviours-contract PROPERTIES LABELS "harness;core"
+    TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,240,90>")
 
 pf_add_smoke_module(pf-smoke-permissions
     NAME permissions
@@ -219,13 +222,16 @@ pf_add_smoke_module(pf-smoke-permissions
         permissions/Refusal.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
-    TIMEOUT 240
+    TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,240>"
 )
 
 add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
     "-DPERMISSIONS=$<TARGET_FILE:pf-smoke-permissions>"
+    "-DRUN_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,240>"
+    "-DPARALLEL_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,900,300>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PermissionsContract.cmake")
-set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core" TIMEOUT 600)
+set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core"
+    TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,1800,600>")
 
 pf_add_smoke_module(pf-smoke-transports
     NAME transports
@@ -245,13 +251,17 @@ pf_add_smoke_module(pf-smoke-transports
         transports/LayerJourney.cpp
     LIBRARIES pf-lift-boarding-support
     LABELS core
-    TIMEOUT 120
+    TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,300,120>"
 )
 
 add_test(NAME smoke-transports-contract COMMAND ${CMAKE_COMMAND}
     "-DTRANSPORTS=$<TARGET_FILE:pf-smoke-transports>"
+    "-DCONCURRENT_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,300,120>"
+    "-DRUN_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,300,240>"
+    "-DPARALLEL_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,240>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TransportsContract.cmake")
-set_tests_properties(smoke-transports-contract PROPERTIES LABELS "harness;core" TIMEOUT 300)
+set_tests_properties(smoke-transports-contract PROPERTIES LABELS "harness;core"
+    TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,900,300>")
 
 pf_add_smoke_module(pf-smoke-routing
     NAME routing
