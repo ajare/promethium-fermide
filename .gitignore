@@ -11,6 +11,9 @@ build-linux/
 build-linux-validation/
 out/
 
+# Python bytecode cache
+__pycache__/
+
 # OS/editor files
 .DS_Store
 Thumbs.db
