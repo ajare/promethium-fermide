@@ -440,6 +440,7 @@ namespace core
 			writeStops(); writeLandingRequirements("landingControlPermissionRequirements");
 			serializer.writeUint32("capacity", record.e);
 			serializer.writeFloat("stopDurationSeconds", record.z);
+			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			writeDestinationRequirements(); break;
 		case ConstructionType::Walkway:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
@@ -515,7 +516,8 @@ namespace core
 		// Version 34 extends authored Broken condition to Bulkhead Doors.
 		// Version 36 adds authored Broken Escalators.
 		// Version 37 adds whole-Lift authored Broken condition.
-		serializer.writeUint32("version", 37);
+		// Version 38 extends whole-transport Broken condition to Platform lifts.
+		serializer.writeUint32("version", 38);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -1033,6 +1035,11 @@ namespace core
 			record.y = serializer.readFloat("maximumBoardingSeconds", true,
 				CORE_PLATFORM_LIFT_STOP_DURATION);
 			record.z = serializer.readFloat("stopDurationSeconds", true, record.y);
+			if (serializer.hasField("initiallyBroken"))
+			{
+				if (version < 38) throw SerializationException("Platform lift Broken condition requires World schema version 38 or later");
+				record.initiallyBroken = serializer.readBool("initiallyBroken");
+			}
 			readDestinationRequirements();
 			break;
 		case ConstructionType::Walkway:
@@ -1123,7 +1130,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 37)
+		if (version < 1 || version > 38)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2347,7 +2354,7 @@ namespace core
 		case ConstructionType::PlatformLift:
 		{
 			CreateLiftOptions options{ record.d, record.values, record.e, record.x,
-				record.y, 0, 0, record.z };
+				record.y, 0, 0, record.z, {}, {}, record.initiallyBroken };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();
@@ -5851,6 +5858,7 @@ namespace core
 		options.minimumDwellSeconds = found->x;
 		options.maximumBoardingSeconds = found->y;
 		options.platformStopDurationSeconds = found->z;
+		options.initiallyBroken = found->initiallyBroken;
 		for (auto const& requirement : found->landingControlPermissionRequirements)
 		{
 			options.landingControlPermissionRequirements.emplace_back();
@@ -5905,6 +5913,7 @@ namespace core
 			found->x = plan.options.minimumDwellSeconds;
 			found->y = plan.options.maximumBoardingSeconds;
 			found->z = plan.options.platformStopDurationSeconds;
+			found->initiallyBroken = plan.options.initiallyBroken;
 			auto stops = plan.options.stopOffsets;
 			sort(stops.begin(), stops.end());
 			stops.erase(unique(stops.begin(), stops.end()), stops.end());

@@ -74,6 +74,7 @@ set(names
     extensibles/warningPreservesPosition
     escalators/brokenWarningPreservesPosition
     lifts/brokenWarningPreservesPosition
+    platformLifts/brokenWarningPreservesPosition
     bulkhead/checkBrokenWarningPreservesPosition
     doorOpenRight/checkBrokenWarningPreservesPosition
     doorOpenRightSolidPassClosed

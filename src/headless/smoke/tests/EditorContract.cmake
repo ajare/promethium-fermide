@@ -184,6 +184,7 @@ set(editor_names
     extensibles/controlsAndHistory
     escalators/brokenControlsAndHistory
     lifts/brokenControlsAndHistory
+    platformLifts/brokenControlsAndHistory
     doorpanel/checkBulkheadBrokenControlsAndHistory
     doorpanel/checkBrokenControlsAndHistory
     doorpanel/checkOrdinaryDoor

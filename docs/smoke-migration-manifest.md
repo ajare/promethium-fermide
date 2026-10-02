@@ -204,6 +204,10 @@ because they do not own smoke-check execution.
 | `smoke/persistence/BrokenLifts.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/render/BrokenLifts.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/simulation/BrokenLifts.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/editor/BrokenPlatformLifts.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/persistence/BrokenPlatformLifts.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/BrokenPlatformLifts.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/simulation/BrokenPlatformLifts.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/editor/BrokenExtensibles.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/persistence/BrokenExtensibles.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/render/BrokenExtensibles.cpp` | module-owned | `pf-smoke-render` |

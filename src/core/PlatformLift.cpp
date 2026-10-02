@@ -10,7 +10,10 @@ namespace core
 	{
 	}
 
-	std::string PlatformLift::getDescription() const { return "Platform Lift"; }
+	std::string PlatformLift::getDescription() const
+	{
+		return isBroken() ? "Platform Lift (Broken)" : "Platform Lift";
+	}
 	void PlatformLift::getCurrentShape(Vector2& minExtent, Vector2& maxExtent) const
 	{
 		getFullShape(minExtent, maxExtent);

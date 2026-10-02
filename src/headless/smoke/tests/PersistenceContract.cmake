@@ -68,6 +68,7 @@ set(names yaml-primitives binary-contract yaml-file transactional-bytes
     extensibleBrokenLifecycle
     escalatorBrokenLifecycle
     liftBrokenLifecycle
+    platformLiftBrokenLifecycle
     doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted
     doorHeightPersistsAndIsLimitedToRooms
     doorOpenLeftPersistsThroughEveryEditorPath

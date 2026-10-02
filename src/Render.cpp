@@ -1792,6 +1792,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 				renderBrokenWarning(*ladder->getLadder(), drawList);
 			else if (auto bridge = dynamic_pointer_cast<const core::ForceBridgeSectorObject>(object))
 				renderBrokenWarning(*bridge->getForceBridge(), drawList);
+			else if (auto platform = dynamic_pointer_cast<const core::LiftSectorObject>(object))
+				renderBrokenWarning(*platform->getLift(), drawList, true);
 		}
 
 	// Objects

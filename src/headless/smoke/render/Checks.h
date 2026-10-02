@@ -40,6 +40,7 @@ namespace render_smoke
 	void registerDoorOpenRight(std::vector<smoke::Check>& checks);
 	void registerBrokenExtensibles(std::vector<smoke::Check>& checks);
 	void registerBrokenLifts(std::vector<smoke::Check>& checks);
+	void registerBrokenPlatformLifts(std::vector<smoke::Check>& checks);
 	void registerBrokenEscalators(std::vector<smoke::Check>& checks);
 	void registerFacades(std::vector<smoke::Check>& checks);
 	void registerFacadeDrawOrder(std::vector<smoke::Check>& checks);

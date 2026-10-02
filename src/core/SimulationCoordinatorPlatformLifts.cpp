@@ -116,6 +116,12 @@ namespace core
 				return;
 			}
 
+			if (resource.mLift->isBroken())
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ResourceDisabled);
+				return;
+			}
+
 			// The virtual boundary reservation above is the committed boarding
 			// boundary, even though this traversal request is still Pending.
 			if (!mWorld.agentAdheresToTransportLandingPermission(request->mResource,
@@ -235,6 +241,9 @@ namespace core
 
 		if (!resource.mLiftPassengerDestinations.contains(request->mOwner))
 		{
+			// Keep boarded intent while operations are unavailable. Restoration
+			// retries selection without moving the passenger or exhausting retries.
+			if (resource.mLift->isBroken()) return;
 			// An accepted Stop request is shared service, not a new selection.
 			// Unauthorized passengers may ride it without operating the selector.
 			if (!resource.mLiftStopRequestOwners[destination].empty())
@@ -282,7 +291,7 @@ namespace core
 		}
 
 		if (resource.mLiftMoving || resource.mLiftCurrentStop != destination
-			|| (resource.mLiftStopPhase != LiftStopPhase::Disembarking
+			|| (!resource.mLift->isBroken() && resource.mLiftStopPhase != LiftStopPhase::Disembarking
 				&& resource.mLiftStopPhase != LiftStopPhase::Boarding)) return;
 		resource.mLiftStopPhase = LiftStopPhase::Disembarking;
 		if (!resource.mVirtualBoundaryOwners.front())

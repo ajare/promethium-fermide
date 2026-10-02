@@ -1,0 +1,36 @@
+# #319: local discovery of unavailable open-platform service.
+version: 38
+name: Broken Platform lift - discovery and recovery
+randomSeed: 0
+cellsWide: 14
+levelsHigh: 4
+layers: 2
+layerNames: [Platform room, Remote origin]
+construction:
+  - {type: room, name: Platform room, layer: 0, y: 0, x: 0, cellsWide: 14, levelsHigh: 4, topLevelHeight: 0.9}
+  - {type: room, name: Remote origin, layer: 1, y: 0, x: 0, cellsWide: 2, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: door, layer: 0, y: 0, x: 0, width: 1, foreControl: false, backControl: false, activationMode: automatic, holdOpenSeconds: 3, crossingLanes: 1, openStyle: openUp}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 4}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 5}
+  - {type: walkway, sectorIndex: 0, levelIndex: 3, xOffset: 4}
+  - {type: walkway, sectorIndex: 0, levelIndex: 3, xOffset: 5}
+  - {type: walkway, sectorIndex: 0, levelIndex: 3, xOffset: 6}
+  - {type: walkway, sectorIndex: 0, levelIndex: 3, xOffset: 7}
+  - {type: platformLift, sectorIndex: 0, levelIndex: 0, xOffset: 4, cellsWide: 1, stopOffsets: [0, 3], capacity: 2, stopDurationSeconds: 4, initiallyBroken: true}
+  - {type: marker, sectorIndex: 0, levelIndex: 0, xOffset: 6.5, id: 1, name: Ground, properties: 0}
+  - {type: marker, sectorIndex: 0, levelIndex: 3, xOffset: 6.5, id: 2, name: Upper Walkway, properties: 0}
+nextMarkerId: 3
+nextAgentGroupId: 1
+agentGroups: []
+agents:
+  - id: 1
+    agent: {name: Remote service observer, flags: 0}
+    sector: 1
+    localX: 0.5
+    localY: 0
+    path: {destinationSector: 0, destinationLocalX: 6.5, destinationLocalY: 3, active: true}
+  - id: 2
+    agent: {name: Recovery passenger, flags: 0}
+    sector: 0
+    localX: 6.5
+    localY: 0

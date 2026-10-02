@@ -56,9 +56,11 @@ namespace
 void renderLiftConditionPanel(shared_ptr<core::World> const& world,
 	shared_ptr<core::Lift> const& lift)
 {
-	if (lift->isOpenPlatformLift()) return;
 	ImGui::TextColored(lift->isBroken() ? ImVec4(1.0f, 0.65f, 0.1f, 1.0f) : ImGui::GetStyleColorVec4(ImGuiCol_Text),
-		"%s; car y: %.2f", lift->isBroken() ? "Broken: whole Lift frozen" : "Lift operating", lift->getPosition().y);
+		"%s; %s y: %.2f", lift->isOpenPlatformLift()
+			? (lift->isBroken() ? "Broken: whole Platform lift frozen" : "Platform lift operating")
+			: (lift->isBroken() ? "Broken: whole Lift frozen" : "Lift operating"),
+		lift->isOpenPlatformLift() ? "platform" : "car", lift->getPosition().y);
 	bool initiallyBroken = lift->isInitiallyBroken();
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	if (ImGui::Checkbox("Initially Broken", &initiallyBroken))

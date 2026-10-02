@@ -60,6 +60,7 @@ namespace
 		{ "extensibleBrokenLifecycle", persistence::extensibleBrokenLifecycle },
 		{ "escalatorBrokenLifecycle", persistence::escalatorBrokenLifecycle },
 		{ "liftBrokenLifecycle", persistence::liftBrokenLifecycle },
+		{ "platformLiftBrokenLifecycle", persistence::platformLiftBrokenLifecycle },
 		{ "doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted", persistence::doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted },
 		{ "doorHeightPersistsAndIsLimitedToRooms", persistence::doorHeightPersistsAndIsLimitedToRooms },
 		{ "doorOpenLeftPersistsThroughEveryEditorPath", persistence::doorOpenLeftPersistsThroughEveryEditorPath },

@@ -5928,7 +5928,8 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	ImGui::Text("Room: %s", room->getName().c_str());
 	ImGui::Text("Layer: %s", layerLabel(world, room->getLayerIndex()).c_str());
 	ImGui::Text("Position: %u, %u", object->getCellX(), object->getCellY());
-	ImGui::Text("Car y: %.2f", platformLift->getPosition().y);
+	ImGui::Text("Platform y: %.2f", platformLift->getPosition().y);
+	renderLiftConditionPanel(world, platformLift);
 	renderLiftDestinationPermissions(world, room->getIndex(), objectIndex);
 
 	static core::World const* editedWorld = nullptr;
@@ -5938,6 +5939,8 @@ void renderPlatformLiftPanel(shared_ptr<core::World> const& world,
 	{
 		editedWorld = world.get(); editedObject = object.get(); draft = current;
 	}
+	// The separate condition control may change while this settings draft stays open.
+	draft.initiallyBroken = platformLift->isInitiallyBroken();
 	ImGui::Separator();
 	ImGui::TextUnformatted("Connected levels");
 	bool ground = true;

@@ -46,7 +46,7 @@ namespace core
 	bool SimulationCoordinator::setLiftBroken(TraversalResourceId id, bool broken)
 	{
 		auto resource = mWorld.mTraversalResources.find(id);
-		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return false;
+		if (!resource || !resource->mLift) return false;
 		if (resource->mLift->mBroken == broken) return true;
 		mWorld.invalidateSimulationSnapshot();
 		resource->mLift->mBroken = broken;

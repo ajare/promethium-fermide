@@ -137,7 +137,7 @@ namespace core
 		auto agentId = mWorld.getAgentId(&agent);
 		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
 		{
-			if (!resource->mLift || resource->mOpenPlatformLift) continue;
+			if (!resource->mLift) continue;
 			bool const visible = sectorId == resource->mLiftSector
 				|| std::any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
 					[&](auto const& stop) { return stop.locationSector == sectorId; });

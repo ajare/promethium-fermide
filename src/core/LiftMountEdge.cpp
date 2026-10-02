@@ -5,6 +5,7 @@
 #include "core/MobilityProfile.h"
 #include "core/LiftMountEdge.h"
 #include "core/Agent.h"
+#include "core/World.h"
 #include "core/Vertex.h"
 #include "core/Exceptions.h"
 
@@ -72,6 +73,13 @@ namespace core
 			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift))
 		{
 			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
+		auto known = context.world ? context.world->knownLiftCondition(
+			getTraversalResourceId(), context.agent, context.observationSector) : nullopt;
+		if (known && known->broken)
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
 		}
 		facts.feasible = true;

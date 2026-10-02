@@ -5478,9 +5478,10 @@ namespace core
 	{
 		if (!mSimulationPaused) return false;
 		auto resource = mTraversalResources.find(id);
-		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return false;
+		if (!resource || !resource->mLift) return false;
 		auto record = findLiftDestinationRecord(*resource);
-		if (!record || record->type != ConstructionType::Lift) return false;
+		if (!record || (record->type != ConstructionType::Lift
+			&& record->type != ConstructionType::PlatformLift)) return false;
 		auto& authored = mConstructionRecords[static_cast<size_t>(record - mConstructionRecords.data())];
 		if (authored.initiallyBroken == broken) return true;
 		authored.initiallyBroken = resource->mLift->mInitiallyBroken = broken;
@@ -5503,7 +5504,7 @@ namespace core
 			id = resource->mLiftCoordinator;
 			resource = mTraversalResources.find(id);
 		}
-		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return nullopt;
+		if (!resource || !resource->mLift) return nullopt;
 		auto const sector = observationSector
 			? SectorId{ static_cast<uint64_t>(observationSector->getIndex()) + 1 } : SectorId{};
 		bool const visible = sector && (sector == resource->mLiftSector
@@ -5514,7 +5515,8 @@ namespace core
 		auto landing = aligned ? mTraversalResources.find(
 			resource->mLiftStops[resource->mLiftCurrentStop].landingResource) : nullptr;
 		return DeviceCondition{ resource->mLift->isBroken(), resource->mLiftPosition, aligned,
-			landing && landing->mDoor && landing->mDoor->isOpen() && resource->mLiftCarDoorOpen };
+			aligned && (resource->mOpenPlatformLift
+				|| (landing && landing->mDoor && landing->mDoor->isOpen() && resource->mLiftCarDoorOpen)) };
 	}
 
 	bool World::setDoorInitiallyBroken(TraversalResourceId id, bool broken)
@@ -7719,7 +7721,10 @@ namespace core
 		}
 		resource->mLiftSelector = liftRes.interiorSelector;
 
+		lift->mInitiallyBroken = options.initiallyBroken;
+		setLiftBroken(coordinator, options.initiallyBroken);
 		ConstructionRecord record{ ConstructionType::PlatformLift };
+		record.initiallyBroken = options.initiallyBroken;
 		record.a = sectorIndex; record.b = levelIndex; record.c = xOffset;
 		record.d = options.cellsWide; record.e = options.capacity;
 		record.z = options.platformStopDurationSeconds;

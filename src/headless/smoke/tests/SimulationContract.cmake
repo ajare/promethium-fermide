@@ -75,6 +75,11 @@ set(core_names
     lifts/brokenStopDoorsAndSelectorSafety
     lifts/brokenLocalMemory
     lifts/brokenRoutePlanning
+    platformLifts/brokenFreezeAndRecoverPassengers
+    platformLifts/brokenStopAndSelectorSafety
+    platformLifts/brokenPermissionsAndCommittedBoarding
+    platformLifts/brokenLocalMemory
+    platformLifts/brokenRoutePlanning
     brokenDoors/frozenPositionAndCommands
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory

@@ -198,7 +198,7 @@ namespace core
 			std::vector<uint32_t> stopDoorOpenStyles{};
 			// Per-stop landing call requirements, parallel to stopOffsets.
 			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
-			// Enclosed Lift only; Platform lifts are a separate failure slice.
+			// Whole-transport authored condition, shared by Lifts and Platform lifts.
 			bool initiallyBroken{ false };
 		};
 

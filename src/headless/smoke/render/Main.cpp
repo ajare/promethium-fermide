@@ -18,6 +18,7 @@ int main(int argc, char** argv)
 	render_smoke::registerBrokenExtensibles(checks);
 	render_smoke::registerBrokenEscalators(checks);
 	render_smoke::registerBrokenLifts(checks);
+	render_smoke::registerBrokenPlatformLifts(checks);
 	render_smoke::registerDoorOpenRight(checks);
 	render_smoke::registerFacades(checks);
 	render_smoke::registerFacadeDrawOrder(checks);

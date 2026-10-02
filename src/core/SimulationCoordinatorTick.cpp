@@ -61,7 +61,7 @@ namespace core
 			{
 				// Scheduler, car position and physical door state remain frozen.
 				// Cancellation may still use an already-open aligned landing safely.
-				if (!resource.mLiftMoving && resource.mLiftCarDoorOpen)
+				if (!resource.mLiftMoving && (resource.mOpenPlatformLift || resource.mLiftCarDoorOpen))
 					assignLiftSafeExitPaths(resource);
 				continue;
 			}
