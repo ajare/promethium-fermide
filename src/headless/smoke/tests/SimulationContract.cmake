@@ -114,6 +114,8 @@ set(core_names
     airlocks/singleAgentJourneys
     airlocks/batchesAndOpposingQueues
     airlocks/lostReservationDoesNotRefill
+    airlocks/interruptedJourneys
+    airlocks/abandonedBoarding
     airlocks/ordinaryOpenBulkheadRegression
     airlocks/emptyCalls
     airlocks/basicEstimates

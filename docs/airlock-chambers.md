@@ -1,4 +1,4 @@
-# Airlock chambers and single-Agent journeys (#322, #323)
+# Airlock chambers and journeys (#322–#325)
 
 The Airlock palette tool paints a one-Level, positive whole-cell chamber on the
 visible Layer. It requires empty chamber cells and a walkable Room or Corridor
@@ -54,9 +54,23 @@ timing, both door states, control identities, entry side, reservations, crossing
 requests, occupants, and availability. Existing Agent/request/permit snapshots
 expose traversal progress. Rendering shows occupants and remaining cycle seconds.
 
-Batch admission/fairness, complete authorization/preferences, structural chamber
-editing/restoration workflows, pressure/scanning simulation, and Broken support
-remain follow-up work, not part of #323. Device commands and traversal
+Fixed capacity-limited batches and opposing ticket-ordered queues are supported
+(#324). Cancelled, inactive, or expired pre-entry members lose their reservations
+without replacement within that batch. If nobody enters, the entrance honours
+its normal Bulkhead timeout, closes, and cycles without an internal press (#325).
+
+Occupants retain capacity, physical position when inactive, and the exit opposite
+entry. Destination changes through World movement commands are deferred until
+completed disembarkation; replacement routing starts from that exit. Pause retains
+selected admissions and occupied journeys rather than selecting a new route inside.
+An inactive internal-button operator relinquishes its interaction so another active
+occupant can operate it. Active occupants may leave independently, but no new batch
+enters until every occupant has left. Reactivation resumes the retained journey;
+there is no automatic activation or passenger removal. Reset clears reservations,
+operators, occupants and cycling while preserving authored geometry and timing.
+
+Complete authorization/preferences, structural chamber editing/restoration
+workflows, pressure/scanning simulation, and Broken support remain follow-up work. Device commands and traversal
 coordination remain separate (ADR 0001); edges never own a coordinator.
 
 Headless coverage is owned by the existing Simulation, World, Persistence,

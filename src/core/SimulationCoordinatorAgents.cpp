@@ -154,6 +154,33 @@ namespace core
 		auto* agent = mWorld.mAgents.find(id);
 		if (agent->isActive() == active) return true;
 		agent->setActive(active);
+		if (!active)
+		{
+			for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+			{
+				(void)resourceId;
+				if (!resource->mAirlock) continue;
+				bool occupant = find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end();
+				if (!occupant)
+				{
+					// Pausing retained selected boarders. Deactivation now abandons
+					// admission, but never takes an occupied slot away.
+					if (agent->mTraversalTask && agent->mTraversalTask->edge->getTraversalResourceId() == resourceId)
+					{
+						agent->cancelTraversal();
+						agent->mState = Agent::State::WaitingForTraversal;
+					}
+				}
+				if (auto request = mWorld.mTraversalRequests.find(resource->mPreparationOperator);
+					request && request->mOwner == id)
+				{
+					cancelInteraction(resource->mActivePreparation);
+					resource->mActivePreparation = {};
+					resource->mPreparationOperator = {};
+					request->mPreparationRequested = false;
+				}
+			}
+		}
 
 		SimulationEvent event;
 		event.sequence = mWorld.mNextEventSequence++;

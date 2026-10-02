@@ -819,6 +819,20 @@ namespace core
 		mWorld.mPausedPathIntents.clear();
 		for (auto const& [id, agent] : mWorld.mAgents.entries())
 		{
+			// Airlock admission/occupancy is a fixed journey, not a new route
+			// choice on resume. Keep its physical position and tasks intact.
+			bool airlockJourney = false;
+			for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+			{
+				(void)resourceId;
+				if (!resource->mAirlock) continue;
+				if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
+					airlockJourney = true;
+				for (auto reservation : resource->mAdmissionReservations)
+					if (auto request = mWorld.mTraversalRequests.find(reservation); request && request->mOwner == id)
+						airlockJourney = true;
+			}
+			if (airlockJourney) continue;
 			if (agent->mPath.path && !agent->mPath.path->nodes.empty())
 			{
 				auto destination = agent->mPath.path->nodes.back().targetVertex;
@@ -858,7 +872,9 @@ namespace core
 		vector<TraversalRequestId> orphaned;
 		for (auto const& [id, request] : mWorld.mTraversalRequests.entries())
 		{
-			(void)request;
+			auto agent = mWorld.mAgents.find(request->mOwner);
+			if (agent && ((agent->mTraversalTask && agent->mTraversalTask->request == id)
+				|| (agent->mQueuedTraversalTask && agent->mQueuedTraversalTask->request == id))) continue;
 			orphaned.push_back(id);
 		}
 		for (auto id : orphaned)

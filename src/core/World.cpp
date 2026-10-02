@@ -7842,6 +7842,9 @@ namespace core
 		if (!isSimulationPaused() || agentBehaviourOwnsMovement(id)) return false;
 		auto agent = mAgents.find(id);
 		if (!agent) return false;
+		// Clearing authored route intent is not permission to discard a committed
+		// Airlock passenger. Runtime cancellation completes the opposite exit.
+		if (agent->getSector() && agent->getSector()->getType() == SectorType::Airlock) return false;
 		mSimulationCoordinator.clearAgentMovementForBehaviourEdit(id);
 		agent->clearPath();
 		modify();

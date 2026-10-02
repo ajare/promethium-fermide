@@ -36,6 +36,20 @@ namespace core
 			(void)id;
 			if (!resource->mAirlock) continue;
 			auto& chamber = *resource->mAirlock;
+			// Legacy Agent activation setters also feed the normal tick pipeline.
+			// Retire an inactive operator before another passenger can claim it.
+			if (auto request = mWorld.mTraversalRequests.find(resource->mPreparationOperator); request)
+				if (auto actor = mWorld.mAgents.find(request->mOwner); !actor || !actor->isActive())
+				{
+					cancelInteraction(resource->mActivePreparation);
+					resource->mActivePreparation = {};
+					resource->mPreparationOperator = {};
+					request->mPreparationRequested = false;
+				}
+			for (auto reservation : resource->mAdmissionReservations)
+				if (auto request = mWorld.mTraversalRequests.find(reservation); request)
+					if (auto actor = mWorld.mAgents.find(request->mOwner); !actor || !actor->isActive())
+						cancelTraversal(reservation, request->mPermit, false);
 			for (auto const& door : chamber.mDoors) door->advanceCoordinatedMotion(World::getFixedTimestep());
 			auto occupied = std::any_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto id) { return (bool)id; });
 			auto crossing = std::any_of(resource->mCrossingOwners.begin(), resource->mCrossingOwners.end(), [](auto id) { return (bool)id; });
@@ -52,7 +66,7 @@ namespace core
 					if (!occupied) { resource->mAirlockEntrySide = -1; chamber.mExitRequested = false; }
 					continue;
 				}
-				bool close = chamber.mClosing || (!reserved && chamber.mActiveSide == resource->mAirlockEntrySide)
+				bool close = chamber.mClosing || (occupied && !reserved && chamber.mActiveSide == resource->mAirlockEntrySide)
 					|| (!occupied && !reserved && door.isOpen() && door.getOpenWaitTime() <= 0);
 				if (close && !crossing && !door.isObstructed() && door.getOpenLeaseCount() == 0
 					&& !door.isClosed() && !door.isClosing())
@@ -114,7 +128,7 @@ namespace core
 	{
 		auto request = mWorld.mTraversalRequests.find(id);
 		auto actor = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
-		if (!actor) return;
+		if (!actor || !actor->isActive()) return;
 		auto& chamber = *resource.mAirlock;
 		bool const entry = request->mDestinationSector == SectorId{ (uint64_t)chamber.getIndex() + 1 };
 		int side = entry ? (request->mSourceSector == resource.mQueueLanes[0].sector ? 0 : 1)
@@ -195,7 +209,11 @@ namespace core
 			resource.mPreparationOperator = {};
 			if (!interaction || interaction->mResult != InteractionResult::Succeeded)
 			{
-				denyTraversalRequest(id, TraversalFailureReason::ControlRejected); return;
+				// A cancelled physical operator does not revoke an occupant's
+				// journey. Allow another active passenger (or a later retry).
+				request->mPreparationRequested = false;
+				if (entry) denyTraversalRequest(id, TraversalFailureReason::ControlRejected);
+				return;
 			}
 		}
 		if (chamber.mActiveSide != side || chamber.mClosing || !chamber.mDoors[side]->isOpen()
