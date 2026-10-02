@@ -297,6 +297,9 @@ namespace core
 		}
 		request->mState = TraversalRequestState::Denied;
 		request->mFailureReason = reason;
+		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource && resource->mAirlock)
+			for (auto& reservation : resource->mAdmissionReservations)
+				if (reservation == requestId) reservation = {};
 		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource)
 		{
 			if (resource->mExtensible && resource->mExtensionRequestLeases.erase(requestId))
@@ -415,7 +418,8 @@ namespace core
 			else
 			{
 				for (auto& occupant : resource.mOccupants) if (occupant == owner) occupant = {};
-				chamber.mClosing = true;
+				if (std::none_of(resource.mOccupants.begin(), resource.mOccupants.end(), [](auto occupant) { return (bool)occupant; }))
+					chamber.mClosing = true;
 			}
 		}
 

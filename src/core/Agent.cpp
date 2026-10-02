@@ -1697,6 +1697,10 @@ namespace core
 			|| mPath.path->nodes.empty()) return;
 		auto request = mWorld->lookupTraversalRequest(mTraversalTask->request);
 		if (!request || !request.entity->getQueueTicket()) return;
+		// A fixed Airlock batch is already being served. Do not discard its
+		// reservation merely to reconsider a still-valid route while the door opens.
+		if (request.entity->hasCapacityPosition()
+			&& mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Airlock) return;
 		auto const& policy = mWorld->getTraversalWaitingPolicy();
 		auto waited = mWorld->getSimulationTick() - request.entity->getQueuedAtTick();
 		if (waited < policy.minimumReplanWaitTicks

@@ -112,6 +112,9 @@ set(core_names
     bandArrivalComposesWithEarlyStopForContendedDoor
     bandArrivalLeavesNonCrossingAgentsUnaffected
     airlocks/singleAgentJourneys
+    airlocks/batchesAndOpposingQueues
+    airlocks/lostReservationDoesNotRefill
+    airlocks/ordinaryOpenBulkheadRegression
     airlocks/emptyCalls
     airlocks/basicEstimates
     airlocks/exitSideReadmission

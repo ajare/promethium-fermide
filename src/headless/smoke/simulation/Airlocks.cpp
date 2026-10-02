@@ -1,10 +1,14 @@
 #include "Checks.h"
 #include "core/AirlockTransit.h"
+#include "core/BulkheadDoorSectorObject.h"
 #include "core/Agent.h"
 #include "core/Graph.h"
 #include "core/World.h"
 #include "core/Path.h"
 #include <cmath>
+#include <algorithm>
+#include <map>
+#include <set>
 #include "core/YamlSerializer.h"
 #include "core/RouteTraversalInputs.h"
 
@@ -38,7 +42,7 @@ namespace
 						auto const state = world.getSimulationSnapshot().airlocks.at(0);
 						require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Airlock interlock violated");
 						if (!boarded && agent->getSector()->getIndex() != index)
-							require(state.cycleComplete, "First entry unexpectedly required an initial cycle");
+							require(state.cycleComplete, "First entry unexpectedly required an initial cycle: width=" + std::to_string(width) + " direction=" + std::to_string(direction) + " tick=" + std::to_string(tick) + " reservations=" + std::to_string(state.reservations.size()) + " entry=" + std::to_string(state.entrySide));
 						if (!state.cycleComplete)
 						{
 							require(state.doors[0] == core::DoorSnapshotState::Closed && state.doors[1] == core::DoorSnapshotState::Closed, "Opening during cycle");
@@ -79,6 +83,214 @@ namespace
 					require(boarded && exited && cycled && agent->getState() == core::Agent::State::Idle, "Airlock journey stalled: state=" + std::to_string((int)agent->getState())
 						+ " sector=" + std::to_string(agent->getSector()->getIndex()) + " boarded=" + std::to_string(boarded) + " cycled=" + std::to_string(cycled));
 				}
+	}
+
+	void batches(smoke::Context const&)
+	{
+		for (uint32_t width : { 1u, 3u })
+			for (int firstSide : { 0, 1 })
+			{
+				core::World world("Airlock batches", width + 20, 2);
+				uint32_t ends[2] = { world.addRoom("Left", 0, 0, 0, 8, 1),
+					world.addCorridor(0, 0, 8 + width, 8, 1) };
+				auto index = world.addAirlock(0, 0, 8, width, 1);
+				auto markers = std::array{ world.addSectorMarker(ends[0], 0, 4.0f),
+					world.addSectorMarker(ends[1], 0, 4.0f) };
+				world.finishBuild();
+				std::map<core::AgentId, int> origins;
+				auto add = [&](int side)
+				{
+					auto id = world.createAgent("Batch traveller", ends[side], 0, side ? 0.5f : 7.5f);
+					auto agent = world.lookupAgent(id).entity;
+					auto marker = markers[1 - side];
+					auto path = world.getGraph()->calculatePath(agent, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index)));
+					require(bool(path), "Batch route unavailable"); agent->setPath(path, true);
+					origins[id] = side; return id;
+				};
+				for (uint32_t member = 0; member < width + 1; ++member) add(firstSide);
+				for (uint32_t member = 0; member < width + 1; ++member) add(1 - firstSide);
+				core::AgentId late;
+				std::set<core::AgentId> admitted, exited, members;
+				std::vector<core::AgentId> boardingOrder;
+				std::vector<core::AgentId> expectedOrder;
+				uint32_t batchCount = 0, internalPresses = 0;
+				std::set<core::InteractionRequestId> presses;
+				bool positioned = false, sawExitContention = false, completed = false;
+				std::string savedBatch;
+				int previousEntry = -1;
+				for (uint32_t tick = 0; tick < 16000; ++tick)
+				{
+					require(world.advanceTick(), "Batch tick refused");
+					auto const snapshot = world.getSimulationSnapshot();
+					auto state = snapshot.airlocks.at(0);
+					require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Batch interlock violated");
+					require(state.occupants.size() + state.reservations.size() <= width, "Reservations overbooked chamber");
+					if (!state.cycleComplete) require(state.doors[0] == core::DoorSnapshotState::Closed && state.doors[1] == core::DoorSnapshotState::Closed, "Batch bypassed cycle");
+					auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index));
+					auto resource = std::find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(), [&](auto const& r) { return r.id == chamber->getTraversalResourceId(); });
+					require(resource != snapshot.traversalResources.end(), "Missing batch packing observation");
+					if (state.entrySide >= 0 && previousEntry < 0 && !state.reservations.empty())
+					{
+						++batchCount; members.clear(); boardingOrder.clear(); expectedOrder.clear();
+						std::vector<core::TraversalRequestSnapshot> waiting;
+						for (auto const& request : snapshot.traversalRequests)
+							if (request.resource == resource->id && request.destinationSector.value == index + 1
+								&& request.state == core::TraversalRequestState::Pending) waiting.push_back(request);
+						std::sort(waiting.begin(), waiting.end(), [](auto const& a, auto const& b) { return a.queueTicket < b.queueTicket; });
+						require(!waiting.empty() && origins.at(waiting.front().owner) == state.entrySide, "Opposing service ignored oldest ticket");
+						for (auto const& request : waiting)
+							if (origins.at(request.owner) == state.entrySide && expectedOrder.size() < width)
+							{
+								auto slot = state.entrySide == 0 ? width - 1 - (uint32_t)expectedOrder.size() : (uint32_t)expectedOrder.size();
+								require(resource->capacityPositions.at(slot).admissionReservation == request.id, "Batch cutoff/order or farthest-first slot incorrect");
+								expectedOrder.push_back(request.owner); members.insert(request.owner);
+							}
+						if (batchCount == 1)
+						{
+							require(state.reservations.size() == width, "Initial same-direction batch not filled: width=" + std::to_string(width) + " side=" + std::to_string(firstSide) + " entry=" + std::to_string(state.entrySide) + " reservations=" + std::to_string(state.reservations.size()) + " waiting=" + std::to_string(waiting.size()));
+							// Arrives after the fixed reservation cutoff, while entry is opening.
+							late = add(state.entrySide);
+						}
+					}
+					previousEntry = state.entrySide;
+					for (auto id : state.occupants)
+					{
+						require(members.contains(id) && origins.at(id) == state.entrySide, "Late/opposing waiter joined fixed batch");
+						if (admitted.insert(id).second) boardingOrder.push_back(id);
+					}
+					if (boardingOrder.size() == expectedOrder.size() && !boardingOrder.empty())
+						require(boardingOrder == expectedOrder, "Within-side boarding ticket order changed");
+					if (state.occupants.size() == width && state.doors[1 - state.entrySide] == core::DoorSnapshotState::Closed)
+					{
+						bool packed = true;
+						for (auto const& position : resource->capacityPositions)
+							if (position.occupant)
+							{
+								auto agent = world.lookupAgent(position.occupant).entity;
+								packed = packed && agent->getLocalPosition().distanceTo(position.position) < 0.001f;
+							}
+						positioned = positioned || packed;
+					}
+					if (batchCount == 1 && state.occupants.size() == width && savedBatch.empty())
+					{
+						auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
+						work.markSerializedUnmodified = false; world.serialize(*writer, work); writer->serialize();
+						savedBatch = writer->getSerializedString();
+					}
+					for (auto const& request : snapshot.traversalRequests)
+						if (request.resource == resource->id && request.state == core::TraversalRequestState::Granted)
+						{
+							if (request.sourceSector.value == index + 1)
+							{
+								require(std::find(state.occupants.begin(), state.occupants.end(), request.owner) != state.occupants.end(), "Slot released before completed exit");
+								if (exited.size() < origins.size() - width) sawExitContention = true;
+							}
+							else require(members.contains(request.owner) && origins.at(request.owner) == state.entrySide, "Waiter entered open exit");
+						}
+					for (auto const& interaction : snapshot.interactionRequests)
+						if (interaction.point == state.controls[2] && interaction.result == core::InteractionResult::Succeeded
+							&& presses.insert(interaction.id).second) ++internalPresses;
+					for (auto const& [id, side] : origins)
+						if (world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side]) exited.insert(id);
+					if (exited.size() == origins.size() && state.entrySide < 0 && state.cycleComplete)
+					{ completed = true; break; }
+				}
+				require(completed && admitted.contains(late), "Contending/late batch journeys stalled");
+				require(positioned && sawExitContention, "Batch standing positions or exit contention not exercised: width=" + std::to_string(width) + " positioned=" + std::to_string(positioned) + " contention=" + std::to_string(sawExitContention));
+				require(internalPresses == batchCount, "Internal button was not shared once per batch");
+				// Authored reset discards all batch state and repeats all journeys.
+				world.resetSimulation(); world.wakeAllAgents();
+				auto reset = world.getSimulationSnapshot().airlocks.at(0);
+				require(reset.entrySide < 0 && reset.reservations.empty() && reset.occupants.empty() && reset.cycleComplete, "Reset retained multi-Agent batch");
+				for (uint32_t tick = 0; tick < 16000; ++tick)
+				{
+					world.advanceTick(); bool done = true;
+					for (auto const& [id, side] : origins) done = done && world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side];
+					if (done) break;
+				}
+				for (auto const& [id, side] : origins) require(world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side], "Reset batch did not repeat journey");
+				auto reader = core::YamlSerializer::fromString(savedBatch); reader->deserialize();
+				core::World loaded("Loaded batch", 1, 1); core::SerializationWorkData work;
+				require(loaded.deserialize(*reader, work), "Occupied batch save refused");
+				auto initial = loaded.getSimulationSnapshot().airlocks.at(0);
+				require(initial.capacity == width && initial.entrySide < 0 && initial.occupants.empty()
+					&& initial.reservations.empty() && initial.cycleComplete, "Load retained transient batch or lost capacity");
+				loaded.wakeAllAgents();
+				for (uint32_t tick = 0; tick < 16000; ++tick)
+				{
+					loaded.advanceTick(); bool done = true;
+					for (auto const& [id, side] : origins) done = done && loaded.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side];
+					if (done) break;
+				}
+				for (auto const& [id, side] : origins) require(loaded.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side], "Loaded batch did not complete journey");
+			}
+	}
+
+	void ordinaryOpenPassage(smoke::Context const&)
+	{
+		core::World world("Ordinary open Bulkhead", 12, 2);
+		auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
+		auto right = world.addRoom("Right", 0, 0, 5, 6, 1);
+		auto made = world.addSectorBulkheadDoor(0, 0, 5, CORE_SIDE_LEFT);
+		auto door = std::static_pointer_cast<core::BulkheadDoorSectorObject>(made.door.sector->getObject(made.door.index))->getDoor();
+		auto leftMarker = world.addSectorMarker(left, 0, 1.0f);
+		auto rightMarker = world.addSectorMarker(right, 0, 4.0f); world.finishBuild();
+		door->requestOpen(); door->update(door->getOpenCloseTime());
+		require(door->isOpen(), "Ordinary Bulkhead fixture did not open");
+		auto leftAgent = world.lookupAgent(world.createAgent("Left crossing", left, 0, 4.5f)).entity;
+		auto rightAgent = world.lookupAgent(world.createAgent("Right crossing", right, 0, 0.5f)).entity;
+		leftAgent->setPath(world.getGraph()->calculatePath(leftAgent, world.getGraph()->getVertexForObject(rightMarker.sector->getObject(rightMarker.index))), true);
+		rightAgent->setPath(world.getGraph()->calculatePath(rightAgent, world.getGraph()->getVertexForObject(leftMarker.sector->getObject(leftMarker.index))), true);
+		bool concurrent = false;
+		for (uint32_t tick = 0; tick < 1200; ++tick)
+		{
+			world.advanceTick(); concurrent = concurrent || world.getSimulationSnapshot().traversalPermits.size() >= 2;
+		}
+		require(concurrent && leftAgent->getSector()->getIndex() == right && rightAgent->getSector()->getIndex() == left,
+			"Ordinary fully open Bulkhead lost unrestricted bidirectional passage");
+	}
+
+	void lostReservation(smoke::Context const&)
+	{
+		core::World world("Lost batch reservation", 18, 2);
+		auto left = world.addRoom("Left", 0, 0, 0, 8, 1);
+		auto right = world.addRoom("Right", 0, 0, 10, 8, 1);
+		auto index = world.addAirlock(0, 0, 8, 2, 1);
+		auto marker = world.addSectorMarker(right, 0, 4.0f); world.finishBuild();
+		for (uint32_t member = 0; member < 3; ++member)
+		{
+			auto id = world.createAgent("Reserved traveller", left, 0, 7.5f);
+			auto agent = world.lookupAgent(id).entity;
+			auto path = world.getGraph()->calculatePath(agent, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index)));
+			require(bool(path), "Lost reservation route unavailable"); agent->setPath(path, true);
+		}
+		core::AgentId cancelled, retained, deferred;
+		bool closed = false, deferredArrived = false;
+		for (uint32_t tick = 0; tick < 9000; ++tick)
+		{
+			world.advanceTick(); auto snapshot = world.getSimulationSnapshot(); auto state = snapshot.airlocks.at(0);
+			require(state.occupants.size() + state.reservations.size() <= 2, "Lost reservation overbooked capacity");
+			if (!cancelled && state.reservations.size() == 2)
+			{
+				std::vector<core::TraversalRequestSnapshot> entrants;
+				for (auto const& request : snapshot.traversalRequests)
+					if (request.destinationSector.value == index + 1) entrants.push_back(request);
+				std::sort(entrants.begin(), entrants.end(), [](auto const& a, auto const& b) { return a.queueTicket < b.queueTicket; });
+				require(entrants.size() == 3, "Lost reservation fixture did not queue three entrants");
+				cancelled = entrants[0].owner; retained = entrants[1].owner; deferred = entrants[2].owner;
+				require(world.cancelAgentMovement(cancelled).status == core::MovementCommandStatus::Accepted, "Pre-entry cancellation refused");
+			}
+			if (cancelled && !closed)
+			{
+				for (auto occupant : state.occupants) require(occupant == retained, "Cancelled slot refilled from waiting queue");
+				if (!state.cycleComplete && !state.occupants.empty()) closed = true;
+			}
+			if (deferred && world.lookupAgent(deferred).entity->getSector()->getIndex() == right)
+			{ deferredArrived = true; break; }
+		}
+		require(cancelled && closed && deferredArrived && world.lookupAgent(retained).entity->getSector()->getIndex() == right,
+			"Lost reservation prevented entry closure or later batch");
+		require(world.lookupAgent(cancelled).entity->getSector()->getIndex() == left, "Cancelled entrant consumed occupancy");
 	}
 
 	struct Scene
@@ -311,6 +523,9 @@ namespace
 void registerAirlocks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "airlocks/singleAgentJourneys", journeys });
+	checks.push_back({ "airlocks/batchesAndOpposingQueues", batches });
+	checks.push_back({ "airlocks/lostReservationDoesNotRefill", lostReservation });
+	checks.push_back({ "airlocks/ordinaryOpenBulkheadRegression", ordinaryOpenPassage });
 	checks.push_back({ "airlocks/emptyCalls", emptyCalls });
 	checks.push_back({ "airlocks/basicEstimates", basicEstimates });
 	checks.push_back({ "airlocks/exitSideReadmission", exitSideReadmission });

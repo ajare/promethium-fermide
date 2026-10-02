@@ -4,6 +4,7 @@
 #include "core/Agent.h"
 #include "core/World.h"
 #include "core/BulkheadDoor.h"
+#include "core/MobilityProfile.h"
 
 namespace core
 {
@@ -38,6 +39,7 @@ namespace core
 			for (auto const& door : chamber.mDoors) door->advanceCoordinatedMotion(World::getFixedTimestep());
 			auto occupied = std::any_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto id) { return (bool)id; });
 			auto crossing = std::any_of(resource->mCrossingOwners.begin(), resource->mCrossingOwners.end(), [](auto id) { return (bool)id; });
+			auto reserved = std::any_of(resource->mAdmissionReservations.begin(), resource->mAdmissionReservations.end(), [](auto id) { return (bool)id; });
 			if (chamber.mActiveSide >= 0)
 			{
 				auto& door = *chamber.mDoors[chamber.mActiveSide];
@@ -50,8 +52,8 @@ namespace core
 					if (!occupied) { resource->mAirlockEntrySide = -1; chamber.mExitRequested = false; }
 					continue;
 				}
-				bool close = chamber.mClosing || (occupied && chamber.mActiveSide == resource->mAirlockEntrySide)
-					|| (!occupied && door.isOpen() && door.getOpenWaitTime() <= 0);
+				bool close = chamber.mClosing || (!reserved && chamber.mActiveSide == resource->mAirlockEntrySide)
+					|| (!occupied && !reserved && door.isOpen() && door.getOpenWaitTime() <= 0);
 				if (close && !crossing && !door.isObstructed() && door.getOpenLeaseCount() == 0
 					&& !door.isClosed() && !door.isClosing())
 				{
@@ -68,10 +70,39 @@ namespace core
 			{
 				if (chamber.mExitRequested) side = 1 - resource->mAirlockEntrySide;
 			}
-			else for (int candidate = 0; candidate < 2; ++candidate)
-				if (chamber.mOutsideRequests[candidate]) { side = candidate; break; }
+			else
+			{
+				TraversalRequest const* oldest = nullptr;
+				for (int candidate = 0; candidate < 2; ++candidate)
+					for (auto waiting : resource->mQueueLanes[candidate].queue)
+						if (auto request = mWorld.mTraversalRequests.find(waiting);
+							request && request->mState == TraversalRequestState::Pending
+							&& (!oldest || request->mQueueTicket < oldest->mQueueTicket))
+						{ oldest = request; side = candidate; }
+				if (oldest && !chamber.mOutsideRequests[side]) side = -1;
+				if (!oldest)
+					for (int candidate = 0; candidate < 2; ++candidate)
+						if (chamber.mOutsideRequests[candidate]) { side = candidate; break; }
+			}
 			if (side >= 0 && chamber.mDoors[0]->isClosed() && chamber.mDoors[1]->isClosed())
 			{
+				if (!occupied)
+				{
+					// Freeze the existing queue, not future arrivals. Reserve every slot
+					// before opening so partial boarding cannot overbook the chamber.
+					uint32_t member = 0;
+					for (auto waiting : resource->mQueueLanes[side].queue)
+					{
+						auto request = mWorld.mTraversalRequests.find(waiting);
+						if (!request || request->mState != TraversalRequestState::Pending) continue;
+						if (member == resource->mCapacity) break;
+						auto slot = side == 0 ? resource->mCapacity - 1 - member : member;
+						resource->mAdmissionReservations[slot] = waiting;
+						request->mCapacityPosition = slot;
+						++member;
+					}
+					if (member) resource->mAirlockEntrySide = side;
+				}
 				chamber.mActiveSide = side;
 				chamber.mOutsideRequests[side] = false;
 				chamber.mDoors[side]->mState = OpenableObject::State::Opening;
@@ -89,7 +120,39 @@ namespace core
 		int side = entry ? (request->mSourceSector == resource.mQueueLanes[0].sector ? 0 : 1)
 			: (request->mDestinationSector == resource.mQueueLanes[0].sector ? 0 : 1);
 		bool const occupied = std::any_of(resource.mOccupants.begin(), resource.mOccupants.end(), [](auto owner) { return (bool)owner; });
-		if (entry && occupied) return;
+		if (entry)
+		{
+			// Sharing a button press does not grant another entrant the operator's
+			// capability or authorization. Keep the former individual entry gate.
+			auto control = mWorld.mInteractionPoints.find(chamber.mControls[side]);
+			if (!actor->isActive() || agentForbidsButtons(actor) || !control
+				|| !mWorld.missingInteractionPermissions(*control, *actor).empty())
+			{
+				denyTraversalRequest(id, TraversalFailureReason::ControlRejected);
+				return;
+			}
+			if (resource.mAirlockEntrySide >= 0)
+			{
+				if (side != resource.mAirlockEntrySide || request->mCapacityPosition >= resource.mCapacity
+					|| resource.mAdmissionReservations[request->mCapacityPosition] != id) return;
+				// Preserve ticket order even if a later reserved boarder is closer.
+				for (auto waiting : resource.mQueueLanes[side].queue)
+				{
+					if (waiting == id) break;
+					if (std::find(resource.mAdmissionReservations.begin(), resource.mAdmissionReservations.end(), waiting)
+						!= resource.mAdmissionReservations.end()) return;
+				}
+			}
+			else
+			{
+				if (occupied || chamber.mActiveSide >= 0) return;
+				for (auto const& lane : resource.mQueueLanes)
+					for (auto waiting : lane.queue)
+						if (auto other = mWorld.mTraversalRequests.find(waiting);
+							other && other->mState == TraversalRequestState::Pending
+							&& other->mQueueTicket < request->mQueueTicket) return;
+			}
+		}
 		if (!entry && (side != 1 - resource.mAirlockEntrySide
 			|| std::find(resource.mOccupants.begin(), resource.mOccupants.end(), request->mOwner) == resource.mOccupants.end()))
 		{
@@ -99,9 +162,23 @@ namespace core
 		// The travelling occupant waits through entrance closure and the visible
 		// cycle before walking to and pressing the internal button. An already
 		// accepted exit can still be resumed through its open opposite Door.
-		if (!entry && !request->mPreparationRequested
-			&& (chamber.mActiveSide == resource.mAirlockEntrySide || !chamber.isCycleComplete())) return;
-		if (!request->mPreparationRequested)
+		if (!entry && !request->mPreparationRequested && !chamber.mExitRequested)
+		{
+			auto slot = std::find(resource.mOccupants.begin(), resource.mOccupants.end(), request->mOwner)
+				- resource.mOccupants.begin();
+			auto target = chamber.getPosition() + resource.mCapacityPositions[slot];
+			actor->mTraversalLocalGoal = target;
+			if (chamber.mActiveSide == resource.mAirlockEntrySide || !chamber.isCycleComplete()
+				|| actor->getGlobalPosition().distanceTo(target) > 0.001f) return;
+			// Finish packing before selecting the one internal operator. Other
+			// passengers retain their standing targets throughout its interaction.
+			for (uint32_t position = 0; position < resource.mCapacity; ++position)
+				if (auto passenger = mWorld.mAgents.find(resource.mOccupants[position]);
+					passenger && passenger->isActive()
+					&& passenger->getGlobalPosition().distanceTo(chamber.getPosition() + resource.mCapacityPositions[position]) > 0.001f) return;
+		}
+		bool const needsOperation = entry ? resource.mAirlockEntrySide < 0 : !chamber.mExitRequested;
+		if (needsOperation && !request->mPreparationRequested)
 		{
 			if (resource.mActivePreparation && resource.mPreparationOperator != id) return;
 			actor->mTraversalLocalGoal.reset();
@@ -124,15 +201,6 @@ namespace core
 		if (chamber.mActiveSide != side || chamber.mClosing || !chamber.mDoors[side]->isOpen()
 			|| !chamber.mDoors[1 - side]->isClosed() || !chamber.isCycleComplete()
 			|| resource.mCrossingOwners[0]) return;
-		if (entry)
-		{
-			// #323 deliberately admits a lone traveller; batching is a later slice.
-			if (std::any_of(resource.mAdmissionReservations.begin(), resource.mAdmissionReservations.end(), [](auto owner) { return (bool)owner; })) return;
-			uint32_t slot = side == 0 ? resource.mCapacity - 1 : 0;
-			resource.mAdmissionReservations[slot] = id;
-			request->mCapacityPosition = slot;
-			resource.mAirlockEntrySide = side;
-		}
 		actor->mTraversalLocalGoal.reset();
 		resource.mCrossingOwners[0] = id;
 		request->mCrossingLane = 0;
