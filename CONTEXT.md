@@ -38,7 +38,7 @@ A location whose perimeter walls are all open. It is occupiable, hosts every obj
 A non-occupiable Sector that exists only to be seen through Windows and other apertures from the Layer in front. It carries one opaque colour, hosts no objects, owns no walkable floor, and takes no part in traversal. Where a Window looks into a sector, that sector is its Background - no separate domain noun is minted for it.
 
 **Transit**:
-A static sector that connects locations through one or more stops, such as a lift shaft, shuttle route, ladder, or stairwell. A transit is placed on layer L and its landing locations are on layer L-1. Within a lift or shuttle transit, an agent may also occupy a specific transport vehicle or carriage.
+A static sector that connects Locations through one or more Stops, such as a lift shaft, shuttle route, ladder, stairwell, or Airlock. Its landing Locations are on the Layer immediately in front, except for an Airlock, which connects Locations on its own Layer; within a lift or shuttle Transit, an Agent may also occupy a specific Transport vehicle or Carriage.
 
 **Stairwell**:
 A compact stair transit that may connect several consecutive levels using alternating flights.
@@ -157,6 +157,14 @@ _Avoid_: Portal
 **Bulkhead Door**:
 A threshold in a shared wall between two adjacent Locations on the same Layer. While closed or opening it controls passage; once fully open it is an unconstrained bidirectional passage. In automatic mode it detects every Agent within its automatic sensor distance on either side, whether or not that Agent intends to cross.
 _Avoid_: Door, when the same-Layer distinction matters
+
+**Airlock**:
+A stationary, capacity-limited Sector connecting Rooms or Corridors on the same Layer through two interlocked Bulkhead Doors, at least one of which remains fully closed. Its chamber holds one Agent per cell of horizontal length, and each admitted batch exits opposite its entry side after a closed-door cycle.
+_Avoid_: Transport vehicle, paired ordinary Bulkhead Doors
+
+**Airlock cycle**:
+The waiting interval that begins when both Airlock Bulkhead Doors are fully closed and must complete before either may open.
+_Avoid_: Door opening time
 
 **Automatic sensor distance**:
 At an automatic Bulkhead Door, the authored maximum physical gap between the Door and an Agent's nearest edge at which the Agent's presence requests opening. It is independent of the Agent's Path.
@@ -289,6 +297,14 @@ The visual manner in which a Door's leaf or leaves reveal its threshold: OpenUp,
 **Interaction point**:
 A place where an agent can request one or more typed device commands, usually represented by a physical button or switch.
 _Avoid_: Device controller, traversal controller
+
+**Broken**:
+A condition of a moving traversal device in which operation is unavailable, with device-specific consequences for passage. A Broken Door or extensible device retains its physical position, a Broken transport cannot provide journeys, and a Broken Escalator is a stationary Staircase.
+_Avoid_: Forbidden traversal, which describes an Agent's Mobility use rather than device condition
+
+**Remembered device condition**:
+An Agent's last locally observed Broken status and traversal-relevant physical condition of a moving traversal device. It persists until replaced by a fresh local Route observation or cleared by simulation reset, and does not reveal remote changes.
+_Avoid_: Route familiarity, global device state
 
 **Device command**:
 A typed request for a device state change, such as opening a door, extending a bridge, or calling a lift.
