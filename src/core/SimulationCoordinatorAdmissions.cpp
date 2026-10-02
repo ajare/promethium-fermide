@@ -150,7 +150,7 @@ namespace core
 		// Disabled or moving/retracted equipment cannot safely accept a new climber.
 		// Existing occupants retain their ownership while the admission gate is closed.
 		if (!resource.mEnabled || (!resource.mLadder && !resource.mStairwell)
-			|| (resource.mExtensible && !resource.mExtensible->isExtended())) return;
+			|| (resource.mExtensible && !resource.mExtensible->admitsNewTraversals())) return;
 
 		// Occupants and granted-but-not-yet-committed reservations are both in flight.
 		// Direction may change only after both sets are empty, so opposite-direction

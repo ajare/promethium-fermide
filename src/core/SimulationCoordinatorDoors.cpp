@@ -49,6 +49,31 @@ namespace core
 		return true;
 	}
 
+	bool SimulationCoordinator::setExtensibleBroken(TraversalResourceId id, bool broken)
+	{
+		auto resource = mWorld.mTraversalResources.find(id);
+		if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible()) return false;
+		auto& device = *resource->mExtensible;
+		if (device.mBroken == broken) return true;
+		mWorld.invalidateSimulationSnapshot();
+		device.mBroken = broken;
+		// A pending safe retract is retained, but Broken fully extended equipment
+		// is usable floor/climbing space until restoration resumes that operation.
+		if (resource->mRetractionPending) resource->mEnabled = broken;
+		if (broken)
+			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+				if (operation->mHasCommand && operation->mCommand.type == DeviceCommandType::SetExtendedState
+					&& operation->mCommand.traversalResource == id
+					&& (operation->mState == DeviceOperationState::Pending
+						|| operation->mState == DeviceOperationState::Running))
+				{
+					touchDeviceOperation(operationId, *operation);
+					operation->mState = DeviceOperationState::Failed;
+				}
+		// Local observation owns planning and releases obsolete waiting work.
+		return true;
+	}
+
 	void SimulationCoordinator::observeLocalDeviceConditions(Agent& agent)
 	{
 		auto sector = agent.getSector();
@@ -68,6 +93,22 @@ namespace core
 			DeviceCondition condition{ door.isBroken(), door.getOpenPercentage() };
 			auto old = agent.rememberedDeviceCondition(id);
 			// Healthy animation is not a condition change that demands planning.
+			changed = changed || (old ? old->broken != condition.broken
+				|| (condition.broken && old->admitsPassage() != condition.admitsPassage())
+				: condition.broken);
+			agent.mRememberedDeviceConditions[id] = condition;
+		}
+		auto const sectorId = SectorId{ static_cast<uint64_t>(sector->getIndex()) + 1 };
+		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
+		{
+			if (!resource->mExtensible) continue;
+			bool const visible = resource->mLadderSector == sectorId
+				|| std::any_of(resource->mQueueLanes.begin(), resource->mQueueLanes.end(),
+					[&](auto const& lane) { return lane.sector == sectorId; });
+			if (!visible) continue;
+			DeviceCondition condition{ resource->mExtensible->isBroken(),
+				resource->mExtensible->getExtendedPercentage() };
+			auto old = agent.rememberedDeviceCondition(id);
 			changed = changed || (old ? old->broken != condition.broken
 				|| (condition.broken && old->admitsPassage() != condition.admitsPassage())
 				: condition.broken);
@@ -289,7 +330,12 @@ namespace core
 			denyTraversalRequest(requestId, TraversalFailureReason::ResourceDisabled);
 			return;
 		}
-		if (resource.mExtensible->isExtended())
+		if (resource.mExtensible->isBroken() && !resource.mExtensible->admitsNewTraversals())
+		{
+			denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+			return;
+		}
+		if (resource.mExtensible->admitsNewTraversals())
 		{
 			if (resource.mLadder)
 			{
@@ -371,7 +417,7 @@ namespace core
 			resource.mSharedPreparationOperation = {};
 			if (resource.mLadder || resource.mForceBridge) refreshQueuePositions(resource);
 			if (request->mState != TraversalRequestState::Pending) return;
-			if (resource.mExtensible->isExtended())
+			if (resource.mExtensible->admitsNewTraversals())
 			{
 				if (resource.mLadder) { attachLadderAdmissionRequest(requestId, resource); tryGrantLadderAdmissions(resource); }
 				else if (resource.mForceBridge) tryGrantDoorQueue(resource);

@@ -37,8 +37,12 @@ namespace core
 					&& adjacent->getOtherVertex(source)->getSector().get() == context.observationSector) return true;
 			return false;
 		};
+		bool frozenExtended = false;
 		auto extension = [&](auto const& device)
 		{
+			auto known = device.knownCondition(context.agent, edge.getTraversalResourceId(), context.observationSector, result.observed);
+			frozenExtended = known && known->broken && known->position >= 1.0f;
+			if (known && !known->admitsPassage()) result.exclusion = RouteExclusionReason::Control;
 			result.extensible = device.isExtensible();
 			result.preparationSeconds = device.getExtendRetractTime();
 			if (result.observed && result.extensible)
@@ -46,6 +50,12 @@ namespace core
 				result.extended = device.isExtended();
 				result.extendedPercentage = device.getExtendedPercentage();
 				result.needsActivation = device.isRetracted() || device.isRetracting();
+			}
+			if (frozenExtended)
+			{
+				result.extended = true;
+				result.extendedPercentage = 1.0f;
+				result.needsActivation = false;
 			}
 		};
 		switch (result.type)
@@ -88,7 +98,7 @@ namespace core
 			SectorId approachSector = sourceSector;
 			if (result.type == EdgeType::Ladder)
 			{
-				result.observed = visibleEntry(EdgeType::LadderMount);
+				result.observed = result.observed || visibleEntry(EdgeType::LadderMount);
 				for (auto const& adjacent : source->getEdges())
 					if (adjacent->getType() == EdgeType::LadderMount)
 					{
@@ -99,18 +109,19 @@ namespace core
 					}
 			}
 			extension(*ladder);
+			if (result.exclusion == RouteExclusionReason::Control) break;
 			if (result.type == EdgeType::Ladder && ladder->isExtensible()
 				&& context.world && context.agent
-				&& ((result.observed && result.extended
+				&& ((result.extended
 					&& !context.world->agentAdheresToExtensiblePermission(
 						ladder->getTraversalResourceId(), approachSector, source->getPosition(),
 						context.world->getAgentId(context.agent)))
-					|| (!(result.observed && result.extended)
+					|| (!result.extended
 						&& !context.world->canAgentOperateExtensibleControl(
 							ladder->getTraversalResourceId(), approachSector, source->getPosition(),
 							context.world->getAgentId(context.agent)))))
 				result.exclusion = RouteExclusionReason::Permission;
-			if (result.type == EdgeType::LadderMount && ladder->isExtensible()
+			if (result.type == EdgeType::LadderMount && ladder->isExtensible() && !frozenExtended
 				&& source->getType() != VertexType::Ladder && !ladder->hasExtensionControlInSector(sourceSector))
 				result.exclusion = RouteExclusionReason::PreparationSide;
 			break;
@@ -119,14 +130,15 @@ namespace core
 		{
 			auto const& bridge = static_cast<ForceBridgeEdge const&>(edge).mForceBridge;
 			extension(*bridge);
-			if (bridge->isExtensible() && (!bridge->hasExtensionControlInSector(sourceSector)
+			if (result.exclusion == RouteExclusionReason::Control) break;
+			if (bridge->isExtensible() && !frozenExtended && (!bridge->hasExtensionControlInSector(sourceSector)
 				|| !bridge->canPrepareFromPosition(source->getPosition().x))) result.exclusion = RouteExclusionReason::PreparationSide;
 			else if (bridge->isExtensible() && context.world && context.agent
-				&& ((result.observed && result.extended
+				&& ((result.extended
 					&& !context.world->agentAdheresToExtensiblePermission(
 						bridge->getTraversalResourceId(), sourceSector, source->getPosition(),
 						context.world->getAgentId(context.agent)))
-					|| (!(result.observed && result.extended)
+					|| (!result.extended
 						&& !context.world->canAgentOperateExtensibleControl(
 							bridge->getTraversalResourceId(), sourceSector, source->getPosition(),
 							context.world->getAgentId(context.agent)))))

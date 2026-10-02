@@ -3565,6 +3565,7 @@ namespace
 				<< YAML::Key << "fromSide" << YAML::Value
 				<< (options.fromSide == CORE_SIDE_LEFT ? "left" : "right")
 				<< YAML::Key << "extensible" << YAML::Value << options.extensible
+				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken
 				<< YAML::Key << "startExtended" << YAML::Value << options.startExtended
 				<< YAML::Key << "controlCount" << YAML::Value << options.controlCount
 				<< YAML::EndMap;
@@ -3597,6 +3598,7 @@ namespace
 			output << YAML::Key << "type" << YAML::Value << "RoomLadder"
 				<< YAML::Key << "object" << YAML::Value << YAML::BeginMap
 				<< YAML::Key << "extensible" << YAML::Value << options.extensible
+				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken
 				<< YAML::Key << "startExtended" << YAML::Value << options.startExtended
 				<< YAML::Key << "directionalBatchLimit" << YAML::Value << options.directionalBatchLimit
 				<< YAML::EndMap;
@@ -3754,6 +3756,7 @@ namespace
 			else if (side == "right") definition.forceBridge.fromSide = CORE_SIDE_RIGHT;
 			else throw runtime_error("Force Bridge fromSide is invalid");
 			definition.forceBridge.extensible = requiredYaml<bool>(object, "extensible");
+			definition.forceBridge.initiallyBroken = object["initiallyBroken"] ? object["initiallyBroken"].as<bool>() : false;
 			definition.forceBridge.startExtended = requiredYaml<bool>(object, "startExtended");
 			definition.forceBridge.controlCount = requiredYaml<uint32_t>(object, "controlCount");
 			if (definition.forceBridge.width == 0
@@ -3786,6 +3789,7 @@ namespace
 		{
 			definition.type = ClipboardObjectType::RoomLadder;
 			definition.ladder.extensible = requiredYaml<bool>(object, "extensible");
+			definition.ladder.initiallyBroken = object["initiallyBroken"] ? object["initiallyBroken"].as<bool>() : false;
 			definition.ladder.startExtended = requiredYaml<bool>(object, "startExtended");
 			definition.ladder.directionalBatchLimit = requiredYaml<uint32_t>(object, "directionalBatchLimit");
 		}
@@ -5681,6 +5685,7 @@ void renderForceBridgePanel(shared_ptr<core::World> const& world,
 	}
 	ImGui::Text("Runtime state: %s (%.2f%%)", state, pct);
 	ImGui::Text("Extend/retract time: %.2fs", forceBridge->getExtendRetractTime());
+	renderExtensibleConditionPanel(world, forceBridge, forceBridge->getTraversalResourceId());
 
 	static core::World const* editedWorld = nullptr;
 	static core::SectorObject const* editedObject = nullptr;
@@ -5709,7 +5714,8 @@ void renderForceBridgePanel(shared_ptr<core::World> const& world,
 			gUISettings.worldPaused = true;
 			core::World::CreateForceBridgeOptions options{ (uint32_t)width,
 				side == 0 ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT, extensible,
-				extensible ? initiallyExtended : true, extensible ? (uint32_t)controls : 0u };
+				extensible ? initiallyExtended : true, extensible ? (uint32_t)controls : 0u,
+				{}, forceBridge->isInitiallyBroken() };
 			gSelectedSectorObject = world->applySectorForceBridgeOptions(
 				room->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset();
@@ -5813,6 +5819,7 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 	}
 	ImGui::Text("State: %s (%3.2f%% extended)", state, pct);
 	ImGui::Text("Extend/retract time: %3.2fs", ladder->getExtendRetractTime());
+	renderExtensibleConditionPanel(world, ladder, ladder->getTraversalResourceId());
 
 	static core::World const* editedWorld = nullptr;
 	static core::SectorObject const* editedObject = nullptr;
@@ -5838,7 +5845,7 @@ void renderLadderPanel(shared_ptr<core::World> const& world,
 			gSelectedSectorObject = world->applyRoomLadderOptions(room->getIndex(), objectIndex,
 				{ ladder->getLevelsHigh(), desiredExtensible,
 					desiredExtensible ? desiredInitiallyExtended : true,
-					(uint32_t)desiredBatchLimit });
+					(uint32_t)desiredBatchLimit, {}, ladder->isInitiallyBroken() });
 			editedObject = gSelectedSectorObject.get();
 			commitDocumentEdit(std::move(undo));
 			return true;
@@ -6667,6 +6674,9 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 		case core::SectorType::Ladder:
 		{
+			auto ladder = static_pointer_cast<const core::LadderTransit>(gSelectedSector)->getLadder();
+			ImGui::Text("Physical extension: %.2f%%", ladder->getExtendedPercentage() * 100.0f);
+			renderExtensibleConditionPanel(world, ladder, ladder->getTraversalResourceId());
 			static core::World const* editedWorld = nullptr;
 			static uint32_t editedSector = ~0u;
 			static bool extensible = false;
@@ -6729,7 +6739,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				core::World::CreateLadderOptions options{
 					gSelectedSector->getLevelsHigh(), extensible,
 					extensible ? initiallyExtended : true,
-					(uint32_t)directionalBatchLimit };
+					(uint32_t)directionalBatchLimit, {}, ladder->isInitiallyBroken() };
 				auto plan = world->planResizeLadder(gSelectedSector->getIndex(),
 					gSelectedSector->getCellX(), gSelectedSector->getCellY(), options);
 				if (!plan.valid)

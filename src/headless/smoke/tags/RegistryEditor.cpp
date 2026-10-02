@@ -94,7 +94,7 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 34") != std::string::npos
+		require(worldYaml.find("version: 35") != std::string::npos
 			&& worldYaml.find("filename: station.tags.yaml") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-10 registry reference");

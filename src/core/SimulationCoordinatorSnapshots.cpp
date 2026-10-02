@@ -239,6 +239,11 @@ namespace core
 			&& abs(resource.mLiftPosition - resource.mLiftStops[resource.mLiftCurrentStop].globalPosition) < 0.001f;
 		result.isExtensible = resource.mExtensible && resource.mExtensible->isExtensible();
 		result.extended = resource.mExtensible && resource.mExtensible->isExtended();
+		if (resource.mExtensible)
+		{
+			result.broken = resource.mExtensible->isBroken();
+			result.extensionPercentage = resource.mExtensible->getExtendedPercentage();
+		}
 		result.retractionPending = resource.mRetractionPending;
 		result.extensionRequestLeaseCount = (uint32_t)resource.mExtensionRequestLeases.size();
 		result.extensionOccupantLeaseCount = (uint32_t)resource.mExtensionOccupantLeases.size();

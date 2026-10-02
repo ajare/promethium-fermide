@@ -2,6 +2,8 @@
 
 #include "core/ExtensibleObject.h"
 #include "core/Exceptions.h"
+#include "core/Agent.h"
+#include "core/Sector.h"
 
 namespace core
 {
@@ -11,6 +13,18 @@ namespace core
 		  mState(startExtended ? State::Extended : State::Retracted),
 		  mIsExtensible(extensible), mExtendedPct(startExtended ? 1.0f : 0.0f)
 	{
+	}
+
+	std::optional<DeviceCondition> ExtensibleObject::knownCondition(Agent const* agent,
+		TraversalResourceId resource, Sector const* observationSector, bool locallyObserved) const
+	{
+		if (!mIsExtensible) return std::nullopt;
+		// Condition belongs to the whole device, not the directed edge's source.
+		// A locally visible landing also observes an eventual opposite-end exit.
+		if (observationSector && mExtensionControlSectors.contains(
+			SectorId{ static_cast<uint64_t>(observationSector->getIndex()) + 1 })) locallyObserved = true;
+		if (locallyObserved) return DeviceCondition{ mBroken, mExtendedPct };
+		return agent ? agent->rememberedDeviceCondition(resource) : std::nullopt;
 	}
 
 	bool ExtensibleObject::isExtensible() const { return mIsExtensible; }
@@ -24,26 +38,27 @@ namespace core
 
 	bool ExtensibleObject::extend()
 	{
-		if (!mIsExtensible) return false;
+		if (!mIsExtensible || mBroken) return false;
 		if (!isExtended()) mState = State::Extending;
 		return true;
 	}
 
 	bool ExtensibleObject::retract()
 	{
-		if (!mIsExtensible || mExtensionLeaseCount != 0) return false;
+		if (!mIsExtensible || mBroken || mExtensionLeaseCount != 0) return false;
 		if (!isRetracted()) mState = State::Retracting;
 		return true;
 	}
 
 	bool ExtensibleObject::toggle()
 	{
-		if (!mIsExtensible) return false;
+		if (!mIsExtensible || mBroken) return false;
 		return isExtended() || isExtending() ? retract() : extend();
 	}
 
 	void ExtensibleObject::update(float frameTime)
 	{
+		if (mBroken) return;
 		if (isExtending())
 		{
 			mExtendedPct = std::min(mExtendedPct + frameTime / getExtendRetractTime(), 1.0f);

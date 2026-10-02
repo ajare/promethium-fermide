@@ -158,9 +158,11 @@ namespace core
 	DeviceOperationId SimulationCoordinator::findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester)
 	{
 		auto missing = mWorld.missingLiftDestinationPermissions(command, requester);
-		auto doorResource = command.type == DeviceCommandType::OpenDoor
-			? mWorld.mTraversalResources.find(command.traversalResource) : nullptr;
-		bool const broken = doorResource && doorResource->mDoor && doorResource->mDoor->isBroken();
+		auto resource = mWorld.mTraversalResources.find(command.traversalResource);
+		bool const broken = resource && ((command.type == DeviceCommandType::OpenDoor
+			&& resource->mDoor && resource->mDoor->isBroken())
+			|| (command.type == DeviceCommandType::SetExtendedState
+				&& resource->mExtensible && resource->mExtensible->isBroken()));
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			if (!broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
@@ -502,6 +504,19 @@ namespace core
 	void SimulationCoordinator::advanceDeviceOperations()
 	{
 		mWorld.invalidateSimulationSnapshot();
+		// The physical safe-retract intent outlives its queryable operation, which
+		// fails on breakage. Restoration may resume it only after leases drain.
+		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
+		{
+			(void)resourceId;
+			if (!resource->mRetractionPending || !resource->mExtensible
+				|| resource->mExtensible->isBroken()) continue;
+			if (resource->mExtensionRequestLeases.empty() && resource->mExtensionOccupantLeases.empty())
+			{
+				resource->mExtensible->retract();
+				if (resource->mExtensible->isRetracted()) resource->mRetractionPending = false;
+			}
+		}
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			(void)id;
@@ -529,6 +544,10 @@ namespace core
 					if (!resource || !resource->mExtensible || !resource->mExtensible->isExtensible())
 					{
 						operation->mState = DeviceOperationState::Rejected;
+					}
+					else if (resource->mExtensible->isBroken())
+					{
+						operation->mState = DeviceOperationState::Failed;
 					}
 					else if (operation->mCommand.desiredState)
 					{
@@ -562,7 +581,7 @@ namespace core
 			else if (operation->mCommand.type == DeviceCommandType::SetExtendedState)
 			{
 				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || !resource->mExtensible)
+				if (!resource || !resource->mExtensible || resource->mExtensible->isBroken())
 				{
 					operation->mState = DeviceOperationState::Failed;
 				}

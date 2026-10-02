@@ -264,6 +264,9 @@ namespace core
 		};
 
 		serializer.writeString("type", constructionTypeName(record.type));
+		if ((record.type == ConstructionType::Ladder || record.type == ConstructionType::SectorLadder
+			|| record.type == ConstructionType::ForceBridge) && record.initiallyBroken)
+			serializer.writeBool("initiallyBroken", true);
 		if (!record.locationPermissionRequirement.empty())
 		{
 			serializer.beginArray("locationPermissionRequirement", false);
@@ -507,7 +510,8 @@ namespace core
 		// falls back to deriving the next ID from the groups that survive.
 		// Version 33 adds ordinary Door authored Broken condition.
 		// Version 34 extends authored Broken condition to Bulkhead Doors.
-		serializer.writeUint32("version", 34);
+		// Version 35 adds authored Broken extensible Ladders and Force Bridges.
+		serializer.writeUint32("version", 35);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -1063,6 +1067,15 @@ namespace core
 				packBackgroundColour(Facade::defaultColour()));
 			break;
 		}
+		if ((record.type == ConstructionType::Ladder || record.type == ConstructionType::SectorLadder
+			|| record.type == ConstructionType::ForceBridge) && serializer.hasField("initiallyBroken"))
+		{
+			if (version < 35) throw SerializationException(
+				"Extensible Broken condition requires World schema version 35 or later");
+			record.initiallyBroken = serializer.readBool("initiallyBroken");
+			if (record.initiallyBroken && !record.p) throw SerializationException(
+				"Only extensible Ladders and Force Bridges may be initially Broken");
+		}
 		return record;
 	}
 
@@ -1092,7 +1105,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 34)
+		if (version < 1 || version > 35)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2215,7 +2228,7 @@ namespace core
 		}
 		case ConstructionType::Ladder:
 		{
-			CreateLadderOptions options{ record.c, record.p, record.q, record.d };
+			CreateLadderOptions options{ record.c, record.p, record.q, record.d, {}, record.initiallyBroken };
 			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 				for (auto permission : record.controlPermissionRequirements[endpoint])
 					options.controlPermissionRequirements[endpoint].push_back(AccessPermissionId{ permission });
@@ -2296,7 +2309,7 @@ namespace core
 			break;
 		case ConstructionType::ForceBridge:
 		{
-			CreateForceBridgeOptions options{ record.d, record.i, record.p, record.q, record.e };
+			CreateForceBridgeOptions options{ record.d, record.i, record.p, record.q, record.e, {}, record.initiallyBroken };
 			for (size_t side = 0; side < 2; ++side)
 				for (auto permission : record.controlPermissionRequirements[side])
 					options.controlPermissionRequirements[side].push_back(AccessPermissionId{ permission });
@@ -2305,7 +2318,7 @@ namespace core
 		}
 		case ConstructionType::SectorLadder:
 		{
-			CreateLadderOptions options{ record.d, record.p, record.q, record.e };
+			CreateLadderOptions options{ record.d, record.p, record.q, record.e, {}, record.initiallyBroken };
 			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 				for (auto permission : record.controlPermissionRequirements[endpoint])
 					options.controlPermissionRequirements[endpoint].push_back(AccessPermissionId{ permission });
@@ -3819,7 +3832,7 @@ namespace core
 			if (!producer) continue;
 			if (producerIndex++ != sectorIndex) continue;
 			if (record.type != ConstructionType::Ladder) return false;
-			options = { record.c, record.p, record.q, record.d };
+			options = { record.c, record.p, record.q, record.d, {}, record.initiallyBroken };
 			for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 				for (auto permission : record.controlPermissionRequirements[endpoint])
 					options.controlPermissionRequirements[endpoint].push_back(
@@ -3873,6 +3886,7 @@ namespace core
 		{
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.levelsHigh;
 			found->p = plan.options.extensible; found->q = plan.options.startExtended;
+			found->initiallyBroken = plan.options.extensible && plan.options.initiallyBroken;
 			found->d = plan.options.directionalBatchLimit;
 			if (!plan.options.extensible) found->controlPermissionRequirements = {};
 			else for (size_t endpoint = 0; endpoint < 2; ++endpoint)
@@ -5562,7 +5576,7 @@ namespace core
 					&& mSectors[sectorIndex]->getCellY() + record.b == object->getCellY();
 			});
 		if (source == mConstructionRecords.end()) return false;
-		options = { source->d, source->p, source->q, source->e };
+		options = { source->d, source->p, source->q, source->e, {}, source->initiallyBroken };
 		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 			for (auto permission : source->controlPermissionRequirements[endpoint])
 				options.controlPermissionRequirements[endpoint].push_back(
@@ -5596,6 +5610,7 @@ namespace core
 		found->p = options.extensible;
 		found->q = options.extensible ? options.startExtended : true;
 		found->e = options.directionalBatchLimit;
+		found->initiallyBroken = options.extensible && options.initiallyBroken;
 		if (!options.extensible) found->controlPermissionRequirements = {};
 		else for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 			if (!options.controlPermissionRequirements[endpoint].empty())
@@ -5675,7 +5690,7 @@ namespace core
 					&& sector->getCellY() + record.b == object->getCellY();
 			});
 		if (found == mConstructionRecords.end()) return false;
-		options = { found->d, found->i, found->p, found->q, found->e };
+		options = { found->d, found->i, found->p, found->q, found->e, {}, found->initiallyBroken };
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : found->controlPermissionRequirements[side])
 				options.controlPermissionRequirements[side].push_back(
@@ -5709,6 +5724,7 @@ namespace core
 		if (found == records.end()) throw WorldException(this, "The Force Bridge has no authored definition");
 		found->d = options.width; found->i = options.fromSide; found->p = options.extensible;
 		found->q = options.startExtended; found->e = options.controlCount;
+		found->initiallyBroken = options.extensible && options.initiallyBroken;
 		for (size_t side = 0; side < 2; ++side)
 		{
 			bool const retained = options.extensible && (options.controlCount > 1

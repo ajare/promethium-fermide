@@ -196,6 +196,10 @@ because they do not own smoke-check execution.
 | `smoke/world/WindowLayers.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/WindowMultiBackground.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/editor/BrokenExtensibles.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/persistence/BrokenExtensibles.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/BrokenExtensibles.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/simulation/BrokenExtensibles.cpp` | module-owned | `pf-smoke-simulation` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

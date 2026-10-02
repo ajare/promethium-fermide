@@ -31,7 +31,7 @@ namespace core
 		auto walking = [&] { return length == 0 ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : length / context.walkSpeed; };
 		auto extension = [&](float probability)
 		{
-			if (!extensible) return;
+			if (!extensible || extended) return;
 			if (observed)
 			{
 				if (!extended) c.knownWaitSeconds = preparationSeconds

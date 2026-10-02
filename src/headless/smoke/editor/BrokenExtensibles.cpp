@@ -1,0 +1,97 @@
+#include "Checks.h"
+#include "State.h"
+#include "BrokenExtensibleFixture.h"
+#include "DoorPanel.h"
+#include "DocumentEdit.h"
+#include "core/YamlSerializer.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
+
+namespace
+{
+	void controlsAndHistory()
+	{
+		using namespace broken_extensible;
+		using smoke::require;
+		for (auto kind : { Kind::RoomLadder, Kind::TransitLadder, Kind::Bridge })
+		{
+			Scene scene(kind);
+			auto world = scene.world;
+			auto device = scene.device;
+			world->pauseSimulation();
+			gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
+			auto save = [&]
+			{
+				core::SerializationWorkData work; work.markSerializedUnmodified = false;
+				auto writer = core::YamlSerializer::toString(); world->serialize(*writer, work); writer->serialize();
+				return writer->getSerializedString();
+			};
+			auto initial = save();
+			auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+			io.DisplaySize = ImVec2(1600, 1000);
+			std::string text;
+			io.ClipboardUserData = &text;
+			io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+			auto frame = [&]
+			{
+				ImGui::NewFrame();
+				ImGui::SetNextWindowPos(ImVec2(10, 10)); ImGui::SetNextWindowSize(ImVec2(1500, 950));
+				ImGui::Begin("Extensible Selection", nullptr, ImGuiWindowFlags_NoSavedSettings);
+				auto depth = GImGui->DisabledStackSize; auto flags = GImGui->CurrentItemFlags; auto alpha = GImGui->Style.Alpha;
+				text.clear(); ImGui::LogToClipboard();
+				renderExtensibleConditionPanel(world, device, scene.resource);
+				ImGui::LogFinish();
+				require(depth == GImGui->DisabledStackSize && flags == GImGui->CurrentItemFlags && alpha == GImGui->Style.Alpha,
+					"Extensible condition panel leaked disabled state");
+				ImGui::End(); ImGui::Render();
+			};
+			auto click = [&](char const* label)
+			{
+				frame(); auto* window = ImGui::FindWindowByName("Extensible Selection"); auto control = window->GetID(label);
+				bool found = false; ImVec2 point;
+				for (float y = window->Pos.y + 25; y < window->Pos.y + 220 && !found; y += 8)
+					for (float x = window->Pos.x + 5; x < window->Pos.x + 180 && !found; x += 16)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == control) { found = true; point = ImVec2(x, y); }
+					}
+				require(found, std::string("Control not reachable: ") + label);
+				io.AddMousePosEvent(point.x, point.y); frame();
+				io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); frame();
+				io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); frame();
+			};
+			click("Initially Broken"); frame();
+			require(device->isInitiallyBroken() && device->isBroken() && gWorldDocumentHistory.undoCount() == 1,
+				"Authored control did not record one edit");
+			require(text.find("Broken (position frozen)") != std::string::npos && text.find("100.00%") != std::string::npos,
+				"Status omitted frozen physical extension");
+			auto authored = save(); world->markSaved();
+			click("Live Broken");
+			require(!device->isBroken() && device->isInitiallyBroken() && save() == authored && !world->isModified()
+				&& gWorldDocumentHistory.undoCount() == 1, "Live control overwrote document/history");
+			require(world->resumeSimulation(), "Resume failed"); click("Live Broken");
+			require(device->isBroken() && save() == authored && !world->isModified(), "Running live control failed");
+			world->pauseSimulation();
+			auto restore = [&](DocumentSnapshot const& snapshot)
+			{
+				auto loaded = std::make_shared<core::World>("History", 1, 1);
+				core::SerializationWorkData work; auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+				require(loaded->deserialize(*reader, work), "Extensible history did not load"); world = loaded; world->pauseSimulation();
+				return true;
+			};
+			require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save()), restore) && save() == initial, "Initial Broken undo failed");
+			require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored, "Initial Broken redo failed");
+
+			Scene excluded(kind, true, false); world = excluded.world; device = excluded.device;
+			frame();
+			require(text.find("Broken") == std::string::npos, "Non-extensible device exposed Broken controls");
+		}
+	}
+}
+
+void editor_smoke::registerBrokenExtensibles(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({ "extensibles/controlsAndHistory", [](smoke::Context const&)
+		{ State state; headless::ScopedImGuiContext context;
+		ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); controlsAndHistory(); } });
+}

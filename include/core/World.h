@@ -125,6 +125,7 @@ namespace core
 			uint32_t controlCount{ 1 };
 			// Indexed by physical side: left, then right.
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateForceBridgeResult
@@ -142,6 +143,7 @@ namespace core
 			uint32_t directionalBatchLimit{ 4 };
 			// Indexed by endpoint: low, then high.
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateLadderResult
@@ -2431,6 +2433,8 @@ namespace core
 		// never dirty the document or change its initial condition.
 		bool setDoorInitiallyBroken(TraversalResourceId door, bool broken);
 		bool setDoorBroken(TraversalResourceId door, bool broken);
+		bool setExtensibleInitiallyBroken(TraversalResourceId resource, bool broken);
+		bool setExtensibleBroken(TraversalResourceId resource, bool broken);
 		bool isManualDoorPermissionEligible(TraversalResourceId door) const;
 		bool setManualDoorPermissionRequirement(TraversalResourceId door,
 			std::vector<AccessPermissionId> const& permissions,

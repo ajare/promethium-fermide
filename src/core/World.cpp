@@ -3885,6 +3885,7 @@ namespace core
 		auto ladderSector = _getSector(sectorIndex);
 		auto ladderTransit = dynamic_pointer_cast<LadderTransit>(ladderSector);
 		auto ladder = ladderTransit->getLadder();
+		ladder->mInitiallyBroken = ladder->mBroken = options.extensible && options.initiallyBroken;
 		auto traversalResource = createLadderTraversalResource("Ladder capacity", ladder,
 			SectorId{ (uint64_t)sectorIndex + 1 }, options.directionalBatchLimit);
 		configureLadderQueueLanes(traversalResource,
@@ -3934,6 +3935,7 @@ namespace core
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = options.levelsHigh; record.d = options.directionalBatchLimit;
 		record.p = options.extensible; record.q = options.startExtended;
+		record.initiallyBroken = options.extensible && options.initiallyBroken;
 		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 			for (auto permission : options.controlPermissionRequirements[endpoint])
 				record.controlPermissionRequirements[endpoint].push_back(
@@ -5463,6 +5465,40 @@ namespace core
 	bool World::setDoorBroken(TraversalResourceId id, bool broken)
 	{
 		return mSimulationCoordinator.setDoorBroken(id, broken);
+	}
+
+	bool World::setExtensibleBroken(TraversalResourceId id, bool broken)
+	{
+		return mSimulationCoordinator.setExtensibleBroken(id, broken);
+	}
+
+	bool World::setExtensibleInitiallyBroken(TraversalResourceId id, bool broken)
+	{
+		if (!mSimulationPaused) return false;
+		auto resource = mTraversalResources.find(id);
+		if (!resource || !resource->mExtensible) return false;
+		auto device = resource->mExtensible;
+		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
+			[&](ConstructionRecord const& record)
+			{
+				if (record.type == ConstructionType::Ladder)
+					return resource->mLadder && record.layer == mSectors[resource->mLadderSector.value - 1]->getLayerIndex()
+						&& record.b == static_cast<uint32_t>(device->getPosition().x)
+						&& record.a == static_cast<uint32_t>(device->getPosition().y);
+				if (record.type != ConstructionType::SectorLadder && record.type != ConstructionType::ForceBridge)
+					return false;
+				if ((record.type == ConstructionType::SectorLadder) != (resource->mLadder != nullptr)) return false;
+				auto const owner = resource->mLadder ? resource->mLadderSector : resource->mQueueLanes[0].sector;
+				if (record.a + 1 != owner.value) return false;
+				auto sector = mSectors[record.a];
+				return record.c + sector->getCellX() == static_cast<uint32_t>(device->getPosition().x)
+					&& record.b + sector->getCellY() == static_cast<uint32_t>(device->getPosition().y);
+			});
+		if (found == mConstructionRecords.rend()) return false;
+		found->initiallyBroken = device->mInitiallyBroken = broken;
+		setExtensibleBroken(id, broken);
+		modify();
+		return true;
 	}
 
 	bool World::setSectorDoorOpenStyle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
@@ -7066,6 +7102,7 @@ namespace core
 			fbObject.sector->_getObject(fbObject.index))->getForceBridge();
 		auto traversalResource = createForceBridgeTraversalResource("Force bridge", forceBridge);
 		forceBridge->configureTraversal(traversalResource);
+		forceBridge->mInitiallyBroken = forceBridge->mBroken = options.extensible && options.initiallyBroken;
 		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
 		configureForceBridgeQueueLanes(traversalResource,
 			SectorId{ (uint64_t)sector->getIndex() + 1 },
@@ -7123,6 +7160,7 @@ namespace core
 		record.a = sectorIndex; record.b = levelIndex; record.c = xOffset; record.d = options.width;
 		record.i = options.fromSide; record.p = options.extensible; record.q = options.startExtended;
 		record.e = options.controlCount;
+		record.initiallyBroken = options.extensible && options.initiallyBroken;
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : options.controlPermissionRequirements[side])
 				record.controlPermissionRequirements[side].push_back(
@@ -7252,6 +7290,7 @@ namespace core
 		auto ladderObject = createLadderSectorObject(layerIndex, x, y, options);
 		auto ladder = dynamic_pointer_cast<LadderSectorObject>(
 			ladderObject.sector->_getObject(ladderObject.index))->getLadder();
+		ladder->mInitiallyBroken = ladder->mBroken = options.extensible && options.initiallyBroken;
 		auto traversalResource = createLadderTraversalResource("Ladder capacity", ladder,
 			SectorId{ (uint64_t)sectorIndex + 1 }, options.directionalBatchLimit);
 		auto const location = SectorId{ (uint64_t)sectorIndex + 1 };
@@ -7325,6 +7364,7 @@ namespace core
 		record.a = sectorIndex; record.b = levelIndex; record.c = xOffset;
 		record.d = options.levelsHigh; record.e = options.directionalBatchLimit;
 		record.p = options.extensible; record.q = options.startExtended;
+		record.initiallyBroken = options.extensible && options.initiallyBroken;
 		for (size_t endpoint = 0; endpoint < 2; ++endpoint)
 			for (auto permission : options.controlPermissionRequirements[endpoint])
 				record.controlPermissionRequirements[endpoint].push_back(
@@ -10891,8 +10931,10 @@ namespace core
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !agent) return false;
+		// Callers decide passage usability from local observation or memory. Do
+		// not inspect remote extension here: requirements are authored facts.
 		if ((!resource->mForceBridge && !resource->mLadder)
-			|| !resource->mExtensible || !resource->mExtensible->isExtended()) return true;
+			|| !resource->mExtensible) return true;
 		if (!agent->getEffectivePermissionAdherence().value) return true;
 
 		// If no control applies on this approach there is no approach-side

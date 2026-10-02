@@ -53,6 +53,7 @@ namespace core
 	bool LadderMountEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Ladder)) return false;
+		if (mLadder->isBroken() && !mLadder->admitsNewTraversals()) return false;
 		// TODO: see if any Agents are on the Ladder
 
 		return true;
@@ -74,7 +75,15 @@ namespace core
 			return facts;
 		}
 		auto const source = getOtherVertex(targetVertex);
-		if (mLadder->isExtensible() && source && source->getType() != VertexType::Ladder)
+		auto known = mLadder->knownCondition(context.agent, getTraversalResourceId(), context.observationSector,
+			source && source->getSector().get() == context.observationSector);
+		if (known && !known->admitsPassage())
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
+		bool const frozenExtended = known && known->broken && known->position >= 1.0f;
+		if (mLadder->isExtensible() && !frozenExtended && source && source->getType() != VertexType::Ladder)
 		{
 			auto const sourceSector = source->getSector()
 				? SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 }

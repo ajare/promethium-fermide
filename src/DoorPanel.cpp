@@ -13,6 +13,7 @@
 
 #include "core/World.h"
 #include "core/Door.h"
+#include "core/ExtensibleObject.h"
 #include "core/DoorSectorObject.h"
 #include "core/Exceptions.h"
 #include "core/Log.h"
@@ -48,6 +49,27 @@ namespace
 		}
 		return "Open Up";
 	}
+}
+
+void renderExtensibleConditionPanel(shared_ptr<core::World> const& world,
+	shared_ptr<core::ExtensibleObject> const& device, core::TraversalResourceId resource)
+{
+	if (!device->isExtensible()) return;
+	if (device->isBroken())
+		ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f),
+			"Broken (position frozen): %.2f%% extended", device->getExtendedPercentage() * 100.0f);
+	bool initiallyBroken = device->isInitiallyBroken();
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	if (ImGui::Checkbox("Initially Broken", &initiallyBroken))
+	{
+		auto undo = captureDocumentSnapshot(world);
+		if (world->setExtensibleInitiallyBroken(resource, initiallyBroken))
+			commitDocumentEdit(std::move(undo));
+	}
+	ImGui::EndDisabled();
+	bool broken = device->isBroken();
+	if (ImGui::Checkbox("Live Broken", &broken)) world->setExtensibleBroken(resource, broken);
+	ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
 }
 
 // Shared ordinary/Bulkhead Door condition selection seam, tested CPU-only.

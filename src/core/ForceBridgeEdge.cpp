@@ -48,7 +48,7 @@ namespace core
 	bool ForceBridgeEdge::isTraversable(shared_ptr<const Vertex>, shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsButtons(agent.get()) && requiresButton()) return false;
-		return mForceBridge->isExtended();
+		return mForceBridge->admitsNewTraversals();
 	}
 
 	EdgeTraversalRequestResult ForceBridgeEdge::requestTraversal(shared_ptr<const Vertex>,
@@ -56,7 +56,8 @@ namespace core
 	{
 		if (agentForbidsButtons(agent.get()) && requiresButton())
 			return EdgeTraversalRequestResult::Failed;
-		return mForceBridge->extend() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
+		return (mForceBridge->admitsNewTraversals() || mForceBridge->extend())
+			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
 	DirectedTraversalFacts ForceBridgeEdge::getDirectedTraversalFacts(
@@ -72,21 +73,28 @@ namespace core
 		auto const sourceSector = source && source->getSector()
 			? SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 }
 			: SectorId{};
-		if (mForceBridge->isExtensible()
+		auto const locallyObserved = source && source->getSector().get() == context.observationSector;
+		auto known = mForceBridge->knownCondition(context.agent, getTraversalResourceId(), context.observationSector, locallyObserved);
+		if (known && !known->admitsPassage())
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
+		bool const frozenExtended = known && known->broken && known->position >= 1.0f;
+		bool const usable = frozenExtended || (locallyObserved && mForceBridge->isExtended());
+		if (mForceBridge->isExtensible() && !frozenExtended
 			&& (!mForceBridge->hasExtensionControlInSector(sourceSector)
 				|| !source || !mForceBridge->canPrepareFromPosition(source->getPosition().x)))
 		{
 			facts.exclusionReason = RouteExclusionReason::PreparationSide;
 			return facts;
 		}
-		auto const locallyObserved = source && source->getSector().get()
-			== context.observationSector;
 		if (mForceBridge->isExtensible() && context.world && context.agent
-			&& ((locallyObserved && mForceBridge->isExtended()
+			&& ((usable
 				&& !context.world->agentAdheresToExtensiblePermission(
 					mForceBridge->getTraversalResourceId(), sourceSector,
 					source->getPosition(), context.world->getAgentId(context.agent)))
-				|| (!(locallyObserved && mForceBridge->isExtended())
+				|| (!usable
 					&& !context.world->canAgentOperateExtensibleControl(
 						mForceBridge->getTraversalResourceId(), sourceSector,
 						source->getPosition(), context.world->getAgentId(context.agent)))))
@@ -101,7 +109,7 @@ namespace core
 		c.motionSeconds = distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
 			: distance / context.walkSpeed;
 		c.riskUnits = distance * context.policy.forceBridgeRiskPerUnit;
-		if (mForceBridge->isExtensible())
+		if (mForceBridge->isExtensible() && !frozenExtended)
 		{
 			auto const preparation = mForceBridge->getExtendRetractTime();
 			if (locallyObserved)

@@ -105,7 +105,7 @@ namespace core
 			// property, grant, or requirement edit cannot start opportunistic use.
 			// Once a permit has been granted this method is no longer entered, so an
 			// Agent already crossing or climbing is allowed to finish safely.
-			if (resource->mExtensible && resource->mExtensible->isExtended()
+			if (resource->mExtensible && resource->mExtensible->admitsNewTraversals()
 				&& (resource->mForceBridge || resource->mLadder)
 				&& !mWorld.agentAdheresToExtensiblePermission(request->mResource,
 					request->mSourceSector, request->mSourceEndpoint, request->mOwner))
@@ -114,7 +114,7 @@ namespace core
 				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
 				return;
 			}
-			if (resource->mExtensible && !resource->mExtensible->isExtended())
+			if (resource->mExtensible && !resource->mExtensible->admitsNewTraversals())
 			{
 				allocateExtensiblePreparation(requestId, *resource);
 				return;
@@ -139,7 +139,7 @@ namespace core
 			if (resource->mLadder || resource->mStairwell)
 			{
 				if (resource->mLadder && resource->mExtensible
-					&& resource->mExtensible->isExtended() && resource->mPreparationOperator)
+					&& resource->mExtensible->admitsNewTraversals() && resource->mPreparationOperator)
 				{
 					resource->mActivePreparation = {};
 					resource->mPreparationOperator = {};

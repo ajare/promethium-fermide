@@ -38,6 +38,7 @@ namespace render_smoke
 	void registerDoorOpenApart(std::vector<smoke::Check>& checks);
 	void registerDoorOpenLeft(std::vector<smoke::Check>& checks);
 	void registerDoorOpenRight(std::vector<smoke::Check>& checks);
+	void registerBrokenExtensibles(std::vector<smoke::Check>& checks);
 	void registerFacades(std::vector<smoke::Check>& checks);
 	void registerFacadeDrawOrder(std::vector<smoke::Check>& checks);
 	void registerViewportCulling(std::vector<smoke::Check>& checks);

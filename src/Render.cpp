@@ -712,11 +712,12 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 
 
 // Keep the condition badge above the threshold, leaving the frozen leaf visible.
-static void renderBrokenWarning(core::Door const& door, WorldDrawList* drawList)
+template<typename Device>
+static void renderBrokenWarning(Device const& device, WorldDrawList* drawList)
 {
-	if (!door.isBroken()) return;
+	if (!device.isBroken()) return;
 	core::Vector2 low, high;
-	door.getFullShape(low, high);
+	device.getFullShape(low, high);
 	core::Vector2 anchor{ (low.x + high.x) * 0.5f, high.y };
 	transformPosition(anchor);
 	drawList->AddTriangleFilled(ImVec2(anchor.x, anchor.y - 16.0f),
@@ -1042,7 +1043,11 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 void renderForceBridge(shared_ptr<const core::ForceBridge> forceBridge, uint32_t /* layer */,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
-	if (style != LayerRenderStyle::Solid) return;
+	if (style != LayerRenderStyle::Solid)
+	{
+		renderBrokenWarning(*forceBridge, drawList);
+		return;
+	}
 	core::Vector2 bounds0, bounds1;
 	if (selected)
 	{
@@ -1057,6 +1062,7 @@ void renderForceBridge(shared_ptr<const core::ForceBridge> forceBridge, uint32_t
 	transformPosition(bounds1);
 	drawList->AddLine({ bounds0.x, bounds0.y }, { bounds1.x, bounds0.y },
 		ImColor(0, 255, 0), selected ? 3.0f : 2.0f);
+	renderBrokenWarning(*forceBridge, drawList);
 }
 
 
@@ -1071,6 +1077,7 @@ void renderLadder(shared_ptr<const core::Ladder> ladder, uint32_t /* layer */, L
 
 	auto colour = LadderColour;
 	drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
+	renderBrokenWarning(*ladder, drawList);
 }
 
 
@@ -1723,6 +1730,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		if (shouldRenderLadderGeometry(style))
 			renderLadder(static_pointer_cast<const core::LadderTransit>(sector)->getLadder(),
 				layer, style, selected, drawList);
+		else if (style == LayerRenderStyle::Wireframe)
+			renderBrokenWarning(*static_pointer_cast<const core::LadderTransit>(sector)->getLadder(), drawList);
 		break;
 
 	case core::SectorType::Lift:
@@ -1763,6 +1772,18 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	{
 		renderSectorObjects(sector, layer, style, RENDER_SECTOR_OBJECTS_BEHIND, drawList);
 	}
+
+	// Condition warnings remain visible on wireframe Layers without painting
+	// filled device geometry over the selected Layer.
+	if (style == LayerRenderStyle::Wireframe)
+		for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		{
+			auto object = sector->getObject(index);
+			if (auto ladder = dynamic_pointer_cast<const core::LadderSectorObject>(object))
+				renderBrokenWarning(*ladder->getLadder(), drawList);
+			else if (auto bridge = dynamic_pointer_cast<const core::ForceBridgeSectorObject>(object))
+				renderBrokenWarning(*bridge->getForceBridge(), drawList);
+		}
 
 	// Objects
 	if (isDrawnSolid(style))

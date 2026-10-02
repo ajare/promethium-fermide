@@ -221,6 +221,7 @@ namespace core
 		// preparation is shared by every pending request for the door, and a
 		// failed preparation retries on a fixed tick delay before it is refused.
 		bool setDoorBroken(TraversalResourceId door, bool broken);
+		bool setExtensibleBroken(TraversalResourceId resource, bool broken);
 		void observeLocalDeviceConditions(Agent& agent);
 		void allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource);
 

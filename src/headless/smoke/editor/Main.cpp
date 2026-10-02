@@ -45,6 +45,7 @@ int main(int argc, char** argv)
 	routing_smoke::registerPlanningTimeEditor(checks);
 	editor_smoke::registerBackground(checks);
 	editor_smoke::registerFacade(checks);
+	editor_smoke::registerBrokenExtensibles(checks);
 	editor_smoke::registerDoorPanel(checks);
 	editor_smoke::registerPalette(checks);
 	editor_smoke::registerHistory(checks);

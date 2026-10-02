@@ -62,6 +62,11 @@ set(core_names
     wideDoorLanesAndGracefulDisableAreSafe
     doorLeasesAndSensorObservationsPreventUnsafeClosure
     unavailableDoorRejectsTraversal
+    brokenExtensibles/frozenMotionAndAdmission
+    brokenExtensibles/waitingOperationsAndSafety
+    brokenExtensibles/individualLocalMemory
+    brokenExtensibles/planningAndPersistence
+    brokenExtensibles/safeRetractionAndPermission
     brokenDoors/frozenPositionAndCommands
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory

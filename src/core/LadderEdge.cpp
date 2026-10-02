@@ -47,6 +47,7 @@ namespace core
 	bool LadderEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Ladder)) return false;
+		if (mLadder->isBroken() && !mLadder->admitsNewTraversals()) return false;
 		// TODO: this will depend on whether there are any Agents in the way.
 		return true;
 	}
@@ -68,7 +69,7 @@ namespace core
 		}
 		auto const source = getOtherVertex(targetVertex);
 		SectorId sourceSector;
-		bool locallyObserved = false;
+		bool locallyObserved = source && source->getSector().get() == context.observationSector;
 		if (source)
 		{
 			sourceSector = SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 };
@@ -84,12 +85,20 @@ namespace core
 					break;
 				}
 		}
+		auto known = mLadder->knownCondition(context.agent, getTraversalResourceId(), context.observationSector, locallyObserved);
+		if (known && !known->admitsPassage())
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
+		bool const frozenExtended = known && known->broken && known->position >= 1.0f;
+		bool const usable = frozenExtended || (locallyObserved && mLadder->isExtended());
 		if (mLadder->isExtensible() && context.world && context.agent
-			&& ((locallyObserved && mLadder->isExtended()
+			&& ((usable
 				&& !context.world->agentAdheresToExtensiblePermission(
 					mLadder->getTraversalResourceId(), sourceSector,
 					source->getPosition(), context.world->getAgentId(context.agent)))
-				|| (!(locallyObserved && mLadder->isExtended())
+				|| (!usable
 					&& !context.world->canAgentOperateExtensibleControl(
 						mLadder->getTraversalResourceId(), sourceSector,
 						source->getPosition(), context.world->getAgentId(context.agent)))))
@@ -111,7 +120,7 @@ namespace core
 		c.interactionUnits = context.policy.ladderMountDismountInteraction;
 		c.riskUnits = distance * context.policy.ladderRiskPerUnit;
 
-		if (mLadder->isExtensible())
+		if (mLadder->isExtensible() && !frozenExtended)
 		{
 			auto const preparation = mLadder->getExtendRetractTime();
 			if (locallyObserved)

@@ -1,0 +1,39 @@
+# #316: frozen retracted Ladder detour and usable Broken extended Force Bridge.
+version: 35
+name: Broken extensibles - frozen operation and safe passage
+randomSeed: 0
+cellsWide: 12
+levelsHigh: 3
+layers: 2
+layerNames: [Demonstration, Background]
+construction:
+  - {type: room, name: Demonstration hall, layer: 0, y: 0, x: 0, cellsWide: 11, levelsHigh: 2, topLevelHeight: 0.9}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 0}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 1}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 4}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 5}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 6}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 7}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 8}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 9}
+  - {type: walkway, sectorIndex: 0, levelIndex: 1, xOffset: 10}
+  - {type: forceBridge, sectorIndex: 0, levelIndex: 1, xOffset: 2, width: 2, fromSide: left, extensible: true, startExtended: true, controlCount: 2, initiallyBroken: true}
+  - {type: sectorLadder, sectorIndex: 0, levelIndex: 0, xOffset: 1, levelsHigh: 2, extensible: true, startExtended: false, directionalBatchLimit: 4, initiallyBroken: true}
+  - {type: sectorLadder, sectorIndex: 0, levelIndex: 0, xOffset: 8, levelsHigh: 2, extensible: false, startExtended: true, directionalBatchLimit: 4}
+  - {type: marker, sectorIndex: 0, levelIndex: 1, xOffset: 0.5, id: 1, name: Upper left destination, properties: 0}
+nextMarkerId: 2
+nextAgentGroupId: 1
+agentGroups: []
+agents:
+  - id: 1
+    agent: {name: Ladder detour observer, flags: 0}
+    sector: 0
+    localX: 0.5
+    localY: 0
+    path: {destinationSector: 0, destinationLocalX: 0.5, destinationLocalY: 1, active: true}
+  - id: 2
+    agent: {name: Bridge crossing observer, flags: 0}
+    sector: 0
+    localX: 8.5
+    localY: 1
+    path: {destinationSector: 0, destinationLocalX: 0.5, destinationLocalY: 1, active: true}

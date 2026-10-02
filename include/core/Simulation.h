@@ -207,6 +207,7 @@ namespace core
 		DoorSnapshotState doorState{ DoorSnapshotState::NotADoor };
 		float doorOpenPercentage{ 0.0f };
 		bool broken{ false };
+		float extensionPercentage{ 0.0f };
 		uint32_t openLeaseCount{ 0 };
 		uint32_t preparationLeaseCount{ 0 };
 		uint32_t crossingLeaseCount{ 0 };
