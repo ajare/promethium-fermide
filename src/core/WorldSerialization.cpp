@@ -323,6 +323,7 @@ namespace core
 			serializer.writeFloat("minimumDwellSeconds", record.x);
 			serializer.writeFloat("maximumBoardingSeconds", record.y);
 			serializer.writeUint32("initialStop", record.g);
+			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			writeDestinationRequirements(); break;
 		case ConstructionType::Shuttle:
 			serializer.writeUint32("layer", record.layer);
@@ -513,7 +514,8 @@ namespace core
 		// Version 33 adds ordinary Door authored Broken condition.
 		// Version 34 extends authored Broken condition to Bulkhead Doors.
 		// Version 36 adds authored Broken Escalators.
-		serializer.writeUint32("version", 36);
+		// Version 37 adds whole-Lift authored Broken condition.
+		serializer.writeUint32("version", 37);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -889,7 +891,13 @@ namespace core
 			readLandingRequirements("landingControlPermissionRequirements"); record.d = serializer.readUint32("capacity");
 			record.x = serializer.readFloat("minimumDwellSeconds");
 			record.y = serializer.readFloat("maximumBoardingSeconds");
-			record.g = serializer.readUint32("initialStop"); break;
+			record.g = serializer.readUint32("initialStop");
+			if (serializer.hasField("initiallyBroken"))
+			{
+				if (version < 37) throw SerializationException("Lift Broken condition requires World schema version 37 or later");
+				record.initiallyBroken = serializer.readBool("initiallyBroken");
+			}
+			break;
 		case ConstructionType::Shuttle:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -1115,7 +1123,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 36)
+		if (version < 1 || version > 37)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2255,7 +2263,7 @@ namespace core
 		case ConstructionType::Lift:
 		{
 			CreateLiftOptions options{ record.c, record.values, record.d, record.x, record.y,
-				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides };
+				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides, {}, record.initiallyBroken };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();

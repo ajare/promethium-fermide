@@ -713,11 +713,12 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 
 // Keep the condition badge above the threshold, leaving the frozen leaf visible.
 template<typename Device>
-static void renderBrokenWarning(Device const& device, WorldDrawList* drawList)
+static void renderBrokenWarning(Device const& device, WorldDrawList* drawList, bool currentShape = false)
 {
 	if (!device.isBroken()) return;
 	core::Vector2 low, high;
-	device.getFullShape(low, high);
+	if (currentShape) device.getCurrentShape(low, high);
+	else device.getFullShape(low, high);
 	core::Vector2 anchor{ (low.x + high.x) * 0.5f, high.y };
 	transformPosition(anchor);
 	drawList->AddTriangleFilled(ImVec2(anchor.x, anchor.y - 16.0f),
@@ -769,7 +770,9 @@ void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderSt
 		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
-	renderBrokenWarning(*door, drawList);
+	// Owned transport Doors share failure, but the warning belongs to the
+	// whole transport and follows its car rather than each stationary landing.
+	if (door->isBreakable()) renderBrokenWarning(*door, drawList);
 }
 
 
@@ -1094,6 +1097,7 @@ void renderLift(shared_ptr<const core::Lift> lift, uint32_t /* layer */, LayerRe
 	if (!drawObjectSprite("lift-car", drawList,
 		{ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }))
 		drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
+	renderBrokenWarning(*lift, drawList, true);
 }
 
 
@@ -1741,6 +1745,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		if (isDrawnSolid(style))
 			renderLift(static_pointer_cast<const core::LiftTransit>(sector)->getLift(),
 				layer, style, selected, drawList);
+		else if (style == LayerRenderStyle::Wireframe)
+			renderBrokenWarning(*static_pointer_cast<const core::LiftTransit>(sector)->getLift(), drawList, true);
 		break;
 
 	case core::SectorType::Shuttle:

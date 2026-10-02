@@ -71,6 +71,10 @@ set(core_names
     escalators/localConditionMemory
     escalators/brokenPlanningAndSafety
     escalators/brokenRouteSelectionAndPersistence
+    lifts/brokenFreezeAndRecoverPassengers
+    lifts/brokenStopDoorsAndSelectorSafety
+    lifts/brokenLocalMemory
+    lifts/brokenRoutePlanning
     brokenDoors/frozenPositionAndCommands
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory

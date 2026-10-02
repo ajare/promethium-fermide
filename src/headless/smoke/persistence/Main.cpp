@@ -59,6 +59,7 @@ namespace
 		{ "bulkheadDoorBrokenLifecycle", persistence::bulkheadDoorBrokenLifecycle },
 		{ "extensibleBrokenLifecycle", persistence::extensibleBrokenLifecycle },
 		{ "escalatorBrokenLifecycle", persistence::escalatorBrokenLifecycle },
+		{ "liftBrokenLifecycle", persistence::liftBrokenLifecycle },
 		{ "doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted", persistence::doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted },
 		{ "doorHeightPersistsAndIsLimitedToRooms", persistence::doorHeightPersistsAndIsLimitedToRooms },
 		{ "doorOpenLeftPersistsThroughEveryEditorPath", persistence::doorOpenLeftPersistsThroughEveryEditorPath },

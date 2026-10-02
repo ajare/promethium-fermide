@@ -4382,6 +4382,7 @@ namespace core
 
 		auto liftTransit = dynamic_pointer_cast<LiftTransit>(liftObject.sector);
 		auto lift = liftTransit->getLift();
+		lift->mInitiallyBroken = options.initiallyBroken;
 
 		// Set layers
 		for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
@@ -4496,8 +4497,10 @@ namespace core
 			if (i == 0) liftRes.interiorSelector = selector;
 		}
 		liftResource->mLiftSelector = liftRes.interiorSelector;
+		setLiftBroken(coordinator, options.initiallyBroken);
 
 		ConstructionRecord record{ ConstructionType::Lift };
+		record.initiallyBroken = options.initiallyBroken;
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = options.cellsWide; record.d = options.capacity;
 		record.e = levelsHigh; record.g = options.initialStop;
@@ -5469,6 +5472,49 @@ namespace core
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
+	}
+
+	bool World::setLiftInitiallyBroken(TraversalResourceId id, bool broken)
+	{
+		if (!mSimulationPaused) return false;
+		auto resource = mTraversalResources.find(id);
+		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return false;
+		auto record = findLiftDestinationRecord(*resource);
+		if (!record || record->type != ConstructionType::Lift) return false;
+		auto& authored = mConstructionRecords[static_cast<size_t>(record - mConstructionRecords.data())];
+		if (authored.initiallyBroken == broken) return true;
+		authored.initiallyBroken = resource->mLift->mInitiallyBroken = broken;
+		setLiftBroken(id, broken);
+		markModified();
+		return true;
+	}
+
+	bool World::setLiftBroken(TraversalResourceId id, bool broken)
+	{
+		return mSimulationCoordinator.setLiftBroken(id, broken);
+	}
+
+	optional<DeviceCondition> World::knownLiftCondition(TraversalResourceId id,
+		Agent const* agent, Sector const* observationSector) const
+	{
+		auto resource = mTraversalResources.find(id);
+		if (resource && resource->mLiftCoordinator)
+		{
+			id = resource->mLiftCoordinator;
+			resource = mTraversalResources.find(id);
+		}
+		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return nullopt;
+		auto const sector = observationSector
+			? SectorId{ static_cast<uint64_t>(observationSector->getIndex()) + 1 } : SectorId{};
+		bool const visible = sector && (sector == resource->mLiftSector
+			|| any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
+				[&](auto const& stop) { return stop.locationSector == sector; }));
+		if (!visible) return agent ? agent->rememberedDeviceCondition(id) : nullopt;
+		bool const aligned = !resource->mLiftMoving && resource->mLiftCurrentStop < resource->mLiftStops.size();
+		auto landing = aligned ? mTraversalResources.find(
+			resource->mLiftStops[resource->mLiftCurrentStop].landingResource) : nullptr;
+		return DeviceCondition{ resource->mLift->isBroken(), resource->mLiftPosition, aligned,
+			landing && landing->mDoor && landing->mDoor->isOpen() && resource->mLiftCarDoorOpen };
 	}
 
 	bool World::setDoorInitiallyBroken(TraversalResourceId id, bool broken)
@@ -11145,13 +11191,14 @@ namespace core
 		{
 			auto coordinator = mTraversalResources.find(resource->mLiftCoordinator);
 			return coordinator && resource->mDoor && resource->mDoor->isOpen()
+				&& !(coordinator->mLift && coordinator->mLift->isBroken())
 				&& !coordinator->mLiftMoving
 				&& coordinator->mLiftCurrentStop == resource->mLiftStopIndex
 				&& coordinator->mLiftStopPhase == LiftStopPhase::Boarding;
 		}
 		if (!resource->mLift && !resource->mShuttle) return false;
 		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
-		return stop < resource->mLiftStops.size() && !resource->mLiftMoving
+		return stop < resource->mLiftStops.size() && !(resource->mLift && resource->mLift->isBroken()) && !resource->mLiftMoving
 			&& resource->mLiftCurrentStop == stop
 			&& resource->mLiftStopPhase == LiftStopPhase::Boarding;
 	}

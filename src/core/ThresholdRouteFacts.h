@@ -27,6 +27,15 @@ namespace core
 		auto source = edge.getOtherVertex(target);
 		auto sector = source ? source->getSector() : nullptr;
 		bool const observed = sector && sector.get() == context.observationSector;
+		auto liftCondition = context.world ? context.world->knownLiftCondition(
+			edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+		if (liftCondition && liftCondition->broken
+			&& ((!sector || isLocationLike(sector->getType())) || !liftCondition->atStop
+				|| !liftCondition->doorsOpen || std::abs(liftCondition->position - source->getPosition().y) > 0.001f))
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
 		auto known = door.knownCondition(context.agent, context.observationSector);
 		bool const brokenOpen = known && known->broken && known->position >= 1.0f;
 		bool const open = brokenOpen || (observed && door.isOpen());

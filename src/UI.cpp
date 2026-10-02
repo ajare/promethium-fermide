@@ -6651,6 +6651,8 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			break;
 
 		case core::SectorType::Lift:
+			renderLiftConditionPanel(world,
+				static_pointer_cast<const core::LiftTransit>(gSelectedSector)->getLift());
 			renderLiftDestinationPermissions(world, gSelectedSector->getIndex());
 			renderLiftPanel(world,
 				static_pointer_cast<const core::LiftTransit>(gSelectedSector)->getLift(), true);

@@ -21,6 +21,7 @@ int main(int argc, char** argv)
 	registerDoors(checks);
 	registerBrokenExtensibles(checks);
 	registerBrokenEscalators(checks);
+	registerBrokenLifts(checks);
 	registerBrokenDoors(checks);
 	registerBrokenBulkheadDoors(checks);
 	registerDoorQueues(checks);

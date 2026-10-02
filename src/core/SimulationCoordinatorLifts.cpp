@@ -43,6 +43,46 @@ namespace core
 	// inside the coordinator - the dispatcher from the coordinator's own
 	// traversal-request allocation, the branches from the dispatcher.
 
+	bool SimulationCoordinator::setLiftBroken(TraversalResourceId id, bool broken)
+	{
+		auto resource = mWorld.mTraversalResources.find(id);
+		if (!resource || !resource->mLift || resource->mOpenPlatformLift) return false;
+		if (resource->mLift->mBroken == broken) return true;
+		mWorld.invalidateSimulationSnapshot();
+		resource->mLift->mBroken = broken;
+		for (auto const& stop : resource->mLiftStops)
+			if (auto landing = mWorld.mTraversalResources.find(stop.landingResource); landing && landing->mDoor)
+				landing->mDoor->mBroken = broken; // Owned doors have no independent failure state.
+		if (broken)
+		{
+			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+			{
+				auto target = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
+				if (!operation->mHasCommand || !target
+					|| (target != resource && target->mLiftCoordinator != id)
+					|| (operation->mState != DeviceOperationState::Pending
+						&& operation->mState != DeviceOperationState::Running)) continue;
+				touchDeviceOperation(operationId, *operation);
+				operation->mState = DeviceOperationState::Failed;
+			}
+			// Retain onboard intent and occupancy, but not a failed selector request.
+			// Restoration must make a fresh request rather than exhaust retries.
+			for (auto const& [requestId, request] : mWorld.mTraversalRequests.entries())
+			{
+				(void)requestId;
+				if (request->mResource != id || request->mState != TraversalRequestState::Pending) continue;
+				for (auto const& [interactionId, interaction] : mWorld.mInteractionRequests.entries())
+					if (interaction->mActor == request->mOwner && interaction->mResult == InteractionResult::Pending)
+						cancelInteraction(interactionId);
+				request->mPreparationRequested = false;
+				request->mPreparationOperation = {};
+				request->mPreparationAttempts = 0;
+			}
+		}
+		// Do not notify Agents; only local observation changes their knowledge.
+		return true;
+	}
+
 	uint32_t SimulationCoordinator::findLiftStop(TraversalResource const& resource, Vector2 const& endpoint) const
 	{
 		uint32_t best = ~0u;
@@ -569,6 +609,26 @@ namespace core
 			return;
 		}
 
+		if (coordinator->mLift && coordinator->mLift->isBroken())
+		{
+			if (boarding)
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ResourceDisabled);
+				return;
+			}
+			// An already-boarded passenger may finish the ride edge only at its
+			// retained destination with both Doors already open. Otherwise wait.
+			if (riding)
+			{
+				auto destination = coordinator->mLiftPassengerDestinations.find(request->mOwner);
+				if (destination == coordinator->mLiftPassengerDestinations.end()
+					|| coordinator->mLiftMoving || destination->second != coordinator->mLiftCurrentStop
+					|| !coordinator->mLiftCarDoorOpen) return;
+				auto landing = mWorld.mTraversalResources.find(coordinator->mLiftStops[destination->second].landingResource);
+				if (!landing || !landing->mDoor || !landing->mDoor->isOpen()) return;
+			}
+		}
+
 		if (boarding)
 		{
 			allocateLiftBoarding(requestId, edgeResource, *coordinator, stop);
@@ -1030,6 +1090,8 @@ namespace core
 			== coordinator.mOccupants.end()
 			|| coordinator.mLiftMoving || coordinator.mLiftCurrentStop != stop) return;
 		auto disembarkLanding = &edgeResource;
+		if (coordinator.mLift && coordinator.mLift->isBroken()
+			&& (!coordinator.mLiftCarDoorOpen || !disembarkLanding->mDoor->isOpen())) return;
 		if (coordinator.mShuttle)
 		{
 			if (!assignShuttleDisembarkDoor(requestId, coordinator, stop)) return;

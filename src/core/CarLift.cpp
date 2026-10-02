@@ -27,7 +27,7 @@ namespace core
 
 	string CarLift::getDescription() const
 	{
-		return "Lift";
+		return isBroken() ? "Lift (Broken)" : "Lift";
 	}
 
 	/***

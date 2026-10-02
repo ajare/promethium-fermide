@@ -220,6 +220,7 @@ namespace core
 		// and pressed a control applicable from the requester's sector. One
 		// preparation is shared by every pending request for the door, and a
 		// failed preparation retries on a fixed tick delay before it is refused.
+		bool setLiftBroken(TraversalResourceId lift, bool broken);
 		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool setExtensibleBroken(TraversalResourceId resource, bool broken);
 		void observeLocalDeviceConditions(Agent& agent);

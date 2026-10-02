@@ -183,6 +183,7 @@ set(editor_names
     facade/theDeletionPlansDoNotCrossTypes
     extensibles/controlsAndHistory
     escalators/brokenControlsAndHistory
+    lifts/brokenControlsAndHistory
     doorpanel/checkBulkheadBrokenControlsAndHistory
     doorpanel/checkBrokenControlsAndHistory
     doorpanel/checkOrdinaryDoor

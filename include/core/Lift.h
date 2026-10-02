@@ -13,6 +13,9 @@ namespace core
 	class Lift : public RailedTransport
 	{
 		friend class World;
+		friend class SimulationCoordinator;
+		bool mInitiallyBroken{ false };
+		bool mBroken{ false };
 		TraversalResourceId mTraversalResource;
 		uint32_t mRouteCapacity{ 1 };
 		float mRouteMinimumDwellSeconds{ 0.75f };
@@ -21,6 +24,8 @@ namespace core
 
 		Lift(uint32_t cellX, uint32_t cellY, float xOffset, float yOffset, float transportWidth, float transportHeight, float speed, std::vector<uint32_t> stopOffsets);
 
+		[[nodiscard]] bool isInitiallyBroken() const { return mInitiallyBroken; }
+		[[nodiscard]] bool isBroken() const { return mBroken; }
 		[[nodiscard]] TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
 		[[nodiscard]] virtual bool isOpenPlatformLift() const { return false; }
 		[[nodiscard]] uint32_t getRouteCapacity() const { return mRouteCapacity; }

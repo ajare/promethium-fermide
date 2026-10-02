@@ -57,6 +57,14 @@ namespace core
 			(void)resourceId;
 			auto& resource = *resourcePtr;
 			if ((!resource.mLift && !resource.mShuttle) || resource.mLiftStops.empty()) continue;
+			if (resource.mLift && resource.mLift->isBroken())
+			{
+				// Scheduler, car position and physical door state remain frozen.
+				// Cancellation may still use an already-open aligned landing safely.
+				if (!resource.mLiftMoving && resource.mLiftCarDoorOpen)
+					assignLiftSafeExitPaths(resource);
+				continue;
+			}
 			for (auto requestId : resource.mOpenPlatformMissedBoarding)
 				if (auto request = mWorld.mTraversalRequests.find(requestId); request)
 					if (auto actor = mWorld.mAgents.find(request->mOwner))

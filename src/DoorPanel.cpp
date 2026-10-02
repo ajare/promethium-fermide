@@ -15,6 +15,7 @@
 #include "core/Door.h"
 #include "core/ExtensibleObject.h"
 #include "core/Staircase.h"
+#include "core/Lift.h"
 #include "core/DoorSectorObject.h"
 #include "core/Exceptions.h"
 #include "core/Log.h"
@@ -50,6 +51,26 @@ namespace
 		}
 		return "Open Up";
 	}
+}
+
+void renderLiftConditionPanel(shared_ptr<core::World> const& world,
+	shared_ptr<core::Lift> const& lift)
+{
+	if (lift->isOpenPlatformLift()) return;
+	ImGui::TextColored(lift->isBroken() ? ImVec4(1.0f, 0.65f, 0.1f, 1.0f) : ImGui::GetStyleColorVec4(ImGuiCol_Text),
+		"%s; car y: %.2f", lift->isBroken() ? "Broken: whole Lift frozen" : "Lift operating", lift->getPosition().y);
+	bool initiallyBroken = lift->isInitiallyBroken();
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	if (ImGui::Checkbox("Initially Broken", &initiallyBroken))
+	{
+		auto undo = captureDocumentSnapshot(world);
+		if (world->setLiftInitiallyBroken(lift->getTraversalResourceId(), initiallyBroken))
+			commitDocumentEdit(std::move(undo));
+	}
+	ImGui::EndDisabled();
+	bool broken = lift->isBroken();
+	if (ImGui::Checkbox("Live Broken", &broken)) world->setLiftBroken(lift->getTraversalResourceId(), broken);
+	ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
 }
 
 void renderEscalatorConditionPanel(shared_ptr<core::World> const& world,

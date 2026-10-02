@@ -5,6 +5,7 @@
 #include "core/LiftEdge.h"
 #include "core/Vertex.h"
 #include "core/Agent.h"
+#include "core/World.h"
 #include "core/Exceptions.h"
 
 
@@ -45,7 +46,7 @@ namespace core
 	bool LiftEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsEdge(agent.get(), *this, mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift)) return false;
-		return true;
+		return !mLift->isBroken();
 	}
 
 	EdgeTraversalRequestResult LiftEdge::requestTraversal(shared_ptr<const Vertex> targetVertex, shared_ptr<const Agent> agent) const
@@ -62,6 +63,13 @@ namespace core
 			mLift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift))
 		{
 			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
+		auto known = context.world ? context.world->knownLiftCondition(
+			getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+		if (known && known->broken)
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
 		}
 		facts.feasible = true;

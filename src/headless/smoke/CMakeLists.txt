@@ -71,6 +71,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/BrokenBulkheadDoors.cpp
         simulation/BrokenExtensibles.cpp
         simulation/BrokenEscalators.cpp
+        simulation/BrokenLifts.cpp
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
@@ -347,6 +348,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/BrokenDoors.cpp
         persistence/BrokenExtensibles.cpp
         persistence/BrokenEscalators.cpp
+        persistence/BrokenLifts.cpp
         persistence/LiftDocuments.cpp
         persistence/ShuttleDocuments.cpp
         persistence/DeepLayerReplay.cpp
@@ -372,6 +374,7 @@ pf_add_smoke_module(pf-smoke-render
         render/DoorOpenRight.cpp
         render/BrokenExtensibles.cpp
         render/BrokenEscalators.cpp
+        render/BrokenLifts.cpp
         render/Facades.cpp
         render/FacadeDrawOrder.cpp
         render/ViewportCulling.cpp
@@ -444,6 +447,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/DoorPanel.cpp
         editor/BrokenExtensibles.cpp
         editor/BrokenEscalators.cpp
+        editor/BrokenLifts.cpp
         editor/Palette.cpp
         editor/History.cpp
     LIBRARIES pf-agent-editing pf-headless-render-support

@@ -684,6 +684,7 @@ namespace core
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
 		mRememberedEscalatorConditions.clear();
+		mRememberedDeviceConditions.clear();
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
 		mRoutePlanningRemainingTicks = 0;

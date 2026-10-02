@@ -160,6 +160,7 @@ namespace core
 		std::vector<ShuttleCarriageSnapshot> shuttleCarriages;
 		std::vector<ShuttleAccessZoneSnapshot> shuttleAccessZones;
 		bool liftMoving{ false };
+		bool liftBroken{ false };
 		bool liftAligned{ false };
 		bool liftCarDoorOpen{ false };
 		LiftStopPhase liftStopPhase{ LiftStopPhase::Idle };

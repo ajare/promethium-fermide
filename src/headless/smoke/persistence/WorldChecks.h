@@ -39,6 +39,7 @@ namespace persistence
 	void ordinaryDoorBrokenLifecycle(smoke::Context const&);
 	void bulkheadDoorBrokenLifecycle(smoke::Context const&);
 	void extensibleBrokenLifecycle(smoke::Context const&);
+	void liftBrokenLifecycle(smoke::Context const&);
 	void escalatorBrokenLifecycle(smoke::Context const&);
 	void doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted(smoke::Context const&);
 	void doorHeightPersistsAndIsLimitedToRooms(smoke::Context const&);

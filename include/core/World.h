@@ -198,6 +198,8 @@ namespace core
 			std::vector<uint32_t> stopDoorOpenStyles{};
 			// Per-stop landing call requirements, parallel to stopOffsets.
 			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
+			// Enclosed Lift only; Platform lifts are a separate failure slice.
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateLiftResult
@@ -2434,6 +2436,10 @@ namespace core
 
 		// Ordinary Doors only. Authored edits are paused and undoable; live edits
 		// never dirty the document or change its initial condition.
+		bool setLiftInitiallyBroken(TraversalResourceId lift, bool broken);
+		bool setLiftBroken(TraversalResourceId lift, bool broken);
+		std::optional<DeviceCondition> knownLiftCondition(TraversalResourceId resource,
+			Agent const* agent, Sector const* observationSector) const;
 		bool setDoorInitiallyBroken(TraversalResourceId door, bool broken);
 		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool setExtensibleInitiallyBroken(TraversalResourceId resource, bool broken);

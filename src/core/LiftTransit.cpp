@@ -65,7 +65,7 @@ namespace core
 
 	void LiftTransit::updateImpl(float frameTime)
 	{
-		mLift->update(frameTime);
+		if (!mLift->isBroken()) mLift->update(frameTime);
 	}
 
 } // core

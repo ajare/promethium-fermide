@@ -160,6 +160,13 @@ namespace core
 		{
 			auto const& lift = result.type == EdgeType::Lift
 				? static_cast<LiftEdge const&>(edge).mLift : static_cast<LiftMountEdge const&>(edge).mLift;
+			auto known = context.world ? context.world->knownLiftCondition(
+				edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+			if (known && known->broken)
+			{
+				result.exclusion = RouteExclusionReason::Control;
+				return result;
+			}
 			result.mobilityKind = lift->isOpenPlatformLift() ? TraversalKind::PlatformLift : TraversalKind::Lift;
 			result.speed = lift->getSpeed();
 			result.dwell = lift->getRouteMinimumDwellSeconds();
@@ -226,6 +233,15 @@ namespace core
 			result.lift = context.agent ? context.agent->observeLiftAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;
 			result.shuttle = context.world ? context.world->observeShuttleAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed)
 				: context.agent ? context.agent->observeShuttleAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;
+			auto liftCondition = context.world ? context.world->knownLiftCondition(
+				edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+			if (liftCondition && liftCondition->broken && (result.boarding
+				|| !liftCondition->atStop || !liftCondition->doorsOpen
+				|| std::abs(liftCondition->position - source->getPosition().y) > 0.001f))
+			{
+				result.exclusion = RouteExclusionReason::Control;
+				return result;
+			}
 			// Unavailable doors retain the existing hard permission rule; otherwise
 			// remote openness is deliberately not even read.
 			auto known = door.knownCondition(context.agent, context.observationSector);
