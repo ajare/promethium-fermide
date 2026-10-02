@@ -5,13 +5,7 @@
 #include <string>
 #include <vector>
 
-#if defined(_WIN32)
-#include <windows.h>
-#if defined(_MSC_VER)
-#include <cstdlib>
-#include <crtdbg.h>
-#endif
-#endif
+#include "NonInteractiveProcess.h"
 
 namespace smoke
 {
@@ -22,19 +16,7 @@ namespace smoke
 
 	void setupProcess()
 	{
-#if defined(_WIN32)
-		SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-#if defined(_MSC_VER)
-		_set_error_mode(_OUT_TO_STDERR);
-		_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-#ifdef _DEBUG
-		_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-		_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-		_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
-		_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
-#endif
-#endif
-#endif
+		pf::setupNonInteractiveProcess();
 	}
 
 	Context::Context()

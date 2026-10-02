@@ -5,7 +5,7 @@ else()
     set(temp "/tmp")
 endif()
 string(RANDOM LENGTH 20 ALPHABET 0123456789abcdef suffix)
-set(work "${temp}/pf-startup-contract-${suffix}")
+set(work "${temp}/pf startup contract ${suffix}")
 file(MAKE_DIRECTORY "${work}")
 
 function(invoke status expected)

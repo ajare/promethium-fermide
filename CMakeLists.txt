@@ -474,7 +474,8 @@ target_link_libraries(pf-pause-position-repro PRIVATE pf-pause-position-support)
 
 # Deliberately no linked libraries: all compatibility work happens in children.
 pf_add_headless_tool(prometheum-fermide-headless src/headless/SmokeScenario.cpp)
-target_include_directories(prometheum-fermide-headless PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_include_directories(prometheum-fermide-headless PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/generated" "${PF_INCLUDE_DIR}")
 
 if(PF_BUILD_GUI)
     file(GLOB PF_IMGUI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/*.cpp")

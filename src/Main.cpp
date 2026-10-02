@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include "Helpers.h"
+#include "NonInteractiveProcess.h"
 #include "WorldRenderSystem.h"
 
 #ifdef _MSC_VER
@@ -66,6 +67,7 @@
 #include "Main.h"
 #include "Render.h"
 #include "Helpers.h"
+#include "NonInteractiveProcess.h"
 #include "UI.h"
 #include "UISettings.h"
 #include "metrics/MetricsHttpServer.h"
@@ -984,6 +986,7 @@ void outputException(std::string const& msg)
 //
 int main(int argc, char** argv)
 {
+	pf::setupNonInteractiveProcess();
 	int exitCode{ 0 };
 
 	try

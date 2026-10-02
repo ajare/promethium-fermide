@@ -3,10 +3,12 @@
 
 #include "Checks.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifndef PF_STARTUP_GUI_EXECUTABLE
 #error "PF_STARTUP_GUI_EXECUTABLE must identify the required GUI child product"
@@ -71,18 +73,54 @@ namespace
 	}
 
 #ifdef _WIN32
+	std::vector<wchar_t> childEnvironment()
+	{
+		auto* inherited = GetEnvironmentStringsW();
+		if (!inherited) throw smoke::Failure("Could not read the child environment");
+		std::vector<wchar_t> environment;
+		try
+		{
+			std::vector<std::wstring> entries;
+			for (auto* entry = inherited; *entry; entry += wcslen(entry) + 1)
+			{
+				if (_wcsnicmp(entry, L"SDL_VIDEODRIVER=", 16) == 0
+					|| _wcsnicmp(entry, L"DISPLAY=", 8) == 0
+					|| _wcsnicmp(entry, L"WAYLAND_DISPLAY=", 16) == 0) continue;
+				entries.emplace_back(entry);
+			}
+			entries.emplace_back(L"SDL_VIDEODRIVER=prometheum-fermide-no-such-video-driver");
+			std::sort(entries.begin(), entries.end(), [](auto const& left, auto const& right)
+			{
+				return _wcsicmp(left.c_str(), right.c_str()) < 0;
+			});
+			for (auto const& entry : entries)
+			{
+				environment.insert(environment.end(), entry.begin(), entry.end());
+				environment.push_back(L'\0');
+			}
+			environment.push_back(L'\0');
+		}
+		catch (...)
+		{
+			FreeEnvironmentStringsW(inherited);
+			throw;
+		}
+		FreeEnvironmentStringsW(inherited);
+		return environment;
+	}
+
 	void runGuiWithUnusableDriver(std::filesystem::path const& guiExecutable)
 	{
-		_putenv_s("SDL_VIDEODRIVER", UnusableVideoDriver);
-
-		STARTUPINFOA startupInfo{};
+		auto environment = childEnvironment();
+		STARTUPINFOW startupInfo{};
 		startupInfo.cb = sizeof(startupInfo);
 		PROCESS_INFORMATION processInfo{};
 
-		std::string commandLine = "\"" + guiExecutable.string() + "\"";
-		auto const workingDirectory = guiExecutable.parent_path().string();
-		if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, FALSE,
-			CREATE_NO_WINDOW, nullptr, workingDirectory.c_str(), &startupInfo, &processInfo))
+		std::wstring commandLine = L"\"" + guiExecutable.wstring() + L"\"";
+		auto const workingDirectory = guiExecutable.parent_path().wstring();
+		if (!CreateProcessW(guiExecutable.c_str(), commandLine.data(), nullptr, nullptr, FALSE,
+			CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, environment.data(),
+			workingDirectory.c_str(), &startupInfo, &processInfo))
 		{
 			throw smoke::Failure("Could not launch required GUI executable: " + guiExecutable.string());
 		}
@@ -131,6 +169,11 @@ namespace
 		{
 			throw smoke::Failure("GUI crashed with exit code " + std::to_string(exitCode)
 				+ " instead of exiting in a controlled way");
+		}
+		if (exitCode != 1)
+		{
+			throw smoke::Failure("GUI exited with unexpected status " + std::to_string(exitCode)
+				+ "; expected controlled graphics startup failure status 1");
 		}
 	}
 #else
@@ -191,6 +234,11 @@ namespace
 		if (WEXITSTATUS(status) == 126 || WEXITSTATUS(status) == 127)
 		{
 			throw smoke::Failure("Could not execute the required GUI child product");
+		}
+		if (WEXITSTATUS(status) != 1)
+		{
+			throw smoke::Failure("GUI exited with unexpected status " + std::to_string(WEXITSTATUS(status))
+				+ "; expected controlled graphics startup failure status 1");
 		}
 	}
 #endif

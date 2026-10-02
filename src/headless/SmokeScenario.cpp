@@ -1,3 +1,4 @@
+#include "NonInteractiveProcess.h"
 // Compatibility only: no production or smoke-check linkage.
 #include "CompatibilityModules.h"
 
@@ -197,10 +198,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-#ifdef _WIN32
-	// Keep caller-selected flags; CreateProcess inherits this mode unless asked not to.
-	SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
-#endif
+	pf::setupNonInteractiveProcess();
 	try
 	{
 		if (argc == 2 && std::string(argv[1]) == "--help")

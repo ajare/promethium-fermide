@@ -6,7 +6,8 @@ function(pf_smoke_target_policy target)
 endfunction()
 
 add_library(pf-smoke-support STATIC support/Smoke.cpp)
-target_include_directories(pf-smoke-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support")
+target_include_directories(pf-smoke-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support"
+    PRIVATE "${PF_INCLUDE_DIR}")
 target_compile_definitions(pf-smoke-support PRIVATE PF_SMOKE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 target_compile_features(pf-smoke-support PUBLIC cxx_std_20)
 pf_smoke_target_policy(pf-smoke-support)
@@ -111,6 +112,22 @@ if(PF_BUILD_GUI)
         LABELS "harness;startup;graphics;subprocess;gui"
         TIMEOUT 120
         RUN_SERIAL TRUE)
+
+    if(BUILD_TESTING)
+        # Synthetic children never touch the application's startup log, so this
+        # contract can run in parallel. No editor/graphics library is linked.
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_executable(pf-startup-probe tests/StartupProbe.cpp startup/Startup.cpp)
+        target_link_libraries(pf-startup-probe PRIVATE pf-smoke-support)
+        target_include_directories(pf-startup-probe PRIVATE "${PF_INCLUDE_DIR}")
+        target_compile_definitions(pf-startup-probe PRIVATE PF_STARTUP_GUI_EXECUTABLE="unused")
+        pf_smoke_target_policy(pf-startup-probe)
+        add_test(NAME smoke-startup-failures COMMAND ${Python3_EXECUTABLE}
+            "${PROJECT_SOURCE_DIR}/scripts/tests/startup_failures.py"
+            "$<TARGET_FILE:pf-smoke-startup>" "$<TARGET_FILE:pf-startup-probe>")
+        set_tests_properties(smoke-startup-failures PROPERTIES
+            LABELS "harness;startup;subprocess" TIMEOUT 90)
+    endif()
 endif()
 
 pf_add_smoke_module(pf-smoke-agent
