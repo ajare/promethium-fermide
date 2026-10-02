@@ -66,11 +66,16 @@ endfunction()
 function(pf_apply_headless_verification_policy target)
     target_compile_features(${target} PRIVATE cxx_std_20)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W3 /permissive-)
+        if(NOT PF_HIGH_ANALYSIS)
+            target_compile_options(${target} PRIVATE /W3 /permissive-)
+        endif()
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     pf_apply_high_analysis(${target})
+    set_target_properties(${target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
 endfunction()
 
 set(PF_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -229,10 +234,15 @@ if(PF_BUILD_GUI)
     )
 endif()
 
-# Build Willpower and its dependency graph as part of the default build. No
-# prometheum-fermide target links it yet; this only keeps the imported library
-# ready for future integration.
+# The GUI consumes Willpower and its dependency graph. Keep dependency
+# configuration changes scoped: Willpower adds standalone-only
+# Shipping/MemCheck configurations to the cache. They are not PF configurations.
+set(PF_CONFIGURATION_TYPES "${CMAKE_CONFIGURATION_TYPES}")
 add_subdirectory(ext/willpower)
+if(PF_CONFIGURATION_TYPES)
+    set(CMAKE_CONFIGURATION_TYPES "${PF_CONFIGURATION_TYPES}" CACHE STRING
+        "Available build configurations" FORCE)
+endif()
 # Willpower's Debug configuration enables its MSVC-only Visual Leak Detector
 # macro on every platform. Undefine it after dependency-provided definitions so
 # supported Linux Debug builds do not attempt to include the Windows-only vld.h.
@@ -271,7 +281,8 @@ target_compile_features(prometheum-fermide-core PUBLIC cxx_std_20)
 target_compile_definitions(prometheum-fermide-core PUBLIC YAML_CPP_STATIC_DEFINE)
 target_include_directories(prometheum-fermide-core PUBLIC "${PF_INCLUDE_DIR}")
 if(MSVC)
-    target_compile_options(prometheum-fermide-core PRIVATE /W3 /permissive-)
+    target_compile_options(prometheum-fermide-core PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(prometheum-fermide-core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -316,7 +327,8 @@ FetchContent_MakeAvailable(cpp_httplib)
 add_library(pf-metrics STATIC src/metrics/PrometheusTextFormatter.cpp src/metrics/MetricsHttpServer.cpp)
 target_link_libraries(pf-metrics PUBLIC prometheum-fermide-core PRIVATE httplib::httplib)
 if(MSVC)
-    target_compile_options(pf-metrics PRIVATE /W3 /permissive-)
+    target_compile_options(pf-metrics PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(pf-metrics PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -353,7 +365,8 @@ target_include_directories(pf-headless-render-support PUBLIC
 target_link_libraries(pf-headless-render-support PUBLIC pf-render)
 foreach(target IN ITEMS pf-render pf-headless-render-support)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W3 /permissive-)
+        target_compile_options(${target} PRIVATE
+            "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -382,7 +395,8 @@ target_compile_definitions(pf-agent-editing PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING>
 )
 if(MSVC)
-    target_compile_options(pf-agent-editing PRIVATE /W3 /permissive-)
+    target_compile_options(pf-agent-editing PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(pf-agent-editing PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -394,7 +408,8 @@ add_library(pf-pause-position-support STATIC src/headless/support/PausePosition.
 target_include_directories(pf-pause-position-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-pause-position-support PUBLIC prometheum-fermide-core)
 if(MSVC)
-    target_compile_options(pf-pause-position-support PRIVATE /W3 /permissive-)
+    target_compile_options(pf-pause-position-support PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(pf-pause-position-support PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -405,7 +420,8 @@ add_library(pf-lift-boarding-support STATIC src/headless/support/LiftBoarding.cp
 target_include_directories(pf-lift-boarding-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-lift-boarding-support PUBLIC prometheum-fermide-core)
 if(MSVC)
-    target_compile_options(pf-lift-boarding-support PRIVATE /W3 /permissive-)
+    target_compile_options(pf-lift-boarding-support PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(pf-lift-boarding-support PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -416,7 +432,8 @@ add_library(pf-routing-population-support STATIC src/headless/support/RoutingPop
 target_include_directories(pf-routing-population-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-routing-population-support PUBLIC prometheum-fermide-core)
 if(MSVC)
-    target_compile_options(pf-routing-population-support PRIVATE /W3 /permissive-)
+    target_compile_options(pf-routing-population-support PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(pf-routing-population-support PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -426,7 +443,8 @@ add_library(pf-restoration-support STATIC src/headless/support/Restoration.cpp)
 target_include_directories(pf-restoration-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
 target_link_libraries(pf-restoration-support PUBLIC prometheum-fermide-core)
 if(MSVC)
-    target_compile_options(pf-restoration-support PRIVATE /W3 /permissive-)
+    target_compile_options(pf-restoration-support PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
     target_compile_options(pf-restoration-support PRIVATE -Wall -Wextra -Wpedantic)
 endif()
@@ -435,14 +453,7 @@ pf_apply_high_analysis(pf-restoration-support)
 # Purpose-specific tools deliberately do not link any smoke runner or checks.
 function(pf_add_headless_tool target)
     add_executable(${target} ${ARGN})
-    target_compile_features(${target} PRIVATE cxx_std_20)
-    if(MSVC)
-        target_compile_options(${target} PRIVATE /W3 /permissive-)
-    else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    pf_apply_high_analysis(${target})
-    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
+    pf_apply_headless_verification_policy(${target})
 endfunction()
 pf_add_headless_tool(pf-restoration-benchmark
     src/headless/tools/RestorationBenchmark.cpp src/headless/tools/ProcessMemory.cpp)
@@ -487,7 +498,8 @@ if(PF_BUILD_GUI)
     )
     target_include_directories(editor PRIVATE "${PF_INCLUDE_DIR}/imgui")
     if(MSVC)
-        target_compile_options(editor PRIVATE /W3 /permissive-)
+        target_compile_options(editor PRIVATE
+            "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
         target_link_options(editor PRIVATE "$<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS>")
     else()
         target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)

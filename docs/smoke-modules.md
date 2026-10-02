@@ -17,7 +17,8 @@ see the [ownership manifest](smoke-migration-manifest.md). The legacy executable
 is now a [dispatch-only compatibility orchestrator](headless-compatibility.md).
 Use direct modules or CTest for coverage without deprecation warnings. The
 complete active Linux matrix is documented in
-[Linux modular smoke validation](linux-smoke-validation.md).
+[Linux modular smoke validation](linux-smoke-validation.md). For MSVC direct-target
+Debug/Release builds, see [Windows build validation](windows-smoke-build-validation.md).
 
 The ticket-by-ticket sections below preserve migration history. Statements that a
 legacy selection “returns 2” describe its transitional state before #305; those
