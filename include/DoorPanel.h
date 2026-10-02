@@ -16,6 +16,7 @@ namespace core
 	class ExtensibleObject;
 	class Staircase;
 	class Lift;
+	class Shuttle;
 	class SectorObject;
 }
 
@@ -29,6 +30,9 @@ void renderExtensibleConditionPanel(std::shared_ptr<core::World> const& world,
 
 void renderLiftConditionPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<core::Lift> const& lift);
+
+void renderShuttleConditionPanel(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<core::Shuttle> const& shuttle);
 
 void renderEscalatorConditionPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<core::Staircase> const& staircase);

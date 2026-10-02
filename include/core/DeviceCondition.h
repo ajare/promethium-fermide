@@ -3,8 +3,9 @@
 namespace core
 {
 	// Value-only, per-Agent knowledge. Position is the traversal-relevant
-	// physical fraction for thresholds/extensibles, or car y for Lifts.
-	// Lift alignment and door position describe safe alighting, not service.
+	// physical fraction for thresholds/extensibles, car y for Lifts, or coupled
+	// vehicle x for Shuttles. Alignment and open Doors describe safe alighting,
+	// not service. Shuttle landing memories retain their own Door aperture.
 	struct DeviceCondition
 	{
 		bool broken{ false };

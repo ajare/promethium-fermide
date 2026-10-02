@@ -57,11 +57,12 @@ namespace core
 			(void)resourceId;
 			auto& resource = *resourcePtr;
 			if ((!resource.mLift && !resource.mShuttle) || resource.mLiftStops.empty()) continue;
-			if (resource.mLift && resource.mLift->isBroken())
+			if ((resource.mLift && resource.mLift->isBroken())
+				|| (resource.mShuttle && resource.mShuttle->isBroken()))
 			{
 				// Scheduler, car position and physical door state remain frozen.
 				// Cancellation may still use an already-open aligned landing safely.
-				if (!resource.mLiftMoving && (resource.mOpenPlatformLift || resource.mLiftCarDoorOpen))
+				if (!resource.mLiftMoving && (resource.mShuttle || resource.mOpenPlatformLift || resource.mLiftCarDoorOpen))
 					assignLiftSafeExitPaths(resource);
 				continue;
 			}

@@ -80,6 +80,10 @@ set(core_names
     platformLifts/brokenPermissionsAndCommittedBoarding
     platformLifts/brokenLocalMemory
     platformLifts/brokenRoutePlanning
+    shuttles/brokenFreezeAndRecoverPassengers
+    shuttles/brokenStopDoorsAndSelectorSafety
+    shuttles/brokenLocalMemory
+    shuttles/brokenRoutePlanning
     brokenDoors/frozenPositionAndCommands
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory

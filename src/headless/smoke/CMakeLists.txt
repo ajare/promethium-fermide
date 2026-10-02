@@ -73,6 +73,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/BrokenEscalators.cpp
         simulation/BrokenLifts.cpp
         simulation/BrokenPlatformLifts.cpp
+        simulation/BrokenShuttles.cpp
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
@@ -351,6 +352,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/BrokenEscalators.cpp
         persistence/BrokenLifts.cpp
         persistence/BrokenPlatformLifts.cpp
+        persistence/BrokenShuttles.cpp
         persistence/LiftDocuments.cpp
         persistence/ShuttleDocuments.cpp
         persistence/DeepLayerReplay.cpp
@@ -378,6 +380,7 @@ pf_add_smoke_module(pf-smoke-render
         render/BrokenEscalators.cpp
         render/BrokenLifts.cpp
         render/BrokenPlatformLifts.cpp
+        render/BrokenShuttles.cpp
         render/Facades.cpp
         render/FacadeDrawOrder.cpp
         render/ViewportCulling.cpp
@@ -452,6 +455,7 @@ pf_add_smoke_module(pf-smoke-editor
         editor/BrokenEscalators.cpp
         editor/BrokenLifts.cpp
         editor/BrokenPlatformLifts.cpp
+        editor/BrokenShuttles.cpp
         editor/Palette.cpp
         editor/History.cpp
     LIBRARIES pf-agent-editing pf-headless-render-support

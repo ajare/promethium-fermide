@@ -6662,6 +6662,8 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			break;
 
 		case core::SectorType::Shuttle:
+			renderShuttleConditionPanel(world,
+				static_pointer_cast<const core::ShuttleTransit>(gSelectedSector)->getShuttle());
 			renderLiftDestinationPermissions(world, gSelectedSector->getIndex());
 			renderShuttlePanel(world,
 				static_pointer_cast<const core::ShuttleTransit>(gSelectedSector)->getShuttle(), true);

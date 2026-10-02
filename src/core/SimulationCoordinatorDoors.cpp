@@ -133,25 +133,33 @@ namespace core
 			changed = changed || (old ? old->broken != condition.broken : condition.broken);
 			agent.mRememberedEscalatorConditions[transit->getIndex()] = condition;
 		}
-		bool aboardLift = false;
+		bool aboardTransport = false;
 		auto agentId = mWorld.getAgentId(&agent);
 		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
 		{
-			if (!resource->mLift) continue;
+			if (!resource->mLift && !resource->mShuttle) continue;
 			bool const visible = sectorId == resource->mLiftSector
-				|| std::any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
-					[&](auto const& stop) { return stop.locationSector == sectorId; });
+				|| (resource->mShuttle ? std::any_of(resource->mShuttleDoors.begin(), resource->mShuttleDoors.end(),
+					[&](auto const& door) { return door.locationSector == sectorId; })
+					: std::any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
+						[&](auto const& stop) { return stop.locationSector == sectorId; }));
 			if (!visible) continue;
-			auto condition = mWorld.knownLiftCondition(id, &agent, sector);
+			auto condition = mWorld.knownTransportCondition(id, &agent, sector);
 			auto old = agent.rememberedDeviceCondition(id);
 			changed = changed || (old ? old->broken != condition->broken : condition->broken);
 			agent.mRememberedDeviceConditions[id] = *condition;
-			aboardLift = aboardLift || std::find(resource->mOccupants.begin(), resource->mOccupants.end(),
+			// Remember individual landing apertures as well as the coupled vehicle.
+			// Disconnected approaches never borrow another carriage's open Door.
+			for (auto const& door : resource->mShuttleDoors)
+				if (door.locationSector == sectorId || sectorId == resource->mLiftSector)
+					agent.mRememberedDeviceConditions[door.landingResource] =
+						*mWorld.knownTransportCondition(door.landingResource, &agent, sector);
+			aboardTransport = aboardTransport || std::find(resource->mOccupants.begin(), resource->mOccupants.end(),
 				agentId) != resource->mOccupants.end();
 		}
 		// A passenger's accepted journey is retained, even while its service is
 		// remembered unavailable for future Paths. Replan only after safe alighting.
-		if (!changed || aboardLift) return;
+		if (!changed || aboardTransport) return;
 		auto goal = mWorld.mMovementGoals.find(agentId);
 		auto path = agent.mPath.path;
 		auto from = agent.mPath.targetNode;
@@ -170,7 +178,7 @@ namespace core
 			// threshold never invalidates the crossing already in progress.
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
 				&& hasCommittedMovement(agent)) continue;
-			auto lift = mWorld.knownLiftCondition(edge->getTraversalResourceId(), &agent, sector);
+			auto lift = mWorld.knownTransportCondition(edge->getTraversalResourceId(), &agent, sector);
 			auto known = agent.rememberedDeviceCondition(edge->getTraversalResourceId());
 			invalid = invalid || (lift ? lift->broken : (known && !known->admitsPassage()));
 			if (edge->getType() == EdgeType::Staircase || edge->getType() == EdgeType::StaircaseMount)

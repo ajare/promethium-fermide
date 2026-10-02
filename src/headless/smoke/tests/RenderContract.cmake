@@ -75,6 +75,7 @@ set(names
     escalators/brokenWarningPreservesPosition
     lifts/brokenWarningPreservesPosition
     platformLifts/brokenWarningPreservesPosition
+    shuttles/brokenWarningPreservesPosition
     bulkhead/checkBrokenWarningPreservesPosition
     doorOpenRight/checkBrokenWarningPreservesPosition
     doorOpenRightSolidPassClosed

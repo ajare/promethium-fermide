@@ -159,11 +159,12 @@ namespace core
 		result.shuttleCapacityPerCarriage = resource.mShuttleCapacityPerCarriage;
 		result.liftMoving = resource.mLiftMoving;
 		result.liftBroken = resource.mLift && resource.mLift->isBroken();
+		result.shuttleBroken = resource.mShuttle && resource.mShuttle->isBroken();
 		result.liftCarDoorOpen = resource.mLiftCarDoorOpen;
 		result.liftStopPhase = resource.mLiftStopPhase;
 		result.liftServiceStartedTick = resource.mLiftServiceStartedTick;
 		result.liftBoardingCutoffTick = resource.mLiftBoardingCutoffTick;
-		result.liftAcceptingBoarders = (resource.mLift || resource.mShuttle) && resource.mEnabled && !result.liftBroken && !resource.mLiftMoving
+		result.liftAcceptingBoarders = (resource.mLift || resource.mShuttle) && resource.mEnabled && !result.liftBroken && !result.shuttleBroken && !resource.mLiftMoving
 			&& resource.mLiftStopPhase == LiftStopPhase::Boarding
 			&& mWorld.mSimulationTick <= resource.mLiftBoardingCutoffTick;
 		result.liftDraining = resource.mLiftDraining;

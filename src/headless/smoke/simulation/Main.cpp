@@ -23,6 +23,7 @@ int main(int argc, char** argv)
 	registerBrokenEscalators(checks);
 	registerBrokenLifts(checks);
 	registerBrokenPlatformLifts(checks);
+	registerBrokenShuttles(checks);
 	registerBrokenDoors(checks);
 	registerBrokenBulkheadDoors(checks);
 	registerDoorQueues(checks);

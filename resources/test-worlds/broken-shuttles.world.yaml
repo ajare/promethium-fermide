@@ -1,0 +1,35 @@
+# #320: remote intent discovers a Broken coupled Shuttle at a local approach.
+version: 39
+name: Broken Shuttle - coupled passenger recovery
+randomSeed: 0
+cellsWide: 30
+levelsHigh: 2
+layers: 3
+layerNames: [Remote origin, Disconnected platforms, Coupled Shuttle]
+construction:
+  - {type: room, name: Origin A, layer: 1, y: 0, x: 0, cellsWide: 4, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: room, name: Origin B, layer: 1, y: 0, x: 5, cellsWide: 4, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: room, name: Destination A, layer: 1, y: 0, x: 20, cellsWide: 4, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: room, name: Destination B, layer: 1, y: 0, x: 25, cellsWide: 4, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: room, name: Remote origin, layer: 0, y: 0, x: 0, cellsWide: 4, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: door, layer: 0, y: 0, x: 1, width: 1, foreControl: false, backControl: false, activationMode: automatic, holdOpenSeconds: 3, crossingLanes: 1, openStyle: openUp}
+  - {type: shuttle, layer: 2, y: 0, x: 0, cellsWide: 29, numCars: 2, carWidth: 4, stopOffsets: [0, 20], initialStop: 0, capacityPerCarriage: 1, doorMask: 5, minimumDwellSeconds: 0.1, maximumBoardingSeconds: 4, allowPartialLandings: false, initiallyBroken: true}
+  - {type: marker, sectorIndex: 0, levelIndex: 0, xOffset: 1.5, id: 1, name: Origin A, properties: 0}
+  - {type: marker, sectorIndex: 1, levelIndex: 0, xOffset: 1.5, id: 2, name: Origin B, properties: 0}
+  - {type: marker, sectorIndex: 2, levelIndex: 0, xOffset: 1.5, id: 3, name: Destination A, properties: 0}
+  - {type: marker, sectorIndex: 3, levelIndex: 0, xOffset: 1.5, id: 4, name: Destination B, properties: 0}
+nextMarkerId: 5
+nextAgentGroupId: 1
+agentGroups: []
+agents:
+  - id: 1
+    agent: {name: Remote service observer, flags: 0}
+    sector: 4
+    localX: 1.5
+    localY: 0
+    path: {destinationSector: 2, destinationLocalX: 1.5, destinationLocalY: 0, active: true}
+  - id: 2
+    agent: {name: Recovery passenger B, flags: 0}
+    sector: 1
+    localX: 1.5
+    localY: 0

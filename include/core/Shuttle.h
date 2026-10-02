@@ -13,6 +13,9 @@ namespace core
 	class Shuttle : public RailedTransport
 	{
 		friend class World;
+		friend class SimulationCoordinator;
+		bool mInitiallyBroken{ false };
+		bool mBroken{ false };
 		TraversalResourceId mTraversalResource;
 		uint32_t mNumCars;
 
@@ -24,6 +27,9 @@ namespace core
 
 		// Overridden from Object
 		[[nodiscard]] std::string getDescription() const override;
+
+		[[nodiscard]] bool isInitiallyBroken() const { return mInitiallyBroken; }
+		[[nodiscard]] bool isBroken() const { return mBroken; }
 
 		uint32_t getNumCars() const;
 

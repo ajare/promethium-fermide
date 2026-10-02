@@ -13,6 +13,7 @@
 #include "core/Defines.h"
 #include "core/Edge.h"
 #include "core/OccupantPacking.h"
+#include "core/Shuttle.h"
 #include "core/Path.h"
 #include "core/Vertex.h"
 
@@ -47,14 +48,38 @@ namespace core
 	{
 		auto resource = mWorld.mTraversalResources.find(id);
 		if (!resource || !resource->mLift) return false;
-		if (resource->mLift->mBroken == broken) return true;
+		return setTransportBroken(id, broken);
+	}
+
+	bool SimulationCoordinator::setShuttleBroken(TraversalResourceId id, bool broken)
+	{
+		auto resource = mWorld.mTraversalResources.find(id);
+		if (!resource || !resource->mShuttle) return false;
+		return setTransportBroken(id, broken);
+	}
+
+	bool SimulationCoordinator::setTransportBroken(TraversalResourceId id, bool broken)
+	{
+		auto resource = mWorld.mTraversalResources.find(id);
+		if (!resource || (!resource->mLift && !resource->mShuttle)) return false;
+		auto& condition = resource->mShuttle ? resource->mShuttle->mBroken : resource->mLift->mBroken;
+		if (condition == broken) return true;
 		mWorld.invalidateSimulationSnapshot();
-		resource->mLift->mBroken = broken;
-		for (auto const& stop : resource->mLiftStops)
-			if (auto landing = mWorld.mTraversalResources.find(stop.landingResource); landing && landing->mDoor)
-				landing->mDoor->mBroken = broken; // Owned doors have no independent failure state.
+		condition = broken;
+		// Include every supported Shuttle landing, not only the representative
+		// Door stored on each Stop. Owned Doors cannot fail independently.
+		for (auto const& [landingId, landing] : mWorld.mTraversalResources.entries())
+		{
+			(void)landingId;
+			if (landing->mLiftCoordinator == id && landing->mDoor) landing->mDoor->mBroken = broken;
+		}
 		if (broken)
 		{
+			// A moving Shuttle's last spacing goal includes its last translation.
+			// Do not let locomotion finish that stale translation after service freezes.
+			if (resource->mShuttle && resource->mLiftMoving)
+				for (auto occupant : resource->mOccupants)
+					if (auto passenger = mWorld.mAgents.find(occupant)) passenger->mTraversalLocalGoal.reset();
 			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
 			{
 				auto target = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
@@ -426,7 +451,8 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		if (resource.mLiftMoving || resource.mLiftCurrentStop >= resource.mLiftStops.size()
-			|| (resource.mLiftStopPhase != LiftStopPhase::Opening
+			|| (!(resource.mShuttle && resource.mShuttle->isBroken())
+				&& resource.mLiftStopPhase != LiftStopPhase::Opening
 				&& resource.mLiftStopPhase != LiftStopPhase::Disembarking
 				&& resource.mLiftStopPhase != LiftStopPhase::Boarding)) return;
 		vector<AgentId> assigned;
@@ -481,6 +507,11 @@ namespace core
 					landingId = door->landingResource;
 					resource.mShuttleCarriages[carriage].alightingDoors[passenger] = landingId;
 				}
+			}
+			if (resource.mShuttle && resource.mShuttle->isBroken())
+			{
+				auto landing = mWorld.mTraversalResources.find(landingId);
+				if (!landing || !landing->mDoor || !landing->mDoor->isOpen()) continue;
 			}
 			shared_ptr<const Edge> landingEdge;
 			shared_ptr<const Vertex> source;
@@ -609,7 +640,8 @@ namespace core
 			return;
 		}
 
-		if (coordinator->mLift && coordinator->mLift->isBroken())
+		if ((coordinator->mLift && coordinator->mLift->isBroken())
+			|| (coordinator->mShuttle && coordinator->mShuttle->isBroken()))
 		{
 			if (boarding)
 			{
@@ -622,9 +654,18 @@ namespace core
 			{
 				auto destination = coordinator->mLiftPassengerDestinations.find(request->mOwner);
 				if (destination == coordinator->mLiftPassengerDestinations.end()
-					|| coordinator->mLiftMoving || destination->second != coordinator->mLiftCurrentStop
-					|| !coordinator->mLiftCarDoorOpen) return;
-				auto landing = mWorld.mTraversalResources.find(coordinator->mLiftStops[destination->second].landingResource);
+					|| coordinator->mLiftMoving || destination->second != coordinator->mLiftCurrentStop) return;
+				auto landingId = coordinator->mLiftStops[destination->second].landingResource;
+				if (coordinator->mShuttle)
+				{
+					auto carriage = findShuttlePassengerCarriage(*coordinator, request->mOwner);
+					if (carriage >= coordinator->mShuttleCarriages.size()) return;
+					auto selected = coordinator->mShuttleCarriages[carriage].alightingDoors.find(request->mOwner);
+					if (selected == coordinator->mShuttleCarriages[carriage].alightingDoors.end()) return;
+					landingId = selected->second;
+				}
+				else if (!coordinator->mLiftCarDoorOpen) return;
+				auto landing = mWorld.mTraversalResources.find(landingId);
 				if (!landing || !landing->mDoor || !landing->mDoor->isOpen()) return;
 			}
 		}
@@ -1097,6 +1138,7 @@ namespace core
 			if (!assignShuttleDisembarkDoor(requestId, coordinator, stop)) return;
 			disembarkLanding = mWorld.mTraversalResources.find(request->mResource);
 			if (!disembarkLanding) return;
+			if (coordinator.mShuttle->isBroken() && !disembarkLanding->mDoor->isOpen()) return;
 
 			// Once the Shuttle has stopped, walk within the carriage into the
 			// selected Door's crossing band before granting the crossing. Staying at

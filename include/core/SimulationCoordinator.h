@@ -221,9 +221,11 @@ namespace core
 		// preparation is shared by every pending request for the door, and a
 		// failed preparation retries on a fixed tick delay before it is refused.
 		bool setLiftBroken(TraversalResourceId lift, bool broken);
+		bool setShuttleBroken(TraversalResourceId shuttle, bool broken);
 		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool setExtensibleBroken(TraversalResourceId resource, bool broken);
 		void observeLocalDeviceConditions(Agent& agent);
+		bool setTransportBroken(TraversalResourceId transport, bool broken);
 		void allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource);
 
 		// A force bridge or extensible ladder must be extended before its

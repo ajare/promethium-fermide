@@ -27,11 +27,17 @@ namespace core
 		auto source = edge.getOtherVertex(target);
 		auto sector = source ? source->getSector() : nullptr;
 		bool const observed = sector && sector.get() == context.observationSector;
-		auto liftCondition = context.world ? context.world->knownLiftCondition(
+		auto const sourceEndpoint = source ? source->getPosition() : Vector2{};
+		auto shuttleAccess = context.world ? context.world->observeShuttleAccess(
+			edge.getTraversalResourceId(), sourceEndpoint, observed)
+			: context.agent ? context.agent->observeShuttleAccess(
+				edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
+		auto liftCondition = context.world ? context.world->knownTransportCondition(
 			edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
 		if (liftCondition && liftCondition->broken
 			&& ((!sector || isLocationLike(sector->getType())) || !liftCondition->atStop
-				|| !liftCondition->doorsOpen || std::abs(liftCondition->position - source->getPosition().y) > 0.001f))
+				|| !liftCondition->doorsOpen || std::abs(liftCondition->position
+					- (shuttleAccess ? shuttleAccess->stopPosition : sourceEndpoint.y)) > 0.001f))
 		{
 			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
@@ -50,15 +56,10 @@ namespace core
 		auto& c = facts.components;
 		c.motionSeconds = motionSeconds;
 		facts.optimisticLowerBoundSeconds = motionSeconds;
-		auto const sourceEndpoint = source ? source->getPosition() : Vector2{};
 		// Querying an unobserved landing returns static capacity only. The World does
 		// not inspect its queue, car position, calls, or scheduler state.
 		auto liftAccess = context.agent ? context.agent->observeLiftAccess(
 			edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
-		auto shuttleAccess = context.world ? context.world->observeShuttleAccess(
-			edge.getTraversalResourceId(), sourceEndpoint, observed)
-			: context.agent ? context.agent->observeShuttleAccess(
-				edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
 		if (door.getActivationMode() == DoorActivationMode::Unavailable
 			&& !(door.isBreakable() ? open : door.isOpen()) && !liftAccess && !shuttleAccess)
 		{

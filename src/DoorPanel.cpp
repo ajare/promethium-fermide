@@ -16,6 +16,7 @@
 #include "core/ExtensibleObject.h"
 #include "core/Staircase.h"
 #include "core/Lift.h"
+#include "core/Shuttle.h"
 #include "core/DoorSectorObject.h"
 #include "core/Exceptions.h"
 #include "core/Log.h"
@@ -72,6 +73,26 @@ void renderLiftConditionPanel(shared_ptr<core::World> const& world,
 	ImGui::EndDisabled();
 	bool broken = lift->isBroken();
 	if (ImGui::Checkbox("Live Broken", &broken)) world->setLiftBroken(lift->getTraversalResourceId(), broken);
+	ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
+}
+
+void renderShuttleConditionPanel(shared_ptr<core::World> const& world,
+	shared_ptr<core::Shuttle> const& shuttle)
+{
+	ImGui::TextColored(shuttle->isBroken() ? ImVec4(1.0f, 0.65f, 0.1f, 1.0f) : ImGui::GetStyleColorVec4(ImGuiCol_Text),
+		"%s; coupled vehicle x: %.2f", shuttle->isBroken()
+			? "Broken: whole Shuttle frozen" : "Shuttle operating", shuttle->getPosition().x);
+	bool initiallyBroken = shuttle->isInitiallyBroken();
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	if (ImGui::Checkbox("Initially Broken", &initiallyBroken))
+	{
+		auto undo = captureDocumentSnapshot(world);
+		if (world->setShuttleInitiallyBroken(shuttle->getTraversalResourceId(), initiallyBroken))
+			commitDocumentEdit(std::move(undo));
+	}
+	ImGui::EndDisabled();
+	bool broken = shuttle->isBroken();
+	if (ImGui::Checkbox("Live Broken", &broken)) world->setShuttleBroken(shuttle->getTraversalResourceId(), broken);
 	ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
 }
 

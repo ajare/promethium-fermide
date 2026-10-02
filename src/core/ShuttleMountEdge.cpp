@@ -4,6 +4,7 @@
 #include "core/MobilityProfile.h"
 #include "core/ShuttleMountEdge.h"
 #include "core/Agent.h"
+#include "core/World.h"
 #include "core/Exceptions.h"
 
 
@@ -69,6 +70,14 @@ namespace core
 		{
 			DirectedTraversalFacts facts;
 			facts.exclusionReason = RouteExclusionReason::Mobility;
+			return facts;
+		}
+		auto known = context.world ? context.world->knownTransportCondition(
+			getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+		if (known && known->broken)
+		{
+			DirectedTraversalFacts facts;
+			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
 		}
 		// Topology connector only: admission is charged at the landing Door.

@@ -49,6 +49,7 @@ int main(int argc, char** argv)
 	editor_smoke::registerBrokenEscalators(checks);
 	editor_smoke::registerBrokenLifts(checks);
 	editor_smoke::registerBrokenPlatformLifts(checks);
+	editor_smoke::registerBrokenShuttles(checks);
 	editor_smoke::registerDoorPanel(checks);
 	editor_smoke::registerPalette(checks);
 	editor_smoke::registerHistory(checks);

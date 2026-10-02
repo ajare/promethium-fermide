@@ -64,7 +64,7 @@ namespace core
 
 	void ShuttleTransit::updateImpl(float frameTime)
 	{
-		mShuttle->update(frameTime);
+		if (!mShuttle->isBroken()) mShuttle->update(frameTime);
 	}
 
 } // core

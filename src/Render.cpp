@@ -1161,6 +1161,7 @@ void renderShuttle(shared_ptr<const core::Shuttle> shuttle, uint32_t /* layer */
 				{ connectorX + 1.0f, bounds1.y });
 		}
 	}
+	renderBrokenWarning(*shuttle, drawList, true);
 }
 
 
@@ -1755,6 +1756,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		if (isDrawnSolid(style))
 			renderShuttle(static_pointer_cast<const core::ShuttleTransit>(sector)->getShuttle(),
 				layer, style, selected, drawList);
+		else if (style == LayerRenderStyle::Wireframe)
+			renderBrokenWarning(*static_pointer_cast<const core::ShuttleTransit>(sector)->getShuttle(), drawList, true);
 		break;
 
 	case core::SectorType::Stairwell:

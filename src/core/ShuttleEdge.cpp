@@ -64,6 +64,14 @@ namespace core
 			facts.exclusionReason = RouteExclusionReason::Mobility;
 			return facts;
 		}
+		auto known = context.world ? context.world->knownTransportCondition(
+			getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+		if (known && known->broken)
+		{
+			DirectedTraversalFacts facts;
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
 		auto source = getOtherVertex(target);
 		auto observe = [&](Vector2 const& endpoint)
 		{

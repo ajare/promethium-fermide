@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/SimulationCoordinator.h"
+#include "core/Shuttle.h"
 
 #include "core/Agent.h"
 #include "core/World.h"
@@ -165,7 +166,10 @@ namespace core
 				&& resource->mExtensible && resource->mExtensible->isBroken())
 			|| ((command.type == DeviceCommandType::CallLift
 				|| command.type == DeviceCommandType::SelectLiftDestination)
-				&& resource->mLift && resource->mLift->isBroken()));
+				&& resource->mLift && resource->mLift->isBroken())
+			|| ((command.type == DeviceCommandType::CallShuttle
+				|| command.type == DeviceCommandType::SelectShuttleDestination)
+				&& resource->mShuttle && resource->mShuttle->isBroken()));
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			if (!broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
@@ -615,6 +619,7 @@ namespace core
 				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
 				if (!resource || (!resource->mLift && !resource->mShuttle) || !resource->mEnabled
 					|| (resource->mLift && resource->mLift->isBroken())
+					|| (resource->mShuttle && resource->mShuttle->isBroken())
 					|| operation->mCommand.stopIndex >= resource->mLiftStops.size())
 				{
 					operation->mState = DeviceOperationState::Rejected;

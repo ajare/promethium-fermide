@@ -54,7 +54,7 @@ namespace core
 	*/
 	string Shuttle::getDescription() const
 	{
-		return format("Shuttle");
+		return mBroken ? "Shuttle (Broken)" : "Shuttle";
 	}
 
 	uint32_t Shuttle::getNumCars() const

@@ -160,7 +160,7 @@ namespace core
 		{
 			auto const& lift = result.type == EdgeType::Lift
 				? static_cast<LiftEdge const&>(edge).mLift : static_cast<LiftMountEdge const&>(edge).mLift;
-			auto known = context.world ? context.world->knownLiftCondition(
+			auto known = context.world ? context.world->knownTransportCondition(
 				edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
 			if (known && known->broken)
 			{
@@ -203,11 +203,23 @@ namespace core
 			break;
 		}
 		case EdgeType::ShuttleMount:
+		{
 			result.mobilityKind = TraversalKind::Shuttle;
+			auto known = context.world ? context.world->knownTransportCondition(
+				edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+			if (known && known->broken) result.exclusion = RouteExclusionReason::Control;
 			break;
+		}
 		case EdgeType::Shuttle:
 		{
 			result.mobilityKind = TraversalKind::Shuttle;
+			auto known = context.world ? context.world->knownTransportCondition(
+				edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
+			if (known && known->broken)
+			{
+				result.exclusion = RouteExclusionReason::Control;
+				return result;
+			}
 			result.speed = static_cast<ShuttleEdge const&>(edge).mShuttle->getSpeed();
 			auto observe = [&](Vector2 endpoint)
 			{
@@ -233,11 +245,12 @@ namespace core
 			result.lift = context.agent ? context.agent->observeLiftAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;
 			result.shuttle = context.world ? context.world->observeShuttleAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed)
 				: context.agent ? context.agent->observeShuttleAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;
-			auto liftCondition = context.world ? context.world->knownLiftCondition(
+			auto liftCondition = context.world ? context.world->knownTransportCondition(
 				edge.getTraversalResourceId(), context.agent, context.observationSector) : std::nullopt;
 			if (liftCondition && liftCondition->broken && (result.boarding
 				|| !liftCondition->atStop || !liftCondition->doorsOpen
-				|| std::abs(liftCondition->position - source->getPosition().y) > 0.001f))
+				|| std::abs(liftCondition->position - (result.shuttle ? result.shuttle->stopPosition
+					: source->getPosition().y)) > 0.001f))
 			{
 				result.exclusion = RouteExclusionReason::Control;
 				return result;

@@ -4764,7 +4764,10 @@ namespace core
 		}
 		shuttleResource->mLiftSelector = shuttleRes.interiorSelector;
 
+		shuttle->mInitiallyBroken = options.initiallyBroken;
+		setShuttleBroken(coordinator, options.initiallyBroken);
 		ConstructionRecord record{ ConstructionType::Shuttle };
+		record.initiallyBroken = options.initiallyBroken;
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = cellsWide; record.d = options.numCars;
 		record.e = options.carWidth; record.f = options.initialStop; record.g = options.capacity;
@@ -5252,7 +5255,7 @@ namespace core
 				{
 					options = { record.d, record.e, record.values, record.f, record.g,
 						record.x, record.y, record.p, record.h ? record.h : (1u << 1),
-						record.overrides };
+						record.overrides, {}, record.initiallyBroken };
 					return true;
 				}
 			}
@@ -5495,23 +5498,83 @@ namespace core
 		return mSimulationCoordinator.setLiftBroken(id, broken);
 	}
 
-	optional<DeviceCondition> World::knownLiftCondition(TraversalResourceId id,
+	bool World::setShuttleInitiallyBroken(TraversalResourceId id, bool broken)
+	{
+		if (!mSimulationPaused) return false;
+		auto resource = mTraversalResources.find(id);
+		if (!resource || !resource->mShuttle) return false;
+		auto record = findLiftDestinationRecord(*resource);
+		if (!record || record->type != ConstructionType::Shuttle) return false;
+		auto& authored = mConstructionRecords[static_cast<size_t>(record - mConstructionRecords.data())];
+		if (authored.initiallyBroken == broken) return true;
+		authored.initiallyBroken = resource->mShuttle->mInitiallyBroken = broken;
+		setShuttleBroken(id, broken);
+		markModified();
+		return true;
+	}
+
+	bool World::setShuttleBroken(TraversalResourceId id, bool broken)
+	{
+		return mSimulationCoordinator.setShuttleBroken(id, broken);
+	}
+
+	optional<DeviceCondition> World::knownTransportCondition(TraversalResourceId id,
 		Agent const* agent, Sector const* observationSector) const
 	{
-		auto resource = mTraversalResources.find(id);
+		auto requestedId = id;
+		auto requested = mTraversalResources.find(id);
+		auto resource = requested;
 		if (resource && resource->mLiftCoordinator)
 		{
 			id = resource->mLiftCoordinator;
 			resource = mTraversalResources.find(id);
 		}
-		if (!resource || !resource->mLift) return nullopt;
+		if (!resource || (!resource->mLift && !resource->mShuttle)) return nullopt;
 		auto const sector = observationSector
 			? SectorId{ static_cast<uint64_t>(observationSector->getIndex()) + 1 } : SectorId{};
 		bool const visible = sector && (sector == resource->mLiftSector
-			|| any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
-				[&](auto const& stop) { return stop.locationSector == sector; }));
-		if (!visible) return agent ? agent->rememberedDeviceCondition(id) : nullopt;
+			|| (resource->mShuttle ? any_of(resource->mShuttleDoors.begin(), resource->mShuttleDoors.end(),
+				[&](auto const& door) { return door.locationSector == sector; })
+				: any_of(resource->mLiftStops.begin(), resource->mLiftStops.end(),
+					[&](auto const& stop) { return stop.locationSector == sector; })));
+		if (!visible)
+		{
+			if (!agent) return nullopt;
+			auto vehicle = agent->rememberedDeviceCondition(id);
+			if (resource->mShuttle && requestedId != id)
+			{
+				if (auto remembered = agent->rememberedDeviceCondition(requestedId))
+				{
+					// Failure/restoration is vehicle-wide. A fresh observation at
+					// another approach supersedes stale vehicle knowledge,
+					// without refreshing that remote Door's remembered aperture.
+					if (vehicle)
+					{
+						remembered->broken = vehicle->broken;
+						remembered->position = vehicle->position;
+						remembered->atStop = vehicle->atStop;
+					}
+					return remembered;
+				}
+				if (vehicle) vehicle->doorsOpen = false; // Never borrow another Carriage's aperture.
+			}
+			return vehicle;
+		}
 		bool const aligned = !resource->mLiftMoving && resource->mLiftCurrentStop < resource->mLiftStops.size();
+		if (resource->mShuttle)
+		{
+			bool const doorVisible = sector == resource->mLiftSector
+				|| any_of(resource->mShuttleDoors.begin(), resource->mShuttleDoors.end(),
+					[&](auto const& door) { return door.landingResource == requestedId && door.locationSector == sector; });
+			auto rememberedDoor = agent ? agent->rememberedDeviceCondition(requestedId) : nullopt;
+			bool const open = aligned && (requestedId != id
+				? requested->mLiftStopIndex == resource->mLiftCurrentStop && requested->mDoor
+					&& (doorVisible ? requested->mDoor->isOpen() : rememberedDoor && rememberedDoor->doorsOpen)
+				: any_of(resource->mShuttleDoors.begin(), resource->mShuttleDoors.end(), [&](auto const& door)
+					{ auto landing = mTraversalResources.find(door.landingResource);
+						return door.stopIndex == resource->mLiftCurrentStop && landing && landing->mDoor->isOpen(); }));
+			return DeviceCondition{ resource->mShuttle->isBroken(), resource->mLiftPosition, aligned, open };
+		}
 		auto landing = aligned ? mTraversalResources.find(
 			resource->mLiftStops[resource->mLiftCurrentStop].landingResource) : nullptr;
 		return DeviceCondition{ resource->mLift->isBroken(), resource->mLiftPosition, aligned,
@@ -11197,13 +11260,15 @@ namespace core
 			auto coordinator = mTraversalResources.find(resource->mLiftCoordinator);
 			return coordinator && resource->mDoor && resource->mDoor->isOpen()
 				&& !(coordinator->mLift && coordinator->mLift->isBroken())
+				&& !(coordinator->mShuttle && coordinator->mShuttle->isBroken())
 				&& !coordinator->mLiftMoving
 				&& coordinator->mLiftCurrentStop == resource->mLiftStopIndex
 				&& coordinator->mLiftStopPhase == LiftStopPhase::Boarding;
 		}
 		if (!resource->mLift && !resource->mShuttle) return false;
 		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
-		return stop < resource->mLiftStops.size() && !(resource->mLift && resource->mLift->isBroken()) && !resource->mLiftMoving
+		return stop < resource->mLiftStops.size() && !(resource->mLift && resource->mLift->isBroken())
+			&& !(resource->mShuttle && resource->mShuttle->isBroken()) && !resource->mLiftMoving
 			&& resource->mLiftCurrentStop == stop
 			&& resource->mLiftStopPhase == LiftStopPhase::Boarding;
 	}

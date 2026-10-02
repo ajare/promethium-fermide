@@ -240,6 +240,8 @@ namespace core
 			std::vector<uint32_t> doorOpenStyles{};
 			// Per physical landing control, using the same fixed grid as doorOpenStyles.
 			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
+			// One authored condition for the complete coupled vehicle.
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateShuttleResult
@@ -2438,8 +2440,13 @@ namespace core
 		// never dirty the document or change its initial condition.
 		bool setLiftInitiallyBroken(TraversalResourceId lift, bool broken);
 		bool setLiftBroken(TraversalResourceId lift, bool broken);
-		std::optional<DeviceCondition> knownLiftCondition(TraversalResourceId resource,
+		bool setShuttleInitiallyBroken(TraversalResourceId shuttle, bool broken);
+		bool setShuttleBroken(TraversalResourceId shuttle, bool broken);
+		std::optional<DeviceCondition> knownTransportCondition(TraversalResourceId resource,
 			Agent const* agent, Sector const* observationSector) const;
+		std::optional<DeviceCondition> knownLiftCondition(TraversalResourceId resource,
+			Agent const* agent, Sector const* observationSector) const
+		{ return knownTransportCondition(resource, agent, observationSector); }
 		bool setDoorInitiallyBroken(TraversalResourceId door, bool broken);
 		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool setExtensibleInitiallyBroken(TraversalResourceId resource, bool broken);
