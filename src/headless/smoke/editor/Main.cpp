@@ -33,6 +33,7 @@ int main(int argc, char** argv)
 	behaviour_smoke::registerDeleteEditor(checks);
 	behaviour_smoke::registerSchemaReconciliationEditor(checks);
 	behaviour_smoke::registerWorkflowEditor(checks);
+	permission_smoke::registerLocationEditor(checks);
 	permission_smoke::registerDestinationEditor(checks);
 	permission_smoke::registerAccessEditor(checks);
 	permission_smoke::registerAdherenceEditor(checks);

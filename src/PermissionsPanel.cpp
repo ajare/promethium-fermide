@@ -9,6 +9,7 @@
 #include "imgui/imgui.h"
 #include "imgui/IconsFontAwesome5.h"
 #include "core/AccessPermission.h"
+#include "core/Log.h"
 #include "core/World.h"
 #include "core/Sector.h"
 #include "DocumentEdit.h"
@@ -133,6 +134,75 @@ bool commitManualDoorPermissionRequirement(shared_ptr<core::World> const& world,
 	});
 }
 
+bool commitLocationPermissionRequirement(shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, core::AccessPermissionId permission, bool required, string& diagnostic)
+{
+	return commit(world, diagnostic, [&]
+	{
+		if (!world->isLocationPermissionEligible(sectorIndex))
+			return world->setLocationPermissionRequirement(sectorIndex, {}, &diagnostic);
+		auto values = world->getLocationPermissionRequirement(sectorIndex);
+		auto found = find(values.begin(), values.end(), permission);
+		if (required && found == values.end()) values.push_back(permission);
+		else if (!required && found != values.end()) values.erase(found);
+		else return false;
+		return world->setLocationPermissionRequirement(sectorIndex, values, &diagnostic);
+	});
+}
+
+bool commitClearLocationPermissionRequirement(shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, string& diagnostic)
+{
+	return commit(world, diagnostic, [&]
+	{
+		if (!world->isLocationPermissionEligible(sectorIndex))
+			return world->setLocationPermissionRequirement(sectorIndex, {}, &diagnostic);
+		if (world->getLocationPermissionRequirement(sectorIndex).empty()) return false;
+		return world->setLocationPermissionRequirement(sectorIndex, {}, &diagnostic);
+	});
+}
+
+void renderLocationPermissionRequirements(shared_ptr<core::World> const& world, uint32_t sectorIndex)
+{
+	if (!world || !world->isLocationPermissionEligible(sectorIndex)) return;
+	auto required = asSet(world->getLocationPermissionRequirement(sectorIndex));
+	string summary;
+	for (auto id : required)
+	{
+		if (!summary.empty()) summary += ", ";
+		summary += world->getAccessPermissionName(id);
+	}
+	ImGui::TextUnformatted("Location permissions");
+	ImGui::TextWrapped("Required (all): %s", summary.empty() ? "None" : summary.c_str());
+	if (!ImGui::TreeNode("Required Access permissions")) return;
+	ImGui::TextWrapped("Every listed permission is required to enter or route through this Location, from direct or Permission set grants. Control operation requirements remain independent.");
+	ImGui::PushID("location-permissions");
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	for (auto id : world->getAccessPermissionIds())
+	{
+		ImGui::PushID(static_cast<int>(id.value));
+		bool selected = required.contains(id);
+		if (ImGui::Checkbox(world->getAccessPermissionName(id).c_str(), &selected))
+		{
+			string diagnostic;
+			if (!commitLocationPermissionRequirement(world, sectorIndex, id, selected, diagnostic)
+				&& !diagnostic.empty()) core::addLogMessage("Location permissions", 0, core::LogLevel::Error, diagnostic);
+		}
+		ImGui::PopID();
+	}
+	ImGui::BeginDisabled(required.empty());
+	if (ImGui::Button("Clear"))
+	{
+		string diagnostic;
+		commitClearLocationPermissionRequirement(world, sectorIndex, diagnostic);
+	}
+	ImGui::EndDisabled();
+	ImGui::EndDisabled();
+	if (!world->getAccessPermissionCount()) ImGui::TextDisabled("No Access permissions defined");
+	ImGui::PopID();
+	ImGui::TreePop();
+}
+
 bool commitLiftDestinationPermissionRequirement(shared_ptr<core::World> const& world,
 	uint32_t sectorIndex, uint32_t stopIndex, core::AccessPermissionId permission, bool required,
 	string& diagnostic, uint32_t objectIndex)
@@ -230,7 +300,7 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 3.0f);
 		ImGui::TableSetupColumn("Direct grants", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 		ImGui::TableSetupColumn("Permission sets", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-		ImGui::TableSetupColumn("Controls / Doors / Destinations", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+		ImGui::TableSetupColumn("Controls / Doors / Destinations / Locations", ImGuiTableColumnFlags_WidthStretch, 1.0f);
 		ImGui::TableSetupColumn("Delete", ImGuiTableColumnFlags_WidthStretch, 1.0f); ImGui::TableHeadersRow();
 		for (auto id : world->getAccessPermissionIds())
 		{
@@ -251,8 +321,8 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 			auto usage = world->getAccessPermissionUsage(id);
 			ImGui::TableNextColumn(); ImGui::Text("%u", usage.directAgentGrants);
 			ImGui::TableNextColumn(); ImGui::Text("%u", usage.permissionSetMemberships);
-			ImGui::TableNextColumn(); ImGui::Text("%u / %u / %u", usage.interactionPointRequirements,
-				usage.manualDoorRequirements, usage.liftDestinationRequirements);
+			ImGui::TableNextColumn(); ImGui::Text("%u / %u / %u / %u", usage.interactionPointRequirements,
+				usage.manualDoorRequirements, usage.liftDestinationRequirements, usage.locationRequirements);
 			ImGui::TableNextColumn(); if (ImGui::Button("Delete")) pendingDelete = id;
 			ImGui::PopID();
 		}
@@ -270,9 +340,9 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 		{
 			auto usage = world->getAccessPermissionUsage(pendingDelete);
 			ImGui::Text("Delete '%s'?", world->getAccessPermissionName(pendingDelete).c_str());
-			ImGui::Text("This clears %u direct Agent grants, membership in %u Permission sets, %u Interaction point requirements, %u manual Door requirements, and %u transport destination requirements.",
+			ImGui::Text("This clears %u direct Agent grants, membership in %u Permission sets, %u Interaction point requirements, %u manual Door requirements, %u transport destination requirements, and %u Location requirements.",
 				usage.directAgentGrants, usage.permissionSetMemberships,
-				usage.interactionPointRequirements, usage.manualDoorRequirements, usage.liftDestinationRequirements);
+				usage.interactionPointRequirements, usage.manualDoorRequirements, usage.liftDestinationRequirements, usage.locationRequirements);
 			if (ImGui::Button("Delete")) { string diagnostic; auto deleted = pendingDelete; commitAccessPermissionDelete(world, pendingDelete, diagnostic); editedNames.erase(deleted.value); pendingDelete = {}; ImGui::CloseCurrentPopup(); }
 			ImGui::SameLine(); if (ImGui::Button("Cancel")) { pendingDelete = {}; ImGui::CloseCurrentPopup(); }
 			ImGui::EndPopup();

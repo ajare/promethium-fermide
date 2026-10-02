@@ -50,6 +50,8 @@ A path is route intent, not movement authority. Before crossing an edge, an agen
 
 A granted permit is short-lived and belongs to one request and one agent. Crossing occurs only in the commit phase while that permit is live. Cancellation, timeout, disablement, replanning, and entity removal release associated queue positions, reservations, leases, and permits. Each read-only traversal-request snapshot includes a stable diagnostic that explains its current wait, active permit, denial, cancellation, or completed commit without requiring a UI to infer protocol internals.
 
+Rooms and Corridors can independently constrain route choice with all-of Access permission requirements. See [static Location permissions (#273)](location-permissions.md) for authoring, persistence, boundary direction, and the runtime/lifecycle follow-up scope.
+
 ## Controlled thresholds
 
 Door and window-threshold resources own their crossing queues. Bulkhead Door resources queue Agents while closed or opening, but a fully open Bulkhead Door becomes an unconstrained bidirectional passage and releases every waiter concurrently. Door resources also coordinate preparation with the physical door and its activation mode:

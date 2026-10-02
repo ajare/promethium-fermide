@@ -9909,6 +9909,76 @@ namespace core
 		return true;
 	}
 
+	bool World::isLocationPermissionEligible(uint32_t sectorIndex) const
+	{
+		return sectorIndex < mSectors.size()
+			&& mSectors[sectorIndex]->getType() == SectorType::Location;
+	}
+
+	World::ConstructionRecord const* World::findLocationPermissionRecord(uint32_t sectorIndex) const
+	{
+		uint32_t index = 0;
+		for (auto const& record : mConstructionRecords)
+		{
+			if (!constructionTypeCreatesSector(record.type)) continue;
+			if (index++ == sectorIndex)
+				return record.type == ConstructionType::Room || record.type == ConstructionType::Corridor
+					? &record : nullptr;
+		}
+		return nullptr;
+	}
+
+	vector<AccessPermissionId> World::getLocationPermissionRequirement(uint32_t sectorIndex) const
+	{
+		if (sectorIndex >= mSectors.size()) throw invalid_argument("The selected Location does not exist");
+		if (!isLocationPermissionEligible(sectorIndex))
+			throw invalid_argument("Location permission requirements are supported only by Rooms and Corridors");
+		vector<AccessPermissionId> result;
+		auto const& requirement = static_cast<Location const&>(*mSectors[sectorIndex]).getPermissionRequirement();
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (requirement.test(bit)) result.push_back(AccessPermissionId{ bit + 1 });
+		return result;
+	}
+
+	bool World::setLocationPermissionRequirement(uint32_t sectorIndex,
+		vector<AccessPermissionId> const& permissions, string* diagnostic)
+	{
+		auto reject = [&](string text) { if (diagnostic) *diagnostic = std::move(text); return false; };
+		if (!mSimulationPaused) return reject("Location permissions can only be edited while the simulation is paused");
+		if (sectorIndex >= mSectors.size()) return reject("The selected Location does not exist");
+		if (!isLocationPermissionEligible(sectorIndex))
+			return reject("Location permission requirements are supported only by Rooms and Corridors");
+		bitset<256> next;
+		for (auto permission : permissions)
+		{
+			auto found = lookupAccessPermission(permission);
+			if (!found) return reject(found.diagnostic);
+			if (next.test(permission.value - 1)) return reject("Duplicate Access permission in Location requirement");
+			next.set(permission.value - 1);
+		}
+		auto record = findLocationPermissionRecord(sectorIndex);
+		if (!record) return reject("The selected Location has no authored definition");
+		auto& location = static_cast<Location&>(*mSectors[sectorIndex]);
+		if (location.mPermissionRequirement != next)
+		{
+			auto& authored = mConstructionRecords[record - mConstructionRecords.data()].locationPermissionRequirement;
+			authored.clear();
+			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+				if (next.test(bit)) authored.push_back(static_cast<uint32_t>(bit + 1));
+			location.mPermissionRequirement = next;
+			modify();
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::canAgentAccessLocation(Sector const& sector, Agent const& agent) const
+	{
+		if (sector.getType() != SectorType::Location) return true;
+		auto const& requirement = static_cast<Location const&>(sector).getPermissionRequirement();
+		return requirement.none() || (requirement & ~effectiveAccessGrants(agent)).none();
+	}
+
 	World::ConstructionRecord const* World::findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex) const
 	{
 		if (objectIndex != ~0u)
@@ -10025,9 +10095,13 @@ namespace core
 				++usage.manualDoorRequirements;
 		}
 		for (auto const& record : mConstructionRecords)
+		{
+			if (find(record.locationPermissionRequirement.begin(), record.locationPermissionRequirement.end(), id.value)
+				!= record.locationPermissionRequirement.end()) ++usage.locationRequirements;
 			for (auto const& requirement : record.destinationPermissionRequirements)
 				if (find(requirement.begin(), requirement.end(), id.value) != requirement.end())
 					++usage.liftDestinationRequirements;
+		}
 		return usage;
 	}
 
@@ -10056,8 +10130,13 @@ namespace core
 			(void)resourceId;
 			if (resource->mDoor) resource->mDoor->mPermissionRequirement.reset(bit);
 		}
+		for (auto const& sector : mSectors)
+			if (sector->getType() == SectorType::Location)
+				static_cast<Location&>(*sector).mPermissionRequirement.reset(bit);
 		for (auto& record : mConstructionRecords)
 		{
+			auto& locationRequirement = record.locationPermissionRequirement;
+			locationRequirement.erase(remove(locationRequirement.begin(), locationRequirement.end(), id.value), locationRequirement.end());
 			if (record.type == ConstructionType::Door)
 				record.values.erase(remove(record.values.begin(), record.values.end(), id.value),
 					record.values.end());

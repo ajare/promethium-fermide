@@ -3,6 +3,7 @@
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks;
+	permission_smoke::registerLocations(checks);
 	permission_smoke::registerAccess(checks);
 	permission_smoke::registerDestinations(checks);
 	permission_smoke::registerAdherence(checks);

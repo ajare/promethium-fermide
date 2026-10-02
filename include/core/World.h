@@ -860,6 +860,8 @@ namespace core
 			std::vector<std::vector<uint32_t>> landingControlPermissionRequirements{};
 			// Lift, Platform lift, and Shuttle requirements, parallel to values (Stops).
 			std::vector<std::vector<uint32_t>> destinationPermissionRequirements{};
+			// Room/Corridor: all-of passage requirement, independent of controls.
+			std::vector<uint32_t> locationPermissionRequirement{};
 			void retainDestinationRequirements(std::vector<uint32_t> const& stops);
 			// Marker / RemoveMarker: stable World-local identity. Marker also
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
@@ -867,6 +869,7 @@ namespace core
 			MarkerId markerId{};
 		};
 
+		ConstructionRecord const* findLocationPermissionRecord(uint32_t sectorIndex) const;
 		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
 		std::vector<ConstructionRecord> mConstructionRecords;
@@ -2324,6 +2327,7 @@ namespace core
 			uint32_t interactionPointRequirements{ 0 };
 			uint32_t manualDoorRequirements{ 0 };
 			uint32_t liftDestinationRequirements{ 0 }; // Includes Platform lifts and Shuttles.
+			uint32_t locationRequirements{ 0 };
 		};
 
 		uint32_t getAccessPermissionCount() const;
@@ -2381,6 +2385,14 @@ namespace core
 		std::vector<PermissionSetId> getAgentPermissionSetAssignments(AgentId agent) const;
 		bool setAgentPermissionSetAssignment(AgentId agent, PermissionSetId set,
 			bool assigned, std::string* diagnostic = nullptr);
+
+		// Static Location authorization (#273): authoring is paused-only; queries
+		// remain available for inspection while running. Empty means unrestricted.
+		bool isLocationPermissionEligible(uint32_t sectorIndex) const;
+		std::vector<AccessPermissionId> getLocationPermissionRequirement(uint32_t sectorIndex) const;
+		bool setLocationPermissionRequirement(uint32_t sectorIndex,
+			std::vector<AccessPermissionId> const& permissions, std::string* diagnostic = nullptr);
+		bool canAgentAccessLocation(Sector const& sector, Agent const& agent) const;
 
 		bool isInteractionPointPermissionEligible(InteractionPointId point) const;
 		// Shared transport destination API (historical Lift names). Omit objectIndex

@@ -6635,6 +6635,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		switch (gSelectedSector->getType())
 		{
 		case core::SectorType::Location:
+			renderLocationPermissionRequirements(world, gSelectedSector->getIndex());
 			renderLocationWallEditor(world, gSelectedSector);
 			break;
 

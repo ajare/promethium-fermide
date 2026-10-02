@@ -95,6 +95,7 @@ namespace core
 		uint64_t mScratchAllocationCount{ 0 };
 		uint64_t mDirectedFactsBuildCount{ 0 };
 		bool mTopologyCaptured = false;
+		Graph const* mGraph = nullptr; // Borrowed from the owner for this decision.
 		std::vector<size_t> mInputArcs;
 		std::vector<RouteTraversalInputs> mInputs;
 		std::vector<uint32_t> mCostGenerations;

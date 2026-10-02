@@ -108,6 +108,7 @@ namespace core
 	{
 		auto const started = std::chrono::steady_clock::now();
 		captureTopology(graph);
+		mGraph = &graph;
 		mDecision.emplace(RouteDecisionContext{ input.agent, input.profile, input.policy,
 			input.observationSector, input.walkSpeed, input.world, input.climbSpeed,
 			input.allowFallbackMobility, input.perceptionKey, input.observationEpoch,
@@ -149,6 +150,26 @@ namespace core
 		auto const& arc = directedArcs.at(index);
 		auto const& context = *mDecision;
 		DirectedTraversalFacts facts;
+		// Location passage is a hard, destination-owned constraint, including
+		// ordinary floor arcs (which otherwise bypass traversal-input capture).
+		// It never depends on Permission adherence or a device's usable state.
+		if (context.agent && context.world)
+		{
+			auto sector = mGraph->getVertices()[arc.targetSlot]->getSector();
+			if (sector && !context.world->canAgentAccessLocation(*sector, *context.agent))
+			{
+				// Walking to an exit may require source-owned waypoints. Admit
+				// those only from within the occupied source Location; an arc
+				// from outside can never re-enter it. Protected destinations are
+				// rejected separately, even when they share the origin Location.
+				auto source = (*arc.edge)->getOtherVertex(mGraph->getVertices()[arc.targetSlot]);
+				if (sector.get() != context.observationSector || source->getSector() != sector)
+				{
+					facts.exclusionReason = RouteExclusionReason::Permission;
+					return facts;
+				}
+			}
+		}
 		if (arc.inputIndex == std::numeric_limits<size_t>::max())
 		{
 			facts.feasible = true;
@@ -489,6 +510,11 @@ namespace core
 			node_type source, node_type target)
 		{
 			if (!graph || (!agent && !source)) return nullptr;
+			if (agent && graph->getWorld() && target)
+			{
+				auto sector = target->getSector();
+				if (sector && !graph->getWorld()->canAgentAccessLocation(*sector, *agent)) return nullptr;
+			}
 			auto profile = graph->getRouteChoicePolicy().baselineProfile;
 			// Resolve Agent-authored preferences once for this immutable search
 			// context. A null-Agent editor preview deliberately keeps the explicit

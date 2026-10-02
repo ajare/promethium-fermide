@@ -32,6 +32,14 @@ function(invoke status expected)
 endfunction()
 
 set(core_names
+    locationAuthoringRoom
+    locationAuthoringCorridor
+    locationRoutingRoom
+    locationRoutingCorridor
+    locationAlternativeRoom
+    locationAlternativeCorridor
+    locationBoundaryRoom
+    locationBoundaryCorridor
     authorizationAndPersistence
     permissionSets
     manualDoorAuthorization

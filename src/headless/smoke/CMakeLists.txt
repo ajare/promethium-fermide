@@ -212,6 +212,7 @@ pf_add_smoke_module(pf-smoke-permissions
     NAME permissions
     SOURCES
         permissions/Main.cpp
+        permissions/Locations.cpp
         permissions/Access.cpp
         permissions/Destinations.cpp
         permissions/Adherence.cpp
@@ -416,6 +417,7 @@ pf_add_smoke_module(pf-smoke-editor
         behaviours/DeleteEditor.cpp
         behaviours/SchemaReconciliationEditor.cpp
         behaviours/WorkflowEditor.cpp
+        permissions/LocationsEditor.cpp
         permissions/DestinationEditor.cpp
         permissions/AccessEditor.cpp
         permissions/AdherenceEditor.cpp

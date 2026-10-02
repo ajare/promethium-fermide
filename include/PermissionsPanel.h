@@ -32,6 +32,12 @@ bool commitManualDoorPermissionRequirement(std::shared_ptr<core::World> const& w
 	core::TraversalResourceId door, core::AccessPermissionId permission, bool required,
 	std::string& diagnostic);
 
+bool commitLocationPermissionRequirement(std::shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, core::AccessPermissionId permission, bool required, std::string& diagnostic);
+bool commitClearLocationPermissionRequirement(std::shared_ptr<core::World> const& world,
+	uint32_t sectorIndex, std::string& diagnostic);
+void renderLocationPermissionRequirements(std::shared_ptr<core::World> const& world, uint32_t sectorIndex);
+
 void renderPermissionsPanel(std::shared_ptr<core::World> const& world);
 void renderAgentAccessPermissions(std::shared_ptr<core::World> const& world, core::AgentId agent);
 void renderAgentRuntimeProperties(std::shared_ptr<core::World> const& world, core::AgentId agent);

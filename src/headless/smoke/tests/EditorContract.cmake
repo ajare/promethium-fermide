@@ -136,6 +136,8 @@ set(editor_names
     behaviours/reconcilesAndMigratesAcrossLoadedWorlds
     behaviours/persistenceHistoryMigrationAndReplacementAreAtomic
     behaviours/realPanelsRenderPausedRunningAndDiagnosticStates
+    permissions/locationSelectionRoom
+    permissions/locationSelectionCorridor
     permissions/destinationAuthoringLift
     permissions/destinationAuthoringPlatform
     permissions/destinationAuthoringShuttle

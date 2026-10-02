@@ -264,6 +264,12 @@ namespace core
 		};
 
 		serializer.writeString("type", constructionTypeName(record.type));
+		if (!record.locationPermissionRequirement.empty())
+		{
+			serializer.beginArray("locationPermissionRequirement", false);
+			for (auto id : record.locationPermissionRequirement) serializer.writeUint32("", id);
+			serializer.endArray();
+		}
 		switch (record.type)
 		{
 		case ConstructionType::Corridor:
@@ -465,6 +471,7 @@ namespace core
 	void World::serializeImpl(Serializer& serializer, SerializationWorkData& workData) const
 	{
 		serializer.beginMap("world");
+		// Version 32 adds static Room/Corridor passage requirements.
 		// Version 30 adds authoring-only ordinary Lift destination requirements.
 		// Version 28 gives transport landing controls stable per-landing requirements.
 		// Version 27 gives extensible Ladder and Force Bridge controls stable requirements.
@@ -496,7 +503,7 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 31);
+		serializer.writeUint32("version", 32);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -814,6 +821,14 @@ namespace core
 		};
 
 		record.type = constructionTypeFromName(serializer.readString("type"));
+		if (version >= 32 && serializer.hasField("locationPermissionRequirement"))
+		{
+			if (record.type != ConstructionType::Room && record.type != ConstructionType::Corridor)
+				throw SerializationException("Location permission requirements are supported only by Rooms and Corridors");
+			serializer.beginArray("locationPermissionRequirement");
+			while (serializer.nextArrayItem()) record.locationPermissionRequirement.push_back(serializer.readUint32(""));
+			serializer.endArray();
+		}
 		switch (record.type)
 		{
 		case ConstructionType::Corridor:
@@ -1050,7 +1065,8 @@ namespace core
 		// Version 29 adds sampled and individual Route planning times.
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
-		if (version < 1 || version > 31)
+		// Version 32 adds static Room/Corridor passage requirements (#273).
+		if (version < 1 || version > 32)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1404,6 +1420,15 @@ namespace core
 
 		for (auto const& record : records)
 		{
+			bitset<256> locationPermissions;
+			for (auto id : record.locationPermissionRequirement)
+			{
+				if (id == 0 || id > AccessPermission::Capacity || !accessPermissions[id - 1])
+					throw SerializationException("Serialized Location permission requirement is dangling");
+				if (locationPermissions.test(id - 1))
+					throw SerializationException("Serialized Location permission requirement contains a duplicate");
+				locationPermissions.set(id - 1);
+			}
 			if (record.type == ConstructionType::Door && !record.values.empty())
 			{
 				if (record.i != static_cast<int32_t>(DoorActivationMode::Manual)
@@ -2153,11 +2178,15 @@ namespace core
 		switch (record.type)
 		{
 		case ConstructionType::Corridor:
-			addCorridor(record.layer == ~0u ? 0u : record.layer, record.a, record.b, record.c, record.d);
-			break;
 		case ConstructionType::Room:
-			addRoom(record.name, record.a, record.b, record.c, record.d, record.e, record.x);
+		{
+			auto index = record.type == ConstructionType::Corridor
+				? addCorridor(record.layer == ~0u ? 0u : record.layer, record.a, record.b, record.c, record.d)
+				: addRoom(record.name, record.a, record.b, record.c, record.d, record.e, record.x);
+			auto& location = static_cast<Location&>(*mSectors[index]);
+			for (auto id : record.locationPermissionRequirement) location.mPermissionRequirement.set(id - 1);
 			break;
+		}
 		case ConstructionType::Ladder:
 		{
 			CreateLadderOptions options{ record.c, record.p, record.q, record.d };
