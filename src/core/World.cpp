@@ -9966,6 +9966,9 @@ namespace core
 			for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
 				if (next.test(bit)) authored.push_back(static_cast<uint32_t>(bit + 1));
 			location.mPermissionRequirement = next;
+			for (auto const& [id, agent] : mAgents.entries())
+				if (!canAgentAccessLocation(location, *agent) && agentPathEntersLocation(*agent, location))
+					replanAgentAfterAuthorizationRefusal(id);
 			modify();
 		}
 		if (diagnostic) diagnostic->clear();
@@ -11028,9 +11031,50 @@ namespace core
 		}
 	}
 
+	bool World::agentPathEntersLocation(Agent const& agent, Sector const& location) const
+	{
+		auto path = agent.mPath.path;
+		auto fromNode = agent.mPath.targetNode;
+		if (!path)
+			if (auto goal = mMovementGoals.find(getAgentId(&agent)); goal != mMovementGoals.end())
+			{
+				path = goal->second.retainedPath;
+				fromNode = goal->second.retainedFromNode;
+			}
+		if (!path) return false;
+		auto source = agent.getSector();
+		// Authorization changes do not revoke an entry already underway. Its
+		// destination becomes the source of the remaining, uncommitted suffix.
+		if (agent.mTraversalTask && agent.mTraversalTask->permit)
+		{
+			source = agent.mTraversalTask->destinationVertex->getSector().get();
+			fromNode += agent.mTraversalTask->pathNodesConsumed;
+		}
+		for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
+		{
+			auto target = path->nodes[i].targetVertex->getSector().get();
+			if (target == &location && source != target) return true;
+			source = target;
+		}
+		return false;
+	}
+
 	void World::reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
 		bool gained)
 	{
+		auto const bit = changed.value - 1;
+		for (auto const& sector : mSectors)
+		{
+			if (sector->getType() != SectorType::Location
+				|| !static_cast<Location const&>(*sector).getPermissionRequirement().test(bit)) continue;
+			if (gained)
+			{
+				if (canAgentAccessLocation(*sector, agent))
+					beginVoluntaryRoutePlanning(getAgentId(&agent));
+			}
+			else if (agentPathEntersLocation(agent, *sector))
+				replanAgentAfterAuthorizationRefusal(getAgentId(&agent));
+		}
 		auto path = agent.mPath.path;
 		auto fromNode = agent.mPath.targetNode;
 		if (!path && !gained)
@@ -11041,7 +11085,6 @@ namespace core
 			}
 		if (!path || path->nodes.empty()
 			|| (gained && agent.mTraversalTask && agent.mTraversalTask->permit)) return;
-		auto const bit = changed.value - 1;
 		auto resourceUsesPermission = [&](TraversalResource const& resource)
 		{
 			if (resource.mDoor && resource.mDoor->mPermissionRequirement.test(bit)) return true;

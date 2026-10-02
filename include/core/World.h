@@ -708,6 +708,7 @@ namespace core
 		bool agentSatisfiesDoorPermission(Door const& door, Agent const& agent) const;
 		void replanAgentsAffectedByControlRequirement(TraversalResourceId resource,
 			std::bitset<256> const& previous, std::bitset<256> const& next);
+		bool agentPathEntersLocation(Agent const& agent, Sector const& location) const;
 		void reconsiderAgentAuthorizationPath(Agent& agent, AccessPermissionId changed,
 			bool gained);
 

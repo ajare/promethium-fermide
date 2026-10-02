@@ -1469,7 +1469,11 @@ namespace core
 		auto const positionB = nodeB.targetVertex->getPosition();
 		auto const agentPosition = getGlobalPosition();
 		auto const layer = getSector()->getLayerIndex();
-		if (nodeA.targetVertex->getSector()->getLayerIndex() != layer
+		// A skipped waypoint must not carry a stale Path past the entry gate of
+		// another, currently unauthorized Location.
+		if ((mWorld && nodeA.targetVertex->getSector() != nodeB.targetVertex->getSector()
+				&& !mWorld->canAgentAccessLocation(*nodeB.targetVertex->getSector(), *this))
+			|| nodeA.targetVertex->getSector()->getLayerIndex() != layer
 			|| nodeB.targetVertex->getSector()->getLayerIndex() != layer
 			|| abs(positionA.y - agentPosition.y) > 0.001f
 			|| abs(positionA.y - positionB.y) > 0.001f
@@ -1564,6 +1568,16 @@ namespace core
 
 		auto requestLookup = mWorld->lookupTraversalRequest(mTraversalTask->request);
 		if (!requestLookup) return;
+		// A selected (or reinstalled stale) Path is intent, not authorization.
+		// Recheck at entry start, even if another queue allocation already granted
+		// this request. Underway entries never return to this allocation state.
+		auto destinationSector = mTraversalTask->destinationVertex->getSector();
+		if (destinationSector.get() != getSector()
+			&& !mWorld->canAgentAccessLocation(*destinationSector, *this))
+		{
+			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+			return;
+		}
 		// A Path may predate an authorization change. Repeat the manual Door
 		// opening check at the threshold, while still allowing passage through a
 		// Door which is locally open and needs no operation.

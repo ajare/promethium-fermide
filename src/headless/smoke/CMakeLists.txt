@@ -213,6 +213,7 @@ pf_add_smoke_module(pf-smoke-permissions
     SOURCES
         permissions/Main.cpp
         permissions/Locations.cpp
+        permissions/LocationChanges.cpp
         permissions/Access.cpp
         permissions/Destinations.cpp
         permissions/Adherence.cpp

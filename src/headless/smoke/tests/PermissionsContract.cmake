@@ -40,6 +40,16 @@ set(core_names
     locationAlternativeCorridor
     locationBoundaryRoom
     locationBoundaryCorridor
+    locationLossesRoom
+    locationGainsRoom
+    locationRequirementChangesRoom
+    locationStaleEntryRoom
+    locationResetAndUnrelatedRoom
+    locationLossesCorridor
+    locationGainsCorridor
+    locationRequirementChangesCorridor
+    locationStaleEntryCorridor
+    locationResetAndUnrelatedCorridor
     authorizationAndPersistence
     permissionSets
     manualDoorAuthorization

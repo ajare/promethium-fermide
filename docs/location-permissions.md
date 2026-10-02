@@ -1,4 +1,4 @@
-# Static Location permission requirements (#273)
+# Location permission requirements (#273, #274)
 
 Rooms and Corridors support a World-owned, all-of Location permission requirement.
 New Locations, an empty requirement, and older Worlds without an authored requirement
@@ -49,14 +49,36 @@ cannot bypass a Location requirement. Conversely, Location authorization never
 substitutes for control-operation authorization, Mobility, physical availability,
 queues, capacity, reservations, or safety. Those existing checks still apply.
 
+## Changing authorization (#274)
+
+Losing a relevant effective grant hard-invalidates a Path that still needs to enter
+the protected Location. Current direct grants and current Permission set assignments
+are authoritative, including runtime overlays and changes to set membership. An
+overlapping grant source preserves authorization until the final source is lost.
+Adding or tightening an unsatisfied authored Location requirement has the same
+mandatory Route planning behavior; satisfied and unrelated edits preserve valid Paths.
+
+Gaining all required authorization for a Location starts voluntary Route planning.
+The retained Path is replaced only when the improvement satisfies Route persistence.
+Partial all-of gains, redundant sources and unrelated changes do not disturb a valid
+Path. Repeated triggers do not restart an episode; invalidating a privately retained
+Path upgrades that episode without resampling its interval. At expiry an authorized
+alternative is selected, or established `Unreachable` Route loss is published once.
+
+Immediately before entry starts, movement rechecks current effective grants against
+the entered Location, even for a stale Path or a queue-granted request. This hard gate
+applies equally to open-wall and Door boundaries, independent of Permission adherence,
+Mobility, controls, physical availability, queues, capacity and safety. It does not
+interrupt a crossing already underway or require permission merely to exit.
+Runtime grant changes do not rewrite authored authorization; Reset restores authored
+grants and reconstructed Paths using the existing simulation semantics.
+
 ## Scope and verification
 
-This is the **static-authorization slice**: grants and requirements remain stable
-through the journey. Reading current effective grants at initial route choice does
-not implement runtime grant/requirement-change reactions, entry-time lifecycle
-hardening, or a general unauthorized-occupancy policy; those are follow-up tickets
-under #272. In particular, do not rely on this slice to revoke an existing Path or
-interrupt an underway entry after an authorization change.
+General unauthorized-occupancy/placement policy, including mandatory replanning after
+completing an already-underway entry into a now-unauthorized Location, belongs to #276.
+Location-edit and permission-maintenance lifecycle hardening belongs to #275. Neither
+follow-up is implemented by this runtime change slice.
 
 Headless coverage is owned by `pf-smoke-permissions` (`locationAuthoring*`,
 `locationRouting*`, `locationAlternative*`, `locationBoundary*`) and `pf-smoke-editor`
@@ -64,3 +86,12 @@ Headless coverage is owned by `pf-smoke-permissions` (`locationAuthoring*`,
 The editor checks drive the production Selection checklist with CPU-only ImGui
 mouse events and restore real document-history snapshots; they open no desktop
 window, native dialog, or clipboard integration.
+
+`LocationChanges.cpp` adds `locationLosses*`, `locationGains*`,
+`locationRequirementChanges*`, `locationStaleEntry*` and `locationResetAndUnrelated*`
+checks for both Rooms and Corridors. Run focused checks with
+`pf-smoke-permissions --check locationStaleEntryRoom`, or the entire Permissions
+module with `ctest --test-dir build-linux -R '^smoke-permissions' --output-on-failure`.
+These checks assert visible Paths, stationary planning/expiry, actual entry and
+movement, Reset, and exactly-once simulation events; no private invalidation helper
+is tested directly.
