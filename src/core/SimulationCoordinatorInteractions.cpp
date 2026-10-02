@@ -194,7 +194,7 @@ namespace core
 			: command.type == DeviceCommandType::SelectLiftDestination ? "Select lift destination"
 			: command.type == DeviceCommandType::CallShuttle ? "Call shuttle"
 			: command.type == DeviceCommandType::SelectShuttleDestination ? "Select shuttle destination"
-				: "Device command";
+				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock" : "Device command";
 		if (!missing.empty())
 		{
 			name += ": missing Access permissions";
@@ -202,8 +202,6 @@ namespace core
 		}
 		auto id = mWorld.mDeviceOperations.add(unique_ptr<DeviceOperation>(new DeviceOperation(name, requester, command)));
 		if (broken) mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Failed;
-		if (command.type == DeviceCommandType::RequestAirlock)
-			mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Rejected;
 		if (!missing.empty())
 		{
 			auto operation = mWorld.mDeviceOperations.find(id);
@@ -225,9 +223,6 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
-		// #322 authors controls, not journeys. Refuse before creating any work.
-		if (point && any_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
-			{ return binding.command.type == DeviceCommandType::RequestAirlock; })) return {};
 		// A deactivated Agent is not simulated (#118), so it cannot take on new
 		// physical interaction work: the request is refused outright rather than
 		// parked, so it can never claim a place in the point's queue (#192).
@@ -595,6 +590,11 @@ namespace core
 				auto sector = mWorld.mSectors[(size_t)operation->mCommand.target.value - 1];
 				bool succeeded = operation->mCommand.desiredState ? sector->lightsOn() : sector->lightsOff();
 				operation->mState = succeeded ? DeviceOperationState::Succeeded : DeviceOperationState::Failed;
+			}
+			else if (operation->mCommand.type == DeviceCommandType::RequestAirlock)
+			{
+				operation->mState = acceptAirlockCommand(operation->mCommand)
+					? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
 			}
 			else if (operation->mCommand.type == DeviceCommandType::SetExtendedState)
 			{

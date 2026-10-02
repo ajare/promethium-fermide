@@ -98,6 +98,13 @@ namespace core
 
 	void Door::update(float frameTime)
 	{
+		// Airlock Doors are shared by two Sector object lists. Only their
+		// coordinator advances them, exactly once per simulated tick.
+		if (!mAirlockOwned) advanceCoordinatedMotion(frameTime);
+	}
+
+	void Door::advanceCoordinatedMotion(float frameTime)
+	{
 		if (mBroken) return;
 		if (isOpening())
 		{

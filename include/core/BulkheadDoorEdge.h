@@ -12,13 +12,15 @@ namespace core
 	{
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<BulkheadDoor> mDoor;
+		std::shared_ptr<class AirlockTransit> mAirlock;
 
 	public:
 
 		// This is meant to be called internally to make a copy.  Why must it be public?
 		BulkheadDoorEdge(uint32_t id, std::shared_ptr<BulkheadDoor> door);
 
-		BulkheadDoorEdge(std::shared_ptr<BulkheadDoor> door);
+		BulkheadDoorEdge(std::shared_ptr<BulkheadDoor> door,
+			std::shared_ptr<class AirlockTransit> airlock = {});
 
 		[[nodiscard]] std::shared_ptr<Edge> copyWithoutVertices() override;
 

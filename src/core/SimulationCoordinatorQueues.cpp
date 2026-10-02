@@ -63,7 +63,7 @@ namespace core
 		{
 			if (resource->mExtensible && resource->mExtensionRequestLeases.insert(id).second)
 				resource->mExtensible->acquireExtensionLease();
-			if ((resource->mDoor && !resource->mLiftCoordinator) || resource->mForceBridge)
+			if ((resource->mDoor && !resource->mLiftCoordinator) || resource->mForceBridge || resource->mAirlock)
 				attachQueueTicket(id, *resource);
 			else if ((resource->mLadder || resource->mStairwell)
 				&& isLadderAdmission(*request, *resource))
@@ -127,7 +127,7 @@ namespace core
 		if (!edge || movementDistance < 0.0f || !agent.getSector()) return false;
 		auto resource = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
 		if (!resource || (!resource->mDoor && !resource->mLadder && !resource->mForceBridge
-			&& !resource->mOpenPlatformLift)) return false;
+			&& !resource->mOpenPlatformLift && !resource->mAirlock)) return false;
 
 		auto const sourceSector = SectorId{ (uint64_t)agent.getSector()->getIndex() + 1 };
 		QueueLane const* lane = nullptr;
@@ -610,7 +610,16 @@ namespace core
 		request->mPermit = {};
 		request->mState = TraversalRequestState::Pending;
 		request->mFailureReason = TraversalFailureReason::PermitExpired;
-		if (auto resource = mWorld.mTraversalResources.find(request->mResource);
+		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource && resource->mAirlock)
+		{
+			for (auto& owner : resource->mCrossingOwners) if (owner == requestId) owner = {};
+			for (auto& owner : resource->mAdmissionReservations) if (owner == requestId) owner = {};
+			request->mCapacityPosition = ~0u;
+			request->mCrossingLane = ~0u;
+			request->mPreparationRequested = false;
+			refreshQueuePositions(*resource);
+		}
+		else if (auto resource = mWorld.mTraversalResources.find(request->mResource);
 			resource && (resource->mLadder || resource->mStairwell))
 		{
 			if (isLadderAdmission(*request, *resource))

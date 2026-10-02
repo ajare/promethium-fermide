@@ -6,6 +6,8 @@
 #include "core/BulkheadDoorEdge.h"
 #include "core/Vertex.h"
 #include "core/Agent.h"
+#include "core/AirlockTransit.h"
+#include "core/RouteTraversalInputs.h"
 #include "core/Exceptions.h"
 
 
@@ -21,9 +23,9 @@ namespace core
 	Implementation of Edge for the Vertices on either side of a BulkheadDoor.
 	*/
 
-	BulkheadDoorEdge::BulkheadDoorEdge(shared_ptr<BulkheadDoor> door)
+	BulkheadDoorEdge::BulkheadDoorEdge(shared_ptr<BulkheadDoor> door, shared_ptr<AirlockTransit> airlock)
 		: Edge(EdgeType::BulkheadDoor)
-		, mDoor(door)
+		, mDoor(door), mAirlock(std::move(airlock))
 	{
 	}
 
@@ -35,7 +37,9 @@ namespace core
 
 	shared_ptr<Edge> BulkheadDoorEdge::copyWithoutVertices()
 	{
-		return make_shared<BulkheadDoorEdge>(getId(), mDoor);
+		auto copy = make_shared<BulkheadDoorEdge>(getId(), mDoor);
+		copy->mAirlock = mAirlock;
+		return copy;
 	}
 
 	string BulkheadDoorEdge::getDescription() const
@@ -61,6 +65,7 @@ namespace core
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
 		auto const distance = getLength();
+		if (mAirlock) return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
 		return thresholdRouteFacts(*this, *mDoor, target, context,
 			distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed,
 			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
@@ -68,12 +73,12 @@ namespace core
 
 	bool BulkheadDoorEdge::requiresButton() const
 	{
-		return mDoor->getActivationMode() == DoorActivationMode::RemoteControlled;
+		return mAirlock || mDoor->getActivationMode() == DoorActivationMode::RemoteControlled;
 	}
 
 	TraversalResourceId BulkheadDoorEdge::getTraversalResourceId() const
 	{
-		return mDoor->getTraversalResourceId();
+		return mAirlock ? mAirlock->getTraversalResourceId() : mDoor->getTraversalResourceId();
 	}
 
 } // core

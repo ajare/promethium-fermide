@@ -4,6 +4,8 @@
 #include "UISettings.h"
 #include "core/AirlockTransit.h"
 #include "core/World.h"
+#include "core/Graph.h"
+#include "core/Agent.h"
 #include <set>
 
 extern UISettings gUISettings;
@@ -47,6 +49,35 @@ namespace
 			auto line = std::get_if<WorldDrawList::Line>(&command);
 			return line && line->colour == ImU32(ImColor(255, 255, 0)) && line->thickness == 3;
 		}), "Selected Airlock missing highlight");
+		gSelectedSector.reset();
+		// Observe an occupied closed-door cycle through production movement and
+		// inspect the normal renderer's command stream, not a test-only state hook.
+		world->pauseSimulation();
+		auto marker = world->addSectorMarker(1, 0, 1.5f);
+		world->finishBuild(); require(world->resumeSimulation(), "Render journey resume refused");
+		auto id = world->createAgent("Visible occupant", 0, 0, 0.5f);
+		auto agent = world->lookupAgent(id).entity;
+		auto path = world->getGraph()->calculatePath(agent, world->getGraph()->getVertexForObject(marker.sector->getObject(marker.index)));
+		require(bool(path), "Render journey route unavailable"); agent->setPath(path, true);
+		bool cycling = false;
+		for (uint32_t tick = 0; tick < 1200; ++tick)
+		{
+			world->advanceTick();
+			if (!world->getSimulationSnapshot().airlocks[0].cycleComplete
+				&& !world->getSimulationSnapshot().airlocks[0].occupants.empty()) { cycling = true; break; }
+		}
+		require(cycling, "Renderer fixture never boarded/cycled");
+		WorldDrawList occupied({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &occupied);
+		require(std::any_of(occupied.commands().begin(), occupied.commands().end(), [](auto const& command) {
+			auto text = std::get_if<WorldDrawList::Text>(&command);
+			return text && text->value == "3.0 s";
+		}), "Renderer missing simulated seconds countdown");
+		auto colour = agentRenderColour(*agent, false);
+		require(std::any_of(occupied.commands().begin(), occupied.commands().end(), [&](auto const& command) {
+			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			auto text = std::get_if<WorldDrawList::Text>(&command);
+			return (triangle && triangle->colour == colour) || (text && text->colour == colour);
+		}), "Renderer missing chamber occupant");
 		ImGui::EndFrame();
 	}
 }

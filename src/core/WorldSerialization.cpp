@@ -78,7 +78,7 @@ namespace core
 
 		if (sector.getType() == SectorType::Airlock)
 		{
-			diagnostic = "Airlock chambers cannot be occupied until Airlock journeys are available";
+			diagnostic = "Agents must enter Airlock chambers through coordinated traversal";
 			return false;
 		}
 

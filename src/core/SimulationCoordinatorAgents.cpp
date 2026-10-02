@@ -463,7 +463,7 @@ namespace core
 		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 		{
 			(void)resourceId;
-			if ((resource->mLift || resource->mShuttle)
+			if ((resource->mLift || resource->mShuttle || resource->mAirlock)
 				&& find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 				acceptedLiftJourney = true;
 		}

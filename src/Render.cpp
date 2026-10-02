@@ -14,6 +14,7 @@
 #include "core/Background.h"
 #include "core/Facade.h"
 #include "core/World.h"
+#include "core/AirlockTransit.h"
 #include "core/Location.h"
 #include "core/LadderTransit.h"
 #include "core/LiftTransit.h"
@@ -1733,6 +1734,16 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Sector-specific
 	switch (sector->getType())
 	{
+	case core::SectorType::Airlock:
+	{
+		auto chamber = static_pointer_cast<const core::AirlockTransit>(sector);
+		if (!chamber->isCycleComplete() && isDrawnSolid(style))
+		{
+			auto text = std::format("{:.1f} s", chamber->getRemainingCycleSeconds());
+			drawList->AddText({ (bounds0.x + bounds1.x) * 0.5f, bounds1.y + 4 }, IM_COL32_WHITE, text.c_str());
+		}
+		break;
+	}
 	case core::SectorType::Ladder:
 		if (shouldRenderLadderGeometry(style))
 			renderLadder(static_pointer_cast<const core::LadderTransit>(sector)->getLadder(),

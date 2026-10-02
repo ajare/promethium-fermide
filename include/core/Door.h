@@ -37,6 +37,7 @@ namespace core
 		uint32_t mOpenLeaseCount{ 0 };
 		bool mObstructed{ false };
 		bool mAirlockOwned{ false };
+		void advanceCoordinatedMotion(float frameTime);
 		bool mBreakable{ false };
 		bool mInitiallyBroken{ false };
 		bool mBroken{ false };

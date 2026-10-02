@@ -17,6 +17,7 @@ namespace core
 		EdgeType type{};
 		std::optional<TraversalKind> mobilityKind;
 		bool buttons = false;
+		bool airlock = false;
 		RouteExclusionReason exclusion = RouteExclusionReason::None;
 		float length = 0;
 		float rise = 0;

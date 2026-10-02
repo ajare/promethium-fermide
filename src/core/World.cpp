@@ -7887,7 +7887,7 @@ namespace core
 			require(resource != nullptr, format("Edge {} references removed traversal resource {}",
 				edge->getId(), id.value));
 			bool compatible = edge->getType() == EdgeType::Door || edge->getType() == EdgeType::BulkheadDoor
-				? resource->mDoor != nullptr
+				? resource->mDoor != nullptr || resource->mAirlock != nullptr
 				: edge->getType() == EdgeType::Window ? resource->mWindow != nullptr
 				: edge->getType() == EdgeType::ForceBridge ? resource->mForceBridge != nullptr
 				: edge->getType() == EdgeType::Ladder || edge->getType() == EdgeType::LadderMount
@@ -8329,7 +8329,7 @@ namespace core
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
 		if (sector.getType() == SectorType::Airlock)
-			throw invalid_argument("Airlock chambers cannot be occupied until Airlock journeys are available");
+			throw invalid_argument("Agents must enter Airlock chambers through coordinated traversal");
 		if (canAgentAccessLocation(sector, agent)) return;
 		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
 		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());

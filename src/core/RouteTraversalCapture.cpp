@@ -5,6 +5,7 @@
 #include "core/World.h"
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
+#include "core/AirlockTransit.h"
 #include "core/LadderEdge.h"
 #include "core/LadderMountEdge.h"
 #include "core/StaircaseEdge.h"
@@ -240,6 +241,20 @@ namespace core
 			Door const& door = result.type == EdgeType::Door
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
 			result.mobilityKind = TraversalKind::Door;
+			if (result.type == EdgeType::BulkheadDoor)
+				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mAirlock)
+				{
+					result.airlock = true;
+					result.preparationSeconds = CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+					if (target->getSector().get() == chamber.get())
+						result.preparationSeconds += chamber->getCycleSeconds() + CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+					else
+					{
+						auto buttonX = chamber->getCellX() + (chamber->getCellsWide() - 1) / 2 + 0.5f;
+						result.length += 2 * std::abs(source->getPosition().x - buttonX);
+					}
+					break;
+				}
 			result.preparationSeconds = result.type == EdgeType::Door ? CORE_DOOR_OPEN_CLOSE_TIME : CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 			result.boarding = sector && isLocationLike(sector->getType());
 			result.lift = context.agent ? context.agent->observeLiftAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;

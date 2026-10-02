@@ -40,6 +40,10 @@ namespace core
 	{
 	public:
 
+		void advanceAirlocks();
+		void allocateAirlockTraversal(TraversalRequestId request, TraversalResource& resource);
+		bool acceptAirlockCommand(DeviceCommand const& command);
+
 		explicit SimulationCoordinator(World& world);
 
 		SimulationCoordinator(SimulationCoordinator const&) = delete;

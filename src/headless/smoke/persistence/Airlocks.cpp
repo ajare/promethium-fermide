@@ -26,10 +26,10 @@ namespace persistence
 			auto state = source.getSimulationSnapshot();
 			require(state.airlocks.size() == 1 && state.airlocks[0].sector.value == index + 1
 				&& state.airlocks[0].occupants.empty() && state.airlocks[0].cycleComplete
-				&& !state.airlocks[0].traversalAvailable && state.airlocks[0].remainingCycleSeconds == 0
+				&& state.airlocks[0].traversalAvailable && state.airlocks[0].remainingCycleSeconds == 0
 				&& state.airlocks[0].doors[0] == core::DoorSnapshotState::Closed
 				&& state.airlocks[0].doors[1] == core::DoorSnapshotState::Closed,
-				"Load/reset must be empty, closed, initially cycled, unavailable");
+				"Load/reset must be empty, closed, initially cycled, ready");
 			for (uint32_t i = 0; i < 3; ++i)
 				require(chamber->getControl(i) == chamberIn(world)->getControl(i)
 					&& source.lookupInteractionPoint(chamber->getControl(i)), "Generated control identity lost");

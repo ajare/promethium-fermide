@@ -48,8 +48,8 @@ namespace
 						&& chamber->getPreviousEnd(1) == core::SectorEndType::Wall, "Wall restoration data missing");
 					require(chamber->getNumObjects() == 3 && world.getSimulationSnapshot().interactionPoints.size() == 3,
 						"Airlock needs two shared Doors and three fixed buttons");
-					require(!chamber->isTraversalAvailable() && world.getSimulationSnapshot().traversalResources.empty(),
-						"Airlock exposed ordinary Bulkhead traversal resources");
+					require(chamber->isTraversalAvailable() && world.getSimulationSnapshot().traversalResources.size() == 1,
+						"Airlock needs one shared journey authority");
 					for (int side = 0; side < 2; ++side)
 					{
 						auto door = chamber->getDoor(side);
@@ -62,8 +62,11 @@ namespace
 					world.addSectorMarker(left, 0, 0.5f, &origin);
 					world.addSectorMarker(right, 0, 0.5f, &destination);
 					world.finishBuild();
-					require(!core::pathing::findPath(nullptr, world.getGraph().get(), world.getGraph()->getVertexByIdentifier(origin),
-						world.getGraph()->getVertexByIdentifier(destination)), "Airlock leaked an ordinary same-Layer bypass");
+					auto path = core::pathing::findPath(nullptr, world.getGraph().get(), world.getGraph()->getVertexByIdentifier(origin),
+						world.getGraph()->getVertexByIdentifier(destination));
+					require(path && std::count_if(path->nodes.begin(), path->nodes.end(), [&](auto const& node) {
+						return node.edge && node.edge->getTraversalResourceId() == chamber->getTraversalResourceId();
+					}) == 2, "Airlock route must use both controlled thresholds");
 				}
 	}
 
@@ -109,7 +112,7 @@ namespace
 			require(!world.setAirlockCycleSeconds(index, seconds) && saved(world) == baseline && !world.isModified(), "Invalid cycle property changed World");
 		auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index));
 		auto actor = world.createAgent("Caller", 0, 0, 0.5f);
-		require(!world.requestInteraction(chamber->getControl(0), actor), "Unavailable outside button accepted operation");
+		require(bool(world.requestInteraction(chamber->getControl(0), actor)), "Outside button refused Airlock entry request");
 		bool refused = false;
 		try { world.createAgent("Occupant", index); } catch (std::exception const&) { refused = true; }
 		require(refused, "Authoring placed an Agent inside unavailable Airlock");

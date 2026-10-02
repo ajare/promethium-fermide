@@ -288,6 +288,9 @@ namespace core
 		std::array<DoorSnapshotState, 2> doors{};
 		std::array<InteractionPointId, 3> controls{};
 		std::vector<AgentId> occupants;
+		int entrySide{ -1 };
+		std::vector<TraversalRequestId> reservations;
+		std::vector<TraversalRequestId> crossings;
 	};
 
 	struct SimulationSnapshot

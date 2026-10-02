@@ -483,6 +483,7 @@ namespace core
 			advanceLiftResources();
 			advanceDoorResources();
 			advanceDeviceOperations();
+			advanceAirlocks();
 			break;
 
 		case SimulationPhase::IntentCollection:

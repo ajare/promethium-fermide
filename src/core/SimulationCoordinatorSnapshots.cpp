@@ -565,7 +565,13 @@ namespace core
 					case OpenableObject::State::Closing: state.doors[side] = DoorSnapshotState::Closing; break;
 					}
 				for (uint32_t control = 0; control < 3; ++control) state.controls[control] = chamber->getControl(control);
-				for (auto agent : sector->getAgents()) state.occupants.push_back(mWorld.getAgentId(agent));
+				if (auto resource = mWorld.mTraversalResources.find(chamber->getTraversalResourceId()))
+				{
+					state.entrySide = resource->mAirlockEntrySide;
+					for (auto owner : resource->mOccupants) if (owner) state.occupants.push_back(owner);
+					for (auto owner : resource->mAdmissionReservations) if (owner) state.reservations.push_back(owner);
+					for (auto owner : resource->mCrossingOwners) if (owner) state.crossings.push_back(owner);
+				}
 				result.airlocks.push_back(std::move(state));
 			}
 		for (auto const& [id, agent] : mWorld.mAgents.entries())

@@ -111,6 +111,11 @@ set(core_names
     bandArrivalCrossesWideDoorFromStandingPosition
     bandArrivalComposesWithEarlyStopForContendedDoor
     bandArrivalLeavesNonCrossingAgentsUnaffected
+    airlocks/singleAgentJourneys
+    airlocks/emptyCalls
+    airlocks/basicEstimates
+    airlocks/exitSideReadmission
+    airlocks/pauseResetAndPersistence
     runScaledWorld
 )
 

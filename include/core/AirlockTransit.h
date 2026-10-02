@@ -5,11 +5,18 @@
 
 namespace core
 {
-	// Stationary same-Layer Transit. Device operation and traversal admission are
-	// deliberately unavailable in the authored-chamber slice (#322).
+	// Stationary same-Layer Transit. Device state lives here; admission and
+	// occupants belong to its World-owned Traversal resource.
 	class AirlockTransit : public Transit
 	{
 		friend class World;
+		friend class SimulationCoordinator;
+		TraversalResourceId mTraversalResource;
+		uint64_t mCycleRemainingTicks{ 0 };
+		int mActiveSide{ -1 };
+		bool mClosing{ false };
+		bool mExitRequested{ false };
+		std::array<bool, 2> mOutsideRequests{};
 		float mCycleSeconds;
 		std::array<SectorEndType, 2> mPreviousEnds;
 		std::array<std::shared_ptr<BulkheadDoor>, 2> mDoors;
@@ -24,13 +31,14 @@ namespace core
 			, mCycleSeconds(cycleSeconds), mPreviousEnds(previousEnds) {}
 
 		float getCycleSeconds() const { return mCycleSeconds; }
-		float getRemainingCycleSeconds() const { return 0.0f; }
-		bool isCycleComplete() const { return true; }
-		bool isTraversalAvailable() const { return false; }
+		float getRemainingCycleSeconds() const;
+		bool isCycleComplete() const { return mCycleRemainingTicks == 0; }
+		bool isTraversalAvailable() const { return true; }
+		TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
 		SectorEndType getPreviousEnd(int side) const { return mPreviousEnds.at(side); }
 		std::shared_ptr<const BulkheadDoor> getDoor(int side) const { return mDoors.at(side); }
 		InteractionPointId getControl(uint32_t index) const { return mControls.at(index); }
-		std::string getDescription() const override { return "Airlock (traversal unavailable)"; }
+		std::string getDescription() const override { return "Airlock"; }
 		bool sectorSupportsObjectType(SectorObjectType) const override { return false; }
 	};
 }

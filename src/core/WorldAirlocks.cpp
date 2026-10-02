@@ -64,26 +64,45 @@ namespace core
 		auto index = (uint32_t)mSectors.size();
 		auto chamber = std::make_shared<AirlockTransit>(index, layer, x, y, width, seconds, stops, previous);
 		mSectors.push_back(chamber);
+		auto resourceId = mTraversalResources.add(std::unique_ptr<TraversalResource>(new TraversalResource("Airlock journey")));
+		auto resource = mTraversalResources.find(resourceId);
+		resource->mAirlock = chamber;
+		resource->mCapacity = width;
+		resource->mOccupants.resize(width);
+		resource->mAdmissionReservations.resize(width);
+		resource->mCrossingOwners.resize(1);
+		for (uint32_t cell = 0; cell < width; ++cell)
+			resource->mCapacityPositions.push_back({ cell + 0.5f, 0.0f });
+		chamber->mTraversalResource = resourceId;
 		for (uint32_t cell = x; cell < x + width; ++cell)
 			grid->getCellDefinition(cell, y).sectorIndex = index;
 		for (int side = 0; side < 2; ++side)
 		{
 			auto thresholdX = side == CORE_SIDE_LEFT ? x : x + width;
 			auto created = createBulkheadDoor(layer, thresholdX, y, CORE_SIDE_LEFT);
+			grid->getCellDefinition(thresholdX - 1, y).bulkheadIndices[CORE_SIDE_RIGHT] = created.index;
+			// The right-side lookup is only used by placement preflight.
+			grid->getCellDefinition(thresholdX, y).bulkheadIndices[CORE_SIDE_LEFT] = created.index;
 			auto object = std::dynamic_pointer_cast<BulkheadDoorSectorObject>(created.sector->getObject(created.index));
 			auto door = object->getDoor();
 			door->configureTraversal(DoorActivationMode::Unavailable, {}, CORE_DOOR_STAY_OPEN_TIME);
 			door->mAirlockOwned = true;
 			chamber->mDoors[side] = door;
-			// Rendered as owned Bulkheads, but never registered as ordinary traversal
-			// resources or graph thresholds. The neighbour's authored wall is open.
+			// Both thresholds share the Airlock authority, never an ordinary Door resource.
 			auto neighbour = _getSector(stops[side].sector->getIndex());
 			neighbour->setEndType(y - neighbour->getCellY(), 1 - side, SectorEndType::None);
+			auto& lane = resource->mQueueLanes[side];
+			lane.sector = SectorId{ (uint64_t)neighbour->getIndex() + 1 };
+			lane.origin = { side == CORE_SIDE_LEFT ? x - 0.3f : x + width + 0.3f, (float)y };
+			for (uint32_t cell = 0; cell < neighbour->getCellsWide(); ++cell)
+				lane.positions.push_back({ side == CORE_SIDE_LEFT ? x - 0.5f - cell : x + width + 0.5f + cell, (float)y });
+			lane.positionOwners.resize(lane.positions.size());
 			auto control = createPhysicalControl("Airlock outside button", layer,
 				side == CORE_SIDE_LEFT ? x - 1 : x + width, y, 1 - side, CORE_BUTTON_F_AUTO_REENABLE);
 			DeviceCommand command;
 			command.type = DeviceCommandType::RequestAirlock;
 			command.target = SectorId{ (uint64_t)index + 1 }; command.stopIndex = side;
+			command.traversalResource = resourceId;
 			chamber->mControls[side] = createPhysicalControlInteractionPoint("Airlock outside button",
 				control, (float)y, 0.15f, getFixedTimestep(),
 				{ { command, InteractionBindingRequirement::Required } });
@@ -93,9 +112,11 @@ namespace core
 		DeviceCommand command;
 		command.type = DeviceCommandType::RequestAirlock;
 		command.target = SectorId{ (uint64_t)index + 1 }; command.stopIndex = 2;
+		command.traversalResource = resourceId;
 		chamber->mControls[2] = createPhysicalControlInteractionPoint("Airlock internal button",
 			internal, (float)y, 0.15f, getFixedTimestep(),
 			{ { command, InteractionBindingRequirement::Required } });
+		resource->mControls.assign(chamber->mControls.begin(), chamber->mControls.end());
 		ConstructionRecord record{ ConstructionType::Airlock };
 		record.layer = layer; record.a = y; record.b = x; record.c = width; record.x = seconds;
 		record.p = previous[0] == SectorEndType::None; record.q = previous[1] == SectorEndType::None;

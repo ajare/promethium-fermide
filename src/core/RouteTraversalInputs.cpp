@@ -1,6 +1,7 @@
 #include "core/RouteTraversalInputs.h"
 #include "core/Defines.h"
 #include "core/MobilityProfile.h"
+#include "core/World.h"
 
 namespace core
 {
@@ -134,6 +135,13 @@ namespace core
 		{
 			c.motionSeconds = type == EdgeType::Door ? 6.0f / 60.0f : walking();
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
+			if (airlock)
+			{
+				c.motionSeconds += World::getFixedTimestep();
+				c.expectedWaitSeconds = preparationSeconds;
+				c.interactionUnits = 1;
+				break;
+			}
 			if (shuttle)
 			{
 				c.motionSeconds += boarding ? p.shuttleBoardingSeconds : p.shuttleAlightingSeconds;

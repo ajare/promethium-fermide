@@ -4,6 +4,7 @@
 #include "core/SimulationCoordinator.h"
 
 #include "core/Agent.h"
+#include "core/AirlockTransit.h"
 #include "core/World.h"
 #include "core/Coordination.h"
 #include "core/Edge.h"
@@ -94,6 +95,11 @@ namespace core
 			if (!resource)
 			{
 				denyTraversalRequest(requestId);
+				return;
+			}
+			if (resource->mAirlock)
+			{
+				allocateAirlockTraversal(requestId, *resource);
 				return;
 			}
 			if (resource->mLift || resource->mShuttle || resource->mLiftCoordinator)
@@ -295,7 +301,7 @@ namespace core
 		{
 			if (resource->mExtensible && resource->mExtensionRequestLeases.erase(requestId))
 				resource->mExtensible->releaseExtensionLease();
-			if (resource->mDoor || resource->mForceBridge)
+			if (resource->mDoor || resource->mForceBridge || resource->mAirlock)
 			{
 				if (resource->mDoor && request->mPreparationLease)
 					releaseDoorOpenLease(*resource, request->mPreparationLease);
@@ -391,6 +397,25 @@ namespace core
 				|| ladderResource->mOccupants[request->mCapacityPosition])
 			{
 				return false;
+			}
+		}
+
+		if (traversalResource && traversalResource->mAirlock)
+		{
+			auto& resource = *traversalResource;
+			auto& chamber = *resource.mAirlock;
+			if (destinationSector.get() == &chamber)
+			{
+				if (request->mCapacityPosition >= resource.mCapacity
+					|| resource.mAdmissionReservations[request->mCapacityPosition] != requestId) return false;
+				resource.mAdmissionReservations[request->mCapacityPosition] = {};
+				resource.mOccupants[request->mCapacityPosition] = owner;
+				request->mCapacityPosition = ~0u;
+			}
+			else
+			{
+				for (auto& occupant : resource.mOccupants) if (occupant == owner) occupant = {};
+				chamber.mClosing = true;
 			}
 		}
 
@@ -612,8 +637,11 @@ namespace core
 			}
 			if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource)
 			{
-				if (resource->mDoor || resource->mForceBridge)
+				if (resource->mDoor || resource->mForceBridge || resource->mAirlock)
 					releaseDoorQueueOwnership(requestId, *resource);
+				if (resource->mAirlock)
+					for (auto& reservation : resource->mAdmissionReservations)
+						if (reservation == requestId) reservation = {};
 				if (auto lift = mWorld.mTraversalResources.find(resource->mLiftCoordinator))
 					releaseLiftAdmission(requestId, *lift);
 				else if (resource->mOpenPlatformLift)
@@ -675,8 +703,11 @@ namespace core
 			{
 				if (resource->mExtensible && resource->mExtensionRequestLeases.erase(requestId))
 					resource->mExtensible->releaseExtensionLease();
-				if (resource->mDoor || resource->mForceBridge)
+				if (resource->mDoor || resource->mForceBridge || resource->mAirlock)
 				{
+					if (resource->mAirlock)
+						for (auto& reservation : resource->mAdmissionReservations)
+							if (reservation == requestId) reservation = {};
 					if (resource->mDoor && request->mPreparationLease)
 						releaseDoorOpenLease(*resource, request->mPreparationLease);
 					if (resource->mDoor && request->mCrossingLease)

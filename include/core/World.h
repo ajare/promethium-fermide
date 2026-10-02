@@ -1705,8 +1705,8 @@ namespace core
 		// Derives stops from every fully overlapping landing-layer corridor row.
 		CreateLiftResult addLift(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, uint32_t levelsHigh);
 
-		// Airlocks use their own Layer, unlike other Transit landings. No journey
-		// or independent owned-device operations are available in this slice.
+		// Airlocks use their own Layer, unlike other Transit landings. Their
+		// thresholds are operated only through Airlock-owned coordination.
 		bool canAddAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
 			float cycleSeconds = 3.0f, std::string* diagnostic = nullptr) const;
 		uint32_t addAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,

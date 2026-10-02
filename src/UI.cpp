@@ -5636,7 +5636,7 @@ void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
 	if (world->isAirlockOwnedObject(object))
 	{
 		ImGui::TextUnformatted("Airlock-owned button");
-		ImGui::TextDisabled("Fixed control; Airlock operation is unavailable in this slice");
+		ImGui::TextDisabled("Fixed control; commands are coordinated by the Airlock");
 		return;
 	}
 	if (auto button = dynamic_pointer_cast<const core::Button>(object->_getObject()))
@@ -6682,7 +6682,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			auto chamber = static_pointer_cast<const core::AirlockTransit>(gSelectedSector);
 			ImGui::Text("Chamber width: %u cells", chamber->getCellsWide());
 			ImGui::Text("Capacity: %u Agents", chamber->getCapacity());
-			ImGui::TextDisabled("Traversal unavailable until Airlock journeys are implemented");
+			ImGui::Text("Cycle remaining: %.1f seconds", chamber->getRemainingCycleSeconds());
 			float seconds = chamber->getCycleSeconds();
 			ImGui::BeginDisabled(!world->isSimulationPaused());
 			if (ImGui::SliderFloat("Cycle duration (seconds)", &seconds, 1.0f, 10.0f))
