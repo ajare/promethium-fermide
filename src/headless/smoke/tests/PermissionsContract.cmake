@@ -50,6 +50,12 @@ set(core_names
     locationRequirementChangesCorridor
     locationStaleEntryCorridor
     locationResetAndUnrelatedCorridor
+    locationOccupancyRoom
+    locationOccupancyCorridor
+    locationCommittedEntryRoom
+    locationCommittedEntryCorridor
+    locationPlacementRoom
+    locationPlacementCorridor
     authorizationAndPersistence
     permissionSets
     manualDoorAuthorization

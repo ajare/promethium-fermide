@@ -1,4 +1,4 @@
-# Location permission requirements (#273, #274)
+# Location permission requirements (#273, #274, #276)
 
 Rooms and Corridors support a World-owned, all-of Location permission requirement.
 New Locations, an empty requirement, and older Worlds without an authored requirement
@@ -73,12 +73,36 @@ interrupt a crossing already underway or require permission merely to exit.
 Runtime grant changes do not rewrite authored authorization; Reset restores authored
 grants and reconstructed Paths using the existing simulation semantics.
 
-## Scope and verification
+## Unauthorized occupancy and placement (#276)
 
-General unauthorized-occupancy/placement policy, including mandatory replanning after
-completing an already-underway entry into a now-unauthorized Location, belongs to #276.
-Location-edit and permission-maintenance lifecycle hardening belongs to #275. Neither
-follow-up is implemented by this runtime change slice.
+An unauthorized occupant may use source-owned vertices only to reach an authorized
+outside destination. Internal destinations (including the current position) are
+unreachable, and leaving never grants permission to re-enter. If no authorized Path
+to the selected destination exists, ordinary `Unreachable` Route loss is reported;
+no evacuation destination is invented. Compatible YAML and binary documents may
+restore existing unauthorized occupants, who follow the same source-only rule.
+
+Loss before physical entry begins clears the Path and starts stationary Route
+planning outside. Loss during a committed crossing preserves the crossing and its
+position, then starts mandatory Route planning at safe completion, before any
+subsequent affected movement. Even an internal destination coincident with the
+completed crossing must be resolved through planning and Route loss, not treated
+as authorized arrival.
+
+Ordinary creation, simulation spawning, authored clipboard/pegman placement and
+direct relocation reject unauthorized placement before ownership, ID allocation,
+position changes or document-history writes. Diagnostics name every missing Access
+permission by current name and identity, using the effective union of direct and
+Permission set grants. Public `createAgent` overloads accept initial direct grants
+and Permission set assignments so authorized creation is atomic; granting access
+after creation is not a way to enter a protected Location. Clipboard authorization
+is validated both when arming a fall and at landing using current set membership;
+foreign-World grants are stripped before the placement check. Drag relocation uses
+the existing Agent's current runtime grants and validates before detaching it.
+
+Location-edit and permission-maintenance lifecycle hardening remains #275 scope.
+
+## Verification
 
 Headless coverage is owned by `pf-smoke-permissions` (`locationAuthoring*`,
 `locationRouting*`, `locationAlternative*`, `locationBoundary*`) and `pf-smoke-editor`
@@ -95,3 +119,9 @@ module with `ctest --test-dir build-linux -R '^smoke-permissions' --output-on-fa
 These checks assert visible Paths, stationary planning/expiry, actual entry and
 movement, Reset, and exactly-once simulation events; no private invalidation helper
 is tested directly.
+
+`LocationOccupancy.cpp` adds `locationOccupancy*`, `locationCommittedEntry*` and
+`locationPlacement*` checks for both Location kinds. `LocationPlacementEditor.cpp`
+adds `permissions/locationPlacementRoom` and `permissions/locationPlacementCorridor`
+to `pf-smoke-editor`, exercising production clipboard, pegman, drag-target and
+history seams without windows, native clipboard access or dialogs.

@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "core/Agent.h"
 #include "core/World.h"
@@ -71,8 +73,10 @@ inline PegmanTarget pegmanAgentTargetAtWorld(std::shared_ptr<const core::World> 
 		? std::clamp(localX, minimumX, maximumX)
 		: sector->getSize().x * 0.5f;
 
+	std::string diagnostic;
+	world->canPlaceAgentInLocation(sector->getIndex(), {}, {}, &diagnostic);
 	return { sector, levelOffset, localX, worldPosition.y,
-		(float)sector->getCellY() + levelOffset, {} };
+		(float)sector->getCellY() + levelOffset, std::move(diagnostic) };
 }
 
 // The drag-move target for a selected Agent, in world coordinates. An Agent
@@ -92,6 +96,14 @@ inline PegmanTarget getAgentMoveTarget(std::shared_ptr<const core::World> const&
 		return { nullptr, 0, 0.0f, worldPosition.y, worldPosition.y,
 			"Agents require a viable sector with available capacity" };
 
+	if (agent)
+	{
+		try { world->validateAgentLocationPlacement(*sector, *agent); }
+		catch (std::exception const& error)
+		{
+			return { nullptr, 0, 0.0f, worldPosition.y, worldPosition.y, error.what() };
+		}
+	}
 	auto cellY = (uint32_t)std::floor(worldPosition.y);
 	if (cellY < sector->getCellY() || cellY >= sector->getCellY() + sector->getLevelsHigh())
 		return { nullptr, 0, 0.0f, worldPosition.y, worldPosition.y, "Agent level is outside the sector" };

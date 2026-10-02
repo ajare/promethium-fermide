@@ -55,6 +55,7 @@ namespace core
 			throw WorldException(&mWorld,
 				"An Agent cannot occupy a Background: it owns no walkable floor and takes no part in traversal");
 		}
+		mWorld.validateAgentLocationPlacement(*sector, *agent);
 		auto rawAgent = agent.get();
 		rawAgent->attachToWorld(&mWorld);
 		sector->enterAgent(rawAgent, levelOffset, xOffset);
@@ -88,6 +89,7 @@ namespace core
 			throw WorldException(&mWorld,
 				"An Agent cannot occupy a Background: it owns no walkable floor and takes no part in traversal");
 		}
+		mWorld.validateAgentLocationPlacement(*sector, *agent);
 		auto rawAgent = agent.get();
 		rawAgent->attachToWorld(&mWorld);
 		sector->enterAgent(rawAgent);
@@ -558,7 +560,8 @@ namespace core
 				agent->clearRuntimePath();
 				if (agent->getSector()
 					&& SectorId{ (uint64_t)agent->getSector()->getIndex() + 1 } == goal.sector
-					&& agent->getGlobalPosition().distanceTo(goal.position) < 0.001f) continue;
+					&& agent->getGlobalPosition().distanceTo(goal.position) < 0.001f
+					&& mWorld.canAgentAccessLocation(*agent->getSector(), *agent)) continue;
 				beginRoutePlanning(*agent);
 				continue; // The first complete planning tick is the next tick.
 			}
@@ -618,7 +621,8 @@ namespace core
 			}
 			goal.retainedPath.reset();
 			if (target && agent->getSector() == target->getSector().get()
-				&& agent->getGlobalPosition() == target->getPosition()) continue;
+				&& agent->getGlobalPosition() == target->getPosition()
+				&& mWorld.canAgentAccessLocation(*target->getSector(), *agent)) continue;
 			if (path && !path->nodes.empty())
 			{
 				agent->assignPath(std::move(path), goal.startPathing, false);

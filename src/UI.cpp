@@ -8098,6 +8098,7 @@ namespace
 		}
 		try
 		{
+			world->validateAgentLocationPlacement(*gAgentMove.preview.sector, *gSelectedAgent);
 			auto undo = captureDocumentSnapshot(world);
 			if (!world->isSimulationPaused()) world->pauseSimulation();
 			gUISettings.worldPaused = true;

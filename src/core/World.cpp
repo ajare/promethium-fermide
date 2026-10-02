@@ -8076,6 +8076,65 @@ namespace core
 		return mSimulationCoordinator.addOwnedAgentToSector(std::move(agent), sectorId);
 	}
 
+	unique_ptr<Agent> World::makeAgentForPlacement(string const& name,
+		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets) const
+	{
+		auto agent = make_unique<Agent>(name);
+		for (auto permission : grants)
+		{
+			auto found = lookupAccessPermission(permission);
+			if (!found) throw invalid_argument(found.diagnostic);
+			agent->mDirectAccessGrants.set(permission.value - 1);
+		}
+		for (auto permissionSet : sets)
+		{
+			auto found = lookupPermissionSet(permissionSet);
+			if (!found) throw invalid_argument(found.diagnostic);
+		}
+		agent->mPermissionSets = sets;
+		return agent;
+	}
+
+	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
+	{
+		if (canAgentAccessLocation(sector, agent)) return;
+		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
+		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());
+		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+			if (missing.test(bit))
+				diagnostic += format(" {} ('{}')", bit + 1, mAccessPermissions[bit]->getName());
+		throw invalid_argument(diagnostic);
+	}
+
+	bool World::canPlaceAgentInLocation(uint32_t sectorId, set<AccessPermissionId> const& grants,
+		set<PermissionSetId> const& sets, string* diagnostic) const
+	{
+		try
+		{
+			auto agent = makeAgentForPlacement("New Agent", grants, sets);
+			validateAgentLocationPlacement(*getSector(sectorId), *agent);
+		}
+		catch (exception const& error)
+		{
+			if (diagnostic) *diagnostic = error.what();
+			return false;
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	AgentId World::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
+		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets)
+	{
+		return addOwnedAgentToSector(makeAgentForPlacement(name, grants, sets), sectorId, levelOffset, xOffset);
+	}
+
+	AgentId World::createAgent(string const& name, uint32_t sectorId,
+		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets)
+	{
+		return addOwnedAgentToSector(makeAgentForPlacement(name, grants, sets), sectorId);
+	}
+
 	AgentId World::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
 	{
 		invalidateSimulationSnapshot();
@@ -11043,13 +11102,19 @@ namespace core
 			}
 		if (!path) return false;
 		auto source = agent.getSector();
-		// Authorization changes do not revoke an entry already underway. Its
-		// destination becomes the source of the remaining, uncommitted suffix.
+		// A committed entry finishes safely, then must plan from its new
+		// occupancy before following any further affected movement.
 		if (agent.mTraversalTask && agent.mTraversalTask->permit)
 		{
-			source = agent.mTraversalTask->destinationVertex->getSector().get();
+			auto committedDestination = agent.mTraversalTask->destinationVertex->getSector().get();
+			if (committedDestination == &location && source != committedDestination) return true;
+			source = committedDestination;
 			fromNode += agent.mTraversalTask->pathNodesConsumed;
 		}
+		// Source-owned waypoints are allowed only for escape, not an internal
+		// destination (including a destination at the current position).
+		if (source == &location && !path->nodes.empty()
+			&& path->nodes.back().targetVertex->getSector().get() == &location) return true;
 		for (uint32_t i = fromNode + 1; i < path->nodes.size(); ++i)
 		{
 			auto target = path->nodes[i].targetVertex->getSector().get();

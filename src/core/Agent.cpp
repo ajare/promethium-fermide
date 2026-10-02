@@ -1145,6 +1145,8 @@ namespace core
 
 	void Agent::setPosition(SectorPosition pos, bool authored)
 	{
+		if (authored && mWorld && pos.sector())
+			mWorld->validateAgentLocationPlacement(*pos.sector(), *this);
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		mPosition = pos;
 		if (authored)
@@ -1343,6 +1345,11 @@ namespace core
 		cancelTraversal();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::MovingToVertex;
+		if (mWorld && !mWorld->canAgentAccessLocation(*mPath.path->nodes.back().targetVertex->getSector(), *this))
+		{
+			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+			return;
+		}
 
 		addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started pathing"));
 	}

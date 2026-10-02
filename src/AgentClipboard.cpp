@@ -1347,6 +1347,9 @@ bool armAgentPlacement(PendingAgentPlacement& pending,
 		return false;
 	}
 
+	if (!world.canPlaceAgentInLocation(sector->getIndex(), payload.directAccessGrants,
+		payload.permissionSets, &diagnostic)) return false;
+
 	pending.payload = payload;
 	pending.sector = sector;
 	pending.levelOffset = levelOffset;
@@ -1410,6 +1413,9 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		return false;
 	}
 
+	if (!world->canPlaceAgentInLocation(sector->getIndex(), payload.directAccessGrants,
+		payload.permissionSets, &diagnostic)) return false;
+
 	// Captured before the first write, so the undo entry holds the document
 	// exactly as it stood before the paste. Every refusal below drops it
 	// uncommitted: no entry, and nothing to undo.
@@ -1448,7 +1454,8 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	{
 		// The Agent is created first: if that is refused, no group has been
 		// made yet, so the common failure leaves nothing behind at all.
-		agentId = world->createAgent(payload.name, sector->getIndex(), levelOffset, localX);
+		agentId = world->createAgent(payload.name, sector->getIndex(), levelOffset, localX,
+			payload.directAccessGrants, payload.permissionSets);
 		auto const created = world->lookupAgent(agentId).entity;
 		if (!created)
 		{
@@ -1645,27 +1652,6 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				behaviourConfiguration, &assignDiagnostic))
 			{
 				diagnostic = "The pasted Agent's behaviour could not be restored: "
-					+ assignDiagnostic + rollBack();
-				return false;
-			}
-		}
-		for (auto permission : payload.directAccessGrants)
-		{
-			string assignDiagnostic;
-			if (!world->grantAgentAccessPermission(agentId, permission, &assignDiagnostic))
-			{
-				diagnostic = "The pasted Agent's direct Access permission grants could not be restored: "
-					+ assignDiagnostic + rollBack();
-				return false;
-			}
-		}
-		for (auto permissionSet : payload.permissionSets)
-		{
-			string assignDiagnostic;
-			if (!world->setAgentPermissionSetAssignment(
-				agentId, permissionSet, true, &assignDiagnostic))
-			{
-				diagnostic = "The pasted Agent's Permission set assignments could not be restored: "
 					+ assignDiagnostic + rollBack();
 				return false;
 			}

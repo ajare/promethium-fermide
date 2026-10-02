@@ -214,8 +214,7 @@ namespace
 			require(route && visits(*route, protectedLocation), "All-of direct/set grants did not authorize passage");
 		}
 		// Location grants do not authorize a protected Button operation.
-		auto operatorId = world.createAgent("Location-authorized operator", protectedLocation, 0, 1.5f);
-		require(world.grantAgentAccessPermission(operatorId, red) && world.grantAgentAccessPermission(operatorId, blue), "Operator grants refused");
+		auto operatorId = world.createAgent("Location-authorized operator", protectedLocation, 0, 1.5f, { red, blue }, {});
 		require(world.setInteractionPointPermissionRequirement(control.interactionPoint, { operation }), "Control requirement refused");
 		if (alternative)
 		{

@@ -1240,6 +1240,9 @@ namespace core
 
 		void buildGraph();
 
+		std::unique_ptr<Agent> makeAgentForPlacement(std::string const& name,
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets) const;
+
 		// Forwards to SimulationCoordinator, which owns Agent placement (ADR 0004).
 		AgentId addOwnedAgentToSector(std::unique_ptr<Agent> agent, uint32_t sectorId, uint32_t levelOffset, float xOffset);
 
@@ -2105,6 +2108,15 @@ namespace core
 		AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
 
 		AgentId createAgent(std::string const& name, uint32_t sectorId);
+
+		// Initial authorization is validated before ownership, placement or ID allocation.
+		AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
+		AgentId createAgent(std::string const& name, uint32_t sectorId,
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
+		bool canPlaceAgentInLocation(uint32_t sectorId, std::set<AccessPermissionId> const& grants,
+			std::set<PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;
+		void validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const;
 
 		EntityLookup<Agent> lookupAgent(AgentId id);
 

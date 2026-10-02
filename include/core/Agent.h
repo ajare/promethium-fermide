@@ -501,6 +501,8 @@ namespace core
 			modify();
 		}
 
+		// Authored placement checks Location authorization. Runtime-only callers
+		// may finish an entry committed before authorization was lost.
 		void setPosition(SectorPosition pos, bool authored = true);
 
 		void attachToWorld(World* world);

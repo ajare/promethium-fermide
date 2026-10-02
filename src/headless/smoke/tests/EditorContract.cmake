@@ -138,6 +138,8 @@ set(editor_names
     behaviours/realPanelsRenderPausedRunningAndDiagnosticStates
     permissions/locationSelectionRoom
     permissions/locationSelectionCorridor
+    permissions/locationPlacementRoom
+    permissions/locationPlacementCorridor
     permissions/destinationAuthoringLift
     permissions/destinationAuthoringPlatform
     permissions/destinationAuthoringShuttle
