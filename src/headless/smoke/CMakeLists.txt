@@ -2,7 +2,9 @@
 # No source globbing: each module explicitly owns its runner and check sources.
 function(pf_smoke_target_policy target)
     pf_apply_headless_verification_policy(${target})
-    set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
+    set_target_properties(${target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
+        FOLDER "Tests/Smoke")
 endfunction()
 
 add_library(pf-smoke-support STATIC support/Smoke.cpp)
@@ -11,6 +13,7 @@ target_include_directories(pf-smoke-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_definitions(pf-smoke-support PRIVATE PF_SMOKE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 target_compile_features(pf-smoke-support PUBLIC cxx_std_20)
 pf_smoke_target_policy(pf-smoke-support)
+set_target_properties(pf-smoke-support PROPERTIES FOLDER "Tests/Support")
 
 function(pf_add_smoke_module target)
     cmake_parse_arguments(MODULE "" "NAME;TIMEOUT" "SOURCES;LIBRARIES;LABELS" ${ARGN})
@@ -122,6 +125,7 @@ if(PF_BUILD_GUI)
         target_include_directories(pf-startup-probe PRIVATE "${PF_INCLUDE_DIR}")
         target_compile_definitions(pf-startup-probe PRIVATE PF_STARTUP_GUI_EXECUTABLE="unused")
         pf_smoke_target_policy(pf-startup-probe)
+        set_target_properties(pf-startup-probe PROPERTIES FOLDER "Tests/Harness")
         add_test(NAME smoke-startup-failures COMMAND ${Python3_EXECUTABLE}
             "${PROJECT_SOURCE_DIR}/scripts/tests/startup_failures.py"
             "$<TARGET_FILE:pf-smoke-startup>" "$<TARGET_FILE:pf-startup-probe>")
@@ -366,6 +370,7 @@ set_tests_properties(smoke-render-contract PROPERTIES LABELS "harness;render" TI
 add_executable(pf-smoke-harness-probe tests/Probe.cpp)
 target_link_libraries(pf-smoke-harness-probe PRIVATE pf-smoke-support)
 pf_smoke_target_policy(pf-smoke-harness-probe)
+set_target_properties(pf-smoke-harness-probe PROPERTIES FOLDER "Tests/Harness")
 add_test(NAME smoke-harness-contract COMMAND ${CMAKE_COMMAND}
     "-DPROBE=$<TARGET_FILE:pf-smoke-harness-probe>"
     "-DSIMULATION=$<TARGET_FILE:pf-smoke-simulation>"

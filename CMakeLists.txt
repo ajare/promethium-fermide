@@ -2,6 +2,21 @@ cmake_minimum_required(VERSION 3.25)
 
 project(prometheum-fermide LANGUAGES C CXX)
 
+# Visual Studio solution folders (ignored by non-IDE generators).
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+# Include dependency helper targets as well as libraries in the solution folder.
+function(pf_group_third_party_targets directory)
+    get_property(targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(target IN LISTS targets)
+        set_target_properties(${target} PROPERTIES FOLDER "Third party")
+    endforeach()
+    get_property(subdirectories DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(subdirectory IN LISTS subdirectories)
+        pf_group_third_party_targets("${subdirectory}")
+    endforeach()
+endfunction()
+
 if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "prometheum-fermide supports Windows and Linux only")
 endif()
@@ -75,7 +90,8 @@ function(pf_apply_headless_verification_policy target)
     pf_apply_high_analysis(${target})
     set_target_properties(${target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
-        ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
+        ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
+        FOLDER "Tests/Standalone")
 endfunction()
 
 set(PF_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -239,6 +255,19 @@ endif()
 # Shipping/MemCheck configurations to the cache. They are not PF configurations.
 set(PF_CONFIGURATION_TYPES "${CMAKE_CONFIGURATION_TYPES}")
 add_subdirectory(ext/willpower)
+# Keep vendored test projects with their owning component without changing
+# the dependency's standalone build or its existing plugin/tool folders.
+foreach(component IN ITEMS common geometry collide application)
+    get_property(component_targets DIRECTORY "ext/willpower/willpower.${component}"
+        PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(target IN LISTS component_targets)
+        if(target MATCHES "_tests$")
+            set_target_properties(${target} PROPERTIES FOLDER "Willpower/Tests/${component}")
+        elseif(target MATCHES "_benchmark$")
+            set_target_properties(${target} PROPERTIES FOLDER "Willpower/Benchmarks/${component}")
+        endif()
+    endforeach()
+endforeach()
 if(WIN32 AND BUILD_TESTING)
     # DIRECTORY-scoped test properties require 3.28; keep vendored ownership
     # while preventing a desktop window in non-interactive verification.
@@ -467,6 +496,7 @@ pf_apply_high_analysis(pf-restoration-support)
 function(pf_add_headless_tool target)
     add_executable(${target} ${ARGN})
     pf_apply_headless_verification_policy(${target})
+    set_target_properties(${target} PROPERTIES FOLDER "Tools/Headless")
 endfunction()
 pf_add_headless_tool(pf-restoration-benchmark
     src/headless/tools/RestorationBenchmark.cpp src/headless/tools/ProcessMemory.cpp)
@@ -578,6 +608,7 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/docs/smoke-migration-manifest.md")
     set_tests_properties(smoke-ownership-audit PROPERTIES LABELS "harness;ownership" TIMEOUT 30)
     pf_add_headless_tool(pf-compatibility-probe src/headless/CompatibilityProbe.cpp)
+    set_target_properties(pf-compatibility-probe PROPERTIES FOLDER "Tests/Harness")
     add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_compatibility.py"
         "$<TARGET_FILE:prometheum-fermide-headless>"
@@ -652,3 +683,21 @@ if(BUILD_TESTING)
 
     # No compatibility aggregate CTest: each module owns its coverage directly.
 endif()
+
+set_target_properties(pf-interaction-api-compile-contract pf-compile-contracts
+    PROPERTIES FOLDER "Tests/Compile Contracts")
+set_target_properties(prometheum-fermide-headless PROPERTIES FOLDER "Tests/Harness")
+set_target_properties(
+    pf-headless-render-support pf-pause-position-support pf-lift-boarding-support
+    pf-routing-population-support pf-restoration-support
+    PROPERTIES FOLDER "Tests/Support")
+
+# FetchContent dependencies may create projects in nested directories. Group
+# their entire target trees without modifying their standalone CMake builds.
+foreach(dependency IN ITEMS yaml-cpp sol2 glew sdl2 spdlog nfd cpp_httplib)
+    if(DEFINED ${dependency}_BINARY_DIR AND EXISTS "${${dependency}_SOURCE_DIR}/CMakeLists.txt")
+        pf_group_third_party_targets("${${dependency}_BINARY_DIR}")
+    endif()
+endforeach()
+set_target_properties(pf-lua pf-imgui-cpu vendor_poly2tri willpower_mpp_external
+    PROPERTIES FOLDER "Third party")
