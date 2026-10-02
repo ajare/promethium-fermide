@@ -289,24 +289,63 @@ namespace core
 			lua_remove(state, backing);
 		}
 
-		void makeTopImmutable(lua_State* state)
+		// Keep owning C++ temporaries in the caller, outside Lua's longjmp
+		// boundary. The operation must only borrow them: even allocation APIs
+		// such as lua_pushlstring can raise on memory-budget exhaustion.
+		template<typename Operation>
+		int protectedLuaOperation(lua_State* state, Operation& operation,
+			int argumentCount = 0, int resultCount = 1)
 		{
-			std::map<void const*, int> visited;
-			pushImmutableValue(state, -1, visited);
-			lua_remove(state, -2);
-			for (auto const& [identity, reference] : visited)
+			static_assert(std::is_trivially_destructible_v<Operation>);
+			auto const functionIndex = lua_gettop(state) - argumentCount + 1;
+			lua_pushcfunction(state, [](lua_State* inner) -> int
 			{
-				(void)identity;
-				luaL_unref(state, LUA_REGISTRYINDEX, reference);
-			}
+				auto* borrowed = static_cast<Operation*>(lua_touserdata(inner, 1));
+				lua_remove(inner, 1);
+				return (*borrowed)(inner);
+			});
+			lua_insert(state, functionIndex);
+			lua_pushlightuserdata(state, &operation);
+			lua_insert(state, functionIndex + 1);
+			return lua_pcall(state, argumentCount + 1, resultCount, 0);
 		}
 
-		int requireDeclaredModule(lua_State* state)
+		// Leaves either the copied string or Lua's allocation-error object on
+		// the stack. The owner can then go out of scope before lua_error.
+		void pushBorrowedDiagnostic(lua_State* state, std::string const& diagnostic)
 		{
-			auto& loader = *static_cast<ModuleLoader*>(
-				lua_touserdata(state, lua_upvalueindex(1)));
-			auto const* requestedText = luaL_checkstring(state, 1);
-			std::string const requested(requestedText);
+			auto copy = [&diagnostic](lua_State* inner)
+			{
+				lua_pushlstring(inner, diagnostic.data(), diagnostic.size());
+				return 1;
+			};
+			(void)protectedLuaOperation(state, copy);
+		}
+
+		void makeTopImmutable(lua_State* state)
+		{
+			int status;
+			{
+				std::map<void const*, int> visited;
+				auto convert = [&visited](lua_State* inner)
+				{
+					pushImmutableValue(inner, 1, visited);
+					return 1;
+				};
+				status = protectedLuaOperation(state, convert, 1);
+				for (auto const& [identity, reference] : visited)
+				{
+					(void)identity;
+					luaL_unref(state, LUA_REGISTRYINDEX, reference);
+				}
+			}
+			if (status != LUA_OK) lua_error(state);
+		}
+
+		int loadDeclaredModule(lua_State* state, ModuleLoader& loader,
+			std::string const& requested, std::string& chunkName, std::string& chain)
+		{
+			auto const* requestedText = requested.c_str();
 			if (requested == "prometheum.v1" || requested == "prometheum.v2")
 			{
 				lua_rawgeti(state, LUA_REGISTRYINDEX, requested == "prometheum.v1"
@@ -330,7 +369,6 @@ namespace core
 				loader.dependencyChain.end(), requested);
 			if (cycle != loader.dependencyChain.end())
 			{
-				std::string chain;
 				for (auto current = loader.dependencyChain.begin();
 					current != loader.dependencyChain.end(); ++current)
 				{
@@ -342,7 +380,7 @@ namespace core
 			}
 
 			auto const& source = module->second.source;
-			auto const chunkName = "@" + loader.packageName + "/"
+			chunkName = "@" + loader.packageName + "/"
 				+ module->second.sourceModulePath;
 			if (luaL_loadbufferx(state, source.data(), source.size(),
 				chunkName.c_str(), "t") != LUA_OK) return lua_error(state);
@@ -365,6 +403,26 @@ namespace core
 			lua_pushvalue(state, -1);
 			loader.loadedModules.emplace(requested,
 				luaL_ref(state, LUA_REGISTRYINDEX));
+			return 1;
+		}
+
+		int requireDeclaredModule(lua_State* state)
+		{
+			auto& loader = *static_cast<ModuleLoader*>(
+				lua_touserdata(state, lua_upvalueindex(1)));
+			auto const* requestedText = luaL_checkstring(state, 1);
+			int status;
+			{
+				std::string const requested(requestedText);
+				std::string chunkName;
+				std::string chain;
+				auto load = [&](lua_State* inner)
+				{
+					return loadDeclaredModule(inner, loader, requested, chunkName, chain);
+				};
+				status = protectedLuaOperation(state, load);
+			}
+			if (status != LUA_OK) return lua_error(state);
 			return 1;
 		}
 
@@ -398,11 +456,20 @@ namespace core
 			lua_setglobal(state, name);
 		}
 
-		void openScratchLibraries(sol::state_view lua, ModuleLoader& loader)
+		void openScratchLibraries(lua_State* state, ModuleLoader& loader)
 		{
-			lua.open_libraries(sol::lib::base, sol::lib::table, sol::lib::string,
-				sol::lib::math, sol::lib::utf8);
-			auto* state = lua.lua_state();
+			// This runs inside a C trampoline: do not create sol2 reference
+			// owners whose destructors an allocator longjmp could bypass.
+			for (auto const& library : {
+				std::pair{ LUA_GNAME, luaopen_base },
+				std::pair{ LUA_TABLIBNAME, luaopen_table },
+				std::pair{ LUA_STRLIBNAME, luaopen_string },
+				std::pair{ LUA_MATHLIBNAME, luaopen_math },
+				std::pair{ LUA_UTF8LIBNAME, luaopen_utf8 } })
+			{
+				luaL_requiref(state, library.first, library.second, 1);
+				lua_pop(state, 1);
+			}
 			installBudgetedProtectedCall(state, "pcall");
 			installBudgetedProtectedCall(state, "xpcall");
 
@@ -459,8 +526,7 @@ namespace core
 		{
 			auto* setup = static_cast<ScratchSetup*>(
 				lua_touserdata(state, lua_upvalueindex(1)));
-			sol::state_view lua(state);
-			openScratchLibraries(lua, *setup->loader);
+			openScratchLibraries(state, *setup->loader);
 			if (setup->opaqueMetatables)
 			{
 				ensureOpaqueMetatables(state);
@@ -1195,10 +1261,16 @@ namespace core
 				return luaL_error(state, "%s requires a name", operation);
 			size_t length = 0;
 			auto const* text = lua_tolstring(state, nameIndex, &length);
-			std::string diagnostic;
-			auto const changed = scope->changeAuthorization(type,
-				std::string_view(text ? text : "", length), diagnostic);
-			if (!diagnostic.empty()) return luaL_error(state, "%s", diagnostic.c_str());
+			bool changed;
+			bool failed;
+			{
+				std::string diagnostic;
+				changed = scope->changeAuthorization(type,
+					std::string_view(text ? text : "", length), diagnostic);
+				failed = !diagnostic.empty();
+				if (failed) pushBorrowedDiagnostic(state, diagnostic);
+			}
+			if (failed) return lua_error(state);
 			pushCommandResult(state, true, changed ? "accepted" : "no_op");
 			return 1;
 		}
@@ -1298,10 +1370,14 @@ namespace core
 				return luaL_error(state, "timer name must not be empty");
 			if (duration < 1)
 				return luaL_error(state, "timer duration must be at least one simulation tick");
-			std::string diagnostic;
-			if (!scope->setTimer(std::string(nameText, nameLength),
-				static_cast<uint64_t>(duration), diagnostic))
-				return luaL_error(state, "%s", diagnostic.c_str());
+			bool accepted;
+			{
+				std::string diagnostic;
+				accepted = scope->setTimer(std::string(nameText, nameLength),
+					static_cast<uint64_t>(duration), diagnostic);
+				if (!accepted) pushBorrowedDiagnostic(state, diagnostic);
+			}
+			if (!accepted) return lua_error(state);
 			pushCommandResult(state, true, "accepted");
 			return 1;
 		}
@@ -1808,8 +1884,17 @@ namespace core
 		void pushConfiguration(lua_State* state,
 			AgentBehaviourConfiguration const& configuration)
 		{
-			pushConfigurationValue(state,
-				AgentBehaviourConfigurationValue(configuration));
+			// Borrow the authored record directly. A temporary variant here
+			// would copy its strings/containers inside the marshalling trampoline
+			// and leak them if a Lua allocation failed before destruction.
+			lua_newtable(state);
+			auto const backing = lua_gettop(state);
+			for (auto const& [name, value] : configuration)
+			{
+				pushConfigurationValue(state, value);
+				lua_setfield(state, backing, name.c_str());
+			}
+			pushImmutableProxy(state);
 		}
 
 		// Per-instance marshalling trampolines are cached in the registry once

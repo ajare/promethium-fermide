@@ -201,6 +201,38 @@ return { api_version = 1, factory = function() return {} end }
 			"An import cycle was accepted or omitted its complete dependency chain");
 	}
 
+	void caughtLoaderFailuresReleaseHostTemporaries()
+	{
+		std::vector<core::AgentBehaviourHelperSource> helpers{
+			{ "helpers.syntax", "modules/syntax-error-with-a-long-name.lua", "return { broken = }" },
+			{ "helpers.runtime", "modules/runtime-error-with-a-long-name.lua", "error('helper exploded')" },
+			{ "helpers.a", "modules/a.lua", "return require('helpers.b')" },
+			{ "helpers.b", "modules/b.lua", "return require('helpers.a')" },
+			{ "helpers.valid", "modules/valid.lua", "return { answer = 42 }" }
+		};
+		auto result = core::AgentBehaviourRuntimeAdapter::preflightModule(
+			"long-package-name-for-error-path-regression.behaviours", "schedule.lua", R"lua(
+for i = 1, 8 do
+  for _, failure in ipairs({
+    { "helpers.not-declared-with-a-long-name", "not declared" },
+    { "helpers.syntax", "syntax-error-with-a-long-name.lua" },
+    { "helpers.runtime", "helper exploded" },
+    { "helpers.a", "schedule.lua -> helpers.a -> helpers.b -> helpers.a" }
+  }) do
+    local ok, diagnostic = pcall(require, failure[1])
+    assert(not ok and string.find(diagnostic, failure[2], 1, true), diagnostic)
+  end
+end
+assert(require("helpers.valid").answer == 42)
+assert(require("helpers.valid") == require("helpers.valid"))
+return { api_version = 1, factory = function() return {} end }
+)lua", helpers);
+		require(result.loaded,
+			"Caught helper errors corrupted loader state or diagnostics: " + result.diagnostic);
+		// LeakSanitizer checks the host allocations at process exit; Lua's own
+		// allocator accounting cannot detect strings skipped by a longjmp.
+	}
+
 	void registryRetainsLoadedAndErrorStatus(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
@@ -248,6 +280,7 @@ void behaviour_smoke::registerRuntimePreflight(std::vector<smoke::Check>& checks
 	checks.push_back({ "customLoaderIsReservedAndImmutable", [](smoke::Context const&)
 	{
 		customLoaderIsReservedAndImmutable();
+		caughtLoaderFailuresReleaseHostTemporaries();
 	} });
 	checks.push_back({ "registryRetainsLoadedAndErrorStatus", [](smoke::Context const& context)
 	{

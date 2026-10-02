@@ -194,6 +194,30 @@ return { api_version = 1, factory = function() return {} end }
 		require(world.resumeSimulation() && world.advanceTick()
 			&& world.consumeAgentBehaviourRuntimeDiagnostics().empty(),
 			"An ordinary behaviour startup near the memory floor was not contained");
+
+		// Force a failure while marshalling an owned configuration string, not
+		// while executing Lua. LSan catches a temporary record/variant copy
+		// whose destructor would otherwise be skipped by this allocator error.
+		world.pauseSimulation();
+		auto const configured = registry->addAgentBehaviour("Large configuration", "trivial.lua", {
+			{ "payload", core::AgentBehaviourSchemaType::String }
+		});
+		core::World configuredWorld("Configuration budget", 8, 2, { 128u * 1024u, 100'000u });
+		auto const configuredRoom = configuredWorld.addRoom("Room", 0, 0, 0, 8, 1);
+		configuredWorld.finishBuild();
+		auto const configuredAgent = configuredWorld.createAgent("Configured", configuredRoom, 0, 0.5f);
+		configuredWorld.pauseSimulation();
+		configuredWorld.attachAgentBehaviourRegistry("tight.behaviours", registry);
+		require(configuredWorld.setAgentBehaviourAssignment(configuredAgent, configured,
+			registry->lookupAgentBehaviour(configured)->getRevision(),
+			{ { "payload", std::string(256u * 1024u, 'x') } }),
+			"Could not assign the oversized configuration fixture");
+		require(configuredWorld.resumeSimulation() && !configuredWorld.advanceTick(),
+			"Oversized configuration escaped the marshalling memory budget");
+		auto diagnostics = configuredWorld.consumeAgentBehaviourRuntimeDiagnostics();
+		require(diagnostics.size() == 1
+			&& diagnostics.front().failure == core::AgentBehaviourRuntimeFailure::MemoryBudgetExceeded,
+			"Configuration allocation failure lacked a structured memory diagnostic");
 	}
 
 	void liveLoadsFactoriesAndCallbacksAreContained(smoke::Context const& context)

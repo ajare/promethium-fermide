@@ -105,6 +105,52 @@ end }
 			"Reset did not restore authored initial authorization");
 	}
 
+	void caughtCommandErrorsKeepCallbackUsable(smoke::Context const& context)
+	{
+		TemporaryDirectory temporary{ context };
+		auto const package = temporary.path / "caught-errors.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeRuntimeText(package / "caught.lua", R"lua(
+return { api_version = 2, factory = function()
+  return { on_start = function(context)
+    assert(context.set_timer("existing-timer-with-a-long-name", 10).accepted)
+    for i = 1, 4 do
+      local ok, diagnostic = pcall(context.set_timer, "rejected-timer-with-a-long-name", 10)
+      assert(not ok and string.find(diagnostic, "timer limit", 1, true), diagnostic)
+      for _, operation in ipairs({ context.grant_access_permission,
+          context.revoke_access_permission, context.assign_permission_set,
+          context.unassign_permission_set }) do
+        ok, diagnostic = pcall(operation, "unknown-authorization-with-a-long-name")
+        assert(not ok and string.find(diagnostic, "case-sensitive", 1, true), diagnostic)
+      end
+    end
+    assert(context.set_timer("existing-timer-with-a-long-name", 20).accepted)
+    assert(context.cancel_timer("existing-timer-with-a-long-name").accepted)
+  end }
+end }
+)lua");
+		auto const behaviour = registry->addAgentBehaviour("Caught errors", "caught.lua", {});
+		core::AgentBehaviourRuntimeLimits limits;
+		limits.timersPerInstance = 1;
+		core::World world("Caught errors", 4, 1, limits);
+		auto const room = world.addRoom("Room", 0, 0, 0, 4, 1);
+		world.finishBuild();
+		auto const agent = world.createAgent("Agent", room, 0, 0.5f);
+		world.pauseSimulation();
+		world.attachAgentBehaviourRegistry("caught-errors.behaviours", registry);
+		require(world.setAgentBehaviourAssignment(agent, behaviour,
+			registry->lookupAgentBehaviour(behaviour)->getRevision(), {}),
+			"Could not assign caught-command-error fixture");
+		require(world.resumeSimulation() && world.advanceTick()
+			&& world.agentBehaviourOwnsMovement(agent)
+			&& world.consumeAgentBehaviourRuntimeDiagnostics().empty(),
+			"Caught timer/authorization errors invalidated the callback");
+		// Running this check under LSan also verifies that each copied error
+		// diagnostic releases its C++ allocation, even when Lua catches it.
+	}
+
 	void unknownAndRenamedAuthorizationNamesAreDiagnosed(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
@@ -153,5 +199,6 @@ void behaviour_smoke::registerRuntimeAuthorization(std::vector<smoke::Check>& ch
 	checks.push_back({ "unknownAndRenamedAuthorizationNamesAreDiagnosed", [](smoke::Context const& context)
 	{
 		unknownAndRenamedAuthorizationNamesAreDiagnosed(context);
+		caughtCommandErrorsKeepCallbackUsable(context);
 	} });
 }

@@ -98,6 +98,31 @@ ctest --test-dir build-high-analysis --output-on-failure
 Use the equivalent Visual Studio x64 generator and `--config Release` on
 Windows. The same CTest names and dependency pins apply.
 
+## Lua error-path leak checks (#329)
+
+Lua uses longjmp for errors, including allocation-budget failures. Runtime C
+trampolines must not leave owning C++ temporaries across an unprotected Lua call.
+Keep owners outside a nested `lua_pcall`, and destroy them before re-raising the
+Lua error. Even copying a diagnostic onto the Lua stack requires protection.
+
+The existing `customLoaderIsReservedAndImmutable`,
+`unknownAndRenamedAuthorizationNamesAreDiagnosed`, and
+`insufficientMemoryBudgetsAreRejectedOrContained` selectors include repeated
+caught helper/command errors and configuration-marshalling allocation failure.
+Their assertions check diagnostics and recovery; LeakSanitizer detects skipped
+host destructors, which Lua allocator accounting cannot see.
+
+On Linux/GCC, validate all four originally affected suites with:
+
+```sh
+cmake -S . -B build-asan -DPF_BUILD_GUI=OFF -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+cmake --build build-asan --target pf-smoke-behaviours pf-smoke-editor --parallel
+ASAN_OPTIONS=detect_leaks=1 ctest --test-dir build-asan \
+  -R '^smoke-(behaviours|editor)(-contract)?$' --output-on-failure
+```
+
 ## Manual GUI release checklist
 
 Perform this pass with a disposable saved World; keep simulation paused for
