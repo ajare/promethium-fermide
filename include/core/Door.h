@@ -36,6 +36,7 @@ namespace core
 		float mHoldOpenTime{ CORE_DOOR_STAY_OPEN_TIME };
 		uint32_t mOpenLeaseCount{ 0 };
 		bool mObstructed{ false };
+		bool mAirlockOwned{ false };
 		bool mBreakable{ false };
 		bool mInitiallyBroken{ false };
 		bool mBroken{ false };
@@ -77,6 +78,7 @@ namespace core
 		std::bitset<256> const& getPermissionRequirement() const { return mPermissionRequirement; }
 
 		// Typed device operations call these commands; no callback/action queue exists.
+		bool isAirlockOwned() const { return mAirlockOwned; }
 		bool isBreakable() const { return mBreakable; }
 		bool isInitiallyBroken() const { return mInitiallyBroken; }
 		bool isBroken() const { return mBroken; }

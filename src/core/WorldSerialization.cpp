@@ -1,4 +1,5 @@
 #include "core/World.h"
+#include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/WorldDocument.h"
 #include "core/AgentBehaviourRegistry.h"
@@ -72,6 +73,12 @@ namespace core
 		if (sector.getType() == SectorType::Background)
 		{
 			diagnostic = format("Background '{}' owns no walkable floor", sector.getName());
+			return false;
+		}
+
+		if (sector.getType() == SectorType::Airlock)
+		{
+			diagnostic = "Airlock chambers cannot be occupied until Airlock journeys are available";
 			return false;
 		}
 
@@ -153,13 +160,14 @@ namespace core
 		case ConstructionType::ObjectTombstone: return "objectTombstone";
 		case ConstructionType::Background: return "background";
 		case ConstructionType::Facade: return "facade";
+		case ConstructionType::Airlock: return "airlock";
 		}
 		throw SerializationException("Unknown World construction record type");
 	}
 
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Facade); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Airlock); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -180,6 +188,7 @@ namespace core
 		case ConstructionType::Staircase:
 		case ConstructionType::Lift:
 		case ConstructionType::Shuttle:
+		case ConstructionType::Airlock:
 			return true;
 		default:
 			return false;
@@ -325,6 +334,13 @@ namespace core
 			serializer.writeUint32("initialStop", record.g);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			writeDestinationRequirements(); break;
+		case ConstructionType::Airlock:
+			serializer.writeUint32("layer", record.layer);
+			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
+			serializer.writeUint32("cellsWide", record.c);
+			serializer.writeFloat("cycleSeconds", record.x);
+			serializer.writeBool("leftWasOpen", record.p);
+			serializer.writeBool("rightWasOpen", record.q); break;
 		case ConstructionType::Shuttle:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -519,7 +535,8 @@ namespace core
 		// Version 37 adds whole-Lift authored Broken condition.
 		// Version 38 extends whole-transport Broken condition to Platform lifts.
 		// Version 39 adds authored whole-coupled-Shuttle Broken condition.
-		serializer.writeUint32("version", 39);
+		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
+		serializer.writeUint32("version", 40);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -902,6 +919,16 @@ namespace core
 				record.initiallyBroken = serializer.readBool("initiallyBroken");
 			}
 			break;
+		case ConstructionType::Airlock:
+			if (version < 40) throw SerializationException("Airlocks require World schema version 40 or later");
+			record.layer = serializer.readUint32("layer");
+			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
+			record.c = serializer.readUint32("cellsWide");
+			record.x = serializer.readFloat("cycleSeconds");
+			record.p = serializer.readBool("leftWasOpen"); record.q = serializer.readBool("rightWasOpen");
+			if (serializer.hasField("initiallyBroken"))
+				throw SerializationException("Airlocks do not support Broken authoring");
+			break;
 		case ConstructionType::Shuttle:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -1138,7 +1165,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 39)
+		if (version < 1 || version > 40)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2288,6 +2315,14 @@ namespace core
 			addLift(transitLayer(record), record.a, record.b, options);
 			break;
 		}
+		case ConstructionType::Airlock:
+		{
+			auto index = addAirlock(record.layer, record.a, record.b, record.c, record.x);
+			auto chamber = std::static_pointer_cast<AirlockTransit>(mSectors[index]);
+			chamber->mPreviousEnds = { record.p ? SectorEndType::None : SectorEndType::Wall,
+				record.q ? SectorEndType::None : SectorEndType::Wall };
+			break;
+		}
 		case ConstructionType::Shuttle:
 		{
 			CreateShuttleOptions options{ record.d, record.e, record.values, record.f,
@@ -2884,11 +2919,13 @@ namespace core
 			case ConstructionType::Staircase:
 			case ConstructionType::Lift:
 			case ConstructionType::Shuttle:
+			case ConstructionType::Airlock:
 			{
-				bool const transit = isTransitRecord(record.type);
+				bool const frontLayerTransit = isTransitRecord(record.type);
+				bool const transit = frontLayerTransit || record.type == ConstructionType::Airlock;
 				auto const layer = producerIndex < mSectors.size() && mSectors[producerIndex]
 						? mSectors[producerIndex]->getLayerIndex() : layerIndex;
-				keep = layer != layerIndex && !(transit && layer == behind);
+				keep = layer != layerIndex && !(frontLayerTransit && layer == behind);
 				if (producerIndex < impact.sectorRemoved.size())
 					impact.sectorRemoved[producerIndex] = !keep;
 				if (keep) sectorMap[producerIndex] = nextSector++;
@@ -2958,6 +2995,7 @@ namespace core
 			case ConstructionType::Staircase:
 			case ConstructionType::Lift:
 			case ConstructionType::Shuttle:
+			case ConstructionType::Airlock:
 			case ConstructionType::Door:
 				// These records carry the Layer they are authored on, so a deletion in
 				// front of them has to pull that Layer forward with every other one.
@@ -4764,9 +4802,7 @@ namespace core
 				locations[sectorIndex++] = { false, record.c, record.d };
 			else if (record.type == ConstructionType::Room)
 				locations[sectorIndex++] = { true, record.d, record.e };
-			else if (record.type == ConstructionType::Ladder
-				|| record.type == ConstructionType::Stairwell || record.type == ConstructionType::Staircase || record.type == ConstructionType::Lift
-				|| record.type == ConstructionType::Shuttle) ++sectorIndex;
+			else if (constructionTypeCreatesSector(record.type)) ++sectorIndex;
 		}
 		auto hasWalkway = [&](uint32_t owner, uint32_t level, uint32_t x)
 		{
@@ -4909,6 +4945,11 @@ namespace core
 			return false;
 		}
 
+		if (isAirlockOwnedObject(object))
+		{
+			diagnostic = "Airlock-owned Doors and controls are fixed";
+			return false;
+		}
 		auto owner = object->getSector();
 		auto sourceX = object->getCellX();
 		auto sourceY = object->getCellY();
@@ -5527,6 +5568,7 @@ namespace core
 		auto object = dynamic_pointer_cast<BulkheadDoorSectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) throw WorldException(this, "The selected object is not a Bulkhead Door");
+		if (isAirlockOwnedObject(object)) throw WorldException(this, "Airlock-owned Doors cannot be edited independently");
 		if (!isFiniteTiming(options.holdOpenSeconds))
 			throw WorldException(this, "Bulkhead Door hold-open time must be finite and non-negative");
 		if (!isfinite(options.automaticSensorDistance)

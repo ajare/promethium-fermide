@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/OccupantPacking.h"
 #include "core/AgentBehaviourRegistry.h"
@@ -5244,10 +5245,7 @@ namespace core
 		uint32_t sectorIndex = 0;
 		for (auto const& record : mConstructionRecords)
 		{
-			bool producer = record.type == ConstructionType::Corridor || record.type == ConstructionType::Room
-				|| record.type == ConstructionType::Ladder || record.type == ConstructionType::Stairwell || record.type == ConstructionType::Staircase
-				|| record.type == ConstructionType::Lift || record.type == ConstructionType::Shuttle;
-			if (!producer) continue;
+			if (!constructionTypeCreatesSector(record.type)) continue;
 			if (record.type == ConstructionType::Shuttle && sectorIndex < mSectors.size())
 			{
 				auto transit = dynamic_pointer_cast<const ShuttleTransit>(mSectors[sectorIndex]);
@@ -5271,10 +5269,7 @@ namespace core
 		uint32_t sectorIndex = 0;
 		for (auto const& record : mConstructionRecords)
 		{
-			bool producer = record.type == ConstructionType::Corridor || record.type == ConstructionType::Room
-				|| record.type == ConstructionType::Ladder || record.type == ConstructionType::Stairwell || record.type == ConstructionType::Staircase
-				|| record.type == ConstructionType::Lift || record.type == ConstructionType::Shuttle;
-			if (!producer) continue;
+			if (!constructionTypeCreatesSector(record.type)) continue;
 			// Only a Shuttle on the requested Layer can serve a Door on that pair.
 			if (record.type == ConstructionType::Shuttle && record.layer == shuttleLayer && record.a == y)
 			{
@@ -8076,7 +8071,11 @@ namespace core
 			require(validSector(point->mSector),
 				format("Interaction point {} has an invalid sector", pointId.value));
 			for (auto const& binding : point->mBindings)
-				if (binding.command.type != DeviceCommandType::SetSectorLights)
+				if (binding.command.type == DeviceCommandType::RequestAirlock)
+					require(validSector(binding.command.target)
+						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock,
+						format("Interaction point {} targets a removed Airlock", pointId.value));
+				else if (binding.command.type != DeviceCommandType::SetSectorLights)
 					require(mTraversalResources.find(binding.command.traversalResource) != nullptr,
 						format("Interaction point {} targets removed traversal resource {}",
 							pointId.value, binding.command.traversalResource.value));
@@ -8329,6 +8328,8 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
+		if (sector.getType() == SectorType::Airlock)
+			throw invalid_argument("Airlock chambers cannot be occupied until Airlock journeys are available");
 		if (canAgentAccessLocation(sector, agent)) return;
 		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
 		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());
@@ -10782,6 +10783,8 @@ namespace core
 	{
 		auto point = mInteractionPoints.find(id);
 		if (!point || !point->mSector) return false;
+		if (auto chamber = dynamic_pointer_cast<AirlockTransit>(mSectors[point->mSector.value - 1]);
+			chamber && chamber->getControl(2) == id) return false;
 		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
 		{
 			return binding.command.type == DeviceCommandType::SelectLiftDestination

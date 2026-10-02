@@ -4,6 +4,7 @@
 
 namespace persistence
 {
+	void airlocks(smoke::Context const&);
 	void restorationPreservesStatePathsAndLifetimes(smoke::Context const&);
 	void worldRoundTripsAuthoredStateAndAgents(smoke::Context const&);
 	void legacyWorldYamlStillLoads(smoke::Context const&);

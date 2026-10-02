@@ -1072,6 +1072,11 @@ namespace core
 			return false;
 		}
 
+		// Authored Airlock chambers have floor but no journey in #322. Do not
+		// expose ordinary same-Layer movement or button vertices inside them.
+		if (mwWorld->getSector(cellDef.sectorIndex)->getType() == SectorType::Airlock)
+			return false;
+
 		if (cellDef.floorType != CellFloorType::None)
 		{
 			return true;

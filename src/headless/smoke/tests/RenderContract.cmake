@@ -32,6 +32,7 @@ set(names
     agentPaths
     carriageDoors
     carriageImages
+    airlocks/chamberAndControls
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

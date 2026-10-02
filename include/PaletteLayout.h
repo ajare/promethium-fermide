@@ -4,9 +4,8 @@
 
 // Geometry of the editor's object-palette tray (ticket #54).
 //
-// The tray is a compact two-row grid. The top row holds the nine space and
-// transit tools; the bottom row holds the nine Agents, Markers, and objects
-// that attach to already-placed Sectors. Neither row contains blank slots.
+// The tray is a compact two-row grid. The top row holds space and Transit
+// tools; the bottom row holds Agents, Markers, and attached objects.
 
 enum class PaletteSlot
 {
@@ -20,6 +19,7 @@ enum class PaletteSlot
 	Lift,
 	Shuttle,
 	Staircase,
+	Airlock,
 	// Bottom row: agents, markers, and attached objects.
 	Agent,
 	Marker,
@@ -57,6 +57,7 @@ inline constexpr int paletteSlotColumn(PaletteSlot slot)
 	case PaletteSlot::Lift: return 6;
 	case PaletteSlot::Shuttle: return 7;
 	case PaletteSlot::Staircase: return 8;
+	case PaletteSlot::Airlock: return 9;
 	case PaletteSlot::Agent: return 0;
 	case PaletteSlot::Marker: return 1;
 	case PaletteSlot::Door: return 2;

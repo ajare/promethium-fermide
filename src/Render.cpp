@@ -1696,6 +1696,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		switch (sectorType)
 		{
 		case core::SectorType::Location: kind = static_pointer_cast<const core::Location>(sector)->isCorridor() ? "corridor" : "room"; break;
+		case core::SectorType::Airlock: kind = "corridor"; break;
 		case core::SectorType::Ladder: kind = "ladder"; break;
 		case core::SectorType::Lift: kind = "lift"; break;
 		// The rail corridor is static architecture; carriage images are rendered

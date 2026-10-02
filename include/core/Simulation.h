@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -275,6 +276,20 @@ namespace core
 		uint64_t expiresAtTick{ 0 };
 	};
 
+	struct AirlockSnapshot
+	{
+		SectorId sector;
+		uint32_t chamberWidth{ 0 };
+		uint32_t capacity{ 0 };
+		float cycleSeconds{ 3.0f };
+		float remainingCycleSeconds{ 0.0f };
+		bool cycleComplete{ true };
+		bool traversalAvailable{ false };
+		std::array<DoorSnapshotState, 2> doors{};
+		std::array<InteractionPointId, 3> controls{};
+		std::vector<AgentId> occupants;
+	};
+
 	struct SimulationSnapshot
 	{
 		uint64_t tick{ 0 };
@@ -290,6 +305,7 @@ namespace core
 		std::vector<TraversalResourceSnapshot> traversalResources;
 		std::vector<TraversalRequestSnapshot> traversalRequests;
 		std::vector<TraversalPermitSnapshot> traversalPermits;
+		std::vector<AirlockSnapshot> airlocks;
 	};
 
 	// These phases are always entered in declaration order for each fixed tick.

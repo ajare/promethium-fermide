@@ -43,6 +43,7 @@ int main(int argc, char** argv)
 	editor_smoke::registerEscalators(checks);
 	routing_smoke::registerPlanningEditor(checks);
 	routing_smoke::registerPlanningTimeEditor(checks);
+	editor_smoke::registerAirlocks(checks);
 	editor_smoke::registerBackground(checks);
 	editor_smoke::registerFacade(checks);
 	editor_smoke::registerBrokenExtensibles(checks);

@@ -7,6 +7,7 @@
 #include "core/Agent.h"
 #include "core/BulkheadDoor.h"
 #include "core/World.h"
+#include "core/AirlockTransit.h"
 #include "core/Coordination.h"
 #include "core/ExtensibleObject.h"
 #include "core/OpenableObject.h"
@@ -545,6 +546,28 @@ namespace core
 		result.traversalRequests.reserve(mWorld.mTraversalRequests.entries().size());
 		result.traversalPermits.reserve(mWorld.mTraversalPermits.entries().size());
 
+		for (auto const& sector : mWorld.mSectors)
+			if (auto chamber = std::dynamic_pointer_cast<const AirlockTransit>(sector))
+			{
+				AirlockSnapshot state;
+				state.sector = SectorId{ (uint64_t)sector->getIndex() + 1 };
+				state.chamberWidth = sector->getCellsWide(); state.capacity = sector->getCapacity();
+				state.cycleSeconds = chamber->getCycleSeconds();
+				state.remainingCycleSeconds = chamber->getRemainingCycleSeconds();
+				state.cycleComplete = chamber->isCycleComplete();
+				state.traversalAvailable = chamber->isTraversalAvailable();
+				for (int side = 0; side < 2; ++side)
+					switch (chamber->getDoor(side)->getState())
+					{
+					case OpenableObject::State::Closed: state.doors[side] = DoorSnapshotState::Closed; break;
+					case OpenableObject::State::Opening: state.doors[side] = DoorSnapshotState::Opening; break;
+					case OpenableObject::State::Open: state.doors[side] = DoorSnapshotState::Open; break;
+					case OpenableObject::State::Closing: state.doors[side] = DoorSnapshotState::Closing; break;
+					}
+				for (uint32_t control = 0; control < 3; ++control) state.controls[control] = chamber->getControl(control);
+				for (auto agent : sector->getAgents()) state.occupants.push_back(mWorld.getAgentId(agent));
+				result.airlocks.push_back(std::move(state));
+			}
 		for (auto const& [id, agent] : mWorld.mAgents.entries())
 		{
 			(void)id;

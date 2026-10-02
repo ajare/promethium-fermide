@@ -66,6 +66,9 @@ namespace core
 			bool validTarget = false;
 			if (binding.command.type == DeviceCommandType::SetSectorLights)
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
+			else if (binding.command.type == DeviceCommandType::RequestAirlock)
+				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size()
+					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock;
 			else if (auto resource = mWorld.mTraversalResources.find(binding.command.traversalResource))
 				validTarget = binding.command.type == DeviceCommandType::OpenDoor ? resource->mDoor != nullptr
 					: binding.command.type == DeviceCommandType::SetExtendedState ? resource->mExtensible != nullptr
@@ -122,6 +125,9 @@ namespace core
 		{
 			return { false, found.diagnostic };
 		}
+		if (any_of(found.entity->mBindings.begin(), found.entity->mBindings.end(), [](auto const& binding)
+			{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
+			return { false, "Airlock controls are fixed and cannot be removed independently" };
 		bool structural = any_of(mWorld.mTraversalResources.entries().begin(), mWorld.mTraversalResources.entries().end(),
 			[id](auto const& entry)
 			{
@@ -196,6 +202,8 @@ namespace core
 		}
 		auto id = mWorld.mDeviceOperations.add(unique_ptr<DeviceOperation>(new DeviceOperation(name, requester, command)));
 		if (broken) mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Failed;
+		if (command.type == DeviceCommandType::RequestAirlock)
+			mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Rejected;
 		if (!missing.empty())
 		{
 			auto operation = mWorld.mDeviceOperations.find(id);
@@ -217,6 +225,9 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
 		auto actor = mWorld.mAgents.find(actorId);
+		// #322 authors controls, not journeys. Refuse before creating any work.
+		if (point && any_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
+			{ return binding.command.type == DeviceCommandType::RequestAirlock; })) return {};
 		// A deactivated Agent is not simulated (#118), so it cannot take on new
 		// physical interaction work: the request is refused outright rather than
 		// parked, so it can never claim a place in the point's queue (#192).

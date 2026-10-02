@@ -73,6 +73,7 @@ namespace core
 
 	void BulkheadDoor::setAutomaticSensorDistance(float distance)
 	{
+		if (isAirlockOwned()) return;
 		mAutomaticSensorDistance = max(0.0f, distance);
 	}
 

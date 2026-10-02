@@ -68,7 +68,7 @@ namespace
 		require(platformLiftMax.x <= bottomRight.x - PalettePadding,
 			"PlatformLift still draws outside the tray");
 		// The tray is sized to the grid, so the tail slot fills the last column.
-		require(platformLiftMax.x + PalettePadding == bottomRight.x,
+		require(paletteSlotMax(TrayTopLeft, PaletteSlot::Airlock).x + PalettePadding == bottomRight.x,
 			"tray width no longer matches the slot grid's widest row");
 	}
 
@@ -138,17 +138,20 @@ namespace
 	// slot addition that overflows fails loudly.
 	static_assert(PaletteSlotWidth >= 96.0f,
 		"palette slots are too narrow for their sector labels");
-	static_assert(paletteColumnCount() == 9, "palette grid column count changed");
+	static_assert(paletteColumnCount() == 10, "palette grid column count changed");
 	static_assert(paletteRowCount() == 2, "palette grid row count changed");
 	static_assert(paletteTraySize().x == PalettePadding * 2.0f
-			+ PaletteSlotWidth * 9.0f + PaletteGap * 8.0f,
+			+ PaletteSlotWidth * 10.0f + PaletteGap * 9.0f,
 		"tray width no longer covers every slot column");
 	static_assert(paletteTraySize().y == PaletteTopMargin + PalettePadding
 			+ PaletteSlotSize * 2.0f + PaletteGap,
 		"tray height no longer covers both slot rows and its top grip");
 	static_assert(paletteSlotMax(ImVec2(0.0f, 0.0f), PaletteSlot::PlatformLift).x
-			+ PalettePadding == paletteTraySize().x,
+			+ PalettePadding <= paletteTraySize().x,
 		"PlatformLift escapes the tray");
+
+	static_assert(paletteSlotMax(ImVec2(0.0f, 0.0f), PaletteSlot::Airlock).x
+			+ PalettePadding == paletteTraySize().x, "Airlock escapes the tray");
 
 	// Ticket #41: the tray is dragged around the view window by its grip and
 	// may never leave that window.

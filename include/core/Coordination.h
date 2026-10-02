@@ -60,7 +60,9 @@ namespace core
 		CallLift,
 		SelectLiftDestination,
 		CallShuttle,
-		SelectShuttleDestination
+		SelectShuttleDestination,
+		// Targets the World-owned Airlock Sector, never one of its owned Doors.
+		RequestAirlock
 	};
 
 	enum struct DoorOpenLeaseKind
