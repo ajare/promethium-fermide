@@ -24,6 +24,7 @@ namespace
 		gUISettings.xOffset = 0; gUISettings.yOffset = 0;
 		auto world = std::make_shared<core::World>("Airlock rendering", 10, 2);
 		world->addRoom("Left", 0, 0, 0, 2, 1); world->addCorridor(0, 0, 5, 2, 1);
+		world->addRoom("Moved left", 0, 1, 0, 4, 1); world->addCorridor(0, 1, 6, 2, 1);
 		auto index = world->addAirlock(0, 0, 2, 3); world->finishBuild();
 		WorldDrawList drawing({ { 0, 0 }, { 1600, 720 } });
 		renderWorld(world, &drawing);
@@ -39,6 +40,29 @@ namespace
 				if (lowX == 2 * CORE_CELL_WIDTH_PIXELS && highX == 5 * CORE_CELL_WIDTH_PIXELS) chamberSurface = true;
 			}
 		require(chamberSurface && doors.size() == 2 && buttons.size() == 3, "Renderer output missing chamber, two Bulkheads or three buttons");
+		world->pauseSimulation();
+		index = world->applyAirlockEdit(world->planResizeAirlock(index, 4, 1, 2));
+		gSelectedSector = world->getSector(index);
+		WorldDrawList moved({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &moved);
+		doors.clear(); buttons.clear(); chamberSurface = false;
+		for (auto const& command : moved.commands())
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+			{
+				float lowX = triangle->positions[0].x, highX = lowX;
+				for (auto const& point : triangle->positions) { lowX = std::min(lowX, point.x); highX = std::max(highX, point.x); }
+				if (triangle->colour == ImU32(ImColor(128, 192, 182))) doors.insert((lowX + highX) * 0.5f);
+				if (triangle->colour == ImU32(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
+				if (lowX == 4 * CORE_CELL_WIDTH_PIXELS && highX == 6 * CORE_CELL_WIDTH_PIXELS) chamberSurface = true;
+			}
+		require(chamberSurface && doors.size() == 2 && buttons.size() == 3
+			&& *doors.begin() >= 4 * CORE_CELL_WIDTH_PIXELS && *doors.rbegin() <= 6 * CORE_CELL_WIDTH_PIXELS,
+			"Moved/resized chamber render kept obsolete geometry or controls");
+		world->applyAirlockEdit(world->planRemoveAirlock(index)); gSelectedSector.reset();
+		WorldDrawList removed({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &removed);
+		require(std::none_of(removed.commands().begin(), removed.commands().end(), [](auto const& command) {
+			auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			return triangle && (triangle->colour == ImU32(ImColor(128, 192, 182)) || triangle->colour == ImU32(ImColor(0, 255, 128)));
+		}), "Deleted chamber rendered orphan Doors/buttons");
 		// Width-one chamber still renders all generated controls separately.
 		world = std::make_shared<core::World>("Single cell chamber", 8, 2);
 		world->addCorridor(0, 0, 0, 2, 1); world->addRoom("Right", 0, 0, 3, 2, 1);

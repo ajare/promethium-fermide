@@ -1,4 +1,4 @@
-# Airlock chambers and journeys (#322–#326)
+# Airlock chambers and journeys (#322–#327)
 
 The Airlock palette tool paints a one-Level, positive whole-cell chamber on the
 visible Layer. It requires empty chamber cells and a walkable Room or Corridor
@@ -64,7 +64,7 @@ operation. Queue/crowding observations are limited to the current approach;
 opposing queues and unobserved remote live Door, reservation, and cycle state
 never determine the estimate. Remote entrances use authored baseline timing.
 
-World schema 41 persists independent outside requirements alongside the chamber's
+World schema 42 persists independent outside requirements alongside the chamber's
 geometry, timing, identity through the construction stream, and prior wall states.
 Version-40 chambers load with unrestricted outside controls; requirement-bearing
 older-schema documents and dangling/duplicate requirements are refused atomically. YAML and binary load, reset, and
@@ -90,8 +90,36 @@ enters until every occupant has left. Reactivation resumes the retained journey;
 there is no automatic activation or passenger removal. Reset clears reservations,
 operators, occupants and cycling while preserving authored geometry and timing.
 
-Structural chamber editing/restoration workflows, pressure/scanning simulation,
-and Broken support remain follow-up work. Device commands and traversal
+## Structural editing (#327)
+
+Move chambers by dragging their interior or editing x/Level in Selection. Resize
+from either horizontal edge or the Selection width field; height remains one Level.
+Delete through Selection or the existing Delete shortcut. Commands participate in
+normal document history and refresh selection, topology, capacity, and generated
+Doors/buttons together. Per-chamber timing and independent outside requirements
+survive edits.
+
+Public `planResizeAirlock`, `planRemoveAirlock`, and `applyAirlockEdit` use the
+existing candidate-World/construction-replay boundary. Geometry has the same
+preflight as creation, with the old chamber removed from the candidate first.
+Plans are revalidated on application; invalid edits do not alter authored or live
+state. Application requires pause. Occupants and either threshold crossing remain
+protected even when paused; structural aggregate replay also refuses while another
+Airlock has occupants/crossings rather than destroying its committed journey.
+Empty waiting queues and pre-entry reservations do not prohibit edits: replay
+cancels old handles and carries destination intent for normal timed Route planning
+on resume, with Route loss if changed topology makes the destination unreachable.
+There is no forced removal, evacuation, or independent Door editing.
+
+Obsolete adjoining ends regain their saved authored states. Schema 42 adds the
+`airlockWallRestoration` flag on a `removeWall` construction record to retain an
+originally open end even after its adjoining chamber is moved/deleted. These
+single-end restoration records replay before dependent Transits, validate their
+Location/Level/side, and are rejected in older-schema documents. Ordinary shared
+wall editing remains unchanged. YAML/binary reload, Reset, and document-history
+replay preserve restoration information and configuration.
+
+Pressure/scanning simulation and Broken support remain follow-up work. Device commands and traversal
 coordination remain separate (ADR 0001); edges never own a coordinator.
 
 Headless coverage is owned by the existing Simulation, World, Persistence,
@@ -124,4 +152,20 @@ requirements, adherence, forbidden and last-resort Buttons, Room/Corridor entry
 requirements, stale Paths, grant loss and tightening after admission, alternative
 route selection, local/opposing queue isolation, YAML/binary/reset/replay, and
 editor undo/redo. Module CLI contracts and ownership/compile audits also passed.
+`git diff --check` passed. Windows validation is not claimed.
+
+## #327 validation
+
+Incremental affected-module builds and focused World, Simulation, Editor, Render,
+and Persistence checks passed, followed by all ten affected module/CLI contracts.
+Full GUI-enabled Linux/GCC default builds and all 85 CTests passed in Release
+(`build-linux`) and Debug with `PF_HIGH_ANALYSIS=ON`
+(`build-linux-validation/debug`), at `--parallel 4`; the optional vendored GUI
+capability smoke was the only skip. After extending waiting-edit coverage to
+resize/delete, both final default builds and the affected Simulation registry,
+CLI contract, and compatibility contract were rerun successfully. Displays were
+unset throughout. New coverage includes invalid-edit atomicity, open/closed
+walls, move/resize/delete, entry and exit crossings, paused occupancy protection,
+waiting reservation cancellation, route recovery/Route loss, history undo/redo,
+YAML/binary/reset/replay, saved restoration flags, and renderer output.
 `git diff --check` passed. Windows validation is not claimed.

@@ -118,5 +118,14 @@ namespace persistence
 		try { reader = core::YamlSerializer::fromString(YAML::Dump(node)); reader->deserialize(); loaded.deserialize(*reader, work); }
 		catch (std::exception const&) { refused = true; }
 		require(refused && chamberIn(loaded)->getCycleSeconds() == 7.5f, "Broken Airlock authored or load not atomic");
+		loaded.pauseSimulation();
+		require(loaded.planRemoveAirlock(index).valid, "Loaded originally open chamber delete refused");
+		loaded.applyAirlockEdit(loaded.planRemoveAirlock(index));
+		require(loaded.getSector(0)->getEndType(0, CORE_SIDE_RIGHT) == core::SectorEndType::None
+			&& loaded.getSector(1)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::Wall,
+			"Deletion ignored authoritative saved wall restoration flags");
+		loaded.resetSimulation();
+		require(loaded.getSector(0)->getEndType(0, CORE_SIDE_RIGHT) == core::SectorEndType::None,
+			"Replay lost detached originally open wall");
 	}
 }

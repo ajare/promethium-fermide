@@ -479,7 +479,9 @@ namespace core
 			serializer.writeUint32("properties", record.c); break;
 		case ConstructionType::RemoveWall:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
-			serializer.writeString("side", sideName(record.i)); break;
+			serializer.writeString("side", sideName(record.i));
+			if (record.p) serializer.writeBool("airlockWallRestoration", true);
+			break;
 		case ConstructionType::RemoveMarker:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("objectIndex", record.b);
 			serializer.writeUint64("id", record.markerId.value); break;
@@ -546,7 +548,8 @@ namespace core
 		// Version 39 adds authored whole-coupled-Shuttle Broken condition.
 		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
 		// Version 41 adds independent outside Airlock control requirements.
-		serializer.writeUint32("version", 41);
+		// Version 42 retains detached original wall ends after Airlock edits.
+		serializer.writeUint32("version", 42);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -1111,6 +1114,11 @@ namespace core
 			}
 			break;
 		case ConstructionType::RemoveWall:
+			if (serializer.hasField("airlockWallRestoration"))
+			{
+				if (version < 42) throw SerializationException("Airlock wall restoration requires World schema version 42 or later");
+				record.p = serializer.readBool("airlockWallRestoration");
+			}
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.i = readSide("side"); break;
 		case ConstructionType::RemoveMarker:
@@ -1180,7 +1188,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 41)
+		if (version < 1 || version > 42)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2440,7 +2448,16 @@ namespace core
 				record.markerId, record.name, record.c);
 			break;
 		case ConstructionType::RemoveWall:
-			removeLocationWall(record.a, record.b, record.i);
+			if (record.p)
+			{
+				if (record.a >= mSectors.size() || mSectors[record.a]->getType() != SectorType::Location
+					|| record.b >= mSectors[record.a]->getLevelsHigh()
+					|| (record.i != CORE_SIDE_LEFT && record.i != CORE_SIDE_RIGHT))
+					throw SerializationException("Invalid Airlock wall restoration");
+				mSectors[record.a]->setEndType(record.b, record.i, SectorEndType::None);
+				recordConstruction(record);
+			}
+			else removeLocationWall(record.a, record.b, record.i);
 			break;
 		case ConstructionType::RemoveMarker:
 		{
@@ -4201,6 +4218,160 @@ namespace core
 			plan.remove ? ~0u : plan.sectorIndex, deltaX, deltaY);
 		if (plan.remove) return ~0u;
 		return mLayers[transitLayer]->getCellDefinition(plan.x, plan.y).sectorIndex;
+	}
+
+	bool World::prepareAirlockEdit(AirlockEditPlan const& plan,
+		vector<ConstructionRecord>& records, string& diagnostic) const
+	{
+		if (plan.sectorIndex >= mSectors.size()
+			|| mSectors[plan.sectorIndex]->getType() != SectorType::Airlock)
+		{ diagnostic = "Only Airlock chambers can be edited"; return false; }
+		// Construction replay replaces the aggregate. Never discard a passenger
+		// or a crossing in this chamber (or another chamber being replayed).
+		for (auto const& [id, resource] : mTraversalResources.entries())
+		{
+			(void)id;
+			if (!resource->mAirlock) continue;
+			if (any_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto owner) { return (bool)owner; })
+				|| any_of(resource->mCrossingOwners.begin(), resource->mCrossingOwners.end(), [](auto owner) { return (bool)owner; })
+				|| !resource->mAirlock->getAgents().empty())
+			{ diagnostic = "Airlock structural replay requires empty chambers with no threshold crossings"; return false; }
+		}
+		auto referencesSector = [](ConstructionType type) {
+			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
+				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
+				|| type == ConstructionType::ObjectTombstone;
+		};
+		records = mConstructionRecords;
+		uint32_t producer = 0;
+		size_t selected = records.size();
+		for (size_t i = 0; i < records.size(); ++i)
+			if (constructionTypeCreatesSector(records[i].type) && producer++ == plan.sectorIndex)
+			{ selected = i; break; }
+		if (selected == records.size() || records[selected].type != ConstructionType::Airlock)
+		{ diagnostic = "The Airlock no longer has an authored definition"; return false; }
+		auto edited = records[selected];
+		auto chamber = static_pointer_cast<const AirlockTransit>(mSectors[plan.sectorIndex]);
+		// The saved restoration flags are authoritative, including documents
+		// whose originally open walls have no separate RemoveWall record.
+		for (int side = 0; side < 2; ++side)
+			if (side == 0 ? edited.p : edited.q)
+			{
+				auto neighbour = chamber->getStop(side).sector;
+				ConstructionRecord wall{ ConstructionType::RemoveWall };
+				wall.a = neighbour->getIndex(); wall.b = chamber->getCellY() - neighbour->getCellY(); wall.i = 1 - side; wall.p = true;
+				if (none_of(records.begin(), records.end(), [&](auto const& record) {
+					return record.type == ConstructionType::RemoveWall && record.p
+						&& record.a == wall.a && record.b == wall.b && record.i == wall.i;
+				})) records.push_back(wall);
+			}
+		auto without = records;
+		without.erase(without.begin() + selected);
+		without.erase(remove_if(without.begin(), without.end(), [&](auto& record) {
+			if (!referencesSector(record.type)) return false;
+			if (record.a == plan.sectorIndex) return true;
+			if (record.a > plan.sectorIndex) --record.a;
+			return false;
+		}), without.end());
+		try
+		{
+			auto candidate = makeCandidateWorld();
+			candidate->mDeserializingConstruction = true;
+			for (auto const& record : canonicalConstructionRecords(without)) candidate->applyConstructionRecord(record);
+			candidate->finishBuild();
+			if (plan.remove) records = std::move(without);
+			else
+			{
+				if (!candidate->canAddAirlock(edited.layer, plan.y, plan.x, plan.width, edited.x, &diagnostic)) return false;
+				edited.a = plan.y; edited.b = plan.x; edited.c = plan.width;
+				for (int side = 0; side < 2; ++side)
+				{
+					auto endX = side == 0 ? plan.x - 1 : plan.x + plan.width;
+					auto neighbour = candidate->getSector(candidate->getLayer(edited.layer)->getCellDefinition(endX, plan.y).sectorIndex);
+					bool open = neighbour->getEndType(plan.y - neighbour->getCellY(), 1 - side) == SectorEndType::None;
+					if (side == 0) edited.p = open; else edited.q = open;
+				}
+				records[selected] = std::move(edited);
+			}
+			records = canonicalConstructionRecords(std::move(records));
+			candidate = makeCandidateWorld(); candidate->mDeserializingConstruction = true;
+			for (auto const& record : records) candidate->applyConstructionRecord(record);
+			candidate->finishBuild();
+		}
+		catch (Exception const& error) { diagnostic = error.getMessage(); return false; }
+		catch (exception const& error) { diagnostic = error.what(); return false; }
+		return true;
+	}
+
+	World::AirlockEditPlan World::planResizeAirlock(uint32_t index, uint32_t x,
+		uint32_t y, uint32_t width) const
+	{
+		AirlockEditPlan plan;
+		plan.sectorIndex = index; plan.x = x; plan.y = y; plan.width = width;
+		vector<ConstructionRecord> records;
+		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
+		return plan;
+	}
+
+	World::AirlockEditPlan World::planRemoveAirlock(uint32_t index) const
+	{
+		AirlockEditPlan plan;
+		plan.sectorIndex = index; plan.remove = true;
+		vector<ConstructionRecord> records;
+		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
+		return plan;
+	}
+
+	uint32_t World::applyAirlockEdit(AirlockEditPlan const& plan)
+	{
+		if (!mSimulationPaused) throw WorldException(this, "Editing an Airlock requires the simulation to be paused");
+		vector<ConstructionRecord> records;
+		string diagnostic;
+		if (!prepareAirlockEdit(plan, records, diagnostic)) throw WorldException(this, diagnostic);
+		auto layer = mSectors[plan.sectorIndex]->getLayerIndex();
+		// Replay cancels every old resource handle. Carry destination intent as
+		// well as Agent properties, including selected pre-entry admissions which
+		// pause deliberately leaves attached to their original journey.
+		auto intents = mPausedPathIntents;
+		for (auto const& [id, agent] : mAgents.entries())
+			if (agent->mPath.path && !agent->mPath.path->nodes.empty())
+			{
+				auto destination = agent->mPath.path->nodes.back().targetVertex;
+				if (!destination || !destination->getSector()) continue;
+				auto& intent = intents[id];
+				intent.destinationSector = SectorId{ (uint64_t)destination->getSector()->getIndex() + 1 };
+				intent.destinationPosition = destination->getPosition();
+				intent.destinationLocalPosition = destination->getSectorOffset();
+				intent.wasPathing = agent->mState != Agent::State::Idle;
+				for (uint32_t i = 0; i < destination->getSector()->getNumObjects(); ++i)
+					if (auto marker = dynamic_pointer_cast<MarkerSectorObject>(destination->getSector()->getObject(i));
+						marker && mGraph->getVertexForObject(marker) == destination)
+						intent.destinationMarker = marker->getMarker()->getId();
+			}
+		map<AgentId, uint32_t> destinationLayers;
+		for (auto const& [id, intent] : intents)
+			if (intent.destinationSector && intent.destinationSector.value <= mSectors.size())
+				destinationLayers[id] = mSectors[intent.destinationSector.value - 1]->getLayerIndex();
+		rebuildFromConstructionRecords(std::move(records));
+		for (auto& [id, intent] : intents)
+			if (destinationLayers.count(id))
+				if (auto sector = getSectorAtPosition(destinationLayers[id], intent.destinationPosition.x, intent.destinationPosition.y))
+				{
+					intent.destinationSector = SectorId{ (uint64_t)sector->getIndex() + 1 };
+					intent.destinationLocalPosition = intent.destinationPosition - sector->getPosition();
+					mPausedPathIntents[id] = intent;
+					if (auto agent = mAgents.find(id); agent && agent->mState == Agent::State::RoutePlanning)
+					{
+						auto& goal = mMovementGoals[id];
+						goal.marker = intent.destinationMarker; goal.fallbackIntent = intent;
+						goal.startPathing = intent.wasPathing;
+						goal.planningFailureReason = RouteLossReason::TopologyChanged;
+					}
+				}
+		if (plan.remove) return ~0u;
+		return mLayers[layer]->getCellDefinition(plan.x, plan.y).sectorIndex;
 	}
 
 	bool World::getStairwellOptions(uint32_t sectorIndex, CreateStairwellOptions& options) const

@@ -152,7 +152,7 @@ namespace
 				root["construction"][record]["locationPermissionRequirement"] = YAML::Load(value);
 				reject(root);
 			}
-		for (auto version : { 31u, 42u })
+		for (auto version : { 31u, 43u })
 		{
 			auto root = YAML::Load(before); root["version"] = version; reject(root);
 		}

@@ -13,10 +13,90 @@
 #include "core/RouteTraversalInputs.h"
 #include "core/MarkerSectorObject.h"
 #include "core/MobilityProfile.h"
+#include "core/Exceptions.h"
 
 namespace
 {
 	using smoke::require;
+	void editSafety(smoke::Context const&)
+	{
+		for (int stage = 0; stage < 6; ++stage)
+		{
+			core::World world("Airlock edit safety", 14, 2);
+			for (uint32_t row = 0; row < 2; ++row)
+			{
+				world.addRoom("Left", 0, row, 0, 4, 1);
+				world.addCorridor(0, row, row == 1 && stage == 4 ? 7 : 6, 4, 1);
+			}
+			auto index = world.addAirlock(0, 0, 4, 2, 1);
+			auto marker = world.addSectorMarker(1, 0, 2.0f);
+			world.finishBuild();
+			auto id = world.createAgent("Traveller", 0, 0, 2.0f);
+			auto agent = world.lookupAgent(id).entity;
+			agent->setPath(world.getGraph()->calculatePath(agent,
+				world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+			bool reached = false;
+			for (unsigned tick = 0; tick < 1600 && !reached; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().airlocks.at(0);
+				if (stage == 0 || stage >= 4) reached = !state.reservations.empty() && state.crossings.empty() && state.occupants.empty();
+				else if (stage == 1) reached = !state.crossings.empty() && state.occupants.empty();
+				else if (stage == 2) reached = !state.occupants.empty() && state.crossings.empty();
+				else reached = !state.crossings.empty() && !state.occupants.empty();
+			}
+			require(reached, "Edit safety fixture never reached requested journey boundary");
+			if (stage > 0 && stage < 4)
+			{
+				auto refuse = [&] {
+					require(!world.planResizeAirlock(index, 4, 1, 2).valid
+						&& !world.planResizeAirlock(index, 4, 0, 2).valid
+						&& !world.planRemoveAirlock(index).valid, "Occupied/crossing chamber edit accepted");
+					core::World::AirlockEditPlan forged;
+					forged.sectorIndex = index; forged.remove = true; forged.valid = true;
+					bool rejected = false;
+					try { world.applyAirlockEdit(forged); } catch (core::Exception const&) { rejected = true; }
+					require(rejected && world.getNumSectors() == 5, "Stale/forged plan bypassed safety");
+				};
+				refuse(); world.pauseSimulation();
+				auto state = world.getSimulationSnapshot().airlocks.at(0);
+				refuse(); world.advanceTicks(60);
+				auto after = world.getSimulationSnapshot().airlocks.at(0);
+				require(after.occupants == state.occupants && after.crossings == state.crossings
+					&& after.reservations == state.reservations, "Paused rejected edit changed journey");
+				world.resumeSimulation();
+			}
+			else
+			{
+				world.pauseSimulation();
+				auto plan = stage == 5 ? world.planRemoveAirlock(index)
+					: world.planResizeAirlock(index, 4, 1, stage == 4 ? 3 : 2);
+				require(plan.valid, "Empty reserved chamber edit refused");
+				index = world.applyAirlockEdit(plan);
+				auto state = world.getSimulationSnapshot();
+				require(state.traversalRequests.empty() && state.traversalPermits.empty(), "Empty edit retained stale requests/permits");
+				if (stage == 5)
+				{
+					require(state.airlocks.empty() && state.interactionPoints.empty()
+						&& state.traversalResources.empty(), "Waiting deletion retained stale resources");
+					world.resumeSimulation(); world.advanceTicks(600);
+					agent = world.lookupAgent(id).entity;
+					require(agent && agent->getSector()->getIndex() == 0 && agent->getState() == core::Agent::State::Idle,
+						"Deleted route did not recover safely through Route loss");
+					continue;
+				}
+				require(state.airlocks.at(0).reservations.empty() && state.airlocks.at(0).occupants.empty()
+					&& state.airlocks.at(0).crossings.empty(), "Empty edit retained stale reservations");
+				index = world.applyAirlockEdit(world.planResizeAirlock(index, 4, 0, 2));
+				world.resumeSimulation();
+				agent = world.lookupAgent(id).entity;
+				require(agent, "Structural replay lost waiting Agent identity");
+			}
+			for (unsigned tick = 0; tick < 2400 && agent->getSector()->getIndex() != 1; ++tick) world.advanceTick();
+			require(agent->getSector()->getIndex() == 1, "Agent did not recover its route after edit/refusal stage=" + std::to_string(stage));
+		}
+	}
+
 	void journeys(smoke::Context const&)
 	{
 		for (uint32_t width : { 1u, 2u, 5u })
@@ -948,6 +1028,7 @@ namespace
 }
 void registerAirlocks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "airlocks/structuralEditSafety", editSafety });
 	checks.push_back({ "airlocks/singleAgentJourneys", journeys });
 	checks.push_back({ "airlocks/batchesAndOpposingQueues", batches });
 	checks.push_back({ "airlocks/lostReservationDoesNotRefill", lostReservation });

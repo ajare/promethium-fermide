@@ -2,10 +2,12 @@
 #include "core/AirlockTransit.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
 #include "core/Pathing.h"
 #include "core/Graph.h"
 #include "core/Exceptions.h"
 #include <limits>
+#include <yaml-cpp/yaml.h>
 
 namespace
 {
@@ -68,6 +70,103 @@ namespace
 						return node.edge && node.edge->getTraversalResourceId() == chamber->getTraversalResourceId();
 					}) == 2, "Airlock route must use both controlled thresholds");
 				}
+	}
+
+	void structuralEdits(smoke::Context const&)
+	{
+		for (bool open : { false, true })
+		{
+			core::World world("Airlock structural edits", 14, 3);
+			for (uint32_t row = 0; row < 3; ++row)
+			{
+				auto left = world.addRoom("Left", 0, row, 0, 3, 1);
+				world.addCorridor(0, row, row == 2 ? 5 : 6, 3, 1);
+				(void)left;
+			}
+			if (open)
+			{
+				// Persisted authored open perimeter ends are restored through the
+				// document seam; normal wall commands require adjacent Locations.
+				auto node = YAML::Load(saved(world));
+				for (uint32_t row = 0; row < 3; ++row)
+				{
+					YAML::Node wall;
+					wall["type"] = "removeWall"; wall["sectorIndex"] = row * 2;
+					wall["levelIndex"] = 0; wall["side"] = "right"; wall["airlockWallRestoration"] = true;
+					node["construction"].push_back(wall);
+				}
+				auto reader = core::YamlSerializer::fromString(YAML::Dump(node)); reader->deserialize();
+				core::SerializationWorkData work;
+				require(world.deserialize(*reader, work), "Originally open wall fixture refused");
+				world.pauseSimulation();
+			}
+			auto index = world.addAirlock(0, 0, 3, 3, 7);
+			world.finishBuild(); world.pauseSimulation();
+			auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index));
+			auto key = world.addAccessPermission("Operator");
+			require(world.setInteractionPointPermissionRequirement(chamber->getControl(0), { key }), "Outside requirement setup failed");
+			world.markSaved();
+			auto baseline = saved(world);
+			for (auto geometry : { std::array<uint32_t, 3>{ 0, 0, 3 }, { 3, 0, 0 }, { 3, 0, 4 }, { 3, 3, 3 }, { ~0u, 0, 3 } })
+			{
+				auto plan = world.planResizeAirlock(index, geometry[0], geometry[1], geometry[2]);
+				require(!plan.valid && !plan.diagnostic.empty(), "Invalid chamber edit accepted");
+				bool refused = false;
+				try { world.applyAirlockEdit(plan); } catch (core::Exception const&) { refused = true; }
+				require(refused && saved(world) == baseline && !world.isModified() && world.isTraversalTopologyValid(), "Rejected edit was not atomic");
+			}
+			auto check = [&](uint32_t y, uint32_t width) {
+				chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index));
+				require(chamber && chamber->getCellY() == y && chamber->getCellsWide() == width
+					&& chamber->getCapacity() == width && chamber->getCycleSeconds() == 7, "Edited geometry/capacity/timing mismatch");
+				require(chamber->getPreviousEnd(0) == (open ? core::SectorEndType::None : core::SectorEndType::Wall)
+					&& chamber->getPreviousEnd(1) == core::SectorEndType::Wall, "Edited wall restoration data incorrect");
+				require(world.getInteractionPointPermissionRequirement(chamber->getControl(0)) == std::vector<core::AccessPermissionId>{ key }
+					&& world.getInteractionPointPermissionRequirement(chamber->getControl(1)).empty(), "Edited outside configuration lost");
+				require(world.getSimulationSnapshot().interactionPoints.size() == 3
+					&& world.getSimulationSnapshot().traversalResources.size() == 1, "Edit orphaned generated resources");
+			};
+			index = world.applyAirlockEdit(world.planResizeAirlock(index, 3, 1, 3));
+			check(1, 3);
+			require(world.getSector(0)->getEndType(0, CORE_SIDE_RIGHT) == (open ? core::SectorEndType::None : core::SectorEndType::Wall)
+				&& world.getSector(1)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::Wall, "Move did not restore old walls");
+			index = world.applyAirlockEdit(world.planResizeAirlock(index, 3, 2, 2));
+			check(2, 2);
+			require(world.getSector(2)->getEndType(0, CORE_SIDE_RIGHT) == (open ? core::SectorEndType::None : core::SectorEndType::Wall)
+				&& world.getSector(3)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::Wall, "Resize did not restore obsolete walls");
+			for (bool binary : { false, true })
+			{
+				core::SerializationWorkData work; work.markSerializedUnmodified = false;
+				auto write = [&](auto writer) {
+					world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+				};
+				auto data = binary ? write(core::BinarySerializer::toString()) : write(core::YamlSerializer::toString());
+				std::unique_ptr<core::Serializer> reader = binary
+					? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				reader->deserialize();
+				require(world.deserialize(*reader, work), "Edited Airlock load failed");
+				world.pauseSimulation(); check(2, 2);
+				world.resetSimulation(); world.pauseSimulation(); check(2, 2);
+			}
+			require(world.applyAirlockEdit(world.planRemoveAirlock(index)) == ~0u, "Airlock delete refused");
+			require(world.getNumSectors() == 6 && world.getSimulationSnapshot().interactionPoints.empty()
+				&& world.getSimulationSnapshot().traversalResources.empty(), "Deletion left orphan controls/resources");
+			require(world.getSector(4)->getEndType(0, CORE_SIDE_RIGHT) == (open ? core::SectorEndType::None : core::SectorEndType::Wall)
+				&& world.getSector(5)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::Wall, "Loaded delete failed wall restoration");
+			auto deleted = core::YamlSerializer::fromString(saved(world)); deleted->deserialize();
+			core::SerializationWorkData work;
+			require(world.deserialize(*deleted, work) && world.getSector(4)->getEndType(0, CORE_SIDE_RIGHT)
+				== (open ? core::SectorEndType::None : core::SectorEndType::Wall), "Deleted chamber wall state lost on reload");
+			if (open)
+			{
+				auto oldSchema = YAML::Load(saved(world)); oldSchema["version"] = 41;
+				bool rejected = false;
+				try { auto input = core::YamlSerializer::fromString(YAML::Dump(oldSchema)); input->deserialize(); world.deserialize(*input, work); }
+				catch (std::exception const&) { rejected = true; }
+				require(rejected, "Older schema silently accepted detached wall restoration");
+			}
+		}
 	}
 
 	void refusals(smoke::Context const&)
@@ -149,6 +248,7 @@ namespace
 
 void registerAirlocks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "airlocks/structuralEdits", structuralEdits });
 	checks.push_back({ "airlocks/placement", placement });
 	checks.push_back({ "airlocks/atomicRefusalAndOwnership", refusals });
 }

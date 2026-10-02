@@ -309,6 +309,8 @@ namespace
 		bool shuttle{ false };
 		bool ladder{ false };
 		bool stairwell{ false };
+		bool airlock{ false };
+		core::World::AirlockEditPlan airlockPreview;
 		ResizeEdge edge{ ResizeEdge::None };
 		ImVec2 pressPosition{};
 		uint32_t originalX{ 0 }, originalY{ 0 }, originalWidth{ 0 }, originalHeight{ 0 };
@@ -2778,6 +2780,29 @@ namespace
 		else commitShuttleEdit(world, plan);
 	}
 
+	void commitAirlockEdit(shared_ptr<core::World> const& world,
+		core::World::AirlockEditPlan const& plan)
+	{
+		if (!plan.valid)
+		{ core::addLogMessage("Airlock editor", 0, core::LogLevel::Error, plan.diagnostic); return; }
+		auto undo = captureDocumentSnapshot(world);
+		try
+		{
+			if (!world->isSimulationPaused()) world->pauseSimulation();
+			auto index = world->applyAirlockEdit(plan);
+			gUISettings.worldPaused = true;
+			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
+			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
+			gSelectedSector = plan.remove ? nullptr : world->getSector(index);
+			commitDocumentEdit(std::move(undo));
+		}
+		catch (core::Exception const& error)
+		{ core::addLogMessage("Airlock editor", 0, core::LogLevel::Error, error.getMessage()); }
+		catch (std::exception const& error)
+		{ core::addLogMessage("Airlock editor", 0, core::LogLevel::Error, error.what()); }
+		resetSectorResize();
+	}
+
 	void commitLadderEdit(shared_ptr<core::World> const& world,
 		core::World::LadderEditPlan const& plan)
 	{
@@ -4321,7 +4346,9 @@ void handleShortcuts(shared_ptr<core::World>& world)
 		{
 			if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector)
 			{
-				if (gSelectedSector->getType() == core::SectorType::Lift)
+				if (gSelectedSector->getType() == core::SectorType::Airlock)
+					commitAirlockEdit(world, world->planRemoveAirlock(gSelectedSector->getIndex()));
+				else if (gSelectedSector->getType() == core::SectorType::Lift)
 				{
 					auto plan = world->planRemoveLift(gSelectedSector->getIndex());
 					if (!plan.valid) core::addLogMessage("Lift editor", 0, core::LogLevel::Error, plan.diagnostic);
@@ -6698,6 +6725,16 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				if (world->setAirlockCycleSeconds(chamber->getIndex(), seconds))
 					commitDocumentEdit(std::move(undo));
 			}
+			int x = (int)chamber->getCellX(), y = (int)chamber->getCellY();
+			int width = (int)chamber->getCellsWide();
+			bool edit = ImGui::InputInt("Chamber x", &x);
+			edit = ImGui::InputInt("Chamber Level", &y) || edit;
+			edit = ImGui::InputInt("Chamber width", &width) || edit;
+			if (edit)
+				commitAirlockEdit(world, world->planResizeAirlock(chamber->getIndex(),
+					(uint32_t)x, (uint32_t)y, (uint32_t)width));
+			if (ImGui::Button("Delete Airlock"))
+				commitAirlockEdit(world, world->planRemoveAirlock(chamber->getIndex()));
 			ImGui::EndDisabled();
 			break;
 		}
@@ -8078,7 +8115,8 @@ namespace
 			|| type == core::SectorType::Lift
 			|| type == core::SectorType::Shuttle
 			|| type == core::SectorType::Ladder
-			|| type == core::SectorType::Stairwell;
+			|| type == core::SectorType::Stairwell
+			|| type == core::SectorType::Airlock;
 	}
 
 	ResizeEdge hoveredResizeEdge(shared_ptr<const core::Sector> const& sector, ImVec2 mouse)
@@ -8098,7 +8136,8 @@ namespace
 			candidates.push_back({ ResizeEdge::Left, abs(mouse.x - topLeft.x) });
 			candidates.push_back({ ResizeEdge::Right, abs(mouse.x - bottomRight.x) });
 		}
-		bool corridor = sector->getType() == core::SectorType::Shuttle
+		bool corridor = sector->getType() == core::SectorType::Airlock
+			|| sector->getType() == core::SectorType::Shuttle
 			|| (sector->getType() == core::SectorType::Location
 				&& sector->getTopLevelHeight() == CORE_CORRIDOR_HEIGHT);
 		if (!corridor && mouse.x >= topLeft.x - tolerance && mouse.x <= bottomRight.x + tolerance)
@@ -8536,7 +8575,8 @@ namespace
 			bool const selectedShuttle = gSelectedSector->getType() == core::SectorType::Shuttle;
 			bool const selectedLadder = gSelectedSector->getType() == core::SectorType::Ladder;
 			bool const selectedStairwell = gSelectedSector->getType() == core::SectorType::Stairwell;
-			if (hoverEdge != ResizeEdge::Move && !selectedLift && !selectedShuttle)
+			if (hoverEdge != ResizeEdge::Move && !selectedLift && !selectedShuttle
+				&& gSelectedSector->getType() != core::SectorType::Airlock)
 			{
 				if (!world->isSimulationPaused()) world->pauseSimulation();
 				gUISettings.worldPaused = true;
@@ -8546,13 +8586,17 @@ namespace
 			gSectorResize.shuttle = selectedShuttle;
 			gSectorResize.ladder = selectedLadder;
 			gSectorResize.stairwell = selectedStairwell;
+			gSectorResize.airlock = gSelectedSector->getType() == core::SectorType::Airlock;
 			gSectorResize.edge = hoverEdge;
 			gSectorResize.pressPosition = io.MousePos;
 			gSectorResize.originalX = gSelectedSector->getCellX();
 			gSectorResize.originalY = gSelectedSector->getCellY();
 			gSectorResize.originalWidth = gSelectedSector->getCellsWide();
 			gSectorResize.originalHeight = gSelectedSector->getLevelsHigh();
-			if (gSectorResize.lift)
+			if (gSectorResize.airlock)
+				gSectorResize.airlockPreview = world->planResizeAirlock(gSelectedSector->getIndex(),
+					gSectorResize.originalX, gSectorResize.originalY, gSectorResize.originalWidth);
+			else if (gSectorResize.lift)
 				gSectorResize.liftPreview = world->planResizeLift(gSelectedSector->getIndex(),
 					gSectorResize.originalX, gSectorResize.originalY,
 					gSectorResize.originalWidth, gSectorResize.originalHeight);
@@ -8624,7 +8668,7 @@ namespace
 			bottom = clamp(bottom + deltaY, 0, (int)world->getLevelsHigh() - height);
 			right = left + width;
 			top = bottom + height;
-			if ((deltaX != 0 || deltaY != 0) && !gSectorResize.lift
+			if ((deltaX != 0 || deltaY != 0) && !gSectorResize.lift && !gSectorResize.airlock
 				&& !world->isSimulationPaused())
 			{
 				world->pauseSimulation();
@@ -8648,7 +8692,15 @@ namespace
 				}
 			}
 		}
-		if (gSectorResize.lift)
+		if (gSectorResize.airlock)
+		{
+			if (gSectorResize.airlockPreview.x != (uint32_t)left
+				|| gSectorResize.airlockPreview.y != (uint32_t)bottom
+				|| gSectorResize.airlockPreview.width != (uint32_t)(right - left))
+				gSectorResize.airlockPreview = world->planResizeAirlock(gSelectedSector->getIndex(),
+					(uint32_t)left, (uint32_t)bottom, (uint32_t)(right - left));
+		}
+		else if (gSectorResize.lift)
 		{
 			if (gSectorResize.liftPreview.x != (uint32_t)left
 				|| gSectorResize.liftPreview.y != (uint32_t)bottom
@@ -8706,6 +8758,7 @@ namespace
 				&& right - left == (int)gSectorResize.originalWidth
 				&& top - bottom == (int)gSectorResize.originalHeight;
 			if (unchanged) resetSectorResize();
+			else if (gSectorResize.airlock) commitAirlockEdit(world, gSectorResize.airlockPreview);
 			else if (gSectorResize.lift && !gSectorResize.liftPreview.valid)
 			{
 				core::addLogMessage("Lift editor", 0, core::LogLevel::Error,
@@ -8798,7 +8851,13 @@ namespace
 		bool hasPlan = false, valid = false, remove = false;
 		uint32_t x = 0, y = 0, width = 0, height = 0;
 		string diagnostic;
-		if (gSectorResize.lift && (gSectorResize.dragging || gSectorResize.liftPreview.cellsWide))
+		if (gSectorResize.airlock && (gSectorResize.dragging || gSectorResize.airlockPreview.width))
+		{
+			auto const& plan = gSectorResize.airlockPreview;
+			hasPlan = true; valid = plan.valid; x = plan.x; y = plan.y;
+			width = plan.width; height = 1; diagnostic = plan.diagnostic;
+		}
+		else if (gSectorResize.lift && (gSectorResize.dragging || gSectorResize.liftPreview.cellsWide))
 		{
 			auto const& plan = gSectorResize.liftPreview;
 			hasPlan = true; valid = plan.valid; remove = plan.remove; x = plan.x; y = plan.y;

@@ -161,6 +161,7 @@ set(editor_names
     routing/inclusiveEndpointsAndPersistence
     routing/individualHistory
     routing/historyAndClipboard
+    airlocks/structuralHistory
     airlocks/editorCommands
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation

@@ -9,6 +9,43 @@
 
 namespace
 {
+	void structuralHistory(smoke::Context const&)
+	{
+		using smoke::require;
+		auto world = std::make_shared<core::World>("Airlock edit history", 12, 3);
+		for (uint32_t y = 0; y < 3; ++y)
+		{
+			world->addRoom("Left", 0, y, 0, 2, 1);
+			world->addCorridor(0, y, y == 2 ? 4 : 5, 2, 1);
+		}
+		auto index = world->addAirlock(0, 0, 2, 3, 8); world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto edit = [&](core::World::AirlockEditPlan const& plan) {
+			require(plan.valid, "Editor structural command refused");
+			auto before = captureDocumentSnapshot(world, history);
+			index = world->applyAirlockEdit(plan);
+			commitDocumentEdit(std::move(before), history);
+		};
+		edit(world->planResizeAirlock(index, 2, 1, 3));
+		edit(world->planResizeAirlock(index, 2, 2, 2));
+		edit(world->planRemoveAirlock(index));
+		require(history.undoCount() == 3 && world->getNumSectors() == 6, "Structural edits missing history/deletion");
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; return world->deserialize(*reader, work);
+		};
+		for (uint32_t row : { 2u, 1u, 0u })
+		{
+			require(history.undo(captureDocumentSnapshot(world, history), restore), "Structural undo failed");
+			auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world->getSector(6));
+			require(chamber && chamber->getCellY() == row && chamber->getCycleSeconds() == 8
+				&& chamber->getCapacity() == (row == 2 ? 2u : 3u), "Structural undo geometry/configuration mismatch");
+		}
+		for (unsigned count = 0; count < 3; ++count)
+			require(history.redo(captureDocumentSnapshot(world, history), restore), "Structural redo failed");
+		require(world->getNumSectors() == 6 && world->getSimulationSnapshot().interactionPoints.empty(), "Redo orphaned Airlock controls");
+	}
+
 	void commands(smoke::Context const&)
 	{
 		using smoke::require;
@@ -61,5 +98,6 @@ namespace
 
 void editor_smoke::registerAirlocks(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "airlocks/structuralHistory", structuralHistory });
 	checks.push_back({ "airlocks/editorCommands", commands });
 }

@@ -111,6 +111,7 @@ set(core_names
     bandArrivalCrossesWideDoorFromStandingPosition
     bandArrivalComposesWithEarlyStopForContendedDoor
     bandArrivalLeavesNonCrossingAgentsUnaffected
+    airlocks/structuralEditSafety
     airlocks/singleAgentJourneys
     airlocks/batchesAndOpposingQueues
     airlocks/lostReservationDoesNotRefill

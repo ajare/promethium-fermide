@@ -357,6 +357,13 @@ namespace core
 			[[nodiscard]] bool requiresConfirmation() const { return !consequences.empty(); }
 		};
 
+		struct AirlockEditPlan
+		{
+			bool valid = false, remove = false;
+			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
+			std::string diagnostic;
+		};
+
 		struct LadderEditPlan
 		{
 			bool valid{ false };
@@ -967,6 +974,8 @@ namespace core
 			uint32_t y, uint32_t cellsWide, uint32_t numCars, uint32_t carWidth,
 			uint32_t doorMask) const;
 
+		bool prepareAirlockEdit(AirlockEditPlan const& plan,
+			std::vector<ConstructionRecord>& records, std::string& diagnostic) const;
 		bool prepareLadderEdit(LadderEditPlan const& plan,
 			std::vector<ConstructionRecord>& records, std::string& diagnostic) const;
 
@@ -1711,6 +1720,10 @@ namespace core
 			float cycleSeconds = 3.0f, std::string* diagnostic = nullptr) const;
 		uint32_t addAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
 			float cycleSeconds = 3.0f);
+		AirlockEditPlan planResizeAirlock(uint32_t sectorIndex, uint32_t x,
+			uint32_t y, uint32_t width) const;
+		AirlockEditPlan planRemoveAirlock(uint32_t sectorIndex) const;
+		uint32_t applyAirlockEdit(AirlockEditPlan const& plan);
 		bool setAirlockCycleSeconds(uint32_t sectorIndex, float seconds);
 		bool canAgentEnterAirlock(TraversalResourceId resource, SectorId approach,
 			AgentId agent, bool locallyObserved) const;
