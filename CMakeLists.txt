@@ -239,6 +239,19 @@ endif()
 # Shipping/MemCheck configurations to the cache. They are not PF configurations.
 set(PF_CONFIGURATION_TYPES "${CMAKE_CONFIGURATION_TYPES}")
 add_subdirectory(ext/willpower)
+if(WIN32 AND BUILD_TESTING)
+    # DIRECTORY-scoped test properties require 3.28; keep vendored ownership
+    # while preventing a desktop window in non-interactive verification.
+    if(CMAKE_VERSION VERSION_LESS 3.28)
+        message(FATAL_ERROR "Windows headless CTest validation requires CMake 3.28 or newer")
+    endif()
+    set_tests_properties(willpower_resource_manager_gui_smoke
+        DIRECTORY ext/willpower/willpower.application PROPERTIES
+        ENVIRONMENT "SDL_ASSERT=abort;SDL_VIDEODRIVER=offscreen"
+        SKIP_REGULAR_EXPRESSION
+            "Resource Manifest Editor GUI failure: Could not create SDL window: Could not load EGL library"
+        TIMEOUT 60)
+endif()
 if(PF_CONFIGURATION_TYPES)
     set(CMAKE_CONFIGURATION_TYPES "${PF_CONFIGURATION_TYPES}" CACHE STRING
         "Available build configurations" FORCE)
@@ -578,7 +591,15 @@ if(BUILD_TESTING)
         "$<TARGET_FILE:pf-lift-repro>"
         "$<TARGET_FILE:pf-pause-position-repro>"
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
-    set_tests_properties(headless-tools-contract PROPERTIES TIMEOUT 180 LABELS "tools;headless")
+    set_tests_properties(headless-tools-contract PROPERTIES
+        TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,180>"
+        LABELS "tools;headless")
+    if(WIN32)
+        add_test(NAME windows-ctest-validator-contract COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/windows_ctest_validator.py")
+        set_tests_properties(windows-ctest-validator-contract PROPERTIES
+            TIMEOUT 30 LABELS "harness;windows")
+    endif()
 endif()
 if(BUILD_TESTING)
     foreach(seed IN ITEMS 0 1 42 2026)

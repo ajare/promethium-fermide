@@ -13,8 +13,8 @@ import urllib.request
 benchmark, generator, service, lift, pause, lift_fixture = sys.argv[1:]
 
 
-def run(exe, args, code=0, diagnostic=None):
-    result = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, timeout=60)
+def run(exe, args, code=0, diagnostic=None, timeout=60):
+    result = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, timeout=timeout)
     assert result.returncode == code, (args, result.returncode, result.stdout, result.stderr)
     if diagnostic:
         assert diagnostic in result.stderr, (args, result.stderr)
@@ -65,7 +65,8 @@ with tempfile.TemporaryDirectory(prefix="pf-tools-") as temporary:
     assert "PASS: Lift boarding stays" in run(lift, ["crossing", lift_fixture])
     assert "PASS: Lift demand drained" in run(lift, ["boarding", lift_fixture])
     assert "PASS: minimal pause-position" in run(pause, ["minimal"])
-    assert "PASS: file-backed pause-position" in run(pause, [lift_fixture])
+    # MSVC Debug needs longer for the unchanged file-backed simulation workload.
+    assert "PASS: file-backed pause-position" in run(pause, [lift_fixture], timeout=240)
 
     first, second = root / "first", root / "second"
     first.mkdir()
