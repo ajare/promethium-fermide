@@ -96,7 +96,8 @@ successful binding. `--world` loads an authored World instead. Detail is opt-in.
 The server uses shared production `pf-metrics`, not smoke support.
 
 Normally it runs until SIGINT/SIGTERM, then stops the HTTP worker, detaches the
-observer, and exits **0**. `--ticks N` provides bounded automation: run N service
+observer, and exits **0**. On Windows, console Ctrl-C delivers SIGINT; forced
+process termination does not run cleanup. `--ticks N` provides bounded automation: run N service
 iterations (advance one simulation tick, or refresh when paused), sleeping 16 ms
 per iteration, then cleanly exit **0**. Bind failure exits **1** immediately,
 unlike the GUI's non-fatal endpoint failure. See [metrics](metrics.md) for HTTP
@@ -120,6 +121,10 @@ ctest --test-dir build-linux -R '^headless-tools-contract$' --output-on-failure
 It checks valid and malformed CLI calls, Lift and pause-position reproductions,
 generation/registry preservation, restoration reports, missing/malformed
 documents, HTTP health and metrics, occupied-port failure, and bounded shutdown,
-using unique temporary directories. The Transports, Simulation, Routing,
-Persistence, and Metrics smoke modules retain ownership of their existing
-behavioral checks.
+using unique temporary directories and file paths containing spaces. It also
+checks stdout/stderr separation, fixture preservation, unsupported HTTP routes
+and methods, and immediate port rebinding after shutdown. For explicit MSVC
+Debug/Release builds, executable paths containing spaces, and the Windows signal
+handling distinction, see [Windows tool validation](windows-tools-validation.md).
+The Transports, Simulation, Routing, Persistence, and Metrics smoke modules retain
+ownership of their existing behavioral checks.

@@ -2,6 +2,7 @@
 import os
 import pathlib
 import signal
+import shutil
 import re
 import subprocess
 import sys
@@ -16,8 +17,12 @@ benchmark, generator, service, lift, pause, lift_fixture = sys.argv[1:]
 def run(exe, args, code=0, diagnostic=None, timeout=60):
     result = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, timeout=timeout)
     assert result.returncode == code, (args, result.returncode, result.stdout, result.stderr)
+    if code == 0:
+        assert not result.stderr, (args, result.stderr)
     if diagnostic:
         assert diagnostic in result.stderr, (args, result.stderr)
+    if code == 2:
+        assert not result.stdout, (args, result.stdout)
     return result.stdout
 
 
@@ -45,15 +50,24 @@ for args in (["--port", "0", "--port", "0"], ["--ticks", "1", "--ticks", "1"],
              ["--detail=sector"], ["--metrics"]):
     run(service, args, 2, "Usage:")
 
-with tempfile.TemporaryDirectory(prefix="pf-tools-") as temporary:
+with tempfile.TemporaryDirectory(prefix="pf tools with spaces ") as temporary:
     root = pathlib.Path(temporary)
-    missing = root / "missing.world.yaml"
+    # Pass argv arrays, never pre-quote paths. Exercise both directory and basename
+    # spaces on every file-backed tool, including the adjacent registry reference.
+    fixture = root / "Lift fixture with spaces.world.yaml"
+    shutil.copyfile(lift_fixture, fixture)
+    fixture_bytes = fixture.read_bytes()
+    # The checked-in Lift fixture refers to this adjacent registry by basename.
+    registry = root / "test.tags.yaml"
+    shutil.copyfile(pathlib.Path(lift_fixture).parent / registry.name, registry)
+    registry_bytes = registry.read_bytes()
+    missing = root / "missing World.world.yaml"
     run(benchmark, [missing], 1, "pf-restoration-benchmark:")
     run(service, ["--world", missing, "--ticks", "1"], 1, "pf-metrics-server:")
     run(lift, ["crossing", missing], 1, "pf-lift-repro:")
     run(lift, ["boarding", missing], 1, "pf-lift-repro:")
     run(pause, [missing], 1, "pf-pause-position-repro:")
-    malformed = root / "malformed.world.yaml"
+    malformed = root / "malformed World.world.yaml"
     malformed.write_text("[invalid: World", encoding="utf-8")
     run(benchmark, [malformed], 1, "pf-restoration-benchmark:")
     run(service, ["--world", malformed], 1, "pf-metrics-server:")
@@ -62,16 +76,19 @@ with tempfile.TemporaryDirectory(prefix="pf-tools-") as temporary:
     run(pause, [malformed], 1, "pf-pause-position-repro:")
     run(generator, [root / "absent" / "routing.world.yaml"], 1, "pf-generate-routing-world:")
 
-    assert "PASS: Lift boarding stays" in run(lift, ["crossing", lift_fixture])
-    assert "PASS: Lift demand drained" in run(lift, ["boarding", lift_fixture])
+    assert "PASS: Lift boarding stays" in run(lift, ["crossing", fixture])
+    assert "PASS: Lift demand drained" in run(lift, ["boarding", fixture])
     assert "PASS: minimal pause-position" in run(pause, ["minimal"])
     # MSVC Debug needs longer for the unchanged file-backed simulation workload.
-    assert "PASS: file-backed pause-position" in run(pause, [lift_fixture], timeout=240)
+    assert "PASS: file-backed pause-position" in run(pause, [fixture], timeout=240)
+    assert fixture.read_bytes() == fixture_bytes
+    assert registry.read_bytes() == registry_bytes
+    assert malformed.read_text(encoding="utf-8") == "[invalid: World"
 
-    first, second = root / "first", root / "second"
+    first, second = root / "first output", root / "second output"
     first.mkdir()
     second.mkdir()
-    world = first / "routing.world.yaml"
+    world = first / "routing scale with spaces.world.yaml"
     output = run(generator, [world])
     assert "PASS: wrote routing stress World and adjacent tag registry" in output
     assert output.count("routing-population agents=1000 vertices=2040") == 2, output
@@ -128,9 +145,19 @@ with tempfile.TemporaryDirectory(prefix="pf-tools-") as temporary:
             with http.open(base + "/metrics", timeout=3) as response:
                 assert "text/plain" in response.headers["Content-Type"]
                 assert b"pf_" in response.read()
-            run(service, ["--port", port], 1, "cannot bind")
+            for route, method, status in (("/absent", "GET", 404), ("/metrics", "POST", 405)):
+                try:
+                    http.open(urllib.request.Request(base + route, method=method), timeout=3)
+                    raise AssertionError((route, method, "unexpected success"))
+                except urllib.error.HTTPError as response:
+                    assert response.code == status, (route, response.code)
+                    response.close()
+            run(service, ["--port", port], 1, "cannot bind", timeout=10)
             _, error = process.communicate(timeout=15)
-            assert process.returncode == 0, error
+            assert process.returncode == 0 and not error, error
+            # Shutdown must release the listening socket; this also catches a
+            # worker surviving the bounded service loop under Windows semantics.
+            run(service, ["--port", port, "--ticks", "1"])
         finally:
             if process.poll() is None:
                 process.kill()
