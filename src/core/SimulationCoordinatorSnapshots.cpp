@@ -401,6 +401,7 @@ namespace core
 		if (resource.mDoor)
 		{
 			result.doorOpenPercentage = resource.mDoor->getOpenPercentage();
+			result.broken = resource.mDoor->isBroken();
 			switch (resource.mDoor->getState())
 			{
 			case OpenableObject::State::Closed: result.doorState = DoorSnapshotState::Closed; break;

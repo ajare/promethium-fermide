@@ -62,6 +62,10 @@ set(core_names
     wideDoorLanesAndGracefulDisableAreSafe
     doorLeasesAndSensorObservationsPreventUnsafeClosure
     unavailableDoorRejectsTraversal
+    brokenDoors/frozenPositionAndCommands
+    brokenDoors/operationsAndAdmittedCrossings
+    brokenDoors/individualLocalMemory
+    brokenDoors/discoveryPlanningAndPersistence
     fairDoorQueuesServeBothSidesInStableOrder
     queueChainsFollowWithoutCompressingDefaultLeft
     queueChainsFollowWithoutCompressingDefaultRight

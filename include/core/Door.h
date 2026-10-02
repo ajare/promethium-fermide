@@ -7,14 +7,18 @@
 #include "core/Defines.h"
 #include "core/OpenableObject.h"
 #include "core/Coordination.h"
+#include "core/DeviceCondition.h"
+#include <optional>
 
 namespace core
 {
 	class Sector;
+	class Agent;
 
 	class Door : public OpenableObject
 	{
 		friend class World;
+		friend class SimulationCoordinator;
 	public:
 		// The authored visual manner in which the Door's leaf or leaves reveal its
 		// threshold. OpenApart's two leaves remain one logical Door. A tall OpenUp
@@ -32,6 +36,9 @@ namespace core
 		float mHoldOpenTime{ CORE_DOOR_STAY_OPEN_TIME };
 		uint32_t mOpenLeaseCount{ 0 };
 		bool mObstructed{ false };
+		bool mBreakable{ false };
+		bool mInitiallyBroken{ false };
+		bool mBroken{ false };
 		// A buttonless manual ordinary Door owns the authorization for its implicit
 		// opening interaction. It is shared by both directed graph edges.
 		std::bitset<256> mPermissionRequirement;
@@ -70,6 +77,14 @@ namespace core
 		std::bitset<256> const& getPermissionRequirement() const { return mPermissionRequirement; }
 
 		// Typed device operations call these commands; no callback/action queue exists.
+		bool isBreakable() const { return mBreakable; }
+		bool isInitiallyBroken() const { return mInitiallyBroken; }
+		bool isBroken() const { return mBroken; }
+		bool admitsNewCrossings() const { return mBroken ? mOpenPct >= 1.0f : isOpen(); }
+		std::optional<DeviceCondition> knownCondition(Agent const* agent,
+			Sector const* observationSector) const;
+		bool open() override;
+		bool close() override;
 		bool requestOpen();
 		bool requestClose();
 		void update(float frameTime) override;

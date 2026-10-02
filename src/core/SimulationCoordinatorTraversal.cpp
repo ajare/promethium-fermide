@@ -181,16 +181,24 @@ namespace core
 			{
 				return; // deactivation cleanup denies waiters after active lanes drain
 			}
-			if (resource->mDoor->isOpen()
+			if (resource->mDoor->admitsNewCrossings()
 				&& !mWorld.agentAdheresToDoorPermission(request->mResource,
 					request->mSourceSector, request->mOwner))
 			{
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 				return;
 			}
+			if (resource->mDoor->isBroken())
+			{
+				if (resource->mDoor->admitsNewCrossings()) tryGrantDoorQueue(*resource);
+				else denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+				return;
+			}
 			if (resource->mDoorActivationMode == DoorActivationMode::Unavailable)
 			{
-				denyTraversalRequest(requestId);
+				if (resource->mDoor->isBreakable() && resource->mDoor->isOpen())
+					tryGrantDoorQueue(*resource);
+				else denyTraversalRequest(requestId);
 				return;
 			}
 			if (request->mEdgeType == EdgeType::Door

@@ -1077,6 +1077,13 @@ namespace core
 		return mWorld ? mWorld->estimateTraversalDelay(resource, sourceSector) : 0.0f;
 	}
 
+	optional<DeviceCondition> Agent::rememberedDeviceCondition(TraversalResourceId resource) const
+	{
+		auto found = mRememberedDeviceConditions.find(resource);
+		return found == mRememberedDeviceConditions.end() ? nullopt
+			: optional<DeviceCondition>{ found->second };
+	}
+
 	float Agent::observeAccessZoneDensity(TraversalResourceId resource,
 		SectorId sourceSector) const
 	{

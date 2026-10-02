@@ -5384,6 +5384,7 @@ namespace core
 		options.holdOpenSeconds = found->x;
 		options.crossingLanes = found->d;
 		options.openStyle = static_cast<Door::OpenStyle>(found->j);
+		options.initiallyBroken = found->initiallyBroken;
 		return true;
 	}
 
@@ -5430,6 +5431,32 @@ namespace core
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
+	}
+
+	bool World::setDoorInitiallyBroken(TraversalResourceId id, bool broken)
+	{
+		if (!mSimulationPaused) return false;
+		auto resource = mTraversalResources.find(id);
+		if (!resource || !resource->mDoor || !resource->mDoor->isBreakable()) return false;
+		auto door = resource->mDoor;
+		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
+			[&](ConstructionRecord const& record)
+			{
+				return record.type == ConstructionType::Door && record.layer == door->getFrontLayer()
+					&& record.a == static_cast<uint32_t>(door->getPosition().y)
+					&& record.b == static_cast<uint32_t>(door->getPosition().x)
+					&& record.c == door->getCellsWide();
+			});
+		if (found == mConstructionRecords.rend()) return false;
+		found->initiallyBroken = door->mInitiallyBroken = broken;
+		setDoorBroken(id, broken);
+		modify();
+		return true;
+	}
+
+	bool World::setDoorBroken(TraversalResourceId id, bool broken)
+	{
+		return mSimulationCoordinator.setDoorBroken(id, broken);
 	}
 
 	bool World::setSectorDoorOpenStyle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
@@ -5686,6 +5713,7 @@ namespace core
 		record.p = options.controls[0]; record.q = options.controls[1];
 		record.i = static_cast<int32_t>(options.activationMode); record.x = options.holdOpenSeconds;
 		record.j = static_cast<int32_t>(options.openStyle);
+		record.initiallyBroken = options.initiallyBroken;
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : options.controlPermissionRequirements[side])
 				record.controlPermissionRequirements[side].push_back(
@@ -6000,6 +6028,11 @@ namespace core
 		auto doorSectorObject = dynamic_pointer_cast<DoorSectorObject>(doorObject.sector->_getObject(doorObject.index));
 		auto door = doorSectorObject->getDoor();
 		door->setOpenStyle(options.openStyle);
+		// Generated transport Doors use the same construction helper but are not
+		// independently breakable in the ordinary Door slice.
+		door->mBreakable = isLocationLike(sectors[0]->getType())
+			&& isLocationLike(sectors[1]->getType());
+		door->mInitiallyBroken = door->mBroken = door->mBreakable && options.initiallyBroken;
 		auto traversalResource = createDoorTraversalResource(
 			format("Door at {},{}", x, y), door, options.activationMode, options.holdOpenSeconds);
 		door->configureTraversal(options.activationMode, traversalResource, options.holdOpenSeconds);
@@ -11041,7 +11074,7 @@ namespace core
 		auto resource = mTraversalResources.find(doorId);
 		if (!resource || !resource->mDoor
 			|| resource->mDoorActivationMode != DoorActivationMode::Manual
-			|| resource->mDoor->isOpen()) return true;
+			|| resource->mDoor->admitsNewCrossings()) return true;
 		return canAgentOpenManualDoor(doorId, agentId);
 	}
 

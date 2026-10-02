@@ -702,7 +702,7 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		if (!resource.mEnabled || (!resource.mDoor && !resource.mForceBridge)
-			|| (resource.mDoor && !resource.mDoor->isOpen())
+			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings())
 			|| (resource.mForceBridge && !resource.mForceBridge->isExtended()))
 		{
 			return;

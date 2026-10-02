@@ -7,6 +7,11 @@
 #include "core/Coordination.h"
 #include "core/Door.h"
 #include "core/ExtensibleObject.h"
+#include "core/DoorSectorObject.h"
+#include "core/Sector.h"
+#include "core/Agent.h"
+#include "core/Path.h"
+#include "core/Edge.h"
 
 
 namespace core
@@ -20,6 +25,78 @@ namespace core
 	// through friendship and calls its own queue refresh, ladder admission,
 	// grant and denial machinery directly - that queue and admission core joined
 	// the coordinator in stage 4, so no facade callback is left in this seam.
+
+	bool SimulationCoordinator::setDoorBroken(TraversalResourceId id, bool broken)
+	{
+		auto resource = mWorld.mTraversalResources.find(id);
+		if (!resource || !resource->mDoor || !resource->mDoor->isBreakable()) return false;
+		auto& door = *resource->mDoor;
+		if (door.mBroken == broken) return true;
+		mWorld.invalidateSimulationSnapshot();
+		door.mBroken = broken;
+		if (broken)
+			for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+				if (operation->mHasCommand && operation->mCommand.type == DeviceCommandType::OpenDoor
+					&& operation->mCommand.traversalResource == id
+					&& (operation->mState == DeviceOperationState::Pending
+						|| operation->mState == DeviceOperationState::Running))
+				{
+					touchDeviceOperation(operationId, *operation);
+					operation->mState = DeviceOperationState::Failed;
+				}
+		// Observation, not this live edit, triggers per-Agent replanning.
+		return true;
+	}
+
+	void SimulationCoordinator::observeLocalDeviceConditions(Agent& agent)
+	{
+		auto sector = agent.getSector();
+		if (!sector) return;
+		bool changed = false;
+		for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		{
+			auto object = dynamic_pointer_cast<DoorSectorObject>(sector->getObject(index));
+			if (!object || !object->getDoor()->isBreakable()) continue;
+			auto const& door = *object->getDoor();
+			auto id = door.getTraversalResourceId();
+			DeviceCondition condition{ door.isBroken(), door.getOpenPercentage() };
+			auto old = agent.rememberedDeviceCondition(id);
+			// Healthy animation is not a condition change that demands planning.
+			changed = changed || (old ? old->broken != condition.broken
+				|| (condition.broken && old->admitsPassage() != condition.admitsPassage())
+				: condition.broken);
+			agent.mRememberedDeviceConditions[id] = condition;
+		}
+		if (!changed) return;
+		auto agentId = mWorld.getAgentId(&agent);
+		auto goal = mWorld.mMovementGoals.find(agentId);
+		auto path = agent.mPath.path;
+		auto from = agent.mPath.targetNode;
+		if (!path && goal != mWorld.mMovementGoals.end())
+		{
+			path = goal->second.retainedPath;
+			from = goal->second.retainedFromNode;
+		}
+		if (!path) return;
+		bool invalid = false;
+		for (size_t node = from; node < path->nodes.size(); ++node)
+		{
+			auto edge = path->nodes[node].edge;
+			if (!edge) continue;
+			// Admission is a safety commitment, not a new crossing. Its frozen
+			// threshold never invalidates the crossing already in progress.
+			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
+				&& hasCommittedMovement(agent)) continue;
+			auto known = agent.rememberedDeviceCondition(edge->getTraversalResourceId());
+			invalid = invalid || (known && !known->admitsPassage());
+		}
+		if (agent.getState() == Agent::State::RoutePlanning)
+		{
+			if (invalid && goal != mWorld.mMovementGoals.end()) goal->second.retainedPath.reset();
+			return; // Never restart or extend an already sampled planning interval.
+		}
+		replanAgentAfterAuthorizationRefusal(agentId, !invalid);
+	}
 
 	void SimulationCoordinator::allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource)
 	{

@@ -25,8 +25,8 @@ namespace core
 		bool isClosed() const;
 		bool isOpening() const;
 		bool isClosing() const;
-		bool open();
-		bool close();
+		virtual bool open();
+		virtual bool close();
 		bool toggle();
 	};
 }

@@ -342,6 +342,7 @@ namespace core
 			serializer.writeBool("backControl", record.q); serializer.writeString("activationMode", activationName(record.i));
 			serializer.writeFloat("holdOpenSeconds", record.x); serializer.writeUint32("crossingLanes", record.d);
 			serializer.writeString("openStyle", openStyleName(record.j));
+			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			// Only a Door whose Buttons were added in the editor carries the mode
 			// removal restores. Authored control layouts need no extra field; their
 			// removal falls back to manual activation.
@@ -503,7 +504,8 @@ namespace core
 		// allocator's high-water mark (#123). It is an added field rather than a
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
-		serializer.writeUint32("version", 32);
+		// Version 33 adds ordinary Door authored Broken condition.
+		serializer.writeUint32("version", 33);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -906,10 +908,24 @@ namespace core
 				? readActivation("preButtonActivation") : -1;
 			record.x = serializer.readFloat("holdOpenSeconds"); record.d = serializer.readUint32("crossingLanes");
 			record.j = readOpenStyle("openStyle");
+			if (serializer.hasField("initiallyBroken"))
+			{
+				if (version < 33) throw SerializationException(
+					"Door Broken condition requires World schema version 33 or later");
+				record.initiallyBroken = serializer.readBool("initiallyBroken");
+			}
 			if (version >= 24 && serializer.hasField("permissionRequirement"))
 			{
 				serializer.beginArray("permissionRequirement");
-				while (serializer.nextArrayItem()) record.values.push_back(serializer.readUint32(""));
+				while (serializer.nextArrayItem())
+				{
+					// This field has always been written as uint64, including binary
+					// reset snapshots. Read the matching wire type before narrowing.
+					auto permission = serializer.readUint64("");
+					if (permission == 0 || permission > 256)
+						throw SerializationException("Invalid manual Door Access permission ID");
+					record.values.push_back(static_cast<uint32_t>(permission));
+				}
 				serializer.endArray();
 			}
 			if (version >= 25)
@@ -1068,7 +1084,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 32)
+		if (version < 1 || version > 33)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2236,7 +2252,7 @@ namespace core
 			auto created = addSectorDoor(doorLayer(record), record.a, record.b,
 				{ record.c, static_cast<Door::Height>(record.e), { record.p, record.q },
 					static_cast<DoorActivationMode>(record.i), record.x, record.d,
-					static_cast<Door::OpenStyle>(record.j) });
+					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken });
 			if (!record.values.empty())
 			{
 				auto resource = mTraversalResources.find(created.traversalResource);

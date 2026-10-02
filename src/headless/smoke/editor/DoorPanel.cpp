@@ -27,6 +27,8 @@
 #include <string>
 
 #include "DoorPanel.h"
+#include "DocumentEdit.h"
+#include "core/YamlSerializer.h"
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
@@ -159,6 +161,80 @@ namespace
 			"An ordinary Door selection, simulation paused");
 	}
 
+	void checkBrokenControlsAndHistory()
+	{
+		auto world = std::make_shared<core::World>("Broken controls", 12, 3);
+		world->addRoom("Front", 0, 0, 0, 11, 1);
+		world->addRoom("Back", 1, 0, 0, 11, 1);
+		auto made = world->addSectorDoor(0, 0, 3);
+		world->finishBuild(); world->pauseSimulation();
+		auto object = doorObjectAt(made.door);
+		auto door = std::static_pointer_cast<const core::DoorSectorObject>(object)->getDoor();
+		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
+		auto save = [&]
+		{
+			core::SerializationWorkData work; work.markSerializedUnmodified = false;
+			auto writer = core::YamlSerializer::toString(); world->serialize(*writer, work); writer->serialize();
+			return writer->getSerializedString();
+		};
+		auto initial = save();
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = ImVec2(1600, 1000);
+		std::string text;
+		io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		auto frame = [&]
+		{
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(10, 10)); ImGui::SetNextWindowSize(ImVec2(1500, 950));
+			ImGui::Begin("Broken Selection", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			text.clear(); ImGui::LogToClipboard(); renderDoorPanel(world, object); ImGui::LogFinish();
+			ImGui::End(); ImGui::Render();
+		};
+		auto pointFor = [&](char const* label)
+		{
+			frame(); auto* window = ImGui::FindWindowByName("Broken Selection");
+			auto id = window->GetID(label);
+			for (float y = window->Pos.y + 25; y < window->Pos.y + 400; y += 8)
+				for (float x = window->Pos.x + 5; x < window->Pos.x + 180; x += 16)
+				{
+					io.AddMousePosEvent(x, y); frame();
+					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+				}
+			throw std::runtime_error(std::string("Door control not reachable: ") + label);
+		};
+		auto click = [&](char const* label)
+		{
+			auto point = pointFor(label); io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); frame();
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); frame();
+		};
+		click("Initially Broken"); frame();
+		require(door->isInitiallyBroken() && door->isBroken() && gWorldDocumentHistory.undoCount() == 1,
+			"Authored Door control did not commit one history entry");
+		require(text.find("Broken (position frozen)") != std::string::npos
+			&& text.find("0.00%") != std::string::npos, "Selection omitted Broken status or physical percentage");
+		auto authored = save(); world->markSaved();
+		click("Live Broken");
+		require(!door->isBroken() && door->isInitiallyBroken() && save() == authored
+			&& !world->isModified() && gWorldDocumentHistory.undoCount() == 1, "Live restore changed document/history");
+		require(world->resumeSimulation(), "Simulation did not resume");
+		click("Live Broken");
+		require(door->isBroken() && save() == authored && !world->isModified(), "Running live break control failed");
+		world->pauseSimulation();
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto loaded = std::make_shared<core::World>("History", 1, 1);
+			core::SerializationWorkData work; auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			require(loaded->deserialize(*reader, work), "Door history did not load"); world = loaded; world->pauseSimulation();
+			return true;
+		};
+		require(gWorldDocumentHistory.undo(gWorldDocumentHistory.capture(save()), restore) && save() == initial,
+			"Door initial Broken undo failed");
+		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored,
+			"Door initial Broken redo failed");
+	}
+
 	void checkExistingButtonsCanBeRemoved()
 	{
 		auto world = std::make_shared<core::World>("Door button checkbox", 12, 3);
@@ -237,6 +313,7 @@ namespace
 
 void editor_smoke::registerDoorPanel(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "doorpanel/checkBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(); } });
 	checks.push_back({ "doorpanel/checkOrdinaryDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkOrdinaryDoor(); } });
 	checks.push_back({ "doorpanel/checkExistingButtonsCanBeRemoved", [](smoke::Context const&) { State state; ImGuiGuard guard; checkExistingButtonsCanBeRemoved(); } });
 	checks.push_back({ "doorpanel/checkLiftOwnedDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkLiftOwnedDoor(); } });

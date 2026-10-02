@@ -63,6 +63,7 @@ set(names yaml-primitives binary-contract yaml-file transactional-bytes
     ladderEditsReplayLocationsBeforeTransits
     staircaseEditsReplayLocationsBeforeTransits
     bulkheadDoorsSupportIndependentObjectEditing
+    ordinaryDoorBrokenLifecycle
     doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted
     doorHeightPersistsAndIsLimitedToRooms
     doorOpenLeftPersistsThroughEveryEditorPath

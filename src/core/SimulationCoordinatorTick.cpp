@@ -481,6 +481,7 @@ namespace core
 			{
 				(void)id;
 				if (!agent->isActive()) continue;
+				observeLocalDeviceConditions(*agent);
 				agent->collectTraversalIntent();
 			}
 			break;

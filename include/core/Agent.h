@@ -6,6 +6,8 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <map>
+#include "core/DeviceCondition.h"
 #include <utility>
 
 #include "core/SectorPosition.h"
@@ -330,6 +332,7 @@ namespace core
 		std::optional<AgentBehaviourAssignment> mBehaviourAssignment;
 
 		World* mWorld{ nullptr };
+		std::map<TraversalResourceId, DeviceCondition> mRememberedDeviceConditions;
 
 		SectorPosition mPosition;
 
@@ -734,6 +737,7 @@ namespace core
 
 		// Used by edge route-cost implementations; these are observations only.
 		float estimateTraversalDelay(TraversalResourceId resource, SectorId sourceSector) const;
+		std::optional<DeviceCondition> rememberedDeviceCondition(TraversalResourceId resource) const;
 		float observeAccessZoneDensity(TraversalResourceId resource,
 			SectorId sourceSector) const;
 		std::optional<ShuttleRouteAccessObservation> observeShuttleAccess(

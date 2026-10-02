@@ -48,7 +48,7 @@ namespace core
 	bool DoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
-		return mDoor->isOpen();
+		return mDoor->admitsNewCrossings();
 	}
 
 	EdgeTraversalRequestResult DoorEdge::requestTraversal(shared_ptr<const Vertex>,
@@ -56,7 +56,8 @@ namespace core
 	{
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
 			return EdgeTraversalRequestResult::Failed;
-		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
+		return (mDoor->admitsNewCrossings() || mDoor->requestOpen())
+			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
 	DirectedTraversalFacts DoorEdge::getDirectedTraversalFacts(
@@ -66,8 +67,9 @@ namespace core
 		auto facts = thresholdRouteFacts(*this, *mDoor, target, context, 6.0f / 60.0f,
 			CORE_DOOR_OPEN_CLOSE_TIME);
 		auto source = getOtherVertex(target);
-		auto const locallyOpen = source && source->getSector().get() == context.observationSector
-			&& mDoor->isOpen();
+		auto known = mDoor->knownCondition(context.agent, context.observationSector);
+		auto const locallyOpen = (source && source->getSector().get() == context.observationSector
+			&& mDoor->isOpen()) || (known && known->broken && known->position >= 1.0f);
 		if (facts.feasible && mDoor->getActivationMode() == DoorActivationMode::Manual
 			&& !locallyOpen && context.world && context.agent
 			&& !context.world->canAgentOpenManualDoor(mDoor->getTraversalResourceId(),

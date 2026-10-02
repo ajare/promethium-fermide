@@ -158,9 +158,12 @@ namespace core
 	DeviceOperationId SimulationCoordinator::findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester)
 	{
 		auto missing = mWorld.missingLiftDestinationPermissions(command, requester);
+		auto doorResource = command.type == DeviceCommandType::OpenDoor
+			? mWorld.mTraversalResources.find(command.traversalResource) : nullptr;
+		bool const broken = doorResource && doorResource->mDoor && doorResource->mDoor->isBroken();
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (missing.empty() && operation->mHasCommand && operation->mCommand == command
+			if (!broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
 			{
 				operation->mRequesters.insert(requester);
@@ -183,6 +186,7 @@ namespace core
 			for (auto permission : missing) name += format(" {}", permission.value);
 		}
 		auto id = mWorld.mDeviceOperations.add(unique_ptr<DeviceOperation>(new DeviceOperation(name, requester, command)));
+		if (broken) mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Failed;
 		if (!missing.empty())
 		{
 			auto operation = mWorld.mDeviceOperations.find(id);
@@ -611,7 +615,7 @@ namespace core
 			else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
 			{
 				auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-				if (!resource || !resource->mDoor)
+				if (!resource || !resource->mDoor || resource->mDoor->isBroken())
 				{
 					operation->mState = DeviceOperationState::Failed;
 				}

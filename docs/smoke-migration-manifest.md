@@ -95,6 +95,7 @@ because they do not own smoke-check execution.
 | `smoke/permissions/Preflight.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/Refusal.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/persistence/AgentRestoration.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/persistence/BrokenDoors.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/DeepLayerReplay.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/DocumentPaths.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/DocumentSaves.cpp` | module-owned | `pf-smoke-persistence` |
@@ -139,6 +140,7 @@ because they do not own smoke-check execution.
 | `smoke/routing/StairRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/ThresholdRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/Workspace.cpp` | module-owned | `pf-smoke-routing` |
+| `smoke/simulation/BrokenDoors.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/CrossingBands.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/DoorQueues.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Doors.cpp` | module-owned | `pf-smoke-simulation` |

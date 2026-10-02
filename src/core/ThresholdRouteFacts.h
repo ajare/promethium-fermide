@@ -27,6 +27,15 @@ namespace core
 		auto source = edge.getOtherVertex(target);
 		auto sector = source ? source->getSector() : nullptr;
 		bool const observed = sector && sector.get() == context.observationSector;
+		auto known = door.knownCondition(context.agent, context.observationSector);
+		bool const brokenOpen = known && known->broken && known->position >= 1.0f;
+		bool const open = brokenOpen || (observed && door.isOpen());
+		if (known && !known->admitsPassage())
+		{
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
+		if (brokenOpen) openingSeconds = 0.0f;
 		auto const& policy = context.policy;
 		facts.feasible = true;
 		auto& c = facts.components;
@@ -42,7 +51,7 @@ namespace core
 			: context.agent ? context.agent->observeShuttleAccess(
 				edge.getTraversalResourceId(), sourceEndpoint, observed) : std::nullopt;
 		if (door.getActivationMode() == DoorActivationMode::Unavailable
-			&& !door.isOpen() && !liftAccess && !shuttleAccess)
+			&& !(door.isBreakable() ? open : door.isOpen()) && !liftAccess && !shuttleAccess)
 		{
 			facts.feasible = false;
 			facts.exclusionReason = RouteExclusionReason::Control;
@@ -53,7 +62,7 @@ namespace core
 		// observed from that side; authorization governs operation, not passage.
 		// Never inspect an unobserved Door's live open state here.
 		if (door.getActivationMode() == DoorActivationMode::RemoteControlled
-			&& !(observed && door.isOpen()) && context.world && context.agent
+			&& !open && context.world && context.agent
 			&& !context.world->canAgentOperateDoorControl(edge.getTraversalResourceId(),
 				sector ? SectorId{ static_cast<uint64_t>(sector->getIndex()) + 1 } : SectorId{},
 				context.world->getAgentId(context.agent)))
@@ -135,9 +144,9 @@ namespace core
 			c.motionSeconds += policy.liftAlightingSeconds;
 			c.interactionUnits += policy.liftAlightingInteraction;
 		}
-		else if (door.getActivationMode() == DoorActivationMode::Manual)
+		else if (!brokenOpen && door.getActivationMode() == DoorActivationMode::Manual)
 			c.interactionUnits += preparationProbability * policy.manualDoorInteraction;
-		else if (door.getActivationMode() == DoorActivationMode::RemoteControlled)
+		else if (!brokenOpen && door.getActivationMode() == DoorActivationMode::RemoteControlled)
 			c.interactionUnits += preparationProbability * policy.remoteDoorInteraction;
 		facts.objectiveDurationSeconds = c.motionSeconds + c.knownWaitSeconds + c.expectedWaitSeconds;
 		return facts;

@@ -2,6 +2,7 @@
 
 #include "core/Door.h"
 #include "core/Sector.h"
+#include "core/Agent.h"
 
 namespace core
 {
@@ -66,21 +67,36 @@ namespace core
 		if (mOpenLeaseCount == 0 && isOpen()) mOpenWaitTime = mHoldOpenTime;
 	}
 
+	std::optional<DeviceCondition> Door::knownCondition(Agent const* agent,
+		Sector const* observationSector) const
+	{
+		if (!mBreakable) return std::nullopt;
+		if (observationSector && (observationSector == getFrontSector().get()
+			|| observationSector == getBackSector().get()))
+			return DeviceCondition{ mBroken, mOpenPct };
+		return agent ? agent->rememberedDeviceCondition(mTraversalResource) : std::nullopt;
+	}
+
+	bool Door::open() { return !mBroken && OpenableObject::open(); }
+	bool Door::close() { return !mBroken && OpenableObject::close(); }
+
 	bool Door::requestOpen()
 	{
+		if (mBroken) return false;
 		if (isOpen() || isOpening()) return true;
 		return open();
 	}
 
 	bool Door::requestClose()
 	{
-		if (mOpenLeaseCount != 0 || mObstructed) return false;
+		if (mBroken || mOpenLeaseCount != 0 || mObstructed) return false;
 		if (isClosed() || isClosing()) return true;
 		return close();
 	}
 
 	void Door::update(float frameTime)
 	{
+		if (mBroken) return;
 		if (isOpening())
 		{
 			mOpenPct = std::min(mOpenPct + frameTime / getOpenCloseTime(), 1.0f);

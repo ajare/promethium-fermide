@@ -74,6 +74,7 @@ namespace core
 			uint32_t crossingLanes{ 0 };
 			Door::OpenStyle openStyle{ Door::OpenStyle::OpenUp };
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateDoorResult
@@ -842,6 +843,7 @@ namespace core
 			int32_t i{ 0 }, j{ 0 };
 			float x{ 0.0f }, y{ 0.0f }, z{ 0.0f };
 			bool p{ false }, q{ false };
+			bool initiallyBroken{ false };
 			// Door: the activation mode the Door had before the editor's Buttons
 			// option first gave it Buttons, or -1 when the Buttons were loaded as
 			// part of the authored definition. Removal restores a recorded mode and
@@ -2424,6 +2426,10 @@ namespace core
 		std::vector<AccessPermissionId> getInteractionPointPermissionRequirement(
 			InteractionPointId point) const;
 
+		// Ordinary Doors only. Authored edits are paused and undoable; live edits
+		// never dirty the document or change its initial condition.
+		bool setDoorInitiallyBroken(TraversalResourceId door, bool broken);
+		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool isManualDoorPermissionEligible(TraversalResourceId door) const;
 		bool setManualDoorPermissionRequirement(TraversalResourceId door,
 			std::vector<AccessPermissionId> const& permissions,

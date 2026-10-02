@@ -220,6 +220,8 @@ namespace core
 		// and pressed a control applicable from the requester's sector. One
 		// preparation is shared by every pending request for the door, and a
 		// failed preparation retries on a fixed tick delay before it is refused.
+		bool setDoorBroken(TraversalResourceId door, bool broken);
+		void observeLocalDeviceConditions(Agent& agent);
 		void allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource);
 
 		// A force bridge or extensible ladder must be extended before its

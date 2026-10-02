@@ -711,6 +711,24 @@ void renderDoorOpenApart(shared_ptr<const core::Door> door, uint32_t layer, Laye
 }
 
 
+// Keep the condition badge above the threshold, leaving the frozen leaf visible.
+static void renderBrokenWarning(core::Door const& door, WorldDrawList* drawList)
+{
+	if (!door.isBroken()) return;
+	core::Vector2 low, high;
+	door.getFullShape(low, high);
+	core::Vector2 anchor{ (low.x + high.x) * 0.5f, high.y };
+	transformPosition(anchor);
+	drawList->AddTriangleFilled(ImVec2(anchor.x, anchor.y - 16.0f),
+		ImVec2(anchor.x - 7.0f, anchor.y - 3.0f),
+		ImVec2(anchor.x + 7.0f, anchor.y - 3.0f), ImColor(255, 166, 26, 255));
+	auto const ink = ImU32(ImColor(30, 20, 0, 255));
+	drawList->AddLine(ImVec2(anchor.x, anchor.y - 12.0f),
+		ImVec2(anchor.x, anchor.y - 8.0f), ink, 2.0f);
+	drawList->AddRectFilled(ImVec2(anchor.x - 1.0f, anchor.y - 6.0f),
+		ImVec2(anchor.x + 1.0f, anchor.y - 4.0f), ink);
+}
+
 void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -750,6 +768,7 @@ void renderDoor(shared_ptr<const core::Door> door, uint32_t layer, LayerRenderSt
 		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
+	renderBrokenWarning(*door, drawList);
 }
 
 

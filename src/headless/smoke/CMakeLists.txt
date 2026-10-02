@@ -67,6 +67,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/Traversal.cpp
         simulation/Interactions.cpp
         simulation/Doors.cpp
+        simulation/BrokenDoors.cpp
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
@@ -340,6 +341,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/Layers.cpp
         persistence/DomainReplay.cpp
         persistence/DoorDocuments.cpp
+        persistence/BrokenDoors.cpp
         persistence/LiftDocuments.cpp
         persistence/ShuttleDocuments.cpp
         persistence/DeepLayerReplay.cpp

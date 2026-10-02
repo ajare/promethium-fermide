@@ -205,7 +205,18 @@ namespace core
 				: context.agent ? context.agent->observeShuttleAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;
 			// Unavailable doors retain the existing hard permission rule; otherwise
 			// remote openness is deliberately not even read.
-			result.open = (result.observed || door.getActivationMode() == DoorActivationMode::Unavailable) && door.isOpen();
+			auto known = door.knownCondition(context.agent, context.observationSector);
+			bool const brokenOpen = known && known->broken && known->position >= 1.0f;
+			result.open = brokenOpen || ((result.observed
+				|| (!door.isBreakable() && door.getActivationMode() == DoorActivationMode::Unavailable)) && door.isOpen());
+			if (known && !known->admitsPassage())
+			{
+				result.exclusion = RouteExclusionReason::Control;
+				return result; // Operation permissions cannot make a frozen aperture usable.
+			}
+			// A frozen open threshold needs no preparation even when its last
+			// observation is remote. Do not turn memory into live queue visibility.
+			if (brokenOpen) result.preparationSeconds = 0.0f;
 			if (door.getActivationMode() == DoorActivationMode::Unavailable && !result.open && !result.lift && !result.shuttle)
 				result.exclusion = RouteExclusionReason::Control;
 			// The Door's live state is usable only when this threshold is local. A
@@ -243,8 +254,8 @@ namespace core
 				&& !context.world->canAgentOperateTransportLandingControl(
 					edge.getTraversalResourceId(), sourceSector, source->getPosition(), routeAgent))
 				result.exclusion = RouteExclusionReason::Permission;
-			if (door.getActivationMode() == DoorActivationMode::Manual) result.activation = 1;
-			else if (door.getActivationMode() == DoorActivationMode::RemoteControlled) result.activation = 2;
+			if (!brokenOpen && door.getActivationMode() == DoorActivationMode::Manual) result.activation = 1;
+			else if (!brokenOpen && door.getActivationMode() == DoorActivationMode::RemoteControlled) result.activation = 2;
 			if (result.observed && context.agent && !result.lift && !result.shuttle)
 			{
 				result.queueSeconds = context.agent->estimateTraversalDelay(edge.getTraversalResourceId(), sourceSector);

@@ -353,8 +353,44 @@ namespace
 }
 
 
+namespace
+{
+	void checkBrokenWarningPreservesPosition()
+	{
+		ImGuiGuard imgui;
+		for (auto style : { core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenLeft,
+			core::Door::OpenStyle::OpenRight, core::Door::OpenStyle::OpenApart })
+			for (float fraction : { 0.0f, 0.5f, 1.0f })
+			{
+				auto scene = buildOpenRightDoorScene(); scene.door->setOpenStyle(style); driveTo(scene, fraction);
+				auto drawList = testDrawList(); drawList->_ResetForNewFrame();
+				renderPass(scene, LayerRenderStyle::Solid, drawList);
+				auto leaf = extentOf(drawList, kDoorLeafColour);
+				require(scene.world->setDoorBroken(scene.door->getTraversalResourceId(), true), "Canvas fixture break failed");
+				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Solid, drawList);
+				auto brokenLeaf = extentOf(drawList, kDoorLeafColour);
+				auto warning = extentOf(drawList, ImU32(ImColor(255, 166, 26, 255)));
+				require(warning.painted() && warning.maxY < toScreenY(scene.door->getSize().y),
+					"Broken warning missing or obscuring physical leaf");
+				require(leaf.vertexCount == brokenLeaf.vertexCount, "Warning changed leaf geometry");
+				if (leaf.painted())
+				{
+					near(brokenLeaf.minX, leaf.minX, "Frozen leaf left"); near(brokenLeaf.maxX, leaf.maxX, "Frozen leaf right");
+					near(brokenLeaf.minY, leaf.minY, "Frozen leaf top"); near(brokenLeaf.maxY, leaf.maxY, "Frozen leaf bottom");
+				}
+				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Wireframe, drawList);
+				require(extentOf(drawList, ImU32(ImColor(255, 166, 26, 255))).painted(), "Wireframe omitted condition warning");
+				scene.world->setDoorBroken(scene.door->getTraversalResourceId(), false);
+				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Solid, drawList);
+				require(!extentOf(drawList, ImU32(ImColor(255, 166, 26, 255))).painted()
+					&& std::abs(scene.door->getOpenPercentage() - fraction) < 0.0001f, "Restore warning/position mismatch");
+			}
+	}
+}
+
 void render_smoke::registerDoorOpenRight(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "doorOpenRight/checkBrokenWarningPreservesPosition", [](smoke::Context const&) { checkBrokenWarningPreservesPosition(); } });
 	checks.push_back({ "doorOpenRightSolidPassClosed", isolated<[](smoke::Context const&) { checkSolidPass(0.0f); }> });
 	checks.push_back({ "doorOpenRightWireframePassClosed", isolated<[](smoke::Context const&) { checkWireframePass(0.0f); }> });
 	checks.push_back({ "doorOpenRightSolidPassHalfOpen", isolated<[](smoke::Context const&) { checkSolidPass(0.5f); }> });
