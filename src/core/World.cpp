@@ -10875,6 +10875,10 @@ namespace core
 						== static_cast<uint32_t>(resource->mForceBridge->getPosition().x)
 						&& mSectors[record.a]->getCellY() + record.b
 						== static_cast<uint32_t>(resource->mForceBridge->getPosition().y);
+				else if (record.type == ConstructionType::Airlock && resource->mAirlock)
+					matches = record.layer == resource->mAirlock->getLayerIndex()
+						&& record.a == resource->mAirlock->getCellY()
+						&& record.b == resource->mAirlock->getCellX();
 				else if (record.type == ConstructionType::Ladder && resource->mLadder)
 					matches = record.b == static_cast<uint32_t>(resource->mLadder->getPosition().x)
 						&& record.a == static_cast<uint32_t>(resource->mLadder->getPosition().y);
@@ -12489,6 +12493,18 @@ namespace core
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource) return 0.0f;
 
+		if (resource->mAirlock)
+		{
+			// Only this approach's queue is locally observable. Opposing demand
+			// and chamber reservations are not a remote queue oracle.
+			size_t ahead = 0;
+			for (auto const& lane : resource->mQueueLanes)
+				if (lane.sector == sourceSector) ahead += lane.queue.size();
+			auto const capacity = max<size_t>(1, resource->mCapacity);
+			auto const batches = (ahead + capacity - 1) / capacity;
+			return static_cast<float>(batches) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+				+ 2 * resource->mAirlock->getCycleSeconds());
+		}
 		if (resource->mLiftCoordinator)
 		{
 			auto lift = mTraversalResources.find(resource->mLiftCoordinator);

@@ -1712,6 +1712,8 @@ namespace core
 		uint32_t addAirlock(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
 			float cycleSeconds = 3.0f);
 		bool setAirlockCycleSeconds(uint32_t sectorIndex, float seconds);
+		bool canAgentEnterAirlock(TraversalResourceId resource, SectorId approach,
+			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
 
 		CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options);

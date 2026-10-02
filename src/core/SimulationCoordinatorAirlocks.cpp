@@ -138,9 +138,9 @@ namespace core
 		{
 			// Sharing a button press does not grant another entrant the operator's
 			// capability or authorization. Keep the former individual entry gate.
-			auto control = mWorld.mInteractionPoints.find(chamber.mControls[side]);
-			if (!actor->isActive() || agentForbidsButtons(actor) || !control
-				|| !mWorld.missingInteractionPermissions(*control, *actor).empty())
+			if (agentForbidsButtons(actor)
+				|| !mWorld.canAgentEnterAirlock(request->mResource, request->mSourceSector,
+					request->mOwner, true))
 			{
 				denyTraversalRequest(id, TraversalFailureReason::ControlRejected);
 				return;

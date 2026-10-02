@@ -119,6 +119,12 @@ set(core_names
     airlocks/ordinaryOpenBulkheadRegression
     airlocks/emptyCalls
     airlocks/basicEstimates
+    airlocks/permissionsAndMobility
+    airlocks/committedAuthorizationChanges
+    airlocks/localAdherence
+    airlocks/staleAuthorization
+    airlocks/alternativeCosts
+    airlocks/localQueueObservations
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
     runScaledWorld

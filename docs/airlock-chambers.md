@@ -1,4 +1,4 @@
-# Airlock chambers and journeys (#322–#325)
+# Airlock chambers and journeys (#322–#326)
 
 The Airlock palette tool paints a one-Level, positive whole-cell chamber on the
 visible Layer. It requires empty chamber cells and a walkable Room or Corridor
@@ -40,13 +40,34 @@ cycle without an internal press. Initial creation/load/reset starts ready for
 immediate first entry. Pause freezes Door motion and remaining simulated seconds
 and retains occupied capacity for resumed routing.
 
-Basic directed estimates use authored chamber walking (including the internal
-button approach), two required interactions, Door motion, and cycle delay.
-Remote live Door, queue, and cycle state are not consulted. Preference and
-complete authorization policy belong to the dedicated follow-up slice.
+Outside buttons expose independent Access permission requirements in their
+Selection panels. Both requirements use all-members authorization and persist
+through document history, YAML/binary load, construction replay, and reset. The
+internal button remains unrestricted. Buttons Mobility use is checked before
+admission even when another passenger could operate the internal button:
+Cannot use refuses routing and stale runtime Paths; Only if no other option uses
+the ordinary two-pass route selection and permits its selected journey.
 
-World schema 40 persists the chamber's geometry, timing, identity through the
-construction stream, and prior wall states. YAML and binary load, reset, and
+Closed or unobserved entrances require authorized outside operation. An adhering
+Agent also declines a protected locally open entrance; a non-adhering Agent may
+consider it usable without acquiring operation permission. Neither willingness
+nor grants bypass fixed admission, direction, capacity, or interlocks. The opposite
+Room or Corridor's Location requirement is checked before admission independently
+of control requirements and adherence. Once admitted, later grant loss or tighter
+control/Location requirements cannot revoke the committed opposite exit.
+
+Directed objective estimates include chamber walking and button approaches,
+required interaction duration, entry opening, exit closure/opening, and one cycle.
+Perceived cost weights waiting and interaction through existing Agent preferences;
+objective timing is unchanged. Locally open entry omits unnecessary outside
+operation. Queue/crowding observations are limited to the current approach;
+opposing queues and unobserved remote live Door, reservation, and cycle state
+never determine the estimate. Remote entrances use authored baseline timing.
+
+World schema 41 persists independent outside requirements alongside the chamber's
+geometry, timing, identity through the construction stream, and prior wall states.
+Version-40 chambers load with unrestricted outside controls; requirement-bearing
+older-schema documents and dangling/duplicate requirements are refused atomically. YAML and binary load, reset, and
 construction replay regenerate the owned Doors and controls deterministically.
 They start empty, with both Doors closed and the initial cycle complete. Public
 `SimulationSnapshot::airlocks` reports the chamber identity, width, capacity,
@@ -69,8 +90,8 @@ enters until every occupant has left. Reactivation resumes the retained journey;
 there is no automatic activation or passenger removal. Reset clears reservations,
 operators, occupants and cycling while preserving authored geometry and timing.
 
-Complete authorization/preferences, structural chamber editing/restoration
-workflows, pressure/scanning simulation, and Broken support remain follow-up work. Device commands and traversal
+Structural chamber editing/restoration workflows, pressure/scanning simulation,
+and Broken support remain follow-up work. Device commands and traversal
 coordination remain separate (ADR 0001); edges never own a coordinator.
 
 Headless coverage is owned by the existing Simulation, World, Persistence,
@@ -90,4 +111,17 @@ interlocks/crossing safety, internal interaction ordering, empty timeouts and
 same-side reopening, exit-side readmission, pause/resume, live reset, authored
 journey reload, directed baseline estimates, and countdown/occupant rendering.
 Ordinary Bulkhead and the affected modules' CLI/ownership contracts passed.
+`git diff --check` passed. Windows validation is not claimed.
+
+## #326 validation
+
+Full incremental GUI-enabled Linux builds passed in Release (`build-linux`) and
+Debug with `PF_HIGH_ANALYSIS=ON` (`build-linux-validation/debug`). Both complete
+CTest inventories passed at `--parallel 4`: 85 registered tests, zero failures,
+and only the optional vendored GUI capability check skipped. Displays were unset;
+all added checks are headless and bounded. Focused checks cover independent outside
+requirements, adherence, forbidden and last-resort Buttons, Room/Corridor entry
+requirements, stale Paths, grant loss and tightening after admission, alternative
+route selection, local/opposing queue isolation, YAML/binary/reset/replay, and
+editor undo/redo. Module CLI contracts and ownership/compile audits also passed.
 `git diff --check` passed. Windows validation is not claimed.

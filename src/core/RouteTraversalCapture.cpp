@@ -245,13 +245,37 @@ namespace core
 				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mAirlock)
 				{
 					result.airlock = true;
-					result.preparationSeconds = CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
-					if (target->getSector().get() == chamber.get())
-						result.preparationSeconds += chamber->getCycleSeconds() + CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
-					else
+					result.boarding = target->getSector().get() == chamber.get();
+					int side = sector.get() == chamber->getStop(0).sector.get() ? 0 : 1;
+					result.open = result.boarding && result.observed && door.isOpen();
+					result.needsActivation = !result.open;
+					result.preparationSeconds = result.open ? 0 : CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+					if (!result.boarding)
 					{
-						auto buttonX = chamber->getCellX() + (chamber->getCellsWide() - 1) / 2 + 0.5f;
+						result.preparationSeconds += CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+						result.airlockCycleSeconds = chamber->getCycleSeconds();
+					}
+					if (context.world && context.agent && result.boarding
+						&& !context.world->canAgentEnterAirlock(edge.getTraversalResourceId(),
+							sourceSector, context.world->getAgentId(context.agent), result.observed))
+						result.exclusion = RouteExclusionReason::Permission;
+					if (result.needsActivation)
+					{
+						auto buttonX = result.boarding ? source->getPosition().x
+							: chamber->getCellX() + (chamber->getCellsWide() - 1) / 2 + 0.5f;
+						result.interactionSeconds = World::getFixedTimestep();
+						if (context.world)
+							if (auto point = context.world->lookupInteractionPoint(chamber->getControl(result.boarding ? side : 2)); point)
+							{
+								buttonX = point.entity->getPosition().x;
+								result.interactionSeconds = point.entity->getDurationTicks() * World::getFixedTimestep();
+							}
 						result.length += 2 * std::abs(source->getPosition().x - buttonX);
+					}
+					if (result.boarding && result.observed && context.agent)
+					{
+						result.queueSeconds = context.agent->estimateTraversalDelay(edge.getTraversalResourceId(), sourceSector);
+						result.density = context.agent->observeAccessZoneDensity(edge.getTraversalResourceId(), sourceSector);
 					}
 					break;
 				}

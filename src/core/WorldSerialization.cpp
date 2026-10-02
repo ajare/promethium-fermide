@@ -340,7 +340,16 @@ namespace core
 			serializer.writeUint32("cellsWide", record.c);
 			serializer.writeFloat("cycleSeconds", record.x);
 			serializer.writeBool("leftWasOpen", record.p);
-			serializer.writeBool("rightWasOpen", record.q); break;
+			serializer.writeBool("rightWasOpen", record.q);
+			for (size_t side = 0; side < 2; ++side)
+				if (!record.controlPermissionRequirements[side].empty())
+				{
+					serializer.beginArray(side == 0 ? "leftControlPermissionRequirement" : "rightControlPermissionRequirement");
+					for (auto permission : record.controlPermissionRequirements[side])
+						serializer.writeUint32("", permission);
+					serializer.endArray();
+				}
+			break;
 		case ConstructionType::Shuttle:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -536,7 +545,8 @@ namespace core
 		// Version 38 extends whole-transport Broken condition to Platform lifts.
 		// Version 39 adds authored whole-coupled-Shuttle Broken condition.
 		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
-		serializer.writeUint32("version", 40);
+		// Version 41 adds independent outside Airlock control requirements.
+		serializer.writeUint32("version", 41);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -928,6 +938,11 @@ namespace core
 			record.p = serializer.readBool("leftWasOpen"); record.q = serializer.readBool("rightWasOpen");
 			if (serializer.hasField("initiallyBroken"))
 				throw SerializationException("Airlocks do not support Broken authoring");
+			if (version < 41 && (serializer.hasField("leftControlPermissionRequirement")
+				|| serializer.hasField("rightControlPermissionRequirement")))
+				throw SerializationException("Airlock control requirements require World schema version 41 or later");
+			readControlRequirement(0, "leftControlPermissionRequirement");
+			readControlRequirement(1, "rightControlPermissionRequirement");
 			break;
 		case ConstructionType::Shuttle:
 			record.layer = readLayerOr("layer", layerBehind(0));
@@ -1165,7 +1180,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 40)
+		if (version < 1 || version > 41)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1575,7 +1590,8 @@ namespace core
 				&& record.type != ConstructionType::BulkheadDoor
 				&& record.type != ConstructionType::Ladder
 				&& record.type != ConstructionType::SectorLadder
-				&& record.type != ConstructionType::ForceBridge) continue;
+				&& record.type != ConstructionType::ForceBridge
+				&& record.type != ConstructionType::Airlock) continue;
 			bool controls[2]{};
 			if (record.type == ConstructionType::Door || record.type == ConstructionType::BulkheadDoor)
 			{
@@ -1589,7 +1605,7 @@ namespace core
 				if (record.e > 0) controls[record.i] = true;
 				if (record.e > 1) controls[1 - record.i] = true;
 			}
-			else if (record.p) controls[0] = controls[1] = true;
+			else if (record.p || record.type == ConstructionType::Airlock) controls[0] = controls[1] = true;
 			for (size_t side = 0; side < 2; ++side)
 			{
 				if (!record.controlPermissionRequirements[side].empty() && !controls[side])
@@ -1722,6 +1738,9 @@ namespace core
 					throw SerializationException(format(
 						"Serialized Access permission requirement has invalid or ineligible Interaction point {}",
 						pointId.value));
+				if (version < 41 && any_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
+					{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
+					throw SerializationException("Airlock control requirements require World schema version 41 or later");
 				// Versions 23-24 persisted generated controls only by replay-order
 				// Interaction point ID. Migrate those requirements onto the stable
 				// authored approach side before adopting the records.
@@ -2321,6 +2340,12 @@ namespace core
 			auto chamber = std::static_pointer_cast<AirlockTransit>(mSectors[index]);
 			chamber->mPreviousEnds = { record.p ? SectorEndType::None : SectorEndType::Wall,
 				record.q ? SectorEndType::None : SectorEndType::Wall };
+			for (size_t side = 0; side < 2; ++side)
+			{
+				auto point = mInteractionPoints.find(chamber->getControl(side));
+				for (auto permission : record.controlPermissionRequirements[side])
+					point->mPermissionRequirement.set(permission - 1);
+			}
 			break;
 		}
 		case ConstructionType::Shuttle:

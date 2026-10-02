@@ -137,9 +137,17 @@ namespace core
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
 			if (airlock)
 			{
-				c.motionSeconds += World::getFixedTimestep();
-				c.expectedWaitSeconds = preparationSeconds;
-				c.interactionUnits = 1;
+				c.motionSeconds += interactionSeconds;
+				c.expectedWaitSeconds = airlockCycleSeconds;
+				if (observed && boarding)
+				{
+					c.knownWaitSeconds = preparationSeconds + queueSeconds;
+					c.crowdingUnits = density;
+				}
+				else c.expectedWaitSeconds += preparationSeconds
+					+ (boarding ? p.unobservedDoorQueueSeconds : 0);
+				c.interactionUnits = p.thresholdInteraction
+					+ (needsActivation ? p.remoteDoorInteraction : 0);
 				break;
 			}
 			if (shuttle)

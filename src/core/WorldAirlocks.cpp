@@ -4,6 +4,7 @@
 #include "core/AirlockTransit.h"
 #include "core/Exceptions.h"
 #include "core/Button.h"
+#include "core/Agent.h"
 
 namespace core
 {
@@ -122,6 +123,27 @@ namespace core
 		record.p = previous[0] == SectorEndType::None; record.q = previous[1] == SectorEndType::None;
 		recordConstruction(std::move(record));
 		return index;
+	}
+
+	bool World::canAgentEnterAirlock(TraversalResourceId id, SectorId approach,
+		AgentId agentId, bool locallyObserved) const
+	{
+		auto resource = mTraversalResources.find(id);
+		auto actor = mAgents.find(agentId);
+		if (!resource || !resource->mAirlock || !actor) return false;
+		auto const& chamber = *resource->mAirlock;
+		int side = approach == resource->mQueueLanes[0].sector ? 0 : 1;
+		if (approach != resource->mQueueLanes[side].sector
+			|| !canAgentAccessLocation(*chamber.getStop(1 - side).sector, *actor)) return false;
+		auto control = mInteractionPoints.find(chamber.getControl(side));
+		if (!control) return false;
+		if (missingInteractionPermissions(*control, *actor).empty()) return true;
+		// Unauthorized operation is never allowed. Non-adhering Agents may use
+		// a locally usable entrance, but the allocator still owns every permit.
+		return locallyObserved && !actor->getEffectivePermissionAdherence().value
+			&& chamber.mActiveSide == side && !chamber.mClosing
+			&& chamber.mDoors[side]->isOpen() && chamber.mDoors[1 - side]->isClosed()
+			&& chamber.isCycleComplete() && resource->mAirlockEntrySide == side;
 	}
 
 	bool World::setAirlockCycleSeconds(uint32_t index, float seconds)

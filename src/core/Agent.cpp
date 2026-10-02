@@ -1596,7 +1596,16 @@ namespace core
 		// this request. Underway entries never return to this allocation state.
 		auto destinationSector = mTraversalTask->destinationVertex->getSector();
 		if (destinationSector.get() != getSector()
+			&& getSector()->getType() != SectorType::Airlock
 			&& !mWorld->canAgentAccessLocation(*destinationSector, *this))
+		{
+			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+			return;
+		}
+		if (destinationSector.get() != getSector() && destinationSector->getType() == SectorType::Airlock
+			&& (agentForbidsEdge(this, *mTraversalTask->edge, TraversalKind::Door)
+				|| !mWorld->canAgentEnterAirlock(mTraversalTask->edge->getTraversalResourceId(),
+					SectorId{ static_cast<uint64_t>(getSector()->getIndex()) + 1 }, mWorld->getAgentId(this), true)))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 			return;

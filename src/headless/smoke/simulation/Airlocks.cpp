@@ -12,6 +12,7 @@
 #include "core/YamlSerializer.h"
 #include "core/RouteTraversalInputs.h"
 #include "core/MarkerSectorObject.h"
+#include "core/MobilityProfile.h"
 
 namespace
 {
@@ -470,7 +471,8 @@ namespace
 		core::World::CreateObjectResult marker = world.addSectorMarker(right, 0, 1.5f);
 		core::AgentId id;
 		core::Agent* agent;
-		Scene()
+		Scene(bool corridor = false)
+			: right(corridor ? world.addCorridor(0, 0, 5, 3, 1) : world.addRoom("Right", 0, 0, 5, 3, 1))
 		{
 			world.finishBuild(); id = world.createAgent("Traveller", left, 0, 1.5f);
 			agent = world.lookupAgent(id).entity;
@@ -491,6 +493,211 @@ namespace
 			return state;
 		}
 	};
+
+	void permissionsAndMobility(smoke::Context const&)
+	{
+		for (bool corridor : { false, true })
+		{
+			Scene scene(corridor); scene.world.pauseSimulation();
+			auto leftKey = scene.world.addAccessPermission("Left button");
+			auto rightKey = scene.world.addAccessPermission("Right button");
+			auto locationKey = scene.world.addAccessPermission("Destination");
+			require(scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(0), { leftKey })
+				&& scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(1), { rightKey }), "Outside protection refused");
+			auto target = scene.world.getGraph()->getVertexForObject(scene.marker.sector->getObject(scene.marker.index));
+			auto choose = [&] { return scene.world.getGraph()->calculatePath(scene.agent, target); };
+			require(!choose(), "Unauthorized outside operation planned");
+			require(scene.world.setAgentIndividualPermissionAdherence(scene.id, false), "Adherence edit refused");
+			require(!choose(), "Non-adherence authorized closed outside operation");
+			require(scene.world.grantAgentAccessPermission(scene.id, leftKey), "Grant refused");
+			require(bool(choose()), "Opposite outside requirement incorrectly restricted entry");
+			require(scene.world.setLocationPermissionRequirement(scene.right, { locationKey }), "Location protection refused");
+			require(!choose(), "Non-adherence bypassed destination Location");
+			require(scene.world.grantAgentAccessPermission(scene.id, locationKey), "Location grant refused");
+			auto permitted = choose(); require(bool(permitted), "Authorized journey unavailable");
+			core::MobilityProfile mobility;
+			mobility.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+			require(scene.world.setAgentIndividualMobilityProfile(scene.id, mobility), "Mobility edit refused");
+			require(!choose(), "Forbidden Buttons route selected");
+			// A stale Path cannot bypass the runtime eligibility gate.
+			scene.agent->setPath(permitted, true); scene.world.resumeSimulation();
+			for (uint32_t tick = 0; tick < 400; ++tick)
+			{
+				auto state = scene.step();
+				require(state.occupants.empty() && state.reservations.empty(), "Forbidden button Agent admitted");
+			}
+			scene.world.pauseSimulation();
+			mobility.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+			require(scene.world.setAgentIndividualMobilityProfile(scene.id, mobility), "Mobility edit refused");
+			require(scene.world.setAgentIndividualPermissionAdherence(scene.id, true), "Adherence edit refused");
+			require(bool(choose()), "Last-resort Buttons failed fallback");
+			scene.route(); scene.world.resumeSimulation();
+			bool arrived = false;
+			for (uint32_t tick = 0; tick < 2400; ++tick)
+			{
+				scene.step();
+				if (scene.agent->getSector()->getIndex() == scene.right) { arrived = true; break; }
+			}
+			require(arrived, "Last-resort runtime journey stalled: state=" + std::to_string((int)scene.agent->getState())
+				+ " node=" + std::to_string(scene.agent->getPathTargetNodeIndex()) + " sector=" + std::to_string(scene.agent->getSector()->getIndex()) + " pos=" + std::to_string(scene.agent->getGlobalPosition().x) + " active=" + std::to_string(scene.agent->isActive())
+				+ " path=" + std::to_string(bool(scene.agent->getPath())));
+			// The other outside button requires its own grant, independently.
+			scene.world.pauseSimulation();
+			auto originMarker = scene.world.addSectorMarker(scene.left, 0, 1.5f);
+			scene.world.finishBuild(); scene.world.pauseSimulation();
+			auto origin = scene.world.getGraph()->getVertexForObject(originMarker.sector->getObject(originMarker.index));
+			require(!scene.world.getGraph()->calculatePath(scene.agent, origin), "Left grant authorized right outside operation");
+			require(scene.world.grantAgentAccessPermission(scene.id, rightKey)
+				&& scene.world.getGraph()->calculatePath(scene.agent, origin), "Right outside grant did not admit return route");
+		}
+	}
+
+	void staleAuthorization(smoke::Context const&)
+	{
+		for (bool location : { false, true })
+			for (bool corridor : { false, true })
+			{
+				Scene scene(corridor);
+				auto destination = scene.world.getGraph()->getVertexForObject(scene.marker.sector->getObject(scene.marker.index));
+				auto stale = scene.world.getGraph()->calculatePath(scene.agent, destination);
+				require(bool(stale), "Stale authorization fixture unreachable");
+				scene.world.pauseSimulation();
+				auto key = scene.world.addAccessPermission("New requirement");
+				require(location ? scene.world.setLocationPermissionRequirement(scene.right, { key })
+					: scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(0), { key }), "Requirement refused");
+				scene.agent->setPath(stale, true); scene.world.resumeSimulation();
+				for (uint32_t tick = 0; tick < 1200; ++tick)
+				{
+					auto state = scene.step();
+					require(state.occupants.empty() && scene.agent->getSector()->getIndex() == scene.left,
+						"Stale Path bypassed current admission authorization");
+				}
+			}
+	}
+
+	void alternativeCosts(smoke::Context const&)
+	{
+		bool reversed = false;
+		for (uint32_t detour = 10; detour < 36 && !reversed; detour += 2)
+		{
+			core::World world("Airlock alternatives", 40, 2);
+			auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
+			auto right = world.addRoom("Right", 0, 0, 5, 35, 1);
+			auto chamberIndex = world.addAirlock(0, 0, 3, 2, 1);
+			world.addRoom("Detour", 1, 0, 0, 40, 1);
+			world.addSectorDoor(0, 0, 0, {}); world.addSectorDoor(0, 0, detour, {});
+			auto marker = world.addSectorMarker(right, 0, 1.5f);
+			world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Chooser", left, 0, 1.5f);
+			auto actor = world.lookupAgent(id).entity;
+			auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(chamberIndex));
+			auto target = world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index));
+			auto chooseAirlock = [&] {
+				auto path = world.getGraph()->calculatePath(actor, target);
+				require(bool(path), "Alternative route unavailable");
+				return std::any_of(path->nodes.begin(), path->nodes.end(), [&](auto const& node) {
+					return node.edge && node.edge->getTraversalResourceId() == chamber->getTraversalResourceId();
+				});
+			};
+			require(world.setAgentIndividualWaitingAversion(id, 0.5f), "Waiting preference refused");
+			bool low = chooseAirlock();
+			require(world.setAgentIndividualWaitingAversion(id, 3), "Waiting preference refused");
+			bool high = chooseAirlock();
+			reversed = low && !high;
+			if (!low) continue;
+			core::MobilityProfile mobility;
+			mobility.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+			require(world.setAgentIndividualMobilityProfile(id, mobility)
+				&& world.setAgentIndividualWaitingAversion(id, 0.5f), "Last-resort alternative fixture failed");
+			require(!chooseAirlock(), "Last-resort Airlock chosen despite ordinary alternative");
+			mobility.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+			require(world.setAgentIndividualMobilityProfile(id, mobility) && !chooseAirlock(), "Forbidden Buttons displaced ordinary route");
+		}
+		require(reversed, "Waiting aversion did not reverse Airlock versus walking choice");
+	}
+
+	void committedAuthorizationChanges(smoke::Context const&)
+	{
+		for (bool corridor : { false, true })
+			for (bool tighten : { false, true })
+			{
+				Scene scene(corridor); scene.world.pauseSimulation();
+				auto key = scene.world.addAccessPermission("Journey permission");
+				if (!tighten)
+				{
+					require(scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(0), { key })
+						&& scene.world.setLocationPermissionRequirement(scene.right, { key })
+						&& scene.world.grantAgentAccessPermission(scene.id, key), "Authorization fixture failed");
+				}
+				scene.route(); scene.world.resumeSimulation();
+				bool boarded = false;
+				for (uint32_t tick = 0; tick < 1600; ++tick)
+					if (!scene.step().occupants.empty()) { boarded = true; break; }
+				require(boarded, "Permission fixture never boarded");
+				if (tighten)
+				{
+					scene.world.pauseSimulation();
+					require(scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(0), { key })
+						&& scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(1), { key })
+						&& scene.world.setLocationPermissionRequirement(scene.right, { key }), "Tightening refused");
+					scene.world.resumeSimulation();
+				}
+				else require(scene.world.setAgentRuntimeAccessPermissionGrant(scene.id, key, false), "Runtime permission loss refused");
+				bool exited = false;
+				for (uint32_t tick = 0; tick < 2400; ++tick)
+				{
+					auto state = scene.step();
+					if (scene.agent->getSector()->getIndex() == scene.right)
+					{ require(state.occupants.empty(), "Exit retained capacity"); exited = true; break; }
+				}
+				require(exited, "Authorization change trapped/reversed committed occupant: tighten=" + std::to_string(tighten)
+					+ " state=" + std::to_string((int)scene.agent->getState()) + " pos=" + std::to_string(scene.agent->getGlobalPosition().x) + " sector=" + std::to_string(scene.agent->getSector()->getIndex())
+					+ " doors=" + std::to_string((int)scene.world.getSimulationSnapshot().airlocks[0].doors[0])
+					+ "," + std::to_string((int)scene.world.getSimulationSnapshot().airlocks[0].doors[1])
+					+ " path=" + std::to_string(bool(scene.agent->getPath())));
+			}
+	}
+
+	void localAdherence(smoke::Context const&)
+	{
+		Scene scene; scene.route();
+		// The public route seam sees a usable entrance only from its approach.
+		for (uint32_t tick = 0; tick < 1200; ++tick)
+		{
+			auto state = scene.step();
+			if (state.doors[0] != core::DoorSnapshotState::Open) continue;
+			scene.world.pauseSimulation();
+			auto key = scene.world.addAccessPermission("Outside operator");
+			require(scene.world.setInteractionPointPermissionRequirement(scene.chamber()->getControl(0), { key }), "Local requirement refused");
+			auto id = scene.world.createAgent("Observer", scene.left, 0, 1.5f);
+			auto observer = scene.world.lookupAgent(id).entity;
+			auto destination = scene.world.getGraph()->getVertexForObject(scene.marker.sector->getObject(scene.marker.index));
+			require(!scene.world.getGraph()->calculatePath(observer, destination), "Adhering observer used protected open entrance");
+			require(scene.world.setAgentIndividualPermissionAdherence(id, false), "Observer adherence edit refused");
+			auto opportunistic = scene.world.getGraph()->calculatePath(observer, destination);
+			require(bool(opportunistic), "Non-adhering observer ignored locally open entrance");
+			core::RouteDecisionContext remote{ observer, {}, {}, nullptr, observer->getWalkSpeed(), &scene.world };
+			for (auto const& edge : scene.world.getGraph()->getEdges())
+				if (edge->getTraversalResourceId() == scene.chamber()->getTraversalResourceId())
+					for (uint32_t side = 0; side < 2; ++side)
+					{
+						auto target = edge->getVertex(side);
+						if (target->getSector().get() == scene.chamber().get()
+							&& edge->getOtherVertex(target)->getSector()->getIndex() == scene.left)
+							require(!core::RouteTraversalInputs::capture(*edge, target, remote).evaluate(remote).feasible,
+								"Remote live entrance authorized route");
+					}
+			observer->setPath(opportunistic, true); scene.world.resumeSimulation();
+			for (uint32_t wait = 0; wait < 1200; ++wait)
+			{
+				auto next = scene.step();
+				require(std::find(next.occupants.begin(), next.occupants.end(), id) == next.occupants.end(),
+					"Non-adherence bypassed fixed batch admission");
+			}
+			return;
+		}
+		throw std::runtime_error("Local adherence fixture did not open entrance");
+	}
 
 	void exitSideReadmission(smoke::Context const&)
 	{
@@ -533,11 +740,19 @@ namespace
 					auto facts = core::RouteTraversalInputs::capture(*edge, target, unseen).evaluate(unseen);
 					auto direct = edge->getDirectedTraversalFacts(target, unseen);
 					require(facts.feasible && facts.objectiveDurationSeconds == direct.objectiveDurationSeconds
-						&& facts.components.interactionUnits == 1, "Basic estimate omitted required interaction");
+						&& facts.components.interactionUnits == unseen.policy.thresholdInteraction + unseen.policy.remoteDoorInteraction,
+						"Basic estimate omitted required interaction");
 					float expectedWait = target->getSector().get() == scene.chamber().get()
-						? 3 + 2 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME : CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+						? CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME : 3 + 2 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 					require(std::abs(facts.components.expectedWaitSeconds - expectedWait) < 0.001f
 						&& facts.components.motionSeconds >= edge->getLength() / scene.agent->getWalkSpeed(), "Basic estimate omitted cycle/movement");
+					core::EffectiveRoutingProfile averse;
+					averse.waitingAversion = 3; averse.interactionAversion = 3;
+					auto neutralCost = unseen.policy.evaluate(facts, unseen.profile);
+					auto averseCost = unseen.policy.evaluate(facts, averse);
+					require(neutralCost && averseCost && averseCost->perceivedCost > neutralCost->perceivedCost
+						&& averseCost->objectiveDurationSeconds == neutralCost->objectiveDurationSeconds,
+						"Airlock preferences changed objective timing instead of perceived cost");
 					arcs.emplace_back(edge, target); baseline.push_back(facts);
 				}
 		require(arcs.size() == 4, "Missing directed Airlock arcs");
@@ -553,6 +768,49 @@ namespace
 					"Unobserved live Airlock state leaked into route estimate");
 			}
 		}
+	}
+
+	void localQueueObservations(smoke::Context const&)
+	{
+		Scene scene; scene.world.pauseSimulation();
+		auto marker = scene.world.addSectorMarker(scene.left, 0, 1.5f); scene.world.finishBuild();
+		auto rightId = scene.world.createAgent("Remote queue", scene.right, 0, 0.5f);
+		auto remoteAgent = scene.world.lookupAgent(rightId).entity;
+		auto target = scene.world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index));
+		std::shared_ptr<const core::Edge> entrance;
+		std::shared_ptr<const core::Vertex> inside;
+		for (auto const& edge : scene.world.getGraph()->getEdges())
+			if (edge->getTraversalResourceId() == scene.chamber()->getTraversalResourceId())
+				for (uint32_t side = 0; side < 2; ++side)
+				{
+					auto vertex = edge->getVertex(side);
+					if (vertex->getSector().get() == scene.chamber().get()
+						&& edge->getOtherVertex(vertex)->getSector()->getIndex() == scene.left)
+					{ entrance = edge; inside = vertex; }
+				}
+		require(bool(entrance), "Queue estimate fixture lacks entrance");
+		core::RouteDecisionContext local{ scene.agent, {}, {}, scene.world.getSector(scene.left).get(), scene.agent->getWalkSpeed(), &scene.world };
+		core::RouteDecisionContext remote{ scene.agent, {}, {}, nullptr, scene.agent->getWalkSpeed(), &scene.world };
+		auto capture = [&](auto const& context) { return core::RouteTraversalInputs::capture(*entrance, inside, context).evaluate(context); };
+		auto baseline = capture(local), unseen = capture(remote);
+		auto path = scene.world.getGraph()->calculatePath(remoteAgent, target);
+		require(bool(path), "Remote queue route unavailable"); remoteAgent->setPath(path, true); scene.world.resumeSimulation();
+		bool queued = false;
+		for (uint32_t tick = 0; tick < 400; ++tick)
+		{
+			scene.step();
+			auto snapshot = scene.world.getSimulationSnapshot();
+			queued = std::any_of(snapshot.traversalRequests.begin(), snapshot.traversalRequests.end(), [&](auto const& request) {
+				return request.owner == rightId && request.resource == scene.chamber()->getTraversalResourceId();
+			});
+			if (queued) break;
+		}
+		require(queued, "Opposing queue fixture never requested entry");
+		auto observed = capture(local);
+		require(observed.objectiveDurationSeconds == baseline.objectiveDurationSeconds
+			&& observed.components.crowdingUnits == baseline.components.crowdingUnits
+			&& capture(remote).objectiveDurationSeconds == unseen.objectiveDurationSeconds,
+			"Opposing unobservable queue leaked into left approach estimate");
 	}
 
 	void emptyCalls(smoke::Context const&)
@@ -698,6 +956,12 @@ void registerAirlocks(std::vector<smoke::Check>& checks)
 	checks.push_back({ "airlocks/ordinaryOpenBulkheadRegression", ordinaryOpenPassage });
 	checks.push_back({ "airlocks/emptyCalls", emptyCalls });
 	checks.push_back({ "airlocks/basicEstimates", basicEstimates });
+	checks.push_back({ "airlocks/permissionsAndMobility", permissionsAndMobility });
+	checks.push_back({ "airlocks/committedAuthorizationChanges", committedAuthorizationChanges });
+	checks.push_back({ "airlocks/localAdherence", localAdherence });
+	checks.push_back({ "airlocks/staleAuthorization", staleAuthorization });
+	checks.push_back({ "airlocks/alternativeCosts", alternativeCosts });
+	checks.push_back({ "airlocks/localQueueObservations", localQueueObservations });
 	checks.push_back({ "airlocks/exitSideReadmission", exitSideReadmission });
 	checks.push_back({ "airlocks/pauseResetAndPersistence", pauseResetAndPersistence });
 }

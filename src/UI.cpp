@@ -5637,6 +5637,13 @@ void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
 	{
 		ImGui::TextUnformatted("Airlock-owned button");
 		ImGui::TextDisabled("Fixed control; commands are coordinated by the Airlock");
+		if (auto button = dynamic_pointer_cast<const core::Button>(object->_getObject()))
+		{
+			auto point = button->getInteractionPointId();
+			if (world->isInteractionPointPermissionEligible(point))
+				renderInteractionPermissionRequirements(world, point);
+			else ImGui::TextDisabled("Internal exit button is unrestricted.");
+		}
 		return;
 	}
 	if (auto button = dynamic_pointer_cast<const core::Button>(object->_getObject()))

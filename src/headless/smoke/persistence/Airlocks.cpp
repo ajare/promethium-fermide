@@ -18,11 +18,19 @@ namespace persistence
 		auto chamberIn = [&](core::World const& source) {
 			return std::dynamic_pointer_cast<const core::AirlockTransit>(source.getSector(index));
 		};
+		auto leftKey = world.addAccessPermission("Left operation");
+		auto rightKey = world.addAccessPermission("Right operation");
+		require(world.setInteractionPointPermissionRequirement(chamberIn(world)->getControl(0), { leftKey })
+			&& world.setInteractionPointPermissionRequirement(chamberIn(world)->getControl(1), { rightKey }), "Outside requirements refused");
+		require(!world.setInteractionPointPermissionRequirement(chamberIn(world)->getControl(2), { leftKey }), "Internal exit protected");
 		auto assertAuthored = [&](core::World const& source) {
 			auto chamber = chamberIn(source);
 			require(chamber && chamber->getCellX() == 2 && chamber->getCellY() == 0
 				&& chamber->getCellsWide() == 3 && chamber->getLayerIndex() == 0
 				&& chamber->getCycleSeconds() == 7.5f && chamber->getCapacity() == 3, "Airlock identity/geometry/timing lost");
+			require(source.getInteractionPointPermissionRequirement(chamber->getControl(0)) == std::vector<core::AccessPermissionId>{ leftKey }
+				&& source.getInteractionPointPermissionRequirement(chamber->getControl(1)) == std::vector<core::AccessPermissionId>{ rightKey }
+				&& source.getInteractionPointPermissionRequirement(chamber->getControl(2)).empty(), "Independent requirements lost on load/replay/reset");
 			auto state = source.getSimulationSnapshot();
 			require(state.airlocks.size() == 1 && state.airlocks[0].sector.value == index + 1
 				&& state.airlocks[0].occupants.empty() && state.airlocks[0].cycleComplete
@@ -68,6 +76,35 @@ namespace persistence
 			&& chamberIn(loaded)->getPreviousEnd(1) == core::SectorEndType::Wall, "Originally open wall restoration lost");
 		loaded.resetSimulation();
 		require(chamberIn(loaded)->getPreviousEnd(0) == core::SectorEndType::None, "Replay closed an originally open wall");
+		// Legacy chambers default to unrestricted controls; protection cannot be
+		// smuggled into an older schema or silently dropped during atomic load.
+		auto protectedNode = node;
+		for (auto value : { "[1, 1]", "[0]", "[256]", "[-1]", "broken" })
+		{
+			auto invalid = YAML::Clone(protectedNode);
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() == "airlock")
+					record["leftControlPermissionRequirement"] = YAML::Load(value);
+			bool rejected = false;
+			try { auto input = core::YamlSerializer::fromString(YAML::Dump(invalid)); input->deserialize(); loaded.deserialize(*input, work); }
+			catch (std::exception const&) { rejected = true; }
+			require(rejected && loaded.getInteractionPointPermissionRequirement(chamberIn(loaded)->getControl(0)) == std::vector<core::AccessPermissionId>{ leftKey },
+				"Malformed outside requirement loaded or changed World");
+		}
+		auto legacy = YAML::Clone(protectedNode); legacy["version"] = 40;
+		bool rejected = false;
+		try { auto input = core::YamlSerializer::fromString(YAML::Dump(legacy)); input->deserialize(); loaded.deserialize(*input, work); }
+		catch (std::exception const&) { rejected = true; }
+		require(rejected, "Old schema silently accepted outside requirements");
+		for (auto record : legacy["construction"])
+			if (record["type"].as<std::string>() == "airlock")
+			{ record.remove("leftControlPermissionRequirement"); record.remove("rightControlPermissionRequirement"); }
+		legacy.remove("interactionPermissionRequirements");
+		core::World unrestricted("Legacy Airlock", 1, 1);
+		auto input = core::YamlSerializer::fromString(YAML::Dump(legacy)); input->deserialize();
+		require(unrestricted.deserialize(*input, work)
+			&& unrestricted.getInteractionPointPermissionRequirement(chamberIn(unrestricted)->getControl(0)).empty()
+			&& unrestricted.getInteractionPointPermissionRequirement(chamberIn(unrestricted)->getControl(1)).empty(), "Legacy outside controls restricted");
 		auto baseline = loaded.getNumSectors();
 		for (auto record : node["construction"])
 			if (record["type"].as<std::string>() == "airlock") record["cycleSeconds"] = 11;

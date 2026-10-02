@@ -18,6 +18,8 @@ namespace core
 		std::optional<TraversalKind> mobilityKind;
 		bool buttons = false;
 		bool airlock = false;
+		float airlockCycleSeconds = 0;
+		float interactionSeconds = 0;
 		RouteExclusionReason exclusion = RouteExclusionReason::None;
 		float length = 0;
 		float rise = 0;
