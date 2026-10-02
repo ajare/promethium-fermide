@@ -62,7 +62,14 @@ namespace
 		path += ".exe";
 #endif
 		std::cout << "RUN " << command.front() << std::endl;
-		if (!std::filesystem::is_regular_file(path))
+		std::error_code discoveryError;
+		auto exists = std::filesystem::is_regular_file(path, discoveryError);
+		if (discoveryError && discoveryError != std::errc::no_such_file_or_directory)
+		{
+			std::cerr << "ERROR " << command.front() << ": executable discovery failed: " << discoveryError.message() << '\n';
+			return 126;
+		}
+		if (!exists)
 		{
 			std::cerr << "ERROR " << command.front() << ": missing executable " << path << '\n';
 			return 127;
@@ -77,7 +84,8 @@ namespace
 		if (!CreateProcessW(path.c_str(), line.data(), nullptr, nullptr, TRUE, 0,
 			nullptr, nullptr, &startup, &process))
 		{
-			std::cerr << "ERROR " << command.front() << ": launch failed, Windows error " << GetLastError() << '\n';
+			auto error = GetLastError(); // Stream operations can overwrite thread last-error.
+			std::cerr << "ERROR " << command.front() << ": launch failed, Windows error " << error << '\n';
 			return 126;
 		}
 		CloseHandle(process.hThread);
@@ -85,12 +93,18 @@ namespace
 		DWORD status = 0;
 		bool queried = GetExitCodeProcess(process.hProcess, &status) != 0;
 		CloseHandle(process.hProcess);
-		if (waited != WAIT_OBJECT_0 || !queried) throw std::runtime_error("Cannot wait for child");
+		if (waited != WAIT_OBJECT_0 || !queried)
+		{
+			std::cerr << "ERROR " << command.front() << ": cannot retrieve child outcome\n";
+			return 1;
+		}
 		if (status >= 0x80000000UL)
 		{
 			std::cerr << "ERROR " << command.front() << ": abnormal termination, Windows status " << status << '\n';
 			return 1;
 		}
+		if (status > 255)
+			std::cerr << "ERROR " << command.front() << ": Windows exit " << status << " normalized to 1\n";
 		int code = status <= 255 ? static_cast<int>(status) : 1;
 #else
 		std::string executable = path.string();
@@ -184,7 +198,8 @@ namespace
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
-	SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+	// Keep caller-selected flags; CreateProcess inherits this mode unless asked not to.
+	SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 #endif
 	try
 	{

@@ -10,6 +10,9 @@ required editor/runtime assets. This also works with `BUILD_TESTING=OFF`.
 Dependencies are one-way: direct module builds never build the aggregate or
 unrelated modules/tools. Children are resolved beside the running executable,
 not in the working directory or PATH; keep the built environment together.
+On Windows the sibling name includes `.exe`. Multi-configuration builds resolve
+only beside the running Debug or Release executable (`bin/x64/<configuration>`),
+never by falling back to the other configuration.
 
 No arguments runs every configured module once, sequentially in alphabetical
 target-name order. Startup is included only with `PF_BUILD_GUI=ON`; it tests a
@@ -57,20 +60,52 @@ malformed wrapper arguments return 2.
 ## Outcomes and verification
 
 - Child success returns 0; ordinary failure reports `FAIL <target>: exit N` and
-  propagates N (Windows statuses above 255 normalize to 1).
+  propagates N. Windows ordinary statuses above 255 normalize to 1, with a
+  diagnostic containing the original status and normalization.
 - Missing executable returns 127; other launch failures return 126.
 - Signal termination on Linux reports the signal and returns 128 + signal.
   Windows exception termination reports the Windows status and returns 1.
 - Multiple-module selections continue after failure, returning the first nonzero
   outcome in deterministic dispatch order. Required missing children never skip.
-- Windows system error dialogs are disabled and inherited by children; smoke
-  modules/tools additionally suppress their own CRT dialogs.
+- Environment and stdout/stderr are inherited without shell expansion. Windows
+  system error dialogs are disabled and inherited by children; caller-selected
+  error-mode flags are preserved. Smoke modules/tools additionally suppress their
+  own CRT dialogs. The synthetic exception child relies on the inherited mode,
+  so it also validates suppression rather than masking it with its own settings.
 
 CTest registers modules directly, **not** the compatibility aggregate. The
 `headless-compatibility-contract` uses disposable synthetic children to test all
 mappings, argument forwarding, stable sequential ordering, PATH invocation from
 an unrelated directory, success/failure/missing/abnormal outcomes and continuation.
-It never launches GUI windows, servers or production smoke checks. World's direct
-contract covers the final preserved `marker-identity` and `two-sided-buttons`
-suites. The Device-operation/Traversal-resource type assertion formerly in the
-legacy main already belongs to `pf-interaction-api-compile-contract`.
+It never launches GUI windows, servers or production smoke checks. Windows cases
+also cover malformed `.exe` startup failures, normalized large exit statuses,
+real unhandled exception termination, inherited environment/error modes, literal
+shell syntax, backslashes adjacent to quotes, empty arguments, configuration/CWD/
+PATH decoys, and differing child outcomes (including missing/startup failures) to
+prove first-failure propagation while continuing dispatch. Windows filenames
+cannot contain literal quotes; quoted argument values are tested separately.
+
+World's direct contract covers the final preserved `marker-identity` and
+`two-sided-buttons` suites. The Device-operation/Traversal-resource type assertion
+formerly in the legacy main already belongs to `pf-interaction-api-compile-contract`.
+
+## Windows validation (#309)
+
+Use an existing MSVC tree configured with `BUILD_TESTING=ON` (see the
+[Windows build matrix](windows-smoke-build-validation.md)):
+
+```bat
+python scripts\validate_windows_compatibility.py --build-tree out\307-nogui
+python scripts\validate_windows_compatibility.py --build-tree out\307-matrix\gui
+```
+
+The validator preserves the tree's GUI setting and builds the dispatcher, its
+build-order dependencies, and synthetic probes in **Debug and Release**. It runs
+`headless-compatibility-contract`, `smoke-ownership-audit`, and
+`smoke-harness-contract` with configuration-selected CTest paths. It never runs
+production tools/services or GUI tests. File API snapshots assert that the
+aggregate compiles only `SmokeScenario.cpp` and links only Windows system
+libraries, while every direct smoke executable's dependency closure excludes
+the aggregate, dedicated tools, and other smoke executables. Evidence is retained
+in `<tree>/compatibility-validation-logs/` (configure/build/test logs and per-config
+source/link/dependency inventories).
