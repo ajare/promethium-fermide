@@ -385,6 +385,7 @@ namespace core
 			serializer.writeString("activationMode", activationName(record.j));
 			serializer.writeFloat("holdOpenSeconds", record.x); serializer.writeUint32("crossingLanes", record.d);
 			serializer.writeFloat("automaticSensorDistance", record.y);
+			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			for (size_t side = 0; side < 2; ++side)
 				if (!record.controlPermissionRequirements[side].empty())
 				{
@@ -505,7 +506,8 @@ namespace core
 		// new version: a reader that predates it still opens these files and
 		// falls back to deriving the next ID from the groups that survive.
 		// Version 33 adds ordinary Door authored Broken condition.
-		serializer.writeUint32("version", 33);
+		// Version 34 extends authored Broken condition to Bulkhead Doors.
+		serializer.writeUint32("version", 34);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -962,6 +964,12 @@ namespace core
 			record.d = serializer.readUint32("crossingLanes");
 			record.y = serializer.readFloat("automaticSensorDistance", true,
 				CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE);
+			if (serializer.hasField("initiallyBroken"))
+			{
+				if (version < 34) throw SerializationException(
+					"Bulkhead Door Broken condition requires World schema version 34 or later");
+				record.initiallyBroken = serializer.readBool("initiallyBroken");
+			}
 			if (version >= 25)
 				for (size_t controlSide = 0; controlSide < 2; ++controlSide)
 				{
@@ -1084,7 +1092,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 33)
+		if (version < 1 || version > 34)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2275,7 +2283,7 @@ namespace core
 		case ConstructionType::BulkheadDoor:
 		{
 			CreateBulkheadDoorOptions options{ { record.p, record.q },
-				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y };
+				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y, {}, record.initiallyBroken };
 			for (size_t side = 0; side < 2; ++side)
 				for (auto permission : record.controlPermissionRequirements[side])
 					options.controlPermissionRequirements[side].push_back(
@@ -5395,7 +5403,7 @@ namespace core
 			});
 		if (found == mConstructionRecords.rend()) return false;
 		options = { { found->p, found->q }, static_cast<DoorActivationMode>(found->j),
-			found->x, found->d, found->y };
+			found->x, found->d, found->y, {}, found->initiallyBroken };
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : found->controlPermissionRequirements[side])
 				options.controlPermissionRequirements[side].push_back(
@@ -5441,6 +5449,7 @@ namespace core
 		found->j = static_cast<int32_t>(options.activationMode);
 		found->x = options.holdOpenSeconds; found->d = options.crossingLanes;
 		found->y = options.automaticSensorDistance;
+		found->initiallyBroken = options.initiallyBroken;
 		for (size_t side = 0; side < 2; ++side)
 		{
 			if (!options.controls[side])

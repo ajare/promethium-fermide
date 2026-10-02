@@ -37,6 +37,7 @@ namespace persistence
 	void staircaseEditsReplayLocationsBeforeTransits(smoke::Context const&);
 	void bulkheadDoorsSupportIndependentObjectEditing(smoke::Context const&);
 	void ordinaryDoorBrokenLifecycle(smoke::Context const&);
+	void bulkheadDoorBrokenLifecycle(smoke::Context const&);
 	void doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted(smoke::Context const&);
 	void doorHeightPersistsAndIsLimitedToRooms(smoke::Context const&);
 	void doorOpenLeftPersistsThroughEveryEditorPath(smoke::Context const&);

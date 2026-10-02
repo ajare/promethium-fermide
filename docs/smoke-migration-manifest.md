@@ -141,6 +141,7 @@ because they do not own smoke-check execution.
 | `smoke/routing/ThresholdRouteCost.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/routing/Workspace.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/simulation/BrokenDoors.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/BrokenBulkheadDoors.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/CrossingBands.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/DoorQueues.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Doors.cpp` | module-owned | `pf-smoke-simulation` |

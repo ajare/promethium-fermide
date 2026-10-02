@@ -68,6 +68,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/Interactions.cpp
         simulation/Doors.cpp
         simulation/BrokenDoors.cpp
+        simulation/BrokenBulkheadDoors.cpp
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp

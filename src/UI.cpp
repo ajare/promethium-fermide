@@ -3523,6 +3523,7 @@ namespace
 				<< YAML::Key << "crossingLanes" << YAML::Value << options.crossingLanes
 				<< YAML::Key << "automaticSensorDistance" << YAML::Value
 				<< options.automaticSensorDistance
+				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken
 				<< YAML::EndMap;
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Window)
@@ -3685,6 +3686,8 @@ namespace
 			auto controls = object["controls"];
 			if (!controls || !controls.IsSequence() || controls.size() != 2)
 				throw runtime_error("Bulkhead Door controls must contain two values");
+			definition.bulkheadDoor.initiallyBroken = object["initiallyBroken"]
+				? object["initiallyBroken"].as<bool>() : false;
 			definition.bulkheadDoor.controls[0] = controls[0].as<bool>();
 			definition.bulkheadDoor.controls[1] = controls[1].as<bool>();
 			auto mode = requiredYaml<string>(object, "activationMode");
@@ -5467,6 +5470,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 	case core::OpenableObject::State::Closing: state = "Closing"; break;
 	}
 	ImGui::Text("Runtime state: %s (%.2f%% open)", state, pct);
+	renderDoorConditionPanel(world, door);
 	ImGui::Text("Open/close time: %.2fs", door->getOpenCloseTime());
 	ImGui::Text("Left: %s", door->getSideSector(CORE_SIDE_LEFT)->getDescription().c_str());
 	ImGui::Text("Right: %s", door->getSideSector(CORE_SIDE_RIGHT)->getDescription().c_str());
@@ -5559,7 +5563,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 			core::World::CreateBulkheadDoorOptions options{
 				{ leftControl, rightControl },
 				static_cast<core::DoorActivationMode>(activationMode),
-				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance };
+				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance, {}, door->isInitiallyBroken() };
 			gSelectedSectorObject = world->applySectorBulkheadDoorOptions(
 				owner->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset(); editedObject = nullptr;

@@ -66,6 +66,12 @@ set(core_names
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory
     brokenDoors/discoveryPlanningAndPersistence
+    brokenBulkheadDoors/concurrentFrozenPassage
+    brokenBulkheadDoors/automaticPresenceWithoutPath
+    brokenBulkheadDoors/frozenPositionAndCommands
+    brokenBulkheadDoors/operationsAndAdmittedCrossings
+    brokenBulkheadDoors/individualLocalMemory
+    brokenBulkheadDoors/discoveryPlanningAndPersistence
     fairDoorQueuesServeBothSidesInStableOrder
     queueChainsFollowWithoutCompressingDefaultLeft
     queueChainsFollowWithoutCompressingDefaultRight

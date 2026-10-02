@@ -71,6 +71,7 @@ set(names
     doorOpenLeftWireframePassHalfOpen
     doorOpenLeftFullyOpenSolidPass
     doorOpenLeftFullyOpenWireframePass
+    bulkhead/checkBrokenWarningPreservesPosition
     doorOpenRight/checkBrokenWarningPreservesPosition
     doorOpenRightSolidPassClosed
     doorOpenRightWireframePassClosed

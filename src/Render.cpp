@@ -807,6 +807,7 @@ void renderBulkheadDoor(shared_ptr<const core::BulkheadDoor> door, uint32_t /* l
 		drawList->AddRectFilled(topLeft, bottomRight, ImColor(255, 255, 0, 48));
 		drawList->AddRect(topLeft, bottomRight, SelectedColour, 0.0f, 0, 2.0f);
 	}
+	renderBrokenWarning(*door, drawList);
 }
 
 
@@ -1322,7 +1323,10 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 		switch (object->getObjectType())
 		{
 		case core::SectorObjectType::BulkheadDoor:
-			if (flags & RENDER_SECTOR_OBJECTS_INFRONT)
+			// Like ordinary Door outlines, same-Layer thresholds and their
+			// condition warning remain visible in the wireframe pass.
+			if (flags & (style == LayerRenderStyle::Wireframe
+				? RENDER_SECTOR_OBJECTS_BEHIND : RENDER_SECTOR_OBJECTS_INFRONT))
 			{
 				renderBulkheadDoor(static_pointer_cast<const core::BulkheadDoorSectorObject>(object)->getDoor(), layer, style, selected, drawList);
 			}

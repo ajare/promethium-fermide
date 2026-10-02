@@ -56,6 +56,7 @@ namespace
 		{ "staircaseEditsReplayLocationsBeforeTransits", persistence::staircaseEditsReplayLocationsBeforeTransits },
 		{ "bulkheadDoorsSupportIndependentObjectEditing", persistence::bulkheadDoorsSupportIndependentObjectEditing },
 		{ "ordinaryDoorBrokenLifecycle", persistence::ordinaryDoorBrokenLifecycle },
+		{ "bulkheadDoorBrokenLifecycle", persistence::bulkheadDoorBrokenLifecycle },
 		{ "doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted", persistence::doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted },
 		{ "doorHeightPersistsAndIsLimitedToRooms", persistence::doorHeightPersistsAndIsLimitedToRooms },
 		{ "doorOpenLeftPersistsThroughEveryEditorPath", persistence::doorOpenLeftPersistsThroughEveryEditorPath },

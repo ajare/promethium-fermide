@@ -8,6 +8,7 @@
 #include "core/Door.h"
 #include "core/ExtensibleObject.h"
 #include "core/DoorSectorObject.h"
+#include "core/BulkheadDoorSectorObject.h"
 #include "core/Sector.h"
 #include "core/Agent.h"
 #include "core/Path.h"
@@ -55,9 +56,14 @@ namespace core
 		bool changed = false;
 		for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
 		{
-			auto object = dynamic_pointer_cast<DoorSectorObject>(sector->getObject(index));
-			if (!object || !object->getDoor()->isBreakable()) continue;
-			auto const& door = *object->getDoor();
+			auto object = sector->getObject(index);
+			shared_ptr<Door> observed;
+			if (auto ordinary = dynamic_pointer_cast<DoorSectorObject>(object))
+				observed = ordinary->getDoor();
+			else if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorSectorObject>(object))
+				observed = bulkhead->getDoor();
+			if (!observed || !observed->isBreakable()) continue;
+			auto const& door = *observed;
 			auto id = door.getTraversalResourceId();
 			DeviceCondition condition{ door.isBroken(), door.getOpenPercentage() };
 			auto old = agent.rememberedDeviceCondition(id);

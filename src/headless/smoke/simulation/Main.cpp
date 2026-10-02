@@ -20,6 +20,7 @@ int main(int argc, char** argv)
 	registerInteractions(checks);
 	registerDoors(checks);
 	registerBrokenDoors(checks);
+	registerBrokenBulkheadDoors(checks);
 	registerDoorQueues(checks);
 	registerCrossingBands(checks);
 	registerScale(checks);

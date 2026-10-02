@@ -181,6 +181,7 @@ set(editor_names
     facade/applyingAFacadeDeleteRemovesItAndLeavesTheRestStanding
     facade/aFacadeCanBeResizedAndMovedLikeARoom
     facade/theDeletionPlansDoNotCrossTypes
+    doorpanel/checkBulkheadBrokenControlsAndHistory
     doorpanel/checkBrokenControlsAndHistory
     doorpanel/checkOrdinaryDoor
     doorpanel/checkExistingButtonsCanBeRemoved

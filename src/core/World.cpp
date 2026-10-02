@@ -5442,6 +5442,12 @@ namespace core
 		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
 			[&](ConstructionRecord const& record)
 			{
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(door))
+					return record.type == ConstructionType::BulkheadDoor
+						&& record.a == bulkhead->getFrontLayer()
+						&& record.b == static_cast<uint32_t>(bulkhead->getPosition().y)
+						&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
+							== static_cast<uint32_t>(bulkhead->getPosition().x + CORE_BULKHEAD_DOOR_WIDTH * 0.5f);
 				return record.type == ConstructionType::Door && record.layer == door->getFrontLayer()
 					&& record.a == static_cast<uint32_t>(door->getPosition().y)
 					&& record.b == static_cast<uint32_t>(door->getPosition().x)
@@ -6450,11 +6456,13 @@ namespace core
 			door, options.activationMode, options.holdOpenSeconds);
 		door->configureTraversal(options.activationMode, traversalResource, options.holdOpenSeconds);
 		door->setAutomaticSensorDistance(options.automaticSensorDistance);
+		door->mBreakable = true;
+		door->mInitiallyBroken = door->mBroken = options.initiallyBroken;
 		configureDoorCrossingLanes(traversalResource, options.crossingLanes);
 
 		// Same-layer geometry gets explicit approaches on opposite sides of the
 		// threshold; no Y/layer heuristic participates in authorization.
-		auto threshold = Vector2{ (float)x, (float)y };
+		auto threshold = Vector2{ (float)cx1, (float)y };
 		auto leftOrigin = threshold - Vector2::UNIT_X * CORE_DOOR_QUEUE_STOP_WIDTH;
 		auto rightOrigin = threshold + Vector2::UNIT_X * CORE_DOOR_QUEUE_STOP_WIDTH;
 		configureDoorQueueLane(traversalResource, SectorId{ (uint64_t)sector0->getIndex() + 1 },
@@ -6494,6 +6502,7 @@ namespace core
 		record.j = static_cast<int32_t>(options.activationMode);
 		record.x = options.holdOpenSeconds; record.d = options.crossingLanes;
 		record.y = options.automaticSensorDistance;
+		record.initiallyBroken = options.initiallyBroken;
 		for (size_t controlSide = 0; controlSide < 2; ++controlSide)
 			for (auto permission : options.controlPermissionRequirements[controlSide])
 				record.controlPermissionRequirements[controlSide].push_back(

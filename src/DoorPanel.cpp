@@ -50,6 +50,31 @@ namespace
 	}
 }
 
+// Shared ordinary/Bulkhead Door condition selection seam, tested CPU-only.
+void renderDoorConditionPanel(shared_ptr<core::World> const& world,
+	shared_ptr<core::Door> const& door)
+{
+	if (door->isBroken())
+		ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f),
+			"Broken (position frozen): %.2f%% open", door->getOpenPercentage() * 100.0f);
+	if (door->isBreakable())
+	{
+		bool initiallyBroken = door->isInitiallyBroken();
+		ImGui::BeginDisabled(!world->isSimulationPaused());
+		if (ImGui::Checkbox("Initially Broken", &initiallyBroken))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			if (world->setDoorInitiallyBroken(door->getTraversalResourceId(), initiallyBroken))
+				commitDocumentEdit(std::move(undo));
+		}
+		ImGui::EndDisabled();
+		bool broken = door->isBroken();
+		if (ImGui::Checkbox("Live Broken", &broken))
+			world->setDoorBroken(door->getTraversalResourceId(), broken);
+		ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
+	}
+}
+
 // Extracted verbatim from UI.cpp (ticket #99), with that ticket's fix: the
 // opening-style selector's disabled scope is closed immediately after the
 // selector, before the Buttons checkbox opens its own scope. The two scopes
@@ -68,24 +93,7 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 	ImGui::Text("Height: %.2f units", door->getSize().y);
 
 	float pct = door->getOpenPercentage() * 100;
-	if (door->isBroken())
-		ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f), "Broken (position frozen)");
-	if (door->isBreakable())
-	{
-		bool initiallyBroken = door->isInitiallyBroken();
-		ImGui::BeginDisabled(!world->isSimulationPaused());
-		if (ImGui::Checkbox("Initially Broken", &initiallyBroken))
-		{
-			auto undo = captureDocumentSnapshot(world);
-			if (world->setDoorInitiallyBroken(door->getTraversalResourceId(), initiallyBroken))
-				commitDocumentEdit(std::move(undo));
-		}
-		ImGui::EndDisabled();
-		bool broken = door->isBroken();
-		if (ImGui::Checkbox("Live Broken", &broken))
-			world->setDoorBroken(door->getTraversalResourceId(), broken);
-		ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
-	}
+	renderDoorConditionPanel(world, door);
 
 	// State
 	switch (door->getState())

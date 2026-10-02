@@ -28,6 +28,8 @@
 
 #include "DoorPanel.h"
 #include "DocumentEdit.h"
+#include "core/BulkheadDoorSectorObject.h"
+
 #include "core/YamlSerializer.h"
 
 #include "imgui/imgui.h"
@@ -161,15 +163,28 @@ namespace
 			"An ordinary Door selection, simulation paused");
 	}
 
-	void checkBrokenControlsAndHistory()
+	void checkBrokenControlsAndHistory(bool bulkhead = false)
 	{
 		auto world = std::make_shared<core::World>("Broken controls", 12, 3);
-		world->addRoom("Front", 0, 0, 0, 11, 1);
-		world->addRoom("Back", 1, 0, 0, 11, 1);
-		auto made = world->addSectorDoor(0, 0, 3);
+		std::shared_ptr<const core::SectorObject> object;
+		std::shared_ptr<core::Door> door;
+		if (bulkhead)
+		{
+			world->addRoom("Left", 0, 0, 0, 5, 1);
+			world->addRoom("Right", 0, 0, 5, 6, 1);
+			auto made = world->addSectorBulkheadDoor(0, 0, 5, CORE_SIDE_LEFT);
+			object = made.door.sector->getObject(made.door.index);
+			door = std::static_pointer_cast<const core::BulkheadDoorSectorObject>(object)->getDoor();
+		}
+		else
+		{
+			world->addRoom("Front", 0, 0, 0, 11, 1);
+			world->addRoom("Back", 1, 0, 0, 11, 1);
+			auto made = world->addSectorDoor(0, 0, 3);
+			object = doorObjectAt(made.door);
+			door = std::static_pointer_cast<const core::DoorSectorObject>(object)->getDoor();
+		}
 		world->finishBuild(); world->pauseSimulation();
-		auto object = doorObjectAt(made.door);
-		auto door = std::static_pointer_cast<const core::DoorSectorObject>(object)->getDoor();
 		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
 		auto save = [&]
 		{
@@ -188,7 +203,10 @@ namespace
 			ImGui::NewFrame();
 			ImGui::SetNextWindowPos(ImVec2(10, 10)); ImGui::SetNextWindowSize(ImVec2(1500, 950));
 			ImGui::Begin("Broken Selection", nullptr, ImGuiWindowFlags_NoSavedSettings);
-			text.clear(); ImGui::LogToClipboard(); renderDoorPanel(world, object); ImGui::LogFinish();
+			text.clear(); ImGui::LogToClipboard();
+			if (bulkhead) renderDoorConditionPanel(world, door);
+			else renderDoorPanel(world, object);
+			ImGui::LogFinish();
 			ImGui::End(); ImGui::Render();
 		};
 		auto pointFor = [&](char const* label)
@@ -198,7 +216,7 @@ namespace
 			for (float y = window->Pos.y + 25; y < window->Pos.y + 400; y += 8)
 				for (float x = window->Pos.x + 5; x < window->Pos.x + 180; x += 16)
 				{
-					io.AddMousePosEvent(x, y); frame();
+					io.AddMousePosEvent(x, y); frame(); frame();
 					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
 				}
 			throw std::runtime_error(std::string("Door control not reachable: ") + label);
@@ -220,7 +238,8 @@ namespace
 			&& !world->isModified() && gWorldDocumentHistory.undoCount() == 1, "Live restore changed document/history");
 		require(world->resumeSimulation(), "Simulation did not resume");
 		click("Live Broken");
-		require(door->isBroken() && save() == authored && !world->isModified(), "Running live break control failed");
+		require(door->isBroken() && save() == authored && !world->isModified(), "Running live break control failed: broken=" + std::to_string(door->isBroken())
+			+ " saved=" + std::to_string(save() == authored) + " dirty=" + std::to_string(world->isModified()));
 		world->pauseSimulation();
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
@@ -313,6 +332,7 @@ namespace
 
 void editor_smoke::registerDoorPanel(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "doorpanel/checkBulkheadBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(true); } });
 	checks.push_back({ "doorpanel/checkBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(); } });
 	checks.push_back({ "doorpanel/checkOrdinaryDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkOrdinaryDoor(); } });
 	checks.push_back({ "doorpanel/checkExistingButtonsCanBeRemoved", [](smoke::Context const&) { State state; ImGuiGuard guard; checkExistingButtonsCanBeRemoved(); } });

@@ -92,6 +92,7 @@ namespace core
 			uint32_t crossingLanes{ 1 };
 			float automaticSensorDistance{ CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE };
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateBulkheadDoorResult

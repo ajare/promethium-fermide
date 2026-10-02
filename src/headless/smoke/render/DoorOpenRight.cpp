@@ -37,6 +37,7 @@
 #include "core/Defines.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
+#include "core/BulkheadDoorSectorObject.h"
 #include "core/Sector.h"
 #include "core/SectorObjectType.h"
 #include "core/Vector2.h"
@@ -355,20 +356,35 @@ namespace
 
 namespace
 {
-	void checkBrokenWarningPreservesPosition()
+	DoorScene buildBulkheadScene()
+	{
+		DoorScene scene;
+		scene.world = std::make_unique<core::World>("Bulkhead warning", 12, 3);
+		scene.frontSectorIndex = scene.world->addRoom("Left", 0, 0, 0, 5, 1);
+		scene.world->addRoom("Right", 0, 0, 5, 6, 1);
+		auto made = scene.world->addSectorBulkheadDoor(0, 0, 5, CORE_SIDE_LEFT);
+		scene.door = std::static_pointer_cast<const core::BulkheadDoorSectorObject>(
+			made.door.sector->getObject(made.door.index))->getDoor();
+		scene.world->finishBuild(); scene.world->pauseSimulation();
+		return scene;
+	}
+
+	void checkBrokenWarningPreservesPosition(bool bulkhead = false)
 	{
 		ImGuiGuard imgui;
 		for (auto style : { core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenLeft,
 			core::Door::OpenStyle::OpenRight, core::Door::OpenStyle::OpenApart })
 			for (float fraction : { 0.0f, 0.5f, 1.0f })
 			{
-				auto scene = buildOpenRightDoorScene(); scene.door->setOpenStyle(style); driveTo(scene, fraction);
+				auto scene = bulkhead ? buildBulkheadScene() : buildOpenRightDoorScene();
+				scene.door->setOpenStyle(style); driveTo(scene, fraction);
+				auto colour = bulkhead ? ImU32(ImColor(128, 192, 182)) : kDoorLeafColour;
 				auto drawList = testDrawList(); drawList->_ResetForNewFrame();
 				renderPass(scene, LayerRenderStyle::Solid, drawList);
-				auto leaf = extentOf(drawList, kDoorLeafColour);
+				auto leaf = extentOf(drawList, colour);
 				require(scene.world->setDoorBroken(scene.door->getTraversalResourceId(), true), "Canvas fixture break failed");
 				drawList->_ResetForNewFrame(); renderPass(scene, LayerRenderStyle::Solid, drawList);
-				auto brokenLeaf = extentOf(drawList, kDoorLeafColour);
+				auto brokenLeaf = extentOf(drawList, colour);
 				auto warning = extentOf(drawList, ImU32(ImColor(255, 166, 26, 255)));
 				require(warning.painted() && warning.maxY < toScreenY(scene.door->getSize().y),
 					"Broken warning missing or obscuring physical leaf");
@@ -390,6 +406,7 @@ namespace
 
 void render_smoke::registerDoorOpenRight(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "bulkhead/checkBrokenWarningPreservesPosition", [](smoke::Context const&) { checkBrokenWarningPreservesPosition(true); } });
 	checks.push_back({ "doorOpenRight/checkBrokenWarningPreservesPosition", [](smoke::Context const&) { checkBrokenWarningPreservesPosition(); } });
 	checks.push_back({ "doorOpenRightSolidPassClosed", isolated<[](smoke::Context const&) { checkSolidPass(0.0f); }> });
 	checks.push_back({ "doorOpenRightWireframePassClosed", isolated<[](smoke::Context const&) { checkWireframePass(0.0f); }> });

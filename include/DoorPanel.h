@@ -11,8 +11,13 @@
 namespace core
 {
 	class World;
+	class Door;
 	class SectorObject;
 }
+
+// Shared condition/status controls used by ordinary and Bulkhead Door Selection.
+void renderDoorConditionPanel(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<core::Door> const& door);
 
 void renderDoorPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> object);
