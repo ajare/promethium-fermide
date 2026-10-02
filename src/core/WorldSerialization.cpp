@@ -311,7 +311,9 @@ namespace core
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
 			serializer.writeUint32("cellsWide", record.c); serializer.writeString("riseSide", sideName(record.i));
-			serializer.writeFloat("speed", record.x); break;
+			serializer.writeFloat("speed", record.x);
+			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
+			break;
 		case ConstructionType::Lift:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -510,8 +512,8 @@ namespace core
 		// falls back to deriving the next ID from the groups that survive.
 		// Version 33 adds ordinary Door authored Broken condition.
 		// Version 34 extends authored Broken condition to Bulkhead Doors.
-		// Version 35 adds authored Broken extensible Ladders and Force Bridges.
-		serializer.writeUint32("version", 35);
+		// Version 36 adds authored Broken Escalators.
+		serializer.writeUint32("version", 36);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -869,7 +871,15 @@ namespace core
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("cellsWide"); record.i = readSide("riseSide");
-			record.x = serializer.readFloat("speed", true, 0.0f); break;
+			record.x = serializer.readFloat("speed", true, 0.0f);
+			if (serializer.hasField("initiallyBroken"))
+			{
+				if (version < 36) throw SerializationException("Escalator Broken condition requires World schema version 36 or later");
+				record.initiallyBroken = serializer.readBool("initiallyBroken");
+				if (record.initiallyBroken && record.x == 0.0f)
+					throw SerializationException("Stationary Staircases cannot be Broken");
+			}
+			break;
 		case ConstructionType::Lift:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -1105,7 +1115,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 35)
+		if (version < 1 || version > 36)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2240,7 +2250,7 @@ namespace core
 				{ record.c, record.i, record.d, record.e });
 			break;
 		case ConstructionType::Staircase:
-			addStaircase(transitLayer(record), record.a, record.b, { record.c, record.i, record.x });
+			addStaircase(transitLayer(record), record.a, record.b, { record.c, record.i, record.x, record.initiallyBroken });
 			break;
 		case ConstructionType::Lift:
 		{
@@ -4077,7 +4087,7 @@ namespace core
 			if (!producer) continue;
 			if (producerIndex++ != sectorIndex) continue;
 			if (record.type != ConstructionType::Staircase) return false;
-			options = { record.c, record.i, record.x };
+			options = { record.c, record.i, record.x, record.initiallyBroken };
 			return true;
 		}
 		return false;
@@ -4092,6 +4102,8 @@ namespace core
 			{ plan.diagnostic = "Only Staircases can be edited"; return plan; }
 		if (options.riseSide != CORE_SIDE_LEFT && options.riseSide != CORE_SIDE_RIGHT)
 			{ plan.diagnostic = "The Staircase rise direction is invalid"; return plan; }
+		if (options.initiallyBroken && options.speed == 0.0f)
+			{ plan.diagnostic = "Stationary Staircases cannot be Broken"; return plan; }
 		if (!isfinite(options.speed))
 			{ plan.diagnostic = "A Staircase speed must be finite"; return plan; }
 		if (options.cellsWide < 2)
@@ -4172,6 +4184,7 @@ namespace core
 		{
 			found->a = plan.y; found->b = plan.x; found->c = plan.options.cellsWide; found->i = plan.options.riseSide;
 			found->x = plan.options.speed;
+			found->initiallyBroken = plan.options.initiallyBroken;
 		}
 		// Replay Locations before Transits regardless of the order they were
 		// authored in: a moved Staircase may land on a Location that was painted

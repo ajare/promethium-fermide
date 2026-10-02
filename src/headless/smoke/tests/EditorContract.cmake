@@ -182,6 +182,7 @@ set(editor_names
     facade/aFacadeCanBeResizedAndMovedLikeARoom
     facade/theDeletionPlansDoNotCrossTypes
     extensibles/controlsAndHistory
+    escalators/brokenControlsAndHistory
     doorpanel/checkBulkheadBrokenControlsAndHistory
     doorpanel/checkBrokenControlsAndHistory
     doorpanel/checkOrdinaryDoor

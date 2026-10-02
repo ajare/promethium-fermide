@@ -44,10 +44,10 @@ namespace core
 	bool StaircaseEdge::isTraversable(shared_ptr<const Vertex> targetVertex,
 		shared_ptr<const Agent> agent) const
 	{
-		auto const kind = mStaircase->isEscalator()
+		auto const kind = mStaircase->isMoving()
 			? TraversalKind::Escalator : TraversalKind::Staircase;
 		if (agentForbidsEdge(agent.get(), *this, kind)) return false;
-		if (!mStaircase->isEscalator()) return true;
+		if (!mStaircase->isMoving()) return true;
 		auto sourceVertex = getOtherVertex(targetVertex);
 		bool const movingUp = targetVertex->getPosition().y > sourceVertex->getPosition().y;
 		return movingUp == (mStaircase->getSpeed() > 0.0f);
@@ -67,7 +67,10 @@ namespace core
 		auto const sourceVertex = getOtherVertex(targetVertex);
 		auto const rise = getDirectedRise(*targetVertex);
 		auto const ascending = rise > 0.0f;
-		if (mStaircase->isEscalator())
+		if (mStaircase->routeIsMoving(context.agent,
+			entryIsVisibleFrom(sourceVertex, context.observationSector)
+			|| entryIsVisibleFrom(targetVertex, context.observationSector)
+			|| sourceVertex->getSector().get() == context.observationSector))
 		{
 			if (routeRejectsEdge(context, *this, TraversalKind::Escalator))
 			{
@@ -123,7 +126,7 @@ namespace core
 	float StaircaseEdge::getTraversalSpeed(Agent const* agent,
 		shared_ptr<const Vertex> const& targetVertex) const
 	{
-		if (mStaircase->isEscalator())
+		if (mStaircase->isMoving())
 			return abs(mStaircase->getSpeed())
 				+ (agent && agent->isWalkingOnEscalator(this) ? agent->getWalkSpeed() : 0.0f);
 		if (!agent || !targetVertex) return 0.0f;

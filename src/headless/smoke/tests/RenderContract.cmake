@@ -72,6 +72,7 @@ set(names
     doorOpenLeftFullyOpenSolidPass
     doorOpenLeftFullyOpenWireframePass
     extensibles/warningPreservesPosition
+    escalators/brokenWarningPreservesPosition
     bulkhead/checkBrokenWarningPreservesPosition
     doorOpenRight/checkBrokenWarningPreservesPosition
     doorOpenRightSolidPassClosed

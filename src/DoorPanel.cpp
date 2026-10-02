@@ -14,6 +14,7 @@
 #include "core/World.h"
 #include "core/Door.h"
 #include "core/ExtensibleObject.h"
+#include "core/Staircase.h"
 #include "core/DoorSectorObject.h"
 #include "core/Exceptions.h"
 #include "core/Log.h"
@@ -49,6 +50,25 @@ namespace
 		}
 		return "Open Up";
 	}
+}
+
+void renderEscalatorConditionPanel(shared_ptr<core::World> const& world,
+	shared_ptr<core::Staircase> const& staircase)
+{
+	if (!staircase->isEscalator()) return;
+	ImGui::TextUnformatted(staircase->isBroken() ? "Broken: stationary Staircase" : "Escalator operating");
+	bool initiallyBroken = staircase->isInitiallyBroken();
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	if (ImGui::Checkbox("Initially Broken", &initiallyBroken))
+	{
+		auto undo = captureDocumentSnapshot(world);
+		if (world->setEscalatorInitiallyBroken(staircase->getSectorIndex(), initiallyBroken))
+			commitDocumentEdit(std::move(undo));
+	}
+	ImGui::EndDisabled();
+	bool broken = staircase->isBroken();
+	if (ImGui::Checkbox("Live Broken", &broken)) world->setEscalatorBroken(staircase->getSectorIndex(), broken);
+	ImGui::TextDisabled("Live changes do not change the initial condition. Reset restores it.");
 }
 
 void renderExtensibleConditionPanel(shared_ptr<core::World> const& world,

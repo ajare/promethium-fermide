@@ -14,6 +14,7 @@ namespace core
 	class World;
 	class Door;
 	class ExtensibleObject;
+	class Staircase;
 	class SectorObject;
 }
 
@@ -24,6 +25,9 @@ void renderDoorConditionPanel(std::shared_ptr<core::World> const& world,
 // Extensible Ladder/Force Bridge selection uses the same authored/live split.
 void renderExtensibleConditionPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<core::ExtensibleObject> const& device, core::TraversalResourceId resource);
+
+void renderEscalatorConditionPanel(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<core::Staircase> const& staircase);
 
 void renderDoorPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> object);

@@ -78,8 +78,19 @@ namespace core
 			auto const& staircase = result.type == EdgeType::Staircase
 				? static_cast<StaircaseEdge const&>(edge).mStaircase
 				: static_cast<StaircaseMountEdge const&>(edge).mStaircase;
-			result.escalator = staircase->isEscalator();
+			bool local = result.observed || target->getSector().get() == context.observationSector;
+			if (result.type == EdgeType::Staircase)
+			{
+				local = local || visibleEntry(EdgeType::StaircaseMount);
+				for (auto const& adjacent : target->getEdges())
+					if (adjacent->getType() == EdgeType::StaircaseMount
+						&& adjacent->getOtherVertex(target)->getSector().get() == context.observationSector) local = true;
+			}
+			result.escalator = staircase->routeIsMoving(context.agent, local);
 			result.mobilityKind = result.escalator ? TraversalKind::Escalator : TraversalKind::Staircase;
+			if (result.type == EdgeType::StaircaseMount && context.agent && context.agent->getSector()
+				&& context.agent->getSector()->getIndex() == staircase->getSectorIndex()
+				&& target->getSector().get() != context.agent->getSector()) result.mobilityKind.reset();
 			result.speed = staircase->getSpeed();
 			if (result.type == EdgeType::Staircase && result.escalator)
 			{

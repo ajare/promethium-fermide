@@ -333,6 +333,9 @@ namespace core
 
 		World* mWorld{ nullptr };
 		std::map<TraversalResourceId, DeviceCondition> mRememberedDeviceConditions;
+		// Escalators have no constrained traversal resource; their stable Transit
+		// index identifies condition knowledge within this simulation topology.
+		std::map<uint32_t, DeviceCondition> mRememberedEscalatorConditions;
 
 		SectorPosition mPosition;
 
@@ -718,6 +721,7 @@ namespace core
 		Shape getBounds() const;
 
 		float getWalkSpeed() const;
+		std::optional<DeviceCondition> rememberedEscalatorCondition(uint32_t sectorIndex) const;
 		EffectiveAgentEscalatorWalkingChance getEffectiveEscalatorWalkingChance() const;
 		std::optional<bool> getActiveEscalatorWalking() const
 		{ return mTraversalTask ? mTraversalTask->escalatorWalking : std::nullopt; }

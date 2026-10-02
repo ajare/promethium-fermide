@@ -6861,12 +6861,14 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 				riseSide = sideIndex == 0 ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
 			ImGui::InputFloat("Speed", &speed, 0.1f, 1.0f, "%.2f");
 			ImGui::TextDisabled("0 = stairs, + = up, - = down");
+			auto stairs = static_pointer_cast<const core::StaircaseTransit>(gSelectedSector)->getStaircase();
+			renderEscalatorConditionPanel(world, stairs);
 			auto apply = [&](bool remove)
 			{
 				auto plan = remove ? world->planRemoveStaircase(gSelectedSector->getIndex())
 					: world->planResizeStaircase(gSelectedSector->getIndex(),
 						(uint32_t)max(0, x), (uint32_t)max(0, y),
-						{ (uint32_t)max(0, width), riseSide, speed });
+						{ (uint32_t)max(0, width), riseSide, speed, speed != 0.0f && stairs->isInitiallyBroken() });
 				if (!plan.valid) { core::addLogMessage("Staircase editor", 0, core::LogLevel::Error, plan.diagnostic); return; }
 				try
 				{

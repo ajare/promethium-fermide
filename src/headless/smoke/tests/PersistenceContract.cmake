@@ -66,6 +66,7 @@ set(names yaml-primitives binary-contract yaml-file transactional-bytes
     ordinaryDoorBrokenLifecycle
     bulkheadDoorBrokenLifecycle
     extensibleBrokenLifecycle
+    escalatorBrokenLifecycle
     doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted
     doorHeightPersistsAndIsLimitedToRooms
     doorOpenLeftPersistsThroughEveryEditorPath

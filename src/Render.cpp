@@ -1243,6 +1243,7 @@ void renderStaircase(shared_ptr<const core::Staircase> staircase, WorldDrawList*
 		}
 		drawSteps(segments, IM_COL32(32, 32, 32, 255), 10.0f);
 		drawSteps(segments, IM_COL32(220, 220, 220, 255), 6.0f);
+		renderBrokenWarning(*staircase, drawList);
 		return;
 	}
 
@@ -1759,6 +1760,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	case core::SectorType::Staircase:
 		if (isDrawnSolid(style))
 			renderStaircase(static_pointer_cast<const core::StaircaseTransit>(sector)->getStaircase(), drawList);
+		else if (style == LayerRenderStyle::Wireframe)
+			renderBrokenWarning(*static_pointer_cast<const core::StaircaseTransit>(sector)->getStaircase(), drawList);
 		break;
 
 	// Background and Facade carry no geometry of their own: their surface is

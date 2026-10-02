@@ -402,7 +402,8 @@ namespace core
 		}
 		return agent.mTraversalTask && agent.mTraversalTask->destinationVertex
 			&& (agent.mTraversalTask->destinationVertex->getSector().get() != agent.getSector()
-				|| agent.mTraversalTask->edge->getTraversalResourceId())
+				|| agent.mTraversalTask->edge->getTraversalResourceId()
+				|| agent.mTraversalTask->edge->getType() == EdgeType::Staircase)
 			&& (agent.mState == Agent::State::TraversingEdge
 				|| agent.mState == Agent::State::AwaitingTraversalCommit);
 	}

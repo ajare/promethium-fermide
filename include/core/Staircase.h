@@ -14,6 +14,10 @@ namespace core
 		int mRiseSide;
 		float mSpeed;
 		float mAnimationPhase{ 0.0f };
+		bool mInitiallyBroken{ false };
+		bool mBroken{ false };
+		uint32_t mSectorIndex{ ~0u };
+		friend class World;
 
 	public:
 		Staircase(uint32_t cellX, uint32_t cellY, uint32_t cellsWide, int riseSide,
@@ -25,6 +29,12 @@ namespace core
 		// Zero is an ordinary staircase; positive moves up and negative moves down.
 		[[nodiscard]] float getSpeed() const { return mSpeed; }
 		[[nodiscard]] bool isEscalator() const { return mSpeed != 0.0f; }
+		bool isBroken() const { return mBroken; }
+		bool isInitiallyBroken() const { return mInitiallyBroken; }
+		bool isMoving() const { return isEscalator() && !mBroken; }
+		uint32_t getSectorIndex() const { return mSectorIndex; }
+		// No live remote condition is consulted by route decisions.
+		bool routeIsMoving(class Agent const* agent, bool locallyObserved) const;
 		[[nodiscard]] uint32_t getStepCount() const { return mCellsWide * 8; }
 
 		// Local coordinates, from the lower corridor endpoint to the upper one.

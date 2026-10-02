@@ -2826,6 +2826,7 @@ namespace core
 		auto sectorIndex = (uint32_t)mSectors.size();
 		mSectors.push_back(make_shared<StaircaseTransit>(sectorIndex, layerIndex, x, y, cellsWide,
 			riseSide, speed, stops));
+		static_pointer_cast<StaircaseTransit>(mSectors.back())->getStaircase()->mSectorIndex = sectorIndex;
 		return sectorIndex;
 	}
 
@@ -4181,8 +4182,40 @@ namespace core
 		return addStaircase(layerIndex, y, x, CreateStaircaseOptions{ cellsWide, riseSide, speed });
 	}
 
+	bool World::setEscalatorInitiallyBroken(uint32_t sectorIndex, bool broken)
+	{
+		if (!mSimulationPaused || sectorIndex >= mSectors.size()) return false;
+		auto transit = dynamic_pointer_cast<StaircaseTransit>(mSectors[sectorIndex]);
+		if (!transit || !transit->getStaircase()->isEscalator()) return false;
+		auto found = find_if(mConstructionRecords.begin(), mConstructionRecords.end(), [&](auto const& record)
+		{
+			return record.type == ConstructionType::Staircase && record.layer == transit->getLayerIndex()
+				&& record.a == transit->getCellY() && record.b == transit->getCellX();
+		});
+		if (found == mConstructionRecords.end()) return false;
+		if (found->initiallyBroken == broken) return true;
+		found->initiallyBroken = transit->getStaircase()->mInitiallyBroken = broken;
+		setEscalatorBroken(sectorIndex, broken);
+		modify();
+		return true;
+	}
+
+	bool World::setEscalatorBroken(uint32_t sectorIndex, bool broken)
+	{
+		if (sectorIndex >= mSectors.size()) return false;
+		auto transit = dynamic_pointer_cast<StaircaseTransit>(mSectors[sectorIndex]);
+		if (!transit || !transit->getStaircase()->isEscalator()) return false;
+		invalidateSimulationSnapshot();
+		transit->getStaircase()->mBroken = broken;
+		// Existing admitted movement keeps its position and target. Only fresh
+		// local observations can change route intent or remote Agent knowledge.
+		return true;
+	}
+
 	uint32_t World::addStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, CreateStaircaseOptions const& options)
 	{
+		if (options.initiallyBroken && options.speed == 0.0f)
+			throw WorldException(this, "Stationary Staircases cannot be Broken");
 		invalidateSimulationSnapshot();
 		beginStructuralEdit("addStaircase");
 		string diagnostic;
@@ -4191,6 +4224,8 @@ namespace core
 		if (!canAddStaircase(layerIndex, y, x, options.cellsWide, options.riseSide, &diagnostic))
 			throw WorldException(this, format("World::addStaircase({}, {}, {}, {}) - {}", layerIndex, y, x, options.cellsWide, diagnostic));
 		auto sectorIndex = createStaircase(layerIndex, x, y, options.cellsWide, options.riseSide, options.speed);
+		auto staircase = static_pointer_cast<StaircaseTransit>(mSectors[sectorIndex])->getStaircase();
+		staircase->mInitiallyBroken = staircase->mBroken = options.initiallyBroken;
 		auto transitLayer = getLayer(layerIndex);
 		for (uint32_t iy = y; iy <= y + 1; ++iy)
 			for (uint32_t ix = x; ix < x + options.cellsWide; ++ix)
@@ -4199,6 +4234,7 @@ namespace core
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = options.cellsWide; record.i = options.riseSide;
 		record.x = options.speed;
+		record.initiallyBroken = options.initiallyBroken;
 		recordConstruction(std::move(record));
 		return sectorIndex;
 	}

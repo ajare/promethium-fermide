@@ -175,6 +175,7 @@ namespace core
 			int riseSide{ CORE_SIDE_RIGHT };
 			// Zero is stationary; positive moves up and negative moves down.
 			float speed{ 0.0f };
+			bool initiallyBroken{ false };
 		};
 
 		struct CreateLiftOptions
@@ -1627,6 +1628,8 @@ namespace core
 		bool canAddStaircase(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, int riseSide,
 			std::string* diagnostic = nullptr) const;
 		bool getStaircaseOptions(uint32_t sectorIndex, CreateStaircaseOptions& options) const;
+		bool setEscalatorBroken(uint32_t sectorIndex, bool broken);
+		bool setEscalatorInitiallyBroken(uint32_t sectorIndex, bool broken);
 
 		CreateLiftResult addLift(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLiftOptions const& options);
 

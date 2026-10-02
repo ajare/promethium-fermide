@@ -13,6 +13,11 @@
 #include "core/Agent.h"
 #include "core/Path.h"
 #include "core/Edge.h"
+#include "core/StaircaseTransit.h"
+#include "core/StaircaseEdge.h"
+#include "core/StaircaseMountEdge.h"
+#include "core/RouteCost.h"
+#include "core/Graph.h"
 
 
 namespace core
@@ -114,6 +119,20 @@ namespace core
 				: condition.broken);
 			agent.mRememberedDeviceConditions[id] = condition;
 		}
+		for (auto const& candidate : mWorld.mSectors)
+		{
+			auto transit = dynamic_pointer_cast<StaircaseTransit>(candidate);
+			if (!transit || !transit->getStaircase()->isEscalator()) continue;
+			bool visible = transit.get() == sector;
+			for (uint32_t stop = 0; stop < transit->getNumStops(); ++stop)
+				visible = visible || transit->getStop(stop).sector.get() == sector;
+			if (!visible) continue;
+			auto const& stairs = *transit->getStaircase();
+			DeviceCondition condition{ stairs.isBroken(), stairs.getSpeed() };
+			auto old = agent.rememberedEscalatorCondition(transit->getIndex());
+			changed = changed || (old ? old->broken != condition.broken : condition.broken);
+			agent.mRememberedEscalatorConditions[transit->getIndex()] = condition;
+		}
 		if (!changed) return;
 		auto agentId = mWorld.getAgentId(&agent);
 		auto goal = mWorld.mMovementGoals.find(agentId);
@@ -136,6 +155,14 @@ namespace core
 				&& hasCommittedMovement(agent)) continue;
 			auto known = agent.rememberedDeviceCondition(edge->getTraversalResourceId());
 			invalid = invalid || (known && !known->admitsPassage());
+			if (edge->getType() == EdgeType::Staircase || edge->getType() == EdgeType::StaircaseMount)
+			{
+				auto const& policy = mWorld.getGraph()->getRouteChoicePolicy();
+				RouteDecisionContext context{ &agent, policy.baselineProfile,
+					policy, sector, agent.getWalkSpeed(), &mWorld,
+					agent.getClimbSpeed(), true, 0, 0, agent.getEffectiveMobilityProfile().value };
+				invalid = invalid || !edge->getDirectedTraversalFacts(path->nodes[node].targetVertex, context).feasible;
+			}
 		}
 		if (agent.getState() == Agent::State::RoutePlanning)
 		{

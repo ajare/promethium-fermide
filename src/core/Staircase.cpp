@@ -2,6 +2,7 @@
 #include <format>
 
 #include "core/Defines.h"
+#include "core/Agent.h"
 #include "core/Staircase.h"
 
 namespace core
@@ -30,9 +31,17 @@ namespace core
 			: array<Vector2, 2>{ Vector2{ right, 0.0f }, Vector2{ left, 1.0f } };
 	}
 
+	bool Staircase::routeIsMoving(Agent const* agent, bool locallyObserved) const
+	{
+		if (!isEscalator()) return false;
+		if (locallyObserved) return !mBroken;
+		auto known = agent ? agent->rememberedEscalatorCondition(mSectorIndex) : nullopt;
+		return !(known ? known->broken : mInitiallyBroken);
+	}
+
 	void Staircase::update(float frameTime)
 	{
-		if (!isEscalator()) return;
+		if (!isMoving()) return;
 		auto const path = getPath();
 		float const length = path[0].distanceTo(path[1]);
 		mAnimationPhase = fmod(mAnimationPhase + mSpeed * frameTime / length, 1.0f);
@@ -42,7 +51,8 @@ namespace core
 	string Staircase::getDescription() const
 	{
 		if (isEscalator())
-			return format("Escalator - {} cells wide, moving {} at {}", mCellsWide,
+			return format("Escalator{} - {} cells wide, configured {} at {}",
+				mBroken ? " (Broken: stationary Staircase)" : "", mCellsWide,
 				mSpeed > 0.0f ? "up" : "down", abs(mSpeed));
 		return format("Staircase - {} cells wide, rising {}", mCellsWide,
 			mRiseSide == CORE_SIDE_RIGHT ? "right" : "left");

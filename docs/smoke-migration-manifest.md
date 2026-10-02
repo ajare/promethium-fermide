@@ -196,6 +196,10 @@ because they do not own smoke-check execution.
 | `smoke/world/WindowLayers.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/WindowMultiBackground.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/editor/BrokenEscalators.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/persistence/BrokenEscalators.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/BrokenEscalators.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/simulation/BrokenEscalators.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/editor/BrokenExtensibles.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/persistence/BrokenExtensibles.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/render/BrokenExtensibles.cpp` | module-owned | `pf-smoke-render` |

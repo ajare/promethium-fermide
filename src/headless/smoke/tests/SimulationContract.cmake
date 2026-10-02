@@ -67,6 +67,10 @@ set(core_names
     brokenExtensibles/individualLocalMemory
     brokenExtensibles/planningAndPersistence
     brokenExtensibles/safeRetractionAndPermission
+    escalators/stationaryBrokenRules
+    escalators/localConditionMemory
+    escalators/brokenPlanningAndSafety
+    escalators/brokenRouteSelectionAndPersistence
     brokenDoors/frozenPositionAndCommands
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory

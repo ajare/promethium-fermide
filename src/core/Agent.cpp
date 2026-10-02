@@ -683,6 +683,7 @@ namespace core
 		mResetPath.reset();
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
+		mRememberedEscalatorConditions.clear();
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
 		mRoutePlanningRemainingTicks = 0;
@@ -696,6 +697,13 @@ namespace core
 	string const& Agent::getName() const
 	{
 		return mName;
+	}
+
+	optional<DeviceCondition> Agent::rememberedEscalatorCondition(uint32_t sectorIndex) const
+	{
+		auto found = mRememberedEscalatorConditions.find(sectorIndex);
+		return found == mRememberedEscalatorConditions.end() ? nullopt
+			: optional<DeviceCondition>{ found->second };
 	}
 
 	EffectiveAgentEscalatorWalkingChance Agent::getEffectiveEscalatorWalkingChance() const
