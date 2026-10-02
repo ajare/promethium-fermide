@@ -40,6 +40,10 @@ set(core_names
     locationAlternativeCorridor
     locationBoundaryRoom
     locationBoundaryCorridor
+    locationLifecycleRoom
+    locationLifecycleCorridor
+    locationLifecycleMalformedRoom
+    locationLifecycleMalformedCorridor
     locationLossesRoom
     locationGainsRoom
     locationRequirementChangesRoom

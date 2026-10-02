@@ -27,11 +27,14 @@ namespace
 	void selection(bool corridor)
 	{
 		permission_smoke::EditorState state;
-		auto world = std::make_shared<core::World>("Selection", 12, 1);
+		auto world = std::make_shared<core::World>("Selection", 12, 2);
 		auto sector = corridor ? world->addCorridor(0, 0, 0, 4, 1)
 			: world->addRoom("Selected Room", 0, 0, 0, 4, 1);
 		auto facade = world->addFacade("Facade", 0, 0, 4, 4, 1);
 		auto background = world->addBackground(0, 0, 8, 4, 1);
+		world->addRoom("Landing", 0, 1, 0, 4, 1);
+		world->addLadder(1, 0, 1, { 2, false, false, 1 });
+		auto transit = world->getNumSectors() - 1;
 		world->finishBuild(); world->pauseSimulation();
 		auto red = world->addAccessPermission("Red##literal");
 		auto blue = world->addAccessPermission("Blue");
@@ -78,6 +81,7 @@ namespace
 			"Selection omitted requirement summary or all-of semantics");
 		frame(facade); require(text.find("Location permissions") == std::string::npos, "Facade exposed requirement");
 		frame(background); require(text.find("Location permissions") == std::string::npos, "Background exposed requirement");
+		frame(transit); require(text.find("Location permissions") == std::string::npos, "Transit exposed requirement");
 		frame(999); require(text.find("Location permissions") == std::string::npos, "Missing Location exposed requirement");
 		require(gWorldDocumentHistory.undoCount() == 0 && !world->isModified(), "Inspection/cancellation created an edit");
 		// Locate actual widgets by hovered ID, then drive press/release events.

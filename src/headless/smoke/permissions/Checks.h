@@ -5,6 +5,8 @@
 
 namespace permission_smoke
 {
+	void registerLocationLifecycle(std::vector<smoke::Check>& checks);
+	void registerLocationLifecycleEditor(std::vector<smoke::Check>& checks);
 	void registerLocations(std::vector<smoke::Check>& checks);
 	void registerLocationChanges(std::vector<smoke::Check>& checks);
 	void registerLocationOccupancy(std::vector<smoke::Check>& checks);

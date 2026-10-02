@@ -1,4 +1,4 @@
-# Location permission requirements (#273, #274, #276)
+# Location permission requirements (#273–#276)
 
 Rooms and Corridors support a World-owned, all-of Location permission requirement.
 New Locations, an empty requirement, and older Worlds without an authored requirement
@@ -100,9 +100,34 @@ is validated both when arming a fall and at landing using current set membership
 foreign-World grants are stripped before the placement check. Drag relocation uses
 the existing Agent's current runtime grants and validates before detaching it.
 
-Location-edit and permission-maintenance lifecycle hardening remains #275 scope.
+## Authored lifecycle (#275)
+
+Location moves, supported resizes, and construction-record reconstruction retain
+requirements with their Room or Corridor. Deleting an owner drops only its requirement;
+new or recreated Locations are unrestricted. Permission rename retains stable references.
+Permission deletion clears every live and persisted Location reference before releasing
+the slot, so a replacement permission cannot inherit stale protection. Authoritative
+usage counts scan current Location owners; the Permissions table and deletion confirmation
+include those counts. Confirmed deletion is one undoable edit; cancellation is a no-op.
+
+Schema 32 (introduced with #273) remains the authoritative requirement format. Older
+supported schemas without requirements default to unrestricted; a requirement field in
+a pre-32 document is rejected rather than silently discarding protection. Unsupported
+owners are rejected even when the field is empty. Duplicate, dangling, out-of-range,
+and malformed requirements fail before changing the destination World.
 
 ## Verification
+
+`LocationLifecycle.cpp` adds `locationLifecycleRoom`, `locationLifecycleCorridor`,
+and `locationLifecycleMalformed*` to `pf-smoke-permissions`, covering public move,
+grow/shrink, deletion/reindexing, Reset reconstruction, rename/deletion, slot reuse,
+complete YAML/binary round trips, older defaults and transactional malformed input.
+`LocationLifecycleEditor.cpp` adds `permissions/locationLifecycle*` to `pf-smoke-editor`:
+CPU-only input drives the real usage table and deletion modal (Cancel and Delete), with
+complete document-history restoration for moves, resizes, rename, permission deletion,
+slot reuse and Location deletion. Logging uses an in-memory callback, never the native
+clipboard. Selection checks also verify Transit ineligibility.
+
 
 Headless coverage is owned by `pf-smoke-permissions` (`locationAuthoring*`,
 `locationRouting*`, `locationAlternative*`, `locationBoundary*`) and `pf-smoke-editor`

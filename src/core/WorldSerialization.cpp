@@ -821,8 +821,10 @@ namespace core
 		};
 
 		record.type = constructionTypeFromName(serializer.readString("type"));
-		if (version >= 32 && serializer.hasField("locationPermissionRequirement"))
+		if (serializer.hasField("locationPermissionRequirement"))
 		{
+			if (version < 32)
+				throw SerializationException("Location permission requirements require World schema version 32 or later");
 			if (record.type != ConstructionType::Room && record.type != ConstructionType::Corridor)
 				throw SerializationException("Location permission requirements are supported only by Rooms and Corridors");
 			serializer.beginArray("locationPermissionRequirement");

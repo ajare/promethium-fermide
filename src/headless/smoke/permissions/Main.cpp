@@ -4,6 +4,7 @@ int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks;
 	permission_smoke::registerLocations(checks);
+	permission_smoke::registerLocationLifecycle(checks);
 	permission_smoke::registerLocationChanges(checks);
 	permission_smoke::registerLocationOccupancy(checks);
 	permission_smoke::registerAccess(checks);

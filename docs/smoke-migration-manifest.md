@@ -86,6 +86,8 @@ because they do not own smoke-check execution.
 | `smoke/permissions/LandingAdherence.cpp` | module-owned | `pf-smoke-permissions` |
 | `smoke/permissions/LandingAdherenceEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/permissions/Locations.cpp` | static Location authorization (#273) | `pf-smoke-permissions` |
+| `smoke/permissions/LocationLifecycle.cpp` | Location requirement lifecycle (#275) | `pf-smoke-permissions` |
+| `smoke/permissions/LocationLifecycleEditor.cpp` | Location history and permission deletion UI (#275) | `pf-smoke-editor` |
 | `smoke/permissions/LocationChanges.cpp` | changing Location authorization (#274) | `pf-smoke-permissions` |
 | `smoke/permissions/LocationOccupancy.cpp` | unauthorized occupancy/placement (#276) | `pf-smoke-permissions` |
 | `smoke/permissions/LocationPlacementEditor.cpp` | authored placement/drop/relocation (#276) | `pf-smoke-editor` |

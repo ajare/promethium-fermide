@@ -10156,10 +10156,13 @@ namespace core
 			if (resource->mDoor && resource->mDoor->mPermissionRequirement.test(bit))
 				++usage.manualDoorRequirements;
 		}
+		// Count current owners, rather than replay metadata or a cached counter.
+		for (auto const& sector : mSectors)
+			if (sector->getType() == SectorType::Location
+				&& static_cast<Location const&>(*sector).getPermissionRequirement().test(bit))
+				++usage.locationRequirements;
 		for (auto const& record : mConstructionRecords)
 		{
-			if (find(record.locationPermissionRequirement.begin(), record.locationPermissionRequirement.end(), id.value)
-				!= record.locationPermissionRequirement.end()) ++usage.locationRequirements;
 			for (auto const& requirement : record.destinationPermissionRequirements)
 				if (find(requirement.begin(), requirement.end(), id.value) != requirement.end())
 					++usage.liftDestinationRequirements;
