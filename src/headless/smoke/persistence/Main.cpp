@@ -41,6 +41,7 @@ namespace
 		{ "layerDeletionPreservesAuthoredRecordDependencies", persistence::layerDeletionPreservesAuthoredRecordDependencies },
 		{ "layerDeletionKeepsAtLeastTwoLayers", persistence::layerDeletionKeepsAtLeastTwoLayers },
 		{ "locationEditsArePlannedAndAppliedAtomically", persistence::locationEditsArePlannedAndAppliedAtomically },
+		{ "structuralReplayPreservesIndividualAgentPropertiesAndRuntimeState", persistence::structuralReplayPreservesIndividualAgentPropertiesAndRuntimeState },
 		{ "editedShuttleRoundTripsWithoutSchemaChanges", persistence::editedShuttleRoundTripsWithoutSchemaChanges },
 		{ "physicalControlsPreferDistinctWallPositions", persistence::physicalControlsPreferDistinctWallPositions },
 		{ "platformLiftStopDurationRoundTrips", persistence::platformLiftStopDurationRoundTrips },

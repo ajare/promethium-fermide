@@ -2588,7 +2588,21 @@ namespace core
 				agent->mRoutePlanningSequence, agent->mRoutePlanningTotalTicks,
 				agent->mRoutePlanningRemainingTicks,
 				agent->mIndividualMinimumRoutePlanningTime, agent->mIndividualMaximumRoutePlanningTime,
-				agent->mMinimumRoutePlanningTimeSample, agent->mMaximumRoutePlanningTimeSample });
+				agent->mMinimumRoutePlanningTimeSample, agent->mMaximumRoutePlanningTimeSample,
+				agent->mIndividualColour, agent->mIndividualEscalatorWalkingChance,
+				agent->mIndividualWalkSpeedModifier, agent->mIndividualHeightModifier,
+				agent->mIndividualStairSpeedModifier, agent->mIndividualInteractionAversion,
+				agent->mIndividualEffortAversion, agent->mIndividualWaitingAversion,
+				agent->mIndividualCrowdAversion, agent->mIndividualRiskAversion,
+				agent->mIndividualRouteFamiliarity, agent->mIndividualRoutePersistence,
+				agent->mIndividualPermissionAdherence, agent->mIndividualMobilityProfile,
+				agent->mInteractionAversionSample, agent->mEffortAversionSample,
+				agent->mWaitingAversionSample, agent->mCrowdAversionSample,
+				agent->mRiskAversionSample, agent->mRouteFamiliaritySample,
+				agent->mRoutePersistenceSample,
+				agent->mRuntimeDirectGrantAdditions, agent->mRuntimeDirectGrantRemovals,
+				agent->mRuntimePermissionSetAdditions, agent->mRuntimePermissionSetRemovals,
+				agent->mEscalatorTraversalSequence, agent->mRouteJourneySequence });
 		}
 		return carried;
 	}
@@ -2642,6 +2656,46 @@ namespace core
 			raw->mIndividualMaximumRoutePlanningTime = saved.individualMaximumRoutePlanningTime;
 			raw->mMinimumRoutePlanningTimeSample = saved.minimumRoutePlanningTimeSample;
 			raw->mMaximumRoutePlanningTimeSample = saved.maximumRoutePlanningTimeSample;
+			// Every authored individual property comes back with the Agent: a
+			// structural replay is neither Reset nor re-authoring (#328).
+			raw->setIndividualColour(saved.individualColour);
+			raw->setIndividualEscalatorWalkingChance(saved.individualEscalatorWalkingChance);
+			raw->setIndividualWalkSpeedModifier(saved.individualWalkSpeedModifier);
+			raw->setIndividualHeightModifier(saved.individualHeightModifier);
+			raw->setIndividualStairSpeedModifier(saved.individualStairSpeedModifier);
+			raw->setIndividualInteractionAversion(saved.individualInteractionAversion);
+			raw->setIndividualEffortAversion(saved.individualEffortAversion);
+			raw->setIndividualWaitingAversion(saved.individualWaitingAversion);
+			raw->setIndividualCrowdAversion(saved.individualCrowdAversion);
+			raw->setIndividualRiskAversion(saved.individualRiskAversion);
+			raw->setIndividualRouteFamiliarity(saved.individualRouteFamiliarity);
+			raw->setIndividualRoutePersistence(saved.individualRoutePersistence);
+			raw->setIndividualPermissionAdherence(saved.individualPermissionAdherence);
+			raw->setIndividualMobilityProfile(saved.individualMobilityProfile);
+			if (saved.interactionAversionSample)
+				raw->setInteractionAversionSample(*saved.interactionAversionSample);
+			if (saved.effortAversionSample)
+				raw->setEffortAversionSample(*saved.effortAversionSample);
+			if (saved.waitingAversionSample)
+				raw->setWaitingAversionSample(*saved.waitingAversionSample);
+			if (saved.crowdAversionSample)
+				raw->setCrowdAversionSample(*saved.crowdAversionSample);
+			if (saved.riskAversionSample)
+				raw->setRiskAversionSample(*saved.riskAversionSample);
+			if (saved.routeFamiliaritySample)
+				raw->setRouteFamiliaritySample(*saved.routeFamiliaritySample);
+			if (saved.routePersistenceSample)
+				raw->setRoutePersistenceSample(*saved.routePersistenceSample);
+			// Runtime authorization overlays survive pause/resume and disappear
+			// only on Reset simulation; an edit replay is a pause, not a Reset (#328).
+			raw->mRuntimeDirectGrantAdditions = saved.runtimeDirectGrantAdditions;
+			raw->mRuntimeDirectGrantRemovals = saved.runtimeDirectGrantRemovals;
+			raw->mRuntimePermissionSetAdditions = saved.runtimePermissionSetAdditions;
+			raw->mRuntimePermissionSetRemovals = saved.runtimePermissionSetRemovals;
+			// Escalator and route-journey draws stay on the uninterrupted run's
+			// stream, exactly like the route-planning stream above (#328).
+			raw->mEscalatorTraversalSequence = saved.escalatorTraversalSequence;
+			raw->mRouteJourneySequence = saved.routeJourneySequence;
 			if (saved.behaviourAssignment)
 				raw->mBehaviourAssignment = *saved.behaviourAssignment;
 			_getSector(sector->getIndex())->mAgents.insert(raw);

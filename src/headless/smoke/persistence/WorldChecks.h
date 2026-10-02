@@ -22,6 +22,7 @@ namespace persistence
 	void layerDeletionPreservesAuthoredRecordDependencies(smoke::Context const&);
 	void layerDeletionKeepsAtLeastTwoLayers(smoke::Context const&);
 	void locationEditsArePlannedAndAppliedAtomically(smoke::Context const&);
+	void structuralReplayPreservesIndividualAgentPropertiesAndRuntimeState(smoke::Context const&);
 	void editedShuttleRoundTripsWithoutSchemaChanges(smoke::Context const&);
 	void physicalControlsPreferDistinctWallPositions(smoke::Context const&);
 	void platformLiftStopDurationRoundTrips(smoke::Context const&);

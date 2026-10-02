@@ -1013,6 +1013,42 @@ namespace core
 			std::optional<float> individualMaximumRoutePlanningTime;
 			std::optional<AgentPropertySample> minimumRoutePlanningTimeSample;
 			std::optional<AgentPropertySample> maximumRoutePlanningTimeSample;
+			// Every remaining authored individual property and persisted sample
+			// travels too: a structural replay is neither Reset nor re-authoring, so
+			// losing one would silently revert the Agent to a neutral default (#328).
+			std::optional<AgentColour> individualColour;
+			std::optional<float> individualEscalatorWalkingChance;
+			std::optional<float> individualWalkSpeedModifier;
+			std::optional<float> individualHeightModifier;
+			std::optional<float> individualStairSpeedModifier;
+			std::optional<float> individualInteractionAversion;
+			std::optional<float> individualEffortAversion;
+			std::optional<float> individualWaitingAversion;
+			std::optional<float> individualCrowdAversion;
+			std::optional<float> individualRiskAversion;
+			std::optional<float> individualRouteFamiliarity;
+			std::optional<float> individualRoutePersistence;
+			std::optional<bool> individualPermissionAdherence;
+			std::optional<MobilityProfile> individualMobilityProfile;
+			std::optional<AgentPropertySample> interactionAversionSample;
+			std::optional<AgentPropertySample> effortAversionSample;
+			std::optional<AgentPropertySample> waitingAversionSample;
+			std::optional<AgentPropertySample> crowdAversionSample;
+			std::optional<AgentPropertySample> riskAversionSample;
+			std::optional<AgentPropertySample> routeFamiliaritySample;
+			std::optional<AgentPropertySample> routePersistenceSample;
+			// Runtime authorization overlays survive pause/resume and disappear only
+			// on Reset; a structural edit is a pause, not a Reset, so they travel
+			// with the Agent as well (#328).
+			std::bitset<256> runtimeDirectGrantAdditions;
+			std::bitset<256> runtimeDirectGrantRemovals;
+			std::set<PermissionSetId> runtimePermissionSetAdditions;
+			std::set<PermissionSetId> runtimePermissionSetRemovals;
+			// Escalator and route-journey deterministic draws stay on the
+			// uninterrupted run's stream, exactly like the route-planning stream
+			// above: structural replay is not Reset (#328).
+			uint64_t escalatorTraversalSequence{ 0 };
+			uint64_t routeJourneySequence{ 0 };
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "core/AgentTagRegistry.h"
 #include "core/Exceptions.h"
 
 #include "core/Graph.h"
@@ -125,6 +126,205 @@ namespace persistence
 		auto fullWidthCorridor = boundaryWorld.applyLocationEdit(boundaryResize);
 		require(boundaryWorld.getSector(fullWidthCorridor)->getCellX1() == 15,
 			"Location resize did not include the final world column");
+	}
+
+	void structuralReplayPreservesIndividualAgentPropertiesAndRuntimeState(smoke::Context const&)
+	{
+		// Per-Agent samples are authored by assigning a tag that carries sampled
+		// properties; every property type rides on one tag so the carried Agent
+		// must keep all thirteen of its persisted draws.
+		auto registry = core::AgentTagRegistry::create();
+		auto const sampledTag = registry->addAgentTag("sampled");
+		std::string diagnostic;
+		require(registry->addAgentTagWalkSpeedModifier(sampledTag, &diagnostic)
+			&& registry->setAgentTagWalkSpeedModifier(sampledTag, { 1.1f, 1.2f }, &diagnostic)
+			&& registry->addAgentTagHeightModifier(sampledTag, &diagnostic)
+			&& registry->setAgentTagHeightModifier(sampledTag, { 0.9f, 1.0f }, &diagnostic)
+			&& registry->addAgentTagStairSpeedModifier(sampledTag, &diagnostic)
+			&& registry->setAgentTagStairSpeedModifier(sampledTag, { 0.8f, 0.9f }, &diagnostic)
+			&& registry->addAgentTagLadderSpeedModifier(sampledTag, &diagnostic)
+			&& registry->setAgentTagLadderSpeedModifier(sampledTag, { 0.9f, 1.0f }, &diagnostic)
+			&& registry->addAgentTagInteractionAversion(sampledTag, &diagnostic)
+			&& registry->setAgentTagInteractionAversion(sampledTag, { 0.1f, 0.2f }, &diagnostic)
+			&& registry->addAgentTagEffortAversion(sampledTag, &diagnostic)
+			&& registry->setAgentTagEffortAversion(sampledTag, { 0.2f, 0.3f }, &diagnostic)
+			&& registry->addAgentTagWaitingAversion(sampledTag, &diagnostic)
+			&& registry->setAgentTagWaitingAversion(sampledTag, { 0.5f, 0.6f }, &diagnostic)
+			&& registry->addAgentTagCrowdAversion(sampledTag, &diagnostic)
+			&& registry->setAgentTagCrowdAversion(sampledTag, { 0.4f, 0.5f }, &diagnostic)
+			&& registry->addAgentTagRiskAversion(sampledTag, &diagnostic)
+			&& registry->setAgentTagRiskAversion(sampledTag, { 0.5f, 0.6f }, &diagnostic)
+			&& registry->addAgentTagRouteFamiliarity(sampledTag, &diagnostic)
+			&& registry->setAgentTagRouteFamiliarity(sampledTag, { 0.6f, 0.7f }, &diagnostic)
+			&& registry->addAgentTagRoutePersistence(sampledTag, &diagnostic)
+			&& registry->setAgentTagRoutePersistence(sampledTag, { 0.7f, 0.8f }, &diagnostic)
+			&& registry->addAgentTagMinimumRoutePlanningTime(sampledTag, &diagnostic)
+			&& registry->setAgentTagMinimumRoutePlanningTime(sampledTag, { 2.0f, 2.5f }, &diagnostic)
+			&& registry->addAgentTagMaximumRoutePlanningTime(sampledTag, &diagnostic)
+			&& registry->setAgentTagMaximumRoutePlanningTime(sampledTag, { 4.0f, 4.5f }, &diagnostic),
+			"The fixture could not author its sampled properties: " + diagnostic);
+
+		core::World world("Replayed", 16, 3);
+		world.attachAgentTagRegistry("replay.tags.yaml", registry);
+		auto const home = world.addRoom("Home", 0, 0, 0, 6, 2);
+		auto const other = world.addRoom("Other", 0, 0, 8, 6, 2);
+		uint32_t destinationIdentifier{ 0x5245504cu };
+		uint32_t secondDestinationIdentifier{ 0x5245504du };
+		world.addSectorMarker(home, 0, 4.5f, &destinationIdentifier);
+		world.addSectorMarker(home, 0, 2.5f, &secondDestinationIdentifier);
+		world.finishBuild();
+		auto const agentId = world.createAgent("Individual", home, 0, 1.0f);
+		world.pauseSimulation();
+		require(world.assignAgentTag(agentId, sampledTag, &diagnostic),
+			"The fixture could not assign its Agent tag: " + diagnostic);
+		auto* agent = world.lookupAgent(agentId).entity;
+
+		core::MobilityProfile mobility;
+		mobility.set(core::TraversalKind::Ladder, core::MobilityUse::CannotUse);
+		require(world.setAgentIndividualColour(agentId, core::AgentColour{ 12, 34, 56 }, &diagnostic)
+			&& world.setAgentIndividualEscalatorWalkingChance(agentId, 0.25f, &diagnostic)
+			&& world.setAgentIndividualWalkSpeedModifier(agentId, 1.15f, &diagnostic)
+			&& world.setAgentIndividualHeightModifier(agentId, 0.95f, &diagnostic)
+			&& world.setAgentIndividualStairSpeedModifier(agentId, 0.8f, &diagnostic)
+			&& world.setAgentIndividualLadderSpeedModifier(agentId, 0.9f, &diagnostic)
+			&& world.setAgentIndividualInteractionAversion(agentId, 0.15f, &diagnostic)
+			&& world.setAgentIndividualEffortAversion(agentId, 0.25f, &diagnostic)
+			&& world.setAgentIndividualWaitingAversion(agentId, 0.55f, &diagnostic)
+			&& world.setAgentIndividualCrowdAversion(agentId, 0.45f, &diagnostic)
+			&& world.setAgentIndividualRiskAversion(agentId, 0.55f, &diagnostic)
+			&& world.setAgentIndividualRouteFamiliarity(agentId, 0.65f, &diagnostic)
+			&& world.setAgentIndividualRoutePersistence(agentId, 0.75f, &diagnostic)
+			&& world.setAgentIndividualMinimumRoutePlanningTime(agentId, 2.5f, &diagnostic)
+			&& world.setAgentIndividualMaximumRoutePlanningTime(agentId, 4.5f, &diagnostic)
+			&& world.setAgentIndividualPermissionAdherence(agentId, false, &diagnostic)
+			&& world.setAgentIndividualMobilityProfile(agentId, mobility, &diagnostic),
+			"Individual Agent properties were not authored: " + diagnostic);
+
+		// Runtime grants made before the edit are pause/resume state and survive
+		// the replay; authored grants stay empty so the current grants afterwards
+		// prove the runtime overlay itself travelled (#328).
+		auto const permission = world.addAccessPermission("Night access");
+		require(world.setAgentRuntimeAccessPermissionGrant(agentId, permission, true),
+			"Runtime Access grant was not applied");
+		auto const permissionSet = world.addPermissionSet("Night set");
+		require(world.setAgentRuntimePermissionSetAssignment(agentId, permissionSet, true),
+			"Runtime Permission set assignment was not applied");
+
+		// Two assignments to different destinations always advance the journey
+		// stream (Vertex ids are process-global, so the first alone might not),
+		// giving the replay a non-zero stream position it must preserve.
+		auto destination = world.getGraph()->getVertexByIdentifier(destinationIdentifier);
+		auto path = world.getGraph()->calculatePath(agent, destination);
+		require(path && !path->nodes.empty(), "Agent path could not be created");
+		agent->setPath(std::move(path), false);
+		auto secondDestination = world.getGraph()->getVertexByIdentifier(secondDestinationIdentifier);
+		auto secondPath = world.getGraph()->calculatePath(agent, secondDestination);
+		require(secondPath && !secondPath->nodes.empty(), "Second Agent path could not be created");
+		agent->setPath(std::move(secondPath), false);
+		auto const journeyBefore = agent->getRouteJourneyIdentity(nullptr);
+		require(journeyBefore != 0, "Route journey stream did not advance across two path assignments");
+
+		// Snapshot everything the replay must preserve; the persisted samples are
+		// deterministic draws, so they are compared against themselves across it.
+		auto const colourBefore = agent->getIndividualColour();
+		auto const escalatorChanceBefore = agent->getIndividualEscalatorWalkingChance();
+		auto const walkSpeedBefore = agent->getIndividualWalkSpeedModifier();
+		auto const heightBefore = agent->getIndividualHeightModifier();
+		auto const stairSpeedBefore = agent->getIndividualStairSpeedModifier();
+		auto const ladderSpeedBefore = agent->getIndividualLadderSpeedModifier();
+		auto const interactionBefore = agent->getIndividualInteractionAversion();
+		auto const effortBefore = agent->getIndividualEffortAversion();
+		auto const waitingBefore = agent->getIndividualWaitingAversion();
+		auto const crowdBefore = agent->getIndividualCrowdAversion();
+		auto const riskBefore = agent->getIndividualRiskAversion();
+		auto const familiarityBefore = agent->getIndividualRouteFamiliarity();
+		auto const persistenceBefore = agent->getIndividualRoutePersistence();
+		auto const minimumPlanningBefore = agent->getIndividualMinimumRoutePlanningTime();
+		auto const maximumPlanningBefore = agent->getIndividualMaximumRoutePlanningTime();
+		auto const adherenceBefore = agent->getIndividualPermissionAdherence();
+		auto const mobilityBefore = agent->getIndividualMobilityProfile();
+		auto const walkSampleBefore = agent->getWalkSpeedModifierSample();
+		auto const heightSampleBefore = agent->getHeightModifierSample();
+		auto const stairSampleBefore = agent->getStairSpeedModifierSample();
+		auto const ladderSampleBefore = agent->getLadderSpeedModifierSample();
+		auto const interactionSampleBefore = agent->getInteractionAversionSample();
+		auto const effortSampleBefore = agent->getEffortAversionSample();
+		auto const waitingSampleBefore = agent->getWaitingAversionSample();
+		auto const crowdSampleBefore = agent->getCrowdAversionSample();
+		auto const riskSampleBefore = agent->getRiskAversionSample();
+		auto const familiaritySampleBefore = agent->getRouteFamiliaritySample();
+		auto const persistenceSampleBefore = agent->getRoutePersistenceSample();
+		auto const minimumPlanningSampleBefore = agent->getMinimumRoutePlanningTimeSample();
+		auto const maximumPlanningSampleBefore = agent->getMaximumRoutePlanningTimeSample();
+
+		// An edit to a Room the Agent does not even stand in replays the World
+		// and must change nothing about the carried Agent.
+		auto resize = world.planResizeLocation(other, 8, 0, 5, 2);
+		if (!resize.valid || resize.requiresConfirmation())
+			throw std::runtime_error("Unrelated Location shrink was not planned cleanly: "
+				+ resize.diagnostic);
+		auto const shrunk = world.applyLocationEdit(resize);
+		require(world.getSector(shrunk)->getCellsWide() == 5,
+			"Unrelated Location width was not changed");
+
+		auto const carried = world.lookupAgent(agentId);
+		require(carried && std::abs(carried.entity->getGlobalPosition().x - 1.0f) < 0.0001f,
+			"Agent was dropped or moved by an unrelated Location edit");
+		auto const* kept = carried.entity;
+
+		require(kept->getIndividualColour() == colourBefore
+				&& kept->getIndividualEscalatorWalkingChance() == escalatorChanceBefore
+				&& kept->getIndividualWalkSpeedModifier() == walkSpeedBefore
+				&& kept->getIndividualHeightModifier() == heightBefore
+				&& kept->getIndividualStairSpeedModifier() == stairSpeedBefore
+				&& kept->getIndividualLadderSpeedModifier() == ladderSpeedBefore
+				&& kept->getIndividualInteractionAversion() == interactionBefore
+				&& kept->getIndividualEffortAversion() == effortBefore
+				&& kept->getIndividualWaitingAversion() == waitingBefore
+				&& kept->getIndividualCrowdAversion() == crowdBefore
+				&& kept->getIndividualRiskAversion() == riskBefore
+				&& kept->getIndividualRouteFamiliarity() == familiarityBefore
+			&& kept->getIndividualRoutePersistence() == persistenceBefore
+				&& kept->getIndividualMinimumRoutePlanningTime() == minimumPlanningBefore
+				&& kept->getIndividualMaximumRoutePlanningTime() == maximumPlanningBefore
+				&& kept->getIndividualPermissionAdherence() == adherenceBefore
+				&& kept->getIndividualMobilityProfile() == mobilityBefore,
+			"Individual Agent properties were lost across the structural replay");
+		require(kept->getIndividualPermissionAdherence()
+				&& !*kept->getIndividualPermissionAdherence(),
+			"Authored Permission adherence false reverted to the default across the replay");
+		require(kept->getIndividualMobilityProfile()
+				&& kept->getIndividualMobilityProfile()->get(core::TraversalKind::Ladder)
+					== core::MobilityUse::CannotUse,
+			"Individual Mobility profile was lost across the structural replay");
+		require(kept->getWalkSpeedModifierSample() == walkSampleBefore
+				&& kept->getHeightModifierSample() == heightSampleBefore
+				&& kept->getStairSpeedModifierSample() == stairSampleBefore
+				&& kept->getLadderSpeedModifierSample() == ladderSampleBefore
+				&& kept->getInteractionAversionSample() == interactionSampleBefore
+				&& kept->getEffortAversionSample() == effortSampleBefore
+				&& kept->getWaitingAversionSample() == waitingSampleBefore
+				&& kept->getCrowdAversionSample() == crowdSampleBefore
+				&& kept->getRiskAversionSample() == riskSampleBefore
+				&& kept->getRouteFamiliaritySample() == familiaritySampleBefore
+				&& kept->getRoutePersistenceSample() == persistenceSampleBefore
+				&& kept->getMinimumRoutePlanningTimeSample() == minimumPlanningSampleBefore
+				&& kept->getMaximumRoutePlanningTimeSample() == maximumPlanningSampleBefore,
+			"Persisted tag samples were lost across the structural replay");
+		require(kept->getWalkSpeedModifierSample() && kept->getInteractionAversionSample()
+				&& kept->getEffortAversionSample() && kept->getWaitingAversionSample()
+				&& kept->getCrowdAversionSample() && kept->getRiskAversionSample()
+				&& kept->getRouteFamiliaritySample() && kept->getRoutePersistenceSample(),
+			"The fixture left Agents without their persisted samples");
+
+		auto currentGrants = world.getAgentCurrentDirectAccessGrants(agentId);
+		require(find(currentGrants.begin(), currentGrants.end(), permission) != currentGrants.end(),
+			"Runtime Access grant overlay was lost across the structural replay");
+		auto currentSets = world.getAgentCurrentPermissionSetAssignments(agentId);
+		require(find(currentSets.begin(), currentSets.end(), permissionSet) != currentSets.end(),
+			"Runtime Permission set overlay was lost across the structural replay");
+		require(kept->getRouteJourneyIdentity(nullptr) == journeyBefore,
+			"Route journey stream position diverged from the uninterrupted run");
 	}
 
 	void editedShuttleRoundTripsWithoutSchemaChanges(smoke::Context const&)

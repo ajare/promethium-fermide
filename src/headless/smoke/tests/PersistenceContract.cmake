@@ -49,6 +49,7 @@ set(names yaml-primitives binary-contract yaml-file transactional-bytes
     layerDeletionPreservesAuthoredRecordDependencies
     layerDeletionKeepsAtLeastTwoLayers
     locationEditsArePlannedAndAppliedAtomically
+    structuralReplayPreservesIndividualAgentPropertiesAndRuntimeState
     editedShuttleRoundTripsWithoutSchemaChanges
     physicalControlsPreferDistinctWallPositions
     platformLiftStopDurationRoundTrips
