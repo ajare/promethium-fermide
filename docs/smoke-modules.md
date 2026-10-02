@@ -19,6 +19,8 @@ Use direct modules or CTest for coverage without deprecation warnings. The
 complete active Linux matrix is documented in
 [Linux modular smoke validation](linux-smoke-validation.md). For MSVC direct-target
 Debug/Release builds, see [Windows build validation](windows-smoke-build-validation.md).
+Direct CLI, fixture and temporary-root validation is documented in
+[Windows runtime validation](windows-smoke-runtime-validation.md).
 
 The ticket-by-ticket sections below preserve migration history. Statements that a
 legacy selection “returns 2” describe its transitional state before #305; those
@@ -54,7 +56,9 @@ uses only CPU-side ImGui contexts, without platform or GPU backends.
 - Only `OptionalCapabilityUnavailable` for an unavailable optional external
   capability may skip. Missing required fixtures/libraries/build products fail.
 - Context creation failure reports `FAIL <module> setup: ...`, a failed summary,
-  and exit 1. Listing and misuse do not create a context or print a summary.
+  and exit 1. Cleanup failure reports `FAIL <module> cleanup: ...`, increments
+failed count and returns 1. Listing and misuse do not create a context or print a
+summary. Execution records are flushed before process teardown.
 
 ## Narrow support and ownership
 
@@ -68,8 +72,11 @@ with a repository-relative file path; the root is provided by CMake, never the
 working directory. They write only beneath `Context::temporaryRoot()`. Each
 invocation atomically creates its own randomly named directory beneath the OS
 temporary directory, even when concurrent processes run the same check. Cleanup
-is best-effort on scope exit, on both pass and failure; crashes/forced termination
-can leave directories behind. Failed artifacts are not intentionally retained.
+is checked before the summary, on both pass and failure. A cleanup error adds
+`FAIL <module> cleanup: <path and OS diagnostic>`, increments the failed summary,
+and returns 1; no retry loop hides open handles. Scope-exit fallback cleanup is
+non-throwing but reports errors to stderr. Crashes/forced termination can leave
+directories behind. Failed artifacts are not intentionally retained.
 Simulation Observation builds its Worlds in memory. Pause-position checks resolve
 both checked-in stair fixtures through `Context::fixture()`; all other Simulation
 checks build their Worlds in memory. The harness probe exercises fixture lookup and

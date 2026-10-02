@@ -1,6 +1,5 @@
 // Migrated from AgentColourSmokeChecks.cpp (#286); core dependency tier.
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -25,26 +24,6 @@ namespace
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		explicit TemporaryDirectory(std::string const& purpose)
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-tag-colour-" + purpose + "-"
-					+ std::to_string(std::chrono::steady_clock::now()
-						.time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	bool isPastelPaletteColour(core::AgentColour const& colour)
 	{
@@ -246,7 +225,7 @@ namespace
 			"A closed World with duplicate inherited Colour sources was attached");
 	}
 
-	void displayColourIsRandomAtCreationBackfilledAndPersisted()
+	void displayColourIsRandomAtCreationBackfilledAndPersisted(smoke::Context const& context)
 	{
 		auto registry = core::AgentTagRegistry::create();
 		auto const created = registry->addAgentTag("created");
@@ -255,8 +234,9 @@ namespace
 		require(!registry->getAgentTagColour(created),
 			"A new tag's display Colour leaked into the inherited Agent Colour property");
 
-		TemporaryDirectory temporary("backfill");
-		auto const path = temporary.path / "legacy.tags.yaml";
+		auto const directory = context.temporaryRoot() / "colour-backfill";
+		std::filesystem::create_directory(directory);
+		auto const path = directory / "legacy.tags.yaml";
 		auto document = YAML::Load(serializeRegistry(*registry));
 		document["tags"][0].remove("displayColour");
 		{
@@ -284,6 +264,6 @@ namespace
 void agent_smoke::registerColour(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "colourIsUniqueRevisionedAndPersisted", [](smoke::Context const&) { colourIsUniqueRevisionedAndPersisted(); } });
-	checks.push_back({ "displayColourIsRandomAtCreationBackfilledAndPersisted", [](smoke::Context const&) { displayColourIsRandomAtCreationBackfilledAndPersisted(); } });
+	checks.push_back({ "displayColourIsRandomAtCreationBackfilledAndPersisted", [](smoke::Context const& context) { displayColourIsRandomAtCreationBackfilledAndPersisted(context); } });
 	checks.push_back({ "closedWorldConflictsAreRejectedWhenTheRegistryIsResolved", [](smoke::Context const&) { closedWorldConflictsAreRejectedWhenTheRegistryIsResolved(); } });
 }

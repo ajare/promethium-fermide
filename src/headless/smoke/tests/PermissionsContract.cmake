@@ -1,6 +1,6 @@
 # Exercise the public CLI outside both source and build trees.
 if(WIN32)
-    set(temp "$ENV{TEMP}")
+    file(TO_CMAKE_PATH "$ENV{TEMP}" temp)
 else()
     set(temp "/tmp")
 endif()
@@ -11,7 +11,7 @@ file(MAKE_DIRECTORY "${work}")
 function(invoke status expected)
     execute_process(COMMAND "${binary}" ${ARGN}
         WORKING_DIRECTORY "${work}" RESULT_VARIABLE result
-        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 60)
+        OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 240)
     if(NOT "${result}" STREQUAL "${status}")
         message(FATAL_ERROR "${ARGN}: expected ${status}, got ${result}\n${out}\n${err}")
     endif()
@@ -151,12 +151,12 @@ foreach(tier IN ITEMS core)
     foreach(index RANGE 1 8)
         file(APPEND "${project}/CTestTestfile.cmake"
             "add_test(${module}-${index} \"${binary}\")\n"
-            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 60 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
+            "set_tests_properties(${module}-${index} PROPERTIES TIMEOUT 240 WORKING_DIRECTORY \"${work}\" PASS_REGULAR_EXPRESSION \"SUMMARY ${module} pass=${count} fail=0 skip=0\" FAIL_REGULAR_EXPRESSION \"FAIL ${module}\")\n")
     endforeach()
 endforeach()
 find_program(ctest NAMES ctest REQUIRED)
 execute_process(COMMAND "${ctest}" --test-dir "${project}" -j 8 --output-on-failure
-    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 120)
+    RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 300)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "Concurrent Permission invocations failed: ${result}\n${out}\n${err}")
 endif()

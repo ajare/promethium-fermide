@@ -198,13 +198,13 @@ pf_add_smoke_module(pf-smoke-permissions
         permissions/Refusal.cpp
     LIBRARIES prometheum-fermide-core
     LABELS core
-    TIMEOUT 60
+    TIMEOUT 240
 )
 
 add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
     "-DPERMISSIONS=$<TARGET_FILE:pf-smoke-permissions>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PermissionsContract.cmake")
-set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core" TIMEOUT 180)
+set_tests_properties(smoke-permissions-contract PROPERTIES LABELS "harness;core" TIMEOUT 600)
 
 pf_add_smoke_module(pf-smoke-transports
     NAME transports

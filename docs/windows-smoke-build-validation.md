@@ -1,7 +1,9 @@
 # Modular smoke builds on Windows
 
-Ticket #307 covers **build** validation. Runtime, CTest concurrency, subprocess,
-fixture and temporary-directory validation remain separate work under #279.
+Ticket #307 covers **build** validation. Direct module CLI, fixture,
+temporary-directory and concurrency validation is covered by
+[#308 runtime validation](windows-smoke-runtime-validation.md). Broader subprocess,
+compatibility and downstream validation remains separate work under #279.
 
 ## Reproduce the matrix
 

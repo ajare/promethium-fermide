@@ -1,6 +1,6 @@
 # Exercise the public Metrics CLI outside both source and build trees.
 if(WIN32)
-    set(temp "$ENV{TEMP}")
+    file(TO_CMAKE_PATH "$ENV{TEMP}" temp)
 else()
     set(temp "/tmp")
 endif()

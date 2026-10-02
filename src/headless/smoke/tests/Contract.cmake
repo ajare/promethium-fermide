@@ -1,7 +1,7 @@
 # Exercise the public CLI, not harness implementation details. Work outside both
 # the source and build trees; every child invocation gets its own harness root.
 if(WIN32)
-    set(temp "$ENV{TEMP}")
+    file(TO_CMAKE_PATH "$ENV{TEMP}" temp)
 else()
     set(temp "/tmp")
 endif()
@@ -54,6 +54,16 @@ foreach(check IN ITEMS paths failed-paths)
         message(FATAL_ERROR "Temporary root not reported or not cleaned: ${output}")
     endif()
 endforeach()
+
+if(WIN32)
+    invoke("${PROBE}" 1 "PASS harness leaked-handle\nFAIL harness cleanup: Cannot clean smoke temporary root: .*\nSUMMARY harness pass=1 fail=1 skip=0\n$" --cleanup-failure)
+    string(REGEX MATCH "ROOT ([^\n]+)" root "${output}")
+    if(NOT root OR NOT EXISTS "${CMAKE_MATCH_1}/open-handle.txt")
+        message(FATAL_ERROR "Leaked handle was not diagnosed: ${output}")
+    endif()
+    # The child has exited and released its deliberately leaked handle.
+    file(REMOVE_RECURSE "${CMAKE_MATCH_1}")
+endif()
 
 # The full Simulation inventory belongs to SimulationContract.cmake.
 invoke("${SIMULATION}" 0 "^PASS simulation observation\nSUMMARY simulation pass=1 fail=0 skip=0\n$" --check observation)

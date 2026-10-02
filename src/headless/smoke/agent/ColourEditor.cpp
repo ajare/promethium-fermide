@@ -5,7 +5,6 @@
 #include "TagsPanel.h"
 #include "UISettings.h"
 
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -37,26 +36,6 @@ namespace
 	{
 		if (!condition) throw std::runtime_error(message);
 	}
-
-	struct TemporaryDirectory
-	{
-		std::filesystem::path path;
-
-		explicit TemporaryDirectory(std::string const& purpose)
-		{
-			path = std::filesystem::temp_directory_path()
-				/ ("promethium-fermide-tag-colour-" + purpose + "-"
-					+ std::to_string(std::chrono::steady_clock::now()
-						.time_since_epoch().count()));
-			std::filesystem::create_directories(path);
-		}
-
-		~TemporaryDirectory()
-		{
-			std::error_code ignored;
-			std::filesystem::remove_all(path, ignored);
-		}
-	};
 
 	std::string serializeRegistry(core::AgentTagRegistry const& registry)
 	{

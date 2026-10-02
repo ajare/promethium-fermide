@@ -1,6 +1,6 @@
 # Public Render CLI from an empty directory outside the source/build trees.
 if(WIN32)
-    set(temp "$ENV{TEMP}")
+    file(TO_CMAKE_PATH "$ENV{TEMP}" temp)
 else()
     set(temp "/tmp")
 endif()

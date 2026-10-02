@@ -4,6 +4,10 @@
 #include <iostream>
 #include <string>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace
 {
 	void pass(smoke::Context const& context)
@@ -55,6 +59,18 @@ namespace
 		std::cout << "ROOT " << context.temporaryRoot().string() << '\n';
 	}
 
+#if defined(_WIN32)
+	void leakHandle(smoke::Context const& context)
+	{
+		auto const path = context.temporaryRoot() / "open-handle.txt";
+		// Intentionally retained until process exit: Windows must refuse cleanup.
+		auto const handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
+			CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+		smoke::require(handle != INVALID_HANDLE_VALUE, "Cannot create cleanup-failure fixture");
+		std::cout << "ROOT " << context.temporaryRoot().string() << '\n';
+	}
+#endif
+
 	void failedPaths(smoke::Context const& context)
 	{
 		paths(context);
@@ -75,5 +91,12 @@ namespace
 
 int main(int argc, char** argv)
 {
+#if defined(_WIN32)
+	if (argc == 2 && std::string_view(argv[1]) == "--cleanup-failure")
+	{
+		constexpr smoke::Check cleanupChecks[] = { { "leaked-handle", leakHandle } };
+		return smoke::main("harness", cleanupChecks, 1, argv);
+	}
+#endif
 	return smoke::main("harness", checks, argc, argv);
 }

@@ -56,8 +56,21 @@ namespace smoke
 
 	Context::~Context()
 	{
-		std::error_code ignored;
-		std::filesystem::remove_all(temporaryRoot_, ignored);
+		if (cleanupAttempted_) return;
+		try { cleanup(); }
+		catch (std::exception const& error)
+		{
+			std::cerr << "ERROR harness: " << error.what() << '\n';
+		}
+	}
+
+	void Context::cleanup()
+	{
+		cleanupAttempted_ = true;
+		std::error_code error;
+		std::filesystem::remove_all(temporaryRoot_, error);
+		require(!error, "Cannot clean smoke temporary root: " + temporaryRoot_.string()
+			+ ": " + error.message());
 	}
 
 	std::filesystem::path Context::fixture(std::filesystem::path const& relative) const
@@ -136,6 +149,12 @@ namespace smoke
 					out << "FAIL " << module << ' ' << check.name << ": unknown exception\n";
 				}
 			}
+			try { context.cleanup(); }
+			catch (std::exception const& error)
+			{
+				++failed;
+				out << "FAIL " << module << " cleanup: " << singleLine(error.what()) << '\n';
+			}
 		}
 		catch (std::exception const& error)
 		{
@@ -143,6 +162,7 @@ namespace smoke
 			out << "FAIL " << module << " setup: " << singleLine(error.what()) << '\n';
 		}
 		out << "SUMMARY " << module << " pass=" << passed << " fail=" << failed << " skip=" << skipped << '\n';
+		out.flush();
 		return failed ? 1 : 0;
 	}
 

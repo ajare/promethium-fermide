@@ -29,6 +29,8 @@ namespace smoke
 	public:
 		Context();
 		~Context();
+		// Explicit completion reports cleanup failures before the invocation summary.
+		void cleanup();
 		Context(Context const&) = delete;
 		Context& operator=(Context const&) = delete;
 
@@ -38,6 +40,7 @@ namespace smoke
 
 	private:
 		std::filesystem::path temporaryRoot_;
+		bool cleanupAttempted_ = false;
 	};
 
 	struct Check
