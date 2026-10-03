@@ -10,8 +10,96 @@
 
 namespace persistence
 {
+	void demonstrationWorkflow(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto root = context.temporaryRoot() / "demonstration";
+		std::filesystem::create_directory(root);
+		auto cataloguePath = root / "furniture.furniture.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.yaml"), cataloguePath);
+		auto source = root / "demo.world.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.world.yaml"), source);
+		auto world = core::loadWorldDocument(source);
+		require(world->furniture().size() == 6, "Required complete Furniture demonstration is missing instances");
+		auto desk = world->furniture()[1];
+		auto sofa = world->furniture()[2];
+		auto walkerId = world->getSimulationSnapshot().agents.front().id;
+		auto walker = world->lookupAgent(walkerId).entity;
+		for (int tick = 0; tick < 600 && walker->getLocalDepth() != 2; ++tick) world->advanceTicks(1);
+		require(walker->getLocalDepth() == 2, "Demo walker never traversed the composed front route");
+		world->pauseSimulation();
+		auto physical = walker->getGlobalPosition();
+		std::string diagnostic;
+		require(world->editFurniture(desk.id, 2.25f, 0, "Edited desk", &diagnostic), diagnostic);
+		require(world->renameMarker(sofa.destinations[1].marker, "Chosen sofa destination", &diagnostic), diagnostic);
+		world->applyLocationEdit(world->planResizeLocation(0, 0, 0, 12, 3));
+		walker = world->lookupAgent(walkerId).entity;
+		require(walker->getGlobalPosition() == physical && walker->getLocalDepth() == 2,
+			"Combined overlapping edit/replay teleported walker or lost depth");
+		// Target by public Marker identity after the live edit, never a stale vertex.
+		auto vertexFor = [](core::World const& current, core::MarkerId id) {
+			for (auto const& vertex : current.getGraph()->getVertices())
+				if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject()); marker && marker->getId() == id)
+					return vertex;
+			return std::shared_ptr<const core::Vertex>{};
+		};
+		auto target = sofa.destinations[1].marker;
+		auto path = world->getGraph()->calculatePath(walker, vertexFor(*world, target));
+		require(path != nullptr, "Edited overlapping catalogue routes lost the chosen destination");
+		walker->setPath(path, true);
+		for (auto extension : {"world.yaml", "world"}) world->saveTo((root / (std::string("authored.") + extension)).string());
+		// Relocate the entire project, then revise the external definition. Both
+		// formats must resolve current geometry and preserve independent names/IDs.
+		auto portable = context.temporaryRoot() / "portable-demonstration";
+		std::filesystem::rename(root, portable);
+		auto catalogue = YAML::LoadFile((portable / "furniture.furniture.yaml").string());
+		auto definitions = catalogue["furnitureCatalogue"]["definitions"];
+		definitions[1]["label"] = "Revised sofa";
+		definitions[1]["usablePoints"][1]["label"] = "Revised right seat";
+		definitions[1]["usablePoints"][1]["x"] = 1.625f;
+		for (auto vertex : definitions[1]["vertices"])
+			if (vertex["key"].as<std::string>() == "rightSeat") vertex["x"] = 1.625f;
+		definitions[0]["usablePoints"].push_back(YAML::Load("{key: extra, label: Extra, x: 0.75}"));
+		{ std::ofstream file(portable / "furniture.furniture.yaml"); file << catalogue; }
+		for (auto extension : {"world.yaml", "world"})
+		{
+			auto loaded = core::loadWorldDocument(portable / (std::string("authored.") + extension));
+			require(loaded->furniture()[1].id == desk.id && loaded->furniture()[1].x == 2.25f
+				&& loaded->furniture()[2].destinations[1].marker == target
+				&& loaded->lookupMarker(target)->getName() == "Chosen sofa destination"
+				&& loaded->furniture()[0].destinations.size() == 2,
+				"Portable reopen/reconciliation lost authored identities or current definitions");
+			for (bool reset : {false, true})
+			{
+				if (reset) loaded->resetSimulation();
+				auto visitor = loaded->lookupAgent(walkerId).entity;
+				require(visitor->getPath() && visitor->getLocalDepth() == 2 && visitor->getGlobalPosition() == physical,
+					"Reconciliation/Reset lost authored position, depth or intent");
+				loaded->advanceTicks(1800);
+				require(visitor->getGlobalPosition().x == 4.75f && visitor->getLocalDepth() == 2,
+					"Restored intent failed to reach the revised overlapping destination");
+			}
+			// The same restored walker then crosses a real Sector boundary. Depth
+			// is reset independently of the showroom's overlapping route numbers.
+			auto visitor = loaded->lookupAgent(walkerId).entity;
+			auto facadeTarget = loaded->furniture()[5].destinations[0].marker;
+			auto crossing = loaded->getGraph()->calculatePath(visitor, vertexFor(*loaded, facadeTarget));
+			require(crossing != nullptr, "Demonstration Facade destination is not reachable");
+			visitor->setPath(crossing, true); loaded->advanceTicks(2400);
+			require(visitor->getSector()->getIndex() == 2 && visitor->getLocalDepth() == 0,
+				"Composed/reconciled journey failed Sector depth reset");
+			loaded->pauseSimulation();
+			auto placed = loaded->placeFurniture(1, "chair", 2.125f, 0, "New corridor chair");
+			require(placed > desk.id, "Reopened place workflow reused an instance identity");
+			loaded->saveTo((portable / (std::string("completed.") + extension)).string());
+			require(core::loadWorldDocument(portable / (std::string("completed.") + extension))->furniture().back().id == placed,
+				"Complete place/edit/target/save/reopen workflow lost placed instance");
+		}
+	}
+
 	void furniture(smoke::Context const& context)
 	{
+		demonstrationWorkflow(context);
 		using smoke::require;
 		auto demo = core::loadWorldDocument(context.fixture("resources/test-worlds/chair.world.yaml"));
 		require(demo->furniture().size() == 3 && demo->getMarkerIds().size() == 5, "Required chair demonstration World is incomplete");

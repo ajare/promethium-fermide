@@ -7,6 +7,14 @@ continuity, composed floor replacement spans and safe catalogue reconciliation
 on World load. There is no sitting state or seat
 reservation.
 
+## Complete bundled demonstration (#359)
+
+See [Furniture demonstration and catalogue authoring](furniture-demonstration.md)
+for the required `furniture.world.yaml` / `furniture.furniture.yaml` teaching
+project, placeholder chair/sofa/desk artwork, front/back observers and portable
+place/edit/target/save/reopen workflow. Earlier slice fixtures below remain
+compatibility and focused regression examples.
+
 ## Authoring
 
 Save a World, put a manually authored `.furniture.yaml` catalogue beside it, then
@@ -309,6 +317,9 @@ existing preflight/no-mutation contracts.
 - `pf-smoke-routing --check furniture/sectorDepthContinuity`
 - `pf-smoke-simulation --check furniture/retainedDepth`
 - `pf-smoke-simulation --check furniture/topologyEdits`
+- `pf-smoke-world --check furniture/demo`
+- `pf-smoke-render --check furniture/demoCommands`
+- `pf-smoke-editor --check furniture/demoActions`
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
 - `pf-smoke-world --check furniture/deskRoutes`

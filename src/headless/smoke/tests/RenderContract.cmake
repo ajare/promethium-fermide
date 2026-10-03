@@ -34,6 +34,7 @@ set(names
     carriageImages
     airlocks/chamberAndControls
     furniture/chairCommands
+    furniture/demoCommands
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

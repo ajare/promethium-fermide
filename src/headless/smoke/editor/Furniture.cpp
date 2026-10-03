@@ -6,9 +6,58 @@
 #include "core/AgentBehaviourRegistry.h"
 #include "core/Agent.h"
 #include "core/MarkerSectorObject.h"
+#include "core/AgentTagRegistryDocument.h"
 
 namespace
 {
+	void demoActions(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto root = context.temporaryRoot();
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.yaml"), root / "furniture.furniture.yaml");
+		auto path = root / "demo.world.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.world.yaml"), path);
+		auto world = core::loadWorldDocument(path); world->pauseSimulation();
+		DocumentHistory history; std::string diagnostic;
+		require(placeSelectedFurniture(world, 1, "chair", 2.125f, 0, false, "Authored chair", diagnostic, history), diagnostic);
+		auto chair = world->furniture().back();
+		require(editSelectedFurniture(world, chair.id, 2.375f, 0, false, "Edited chair", diagnostic, history), diagnostic);
+		auto catalogue = world->furnitureCatalogue();
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto restored = world->deserialize(*reader, work); world->pauseSimulation(); return restored;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore) && world->furniture().back().x == 2.125f,
+			"Bundled authoring workflow cannot undo movement");
+		require(history.redo(captureDocumentSnapshot(world, history), restore)
+			&& world->furniture().back().marker == chair.marker && world->furniture().back().x == 2.375f,
+			"Bundled authoring history lost placement/identity");
+		require(world->renameMarker(chair.marker, "Authored destination", &diagnostic), diagnostic);
+		world->addSectorMarker(1, 0, 0.125f, "Corridor entrance");
+		require(world->rebuildTraversalTopology(), world->getTopologyDiagnostic());
+		std::shared_ptr<const core::Vertex> destination;
+		for (auto const& vertex : world->getGraph()->getVertices())
+			if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject()); marker && marker->getId() == chair.marker)
+				destination = vertex;
+		auto visitorId = world->createAgent("Authored visitor", 1, 0, 0.125f);
+		auto visitor = world->lookupAgent(visitorId).entity;
+		auto route = world->getGraph()->calculatePath(visitor, destination);
+		require(route != nullptr, "Editor-placed sample destination cannot be targeted");
+		visitor->setPath(route, true);
+		for (auto extension : {"world.yaml", "world"})
+		{
+			auto output = root / (std::string("edited.") + extension); world->saveTo(output.string());
+			auto reopened = core::loadWorldDocument(output);
+			require(reopened->furniture().back().id == chair.id && reopened->furniture().back().marker == chair.marker
+				&& reopened->lookupMarker(chair.marker)->getName() == "Authored destination",
+				"Editor workflow lost identity/name on reopen");
+			reopened->advanceTicks(1200);
+			require(reopened->lookupAgent(visitorId).entity->getGlobalPosition().x == 14.875f,
+				"Reopened editor-authored journey did not arrive");
+		}
+	}
+
 	void attachmentActions(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -313,6 +362,7 @@ namespace
 }
 void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/demoActions", demoActions });
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });
 	checks.push_back({ "furniture/compositionActions", compositionActions });

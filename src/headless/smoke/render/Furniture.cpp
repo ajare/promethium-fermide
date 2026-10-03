@@ -5,12 +5,84 @@
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/MarkerSectorObject.h"
+#include "core/AgentTagRegistryDocument.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
 extern UISettings gUISettings;
 namespace
 {
+	void demoCommands(smoke::Context const& context)
+	{
+		using smoke::require;
+		ImGui::GetIO().DisplaySize = {1200, 600}; ImGui::GetIO().Fonts->AddFontDefault();
+		ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
+		gUISettings.worldZoom = 1; gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 600;
+		gUISettings.worldViewportX = 0; gUISettings.worldViewportY = 0; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
+		auto manifest = YAML::LoadFile(context.fixture("resources/Resources.yaml").string());
+		ObjectTileset tiles; tiles.width = 320; tiles.height = 640;
+		bool demoDependency = false, catalogueDependency = false;
+		for (auto resource : manifest["Resources"]["Resource"])
+		{
+			auto name = resource["name"].as<std::string>();
+			if (name == "FurnitureDemo") demoDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureCatalogue";
+			if (name == "FurnitureCatalogue") catalogueDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "ObjectAtlas";
+			if (name == "ObjectAtlas")
+				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
+					tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
+		}
+		require(demoDependency && catalogueDependency, "Required bundled Furniture resource dependencies are missing");
+		require(std::filesystem::is_regular_file(context.fixture("resources/textures/objects.png")), "Required placeholder atlas is missing");
+		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture.world.yaml"));
+		for (auto const& [key, definition] : world->furnitureCatalogue()->definitions())
+			for (auto const& tile : definition.tiles)
+			{
+				auto found = tiles.sprites.find(tile.image);
+				require(found != tiles.sprites.end() && found->second.region.width == 64 && found->second.region.height == 160,
+					"Required sample artwork must resolve a full World tile");
+			}
+		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		RenderWorldScope scope(world);
+		for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden})
+		{
+			WorldDrawList::ClipRectangle clip{{120,300},{400,590}};
+			WorldDrawList drawing(clip);
+			renderSector(world->getSector(0), 0, style, false, ImColor(192,192,255), &drawing);
+			size_t deskFirst = drawing.commands().size(), deskLast = 0, frontFirst = drawing.commands().size(), backLast = 0;
+			unsigned deskCount = 0, sofaCount = 0, frontCount = 0, backCount = 0;
+			for (size_t i = 0; i < drawing.commands().size(); ++i)
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
+					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+				{
+					auto uv = triangle->texcoords[0];
+					if (uv.y >= 480.f / 640)
+					{
+						if (uv.x >= 128.f / 320) { ++deskCount; deskFirst = std::min(deskFirst, i); deskLast = i; }
+						else ++sofaCount;
+					}
+					else if (uv.x >= 83.f / 320 && uv.x < 110.f / 320 && uv.y >= 248.f / 640)
+					{
+						auto x = std::min({triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x});
+						// Agent sprite's physical half-width is 0.2 World units.
+						if (std::abs(x - (2.875f - 0.2f) * CORE_CELL_WIDTH_PIXELS) < 0.01f)
+						{
+							if (!deskCount) { ++backCount; backLast = i; }
+							else { ++frontCount; frontFirst = std::min(frontFirst, i); }
+						}
+					}
+					else continue;
+					require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.y == clip.maximum.y,
+						"Bundled overlapping Furniture escaped Layer/aperture clipping");
+				}
+			if (style == LayerRenderStyle::Hidden || style == LayerRenderStyle::Wireframe)
+				require(!deskCount && !sofaCount && !frontCount && !backCount, "Demo exposed hidden Layer textures");
+			else require(deskCount == 4 && sofaCount == 8 && frontCount == 2 && backCount == 2
+				&& backLast < deskFirst && deskLast < frontFirst,
+				"Bundled demo did not render retained Agents behind/in front of the desk");
+		}
+		clearObjectTileset(); ImGui::EndFrame();
+	}
+
 	void chairCommands(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -302,4 +374,5 @@ namespace
 void render_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/chairCommands", isolated<chairCommands> });
+	checks.push_back({ "furniture/demoCommands", isolated<demoCommands> });
 }

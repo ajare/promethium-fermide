@@ -4,6 +4,7 @@
 #include "core/AgentBehaviourRegistry.h"
 #include "core/MarkerSectorObject.h"
 #include "core/YamlSerializer.h"
+#include "core/AgentTagRegistryDocument.h"
 #include <limits>
 #include "core/Exceptions.h"
 #include <fstream>
@@ -16,6 +17,43 @@ namespace
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		work.markSerializedUnmodified = false;
 		world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+	}
+
+	void demonstration(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture.world.yaml"));
+		require(world->furniture().size() == 6 && world->furniture()[3].y == 1
+			&& world->furniture()[2].destinations.size() == 2
+			&& world->furniture()[2].destinations[0].marker != world->furniture()[2].destinations[1].marker,
+			"Required demonstration lost Walkway support or distinct sofa destinations");
+		std::shared_ptr<const core::Vertex> exit;
+		for (auto const& vertex : world->getGraph()->getVertices())
+			if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject()); marker && marker->getName() == "Desk Far side") exit = vertex;
+		require(exit != nullptr, "Required demo Exit Marker is missing");
+		for (auto const& entry : world->getSimulationSnapshot().agents)
+		{
+			auto agent = world->lookupAgent(entry.id).entity;
+			if (agent->getName() == "Showroom walker") continue;
+			auto depth = agent->getLocalDepth();
+			auto path = world->getGraph()->calculatePath(agent, exit);
+			require(path != nullptr, "Stationary demonstration observer cannot depart");
+			bool side = false;
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getLength() > 0 && node.edge->getVertex(0)->getPosition().x >= 2.375f
+					&& node.edge->getVertex(1)->getPosition().x <= 3.875f)
+				{
+					side = true;
+					require(node.edge->getLocalDepth() == depth, "Equal-cost demo departure lost retained depth continuity: " + agent->getName()
+						+ " selected=" + std::to_string(node.edge->getLocalDepth()) + " x=" + std::to_string(node.edge->getVertex(0)->getPosition().x));
+				}
+			require(side, "Demo observer avoided the explicit front/back routes");
+			agent->setPath(path, true);
+		}
+		world->advanceTicks(1800);
+		for (auto const& entry : world->getSimulationSnapshot().agents)
+			require(entry.globalPosition.x == (world->lookupAgent(entry.id).entity->getName() == "Showroom walker" ? 9.5f : 3.875f),
+				"Bundled demo journey did not arrive normally");
 	}
 
 	void chair(smoke::Context const& context)
@@ -689,6 +727,7 @@ namespace
 }
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/demo", demonstration });
 	checks.push_back({ "furniture/chair", chair });
 	checks.push_back({ "furniture/layouts", layouts });
 	checks.push_back({ "furniture/deskRoutes", deskRoutes });

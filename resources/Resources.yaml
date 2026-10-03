@@ -56,12 +56,30 @@ Resources:
               - { name: "agent", x: "83", y: "248", width: "26", height: "72" }
               - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
               - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
+              - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
+              - { name: "sofa-right", x: "64", y: "480", width: "64", height: "160" }
+              - { name: "desk-left", x: "128", y: "480", width: "64", height: "160" }
+              - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
               - { name: "platform-lift", x: "192", y: "310", width: "64", height: "10" }
               - { name: "shuttle-car-left", x: "0", y: "320", width: "64", height: "160" }
               - { name: "shuttle-car-middle", x: "64", y: "320", width: "64", height: "160" }
               - { name: "shuttle-car-right", x: "128", y: "320", width: "64", height: "160" }
               - { name: "shuttle-car-connector", x: "192", y: "320", width: "64", height: "160" }
               - { name: "lift-car", x: "256", y: "320", width: "64", height: "160" }
+    - type: "FurnitureCatalogue"
+      name: "FurnitureCatalogue"
+      location: "test-worlds/furniture.furniture.yaml"
+      DependentResources:
+        DependentResource:
+          id: "Artwork"
+          ref: "ObjectAtlas"
+    - type: "World"
+      name: "FurnitureDemo"
+      location: "test-worlds/furniture.world.yaml"
+      DependentResources:
+        DependentResource:
+          id: "Furniture"
+          ref: "FurnitureCatalogue"
     - type: "FurnitureCatalogue"
       name: "ChairCatalogue"
       location: "test-worlds/chair.furniture.yaml"
