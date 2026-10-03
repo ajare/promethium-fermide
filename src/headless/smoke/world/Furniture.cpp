@@ -284,6 +284,116 @@ namespace
 			&& diagnostic.find("Seat visitor 1") != std::string::npos && snapshot(world) == before,
 			"Deletion did not protect every owned destination atomically");
 	}
+	void attachments(smoke::Context const& context)
+	{
+		using smoke::require;
+		int baselineArrival = 0;
+		for (int variant = 0; variant < 11; ++variant)
+		{
+			auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/attachments.furniture.yaml").string());
+			auto desk = yaml["furnitureCatalogue"]["definitions"][0];
+			auto chair = yaml["furnitureCatalogue"]["definitions"][1];
+			// Isolate the back route: a chair must not acquire it through the front.
+			desk["edges"].remove(5); desk["edges"].remove(3);
+			if (variant == 2) chair["vertices"][0]["external"] = false;
+			if (variant == 4) desk["vertices"][2]["external"] = true;
+			if (variant == 5) chair["vertices"][1]["external"] = true;
+			if (variant == 7) chair["edges"][0]["depthOffset"] = 2;
+			if (variant == 9)
+			{
+				auto other = YAML::Clone(chair); other["key"] = "other";
+				other["edges"][0]["depthOffset"] = -2;
+				yaml["furnitureCatalogue"]["definitions"].push_back(other);
+				auto coincident = YAML::Clone(other); coincident["key"] = "coincident";
+				coincident["edges"][0]["depthOffset"] = -3;
+				yaml["furnitureCatalogue"]["definitions"].push_back(coincident);
+			}
+			if (variant == 10) chair["edges"][0].remove("depthOffset");
+			auto filename = context.temporaryRoot() / ("attachment" + std::to_string(variant) + ".furniture.yaml");
+			{ std::ofstream file(filename); file << yaml; }
+			core::World world("Attached arrangement", 8, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
+			auto chairX = variant == 10 ? 2.25f : (variant == 3 || variant == 4 ? 2.375f : 3.125f);
+			auto chairDepth = variant == 1 ? 3 : 1;
+			uint64_t chairId = 0;
+			if (variant == 6) chairId = world.placeFurniture(room, "chair", chairX, 0, "Chair", chairDepth);
+			world.placeFurniture(room, "desk", 2.125f, 0, "Desk", 2);
+			if (variant != 6 && variant != 8) chairId = world.placeFurniture(room, "chair", chairX, 0, "Chair", chairDepth);
+			if (variant == 9)
+			{
+				world.placeFurniture(room, "other", 2.75f, 0, "Other chair", 4);
+				world.placeFurniture(room, "coincident", 3.125f, 0, "Coincident chair", 5);
+			}
+			uint32_t a = 0, b = 0;
+			world.addSectorMarker(room, 0, 0.5f, "Entrance", &a);
+			world.addSectorMarker(room, 0, 6.5f, "Exit", &b);
+			world.finishBuild();
+			auto graph = world.getGraph(); core::Agent query("Query");
+			auto left = graph->getVertexByIdentifier(a), right = graph->getVertexByIdentifier(b);
+			auto through = graph->calculatePath(&query, left, right);
+			require(through != nullptr, "Attachment severed authored front circulation");
+			float frontLength = 0;
+			unsigned frontSegments = 0;
+			for (auto const& node : through->nodes)
+				if (node.edge && node.edge->getLocalDepth() == 2 && node.edge->getLength() > 0)
+				{ frontLength += node.edge->getLength(); ++frontSegments; }
+			require(frontLength == 1.5f, "Splitting altered the authored route geometry/depth");
+			if (variant == 0 || variant == 5 || variant == 6 || variant == 9)
+				require(frontSegments > 1, "Middle external point did not split the route");
+			if (variant != 8)
+			{
+				auto instance = std::find_if(world.furniture().begin(), world.furniture().end(),
+					[&](auto const& f) { return f.id == chairId; });
+				auto marker = instance->marker;
+				std::shared_ptr<const core::Vertex> seat;
+				for (uint32_t i = 0; i < world.getSector(room)->getNumObjects(); ++i)
+					if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(world.getSector(room)->getObject(i));
+						object && object->getMarker()->getId() == marker) seat = graph->getVertexForObject(object);
+				bool reachable = variant == 0 || variant == 4 || variant == 5 || variant == 6 || variant == 9 || variant == 10;
+				require(bool(graph->calculatePath(&query, left, seat)) == reachable,
+					"Port accessibility violated explicit matching-depth connectivity: " + std::to_string(variant));
+				require(bool(graph->calculatePath(&query, seat, right)) == reachable, "Attachment was not bidirectional");
+				for (auto const& node : through->nodes) require(node.targetVertex != seat, "Blocking seat became an intermediate waypoint");
+				// The isolated back route is never implicitly joined by a front chair.
+				if (variant == 0)
+				{
+					for (auto const& edge : graph->getEdges())
+						if (edge->getLocalDepth() == 3 && edge->getLength() > 0)
+							require(!graph->calculatePath(&query, seat, edge->getVertex(0)), "Chair approach implicitly joined the back route");
+					auto visitor = world.lookupAgent(world.createAgent("Visitor", room, 0, 0.5f)).entity;
+					visitor->setPath(graph->calculatePath(visitor, seat), true); world.advanceTicks(900);
+					require(visitor->getGlobalPosition().x == 3.625f && visitor->getLocalDepth() == 2,
+						"Agent did not arrive through the matching-depth port");
+				}
+			}
+			auto walkerId = world.createAgent("Walker", room, 0, 0.5f);
+			auto walker = world.lookupAgent(walkerId).entity;
+			walker->setPath(graph->calculatePath(walker, right), true);
+			int arrival = 0;
+			for (int tick = 1; tick <= 900 && !arrival; ++tick)
+			{
+				world.advanceTicks(1);
+				if (walker->getGlobalPosition().x == 6.5f) arrival = tick;
+			}
+			require(arrival > 0, "Split route failed physical traversal");
+			if (variant == 0) baselineArrival = arrival;
+			require(arrival == baselineArrival, "Attachment changed objective traversal duration");
+			if (variant == 0)
+			{
+				world.pauseSimulation();
+				auto position = walker->getGlobalPosition(); std::string diagnostic;
+				require(world.editFurniture(chairId, 5, 0, "Moved chair", &diagnostic), diagnostic);
+				require(world.lookupAgent(walkerId).entity->getGlobalPosition() == position, "Attachment rebuild teleported an Agent");
+				require(world.removeFurniture(chairId, &diagnostic), diagnostic);
+				unsigned restored = 0;
+				for (auto const& edge : world.getGraph()->getEdges())
+					if (edge->getLocalDepth() == 2 && edge->getLength() == 1.5f) ++restored;
+				require(restored == 1, "Removing attachment left stale split contributions");
+			}
+		}
+	}
+
 	void deskRoutes(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -439,4 +549,5 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "furniture/chair", chair });
 	checks.push_back({ "furniture/layouts", layouts });
 	checks.push_back({ "furniture/deskRoutes", deskRoutes });
+	checks.push_back({ "furniture/attachments", attachments });
 }

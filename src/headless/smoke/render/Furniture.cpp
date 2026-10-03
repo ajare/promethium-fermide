@@ -207,6 +207,73 @@ namespace
 					"Stationary/paused Agent rendered behind equal-depth Furniture");
 			}
 		}
+		// A chair attached in the middle of the desk's front route renders using
+		// the actual traversal depth, without relying on equal-cost route choice.
+		auto attached = std::make_shared<core::World>("Attached rendering", 8, 2);
+		auto attachedRoom = attached->addRoom("Room", 0, 0, 0, 8, 1);
+		attached->attachFurnitureCatalogue("attachments.furniture.yaml",
+			core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/attachments.furniture.yaml")));
+		attached->placeFurniture(attachedRoom, "desk", 2.125f, 0, "Desk", 2);
+		auto attachedChair = attached->placeFurniture(attachedRoom, "chair", 3.25f, 0, "Chair", 1);
+		auto attachedMarker = attached->furniture().back().marker;
+		attached->finishBuild();
+		std::shared_ptr<const core::Vertex> attachedSeat;
+		for (uint32_t i = 0; i < attached->getSector(attachedRoom)->getNumObjects(); ++i)
+			if (auto marker = std::dynamic_pointer_cast<core::MarkerSectorObject>(attached->getSector(attachedRoom)->getObject(i));
+				marker && marker->getMarker()->getId() == attachedMarker)
+				attachedSeat = attached->getGraph()->getVertexForObject(marker);
+		auto visitorId = attached->createAgent("Visitor", attachedRoom, 0, 0.5f);
+		auto visitor = attached->lookupAgent(visitorId).entity;
+		visitor->setPath(attached->getGraph()->calculatePath(visitor, attachedSeat), true);
+		for (int tick = 0; tick < 900 && visitor->getGlobalPosition().x < 3.375f; ++tick) attached->advanceTicks(1);
+		require(visitor->getGlobalPosition().x >= 3.375f && visitor->getGlobalPosition().x < 3.75f
+			&& visitor->getLocalDepth() == 2, "Attached visitor did not traverse the matching-depth branch");
+		RenderWorldScope attachedScope(attached);
+		auto checkAttached = [&] {
+			for (auto style : { LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden })
+			{
+				WorldDrawList::ClipRectangle clip{{150,450},{270,590}};
+				WorldDrawList drawing(clip);
+				renderSector(attached->getSector(attachedRoom), 0, style, false, ImColor(192,192,255), &drawing);
+				size_t deskLast = 0, agentFirst = drawing.commands().size(), agentLast = 0, chairFirst = drawing.commands().size();
+				unsigned deskTriangles = 0, chairTriangles = 0, agentTriangles = 0;
+				for (size_t i = 0; i < drawing.commands().size(); ++i)
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
+						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					{
+						if (triangle->texcoords[0].x >= 256.f / 320)
+						{
+							auto x = std::min({triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x});
+							if (x == attached->furniture().back().x * CORE_CELL_WIDTH_PIXELS)
+							{ ++chairTriangles; chairFirst = std::min(chairFirst, i); }
+							else { ++deskTriangles; deskLast = i; }
+						}
+						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
+						else continue;
+						require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.minimum.y == clip.minimum.y
+							&& triangle->clip.maximum.x == clip.maximum.x && triangle->clip.maximum.y == clip.maximum.y,
+							"Attached content escaped aperture clipping");
+					}
+				if (style == LayerRenderStyle::Wireframe || style == LayerRenderStyle::Hidden)
+					require(!deskTriangles && !chairTriangles && !agentTriangles, "Attachment exposed hidden Layer content");
+				else
+					require(deskTriangles == 4 && chairTriangles == 2 && agentTriangles == 2
+						&& deskLast < agentFirst && agentLast < chairFirst,
+						"Attached commands lost fractional artwork or resolved-depth order");
+			}
+		};
+		checkAttached();
+		attached->advanceTicks(900);
+		require(visitor->getGlobalPosition().x == 3.75f && visitor->getLocalDepth() == 2,
+			"Attached stationary destination lost incoming depth");
+		checkAttached(); attached->pauseSimulation();
+		auto position = visitor->getGlobalPosition();
+		require(attached->editFurniture(attachedChair, 2.375f, 0, "Detached", &diagnostic), diagnostic);
+		visitor = attached->lookupAgent(visitorId).entity;
+		require(visitor->getGlobalPosition() == position && visitor->getLocalDepth() == 2,
+			"Detached rendering rebuild changed Agent physical/depth history");
+		checkAttached();
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 }

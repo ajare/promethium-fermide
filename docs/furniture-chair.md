@@ -1,9 +1,10 @@
-# Catalogue-backed Furniture (#348–#353)
+# Catalogue-backed Furniture (#348–#355)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
-placement/editing and complete-Path depth continuity. Overlapping-route composition
-and catalogue migration remain later tickets. There is no sitting state or seat
+placement/editing, matching-depth external attachments and complete-Path depth
+continuity. Composition of two replacement spans and catalogue migration remain
+later tickets. There is no sitting state or seat
 reservation.
 
 ## Authoring
@@ -119,8 +120,10 @@ adds `vertices` and `edges` alongside `usablePoints`:
   its right boundary), and optional `y: 0`. A `usablePoint` binding names exactly
   one existing usable-point key at its authored x. Every usable point must be
   bound exactly once. Other vertices are routing-only, never behaviour destinations.
-- `external: true` explicitly designates a fixed-0 attachment to the surrounding
-  floor. Undesignated vertices are private even when coordinates coincide.
+- `external: true` exposes the resolved depths of the vertex's incident authored
+  edges for attachment. Only a port with an incident depth-0 edge attaches to the
+  surrounding ordinary floor. Undesignated vertices remain private even when
+  coordinates coincide.
 - Each bidirectional edge names `from` and `to` vertex keys. Missing `depthOffset`
   means fixed Local depth 0; a signed `depthOffset` resolves relative to the
   instance depth. Unknown endpoints, self edges and duplicate connections fail
@@ -132,8 +135,8 @@ adds `vertices` and `edges` alongside `usablePoints`:
   instance depth 2 these resolve to front 2 and back 3, with no ordinary bypass.
 - Instance Local depth and every resolved edge depth must be non-negative and
   fit an integer. Invalid placement, movement, depth edits and document replay
-  fail atomically. Different-depth artwork overlap is allowed; this slice does
-  not split or compose overlapping private routes.
+  fail atomically. Different-depth artwork overlap is allowed; external route
+  attachment is described below.
 
 Local depth is a render-order integer local to a Location, not a Layer or physical
 coordinate. Edge geometry, walking duration, permissions and Mobility constraints
@@ -142,6 +145,32 @@ waypoints are not skipped. Larger depths render first, and Furniture renders bef
 Agents at equal depth, under the existing Layer visibility and aperture clips.
 Thus a depth-2 walker is in front of the depth-2 desk, while a depth-3 walker is behind it.
 Complete-Path depth continuity is described below; it does not change edge route costs.
+
+## Matching-depth attachments (#355)
+
+`resources/test-worlds/attachments.furniture.yaml` adds a non-replacing chair
+whose external approach exposes an authored relative-depth edge. A depth-1 chair
+at x=3.125 attaches to the middle of a depth-2 desk's front route at x=2.125:
+its approach edge has `depthOffset: 1`, resolving to the same depth 2. It does
+not attach to the desk's coincident depth-3 back route.
+
+Two designated external points at the same position can connect at their shared
+resolved edge depths. An external point strictly inside another instance's route
+splits that route and attaches at matching depth. A private endpoint is not an
+external port. Splits retain the original horizontal geometry, depth and total
+walking distance/duration; their junctions are routing-only, not usable Markers.
+Multiple attachments are rebuilt deterministically, independent of placement
+order, including coincident ports. No artwork intersection, private vertex
+coincidence, edge crossing or mismatched port depth creates a connection.
+
+A port with no incident depth-0 edge cannot acquire a floor connection. A depth
+switch requires incident edges explicitly joined by a definition, rather than
+an inferred front/back shortcut. Usable Markers retain Blocks pathing semantics,
+identity and independent names. Attachments are derived on build, movement,
+undo/redo, deletion, Reset and YAML/binary reopening; no additional saved graph
+or schema is introduced. Furniture movement leaves Agents' physical positions
+and retained depths alone. This slice deliberately does not connect two
+route-replacing instances; composition of their replacement spans is later work.
 
 ## Retained Agent depth (#352)
 
@@ -208,9 +237,11 @@ valid-Path persistence and repeated-run determinism use production seams.
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
 - `pf-smoke-world --check furniture/deskRoutes`
+- `pf-smoke-world --check furniture/attachments`
 - `pf-smoke-persistence --check furniture/documents`
 - `pf-smoke-render --check furniture/chairCommands`
 - `pf-smoke-editor --check furniture/chairActions`
+- `pf-smoke-editor --check furniture/attachmentActions`
 
 The checks use the existing World/document, CPU draw-command, and production
 editor-action seams, isolated temporary roots and deterministic simulation ticks.
@@ -259,3 +290,13 @@ the optional vendored GUI capability test was explicitly skipped. Focused
 cross-Sector scenarios and affected Routing, Simulation, Permissions, Transports
 and Render modules/contracts passed. `git diff --check` passed. Windows
 validation is not claimed.
+
+## #355 validation
+
+Final incremental default builds and complete CTest inventories passed in Linux
+GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
+(82 tests each), in the four build trees listed above, using build/test parallelism
+4. Displays were unset; the optional vendored GUI capability test was explicitly
+skipped. Focused attachment, editor history, YAML/binary replay, physical traversal
+and render-command checks passed, together with affected module/CLI contracts.
+`git diff --check` passed. Windows validation is not claimed.

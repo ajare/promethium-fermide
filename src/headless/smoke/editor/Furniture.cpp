@@ -4,9 +4,68 @@
 #include "imgui/imgui.h"
 #include "core/YamlSerializer.h"
 #include "core/AgentBehaviourRegistry.h"
+#include "core/Agent.h"
+#include "core/MarkerSectorObject.h"
 
 namespace
 {
+	void attachmentActions(smoke::Context const& context)
+	{
+		editor_smoke::State state;
+		using smoke::require;
+		auto path = context.temporaryRoot() / "attachment.world.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/attachments.furniture.yaml"), path.parent_path() / "attachments.furniture.yaml");
+		auto world = std::make_shared<core::World>("Attachment editor", 8, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
+		world->addSectorMarker(room, 0, 0.5f, "Entrance");
+		world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
+		DocumentHistory history; std::string diagnostic;
+		require(selectFurnitureCatalogue(world, path, "attachments.furniture.yaml", diagnostic, history), diagnostic);
+		require(placeSelectedFurniture(world, room, "desk", 2.125f, 0, false, "Desk", diagnostic, history, 2), diagnostic);
+		auto agentId = world->createAgent("Observer", room, 0, 0.5f);
+		require(placeSelectedFurniture(world, room, "chair", 3.125f, 0, false, "Chair", diagnostic, history, 1), diagnostic);
+		auto chair = world->furniture().back();
+		auto catalogue = world->furnitureCatalogue();
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto restored = world->deserialize(*reader, work); world->pauseSimulation(); return restored;
+		};
+		auto connected = [&](bool expected) {
+			std::shared_ptr<const core::Vertex> seat, entrance;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+				if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(world->getSector(room)->getObject(i));
+					object)
+				{
+					if (object->getMarker()->getId() == chair.marker) seat = world->getGraph()->getVertexForObject(object);
+					if (object->getMarker()->getName() == "Entrance") entrance = world->getGraph()->getVertexForObject(object);
+				}
+			core::Agent query("Query");
+			require(seat && bool(world->getGraph()->calculatePath(&query,
+				entrance, seat)) == expected,
+				"Editor history retained stale attachment connectivity");
+			require(world->furniture().back().marker == chair.marker, "History changed attached Marker identity");
+			require(world->lookupAgent(agentId).entity->getGlobalPosition().x == 0.5f, "Furniture history teleported an Agent");
+		};
+		connected(true);
+		require(history.undo(captureDocumentSnapshot(world, history), restore)
+			&& world->furniture().size() == 1 && !world->lookupMarker(chair.marker), "Attachment placement undo left contributions");
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Attachment placement redo failed");
+		connected(true);
+		// Move the port to a private endpoint: overlap remains, attachment does not.
+		require(editSelectedFurniture(world, chair.id, 2.375f, 0, false, "Moved", diagnostic, history), diagnostic);
+		connected(false);
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Attachment movement undo failed");
+		connected(true);
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Attachment movement redo failed");
+		connected(false);
+		require(editSelectedFurniture(world, chair.id, 3.125f, 0, false, "Reattached", diagnostic, history), diagnostic);
+		connected(true);
+		require(deleteSelectedFurniture(world, chair.id, diagnostic, history), diagnostic);
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Attachment deletion undo failed");
+		connected(true);
+	}
+
 	void chairActions(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -161,4 +220,5 @@ namespace
 void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/chairActions", chairActions });
+	checks.push_back({ "furniture/attachmentActions", attachmentActions });
 }

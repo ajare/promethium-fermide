@@ -164,6 +164,7 @@ set(editor_names
     airlocks/structuralHistory
     airlocks/editorCommands
     furniture/chairActions
+    furniture/attachmentActions
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation
     background/theColourEditCarriesNoAlphaChannel

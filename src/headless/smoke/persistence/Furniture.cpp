@@ -1,5 +1,7 @@
 #include "WorldChecks.h"
 #include "core/World.h"
+#include "core/Agent.h"
+#include "core/MarkerSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
@@ -184,6 +186,46 @@ namespace persistence
 		revisedDesk["furnitureCatalogue"]["definitions"][0]["edges"][1]["depthOffset"] = -5;
 		{ std::ofstream file(root / "desk.furniture.yaml"); file << revisedDesk; }
 		refuseDesk(deskYaml, "resolved edge depth");
+		// Attachments are derived from current definitions in both supported formats.
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/attachments.furniture.yaml"), root / "attachments.furniture.yaml");
+		auto arrangement = std::make_shared<core::World>("Attached documents", 8, 2);
+		auto arrangementRoom = arrangement->addRoom("Room", 0, 0, 0, 8, 1);
+		arrangement->attachFurnitureCatalogue("attachments.furniture.yaml", core::FurnitureCatalogue::load(root / "attachments.furniture.yaml"));
+		arrangement->placeFurniture(arrangementRoom, "desk", 2.125f, 0, "Desk", 2);
+		arrangement->placeFurniture(arrangementRoom, "chair", 3.125f, 0, "Chair", 1);
+		auto attachedMarker = arrangement->furniture().back().marker;
+		arrangement->addSectorMarker(arrangementRoom, 0, 0.5f, "Entrance");
+		arrangement->finishBuild(); arrangement->pauseSimulation();
+		require(arrangement->renameMarker(attachedMarker, "Attached destination", &diagnostic), diagnostic);
+		for (auto filename : { "attachment.world.yaml", "attachment.world" })
+		{
+			arrangement->saveTo((root / filename).string());
+			auto loaded = core::loadWorldDocument(root / filename);
+			for (bool reset : { false, true })
+			{
+				if (reset) loaded->resetSimulation();
+				require(loaded->furniture().back().marker == attachedMarker
+					&& loaded->lookupMarker(attachedMarker)->getName() == "Attached destination"
+					&& loaded->lookupMarker(attachedMarker)->hasProperty(core::MarkerProperty::BlocksPathing),
+					"Attachment replay lost Marker identity/name/properties");
+				std::shared_ptr<const core::Vertex> seat, approach;
+				for (uint32_t i = 0; i < loaded->getSector(arrangementRoom)->getNumObjects(); ++i)
+					if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(loaded->getSector(arrangementRoom)->getObject(i));
+						object)
+					{
+						if (object->getMarker()->getId() == attachedMarker) seat = loaded->getGraph()->getVertexForObject(object);
+						if (object->getMarker()->getName() == "Entrance") approach = loaded->getGraph()->getVertexForObject(object);
+					}
+				core::Agent query("Query");
+				require(seat && loaded->getGraph()->calculatePath(&query,
+					approach, seat), "Document replay lost route attachment");
+				auto visitor = loaded->lookupAgent(loaded->createAgent("Visitor", arrangementRoom, 0, 0.5f)).entity;
+				visitor->setPath(loaded->getGraph()->calculatePath(visitor, seat), true);
+				loaded->advanceTicks(900);
+				require(visitor->getGlobalPosition().x == 3.625f && visitor->getLocalDepth() == 2,
+					"Reopened attachment failed physical arrival");
+			}
+		}
 		// Portable references survive moving the complete project directory.
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);

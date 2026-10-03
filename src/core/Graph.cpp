@@ -351,7 +351,25 @@ namespace core
 		uint32_t runStart, uint32_t runEnd)
 	{
 		// Furniture's private graph is never inserted into the ordinary row chain.
-		// Only designated external points get a fixed-0 floor attachment.
+		// External points expose only the resolved depths of their authored edges.
+		// Assemble routes before attaching ports so placement order is immaterial.
+		struct FurniturePort
+		{
+			uint64_t instance;
+			bool replacesFloor;
+			shared_ptr<Vertex> vertex;
+			std::vector<int> depths;
+		};
+		struct FurnitureRoute
+		{
+			uint64_t instance;
+			bool replacesFloor;
+			int depth;
+			shared_ptr<Vertex> from, to;
+			VertexList cuts;
+		};
+		std::vector<FurniturePort> ports;
+		std::vector<FurnitureRoute> routes;
 		std::vector<std::pair<shared_ptr<const Sector>, std::pair<float, float>>> furnitureSpans;
 		for (auto const& instance : mwWorld->furniture())
 		{
@@ -383,21 +401,90 @@ namespace core
 				authored.emplace(point.key, vertex);
 				if (point.external)
 				{
-					auto anchor = make_shared<SectorMarkerVertex>(sector, instance.x + point.x, instance.y);
-					vertices.push_back(anchor);
-					addEdge(make_shared<SectorEdge>(), anchor, vertex, false);
+					FurniturePort port{ instance.id, definition.sideRoutes, vertex, {} };
+					for (auto const& connection : definition.edges)
+						if (connection.from == point.key || connection.to == point.key)
+						{
+							auto depth = connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0;
+							if (find(port.depths.begin(), port.depths.end(), depth) == port.depths.end())
+								port.depths.push_back(depth);
+						}
+					if (find(port.depths.begin(), port.depths.end(), 0) != port.depths.end())
+					{
+						auto anchor = make_shared<SectorMarkerVertex>(sector, instance.x + point.x, instance.y);
+						vertices.push_back(anchor);
+						addEdge(make_shared<SectorEdge>(), anchor, vertex, false);
+					}
+					ports.push_back(std::move(port));
 				}
 			}
 			for (auto const& connection : definition.edges)
 			{
-				auto edge = make_shared<SectorEdge>();
-				edge->mLocalDepth = connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0;
-				edge->mFurnitureRoute = true;
-				addEdge(edge, authored.at(connection.from), authored.at(connection.to), false);
+				routes.push_back({ instance.id, definition.sideRoutes,
+					connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0,
+					authored.at(connection.from), authored.at(connection.to), {} });
 			}
 			if (definition.sideRoutes)
 				furnitureSpans.push_back({ sector, { sector->getCellX() + instance.x + definition.minX,
 					sector->getCellX() + instance.x + definition.maxX } });
+		}
+
+		auto connectPort = [&](shared_ptr<Vertex> const& from, shared_ptr<Vertex> const& to, int depth) {
+			auto edge = make_shared<SectorEdge>();
+			edge->mLocalDepth = depth;
+			edge->mFurnitureRoute = true;
+			addEdge(edge, from, to, false);
+		};
+		// Endpoint attachment requires two designated ports, not a private vertex
+		// which happens to coincide. Emit each shared-depth connector once.
+		for (size_t i = 0; i < ports.size(); ++i)
+			for (size_t j = i + 1; j < ports.size(); ++j)
+			{
+				auto const& a = ports[i]; auto const& b = ports[j];
+				if (a.instance == b.instance || (a.replacesFloor && b.replacesFloor)
+					|| a.vertex->getSector() != b.vertex->getSector()
+					|| a.vertex->getPosition() != b.vertex->getPosition()) continue;
+				for (auto depth : a.depths)
+					if (find(b.depths.begin(), b.depths.end(), depth) != b.depths.end())
+						connectPort(a.vertex, b.vertex, depth);
+			}
+		for (auto& route : routes)
+		{
+			auto left = route.from, right = route.to;
+			if (left->getPosition().x > right->getPosition().x) swap(left, right);
+			for (auto const& port : ports)
+			{
+				if (port.instance == route.instance || (port.replacesFloor && route.replacesFloor)
+					|| port.vertex->getSector() != left->getSector()
+					|| find(port.depths.begin(), port.depths.end(), route.depth) == port.depths.end()) continue;
+				auto x = port.vertex->getPosition().x;
+				if (x > left->getPosition().x && x < right->getPosition().x)
+				{
+					// Split in the route's own topology; never merge coincident front/back
+					// vertices or use a blocking usable Marker as a through waypoint.
+					auto cut = find_if(route.cuts.begin(), route.cuts.end(),
+						[&](auto const& v) { return v->getPosition().x == x; });
+					shared_ptr<Vertex> junction;
+					if (cut != route.cuts.end()) junction = *cut;
+					else
+					{
+						auto sector = left->getSector();
+						junction = make_shared<SectorMarkerVertex>(sector,
+							x - sector->getCellX(), y - sector->getCellY());
+						route.cuts.push_back(junction);
+						mVertices.push_back(junction);
+						mSectorVertexLookup[sector.get()].push_back(junction);
+					}
+					connectPort(port.vertex, junction, route.depth);
+				}
+			}
+			route.cuts.push_back(left);
+			route.cuts.push_back(right);
+			stable_sort(route.cuts.begin(), route.cuts.end(), [](auto const& a, auto const& b) {
+				return a->getPosition().x < b->getPosition().x;
+			});
+			for (size_t i = 1; i < route.cuts.size(); ++i)
+				connectPort(route.cuts[i - 1], route.cuts[i], route.depth);
 		}
 
 		if (vertices.empty()) return;
