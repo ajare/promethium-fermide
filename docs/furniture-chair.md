@@ -1,9 +1,9 @@
-# Catalogue-backed chair (#348)
+# Catalogue-backed Furniture (#348–#350)
 
-This first Furniture slice supports one tile at `(0, 0)`, one usable point, and
-fixed-depth-0 routing. Multi-tile layouts, Local-depth editing, explicit side
-routes and catalogue migration are later tickets, not silently
-approximated here. There is no sitting state or seat reservation.
+Furniture supports one-, two-, and larger-tile artwork layouts with individually
+authored usable points and fixed-depth-0 routing. Local-depth editing, explicit
+side routes and catalogue migration remain later tickets. There is no sitting
+state or seat reservation.
 
 ## Authoring
 
@@ -25,12 +25,12 @@ resources; headless document tools use the same parser without graphics resource
 
 ## Placement and destinations
 
-The whole one-tile footprint must fit inside one Location and have continuous
+The whole artwork bounding rectangle must fit inside one Location and have continuous
 Ground or Walkway support. Fractional x, boundary-touching chairs and elevated
 Walkways are supported; gaps, overhangs, fractional y, non-finite positions,
 same-depth overlap, Backgrounds and Transits are refused before mutation.
 
-A placed chair owns one independently named World Marker. Its initial name is
+Each authored usable point owns an independently named World Marker. Its initial name is
 `<instance name> <usable label>`, validated in the existing Marker namespace. It
 appears in the ordinary behaviour destination selectors and defaults to **Blocks
 pathing**. The graph connects it as a destination branch off an ordinary floor
@@ -43,7 +43,7 @@ Select an existing instance in the **Furniture instance** selector in the World
 panel. While paused, change its name, Location-local x or supporting Level and
 click **Apply Furniture edit**, or click **Delete Furniture**. Edits and deletion
 use ordinary document undo/redo. Movement stays inside the owning Location and
-rigidly translates artwork and the definition's owned point; it cannot cross a
+rigidly translates artwork and every owned point; it cannot cross a
 Floor/Walkway gap, overhang the Location or overlap another chair.
 
 Instance names generate point names only at placement. Renaming an instance does
@@ -64,9 +64,10 @@ Local-depth lifecycle behaviour remains a later topology ticket.
 
 ## Documents
 
-World schema 43 adds a catalogue basename/expected UUID reference, instance
-identity/name/placement/definition key, usable-point key and Marker identity/name/
-properties, and a non-reused instance identity allocator. YAML `.world.yaml` and
+World schema 44 stores a catalogue basename/expected UUID reference, instance
+identity/name/placement/definition key, a `destinations` array containing every
+usable-point key and Marker identity/name/properties, and a non-reused instance
+identity allocator. Schema-43 chair documents remain readable. YAML `.world.yaml` and
 binary `.world` documents use the same construction records. They resolve the
 current catalogue on reopening, not an embedded definition snapshot. Worlds
 without Furniture have no catalogue dependency. Move the World and its catalogue
@@ -77,9 +78,35 @@ removed usable point, UUID mismatch or invalid placement is a diagnostic failure
 Location types and an Agent visiting the reading chair. Reaching its Marker uses
 ordinary movement, not a new Furniture behaviour API.
 
+## Multi-tile layouts (#350)
+
+`resources/test-worlds/layouts.furniture.yaml` contains a two-seat sofa and a
+sparse three-by-two layout. Every `tiles` entry names an `ObjectAtlas` Image-set
+region of exactly one World tile (64 × 160 pixels), at integer `x`/`y` offsets.
+Offsets may extend horizontally either side of the instance origin; artwork may
+extend upward, but never below the supporting Floor. Transparent pixels and
+missing tiles inside the bounding rectangle do not shrink its footprint. Entire
+horizontal support is checked from the rectangle's left to right edge, including
+fractional end cells. Boundary touching is allowed; area overlap is not.
+
+Every `usablePoints` entry has a distinct stable `key`, a distinct initial `label`,
+a finite fractional `x` offset within the artwork width, and `y: 0`. All Markers
+and graph vertices stay at the instance's supporting Floor/Walkway height, even
+for tall artwork. Point order and display labels are not identities. The editor's
+snap toggle rounds only the instance x origin, leaving all point offsets rigid.
+It never rounds or permits fractional y.
+
+Each destination is independently selectable and renameable using the ordinary
+Marker/behaviour UI. Renaming the instance does not rename its destinations.
+Movement, replay, history, deletion and supported-format round trips handle all
+points together; referenced deletion and invalid placement are atomic refusals.
+The existing first-destination `marker` convenience member is retained for chair
+API compatibility; `destinations` exposes the complete stable-key layout.
+
 ## Headless checks
 
 - `pf-smoke-world --check furniture/chair`
+- `pf-smoke-world --check furniture/layouts`
 - `pf-smoke-persistence --check furniture/documents`
 - `pf-smoke-render --check furniture/chairCommands`
 - `pf-smoke-editor --check furniture/chairActions`

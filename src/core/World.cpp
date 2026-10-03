@@ -6942,14 +6942,20 @@ namespace core
 		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
 			[id](ConstructionRecord const& candidate)
 			{
-				return (candidate.type == ConstructionType::Marker || candidate.type == ConstructionType::Furniture)
-					&& candidate.markerId == id;
+				return (candidate.type == ConstructionType::Marker && candidate.markerId == id)
+					|| (candidate.type == ConstructionType::Furniture && std::any_of(candidate.furnitureDestinations.begin(),
+						candidate.furnitureDestinations.end(), [id](auto const& p) { return p.marker == id; }));
 			});
 		if (record == mConstructionRecords.end())
 			throw WorldException(this, "renameMarker - Marker has no authored record");
 		invalidateSimulationSnapshot();
 		marker->setName(trimmed);
-		if (record->type == ConstructionType::Furniture) record->markerName = trimmed;
+		if (record->type == ConstructionType::Furniture)
+		{
+			for (auto& point : record->furnitureDestinations) if (point.marker == id) point.name = trimmed;
+			for (auto& instance : mFurniture)
+				for (auto& point : instance.destinations) if (point.marker == id) point.name = trimmed;
+		}
 		else record->name = trimmed;
 		modify();
 		return true;
@@ -6977,14 +6983,21 @@ namespace core
 		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
 			[id](ConstructionRecord const& candidate)
 			{
-				return (candidate.type == ConstructionType::Marker || candidate.type == ConstructionType::Furniture)
-					&& candidate.markerId == id;
+				return (candidate.type == ConstructionType::Marker && candidate.markerId == id)
+					|| (candidate.type == ConstructionType::Furniture && std::any_of(candidate.furnitureDestinations.begin(),
+						candidate.furnitureDestinations.end(), [id](auto const& p) { return p.marker == id; }));
 			});
 		if (record == mConstructionRecords.end())
 			throw WorldException(this, "setMarkerProperties - Marker has no authored record");
 		invalidateSimulationSnapshot();
 		marker->setProperties(properties);
-		record->c = properties;
+		if (record->type == ConstructionType::Furniture)
+		{
+			for (auto& point : record->furnitureDestinations) if (point.marker == id) point.properties = properties;
+			for (auto& instance : mFurniture)
+				for (auto& point : instance.destinations) if (point.marker == id) point.properties = properties;
+		}
+		else record->c = properties;
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;

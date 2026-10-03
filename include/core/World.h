@@ -893,7 +893,8 @@ namespace core
 			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
 			uint64_t furnitureId{ 0 };
-			std::string definitionKey{}, usableKey{}, markerName{};
+			std::string definitionKey{};
+			std::vector<FurnitureDestination> furnitureDestinations{};
 		};
 
 		void restoreFurniture(ConstructionRecord const& record);

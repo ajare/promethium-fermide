@@ -69,6 +69,70 @@ namespace persistence
 		core::World legacy("No Furniture", 2, 1); legacy.addCorridor(0, 0, 2); legacy.finishBuild();
 		legacy.saveTo((root / "legacy.world").string());
 		require(!core::loadWorldDocument(root / "legacy.world")->furnitureCatalogue(), "Unfurnished World acquired a catalogue dependency");
+		// Multi-tile layouts use the same document contract, preserving every point.
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/layouts.furniture.yaml"), root / "layouts.furniture.yaml");
+		auto layouts = std::make_shared<core::World>("Layout documents", 16, 4);
+		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 16, 4);
+		layouts->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(root / "layouts.furniture.yaml"));
+		auto sofa = layouts->placeFurniture(layoutRoom, "sofa", 1.125f, 0, "Sofa");
+		auto larger = layouts->placeFurniture(layoutRoom, "larger", 8.25f, 0, "Sparse");
+		auto sofaPoints = layouts->furniture()[0].destinations;
+		auto largerPoints = layouts->furniture()[1].destinations;
+		layouts->renameMarker(sofaPoints[1].marker, "Right destination");
+		layouts->renameMarker(largerPoints[2].marker, "Third destination");
+		layouts->setMarkerProperties(largerPoints[1].marker, 0);
+		auto later = layouts->addSectorMarker(layoutRoom, 0, 15.5f, "Later standalone Marker");
+		layouts->finishBuild(); layouts->pauseSimulation();
+		require(layouts->removeSectorMarker(layoutRoom, later.index, &diagnostic), diagnostic);
+		require(layouts->editFurniture(sofa, 3.375f, 0, "Moved sofa", &diagnostic), diagnostic);
+		require(layouts->editFurniture(larger, 10.625f, 0, "Moved larger", &diagnostic), diagnostic);
+		layouts->applyLocationEdit(layouts->planResizeLocation(layoutRoom, 0, 0, 16, 3));
+		for (auto filename : { "layouts.world.yaml", "layouts.world" })
+		{
+			layouts->saveTo((root / filename).string());
+			auto loaded = core::loadWorldDocument(root / filename);
+			require(loaded->furniture()[0].x == 3.375f && loaded->furniture()[1].x == 10.625f, "Round trip lost fractional layout position");
+			for (size_t i = 0; i < sofaPoints.size(); ++i)
+				require(loaded->furniture()[0].destinations[i].marker == sofaPoints[i].marker, "Sofa point identity changed");
+			for (size_t i = 0; i < largerPoints.size(); ++i)
+				require(loaded->furniture()[1].destinations[i].marker == largerPoints[i].marker, "Larger point identity changed");
+			require(loaded->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination"
+				&& loaded->lookupMarker(largerPoints[2].marker)->getName() == "Third destination"
+				&& !loaded->lookupMarker(largerPoints[1].marker)->hasProperty(core::MarkerProperty::BlocksPathing)
+				&& loaded->lookupMarker(largerPoints[0].marker)->hasProperty(core::MarkerProperty::BlocksPathing),
+				"Round trip lost independent names/properties");
+			for (auto const& instance : loaded->furniture())
+				for (auto const& point : instance.destinations)
+				{
+					auto const& definition = *loaded->furnitureCatalogue()->definition(instance.definitionKey);
+					auto authored = std::find_if(definition.usablePoints.begin(), definition.usablePoints.end(),
+						[&](auto const& p) { return p.key == point.key; });
+					require(loaded->lookupMarker(point.marker)->getCellX() + loaded->lookupMarker(point.marker)->getOffset() == instance.x + authored->x
+						&& loaded->lookupMarker(point.marker)->getCellY() == instance.y,
+						"Round trip changed a fractional horizontal offset or floor height");
+				}
+			loaded->pauseSimulation();
+			require(loaded->removeFurniture(sofa, &diagnostic), diagnostic);
+			for (auto const& p : sofaPoints) require(!loaded->lookupMarker(p.marker), "Multi-point deletion left an orphan");
+			loaded->saveTo((root / "deleted-layout.world").string());
+			loaded = core::loadWorldDocument(root / "deleted-layout.world");
+			require(loaded->furniture().size() == 1 && loaded->furniture()[0].destinations.size() == 3, "Deletion/replay damaged unrelated layout slots");
+		}
+		// Definition/point order is not identity; current fractional offsets are resolved by key.
+		auto layoutCataloguePath = root / "layouts.furniture.yaml";
+		auto layoutCatalogue = YAML::LoadFile(layoutCataloguePath.string());
+		auto definitions = layoutCatalogue["furnitureCatalogue"]["definitions"];
+		auto firstPoint = YAML::Clone(definitions[0]["usablePoints"][0]);
+		definitions[0]["usablePoints"][0] = YAML::Clone(definitions[0]["usablePoints"][1]);
+		definitions[0]["usablePoints"][1] = firstPoint;
+		definitions[0]["usablePoints"][1]["label"] = "Revised left seat";
+		{ std::ofstream file(layoutCataloguePath); file << layoutCatalogue; }
+		auto reordered = core::loadWorldDocument(root / "layouts.world.yaml");
+		require(reordered->furniture()[0].destinations[0].marker == sofaPoints[0].marker
+			&& reordered->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination", "Catalogue ordering retargeted point identities");
+		// Schema-43 chair fixtures still load, while newly written layouts use schema 44.
+		require(core::loadWorldDocument(context.fixture("resources/test-worlds/chair.world.yaml"))->furniture().size() == 3,
+			"Schema-43 chair compatibility was lost");
 		// Portable references survive moving the complete project directory.
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);

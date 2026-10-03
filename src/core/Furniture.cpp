@@ -3,6 +3,8 @@
 #include "core/Marker.h"
 #include "core/SerializationException.h"
 #include <cmath>
+#include <algorithm>
+#include <set>
 #include <utility>
 #include <yaml-cpp/yaml.h>
 
@@ -39,27 +41,42 @@ namespace core
 				d.label = entry["label"].as<std::string>();
 				auto tiles = entry["tiles"];
 				auto points = entry["usablePoints"];
-				if (!tiles.IsSequence() || tiles.size() != 1 || !points.IsSequence() || points.size() != 1
+				if (!tiles.IsSequence() || tiles.size() == 0 || !points.IsSequence() || points.size() == 0
 					|| entry["edges"] || entry["vertices"])
-					throw SerializationException("Furniture slice 1 requires one tile and one usable point, without side routes");
-				auto tile = tiles[0];
-				if (tile["x"].as<int>() != 0 || tile["y"].as<int>() != 0)
-					throw SerializationException("Furniture slice 1 tile offset must be (0, 0)");
-				d.imageSet = tile["imageSet"].as<std::string>();
-				d.image = tile["image"].as<std::string>();
-				if (d.imageSet != "ObjectAtlas" || d.image.empty())
-					throw SerializationException("Furniture slice 1 artwork requires an ObjectAtlas Image-set region");
-				d.usableKey = points[0]["key"].as<std::string>();
-				d.usableLabel = points[0]["label"].as<std::string>();
-				d.usableX = points[0]["x"].as<float>();
-				if ((points[0]["y"] && points[0]["y"].as<float>() != 0)
-					|| (entry["depth"] && entry["depth"].as<int>() != 0))
-					throw SerializationException("Furniture slice 1 requires floor-height points and fixed depth 0");
+					throw SerializationException("Furniture requires artwork tiles and usable points, without side routes");
+				if (entry["depth"] && entry["depth"].as<int>() != 0)
+					throw SerializationException("Furniture currently requires fixed depth 0");
+				std::set<std::pair<int, int>> offsets;
+				bool first = true;
+				for (auto tile : tiles)
+				{
+					FurnitureTile t{ tile["x"].as<int>(), tile["y"].as<int>(),
+						tile["imageSet"].as<std::string>(), tile["image"].as<std::string>() };
+					// Bound arithmetic and prohibit artwork below its supporting Floor.
+					if (t.x < -65536 || t.x > 65536 || t.y < 0 || t.y > 65536
+						|| !offsets.emplace(t.x, t.y).second)
+						throw SerializationException("Invalid or duplicate Furniture tile offset");
+					if (t.imageSet != "ObjectAtlas" || t.image.empty())
+						throw SerializationException("Furniture artwork requires an ObjectAtlas Image-set region");
+					if (first) { d.minX = t.x; d.minY = t.y; d.maxX = t.x + 1; d.maxY = t.y + 1; first = false; }
+					else { d.minX = std::min(d.minX, t.x); d.minY = std::min(d.minY, t.y);
+						d.maxX = std::max(d.maxX, t.x + 1); d.maxY = std::max(d.maxY, t.y + 1); }
+					d.tiles.push_back(std::move(t));
+				}
 				std::string diagnostic;
-				if (d.key.empty() || d.usableKey.empty() || !Marker::nameIsValid(d.label, &diagnostic)
-					|| !Marker::nameIsValid(d.usableLabel, &diagnostic)
-					|| !std::isfinite(d.usableX) || d.usableX < 0 || d.usableX >= 1)
-					throw SerializationException("Invalid Furniture definition key, label or usable point");
+				std::set<std::string> keys, labels;
+				for (auto point : points)
+				{
+					FurnitureUsablePoint p{ point["key"].as<std::string>(), point["label"].as<std::string>(), point["x"].as<float>() };
+					if ((point["y"] && point["y"].as<float>() != 0) || !std::isfinite(p.x)
+						|| p.x < d.minX || p.x >= d.maxX || p.key.empty()
+						|| !Marker::nameIsValid(p.label, &diagnostic) || Marker::trimName(p.label) != p.label
+						|| !keys.insert(p.key).second || !labels.insert(p.label).second)
+						throw SerializationException("Invalid Furniture usable point key, label or floor-height offset");
+					d.usablePoints.push_back(std::move(p));
+				}
+				if (d.key.empty() || !Marker::nameIsValid(d.label, &diagnostic))
+					throw SerializationException("Invalid Furniture definition key or label");
 				if (!result->mDefinitions.emplace(d.key, d).second)
 					throw SerializationException("Duplicate Furniture definition key: " + d.key);
 			}

@@ -24,7 +24,8 @@ namespace core
 	bool World::isFurnitureMarker(MarkerId id) const
 	{
 		return std::any_of(mFurniture.begin(), mFurniture.end(),
-			[id](auto const& instance) { return instance.marker == id; });
+			[id](auto const& instance) { return std::any_of(instance.destinations.begin(), instance.destinations.end(),
+				[id](auto const& point) { return point.marker == id; }); });
 	}
 
 	bool World::canPlaceFurniture(uint32_t sectorIndex, std::string const& key,
@@ -40,9 +41,10 @@ namespace core
 		auto sector = mSectors[sectorIndex];
 		if (!std::isfinite(x) || !std::isfinite(y) || x < 0 || y < 0
 			|| std::floor(y) != y || y >= sector->getLevelsHigh()
-			|| x + 1 > sector->getCellsWide())
+			|| x + definition->minX < 0 || x + definition->maxX > sector->getCellsWide()
+			|| y + definition->maxY > sector->getLevelsHigh())
 			return reject("Furniture requires floor-aligned y and its complete width inside one Location");
-		for (auto cellX = static_cast<uint32_t>(std::floor(x)); cellX < static_cast<uint32_t>(std::ceil(x + 1)); ++cellX)
+		for (auto cellX = static_cast<uint32_t>(std::floor(x + definition->minX)); cellX < static_cast<uint32_t>(std::ceil(x + definition->maxX)); ++cellX)
 		{
 			auto const& cell = mLayers[sector->getLayerIndex()]->getCellDefinition(
 				sector->getCellX() + cellX, sector->getCellY() + static_cast<uint32_t>(y));
@@ -51,21 +53,29 @@ namespace core
 				return reject("Furniture requires continuous Floor or Walkway support across its complete width");
 		}
 		for (auto const& instance : mFurniture)
-			if (instance.sector == sectorIndex && x < instance.x + 1 && x + 1 > instance.x
-				&& y < instance.y + 1 && y + 1 > instance.y)
+		{
+			auto const& other = *mFurnitureCatalogue->definition(instance.definitionKey);
+			if (instance.sector == sectorIndex && x + definition->minX < instance.x + other.maxX
+				&& x + definition->maxX > instance.x + other.minX
+				&& y + definition->minY < instance.y + other.maxY && y + definition->maxY > instance.y + other.minY)
 				return reject("Furniture footprint overlaps at depth 0: " + instance.name);
+		}
 		std::string reason;
 		auto trimmed = Marker::trimName(name);
 		if (!Marker::nameIsValid(trimmed, &reason)) return reject("Invalid Furniture name: " + reason);
-		if (!mDeserializingConstruction)
+		for (auto const& point : definition->usablePoints)
 		{
-			auto markerName = trimmed + " " + definition->usableLabel;
-			if (!Marker::nameIsValid(markerName, &reason)) return reject("Invalid usable Marker name: " + reason);
-			if (markerNameTaken(markerName)) return reject("A Marker with this name already exists");
+			if (!mDeserializingConstruction)
+			{
+				auto markerName = trimmed + " " + point.label;
+				if (!Marker::nameIsValid(markerName, &reason)) return reject("Invalid usable Marker name: " + reason);
+				if (markerNameTaken(markerName)) return reject("A Marker with this name already exists");
+			}
+			if (!canAddSectorMarker(sectorIndex, static_cast<uint32_t>(y), x + point.x, &reason)) return reject(reason);
 		}
-		if (!canAddSectorMarker(sectorIndex, static_cast<uint32_t>(y), x + definition->usableX, &reason))
-			return reject(reason);
-		if (!mDeserializingConstruction && (!mNextFurnitureId || !mNextMarkerId)) return reject("Furniture or Marker identity space is exhausted");
+		if (!mDeserializingConstruction && (!mNextFurnitureId || !mNextMarkerId
+			|| definition->usablePoints.size() > std::numeric_limits<uint64_t>::max() - mNextMarkerId + 1))
+			return reject("Furniture or Marker identity space is exhausted");
 		if (mBuildFinished && !mSimulationPaused) return reject("Pause the simulation before placing Furniture");
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -81,13 +91,13 @@ namespace core
 		ConstructionRecord record{ ConstructionType::Furniture };
 		record.a = sector; record.x = x; record.y = y;
 		record.name = Marker::trimName(name); record.definitionKey = key;
-		record.usableKey = definition.usableKey;
-		record.markerName = record.name + " " + definition.usableLabel;
-		record.markerId = MarkerId{ mNextMarkerId };
+		auto next = mNextMarkerId;
+		for (auto const& point : definition.usablePoints)
+			record.furnitureDestinations.push_back({ point.key, MarkerId{ next++ }, record.name + " " + point.label,
+				markerPropertyBit(MarkerProperty::BlocksPathing) });
 		record.furnitureId = mNextFurnitureId;
-		record.c = markerPropertyBit(MarkerProperty::BlocksPathing);
 		restoreFurniture(record);
-		++mNextFurnitureId; ++mNextMarkerId;
+		++mNextFurnitureId; mNextMarkerId = next;
 		return record.furnitureId;
 	}
 
@@ -139,22 +149,31 @@ namespace core
 		if (!mSimulationPaused) return reject("Pause the simulation before deleting Furniture");
 		auto found = std::find_if(mFurniture.begin(), mFurniture.end(), [id](auto const& instance) { return instance.id == id; });
 		if (found == mFurniture.end()) return reject("The Furniture instance no longer exists");
-		return markerHasNoBehaviourReferences(found->marker, diagnostic);
+		std::string references;
+		for (auto const& point : found->destinations)
+		{
+			std::string reason;
+			if (!markerHasNoBehaviourReferences(point.marker, &reason)) references += reason + "\n";
+		}
+		if (!references.empty()) return reject(references);
+		return true;
 	}
 
 	bool World::removeFurniture(uint64_t id, std::string* diagnostic)
 	{
 		if (!canRemoveFurniture(id, diagnostic)) return false;
-		auto records = mConstructionRecords;
-		for (auto& record : records)
-			if (record.type == ConstructionType::Furniture && record.furnitureId == id)
+		std::vector<ConstructionRecord> records;
+		for (auto const& record : mConstructionRecords)
+		{
+			if (record.type != ConstructionType::Furniture || record.furnitureId != id) records.push_back(record);
+			else for (size_t i = 0; i < record.furnitureDestinations.size(); ++i)
 			{
-				// Preserve other objects' authored slots, but never the destination.
+				// Preserve every owned object's slot for subsequent authored removals.
 				ConstructionRecord tombstone{ ConstructionType::ObjectTombstone };
 				tombstone.a = record.a;
-				record = std::move(tombstone);
-				break;
+				records.push_back(std::move(tombstone));
 			}
+		}
 		rebuildFromConstructionRecords(std::move(records));
 		return true;
 	}
@@ -163,8 +182,12 @@ namespace core
 	{
 		std::string result;
 		for (auto const& instance : mFurniture)
-			if (instance.sector == sector && instance.y == y && instance.x < x + 1.f && instance.x + 1.f > x)
+		{
+			auto const& definition = *mFurnitureCatalogue->definition(instance.definitionKey);
+			if (instance.sector == sector && instance.y == y
+				&& instance.x + definition.minX < x + 1.f && instance.x + definition.maxX > x)
 				result += "\n- " + instance.name + " (" + std::to_string(instance.id) + ")";
+		}
 		return result.empty() ? result : "Floor removal would leave Furniture unsupported:" + result;
 	}
 
@@ -173,8 +196,25 @@ namespace core
 		if (!mFurnitureCatalogue) throw WorldException(this, "Missing Furniture catalogue dependency");
 		auto definition = mFurnitureCatalogue->definition(record.definitionKey);
 		if (!definition) throw WorldException(this, "Missing Furniture definition: " + record.definitionKey);
-		if (definition->usableKey != record.usableKey)
-			throw WorldException(this, "Missing Furniture usable-point key: " + record.usableKey);
+		if (record.furnitureDestinations.size() != definition->usablePoints.size())
+			throw WorldException(this, "Furniture usable-point layout does not match saved destinations");
+		std::vector<std::pair<FurnitureDestination const*, FurnitureUsablePoint const*>> points;
+		for (auto const& saved : record.furnitureDestinations)
+		{
+			auto point = std::find_if(definition->usablePoints.begin(), definition->usablePoints.end(),
+				[&](auto const& p) { return p.key == saved.key; });
+			if (point == definition->usablePoints.end())
+				throw WorldException(this, "Missing Furniture usable-point key: " + saved.key);
+			if (std::any_of(points.begin(), points.end(), [&](auto const& p) { return p.first->key == saved.key; }))
+				throw WorldException(this, "Duplicate Furniture usable-point key: " + saved.key);
+			if (!saved.marker || lookupMarker(saved.marker) || !Marker::nameIsValid(saved.name, nullptr)
+				|| Marker::trimName(saved.name) != saved.name || markerNameTaken(saved.name)
+				|| (saved.properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
+				|| std::any_of(points.begin(), points.end(), [&](auto const& p) {
+					return p.first->marker == saved.marker || p.first->name == saved.name; }))
+				throw WorldException(this, "Invalid or duplicate Furniture Marker identity, name or properties");
+			points.emplace_back(&saved, &*point);
+		}
 		// Geometry and overlap use exactly the authoring contract. The independent
 		// saved Marker name may differ from its initial generated name.
 		std::string diagnostic;
@@ -188,13 +228,14 @@ namespace core
 		mDeserializingConstruction = true;
 		try
 		{
-			addSectorMarkerRestored(record.a, static_cast<uint32_t>(record.y), record.x + definition->usableX,
-				record.markerId, record.markerName, record.c);
+			for (auto const& [saved, point] : points)
+				addSectorMarkerRestored(record.a, static_cast<uint32_t>(record.y), record.x + point->x,
+					saved->marker, saved->name, saved->properties);
 		}
 		catch (...) { mDeserializingConstruction = old; throw; }
 		mDeserializingConstruction = old;
 		mFurniture.push_back({ record.furnitureId, record.a, record.x, record.y,
-			record.definitionKey, record.name, record.usableKey, record.markerId });
+			record.definitionKey, record.name, record.furnitureDestinations, record.furnitureDestinations.front().marker });
 		recordConstruction(record);
 	}
 }

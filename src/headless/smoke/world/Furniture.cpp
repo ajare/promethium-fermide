@@ -6,6 +6,8 @@
 #include "core/YamlSerializer.h"
 #include <limits>
 #include "core/Exceptions.h"
+#include <fstream>
+#include <yaml-cpp/yaml.h>
 
 namespace
 {
@@ -160,5 +162,131 @@ namespace
 		auto next = world.placeFurniture(room, "chair", 5.25f, 0, "Replacement");
 		require(next > id && world.furniture().back().marker.value > seat.value, "Deletion reused identities");
 	}
+	void layouts(smoke::Context const& context)
+	{
+		using smoke::require;
+		core::World world("Multi-point layouts", 20, 5);
+		auto room = world.addRoom("Room", 0, 0, 0, 20, 5);
+		world.attachFurnitureCatalogue("layouts.furniture.yaml",
+			core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/layouts.furniture.yaml")));
+		for (uint32_t x = 7; x < 12; ++x) world.addSectorWalkway(room, 1, x);
+		for (uint32_t x = 4; x < 7; ++x) world.addSectorWalkway(room, 2, x);
+		world.addSectorWalkway(room, 2, 7); world.addSectorWalkway(room, 2, 9);
+		for (uint32_t x = 12; x < 16; ++x) world.addSectorWalkway(room, 2, x);
+		auto sofa = world.placeFurniture(room, "sofa", 1.125f, 0, "Sofa");
+		world.placeFurniture(room, "sofa", 3.125f, 0, "Touching sofa");
+		world.placeFurniture(room, "larger", 8.25f, 0, "Sparse layout");
+		world.placeFurniture(room, "sofa", 4.25f, 2, "Walkway sofa");
+		world.placeFurniture(room, "larger", 13.25f, 2, "Walkway layout");
+		auto points = world.furniture().front().destinations;
+		require(points.size() == 2 && points[0].marker != points[1].marker
+			&& world.lookupMarker(points[0].marker)->getName() == "Sofa Left seat"
+			&& world.lookupMarker(points[1].marker)->getName() == "Sofa Right seat", "Sofa did not create independent labelled identities");
+		auto refuse = [&](std::string const& key, float x, float y, std::string const& fragment) {
+			auto before = snapshot(world); auto generation = world.getTopologyGeneration(); auto dirty = world.isModified();
+			std::string diagnostic;
+			require(!world.canPlaceFurniture(room, key, x, y, "Invalid", &diagnostic)
+				&& diagnostic.find(fragment) != std::string::npos, diagnostic);
+			try { world.placeFurniture(room, key, x, y, "Invalid"); require(false, "Invalid layout accepted"); }
+			catch (core::Exception const&) {}
+			require(snapshot(world) == before && generation == world.getTopologyGeneration() && dirty == world.isModified(),
+				"Rejected multi-point placement mutated the World");
+		};
+		refuse("sofa", 18.25f, 0, "complete width");
+		refuse("larger", 0.5f, 0, "complete width");
+		refuse("larger", 8, 2, "continuous"); // Empty artwork cell still requires support.
+		refuse("sofa", 6.25f, 2, "continuous"); // Fractional Walkway overhang.
+		refuse("sofa", 8.25f, 1, "overlaps"); // Empty/transparent artwork still occupies the rectangle.
+		refuse("larger", 13.25f, 2.25f, "floor-aligned");
+		world.addSectorMarker(room, 0, 19.5f, "Invalid Right seat");
+		refuse("sofa", 12.5f, 0, "already exists"); // Validate the second point before issuing either identity.
+		auto malformedPath = context.temporaryRoot() / "invalid.furniture.yaml";
+		auto catalogueYaml = YAML::LoadFile(context.fixture("resources/test-worlds/layouts.furniture.yaml").string());
+		for (int variant = 0; variant < 5; ++variant)
+		{
+			auto invalid = YAML::Clone(catalogueYaml);
+			auto definition = invalid["furnitureCatalogue"]["definitions"][0];
+			if (variant == 0) definition["usablePoints"][1]["key"] = "left";
+			if (variant == 1) definition["usablePoints"][1]["y"] = 0.25;
+			if (variant == 2) definition["tiles"][1]["x"] = 1.25;
+			if (variant == 3) definition["usablePoints"][1]["label"] = "Left seat";
+			if (variant == 4) definition["usablePoints"][1]["x"] = ".nan";
+			{ std::ofstream file(malformedPath); file << invalid; }
+			bool refused = false;
+			try { (void)core::FurnitureCatalogue::load(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "Malformed multi-point catalogue was accepted");
+		}
+		uint32_t entranceId = 0, exitId = 0;
+		world.addSectorMarker(room, 0, 0.125f, "Entrance", &entranceId);
+		world.addSectorMarker(room, 0, 18.875f, "Exit", &exitId);
+		world.finishBuild(); world.pauseSimulation();
+		auto graph = world.getGraph(); auto sector = world.getSector(room);
+		auto vertexFor = [&](core::MarkerId id) {
+			std::shared_ptr<const core::Vertex> result;
+			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+				if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(sector->getObject(i));
+					object && object->getMarker()->getId() == id) result = graph->getVertexForObject(object);
+			return result;
+		};
+		core::Agent query("Query");
+		auto entrance = graph->getVertexByIdentifier(entranceId), exit = graph->getVertexByIdentifier(exitId);
+		auto through = graph->calculatePath(&query, entrance, exit);
+		require(through != nullptr, "Multi-point layouts severed circulation");
+		for (auto const& instance : world.furniture())
+			for (auto const& point : instance.destinations)
+			{
+				auto seat = vertexFor(point.marker);
+				auto const& definition = *world.furnitureCatalogue()->definition(instance.definitionKey);
+				auto authored = std::find_if(definition.usablePoints.begin(), definition.usablePoints.end(),
+					[&](auto const& p) { return p.key == point.key; });
+				require(seat && seat->getPosition().x == instance.x + authored->x
+					&& seat->getPosition().y == instance.y, "Graph lost fractional x or introduced an elevated movement point");
+				require(world.lookupMarker(point.marker)->hasProperty(core::MarkerProperty::BlocksPathing), "Seat did not default to Blocks pathing");
+				if (instance.y == 0)
+				{
+					for (auto const& node : through->nodes) require(node.targetVertex != seat, "Passing route used a seat");
+					require(graph->calculatePath(&query, entrance, seat) && graph->calculatePath(&query, seat, exit), "Seat is not a valid origin/destination");
+				}
+			}
+		std::string diagnostic;
+		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+			if (auto object = sector->getObject(i); object && object->getObjectType() == core::SectorObjectType::Walkway
+				&& object->getCellX() == 13 && object->getCellY() == 2)
+			{
+				auto plan = world.planRemoveSectorWalkway(room, i);
+				require(!plan.valid && plan.diagnostic.find("Walkway layout") != std::string::npos,
+					"Removing support under a transparent layout gap was permitted");
+			}
+		require(world.renameMarker(points[1].marker, "Independent right destination", &diagnostic), diagnostic);
+		auto before = snapshot(world);
+		require(!world.editFurniture(sofa, 4, 0, "Moved", &diagnostic) && snapshot(world) == before, "Overlapping multi-point move mutated identities");
+		require(world.editFurniture(sofa, 15.375f, 0, "Moved sofa", &diagnostic), diagnostic);
+		require(world.furniture().front().destinations[0].marker == points[0].marker
+			&& world.furniture().front().destinations[1].marker == points[1].marker
+			&& world.lookupMarker(points[1].marker)->getName() == "Independent right destination"
+			&& world.lookupMarker(points[0].marker)->getCellX() + world.lookupMarker(points[0].marker)->getOffset() == 15.625f
+			&& world.lookupMarker(points[1].marker)->getCellX() + world.lookupMarker(points[1].marker)->getOffset() == 17.f, "Rigid move lost identity/name/offset");
+		auto registry = core::AgentBehaviourRegistry::create();
+		world.attachAgentBehaviourRegistry("layouts.behaviours", registry);
+		auto behaviour = registry->addAgentBehaviour("Visit", "visit.lua", {
+			{ "destination", core::AgentBehaviourSchemaType::Marker, {}, true, std::nullopt }
+		});
+		for (size_t i = 0; i < points.size(); ++i)
+		{
+			auto agent = world.createAgent("Seat visitor " + std::to_string(i), room, 0, 0.125f);
+			require(world.setAgentBehaviourAssignment(agent, behaviour, 1, {{"destination", points[i].marker}}, &diagnostic), diagnostic);
+			require(*core::agentBehaviourConfigurationGetIf<core::MarkerId>(&world.getAgentBehaviourAssignment(agent)->configuration.at("destination"))
+				== points[i].marker, "Independent destination selection retargeted a seat");
+		}
+		before = snapshot(world);
+		require(!world.removeFurniture(sofa, &diagnostic) && diagnostic.find("Seat visitor 0") != std::string::npos
+			&& diagnostic.find("Seat visitor 1") != std::string::npos && snapshot(world) == before,
+			"Deletion did not protect every owned destination atomically");
+	}
 }
-void registerFurniture(std::vector<smoke::Check>& checks) { checks.push_back({ "furniture/chair", chair }); }
+void registerFurniture(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({ "furniture/chair", chair });
+	checks.push_back({ "furniture/layouts", layouts });
+}

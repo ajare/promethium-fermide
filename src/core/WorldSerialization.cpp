@@ -479,10 +479,17 @@ namespace core
 			serializer.writeString("name", record.name);
 			serializer.writeFloat("x", record.x);
 			serializer.writeFloat("y", record.y);
-			serializer.writeString("usablePoint", record.usableKey);
-			serializer.writeUint64("markerId", record.markerId.value);
-			serializer.writeString("markerName", record.markerName);
-			serializer.writeUint32("properties", record.c);
+			serializer.beginArray("destinations");
+			for (auto const& point : record.furnitureDestinations)
+			{
+				serializer.beginMap("");
+				serializer.writeString("usablePoint", point.key);
+				serializer.writeUint64("markerId", point.marker.value);
+				serializer.writeString("markerName", point.name);
+				serializer.writeUint32("properties", point.properties);
+				serializer.endMap();
+			}
+			serializer.endArray();
 			break;
 		case ConstructionType::Marker:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
@@ -562,8 +569,8 @@ namespace core
 		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
-		// Version 43 adds catalogue-backed Furniture and owned Marker identities.
-		serializer.writeUint32("version", 43);
+		// Version 44 stores every stable-key Furniture destination.
+		serializer.writeUint32("version", 44);
 		serializer.writeUint64("nextFurnitureId", mNextFurnitureId);
 		if (mFurnitureCatalogue)
 		{
@@ -1128,10 +1135,23 @@ namespace core
 			record.name = serializer.readString("name");
 			record.x = serializer.readFloat("x");
 			record.y = serializer.readFloat("y");
-			record.usableKey = serializer.readString("usablePoint");
-			record.markerId = MarkerId{ serializer.readUint64("markerId") };
-			record.markerName = serializer.readString("markerName");
-			record.c = serializer.readUint32("properties");
+			if (version >= 44)
+			{
+				serializer.beginArray("destinations");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					record.furnitureDestinations.push_back({ serializer.readString("usablePoint"),
+						MarkerId{ serializer.readUint64("markerId") }, serializer.readString("markerName"),
+						serializer.readUint32("properties") });
+					serializer.endMap();
+				}
+				serializer.endArray();
+				if (record.furnitureDestinations.empty()) throw SerializationException("Furniture needs destinations");
+			}
+			else record.furnitureDestinations.push_back({ serializer.readString("usablePoint"),
+				MarkerId{ serializer.readUint64("markerId") }, serializer.readString("markerName"),
+				serializer.readUint32("properties") });
 			break;
 		case ConstructionType::Marker:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
@@ -1223,7 +1243,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 43)
+		if (version < 1 || version > 44)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1408,13 +1428,12 @@ namespace core
 			set<string> liveNames;
 			for (auto const& record : records)
 			{
-				if (record.type == ConstructionType::Marker || record.type == ConstructionType::Furniture)
+				auto addMarker = [&](MarkerId id, string const& markerName)
 				{
-					if (!record.markerId)
+					if (!id)
 						throw SerializationException("Serialized Marker ID cannot be zero");
-					if (!issued.insert(record.markerId).second)
+					if (!issued.insert(id).second)
 						throw SerializationException("Serialized Marker IDs must be unique");
-					auto const& markerName = record.type == ConstructionType::Furniture ? record.markerName : record.name;
 					auto const trimmed = Marker::trimName(markerName);
 					string reason;
 					if (trimmed != markerName || !Marker::nameIsValid(trimmed, &reason))
@@ -1422,9 +1441,12 @@ namespace core
 							+ (trimmed != markerName ? string("it must be trimmed") : reason));
 					if (!liveNames.insert(trimmed).second)
 						throw SerializationException("Serialized live Marker names must be unique");
-					live.emplace(record.markerId, trimmed);
-					highestMarkerId = max(highestMarkerId, record.markerId.value);
-				}
+					live.emplace(id, trimmed);
+					highestMarkerId = max(highestMarkerId, id.value);
+				};
+				if (record.type == ConstructionType::Marker) addMarker(record.markerId, record.name);
+				else if (record.type == ConstructionType::Furniture)
+					for (auto const& point : record.furnitureDestinations) addMarker(point.marker, point.name);
 				else if (record.type == ConstructionType::RemoveMarker)
 				{
 					if (!record.markerId)

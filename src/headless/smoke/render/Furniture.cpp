@@ -57,6 +57,54 @@ namespace
 		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 2);
 		require(world->removeFurniture(id, &diagnostic), "Could not delete rendered Furniture");
 		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 0);
+		auto layouts = std::make_shared<core::World>("Layout rendering", 20, 4);
+		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 20, 4);
+		layouts->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/layouts.furniture.yaml")));
+		auto sofa = layouts->placeFurniture(layoutRoom, "sofa", 1.125f, 0, "Sofa");
+		auto larger = layouts->placeFurniture(layoutRoom, "larger", 8.375f, 0, "Larger");
+		layouts->finishBuild(); layouts->pauseSimulation();
+		RenderWorldScope layoutScope(layouts);
+		auto checkLayouts = [&](LayerRenderStyle style, WorldDrawList::ClipRectangle clip) {
+			WorldDrawList drawing(clip);
+			renderSector(layouts->getSector(layoutRoom), 0, style, false, ImColor(192,192,255), &drawing);
+			std::map<std::pair<float, float>, unsigned> tilesDrawn;
+			for (auto const& command : drawing.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas
+					&& triangle->texcoords[0].x >= 256.0f / 320 && triangle->texcoords[0].y <= 320.0f / 480)
+				{
+					require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x
+						&& triangle->clip.minimum.y == clip.minimum.y && triangle->clip.maximum.y == clip.maximum.y,
+						"Layout draw command escaped clipping");
+					float minX = triangle->positions[0].x, maxX = minX;
+					float minY = triangle->positions[0].y, maxY = minY;
+					for (auto p : triangle->positions) { minX = std::min(minX, p.x); maxX = std::max(maxX, p.x);
+						minY = std::min(minY, p.y); maxY = std::max(maxY, p.y); }
+					require(maxX - minX == CORE_CELL_WIDTH_PIXELS && maxY - minY == CORE_LEVEL_HEIGHT_PIXELS,
+						"Multi-tile artwork was arbitrarily scaled");
+					++tilesDrawn[{minX, maxY}];
+				}
+			if (style == LayerRenderStyle::Wireframe) require(tilesDrawn.empty(), "Wireframe rendered tile textures");
+			else
+			{
+				size_t total = 0;
+				for (auto const& instance : layouts->furniture())
+					for (auto const& tile : layouts->furnitureCatalogue()->definition(instance.definitionKey)->tiles)
+					{
+						++total;
+						require(tilesDrawn[{(instance.x + tile.x) * CORE_CELL_WIDTH_PIXELS,
+							600 - (instance.y + tile.y) * CORE_LEVEL_HEIGHT_PIXELS}] == 2,
+							"Tile command lost fractional origin or rigid integer offset");
+					}
+				require(tilesDrawn.size() == total, "Renderer filled transparent layout gaps with extra tiles");
+			}
+		};
+		checkLayouts(LayerRenderStyle::Solid, {{0,0},{800,600}});
+		checkLayouts(LayerRenderStyle::Aperture, {{100,400},{500,590}});
+		checkLayouts(LayerRenderStyle::Wireframe, {{0,0},{800,600}});
+		require(layouts->editFurniture(sofa, 3.625f, 0, "Moved sofa", &diagnostic), diagnostic);
+		require(layouts->editFurniture(larger, 11.875f, 0, "Moved larger", &diagnostic), diagnostic);
+		checkLayouts(LayerRenderStyle::Solid, {{0,0},{800,600}});
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 }

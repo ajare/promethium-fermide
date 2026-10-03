@@ -5,16 +5,35 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 #include "core/EntityId.h"
 
 namespace core
 {
-	// Slice 1 deliberately accepts only a single World tile and one fixed-depth-0
-	// usable point. Later catalogue layouts must not be silently approximated.
+	struct FurnitureTile
+	{
+		int x{ 0 }, y{ 0 };
+		std::string imageSet, image;
+	};
+	struct FurnitureUsablePoint
+	{
+		std::string key, label;
+		float x{ 0.5f };
+	};
 	struct FurnitureDefinition
 	{
-		std::string key, label, imageSet, image, usableKey, usableLabel;
-		float usableX{ 0.5f };
+		std::string key, label;
+		std::vector<FurnitureTile> tiles;
+		std::vector<FurnitureUsablePoint> usablePoints;
+		// Full artwork rectangle, including transparent pixels and layout gaps.
+		int minX{ 0 }, minY{ 0 }, maxX{ 0 }, maxY{ 0 };
+	};
+	struct FurnitureDestination
+	{
+		std::string key;
+		MarkerId marker{};
+		std::string name;
+		uint32_t properties{ 0 };
 	};
 
 	class FurnitureCatalogue
@@ -38,7 +57,9 @@ namespace core
 		uint64_t id{ 0 };
 		uint32_t sector{ 0 };
 		float x{ 0 }, y{ 0 }; // Location-local supporting Floor position
-		std::string definitionKey, name, usableKey;
+		std::string definitionKey, name;
+		std::vector<FurnitureDestination> destinations;
+		// First destination retained for compatibility with the chair authoring API.
 		MarkerId marker{};
 	};
 }

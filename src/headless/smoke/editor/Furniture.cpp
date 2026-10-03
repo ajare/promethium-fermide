@@ -73,6 +73,54 @@ namespace
 			&& diagnostic.find("Editor visitor") != std::string::npos && diagnostic.find("destination") != std::string::npos
 			&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == protectedSnapshot,
 			"Editor deletion did not protect references without history or mutation");
+		// Exercise multi-point layouts through the same production history actions.
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/layouts.furniture.yaml"), path.parent_path() / "layouts.furniture.yaml");
+		auto layouts = std::make_shared<core::World>("Layout editor", 20, 4);
+		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 20, 4);
+		layouts->finishBuild(); layouts->pauseSimulation(); layouts->saveTo(path.string());
+		DocumentHistory layoutHistory;
+		require(selectFurnitureCatalogue(layouts, path, "layouts.furniture.yaml", diagnostic, layoutHistory), diagnostic);
+		auto layoutCatalogue = layouts->furnitureCatalogue();
+		require(placeSelectedFurniture(layouts, layoutRoom, "sofa", 1.375f, 0, false, "Sofa", diagnostic, layoutHistory), diagnostic);
+		require(placeSelectedFurniture(layouts, layoutRoom, "larger", 7.375f, 0, true, "Large", diagnostic, layoutHistory), diagnostic);
+		require(layouts->furniture()[0].x == 1.375f && layouts->furniture()[1].x == 7, "Layout snap mode changed offsets or ignored toggle");
+		auto sofa = layouts->furniture()[0]; auto large = layouts->furniture()[1];
+		require(layouts->renameMarker(sofa.destinations[1].marker, "Right seat independently renamed", &diagnostic), diagnostic);
+		auto restoreLayout = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = layoutCatalogue;
+			auto restored = layouts->deserialize(*reader, work); layouts->pauseSimulation(); return restored;
+		};
+		require(editSelectedFurniture(layouts, sofa.id, 12.625f, 0, true, "Snapped sofa", diagnostic, layoutHistory), diagnostic);
+		require(layouts->furniture()[0].x == 13, "Whole sofa did not snap horizontally");
+		require(editSelectedFurniture(layouts, large.id, 8.625f, 0, false, "Fractional larger", diagnostic, layoutHistory), diagnostic);
+		require(layouts->furniture()[1].x == 8.625f
+			&& layouts->lookupMarker(sofa.destinations[0].marker)->getCellX() + layouts->lookupMarker(sofa.destinations[0].marker)->getOffset() == 13.25f
+			&& layouts->lookupMarker(sofa.destinations[1].marker)->getCellX() + layouts->lookupMarker(sofa.destinations[1].marker)->getOffset() == 14.625f
+			&& layouts->lookupMarker(large.destinations[0].marker)->getCellX() + layouts->lookupMarker(large.destinations[0].marker)->getOffset() == 7.875f
+			&& layouts->lookupMarker(large.destinations[1].marker)->getCellX() + layouts->lookupMarker(large.destinations[1].marker)->getOffset() == 9.f
+			&& layouts->lookupMarker(large.destinations[2].marker)->getCellX() + layouts->lookupMarker(large.destinations[2].marker)->getOffset() == 10.375f,
+			"Editor snapping/movement changed rigid fractional offsets");
+		count = layoutHistory.undoCount();
+		auto layoutBefore = captureDocumentSnapshot(layouts, layoutHistory)->yaml;
+		for (bool snap : {false, true})
+			require(!editSelectedFurniture(layouts, large.id, 8.625f, 0.25f, snap, "Floating", diagnostic, layoutHistory)
+				&& layoutHistory.undoCount() == count && captureDocumentSnapshot(layouts, layoutHistory)->yaml == layoutBefore,
+				"Snap toggle allowed fractional y or acquired refusal history");
+		require(!editSelectedFurniture(layouts, large.id, 13, 0, false, "Overlap", diagnostic, layoutHistory)
+			&& layoutHistory.undoCount() == count, "Multi-point overlap failure acquired history");
+		require(layoutHistory.undo(captureDocumentSnapshot(layouts, layoutHistory), restoreLayout)
+			&& layouts->furniture()[1].x == 7, "Larger movement undo failed");
+		require(layoutHistory.redo(captureDocumentSnapshot(layouts, layoutHistory), restoreLayout)
+			&& layouts->furniture()[1].x == 8.625f, "Larger movement redo failed");
+		for (size_t i = 0; i < large.destinations.size(); ++i)
+			require(layouts->furniture()[1].destinations[i].marker == large.destinations[i].marker, "History changed larger destination identity");
+		require(deleteSelectedFurniture(layouts, sofa.id, diagnostic, layoutHistory), diagnostic);
+		for (auto const& point : sofa.destinations) require(!layouts->lookupMarker(point.marker), "Editor deletion left a destination");
+		require(layoutHistory.undo(captureDocumentSnapshot(layouts, layoutHistory), restoreLayout)
+			&& layouts->furniture()[0].destinations[1].marker == sofa.destinations[1].marker
+			&& layouts->lookupMarker(sofa.destinations[1].marker)->getName() == "Right seat independently renamed",
+			"Multi-point delete undo changed identity or name");
 		ImGui::GetIO().DisplaySize = {800, 600}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture actions");
 		renderFurniturePanel(world, path, world->getSector(room));

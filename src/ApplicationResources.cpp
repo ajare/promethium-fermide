@@ -114,9 +114,15 @@ void FurnitureCatalogueResource::create(resources::DataStreamPtr, resources::Res
 	{
 		auto set = hasDependentResource("Artwork")
 			? std::dynamic_pointer_cast<resources::ImageSetResource>(getDependentResource("Artwork")) : nullptr;
-		if (!set || set->getName() != definition.imageSet || !set->getImageDefinitions().contains(definition.image))
-			throw resources::ResourceException(this, "Missing Furniture Image-set region for " + key
-				+ ": " + definition.imageSet + "/" + definition.image);
+		for (auto const& tile : definition.tiles)
+		{
+			if (!set || set->getName() != tile.imageSet || !set->getImageDefinitions().contains(tile.image))
+				throw resources::ResourceException(this, "Missing Furniture Image-set region for " + key
+					+ ": " + tile.imageSet + "/" + tile.image);
+			auto const& region = set->getImageDefinitions().at(tile.image);
+			if (region.width != CORE_CELL_WIDTH_PIXELS || region.height != CORE_LEVEL_HEIGHT_PIXELS)
+				throw resources::ResourceException(this, "Furniture artwork must be a World-tile-sized Image-set region: " + tile.image);
+		}
 	}
 	mCatalogue = std::move(catalogue);
 }
