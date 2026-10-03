@@ -10,6 +10,57 @@ namespace persistence
 	void airlocks(smoke::Context const&)
 	{
 		using smoke::require;
+		// Pre-automation documents allocated three point IDs per chamber.
+		// Removing the physical internal button must not retarget permissions
+		// on a subsequent chamber or an unrelated authored control.
+		{
+			core::World legacySource("Legacy control identities", 20, 2);
+			legacySource.addRoom("Left", 0, 0, 0, 2, 1);
+			legacySource.addRoom("Middle", 0, 0, 5, 2, 1);
+			legacySource.addRoom("Right", 0, 0, 10, 3, 1);
+			legacySource.addAirlock(0, 0, 2, 3);
+			legacySource.addAirlock(0, 0, 7, 3);
+			legacySource.addSectorLightSwitch(2, 2);
+			legacySource.finishBuild(); legacySource.pauseSimulation();
+			auto key = legacySource.addAccessPermission("Legacy control protection");
+			auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
+			work.markSerializedUnmodified = false; legacySource.serialize(*writer, work); writer->serialize();
+			auto legacy = YAML::Load(writer->getSerializedString());
+			legacy["version"] = 42;
+			for (auto id : { 4, 7 })
+			{
+				YAML::Node requirement;
+				requirement["interactionPoint"] = id;
+				requirement["permissions"].push_back(key.value);
+				legacy["interactionPermissionRequirements"].push_back(requirement);
+			}
+			core::World migrated("Migrated", 1, 1);
+			auto input = core::YamlSerializer::fromString(YAML::Dump(legacy)); input->deserialize();
+			require(migrated.deserialize(*input, work), "Legacy Airlock control identities refused");
+			auto check = [&](core::World const& source) {
+				auto state = source.getSimulationSnapshot();
+				require(state.airlocks.size() == 2 && state.interactionPoints.size() == 5
+					&& state.airlocks[0].controls[0].value == 1 && state.airlocks[0].controls[1].value == 2
+					&& state.airlocks[1].controls[0].value == 4 && state.airlocks[1].controls[1].value == 5
+					&& !source.lookupInteractionPoint(core::InteractionPointId{ 3 })
+					&& !source.lookupInteractionPoint(core::InteractionPointId{ 6 }), "Removed internal buttons shifted later controls or survived migration");
+				for (uint64_t id : { 4u, 7u })
+					require(source.getInteractionPointPermissionRequirement(core::InteractionPointId{ id }) == std::vector<core::AccessPermissionId>{ key },
+						"Legacy permission reference retargeted after internal button removal");
+			};
+			check(migrated); migrated.resetSimulation(); check(migrated);
+			for (bool binary : { false, true })
+			{
+				auto save = [&](auto output) {
+					migrated.serialize(*output, work); output->serialize(); return output->getSerializedString();
+				};
+				auto data = binary ? save(core::BinarySerializer::toString()) : save(core::YamlSerializer::toString());
+				std::unique_ptr<core::Serializer> reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				reader->deserialize(); core::World reloaded("Reloaded", 1, 1);
+				require(reloaded.deserialize(*reader, work), "Migrated control references failed round trip"); check(reloaded);
+			}
+		}
 		core::World world("Persisted chambers", 12, 3);
 		world.addRoom("Left", 0, 0, 0, 2, 1); world.addCorridor(0, 0, 5, 2, 1);
 		auto index = world.addAirlock(0, 0, 2, 3, 7.5f);
@@ -22,15 +73,14 @@ namespace persistence
 		auto rightKey = world.addAccessPermission("Right operation");
 		require(world.setInteractionPointPermissionRequirement(chamberIn(world)->getControl(0), { leftKey })
 			&& world.setInteractionPointPermissionRequirement(chamberIn(world)->getControl(1), { rightKey }), "Outside requirements refused");
-		require(!world.setInteractionPointPermissionRequirement(chamberIn(world)->getControl(2), { leftKey }), "Internal exit protected");
+		require(world.getSimulationSnapshot().interactionPoints.size() == 2, "Internal button was generated");
 		auto assertAuthored = [&](core::World const& source) {
 			auto chamber = chamberIn(source);
 			require(chamber && chamber->getCellX() == 2 && chamber->getCellY() == 0
 				&& chamber->getCellsWide() == 3 && chamber->getLayerIndex() == 0
 				&& chamber->getCycleSeconds() == 7.5f && chamber->getCapacity() == 3, "Airlock identity/geometry/timing lost");
 			require(source.getInteractionPointPermissionRequirement(chamber->getControl(0)) == std::vector<core::AccessPermissionId>{ leftKey }
-				&& source.getInteractionPointPermissionRequirement(chamber->getControl(1)) == std::vector<core::AccessPermissionId>{ rightKey }
-				&& source.getInteractionPointPermissionRequirement(chamber->getControl(2)).empty(), "Independent requirements lost on load/replay/reset");
+				&& source.getInteractionPointPermissionRequirement(chamber->getControl(1)) == std::vector<core::AccessPermissionId>{ rightKey }, "Independent requirements lost on load/replay/reset");
 			auto state = source.getSimulationSnapshot();
 			require(state.airlocks.size() == 1 && state.airlocks[0].sector.value == index + 1
 				&& state.airlocks[0].occupants.empty() && state.airlocks[0].cycleComplete
@@ -38,7 +88,8 @@ namespace persistence
 				&& state.airlocks[0].doors[0] == core::DoorSnapshotState::Closed
 				&& state.airlocks[0].doors[1] == core::DoorSnapshotState::Closed,
 				"Load/reset must be empty, closed, initially cycled, ready");
-			for (uint32_t i = 0; i < 3; ++i)
+			require(state.interactionPoints.size() == 2 && chamber->getNumObjects() == 2, "Load/reset regenerated an internal button");
+			for (uint32_t i = 0; i < 2; ++i)
 				require(chamber->getControl(i) == chamberIn(world)->getControl(i)
 					&& source.lookupInteractionPoint(chamber->getControl(i)), "Generated control identity lost");
 			require(source.getSector(3)->getName() == "Ordinary" && source.getSector(3)->getNumObjects() == 0,

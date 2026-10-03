@@ -4,6 +4,7 @@
 
 namespace persistence
 {
+	void boothWindows(smoke::Context const&);
 	void airlocks(smoke::Context const&);
 	void securityScanners(smoke::Context const&);
 	void restorationPreservesStatePathsAndLifetimes(smoke::Context const&);

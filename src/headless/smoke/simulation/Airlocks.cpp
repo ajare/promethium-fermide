@@ -36,7 +36,7 @@ namespace
 			agent->setPath(world.getGraph()->calculatePath(agent,
 				world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
 			bool reached = false;
-			for (unsigned tick = 0; tick < 1600 && !reached; ++tick)
+			for (unsigned tick = 0; tick < 2200 && !reached; ++tick)
 			{
 				world.advanceTick();
 				auto state = world.getSimulationSnapshot().airlocks.at(0);
@@ -138,12 +138,14 @@ namespace
 						if (cycleStart && state.cycleComplete)
 						{
 							require(world.getSimulationTick() - cycleStart >= core::secondsToTicks(seconds, world.getFixedTimestep()), "Cycle completed early");
+							if (boarded && !exited)
+								require(state.doors[1 - direction] == core::DoorSnapshotState::Opening
+									&& world.getSimulationTick() - cycleStart == core::secondsToTicks(seconds, world.getFixedTimestep()),
+									"Exit did not open automatically when the closed-door cycle completed");
 							cycleStart = 0;
 						}
-						for (auto const& interaction : world.getSimulationSnapshot().interactionRequests)
-							if (interaction.point == state.controls[2])
-								require(state.cycleComplete && state.doors[direction] == core::DoorSnapshotState::Closed,
-									"Internal interaction started before the closed-door cycle completed");
+						for (auto const& point : world.getSimulationSnapshot().interactionPoints)
+							require(point.sectorId.value != index + 1, "Automatic chamber retained an internal interaction point");
 						for (auto const& request : world.getSimulationSnapshot().traversalRequests)
 							if (request.resource == std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index))->getTraversalResourceId()
 								&& request.state == core::TraversalRequestState::Granted)
@@ -165,6 +167,156 @@ namespace
 					require(boarded && exited && cycled && agent->getState() == core::Agent::State::Idle, "Airlock journey stalled: state=" + std::to_string((int)agent->getState())
 						+ " sector=" + std::to_string(agent->getSector()->getIndex()) + " boarded=" + std::to_string(boarded) + " cycled=" + std::to_string(cycled));
 				}
+	}
+
+	void approachingBatch(smoke::Context const&)
+	{
+		for (int side : { 0, 1 })
+		{
+			core::World world("Spaced Airlock arrivals", 16, 6);
+			uint32_t ends[] = { world.addCorridor(0, 1, 2, 5, 1), world.addCorridor(0, 1, 10, 4, 1) };
+			world.addAirlock(0, 1, 7, 3, 3);
+			auto marker = world.addSectorMarker(ends[1 - side], 0, 3.0f);
+			auto markerId = std::static_pointer_cast<core::MarkerSectorObject>(marker.sector->getObject(marker.index))->getMarker()->getId();
+			world.finishBuild();
+			std::vector<core::AgentId> agents;
+			for (float x : { 0.3125f, 1.5f, 2.578125f })
+			{
+				auto id = world.createAgent("Approaching traveller", ends[side], 0, side ? 4.0f - x : x);
+				agents.push_back(id);
+				require(world.moveAgentToMarker(id, markerId).accepted(), "Spaced arrival Marker command refused");
+			}
+			size_t peak = 0;
+			bool completed = false;
+			for (unsigned tick = 0; tick < 7000; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().airlocks.at(0);
+				require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Spaced arrival interlock violated");
+				require(state.occupants.size() + state.reservations.size() <= 3, "Spaced arrival overbooked chamber");
+				peak = std::max(peak, state.occupants.size());
+				completed = std::all_of(agents.begin(), agents.end(), [&](auto id) {
+					auto agent = world.lookupAgent(id).entity;
+					return agent->getSector()->getIndex() == ends[1 - side] && agent->getState() == core::Agent::State::Idle;
+				});
+				if (completed) break;
+			}
+			require(peak == 3, "Spaced arrivals never filled capacity: peak=" + std::to_string(peak));
+			require(completed, "Spaced arrivals failed to reach Marker");
+		}
+	}
+
+	void sharedOutsideCall(smoke::Context const&)
+	{
+		for (int side : { 0, 1 })
+		for (bool cancelCaller : { false, true })
+		{
+			core::World world("Shared outside call", 20, 2);
+			uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 8, 1), world.addRoom("Right", 0, 0, 11, 8, 1) };
+			world.addAirlock(0, 0, 8, 3, 10);
+			auto marker = world.addSectorMarker(ends[1 - side], 0, 4);
+			world.finishBuild();
+			std::vector<core::AgentId> agents;
+			for (unsigned member = 0; member < 6; ++member)
+			{
+				auto id = world.createAgent("Waiting traveller", ends[side], 0, side ? 0.5f : 7.5f);
+				agents.push_back(id);
+				auto agent = world.lookupAgent(id).entity;
+				agent->setPath(world.getGraph()->calculatePath(agent, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+			}
+			std::set<core::InteractionRequestId> presses, attempts;
+			core::AgentId cancelled;
+			unsigned batches = 0;
+			bool completed = false;
+			int previousEntry = -1;
+			for (unsigned tick = 0; tick < 12000; ++tick)
+			{
+				world.advanceTick();
+				auto snapshot = world.getSimulationSnapshot();
+				auto state = snapshot.airlocks.at(0);
+				require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Shared call interlock violated");
+				require(state.occupants.size() + state.reservations.size() <= 3, "Shared call overbooked chamber");
+				if (state.entrySide >= 0 && previousEntry < 0) ++batches;
+				previousEntry = state.entrySide;
+				for (auto const& request : snapshot.interactionRequests)
+					if (request.point == state.controls[side])
+					{
+						attempts.insert(request.id);
+						if (request.result != core::InteractionResult::Succeeded || !presses.insert(request.id).second) continue;
+						// The second call waits through the post-exit cycle. Its
+						// acceptance must survive the physical caller leaving the queue.
+						if (cancelCaller && presses.size() == 2)
+						{
+							require(state.entrySide < 0 && !state.cycleComplete, "Call did not wait through cycling");
+							cancelled = request.actor;
+							require(world.cancelAgentMovement(cancelled).accepted(), "Accepted caller cancellation refused");
+						}
+					}
+				completed = std::all_of(agents.begin(), agents.end(), [&](auto id) {
+					return id == cancelled || world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side];
+				});
+				if (completed) break;
+			}
+			require(completed && batches == 2, "Shared call fixture failed to complete two batches");
+			require(presses.size() == batches && attempts.size() == batches, "Outside button was pressed again despite an accepted call: presses="
+				+ std::to_string(presses.size()) + " attempts=" + std::to_string(attempts.size()) + " batches=" + std::to_string(batches));
+			if (cancelCaller) require(cancelled && world.lookupAgent(cancelled).entity->getSector()->getIndex() == ends[side],
+				"Cancelled caller did not remain outside");
+		}
+	}
+
+	void boardingDeadline(smoke::Context const&)
+	{
+		for (int side : { 0, 1 })
+		{
+			core::World world("Bounded boarding", 20, 2);
+			uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 8, 1), world.addRoom("Right", 0, 0, 11, 8, 1) };
+			world.addAirlock(0, 0, 8, 3, 1);
+			auto markers = std::array{ world.addSectorMarker(ends[0], 0, 4), world.addSectorMarker(ends[1], 0, 4) };
+			world.finishBuild();
+			auto add = [&](int origin) {
+				auto id = world.createAgent("Deadline traveller", ends[origin], 0, origin ? 0.5f : 7.5f);
+				auto agent = world.lookupAgent(id).entity;
+				auto marker = markers[1 - origin];
+				agent->setPath(world.getGraph()->calculatePath(agent, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+				return id;
+			};
+			auto first = add(side);
+			core::AgentId opposite, late;
+			uint64_t openedAt = 0;
+			auto const window = core::secondsToTicks(CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME + CORE_BULKHEAD_DOOR_STAY_OPEN_TIME, world.getFixedTimestep());
+			bool closed = false, completed = false;
+			for (unsigned tick = 0; tick < 9000; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().airlocks.at(0);
+				require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Deadline interlock violated");
+				if (!openedAt && state.entrySide == side)
+				{
+					openedAt = world.getSimulationTick();
+					opposite = add(1 - side);
+				}
+				if (openedAt && !late && world.getSimulationTick() >= openedAt + window)
+					late = add(side);
+				if (openedAt && !closed)
+				{
+					for (auto occupant : state.occupants) require(occupant == first, "Post-deadline/opposing arrival joined batch");
+					if (state.doors[side] == core::DoorSnapshotState::Closing)
+					{
+						require(world.getSimulationTick() >= openedAt + window, "Underfilled batch closed before deadline");
+						require(world.getSimulationTick() <= openedAt + window + 2, "Underfilled batch extended deadline");
+						closed = true;
+					}
+				}
+				if (late && world.lookupAgent(late).entity->getSector()->getIndex() == ends[1 - side])
+				{
+					require(world.lookupAgent(opposite).entity->getSector()->getIndex() == ends[side], "Late arrival overtook opposing queue");
+					completed = true; break;
+				}
+			}
+			// The late Agent may only enter a subsequent batch.
+			require(closed && completed, "Underfilled/deferred batch stalled");
+		}
 	}
 
 	void batches(smoke::Context const&)
@@ -195,8 +347,7 @@ namespace
 				std::set<core::AgentId> admitted, exited, members;
 				std::vector<core::AgentId> boardingOrder;
 				std::vector<core::AgentId> expectedOrder;
-				uint32_t batchCount = 0, internalPresses = 0;
-				std::set<core::InteractionRequestId> presses;
+				uint32_t batchCount = 0;
 				bool positioned = false, sawExitContention = false, completed = false;
 				std::string savedBatch;
 				int previousEntry = -1;
@@ -235,6 +386,19 @@ namespace
 						}
 					}
 					previousEntry = state.entrySide;
+					// Later underfilled batches may now gain members during their
+					// boarding window, not only on the tick that entry opens.
+					std::vector<core::TraversalRequestSnapshot> additions;
+					for (auto const& request : snapshot.traversalRequests)
+						if (!members.contains(request.owner) && std::find(state.reservations.begin(), state.reservations.end(), request.id) != state.reservations.end())
+							additions.push_back(request);
+					std::sort(additions.begin(), additions.end(), [](auto const& a, auto const& b) { return a.queueTicket < b.queueTicket; });
+					for (auto const& request : additions)
+					{
+						require(batchCount > 1 && expectedOrder.size() < width && origins.at(request.owner) == state.entrySide,
+							"Full/opposing batch accepted a later member");
+						expectedOrder.push_back(request.owner); members.insert(request.owner);
+					}
 					for (auto id : state.occupants)
 					{
 						require(members.contains(id) && origins.at(id) == state.entrySide, "Late/opposing waiter joined fixed batch");
@@ -269,9 +433,6 @@ namespace
 							}
 							else require(members.contains(request.owner) && origins.at(request.owner) == state.entrySide, "Waiter entered open exit");
 						}
-					for (auto const& interaction : snapshot.interactionRequests)
-						if (interaction.point == state.controls[2] && interaction.result == core::InteractionResult::Succeeded
-							&& presses.insert(interaction.id).second) ++internalPresses;
 					for (auto const& [id, side] : origins)
 						if (world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side]) exited.insert(id);
 					if (exited.size() == origins.size() && state.entrySide < 0 && state.cycleComplete)
@@ -279,7 +440,7 @@ namespace
 				}
 				require(completed && admitted.contains(late), "Contending/late batch journeys stalled");
 				require(positioned && sawExitContention, "Batch standing positions or exit contention not exercised: width=" + std::to_string(width) + " positioned=" + std::to_string(positioned) + " contention=" + std::to_string(sawExitContention));
-				require(internalPresses == batchCount, "Internal button was not shared once per batch");
+				require(world.getSimulationSnapshot().interactionPoints.size() == 2, "Batch required an internal control");
 				// Authored reset discards all batch state and repeats all journeys.
 				world.resetSimulation(); world.wakeAllAgents();
 				auto reset = world.getSimulationSnapshot().airlocks.at(0);
@@ -328,7 +489,7 @@ namespace
 				};
 				auto first = add(side), second = add(side);
 				bool interrupted = false, partial = false, resumed = false, complete = false;
-				core::AgentId operatorId, waiter;
+				core::AgentId operatorId = first, waiter;
 				core::Vector2 frozen;
 				for (uint32_t tick = 0; tick < 10000; ++tick)
 				{
@@ -336,17 +497,8 @@ namespace
 					auto snapshot = world.getSimulationSnapshot(); auto state = snapshot.airlocks.at(0);
 					require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Interrupted interlock violated");
 					require(state.occupants.size() + state.reservations.size() <= 2, "Interrupted batch overbooked");
-					uint32_t physicalOperators = 0;
-					for (auto const& request : snapshot.interactionRequests)
-						if (request.point == state.controls[2] && request.result == core::InteractionResult::Pending)
-						{
-							++physicalOperators;
-							if (!interrupted) operatorId = request.actor;
-						}
-					require(physicalOperators <= 1, "Duplicate internal physical operators");
-					if (!interrupted && operatorId)
+					if (!interrupted && state.occupants.size() == 2 && !state.cycleComplete)
 					{
-						require(state.occupants.size() == 2, "Operator selected before batch boarded");
 						world.pauseSimulation();
 						require(!world.clearAgentPath(operatorId), "Paused path clear discarded committed occupant");
 						frozen = world.lookupAgent(operatorId).entity->getGlobalPosition();
@@ -364,7 +516,8 @@ namespace
 						require(!world.lookupAgent(operatorId).entity->isActive(), "Occupant auto-reactivated");
 						require(std::find(state.occupants.begin(), state.occupants.end(), operatorId) != state.occupants.end(), "Inactive occupant lost capacity");
 						require(state.entrySide == side && state.reservations.empty(), "New batch mixed with inactive occupant");
-						if ((allInactive && tick > 1500) || (!allInactive && state.occupants.size() == 1))
+						if ((allInactive && state.doors[1 - side] == core::DoorSnapshotState::Open)
+							|| (!allInactive && state.occupants.size() == 1))
 						{
 							partial = !allInactive;
 							if (partial) require(world.lookupAgent(operatorId == first ? second : first).entity->getSector()->getIndex() == ends[1 - side], "Changed destination reversed occupant");
@@ -714,6 +867,11 @@ namespace
 				for (uint32_t tick = 0; tick < 1600; ++tick)
 					if (!scene.step().occupants.empty()) { boarded = true; break; }
 				require(boarded, "Permission fixture never boarded");
+				scene.world.pauseSimulation();
+				core::MobilityProfile mobility;
+				mobility.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+				require(scene.world.setAgentIndividualMobilityProfile(scene.id, mobility), "Committed occupant mobility edit refused");
+				scene.world.resumeSimulation();
 				if (tighten)
 				{
 					scene.world.pauseSimulation();
@@ -768,12 +926,14 @@ namespace
 								"Remote live entrance authorized route");
 					}
 			observer->setPath(opportunistic, true); scene.world.resumeSimulation();
-			for (uint32_t wait = 0; wait < 1200; ++wait)
+			bool admitted = false, arrived = false;
+			for (uint32_t wait = 0; wait < 3000; ++wait)
 			{
 				auto next = scene.step();
-				require(std::find(next.occupants.begin(), next.occupants.end(), id) == next.occupants.end(),
-					"Non-adherence bypassed fixed batch admission");
+				admitted = admitted || std::find(next.occupants.begin(), next.occupants.end(), id) != next.occupants.end();
+				if (observer->getSector()->getIndex() == scene.right) { arrived = true; break; }
 			}
+			require(admitted && arrived, "Eligible local observer did not use spare boarding-window capacity");
 			return;
 		}
 		throw std::runtime_error("Local adherence fixture did not open entrance");
@@ -820,12 +980,16 @@ namespace
 					auto facts = core::RouteTraversalInputs::capture(*edge, target, unseen).evaluate(unseen);
 					auto direct = edge->getDirectedTraversalFacts(target, unseen);
 					require(facts.feasible && facts.objectiveDurationSeconds == direct.objectiveDurationSeconds
-						&& facts.components.interactionUnits == unseen.policy.thresholdInteraction + unseen.policy.remoteDoorInteraction,
+						&& facts.components.interactionUnits == unseen.policy.thresholdInteraction
+							+ (target->getSector().get() == scene.chamber().get() ? unseen.policy.remoteDoorInteraction : 0),
 						"Basic estimate omitted required interaction");
 					float expectedWait = target->getSector().get() == scene.chamber().get()
 						? CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME : 3 + 2 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 					require(std::abs(facts.components.expectedWaitSeconds - expectedWait) < 0.001f
 						&& facts.components.motionSeconds >= edge->getLength() / scene.agent->getWalkSpeed(), "Basic estimate omitted cycle/movement");
+					if (target->getSector().get() != scene.chamber().get())
+						require(std::abs(facts.components.motionSeconds - edge->getLength() / scene.agent->getWalkSpeed()) < 0.001f,
+							"Automatic exit estimate retained internal-button walking or interaction time");
 					core::EffectiveRoutingProfile averse;
 					averse.waitingAversion = 3; averse.interactionAversion = 3;
 					auto neutralCost = unseen.policy.evaluate(facts, unseen.profile);
@@ -1031,6 +1195,9 @@ void registerAirlocks(std::vector<smoke::Check>& checks)
 	checks.push_back({ "airlocks/structuralEditSafety", editSafety });
 	checks.push_back({ "airlocks/singleAgentJourneys", journeys });
 	checks.push_back({ "airlocks/batchesAndOpposingQueues", batches });
+	checks.push_back({ "airlocks/approachingBatch", approachingBatch });
+	checks.push_back({ "airlocks/boardingDeadline", boardingDeadline });
+	checks.push_back({ "airlocks/sharedOutsideCall", sharedOutsideCall });
 	checks.push_back({ "airlocks/lostReservationDoesNotRefill", lostReservation });
 	checks.push_back({ "airlocks/interruptedJourneys", interruptedJourneys });
 	checks.push_back({ "airlocks/abandonedBoarding", abandonedBoarding });

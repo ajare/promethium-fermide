@@ -114,6 +114,9 @@ set(core_names
     airlocks/structuralEditSafety
     airlocks/singleAgentJourneys
     airlocks/batchesAndOpposingQueues
+    airlocks/approachingBatch
+    airlocks/boardingDeadline
+    airlocks/sharedOutsideCall
     airlocks/lostReservationDoesNotRefill
     airlocks/interruptedJourneys
     airlocks/abandonedBoarding
@@ -140,6 +143,11 @@ set(core_names
     securityScanners/presenceAndEmptyTimeout
     securityScanners/resetAndLoad
     securityScanners/destinationAndMobilityGates
+    boothWindows/runtimeTimingAndReversal
+    boothWindows/runtimeLifecycle
+    boothWindows/typedInteractionActivation
+    boothWindows/backSideAgentPanel
+    boothWindows/ownedPanelLifecycle
     runScaledWorld
 )
 

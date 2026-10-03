@@ -28,6 +28,10 @@ set(checks
     securityScanners/chambers
     securityScanners/structuralEdits
     securityScanners/preflight
+    boothWindows/placementAndTopology
+    boothWindows/atomicRefusal
+    boothWindows/lifecycle
+    boothWindows/simultaneousAdjacentPairs
     markerPlacementEnforcesPaletteCoreRules
     corridorDoorPlacementEnforcesPaletteRules
     objectMoveValidatesAndRebuildsOnceCommitted
@@ -60,7 +64,7 @@ function(invoke status expected)
 endfunction()
 
 invoke(0 "^${listed}$" --list)
-invoke(0 "SUMMARY world pass=30 fail=0 skip=0\n$")
+invoke(0 "SUMMARY world pass=34 fail=0 skip=0\n$")
 foreach(check IN LISTS checks)
     invoke(0 "^PASS world ${check}\nSUMMARY world pass=1 fail=0 skip=0\n$" --check "${check}")
 endforeach()

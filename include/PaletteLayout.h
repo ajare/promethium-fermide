@@ -31,6 +31,7 @@ enum class PaletteSlot
 	ForceBridge,
 	RoomLadder,
 	PlatformLift,
+	BoothWindow,
 	Count
 };
 
@@ -65,6 +66,7 @@ inline constexpr int paletteSlotColumn(PaletteSlot slot)
 	case PaletteSlot::Door: return 2;
 	case PaletteSlot::BulkheadDoor: return 3;
 	case PaletteSlot::Window: return 4;
+	case PaletteSlot::BoothWindow: return 9;
 	case PaletteSlot::Walkway: return 5;
 	case PaletteSlot::ForceBridge: return 6;
 	case PaletteSlot::RoomLadder: return 7;

@@ -565,7 +565,7 @@ namespace core
 					case OpenableObject::State::Open: state.doors[side] = DoorSnapshotState::Open; break;
 					case OpenableObject::State::Closing: state.doors[side] = DoorSnapshotState::Closing; break;
 					}
-				for (uint32_t control = 0; control < 3; ++control) state.controls[control] = chamber->getControl(control);
+				for (uint32_t control = 0; control < state.controls.size(); ++control) state.controls[control] = chamber->getControl(control);
 				if (auto resource = mWorld.mTraversalResources.find(chamber->getTraversalResourceId()))
 				{
 					state.entrySide = resource->mAirlockEntrySide;

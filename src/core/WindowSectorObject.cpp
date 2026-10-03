@@ -25,8 +25,10 @@ namespace core
 	- cellX and cellY are global, not relative to the Location that it's in.
 	- cellsWide should generally be 1, but in theory there's no reason why it can't be any value greater than zero.
 	*/
-	WindowSectorObject::WindowSectorObject(uint32_t cellX, uint32_t cellY, uint32_t cellsWide, uint32_t levelsHigh, shared_ptr<const Sector> sectors[2], uint32_t * vertexIdentifer)
-		: SectorObject(SectorObjectType::Window, sectors[0], cellX, cellY, cellsWide, levelsHigh, make_shared<Window>(cellX, cellY, cellsWide, levelsHigh, sectors), vertexIdentifer)
+	WindowSectorObject::WindowSectorObject(uint32_t cellX, uint32_t cellY, uint32_t cellsWide, uint32_t levelsHigh, shared_ptr<const Sector> sectors[2], uint32_t * vertexIdentifer, bool boothWindow)
+		: SectorObject(boothWindow ? SectorObjectType::BoothWindow : SectorObjectType::Window, sectors[0], cellX, cellY, cellsWide, levelsHigh,
+			boothWindow ? static_pointer_cast<Window>(make_shared<BoothWindow>(cellX, cellY, sectors))
+				: make_shared<Window>(cellX, cellY, cellsWide, levelsHigh, sectors), vertexIdentifer)
 	{
 	}
 

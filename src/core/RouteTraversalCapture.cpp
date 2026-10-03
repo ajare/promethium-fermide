@@ -272,7 +272,7 @@ namespace core
 					result.boarding = target->getSector().get() == chamber.get();
 					int side = sector.get() == chamber->getStop(0).sector.get() ? 0 : 1;
 					result.open = result.boarding && result.observed && door.isOpen();
-					result.needsActivation = !result.open;
+					result.needsActivation = result.boarding && !result.open;
 					result.preparationSeconds = result.open ? 0 : CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 					if (!result.boarding)
 					{
@@ -285,11 +285,10 @@ namespace core
 						result.exclusion = RouteExclusionReason::Permission;
 					if (result.needsActivation)
 					{
-						auto buttonX = result.boarding ? source->getPosition().x
-							: chamber->getCellX() + (chamber->getCellsWide() - 1) / 2 + 0.5f;
+						auto buttonX = source->getPosition().x;
 						result.interactionSeconds = World::getFixedTimestep();
 						if (context.world)
-							if (auto point = context.world->lookupInteractionPoint(chamber->getControl(result.boarding ? side : 2)); point)
+							if (auto point = context.world->lookupInteractionPoint(chamber->getControl(side)); point)
 							{
 								buttonX = point.entity->getPosition().x;
 								result.interactionSeconds = point.entity->getDurationTicks() * World::getFixedTimestep();

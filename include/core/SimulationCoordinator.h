@@ -180,6 +180,8 @@ namespace core
 
 		// Device-operation lifecycle. Commands coalesce: one accepted command is
 		// shared by every requester, and the operation outlives no requester.
+		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 
 		DeviceOperationId findOrCreateDeviceOperation(DeviceCommand const& command, AgentId requester);

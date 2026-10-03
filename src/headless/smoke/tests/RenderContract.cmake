@@ -35,6 +35,7 @@ set(names
     airlocks/chamberAndControls
     securityScanners/chamberCommandStream
     securityScanners/beamSweeps
+    boothWindows/staticPresentationAndNestedClipping
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

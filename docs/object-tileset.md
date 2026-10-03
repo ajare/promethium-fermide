@@ -1,6 +1,6 @@
 # Object atlas
 
-`resources/textures/objects.png` is a 320x320 RGBA atlas. Its uniform cells are
+`resources/textures/objects.png` is a 320x480 RGBA atlas. Its uniform cells are
 64x160 pixels: the same 1x1 world-unit footprint used by sector rendering, not
 64x64 screen pixels. Unoccupied cell space is transparent. Small objects do not
 expand to fill their cell.
@@ -19,6 +19,10 @@ Supported sprites:
 - Enabled/disabled Buttons, at the existing Button bounds.
 - Clear, frosted and tinted Windows: back-sector rendering precedes the overlay.
   Clear glass has a transparent centre; tinted glass is translucent.
+- BoothWindow frame and distinct inner shutter: fixed ordinary one-cell Window
+  geometry. The transparent Open frame stays stationary; the opaque 42x38 shutter
+  subregion of the Closed tile translates upwards behind it, clipped to its centre.
+  See [BoothWindows](booth-windows.md) for authoring and regeneration.
 - Agents and Markers, keeping the existing icon-fit dimensions.
 - Platform lift car: the sprite follows the moving slab's actual bounds, not the
   shaft bounds. The editor shaft outline is retained.

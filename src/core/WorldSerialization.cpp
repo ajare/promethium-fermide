@@ -151,6 +151,7 @@ namespace core
 		case ConstructionType::Shuttle: return "shuttle";
 		case ConstructionType::Door: return "door";
 		case ConstructionType::Window: return "window";
+		case ConstructionType::BoothWindow: return "boothWindow";
 		case ConstructionType::BulkheadDoor: return "bulkheadDoor";
 		case ConstructionType::LightSwitch: return "lightSwitch";
 		case ConstructionType::ForceBridge: return "forceBridge";
@@ -171,7 +172,7 @@ namespace core
 
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::SecurityScanner); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::BoothWindow); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -418,6 +419,19 @@ namespace core
 					serializer.endArray();
 				}
 			break;
+		case ConstructionType::BoothWindow:
+			if (record.d != 1 || record.e != 1 || record.p || record.j != 0
+				|| (record.i != 0 && record.i != 2))
+				throw SerializationException("Invalid BoothWindow authored record");
+			serializer.writeUint32("layer", record.a); serializer.writeUint32("y", record.b);
+			serializer.writeUint32("x", record.c); serializer.writeUint32("cellsWide", 1);
+			serializer.writeUint32("levelsHigh", 1);
+			serializer.writeString("initialState", record.i == 0 ? "open" : "closed");
+			serializer.beginArray("panelPermissionRequirement");
+			for (auto permission : record.controlPermissionRequirements[1])
+				serializer.writeUint32("", permission);
+			serializer.endArray();
+			break;
 		case ConstructionType::Window:
 		{
 			static char const* states[] = { "open", "opening", "closed", "closing", "broken", "frosted", "frosting", "unfrosting", "tinted", "tinting", "untinting" };
@@ -569,7 +583,9 @@ namespace core
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
 		// Version 43 adds directional capacity-one authored Security scanners.
-		serializer.writeUint32("version", 43);
+		// Version 43 adds distinct non-traversable BoothWindow authored records.
+		// Version 44 adds authored BoothWindow panel requirements.
+		serializer.writeUint32("version", 44);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -670,7 +686,7 @@ namespace core
 		serializer.beginArray("interactionPermissionRequirements");
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
-			if (point->mPermissionRequirement.none()) continue;
+			if (point->mPermissionRequirement.none() || point->mBoothWindowOwner) continue;
 			serializer.beginMap("");
 			serializer.writeUint64("interactionPoint", pointId.value);
 			serializer.beginArray("permissions");
@@ -1057,6 +1073,25 @@ namespace core
 					serializer.endArray();
 				}
 			break;
+		case ConstructionType::BoothWindow:
+		{
+			if (version < 43) throw SerializationException("BoothWindow requires World schema version 43");
+			if (serializer.hasField("panelPermissionRequirement"))
+			{
+				if (version < 44) throw SerializationException("BoothWindow panel requirements require World schema version 44");
+				readControlRequirement(1, "panelPermissionRequirement");
+			}
+			if (serializer.hasField("traversable") || serializer.hasField("style") || serializer.hasField("initiallyBroken"))
+				throw SerializationException("BoothWindow does not support traversal, glass styles, or Broken conditions");
+			record.a = readLayer("layer"); record.b = serializer.readUint32("y");
+			record.c = serializer.readUint32("x"); record.d = serializer.readUint32("cellsWide");
+			record.e = serializer.readUint32("levelsHigh");
+			auto state = serializer.readString("initialState");
+			if (record.d != 1 || record.e != 1 || (state != "open" && state != "closed"))
+				throw SerializationException("BoothWindow requires a 1x1 footprint and Open or Closed initial state");
+			record.i = state == "open" ? 0 : 2;
+			break;
+		}
 		case ConstructionType::Window:
 		{
 			static char const* states[] = { "open", "opening", "closed", "closing", "broken", "frosted", "frosting", "unfrosting", "tinted", "tinting", "untinting" };
@@ -1225,7 +1260,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 43)
+		if (version < 1 || version > 44)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1636,7 +1671,8 @@ namespace core
 				&& record.type != ConstructionType::Ladder
 				&& record.type != ConstructionType::SectorLadder
 				&& record.type != ConstructionType::ForceBridge
-				&& record.type != ConstructionType::Airlock) continue;
+				&& record.type != ConstructionType::Airlock
+				&& record.type != ConstructionType::BoothWindow) continue;
 			bool controls[2]{};
 			if (record.type == ConstructionType::Door || record.type == ConstructionType::BulkheadDoor)
 			{
@@ -1650,6 +1686,7 @@ namespace core
 				if (record.e > 0) controls[record.i] = true;
 				if (record.e > 1) controls[1 - record.i] = true;
 			}
+			else if (record.type == ConstructionType::BoothWindow) controls[1] = true;
 			else if (record.p || record.type == ConstructionType::Airlock) controls[0] = controls[1] = true;
 			for (size_t side = 0; side < 2; ++side)
 			{
@@ -1779,7 +1816,7 @@ namespace core
 			for (auto const& [pointId, requirement] : serializedRequirements)
 			{
 				auto point = candidate.mInteractionPoints.find(pointId);
-				if (!point || !candidate.isInteractionPointPermissionEligible(pointId))
+				if (!point || point->mBoothWindowOwner || !candidate.isInteractionPointPermissionEligible(pointId))
 					throw SerializationException(format(
 						"Serialized Access permission requirement has invalid or ineligible Interaction point {}",
 						pointId.value));
@@ -2257,7 +2294,7 @@ namespace core
 			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
 				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id)
-					&& !mAuthoredControlRequirements.contains(id))
+					&& !mAuthoredControlRequirements.contains(id) && !point->mBoothWindowOwner)
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
@@ -2267,8 +2304,13 @@ namespace core
 		}
 		mAuthoredControlRequirements.clear();
 		mInteractionPoints = {};
+		auto const nextInteractionRequest = mInteractionRequests.nextId();
 		mInteractionRequests = {};
+		mInteractionRequests.restoreNextId(nextInteractionRequest);
+		auto const nextOperation = mDeviceOperations.nextId();
 		mDeviceOperations = {};
+		mDeviceOperations.restoreNextId(nextOperation);
+		mBoothWindows.clear(); // Do not reuse handles held by editor/device clients.
 		mTraversalResources = {};
 		mTraversalRequests = {};
 		mTraversalPermits = {};
@@ -2439,6 +2481,16 @@ namespace core
 					for (auto permission : record.controlPermissionRequirements[side])
 						point->mPermissionRequirement.set(permission - 1);
 				}
+			break;
+		}
+		case ConstructionType::BoothWindow:
+		{
+			auto created = addWindowAperture(record.a, record.b, record.c, record.d, record.e,
+				{ record.p, static_cast<Window::State>(record.i), static_cast<Window::Style>(record.j) }, true);
+			auto booth = static_pointer_cast<const BoothWindow>(created.object);
+			auto point = mInteractionPoints.find(booth->getPanel());
+			for (auto permission : record.controlPermissionRequirements[1])
+				point->mPermissionRequirement.set(permission - 1);
 			break;
 		}
 		case ConstructionType::Window:
@@ -3037,6 +3089,7 @@ namespace core
 					.count(layerIndex) == 0;
 				if (!keep) ++impact.doorsRemoved;
 				break;
+			case ConstructionType::BoothWindow:
 			case ConstructionType::Window:
 			{
 				// A Window keeps the Layer it was authored on, pulled forward with every
@@ -3044,7 +3097,7 @@ namespace core
 				// Layer, and also if compaction leaves it on the new back-most Layer.
 				auto const shifted = record.a > layerIndex ? record.a - 1 : record.a;
 				auto const crossed = record.a == layerIndex
-					|| thresholdLayers(SectorObjectType::Window, record.c, record.b).count(layerIndex) != 0;
+					|| thresholdLayers(record.type == ConstructionType::BoothWindow ? SectorObjectType::BoothWindow : SectorObjectType::Window, record.c, record.b).count(layerIndex) != 0;
 				auto const stranded = !crossed && shifted >= backMostLayerAfter;
 				keep = !crossed && !stranded;
 				if (crossed) ++impact.windowsRemoved;
@@ -3078,6 +3131,7 @@ namespace core
 			switch (record.type)
 			{
 			case ConstructionType::Room:
+			case ConstructionType::BoothWindow:
 			case ConstructionType::Window:
 			case ConstructionType::BulkheadDoor:
 				if (record.a > layerIndex) record.a -= 1;
@@ -3187,11 +3241,11 @@ namespace core
 				auto& y = record.type == ConstructionType::Room ? record.b : record.a;
 				if (y > level) --y;
 			}
-			else if (record.type == ConstructionType::Door || record.type == ConstructionType::Window
+			else if (record.type == ConstructionType::Door || record.type == ConstructionType::Window || record.type == ConstructionType::BoothWindow
 				|| record.type == ConstructionType::BulkheadDoor)
 			{
 				bool door = record.type == ConstructionType::Door;
-				bool window = record.type == ConstructionType::Window;
+				bool window = record.type == ConstructionType::Window || record.type == ConstructionType::BoothWindow;
 				auto layer = door ? (record.layer == ~0u ? 0u : record.layer) : record.a;
 				auto& y = door ? record.a : record.b;
 				auto x = door ? record.b : record.c;
@@ -5251,8 +5305,9 @@ namespace core
 				return record.type == ConstructionType::BulkheadDoor
 					&& record.a == owner->getLayerIndex() && record.b == sourceY
 					&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u) == sourceX;
+			case SectorObjectType::BoothWindow:
 			case SectorObjectType::Window:
-				return record.type == ConstructionType::Window
+				return (record.type == ConstructionType::Window || record.type == ConstructionType::BoothWindow)
 					&& record.c == sourceX && record.b == sourceY
 					&& record.a == owner->getLayerIndex();
 			case SectorObjectType::ForceBridge:
@@ -5354,7 +5409,7 @@ namespace core
 			return false;
 		}
 		bool const pastePlaced = type == SectorObjectType::Door
-			|| type == SectorObjectType::BulkheadDoor || type == SectorObjectType::Window
+			|| type == SectorObjectType::BulkheadDoor || isWindowAperture(type)
 			|| type == SectorObjectType::Marker;
 		auto targetOwner = getSectorAtPosition(owner->getLayerIndex(),
 			type == SectorObjectType::BulkheadDoor ? (float)plan.x - 0.5f : (float)plan.x + 0.5f,
@@ -5560,6 +5615,7 @@ namespace core
 		case SectorObjectType::BulkheadDoor:
 			found->a = owner->getLayerIndex(); found->b = plan.y; found->c = plan.x;
 			found->i = CORE_SIDE_LEFT; break;
+		case SectorObjectType::BoothWindow:
 		case SectorObjectType::Window:
 			found->b = plan.y; found->c = plan.x;
 			found->d = targetWidth; found->e = targetHeight; break;
@@ -5614,7 +5670,7 @@ namespace core
 					if (side == CORE_SIDE_LEFT ? moved.p : moved.q) tombstones.push_back(tombstone);
 				}
 			}
-			else if (type == SectorObjectType::Window)
+			else if (isWindowAperture(type))
 			{
 				auto window = static_pointer_cast<WindowSectorObject>(object)->getWindow();
 				for (uint32_t side = 0; side < 2; ++side)
@@ -5643,6 +5699,7 @@ namespace core
 
 		if (type == SectorObjectType::Walkway && (plan.x != sourceX || plan.y != sourceY))
 		{
+			removeBoothWindowsAtSupport(records, owner->getLayerIndex(), sourceX, sourceY);
 			uint32_t sourceLevel = sourceY - owner->getCellY();
 			vector<ConstructionRecord> reconciled;
 			for (auto const& record : records)
@@ -6431,6 +6488,12 @@ namespace core
 			|| !dynamic_pointer_cast<const WalkwaySectorObject>(mSectors[sectorIndex]->getObject(objectIndex)))
 		{ plan.diagnostic = "The selected Walkway no longer exists"; return plan; }
 		auto walkway = mSectors[sectorIndex]->getObject(objectIndex);
+		for (auto const& booth : allWindowObjects())
+			if (booth->getWindow()->isBoothWindow() && booth->getCellX()==walkway->getCellX()
+				&& booth->getCellY()==walkway->getCellY()
+				&& (booth->getWindow()->getFrontLayer()==mSectors[sectorIndex]->getLayerIndex()
+					|| booth->getWindow()->getBackLayer()==mSectors[sectorIndex]->getLayerIndex()))
+				plan.consequences.push_back("Delete BoothWindow losing its walkable approach");
 		for (uint32_t i = 0; i < mSectors[sectorIndex]->getNumObjects(); ++i)
 		{
 			auto liftObject = dynamic_pointer_cast<const LiftSectorObject>(mSectors[sectorIndex]->getObject(i));
@@ -6453,6 +6516,30 @@ namespace core
 		invalidateSimulationSnapshot();
 		if (!plan.valid) throw WorldException(this, plan.diagnostic);
 		return removeSectorWalkway(plan.sectorIndex, plan.objectIndex);
+	}
+
+	void World::removeBoothWindowsAtSupport(vector<ConstructionRecord>& records,
+		uint32_t layer, uint32_t x, uint32_t y) const
+	{
+		vector<ConstructionRecord> retained;
+		for (auto const& record : records)
+		{
+			if (record.type != ConstructionType::BoothWindow || record.c != x || record.b != y
+				|| (record.a != layer && record.a + 1 != layer))
+			{
+				retained.push_back(record);
+				continue;
+			}
+			set<uint32_t> owners;
+			for (auto side : {record.a,record.a+1})
+				owners.insert(mLayers[side]->getCellDefinition(x,y).sectorIndex);
+			for (auto owner : owners)
+			{
+				ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
+				tombstone.a=owner; retained.push_back(tombstone);
+			}
+		}
+		records=std::move(retained);
 	}
 
 	bool World::removeSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex)
@@ -6630,6 +6717,7 @@ namespace core
 			else records.push_back(mConstructionRecords[i]);
 		}
 		records.insert(records.end(), movedBridges.begin(), movedBridges.end());
+		removeBoothWindowsAtSupport(records, room->getLayerIndex(), supportX, supportY);
 		rebuildFromConstructionRecords(std::move(records));
 		return true;
 	}
@@ -6651,7 +6739,7 @@ namespace core
 		auto sourceLayer = object->getSector()->getLayerIndex();
 		auto matches = [&](ConstructionRecord const& record)
 		{
-			return record.type == ConstructionType::Window && record.a == sourceLayer
+			return (record.type == ConstructionType::Window || record.type == ConstructionType::BoothWindow) && record.a == sourceLayer
 				&& record.b == sourceY && record.c == sourceX
 				&& record.d == window->getCellsWide() && record.e == window->getLevelsHigh();
 		};
@@ -6951,7 +7039,7 @@ namespace core
 			if (plan.move)
 			{
 				auto type = object->getObjectType();
-				if (type == SectorObjectType::Door || type == SectorObjectType::Window
+				if (type == SectorObjectType::Door || isWindowAperture(type)
 					|| type == SectorObjectType::BulkheadDoor)
 					plan.consequences.push_back("Delete " + object->getDescription());
 				continue;

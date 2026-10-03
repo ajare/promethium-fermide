@@ -83,6 +83,7 @@ namespace
 		case core::SectorObjectType::Marker: return "Marker";
 		case core::SectorObjectType::Shuttle: return "Shuttle";
 		case core::SectorObjectType::Walkway: return "Walkway";
+		case core::SectorObjectType::BoothWindow: return "BoothWindow";
 		case core::SectorObjectType::Window: return "Window";
 		}
 		return "Unknown";
@@ -942,7 +943,7 @@ agents: []
 		world.finishBuild();
 
 		auto const yaml = serializeWorld(world);
-		require(yaml.find("version: 43") != std::string::npos,
+		require(yaml.find("version: 44") != std::string::npos,
 			"The writer did not raise the version above the pre-Door-style ceiling");
 
 		bool refusedVersion = false;
