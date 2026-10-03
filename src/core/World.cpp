@@ -8152,8 +8152,9 @@ namespace core
 			for (auto const& binding : point->mBindings)
 				if (binding.command.type == DeviceCommandType::RequestAirlock)
 					require(validSector(binding.command.target)
-						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock,
-						format("Interaction point {} targets a removed Airlock", pointId.value));
+						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock
+						&& binding.command.stopIndex < 2,
+						format("Interaction point {} targets a removed Airlock or invalid entry side", pointId.value));
 				else if (binding.command.type == DeviceCommandType::ToggleBoothWindow
 					|| binding.command.type == DeviceCommandType::SetBoothWindowState)
 					require(bool(lookupBoothWindow(binding.command.boothWindow)),
@@ -10866,8 +10867,6 @@ namespace core
 	{
 		auto point = mInteractionPoints.find(id);
 		if (!point || !point->mSector) return false;
-		if (auto chamber = dynamic_pointer_cast<AirlockTransit>(mSectors[point->mSector.value - 1]);
-			chamber && chamber->getControl(2) == id) return false;
 		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
 		{
 			return binding.command.type == DeviceCommandType::SelectLiftDestination

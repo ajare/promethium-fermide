@@ -129,6 +129,12 @@ namespace core
 		if (!resource || (!resource->mDoor && !resource->mLadder && !resource->mForceBridge
 			&& !resource->mOpenPlatformLift && !resource->mAirlock)) return false;
 
+		// An admitted Airlock occupant should wait at its assigned standing
+		// position, not walk to the exit threshold and back before requesting it.
+		// Collect the exit intent immediately; its coordinator owns the local goal.
+		if (resource->mAirlock && std::find(resource->mOccupants.begin(), resource->mOccupants.end(),
+			mWorld.getAgentId(&agent)) != resource->mOccupants.end()) return true;
+
 		auto const sourceSector = SectorId{ (uint64_t)agent.getSector()->getIndex() + 1 };
 		QueueLane const* lane = nullptr;
 		float closestEndpoint = numeric_limits<float>::max();

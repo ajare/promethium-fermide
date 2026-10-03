@@ -138,12 +138,14 @@ namespace
 						if (cycleStart && state.cycleComplete)
 						{
 							require(world.getSimulationTick() - cycleStart >= core::secondsToTicks(seconds, world.getFixedTimestep()), "Cycle completed early");
+							if (boarded && !exited)
+								require(state.doors[1 - direction] == core::DoorSnapshotState::Opening
+									&& world.getSimulationTick() - cycleStart == core::secondsToTicks(seconds, world.getFixedTimestep()),
+									"Exit did not open automatically when the closed-door cycle completed");
 							cycleStart = 0;
 						}
-						for (auto const& interaction : world.getSimulationSnapshot().interactionRequests)
-							if (interaction.point == state.controls[2])
-								require(state.cycleComplete && state.doors[direction] == core::DoorSnapshotState::Closed,
-									"Internal interaction started before the closed-door cycle completed");
+						for (auto const& point : world.getSimulationSnapshot().interactionPoints)
+							require(point.sectorId.value != index + 1, "Automatic chamber retained an internal interaction point");
 						for (auto const& request : world.getSimulationSnapshot().traversalRequests)
 							if (request.resource == std::dynamic_pointer_cast<const core::AirlockTransit>(world.getSector(index))->getTraversalResourceId()
 								&& request.state == core::TraversalRequestState::Granted)
@@ -286,8 +288,7 @@ namespace
 				std::set<core::AgentId> admitted, exited, members;
 				std::vector<core::AgentId> boardingOrder;
 				std::vector<core::AgentId> expectedOrder;
-				uint32_t batchCount = 0, internalPresses = 0;
-				std::set<core::InteractionRequestId> presses;
+				uint32_t batchCount = 0;
 				bool positioned = false, sawExitContention = false, completed = false;
 				std::string savedBatch;
 				int previousEntry = -1;
@@ -373,9 +374,6 @@ namespace
 							}
 							else require(members.contains(request.owner) && origins.at(request.owner) == state.entrySide, "Waiter entered open exit");
 						}
-					for (auto const& interaction : snapshot.interactionRequests)
-						if (interaction.point == state.controls[2] && interaction.result == core::InteractionResult::Succeeded
-							&& presses.insert(interaction.id).second) ++internalPresses;
 					for (auto const& [id, side] : origins)
 						if (world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side]) exited.insert(id);
 					if (exited.size() == origins.size() && state.entrySide < 0 && state.cycleComplete)
@@ -383,7 +381,7 @@ namespace
 				}
 				require(completed && admitted.contains(late), "Contending/late batch journeys stalled");
 				require(positioned && sawExitContention, "Batch standing positions or exit contention not exercised: width=" + std::to_string(width) + " positioned=" + std::to_string(positioned) + " contention=" + std::to_string(sawExitContention));
-				require(internalPresses == batchCount, "Internal button was not shared once per batch");
+				require(world.getSimulationSnapshot().interactionPoints.size() == 2, "Batch required an internal control");
 				// Authored reset discards all batch state and repeats all journeys.
 				world.resetSimulation(); world.wakeAllAgents();
 				auto reset = world.getSimulationSnapshot().airlocks.at(0);
@@ -432,7 +430,7 @@ namespace
 				};
 				auto first = add(side), second = add(side);
 				bool interrupted = false, partial = false, resumed = false, complete = false;
-				core::AgentId operatorId, waiter;
+				core::AgentId operatorId = first, waiter;
 				core::Vector2 frozen;
 				for (uint32_t tick = 0; tick < 10000; ++tick)
 				{
@@ -440,17 +438,8 @@ namespace
 					auto snapshot = world.getSimulationSnapshot(); auto state = snapshot.airlocks.at(0);
 					require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Interrupted interlock violated");
 					require(state.occupants.size() + state.reservations.size() <= 2, "Interrupted batch overbooked");
-					uint32_t physicalOperators = 0;
-					for (auto const& request : snapshot.interactionRequests)
-						if (request.point == state.controls[2] && request.result == core::InteractionResult::Pending)
-						{
-							++physicalOperators;
-							if (!interrupted) operatorId = request.actor;
-						}
-					require(physicalOperators <= 1, "Duplicate internal physical operators");
-					if (!interrupted && operatorId)
+					if (!interrupted && state.occupants.size() == 2 && !state.cycleComplete)
 					{
-						require(state.occupants.size() == 2, "Operator selected before batch boarded");
 						world.pauseSimulation();
 						require(!world.clearAgentPath(operatorId), "Paused path clear discarded committed occupant");
 						frozen = world.lookupAgent(operatorId).entity->getGlobalPosition();
@@ -468,7 +457,8 @@ namespace
 						require(!world.lookupAgent(operatorId).entity->isActive(), "Occupant auto-reactivated");
 						require(std::find(state.occupants.begin(), state.occupants.end(), operatorId) != state.occupants.end(), "Inactive occupant lost capacity");
 						require(state.entrySide == side && state.reservations.empty(), "New batch mixed with inactive occupant");
-						if ((allInactive && tick > 1500) || (!allInactive && state.occupants.size() == 1))
+						if ((allInactive && state.doors[1 - side] == core::DoorSnapshotState::Open)
+							|| (!allInactive && state.occupants.size() == 1))
 						{
 							partial = !allInactive;
 							if (partial) require(world.lookupAgent(operatorId == first ? second : first).entity->getSector()->getIndex() == ends[1 - side], "Changed destination reversed occupant");
@@ -818,6 +808,11 @@ namespace
 				for (uint32_t tick = 0; tick < 1600; ++tick)
 					if (!scene.step().occupants.empty()) { boarded = true; break; }
 				require(boarded, "Permission fixture never boarded");
+				scene.world.pauseSimulation();
+				core::MobilityProfile mobility;
+				mobility.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+				require(scene.world.setAgentIndividualMobilityProfile(scene.id, mobility), "Committed occupant mobility edit refused");
+				scene.world.resumeSimulation();
 				if (tighten)
 				{
 					scene.world.pauseSimulation();
@@ -926,12 +921,16 @@ namespace
 					auto facts = core::RouteTraversalInputs::capture(*edge, target, unseen).evaluate(unseen);
 					auto direct = edge->getDirectedTraversalFacts(target, unseen);
 					require(facts.feasible && facts.objectiveDurationSeconds == direct.objectiveDurationSeconds
-						&& facts.components.interactionUnits == unseen.policy.thresholdInteraction + unseen.policy.remoteDoorInteraction,
+						&& facts.components.interactionUnits == unseen.policy.thresholdInteraction
+							+ (target->getSector().get() == scene.chamber().get() ? unseen.policy.remoteDoorInteraction : 0),
 						"Basic estimate omitted required interaction");
 					float expectedWait = target->getSector().get() == scene.chamber().get()
 						? CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME : 3 + 2 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 					require(std::abs(facts.components.expectedWaitSeconds - expectedWait) < 0.001f
 						&& facts.components.motionSeconds >= edge->getLength() / scene.agent->getWalkSpeed(), "Basic estimate omitted cycle/movement");
+					if (target->getSector().get() != scene.chamber().get())
+						require(std::abs(facts.components.motionSeconds - edge->getLength() / scene.agent->getWalkSpeed()) < 0.001f,
+							"Automatic exit estimate retained internal-button walking or interaction time");
 					core::EffectiveRoutingProfile averse;
 					averse.waitingAversion = 3; averse.interactionAversion = 3;
 					auto neutralCost = unseen.policy.evaluate(facts, unseen.profile);

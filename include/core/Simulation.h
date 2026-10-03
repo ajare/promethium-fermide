@@ -286,7 +286,7 @@ namespace core
 		bool cycleComplete{ true };
 		bool traversalAvailable{ false };
 		std::array<DoorSnapshotState, 2> doors{};
-		std::array<InteractionPointId, 3> controls{};
+		std::array<InteractionPointId, 2> controls{};
 		std::vector<AgentId> occupants;
 		int entrySide{ -1 };
 		std::vector<TraversalRequestId> reservations;

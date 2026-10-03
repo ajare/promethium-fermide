@@ -48,8 +48,8 @@ namespace
 						"Airlock failed to open adjoining wall ends");
 					require(chamber->getPreviousEnd(0) == core::SectorEndType::Wall
 						&& chamber->getPreviousEnd(1) == core::SectorEndType::Wall, "Wall restoration data missing");
-					require(chamber->getNumObjects() == 3 && world.getSimulationSnapshot().interactionPoints.size() == 3,
-						"Airlock needs two shared Doors and three fixed buttons");
+					require(chamber->getNumObjects() == 2 && world.getSimulationSnapshot().interactionPoints.size() == 2,
+						"Airlock needs two shared Doors, two outside buttons and no internal button");
 					require(chamber->isTraversalAvailable() && world.getSimulationSnapshot().traversalResources.size() == 1,
 						"Airlock needs one shared journey authority");
 					for (int side = 0; side < 2; ++side)
@@ -126,7 +126,7 @@ namespace
 					&& chamber->getPreviousEnd(1) == core::SectorEndType::Wall, "Edited wall restoration data incorrect");
 				require(world.getInteractionPointPermissionRequirement(chamber->getControl(0)) == std::vector<core::AccessPermissionId>{ key }
 					&& world.getInteractionPointPermissionRequirement(chamber->getControl(1)).empty(), "Edited outside configuration lost");
-				require(world.getSimulationSnapshot().interactionPoints.size() == 3
+				require(world.getSimulationSnapshot().interactionPoints.size() == 2
 					&& world.getSimulationSnapshot().traversalResources.size() == 1, "Edit orphaned generated resources");
 			};
 			index = world.applyAirlockEdit(world.planResizeAirlock(index, 3, 1, 3));
@@ -247,7 +247,7 @@ namespace
 				require(editRefused && bulkhead->getDoor()->isClosed(), "Owned Door independently configured");
 			}
 		}
-		for (uint32_t control = 0; control < 3; ++control)
+		for (uint32_t control = 0; control < 2; ++control)
 			require(!world.removeInteractionPoint(chamber->getControl(control)), "Fixed Airlock button removed");
 		world.advanceTicks(120);
 		require(chamber->getDoor(0)->isClosed() && chamber->getDoor(1)->isClosed(), "Unavailable chamber opened over time");

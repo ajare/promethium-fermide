@@ -69,7 +69,7 @@ namespace
 		std::string diagnostic;
 		require(commitInteractionPermissionRequirement(world, chamber->getControl(0), key, true, diagnostic)
 			&& commitInteractionPermissionRequirement(world, chamber->getControl(1), key, true, diagnostic), "Outside permission editor command refused");
-		require(!commitInteractionPermissionRequirement(world, chamber->getControl(2), key, true, diagnostic), "Editor protected internal exit");
+		require(world->getSimulationSnapshot().interactionPoints.size() == 2, "Editor retained internal button");
 		commitDocumentEdit(std::move(property), history);
 		auto restore = [&](DocumentSnapshot const& snapshot) {
 			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
@@ -90,7 +90,8 @@ namespace
 			"Undo creation failed to restore original wall");
 		require(history.redo(captureDocumentSnapshot(world, history), restore), "Airlock creation redo failed");
 		chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world->getSector(index));
-		require(chamber && chamber->getControl(2) && chamber->getDoor(0)->isClosed(), "Redo lost generated devices");
+		require(chamber && chamber->getControl(0) && chamber->getControl(1)
+			&& chamber->getNumObjects() == 2 && chamber->getDoor(0)->isClosed(), "Redo lost generated devices");
 		world->resumeSimulation();
 		require(!world->setAirlockCycleSeconds(index, 4), "Running Airlock accepted authored property edit");
 	}

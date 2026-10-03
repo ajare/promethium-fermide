@@ -72,7 +72,8 @@ namespace core
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
 			else if (binding.command.type == DeviceCommandType::RequestAirlock)
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size()
-					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock;
+					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock
+					&& binding.command.stopIndex < 2;
 			else if (auto resource = mWorld.mTraversalResources.find(binding.command.traversalResource))
 				validTarget = binding.command.type == DeviceCommandType::OpenDoor ? resource->mDoor != nullptr
 					: binding.command.type == DeviceCommandType::SetExtendedState ? resource->mExtensible != nullptr

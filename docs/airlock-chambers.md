@@ -11,20 +11,19 @@ cell) and configure its cycle duration while paused. The duration defaults to
 3 simulated seconds and accepts finite values in inclusive range [1, 10].
 Creation and timing edits participate in existing document undo/redo.
 
-World owns the chamber, its two generated Bulkhead Doors, and three fixed
-physical buttons (one centred in the cell immediately outside each entrance,
-matching standalone Bulkhead Door buttons, and one inside). The adjoining
+World owns the chamber, its two generated Bulkhead Doors, and two fixed
+physical buttons, each centred in the cell immediately outside its entrance,
+matching standalone Bulkhead Door buttons. There is no internal button. The adjoining
 Location wall ends are opened automatically. Their previous authored states,
 including an originally open end, are retained separately for later restoration.
 The owned Doors cannot be independently edited, opened, removed, or authored
-Broken; the buttons cannot be independently moved or removed. The internal
-button cannot acquire a Permission requirement.
+Broken; the outside buttons cannot be independently moved or removed.
 
 A lone Agent can route through the chamber in either direction. Both threshold
 edges reference one Airlock Traversal resource, which owns queue tickets,
 admission reservations, crossing authority, and occupants. Fixed buttons target
 the Airlock, never individual Doors. Outside buttons request entry from their
-own side; the internal button requests exit opposite entry. Authored Agent
+own side; the exit opposite entry opens automatically after the closed-door cycle. Authored Agent
 placement inside the chamber remains refused: entry must establish occupancy
 through coordinated traversal. Ordinary Bulkheads and other Transit landing
 conventions are unchanged.
@@ -34,19 +33,19 @@ open entrance, and its crossing authority protects closure until boarding
 completes. Once the boarding window has ended and selected Agents have boarded,
 the entrance closes; the authored cycle starts precisely
 when both Doors become fully closed. Neither Door opens before that cycle
-finishes. The internal interaction serves the committed opposite exit. Capacity
+finishes. For an occupied chamber, the committed opposite exit starts opening
+on the tick the cycle completes, without any Agent interaction. Capacity
 is retained throughout exit crossing and released only on completed exit; the
 exit closes and another cycle runs before subsequent entry, including from the
 previous exit side. Empty calls close after the normal Bulkhead timeout and
-cycle without an internal press. Initial creation/load/reset starts ready for
+cycle back to readiness without opening an unrequested opposite Door. Initial creation/load/reset starts ready for
 immediate first entry. Pause freezes Door motion and remaining simulated seconds
 and retains occupied capacity for resumed routing.
 
 Outside buttons expose independent Access permission requirements in their
 Selection panels. Both requirements use all-members authorization and persist
-through document history, YAML/binary load, construction replay, and reset. The
-internal button remains unrestricted. Buttons Mobility use is checked before
-admission even when another passenger could operate the internal button:
+through document history, YAML/binary load, construction replay, and reset.
+Buttons Mobility use is checked before admission for the outside controls:
 Cannot use refuses routing and stale runtime Paths; Only if no other option uses
 the ordinary two-pass route selection and permits its selected journey.
 
@@ -58,8 +57,9 @@ Room or Corridor's Location requirement is checked before admission independentl
 of control requirements and adherence. Once admitted, later grant loss or tighter
 control/Location requirements cannot revoke the committed opposite exit.
 
-Directed objective estimates include chamber walking and button approaches,
-required interaction duration, entry opening, exit closure/opening, and one cycle.
+Directed objective estimates include chamber walking, outside button approaches
+and required entry interaction duration, Door closure/opening, and one cycle.
+Automatic exit has no internal-button interaction or walking detour.
 Perceived cost weights waiting and interaction through existing Agent preferences;
 objective timing is unchanged. Locally open entry omits unnecessary outside
 operation. Queue/crowding observations are limited to the current approach;
@@ -70,7 +70,10 @@ World schema 42 persists independent outside requirements alongside the chamber'
 geometry, timing, identity through the construction stream, and prior wall states.
 Version-40 chambers load with unrestricted outside controls; requirement-bearing
 older-schema documents and dangling/duplicate requirements are refused atomically. YAML and binary load, reset, and
-construction replay regenerate the owned Doors and controls deterministically.
+construction replay regenerate the owned Doors and two outside controls deterministically.
+The former internal InteractionPoint ID is kept unused during construction so
+permission references on subsequent controls in older documents remain valid;
+no internal button, interaction point, or topology vertex is regenerated.
 They start empty, with both Doors closed and the initial cycle complete. Public
 `SimulationSnapshot::airlocks` reports the chamber identity, width, capacity,
 timing, both door states, control identities, entry side, reservations, crossing
@@ -89,14 +92,15 @@ indefinitely for more Agents. Opposing queues wait for the committed batch to ex
 Cancelled, inactive, or expired pre-entry members lose their reservations
 without replacement within that batch, even while other never-selected slots
 remain available. If nobody enters, the entrance honours
-its normal Bulkhead timeout, closes, and cycles without an internal press (#325).
+its normal Bulkhead timeout, closes, and cycles back to readiness (#325).
 
 Occupants retain capacity, physical position when inactive, and the exit opposite
 entry. Destination changes through World movement commands are deferred until
 completed disembarkation; replacement routing starts from that exit. Pause retains
 selected admissions and occupied journeys rather than selecting a new route inside.
-An inactive internal-button operator relinquishes its interaction so another active
-occupant can operate it. Active occupants may leave independently, but no new batch
+Cycling and automatic exit opening continue even when every occupant is inactive;
+inactive occupants remain in place and retain capacity. Active occupants may leave
+independently, but no new batch
 enters until every occupant has left. Reactivation resumes the retained journey;
 there is no automatic activation or passenger removal. Reset clears reservations,
 operators, occupants and cycling while preserving authored geometry and timing.

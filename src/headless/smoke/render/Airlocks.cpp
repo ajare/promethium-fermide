@@ -39,7 +39,7 @@ namespace
 				if (triangle->colour == ImU32(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
 				if (lowX == 2 * CORE_CELL_WIDTH_PIXELS && highX == 5 * CORE_CELL_WIDTH_PIXELS) chamberSurface = true;
 			}
-		require(chamberSurface && doors.size() == 2 && buttons.size() == 3, "Renderer output missing chamber, two Bulkheads or three buttons");
+		require(chamberSurface && doors.size() == 2 && buttons.size() == 2, "Renderer must show chamber, two Bulkheads and only two outside buttons");
 		world->pauseSimulation();
 		index = world->applyAirlockEdit(world->planResizeAirlock(index, 4, 1, 2));
 		gSelectedSector = world->getSector(index);
@@ -54,7 +54,7 @@ namespace
 				if (triangle->colour == ImU32(ImColor(0, 255, 128))) buttons.insert((lowX + highX) * 0.5f);
 				if (lowX == 4 * CORE_CELL_WIDTH_PIXELS && highX == 6 * CORE_CELL_WIDTH_PIXELS) chamberSurface = true;
 			}
-		require(chamberSurface && doors.size() == 2 && buttons.size() == 3
+		require(chamberSurface && doors.size() == 2 && buttons.size() == 2
 			&& *doors.begin() >= 4 * CORE_CELL_WIDTH_PIXELS && *doors.rbegin() <= 6 * CORE_CELL_WIDTH_PIXELS,
 			"Moved/resized chamber render kept obsolete geometry or controls");
 		world->applyAirlockEdit(world->planRemoveAirlock(index)); gSelectedSector.reset();

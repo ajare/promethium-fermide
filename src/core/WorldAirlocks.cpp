@@ -109,15 +109,11 @@ namespace core
 				control, (float)y, 0.15f, getFixedTimestep(),
 				{ { command, InteractionBindingRequirement::Required } });
 		}
-		auto internal = createPhysicalControl("Airlock internal button", layer, x + (width - 1) / 2,
-			y, CORE_SIDE_MIDDLE, CORE_BUTTON_F_AUTO_REENABLE);
-		DeviceCommand command;
-		command.type = DeviceCommandType::RequestAirlock;
-		command.target = SectorId{ (uint64_t)index + 1 }; command.stopIndex = 2;
-		command.traversalResource = resourceId;
-		chamber->mControls[2] = createPhysicalControlInteractionPoint("Airlock internal button",
-			internal, (float)y, 0.15f, getFixedTimestep(),
-			{ { command, InteractionBindingRequirement::Required } });
+		// Older documents allocated a third InteractionPoint for the internal
+		// button. Keep that ID unused so subsequent controls retain their saved
+		// permission references, without retaining a button or interaction.
+		if (!mInteractionPoints.exhausted())
+			mInteractionPoints.restoreNextId(mInteractionPoints.nextId() + 1);
 		resource->mControls.assign(chamber->mControls.begin(), chamber->mControls.end());
 		ConstructionRecord record{ ConstructionType::Airlock };
 		record.layer = layer; record.a = y; record.b = x; record.c = width; record.x = seconds;

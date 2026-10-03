@@ -18,12 +18,11 @@ namespace core
 		uint32_t mBoardingMembers{ 0 };
 		int mActiveSide{ -1 };
 		bool mClosing{ false };
-		bool mExitRequested{ false };
 		std::array<bool, 2> mOutsideRequests{};
 		float mCycleSeconds;
 		std::array<SectorEndType, 2> mPreviousEnds;
 		std::array<std::shared_ptr<BulkheadDoor>, 2> mDoors;
-		std::array<InteractionPointId, 3> mControls;
+		std::array<InteractionPointId, 2> mControls;
 
 	public:
 		AirlockTransit(uint32_t index, uint32_t layer, uint32_t x, uint32_t y,
