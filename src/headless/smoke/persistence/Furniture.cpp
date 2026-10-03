@@ -25,16 +25,24 @@ namespace persistence
 		// Unrelated structural reconstruction carries the owned layout/identity.
 		world->applyLocationEdit(world->planResizeLocation(room, 0, 0, 8, 2));
 		require(world->furniture().front().id == id && world->lookupMarker(marker)->getName() == "Workstation", "Replay lost chair identities");
+		std::string diagnostic;
+		require(world->editFurniture(id, 2.25f, 0, "Renamed desk chair", &diagnostic), diagnostic);
 		for (auto filename : { "chair.world.yaml", "chair.world" })
 		{
 			world->saveTo((root / filename).string());
 			auto loaded = core::loadWorldDocument(root / filename);
 			require(loaded->furniture().size() == 1 && loaded->furniture().front().id == id
-				&& loaded->furniture().front().x == 1.25f && loaded->furniture().front().marker == marker
+				&& loaded->furniture().front().x == 2.25f && loaded->furniture().front().name == "Renamed desk chair"
+				&& loaded->furniture().front().marker == marker
 				&& loaded->lookupMarker(marker)->getName() == "Workstation"
 				&& loaded->furnitureCatalogueFilename() == "chair.furniture.yaml", "World format lost Furniture reference or identities");
 			loaded->resetSimulation();
 			require(loaded->furniture().front().marker == marker, "Reset lost chair Marker identity");
+			loaded->pauseSimulation();
+			require(loaded->removeFurniture(id, &diagnostic), diagnostic);
+			loaded->saveTo((root / "deleted.world").string());
+			loaded = core::loadWorldDocument(root / "deleted.world");
+			require(loaded->furniture().empty() && !loaded->lookupMarker(marker), "Deleted destination returned on reopen");
 			loaded->pauseSimulation();
 			auto nextId = loaded->placeFurniture(room, "chair", 4, 0, "New chair");
 			require(nextId > id && loaded->furniture().back().marker.value > marker.value, "Reopening reused Furniture or Marker identity");

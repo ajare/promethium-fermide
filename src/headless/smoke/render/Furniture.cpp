@@ -27,7 +27,8 @@ namespace
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
 		world->attachFurnitureCatalogue("chair.furniture.yaml", core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/chair.furniture.yaml")));
-		world->placeFurniture(room, "chair", 2.25f, 0, "Chair"); world->finishBuild();
+		auto id = world->placeFurniture(room, "chair", 2.25f, 0, "Chair"); world->finishBuild();
+		float artworkX = 2.25f;
 		RenderWorldScope scope(world);
 		auto check = [&](LayerRenderStyle style, WorldDrawList::ClipRectangle clip, unsigned expected) {
 			WorldDrawList drawing(clip);
@@ -41,7 +42,7 @@ namespace
 					++triangles;
 					require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x, "Chair escaped aperture clipping");
 					for (auto point : triangle->positions)
-						require((point.x == 2.25f * CORE_CELL_WIDTH_PIXELS || point.x == 3.25f * CORE_CELL_WIDTH_PIXELS)
+						require((point.x == artworkX * CORE_CELL_WIDTH_PIXELS || point.x == (artworkX + 1) * CORE_CELL_WIDTH_PIXELS)
 							&& (point.y == 600 || point.y == 600 - CORE_LEVEL_HEIGHT_PIXELS), "Chair artwork was scaled or lost fractional placement");
 				}
 			require(triangles == expected, "Chair draw-command/Layer style mismatch");
@@ -49,6 +50,13 @@ namespace
 		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 2);
 		check(LayerRenderStyle::Aperture, {{150,450},{190,590}}, 2);
 		check(LayerRenderStyle::Wireframe, {{0,0},{800,600}}, 0);
+		world->pauseSimulation();
+		std::string diagnostic;
+		require(world->editFurniture(id, 4.25f, 0, "Moved chair", &diagnostic), "Could not move rendered Furniture");
+		artworkX = 4.25f;
+		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 2);
+		require(world->removeFurniture(id, &diagnostic), "Could not delete rendered Furniture");
+		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 0);
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 }

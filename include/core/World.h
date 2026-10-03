@@ -897,6 +897,8 @@ namespace core
 		};
 
 		void restoreFurniture(ConstructionRecord const& record);
+		bool markerHasNoBehaviourReferences(MarkerId id, std::string* diagnostic) const;
+		std::string furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const;
 		ConstructionRecord const* findLocationPermissionRecord(uint32_t sectorIndex) const;
 		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
@@ -2718,6 +2720,12 @@ namespace core
 		std::string const& furnitureCatalogueFilename() const { return mFurnitureCatalogueFilename; }
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
+		bool canEditFurniture(uint64_t id, float x, float y, std::string const& name,
+			std::string* diagnostic = nullptr) const;
+		bool editFurniture(uint64_t id, float x, float y, std::string const& name,
+			std::string* diagnostic = nullptr);
+		bool canRemoveFurniture(uint64_t id, std::string* diagnostic = nullptr) const;
+		bool removeFurniture(uint64_t id, std::string* diagnostic = nullptr);
 		bool canPlaceFurniture(uint32_t sector, std::string const& definition,
 			float x, float y, std::string const& name, std::string* diagnostic = nullptr) const;
 		uint64_t placeFurniture(uint32_t sector, std::string const& definition,

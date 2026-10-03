@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "core/World.h"
 #include "core/Agent.h"
+#include "core/AgentBehaviourRegistry.h"
 #include "core/MarkerSectorObject.h"
 #include "core/YamlSerializer.h"
 #include <limits>
@@ -76,6 +77,88 @@ namespace
 		require(std::abs(agent->getGlobalPosition().x - 2.75f) < 0.01f, "Agent did not arrive at chair");
 		agent->setPath(graph->calculatePath(agent, right), true); world.advanceTicks(600);
 		require(std::abs(agent->getGlobalPosition().x - 6.5f) < 0.01f, "Agent could not leave chair");
+		world.pauseSimulation();
+		auto id = world.furniture().front().id;
+		auto walkerId = world.createAgent("Walker", room, 0, 0.5f);
+		auto walker = world.lookupAgent(walkerId).entity;
+		walker->setPath(world.getGraph()->calculatePath(walker, seatVertex), true);
+		require(world.resumeSimulation(), "Could not resume destination journey");
+		world.advanceTicks(10); world.pauseSimulation();
+		auto walkerPosition = world.lookupAgent(walkerId).entity->getGlobalPosition();
+		auto visitor = world.getAgentId(agent);
+		auto position = world.lookupAgent(visitor).entity->getGlobalPosition();
+		std::string diagnostic;
+		require(world.renameMarker(seat, "Independently authored", &diagnostic), diagnostic);
+		auto before = snapshot(world);
+		require(!world.editFurniture(id, 3.5f, 0, "Renamed", &diagnostic)
+			&& snapshot(world) == before, "Overlapping move was not a no-op");
+		require(!world.editFurniture(id, 5, 0.2f, "Renamed", &diagnostic)
+			&& snapshot(world) == before, "Floating move was not a no-op");
+		require(world.editFurniture(id, 5.25f, 0, "Renamed", &diagnostic), diagnostic);
+		require(world.furniture().front().marker == seat && world.lookupMarker(seat)->getName() == "Independently authored"
+			&& world.lookupAgent(visitor).entity->getGlobalPosition() == position, "Move changed names, identities or Agent position");
+		require(world.lookupAgent(walkerId).entity->getGlobalPosition() == walkerPosition, "Moving a destination teleported its travelling Agent");
+		require(world.resumeSimulation(), "Could not resume relocated destination intent");
+		world.advanceTicks(900);
+		require(std::abs(world.lookupAgent(walkerId).entity->getGlobalPosition().x - 5.75f) < 0.01f,
+			"Existing planning did not follow the same relocated Marker");
+		world.pauseSimulation();
+		uint32_t ownedSlot = ~0u, walkwaySlot = ~0u;
+		sector = world.getSector(room);
+		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+		{
+			auto object = sector->getObject(i);
+			if (auto marker = std::dynamic_pointer_cast<core::MarkerSectorObject>(object);
+				marker && marker->getMarker()->getId() == seat) ownedSlot = i;
+			if (object && object->getObjectType() == core::SectorObjectType::Walkway) walkwaySlot = i;
+		}
+		before = snapshot(world);
+		auto generation = world.getTopologyGeneration();
+		auto dirty = world.isModified();
+		require(!world.removeSectorMarker(room, ownedSlot, &diagnostic)
+			&& !diagnostic.empty(), "Owned Marker deletion succeeded");
+		try { world.applyObjectMove(world.planMoveSectorObject(room, ownedSlot, 6, 0)); require(false, "Owned Marker movement succeeded"); }
+		catch (core::Exception const&) {}
+		require(!world.canRemoveSectorMarker(room, ownedSlot, &diagnostic)
+			&& !world.planMoveSectorObject(room, ownedSlot, 6, 0).valid, "Owned Marker accepted an independent layout edit");
+		require(!world.renameMarker(seat, "Exit", &diagnostic) && snapshot(world) == before,
+			"Owned Marker rename bypassed World namespace or mutated on failure");
+		auto removeRoom = world.planRemoveLocation(room);
+		require(!removeRoom.valid && removeRoom.diagnostic.find("Renamed") != std::string::npos,
+			"Ground Floor removal did not identify blocking Furniture");
+		auto cropRoom = world.planResizeLocation(room, 0, 0, 5, 3);
+		require(!cropRoom.valid && cropRoom.diagnostic.find("Renamed") != std::string::npos,
+			"Room cropping silently removed unsupported Furniture");
+		try { world.applyLocationEdit(removeRoom); require(false, "Ground Floor removal succeeded"); }
+		catch (core::Exception const&) {}
+		try { world.applyLocationEdit(cropRoom); require(false, "Unsupported Room crop succeeded"); }
+		catch (core::Exception const&) {}
+		auto plan = world.planRemoveSectorWalkway(room, walkwaySlot);
+		require(!plan.valid && plan.diagnostic.find("Walkway chair") != std::string::npos, "Walkway preflight did not identify Furniture");
+		try { world.removeSectorWalkway(room, walkwaySlot); require(false, "Unsupported Furniture accepted"); }
+		catch (core::Exception const&) {}
+		require(snapshot(world) == before, "Refused owned-point or support edits mutated serialization");
+		require(world.getTopologyGeneration() == generation && world.isModified() == dirty,
+			"Refused edits changed topology generation or modified state");
+		auto registry = core::AgentBehaviourRegistry::create();
+		world.attachAgentBehaviourRegistry("furniture.behaviours", registry);
+		auto behaviour = registry->addAgentBehaviour("Visit", "visit.lua", {
+			{ "destination", core::AgentBehaviourSchemaType::Marker, {}, true, std::nullopt }
+		});
+		require(world.setAgentBehaviourAssignment(visitor, behaviour, 1, {{"destination", seat}}, &diagnostic), diagnostic);
+		require(world.renameMarker(seat, "New destination label", &diagnostic), diagnostic);
+		require(*core::agentBehaviourConfigurationGetIf<core::MarkerId>(
+			&world.getAgentBehaviourAssignment(visitor)->configuration.at("destination")) == seat,
+			"Marker rename retargeted behaviour configuration");
+		before = snapshot(world);
+		require(!world.removeFurniture(id, &diagnostic) && diagnostic.find("Visitor") != std::string::npos
+			&& diagnostic.find("destination") != std::string::npos && snapshot(world) == before, "Referenced Furniture deletion was not transactional");
+		require(world.clearAgentBehaviourAssignment(visitor, &diagnostic), diagnostic);
+		auto markerCount = world.getMarkerIds().size();
+		require(world.removeFurniture(id, &diagnostic) && !world.lookupMarker(seat)
+			&& world.getMarkerIds().size() == markerCount - 1, "Deletion left an owned destination");
+		auto next = world.placeFurniture(room, "chair", 5.25f, 0, "Replacement");
+		require(next > id && world.furniture().back().marker.value > seat.value, "Deletion reused identities");
 	}
 }
 void registerFurniture(std::vector<smoke::Check>& checks) { checks.push_back({ "furniture/chair", chair }); }

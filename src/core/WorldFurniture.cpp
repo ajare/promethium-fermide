@@ -91,6 +91,83 @@ namespace core
 		return record.furnitureId;
 	}
 
+	bool World::canEditFurniture(uint64_t id, float x, float y,
+		std::string const& name, std::string* diagnostic) const
+	{
+		auto reject = [&](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		if (!mSimulationPaused) return reject("Pause the simulation before editing Furniture");
+		auto records = mConstructionRecords;
+		auto found = std::find_if(records.begin(), records.end(), [&](auto const& record) {
+			return record.type == ConstructionType::Furniture && record.furnitureId == id;
+		});
+		if (found == records.end()) return reject("The Furniture instance no longer exists");
+		found->x = x; found->y = y; found->name = Marker::trimName(name);
+		try
+		{
+			auto candidate = makeCandidateWorld();
+			candidate->mDeserializingConstruction = true;
+			for (auto const& record : records) candidate->applyConstructionRecord(record);
+			candidate->finishBuild();
+		}
+		catch (std::exception const& error) { return reject(error.what()); }
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::editFurniture(uint64_t id, float x, float y,
+		std::string const& name, std::string* diagnostic)
+	{
+		if (!canEditFurniture(id, x, y, name, diagnostic)) return false;
+		auto records = mConstructionRecords;
+		for (auto& record : records)
+			if (record.type == ConstructionType::Furniture && record.furnitureId == id)
+			{
+				auto trimmed = Marker::trimName(name);
+				if (record.x == x && record.y == y && record.name == trimmed) return false;
+				record.x = x; record.y = y; record.name = std::move(trimmed);
+				break;
+			}
+		// No sector translation: carried Agents stay at their physical positions.
+		rebuildFromConstructionRecords(std::move(records));
+		return true;
+	}
+
+	bool World::canRemoveFurniture(uint64_t id, std::string* diagnostic) const
+	{
+		if (diagnostic) diagnostic->clear();
+		auto reject = [&](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		if (!mSimulationPaused) return reject("Pause the simulation before deleting Furniture");
+		auto found = std::find_if(mFurniture.begin(), mFurniture.end(), [id](auto const& instance) { return instance.id == id; });
+		if (found == mFurniture.end()) return reject("The Furniture instance no longer exists");
+		return markerHasNoBehaviourReferences(found->marker, diagnostic);
+	}
+
+	bool World::removeFurniture(uint64_t id, std::string* diagnostic)
+	{
+		if (!canRemoveFurniture(id, diagnostic)) return false;
+		auto records = mConstructionRecords;
+		for (auto& record : records)
+			if (record.type == ConstructionType::Furniture && record.furnitureId == id)
+			{
+				// Preserve other objects' authored slots, but never the destination.
+				ConstructionRecord tombstone{ ConstructionType::ObjectTombstone };
+				tombstone.a = record.a;
+				record = std::move(tombstone);
+				break;
+			}
+		rebuildFromConstructionRecords(std::move(records));
+		return true;
+	}
+
+	std::string World::furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const
+	{
+		std::string result;
+		for (auto const& instance : mFurniture)
+			if (instance.sector == sector && instance.y == y && instance.x < x + 1.f && instance.x + 1.f > x)
+				result += "\n- " + instance.name + " (" + std::to_string(instance.id) + ")";
+		return result.empty() ? result : "Floor removal would leave Furniture unsupported:" + result;
+	}
+
 	void World::restoreFurniture(ConstructionRecord const& record)
 	{
 		if (!mFurnitureCatalogue) throw WorldException(this, "Missing Furniture catalogue dependency");
@@ -102,7 +179,7 @@ namespace core
 		// saved Marker name may differ from its initial generated name.
 		std::string diagnostic;
 		if (!canPlaceFurniture(record.a, record.definitionKey, record.x, record.y, record.name, &diagnostic))
-			throw WorldException(this, diagnostic);
+			throw WorldException(this, "Furniture '" + record.name + "' (" + std::to_string(record.furnitureId) + "): " + diagnostic);
 		if (!record.furnitureId || std::any_of(mFurniture.begin(), mFurniture.end(),
 			[&](auto const& i) { return i.id == record.furnitureId; }))
 			throw WorldException(this, "Furniture instance identity is zero or duplicated");

@@ -4791,6 +4791,18 @@ namespace core
 		vector<ConstructionRecord>& records, uint32_t& newSectorIndex,
 		string& diagnostic) const
 	{
+		if (plan.remove)
+		{
+			string blockers;
+			for (auto const& instance : mFurniture)
+				if (instance.sector == plan.sectorIndex)
+					blockers += "\n- " + instance.name + " (" + to_string(instance.id) + ")";
+			if (!blockers.empty())
+			{
+				diagnostic = "Floor removal would leave Furniture unsupported. Delete Furniture first:" + blockers;
+				return false;
+			}
+		}
 		auto createsSector = [](ConstructionType type)
 		{
 			return constructionTypeCreatesSector(type);
@@ -5024,7 +5036,7 @@ namespace core
 				}
 				catch (Exception const& error)
 				{
-					if (producer)
+					if (producer || source.type == ConstructionType::Furniture)
 					{
 						diagnostic = error.getMessage();
 						if (source.type == ConstructionType::Ladder)
@@ -6425,6 +6437,10 @@ namespace core
 			|| !dynamic_pointer_cast<const WalkwaySectorObject>(mSectors[sectorIndex]->getObject(objectIndex)))
 		{ plan.diagnostic = "The selected Walkway no longer exists"; return plan; }
 		auto walkway = mSectors[sectorIndex]->getObject(objectIndex);
+		plan.diagnostic = furnitureSupportDiagnostic(sectorIndex,
+			walkway->getCellX() - mSectors[sectorIndex]->getCellX(),
+			walkway->getCellY() - mSectors[sectorIndex]->getCellY());
+		if (!plan.diagnostic.empty()) return plan;
 		for (uint32_t i = 0; i < mSectors[sectorIndex]->getNumObjects(); ++i)
 		{
 			auto liftObject = dynamic_pointer_cast<const LiftSectorObject>(mSectors[sectorIndex]->getObject(i));
@@ -6444,14 +6460,12 @@ namespace core
 
 	bool World::applyWalkwayEdit(WalkwayEditPlan const& plan)
 	{
-		invalidateSimulationSnapshot();
 		if (!plan.valid) throw WorldException(this, plan.diagnostic);
 		return removeSectorWalkway(plan.sectorIndex, plan.objectIndex);
 	}
 
 	bool World::removeSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex)
 	{
-		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Deleting a Walkway requires the simulation to be paused");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
@@ -6459,6 +6473,10 @@ namespace core
 		auto object = dynamic_pointer_cast<WalkwaySectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) return false;
+		auto supportDiagnostic = furnitureSupportDiagnostic(sectorIndex,
+			object->getCellX() - mSectors[sectorIndex]->getCellX(),
+			object->getCellY() - mSectors[sectorIndex]->getCellY());
+		if (!supportDiagnostic.empty()) throw WorldException(this, supportDiagnostic);
 		if (walkwayHasOccupant(object->getSector(), object->getCellX(), object->getCellY()))
 			throw WorldException(this, "Move the Agent standing on this Walkway before deleting it");
 		for (uint32_t i = 0; i < object->getSector()->getNumObjects(); ++i)
@@ -6817,7 +6835,6 @@ namespace core
 
 	shared_ptr<const SectorObject> World::applyObjectMove(ObjectMovePlan const& requested)
 	{
-		invalidateSimulationSnapshot();
 		if (!mSimulationPaused)
 			throw WorldException(this, "Moving an object requires the simulation to be paused");
 		auto plan = requested;
@@ -7155,7 +7172,6 @@ namespace core
 
 	uint32_t World::applyLocationEdit(LocationEditPlan const& requested)
 	{
-		invalidateSimulationSnapshot();
 		// A Background edit is carried in the same plan shape but reconstructs itself
 		// through the Background path, which knows what taking a Background away costs
 		// the Windows looking into it.

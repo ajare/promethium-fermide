@@ -3,6 +3,7 @@
 #include "FurniturePanel.h"
 #include "imgui/imgui.h"
 #include "core/YamlSerializer.h"
+#include "core/AgentBehaviourRegistry.h"
 
 namespace
 {
@@ -34,11 +35,44 @@ namespace
 		auto restore = [&](DocumentSnapshot const& snapshot) {
 			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
 			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
-			return world->deserialize(*reader, work);
+			auto restored = world->deserialize(*reader, work);
+			world->pauseSimulation();
+			return restored;
 		};
 		require(history.undo(captureDocumentSnapshot(world, history), restore) && world->furniture().size() == 2, "Chair placement undo failed");
 		require(history.redo(captureDocumentSnapshot(world, history), restore) && world->furniture().size() == 3
 			&& world->furniture().front().marker == marker, "Chair placement redo changed Marker identity");
+		auto id = world->furniture().front().id;
+		require(world->renameMarker(marker, "Authored seat", &diagnostic), diagnostic);
+		require(editSelectedFurniture(world, id, 3.25f, 0, false, "Edited chair", diagnostic, history), diagnostic);
+		require(world->furniture().front().x == 3.25f && world->lookupMarker(marker)->getName() == "Authored seat", "Editor move changed authored Marker name");
+		count = history.undoCount();
+		require(!editSelectedFurniture(world, id, 5.5f, 0, false, "Overhang", diagnostic, history)
+			&& !diagnostic.empty() && history.undoCount() == count, "Refused movement acquired history");
+		require(history.undo(captureDocumentSnapshot(world, history), restore)
+			&& world->furniture().front().x == 1.25f && world->lookupMarker(marker)->getName() == "Authored seat", "Furniture move undo lost ownership or name");
+		require(history.redo(captureDocumentSnapshot(world, history), restore)
+			&& world->furniture().front().x == 3.25f && world->furniture().front().name == "Edited chair", "Furniture move redo lost placement or instance name");
+		require(deleteSelectedFurniture(world, id, diagnostic, history) && !world->lookupMarker(marker), diagnostic);
+		require(history.undo(captureDocumentSnapshot(world, history), restore)
+			&& world->furniture().front().id == id && world->furniture().front().marker == marker
+			&& world->lookupMarker(marker)->getName() == "Authored seat", "Furniture delete undo lost identities or authored name");
+		require(history.redo(captureDocumentSnapshot(world, history), restore)
+			&& !world->lookupMarker(marker) && world->furniture().size() == 2, "Furniture delete redo left destination");
+		auto remaining = world->furniture().front();
+		auto registry = core::AgentBehaviourRegistry::create();
+		world->attachAgentBehaviourRegistry("editor.behaviours", registry);
+		auto behaviour = registry->addAgentBehaviour("Visit", "visit.lua", {
+			{ "destination", core::AgentBehaviourSchemaType::Marker, {}, true, std::nullopt }
+		});
+		auto agent = world->createAgent("Editor visitor", remaining.sector, 0, 0.5f);
+		require(world->setAgentBehaviourAssignment(agent, behaviour, 1, {{"destination", remaining.marker}}, &diagnostic), "Could not configure Furniture reference");
+		count = history.undoCount();
+		auto protectedSnapshot = captureDocumentSnapshot(world, history)->yaml;
+		require(!deleteSelectedFurniture(world, remaining.id, diagnostic, history)
+			&& diagnostic.find("Editor visitor") != std::string::npos && diagnostic.find("destination") != std::string::npos
+			&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == protectedSnapshot,
+			"Editor deletion did not protect references without history or mutation");
 		ImGui::GetIO().DisplaySize = {800, 600}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture actions");
 		renderFurniturePanel(world, path, world->getSector(room));

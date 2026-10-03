@@ -6935,7 +6935,6 @@ namespace core
 
 	bool World::renameMarker(MarkerId id, string const& name, string* diagnostic)
 	{
-		invalidateSimulationSnapshot();
 		if (!canRenameMarker(id, name, diagnostic)) return false;
 		auto const trimmed = Marker::trimName(name);
 		auto marker = mutableMarker(id);
@@ -6948,6 +6947,7 @@ namespace core
 			});
 		if (record == mConstructionRecords.end())
 			throw WorldException(this, "renameMarker - Marker has no authored record");
+		invalidateSimulationSnapshot();
 		marker->setName(trimmed);
 		if (record->type == ConstructionType::Furniture) record->markerName = trimmed;
 		else record->name = trimmed;
@@ -7071,6 +7071,12 @@ namespace core
 		if (!markerObject) return reject("The selected object is not a Marker");
 		auto const marker = markerObject->getMarker()->getId();
 		if (isFurnitureMarker(marker)) return reject("A Furniture-owned Marker cannot be deleted independently");
+		return markerHasNoBehaviourReferences(marker, diagnostic);
+	}
+
+	bool World::markerHasNoBehaviourReferences(MarkerId marker, string* diagnostic) const
+	{
+		if (diagnostic) diagnostic->clear();
 		vector<string> references;
 		function<void(AgentBehaviourConfigurationValue const&, string const&,
 			AgentId, Agent const&)> collectReferences;
@@ -7109,9 +7115,10 @@ namespace core
 		if (!references.empty())
 		{
 			string message = format("Marker '{}' is referenced by:",
-				markerObject->getMarker()->getName());
+				lookupMarker(marker)->getName());
 			for (auto const& reference : references) message += "\n- " + reference;
-			return reject(std::move(message));
+			if (diagnostic) *diagnostic = std::move(message);
+			return false;
 		}
 		return true;
 	}
@@ -7119,7 +7126,6 @@ namespace core
 	bool World::removeSectorMarker(uint32_t sectorIndex, uint32_t objectIndex,
 		string* diagnostic)
 	{
-		invalidateSimulationSnapshot();
 		if (!canRemoveSectorMarker(sectorIndex, objectIndex, diagnostic)) return false;
 		auto sector = _getSector(sectorIndex);
 		auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(objectIndex));
