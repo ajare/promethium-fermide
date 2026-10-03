@@ -8331,8 +8331,10 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
-		if (sector.getType() == SectorType::Airlock)
-			throw invalid_argument("Agents must enter Airlock chambers through coordinated traversal");
+		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::SecurityScanner)
+			throw invalid_argument(sector.getType() == SectorType::SecurityScanner
+				? "Agents cannot be placed inside authored Security scanners"
+				: "Agents must enter Airlock chambers through coordinated traversal");
 		if (canAgentAccessLocation(sector, agent)) return;
 		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
 		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());

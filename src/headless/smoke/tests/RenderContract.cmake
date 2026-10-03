@@ -33,6 +33,7 @@ set(names
     carriageDoors
     carriageImages
     airlocks/chamberAndControls
+    securityScanners/chamberCommandStream
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

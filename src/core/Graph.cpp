@@ -424,6 +424,10 @@ namespace core
 			auto vertexSubType0 = vertices[i]->getSubType();
 			auto vertexSubType1 = vertices[j]->getSubType();
 
+			// The authored scanner slice has no traversable edges, including gaps.
+			if (vertices[i]->getSector()->getType() == SectorType::SecurityScanner
+				|| vertices[j]->getSector()->getType() == SectorType::SecurityScanner) continue;
+
 			// Airlock thresholds are connected explicitly. Fixed buttons can sort
 			// between the two endpoints, but must never create a Sector-edge bypass.
 			if (vertices[i]->getSector() != vertices[j]->getSector()

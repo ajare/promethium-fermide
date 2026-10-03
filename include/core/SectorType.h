@@ -16,7 +16,8 @@ namespace core
 		Shuttle,
 		Stairwell,
 		Staircase,
-		Airlock
+		Airlock,
+		SecurityScanner
 	};
 
 	std::string getSectorTypeString(SectorType type);

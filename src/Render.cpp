@@ -15,6 +15,7 @@
 #include "core/Facade.h"
 #include "core/World.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/Location.h"
 #include "core/LadderTransit.h"
 #include "core/LiftTransit.h"
@@ -1697,7 +1698,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		switch (sectorType)
 		{
 		case core::SectorType::Location: kind = static_pointer_cast<const core::Location>(sector)->isCorridor() ? "corridor" : "room"; break;
-		case core::SectorType::Airlock: kind = "corridor"; break;
+		case core::SectorType::Airlock:
+		case core::SectorType::SecurityScanner: kind = "corridor"; break;
 		case core::SectorType::Ladder: kind = "ladder"; break;
 		case core::SectorType::Lift: kind = "lift"; break;
 		// The rail corridor is static architecture; carriage images are rendered
@@ -1734,6 +1736,23 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Sector-specific
 	switch (sector->getType())
 	{
+	case core::SectorType::SecurityScanner:
+	{
+		if (isDrawnSolid(style))
+		{
+			auto chamber = static_pointer_cast<const core::SecurityScannerTransit>(sector);
+			float centreX = (bounds0.x + bounds1.x) * 0.5f;
+			float centreY = (bounds0.y + bounds1.y) * 0.5f;
+			float half = min((bounds1.x - bounds0.x) * 0.3f, 30.0f);
+			float direction = chamber->isLeftToRight() ? 1.0f : -1.0f;
+			ImVec2 tip{ centreX + direction * half, centreY };
+			drawList->AddLine({ centreX - direction * half, centreY }, tip, IM_COL32_WHITE, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, "Capacity: 1");
+		}
+		break;
+	}
 	case core::SectorType::Airlock:
 	{
 		auto chamber = static_pointer_cast<const core::AirlockTransit>(sector);

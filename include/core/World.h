@@ -839,7 +839,8 @@ namespace core
 			// producing record, replayed with all wall ends open intrinsically
 			// (ADR 0003).
 			Facade,
-			Airlock
+			Airlock,
+			SecurityScanner
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -1728,6 +1729,11 @@ namespace core
 		bool canAgentEnterAirlock(TraversalResourceId resource, SectorId approach,
 			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		bool isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		bool canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			std::string* diagnostic = nullptr) const;
+		uint32_t addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			bool leftToRight = true);
 
 		CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options);
 

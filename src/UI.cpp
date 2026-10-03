@@ -64,6 +64,7 @@
 #include "core/StairwellTransit.h"
 #include "core/StaircaseTransit.h"
 #include "core/AirlockTransit.h"
+#include "SecurityScannerPanel.h"
 #include "core/DoorSectorObject.h"
 #include "core/WindowSectorObject.h"
 #include "core/MarkerSectorObject.h"
@@ -247,7 +248,8 @@ namespace
 		Staircase,
 		Lift,
 		Shuttle,
-		Airlock
+		Airlock,
+		SecurityScanner
 	};
 
 	struct PaintState
@@ -257,6 +259,7 @@ namespace
 		uint32_t layer{ 0 };
 		int anchorX{ 0 };
 		int anchorY{ 0 };
+		core::Vector2 anchorPosition;
 	};
 
 	struct PaintRectangle
@@ -267,6 +270,7 @@ namespace
 		uint32_t width{ 0 };
 		uint32_t height{ 0 };
 		string diagnostic;
+		bool leftToRight{ true };
 	};
 
 	PaintState gPaint;
@@ -1147,6 +1151,12 @@ namespace
 				result.width, result.height, &result.diagnostic);
 			return result;
 		}
+		if (gPaint.tool == PaintTool::SecurityScanner)
+		{
+			auto draft = planSecurityScannerDrag(*world, gPaint.layer, gPaint.anchorPosition.x,
+				gPaint.anchorPosition.y, worldPosition.x, worldPosition.y);
+			return { draft.valid, draft.x, draft.y, draft.width, 1, draft.diagnostic, draft.leftToRight };
+		}
 		if (layer->getCellDefinition(gPaint.anchorX, gPaint.anchorY).occupied()) return {};
 
 		int endX = clamp((int)floor(worldPosition.x), 0, (int)world->getCellsWide() - 1);
@@ -1551,6 +1561,8 @@ namespace
 		auto staircaseMin = paletteSlotMin(trayTopLeft, PaletteSlot::Staircase);
 		auto airlockMin = paletteSlotMin(trayTopLeft, PaletteSlot::Airlock);
 		auto airlockMax = paletteSlotMax(trayTopLeft, PaletteSlot::Airlock);
+		auto scannerMin = paletteSlotMin(trayTopLeft, PaletteSlot::SecurityScanner);
+		auto scannerMax = paletteSlotMax(trayTopLeft, PaletteSlot::SecurityScanner);
 		auto agentMin = paletteSlotMin(trayTopLeft, PaletteSlot::Agent);
 		auto markerMin = paletteSlotMin(trayTopLeft, PaletteSlot::Marker);
 		auto doorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Door);
@@ -1595,6 +1607,7 @@ namespace
 		bool shuttleHovered = gWorldHovered && pointInRect(io.MousePos, shuttleMin, shuttleMax);
 		bool staircaseHovered = gWorldHovered && pointInRect(io.MousePos, staircaseMin, staircaseMax);
 		bool airlockHovered = gWorldHovered && pointInRect(io.MousePos, airlockMin, airlockMax);
+		bool scannerHovered = gWorldHovered && pointInRect(io.MousePos, scannerMin, scannerMax);
 		bool backOnlyDisabled = gUISettings.visibleLayer == 0;
 		if (overTray) paletteConsumedMouse = true;
 
@@ -1627,7 +1640,7 @@ namespace
 
 		if (gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging
 			&& (roomHovered || facadeHovered || corridorHovered || backgroundHovered || ladderHovered
-				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered))
+				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered || scannerHovered))
 		{
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -1640,7 +1653,8 @@ namespace
 					: corridorHovered ? "Paint Corridor"
 					: backgroundHovered ? "Paint Background" : ladderHovered ? "Paint Ladder"
 					: stairwellHovered ? "Paint Stairwell" : staircaseHovered ? "Paint Staircase"
-					: liftHovered ? "Paint Lift" : airlockHovered ? "Paint Airlock" : "Paint Shuttle");
+					: liftHovered ? "Paint Lift" : airlockHovered ? "Paint Airlock"
+					: scannerHovered ? "Paint Security scanner" : "Paint Shuttle");
 
 			if (io.MouseClicked[0] && !gViewPan.dragging
 				&& !((ladderHovered || stairwellHovered || staircaseHovered || liftHovered || shuttleHovered)
@@ -1653,7 +1667,8 @@ namespace
 					: ladderHovered ? PaintTool::Ladder
 					: stairwellHovered ? PaintTool::Stairwell
 					: staircaseHovered ? PaintTool::Staircase
-					: liftHovered ? PaintTool::Lift : airlockHovered ? PaintTool::Airlock : PaintTool::Shuttle;
+					: liftHovered ? PaintTool::Lift : airlockHovered ? PaintTool::Airlock
+					: scannerHovered ? PaintTool::SecurityScanner : PaintTool::Shuttle;
 				gPaint.tool = gPaint.tool == clickedTool ? PaintTool::None : clickedTool;
 				gPaint.dragging = false;
 				resetPegman();
@@ -1682,6 +1697,7 @@ namespace
 		drawPaintButton(staircaseMin, staircaseMax, "Staircase", PaintTool::Staircase,
 			staircaseHovered, backOnlyDisabled);
 		drawPaintButton(airlockMin, airlockMax, "Airlock", PaintTool::Airlock, airlockHovered, false);
+		drawPaintButton(scannerMin, scannerMax, "Scanner", PaintTool::SecurityScanner, scannerHovered, false);
 		drawBulkheadDoorIcon(drawList, bulkheadDoorMin, bulkheadDoorMax, yellow);
 		drawWindowIcon(drawList, windowMin, windowMax, yellow);
 		drawWalkwayIcon(drawList, walkwayMin, walkwayMax, yellow);
@@ -1710,6 +1726,7 @@ namespace
 				gPaint.layer = (uint32_t)gUISettings.visibleLayer;
 				gPaint.anchorX = x;
 				gPaint.anchorY = y;
+				gPaint.anchorPosition = worldPosition;
 			}
 		}
 
@@ -1781,6 +1798,14 @@ namespace
 							// Layer, so it never takes the transit front-layer gate.
 							auto const index = world->addBackground(gPaint.layer, paintRectangle.y,
 								paintRectangle.x, paintRectangle.width, paintRectangle.height);
+							setSelectionMode(UISettings::SelectionMode::Sector);
+							gSelectedSector = world->getSector(index);
+						}
+						else if (tool == PaintTool::SecurityScanner)
+						{
+							SecurityScannerDraft draft{ paintRectangle.valid, paintRectangle.x,
+								paintRectangle.y, paintRectangle.width, paintRectangle.leftToRight, paintRectangle.diagnostic };
+							auto index = commitSecurityScannerDraft(*world, gPaint.layer, draft);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
 						}
@@ -5498,9 +5523,10 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 {
 	auto doorObject = static_pointer_cast<const core::BulkheadDoorSectorObject>(object);
 	auto door = doorObject->getDoor();
-	if (world->isAirlockOwnedObject(object))
+	if (world->isChamberOwnedObject(object))
 	{
-		ImGui::TextUnformatted("Airlock-owned Bulkhead Door");
+		ImGui::TextUnformatted(door->isSecurityScannerOwned()
+			? "Security scanner-owned Bulkhead Door" : "Airlock-owned Bulkhead Door");
 		ImGui::TextDisabled("Fixed, closed, and not independently editable or operable");
 		return;
 	}
@@ -6691,6 +6717,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		case core::SectorType::Lift: type = "Lift"; break;
 		case core::SectorType::Shuttle: type = "Shuttle"; break;
 		case core::SectorType::Airlock: type = "Airlock"; break;
+		case core::SectorType::SecurityScanner: type = "Security scanner"; break;
 		case core::SectorType::Ladder: type = "Ladder"; break;
 		case core::SectorType::Stairwell: type = "Stairwell"; break;
 	case core::SectorType::Staircase: type = "Staircase"; break;
@@ -6711,6 +6738,9 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 		switch (gSelectedSector->getType())
 		{
+		case core::SectorType::SecurityScanner:
+			drawSecurityScannerSelectionPanel(*static_pointer_cast<const core::SecurityScannerTransit>(gSelectedSector));
+			break;
 		case core::SectorType::Airlock:
 		{
 			auto chamber = static_pointer_cast<const core::AirlockTransit>(gSelectedSector);
@@ -8395,7 +8425,7 @@ namespace
 			return;
 		}
 
-		if (world->isAirlockOwnedObject(gSelectedSectorObject)
+		if (world->isChamberOwnedObject(gSelectedSectorObject)
 			|| world->isLiftOwnedDoor(gSelectedSectorObject)
 			|| world->isBulkheadDoorOwnedControl(gSelectedSectorObject)
 			|| world->isLiftOwnedControl(gSelectedSectorObject)

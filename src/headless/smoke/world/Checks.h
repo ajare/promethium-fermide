@@ -3,6 +3,7 @@
 #include <vector>
 
 void registerAirlocks(std::vector<smoke::Check>& checks);
+void registerSecurityScanners(std::vector<smoke::Check>& checks);
 void registerObjectEditing(std::vector<smoke::Check>& checks);
 void registerFloorsAndWalls(std::vector<smoke::Check>& checks);
 void registerTopology(std::vector<smoke::Check>& checks);

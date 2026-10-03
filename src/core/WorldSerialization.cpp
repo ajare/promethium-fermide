@@ -1,5 +1,6 @@
 #include "core/World.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/WorldDocument.h"
 #include "core/AgentBehaviourRegistry.h"
@@ -76,9 +77,11 @@ namespace core
 			return false;
 		}
 
-		if (sector.getType() == SectorType::Airlock)
+		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::SecurityScanner)
 		{
-			diagnostic = "Agents must enter Airlock chambers through coordinated traversal";
+			diagnostic = sector.getType() == SectorType::SecurityScanner
+				? "Agents cannot be placed inside authored Security scanners"
+				: "Agents must enter Airlock chambers through coordinated traversal";
 			return false;
 		}
 
@@ -161,13 +164,14 @@ namespace core
 		case ConstructionType::Background: return "background";
 		case ConstructionType::Facade: return "facade";
 		case ConstructionType::Airlock: return "airlock";
+		case ConstructionType::SecurityScanner: return "securityScanner";
 		}
 		throw SerializationException("Unknown World construction record type");
 	}
 
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Airlock); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::SecurityScanner); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -189,6 +193,7 @@ namespace core
 		case ConstructionType::Lift:
 		case ConstructionType::Shuttle:
 		case ConstructionType::Airlock:
+		case ConstructionType::SecurityScanner:
 			return true;
 		default:
 			return false;
@@ -334,6 +339,20 @@ namespace core
 			serializer.writeUint32("initialStop", record.g);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			writeDestinationRequirements(); break;
+		case ConstructionType::SecurityScanner:
+			serializer.writeUint32("layer", record.layer);
+			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
+			serializer.writeUint32("cellsWide", record.c);
+			serializer.writeUint32("levelsHigh", 1);
+			serializer.writeBool("leftToRight", record.d != 0);
+			serializer.writeUint32("capacity", 1);
+			serializer.writeFloat("preDelaySeconds", record.x);
+			serializer.writeFloat("scanSeconds", record.y);
+			serializer.writeFloat("postPauseSeconds", record.z);
+			serializer.writeFloat("sensorDistance", 0.5f);
+			serializer.writeBool("leftWasOpen", record.p);
+			serializer.writeBool("rightWasOpen", record.q);
+			break;
 		case ConstructionType::Airlock:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -549,7 +568,8 @@ namespace core
 		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
-		serializer.writeUint32("version", 42);
+		// Version 43 adds directional capacity-one authored Security scanners.
+		serializer.writeUint32("version", 43);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -932,6 +952,22 @@ namespace core
 				record.initiallyBroken = serializer.readBool("initiallyBroken");
 			}
 			break;
+		case ConstructionType::SecurityScanner:
+			if (version < 43) throw SerializationException("Security scanners require World schema version 43 or later");
+			record.layer = serializer.readUint32("layer");
+			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
+			record.c = serializer.readUint32("cellsWide");
+			record.d = serializer.readBool("leftToRight") ? 1 : 0;
+			record.x = serializer.readFloat("preDelaySeconds");
+			record.y = serializer.readFloat("scanSeconds");
+			record.z = serializer.readFloat("postPauseSeconds");
+			record.p = serializer.readBool("leftWasOpen"); record.q = serializer.readBool("rightWasOpen");
+			if (serializer.readUint32("levelsHigh") != 1 || serializer.readUint32("capacity") != 1 || record.x != 1.0f
+				|| record.y != 2.0f || record.z != 1.0f || serializer.readFloat("sensorDistance") != 0.5f
+				|| serializer.hasField("initiallyBroken") || serializer.hasField("leftControlPermissionRequirement")
+				|| serializer.hasField("rightControlPermissionRequirement"))
+				throw SerializationException("Invalid Security scanner configuration");
+			break;
 		case ConstructionType::Airlock:
 			if (version < 40) throw SerializationException("Airlocks require World schema version 40 or later");
 			record.layer = serializer.readUint32("layer");
@@ -1188,7 +1224,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 42)
+		if (version < 1 || version > 43)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2342,6 +2378,17 @@ namespace core
 			addLift(transitLayer(record), record.a, record.b, options);
 			break;
 		}
+		case ConstructionType::SecurityScanner:
+		{
+			if (record.d > 1 || record.x != 1 || record.y != 2 || record.z != 1)
+				throw SerializationException("Invalid Security scanner replay configuration");
+			auto index = addSecurityScanner(record.layer, record.a, record.b, record.c, record.d != 0);
+			auto chamber = std::static_pointer_cast<SecurityScannerTransit>(mSectors[index]);
+			if ((chamber->getPreviousEnd(0) == SectorEndType::None) != record.p
+				|| (chamber->getPreviousEnd(1) == SectorEndType::None) != record.q)
+				throw SerializationException("Invalid Security scanner wall restoration");
+			break;
+		}
 		case ConstructionType::Airlock:
 		{
 			auto index = addAirlock(record.layer, record.a, record.b, record.c, record.x);
@@ -2962,9 +3009,11 @@ namespace core
 			case ConstructionType::Lift:
 			case ConstructionType::Shuttle:
 			case ConstructionType::Airlock:
+			case ConstructionType::SecurityScanner:
 			{
 				bool const frontLayerTransit = isTransitRecord(record.type);
-				bool const transit = frontLayerTransit || record.type == ConstructionType::Airlock;
+				bool const transit = frontLayerTransit || record.type == ConstructionType::Airlock
+					|| record.type == ConstructionType::SecurityScanner;
 				auto const layer = producerIndex < mSectors.size() && mSectors[producerIndex]
 						? mSectors[producerIndex]->getLayerIndex() : layerIndex;
 				keep = layer != layerIndex && !(frontLayerTransit && layer == behind);
@@ -3038,6 +3087,7 @@ namespace core
 			case ConstructionType::Lift:
 			case ConstructionType::Shuttle:
 			case ConstructionType::Airlock:
+			case ConstructionType::SecurityScanner:
 			case ConstructionType::Door:
 				// These records carry the Layer they are authored on, so a deletion in
 				// front of them has to pull that Layer forward with every other one.
@@ -5141,9 +5191,10 @@ namespace core
 			return false;
 		}
 
-		if (isAirlockOwnedObject(object))
+		if (isChamberOwnedObject(object))
 		{
-			diagnostic = "Airlock-owned Doors and controls are fixed";
+			diagnostic = isAirlockOwnedObject(object) ? "Airlock-owned Doors and controls are fixed"
+				: "Security scanner-owned Doors are fixed";
 			return false;
 		}
 		auto owner = object->getSector();
@@ -5764,7 +5815,8 @@ namespace core
 		auto object = dynamic_pointer_cast<BulkheadDoorSectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) throw WorldException(this, "The selected object is not a Bulkhead Door");
-		if (isAirlockOwnedObject(object)) throw WorldException(this, "Airlock-owned Doors cannot be edited independently");
+		if (isChamberOwnedObject(object)) throw WorldException(this, isAirlockOwnedObject(object)
+			? "Airlock-owned Doors cannot be edited independently" : "Security scanner-owned Doors cannot be edited independently");
 		if (!isFiniteTiming(options.holdOpenSeconds))
 			throw WorldException(this, "Bulkhead Door hold-open time must be finite and non-negative");
 		if (!isfinite(options.automaticSensorDistance)
