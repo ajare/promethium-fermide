@@ -3,7 +3,9 @@
 #include "core/Agent.h"
 #include "core/MarkerSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
+#include "core/AgentBehaviourRegistry.h"
 #include <fstream>
+#include <limits>
 #include <yaml-cpp/yaml.h>
 
 namespace persistence
@@ -64,7 +66,10 @@ namespace persistence
 			&& revised->lookupMarker(marker)->getName() == "Workstation", "Reload used an embedded snapshot or renamed an owned Marker");
 		catalogue["furnitureCatalogue"]["uuid"] = "e78a6c36-7902-4abc-9c90-1876058b32f4"; saveCatalogue(); expectFailure("UUID mismatch");
 		catalogue["furnitureCatalogue"]["uuid"] = world->furnitureCatalogue()->uuid();
-		catalogue["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["key"] = "removed-seat"; saveCatalogue(); expectFailure("Missing Furniture usable-point key");
+		catalogue["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["key"] = "removed-seat"; saveCatalogue();
+		auto replacedPoint = core::loadWorldDocument(root / "chair.world.yaml");
+		require(!replacedPoint->lookupMarker(marker) && replacedPoint->furniture().front().marker.value > marker.value,
+			"Removed point silently retargeted its identity to a new key");
 		catalogue["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["key"] = "seat";
 		catalogue["furnitureCatalogue"]["definitions"][0]["key"] = "removed-chair"; saveCatalogue(); expectFailure("Missing Furniture definition");
 		std::filesystem::remove(cataloguePath); expectFailure("Missing Furniture catalogue");
@@ -83,7 +88,9 @@ namespace persistence
 		layouts->renameMarker(sofaPoints[1].marker, "Right destination");
 		layouts->renameMarker(largerPoints[2].marker, "Third destination");
 		layouts->setMarkerProperties(largerPoints[1].marker, 0);
+		layouts->addSectorMarker(layoutRoom, 0, 15.f, "Moved sofa Right destination");
 		auto later = layouts->addSectorMarker(layoutRoom, 0, 15.5f, "Later standalone Marker");
+		auto retiredMarker = layouts->getMarkerIds().back();
 		layouts->finishBuild(); layouts->pauseSimulation();
 		require(layouts->removeSectorMarker(layoutRoom, later.index, &diagnostic), diagnostic);
 		require(layouts->editFurniture(sofa, 3.375f, 0, "Moved sofa", &diagnostic), diagnostic);
@@ -132,6 +139,146 @@ namespace persistence
 		auto reordered = core::loadWorldDocument(root / "layouts.world.yaml");
 		require(reordered->furniture()[0].destinations[0].marker == sofaPoints[0].marker
 			&& reordered->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination", "Catalogue ordering retargeted point identities");
+		// Compatible edits reconcile by key in both formats. New points allocate
+		// beyond even deleted standalone identities and use valid unique names.
+		auto originalLayouts = YAML::LoadFile(context.fixture("resources/test-worlds/layouts.furniture.yaml").string());
+		auto writeLayouts = [&](YAML::Node const& value) { std::ofstream file(layoutCataloguePath); file << value; };
+		auto changed = YAML::Clone(originalLayouts);
+		auto added = YAML::Load("{key: new, label: Right destination, x: 1, y: 0}");
+		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"].push_back(added);
+		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["x"] = 0.5f;
+		// Also reorder definitions, independently of usable-point order.
+		auto sofaDefinition = YAML::Clone(changed["furnitureCatalogue"]["definitions"][0]);
+		changed["furnitureCatalogue"]["definitions"][0] = YAML::Clone(changed["furnitureCatalogue"]["definitions"][1]);
+		changed["furnitureCatalogue"]["definitions"][1] = sofaDefinition;
+		writeLayouts(changed);
+		core::MarkerId newPoint;
+		for (auto filename : { "layouts.world.yaml", "layouts.world" })
+		{
+			auto loaded = core::loadWorldDocument(root / filename);
+			auto const& points = loaded->furniture()[0].destinations;
+			require(points.size() == 3 && points[0].marker == sofaPoints[0].marker
+				&& points[1].marker == sofaPoints[1].marker && points[2].marker.value > retiredMarker.value,
+				"Compatible current layout lost stable identities or reused an issued identity");
+			if (newPoint) require(newPoint == points[2].marker, "Binary/YAML new identities differ");
+			newPoint = points[2].marker;
+			require(loaded->lookupMarker(newPoint)->getName() != "Moved sofa Right destination"
+				&& core::Marker::nameIsValid(loaded->lookupMarker(newPoint)->getName(), nullptr),
+				"New point did not resolve its generated-name conflict");
+			require(loaded->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination"
+				&& loaded->lookupMarker(sofaPoints[0].marker)->getOffset() == 0.875f,
+				"Current offset or independently authored name was not adopted");
+			loaded->saveTo((root / "reconciled.world").string());
+			auto reopened = core::loadWorldDocument(root / "reconciled.world");
+			reopened->resetSimulation();
+			require(reopened->furniture()[0].destinations[2].marker == newPoint,
+				"Save/reopen/Reset allocated a second identity for the new point");
+		}
+		require(layouts->furniture()[0].destinations.size() == 2,
+			"Editing the external catalogue live-reloaded an already open World");
+		// Allocation exhaustion stays explicit; the final uint64 identity is valid
+		// and advances to the exhausted (zero) mark without wrapping to one.
+		auto allocationDocument = YAML::LoadFile((root / "layouts.world.yaml").string());
+		allocationDocument["nextMarkerId"] = std::numeric_limits<uint64_t>::max();
+		auto allocationPath = root / "allocation.world.yaml";
+		{ std::ofstream file(allocationPath); file << allocationDocument; }
+		auto finalIdentity = core::loadWorldDocument(allocationPath);
+		require(finalIdentity->furniture()[0].destinations.back().marker.value == std::numeric_limits<uint64_t>::max(),
+			"Final available Marker identity was refused or wrapped");
+		allocationDocument["nextMarkerId"] = 0;
+		{ std::ofstream file(allocationPath); file << allocationDocument; }
+		try { (void)core::loadWorldDocument(allocationPath); require(false, "Exhausted allocator accepted a new point"); }
+		catch (std::exception const& error) {
+			require(std::string(error.what()).find("identity space is exhausted") != std::string::npos, error.what());
+		}
+		// Remove a point and add another in the same edit: never reuse by ordinal.
+		changed["furnitureCatalogue"]["definitions"][1]["usablePoints"].remove(0);
+		writeLayouts(changed);
+		for (auto filename : { "layouts.world.yaml", "layouts.world" })
+		{
+			auto loaded = core::loadWorldDocument(root / filename);
+			require(!loaded->lookupMarker(sofaPoints[0].marker)
+				&& loaded->furniture()[0].destinations[0].marker == sofaPoints[1].marker,
+				"Unreferenced removal silently retargeted a destination");
+		}
+		auto failLayouts = [&](YAML::Node const& value, std::string const& fragment) {
+			writeLayouts(value);
+			for (auto filename : { "layouts.world.yaml", "layouts.world" })
+			{
+				try { (void)core::loadWorldDocument(root / filename); }
+				catch (std::exception const& error) { require(std::string(error.what()).find(fragment) != std::string::npos, error.what()); continue; }
+				require(false, "Incompatible current layout was accepted");
+			}
+		};
+		auto invalidLayout = YAML::Clone(originalLayouts);
+		invalidLayout["furnitureCatalogue"]["definitions"][0]["tiles"].push_back(
+			YAML::Load("{x: 12, y: 0, imageSet: ObjectAtlas, image: chair}"));
+		failLayouts(invalidLayout, "inside one Location");
+		invalidLayout = YAML::Clone(originalLayouts);
+		invalidLayout["furnitureCatalogue"]["definitions"][0]["tiles"].push_back(
+			YAML::Load("{x: 7, y: 0, imageSet: ObjectAtlas, image: chair}"));
+		failLayouts(invalidLayout, "overlaps");
+		invalidLayout = YAML::Clone(originalLayouts);
+		invalidLayout["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["x"] = 99;
+		failLayouts(invalidLayout, "usable");
+		writeLayouts(originalLayouts);
+		// A width expansion across a Walkway gap is rejected, not omitted or moved.
+		auto elevated = std::make_shared<core::World>("Elevated", 8, 3);
+		auto elevatedRoom = elevated->addRoom("Room", 0, 0, 0, 8, 3);
+		elevated->addSectorWalkway(elevatedRoom, 1, 1);
+		elevated->addSectorWalkway(elevatedRoom, 1, 2);
+		elevated->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(layoutCataloguePath));
+		elevated->placeFurniture(elevatedRoom, "sofa", 1, 1, "Elevated sofa");
+		elevated->finishBuild();
+		for (auto filename : { "elevated.world.yaml", "elevated.world" }) elevated->saveTo((root / filename).string());
+		invalidLayout = YAML::Clone(originalLayouts);
+		invalidLayout["furnitureCatalogue"]["definitions"][0]["tiles"].push_back(
+			YAML::Load("{x: 2, y: 0, imageSet: ObjectAtlas, image: chair}"));
+		writeLayouts(invalidLayout);
+		for (auto filename : { "elevated.world.yaml", "elevated.world" })
+		{
+			try { (void)core::loadWorldDocument(root / filename); }
+			catch (std::exception const& error) {
+				require(std::string(error.what()).find("continuous Floor or Walkway support") != std::string::npos, error.what()); continue;
+			}
+			require(false, "Current width silently crossed a support gap");
+		}
+		writeLayouts(originalLayouts);
+		// Behaviour references survive label edits; referenced removals fail with
+		// the Agent, configuration field, definition and point identified.
+		auto package = root / "patrol.behaviours";
+		std::filesystem::copy(context.fixture("resources/test-worlds/door-test-1.behaviours/behaviours.yaml").parent_path(), package,
+			std::filesystem::copy_options::recursive);
+		auto registry = core::AgentBehaviourRegistry::loadFrom((package / "behaviours.yaml").string());
+		auto behaviourVisitor = layouts->createAgent("Catalogue visitor", layoutRoom, 0, 0.5f);
+		layouts->attachAgentBehaviourRegistry("patrol.behaviours", registry);
+		require(layouts->setAgentBehaviourAssignment(behaviourVisitor, core::AgentBehaviourId{1}, 1,
+			{{"first_marker", sofaPoints[0].marker}, {"second_marker", sofaPoints[1].marker}}, &diagnostic), diagnostic);
+		for (auto filename : { "referenced.world.yaml", "referenced.world" }) layouts->saveTo((root / filename).string());
+		changed = YAML::Clone(originalLayouts);
+		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["label"] = "New label";
+		writeLayouts(changed);
+		for (auto filename : { "referenced.world.yaml", "referenced.world" })
+		{
+			auto loaded = core::loadWorldDocument(root / filename);
+			auto assignment = loaded->getAgentBehaviourAssignment(behaviourVisitor);
+			require(assignment && *core::agentBehaviourConfigurationGetIf<core::MarkerId>(&assignment->configuration.at("first_marker")) == sofaPoints[0].marker,
+				"Label change lost a behaviour reference");
+		}
+		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"].remove(0);
+		writeLayouts(changed);
+		for (auto filename : { "referenced.world.yaml", "referenced.world" })
+		{
+			try { (void)core::loadWorldDocument(root / filename); }
+			catch (std::exception const& error) {
+				auto message = std::string(error.what());
+				require(message.find("Catalogue visitor") != std::string::npos && message.find("first_marker") != std::string::npos
+					&& message.find("sofa") != std::string::npos && message.find("left") != std::string::npos, message);
+				continue;
+			}
+			require(false, "Referenced removal did not fail loading");
+		}
+		writeLayouts(originalLayouts);
 		// Schema-43 chair fixtures still load with default Local depth 0.
 		require(core::loadWorldDocument(context.fixture("resources/test-worlds/chair.world.yaml"))->furniture().size() == 3,
 			"Schema-43 chair compatibility was lost");
@@ -270,7 +417,11 @@ namespace persistence
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);
 		std::filesystem::rename(cataloguePath, moved / cataloguePath.filename());
-		std::filesystem::rename(root / "chair.world", moved / "chair.world");
-		require(core::loadWorldDocument(moved / "chair.world")->furniture().front().marker == marker, "Project relocation broke relative Furniture reference");
+		for (auto filename : { "chair.world.yaml", "chair.world" })
+		{
+			std::filesystem::rename(root / filename, moved / filename);
+			require(core::loadWorldDocument(moved / filename)->furniture().front().marker == marker,
+				"Project relocation broke relative Furniture reference");
+		}
 	}
 }

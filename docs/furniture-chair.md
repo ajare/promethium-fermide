@@ -1,10 +1,10 @@
-# Catalogue-backed Furniture (#348–#356)
+# Catalogue-backed Furniture (#348–#357)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
 placement/editing, matching-depth external attachments and complete-Path depth
-continuity and composed floor replacement spans. Catalogue migration remains
-later work. There is no sitting state or seat
+continuity, composed floor replacement spans and safe catalogue reconciliation
+on World load. There is no sitting state or seat
 reservation.
 
 ## Authoring
@@ -79,7 +79,28 @@ readable with default Local depth 0. YAML `.world.yaml` and binary `.world` docu
 current catalogue on reopening, not an embedded definition snapshot. Worlds
 without Furniture have no catalogue dependency. Move the World and its catalogue
 together to preserve portable references; a missing catalogue, missing definition,
-removed usable point, UUID mismatch or invalid placement is a diagnostic failure.
+malformed dependency, UUID mismatch or invalid current placement is a diagnostic failure.
+
+### Catalogue edits on next load (#357)
+
+The current external catalogue is authoritative; no layout snapshot is saved.
+Definition and usable-point keys preserve existing Marker identities, independent
+names/properties and behaviour references through label changes and reordering.
+New points receive new identities beyond the saved non-reuse allocation mark;
+initial names use the current instance name and point label, with a unique
+identity-based fallback for conflicting or overlong names. Removed points retire
+their identities rather than transferring them to another key. Removing a point
+referenced anywhere in an Agent behaviour configuration fails loading with the
+instance, definition, point, Marker, Agent and configuration field identified.
+
+Current artwork widths, usable offsets and routes are resolved on load. Complete
+footprints must still have Floor/Walkway support within their owning Location and
+remain separated from same-depth Furniture; incompatible layouts fail rather
+than moving or omitting instances. Both YAML and binary documents use this same
+reconciliation. Saving the loaded World persists the reconciled destinations and
+advanced allocation mark. Already open Worlds (including Reset and history) keep
+their loaded catalogue; there is no live reload, designer, migration UI or
+automatic geometry/reference repair.
 
 `resources/test-worlds/chair.world.yaml` demonstrates chairs in all three supported
 Location types and an Agent visiting the reading chair. Reaching its Marker uses

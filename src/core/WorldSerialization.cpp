@@ -1489,6 +1489,67 @@ namespace core
 				throw SerializationException("Serialized next Marker ID does not follow issued Marker IDs");
 		}
 
+		// Reconcile only after validating all saved identities and the allocation
+		// high-water mark. Removed identities remain retired, even when a key is
+		// subsequently reintroduced. Keep surviving points in saved order so label
+		// and catalogue ordering edits cannot reinterpret authored destinations.
+		map<MarkerId, string> removedFurniturePoints;
+		set<string> reservedMarkerNames;
+		for (auto const& record : records)
+		{
+			if (record.type == ConstructionType::Marker) reservedMarkerNames.insert(record.name);
+			for (auto const& point : record.furnitureDestinations) reservedMarkerNames.insert(point.name);
+		}
+		bool furnitureLayoutChanged = false;
+		for (auto& record : records)
+		{
+			if (record.type != ConstructionType::Furniture) continue;
+			if (!furnitureCatalogue) throw SerializationException("Missing Furniture catalogue dependency");
+			auto definition = furnitureCatalogue->definition(record.definitionKey);
+			if (!definition) throw SerializationException("Missing Furniture definition: " + record.definitionKey);
+			set<string> savedKeys;
+			for (auto const& point : record.furnitureDestinations)
+			{
+				if (!savedKeys.insert(point.key).second)
+					throw SerializationException("Duplicate Furniture usable-point key: " + point.key);
+				if (point.properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
+					throw SerializationException("Invalid Furniture Marker properties");
+			}
+			erase_if(record.furnitureDestinations, [&](auto const& point) {
+				if (any_of(definition->usablePoints.begin(), definition->usablePoints.end(),
+					[&](auto const& current) { return current.key == point.key; })) return false;
+				removedFurniturePoints.emplace(point.marker, format(
+					"Furniture '{}' ({}) definition '{}' removed usable point '{}' (Marker {} '{}')",
+					record.name, record.furnitureId, record.definitionKey, point.key, point.marker.value, point.name));
+				furnitureLayoutChanged = true;
+				return true;
+			});
+			for (auto const& point : definition->usablePoints)
+			{
+				if (savedKeys.contains(point.key)) continue;
+				if (!nextMarkerId)
+					throw SerializationException("Furniture Marker identity space is exhausted");
+				auto marker = MarkerId{ nextMarkerId };
+				nextMarkerId = nextMarkerId == numeric_limits<uint64_t>::max() ? 0 : nextMarkerId + 1;
+				auto markerName = record.name + " " + point.label;
+				// Authored names take precedence. Fall back to a bounded, identity-
+				// based name if the current label is too long or already in use.
+				if (!Marker::nameIsValid(markerName, nullptr) || reservedMarkerNames.contains(markerName))
+				{
+					markerName = format("Marker {}", marker.value);
+					uint64_t suffix = 1;
+					while (reservedMarkerNames.contains(markerName))
+						markerName = format("Marker {} ({})", marker.value, suffix++);
+					if (!Marker::nameIsValid(markerName, nullptr))
+						throw SerializationException("No valid new Furniture Marker name is available");
+				}
+				reservedMarkerNames.insert(markerName);
+				record.furnitureDestinations.push_back({ point.key, marker, markerName,
+					markerPropertyBit(MarkerProperty::BlocksPathing) });
+				furnitureLayoutChanged = true;
+			}
+		}
+
 		// Agent groups are version-9 authored data. Every entry is read and
 		// judged here, before the World is reset, so a malformed group list
 		// refuses the whole file without leaving partial groups behind: nothing
@@ -1837,6 +1898,17 @@ namespace core
 					if (!object) throw SerializationException("Legacy Marker removal is dangling");
 					record.markerId = object->getMarker()->getId();
 				}
+				// Furniture point additions/removals shift later object slots. Resolve
+				// standalone Marker deletions by their validated stable identity.
+				if (furnitureLayoutChanged && record.type == ConstructionType::RemoveMarker
+					&& record.a < candidate.mSectors.size() && candidate.mSectors[record.a])
+				{
+					auto sector = candidate.mSectors[record.a];
+					for (uint32_t slot = 0; slot < sector->getNumObjects(); ++slot)
+						if (auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(slot));
+							object && object->getMarker()->getId() == record.markerId)
+						{ record.b = slot; break; }
+				}
 				candidate.applyConstructionRecord(record);
 			}
 			candidate.finishBuild();
@@ -2044,6 +2116,24 @@ namespace core
 			}
 			if (agent->getBehaviourAssignment())
 			{
+				// Inspect recursive authored values, even if the behaviour registry
+				// is unavailable or its current schema no longer uses this field.
+				std::function<void(AgentBehaviourConfigurationValue const&, string const&)> checkReference;
+				checkReference = [&](auto const& value, string const& path) {
+					if (auto marker = agentBehaviourConfigurationGetIf<MarkerId>(&value))
+					{
+						if (auto removed = removedFurniturePoints.find(*marker); removed != removedFurniturePoints.end())
+							throw SerializationException(format("{}; incompatible reference in Agent '{}' ({}) behaviour configuration field '{}'",
+								removed->second, agent->getName(), id.value, path));
+					}
+					else if (auto list = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationList>(&value))
+						for (size_t index = 0; index < list->size(); ++index)
+							checkReference((*list)[index], path + "[" + to_string(index) + "]");
+					else if (auto fields = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationRecord>(&value))
+						for (auto const& [field, nested] : *fields) checkReference(nested, path + "." + field);
+				};
+				for (auto const& [field, value] : agent->getBehaviourAssignment()->configuration)
+					checkReference(value, field);
 				if (version < 13)
 					throw SerializationException(
 						"Agent behaviour assignments require World serialization version 13");
