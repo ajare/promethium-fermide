@@ -129,6 +129,7 @@ namespace core
 		friend class SimulationCoordinator;
 
 		std::string mName;
+		BoothWindowId mBoothWindowOwner;
 		SectorId mSector;
 		Vector2 mPosition;
 		float mReach{ 0.25f };
@@ -163,6 +164,9 @@ namespace core
 		SectorId getSector() const { return mSector; }
 		Vector2 const& getPosition() const { return mPosition; }
 		float getReach() const { return mReach; }
+		// Owned BoothWindow panels never auto-approach; other controls retain their policy.
+		bool requiresReachAtRequest() const { return bool(mBoothWindowOwner); }
+		BoothWindowId getBoothWindowOwner() const { return mBoothWindowOwner; }
 		uint64_t getDurationTicks() const { return mDurationTicks; }
 		InteractionRequestId getActiveRequest() const { return mActiveRequest; }
 	};

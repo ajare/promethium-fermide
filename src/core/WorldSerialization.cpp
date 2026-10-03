@@ -2255,7 +2255,9 @@ namespace core
 		}
 		mAuthoredControlRequirements.clear();
 		mInteractionPoints = {};
+		auto const nextInteractionRequest = mInteractionRequests.nextId();
 		mInteractionRequests = {};
+		mInteractionRequests.restoreNextId(nextInteractionRequest);
 		auto const nextOperation = mDeviceOperations.nextId();
 		mDeviceOperations = {};
 		mDeviceOperations.restoreNextId(nextOperation);

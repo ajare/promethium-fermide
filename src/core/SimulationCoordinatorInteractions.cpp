@@ -129,6 +129,8 @@ namespace core
 		{
 			return { false, found.diagnostic };
 		}
+		if (found.entity->mBoothWindowOwner)
+			return { false, "BoothWindow panels are owned and cannot be removed independently" };
 		if (any_of(found.entity->mBindings.begin(), found.entity->mBindings.end(), [](auto const& binding)
 			{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
 			return { false, "Airlock controls are fixed and cannot be removed independently" };
@@ -240,7 +242,9 @@ namespace core
 		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor) || !point->mSector
 			|| (actor->getState() != Agent::State::Idle
 				&& actor->getState() != Agent::State::WaitingForTraversal)
-			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
+			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
+			|| (point->requiresReachAtRequest()
+				&& actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach))
 		{
 			return {};
 		}
@@ -304,6 +308,7 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
+		if (point && point->requiresReachAtRequest()) return requestInteraction(pointId, actorId);
 		auto actor = mWorld.mAgents.find(actorId);
 		// Even the press a moving Agent makes in passing is physical work, so a
 		// deactivated Agent may not start one (#118, #192), and a
@@ -920,7 +925,10 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !actor->isActive() || agentForbidsButtons(actor))
+				if (!actor || !actor->isActive() || agentForbidsButtons(actor)
+					|| (point->requiresReachAtRequest()
+						&& (actor->getSector() != mWorld.mSectors[point->mSector.value - 1].get()
+							|| actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach)))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -985,7 +993,9 @@ namespace core
 				}
 			}
 			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
-				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
+				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
+				|| (point->requiresReachAtRequest()
+					&& actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must

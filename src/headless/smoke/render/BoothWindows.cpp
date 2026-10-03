@@ -89,7 +89,8 @@ namespace
 				require(near(shutterMinY,innerTop-height*expected) && near(shutterMaxY,innerBottom-height*expected),
 					"Shutter did not translate upwards at physical progress");
 				require(shutterIndex<frameIndex && (!backdrop || backdropIndex<shutterIndex),"Aperture/shutter/frame draw order changed");
-				require(world->getSimulationSnapshot().interactionPoints.empty(),"Generated a physical panel");
+				require(world->getSimulationSnapshot().interactionPoints.size() == (nestedBooth ? 2u : 1u),
+					"Invisible owned panel missing/duplicated during production rendering");
 			};
 			draw(0);
 			if (backBooth) { toggle(backBooth); require(world->advanceTicks(24),"Nested shutter setup failed"); }

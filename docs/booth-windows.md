@@ -1,4 +1,4 @@
-# BoothWindows (#334, #335)
+# BoothWindows (#334, #335, #336)
 
 BoothWindow is a fixed one-cell-wide, one-Level-high service aperture authored on
 Layer L, with its back side on L+1. Both sides require an occupiable Room,
@@ -18,8 +18,7 @@ Walkway remove the invalidated aperture and both approaches.
 The two approaches are centred at x+0.5 on the walking Level, one per side,
 connected only to that side's walking topology. Neither shutter state creates
 a cross-Layer edge or a Traversal resource. Window base APIs reject glass states,
-glass styles, and traversal configuration for BoothWindow. Agent-operated
-invisible Interaction points and Agent panel controls remain dependent-ticket work.
+glass styles, and traversal configuration for BoothWindow.
 
 ## Runtime shutter operation (#335)
 
@@ -46,6 +45,34 @@ hold indefinitely, with no sensors or automatic closing. Runtime progress, targe
 IDs, and operations are never serialized. Reset and structural replay restore the
 authored initial state and retire old device references even if callers retain
 object pointers; device/operation IDs are not reused within the World.
+
+## Back-side Agent panel (#336)
+
+`BoothWindow::getPanel()` exposes exactly one owned invisible Interaction point at
+its centred back-side walking approach (x+0.5, Level), with 0.25 world-unit inclusive
+reach and a one-tick press. Use `World::requestInteraction(panel, agent)` and normal
+Interaction-request / Device-operation lookups, snapshots, and outcome events. The
+binding is a required typed `ToggleBoothWindow`, not a traversal command or permit.
+An accepted press resolves the current target only at activation; competing presses
+use the normal FIFO point queue, never coalesce, and reverse moving shutters smoothly.
+
+The Agent must be active, in the back-side Location, within reach, and permitted to
+use Buttons under the normal effective Mobility profile and global interaction-state
+constraints. Exact vertex arrival and crossing intent are unnecessary. Front-side,
+wrong-Location, inactive, Buttons-forbidden, and out-of-reach requests return the
+normal null rejected handle without allocating operations, moving the Agent, or
+changing its route/target. Eligibility is checked again before pressing; departed or
+newly ineligible queued Agents receive Cancelled outcomes, not auto-approach or a
+late press. Other Interaction points, including Lift selectors, retain auto-approach.
+
+The panel has no Sector object, physical Button, or renderer primitive and cannot be
+independently placed/deleted. Access permission requirement authoring is deferred;
+the owned panel is unrestricted by default and ineligible for direct requirements.
+Construction, movement, save/load, clipboard, history, replay, and reset reconstruct
+exactly one panel on the correct back side. Deletion and invalidating structural
+edits clear outstanding requests and operations; request/operation handles are not
+reused within the World. Only authored BoothWindow configuration persists, never
+pending presses or runtime shutter state.
 
 ## Persistence
 
@@ -94,7 +121,8 @@ Focused headless module checks:
 - World: `boothWindows/placementAndTopology`, `boothWindows/atomicRefusal`,
   `boothWindows/lifecycle`, `boothWindows/simultaneousAdjacentPairs`.
 - Simulation: `boothWindows/runtimeTimingAndReversal`, `boothWindows/runtimeLifecycle`,
-  `boothWindows/typedInteractionActivation`.
+  `boothWindows/typedInteractionActivation`, `boothWindows/backSideAgentPanel`,
+  `boothWindows/ownedPanelLifecycle`.
 - Persistence: `boothWindows/authoredRoundTripAndMalformedRecords` (also pending
   commands and mid-motion saves in both directions and both document formats).
 - Render: `boothWindows/staticPresentationAndNestedClipping` (also runtime partial,

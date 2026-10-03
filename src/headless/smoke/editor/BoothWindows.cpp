@@ -15,7 +15,26 @@ namespace
 		auto world=std::make_shared<core::World>("BoothWindow editor",10,3);
 		world->addRoom("Front",0,0,0,9,2); world->addRoom("Back",1,0,0,9,2);
 		world->finishBuild(); world->pauseSimulation(); gWorldDocumentHistory.clear();
-		auto edit=[&](auto action) { auto before=captureDocumentSnapshot(world); action(); commitDocumentEdit(std::move(before)); };
+		auto panels=[&] {
+			unsigned count=0;
+			for (uint32_t sectorIndex=0;sectorIndex<world->getNumSectors();++sectorIndex)
+			{
+				auto sector=world->getSector(sectorIndex);
+				for (uint32_t i=0;i<sector->getNumObjects();++i)
+					if (auto object=std::dynamic_pointer_cast<const core::WindowSectorObject>(sector->getObject(i));
+						object && object->getWindow()->isBoothWindow() && object->getWindow()->getFrontSector()==sector)
+					{
+						++count; auto booth=std::static_pointer_cast<const core::BoothWindow>(object->getWindow());
+						auto panel=world->lookupInteractionPoint(booth->getPanel()).entity;
+						require(panel && panel->getPosition().x==float(object->getCellX())+0.5f
+							&& panel->getPosition().y==float(object->getCellY())
+							&& panel->getSector().value==booth->getBackSector()->getIndex()+1,
+							"History/clipboard/move reconstructed panel on wrong side/position");
+					}
+			}
+			require(world->getSimulationSnapshot().interactionPoints.size()==count,"History duplicated or orphaned panel");
+		};
+		auto edit=[&](auto action) { auto before=captureDocumentSnapshot(world); action(); commitDocumentEdit(std::move(before)); panels(); };
 		edit([&] { world->addBoothWindow(0,0,2); world->finishBuild(); });
 		require(paletteSlotRow(PaletteSlot::BoothWindow)==1 && gWorldDocumentHistory.undoCount()==1,"Palette creation not distinct/undoable");
 		auto get=[&](uint32_t x) -> std::shared_ptr<const core::WindowSectorObject> {
@@ -65,7 +84,7 @@ namespace
 		require(bool(get(4)),"Production paste lost BoothWindow");
 		auto restore=[&](DocumentSnapshot const& snapshot) {
 			auto reader=core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize(); core::SerializationWorkData work;
-			bool result=world->deserialize(*reader,work); world->pauseSimulation(); return result;
+			bool result=world->deserialize(*reader,work); world->pauseSimulation(); panels(); return result;
 		};
 		auto undo=[&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore),"Undo failed"); };
 		auto redo=[&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world),restore),"Redo failed"); };
@@ -91,7 +110,7 @@ namespace
 		auto plan=world->planMoveSectorObject(0,index,3,0); require(plan.valid,plan.diagnostic);
 		edit([&] { world->applyObjectMove(plan); }); require(bool(get(3)) && !get(2),"Move lost BoothWindow");
 		undo(); require(bool(get(2)) && !get(3),"Move undo failed"); redo(); require(bool(get(3)) && !get(2),"Move redo failed");
-		world->resetSimulation(); require(get(3)->getWindow()->getState()==core::Window::State::Open,"Reset lost authored state");
+		world->resetSimulation(); panels(); require(get(3)->getWindow()->getState()==core::Window::State::Open,"Reset lost authored state");
 	}
 }
 void editor_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)

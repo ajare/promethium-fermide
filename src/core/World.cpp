@@ -6458,6 +6458,14 @@ namespace core
 			if (mNextBoothWindowId == 0) throw overflow_error("BoothWindow device identity space is exhausted");
 			booth->mDeviceId = BoothWindowId{ mNextBoothWindowId++ };
 			mBoothWindows.emplace(booth->mDeviceId, booth);
+			DeviceCommand toggle;
+			toggle.type = DeviceCommandType::ToggleBoothWindow;
+			toggle.boothWindow = booth->mDeviceId;
+			booth->mPanel = createInteractionPoint("BoothWindow back-side panel",
+				SectorId{ static_cast<uint64_t>(booth->getBackSector()->getIndex()) + 1 },
+				{ static_cast<float>(x) + 0.5f, static_cast<float>(y) }, 0.25f,
+				getFixedTimestep(), {{ toggle, InteractionBindingRequirement::Required }});
+			mInteractionPoints.find(booth->mPanel)->mBoothWindowOwner = booth->mDeviceId;
 		}
 		TraversalResourceId traversalResource;
 		if (options.traversable && window->getFrontSector() && window->getBackSector())
@@ -8146,6 +8154,10 @@ namespace core
 					require(validSector(binding.command.target)
 						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock,
 						format("Interaction point {} targets a removed Airlock", pointId.value));
+				else if (binding.command.type == DeviceCommandType::ToggleBoothWindow
+					|| binding.command.type == DeviceCommandType::SetBoothWindowState)
+					require(bool(lookupBoothWindow(binding.command.boothWindow)),
+						format("Interaction point {} targets a removed BoothWindow", pointId.value));
 				else if (binding.command.type != DeviceCommandType::SetSectorLights)
 					require(mTraversalResources.find(binding.command.traversalResource) != nullptr,
 						format("Interaction point {} targets removed traversal resource {}",
@@ -10853,7 +10865,7 @@ namespace core
 	bool World::isInteractionPointPermissionEligible(InteractionPointId id) const
 	{
 		auto point = mInteractionPoints.find(id);
-		if (!point || !point->mSector) return false;
+		if (!point || !point->mSector || point->mBoothWindowOwner) return false;
 		if (auto chamber = dynamic_pointer_cast<AirlockTransit>(mSectors[point->mSector.value - 1]);
 			chamber && chamber->getControl(2) == id) return false;
 		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)

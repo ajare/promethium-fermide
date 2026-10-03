@@ -112,6 +112,7 @@ namespace core
 		friend class World;
 		friend class SimulationCoordinator;
 		BoothWindowId mDeviceId;
+		InteractionPointId mPanel;
 		float mProgress{ 0.0f };
 		bool mTargetOpen{ false };
 		void refreshState();
@@ -122,6 +123,7 @@ namespace core
 			: Window(x, y, 1, 1, sectors) {}
 		bool isBoothWindow() const override { return true; }
 		BoothWindowId getDeviceId() const { return mDeviceId; }
+		InteractionPointId getPanel() const { return mPanel; }
 		float getProgress() const { return mProgress; }
 		bool getTargetOpen() const { return mTargetOpen; }
 		void setState(State state, Style style = Style::Clear) override;

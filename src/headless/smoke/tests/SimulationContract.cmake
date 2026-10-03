@@ -131,6 +131,8 @@ set(core_names
     boothWindows/runtimeTimingAndReversal
     boothWindows/runtimeLifecycle
     boothWindows/typedInteractionActivation
+    boothWindows/backSideAgentPanel
+    boothWindows/ownedPanelLifecycle
     runScaledWorld
 )
 

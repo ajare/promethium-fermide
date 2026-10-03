@@ -31,7 +31,13 @@ namespace
 				require(created.window.type == core::SectorObjectType::BoothWindow && created.object->isBoothWindow()
 					&& created.object->getState() == state && !created.object->isTraversalConfigured()
 					&& !created.traversalResource && world.getSimulationSnapshot().traversalResources.empty()
-					&& world.getSimulationSnapshot().interactionPoints.empty(), "BoothWindow leaked traversal or control resources");
+					&& world.getSimulationSnapshot().interactionPoints.size() == 1, "BoothWindow leaked traversal or duplicated panel resources");
+				auto booth = std::static_pointer_cast<const core::BoothWindow>(created.object);
+				auto panel = world.lookupInteractionPoint(booth->getPanel()).entity;
+				require(panel && panel->getSector() == core::SectorId{static_cast<uint64_t>(right) + 1}
+					&& panel->getPosition().x == 3.5f && panel->getPosition().y == 0
+					&& panel->getDurationTicks() == 1 && panel->getReach() == 0.25f,
+					"Panel not at centred back-side walkable approach");
 				auto position = created.object->getPosition(); auto size = created.object->getSize();
 				require(std::abs(position.x - 3.1f) < 0.001f && std::abs(position.y - 0.2f) < 0.001f
 					&& std::abs(size.x - 0.8f) < 0.001f && std::abs(size.y - 0.3f) < 0.001f, "Wrong aperture geometry");
@@ -99,6 +105,11 @@ namespace
 					++approaches;
 					require(point->getWindow()->getBackLayer()==point->getWindow()->getFrontLayer()+1,"Lifecycle broke adjacent pair");
 				}
+			require(world.getSimulationSnapshot().interactionPoints.size() == ((operation==0 || operation==3) ? 1u : 0u),
+				"Lifecycle retained invalid panel or lost reconstructed panel");
+			for (auto const& panel : world.getSimulationSnapshot().interactionPoints)
+				require(panel.position.x == 3.5f && panel.position.y == 1,
+					"Reconstructed panel lost walkable approach position");
 			require(approaches==((operation==0 || operation==3) ? 2u : 0u),"Lifecycle retained invalid BoothWindow/stale approach or lost valid pair");
 		}
 		core::World transit("BoothWindow Transit refusal",10,4);

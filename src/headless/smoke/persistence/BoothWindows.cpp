@@ -31,13 +31,20 @@ namespace persistence
 						object && object->getCellX() == p[1])
 					{
 						auto booth = object->getWindow(); found = booth->isBoothWindow();
+						auto device = std::static_pointer_cast<const core::BoothWindow>(booth);
+						auto panel = source.lookupInteractionPoint(device->getPanel()).entity;
+						require(panel && panel->getPosition().x == float(p[1]) + 0.5f
+							&& panel->getPosition().y == 0 && panel->getSector().value == booth->getBackSector()->getIndex() + 1,
+							"Round trip did not reconstruct correct owned panel");
 						require(object->getObjectType() == core::SectorObjectType::BoothWindow && booth->getFrontLayer() == p[0]
 							&& booth->getBackLayer() == p[0] + 1 && static_cast<uint32_t>(booth->getState()) == p[2]
 							&& !booth->isTraversalConfigured(), "Authored BoothWindow lost kind/pair/state");
 					}
 				require(found, "Authored BoothWindow missing");
 			}
-			require(source.getSimulationSnapshot().traversalResources.empty() && source.getSimulationSnapshot().interactionPoints.empty(), "Document created crossing/panel resources");
+			require(source.getSimulationSnapshot().traversalResources.empty() && source.getSimulationSnapshot().interactionPoints.size() == 2
+				&& source.getSimulationSnapshot().interactionRequests.empty()
+				&& source.getSimulationSnapshot().deviceOperations.empty(), "Document persisted transient work or lost/duplicated owned panels");
 		};
 		auto baselineYaml = write(world, false), baselineBinary = write(world, true);
 		for (auto device : {closed, open})
@@ -60,6 +67,20 @@ namespace persistence
 			reader->deserialize(); core::SerializationWorkData work; core::World loaded("Loaded", 1, 1);
 			require(loaded.deserialize(*reader, work), "BoothWindow round trip refused"); assertAuthored(loaded);
 			loaded.resetSimulation(); assertAuthored(loaded); loaded.pauseSimulation(); loaded.addLayer(); assertAuthored(loaded);
+		}
+		// Save a real Agent's pending panel press, not just editor commands.
+		world.resetSimulation();
+		auto actor = world.createAgent("Pending panel operator", 1, 0, 2.35f);
+		auto panelId = world.getSimulationSnapshot().interactionPoints.front().id;
+		require(bool(world.requestInteraction(panelId, actor)), "Pending panel save fixture refused");
+		for (bool binary : {false, true})
+		{
+			auto data = write(world, binary);
+			std::unique_ptr<core::Serializer> reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			reader->deserialize(); core::SerializationWorkData work; core::World loaded("Pending load", 1, 1);
+			require(loaded.deserialize(*reader, work), "Pending panel document refused"); assertAuthored(loaded);
+			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
 		require(node["version"].as<int>() == 43, "BoothWindow schema not allocated");
