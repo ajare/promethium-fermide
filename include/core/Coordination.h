@@ -321,6 +321,7 @@ namespace core
 		std::shared_ptr<Shuttle> mShuttle;
 		std::shared_ptr<Stairwell> mStairwell;
 		std::shared_ptr<class AirlockTransit> mAirlock;
+		std::shared_ptr<class SecurityScannerTransit> mSecurityScanner;
 		int mAirlockEntrySide{ -1 };
 		// Lift coordinators are separate from their landing-door resources. The
 		// latter point back to the coordinator and one stop.

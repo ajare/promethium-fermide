@@ -41,6 +41,15 @@ namespace core
 		auto chamber = std::make_shared<SecurityScannerTransit>(index, layer, x, y,
 			width, leftToRight, stops, previous);
 		mSectors.push_back(chamber);
+		auto resourceId = mTraversalResources.add(std::unique_ptr<TraversalResource>(new TraversalResource("Security scanner journey")));
+		auto resource = mTraversalResources.find(resourceId);
+		resource->mSecurityScanner = chamber;
+		resource->mCapacity = 1;
+		resource->mOccupants.resize(1);
+		resource->mAdmissionReservations.resize(1);
+		resource->mCrossingOwners.resize(1);
+		resource->mCapacityPositions.push_back({ width * 0.5f, 0.0f });
+		chamber->mTraversalResource = resourceId;
 		for (uint32_t cell = x; cell < x + width; ++cell)
 			grid->getCellDefinition(cell, y).sectorIndex = index;
 		for (int side = 0; side < 2; ++side)
@@ -57,6 +66,12 @@ namespace core
 			chamber->mDoors[side] = door;
 			auto neighbour = _getSector(stops[side].sector->getIndex());
 			neighbour->setEndType(y - neighbour->getCellY(), 1 - side, SectorEndType::None);
+			auto& lane = resource->mQueueLanes[side];
+			lane.sector = SectorId{ (uint64_t)neighbour->getIndex() + 1 };
+			lane.origin = { side == CORE_SIDE_LEFT ? x - 0.3f : x + width + 0.3f, (float)y };
+			for (uint32_t cell = 0; cell < neighbour->getCellsWide(); ++cell)
+				lane.positions.push_back({ side == CORE_SIDE_LEFT ? x - 0.5f - cell : x + width + 0.5f + cell, (float)y });
+			lane.positionOwners.resize(lane.positions.size());
 		}
 		ConstructionRecord record{ ConstructionType::SecurityScanner };
 		record.layer = layer; record.a = y; record.b = x; record.c = width;

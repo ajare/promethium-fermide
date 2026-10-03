@@ -34,17 +34,17 @@ namespace
 						auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
 						require(chamber && chamber->getCapacity() == 1 && chamber->getCellsWide() == width
 							&& chamber->getLevelsHigh() == 1 && chamber->getLayerIndex() == layer
-							&& chamber->isLeftToRight() == direction && !chamber->isTraversalAvailable(), "Scanner identity/geometry/direction/capacity");
+							&& chamber->isLeftToRight() == direction && chamber->isTraversalAvailable(), "Scanner identity/geometry/direction/capacity");
 						require(chamber->getPreDelaySeconds() == 1 && chamber->getScanSeconds() == 2
 							&& chamber->getPostPauseSeconds() == 1 && chamber->getSensorDistance() == 0.5f, "Scanner defaults");
 						require(chamber->getNumObjects() == 2 && world.getSimulationSnapshot().interactionPoints.empty()
-							&& world.getSimulationSnapshot().traversalResources.empty(), "Scanner generated controls or journey resources");
+							&& world.getSimulationSnapshot().traversalResources.size() == 1, "Scanner generated controls or extra journey resources");
 						require(chamber->getStop(0).sector->getIndex() == left && chamber->getStop(1).sector->getIndex() == right,
 							"Scanner Stops not same-Layer neighbours");
 						auto actorId = world.createAgent("Outside", left, 0, 0.5f);
 						auto actor = world.lookupAgent(actorId).entity;
-						require(!world.getGraph()->calculatePath(actor, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))),
-							"Authored scanner admitted a route");
+						require(bool(world.getGraph()->calculatePath(actor, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index)))) == direction,
+							"Scanner route ignored authored direction");
 						world.markSaved(); auto baseline = saved(world);
 						for (bool explicitPosition : { false, true })
 						{

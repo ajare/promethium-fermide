@@ -135,6 +135,11 @@ namespace core
 		{
 			c.motionSeconds = type == EdgeType::Door ? 6.0f / 60.0f : walking();
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
+			if (securityScanner)
+			{
+				c.expectedWaitSeconds = preparationSeconds;
+				break; // Automatic: no button motion or interaction premiums.
+			}
 			if (airlock)
 			{
 				c.motionSeconds += interactionSeconds;

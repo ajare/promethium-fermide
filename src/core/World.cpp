@@ -7890,7 +7890,7 @@ namespace core
 			require(resource != nullptr, format("Edge {} references removed traversal resource {}",
 				edge->getId(), id.value));
 			bool compatible = edge->getType() == EdgeType::Door || edge->getType() == EdgeType::BulkheadDoor
-				? resource->mDoor != nullptr || resource->mAirlock != nullptr
+				? resource->mDoor != nullptr || resource->mAirlock != nullptr || resource->mSecurityScanner != nullptr
 				: edge->getType() == EdgeType::Window ? resource->mWindow != nullptr
 				: edge->getType() == EdgeType::ForceBridge ? resource->mForceBridge != nullptr
 				: edge->getType() == EdgeType::Ladder || edge->getType() == EdgeType::LadderMount

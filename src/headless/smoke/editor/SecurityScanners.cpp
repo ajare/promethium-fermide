@@ -51,7 +51,8 @@ namespace
 					ImGui::LogToBuffer(); drawSecurityScannerSelectionPanel(*chamber);
 					std::string text = GImGui->LogBuffer.c_str(); ImGui::LogFinish(); ImGui::End(); ImGui::Render();
 					for (auto readout : { "Security scanner", "Capacity: 1", "Pre-delay: 1.0 s", "Complete scan: 2.0 s",
-						"Post-pause: 1.0 s", "Sensor distance: 0.5 units", "structural editing unavailable" })
+						"Post-pause: 1.0 s", "Sensor distance: 0.5 units", "Phase: Idle", "Remaining: 0.0 s",
+						"Occupancy: 0 / 1", "Scan progress: 0%", "structural editing unavailable" })
 						require(text.find(readout) != std::string::npos, "Production Selection missing scanner readout");
 					require(text.find(draft.leftToRight ? "Left to right" : "Right to left") != std::string::npos, "Selection direction wrong");
 					auto restore = [&](DocumentSnapshot const& snapshot) {

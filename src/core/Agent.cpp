@@ -1456,6 +1456,9 @@ namespace core
 	uint32_t Agent::getSkippablePathTarget(uint32_t vertexA) const
 	{
 		if (!mPath.path || !getSector() || vertexA + 1 >= mPath.path->nodes.size()) return vertexA;
+		if (getSector()->getType() == SectorType::SecurityScanner
+			|| (mPath.path->nodes[vertexA].targetVertex
+				&& mPath.path->nodes[vertexA].targetVertex->getSector()->getType() == SectorType::SecurityScanner)) return vertexA;
 		auto const& nodeA = mPath.path->nodes[vertexA];
 		if (!nodeA.targetVertex
 			|| nodeA.targetVertex->getSubType() == VertexSubType::Interactable) return vertexA;
@@ -1597,6 +1600,7 @@ namespace core
 		auto destinationSector = mTraversalTask->destinationVertex->getSector();
 		if (destinationSector.get() != getSector()
 			&& getSector()->getType() != SectorType::Airlock
+			&& getSector()->getType() != SectorType::SecurityScanner
 			&& !mWorld->canAgentAccessLocation(*destinationSector, *this))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
@@ -1709,7 +1713,8 @@ namespace core
 		// A fixed Airlock batch is already being served. Do not discard its
 		// reservation merely to reconsider a still-valid route while the door opens.
 		if (request.entity->hasCapacityPosition()
-			&& mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Airlock) return;
+			&& (mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Airlock
+				|| mTraversalTask->destinationVertex->getSector()->getType() == SectorType::SecurityScanner)) return;
 		auto const& policy = mWorld->getTraversalWaitingPolicy();
 		auto waited = mWorld->getSimulationTick() - request.entity->getQueuedAtTick();
 		if (waited < policy.minimumReplanWaitTicks

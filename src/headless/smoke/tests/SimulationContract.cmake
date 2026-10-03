@@ -128,6 +128,10 @@ set(core_names
     airlocks/localQueueObservations
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
+    securityScanners/automaticJourneys
+    securityScanners/presenceAndEmptyTimeout
+    securityScanners/resetAndLoad
+    securityScanners/destinationAndMobilityGates
     runScaledWorld
 )
 

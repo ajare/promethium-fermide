@@ -44,5 +44,9 @@ void drawSecurityScannerSelectionPanel(core::SecurityScannerTransit const& chamb
 	ImGui::Text("Complete scan: %.1f s", chamber.getScanSeconds());
 	ImGui::Text("Post-pause: %.1f s", chamber.getPostPauseSeconds());
 	ImGui::Text("Sensor distance: %.1f units", chamber.getSensorDistance());
-	ImGui::TextDisabled("Authored chamber; traversal and structural editing unavailable");
+	ImGui::Text("Phase: %s", chamber.getPhaseName().c_str());
+	ImGui::Text("Remaining: %.1f s", chamber.getRemainingSeconds());
+	ImGui::Text("Occupancy: %u / 1", chamber.getOccupant() ? 1u : 0u);
+	ImGui::Text("Scan progress: %.0f%%", chamber.getScanProgress() * 100.0f);
+	ImGui::TextDisabled("Automatic journey; structural editing unavailable");
 }

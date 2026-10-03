@@ -1750,6 +1750,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
 			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
 			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, "Capacity: 1");
+			auto readout = std::format("{}: {:.1f} s", chamber->getPhaseName(), chamber->getRemainingSeconds());
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 20 }, IM_COL32_WHITE, readout.c_str());
 		}
 		break;
 	}

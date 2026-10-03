@@ -3,6 +3,9 @@
 #include "WorldDrawList.h"
 #include "UISettings.h"
 #include "core/World.h"
+#include "core/Agent.h"
+#include "core/Graph.h"
+#include "core/SecurityScannerTransit.h"
 #include <set>
 
 extern UISettings gUISettings;
@@ -23,8 +26,9 @@ namespace
 			for (bool direction : { false, true })
 			{
 				auto world = std::make_shared<core::World>("Scanner drawing", 12, 2);
-				world->addRoom("Left", 0, 0, 0, 2, 1); world->addCorridor(0, 0, 2 + width, 2, 1);
-				auto index = world->addSecurityScanner(0, 0, 2, width, direction); world->finishBuild();
+				uint32_t ends[] = { world->addRoom("Left", 0, 0, 0, 2, 1), world->addCorridor(0, 0, 2 + width, 2, 1) };
+				auto index = world->addSecurityScanner(0, 0, 2, width, direction);
+				auto marker = world->addSectorMarker(ends[direction ? 1 : 0], 0, 1.0f); world->finishBuild();
 				gSelectedSector = world->getSector(index);
 				WorldDrawList drawing({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &drawing);
 				std::set<float> doors; uint32_t buttons = 0, arrows = 0;
@@ -54,6 +58,17 @@ namespace
 				}
 				require(surface && doors.size() == 2 && buttons == 0 && arrows == 3 && capacity && selected,
 					"Scanner render omitted surface/Doors/direction/capacity/selection or added buttons");
+				auto id = world->createAgent("Traveller", ends[direction ? 0 : 1], 0, 1.0f);
+				auto actor = world->lookupAgent(id).entity;
+				actor->setPath(world->getGraph()->calculatePath(actor, world->getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(index));
+				for (unsigned tick = 0; tick < 2000 && chamber->getPhase() != core::SecurityScannerPhase::Scanning; ++tick) world->advanceTick();
+				require(chamber->getPhase() == core::SecurityScannerPhase::Scanning, "Render journey did not reach scan");
+				WorldDrawList scanDrawing({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &scanDrawing);
+				bool countdown = false;
+				for (auto const& command : scanDrawing.commands())
+					if (auto text = std::get_if<WorldDrawList::Text>(&command)) countdown = countdown || text->value == "Scanning: 2.0 s";
+				require(countdown, "Canvas omitted live phase/countdown readout");
 			}
 		gSelectedSector.reset(); ImGui::EndFrame();
 	}

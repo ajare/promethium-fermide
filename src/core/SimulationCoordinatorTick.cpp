@@ -484,6 +484,7 @@ namespace core
 			advanceDoorResources();
 			advanceDeviceOperations();
 			advanceAirlocks();
+			advanceSecurityScanners();
 			break;
 
 		case SimulationPhase::IntentCollection:
@@ -825,7 +826,7 @@ namespace core
 			for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 			{
 				(void)resourceId;
-				if (!resource->mAirlock) continue;
+				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
 				if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 					airlockJourney = true;
 				for (auto reservation : resource->mAdmissionReservations)

@@ -5,10 +5,21 @@
 
 namespace core
 {
-	// Authored only: no journey authority or traversable thresholds yet.
+	enum class SecurityScannerPhase
+	{
+		Idle, EntryOpening, Boarding, Positioning, EntryClosing,
+		PreDelay, Scanning, PostPause, ExitOpening, Exiting, ExitClosing
+	};
+
 	class SecurityScannerTransit : public Transit
 	{
 		friend class World;
+		friend class SimulationCoordinator;
+		TraversalResourceId mTraversalResource;
+		SecurityScannerPhase mPhase{ SecurityScannerPhase::Idle };
+		uint64_t mRemainingTicks{ 0 };
+		AgentId mOccupant;
+		float mScanProgress{ 0 };
 		bool mLeftToRight;
 		std::array<SectorEndType, 2> mPreviousEnds;
 		std::array<std::shared_ptr<BulkheadDoor>, 2> mDoors;
@@ -28,7 +39,13 @@ namespace core
 		float getScanSeconds() const { return 2.0f; }
 		float getPostPauseSeconds() const { return 1.0f; }
 		float getSensorDistance() const { return 0.5f; }
-		bool isTraversalAvailable() const { return false; }
+		bool isTraversalAvailable() const { return true; }
+		TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
+		SecurityScannerPhase getPhase() const { return mPhase; }
+		std::string getPhaseName() const;
+		float getRemainingSeconds() const;
+		float getScanProgress() const { return mScanProgress; }
+		AgentId getOccupant() const { return mOccupant; }
 		SectorEndType getPreviousEnd(int side) const { return mPreviousEnds.at(side); }
 		std::shared_ptr<const BulkheadDoor> getDoor(int side) const { return mDoors.at(side); }
 		std::string getDescription() const override { return "Security scanner"; }
