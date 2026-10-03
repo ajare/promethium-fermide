@@ -6,6 +6,7 @@
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/LadderEdge.h"
 #include "core/LadderMountEdge.h"
 #include "core/StaircaseEdge.h"
@@ -242,6 +243,29 @@ namespace core
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
 			result.mobilityKind = TraversalKind::Door;
 			if (result.type == EdgeType::BulkheadDoor)
+				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mSecurityScanner)
+				{
+					result.securityScanner = true;
+					result.boarding = target->getSector().get() == chamber.get();
+					auto expectedSource = result.boarding ? chamber->getStop(chamber->getEntrySide()).sector.get() : chamber.get();
+					auto expectedTarget = result.boarding ? chamber.get() : chamber->getStop(chamber->getExitSide()).sector.get();
+					if (sector.get() != expectedSource || target->getSector().get() != expectedTarget)
+						result.exclusion = RouteExclusionReason::Control;
+					if (result.boarding && context.world && context.agent
+						&& !context.world->canAgentAccessLocation(*chamber->getStop(chamber->getExitSide()).sector, *context.agent))
+						result.exclusion = RouteExclusionReason::Permission;
+					if (result.boarding && result.observed && context.agent)
+					{
+						result.queueSeconds = context.agent->estimateTraversalDelay(edge.getTraversalResourceId(), sourceSector);
+						result.density = context.agent->observeAccessZoneDensity(edge.getTraversalResourceId(), sourceSector);
+					}
+					result.preparationSeconds = CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+					if (!result.boarding)
+						result.preparationSeconds += CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+							+ chamber->getPreDelaySeconds() + chamber->getScanSeconds() + chamber->getPostPauseSeconds();
+					break;
+				}
+			if (result.type == EdgeType::BulkheadDoor)
 				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mAirlock)
 				{
 					result.airlock = true;
@@ -278,6 +302,11 @@ namespace core
 					}
 					break;
 				}
+			if (door.isSecurityScannerOwned())
+			{
+				result.exclusion = RouteExclusionReason::Control;
+				break; // An ordinary Bulkhead edge cannot stand in for the journey authority.
+			}
 			result.preparationSeconds = result.type == EdgeType::Door ? CORE_DOOR_OPEN_CLOSE_TIME : CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 			result.boarding = sector && isLocationLike(sector->getType());
 			result.lift = context.agent ? context.agent->observeLiftAccess(edge.getTraversalResourceId(), source->getPosition(), result.observed) : std::nullopt;

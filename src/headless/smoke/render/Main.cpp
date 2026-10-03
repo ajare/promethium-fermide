@@ -13,6 +13,7 @@ int main(int argc, char** argv)
 		{ "carriageImages", isolated<carriageImages> },
 	};
 	render_smoke::registerAirlocks(checks);
+	render_smoke::registerSecurityScanners(checks);
 	render_smoke::registerBoothWindows(checks);
 	render_smoke::registerDrawOrder(checks);
 	render_smoke::registerDoorOpenApart(checks);

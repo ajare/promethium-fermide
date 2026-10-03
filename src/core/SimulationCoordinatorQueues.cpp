@@ -63,7 +63,7 @@ namespace core
 		{
 			if (resource->mExtensible && resource->mExtensionRequestLeases.insert(id).second)
 				resource->mExtensible->acquireExtensionLease();
-			if ((resource->mDoor && !resource->mLiftCoordinator) || resource->mForceBridge || resource->mAirlock)
+			if ((resource->mDoor && !resource->mLiftCoordinator) || resource->mForceBridge || resource->mAirlock || resource->mSecurityScanner)
 				attachQueueTicket(id, *resource);
 			else if ((resource->mLadder || resource->mStairwell)
 				&& isLadderAdmission(*request, *resource))
@@ -127,7 +127,7 @@ namespace core
 		if (!edge || movementDistance < 0.0f || !agent.getSector()) return false;
 		auto resource = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
 		if (!resource || (!resource->mDoor && !resource->mLadder && !resource->mForceBridge
-			&& !resource->mOpenPlatformLift && !resource->mAirlock)) return false;
+			&& !resource->mOpenPlatformLift && !resource->mAirlock && !resource->mSecurityScanner)) return false;
 
 		// An admitted Airlock occupant should wait at its assigned standing
 		// position, not walk to the exit threshold and back before requesting it.
@@ -616,7 +616,7 @@ namespace core
 		request->mPermit = {};
 		request->mState = TraversalRequestState::Pending;
 		request->mFailureReason = TraversalFailureReason::PermitExpired;
-		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource && resource->mAirlock)
+		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource && (resource->mAirlock || resource->mSecurityScanner))
 		{
 			for (auto& owner : resource->mCrossingOwners) if (owner == requestId) owner = {};
 			for (auto& owner : resource->mAdmissionReservations) if (owner == requestId) owner = {};

@@ -163,8 +163,8 @@ A stationary, capacity-limited Sector connecting Rooms or Corridors on the same 
 _Avoid_: Transport vehicle, paired ordinary Bulkhead Doors
 
 **Security scanner**:
-A stationary Transit connecting Rooms or Corridors on the same Layer through two interlocked Bulkhead Doors. It admits one Agent at a time in its designated entry-to-exit direction and automatically scans the Agent before releasing it through the exit.
-_Avoid_: Airlock, security checkpoint when referring to this chamber
+A directional, capacity-one stationary Transit connecting Rooms or Corridors on the same Layer through two interlocked Bulkhead Doors, with fixed entry and exit sides independent of its horizontal length. It automatically scans the admitted Agent before releasing it through the exit.
+_Avoid_: Airlock, paired ordinary Bulkhead Doors, security checkpoint when referring to this chamber
 
 **Airlock cycle**:
 The waiting interval that begins when both Airlock Bulkhead Doors are fully closed and must complete before either may open.

@@ -159,13 +159,14 @@ namespace core
 			for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 			{
 				(void)resourceId;
-				if (!resource->mAirlock) continue;
+				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
 				bool occupant = find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end();
 				if (!occupant)
 				{
 					// Pausing retained selected boarders. Deactivation now abandons
 					// admission, but never takes an occupied slot away.
-					if (agent->mTraversalTask && agent->mTraversalTask->edge->getTraversalResourceId() == resourceId)
+					if ((agent->mTraversalTask && agent->mTraversalTask->edge->getTraversalResourceId() == resourceId)
+						|| (agent->mQueuedTraversalTask && agent->mQueuedTraversalTask->edge->getTraversalResourceId() == resourceId))
 					{
 						agent->cancelTraversal();
 						agent->mState = Agent::State::WaitingForTraversal;
@@ -490,7 +491,7 @@ namespace core
 		for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 		{
 			(void)resourceId;
-			if ((resource->mLift || resource->mShuttle || resource->mAirlock)
+			if ((resource->mLift || resource->mShuttle || resource->mAirlock || resource->mSecurityScanner)
 				&& find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 				acceptedLiftJourney = true;
 		}

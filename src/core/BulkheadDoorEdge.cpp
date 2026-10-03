@@ -7,6 +7,7 @@
 #include "core/Vertex.h"
 #include "core/Agent.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/RouteTraversalInputs.h"
 #include "core/Exceptions.h"
 
@@ -29,6 +30,9 @@ namespace core
 	{
 	}
 
+	BulkheadDoorEdge::BulkheadDoorEdge(shared_ptr<BulkheadDoor> door, shared_ptr<SecurityScannerTransit> scanner)
+		: Edge(EdgeType::BulkheadDoor), mDoor(door), mSecurityScanner(std::move(scanner)) {}
+
 	BulkheadDoorEdge::BulkheadDoorEdge(uint32_t id, shared_ptr<BulkheadDoor> door)
 		: Edge(id, EdgeType::BulkheadDoor)
 		, mDoor(door)
@@ -39,6 +43,7 @@ namespace core
 	{
 		auto copy = make_shared<BulkheadDoorEdge>(getId(), mDoor);
 		copy->mAirlock = mAirlock;
+		copy->mSecurityScanner = mSecurityScanner;
 		return copy;
 	}
 
@@ -47,9 +52,12 @@ namespace core
 		return format("BulkheadDoor edge for {}", mDoor->getDescription());
 	}
 
-	bool BulkheadDoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
+	bool BulkheadDoorEdge::isTraversable(shared_ptr<const Vertex> targetVertex, shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
+		// Scanner thresholds require a coordinator permit, never opportunistic use.
+		if (mDoor->isSecurityScannerOwned()) return false;
+		(void)targetVertex;
 		return mDoor->isOpen();
 	}
 
@@ -65,7 +73,13 @@ namespace core
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
 		auto const distance = getLength();
-		if (mAirlock) return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
+		if (mAirlock || mSecurityScanner) return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
+		if (mDoor->isSecurityScannerOwned())
+		{
+			DirectedTraversalFacts facts;
+			facts.exclusionReason = RouteExclusionReason::Control;
+			return facts;
+		}
 		return thresholdRouteFacts(*this, *mDoor, target, context,
 			distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed,
 			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
@@ -78,6 +92,7 @@ namespace core
 
 	TraversalResourceId BulkheadDoorEdge::getTraversalResourceId() const
 	{
+		if (mSecurityScanner) return mSecurityScanner->getTraversalResourceId();
 		return mAirlock ? mAirlock->getTraversalResourceId() : mDoor->getTraversalResourceId();
 	}
 
