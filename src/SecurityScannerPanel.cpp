@@ -48,5 +48,5 @@ void drawSecurityScannerSelectionPanel(core::SecurityScannerTransit const& chamb
 	ImGui::Text("Remaining: %.1f s", chamber.getRemainingSeconds());
 	ImGui::Text("Occupancy: %u / 1", chamber.getOccupant() ? 1u : 0u);
 	ImGui::Text("Scan progress: %.0f%%", chamber.getScanProgress() * 100.0f);
-	ImGui::TextDisabled("Automatic journey; structural editing unavailable");
+	ImGui::TextDisabled("Automatic journey; structural edits require an empty, paused chamber");
 }

@@ -12,6 +12,75 @@
 
 namespace
 {
+	void structuralHistory(smoke::Context const&)
+	{
+		using smoke::require;
+		for (bool forward : { false, true })
+		{
+			auto world = std::make_shared<core::World>("Scanner structural history", 14, 3);
+			for (uint32_t row = 0; row < 3; ++row)
+			{
+				world->addRoom("Left", 0, row, 0, 3 + row, 1);
+				world->addCorridor(0, row, 4 + 2 * row, 3, 1);
+			}
+			auto index = world->addSecurityScanner(0, 0, 3, 1, forward);
+			world->finishBuild(); world->pauseSimulation();
+			require(world->setSecurityScannerConfiguration(index, 8, 0, 0.1f, 10), "History configuration refused");
+			DocumentHistory history;
+			auto restore = [&](DocumentSnapshot const& snapshot) {
+				auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+				core::SerializationWorkData work; bool result = world->deserialize(*reader, work);
+				world->pauseSimulation(); return result;
+			};
+			std::vector<std::string> states{ captureDocumentSnapshot(world, history)->yaml };
+			auto stale = world->planResizeSecurityScanner(index, 4, 1, 2, !forward);
+			world->resumeSimulation();
+			for (auto plan : { stale, world->planRemoveSecurityScanner(index) })
+			{
+				bool refused = false;
+				try { world->applySecurityScannerEdit(plan); } catch (core::Exception const&) { refused = true; }
+				require(refused && captureDocumentSnapshot(world, history)->yaml == states[0]
+					&& history.undoCount() == 0 && history.redoCount() == 0, "Running structural edit changed document/history");
+			}
+			world->pauseSimulation();
+			for (auto plan : { world->planResizeSecurityScanner(index, 0, 0, 1, forward),
+				world->planResizeSecurityScanner(index, 3, 0, 2, forward) })
+			{
+				require(!plan.valid, "Invalid history geometry planned");
+				bool refused = false;
+				try { world->applySecurityScannerEdit(plan); } catch (core::Exception const&) { refused = true; }
+				require(refused && captureDocumentSnapshot(world, history)->yaml == states[0]
+					&& history.undoCount() == 0, "Invalid structural edit changed document/history");
+			}
+			for (int step = 0; step < 4; ++step)
+			{
+				auto before = captureDocumentSnapshot(world, history);
+				auto plan = step == 3 ? world->planRemoveSecurityScanner(index)
+					: world->planResizeSecurityScanner(index, step == 0 ? 3 : 3 + step,
+						step == 0 ? 0 : step, step == 0 ? 1 : 1 + step, !forward);
+				require(plan.valid, "History scanner edit refused");
+				index = world->applySecurityScannerEdit(plan);
+				commitDocumentEdit(std::move(before), history);
+				states.push_back(captureDocumentSnapshot(world, history)->yaml);
+			}
+			require(history.undoCount() == 4 && world->getNumSectors() == 6, "Structural commands not recorded");
+			for (int step = 3; step >= 0; --step)
+			{
+				require(history.undo(captureDocumentSnapshot(world, history), restore), "Structural undo refused");
+				require(captureDocumentSnapshot(world, history)->yaml == states[step], "Structural undo lost authored state/wall metadata");
+				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(6));
+				require(chamber && chamber->getDoor(0)->isSecurityScannerOwned() && chamber->getDoor(1)->isSecurityScannerOwned()
+					&& chamber->getCapacity() == 1 && chamber->getSensorDistance() == 8
+					&& chamber->getScanSeconds() == 0.1f && world->isTraversalTopologyValid(), "Structural undo lost configuration/ownership");
+			}
+			for (int step = 1; step <= 4; ++step)
+			{
+				require(history.redo(captureDocumentSnapshot(world, history), restore), "Structural redo refused");
+				require(captureDocumentSnapshot(world, history)->yaml == states[step], "Structural redo lost authored state");
+			}
+		}
+	}
+
 	void commands(smoke::Context const&)
 	{
 		using smoke::require;
@@ -52,7 +121,7 @@ namespace
 					std::string text = GImGui->LogBuffer.c_str(); ImGui::LogFinish(); ImGui::End(); ImGui::Render();
 					for (auto readout : { "Security scanner", "Capacity: 1", "Pre-delay: 1.0 s", "Complete scan: 2.0 s",
 						"Post-pause: 1.0 s", "Sensor distance: 0.5 units", "Phase: Idle", "Remaining: 0.0 s",
-						"Occupancy: 0 / 1", "Scan progress: 0%", "structural editing unavailable" })
+						"Occupancy: 0 / 1", "Scan progress: 0%", "structural edits require an empty, paused chamber" })
 						require(text.find(readout) != std::string::npos, "Production Selection missing scanner readout");
 					require(text.find(draft.leftToRight ? "Left to right" : "Right to left") != std::string::npos, "Selection direction wrong");
 					auto restore = [&](DocumentSnapshot const& snapshot) {
@@ -97,4 +166,5 @@ namespace
 void editor_smoke::registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "securityScanners/editorCommandsAndHistory", commands });
+	checks.push_back({ "securityScanners/structuralHistory", structuralHistory });
 }

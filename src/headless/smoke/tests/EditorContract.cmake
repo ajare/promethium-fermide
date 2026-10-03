@@ -164,6 +164,7 @@ set(editor_names
     airlocks/structuralHistory
     airlocks/editorCommands
     securityScanners/editorCommandsAndHistory
+    securityScanners/structuralHistory
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation
     background/theColourEditCarriesNoAlphaChannel

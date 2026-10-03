@@ -30,9 +30,12 @@ namespace
 			{
 				auto world = std::make_shared<core::World>("Scanner beams", width + 8, 2);
 				uint32_t ends[] = { world->addRoom("Left", 0, 0, 0, 3, 1), world->addCorridor(0, 0, width + 3, 3, 1) };
-				auto index = world->addSecurityScanner(0, 0, 3, width, direction);
+				world->addRoom("Old left", 0, 1, 0, 2, 1); world->addCorridor(0, 1, 3, 2, 1);
+				auto index = world->addSecurityScanner(0, 1, 2, 1, !direction);
+				world->finishBuild(); world->pauseSimulation();
+				index = world->applySecurityScannerEdit(world->planResizeSecurityScanner(index, 3, 0, width, direction));
 				auto marker = world->addSectorMarker(ends[direction ? 1 : 0], 0, 1.5f);
-				world->finishBuild();
+				world->finishBuild(); world->resumeSimulation();
 				auto id = world->createAgent("Traveller", ends[direction ? 0 : 1], 0, 1.5f);
 				auto actor = world->lookupAgent(id).entity;
 				actor->setPath(world->getGraph()->calculatePath(actor,
@@ -133,8 +136,12 @@ namespace
 			{
 				auto world = std::make_shared<core::World>("Scanner drawing", 12, 2);
 				uint32_t ends[] = { world->addRoom("Left", 0, 0, 0, 2, 1), world->addCorridor(0, 0, 2 + width, 2, 1) };
-				auto index = world->addSecurityScanner(0, 0, 2, width, direction);
+				world->addRoom("Old left", 0, 1, 0, 3, 1); world->addCorridor(0, 1, 4, 2, 1);
+				auto index = world->addSecurityScanner(0, 1, 3, 1, !direction);
+				world->finishBuild(); world->pauseSimulation();
+				index = world->applySecurityScannerEdit(world->planResizeSecurityScanner(index, 2, 0, width, direction));
 				auto marker = world->addSectorMarker(ends[direction ? 1 : 0], 0, 1.0f); world->finishBuild();
+				world->resumeSimulation();
 				gSelectedSector = world->getSector(index);
 				WorldDrawList drawing({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &drawing);
 				std::set<float> doors; uint32_t buttons = 0, arrows = 0;
@@ -162,7 +169,8 @@ namespace
 					if (auto text = std::get_if<WorldDrawList::Text>(&command))
 						if (text->value == "Capacity: 1") capacity = true;
 				}
-				require(surface && doors.size() == 2 && buttons == 0 && arrows == 3 && capacity && selected,
+				require(surface && doors == std::set<float>{ 2 * CORE_CELL_WIDTH_PIXELS, (2 + width) * CORE_CELL_WIDTH_PIXELS }
+					&& buttons == 0 && arrows == 3 && capacity && selected,
 					"Scanner render omitted surface/Doors/direction/capacity/selection or added buttons");
 				auto id = world->createAgent("Traveller", ends[direction ? 0 : 1], 0, 1.0f);
 				auto actor = world->lookupAgent(id).entity;
@@ -175,6 +183,16 @@ namespace
 				for (auto const& command : scanDrawing.commands())
 					if (auto text = std::get_if<WorldDrawList::Text>(&command)) countdown = countdown || text->value == "Scanning: 2.0 s";
 				require(countdown, "Canvas omitted live phase/countdown readout");
+				world->advanceTicks(2400); world->pauseSimulation();
+				world->applySecurityScannerEdit(world->planRemoveSecurityScanner(index)); gSelectedSector.reset();
+				WorldDrawList deleted({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &deleted);
+				for (auto const& command : deleted.commands())
+				{
+					if (auto text = std::get_if<WorldDrawList::Text>(&command))
+						require(text->value != "Capacity: 1", "Deleted scanner readout rendered");
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+						require(triangle->colour != ImU32(ImColor(128, 192, 182)), "Deleted generated Door rendered");
+				}
 			}
 		gSelectedSector.reset(); ImGui::EndFrame();
 	}

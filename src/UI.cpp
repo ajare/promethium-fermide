@@ -2813,8 +2813,9 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
-			auto index = world->applyAirlockEdit(plan);
+			// A cached scanner drag plan must not turn a running edit into a pause.
+			if (!plan.scanner && !world->isSimulationPaused()) world->pauseSimulation();
+			auto index = plan.scanner ? world->applySecurityScannerEdit(plan) : world->applyAirlockEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -4371,7 +4372,9 @@ void handleShortcuts(shared_ptr<core::World>& world)
 		{
 			if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector)
 			{
-				if (gSelectedSector->getType() == core::SectorType::Airlock)
+				if (gSelectedSector->getType() == core::SectorType::SecurityScanner)
+					commitAirlockEdit(world, world->planRemoveSecurityScanner(gSelectedSector->getIndex()));
+				else if (gSelectedSector->getType() == core::SectorType::Airlock)
 					commitAirlockEdit(world, world->planRemoveAirlock(gSelectedSector->getIndex()));
 				else if (gSelectedSector->getType() == core::SectorType::Lift)
 				{
@@ -6742,6 +6745,20 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		{
 			auto chamber = static_pointer_cast<const core::SecurityScannerTransit>(gSelectedSector);
 			drawSecurityScannerSelectionPanel(*chamber);
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			int x = (int)chamber->getCellX(), y = (int)chamber->getCellY();
+			int width = (int)chamber->getCellsWide();
+			bool direction = chamber->isLeftToRight();
+			bool structural = ImGui::InputInt("Chamber x", &x);
+			structural = ImGui::InputInt("Chamber Level", &y) || structural;
+			structural = ImGui::InputInt("Chamber width", &width) || structural;
+			structural = ImGui::Checkbox("Left to right", &direction) || structural;
+			if (structural)
+				commitAirlockEdit(world, world->planResizeSecurityScanner(chamber->getIndex(),
+					(uint32_t)x, (uint32_t)y, (uint32_t)width, direction));
+			if (ImGui::Button("Delete Security scanner"))
+				commitAirlockEdit(world, world->planRemoveSecurityScanner(chamber->getIndex()));
+			ImGui::EndDisabled();
 			float sensor = chamber->getSensorDistance(), pre = chamber->getPreDelaySeconds();
 			float scan = chamber->getScanSeconds(), post = chamber->getPostPauseSeconds();
 			ImGui::BeginDisabled(!world->isSimulationPaused());
@@ -8163,7 +8180,7 @@ namespace
 			|| type == core::SectorType::Shuttle
 			|| type == core::SectorType::Ladder
 			|| type == core::SectorType::Stairwell
-			|| type == core::SectorType::Airlock;
+			|| type == core::SectorType::Airlock || type == core::SectorType::SecurityScanner;
 	}
 
 	ResizeEdge hoveredResizeEdge(shared_ptr<const core::Sector> const& sector, ImVec2 mouse)
@@ -8183,7 +8200,7 @@ namespace
 			candidates.push_back({ ResizeEdge::Left, abs(mouse.x - topLeft.x) });
 			candidates.push_back({ ResizeEdge::Right, abs(mouse.x - bottomRight.x) });
 		}
-		bool corridor = sector->getType() == core::SectorType::Airlock
+		bool corridor = sector->getType() == core::SectorType::SecurityScanner || sector->getType() == core::SectorType::Airlock
 			|| sector->getType() == core::SectorType::Shuttle
 			|| (sector->getType() == core::SectorType::Location
 				&& sector->getTopLevelHeight() == CORE_CORRIDOR_HEIGHT);
@@ -8623,7 +8640,8 @@ namespace
 			bool const selectedLadder = gSelectedSector->getType() == core::SectorType::Ladder;
 			bool const selectedStairwell = gSelectedSector->getType() == core::SectorType::Stairwell;
 			if (hoverEdge != ResizeEdge::Move && !selectedLift && !selectedShuttle
-				&& gSelectedSector->getType() != core::SectorType::Airlock)
+				&& gSelectedSector->getType() != core::SectorType::Airlock
+				&& gSelectedSector->getType() != core::SectorType::SecurityScanner)
 			{
 				if (!world->isSimulationPaused()) world->pauseSimulation();
 				gUISettings.worldPaused = true;
@@ -8633,7 +8651,8 @@ namespace
 			gSectorResize.shuttle = selectedShuttle;
 			gSectorResize.ladder = selectedLadder;
 			gSectorResize.stairwell = selectedStairwell;
-			gSectorResize.airlock = gSelectedSector->getType() == core::SectorType::Airlock;
+			gSectorResize.airlock = gSelectedSector->getType() == core::SectorType::Airlock
+				|| gSelectedSector->getType() == core::SectorType::SecurityScanner;
 			gSectorResize.edge = hoverEdge;
 			gSectorResize.pressPosition = io.MousePos;
 			gSectorResize.originalX = gSelectedSector->getCellX();
@@ -8641,8 +8660,12 @@ namespace
 			gSectorResize.originalWidth = gSelectedSector->getCellsWide();
 			gSectorResize.originalHeight = gSelectedSector->getLevelsHigh();
 			if (gSectorResize.airlock)
-				gSectorResize.airlockPreview = world->planResizeAirlock(gSelectedSector->getIndex(),
-					gSectorResize.originalX, gSectorResize.originalY, gSectorResize.originalWidth);
+				gSectorResize.airlockPreview = gSelectedSector->getType() == core::SectorType::SecurityScanner
+					? world->planResizeSecurityScanner(gSelectedSector->getIndex(), gSectorResize.originalX,
+						gSectorResize.originalY, gSectorResize.originalWidth,
+						static_pointer_cast<const core::SecurityScannerTransit>(gSelectedSector)->isLeftToRight())
+					: world->planResizeAirlock(gSelectedSector->getIndex(),
+						gSectorResize.originalX, gSectorResize.originalY, gSectorResize.originalWidth);
 			else if (gSectorResize.lift)
 				gSectorResize.liftPreview = world->planResizeLift(gSelectedSector->getIndex(),
 					gSectorResize.originalX, gSectorResize.originalY,
@@ -8744,8 +8767,12 @@ namespace
 			if (gSectorResize.airlockPreview.x != (uint32_t)left
 				|| gSectorResize.airlockPreview.y != (uint32_t)bottom
 				|| gSectorResize.airlockPreview.width != (uint32_t)(right - left))
-				gSectorResize.airlockPreview = world->planResizeAirlock(gSelectedSector->getIndex(),
-					(uint32_t)left, (uint32_t)bottom, (uint32_t)(right - left));
+				gSectorResize.airlockPreview = gSelectedSector->getType() == core::SectorType::SecurityScanner
+					? world->planResizeSecurityScanner(gSelectedSector->getIndex(), (uint32_t)left,
+						(uint32_t)bottom, (uint32_t)(right - left),
+						static_pointer_cast<const core::SecurityScannerTransit>(gSelectedSector)->isLeftToRight())
+					: world->planResizeAirlock(gSelectedSector->getIndex(),
+						(uint32_t)left, (uint32_t)bottom, (uint32_t)(right - left));
 		}
 		else if (gSectorResize.lift)
 		{

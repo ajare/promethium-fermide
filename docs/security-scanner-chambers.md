@@ -1,4 +1,4 @@
-# Security scanner chambers (#339, #340, #341, #342, #343, #344)
+# Security scanner chambers (#339, #340, #341, #342, #343, #344, #345)
 
 The palette's **Scanner** tool creates a distinct same-Layer Security scanner.
 Drag horizontally across empty whole cells between adjoining walkable Room or
@@ -46,8 +46,8 @@ Global pause freezes motion, timers, and progress. Reset and document load repla
 closed, empty chambers, clear queues/reservations/operations, and restore Agents'
 authored positions and Paths through the existing World restoration pipeline.
 Generated Doors cannot be independently operated, configured, moved, or deleted.
-Direct Agent creation/placement/relocation inside is refused. Scanner move,
-resize, delete, and reversal remain unsupported, including while occupied.
+Direct Agent creation/placement/relocation inside is refused. Structural edits
+require a globally paused World and an empty chamber with no threshold crossing.
 
 ## Scan beams
 
@@ -102,7 +102,28 @@ Perceived route costs retain the automated-duration estimate. Only an entry-loca
 Route observation adds that approach's queue service estimate and density; remote
 live occupancy, phase, and queues are not revealed. No fictitious Buttons
 interaction, scanner control permission, or new Mobility category is introduced.
-Structural editing remains a separate follow-up ticket.
+Structural edits preserve committed journeys by refusing occupied or crossing chambers.
+
+## Safe structural editing
+
+While paused, Selection edits chamber x, Level, width, and left-to-right direction;
+the canvas supports move/resize and Delete removes the selected scanner. World
+`planResizeSecurityScanner`, `planRemoveSecurityScanner`, and
+`applySecurityScannerEdit` revalidate before mutation. Edits retain the same Layer,
+positive whole-cell width, walkable Room/Corridor ends, fixed capacity one, and all
+authored sensing/timing values. Reversal updates both routing and runtime gates.
+
+Occupied chambers and crossings refuse move, resize, reversal, and deletion,
+even while paused. Running or invalid edits change neither authored state nor
+queues, walls, Doors, Paths, or history. Construction replay also refuses if
+another Airlock or scanner has an occupant/crossing, rather than discarding its
+journey. Valid empty edits retire old requests, reservations, and permits and
+reconsider affected Paths while preserving Agent identity and destination intent.
+
+Generated Doors move with the chamber and remain independently uneditable.
+Old adjoining walls are restored exactly, including originally open walls;
+deleting removes both Doors and the chamber's resource. Rendering, readouts, and
+optional beams consume the unchanged public geometry/progress seams.
 
 ## Persistence and history
 
@@ -115,7 +136,7 @@ geometry/configuration, missing fields, wall-restoration contradictions, and
 scanners in older schemas are rejected transactionally. Non-default sensing/timing is retained by both formats and replay; unsupported
 configuration is rejected rather than silently dropped.
 
-Creation uses normal document snapshots/history. Undo removes the chamber and
+Creation, move, resize, reversal, and deletion use normal document snapshots/history. Undo removes the chamber and
 both Doors and restores original wall states; redo reconstructs configuration
 and ownership. Detached open-wall restoration records remain supported.
 
@@ -123,6 +144,9 @@ and ownership. Detached open-wall restoration records remain supported.
 
 - `pf-smoke-world --check securityScanners/chambers`
 - `pf-smoke-world --check securityScanners/preflight`
+- `pf-smoke-world --check securityScanners/structuralEdits`
+- `pf-smoke-simulation --check securityScanners/editSafety`
+- `pf-smoke-editor --check securityScanners/structuralHistory`
 - `pf-smoke-simulation --check securityScanners/committedInterruptions`
 - `pf-smoke-simulation --check securityScanners/admissionAuthorizationChanges`
 - `pf-smoke-simulation --check securityScanners/localRouteObservations`

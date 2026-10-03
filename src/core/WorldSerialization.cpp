@@ -4277,19 +4277,24 @@ namespace core
 	bool World::prepareAirlockEdit(AirlockEditPlan const& plan,
 		vector<ConstructionRecord>& records, string& diagnostic) const
 	{
+		if (plan.scanner && !mSimulationPaused)
+		{ diagnostic = "Chamber structural editing requires a paused simulation"; return false; }
+		auto type = plan.scanner ? SectorType::SecurityScanner : SectorType::Airlock;
+		auto constructionType = plan.scanner ? ConstructionType::SecurityScanner : ConstructionType::Airlock;
 		if (plan.sectorIndex >= mSectors.size()
-			|| mSectors[plan.sectorIndex]->getType() != SectorType::Airlock)
-		{ diagnostic = "Only Airlock chambers can be edited"; return false; }
+			|| mSectors[plan.sectorIndex]->getType() != type)
+		{ diagnostic = "Only the selected chamber type can be edited"; return false; }
 		// Construction replay replaces the aggregate. Never discard a passenger
 		// or a crossing in this chamber (or another chamber being replayed).
 		for (auto const& [id, resource] : mTraversalResources.entries())
 		{
 			(void)id;
-			if (!resource->mAirlock) continue;
+			if (!resource->mAirlock && !resource->mSecurityScanner) continue;
 			if (any_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto owner) { return (bool)owner; })
 				|| any_of(resource->mCrossingOwners.begin(), resource->mCrossingOwners.end(), [](auto owner) { return (bool)owner; })
-				|| !resource->mAirlock->getAgents().empty())
-			{ diagnostic = "Airlock structural replay requires empty chambers with no threshold crossings"; return false; }
+				|| (resource->mAirlock && !resource->mAirlock->getAgents().empty())
+				|| (resource->mSecurityScanner && !resource->mSecurityScanner->getAgents().empty()))
+			{ diagnostic = "Chamber structural replay requires empty chambers with no threshold crossings"; return false; }
 		}
 		auto referencesSector = [](ConstructionType type) {
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
@@ -4304,10 +4309,10 @@ namespace core
 		for (size_t i = 0; i < records.size(); ++i)
 			if (constructionTypeCreatesSector(records[i].type) && producer++ == plan.sectorIndex)
 			{ selected = i; break; }
-		if (selected == records.size() || records[selected].type != ConstructionType::Airlock)
-		{ diagnostic = "The Airlock no longer has an authored definition"; return false; }
+		if (selected == records.size() || records[selected].type != constructionType)
+		{ diagnostic = "The chamber no longer has an authored definition"; return false; }
 		auto edited = records[selected];
-		auto chamber = static_pointer_cast<const AirlockTransit>(mSectors[plan.sectorIndex]);
+		auto chamber = static_pointer_cast<const Transit>(mSectors[plan.sectorIndex]);
 		// The saved restoration flags are authoritative, including documents
 		// whose originally open walls have no separate RemoveWall record.
 		for (int side = 0; side < 2; ++side)
@@ -4338,8 +4343,12 @@ namespace core
 			if (plan.remove) records = std::move(without);
 			else
 			{
-				if (!candidate->canAddAirlock(edited.layer, plan.y, plan.x, plan.width, edited.x, &diagnostic)) return false;
+				bool valid = plan.scanner
+					? candidate->canAddSecurityScanner(edited.layer, plan.y, plan.x, plan.width, &diagnostic)
+					: candidate->canAddAirlock(edited.layer, plan.y, plan.x, plan.width, edited.x, &diagnostic);
+				if (!valid) return false;
 				edited.a = plan.y; edited.b = plan.x; edited.c = plan.width;
+				if (plan.scanner) edited.d = plan.leftToRight ? 1 : 0;
 				for (int side = 0; side < 2; ++side)
 				{
 					auto endX = side == 0 ? plan.x - 1 : plan.x + plan.width;
@@ -4357,6 +4366,32 @@ namespace core
 		catch (Exception const& error) { diagnostic = error.getMessage(); return false; }
 		catch (exception const& error) { diagnostic = error.what(); return false; }
 		return true;
+	}
+
+	World::SecurityScannerEditPlan World::planResizeSecurityScanner(uint32_t index,
+		uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const
+	{
+		SecurityScannerEditPlan plan;
+		plan.scanner = true; plan.leftToRight = leftToRight;
+		plan.sectorIndex = index; plan.x = x; plan.y = y; plan.width = width;
+		vector<ConstructionRecord> records;
+		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
+		return plan;
+	}
+
+	World::SecurityScannerEditPlan World::planRemoveSecurityScanner(uint32_t index) const
+	{
+		SecurityScannerEditPlan plan;
+		plan.scanner = true; plan.remove = true; plan.sectorIndex = index;
+		vector<ConstructionRecord> records;
+		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
+		return plan;
+	}
+
+	uint32_t World::applySecurityScannerEdit(SecurityScannerEditPlan const& plan)
+	{
+		if (!plan.scanner) throw WorldException(this, "Not a Security scanner edit plan");
+		return applyAirlockEdit(plan);
 	}
 
 	World::AirlockEditPlan World::planResizeAirlock(uint32_t index, uint32_t x,
@@ -4380,7 +4415,7 @@ namespace core
 
 	uint32_t World::applyAirlockEdit(AirlockEditPlan const& plan)
 	{
-		if (!mSimulationPaused) throw WorldException(this, "Editing an Airlock requires the simulation to be paused");
+		if (!mSimulationPaused) throw WorldException(this, "Editing a chamber requires the simulation to be paused");
 		vector<ConstructionRecord> records;
 		string diagnostic;
 		if (!prepareAirlockEdit(plan, records, diagnostic)) throw WorldException(this, diagnostic);

@@ -358,9 +358,11 @@ namespace core
 			[[nodiscard]] bool requiresConfirmation() const { return !consequences.empty(); }
 		};
 
+		// Both stationary chamber types share validated construction replay.
 		struct AirlockEditPlan
 		{
 			bool valid = false, remove = false;
+			bool scanner = false, leftToRight = true;
 			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
 			std::string diagnostic;
 		};
@@ -1732,6 +1734,11 @@ namespace core
 			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
 		bool isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		using SecurityScannerEditPlan = AirlockEditPlan;
+		SecurityScannerEditPlan planResizeSecurityScanner(uint32_t sectorIndex, uint32_t x,
+			uint32_t y, uint32_t width, bool leftToRight) const;
+		SecurityScannerEditPlan planRemoveSecurityScanner(uint32_t sectorIndex) const;
+		uint32_t applySecurityScannerEdit(SecurityScannerEditPlan const& plan);
 		bool setSecurityScannerConfiguration(uint32_t sectorIndex, float sensorDistance,
 			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
 		bool canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,

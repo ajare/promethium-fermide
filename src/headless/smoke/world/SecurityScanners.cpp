@@ -5,6 +5,8 @@
 #include "core/YamlSerializer.h"
 #include "core/Exceptions.h"
 #include "core/SectorPosition.h"
+#include "core/BinarySerializer.h"
+#include <yaml-cpp/yaml.h>
 
 namespace
 {
@@ -13,6 +15,101 @@ namespace
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		work.markSerializedUnmodified = false; world.serialize(*writer, work);
 		writer->serialize(); return writer->getSerializedString();
+	}
+
+	void structuralEdits(smoke::Context const&)
+	{
+		using smoke::require;
+		for (bool open : { false, true })
+			for (bool direction : { false, true })
+			{
+				core::World world("Scanner edits", 18, 3);
+				for (uint32_t row = 0; row < 3; ++row)
+				{
+					world.addRoom("Left", 1, row, 0, 3 + row, 1);
+					world.addCorridor(1, row, 6 + row * 2, 3, 1);
+				}
+				if (open)
+				{
+					auto node = YAML::Load(saved(world));
+					for (uint32_t sector = 0; sector < 6; ++sector)
+					{
+						YAML::Node wall; wall["type"] = "removeWall"; wall["sectorIndex"] = sector;
+						wall["levelIndex"] = 0; wall["side"] = sector % 2 ? "left" : "right";
+						wall["airlockWallRestoration"] = true; node["construction"].push_back(wall);
+					}
+					auto input = core::YamlSerializer::fromString(YAML::Dump(node)); input->deserialize();
+					core::SerializationWorkData work;
+					require(world.deserialize(*input, work), "Open wall fixture refused");
+				}
+				world.pauseSimulation();
+				auto index = world.addSecurityScanner(1, 0, 3, 3, direction);
+				world.finishBuild(); world.pauseSimulation();
+				require(world.setSecurityScannerConfiguration(index, 9, 0, 0.1f, 10), "Edit fixture configuration refused");
+				world.markSaved(); auto baseline = saved(world);
+				auto stale = world.planResizeSecurityScanner(index, 4, 1, 4, !direction);
+				world.resumeSimulation();
+				require(!world.planRemoveSecurityScanner(index).valid, "Running deletion planned");
+				bool refused = false;
+				try { world.applySecurityScannerEdit(stale); } catch (core::Exception const&) { refused = true; }
+				require(refused && saved(world) == baseline && !world.isModified(), "Running edit mutated authored state");
+				world.pauseSimulation();
+				for (auto geometry : { std::array<uint32_t, 3>{ 0, 0, 3 }, { 3, 0, 0 }, { 3, 0, 4 }, { 3, 3, 3 }, { ~0u, 0, 3 } })
+				{
+					auto plan = world.planResizeSecurityScanner(index, geometry[0], geometry[1], geometry[2], direction);
+					require(!plan.valid && !plan.diagnostic.empty(), "Invalid scanner edit planned");
+					refused = false;
+					try { world.applySecurityScannerEdit(plan); } catch (core::Exception const&) { refused = true; }
+					require(refused && saved(world) == baseline && !world.isModified()
+						&& world.isTraversalTopologyValid(), "Invalid scanner edit not atomic");
+				}
+				auto check = [&](uint32_t row, bool forward) {
+					auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+					require(chamber && chamber->getCellX() == 3 + row && chamber->getCellY() == row
+						&& chamber->getCellsWide() == 3 + row && chamber->getCapacity() == 1
+						&& chamber->isLeftToRight() == forward && chamber->getLayerIndex() == 1
+						&& chamber->getSensorDistance() == 9 && chamber->getPreDelaySeconds() == 0
+						&& chamber->getScanSeconds() == 0.1f && chamber->getPostPauseSeconds() == 10,
+						"Structural edit lost geometry/direction/configuration");
+					for (int side = 0; side < 2; ++side)
+						require(chamber->getPreviousEnd(side) == (open ? core::SectorEndType::None : core::SectorEndType::Wall)
+							&& chamber->getDoor(side)->isSecurityScannerOwned() && chamber->getDoor(side)->isClosed(),
+							"Structural edit lost wall restoration/ownership");
+					require(chamber->getNumObjects() == 2 && world.isTraversalTopologyValid()
+						&& world.getSimulationSnapshot().traversalResources.size() == 1, "Edit orphaned Doors/resources");
+				};
+				for (uint32_t row = 0; row < 3; ++row)
+				{
+					index = world.applySecurityScannerEdit(world.planResizeSecurityScanner(index, 3 + row, row, 3 + row, !direction));
+					check(row, !direction);
+					for (uint32_t old = 0; old < row; ++old)
+						for (uint32_t side = 0; side < 2; ++side)
+							require(world.getSector(old * 2 + side)->getEndType(0, 1 - side)
+								== (open ? core::SectorEndType::None : core::SectorEndType::Wall), "Move failed old wall restoration");
+				}
+				for (bool binary : { false, true })
+				{
+					core::SerializationWorkData work; work.markSerializedUnmodified = false;
+					auto write = [&](auto writer) {
+						world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+					};
+					auto data = binary ? write(core::BinarySerializer::toString()) : write(core::YamlSerializer::toString());
+					std::unique_ptr<core::Serializer> input = binary
+						? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+						: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+					input->deserialize(); require(world.deserialize(*input, work), "Edited scanner load refused");
+					world.pauseSimulation(); check(2, !direction);
+					world.resetSimulation(); world.pauseSimulation(); check(2, !direction);
+				}
+				require(world.applySecurityScannerEdit(world.planRemoveSecurityScanner(index)) == ~0u, "Delete refused");
+				require(world.getNumSectors() == 6 && world.getSimulationSnapshot().traversalResources.empty(), "Deleted scanner resources survived");
+				for (uint32_t sector = 0; sector < 6; ++sector)
+					require(world.getSector(sector)->getNumObjects() == 0 && world.getSector(sector)->getEndType(0, sector % 2 ? 0 : 1)
+						== (open ? core::SectorEndType::None : core::SectorEndType::Wall), "Delete failed Door removal/wall restoration");
+				auto input = core::YamlSerializer::fromString(saved(world)); input->deserialize(); core::SerializationWorkData work;
+				require(world.deserialize(*input, work) && world.getSector(4)->getEndType(0, 1)
+					== (open ? core::SectorEndType::None : core::SectorEndType::Wall), "Deleted wall metadata lost on reload");
+			}
 	}
 
 	void chambers(smoke::Context const&)
@@ -114,5 +211,6 @@ namespace
 void registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "securityScanners/chambers", chambers });
+	checks.push_back({ "securityScanners/structuralEdits", structuralEdits });
 	checks.push_back({ "securityScanners/preflight", preflight });
 }

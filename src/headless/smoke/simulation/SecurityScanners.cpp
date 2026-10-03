@@ -59,6 +59,116 @@ namespace
 				"Scan without one sealed occupant");
 	}
 
+	void editSafety(smoke::Context const&)
+	{
+		for (bool forward : { false, true })
+			for (int stage = 0; stage < 7; ++stage)
+			{
+				core::World world("Scanner edit safety", 14, 2);
+				for (uint32_t row = 0; row < 2; ++row)
+				{
+					world.addRoom("Left", 0, row, 0, 4, 1);
+					world.addCorridor(0, row, stage == 4 && row == 1 ? 7 : 6, 4, 1);
+				}
+				auto index = world.addSecurityScanner(0, 0, 4, 2, forward);
+				auto source = forward ? 0u : 1u, destination = 1 - source;
+				auto marker = world.addSectorMarker(destination, 0, 2.0f);
+				auto reverseMarker = world.addSectorMarker(source, 0, 1.0f);
+				world.finishBuild();
+				auto id = world.createAgent("Traveller", source, 0, 2.0f);
+				auto agent = world.lookupAgent(id).entity;
+				agent->setPath(world.getGraph()->calculatePath(agent,
+					world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+				core::AgentId waiterId;
+				if (stage == 0 || stage >= 4)
+				{
+					waiterId = world.createAgent("Waiting traveller", source, 0, 2.0f);
+					auto waiter = world.lookupAgent(waiterId).entity;
+					waiter->setPath(world.getGraph()->calculatePath(waiter,
+						world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+				}
+				bool reached = false;
+				for (unsigned tick = 0; tick < 2000 && !reached; ++tick)
+				{
+					world.advanceTick();
+					auto state = world.getSimulationSnapshot().securityScanners.at(0);
+					if (stage == 0 || stage >= 4) reached = !state.reservations.empty() && state.crossings.empty() && !state.occupant;
+					else if (stage == 1) reached = !state.crossings.empty() && !state.occupant;
+					else if (stage == 2) reached = state.occupant && state.crossings.empty();
+					else reached = !state.crossings.empty() && state.occupant;
+				}
+				require(reached, "Scanner edit fixture failed journey boundary stage=" + std::to_string(stage));
+				world.pauseSimulation();
+				if (stage > 0 && stage < 4)
+				{
+					auto before = world.getSimulationSnapshot().securityScanners.at(0);
+					world.markSaved();
+					for (auto plan : { world.planResizeSecurityScanner(index, 4, 1, 2, forward),
+						world.planResizeSecurityScanner(index, 4, 1, 3, forward),
+						world.planResizeSecurityScanner(index, 4, 0, 2, !forward), world.planRemoveSecurityScanner(index) })
+					{
+						require(!plan.valid, "Occupied/crossing scanner edit planned");
+						plan.valid = true;
+						bool refused = false;
+						try { world.applySecurityScannerEdit(plan); } catch (core::Exception const&) { refused = true; }
+						require(refused && !world.isModified() && world.getNumSectors() == 5, "Forged occupied plan mutated World");
+					}
+					world.advanceTicks(60);
+					auto after = world.getSimulationSnapshot().securityScanners.at(0);
+					require(after.occupant == before.occupant && after.crossings == before.crossings
+						&& after.reservations == before.reservations && after.doors == before.doors
+						&& after.phase == before.phase && after.scanProgress == before.scanProgress,
+						"Paused refusal changed journey");
+				}
+				else
+				{
+					auto stale = world.planRemoveSecurityScanner(index);
+					world.resumeSimulation(); world.advanceTicks(1);
+					bool refused = false;
+					try { world.applySecurityScannerEdit(stale); } catch (core::Exception const&) { refused = true; }
+					require(refused, "Running stale scanner plan accepted");
+					world.pauseSimulation();
+					auto plan = stage == 5 ? world.planRemoveSecurityScanner(index)
+						: world.planResizeSecurityScanner(index, 4,
+							stage == 6 ? 0 : 1, stage == 4 ? 3 : 2, stage == 6 ? !forward : forward);
+					require(plan.valid, "Reserved empty scanner edit refused");
+					require(world.getSimulationSnapshot().traversalRequests.size() >= 2, "Edit fixture omitted waiting ticket");
+					index = world.applySecurityScannerEdit(plan);
+					auto state = world.getSimulationSnapshot();
+					require(state.traversalRequests.empty() && state.traversalPermits.empty(), "Scanner edit retained requests/permits");
+					if (stage == 5)
+						require(state.securityScanners.empty() && state.traversalResources.empty(), "Deleted scanner authority survived");
+					else
+					{
+						require(state.securityScanners.at(0).reservations.empty() && !state.securityScanners.at(0).occupant
+							&& state.securityScanners.at(0).crossings.empty(), "Scanner edit retained stale admission");
+						if (stage != 6) index = world.applySecurityScannerEdit(world.planResizeSecurityScanner(index, 4, 0, 2, forward));
+					}
+				}
+				world.resumeSimulation(); agent = world.lookupAgent(id).entity;
+				require(agent, "Replay lost waiting Agent identity");
+				world.advanceTicks(6000);
+				require(agent->getSector()->getIndex() == ((stage == 5 || stage == 6) ? source : destination),
+					"Scanner edited/refused route recovery failed stage=" + std::to_string(stage)
+					+ " sector=" + std::to_string(agent->getSector()->getIndex())
+					+ " phase=" + (stage == 5 ? "deleted" : world.getSimulationSnapshot().securityScanners.at(0).phase));
+				if (waiterId)
+					require(world.lookupAgent(waiterId).entity->getSector()->getIndex()
+						== ((stage == 5 || stage == 6) ? source : destination), "Queued Agent did not recover after scanner edit");
+				if (stage == 6)
+				{
+					// Reversed routing and gates also serve a new real forward journey.
+					auto reverseObject = world.getSector(source)->getObject(reverseMarker.index);
+					auto otherId = world.createAgent("Reverse traveller", destination, 0, 2.0f);
+					auto other = world.lookupAgent(otherId).entity;
+					other->setPath(world.getGraph()->calculatePath(other,
+						world.getGraph()->getVertexForObject(reverseObject)), true);
+					world.advanceTicks(2400);
+					require(other->getSector()->getIndex() == source, "Reversed scanner real forward journey failed");
+				}
+			}
+	}
+
 	void contention(smoke::Context const&)
 	{
 		for (uint32_t width : { 1u, 2u, 5u })
@@ -827,6 +937,7 @@ namespace
 
 void registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "securityScanners/editSafety", editSafety });
 	checks.push_back({ "securityScanners/committedInterruptions", interruptions });
 	checks.push_back({ "securityScanners/admissionAuthorizationChanges", admissionAuthorization });
 	checks.push_back({ "securityScanners/localRouteObservations", routeObservations });

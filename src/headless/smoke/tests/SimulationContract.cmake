@@ -128,6 +128,7 @@ set(core_names
     airlocks/localQueueObservations
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
+    securityScanners/editSafety
     securityScanners/committedInterruptions
     securityScanners/admissionAuthorizationChanges
     securityScanners/localRouteObservations
