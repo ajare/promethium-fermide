@@ -5,6 +5,7 @@
 
 #include "core/Agent.h"
 #include "core/AirlockTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/World.h"
 #include "core/Coordination.h"
 #include "core/Edge.h"
@@ -89,12 +90,35 @@ namespace core
 			return;
 		}
 
+		// Interior walking is held at the centre until the automatic scan finishes.
+		if (request->mSourceSector == request->mDestinationSector
+			&& request->mSourceSector.value <= mWorld.mSectors.size())
+			if (auto chamber = std::dynamic_pointer_cast<ChamberTransit>(mWorld.mSectors[request->mSourceSector.value - 1]);
+				chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
+			{
+				auto actor = mWorld.mAgents.find(request->mOwner);
+				if (!actor || chamber->mOccupant != request->mOwner) { denyTraversalRequest(requestId); return; }
+				if (chamber->mPhase != SecurityScannerPhase::Exiting)
+				{
+					actor->mTraversalLocalGoal = chamber->getPosition() + Vector2{ chamber->getCellsWide() * 0.5f, 0.0f };
+					return;
+				}
+				actor->mTraversalLocalGoal.reset();
+				grantTraversalRequest(requestId);
+				return;
+			}
+
 		if (request->mResource)
 		{
 			auto resource = mWorld.mTraversalResources.find(request->mResource);
 			if (!resource)
 			{
 				denyTraversalRequest(requestId);
+				return;
+			}
+			if (resource->mSecurityScanner)
+			{
+				allocateSecurityScannerTraversal(requestId, *resource);
 				return;
 			}
 			if (resource->mAirlock)
@@ -297,14 +321,14 @@ namespace core
 		}
 		request->mState = TraversalRequestState::Denied;
 		request->mFailureReason = reason;
-		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource && resource->mAirlock)
+		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource && (resource->mAirlock || resource->mSecurityScanner))
 			for (auto& reservation : resource->mAdmissionReservations)
 				if (reservation == requestId) reservation = {};
 		if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource)
 		{
 			if (resource->mExtensible && resource->mExtensionRequestLeases.erase(requestId))
 				resource->mExtensible->releaseExtensionLease();
-			if (resource->mDoor || resource->mForceBridge || resource->mAirlock)
+			if (resource->mDoor || resource->mForceBridge || resource->mAirlock || resource->mSecurityScanner)
 			{
 				if (resource->mDoor && request->mPreparationLease)
 					releaseDoorOpenLease(*resource, request->mPreparationLease);
@@ -400,6 +424,42 @@ namespace core
 				|| ladderResource->mOccupants[request->mCapacityPosition])
 			{
 				return false;
+			}
+		}
+
+		if (traversalResource && traversalResource->mSecurityScanner)
+		{
+			auto& resource = *traversalResource;
+			auto& chamber = *resource.mSecurityScanner;
+			bool entry = destinationSector.get() == &chamber;
+			auto side = entry ? chamber.getEntrySide() : chamber.getExitSide();
+			if (!chamber.isTraversalAvailable() || !chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed()) return false;
+			if (entry)
+			{
+				if (!chamber.getAgents().empty() || resource.mAdmissionReservations[0] != requestId || resource.mOccupants[0]) return false;
+				resource.mAdmissionReservations[0] = {};
+				resource.mOccupants[0] = owner;
+				chamber.mOccupant = owner;
+				resource.mScannerAdmittedPath = agent.mPath.path;
+				resource.mScannerCommittedPath = std::make_shared<Path>();
+				// Retain only the forward chamber journey, not mutable destination
+				// intent. Recovery starts with interior walking from the current position.
+				for (size_t node = agent.mPath.targetNode + 1; node < agent.mPath.path->nodes.size(); ++node)
+				{
+					resource.mScannerCommittedPath->nodes.push_back(agent.mPath.path->nodes[node]);
+					if (agent.mPath.path->nodes[node].targetVertex->getSector().get() != &chamber) break;
+				}
+				chamber.mPhase = SecurityScannerPhase::Positioning;
+				request->mCapacityPosition = ~0u;
+			}
+			else
+			{
+				if (resource.mOccupants[0] != owner) return false;
+				resource.mOccupants[0] = {};
+				chamber.mOccupant = {};
+				resource.mScannerCommittedPath.reset();
+				resource.mScannerAdmittedPath.reset();
+				chamber.mPhase = SecurityScannerPhase::ExitClosing;
 			}
 		}
 
@@ -641,9 +701,9 @@ namespace core
 			}
 			if (auto resource = mWorld.mTraversalResources.find(request->mResource); resource)
 			{
-				if (resource->mDoor || resource->mForceBridge || resource->mAirlock)
+				if (resource->mDoor || resource->mForceBridge || resource->mAirlock || resource->mSecurityScanner)
 					releaseDoorQueueOwnership(requestId, *resource);
-				if (resource->mAirlock)
+				if (resource->mAirlock || resource->mSecurityScanner)
 					for (auto& reservation : resource->mAdmissionReservations)
 						if (reservation == requestId) reservation = {};
 				if (auto lift = mWorld.mTraversalResources.find(resource->mLiftCoordinator))
@@ -707,9 +767,9 @@ namespace core
 			{
 				if (resource->mExtensible && resource->mExtensionRequestLeases.erase(requestId))
 					resource->mExtensible->releaseExtensionLease();
-				if (resource->mDoor || resource->mForceBridge || resource->mAirlock)
+				if (resource->mDoor || resource->mForceBridge || resource->mAirlock || resource->mSecurityScanner)
 				{
-					if (resource->mAirlock)
+					if (resource->mAirlock || resource->mSecurityScanner)
 						for (auto& reservation : resource->mAdmissionReservations)
 							if (reservation == requestId) reservation = {};
 					if (resource->mDoor && request->mPreparationLease)

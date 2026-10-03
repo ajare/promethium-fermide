@@ -19,6 +19,11 @@ any missing, stale, duplicate, or mismatched manifest row. Runner, state, harnes
 support, tool, compatibility, and compile-only sources are listed separately below
 because they do not own smoke-check execution.
 
+Validation lanes do not change scenario ownership: each direct module remains
+its sole functional owner. CLI/isolation contracts reuse exhaustive inventories;
+contract/probe invocations are not new scenario owners. See
+[validation lanes](smoke-validation-lanes.md).
+
 <!-- current-ownership-begin -->
 | Current check source | Ownership | Target |
 | --- | --- | --- |
@@ -222,10 +227,20 @@ because they do not own smoke-check execution.
 | `smoke/render/BrokenExtensibles.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/simulation/BrokenExtensibles.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Airlocks.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/SecurityScanners.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/BoothWindows.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/world/BoothWindows.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/Airlocks.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/persistence/BoothWindows.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/persistence/Airlocks.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/BoothWindows.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/render/Airlocks.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/editor/BoothWindows.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/Airlocks.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/world/SecurityScanners.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/persistence/SecurityScanners.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/SecurityScanners.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/editor/SecurityScanners.cpp` | module-owned | `pf-smoke-editor` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

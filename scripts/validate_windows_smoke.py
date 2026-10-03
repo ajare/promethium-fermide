@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import validation_run as validation
 
 TOOLS = {
     "pf-restoration-benchmark", "pf-generate-routing-world", "pf-metrics-server",
@@ -23,7 +24,7 @@ TOOLS = {
 def run(command, log):
     print(subprocess.list2cmdline(command), flush=True)
     with log.open("w", encoding="utf-8") as stream:
-        result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT)
+        result = validation.run(command, stdout=stream, stderr=subprocess.STDOUT)
     if result.returncode:
         raise RuntimeError(f"command failed ({result.returncode}); see {log}")
 
@@ -37,6 +38,7 @@ def main():
     parser.add_argument("--parallel", type=int, default=4)
     parser.add_argument("--gui", choices=("on", "off", "both"), default="both")
     parser.add_argument("--high-analysis", action="store_true")
+    validation.arguments(parser, default=14400)
     args = parser.parse_args()
     if sys.platform != "win32":
         parser.error("this validation requires Windows and MSVC")
@@ -45,6 +47,10 @@ def main():
     source = Path(__file__).resolve().parents[1]
     root = args.build_root.resolve()
     modes = ("on", "off") if args.gui == "both" else (args.gui,)
+    trees = [args.build_tree.resolve() if args.build_tree else root / ('gui' if mode == 'on' else 'nogui') for mode in modes]
+    status = validation.supervise(args, trees)
+    if status is not None:
+        return status
     for mode in modes:
         build = args.build_tree.resolve() if args.build_tree else root / ("gui" if mode == "on" else "nogui")
         logs = build / "validation-logs"

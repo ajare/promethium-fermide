@@ -39,7 +39,7 @@ namespace core
 			type == SectorObjectType::Lift ||
 			type == SectorObjectType::Marker ||
 			type == SectorObjectType::Walkway ||
-			type == SectorObjectType::Window;
+			isWindowAperture(type);
 	}
 
 } // core

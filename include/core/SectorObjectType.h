@@ -18,8 +18,14 @@ namespace core
 		Marker,
 		Shuttle,
 		Walkway,
-		Window
+		Window,
+		BoothWindow
 	};
+
+	inline bool isWindowAperture(SectorObjectType type)
+	{
+		return type == SectorObjectType::Window || type == SectorObjectType::BoothWindow;
+	}
 
 	std::string getSectorObjectTypeString(SectorObjectType type);
 

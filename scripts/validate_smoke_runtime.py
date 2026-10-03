@@ -14,6 +14,7 @@ import re
 import subprocess
 import tempfile
 import time
+import validation_run as validation
 
 
 def main():
@@ -21,12 +22,18 @@ def main():
     parser.add_argument("--build-tree", type=Path, required=True)
     parser.add_argument("--configuration", choices=("Debug", "Release"), action="append")
     parser.add_argument("--module", action="append", help="optional smoke module name filter")
+    parser.add_argument('--subprocess-timeout', type=validation.positive, default=300,
+                        help='each direct smoke process seconds (default: 300)')
+    validation.arguments(parser)
     args = parser.parse_args()
     build = args.build_tree.resolve()
+    status = validation.supervise(args, [build])
+    if status is not None:
+        return status
     logs = build / "runtime-validation"
     logs.mkdir(exist_ok=True)
     for config in args.configuration or ("Debug", "Release"):
-        result = subprocess.run(["ctest", "--test-dir", str(build), "-C", config,
+        result = validation.run(["ctest", "--test-dir", str(build), "-C", config,
                                  "--show-only=json-v1"], capture_output=True, text=True,
                                 check=True, timeout=30)
         tests = json.loads(result.stdout)["tests"]
@@ -51,8 +58,8 @@ def main():
             def invoke(name, executable, arguments, status, label):
                 if not executable.is_file():
                     raise RuntimeError(f"missing required product: {executable}")
-                result = subprocess.run([str(executable), *arguments], cwd=work, env=env,
-                                        capture_output=True, text=True, timeout=300)
+                result = validation.run([str(executable), *arguments], cwd=work, env=env,
+                                        capture_output=True, text=True, timeout=args.subprocess_timeout)
                 (logs / f"{config}-{name}-{label}.log").write_text(
                     result.stdout + result.stderr, encoding="utf-8")
                 if result.returncode != status:

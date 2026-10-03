@@ -62,7 +62,9 @@ namespace core
 		CallShuttle,
 		SelectShuttleDestination,
 		// Targets the World-owned Airlock Sector, never one of its owned Doors.
-		RequestAirlock
+		RequestAirlock,
+		SetBoothWindowState,
+		ToggleBoothWindow
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -85,8 +87,8 @@ namespace core
 		TraversalRequestId request;
 	};
 
-	// A command says which state is desired. It is intentionally not a toggle:
-	// retries and equivalent requests are therefore idempotent and coalescible.
+	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow
+	// is an activation, never coalesced, and resolves its target exactly once.
 	struct DeviceCommand
 	{
 		DeviceCommandType type{ DeviceCommandType::SetSectorLights };
@@ -94,6 +96,7 @@ namespace core
 		bool desiredState{ false };
 		TraversalResourceId traversalResource{};
 		uint32_t stopIndex{ ~0u };
+		BoothWindowId boothWindow{};
 
 		friend bool operator==(DeviceCommand const&, DeviceCommand const&) = default;
 	};
@@ -126,6 +129,7 @@ namespace core
 		friend class SimulationCoordinator;
 
 		std::string mName;
+		BoothWindowId mBoothWindowOwner;
 		SectorId mSector;
 		Vector2 mPosition;
 		float mReach{ 0.25f };
@@ -160,6 +164,9 @@ namespace core
 		SectorId getSector() const { return mSector; }
 		Vector2 const& getPosition() const { return mPosition; }
 		float getReach() const { return mReach; }
+		// Owned BoothWindow panels never auto-approach; other controls retain their policy.
+		bool requiresReachAtRequest() const { return bool(mBoothWindowOwner); }
+		BoothWindowId getBoothWindowOwner() const { return mBoothWindowOwner; }
 		uint64_t getDurationTicks() const { return mDurationTicks; }
 		InteractionRequestId getActiveRequest() const { return mActiveRequest; }
 	};
@@ -321,6 +328,10 @@ namespace core
 		std::shared_ptr<Shuttle> mShuttle;
 		std::shared_ptr<Stairwell> mStairwell;
 		std::shared_ptr<class AirlockTransit> mAirlock;
+		std::shared_ptr<class ChamberTransit> mSecurityScanner;
+		// Owned here, not by the chamber: Path edges reference the chamber.
+		std::shared_ptr<class Path> mScannerCommittedPath;
+		std::shared_ptr<class Path> mScannerAdmittedPath;
 		int mAirlockEntrySide{ -1 };
 		// Lift coordinators are separate from their landing-door resources. The
 		// latter point back to the coordinator and one stop.

@@ -20,6 +20,7 @@ enum class PaletteSlot
 	Shuttle,
 	Staircase,
 	Airlock,
+	Chamber,
 	// Bottom row: agents, markers, and attached objects.
 	Agent,
 	Marker,
@@ -30,6 +31,7 @@ enum class PaletteSlot
 	ForceBridge,
 	RoomLadder,
 	PlatformLift,
+	BoothWindow,
 	Count
 };
 
@@ -58,11 +60,13 @@ inline constexpr int paletteSlotColumn(PaletteSlot slot)
 	case PaletteSlot::Shuttle: return 7;
 	case PaletteSlot::Staircase: return 8;
 	case PaletteSlot::Airlock: return 9;
+	case PaletteSlot::Chamber: return 10;
 	case PaletteSlot::Agent: return 0;
 	case PaletteSlot::Marker: return 1;
 	case PaletteSlot::Door: return 2;
 	case PaletteSlot::BulkheadDoor: return 3;
 	case PaletteSlot::Window: return 4;
+	case PaletteSlot::BoothWindow: return 9;
 	case PaletteSlot::Walkway: return 5;
 	case PaletteSlot::ForceBridge: return 6;
 	case PaletteSlot::RoomLadder: return 7;

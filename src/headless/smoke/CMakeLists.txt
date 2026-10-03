@@ -15,6 +15,12 @@ target_compile_features(pf-smoke-support PUBLIC cxx_std_20)
 pf_smoke_target_policy(pf-smoke-support)
 set_target_properties(pf-smoke-support PROPERTIES FOLDER "Tests/Support")
 
+function(pf_add_smoke_contract)
+    cmake_parse_arguments(CONTRACT "" "NAME" "COMMAND" ${ARGN})
+    add_test(NAME ${CONTRACT_NAME} COMMAND ${CONTRACT_COMMAND})
+    set_property(TEST ${CONTRACT_NAME} PROPERTY PF_CONTRACT_COMMAND "${CONTRACT_COMMAND}")
+endfunction()
+
 function(pf_add_smoke_module target)
     cmake_parse_arguments(MODULE "" "NAME;TIMEOUT" "SOURCES;LIBRARIES;LABELS" ${ARGN})
     if(MODULE_UNPARSED_ARGUMENTS OR NOT MODULE_NAME OR NOT MODULE_SOURCES OR NOT MODULE_TIMEOUT)
@@ -53,7 +59,7 @@ function(pf_add_smoke_module target)
     pf_smoke_target_policy(${target})
     add_test(NAME smoke-${MODULE_NAME} COMMAND ${target})
     set_tests_properties(smoke-${MODULE_NAME} PROPERTIES
-        LABELS "smoke;${MODULE_LABELS}" TIMEOUT ${MODULE_TIMEOUT})
+        LABELS "smoke;functional;validation-fast;${MODULE_LABELS}" TIMEOUT ${MODULE_TIMEOUT})
 endfunction()
 
 pf_add_smoke_module(pf-smoke-simulation
@@ -77,13 +83,14 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
-        simulation/Airlocks.cpp
+        simulation/Airlocks.cpp simulation/SecurityScanners.cpp
+        simulation/BoothWindows.cpp
     LIBRARIES prometheum-fermide-core pf-pause-position-support
     LABELS core
     TIMEOUT 60
 )
 
-add_test(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-simulation-contract COMMAND ${CMAKE_COMMAND}
     "-DSIMULATION=$<TARGET_FILE:pf-smoke-simulation>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/SimulationContract.cmake")
 set_tests_properties(smoke-simulation-contract PROPERTIES LABELS "harness;core" TIMEOUT 240)
@@ -163,7 +170,7 @@ pf_add_smoke_module(pf-smoke-agent
     TIMEOUT 30
 )
 
-add_test(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
     "-DAGENT=$<TARGET_FILE:pf-smoke-agent>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/AgentContract.cmake")
 set_tests_properties(smoke-agent-contract PROPERTIES LABELS "harness;core" TIMEOUT 60)
@@ -181,7 +188,7 @@ pf_add_smoke_module(pf-smoke-agent-tags
     TIMEOUT 30
 )
 
-add_test(NAME smoke-agent-tags-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-agent-tags-contract COMMAND ${CMAKE_COMMAND}
     "-DTAGS=$<TARGET_FILE:pf-smoke-agent-tags>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TagsContract.cmake")
 set_tests_properties(smoke-agent-tags-contract PROPERTIES LABELS "harness;core" TIMEOUT 90)
@@ -208,7 +215,7 @@ pf_add_smoke_module(pf-smoke-behaviours
     TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,60,30>"
 )
 
-add_test(NAME smoke-behaviours-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-behaviours-contract COMMAND ${CMAKE_COMMAND}
     "-DBEHAVIOURS=$<TARGET_FILE:pf-smoke-behaviours>"
     "-DRUN_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,60,15>"
     "-DPARALLEL_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,120,45>"
@@ -237,7 +244,7 @@ pf_add_smoke_module(pf-smoke-permissions
     TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,240>"
 )
 
-add_test(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-permissions-contract COMMAND ${CMAKE_COMMAND}
     "-DPERMISSIONS=$<TARGET_FILE:pf-smoke-permissions>"
     "-DRUN_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,240>"
     "-DPARALLEL_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,900,300>"
@@ -266,7 +273,7 @@ pf_add_smoke_module(pf-smoke-transports
     TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,300,120>"
 )
 
-add_test(NAME smoke-transports-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-transports-contract COMMAND ${CMAKE_COMMAND}
     "-DTRANSPORTS=$<TARGET_FILE:pf-smoke-transports>"
     "-DCONCURRENT_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,300,120>"
     "-DRUN_TIMEOUT=$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,300,240>"
@@ -297,7 +304,7 @@ pf_add_smoke_module(pf-smoke-routing
     TIMEOUT 120
 )
 
-add_test(NAME smoke-routing-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-routing-contract COMMAND ${CMAKE_COMMAND}
     "-DROUTING=$<TARGET_FILE:pf-smoke-routing>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RoutingContract.cmake")
 set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core" TIMEOUT 300)
@@ -305,7 +312,7 @@ set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES
-        world/Main.cpp world/Airlocks.cpp world/Furniture.cpp
+        world/Main.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
         world/MarkerIdentity.cpp
         world/TwoSidedButtons.cpp
         world/BackgroundSector.cpp
@@ -328,7 +335,7 @@ pf_add_smoke_module(pf-smoke-world
     TIMEOUT 30
 )
 
-add_test(NAME smoke-world-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-world-contract COMMAND ${CMAKE_COMMAND}
     "-DWORLD=$<TARGET_FILE:pf-smoke-world>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/WorldContract.cmake")
 set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core" TIMEOUT 30)
@@ -336,7 +343,7 @@ set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core" TIMEO
 pf_add_smoke_module(pf-smoke-persistence
     NAME persistence
     SOURCES
-        persistence/Main.cpp persistence/Airlocks.cpp persistence/Furniture.cpp
+        persistence/Main.cpp persistence/Airlocks.cpp persistence/Furniture.cpp persistence/SecurityScanners.cpp persistence/BoothWindows.cpp
         persistence/Formats.cpp
         persistence/TransactionalWrites.cpp
         persistence/DocumentPaths.cpp
@@ -363,7 +370,7 @@ pf_add_smoke_module(pf-smoke-persistence
     TIMEOUT 30
 )
 
-add_test(NAME smoke-persistence-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-persistence-contract COMMAND ${CMAKE_COMMAND}
     "-DPERSISTENCE=$<TARGET_FILE:pf-smoke-persistence>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/PersistenceContract.cmake")
 set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core" TIMEOUT 60)
@@ -371,7 +378,7 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 pf_add_smoke_module(pf-smoke-render
     NAME render
     SOURCES
-        render/Main.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp
+        render/Main.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
         render/SerializationRendering.cpp
         render/DrawOrder.cpp
         render/DoorOpenApart.cpp
@@ -394,7 +401,7 @@ pf_add_smoke_module(pf-smoke-render
     TIMEOUT 30
 )
 
-add_test(NAME smoke-render-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-render-contract COMMAND ${CMAKE_COMMAND}
     "-DRENDER=$<TARGET_FILE:pf-smoke-render>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RenderContract.cmake")
 set_tests_properties(smoke-render-contract PROPERTIES LABELS "harness;render" TIMEOUT 30)
@@ -413,7 +420,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/Main.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp
+        editor/Main.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -464,7 +471,51 @@ pf_add_smoke_module(pf-smoke-editor
     TIMEOUT 60
 )
 
-add_test(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
+pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/EditorContract.cmake")
 set_tests_properties(smoke-editor-contract PROPERTIES LABELS "harness;editor" TIMEOUT 180)
+
+# The historical *-contract entries retain EVERY exhaustive assertion and remain
+# in unfiltered CTest. Lightweight lanes reuse their inventories and time budgets.
+if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    foreach(module IN ITEMS simulation permissions routing transports behaviours
+            agent-tags agent world persistence render editor)
+        set(stress smoke-${module}-contract)
+        get_test_property(${stress} LABELS labels)
+        get_test_property(${stress} PF_CONTRACT_COMMAND command)
+        get_test_property(${stress} TIMEOUT budget)
+        # Agent and World only select every check; the others fan out eight children.
+        set(processors 8)
+        if(module STREQUAL "agent" OR module STREQUAL "world")
+            set(processors 1)
+        endif()
+        set_tests_properties(${stress} PROPERTIES
+            LABELS "${labels};validation-stress" PROCESSORS ${processors})
+        list(POP_BACK command script)
+        list(POP_BACK command flag) # -P
+        if(NOT flag STREQUAL "-P")
+            message(FATAL_ERROR "${stress}: expected a CMake contract script")
+        endif()
+        foreach(lane IN ITEMS cli concurrency)
+            set(name smoke-${module}-${lane}-contract)
+            add_test(NAME ${name} COMMAND ${command}
+                "-DLANE=${lane}" "-DPYTHON=${Python3_EXECUTABLE}"
+                "-DPROBE=$<TARGET_FILE:pf-smoke-harness-probe>" -P "${script}")
+            set_tests_properties(${name} PROPERTIES
+                LABELS "${labels};validation-fast;validation-${lane}" TIMEOUT ${budget})
+            if(lane STREQUAL "concurrency")
+                set_tests_properties(${name} PROPERTIES PROCESSORS 4)
+            endif()
+        endforeach()
+    endforeach()
+    # Single-check Metrics/Startup and synthetic harness contracts stay bounded.
+    foreach(name IN ITEMS smoke-metrics-contract smoke-startup-contract
+            smoke-startup-failures smoke-harness-contract)
+        if(TEST ${name})
+            set_property(TEST ${name} APPEND PROPERTY LABELS validation-fast)
+        endif()
+    endforeach()
+    set_tests_properties(smoke-metrics-contract PROPERTIES PROCESSORS 8)
+endif()

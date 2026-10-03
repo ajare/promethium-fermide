@@ -15,6 +15,7 @@
 #include "core/Facade.h"
 #include "core/World.h"
 #include "core/AirlockTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/Location.h"
 #include "core/LadderTransit.h"
 #include "core/LiftTransit.h"
@@ -921,6 +922,42 @@ void renderWindowTinted(shared_ptr<const core::Window> window, uint32_t layer, L
 }
 
 
+void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer,
+	LayerRenderStyle style, WorldDrawList* drawList)
+{
+	if (style == LayerRenderStyle::Wireframe)
+	{
+		renderWindowClear(booth, layer, style, false, drawList);
+		return;
+	}
+	if (!isDrawnSolid(style)) return;
+	core::Vector2 from, to;
+	booth->getFullShape(from, to);
+	transformPosition(from); transformPosition(to);
+	ImVec2 topLeft{min(from.x, to.x), min(from.y, to.y)};
+	ImVec2 bottomRight{max(from.x, to.x), max(from.y, to.y)};
+	// These insets are the transparent centre of the supplied 52 x 48 frame.
+	float const width = bottomRight.x - topLeft.x, height = bottomRight.y - topLeft.y;
+	ImVec2 innerMin{topLeft.x + width * 5.0f / 52.0f, topLeft.y + height * 5.0f / 48.0f};
+	ImVec2 innerMax{bottomRight.x - width * 5.0f / 52.0f, bottomRight.y - height * 5.0f / 48.0f};
+	float const travel = (innerMax.y - innerMin.y) * booth->getProgress();
+	if (booth->getProgress() > 0.0f)
+	{
+		drawList->PushClipRect({innerMin.x, innerMax.y - travel}, innerMax, true);
+		renderWindowClear(booth, layer, style, false, drawList);
+		drawList->PopClipRect();
+	}
+	// Only the shutter translates. Its clip intersects any enclosing aperture.
+	drawList->PushClipRect(innerMin, innerMax, true);
+	ImVec2 shutterMin{innerMin.x, innerMin.y - travel};
+	ImVec2 shutterMax{innerMax.x, innerMax.y - travel};
+	if (!drawObjectSprite("booth-window-shutter", drawList, shutterMin, shutterMax))
+		drawList->AddRectFilled(shutterMin, shutterMax, ImColor(90, 106, 116));
+	drawList->PopClipRect();
+	if (!drawObjectSprite("booth-window-open", drawList, topLeft, bottomRight))
+		drawList->AddRect(topLeft, bottomRight, ImColor(148, 162, 170), 0.0f, 0, 2.0f);
+}
+
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -930,7 +967,9 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 
 	auto windowStyle = window->getStyle();
 
-	switch (windowStyle)
+	bool const booth = window->isBoothWindow();
+	if (booth) renderBoothWindow(static_pointer_cast<const core::BoothWindow>(window), layer, style, drawList);
+	else switch (windowStyle)
 	{
 	case core::Window::Style::Clear:
 		renderWindowClear(window, layer, style, selected, drawList);
@@ -945,7 +984,7 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		break;
 	}
 
-	if (style == LayerRenderStyle::Solid && hasObjectTileset())
+	if (!booth && style == LayerRenderStyle::Solid && hasObjectTileset())
 	{
 		core::Vector2 from, to;
 		window->getFullShape(from, to);
@@ -1412,6 +1451,7 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 			}
 			break;
 
+		case core::SectorObjectType::BoothWindow:
 		case core::SectorObjectType::Window:
 			if (flags & RENDER_SECTOR_OBJECTS_BEHIND)
 			{
@@ -1716,7 +1756,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		switch (sectorType)
 		{
 		case core::SectorType::Location: kind = static_pointer_cast<const core::Location>(sector)->isCorridor() ? "corridor" : "room"; break;
-		case core::SectorType::Airlock: kind = "corridor"; break;
+		case core::SectorType::Airlock:
+		case core::SectorType::Chamber: kind = "corridor"; break;
 		case core::SectorType::Ladder: kind = "ladder"; break;
 		case core::SectorType::Lift: kind = "lift"; break;
 		// The rail corridor is static architecture; carriage images are rendered
@@ -1753,6 +1794,25 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Sector-specific
 	switch (sector->getType())
 	{
+	case core::SectorType::Chamber:
+	{
+		auto chamber = static_pointer_cast<const core::ChamberTransit>(sector);
+		if (chamber->getSubtype() == core::ChamberSubtype::SecurityScanner && isDrawnSolid(style))
+		{
+			float centreX = (bounds0.x + bounds1.x) * 0.5f;
+			float centreY = (bounds0.y + bounds1.y) * 0.5f;
+			float half = min((bounds1.x - bounds0.x) * 0.3f, 30.0f);
+			float direction = chamber->isLeftToRight() ? 1.0f : -1.0f;
+			ImVec2 tip{ centreX + direction * half, centreY };
+			drawList->AddLine({ centreX - direction * half, centreY }, tip, IM_COL32_WHITE, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, "Capacity: 1");
+			auto readout = std::format("{}: {:.1f} s", chamber->getPhaseName(), chamber->getRemainingSeconds());
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 20 }, IM_COL32_WHITE, readout.c_str());
+		}
+		break;
+	}
 	case core::SectorType::Airlock:
 	{
 		auto chamber = static_pointer_cast<const core::AirlockTransit>(sector);
@@ -1841,6 +1901,24 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// front; the wireframe overlay pass must not expose them.
 	if (shouldRenderSectorAgents(sector->getType(), style))
 		renderSectorDepthContent(sector, drawList);
+
+	// Scan overlays follow occupants, and share the production scan clock. The
+	// triangular wave is independent of the chamber's authored travel direction.
+	if (sector->getType() == core::SectorType::Chamber && isDrawnSolid(style))
+	{
+		auto chamber = static_pointer_cast<const core::ChamberTransit>(sector);
+		if (chamber->getSubtype() == core::ChamberSubtype::SecurityScanner
+			&& chamber->getPhase() == core::SecurityScannerPhase::Scanning)
+		{
+			float progress = chamber->getScanProgress();
+			float sweep = 1.0f - std::abs(2.0f * progress - 1.0f);
+			float x = bounds0.x + (bounds1.x - bounds0.x) * sweep;
+			float y = bounds1.y + (bounds0.y - bounds1.y) * sweep;
+			auto colour = IM_COL32(255, 0, 0, 128);
+			drawList->AddLine({ bounds0.x, y }, { bounds1.x, y }, colour, 4.0f);
+			drawList->AddLine({ x, bounds1.y }, { x, bounds0.y }, colour, 4.0f);
+		}
+	}
 
 	// Render ceiling
 	// A Background has no floor, ceiling or walls - its colour is the whole

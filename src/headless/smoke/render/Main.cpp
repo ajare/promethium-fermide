@@ -14,6 +14,8 @@ int main(int argc, char** argv)
 	};
 	render_smoke::registerAirlocks(checks);
 	render_smoke::registerFurniture(checks);
+	render_smoke::registerSecurityScanners(checks);
+	render_smoke::registerBoothWindows(checks);
 	render_smoke::registerDrawOrder(checks);
 	render_smoke::registerDoorOpenApart(checks);
 	render_smoke::registerDoorOpenLeft(checks);

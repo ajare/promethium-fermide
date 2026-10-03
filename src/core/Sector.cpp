@@ -210,14 +210,14 @@ namespace core
 		addSectorObject(door);
 	}
 
-	uint32_t Sector::createWindow(shared_ptr<const Sector> sector, shared_ptr<const Sector> backSector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier)
+	uint32_t Sector::createWindow(shared_ptr<const Sector> sector, shared_ptr<const Sector> backSector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier, bool boothWindow)
 	{
 		ASSERT_PTR_EQ_THIS(sector);
 		assert(x >= getCellX0() && x <= getCellX1());
 		assert(y >= getCellY0() && y <= getCellY1());
 
 		shared_ptr<const Sector> sectors[2] = { sector, backSector };
-		auto window = make_shared<WindowSectorObject>(x, y, cellsWide, levelsHigh, sectors, vertexIdentifier);
+		auto window = make_shared<WindowSectorObject>(x, y, cellsWide, levelsHigh, sectors, vertexIdentifier, boothWindow);
 
 		return addSectorObject(window);
 	}

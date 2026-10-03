@@ -26,7 +26,7 @@ function(invoke status expected)
     endif()
 endfunction()
 
-set(names airlocks/authoredRoundTripAndReplay furniture/documents yaml-primitives binary-contract yaml-file transactional-bytes
+set(names boothWindows/authoredRoundTripAndMalformedRecords airlocks/authoredRoundTripAndReplay furniture/documents securityScanners/authoredRoundTripAndReplay yaml-primitives binary-contract yaml-file transactional-bytes
     world-document-formats yaml-errors checked-in-world document-paths
     transactional-late-failure transactional-predictable-path
     transactional-symlink-target transactional-symlink-temp transactional-permissions
@@ -103,6 +103,14 @@ set(names airlocks/authoredRoundTripAndReplay furniture/documents yaml-primitive
     staircaseEditsReturnTheStaircaseOwnLayer
     restorationPreservesStatePathsAndLifetimes
 )
+if(DEFINED LANE)
+    set(lane_binary "${PERSISTENCE}")
+    set(lane_module persistence)
+    set(lane_names ${names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 set(posix_names transactional-symlink-target transactional-symlink-temp transactional-permissions)
 list(LENGTH names passes)
 set(skips 0)

@@ -1,11 +1,13 @@
 """Focused regression tests for the MSVC evidence validator; no native children."""
 import copy
+import sys
 import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 spec = importlib.util.spec_from_file_location(
     'validator', Path(__file__).resolve().parents[1] / 'validate_windows_ctest.py')
 v = importlib.util.module_from_spec(spec)
@@ -21,7 +23,8 @@ class InventoryTests(unittest.TestCase):
             exe = Path(self.root.name) / 'Debug' / f'pf-smoke-{module}.exe'
             exe.parent.mkdir(exist_ok=True)
             exe.touch()
-            labels = ['smoke', 'core' if module in v.CORE else module]
+            labels = ['smoke', 'functional', 'validation-fast',
+                      'core' if module in v.CORE else module]
             if module == 'metrics':
                 labels.append('http')
             self.inventory['tests'].append({'name': f'smoke-{module}', 'command': [str(exe)],

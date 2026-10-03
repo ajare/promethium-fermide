@@ -31,6 +31,7 @@
 // Edges
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/WindowEdge.h"
 #include "core/DoorEdge.h"
 #include "core/ForceBridgeEdge.h"
@@ -569,7 +570,9 @@ namespace core
 			// between the two endpoints, but must never create a Sector-edge bypass.
 			if (vertices[i]->getSector() != vertices[j]->getSector()
 				&& (vertices[i]->getSector()->getType() == SectorType::Airlock
-					|| vertices[j]->getSector()->getType() == SectorType::Airlock)) continue;
+					|| vertices[j]->getSector()->getType() == SectorType::Airlock
+					|| vertices[i]->getSector()->getType() == SectorType::Chamber
+					|| vertices[j]->getSector()->getType() == SectorType::Chamber)) continue;
 
 			// Replace the ordinary floor across a routed Furniture footprint. Even
 			// unrelated row objects inside the span cannot supply a floor bypass.
@@ -598,7 +601,7 @@ namespace core
 					addEdge(make_shared<GapEdge>(), vertices[i], vertices[j], connectZ);
 				}
 				else if (vertexSubType0 == VertexSubType::BulkheadDoor && vertexSubType1 == VertexSubType::BulkheadDoor
-					&& !static_pointer_cast<BulkheadDoorVertex>(vertices[i])->getBulkheadDoor()->isAirlockOwned())
+					&& !static_pointer_cast<BulkheadDoorVertex>(vertices[i])->getBulkheadDoor()->isChamberOwned())
 				{
 					auto bulkheadVertex = dynamic_pointer_cast<BulkheadDoorVertex>(vertices[i]);
 					auto bulkheadDoor = bulkheadVertex->getBulkheadDoor();
@@ -872,6 +875,11 @@ namespace core
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), chamber), verts[0], verts[1], false);
 		else if (auto rightChamber = dynamic_pointer_cast<AirlockTransit>(obj.adjacent[1]); rightChamber)
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), rightChamber), verts[0], verts[1], false);
+
+		if (auto scanner = dynamic_pointer_cast<ChamberTransit>(obj.adjacent[0]); scanner && scanner->getSubtype() == ChamberSubtype::SecurityScanner)
+			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scanner), verts[0], verts[1], false);
+		else if (auto scannerRight = dynamic_pointer_cast<ChamberTransit>(obj.adjacent[1]); scannerRight && scannerRight->getSubtype() == ChamberSubtype::SecurityScanner)
+			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scannerRight), verts[0], verts[1], false);
 
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_LEFT]);
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_RIGHT]);
@@ -1624,7 +1632,7 @@ namespace core
 			return door && door->getFrontLayer() == frontLayer && door->getBackLayer() == backLayer;
 		}
 
-		if (type == SectorObjectType::Window)
+		if (isWindowAperture(type))
 		{
 			auto const windowObject = dynamic_pointer_cast<WindowSectorObject>(object);
 			if (!windowObject) return false;
@@ -1686,10 +1694,10 @@ namespace core
 			}
 		}
 
-		if (frontProcessable && frontCell.sectorObjectType == SectorObjectType::Window
+		if (frontProcessable && isWindowAperture(frontCell.sectorObjectType)
 			&& isLeftMostObjectCell(frontLayer, x, y, frontCell)
 			&& thresholdBelongsToPair(mwWorld->_getSector(frontCell.sectorIndex),
-				frontCell.sectorObjectIndex, SectorObjectType::Window, frontLayer, backLayer))
+				frontCell.sectorObjectIndex, frontCell.sectorObjectType, frontLayer, backLayer))
 		{
 			auto const frontSector = mwWorld->_getSector(frontCell.sectorIndex);
 			auto const sharedObject = frontSector->_getObject(frontCell.sectorObjectIndex);
@@ -1697,7 +1705,7 @@ namespace core
 			processWindow(front, interLayerVertexLookup, rows[frontLayer][y]);
 
 			auto const windowObject = dynamic_pointer_cast<WindowSectorObject>(sharedObject);
-			if (backProcessable && windowObject && windowObject->getWindow()->isTraversalConfigured())
+			if (backProcessable && windowObject && (windowObject->getWindow()->isTraversalConfigured() || windowObject->getWindow()->isBoothWindow()))
 			{
 				auto const backSector = mwWorld->_getSector(backCell.sectorIndex);
 				auto const backIndex = indexOfSharedObject(backSector, sharedObject);

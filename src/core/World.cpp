@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "core/ChamberTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/OccupantPacking.h"
@@ -2972,7 +2973,7 @@ namespace core
 		};
 	}
 
-	World::CreateObjectResult World::createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier)
+	World::CreateObjectResult World::createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier, bool boothWindow)
 	{
 		invalidateSimulationSnapshot();
 		string caller = format("World::createWindow({}, {}, {}, {}, {})", layerIndex, x, y, cellsWide, levelsHigh);
@@ -3004,7 +3005,7 @@ namespace core
 		}
 
 		// Create window in fore Location and add to back
-		auto windowIndex = foreSector->createWindow(foreSector, backSector, x, y, cellsWide, levelsHigh, vertexIdentifier);
+		auto windowIndex = foreSector->createWindow(foreSector, backSector, x, y, cellsWide, levelsHigh, vertexIdentifier, boothWindow);
 
 		if (backSector)
 		{
@@ -3013,7 +3014,7 @@ namespace core
 
 		return {
 			windowIndex,
-			SectorObjectType::Window,
+			boothWindow ? SectorObjectType::BoothWindow : SectorObjectType::Window,
 			foreSector
 		};
 	}
@@ -6408,9 +6409,18 @@ namespace core
 	World::CreateWindowResult World::addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions const& options)
 	{
-		invalidateSimulationSnapshot();
+		return addWindowAperture(layerIndex, y, x, cellsWide, levelsHigh, options, false);
+	}
+
+	World::CreateWindowResult World::addWindowAperture(uint32_t layerIndex, uint32_t y, uint32_t x,
+		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions const& options, bool boothWindow)
+	{
 		string diagnostic;
-		if (!canAddSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
+		if (boothWindow && (options.traversable || options.style != Window::Style::Clear
+			|| (options.initialState != Window::State::Open && options.initialState != Window::State::Closed)))
+			throw WorldException(this, "BoothWindow supports only non-traversable Open or Closed shutters");
+		if (!(boothWindow ? canAddBoothWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic)
+			: canAddSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic)))
 			throw WorldException(this, diagnostic);
 		if (options.traversable)
 		{
@@ -6436,13 +6446,28 @@ namespace core
 		auto layer = getLayer(layerIndex);
 
 		// Create window
-		auto createdWindow = createWindow(layerIndex, x, y, cellsWide, levelsHigh);
+		auto createdWindow = createWindow(layerIndex, x, y, cellsWide, levelsHigh, nullptr, boothWindow);
 		auto windowIndex = createdWindow.index;
 		auto windowObjType = createdWindow.type;
 		auto windowSector = createdWindow.sector;
 		auto windowObject = dynamic_pointer_cast<WindowSectorObject>(windowSector->_getObject(windowIndex));
 		auto window = windowObject->getWindow();
 		window->setState(options.initialState, options.style);
+		if (boothWindow)
+		{
+			auto booth = static_pointer_cast<BoothWindow>(window);
+			if (mNextBoothWindowId == 0) throw overflow_error("BoothWindow device identity space is exhausted");
+			booth->mDeviceId = BoothWindowId{ mNextBoothWindowId++ };
+			mBoothWindows.emplace(booth->mDeviceId, booth);
+			DeviceCommand toggle;
+			toggle.type = DeviceCommandType::ToggleBoothWindow;
+			toggle.boothWindow = booth->mDeviceId;
+			booth->mPanel = createInteractionPoint("BoothWindow back-side panel",
+				SectorId{ static_cast<uint64_t>(booth->getBackSector()->getIndex()) + 1 },
+				{ static_cast<float>(x) + 0.5f, static_cast<float>(y) }, 0.25f,
+				getFixedTimestep(), {{ toggle, InteractionBindingRequirement::Required }});
+			mInteractionPoints.find(booth->mPanel)->mBoothWindowOwner = booth->mDeviceId;
+		}
 		TraversalResourceId traversalResource;
 		if (options.traversable && window->getFrontSector() && window->getBackSector())
 		{
@@ -6457,10 +6482,10 @@ namespace core
 				auto& cellDef = layer->getCellDefinition(ix, iy);
 
 				cellDef.sectorObjectIndex = windowIndex;
-				cellDef.sectorObjectType = SectorObjectType::Window;
+				cellDef.sectorObjectType = windowObjType;
 			}
 
-		ConstructionRecord record{ ConstructionType::Window };
+		ConstructionRecord record{ boothWindow ? ConstructionType::BoothWindow : ConstructionType::Window };
 		record.a = layerIndex; record.b = y; record.c = x; record.d = cellsWide; record.e = levelsHigh;
 		record.p = options.traversable;
 		record.i = static_cast<int32_t>(options.initialState);
@@ -6469,13 +6494,65 @@ namespace core
 		return { { windowIndex, windowObjType, windowSector }, window, traversalResource };
 	}
 
+	bool World::canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
+		uint32_t width, uint32_t height, string* diagnostic) const
+	{
+		auto reject = [&](string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (width != 1 || height != 1) return reject("BoothWindow requires a fixed one-cell-wide, one-Level-high footprint");
+		if (layer >= getLayerCount() || layer + 1 >= getLayerCount())
+			return reject("BoothWindow needs an adjacent Layer behind it");
+		if (x >= mCellsWide || y >= mLevelsHigh) return reject("BoothWindow position is outside the World");
+		for (auto side : { layer, layer + 1 })
+		{
+			auto const& cell = mLayers[side]->getCellDefinition(x, y);
+			if (cell.sectorIndex == ~0u || !isLocationLike(mSectors[cell.sectorIndex]->getType()))
+				return reject(format("BoothWindow requires a Room, Corridor, or Facade on Layer {}", side));
+			if (cell.floorType == CellFloorType::None || cell.floorType == CellFloorType::ForceBridge)
+				return reject(format("BoothWindow requires a walkable approach on Layer {} at Level {}", side, y));
+		}
+		return canAddSectorWindow(layer, y, x, width, height, diagnostic);
+	}
+
+	shared_ptr<const BoothWindow> World::lookupBoothWindow(BoothWindowId id) const
+	{
+		auto found = mBoothWindows.find(id);
+		return found == mBoothWindows.end() ? nullptr : found->second.lock();
+	}
+
+	DeviceOperationId World::submitDeviceCommand(DeviceCommand const& command)
+	{
+		return mSimulationCoordinator.submitDeviceCommand(command);
+	}
+
+	World::CreateWindowResult World::addBoothWindow(uint32_t layer, uint32_t y, uint32_t x, Window::State state)
+	{
+		return addWindowAperture(layer, y, x, 1, 1, { false, state, Window::Style::Clear }, true);
+	}
+
+	bool World::setBoothWindowInitialState(uint32_t layer, uint32_t y, uint32_t x, Window::State state)
+	{
+		if (state != Window::State::Open && state != Window::State::Closed)
+			throw WorldException(this, "BoothWindow initial state must be Open or Closed");
+		auto records = mConstructionRecords;
+		for (auto& record : records)
+			if (record.type == ConstructionType::BoothWindow && record.a == layer && record.b == y && record.c == x)
+			{
+				if (record.i == static_cast<int32_t>(state)) return false;
+				record.i = static_cast<int32_t>(state);
+				rebuildFromConstructionRecords(std::move(records));
+				modify();
+				return true;
+			}
+		return false;
+	}
+
 	bool World::getSectorWindowOptions(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions& options) const
 	{
 		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
 			[&](ConstructionRecord const& record)
 			{
-				return record.type == ConstructionType::Window && record.a == layerIndex
+				return (record.type == ConstructionType::Window || record.type == ConstructionType::BoothWindow) && record.a == layerIndex
 					&& record.b == y && record.c == x && record.d == cellsWide
 					&& record.e == levelsHigh;
 			});
@@ -6545,9 +6622,9 @@ namespace core
 				|| right.bulkheadIndices[CORE_SIDE_LEFT] != ~0u)
 				return reject("A Bulkhead Door already occupies this boundary");
 			if (left.sectorObjectType == SectorObjectType::Door
-				|| left.sectorObjectType == SectorObjectType::Window
+				|| isWindowAperture(left.sectorObjectType)
 				|| right.sectorObjectType == SectorObjectType::Door
-				|| right.sectorObjectType == SectorObjectType::Window)
+				|| isWindowAperture(right.sectorObjectType))
 				return reject("Another object blocks Bulkhead Door placement");
 			validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
 				SectorObjectType::BulkheadDoor, left.sectorIndex);
@@ -6604,11 +6681,11 @@ namespace core
 
 		// Check that there are no Doors or Windows in cells X and X-1, as there won't
 		// be space for them.
-		if (cellDef0.sectorObjectType == SectorObjectType::Door || cellDef0.sectorObjectType == SectorObjectType::Window)
+		if (cellDef0.sectorObjectType == SectorObjectType::Door || isWindowAperture(cellDef0.sectorObjectType))
 		{
 			throw WorldException(this, format("{} - cell at {}, {} has an object blocking the Bulkhead door", caller, cx0, y));
 		}
-		if (cellDef1.sectorObjectType == SectorObjectType::Door || cellDef1.sectorObjectType == SectorObjectType::Window)
+		if (cellDef1.sectorObjectType == SectorObjectType::Door || isWindowAperture(cellDef1.sectorObjectType))
 		{
 			throw WorldException(this, format("{} - cell at {}, {} has an object blocking the Bulkhead door", caller, cx1, y));
 		}
@@ -7872,6 +7949,13 @@ namespace core
 		// Clearing authored route intent is not permission to discard a committed
 		// Airlock passenger. Runtime cancellation completes the opposite exit.
 		if (agent->getSector() && agent->getSector()->getType() == SectorType::Airlock) return false;
+		if (agent->getSector() && agent->getSector()->getType() == SectorType::Chamber)
+		{
+			mSimulationCoordinator.cancelAgentMovement(id, false);
+			agent->clearPath();
+			modify();
+			return true;
+		}
 		mSimulationCoordinator.clearAgentMovementForBehaviourEdit(id);
 		agent->clearPath();
 		modify();
@@ -7917,7 +8001,7 @@ namespace core
 			require(resource != nullptr, format("Edge {} references removed traversal resource {}",
 				edge->getId(), id.value));
 			bool compatible = edge->getType() == EdgeType::Door || edge->getType() == EdgeType::BulkheadDoor
-				? resource->mDoor != nullptr || resource->mAirlock != nullptr
+				? resource->mDoor != nullptr || resource->mAirlock != nullptr || resource->mSecurityScanner != nullptr
 				: edge->getType() == EdgeType::Window ? resource->mWindow != nullptr
 				: edge->getType() == EdgeType::ForceBridge ? resource->mForceBridge != nullptr
 				: edge->getType() == EdgeType::Ladder || edge->getType() == EdgeType::LadderMount
@@ -8103,8 +8187,13 @@ namespace core
 			for (auto const& binding : point->mBindings)
 				if (binding.command.type == DeviceCommandType::RequestAirlock)
 					require(validSector(binding.command.target)
-						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock,
-						format("Interaction point {} targets a removed Airlock", pointId.value));
+						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock
+						&& binding.command.stopIndex < 2,
+						format("Interaction point {} targets a removed Airlock or invalid entry side", pointId.value));
+				else if (binding.command.type == DeviceCommandType::ToggleBoothWindow
+					|| binding.command.type == DeviceCommandType::SetBoothWindowState)
+					require(bool(lookupBoothWindow(binding.command.boothWindow)),
+						format("Interaction point {} targets a removed BoothWindow", pointId.value));
 				else if (binding.command.type != DeviceCommandType::SetSectorLights)
 					require(mTraversalResources.find(binding.command.traversalResource) != nullptr,
 						format("Interaction point {} targets removed traversal resource {}",
@@ -8359,8 +8448,10 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
-		if (sector.getType() == SectorType::Airlock)
-			throw invalid_argument("Agents must enter Airlock chambers through coordinated traversal");
+		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::Chamber)
+			throw invalid_argument(sector.getType() == SectorType::Chamber
+				? "Agents cannot be placed inside authored Security scanners"
+				: "Agents must enter Airlock chambers through coordinated traversal");
 		if (canAgentAccessLocation(sector, agent)) return;
 		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
 		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());
@@ -10814,8 +10905,6 @@ namespace core
 	{
 		auto point = mInteractionPoints.find(id);
 		if (!point || !point->mSector) return false;
-		if (auto chamber = dynamic_pointer_cast<AirlockTransit>(mSectors[point->mSector.value - 1]);
-			chamber && chamber->getControl(2) == id) return false;
 		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
 		{
 			return binding.command.type == DeviceCommandType::SelectLiftDestination
@@ -10843,6 +10932,20 @@ namespace core
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
 		auto const previous = point->mPermissionRequirement;
 		point->mPermissionRequirement = next;
+		if (auto booth = lookupBoothWindow(point->mBoothWindowOwner))
+		{
+			for (auto& record : mConstructionRecords)
+				if (record.type == ConstructionType::BoothWindow && record.a == booth->getFrontLayer()
+					&& record.b == static_cast<uint32_t>(booth->getPosition().y)
+					&& record.c == static_cast<uint32_t>(booth->getPosition().x))
+				{
+					auto& stored = record.controlPermissionRequirements[1];
+					stored.clear();
+					for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+						if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+					break;
+				}
+		}
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
 			bool usesPoint = find(resource->mControls.begin(), resource->mControls.end(), id)
@@ -11637,9 +11740,10 @@ namespace core
 	TraversalResourceId World::createWindowTraversalResource(string const& name,
 		shared_ptr<Window> window)
 	{
+		if (!window || window->isBoothWindow())
+			throw invalid_argument("A Window crossing resource requires an ordinary Window, not a BoothWindow");
 		invalidateSimulationSnapshot();
 		beginStructuralEdit("createWindowTraversalResource");
-		if (!window) throw invalid_argument("A window traversal resource requires a Window");
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(
 			new TraversalResource(name, std::move(window))));
 		SimulationEvent event;
@@ -12521,6 +12625,17 @@ namespace core
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource) return 0.0f;
 
+		if (resource->mSecurityScanner)
+		{
+			// Only the entry approach queue is observable: neither occupancy,
+			// reservations nor a remote live phase are route-planning knowledge.
+			size_t ahead = 0;
+			for (auto const& lane : resource->mQueueLanes)
+				if (lane.sector == sourceSector) ahead += lane.queue.size();
+			auto const& chamber = *resource->mSecurityScanner;
+			return static_cast<float>(ahead) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+				+ chamber.getPreDelaySeconds() + chamber.getScanSeconds() + chamber.getPostPauseSeconds());
+		}
 		if (resource->mAirlock)
 		{
 			// Only this approach's queue is locally observable. Opposing demand

@@ -39,6 +39,7 @@
 #include "MarkerPanel.h"
 #include "FurniturePanel.h"
 #include "AgentClipboard.h"
+#include "BoothWindowEditor.h"
 
 #if defined(_WIN32)
 #include <nfd.h>
@@ -65,6 +66,7 @@
 #include "core/StairwellTransit.h"
 #include "core/StaircaseTransit.h"
 #include "core/AirlockTransit.h"
+#include "ChamberPanel.h"
 #include "core/DoorSectorObject.h"
 #include "core/WindowSectorObject.h"
 #include "core/MarkerSectorObject.h"
@@ -167,6 +169,7 @@ namespace
 		Door,
 		BulkheadDoor,
 		Window,
+		BoothWindow,
 		Walkway,
 		ForceBridge,
 		RoomLadder,
@@ -248,7 +251,8 @@ namespace
 		Staircase,
 		Lift,
 		Shuttle,
-		Airlock
+		Airlock,
+		Chamber
 	};
 
 	struct PaintState
@@ -258,6 +262,7 @@ namespace
 		uint32_t layer{ 0 };
 		int anchorX{ 0 };
 		int anchorY{ 0 };
+		core::Vector2 anchorPosition;
 	};
 
 	struct PaintRectangle
@@ -268,6 +273,7 @@ namespace
 		uint32_t width{ 0 };
 		uint32_t height{ 0 };
 		string diagnostic;
+		bool leftToRight{ true };
 	};
 
 	PaintState gPaint;
@@ -535,7 +541,7 @@ namespace
 	}
 
 	PegmanTarget getWindowTarget(shared_ptr<const core::World> const& world,
-		ImVec2 position, ImVec2 canvasPos, ImVec2 canvasSize)
+		ImVec2 position, ImVec2 canvasPos, ImVec2 canvasSize, bool booth = false)
 	{
 		PegmanTarget target;
 		if (!pointInRect(position, canvasPos, canvasPos + canvasSize))
@@ -552,7 +558,9 @@ namespace
 		target.cellX = (uint32_t)floor(worldPosition.x);
 		target.cellY = (uint32_t)floor(worldPosition.y);
 		target.sector = world->getSectorAtPosition(gUISettings.visibleLayer, worldPosition.x, worldPosition.y);
-		world->canAddSectorWindow(gUISettings.visibleLayer, target.cellY, target.cellX,
+		if (booth) world->canAddBoothWindow(gUISettings.visibleLayer, target.cellY, target.cellX,
+			1, 1, &target.diagnostic);
+		else world->canAddSectorWindow(gUISettings.visibleLayer, target.cellY, target.cellX,
 			1, 1, &target.diagnostic);
 		return target;
 	}
@@ -1148,6 +1156,12 @@ namespace
 				result.width, result.height, &result.diagnostic);
 			return result;
 		}
+		if (gPaint.tool == PaintTool::Chamber)
+		{
+			auto draft = planChamberDrag(*world, gPaint.layer, gPaint.anchorPosition.x,
+				gPaint.anchorPosition.y, worldPosition.x, worldPosition.y);
+			return { draft.valid, draft.x, draft.y, draft.width, 1, draft.diagnostic, draft.leftToRight };
+		}
 		if (layer->getCellDefinition(gPaint.anchorX, gPaint.anchorY).occupied()) return {};
 
 		int endX = clamp((int)floor(worldPosition.x), 0, (int)world->getCellsWide() - 1);
@@ -1341,13 +1355,13 @@ namespace
 		}
 	}
 
-	void placeWindow(shared_ptr<core::World> const& world, PegmanTarget const& target)
+	void placeWindow(shared_ptr<core::World> const& world, PegmanTarget const& target, bool booth = false)
 	{
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = world->addSectorWindow(gUISettings.visibleLayer,
-				target.cellY, target.cellX, 1, 1, {});
+			auto created = booth ? world->addBoothWindow(gUISettings.visibleLayer, target.cellY, target.cellX)
+				: world->addSectorWindow(gUISettings.visibleLayer, target.cellY, target.cellX, 1, 1, {});
 			world->finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
@@ -1552,10 +1566,14 @@ namespace
 		auto staircaseMin = paletteSlotMin(trayTopLeft, PaletteSlot::Staircase);
 		auto airlockMin = paletteSlotMin(trayTopLeft, PaletteSlot::Airlock);
 		auto airlockMax = paletteSlotMax(trayTopLeft, PaletteSlot::Airlock);
+		auto scannerMin = paletteSlotMin(trayTopLeft, PaletteSlot::Chamber);
+		auto scannerMax = paletteSlotMax(trayTopLeft, PaletteSlot::Chamber);
 		auto agentMin = paletteSlotMin(trayTopLeft, PaletteSlot::Agent);
 		auto markerMin = paletteSlotMin(trayTopLeft, PaletteSlot::Marker);
 		auto doorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Door);
 		auto bulkheadDoorMin = paletteSlotMin(trayTopLeft, PaletteSlot::BulkheadDoor);
+		auto boothMin = paletteSlotMin(trayTopLeft, PaletteSlot::BoothWindow);
+		auto boothMax = paletteSlotMax(trayTopLeft, PaletteSlot::BoothWindow);
 		auto windowMin = paletteSlotMin(trayTopLeft, PaletteSlot::Window);
 		auto walkwayMin = paletteSlotMin(trayTopLeft, PaletteSlot::Walkway);
 		auto forceBridgeMin = paletteSlotMin(trayTopLeft, PaletteSlot::ForceBridge);
@@ -1596,6 +1614,7 @@ namespace
 		bool shuttleHovered = gWorldHovered && pointInRect(io.MousePos, shuttleMin, shuttleMax);
 		bool staircaseHovered = gWorldHovered && pointInRect(io.MousePos, staircaseMin, staircaseMax);
 		bool airlockHovered = gWorldHovered && pointInRect(io.MousePos, airlockMin, airlockMax);
+		bool scannerHovered = gWorldHovered && pointInRect(io.MousePos, scannerMin, scannerMax);
 		bool backOnlyDisabled = gUISettings.visibleLayer == 0;
 		if (overTray) paletteConsumedMouse = true;
 
@@ -1628,7 +1647,7 @@ namespace
 
 		if (gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging
 			&& (roomHovered || facadeHovered || corridorHovered || backgroundHovered || ladderHovered
-				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered))
+				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered || scannerHovered))
 		{
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -1641,7 +1660,8 @@ namespace
 					: corridorHovered ? "Paint Corridor"
 					: backgroundHovered ? "Paint Background" : ladderHovered ? "Paint Ladder"
 					: stairwellHovered ? "Paint Stairwell" : staircaseHovered ? "Paint Staircase"
-					: liftHovered ? "Paint Lift" : airlockHovered ? "Paint Airlock" : "Paint Shuttle");
+					: liftHovered ? "Paint Lift" : airlockHovered ? "Paint Airlock"
+					: scannerHovered ? "Paint Chamber" : "Paint Shuttle");
 
 			if (io.MouseClicked[0] && !gViewPan.dragging
 				&& !((ladderHovered || stairwellHovered || staircaseHovered || liftHovered || shuttleHovered)
@@ -1654,7 +1674,8 @@ namespace
 					: ladderHovered ? PaintTool::Ladder
 					: stairwellHovered ? PaintTool::Stairwell
 					: staircaseHovered ? PaintTool::Staircase
-					: liftHovered ? PaintTool::Lift : airlockHovered ? PaintTool::Airlock : PaintTool::Shuttle;
+					: liftHovered ? PaintTool::Lift : airlockHovered ? PaintTool::Airlock
+					: scannerHovered ? PaintTool::Chamber : PaintTool::Shuttle;
 				gPaint.tool = gPaint.tool == clickedTool ? PaintTool::None : clickedTool;
 				gPaint.dragging = false;
 				resetPegman();
@@ -1683,8 +1704,11 @@ namespace
 		drawPaintButton(staircaseMin, staircaseMax, "Staircase", PaintTool::Staircase,
 			staircaseHovered, backOnlyDisabled);
 		drawPaintButton(airlockMin, airlockMax, "Airlock", PaintTool::Airlock, airlockHovered, false);
+		drawPaintButton(scannerMin, scannerMax, "Chamber", PaintTool::Chamber, scannerHovered, false);
 		drawBulkheadDoorIcon(drawList, bulkheadDoorMin, bulkheadDoorMax, yellow);
 		drawWindowIcon(drawList, windowMin, windowMax, yellow);
+		drawList->AddRect(boothMin, boothMax, yellow, 3.0f);
+		drawList->AddText(paletteLabelPosition(boothMin, boothMax, "BoothWindow"), yellow, "BoothWindow");
 		drawWalkwayIcon(drawList, walkwayMin, walkwayMax, yellow);
 		drawForceBridgeIcon(drawList, forceBridgeMin, forceBridgeMax, IM_COL32(0, 255, 0, 255));
 		drawLadderIcon(drawList, roomLadderMin, roomLadderMax, yellow);
@@ -1711,6 +1735,7 @@ namespace
 				gPaint.layer = (uint32_t)gUISettings.visibleLayer;
 				gPaint.anchorX = x;
 				gPaint.anchorY = y;
+				gPaint.anchorPosition = worldPosition;
 			}
 		}
 
@@ -1785,6 +1810,14 @@ namespace
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
 						}
+						else if (tool == PaintTool::Chamber)
+						{
+							ChamberDraft draft{ paintRectangle.valid, paintRectangle.x,
+								paintRectangle.y, paintRectangle.width, paintRectangle.leftToRight, paintRectangle.diagnostic };
+							auto index = commitChamberDraft(*world, gPaint.layer, draft);
+							setSelectionMode(UISettings::SelectionMode::Sector);
+							gSelectedSector = world->getSector(index);
+						}
 						else if (tool == PaintTool::Airlock)
 						{
 							auto index = world->addAirlock(gPaint.layer, paintRectangle.y, paintRectangle.x, paintRectangle.width);
@@ -1839,6 +1872,7 @@ namespace
 			else if (pointInRect(io.MousePos, doorMin, doorMax)) hoveredItem = PaletteItem::Door;
 			else if (pointInRect(io.MousePos, bulkheadDoorMin, bulkheadDoorMax)) hoveredItem = PaletteItem::BulkheadDoor;
 			else if (pointInRect(io.MousePos, windowMin, windowMax)) hoveredItem = PaletteItem::Window;
+			else if (pointInRect(io.MousePos, boothMin, boothMax)) hoveredItem = PaletteItem::BoothWindow;
 			else if (pointInRect(io.MousePos, walkwayMin, walkwayMax)) hoveredItem = PaletteItem::Walkway;
 			else if (pointInRect(io.MousePos, forceBridgeMin, forceBridgeMax)) hoveredItem = PaletteItem::ForceBridge;
 			else if (pointInRect(io.MousePos, roomLadderMin, roomLadderMax)) hoveredItem = PaletteItem::RoomLadder;
@@ -1870,6 +1904,7 @@ namespace
 				: hoveredItem == PaletteItem::Marker ? "Drag to add Marker"
 				: hoveredItem == PaletteItem::BulkheadDoor ? "Drag to add Bulkhead Door"
 				: hoveredItem == PaletteItem::Window ? "Drag to add Window"
+				: hoveredItem == PaletteItem::BoothWindow ? "Drag to add BoothWindow"
 				: hoveredItem == PaletteItem::Walkway ? "Drag to add Walkway"
 				: hoveredItem == PaletteItem::ForceBridge ? "Drag to add Force Bridge"
 				: hoveredItem == PaletteItem::RoomLadder ? "Drag to add Room Ladder"
@@ -1906,8 +1941,8 @@ namespace
 				target = getDoorTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::BulkheadDoor)
 				target = getBulkheadDoorTarget(world, dragMouse, canvasPos, canvasSize);
-			else if (gPegman.item == PaletteItem::Window)
-				target = getWindowTarget(world, dragMouse, canvasPos, canvasSize);
+			else if (gPegman.item == PaletteItem::Window || gPegman.item == PaletteItem::BoothWindow)
+				target = getWindowTarget(world, dragMouse, canvasPos, canvasSize, gPegman.item == PaletteItem::BoothWindow);
 			else if (gPegman.item == PaletteItem::Walkway)
 				target = getWalkwayTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::ForceBridge)
@@ -1937,9 +1972,9 @@ namespace
 					placeBulkheadDoor(world, target);
 					resetPegman();
 				}
-				else if (target && gPegman.item == PaletteItem::Window)
+				else if (target && (gPegman.item == PaletteItem::Window || gPegman.item == PaletteItem::BoothWindow))
 				{
-					placeWindow(world, target);
+					placeWindow(world, target, gPegman.item == PaletteItem::BoothWindow);
 					resetPegman();
 				}
 				else if (target && gPegman.item == PaletteItem::Walkway)
@@ -2046,7 +2081,7 @@ namespace
 				drawList->AddLine({ x, top }, { x, bottom }, colour, 5.0f);
 			}
 			else if (gPegman.item == PaletteItem::Door
-				|| gPegman.item == PaletteItem::Window)
+				|| gPegman.item == PaletteItem::Window || gPegman.item == PaletteItem::BoothWindow)
 			{
 				if (target.sector)
 				{
@@ -2792,8 +2827,9 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			if (!world->isSimulationPaused()) world->pauseSimulation();
-			auto index = world->applyAirlockEdit(plan);
+			// A cached Chamber drag plan must not turn a running edit into a pause.
+			if (!plan.chamber && !world->isSimulationPaused()) world->pauseSimulation();
+			auto index = plan.chamber ? world->applyChamberEdit(plan) : world->applyAirlockEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();
@@ -3388,7 +3424,7 @@ namespace
 		}
 	}
 
-	enum class ClipboardObjectType { Agent, Door, BulkheadDoor, Window, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
+	enum class ClipboardObjectType { Agent, Door, BulkheadDoor, Window, BoothWindow, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
 	struct ClipboardDefinition
 	{
 		ClipboardObjectType type{};
@@ -3397,6 +3433,7 @@ namespace
 		core::World::CreateDoorOptions door;
 		core::World::CreateBulkheadDoorOptions bulkheadDoor;
 		core::World::CreateWindowOptions window;
+		BoothWindowClipboard boothWindow;
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
 		core::World::CreateLiftOptions platformLift;
@@ -3438,7 +3475,7 @@ namespace
 		if (!gSelectedSectorObject) return false;
 		auto type = gSelectedSectorObject->getObjectType();
 		return type == core::SectorObjectType::Door || type == core::SectorObjectType::BulkheadDoor
-			|| type == core::SectorObjectType::Window
+			|| core::isWindowAperture(type)
 			|| type == core::SectorObjectType::Marker || type == core::SectorObjectType::Walkway
 			|| type == core::SectorObjectType::ForceBridge || type == core::SectorObjectType::Ladder
 			|| type == core::SectorObjectType::Lift;
@@ -3570,6 +3607,12 @@ namespace
 				<< options.automaticSensorDistance
 				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken
 				<< YAML::EndMap;
+		}
+		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::BoothWindow)
+		{
+			output << YAML::Key << "type" << YAML::Value << "BoothWindow"
+				<< YAML::Key << "object" << YAML::Value
+				<< makeBoothWindowClipboardObject(*world, *static_pointer_cast<const core::WindowSectorObject>(gSelectedSectorObject));
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Window)
 		{
@@ -3759,6 +3802,12 @@ namespace
 				&& (definition.bulkheadDoor.controls[0] || definition.bulkheadDoor.controls[1]))
 				throw runtime_error("Bulkhead Door controls require RemoteControlled activation");
 		}
+		else if (type == "BoothWindow")
+		{
+			definition.type = ClipboardObjectType::BoothWindow;
+			definition.width = 1; definition.height = 1;
+			definition.boothWindow = readBoothWindowClipboardObject(object);
+		}
 		else if (type == "Window")
 		{
 			definition.type = ClipboardObjectType::Window;
@@ -3887,7 +3936,7 @@ namespace
 					? world->removeSectorDoor(sector->getIndex(), i)
 					: type == core::SectorObjectType::BulkheadDoor
 						? world->removeSectorBulkheadDoor(sector->getIndex(), i)
-						: type == core::SectorObjectType::Window
+						: core::isWindowAperture(type)
 						? world->removeSectorWindow(sector->getIndex(), i)
 						: type == core::SectorObjectType::Ladder
 							? world->removeRoomLadder(sector->getIndex(), i)
@@ -4071,6 +4120,12 @@ namespace
 					CORE_SIDE_LEFT, definition.bulkheadDoor, &diagnostic))
 					throw runtime_error(diagnostic);
 			}
+			else if (definition.type == ClipboardObjectType::BoothWindow)
+			{
+				resolveBoothWindowClipboardPermissions(*world, definition.boothWindow);
+				if (!world->canAddBoothWindow(gUISettings.visibleLayer, y, x, definition.width, definition.height, &diagnostic))
+					throw runtime_error(diagnostic);
+			}
 			else if (definition.type == ClipboardObjectType::Window)
 			{
 				if (!world->canAddSectorWindow(gUISettings.visibleLayer, y, x,
@@ -4151,6 +4206,10 @@ namespace
 					auto result = world->addSectorBulkheadDoor(gUISettings.visibleLayer,
 						y, x, CORE_SIDE_LEFT, definition.bulkheadDoor);
 					created = result.door.sector->getObject(result.door.index);
+				}
+				else if (definition.type == ClipboardObjectType::BoothWindow)
+				{
+					created = pasteBoothWindow(world, gUISettings.visibleLayer, y, x, definition.boothWindow);
 				}
 				else if (definition.type == ClipboardObjectType::Window)
 				{
@@ -4350,7 +4409,9 @@ void handleShortcuts(shared_ptr<core::World>& world)
 		{
 			if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector)
 			{
-				if (gSelectedSector->getType() == core::SectorType::Airlock)
+				if (gSelectedSector->getType() == core::SectorType::Chamber)
+					commitAirlockEdit(world, world->planRemoveChamber(gSelectedSector->getIndex()));
+				else if (gSelectedSector->getType() == core::SectorType::Airlock)
 					commitAirlockEdit(world, world->planRemoveAirlock(gSelectedSector->getIndex()));
 				else if (gSelectedSector->getType() == core::SectorType::Lift)
 				{
@@ -4442,7 +4503,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 				&& (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Marker
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::Door
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::BulkheadDoor
-					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::Window
+					|| core::isWindowAperture(gSelectedSectorObject->getObjectType())
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::Walkway
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::ForceBridge
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::Ladder
@@ -4504,7 +4565,7 @@ void handleShortcuts(shared_ptr<core::World>& world)
 								? world->removeSectorDoor(sector->getIndex(), i)
 								: type == core::SectorObjectType::BulkheadDoor
 									? world->removeSectorBulkheadDoor(sector->getIndex(), i)
-									: type == core::SectorObjectType::Window
+									: core::isWindowAperture(type)
 									? world->removeSectorWindow(sector->getIndex(), i)
 									: type == core::SectorObjectType::Ladder
 										? world->removeRoomLadder(sector->getIndex(), i)
@@ -5229,6 +5290,12 @@ void renderWalkwayPanel(shared_ptr<core::World> const& world,
 void renderWindowPanel(shared_ptr<const core::World> const& world,
 	shared_ptr<const core::SectorObject> object)
 {
+	if (object->getObjectType() == core::SectorObjectType::BoothWindow)
+	{
+		if (renderBoothWindowPanel(const_pointer_cast<core::World>(world), static_pointer_cast<const core::WindowSectorObject>(object)))
+			clearSelections();
+		return;
+	}
 	auto window = static_pointer_cast<const core::WindowSectorObject>(object)->getWindow();
 	auto position = window->getPosition();
 	char const* style = "Clear";
@@ -5254,7 +5321,7 @@ void renderWindowPanel(shared_ptr<const core::World> const& world,
 	case core::Window::State::Untinting: state = "Untinting"; break;
 	}
 
-	ImGui::TextUnformatted("Window");
+	ImGui::TextUnformatted(window->getDescription().c_str());
 	ImGui::Text("Position: %.2f, %.2f", position.x, position.y);
 	ImGui::Text("Size: %u x %u cell%s", window->getCellsWide(), window->getLevelsHigh(),
 		window->getCellsWide() == 1 && window->getLevelsHigh() == 1 ? "" : "s");
@@ -5502,9 +5569,10 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 {
 	auto doorObject = static_pointer_cast<const core::BulkheadDoorSectorObject>(object);
 	auto door = doorObject->getDoor();
-	if (world->isAirlockOwnedObject(object))
+	if (world->isChamberOwnedObject(object))
 	{
-		ImGui::TextUnformatted("Airlock-owned Bulkhead Door");
+		ImGui::TextUnformatted(door->isChamberOwned()
+			? "Chamber-owned Bulkhead Door" : "Airlock-owned Bulkhead Door");
 		ImGui::TextDisabled("Fixed, closed, and not independently editable or operable");
 		return;
 	}
@@ -6695,6 +6763,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		case core::SectorType::Lift: type = "Lift"; break;
 		case core::SectorType::Shuttle: type = "Shuttle"; break;
 		case core::SectorType::Airlock: type = "Airlock"; break;
+		case core::SectorType::Chamber: type = "Chamber"; break;
 		case core::SectorType::Ladder: type = "Ladder"; break;
 		case core::SectorType::Stairwell: type = "Stairwell"; break;
 	case core::SectorType::Staircase: type = "Staircase"; break;
@@ -6715,6 +6784,13 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 		switch (gSelectedSector->getType())
 		{
+		case core::SectorType::Chamber:
+		{
+			auto chamber = static_pointer_cast<const core::ChamberTransit>(gSelectedSector);
+			if (auto plan = drawChamberSelectionPanel(world, *chamber))
+				commitAirlockEdit(world, *plan);
+			break;
+		}
 		case core::SectorType::Airlock:
 		{
 			auto chamber = static_pointer_cast<const core::AirlockTransit>(gSelectedSector);
@@ -7025,6 +7101,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			renderMarkerPanel(world, gSelectedSectorObject);
 			break;
 
+		case core::SectorObjectType::BoothWindow:
 		case core::SectorObjectType::Window:
 			renderWindowPanel(world, gSelectedSectorObject);
 			break;
@@ -8121,7 +8198,7 @@ namespace
 			|| type == core::SectorType::Shuttle
 			|| type == core::SectorType::Ladder
 			|| type == core::SectorType::Stairwell
-			|| type == core::SectorType::Airlock;
+			|| type == core::SectorType::Airlock || type == core::SectorType::Chamber;
 	}
 
 	ResizeEdge hoveredResizeEdge(shared_ptr<const core::Sector> const& sector, ImVec2 mouse)
@@ -8141,7 +8218,7 @@ namespace
 			candidates.push_back({ ResizeEdge::Left, abs(mouse.x - topLeft.x) });
 			candidates.push_back({ ResizeEdge::Right, abs(mouse.x - bottomRight.x) });
 		}
-		bool corridor = sector->getType() == core::SectorType::Airlock
+		bool corridor = sector->getType() == core::SectorType::Chamber || sector->getType() == core::SectorType::Airlock
 			|| sector->getType() == core::SectorType::Shuttle
 			|| (sector->getType() == core::SectorType::Location
 				&& sector->getTopLevelHeight() == CORE_CORRIDOR_HEIGHT);
@@ -8374,7 +8451,7 @@ namespace
 		bool objectOnVisibleLayer = gSelectedSectorObject
 			&& gSelectedSectorObject->getSector()->getLayerIndex() == (uint32_t)gUISettings.visibleLayer;
 		if (gSelectedSectorObject
-			&& gSelectedSectorObject->getObjectType() == core::SectorObjectType::Window)
+			&& core::isWindowAperture(gSelectedSectorObject->getObjectType()))
 		{
 			auto window = static_pointer_cast<const core::WindowSectorObject>(
 				gSelectedSectorObject)->getWindow();
@@ -8400,7 +8477,7 @@ namespace
 			return;
 		}
 
-		if (world->isAirlockOwnedObject(gSelectedSectorObject)
+		if (world->isChamberOwnedObject(gSelectedSectorObject)
 			|| world->isLiftOwnedDoor(gSelectedSectorObject)
 			|| world->isBulkheadDoorOwnedControl(gSelectedSectorObject)
 			|| world->isLiftOwnedControl(gSelectedSectorObject)
@@ -8581,7 +8658,8 @@ namespace
 			bool const selectedLadder = gSelectedSector->getType() == core::SectorType::Ladder;
 			bool const selectedStairwell = gSelectedSector->getType() == core::SectorType::Stairwell;
 			if (hoverEdge != ResizeEdge::Move && !selectedLift && !selectedShuttle
-				&& gSelectedSector->getType() != core::SectorType::Airlock)
+				&& gSelectedSector->getType() != core::SectorType::Airlock
+				&& gSelectedSector->getType() != core::SectorType::Chamber)
 			{
 				if (!world->isSimulationPaused()) world->pauseSimulation();
 				gUISettings.worldPaused = true;
@@ -8591,7 +8669,8 @@ namespace
 			gSectorResize.shuttle = selectedShuttle;
 			gSectorResize.ladder = selectedLadder;
 			gSectorResize.stairwell = selectedStairwell;
-			gSectorResize.airlock = gSelectedSector->getType() == core::SectorType::Airlock;
+			gSectorResize.airlock = gSelectedSector->getType() == core::SectorType::Airlock
+				|| gSelectedSector->getType() == core::SectorType::Chamber;
 			gSectorResize.edge = hoverEdge;
 			gSectorResize.pressPosition = io.MousePos;
 			gSectorResize.originalX = gSelectedSector->getCellX();
@@ -8599,8 +8678,12 @@ namespace
 			gSectorResize.originalWidth = gSelectedSector->getCellsWide();
 			gSectorResize.originalHeight = gSelectedSector->getLevelsHigh();
 			if (gSectorResize.airlock)
-				gSectorResize.airlockPreview = world->planResizeAirlock(gSelectedSector->getIndex(),
-					gSectorResize.originalX, gSectorResize.originalY, gSectorResize.originalWidth);
+				gSectorResize.airlockPreview = gSelectedSector->getType() == core::SectorType::Chamber
+					? world->planResizeChamber(gSelectedSector->getIndex(), gSectorResize.originalX,
+						gSectorResize.originalY, gSectorResize.originalWidth,
+						static_pointer_cast<const core::ChamberTransit>(gSelectedSector)->isLeftToRight())
+					: world->planResizeAirlock(gSelectedSector->getIndex(),
+						gSectorResize.originalX, gSectorResize.originalY, gSectorResize.originalWidth);
 			else if (gSectorResize.lift)
 				gSectorResize.liftPreview = world->planResizeLift(gSelectedSector->getIndex(),
 					gSectorResize.originalX, gSectorResize.originalY,
@@ -8702,8 +8785,12 @@ namespace
 			if (gSectorResize.airlockPreview.x != (uint32_t)left
 				|| gSectorResize.airlockPreview.y != (uint32_t)bottom
 				|| gSectorResize.airlockPreview.width != (uint32_t)(right - left))
-				gSectorResize.airlockPreview = world->planResizeAirlock(gSelectedSector->getIndex(),
-					(uint32_t)left, (uint32_t)bottom, (uint32_t)(right - left));
+				gSectorResize.airlockPreview = gSelectedSector->getType() == core::SectorType::Chamber
+					? world->planResizeChamber(gSelectedSector->getIndex(), (uint32_t)left,
+						(uint32_t)bottom, (uint32_t)(right - left),
+						static_pointer_cast<const core::ChamberTransit>(gSelectedSector)->isLeftToRight())
+					: world->planResizeAirlock(gSelectedSector->getIndex(),
+						(uint32_t)left, (uint32_t)bottom, (uint32_t)(right - left));
 		}
 		else if (gSectorResize.lift)
 		{

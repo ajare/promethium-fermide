@@ -41,6 +41,13 @@ runtime validation remains tracked separately in #279. The runners suppress
 Windows error/CRT assertion dialogs and never create a graphics window. Render
 uses only CPU-side ImGui contexts, without platform or GPU backends.
 
+## Validation selection
+
+[Smoke validation lanes](smoke-validation-lanes.md) documents the explicit fast
+and exhaustive-final selections. Historical `smoke-<module>-contract` entries
+remain registered as `validation-stress`; new bounded CLI/isolation entries reuse
+their inventories. Unfiltered CTest continues to run all assertions.
+
 ## Contract
 
 - No arguments executes the explicit module-local registry in order.

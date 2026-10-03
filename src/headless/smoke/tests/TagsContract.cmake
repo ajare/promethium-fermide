@@ -40,6 +40,14 @@ set(core_names
     mobilityProfileRegistryAndAssignment
 )
 
+if(DEFINED LANE)
+    set(lane_binary "${TAGS}")
+    set(lane_module agent-tags)
+    set(lane_names ${core_names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${TAGS}")

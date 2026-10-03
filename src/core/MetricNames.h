@@ -113,6 +113,8 @@ case DeviceCommandType::SelectLiftDestination: return "select_lift_destination";
 case DeviceCommandType::CallShuttle: return "call_shuttle";
 case DeviceCommandType::SelectShuttleDestination: return "select_shuttle_destination";
 case DeviceCommandType::RequestAirlock: return "request_airlock";
+case DeviceCommandType::SetBoothWindowState: return "set_booth_window_state";
+case DeviceCommandType::ToggleBoothWindow: return "toggle_booth_window";
 } return "unknown"; }
 inline std::string metricName(DoorOpenLeaseKind value) { switch(value) {
 case DoorOpenLeaseKind::Preparation: return "preparation";

@@ -286,9 +286,22 @@ namespace core
 		bool cycleComplete{ true };
 		bool traversalAvailable{ false };
 		std::array<DoorSnapshotState, 2> doors{};
-		std::array<InteractionPointId, 3> controls{};
+		std::array<InteractionPointId, 2> controls{};
 		std::vector<AgentId> occupants;
 		int entrySide{ -1 };
+		std::vector<TraversalRequestId> reservations;
+		std::vector<TraversalRequestId> crossings;
+	};
+
+	struct SecurityScannerSnapshot
+	{
+		SectorId sector;
+		bool leftToRight{ true };
+		std::string phase;
+		float remainingSeconds{ 0 };
+		float scanProgress{ 0 };
+		std::array<DoorSnapshotState, 2> doors{};
+		AgentId occupant;
 		std::vector<TraversalRequestId> reservations;
 		std::vector<TraversalRequestId> crossings;
 	};
@@ -309,6 +322,7 @@ namespace core
 		std::vector<TraversalRequestSnapshot> traversalRequests;
 		std::vector<TraversalPermitSnapshot> traversalPermits;
 		std::vector<AirlockSnapshot> airlocks;
+		std::vector<SecurityScannerSnapshot> securityScanners;
 	};
 
 	// These phases are always entered in declaration order for each fixed tick.

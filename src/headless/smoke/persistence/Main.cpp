@@ -6,8 +6,10 @@
 namespace
 {
 	constexpr smoke::Check checks[] = {
+		{ "boothWindows/authoredRoundTripAndMalformedRecords", persistence::boothWindows },
 		{ "airlocks/authoredRoundTripAndReplay", persistence::airlocks },
 		{ "furniture/documents", persistence::furniture },
+		{ "securityScanners/authoredRoundTripAndReplay", persistence::securityScanners },
 		{ "yaml-primitives", persistence::stringYamlRoundTripsPrimitiveValues },
 		{ "binary-contract", persistence::binarySerializerHonoursTheSerializerContract },
 		{ "yaml-file", persistence::fileYamlRoundTrips },

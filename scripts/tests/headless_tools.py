@@ -11,7 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-benchmark, generator, service, lift, pause, lift_fixture = sys.argv[1:]
+lightweight = sys.argv[-1:] == ['--cli']
+benchmark, generator, service, lift, pause, lift_fixture = sys.argv[1:-1] if lightweight else sys.argv[1:]
 
 
 def run(exe, args, code=0, diagnostic=None, timeout=60):
@@ -50,32 +51,7 @@ for args in (["--port", "0", "--port", "0"], ["--ticks", "1", "--ticks", "1"],
              ["--detail=sector"], ["--metrics"]):
     run(service, args, 2, "Usage:")
 
-with tempfile.TemporaryDirectory(prefix="pf tools with spaces ") as temporary:
-    root = pathlib.Path(temporary)
-    # Pass argv arrays, never pre-quote paths. Exercise both directory and basename
-    # spaces on every file-backed tool, including the adjacent registry reference.
-    fixture = root / "Lift fixture with spaces.world.yaml"
-    shutil.copyfile(lift_fixture, fixture)
-    fixture_bytes = fixture.read_bytes()
-    # The checked-in Lift fixture refers to this adjacent registry by basename.
-    registry = root / "test.tags.yaml"
-    shutil.copyfile(pathlib.Path(lift_fixture).parent / registry.name, registry)
-    registry_bytes = registry.read_bytes()
-    missing = root / "missing World.world.yaml"
-    run(benchmark, [missing], 1, "pf-restoration-benchmark:")
-    run(service, ["--world", missing, "--ticks", "1"], 1, "pf-metrics-server:")
-    run(lift, ["crossing", missing], 1, "pf-lift-repro:")
-    run(lift, ["boarding", missing], 1, "pf-lift-repro:")
-    run(pause, [missing], 1, "pf-pause-position-repro:")
-    malformed = root / "malformed World.world.yaml"
-    malformed.write_text("[invalid: World", encoding="utf-8")
-    run(benchmark, [malformed], 1, "pf-restoration-benchmark:")
-    run(service, ["--world", malformed], 1, "pf-metrics-server:")
-    run(lift, ["crossing", malformed], 1, "pf-lift-repro:")
-    run(lift, ["boarding", malformed], 1, "pf-lift-repro:")
-    run(pause, [malformed], 1, "pf-pause-position-repro:")
-    run(generator, [root / "absent" / "routing.world.yaml"], 1, "pf-generate-routing-world:")
-
+def functional(root, fixture, fixture_bytes, registry, registry_bytes, malformed):
     assert "PASS: Lift boarding stays" in run(lift, ["crossing", fixture])
     assert "PASS: Lift demand drained" in run(lift, ["boarding", fixture])
     assert "PASS: minimal pause-position" in run(pause, ["minimal"])
@@ -121,6 +97,36 @@ with tempfile.TemporaryDirectory(prefix="pf tools with spaces ") as temporary:
             assert field in report, report
     assert originals == {p.name: p.read_bytes() for p in first.iterdir()}
     assert "Metrics: http://127.0.0.1:" in run(service, ["--world", world, "--port", "0", "--ticks", "1"])
+
+
+with tempfile.TemporaryDirectory(prefix="pf tools with spaces ") as temporary:
+    root = pathlib.Path(temporary)
+    # Pass argv arrays, never pre-quote paths. Exercise both directory and basename
+    # spaces on every file-backed tool, including the adjacent registry reference.
+    fixture = root / "Lift fixture with spaces.world.yaml"
+    shutil.copyfile(lift_fixture, fixture)
+    fixture_bytes = fixture.read_bytes()
+    # The checked-in Lift fixture refers to this adjacent registry by basename.
+    registry = root / "test.tags.yaml"
+    shutil.copyfile(pathlib.Path(lift_fixture).parent / registry.name, registry)
+    registry_bytes = registry.read_bytes()
+    missing = root / "missing World.world.yaml"
+    run(benchmark, [missing], 1, "pf-restoration-benchmark:")
+    run(service, ["--world", missing, "--ticks", "1"], 1, "pf-metrics-server:")
+    run(lift, ["crossing", missing], 1, "pf-lift-repro:")
+    run(lift, ["boarding", missing], 1, "pf-lift-repro:")
+    run(pause, [missing], 1, "pf-pause-position-repro:")
+    malformed = root / "malformed World.world.yaml"
+    malformed.write_text("[invalid: World", encoding="utf-8")
+    run(benchmark, [malformed], 1, "pf-restoration-benchmark:")
+    run(service, ["--world", malformed], 1, "pf-metrics-server:")
+    run(lift, ["crossing", malformed], 1, "pf-lift-repro:")
+    run(lift, ["boarding", malformed], 1, "pf-lift-repro:")
+    run(pause, [malformed], 1, "pf-pause-position-repro:")
+    run(generator, [root / "absent" / "routing.world.yaml"], 1, "pf-generate-routing-world:")
+
+    if not lightweight:
+        functional(root, fixture, fixture_bytes, registry, registry_bytes, malformed)
 
     # File-backed stdout avoids an unbounded readline waiting for server startup.
     log = root / "service.log"

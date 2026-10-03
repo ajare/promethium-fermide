@@ -484,6 +484,7 @@ namespace core
 			advanceDoorResources();
 			advanceDeviceOperations();
 			advanceAirlocks();
+			advanceSecurityScanners();
 			break;
 
 		case SimulationPhase::IntentCollection:
@@ -863,7 +864,15 @@ namespace core
 			for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 			{
 				(void)resourceId;
-				if (!resource->mAirlock) continue;
+				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
+				// Scanner waiting tickets also survive a plain global pause. Recreating
+				// them in Agent order on resume would silently undo fair admission.
+				if (resource->mSecurityScanner)
+					for (auto const& lane : resource->mQueueLanes)
+						for (auto requestId : lane.queue)
+							if (auto request = mWorld.mTraversalRequests.find(requestId); request && request->mOwner == id
+								&& (request->mState == TraversalRequestState::Pending || request->mState == TraversalRequestState::Granted))
+								airlockJourney = true;
 				if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 					airlockJourney = true;
 				for (auto reservation : resource->mAdmissionReservations)

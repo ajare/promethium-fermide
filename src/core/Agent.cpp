@@ -1241,8 +1241,11 @@ namespace core
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
-		mResetPosition = mPosition;
-		mResetLocalDepth = mLocalDepth;
+		if (!getSector() || getSector()->getType() != SectorType::Chamber)
+		{
+			mResetPosition = mPosition;
+			mResetLocalDepth = mLocalDepth;
+		}
 		mResetPath = path;
 		mResetDestinationMarker = {};
 		if (path && !path->nodes.empty())
@@ -1265,6 +1268,25 @@ namespace core
 				mRouteJourneyDestinationVertexId = destination->getId();
 			}
 		};
+		if (mWorld && getSector() && getSector()->getType() == SectorType::Chamber)
+		{
+			// Destination intent is independent of the already admitted journey.
+			// Capture a replacement destination for planning after the forward exit,
+			// without cancelling its live crossing, queue ticket, or occupancy.
+			auto admitted = mPath.path;
+			mPath.path = std::move(path);
+			auto const id = mWorld->getAgentId(this);
+			if (mPath.path)
+			{
+				// Explicit replacement supersedes any previously deferred intent.
+				mWorld->mMovementGoals.erase(id);
+				mWorld->replanAgentAfterAuthorizationRefusal(id);
+			}
+			else mWorld->cancelAgentMovement(id);
+			mPath.path = std::move(admitted);
+			if (markModified) modify();
+			return;
+		}
 		// An onboard replacement remains the same transport journey. Retarget the
 		// live ride request and stop-request ownership instead of cancelling into a
 		// needless exit/reboard cycle.
@@ -1358,8 +1380,11 @@ namespace core
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		clearRuntimePath();
-		mResetPosition = mPosition;
-		mResetLocalDepth = mLocalDepth;
+		if (!getSector() || getSector()->getType() != SectorType::Chamber)
+		{
+			mResetPosition = mPosition;
+			mResetLocalDepth = mLocalDepth;
+		}
 		mResetDestinationMarker = {};
 		mResetPath.reset();
 		mResetPathActive = false;
@@ -1473,6 +1498,9 @@ namespace core
 	uint32_t Agent::getSkippablePathTarget(uint32_t vertexA) const
 	{
 		if (!mPath.path || !getSector() || vertexA + 1 >= mPath.path->nodes.size()) return vertexA;
+		if (getSector()->getType() == SectorType::Chamber
+			|| (mPath.path->nodes[vertexA].targetVertex
+				&& mPath.path->nodes[vertexA].targetVertex->getSector()->getType() == SectorType::Chamber)) return vertexA;
 		auto const& nodeA = mPath.path->nodes[vertexA];
 		if (!nodeA.targetVertex
 			|| nodeA.targetVertex->getSubType() == VertexSubType::Interactable) return vertexA;
@@ -1615,6 +1643,7 @@ namespace core
 		auto destinationSector = mTraversalTask->destinationVertex->getSector();
 		if (destinationSector.get() != getSector()
 			&& getSector()->getType() != SectorType::Airlock
+			&& getSector()->getType() != SectorType::Chamber
 			&& !mWorld->canAgentAccessLocation(*destinationSector, *this))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
@@ -1729,7 +1758,8 @@ namespace core
 		// A fixed Airlock batch is already being served. Do not discard its
 		// reservation merely to reconsider a still-valid route while the door opens.
 		if (request.entity->hasCapacityPosition()
-			&& mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Airlock) return;
+			&& (mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Airlock
+				|| mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Chamber)) return;
 		auto const& policy = mWorld->getTraversalWaitingPolicy();
 		auto waited = mWorld->getSimulationTick() - request.entity->getQueuedAtTick();
 		if (waited < policy.minimumReplanWaitTicks

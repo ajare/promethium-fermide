@@ -31,6 +31,13 @@ set(checks
     furniture/deskRoutes
     furniture/attachments
     furniture/composition
+    securityScanners/chambers
+    securityScanners/structuralEdits
+    securityScanners/preflight
+    boothWindows/placementAndTopology
+    boothWindows/atomicRefusal
+    boothWindows/lifecycle
+    boothWindows/simultaneousAdjacentPairs
     markerPlacementEnforcesPaletteCoreRules
     corridorDoorPlacementEnforcesPaletteRules
     objectMoveValidatesAndRebuildsOnceCommitted
@@ -61,6 +68,14 @@ function(invoke status expected)
         message(FATAL_ERROR "Unexpected result: ${out} / ${err}")
     endif()
 endfunction()
+
+if(DEFINED LANE)
+    set(lane_binary "${WORLD}")
+    set(lane_module world)
+    set(lane_names ${checks})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
 
 invoke(0 "^${listed}$" --list)
 list(LENGTH checks count)

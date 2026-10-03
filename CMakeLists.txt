@@ -420,9 +420,11 @@ endforeach()
 add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
     src/DoorPanel.cpp
+    src/ChamberPanel.cpp
     src/AgentGroupsPanel.cpp
     src/AgentGroupAssignmentPanel.cpp
     src/AgentClipboard.cpp
+    src/BoothWindowEditor.cpp
     src/AgentTagAssignmentPanel.cpp
     src/TagsPanel.cpp
     src/BehavioursPanel.cpp
@@ -615,7 +617,7 @@ if(BUILD_TESTING)
         "$<TARGET_FILE:prometheum-fermide-headless>"
         "$<TARGET_FILE:pf-compatibility-probe>" ${PF_COMPATIBILITY_MODULES})
     set_tests_properties(headless-compatibility-contract PROPERTIES TIMEOUT 60 LABELS "harness;headless")
-    add_test(NAME headless-tools-contract COMMAND ${Python3_EXECUTABLE}
+    set(PF_TOOLS_CONTRACT_COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_tools.py"
         "$<TARGET_FILE:pf-restoration-benchmark>"
         "$<TARGET_FILE:pf-generate-routing-world>"
@@ -623,9 +625,23 @@ if(BUILD_TESTING)
         "$<TARGET_FILE:pf-lift-repro>"
         "$<TARGET_FILE:pf-pause-position-repro>"
         "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/lift-test-1.world.yaml")
+    add_test(NAME headless-tools-contract COMMAND ${PF_TOOLS_CONTRACT_COMMAND})
+    add_test(NAME headless-tools-cli-contract COMMAND ${PF_TOOLS_CONTRACT_COMMAND} --cli)
+    set_tests_properties(headless-tools-cli-contract PROPERTIES
+        TIMEOUT 90 LABELS "tools;headless;validation-fast;validation-cli")
+    add_test(NAME validation-lifecycle-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/validation_run.py")
+    set_tests_properties(validation-lifecycle-contract PROPERTIES
+        TIMEOUT 60 LABELS "harness;validation-fast")
+    add_test(NAME smoke-lanes-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/smoke_lanes.py"
+        "${CMAKE_BINARY_DIR}" "$<CONFIG>"
+        "$<TARGET_FILE:pf-smoke-harness-probe>")
+    set_tests_properties(smoke-lanes-contract PROPERTIES
+        TIMEOUT 60 LABELS "harness;validation-fast")
     set_tests_properties(headless-tools-contract PROPERTIES
         TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,180>"
-        LABELS "tools;headless")
+        LABELS "tools;headless;validation-stress")
     if(WIN32)
         add_test(NAME windows-ctest-validator-contract COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/windows_ctest_validator.py")
@@ -692,6 +708,18 @@ set_target_properties(
     pf-headless-render-support pf-pause-position-support pf-lift-boarding-support
     pf-routing-population-support pf-restoration-support
     PROPERTIES FOLDER "Tests/Support")
+
+# Explicit development selection includes project regression/CLI tests, never
+# silently removes exhaustive coverage from an unfiltered full CTest run.
+if(BUILD_TESTING)
+    get_property(project_tests DIRECTORY PROPERTY TESTS)
+    foreach(test IN LISTS project_tests)
+        get_test_property(${test} LABELS labels)
+        if(NOT "validation-stress" IN_LIST labels AND NOT "validation-fast" IN_LIST labels)
+            set_property(TEST ${test} APPEND PROPERTY LABELS validation-fast)
+        endif()
+    endforeach()
+endif()
 
 # FetchContent dependencies may create projects in nested directories. Group
 # their entire target trees without modifying their standalone CMake builds.

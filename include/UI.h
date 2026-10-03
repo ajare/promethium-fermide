@@ -20,6 +20,7 @@ inline bool isCanvasSelectableSectorType(core::SectorType type)
 		|| type == core::SectorType::Stairwell
 		|| type == core::SectorType::Staircase
 		|| type == core::SectorType::Airlock
+		|| type == core::SectorType::Chamber
 		// A Background is selected to be inspected and recoloured, and to be deleted
 		// through its cascade. It is never entered, so selection asks nothing of it.
 		|| type == core::SectorType::Background

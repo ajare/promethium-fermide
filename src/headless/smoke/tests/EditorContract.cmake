@@ -167,6 +167,10 @@ set(editor_names
     furniture/chairActions
     furniture/attachmentActions
     furniture/compositionActions
+    securityScanners/editorCommandsAndHistory
+    securityScanners/structuralHistory
+    securityScanners/selectionWorkflow
+    boothWindows/historyAndClipboard
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation
     background/theColourEditCarriesNoAlphaChannel
@@ -211,6 +215,14 @@ set(editor_names
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
 )
+
+if(DEFINED LANE)
+    set(lane_binary "${EDITOR}")
+    set(lane_module editor)
+    set(lane_names ${editor_names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
 
 foreach(tier IN ITEMS editor)
     if(tier STREQUAL "editor")

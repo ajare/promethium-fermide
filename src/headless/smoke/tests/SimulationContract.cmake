@@ -116,6 +116,9 @@ set(core_names
     airlocks/structuralEditSafety
     airlocks/singleAgentJourneys
     airlocks/batchesAndOpposingQueues
+    airlocks/approachingBatch
+    airlocks/boardingDeadline
+    airlocks/sharedOutsideCall
     airlocks/lostReservationDoesNotRefill
     airlocks/interruptedJourneys
     airlocks/abandonedBoarding
@@ -130,8 +133,33 @@ set(core_names
     airlocks/localQueueObservations
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
+    securityScanners/editSafety
+    securityScanners/committedInterruptions
+    securityScanners/admissionAuthorizationChanges
+    securityScanners/localRouteObservations
+    securityScanners/automaticJourneys
+    securityScanners/configuration
+    securityScanners/contentionAndReuse
+    securityScanners/abandonedAdmission
+    securityScanners/defensiveOccupancy
+    securityScanners/presenceAndEmptyTimeout
+    securityScanners/resetAndLoad
+    securityScanners/destinationAndMobilityGates
+    boothWindows/runtimeTimingAndReversal
+    boothWindows/runtimeLifecycle
+    boothWindows/typedInteractionActivation
+    boothWindows/backSideAgentPanel
+    boothWindows/ownedPanelLifecycle
     runScaledWorld
 )
+
+if(DEFINED LANE)
+    set(lane_binary "${SIMULATION}")
+    set(lane_module simulation)
+    set(lane_names ${core_names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
 
 foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")

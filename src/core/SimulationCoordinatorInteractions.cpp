@@ -8,6 +8,7 @@
 
 #include "core/SimulationCoordinator.h"
 #include "core/Shuttle.h"
+#include "core/Window.h"
 
 #include "core/Agent.h"
 #include "core/World.h"
@@ -64,11 +65,15 @@ namespace core
 		for (auto const& binding : bindings)
 		{
 			bool validTarget = false;
-			if (binding.command.type == DeviceCommandType::SetSectorLights)
+			if (binding.command.type == DeviceCommandType::SetBoothWindowState
+				|| binding.command.type == DeviceCommandType::ToggleBoothWindow)
+				validTarget = bool(mWorld.lookupBoothWindow(binding.command.boothWindow));
+			else if (binding.command.type == DeviceCommandType::SetSectorLights)
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
 			else if (binding.command.type == DeviceCommandType::RequestAirlock)
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size()
-					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock;
+					&& mWorld.mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock
+					&& binding.command.stopIndex < 2;
 			else if (auto resource = mWorld.mTraversalResources.find(binding.command.traversalResource))
 				validTarget = binding.command.type == DeviceCommandType::OpenDoor ? resource->mDoor != nullptr
 					: binding.command.type == DeviceCommandType::SetExtendedState ? resource->mExtensible != nullptr
@@ -125,6 +130,8 @@ namespace core
 		{
 			return { false, found.diagnostic };
 		}
+		if (found.entity->mBoothWindowOwner)
+			return { false, "BoothWindow panels are owned and cannot be removed independently" };
 		if (any_of(found.entity->mBindings.begin(), found.entity->mBindings.end(), [](auto const& binding)
 			{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
 			return { false, "Airlock controls are fixed and cannot be removed independently" };
@@ -178,7 +185,8 @@ namespace core
 				&& resource->mShuttle && resource->mShuttle->isBroken()));
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (!broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
+			if (command.type != DeviceCommandType::ToggleBoothWindow
+				&& !broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
 			{
 				operation->mRequesters.insert(requester);
@@ -194,7 +202,9 @@ namespace core
 			: command.type == DeviceCommandType::SelectLiftDestination ? "Select lift destination"
 			: command.type == DeviceCommandType::CallShuttle ? "Call shuttle"
 			: command.type == DeviceCommandType::SelectShuttleDestination ? "Select shuttle destination"
-				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock" : "Device command";
+				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock"
+				: command.type == DeviceCommandType::ToggleBoothWindow ? "Toggle BoothWindow shutter"
+				: command.type == DeviceCommandType::SetBoothWindowState ? "Set BoothWindow shutter target" : "Device command";
 		if (!missing.empty())
 		{
 			name += ": missing Access permissions";
@@ -233,7 +243,9 @@ namespace core
 		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor) || !point->mSector
 			|| (actor->getState() != Agent::State::Idle
 				&& actor->getState() != Agent::State::WaitingForTraversal)
-			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
+			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
+			|| (point->requiresReachAtRequest()
+				&& actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach))
 		{
 			return {};
 		}
@@ -297,6 +309,7 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
+		if (point && point->requiresReachAtRequest()) return requestInteraction(pointId, actorId);
 		auto actor = mWorld.mAgents.find(actorId);
 		// Even the press a moving Agent makes in passing is physical work, so a
 		// deactivated Agent may not start one (#118, #192), and a
@@ -428,6 +441,19 @@ namespace core
 		return { true, {} };
 	}
 
+	DeviceOperationId SimulationCoordinator::submitDeviceCommand(DeviceCommand const& command)
+	{
+		// Editor activation uses exactly the same operations as Interaction bindings.
+		// No Agent, admission resource, or document/history mutation is involved.
+		if ((command.type != DeviceCommandType::SetBoothWindowState
+			&& command.type != DeviceCommandType::ToggleBoothWindow)
+			|| !mWorld.lookupBoothWindow(command.boothWindow)) return {};
+		mWorld.invalidateSimulationSnapshot();
+		auto id = findOrCreateDeviceOperation(command, {});
+		mWorld.mDeviceOperations.find(id)->mActivated = true;
+		return id;
+	}
+
 	DeviceOperationId SimulationCoordinator::createDeviceOperation(string const& name, AgentId requester)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -541,7 +567,31 @@ namespace core
 			if (operation->mState == DeviceOperationState::Pending)
 			{
 				operation->mState = DeviceOperationState::Running;
-				if (operation->mCommand.type == DeviceCommandType::OpenDoor)
+				if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
+					|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
+				{
+					auto found = mWorld.mBoothWindows.find(operation->mCommand.boothWindow);
+					auto booth = found == mWorld.mBoothWindows.end() ? nullptr : found->second.lock();
+					if (!booth) operation->mState = DeviceOperationState::Rejected;
+					else
+					{
+						// A new target supersedes prior travel, not its physical position.
+						for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
+							if (otherId != id && other->mState == DeviceOperationState::Running
+								&& (other->mCommand.type == DeviceCommandType::SetBoothWindowState
+									|| other->mCommand.type == DeviceCommandType::ToggleBoothWindow)
+								&& other->mCommand.boothWindow == operation->mCommand.boothWindow)
+							{
+								touchDeviceOperation(otherId, *other);
+								other->mState = DeviceOperationState::Cancelled;
+							}
+						if (operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
+							operation->mCommand.desiredState = !booth->mTargetOpen;
+						booth->mTargetOpen = operation->mCommand.desiredState;
+						booth->refreshState();
+					}
+				}
+				else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
 				{
 					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
 					if (!resource || !resource->mDoor || !resource->mEnabled
@@ -583,7 +633,13 @@ namespace core
 			{
 				continue;
 			}
-			if (operation->mCommand.type == DeviceCommandType::SetSectorLights
+			if (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
+				|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow)
+			{
+				if (!mWorld.lookupBoothWindow(operation->mCommand.boothWindow))
+					operation->mState = DeviceOperationState::Failed;
+			}
+			else if (operation->mCommand.type == DeviceCommandType::SetSectorLights
 				&& operation->mCommand.target
 				&& operation->mCommand.target.value <= mWorld.mSectors.size())
 			{
@@ -673,6 +729,31 @@ namespace core
 				operation->mState = DeviceOperationState::Failed;
 			}
 		}
+		// Travel is owned by the device, not by the lifetime of an operation or
+		// a traversal lease. This phase runs only on active simulation ticks.
+		for (auto const& [deviceId, weak] : mWorld.mBoothWindows)
+		{
+			(void)deviceId;
+			if (auto booth = weak.lock())
+			{
+				auto const step = World::getFixedTimestep() / BoothWindow::TravelSeconds;
+				booth->mProgress = clamp(booth->mProgress + (booth->mTargetOpen ? step : -step), 0.0f, 1.0f);
+				// Absorb floating point accumulation error at the final fixed tick.
+				if (booth->mProgress < 1e-6f) booth->mProgress = 0.0f;
+				if (booth->mProgress > 1.0f - 1e-6f) booth->mProgress = 1.0f;
+				booth->refreshState();
+			}
+		}
+		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
+			if (operation->mState == DeviceOperationState::Running
+				&& (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
+					|| operation->mCommand.type == DeviceCommandType::ToggleBoothWindow))
+				if (auto booth = mWorld.lookupBoothWindow(operation->mCommand.boothWindow);
+					booth && (operation->mCommand.desiredState ? booth->getProgress() == 1.0f : booth->getProgress() == 0.0f))
+				{
+					touchDeviceOperation(id, *operation);
+					operation->mState = DeviceOperationState::Succeeded;
+				}
 	}
 
 	void SimulationCoordinator::pressPhysicalControl(InteractionPointId pointId)
@@ -845,7 +926,10 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !actor->isActive() || agentForbidsButtons(actor))
+				if (!actor || !actor->isActive() || agentForbidsButtons(actor)
+					|| (point->requiresReachAtRequest()
+						&& (actor->getSector() != mWorld.mSectors[point->mSector.value - 1].get()
+							|| actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach)))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -910,7 +994,9 @@ namespace core
 				}
 			}
 			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
-				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
+				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
+				|| (point->requiresReachAtRequest()
+					&& actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must

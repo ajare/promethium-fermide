@@ -23,6 +23,7 @@
 #include "core/Marker.h"
 #include "core/Furniture.h"
 #include "core/SectorType.h"
+#include "core/ChamberSubtype.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
 #include "core/Window.h"
@@ -53,6 +54,7 @@ namespace core
 		// The coordinator owns no entities; it drives the registries below and
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
+		friend struct WorldAgentRestorationTestAccess;
 
 	public:
 
@@ -358,9 +360,11 @@ namespace core
 			[[nodiscard]] bool requiresConfirmation() const { return !consequences.empty(); }
 		};
 
+		// Both stationary chamber types share validated construction replay.
 		struct AirlockEditPlan
 		{
 			bool valid = false, remove = false;
+			bool chamber = false, leftToRight = true;
 			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
 			std::string diagnostic;
 		};
@@ -763,6 +767,9 @@ namespace core
 		EntityRegistry<InteractionRequestId, InteractionRequest> mInteractionRequests;
 
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
+		// Runtime-only device identities, independent of movement admission.
+		uint64_t mNextBoothWindowId{ 1 };
+		std::map<BoothWindowId, std::weak_ptr<BoothWindow>> mBoothWindows;
 
 		EntityRegistry<TraversalResourceId, TraversalResource> mTraversalResources;
 
@@ -865,7 +872,9 @@ namespace core
 			// (ADR 0003).
 			Facade,
 			Airlock,
-			Furniture
+			Furniture,
+			Chamber,
+			BoothWindow
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -884,6 +893,8 @@ namespace core
 			uint32_t a{ 0 }, b{ 0 }, c{ 0 }, d{ 0 }, e{ 0 }, f{ 0 }, g{ 0 }, h{ 0 };
 			int32_t i{ 0 }, j{ 0 };
 			float x{ 0.0f }, y{ 0.0f }, z{ 0.0f };
+			ChamberSubtype chamberSubtype{ ChamberSubtype::SecurityScanner };
+			float scannerSensorDistance{ 0.5f };
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
 			// Door: the activation mode the Door had before the editor's Buttons
@@ -1017,6 +1028,9 @@ namespace core
 
 		std::vector<ConstructionRecord> canonicalConstructionRecords(
 			std::vector<ConstructionRecord> records) const;
+
+		void removeBoothWindowsAtSupport(std::vector<ConstructionRecord>& records,
+			uint32_t layer, uint32_t x, uint32_t y) const;
 
 		void rebuildFromConstructionRecords(std::vector<ConstructionRecord> records,
 			uint32_t movedSectorIndex = ~0u, int deltaX = 0, int deltaY = 0);
@@ -1278,7 +1292,9 @@ namespace core
 		CreateObjectResult createDoor(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
 			Door::Height height = Door::Height::Regular, uint32_t* vertexIdentifier = nullptr);
 
-		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr);
+		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr, bool boothWindow = false);
+		CreateWindowResult addWindowAperture(uint32_t layer, uint32_t y, uint32_t x,
+			uint32_t width, uint32_t height, CreateWindowOptions const& options, bool boothWindow);
 
 		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side);
 
@@ -1769,6 +1785,18 @@ namespace core
 		bool canAgentEnterAirlock(TraversalResourceId resource, SectorId approach,
 			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		bool isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		using ChamberEditPlan = AirlockEditPlan;
+		ChamberEditPlan planResizeChamber(uint32_t sectorIndex, uint32_t x,
+			uint32_t y, uint32_t width, bool leftToRight) const;
+		ChamberEditPlan planRemoveChamber(uint32_t sectorIndex) const;
+		uint32_t applyChamberEdit(ChamberEditPlan const& plan);
+		bool setChamberConfiguration(uint32_t sectorIndex, float sensorDistance,
+			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
+		bool canAddChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			std::string* diagnostic = nullptr, ChamberSubtype subtype = ChamberSubtype::SecurityScanner) const;
+		uint32_t addChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			bool leftToRight = true, ChamberSubtype subtype = ChamberSubtype::SecurityScanner);
 
 		CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options);
 
@@ -1905,6 +1933,12 @@ namespace core
 
 		bool getSectorWindowOptions(uint32_t layerIndex, uint32_t y, uint32_t x,
 			uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions& options) const;
+
+		bool canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
+			uint32_t width = 1, uint32_t height = 1, std::string* diagnostic = nullptr) const;
+		CreateWindowResult addBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
+			Window::State initialState = Window::State::Closed);
+		bool setBoothWindowInitialState(uint32_t layer, uint32_t y, uint32_t x, Window::State state);
 
 		bool removeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex);
 
@@ -2615,6 +2649,11 @@ namespace core
 		bool cancelInteraction(InteractionRequestId id);
 
 		EntityRemovalResult removeInteractionRequest(InteractionRequestId id);
+
+		// Activate a BoothWindow editor/device command without an authored edit.
+		// Other device commands continue to activate through Interaction points.
+		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+		std::shared_ptr<const BoothWindow> lookupBoothWindow(BoothWindowId id) const;
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 
