@@ -11,7 +11,9 @@ namespace persistence
 		using smoke::require;
 		core::World world("BoothWindow document", 10, 3); world.addLayer();
 		for (uint32_t layer = 0; layer < 3; ++layer) world.addRoom("Room", layer, 0, 0, 9, 2);
-		world.addBoothWindow(0, 0, 2); world.addBoothWindow(1, 0, 4, core::Window::State::Open); world.finishBuild();
+		auto closed = std::static_pointer_cast<const core::BoothWindow>(world.addBoothWindow(0, 0, 2).object);
+		auto open = std::static_pointer_cast<const core::BoothWindow>(world.addBoothWindow(1, 0, 4, core::Window::State::Open).object);
+		world.finishBuild();
 		auto write = [](core::World const& source, bool binary) {
 			auto serialize = [&](auto writer) {
 				core::SerializationWorkData work; work.markSerializedUnmodified = false;
@@ -37,6 +39,19 @@ namespace persistence
 			}
 			require(source.getSimulationSnapshot().traversalResources.empty() && source.getSimulationSnapshot().interactionPoints.empty(), "Document created crossing/panel resources");
 		};
+		auto baselineYaml = write(world, false), baselineBinary = write(world, true);
+		for (auto device : {closed, open})
+		{
+			core::DeviceCommand command; command.type = core::DeviceCommandType::ToggleBoothWindow;
+			command.boothWindow = device->getDeviceId(); require(bool(world.submitDeviceCommand(command)), "Runtime command refused");
+		}
+		require(write(world, false) == baselineYaml && write(world, true) == baselineBinary,
+			"Saving pending commands persisted transient operations");
+		require(world.advanceTicks(12), "Mid-motion save setup failed");
+		require(closed->getState() == core::Window::State::Opening && open->getState() == core::Window::State::Closing,
+			"Save did not exercise both moving states");
+		require(write(world, false) == baselineYaml && write(world, true) == baselineBinary,
+			"Saving mid-motion persisted progress, target, or pending operation");
 		for (bool binary : {false,true})
 		{
 			auto data = write(world, binary);

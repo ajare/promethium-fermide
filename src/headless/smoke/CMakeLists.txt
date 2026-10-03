@@ -78,6 +78,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
         simulation/Airlocks.cpp
+        simulation/BoothWindows.cpp
     LIBRARIES prometheum-fermide-core pf-pause-position-support
     LABELS core
     TIMEOUT 60

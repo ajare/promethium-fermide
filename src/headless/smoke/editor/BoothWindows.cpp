@@ -5,6 +5,7 @@
 #include "PaletteLayout.h"
 #include "core/YamlSerializer.h"
 #include "imgui/imgui_internal.h"
+#include <cmath>
 
 namespace
 {
@@ -40,6 +41,24 @@ namespace
 		require(found,"Initial shutter checkbox inaccessible");
 		io.AddMousePosEvent(point.x,point.y); frame(); io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame();
 		require(get(2)->getWindow()->getState()==core::Window::State::Open && gWorldDocumentHistory.undoCount()==2,"Panel did not edit authored state/history");
+		// Operate the actual runtime panel button; it must not author a history entry.
+		auto authoredSnapshot = captureDocumentSnapshot(world)->yaml;
+		auto historyCount = gWorldDocumentHistory.undoCount();
+		auto toggleControl = window->GetID("Toggle shutter"); found = false;
+		for (float y=35;y<220 && !found;y+=8) for (float x=15;x<220 && !found;x+=16)
+		{
+			io.AddMousePosEvent(x,y); frame(); frame();
+			if (ImGui::GetHoveredID()==toggleControl) { found=true; point={x,y}; }
+		}
+		require(found, "Runtime shutter control inaccessible");
+		io.AddMousePosEvent(point.x,point.y); frame(); io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame();
+		require(world->getSimulationSnapshot().deviceOperations.size()==1, "Runtime panel bypassed typed device commands");
+		world->resumeSimulation(); require(world->advanceTicks(12), "Runtime panel motion failed"); world->pauseSimulation();
+		auto device = std::static_pointer_cast<const core::BoothWindow>(get(2)->getWindow());
+		require(device->getState()==core::Window::State::Closing && std::abs(device->getProgress()-0.75f)<0.00001f,
+			"Runtime panel did not animate shutter");
+		require(gWorldDocumentHistory.undoCount()==historyCount && captureDocumentSnapshot(world)->yaml==authoredSnapshot,
+			"Runtime panel mutated authored history/snapshot");
 		auto payload=makeBoothWindowClipboardObject(*world,*get(2));
 		require(payload["initialState"].as<std::string>()=="Open" && !payload["traversable"] && !payload["style"],"Clipboard leaked ordinary Window capabilities");
 		edit([&] { pasteBoothWindow(world,0,0,4,readBoothWindowClipboardObject(payload)); });

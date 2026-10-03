@@ -19,8 +19,9 @@ Supported sprites:
 - Enabled/disabled Buttons, at the existing Button bounds.
 - Clear, frosted and tinted Windows: back-sector rendering precedes the overlay.
   Clear glass has a transparent centre; tinted glass is translucent.
-- BoothWindow Open frame and Closed shutter: fixed ordinary one-cell Window
-  geometry; Open has a fully transparent centre and Closed an opaque centre.
+- BoothWindow frame and distinct inner shutter: fixed ordinary one-cell Window
+  geometry. The transparent Open frame stays stationary; the opaque 42x38 shutter
+  subregion of the Closed tile translates upwards behind it, clipped to its centre.
   See [BoothWindows](booth-windows.md) for authoring and regeneration.
 - Agents and Markers, keeping the existing icon-fit dimensions.
 - Platform lift car: the sprite follows the moving slab's actual bounds, not the

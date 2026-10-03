@@ -62,7 +62,9 @@ namespace core
 		CallShuttle,
 		SelectShuttleDestination,
 		// Targets the World-owned Airlock Sector, never one of its owned Doors.
-		RequestAirlock
+		RequestAirlock,
+		SetBoothWindowState,
+		ToggleBoothWindow
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -85,8 +87,8 @@ namespace core
 		TraversalRequestId request;
 	};
 
-	// A command says which state is desired. It is intentionally not a toggle:
-	// retries and equivalent requests are therefore idempotent and coalescible.
+	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow
+	// is an activation, never coalesced, and resolves its target exactly once.
 	struct DeviceCommand
 	{
 		DeviceCommandType type{ DeviceCommandType::SetSectorLights };
@@ -94,6 +96,7 @@ namespace core
 		bool desiredState{ false };
 		TraversalResourceId traversalResource{};
 		uint32_t stopIndex{ ~0u };
+		BoothWindowId boothWindow{};
 
 		friend bool operator==(DeviceCommand const&, DeviceCommand const&) = default;
 	};

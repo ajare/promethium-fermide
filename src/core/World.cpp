@@ -6452,6 +6452,13 @@ namespace core
 		auto windowObject = dynamic_pointer_cast<WindowSectorObject>(windowSector->_getObject(windowIndex));
 		auto window = windowObject->getWindow();
 		window->setState(options.initialState, options.style);
+		if (boothWindow)
+		{
+			auto booth = static_pointer_cast<BoothWindow>(window);
+			if (mNextBoothWindowId == 0) throw overflow_error("BoothWindow device identity space is exhausted");
+			booth->mDeviceId = BoothWindowId{ mNextBoothWindowId++ };
+			mBoothWindows.emplace(booth->mDeviceId, booth);
+		}
 		TraversalResourceId traversalResource;
 		if (options.traversable && window->getFrontSector() && window->getBackSector())
 		{
@@ -6495,6 +6502,17 @@ namespace core
 				return reject(format("BoothWindow requires a walkable approach on Layer {} at Level {}", side, y));
 		}
 		return canAddSectorWindow(layer, y, x, width, height, diagnostic);
+	}
+
+	shared_ptr<const BoothWindow> World::lookupBoothWindow(BoothWindowId id) const
+	{
+		auto found = mBoothWindows.find(id);
+		return found == mBoothWindows.end() ? nullptr : found->second.lock();
+	}
+
+	DeviceOperationId World::submitDeviceCommand(DeviceCommand const& command)
+	{
+		return mSimulationCoordinator.submitDeviceCommand(command);
 	}
 
 	World::CreateWindowResult World::addBoothWindow(uint32_t layer, uint32_t y, uint32_t x, Window::State state)

@@ -2256,7 +2256,10 @@ namespace core
 		mAuthoredControlRequirements.clear();
 		mInteractionPoints = {};
 		mInteractionRequests = {};
+		auto const nextOperation = mDeviceOperations.nextId();
 		mDeviceOperations = {};
+		mDeviceOperations.restoreNextId(nextOperation);
+		mBoothWindows.clear(); // Do not reuse handles held by editor/device clients.
 		mTraversalResources = {};
 		mTraversalRequests = {};
 		mTraversalPermits = {};

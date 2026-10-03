@@ -128,6 +128,9 @@ set(core_names
     airlocks/localQueueObservations
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
+    boothWindows/runtimeTimingAndReversal
+    boothWindows/runtimeLifecycle
+    boothWindows/typedInteractionActivation
     runScaledWorld
 )
 

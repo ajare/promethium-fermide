@@ -217,6 +217,7 @@ because they do not own smoke-check execution.
 | `smoke/render/BrokenExtensibles.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/simulation/BrokenExtensibles.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Airlocks.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/BoothWindows.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/world/BoothWindows.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/Airlocks.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/persistence/BoothWindows.cpp` | module-owned | `pf-smoke-persistence` |

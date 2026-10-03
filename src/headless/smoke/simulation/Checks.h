@@ -19,4 +19,5 @@ void registerDoors(std::vector<smoke::Check>& checks);
 void registerDoorQueues(std::vector<smoke::Check>& checks);
 void registerCrossingBands(std::vector<smoke::Check>& checks);
 void registerAirlocks(std::vector<smoke::Check>& checks);
+void registerBoothWindows(std::vector<smoke::Check>& checks);
 void registerScale(std::vector<smoke::Check>& checks);

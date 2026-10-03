@@ -40,6 +40,17 @@ std::shared_ptr<const core::SectorObject> pasteBoothWindow(std::shared_ptr<core:
 	return created.window.sector->getObject(created.window.index);
 }
 
+core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<const core::WindowSectorObject> const& object)
+{
+	auto device = object ? std::dynamic_pointer_cast<const core::BoothWindow>(object->getWindow()) : nullptr;
+	if (!device) return {};
+	core::DeviceCommand command;
+	command.type = core::DeviceCommandType::ToggleBoothWindow;
+	command.boothWindow = device->getDeviceId();
+	return world->submitDeviceCommand(command);
+}
+
 bool renderBoothWindowPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::WindowSectorObject> const& object)
 {
@@ -49,7 +60,13 @@ bool renderBoothWindowPanel(std::shared_ptr<core::World> const& world,
 	ImGui::Text("Position: %u, %u; Layer pair: %u / %u", object->getCellX(), object->getCellY(),
 		booth->getFrontLayer(), booth->getBackLayer());
 	ImGui::TextUnformatted("Fixed 1 x 1 footprint; service aperture only. No crossing or physical panel.");
-	ImGui::Text("Shutter: %s", booth->getState() == core::Window::State::Open ? "Open" : "Closed");
+	auto device = std::static_pointer_cast<const core::BoothWindow>(booth);
+	auto state = booth->getState();
+	ImGui::Text("Shutter: %s (%.0f%%); target: %s",
+		state == core::Window::State::Open ? "Open" : state == core::Window::State::Closed ? "Closed"
+		: state == core::Window::State::Opening ? "Opening" : "Closing",
+		device->getProgress() * 100.0f, device->getTargetOpen() ? "Open" : "Closed");
+	if (ImGui::Button("Toggle shutter")) operateBoothWindowShutter(world, object);
 	if (!world->getSectorWindowOptions(booth->getFrontLayer(), object->getCellY(), object->getCellX(), 1, 1, options))
 		return false;
 	bool open = options.initialState == core::Window::State::Open;

@@ -33,6 +33,10 @@ sprites:
     cell: [4, 1]
     content: [6, 80, 52, 48]
     tintable: false
+  booth-window-shutter:
+    cell: [4, 1]
+    content: [11, 21, 42, 38]
+    tintable: false
   booth-window-closed:
     cell: [4, 1]
     content: [6, 16, 52, 48]

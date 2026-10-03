@@ -738,6 +738,9 @@ namespace core
 		EntityRegistry<InteractionRequestId, InteractionRequest> mInteractionRequests;
 
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
+		// Runtime-only device identities, independent of movement admission.
+		uint64_t mNextBoothWindowId{ 1 };
+		std::map<BoothWindowId, std::weak_ptr<BoothWindow>> mBoothWindows;
 
 		EntityRegistry<TraversalResourceId, TraversalResource> mTraversalResources;
 
@@ -2586,6 +2589,11 @@ namespace core
 		bool cancelInteraction(InteractionRequestId id);
 
 		EntityRemovalResult removeInteractionRequest(InteractionRequestId id);
+
+		// Activate a BoothWindow editor/device command without an authored edit.
+		// Other device commands continue to activate through Interaction points.
+		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+		std::shared_ptr<const BoothWindow> lookupBoothWindow(BoothWindowId id) const;
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 

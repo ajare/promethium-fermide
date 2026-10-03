@@ -921,6 +921,42 @@ void renderWindowTinted(shared_ptr<const core::Window> window, uint32_t layer, L
 }
 
 
+void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer,
+	LayerRenderStyle style, WorldDrawList* drawList)
+{
+	if (style == LayerRenderStyle::Wireframe)
+	{
+		renderWindowClear(booth, layer, style, false, drawList);
+		return;
+	}
+	if (!isDrawnSolid(style)) return;
+	core::Vector2 from, to;
+	booth->getFullShape(from, to);
+	transformPosition(from); transformPosition(to);
+	ImVec2 topLeft{min(from.x, to.x), min(from.y, to.y)};
+	ImVec2 bottomRight{max(from.x, to.x), max(from.y, to.y)};
+	// These insets are the transparent centre of the supplied 52 x 48 frame.
+	float const width = bottomRight.x - topLeft.x, height = bottomRight.y - topLeft.y;
+	ImVec2 innerMin{topLeft.x + width * 5.0f / 52.0f, topLeft.y + height * 5.0f / 48.0f};
+	ImVec2 innerMax{bottomRight.x - width * 5.0f / 52.0f, bottomRight.y - height * 5.0f / 48.0f};
+	float const travel = (innerMax.y - innerMin.y) * booth->getProgress();
+	if (booth->getProgress() > 0.0f)
+	{
+		drawList->PushClipRect({innerMin.x, innerMax.y - travel}, innerMax, true);
+		renderWindowClear(booth, layer, style, false, drawList);
+		drawList->PopClipRect();
+	}
+	// Only the shutter translates. Its clip intersects any enclosing aperture.
+	drawList->PushClipRect(innerMin, innerMax, true);
+	ImVec2 shutterMin{innerMin.x, innerMin.y - travel};
+	ImVec2 shutterMax{innerMax.x, innerMax.y - travel};
+	if (!drawObjectSprite("booth-window-shutter", drawList, shutterMin, shutterMax))
+		drawList->AddRectFilled(shutterMin, shutterMax, ImColor(90, 106, 116));
+	drawList->PopClipRect();
+	if (!drawObjectSprite("booth-window-open", drawList, topLeft, bottomRight))
+		drawList->AddRect(topLeft, bottomRight, ImColor(148, 162, 170), 0.0f, 0, 2.0f);
+}
+
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
 {
 	if (style == LayerRenderStyle::Hidden)
@@ -931,8 +967,8 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 	auto windowStyle = window->getStyle();
 
 	bool const booth = window->isBoothWindow();
-	bool const shutterClosed = booth && window->getState() == core::Window::State::Closed;
-	if (!shutterClosed || style == LayerRenderStyle::Wireframe) switch (windowStyle)
+	if (booth) renderBoothWindow(static_pointer_cast<const core::BoothWindow>(window), layer, style, drawList);
+	else switch (windowStyle)
 	{
 	case core::Window::Style::Clear:
 		renderWindowClear(window, layer, style, selected, drawList);
@@ -947,24 +983,17 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		break;
 	}
 
-	if ((style == LayerRenderStyle::Solid || (booth && style == LayerRenderStyle::Aperture)) && hasObjectTileset())
+	if (!booth && style == LayerRenderStyle::Solid && hasObjectTileset())
 	{
 		core::Vector2 from, to;
 		window->getFullShape(from, to);
 		transformPosition(from);
 		transformPosition(to);
-		auto const sprite = booth ? (shutterClosed ? "booth-window-closed" : "booth-window-open")
-			: windowStyle == core::Window::Style::Clear ? "window-clear"
+		auto const sprite = windowStyle == core::Window::Style::Clear ? "window-clear"
 			: windowStyle == core::Window::Style::Frosted ? "window-frosted" : "window-tinted";
 		drawObjectSprite(sprite, drawList, {from.x, from.y}, {to.x, to.y});
 	}
 
-	if (shutterClosed && isDrawnSolid(style) && !hasObjectTileset())
-	{
-		core::Vector2 from, to;
-		window->getFullShape(from, to); transformPosition(from); transformPosition(to);
-		drawList->AddRectFilled({from.x, from.y}, {to.x, to.y}, ImColor(70, 80, 90));
-	}
 	if (selected)
 	{
 		core::Vector2 bounds0, bounds1;

@@ -120,6 +120,21 @@ namespace core
 		mStyle = style;
 	}
 
+	void BoothWindow::setState(State state, Style style)
+	{
+		Window::setState(state, style);
+		mTargetOpen = state == State::Open;
+		mProgress = mTargetOpen ? 1.0f : 0.0f;
+	}
+
+	void BoothWindow::refreshState()
+	{
+		// Only the runtime device path may assign moving states. Base APIs still
+		// reject glass styles and unsupported authored states.
+		mState = mTargetOpen ? (mProgress == 1.0f ? State::Open : State::Opening)
+			: (mProgress == 0.0f ? State::Closed : State::Closing);
+	}
+
 	void Window::configureTraversal(bool enabled, TraversalResourceId resource)
 	{
 		if (isBoothWindow() && (enabled || resource))

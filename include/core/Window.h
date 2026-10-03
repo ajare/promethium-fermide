@@ -13,6 +13,7 @@ namespace core
 
 	class Window : public Object
 	{
+		friend class BoothWindow;
 	public:
 
 		enum struct State
@@ -85,7 +86,7 @@ namespace core
 		[[nodiscard]] uint32_t getFrontLayer() const;
 		[[nodiscard]] uint32_t getBackLayer() const;
 
-		// Window animation is not yet device-driven; this explicit state seam lets
+		// Ordinary Window animation is not device-driven; this explicit state seam lets
 		// world logic configure/test the threshold without treating broken glass as
 		// an ordinary passage.
 		virtual void setState(State state, Style style = Style::Clear);
@@ -108,10 +109,23 @@ namespace core
 	// including through a Window reference.
 	class BoothWindow final : public Window
 	{
+		friend class World;
+		friend class SimulationCoordinator;
+		BoothWindowId mDeviceId;
+		float mProgress{ 0.0f };
+		bool mTargetOpen{ false };
+		void refreshState();
+
 	public:
+		static constexpr float TravelSeconds = 0.8f;
 		BoothWindow(uint32_t x, uint32_t y, std::shared_ptr<const Sector> sectors[2])
 			: Window(x, y, 1, 1, sectors) {}
 		bool isBoothWindow() const override { return true; }
+		BoothWindowId getDeviceId() const { return mDeviceId; }
+		float getProgress() const { return mProgress; }
+		bool getTargetOpen() const { return mTargetOpen; }
+		void setState(State state, Style style = Style::Clear) override;
+
 		std::string getDescription() const override { return "BoothWindow"; }
 	};
 
