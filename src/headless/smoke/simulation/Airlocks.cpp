@@ -326,6 +326,19 @@ namespace
 						}
 					}
 					previousEntry = state.entrySide;
+					// Later underfilled batches may now gain members during their
+					// boarding window, not only on the tick that entry opens.
+					std::vector<core::TraversalRequestSnapshot> additions;
+					for (auto const& request : snapshot.traversalRequests)
+						if (!members.contains(request.owner) && std::find(state.reservations.begin(), state.reservations.end(), request.id) != state.reservations.end())
+							additions.push_back(request);
+					std::sort(additions.begin(), additions.end(), [](auto const& a, auto const& b) { return a.queueTicket < b.queueTicket; });
+					for (auto const& request : additions)
+					{
+						require(batchCount > 1 && expectedOrder.size() < width && origins.at(request.owner) == state.entrySide,
+							"Full/opposing batch accepted a later member");
+						expectedOrder.push_back(request.owner); members.insert(request.owner);
+					}
 					for (auto id : state.occupants)
 					{
 						require(members.contains(id) && origins.at(id) == state.entrySide, "Late/opposing waiter joined fixed batch");

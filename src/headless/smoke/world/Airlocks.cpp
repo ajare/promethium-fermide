@@ -54,6 +54,9 @@ namespace
 						"Airlock needs one shared journey authority");
 					for (int side = 0; side < 2; ++side)
 					{
+						auto control = world.lookupInteractionPoint(chamber->getControl(side)).entity;
+						require(control && control->getPosition().distanceTo({ side == CORE_SIDE_LEFT ? 1.5f : 2.5f + width, 1.0f }) < 0.001f,
+							"Outside Airlock button must be centred in its adjacent cell");
 						auto door = chamber->getDoor(side);
 						require(door && door->isClosed() && !door->isBreakable()
 							&& door->isAirlockOwned() && door->getActivationMode() == core::DoorActivationMode::Unavailable,
@@ -196,6 +199,20 @@ namespace
 			if (facade) unsupported.addFacade(0, 0, 4, 2, 1);
 			else unsupported.addBackground(0, 0, 4, 2, 1);
 			require(!unsupported.canAddAirlock(0, 0, 2, 2), "Airlock accepted Facade or Background");
+		}
+		for (int side : { CORE_SIDE_LEFT, CORE_SIDE_RIGHT })
+		{
+			core::World blocked("Occupied outside button cell", 10, 2);
+			auto left = blocked.addRoom("Left", 0, 0, 0, 2, 1);
+			auto right = blocked.addRoom("Right", 0, 0, 5, 2, 1);
+			blocked.addSectorLightSwitch(side == CORE_SIDE_LEFT ? left : right, side == CORE_SIDE_LEFT ? 1 : 0);
+			blocked.finishBuild(); blocked.pauseSimulation(); blocked.markSaved();
+			auto before = saved(blocked);
+			require(!blocked.canAddAirlock(0, 0, 2, 3), "Airlock accepted an occupied cell-centre button slot");
+			bool refused = false;
+			try { blocked.addAirlock(0, 0, 2, 3); } catch (core::Exception const&) { refused = true; }
+			require(refused && saved(blocked) == before && !blocked.isModified() && blocked.isTraversalTopologyValid(),
+				"Button collision partially constructed an Airlock");
 		}
 		core::World unsupportedTransit("Unsupported Transit neighbour", 8, 3);
 		unsupportedTransit.addCorridor(0, 0, 0, 1, 1);

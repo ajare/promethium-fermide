@@ -38,7 +38,8 @@ namespace core
 				return reject("Airlock neighbours must have adjoining walkable ends");
 			auto end = sector->getEndType(y - sector->getCellY(), 1 - side);
 			if (end == SectorEndType::BulkheadDoor || cell.bulkheadIndices[1 - side] != ~0u
-				|| cell.hasObject() || cell.controls[1 - side] != ~0u)
+				|| cell.hasObject() || cell.controls[1 - side] != ~0u
+				|| cell.controls[CORE_SIDE_MIDDLE] != ~0u)
 				return reject("An object or control blocks the Airlock entrance");
 		}
 		if (diagnostic) diagnostic->clear();
@@ -99,7 +100,7 @@ namespace core
 				lane.positions.push_back({ side == CORE_SIDE_LEFT ? x - 0.5f - cell : x + width + 0.5f + cell, (float)y });
 			lane.positionOwners.resize(lane.positions.size());
 			auto control = createPhysicalControl("Airlock outside button", layer,
-				side == CORE_SIDE_LEFT ? x - 1 : x + width, y, 1 - side, CORE_BUTTON_F_AUTO_REENABLE);
+				side == CORE_SIDE_LEFT ? x - 1 : x + width, y, CORE_SIDE_MIDDLE, CORE_BUTTON_F_AUTO_REENABLE);
 			DeviceCommand command;
 			command.type = DeviceCommandType::RequestAirlock;
 			command.target = SectorId{ (uint64_t)index + 1 }; command.stopIndex = side;

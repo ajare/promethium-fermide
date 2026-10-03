@@ -12,7 +12,8 @@ cell) and configure its cycle duration while paused. The duration defaults to
 Creation and timing edits participate in existing document undo/redo.
 
 World owns the chamber, its two generated Bulkhead Doors, and three fixed
-physical buttons (one at each outside entrance and one inside). The adjoining
+physical buttons (one centred in the cell immediately outside each entrance,
+matching standalone Bulkhead Door buttons, and one inside). The adjoining
 Location wall ends are opened automatically. Their previous authored states,
 including an originally open end, are retained separately for later restoration.
 The owned Doors cannot be independently edited, opened, removed, or authored
