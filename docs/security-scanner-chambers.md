@@ -1,4 +1,4 @@
-# Security scanner chambers (#339, #340, #341)
+# Security scanner chambers (#339, #340, #341, #342)
 
 The palette's **Scanner** tool creates a distinct same-Layer Security scanner.
 Drag horizontally across empty whole cells between adjoining walkable Room or
@@ -18,7 +18,14 @@ either threshold. Destination Location requirements and Door Mobility use apply
 before admission; Buttons capability and scanner-specific permissions do not.
 
 The World-owned Traversal resource reserves its sole slot before admission.
-Another Agent waits outside rather than piggybacking. After crossing the fully
+The oldest eligible waiting ticket receives that exclusive reservation; eligibility
+requires an active entry-side Agent within sensor range, usable Door Mobility,
+and destination Location access. Another Agent waits outside rather than
+piggybacking, even during a presence-only opening or in a longer chamber.
+Cancellation before crossing and deactivation before admission release claims;
+abandoned boarding cannot hold the slot indefinitely. Movement cancellation
+preserves a crossing already in flight, while deactivation releases an
+uncommitted boarder at its safe source boundary. After crossing the fully
 open entry, the occupant walks to the centre and remains there. Entry closure
 starts only once positioned and clear of crossing. When both Doors are fully
 closed, the coordinator starts **1s pre-delay → 2s scan → 1s post-pause**, then
@@ -52,8 +59,13 @@ chamber width (including one cell). Positions consume only public normalized sca
 progress; there is no renderer clock. Pause freezes the beams, and reset/load
 removes them. Pre-delay, post-pause, and all other phases show no beams.
 
-Fair admission policy, configurable sensing/timing, interrupted
-journey recovery, and structural editing are separate follow-up tickets.
+Physical multiple occupancy defensively latches an **Occupancy violation: multiple
+Agents** phase, clears scan timing/progress, and stops Door motion and further
+admission until reset. Selection and snapshots report the phase; it is never a
+successful multi-Agent scan. Public placement still refuses scanner occupants.
+
+Configurable sensing/timing, interrupted occupied-journey recovery, and structural
+editing are separate follow-up tickets.
 
 ## Persistence and history
 
@@ -75,6 +87,9 @@ and ownership. Detached open-wall restoration records remain supported.
 - `pf-smoke-world --check securityScanners/chambers`
 - `pf-smoke-world --check securityScanners/preflight`
 - `pf-smoke-simulation --check securityScanners/automaticJourneys`
+- `pf-smoke-simulation --check securityScanners/contentionAndReuse`
+- `pf-smoke-simulation --check securityScanners/abandonedAdmission`
+- `pf-smoke-simulation --check securityScanners/defensiveOccupancy`
 - `pf-smoke-simulation --check securityScanners/presenceAndEmptyTimeout`
 - `pf-smoke-simulation --check securityScanners/destinationAndMobilityGates`
 - `pf-smoke-simulation --check securityScanners/resetAndLoad`
@@ -85,6 +100,7 @@ and ownership. Detached open-wall restoration records remain supported.
 
 Checks exercise World commands, real Paths, fixed ticks, snapshots, Selection
 readouts, rendering command streams, undo/redo, YAML/binary load, reset, replay,
-and Layer compaction. They require no windows, dialogs, clipboard, private-state
-injection, or new harness. Airlock/Bulkhead regressions retain their existing
+and Layer compaction. Defensive occupancy coverage uses narrow test-only access
+to the existing carried-Agent restoration seam (no public corruption API).
+They require no windows, dialogs, clipboard, or new harness. Airlock/Bulkhead regressions retain their existing
 owners. See [Linux validation](linux-smoke-validation.md).

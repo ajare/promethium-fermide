@@ -129,6 +129,9 @@ set(core_names
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
     securityScanners/automaticJourneys
+    securityScanners/contentionAndReuse
+    securityScanners/abandonedAdmission
+    securityScanners/defensiveOccupancy
     securityScanners/presenceAndEmptyTimeout
     securityScanners/resetAndLoad
     securityScanners/destinationAndMobilityGates

@@ -8,7 +8,7 @@ namespace core
 	enum class SecurityScannerPhase
 	{
 		Idle, EntryOpening, Boarding, Positioning, EntryClosing,
-		PreDelay, Scanning, PostPause, ExitOpening, Exiting, ExitClosing
+		PreDelay, Scanning, PostPause, ExitOpening, Exiting, ExitClosing, OccupancyViolation
 	};
 
 	class SecurityScannerTransit : public Transit
@@ -39,7 +39,7 @@ namespace core
 		float getScanSeconds() const { return 2.0f; }
 		float getPostPauseSeconds() const { return 1.0f; }
 		float getSensorDistance() const { return 0.5f; }
-		bool isTraversalAvailable() const { return true; }
+		bool isTraversalAvailable() const { return mPhase != SecurityScannerPhase::OccupancyViolation; }
 		TraversalResourceId getTraversalResourceId() const { return mTraversalResource; }
 		SecurityScannerPhase getPhase() const { return mPhase; }
 		std::string getPhaseName() const;

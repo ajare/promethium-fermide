@@ -10,21 +10,249 @@
 #include "core/RouteTraversalInputs.h"
 #include "core/Vertex.h"
 #include "core/Exceptions.h"
+#include "core/Marker.h"
+#include "core/MarkerSectorObject.h"
 #include <cmath>
 #include <map>
+
+namespace core
+{
+	// Narrow test-only access to existing structural restoration, following the
+	// GraphSourceIndexTestAccess pattern. No public occupancy mutation API.
+	struct WorldAgentRestorationTestAccess
+	{
+		static void restoreAt(World& world, AgentId id, Vector2 position)
+		{
+			auto carried = world.captureAgentsForReplay();
+			std::vector<World::CarriedAgent> selected;
+			for (auto saved : carried) if (saved.id == id)
+			{
+				saved.position = position; selected.push_back(saved);
+			}
+			smoke::require(world.removeAgent(id).removed, "Carried fixture removal refused");
+			world.restoreCarriedAgents(selected, false);
+		}
+	};
+}
 
 namespace
 {
 	using smoke::require;
+	core::MarkerId markerId(core::World::CreateObjectResult const& marker)
+	{
+		return std::static_pointer_cast<core::MarkerSectorObject>(marker.sector->getObject(marker.index))->getMarker()->getId();
+	}
+
+	void safeCapacity(core::World const& world, uint32_t index)
+	{
+		auto snapshot = world.getSimulationSnapshot();
+		auto const& state = snapshot.securityScanners.at(0);
+		require(world.getSector(index)->getAgents().size() <= 1, "Physical scanner capacity exceeded");
+		require(state.reservations.size() + (state.occupant ? 1 : 0) <= 1 && state.crossings.size() <= 1,
+			"Scanner slot/crossing overbooked");
+		require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed,
+			"Scanner interlock violated");
+		if (state.phase == "Pre-delay" || state.phase == "Scanning" || state.phase == "Post-pause")
+			require(state.occupant && world.getSector(index)->getAgents().size() == 1
+				&& state.doors[0] == core::DoorSnapshotState::Closed && state.doors[1] == core::DoorSnapshotState::Closed,
+				"Scan without one sealed occupant");
+	}
+
+	void contention(smoke::Context const&)
+	{
+		for (uint32_t width : { 1u, 2u, 5u })
+			for (bool direction : { false, true })
+			{
+				core::World world("Scanner contention", width + 16, 2);
+				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 7, 1), world.addCorridor(0, 0, width + 7, 7, 1) };
+				auto index = world.addSecurityScanner(0, 0, 7, width, direction);
+				int entry = direction ? 0 : 1, exit = 1 - entry;
+				auto destination = markerId(world.addSectorMarker(ends[exit], 0, 3.5f));
+				world.finishBuild();
+				std::vector<core::AgentId> actors;
+				for (unsigned i = 0; i < 3; ++i)
+					actors.push_back(world.createAgent("Contender", ends[entry], 0, entry ? 0.5f : 6.5f));
+				// Install simultaneous intent in reverse identity order: service is
+				// determined by observed queue tickets, not registry order.
+				for (auto it = actors.rbegin(); it != actors.rend(); ++it)
+					require(world.moveAgentToMarker(*it, destination).accepted(), "Contender command refused");
+				bool late = false;
+				core::AgentId previousOccupant;
+				unsigned admissions = 0;
+				std::map<core::AgentId, core::QueueTicketId> tickets;
+				core::QueueTicketId previousTicket;
+				bool complete = false;
+				for (unsigned tick = 0; tick < 12000; ++tick)
+				{
+					world.advanceTick(); safeCapacity(world, index);
+					auto snapshot = world.getSimulationSnapshot(); auto state = snapshot.securityScanners.at(0);
+					for (auto const& request : snapshot.traversalRequests)
+						if (request.destinationSector.value == index + 1 && request.queueTicket)
+							tickets[request.owner] = request.queueTicket;
+					if (state.occupant && state.occupant != previousOccupant)
+					{
+						++admissions;
+						auto ticket = tickets.at(state.occupant);
+						require(!previousTicket || previousTicket < ticket, "Later ticket overtook eligible predecessor");
+						for (auto const& [owner, waitingTicket] : tickets)
+							if (world.lookupAgent(owner).entity->getSector()->getIndex() == ends[entry])
+								require(ticket < waitingTicket, "Admission skipped oldest waiting ticket");
+						previousTicket = ticket;
+					}
+					previousOccupant = state.occupant;
+					if (!late && state.phase == "Boarding")
+					{
+						late = true;
+						auto id = world.createAgent("Open entry piggyback", ends[entry], 0, entry ? 0.3f : 6.7f);
+						actors.push_back(id);
+						require(world.moveAgentToMarker(id, destination).accepted(), "Late arrival refused");
+					}
+					if (state.phase == "Exit closing")
+						require(state.reservations.empty() && state.doors[entry] == core::DoorSnapshotState::Closed,
+							"Next entry reserved/opened before exit closed");
+					complete = late && admissions == actors.size() && state.phase == "Idle";
+					for (auto id : actors) complete = complete && world.lookupAgent(id).entity->getSector()->getIndex() == ends[exit]
+						&& world.lookupAgent(id).entity->getState() == core::Agent::State::Idle;
+					if (complete) break;
+				}
+				std::string diagnostic = "Repeated contended journeys stalled width=" + std::to_string(width)
+					+ " direction=" + std::to_string(direction) + " admissions=" + std::to_string(admissions)
+					+ " phase=" + world.getSimulationSnapshot().securityScanners.at(0).phase
+					+ " doors=" + std::to_string((int)world.getSimulationSnapshot().securityScanners.at(0).doors[0])
+					+ "," + std::to_string((int)world.getSimulationSnapshot().securityScanners.at(0).doors[1]);
+				for (auto id : actors) diagnostic += " actor=" + std::to_string(id.value) + " sector="
+					+ std::to_string(world.lookupAgent(id).entity->getSector()->getIndex()) + " x="
+					+ std::to_string(world.lookupAgent(id).entity->getGlobalPosition().x);
+				for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+					diagnostic += " request=" + std::to_string(request.id.value) + " owner=" + std::to_string(request.owner.value)
+						+ " state=" + std::to_string((int)request.state) + " source=" + std::to_string(request.sourceSector.value)
+						+ " dest=" + std::to_string(request.destinationSector.value);
+				require(complete, diagnostic);
+				world.advanceTicks(5);
+				auto snapshot = world.getSimulationSnapshot();
+				require(snapshot.securityScanners.at(0).reservations.empty() && snapshot.securityScanners.at(0).crossings.empty()
+					&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(), "Repeated use retained claims");
+			}
+	}
+
+	void abandonment(smoke::Context const&)
+	{
+		for (std::string stage : { "Entry opening", "Boarding" })
+			for (bool deactivate : { false, true })
+			{
+				// Movement cancellation preserves an in-flight crossing. Before
+				// grant it abandons entry; after grant it must finish safely and
+				// release capacity. Deactivation exercises safe-source rollback.
+				bool committedCancellation = stage == "Boarding" && !deactivate;
+				core::World world("Scanner abandonment", 14, 2);
+				auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
+				auto right = world.addCorridor(0, 0, 8, 5, 1);
+				auto index = world.addSecurityScanner(0, 0, 5, 3);
+				auto destination = markerId(world.addSectorMarker(right, 0, 2.5f)); world.finishBuild();
+				auto first = world.createAgent("Abandon", left, 0, 4.5f);
+				require(world.moveAgentToMarker(first, destination).accepted(), "Abandon command refused");
+				bool reached = false;
+				for (unsigned tick = 0; tick < 1000; ++tick)
+				{
+					world.advanceTick(); safeCapacity(world, index);
+					auto state = world.getSimulationSnapshot().securityScanners.at(0);
+					if (state.phase == stage && !state.reservations.empty()) { reached = true; break; }
+				}
+				require(reached, "Abandon fixture failed before " + stage);
+				if (deactivate)
+				{
+					world.pauseSimulation();
+					require(world.setAgentActive(first, false), "Boarder deactivation refused");
+					require(world.getSimulationSnapshot().securityScanners.at(0).reservations.empty(), "Inactive boarder retained reservation");
+					require(world.resumeSimulation(), "Abandon resume refused");
+				}
+				else require(world.cancelAgentMovement(first).accepted(), "Boarder cancellation refused");
+				bool recovered = false;
+				for (unsigned tick = 0; tick < 2400; ++tick)
+				{
+					world.advanceTick(); safeCapacity(world, index);
+					auto state = world.getSimulationSnapshot().securityScanners.at(0);
+					if (!committedCancellation)
+						require(!state.occupant && state.scanProgress == 0 && state.remainingSeconds == 0,
+							"Abandoned boarder caused scan at " + stage + " deactivate=" + std::to_string(deactivate));
+					else require(!state.occupant || state.occupant == first, "Cancelled crossing admitted another occupant");
+					if (state.phase == "Idle" && state.reservations.empty() && state.crossings.empty()) { recovered = true; break; }
+				}
+				require(recovered && world.lookupAgent(first).entity->getSector()->getIndex() == (committedCancellation ? right : left), "Abandoned admission stranded scanner");
+				auto next = world.createAgent("Successor", left, 0, 4.5f);
+				require(world.moveAgentToMarker(next, destination).accepted(), "Successor command refused");
+				bool exited = false;
+				for (unsigned tick = 0; tick < 2400; ++tick)
+				{
+					world.advanceTick(); safeCapacity(world, index);
+					exited = world.lookupAgent(next).entity->getSector()->getIndex() == right;
+					if (exited && world.getSimulationSnapshot().securityScanners.at(0).phase == "Idle") break;
+				}
+				require(exited, "Successor could not reuse abandoned scanner");
+			}
+	}
+
+	void occupancyViolation(smoke::Context const&)
+	{
+		core::World world("Defensive occupancy", 14, 2);
+		auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
+		auto right = world.addCorridor(0, 0, 8, 5, 1);
+		auto index = world.addSecurityScanner(0, 0, 5, 3);
+		auto destination = markerId(world.addSectorMarker(right, 0, 2.5f)); world.finishBuild();
+		auto traveller = world.createAgent("Traveller", left, 0, 4.5f);
+		require(world.moveAgentToMarker(traveller, destination).accepted(), "Defensive fixture command refused");
+		bool scanning = false;
+		for (unsigned tick = 0; tick < 1600; ++tick)
+		{
+			world.advanceTick(); safeCapacity(world, index);
+			if (world.getSimulationSnapshot().securityScanners.at(0).phase == "Scanning") { scanning = true; break; }
+		}
+		require(scanning, "Defensive fixture did not scan"); world.pauseSimulation();
+		bool refused = false;
+		try { world.createAgent("Unsupported placement", index, 0, 0.5f); } catch (std::exception const&) { refused = true; }
+		require(refused, "Public placement overbooked scanner");
+		// Exercise the existing structural-restoration seam, not a new corruption
+		// API. An inconsistent carried occupant must not be scanned successfully.
+		auto extra = world.createAgent("Carried occupant", left, 0, 1.5f);
+		core::WorldAgentRestorationTestAccess::restoreAt(world, extra, { 5.5f, 0 });
+		require(world.getSector(index)->getAgents().size() == 2, "Restoration seam did not exercise defensive occupancy");
+		auto waiting = world.createAgent("Blocked admission", left, 0, 4.5f);
+		require(world.moveAgentToMarker(waiting, destination).accepted(), "Defensive waiting command refused");
+		require(world.resumeSimulation(), "Defensive resume refused");
+		for (unsigned tick = 0; tick < 800; ++tick)
+		{
+			world.advanceTick();
+			auto snapshot = world.getSimulationSnapshot();
+			require(world.lookupAgent(waiting).entity->getSector()->getIndex() == left, "Fault admitted another Agent");
+			for (auto const& request : snapshot.traversalRequests)
+				if (request.resource == std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index))->getTraversalResourceId())
+					require(request.state != core::TraversalRequestState::Granted, "Fault issued a traversal permit");
+		}
+		auto state = world.getSimulationSnapshot().securityScanners.at(0);
+		auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+		require(state.phase == "Occupancy violation: multiple Agents" && !chamber->isTraversalAvailable()
+			&& state.remainingSeconds == 0 && state.scanProgress == 0 && state.reservations.empty() && state.crossings.empty()
+			&& state.doors[0] == core::DoorSnapshotState::Closed && state.doors[1] == core::DoorSnapshotState::Closed,
+			"Multiple occupancy completed a scan or was not reported");
+		world.pauseSimulation(); require(world.removeAgent(extra).removed, "Fault occupant removal refused");
+		require(world.resumeSimulation(), "Fault latch resume refused"); world.advanceTicks(10);
+		require(!chamber->isTraversalAvailable(), "Occupancy fault resumed without reset");
+		world.resetSimulation();
+		require(world.getSimulationSnapshot().securityScanners.at(0).phase == "Idle", "Reset retained occupancy fault");
+	}
+
 	void sensing(smoke::Context const&)
 	{
 		for (bool direction : { false, true })
+			for (bool entryApproach : { false, true })
 			for (float gap : { 0.49f, 0.51f })
 			{
 				core::World world("Scanner sensor", 10, 2);
 				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 3, 1), world.addCorridor(0, 0, 5, 3, 1) };
-				auto index = world.addSecurityScanner(0, 0, 3, 2, direction); world.finishBuild();
-				int side = direction ? 0 : 1;
+				auto index = world.addSecurityScanner(0, 0, 3, 2, direction);
+				int entry = direction ? 0 : 1;
+				int side = entryApproach ? entry : 1 - entry;
+				auto away = markerId(world.addSectorMarker(ends[side], 0, 1.5f)); world.finishBuild();
 				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
 				auto id = world.createAgent("Presence only", ends[side], 0, 1.5f);
 				auto actor = world.lookupAgent(id).entity;
@@ -34,17 +262,30 @@ namespace
 				world.pauseSimulation(); require(world.removeAgent(id).removed, "Sensor fixture removal refused");
 				id = world.createAgent("Presence only", ends[side], 0, target - world.getSector(ends[side])->getPosition().x);
 				require(world.resumeSimulation(), "Sensor resume refused");
+				require(world.moveAgentToMarker(id, away).accepted(), "Passing Agent command refused");
 				bool opened = false, closed = false;
+				uint64_t openedAt = 0, closingAt = 0;
 				for (unsigned tick = 0; tick < 1300; ++tick)
 				{
 					world.advanceTick(); auto state = world.getSimulationSnapshot().securityScanners.at(0);
+					if (!openedAt && state.doors[entry] == core::DoorSnapshotState::Open) openedAt = world.getSimulationTick();
+					if (!closingAt && state.phase == "Entry closing") closingAt = world.getSimulationTick();
 					opened = opened || state.doors[side] == core::DoorSnapshotState::Open;
 					closed = closed || (opened && state.phase == "Idle");
 					require(!state.occupant && state.reservations.empty() && state.scanProgress == 0
-						&& state.remainingSeconds == 0 && state.doors[1 - side] == core::DoorSnapshotState::Closed,
+						&& state.remainingSeconds == 0 && state.doors[1 - entry] == core::DoorSnapshotState::Closed,
 						"Empty presence opening scanned or violated interlock");
 				}
-				require(opened == (gap < 0.5f) && (gap > 0.5f || closed), "Sensor gap boundary or empty opening timeout incorrect");
+				require(opened == (entryApproach && gap < 0.5f) && (!opened || closed), "Entry/exit sensor boundary or empty opening timeout incorrect");
+				if (opened)
+				{
+					auto hold = core::secondsToTicks(CORE_BULKHEAD_DOOR_STAY_OPEN_TIME, world.getFixedTimestep());
+					require(closingAt >= openedAt + hold && closingAt <= openedAt + hold + 1,
+						"Empty opening did not use existing Door-open timeout");
+				}
+				auto snapshot = world.getSimulationSnapshot();
+				require(snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty()
+					&& snapshot.securityScanners.at(0).phase == "Idle", "Passing Agent retained stale opening claims");
 			}
 	}
 
@@ -285,6 +526,9 @@ namespace
 void registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "securityScanners/automaticJourneys", journeys });
+	checks.push_back({ "securityScanners/contentionAndReuse", contention });
+	checks.push_back({ "securityScanners/abandonedAdmission", abandonment });
+	checks.push_back({ "securityScanners/defensiveOccupancy", occupancyViolation });
 	checks.push_back({ "securityScanners/presenceAndEmptyTimeout", sensing });
 	checks.push_back({ "securityScanners/resetAndLoad", restoration });
 	checks.push_back({ "securityScanners/destinationAndMobilityGates", permissions });

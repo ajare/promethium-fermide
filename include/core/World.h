@@ -52,6 +52,7 @@ namespace core
 		// The coordinator owns no entities; it drives the registries below and
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
+		friend struct WorldAgentRestorationTestAccess;
 
 	public:
 

@@ -432,10 +432,10 @@ namespace core
 			auto& chamber = *resource.mSecurityScanner;
 			bool entry = destinationSector.get() == &chamber;
 			auto side = entry ? chamber.getEntrySide() : chamber.getExitSide();
-			if (!chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed()) return false;
+			if (!chamber.isTraversalAvailable() || !chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed()) return false;
 			if (entry)
 			{
-				if (resource.mAdmissionReservations[0] != requestId || resource.mOccupants[0]) return false;
+				if (!chamber.getAgents().empty() || resource.mAdmissionReservations[0] != requestId || resource.mOccupants[0]) return false;
 				resource.mAdmissionReservations[0] = {};
 				resource.mOccupants[0] = owner;
 				chamber.mOccupant = owner;
