@@ -1,4 +1,4 @@
-# Security scanner chambers (#339, #340, #341, #342, #343)
+# Security scanner chambers (#339, #340, #341, #342, #343, #344)
 
 The palette's **Scanner** tool creates a distinct same-Layer Security scanner.
 Drag horizontally across empty whole cells between adjoining walkable Room or
@@ -81,8 +81,28 @@ active duration, so beam consumers need no separate clock. Route estimates use
 the authored timings and automatic Door motion, with no Airlock cycle or Buttons
 assumptions.
 
-Interrupted occupied-journey recovery and structural editing remain separate
-follow-up tickets.
+## Interrupted journeys
+
+Admission commits the forward exit independently of destination intent and Path
+lifetime. Destination replacements defer Route planning until the occupant leaves;
+Path loss restores only the committed forward chamber suffix, never an entry-side
+return. Clearing an authored Path through the World command likewise retains the
+occupied slot until exit. Location grant loss or requirement tightening after
+admission cannot revoke that exit; before admission they refuse/reconsider entry.
+
+Deactivation freezes Agent movement, not automatic Door motion or scan timing.
+A centred inactive occupant may finish scanning and await the open exit, retaining
+capacity until reactivation and completed disembarkation. An inactive occupant
+still positioning waits for reactivation before entry closure. Global pause freezes
+both movement and device operation. Scanner waiting tickets and selected
+reservations survive pause/resume without reordering or duplication; cancellation
+and ineligible pre-entry changes retire claims through normal traversal cleanup.
+
+Perceived route costs retain the automated-duration estimate. Only an entry-local
+Route observation adds that approach's queue service estimate and density; remote
+live occupancy, phase, and queues are not revealed. No fictitious Buttons
+interaction, scanner control permission, or new Mobility category is introduced.
+Structural editing remains a separate follow-up ticket.
 
 ## Persistence and history
 
@@ -103,6 +123,9 @@ and ownership. Detached open-wall restoration records remain supported.
 
 - `pf-smoke-world --check securityScanners/chambers`
 - `pf-smoke-world --check securityScanners/preflight`
+- `pf-smoke-simulation --check securityScanners/committedInterruptions`
+- `pf-smoke-simulation --check securityScanners/admissionAuthorizationChanges`
+- `pf-smoke-simulation --check securityScanners/localRouteObservations`
 - `pf-smoke-simulation --check securityScanners/automaticJourneys`
 - `pf-smoke-simulation --check securityScanners/configuration`
 - `pf-smoke-simulation --check securityScanners/contentionAndReuse`

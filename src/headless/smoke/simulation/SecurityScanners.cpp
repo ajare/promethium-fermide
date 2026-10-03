@@ -77,7 +77,7 @@ namespace
 				// determined by observed queue tickets, not registry order.
 				for (auto it = actors.rbegin(); it != actors.rend(); ++it)
 					require(world.moveAgentToMarker(*it, destination).accepted(), "Contender command refused");
-				bool late = false;
+				bool late = false, queuePaused = false;
 				core::AgentId previousOccupant;
 				unsigned admissions = 0;
 				std::map<core::AgentId, core::QueueTicketId> tickets;
@@ -101,6 +101,25 @@ namespace
 						previousTicket = ticket;
 					}
 					previousOccupant = state.occupant;
+					if (!queuePaused && late && state.phase == "Scanning")
+					{
+						queuePaused = true;
+						std::map<core::TraversalRequestId, core::QueueTicketId> pending;
+						for (auto const& request : snapshot.traversalRequests)
+							if (request.destinationSector.value == index + 1 && request.state == core::TraversalRequestState::Pending)
+								pending[request.id] = request.queueTicket;
+						require(pending.size() >= 2, "Contended pause had no waiting tickets");
+						world.pauseSimulation(); world.advanceTicks(100);
+						require(world.resumeSimulation(), "Contended pause resume refused");
+						auto resumed = world.getSimulationSnapshot();
+						for (auto const& [id, ticket] : pending)
+						{
+							unsigned matches = 0;
+							for (auto const& request : resumed.traversalRequests)
+								if (request.id == id && request.queueTicket == ticket) ++matches;
+							require(matches == 1, "Pause recreated or duplicated scanner waiting ticket");
+						}
+					}
 					if (!late && state.phase == "Boarding")
 					{
 						late = true;
@@ -191,6 +210,195 @@ namespace
 				}
 				require(exited, "Successor could not reuse abandoned scanner");
 			}
+	}
+
+	void interruptions(smoke::Context const&)
+	{
+		for (bool direction : { false, true })
+			for (std::string stage : { "Positioning", "Pre-delay", "Scanning", "Post-pause", "Exiting", "Exit crossing" })
+				for (std::string change : { "destination", "replacementPath", "path", "publicPath", "grant", "requirement", "inactive" })
+				{
+					core::World world("Committed scanner exit", 16, 2);
+					uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 5, 1), world.addCorridor(0, 0, 8, 5, 1) };
+					auto index = world.addSecurityScanner(0, 0, 5, 3, direction);
+					int entry = direction ? 0 : 1, exit = 1 - entry;
+					auto destination = markerId(world.addSectorMarker(ends[exit], 0, 3.5f));
+					auto replacement = markerId(world.addSectorMarker(ends[exit], 0, 1.5f));
+					world.finishBuild(); world.pauseSimulation();
+					auto permission = world.addAccessPermission("Destination");
+					auto id = world.createAgent("Occupant", ends[entry], 0, entry ? 0.5f : 4.5f);
+					require(world.grantAgentAccessPermission(id, permission), "Initial grant refused");
+					if (change == "grant") require(world.setLocationPermissionRequirement(ends[exit], { permission }), "Initial requirement refused");
+					require(world.moveAgentToMarker(id, destination).accepted() && world.resumeSimulation(), "Interruption fixture refused");
+					auto actor = world.lookupAgent(id).entity;
+					bool reached = false;
+					for (unsigned tick = 0; tick < 2400; ++tick)
+					{
+						world.advanceTick(); safeCapacity(world, index);
+						auto state = world.getSimulationSnapshot().securityScanners.at(0);
+						bool atStage = state.phase == stage;
+						if (stage == "Exit crossing")
+							for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+								atStage = atStage || (request.owner == id && request.sourceSector.value == index + 1
+									&& request.destinationSector.value == ends[exit] + 1 && request.state == core::TraversalRequestState::Granted);
+						if (atStage && state.occupant == id) { reached = true; break; }
+					}
+					require(reached, "Interruption fixture stalled at " + stage);
+					world.pauseSimulation();
+					if (change == "destination") require(world.moveAgentToMarker(id, replacement).accepted(), "Replacement refused");
+					if (change == "path") actor->clearPath();
+					if (change == "publicPath") require(world.clearAgentPath(id), "Public Path loss refused");
+					if (change == "replacementPath")
+					{
+						for (auto const& node : actor->getPath()->nodes)
+							if (node.targetVertex->getSector()->getIndex() == ends[exit])
+							{
+								auto path = world.getGraph()->calculatePath(actor, node.targetVertex);
+								require(bool(path), "Replacement Path unavailable"); actor->setPath(path, true); break;
+							}
+					}
+					if (change == "grant") require(world.revokeAgentAccessPermission(id, permission), "Revoke refused");
+					if (change == "requirement")
+					{
+						auto other = world.addAccessPermission("New requirement");
+						require(world.setLocationPermissionRequirement(ends[exit], { other }), "Requirement change refused");
+					}
+					if (change == "inactive") require(world.setAgentActive(id, false), "Deactivation refused");
+					auto frozen = world.getSimulationSnapshot().securityScanners.at(0);
+					auto position = actor->getGlobalPosition();
+					world.advanceTicks(100);
+					auto after = world.getSimulationSnapshot().securityScanners.at(0);
+					require(after.occupant == id && after.phase == frozen.phase && after.remainingSeconds == frozen.remainingSeconds
+						&& after.doors == frozen.doors && actor->getGlobalPosition() == position, "Pause lost commitment");
+					auto follower = world.createAgent("Follower", ends[entry], 0, entry ? 0.5f : 4.5f);
+					require(world.moveAgentToMarker(follower, destination).accepted(), "Follower refused");
+					require(world.resumeSimulation(), "Interrupted resume refused");
+					if (change == "inactive")
+					{
+						for (unsigned tick = 0; tick < 1000; ++tick)
+						{
+							world.advanceTick(); safeCapacity(world, index);
+							require(world.getSimulationSnapshot().securityScanners.at(0).occupant == id
+								&& actor->getGlobalPosition() == position && world.lookupAgent(follower).entity->getSector()->getIndex() == ends[entry],
+								"Inactive occupant released capacity or moved");
+						}
+						if (stage != "Positioning") require(world.getSimulationSnapshot().securityScanners.at(0).phase == "Exiting", "Inactive automatic operation stalled");
+						world.pauseSimulation(); require(world.setAgentActive(id, true) && world.resumeSimulation(), "Reactivation refused");
+					}
+					bool exited = false;
+					for (unsigned tick = 0; tick < 2400; ++tick)
+					{
+						world.advanceTick(); safeCapacity(world, index);
+						require(actor->getSector()->getIndex() != ends[entry], "Committed journey returned through entry");
+						if (actor->getSector()->getIndex() == ends[exit]) { exited = true; break; }
+						require(world.getSimulationSnapshot().securityScanners.at(0).occupant == id, "Path interruption abandoned occupancy");
+					}
+					require(exited, "Interrupted exit stalled: " + stage + " / " + change);
+					if (change == "destination")
+					{
+						world.advanceTicks(1000);
+						require(actor->getState() == core::Agent::State::Idle && std::abs(actor->getGlobalPosition().x
+							- (world.getSector(ends[exit])->getPosition().x + 1.5f)) < 0.001f, "Replacement not planned after exit");
+					}
+				}
+	}
+
+	void admissionAuthorization(smoke::Context const&)
+	{
+		for (bool tighten : { false, true })
+		{
+			core::World world("Interrupted admission", 14, 2);
+			auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
+			auto right = world.addCorridor(0, 0, 8, 5, 1);
+			auto index = world.addSecurityScanner(0, 0, 5, 3);
+			auto destination = markerId(world.addSectorMarker(right, 0, 2.5f)); world.finishBuild(); world.pauseSimulation();
+			auto key = world.addAccessPermission("Entry eligibility");
+			auto id = world.createAgent("Boarder", left, 0, 4.5f);
+			if (!tighten) require(world.setLocationPermissionRequirement(right, { key }) && world.grantAgentAccessPermission(id, key), "Admission authorization fixture refused");
+			require(world.moveAgentToMarker(id, destination).accepted() && world.resumeSimulation(), "Boarder command refused");
+			bool reserved = false;
+			for (unsigned tick = 0; tick < 1600; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().securityScanners.at(0);
+				if (state.phase == "Entry opening" && !state.reservations.empty()) { reserved = true; break; }
+			}
+			require(reserved, "No pre-admission reservation");
+			world.pauseSimulation();
+			if (tighten) require(world.setLocationPermissionRequirement(right, { key }), "Admission tightening refused");
+			else require(world.revokeAgentAccessPermission(id, key), "Admission revoke refused");
+			require(world.resumeSimulation(), "Admission interruption resume refused");
+			for (unsigned tick = 0; tick < 800; ++tick)
+			{
+				world.advanceTick(); safeCapacity(world, index);
+				require(!world.getSimulationSnapshot().securityScanners.at(0).occupant
+					&& world.lookupAgent(id).entity->getSector()->getIndex() == left, "Ineligible reserved boarder entered");
+			}
+			require(world.getSimulationSnapshot().securityScanners.at(0).reservations.empty(), "Ineligible reservation retained");
+			world.pauseSimulation(); require(world.grantAgentAccessPermission(id, key) && world.resumeSimulation(), "Restored grant refused");
+			require(world.moveAgentToMarker(id, destination).accepted(), "Restored entry command refused");
+			world.advanceTicks(2400);
+			require(world.lookupAgent(id).entity->getSector()->getIndex() == right, "Restored authorization could not enter");
+		}
+	}
+
+	void routeObservations(smoke::Context const&)
+	{
+		bool reversed = false;
+		for (uint32_t detour = 10; detour < 36 && !reversed; detour += 2)
+		{
+			core::World world("Scanner alternatives", 40, 2);
+			auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
+			auto right = world.addRoom("Right", 0, 0, 5, 35, 1);
+			auto index = world.addSecurityScanner(0, 0, 3, 2);
+			world.addRoom("Detour", 1, 0, 0, 40, 1);
+			world.addSectorDoor(0, 0, 0, {}); world.addSectorDoor(0, 0, detour, {});
+			auto marker = world.addSectorMarker(right, 0, 1.5f); world.finishBuild(); world.pauseSimulation();
+			auto id = world.createAgent("Chooser", left, 0, 2.5f);
+			auto actor = world.lookupAgent(id).entity;
+			auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+			auto target = world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index));
+			auto choose = [&] {
+				auto path = world.getGraph()->calculatePath(actor, target); require(bool(path), "Scanner alternative unavailable");
+				return std::any_of(path->nodes.begin(), path->nodes.end(), [&](auto const& node) {
+					return node.edge && node.edge->getTraversalResourceId() == chamber->getTraversalResourceId();
+				});
+			};
+			require(world.setAgentIndividualWaitingAversion(id, 0.5f), "Low waiting aversion refused");
+			bool low = choose();
+			require(world.setAgentIndividualWaitingAversion(id, 3), "High waiting aversion refused");
+			bool high = choose(); reversed = low && !high;
+			if (!reversed) continue;
+			// Observe the same entry edge with and without local knowledge while
+			// real routed contenders fill its approach. Remote facts must not change.
+			core::MobilityProfile mobility; mobility.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+			require(world.setAgentIndividualMobilityProfile(id, mobility) && world.setAgentIndividualWaitingAversion(id, 0.5f), "Buttons prohibition refused");
+			auto path = world.getGraph()->calculatePath(actor, target); require(bool(path), "Automatic route required Buttons");
+			core::PathNode const* entryNode = nullptr;
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getTraversalResourceId() == chamber->getTraversalResourceId()
+					&& node.targetVertex->getSector()->getIndex() == index) entryNode = &node;
+			require(entryNode != nullptr, "Automatic alternative omitted scanner");
+			core::RouteDecisionContext remote{ actor, {}, {}, nullptr, actor->getWalkSpeed(), &world };
+			core::RouteDecisionContext local{ actor, {}, {}, actor->getSector(), actor->getWalkSpeed(), &world };
+			auto before = entryNode->edge->getDirectedTraversalFacts(entryNode->targetVertex, remote);
+			for (unsigned i = 0; i < 4; ++i)
+			{
+				auto waiter = world.createAgent("Queue", left, 0, 2.5f);
+				require(world.setAgentIndividualMobilityProfile(waiter, mobility) && world.setAgentIndividualWaitingAversion(waiter, 0.5f)
+					&& world.moveAgentToMarker(waiter, markerId(marker)).accepted(), "Queue fixture refused");
+			}
+			require(world.resumeSimulation(), "Observation resume refused");
+			world.advanceTicks(220); safeCapacity(world, index);
+			auto unseen = entryNode->edge->getDirectedTraversalFacts(entryNode->targetVertex, remote);
+			auto seen = entryNode->edge->getDirectedTraversalFacts(entryNode->targetVertex, local);
+			require(unseen.components.expectedWaitSeconds == before.components.expectedWaitSeconds && unseen.components.knownWaitSeconds == 0
+				&& unseen.components.crowdingUnits == 0, "Remote scanner state leaked into costs");
+			require(seen.components.knownWaitSeconds > 0 && seen.components.crowdingUnits > 0
+				&& seen.components.interactionUnits == 0 && seen.components.expectedWaitSeconds == before.components.expectedWaitSeconds,
+				"Local scanner queue omitted or introduced button costs");
+		}
+		require(reversed, "Automated duration did not affect route alternatives");
 	}
 
 	void occupancyViolation(smoke::Context const&)
@@ -619,6 +827,9 @@ namespace
 
 void registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "securityScanners/committedInterruptions", interruptions });
+	checks.push_back({ "securityScanners/admissionAuthorizationChanges", admissionAuthorization });
+	checks.push_back({ "securityScanners/localRouteObservations", routeObservations });
 	checks.push_back({ "securityScanners/automaticJourneys", journeys });
 	checks.push_back({ "securityScanners/configuration", configuration });
 	checks.push_back({ "securityScanners/contentionAndReuse", contention });

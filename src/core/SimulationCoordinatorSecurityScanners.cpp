@@ -53,6 +53,17 @@ namespace core
 				chamber.mScanProgress = 0;
 			}
 			if (!chamber.isTraversalAvailable()) continue;
+			if (auto actor = mWorld.mAgents.find(chamber.mOccupant); actor && resource->mScannerCommittedPath
+				&& ((actor->mPath.path != resource->mScannerAdmittedPath && actor->mPath.path != resource->mScannerCommittedPath)
+					|| actor->mState == Agent::State::Idle))
+			{
+				// Intent may disappear, but physical membership and occupied capacity
+				// remain authoritative. Never route an occupant back through entry.
+				actor->cancelTraversal();
+				actor->mPath.path = resource->mScannerCommittedPath;
+				actor->mPath.targetNode = 0;
+				actor->mState = Agent::State::WaitingForTraversal;
+			}
 			// Sole motion owner. Sector updates skip chamber-owned Doors.
 			entry.advanceCoordinatedMotion(World::getFixedTimestep());
 			exit.advanceCoordinatedMotion(World::getFixedTimestep());
@@ -210,7 +221,7 @@ namespace core
 			|| chamber.mPhase != SecurityScannerPhase::Boarding)) return;
 		if (!entry && chamber.mPhase != SecurityScannerPhase::Exiting) return;
 		if (!chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed() || resource.mCrossingOwners[0]) return;
-		if (agentForbidsTraversal(actor, TraversalKind::Door)) { denyTraversalRequest(id); return; }
+		if (entry && agentForbidsTraversal(actor, TraversalKind::Door)) { denyTraversalRequest(id); return; }
 		actor->mTraversalLocalGoal.reset();
 		resource.mCrossingOwners[0] = id;
 		request->mCrossingLane = 0;

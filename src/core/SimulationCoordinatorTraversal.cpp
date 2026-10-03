@@ -439,6 +439,15 @@ namespace core
 				resource.mAdmissionReservations[0] = {};
 				resource.mOccupants[0] = owner;
 				chamber.mOccupant = owner;
+				resource.mScannerAdmittedPath = agent.mPath.path;
+				resource.mScannerCommittedPath = std::make_shared<Path>();
+				// Retain only the forward chamber journey, not mutable destination
+				// intent. Recovery starts with interior walking from the current position.
+				for (size_t node = agent.mPath.targetNode + 1; node < agent.mPath.path->nodes.size(); ++node)
+				{
+					resource.mScannerCommittedPath->nodes.push_back(agent.mPath.path->nodes[node]);
+					if (agent.mPath.path->nodes[node].targetVertex->getSector().get() != &chamber) break;
+				}
 				chamber.mPhase = SecurityScannerPhase::Positioning;
 				request->mCapacityPosition = ~0u;
 			}
@@ -447,6 +456,8 @@ namespace core
 				if (resource.mOccupants[0] != owner) return false;
 				resource.mOccupants[0] = {};
 				chamber.mOccupant = {};
+				resource.mScannerCommittedPath.reset();
+				resource.mScannerAdmittedPath.reset();
 				chamber.mPhase = SecurityScannerPhase::ExitClosing;
 			}
 		}

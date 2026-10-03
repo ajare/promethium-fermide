@@ -138,6 +138,11 @@ namespace core
 			if (securityScanner)
 			{
 				c.expectedWaitSeconds = preparationSeconds;
+				if (boarding && observed)
+				{
+					c.knownWaitSeconds = queueSeconds;
+					c.crowdingUnits = density;
+				}
 				break; // Automatic: no button motion or interaction premiums.
 			}
 			if (airlock)

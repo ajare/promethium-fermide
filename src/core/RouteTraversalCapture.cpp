@@ -254,6 +254,11 @@ namespace core
 					if (result.boarding && context.world && context.agent
 						&& !context.world->canAgentAccessLocation(*chamber->getStop(chamber->getExitSide()).sector, *context.agent))
 						result.exclusion = RouteExclusionReason::Permission;
+					if (result.boarding && result.observed && context.agent)
+					{
+						result.queueSeconds = context.agent->estimateTraversalDelay(edge.getTraversalResourceId(), sourceSector);
+						result.density = context.agent->observeAccessZoneDensity(edge.getTraversalResourceId(), sourceSector);
+					}
 					result.preparationSeconds = CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
 					if (!result.boarding)
 						result.preparationSeconds += CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME

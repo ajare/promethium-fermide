@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/OccupantPacking.h"
@@ -7845,6 +7846,13 @@ namespace core
 		// Clearing authored route intent is not permission to discard a committed
 		// Airlock passenger. Runtime cancellation completes the opposite exit.
 		if (agent->getSector() && agent->getSector()->getType() == SectorType::Airlock) return false;
+		if (agent->getSector() && agent->getSector()->getType() == SectorType::SecurityScanner)
+		{
+			mSimulationCoordinator.cancelAgentMovement(id, false);
+			agent->clearPath();
+			modify();
+			return true;
+		}
 		mSimulationCoordinator.clearAgentMovementForBehaviourEdit(id);
 		agent->clearPath();
 		modify();
@@ -12495,6 +12503,17 @@ namespace core
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource) return 0.0f;
 
+		if (resource->mSecurityScanner)
+		{
+			// Only the entry approach queue is observable: neither occupancy,
+			// reservations nor a remote live phase are route-planning knowledge.
+			size_t ahead = 0;
+			for (auto const& lane : resource->mQueueLanes)
+				if (lane.sector == sourceSector) ahead += lane.queue.size();
+			auto const& chamber = *resource->mSecurityScanner;
+			return static_cast<float>(ahead) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+				+ chamber.getPreDelaySeconds() + chamber.getScanSeconds() + chamber.getPostPauseSeconds());
+		}
 		if (resource->mAirlock)
 		{
 			// Only this approach's queue is locally observable. Opposing demand
