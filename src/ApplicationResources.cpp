@@ -14,6 +14,8 @@
 #include "core/SerializationException.h"
 #include "core/SerializationWorkData.h"
 #include "core/World.h"
+#include "core/Furniture.h"
+#include <willpower/application/resourcesystem/ImageSetResource.h>
 #include "core/YamlSerializer.h"
 
 namespace resources = wp::application::resourcesystem;
@@ -21,8 +23,9 @@ namespace
 {
 	std::filesystem::path sourcePath(resources::Resource const& resource)
 	{
-		return std::filesystem::path(resource.getDefinitionFile()).parent_path()
-			/ resource.getSource();
+		auto source = std::filesystem::path(resource.getSource());
+		if (source.is_absolute()) return source;
+		return std::filesystem::path(resource.getDefinitionFile()).parent_path() / source;
 	}
 
 	template <typename ResourceType>
@@ -99,6 +102,26 @@ void AgentBehaviourRegistryResource::destroy()
 	mRegistry.reset();
 }
 
+FurnitureCatalogueResource::FurnitureCatalogueResource(std::string const& name,
+	std::string const& namesp, std::string const& source,
+	std::map<std::string, std::string> const& tags, resources::ResourceLocation* location)
+	: Resource(name, namesp, "FurnitureCatalogue", source, tags, location) {}
+
+void FurnitureCatalogueResource::create(resources::DataStreamPtr, resources::ResourceManager*)
+{
+	auto catalogue = core::FurnitureCatalogue::readFile(sourcePath(*this));
+	for (auto const& [key, definition] : catalogue->definitions())
+	{
+		auto set = hasDependentResource("Artwork")
+			? std::dynamic_pointer_cast<resources::ImageSetResource>(getDependentResource("Artwork")) : nullptr;
+		if (!set || set->getName() != definition.imageSet || !set->getImageDefinitions().contains(definition.image))
+			throw resources::ResourceException(this, "Missing Furniture Image-set region for " + key
+				+ ": " + definition.imageSet + "/" + definition.image);
+	}
+	mCatalogue = std::move(catalogue);
+}
+void FurnitureCatalogueResource::destroy() { mCatalogue.reset(); }
+
 WorldResource::WorldResource(std::string const& name,
 	std::string const& namesp, std::string const& source,
 	std::map<std::string, std::string> const& tags,
@@ -116,6 +139,13 @@ void WorldResource::create(resources::DataStreamPtr data,
 	serializer->deserialize();
 	auto world = std::make_shared<core::World>("Loading", 1, 1);
 	core::SerializationWorkData workData;
+	if (hasDependentResource("Furniture"))
+	{
+		auto dependency = std::dynamic_pointer_cast<FurnitureCatalogueResource>(getDependentResource("Furniture"));
+		if (!dependency || !dependency->catalogue())
+			throw resources::ResourceException(this, "Furniture dependency is not a loaded FurnitureCatalogue");
+		workData.furnitureCatalogue = dependency->catalogue();
+	}
 	if (!world->deserialize(*serializer, workData))
 		throw core::SerializationException("Could not deserialize World resource");
 
@@ -168,5 +198,6 @@ void registerApplicationResourceTypes(resources::ResourceManager& manager)
 		"AgentTagRegistry"));
 	manager.addResourceFactory(new Factory<AgentBehaviourRegistryResource>(
 		"AgentBehaviourRegistry"));
+	manager.addResourceFactory(new Factory<FurnitureCatalogueResource>("FurnitureCatalogue"));
 	manager.addResourceFactory(new Factory<WorldResource>("World"));
 }

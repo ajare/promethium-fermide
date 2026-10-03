@@ -7,6 +7,7 @@ namespace
 {
 	constexpr smoke::Check checks[] = {
 		{ "airlocks/authoredRoundTripAndReplay", persistence::airlocks },
+		{ "furniture/documents", persistence::furniture },
 		{ "yaml-primitives", persistence::stringYamlRoundTripsPrimitiveValues },
 		{ "binary-contract", persistence::binarySerializerHonoursTheSerializerContract },
 		{ "yaml-file", persistence::fileYamlRoundTrips },

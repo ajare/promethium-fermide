@@ -22,6 +22,7 @@
 #include "core/ShuttleVertex.h"
 #include "core/SectorObjectVertex.h"
 #include "core/SectorMarkerVertex.h"
+#include "core/MarkerSectorObject.h"
 #include "core/StairwellLocationVertex.h"
 #include "core/StairwellVertex.h"
 #include "core/StaircaseVertex.h"
@@ -520,7 +521,19 @@ namespace core
 			mIdentifierVertexLookup[vertexIdentifier] = markerVertex;
 		}
 
-		appendRowVertex(row, obj.x, SlotMarker, markerVertex);
+		auto markerObject = std::dynamic_pointer_cast<MarkerSectorObject>(marker);
+		if (markerObject && mwWorld->isFurnitureMarker(markerObject->getMarker()->getId()))
+		{
+			// A seat is a destination branch, never the mandatory floor chain.
+			auto anchor = make_shared<SectorMarkerVertex>(obj.sector,
+				markerVertex->getPosition().x - obj.sector->getCellX(),
+				markerVertex->getPosition().y - obj.sector->getCellY());
+			addEdge(make_shared<SectorEdge>(), anchor, markerVertex, false);
+			mSectorVertexLookup[obj.sector.get()].push_back(markerVertex);
+			mVertices.push_back(markerVertex);
+			appendRowVertex(row, obj.x, SlotMarker, anchor);
+		}
+		else appendRowVertex(row, obj.x, SlotMarker, markerVertex);
 	}
 
 	std::shared_ptr<SectorObject> Graph::resolveSectorObject(shared_ptr<Sector> sector, uint32_t index,

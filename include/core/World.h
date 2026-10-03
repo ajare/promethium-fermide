@@ -21,6 +21,7 @@
 #include "core/Layer.h"
 #include "core/Location.h"
 #include "core/Marker.h"
+#include "core/Furniture.h"
 #include "core/SectorType.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
@@ -528,6 +529,10 @@ namespace core
 		// Marker identity is carried by the authored Marker itself. The high-water
 		// mark remains after deletion, so an identity is never issued twice.
 		uint64_t mNextMarkerId{ 1 };
+		std::shared_ptr<const FurnitureCatalogue> mFurnitureCatalogue;
+		std::string mFurnitureCatalogueFilename;
+		std::vector<FurnitureInstance> mFurniture;
+		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
 		{
 			MarkerId marker{};
@@ -839,7 +844,8 @@ namespace core
 			// producing record, replayed with all wall ends open intrinsically
 			// (ADR 0003).
 			Facade,
-			Airlock
+			Airlock,
+			Furniture
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -886,8 +892,11 @@ namespace core
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
+			uint64_t furnitureId{ 0 };
+			std::string definitionKey{}, usableKey{}, markerName{};
 		};
 
+		void restoreFurniture(ConstructionRecord const& record);
 		ConstructionRecord const* findLocationPermissionRecord(uint32_t sectorIndex) const;
 		ConstructionRecord const* findLiftDestinationRecord(uint32_t sectorIndex, uint32_t objectIndex = ~0u) const;
 		ConstructionRecord const* findLiftDestinationRecord(TraversalResource const& resource) const;
@@ -2703,6 +2712,16 @@ namespace core
 		// only after the file write has completely succeeded; any open, write,
 		// flush, close, or replacement error throws and leaves the World and
 		// its Agents exactly as dirty as they were before the attempt.
+		void attachFurnitureCatalogue(std::string filename,
+			std::shared_ptr<const FurnitureCatalogue> catalogue);
+		auto const& furnitureCatalogue() const { return mFurnitureCatalogue; }
+		std::string const& furnitureCatalogueFilename() const { return mFurnitureCatalogueFilename; }
+		auto const& furniture() const { return mFurniture; }
+		bool isFurnitureMarker(MarkerId id) const;
+		bool canPlaceFurniture(uint32_t sector, std::string const& definition,
+			float x, float y, std::string const& name, std::string* diagnostic = nullptr) const;
+		uint64_t placeFurniture(uint32_t sector, std::string const& definition,
+			float x, float y, std::string const& name);
 		void saveTo(std::string const& filepath);
 
 		// Rendering supplies elapsed wall time here.  It is accumulated and only

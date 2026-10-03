@@ -33,6 +33,7 @@
 #include <willpower/common/Logger.h>
 
 #include "ApplicationResources.h"
+#include "core/Furniture.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
@@ -235,13 +236,27 @@ namespace
 			mObjectSet = requireImageSet("ObjectAtlas");
 			installAtlasDefinitions();
 
+
 			mScene = mRenderSystem->createScene("Default");
 			mScene->load();
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
+			core::FurnitureCatalogue::setResourceLoader([this](std::filesystem::path const& path)
+			{
+				static uint64_t sequence = 0;
+				auto resource = std::make_shared<FurnitureCatalogueResource>(
+					"UserFurniture" + std::to_string(++sequence), "",
+					std::filesystem::absolute(path).string(), std::map<std::string, std::string>{}, nullptr);
+				resource->setArtwork(mObjectSet);
+				mResources->addResource(resource);
+				mResources->createResource(resource);
+				mResources->loadResource(resource);
+				return resource->catalogue();
+			});
 		}
 
 		~WorldRenderSystem()
 		{
+			core::FurnitureCatalogue::setResourceLoader({});
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear();
 			if (mScene)

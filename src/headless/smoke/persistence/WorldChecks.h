@@ -76,3 +76,5 @@ namespace persistence
 	void stairwellEditsUseTheStairwellsOwnLayer(smoke::Context const&);
 	void staircaseEditsReturnTheStaircaseOwnLayer(smoke::Context const&);
 }
+
+namespace persistence { void furniture(smoke::Context const& context); }

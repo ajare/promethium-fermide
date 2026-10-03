@@ -428,6 +428,7 @@ add_library(pf-agent-editing STATIC
     src/BehavioursPanel.cpp
     src/AgentBehaviourAssignmentPanel.cpp
     src/MarkerPanel.cpp
+    src/FurniturePanel.cpp
     src/PermissionsPanel.cpp
 )
 target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu)

@@ -52,3 +52,5 @@ namespace render_smoke
 	void registerLifetime(std::vector<smoke::Check>& checks);
 	void registerDoorButtons(std::vector<smoke::Check>& checks);
 }
+
+namespace render_smoke { void registerFurniture(std::vector<smoke::Check>& checks); }

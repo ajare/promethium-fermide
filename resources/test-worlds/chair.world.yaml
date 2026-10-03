@@ -1,0 +1,31 @@
+# #348: one-tile catalogue-backed chairs are ordinary Marker destinations.
+version: 43
+name: Catalogue chair demonstration
+randomSeed: 0
+cellsWide: 12
+levelsHigh: 2
+layers: 2
+layerNames: [Furnished Locations, Background]
+furnitureCatalogue:
+  filename: chair.furniture.yaml
+  expectedUuid: "e78a6c36-7902-4abc-9c90-1876058b32f3"
+nextFurnitureId: 4
+nextMarkerId: 6
+nextAgentGroupId: 1
+agentGroups: []
+construction:
+  - {type: room, name: Reading room, layer: 0, y: 0, x: 0, cellsWide: 6, levelsHigh: 1, topLevelHeight: 0.9}
+  - {type: corridor, layer: 0, y: 1, x: 0, cellsWide: 12, levelsHigh: 1}
+  - {type: facade, name: Terrace, layer: 0, y: 0, x: 6, cellsWide: 6, levelsHigh: 1, topLevelHeight: 0.9, colour: 10263708}
+  - {type: furniture, sectorIndex: 0, id: 1, definition: chair, name: Reading chair, x: 2.25, y: 0, usablePoint: seat, markerId: 1, markerName: Reading chair Seat, properties: 1}
+  - {type: furniture, sectorIndex: 1, id: 2, definition: chair, name: Hall chair, x: 5, y: 0, usablePoint: seat, markerId: 2, markerName: Hall chair Seat, properties: 1}
+  - {type: furniture, sectorIndex: 2, id: 3, definition: chair, name: Terrace chair, x: 2, y: 0, usablePoint: seat, markerId: 3, markerName: Terrace chair Seat, properties: 1}
+  - {type: marker, sectorIndex: 0, levelIndex: 0, xOffset: 0.5, id: 4, name: Reading room entrance, properties: 0}
+  - {type: marker, sectorIndex: 0, levelIndex: 0, xOffset: 5.5, id: 5, name: Reading room exit, properties: 0}
+agents:
+  - id: 1
+    agent: {name: Chair visitor, flags: 0}
+    sector: 0
+    localX: 0.5
+    localY: 0
+    path: {destinationSector: 0, destinationLocalX: 2.75, destinationLocalY: 0, active: true}

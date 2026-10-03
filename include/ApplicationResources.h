@@ -12,6 +12,7 @@ namespace core
 	class AgentBehaviourRegistry;
 	class AgentTagRegistry;
 	class World;
+	class FurnitureCatalogue;
 }
 
 namespace wp::application::resourcesystem
@@ -62,6 +63,21 @@ private:
 		wp::application::resourcesystem::ResourceManager* manager) override;
 	void destroy() override;
 	std::shared_ptr<core::AgentBehaviourRegistry> mRegistry;
+};
+
+class FurnitureCatalogueResource final : public wp::application::resourcesystem::Resource
+{
+public:
+	FurnitureCatalogueResource(std::string const& name, std::string const& namesp,
+		std::string const& source, std::map<std::string, std::string> const& tags,
+		wp::application::resourcesystem::ResourceLocation* location);
+	std::shared_ptr<const core::FurnitureCatalogue> const& catalogue() const { return mCatalogue; }
+	void setArtwork(wp::application::resourcesystem::ResourcePtr artwork) { addDependentResource("Artwork", std::move(artwork)); }
+private:
+	void create(wp::application::resourcesystem::DataStreamPtr data,
+		wp::application::resourcesystem::ResourceManager* manager) override;
+	void destroy() override;
+	std::shared_ptr<const core::FurnitureCatalogue> mCatalogue;
 };
 
 class WorldResource final : public wp::application::resourcesystem::Resource

@@ -6943,13 +6943,14 @@ namespace core
 		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
 			[id](ConstructionRecord const& candidate)
 			{
-				return candidate.type == ConstructionType::Marker
+				return (candidate.type == ConstructionType::Marker || candidate.type == ConstructionType::Furniture)
 					&& candidate.markerId == id;
 			});
 		if (record == mConstructionRecords.end())
 			throw WorldException(this, "renameMarker - Marker has no authored record");
 		marker->setName(trimmed);
-		record->name = trimmed;
+		if (record->type == ConstructionType::Furniture) record->markerName = trimmed;
+		else record->name = trimmed;
 		modify();
 		return true;
 	}
@@ -6976,7 +6977,7 @@ namespace core
 		auto record = find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
 			[id](ConstructionRecord const& candidate)
 			{
-				return candidate.type == ConstructionType::Marker
+				return (candidate.type == ConstructionType::Marker || candidate.type == ConstructionType::Furniture)
 					&& candidate.markerId == id;
 			});
 		if (record == mConstructionRecords.end())
@@ -7069,6 +7070,7 @@ namespace core
 		auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(objectIndex));
 		if (!markerObject) return reject("The selected object is not a Marker");
 		auto const marker = markerObject->getMarker()->getId();
+		if (isFurnitureMarker(marker)) return reject("A Furniture-owned Marker cannot be deleted independently");
 		vector<string> references;
 		function<void(AgentBehaviourConfigurationValue const&, string const&,
 			AgentId, Agent const&)> collectReferences;

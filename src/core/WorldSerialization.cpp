@@ -161,13 +161,14 @@ namespace core
 		case ConstructionType::Background: return "background";
 		case ConstructionType::Facade: return "facade";
 		case ConstructionType::Airlock: return "airlock";
+		case ConstructionType::Furniture: return "furniture";
 		}
 		throw SerializationException("Unknown World construction record type");
 	}
 
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Airlock); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Furniture); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -471,6 +472,18 @@ namespace core
 		case ConstructionType::Walkway:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); break;
+		case ConstructionType::Furniture:
+			serializer.writeUint32("sectorIndex", record.a);
+			serializer.writeUint64("id", record.furnitureId);
+			serializer.writeString("definition", record.definitionKey);
+			serializer.writeString("name", record.name);
+			serializer.writeFloat("x", record.x);
+			serializer.writeFloat("y", record.y);
+			serializer.writeString("usablePoint", record.usableKey);
+			serializer.writeUint64("markerId", record.markerId.value);
+			serializer.writeString("markerName", record.markerName);
+			serializer.writeUint32("properties", record.c);
+			break;
 		case ConstructionType::Marker:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeFloat("xOffset", record.x);
@@ -549,7 +562,16 @@ namespace core
 		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
-		serializer.writeUint32("version", 42);
+		// Version 43 adds catalogue-backed Furniture and owned Marker identities.
+		serializer.writeUint32("version", 43);
+		serializer.writeUint64("nextFurnitureId", mNextFurnitureId);
+		if (mFurnitureCatalogue)
+		{
+			serializer.beginMap("furnitureCatalogue");
+			serializer.writeString("filename", mFurnitureCatalogueFilename);
+			serializer.writeString("expectedUuid", mFurnitureCatalogue->uuid());
+			serializer.endMap();
+		}
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -1098,6 +1120,19 @@ namespace core
 		case ConstructionType::Walkway:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); break;
+		case ConstructionType::Furniture:
+			if (version < 43) throw SerializationException("Furniture requires World schema 43 or later");
+			record.a = serializer.readUint32("sectorIndex");
+			record.furnitureId = serializer.readUint64("id");
+			record.definitionKey = serializer.readString("definition");
+			record.name = serializer.readString("name");
+			record.x = serializer.readFloat("x");
+			record.y = serializer.readFloat("y");
+			record.usableKey = serializer.readString("usablePoint");
+			record.markerId = MarkerId{ serializer.readUint64("markerId") };
+			record.markerName = serializer.readString("markerName");
+			record.c = serializer.readUint32("properties");
+			break;
 		case ConstructionType::Marker:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.x = serializer.readFloat("xOffset");
@@ -1188,7 +1223,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 42)
+		if (version < 1 || version > 43)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1198,6 +1233,27 @@ namespace core
 		auto const cellsWide = serializer.readUint32("cellsWide");
 		auto const levelsHigh = serializer.readUint32(serializer.hasField("levelsHigh")
 			? "levelsHigh" : "decksHigh");
+
+		std::shared_ptr<const FurnitureCatalogue> furnitureCatalogue;
+		std::string furnitureFilename;
+		auto nextFurnitureId = version >= 43 ? serializer.readUint64("nextFurnitureId") : uint64_t{1};
+		if (serializer.hasField("furnitureCatalogue"))
+		{
+			if (version < 43) throw SerializationException("Furniture requires World schema 43 or later");
+			serializer.beginMap("furnitureCatalogue");
+			furnitureFilename = serializer.readString("filename");
+			auto expectedUuid = serializer.readString("expectedUuid");
+			serializer.endMap();
+			filesystem::path path(furnitureFilename);
+			if (furnitureFilename.empty() || path.has_parent_path() || !furnitureFilename.ends_with(".furniture.yaml"))
+				throw SerializationException("Furniture catalogue reference must be a .furniture.yaml basename");
+			if (!workData.documentDirectory.empty())
+				furnitureCatalogue = FurnitureCatalogue::load(workData.documentDirectory / path);
+			else furnitureCatalogue = workData.furnitureCatalogue ? workData.furnitureCatalogue : mFurnitureCatalogue;
+			if (!furnitureCatalogue) throw SerializationException("Missing Furniture catalogue dependency: " + furnitureFilename);
+			if (furnitureCatalogue->uuid() != expectedUuid)
+				throw SerializationException("Furniture catalogue UUID mismatch: expected " + expectedUuid + ", found " + furnitureCatalogue->uuid());
+		}
 
 		optional<AgentTagRegistryReference> agentTagRegistryReference;
 		if (version >= 10 && serializer.hasField("agentTagRegistry"))
@@ -1352,17 +1408,18 @@ namespace core
 			set<string> liveNames;
 			for (auto const& record : records)
 			{
-				if (record.type == ConstructionType::Marker)
+				if (record.type == ConstructionType::Marker || record.type == ConstructionType::Furniture)
 				{
 					if (!record.markerId)
 						throw SerializationException("Serialized Marker ID cannot be zero");
 					if (!issued.insert(record.markerId).second)
 						throw SerializationException("Serialized Marker IDs must be unique");
-					auto const trimmed = Marker::trimName(record.name);
+					auto const& markerName = record.type == ConstructionType::Furniture ? record.markerName : record.name;
+					auto const trimmed = Marker::trimName(markerName);
 					string reason;
-					if (trimmed != record.name || !Marker::nameIsValid(trimmed, &reason))
+					if (trimmed != markerName || !Marker::nameIsValid(trimmed, &reason))
 						throw SerializationException("Serialized Marker name is invalid: "
-							+ (trimmed != record.name ? string("it must be trimmed") : reason));
+							+ (trimmed != markerName ? string("it must be trimmed") : reason));
 					if (!liveNames.insert(trimmed).second)
 						throw SerializationException("Serialized live Marker names must be unique");
 					live.emplace(record.markerId, trimmed);
@@ -1380,6 +1437,18 @@ namespace core
 				}
 			}
 		}
+
+		uint64_t highestFurnitureId = 0;
+		set<uint64_t> furnitureIds;
+		for (auto const& record : records)
+			if (record.type == ConstructionType::Furniture)
+			{
+				if (!record.furnitureId || !furnitureIds.insert(record.furnitureId).second)
+					throw SerializationException("Furniture instance identities must be nonzero and unique");
+				highestFurnitureId = max(highestFurnitureId, record.furnitureId);
+			}
+		if (nextFurnitureId != 0 && nextFurnitureId <= highestFurnitureId)
+			throw SerializationException("Next Furniture identity does not follow issued identities");
 
 		uint64_t nextMarkerId = highestMarkerId == numeric_limits<uint64_t>::max()
 			? 0 : highestMarkerId + 1;
@@ -1723,6 +1792,8 @@ namespace core
 			RestorationTiming timing("validation-replay");
 			World candidate(name, cellsWide, levelsHigh);
 			while (candidate.getLayerCount() < layerCount) candidate.addLayer();
+			candidate.mFurnitureCatalogue = furnitureCatalogue;
+			candidate.mFurnitureCatalogueFilename = furnitureFilename;
 			candidate.mDeserializingConstruction = true;
 			for (auto& record : records)
 			{
@@ -1801,6 +1872,9 @@ namespace core
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;
+		mNextFurnitureId = nextFurnitureId;
+		mFurnitureCatalogue = std::move(furnitureCatalogue);
+		mFurnitureCatalogueFilename = std::move(furnitureFilename);
 		mAgentTagRegistryReference = std::move(agentTagRegistryReference);
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
 		mAgentTagRegistry.reset();
@@ -2236,6 +2310,7 @@ namespace core
 		mTraversalRequests = {};
 		mTraversalPermits = {};
 		mSectors.clear();
+		mFurniture.clear();
 		mConstructionRecords.clear();
 		mPhysicalControlPlacements.clear();
 
@@ -2284,6 +2359,8 @@ namespace core
 			candidate->addLayer();
 		for (uint32_t layer = 2; layer < getLayerCount(); ++layer)
 			candidate->setLayerName(layer, mLayerNames[layer]);
+		candidate->mFurnitureCatalogue = mFurnitureCatalogue;
+		candidate->mFurnitureCatalogueFilename = mFurnitureCatalogueFilename;
 		return candidate;
 	}
 
@@ -2443,6 +2520,8 @@ namespace core
 		case ConstructionType::Walkway:
 			addSectorWalkway(record.a, record.b, record.c);
 			break;
+		case ConstructionType::Furniture:
+			restoreFurniture(record); break;
 		case ConstructionType::Marker:
 			addSectorMarkerRestored(record.a, record.b, record.x,
 				record.markerId, record.name, record.c);
@@ -2511,7 +2590,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -2930,7 +3009,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4020,7 +4099,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4240,7 +4319,7 @@ namespace core
 		auto referencesSector = [](ConstructionType type) {
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4469,7 +4548,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4523,7 +4602,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4720,7 +4799,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -5144,6 +5223,12 @@ namespace core
 		if (isAirlockOwnedObject(object))
 		{
 			diagnostic = "Airlock-owned Doors and controls are fixed";
+			return false;
+		}
+		if (auto marker = dynamic_pointer_cast<MarkerSectorObject>(object);
+			marker && isFurnitureMarker(marker->getMarker()->getId()))
+		{
+			diagnostic = "A Furniture-owned Marker cannot be moved independently";
 			return false;
 		}
 		auto owner = object->getSector();
@@ -7157,7 +7242,7 @@ namespace core
 		{
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
-				|| type == ConstructionType::Walkway || type == ConstructionType::Marker
+				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};

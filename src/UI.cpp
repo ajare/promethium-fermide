@@ -37,6 +37,7 @@
 #include "TagsPanel.h"
 #include "BehavioursPanel.h"
 #include "MarkerPanel.h"
+#include "FurniturePanel.h"
 #include "AgentClipboard.h"
 
 #if defined(_WIN32)
@@ -2360,12 +2361,15 @@ namespace
 		try
 		{
 			shared_ptr<core::World> loaded;
-			auto restore = [&loaded](DocumentSnapshot const& target)
+			auto restore = [&loaded, &world](DocumentSnapshot const& target)
 			{
 				loaded = make_shared<core::World>("Loading", 1, 1);
 				auto serializer = core::YamlSerializer::fromString(target.yaml);
 				serializer->deserialize();
 				core::SerializationWorkData workData;
+				workData.furnitureCatalogue = world->furnitureCatalogue();
+				if (!workData.furnitureCatalogue && !gWorldFilepath.empty())
+					workData.documentDirectory = filesystem::path(gWorldFilepath).parent_path();
 				if (!loaded->deserialize(*serializer, workData)) return false;
 				core::loadAndAttachAgentTagRegistry(*loaded, gWorldFilepath);
 				core::loadAndAttachAgentBehaviourRegistry(*loaded, gWorldFilepath);
@@ -7738,6 +7742,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		renderAgentView(world);
 	}
 
+	renderFurniturePanel(world, gWorldFilepath, gSelectedSector);
 	renderSelectedObjectPanel(world);
 	renderSelectedAgentPanel(world);
 

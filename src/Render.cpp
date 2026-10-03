@@ -1293,6 +1293,23 @@ void renderSelected(shared_ptr<const core::Object> object, int /* layer */, bool
 
 void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, int flags, WorldDrawList* drawList)
 {
+	if ((flags & RENDER_SECTOR_OBJECTS_INFRONT) && gRenderWorld && gRenderWorld->furnitureCatalogue())
+	{
+		for (auto const& instance : gRenderWorld->furniture())
+		{
+			if (instance.sector != sector->getIndex()) continue;
+			auto definition = gRenderWorld->furnitureCatalogue()->definition(instance.definitionKey);
+			if (!definition) continue; // Loaded Worlds validate the reference.
+			core::Vector2 top{ sector->getCellX() + instance.x, sector->getCellY() + instance.y + 1 };
+			core::Vector2 bottom{ top.x + 1, top.y - 1 };
+			transformPosition(top); transformPosition(bottom);
+			if (style == LayerRenderStyle::Wireframe)
+				drawList->AddRect({ top.x, top.y }, { bottom.x, bottom.y }, ForeLocationColour);
+			else if (!drawObjectSprite(definition->image.c_str(), drawList,
+				{ top.x, top.y }, { bottom.x, bottom.y }))
+				throw std::runtime_error("Missing Furniture Image-set region: " + definition->image);
+		}
+	}
 	// Sort so that Ladders and Lifts are rendered first, as these need to be behind everything else.
 	auto sortedObjects = sector->getSortedObjects([](auto obj1, auto obj2)
 	{

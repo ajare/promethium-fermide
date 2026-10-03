@@ -26,6 +26,10 @@ because they do not own smoke-check execution.
 | `SectorTilesetChecks.cpp` | retained standalone | `pf-sector-tileset-checks` |
 | `SimulationStepTimingChecks.cpp` | retained standalone | `pf-simulation-step-timing-checks` |
 | `WorldRenderSlotChecks.cpp` | retained standalone | `pf-world-render-slot-checks` |
+| `smoke/world/Furniture.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/persistence/Furniture.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/Furniture.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/editor/Furniture.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |

@@ -21,3 +21,5 @@ void runWindowMultiBackgroundSmokeChecks();
 void runFacadeSmokeChecks();
 void runZeroSizeLocationSmokeChecks();
 void runThresholdLayerOverlapSmokeChecks();
+
+void registerFurniture(std::vector<smoke::Check>& checks);

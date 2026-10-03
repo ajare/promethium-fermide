@@ -487,6 +487,7 @@ namespace core
 			serializer->deserialize();
 		}
 		SerializationWorkData workData;
+		workData.documentDirectory = canonicalWorld.parent_path();
 		{
 			RestorationTiming phase("reload-reconstruction");
 			if (!loaded->deserialize(*serializer, workData))

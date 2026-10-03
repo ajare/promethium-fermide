@@ -19,3 +19,5 @@ namespace editor_smoke
 	void registerEscalators(std::vector<smoke::Check>& checks);
 	void registerIsolation(std::vector<smoke::Check>& checks);
 }
+
+namespace editor_smoke { void registerFurniture(std::vector<smoke::Check>& checks); }
