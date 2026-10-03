@@ -1,0 +1,102 @@
+version: 44
+name: security-scanners
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 6
+layers: 2
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+  - Level 3
+  - Level 4
+  - Level 5
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 1
+    cellsWide: 7
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 10
+    cellsWide: 6
+    levelsHigh: 1
+  - type: securityScanner
+    layer: 0
+    y: 2
+    x: 8
+    cellsWide: 2
+    levelsHigh: 1
+    leftToRight: true
+    capacity: 1
+    preDelaySeconds: 1
+    scanSeconds: 2
+    postPauseSeconds: 1
+    sensorDistance: 0.5
+    leftWasOpen: false
+    rightWasOpen: false
+  - type: marker
+    sectorIndex: 1
+    levelIndex: 0
+    xOffset: 4.078125
+    id: 1
+    name: Marker 1
+    properties: 0
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 2
+nextAgentGroupId: 1
+agents:
+  - id: 1
+    agent:
+      name: Agent 1
+      flags: 0
+    sector: 0
+    localX: 1.984375
+    localY: 0
+    path:
+      destinationSector: 1
+      destinationLocalX: 4.078125
+      destinationLocalY: 0
+      active: true
+  - id: 2
+    agent:
+      name: Agent 2
+      flags: 0
+    sector: 0
+    localX: 2.75
+    localY: 0
+    path:
+      destinationSector: 1
+      destinationLocalX: 4.078125
+      destinationLocalY: 0
+      active: true
+  - id: 3
+    agent:
+      name: Agent 3
+      flags: 0
+    sector: 0
+    localX: 3.59375
+    localY: 0
+    path:
+      destinationSector: 1
+      destinationLocalX: 4.078125
+      destinationLocalY: 0
+      active: true
