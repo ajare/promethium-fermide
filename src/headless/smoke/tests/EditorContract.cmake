@@ -165,6 +165,7 @@ set(editor_names
     airlocks/editorCommands
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory
+    securityScanners/selectionWorkflow
     boothWindows/historyAndClipboard
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation

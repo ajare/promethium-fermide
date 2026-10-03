@@ -68,7 +68,7 @@ namespace
 		require(platformLiftMax.x <= bottomRight.x - PalettePadding,
 			"PlatformLift still draws outside the tray");
 		// The tray is sized to the grid, so the tail slot fills the last column.
-		require(paletteSlotMax(TrayTopLeft, PaletteSlot::SecurityScanner).x + PalettePadding == bottomRight.x,
+		require(paletteSlotMax(TrayTopLeft, PaletteSlot::Chamber).x + PalettePadding == bottomRight.x,
 			"tray width no longer matches the slot grid's widest row");
 	}
 
@@ -85,7 +85,7 @@ namespace
 			require(paletteSlotRow(slotAt(index)) == 1,
 				"bottom-row tool drifted off the bottom row");
 		}
-		for (int index = 0; index <= static_cast<int>(PaletteSlot::SecurityScanner); ++index)
+		for (int index = 0; index <= static_cast<int>(PaletteSlot::Chamber); ++index)
 		{
 			require(paletteSlotColumn(slotAt(index)) == index,
 				"top row is no longer contiguous from Room rightward");
@@ -150,7 +150,7 @@ namespace
 			+ PalettePadding <= paletteTraySize().x,
 		"PlatformLift escapes the tray");
 
-	static_assert(paletteSlotMax(ImVec2(0.0f, 0.0f), PaletteSlot::SecurityScanner).x
+	static_assert(paletteSlotMax(ImVec2(0.0f, 0.0f), PaletteSlot::Chamber).x
 			+ PalettePadding == paletteTraySize().x, "Security scanner escapes the tray");
 
 	// Ticket #41: the tray is dragged around the view window by its grip and

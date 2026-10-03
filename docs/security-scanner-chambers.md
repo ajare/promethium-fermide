@@ -1,6 +1,6 @@
 # Security scanner chambers (#339, #340, #341, #342, #343, #344, #345)
 
-The palette's **Scanner** tool creates a same-Layer Chamber with the Security Scanner subtype through temporary compatibility interfaces. Chamber is the domain identity; Airlock remains separate. The existing editor tool and panel are unchanged in this expansion stage (#364).
+The palette's **Chamber** tool creates a same-Layer Chamber with the Security Scanner subtype through World-owned Chamber commands. Selection identifies the Sector as Chamber and offers a required **Subtype** dropdown containing only **Security Scanner**. Choosing the active subtype is a no-op: configuration, dirty state, and document history remain unchanged. Airlock remains separate and unchanged.
 Drag horizontally across empty whole cells between adjoining walkable Room or
 Corridor ends. The complete requested footprint must be free; it is never carved
 or shortened. Drag direction fixes entry and exit, including single-cell drags.
@@ -106,10 +106,12 @@ Structural edits preserve committed journeys by refusing occupied or crossing ch
 
 ## Safe structural editing
 
-While paused, Selection edits chamber x, Level, width, and left-to-right direction;
-the canvas supports move/resize and Delete removes the selected scanner. World
-`planResizeSecurityScanner`, `planRemoveSecurityScanner`, and
-`applySecurityScannerEdit` revalidate before mutation. Edits retain the same Layer,
+While paused, general Chamber controls edit horizontal position, Level, and width,
+and **Delete Chamber** removes the selected Chamber. A separate **Security Scanner**
+section exposes direction, sensor distance, all three timings, capacity, phase,
+remaining time, occupancy, and scan progress. The canvas supports move/resize.
+World `planResizeChamber`, `planRemoveChamber`, and `applyChamberEdit`
+revalidate before mutation. Edits retain the same Layer,
 positive whole-cell width, walkable Room/Corridor ends, fixed capacity one, and all
 authored sensing/timing values. Reversal updates both routing and runtime gates.
 
@@ -162,6 +164,7 @@ journey snapshots and rendering remain available to existing callers.
 - `pf-smoke-world --check securityScanners/structuralEdits`
 - `pf-smoke-simulation --check securityScanners/editSafety`
 - `pf-smoke-editor --check securityScanners/structuralHistory`
+- `pf-smoke-editor --check securityScanners/selectionWorkflow`
 - `pf-smoke-simulation --check securityScanners/committedInterruptions`
 - `pf-smoke-simulation --check securityScanners/admissionAuthorizationChanges`
 - `pf-smoke-simulation --check securityScanners/localRouteObservations`
