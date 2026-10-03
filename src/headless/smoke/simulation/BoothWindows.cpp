@@ -127,8 +127,95 @@ namespace
 			"Desired-state reversal did not complete proportional opening");
 	}
 
+	void panelPermissions()
+	{
+		for (unsigned scenario = 0; scenario < 11; ++scenario)
+		{
+			Fixture f;
+			auto id = f.world.createAgent("Protected operator", scenario == 7 ? 0 : 1, 0,
+				scenario == 8 ? 4.0f : 3.4f);
+			auto actor = f.world.lookupAgent(id).entity;
+			auto position = actor->getGlobalPosition();
+			f.world.pauseSimulation();
+			auto a = f.world.addAccessPermission("A"), b = f.world.addAccessPermission("B");
+			auto set = f.world.addPermissionSet("Operators");
+			require(f.world.setPermissionSetAccessPermission(set, b, true), "Set grant fixture failed");
+			require(f.world.setInteractionPointPermissionRequirement(f.booth->getPanel(), {a,b}), "Owned panel requirement refused");
+			require(f.world.setAgentIndividualPermissionAdherence(id, false), "Adherence edit failed");
+			if (scenario != 0) require(f.world.grantAgentAccessPermission(id, a), "Direct grant failed");
+			if (scenario >= 2)
+			{
+				if (scenario == 2) require(f.world.grantAgentAccessPermission(id, b), "Second direct grant failed");
+				else require(f.world.setAgentPermissionSetAssignment(id, set, true), "Set assignment failed");
+			}
+			if (scenario == 9)
+			{
+				require(f.world.grantAgentAccessPermission(id, b), "Overlapping direct grant failed");
+				require(f.world.setAgentRuntimePermissionSetAssignment(id, set, false), "Overlap set loss failed");
+			}
+			f.world.resumeSimulation();
+			auto request = f.world.requestInteraction(f.booth->getPanel(), id);
+			if (scenario < 2 || scenario == 7 || scenario == 8)
+			{
+				if (scenario < 2)
+				{
+					auto outcome = f.world.lookupInteractionRequest(request).entity;
+					require(outcome && outcome->getResult() == core::InteractionResult::Rejected
+						&& outcome->getMissingPermissions().size() == (scenario == 0 ? 2u : 1u),
+						"Missing all-of permission bypassed by non-adherence");
+				}
+				else require(!request, "Held permissions bypassed reach/side eligibility");
+				f.ticks(3); f.progress(0);
+				require(!f.booth->getTargetOpen() && actor->getGlobalPosition().distanceTo(position) == 0
+					&& f.world.getSimulationSnapshot().deviceOperations.empty(), "Refused press changed target/Agent/work");
+				continue;
+			}
+			require(bool(request), "Effective direct/set grants refused");
+			// Revoke after admission but before the one-tick physical press.
+			if (scenario == 4 || scenario == 5)
+			{
+				if (scenario == 4) require(f.world.setAgentRuntimeAccessPermissionGrant(id, a, false), "Grant loss failed");
+				else require(f.world.setAgentRuntimePermissionSetAssignment(id, set, false), "Set loss failed");
+				f.ticks(1);
+				auto outcome = f.world.lookupInteractionRequest(request).entity;
+				require(outcome && outcome->getResult() == core::InteractionResult::Rejected
+					&& !outcome->getMissingPermissions().empty(), "Pre-activation loss did not report normal authorization refusal");
+				f.ticks(3); f.progress(0);
+				require(!f.booth->getTargetOpen() && actor->getGlobalPosition().distanceTo(position) == 0,
+					"Rejected press moved operator or toggled target");
+				require(f.world.getSimulationSnapshot().deviceOperations.empty()
+					&& !f.world.lookupInteractionPoint(f.booth->getPanel()).entity->getActiveRequest(),
+					"Authorization rejection retained operations or panel reservation");
+				continue;
+			}
+			if (scenario == 10)
+			{
+				f.ticks(1); // Physical press accepted; device advancement is next tick.
+				require(f.world.setAgentRuntimePermissionSetAssignment(id, set, false), "Activated press grant loss failed");
+				f.ticks(1);
+			}
+			else f.ticks(2);
+			require(f.booth->getTargetOpen(), "Authorized press failed to activate");
+			if (scenario == 6)
+			{
+				require(f.world.setAgentRuntimePermissionSetAssignment(id, set, false), "Post-press loss failed");
+			}
+			f.ticks(47); f.progress(1);
+			require(f.world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Succeeded
+				&& actor->getGlobalPosition().distanceTo(position) == 0, "Accepted toggle was revoked or moved Agent");
+			if (scenario == 6)
+			{
+				auto next = f.world.requestInteraction(f.booth->getPanel(), id);
+				require(next && f.world.lookupInteractionRequest(next).entity->getResult() == core::InteractionResult::Rejected,
+					"Subsequent unauthorized press accepted");
+				f.ticks(3); f.progress(1);
+			}
+		}
+	}
+
 	void panelAgents(smoke::Context const&)
 	{
+		panelPermissions();
 		// Inclusive reach boundary, no exact arrival, no crossing intent.
 		for (float x : {3.25f, 3.35f, 3.5f, 3.75f})
 		{

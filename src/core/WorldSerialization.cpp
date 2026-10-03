@@ -408,6 +408,10 @@ namespace core
 			serializer.writeUint32("x", record.c); serializer.writeUint32("cellsWide", 1);
 			serializer.writeUint32("levelsHigh", 1);
 			serializer.writeString("initialState", record.i == 0 ? "open" : "closed");
+			serializer.beginArray("panelPermissionRequirement");
+			for (auto permission : record.controlPermissionRequirements[1])
+				serializer.writeUint32("", permission);
+			serializer.endArray();
 			break;
 		case ConstructionType::Window:
 		{
@@ -560,7 +564,8 @@ namespace core
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
 		// Version 43 adds distinct non-traversable BoothWindow authored records.
-		serializer.writeUint32("version", 43);
+		// Version 44 adds authored BoothWindow panel requirements.
+		serializer.writeUint32("version", 44);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -661,7 +666,7 @@ namespace core
 		serializer.beginArray("interactionPermissionRequirements");
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
-			if (point->mPermissionRequirement.none()) continue;
+			if (point->mPermissionRequirement.none() || point->mBoothWindowOwner) continue;
 			serializer.beginMap("");
 			serializer.writeUint64("interactionPoint", pointId.value);
 			serializer.beginArray("permissions");
@@ -1034,6 +1039,11 @@ namespace core
 		case ConstructionType::BoothWindow:
 		{
 			if (version < 43) throw SerializationException("BoothWindow requires World schema version 43");
+			if (serializer.hasField("panelPermissionRequirement"))
+			{
+				if (version < 44) throw SerializationException("BoothWindow panel requirements require World schema version 44");
+				readControlRequirement(1, "panelPermissionRequirement");
+			}
 			if (serializer.hasField("traversable") || serializer.hasField("style") || serializer.hasField("initiallyBroken"))
 				throw SerializationException("BoothWindow does not support traversal, glass styles, or Broken conditions");
 			record.a = readLayer("layer"); record.b = serializer.readUint32("y");
@@ -1213,7 +1223,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 43)
+		if (version < 1 || version > 44)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1624,7 +1634,8 @@ namespace core
 				&& record.type != ConstructionType::Ladder
 				&& record.type != ConstructionType::SectorLadder
 				&& record.type != ConstructionType::ForceBridge
-				&& record.type != ConstructionType::Airlock) continue;
+				&& record.type != ConstructionType::Airlock
+				&& record.type != ConstructionType::BoothWindow) continue;
 			bool controls[2]{};
 			if (record.type == ConstructionType::Door || record.type == ConstructionType::BulkheadDoor)
 			{
@@ -1638,6 +1649,7 @@ namespace core
 				if (record.e > 0) controls[record.i] = true;
 				if (record.e > 1) controls[1 - record.i] = true;
 			}
+			else if (record.type == ConstructionType::BoothWindow) controls[1] = true;
 			else if (record.p || record.type == ConstructionType::Airlock) controls[0] = controls[1] = true;
 			for (size_t side = 0; side < 2; ++side)
 			{
@@ -1767,7 +1779,7 @@ namespace core
 			for (auto const& [pointId, requirement] : serializedRequirements)
 			{
 				auto point = candidate.mInteractionPoints.find(pointId);
-				if (!point || !candidate.isInteractionPointPermissionEligible(pointId))
+				if (!point || point->mBoothWindowOwner || !candidate.isInteractionPointPermissionEligible(pointId))
 					throw SerializationException(format(
 						"Serialized Access permission requirement has invalid or ineligible Interaction point {}",
 						pointId.value));
@@ -2245,7 +2257,7 @@ namespace core
 			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
 				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id)
-					&& !mAuthoredControlRequirements.contains(id))
+					&& !mAuthoredControlRequirements.contains(id) && !point->mBoothWindowOwner)
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
@@ -2421,9 +2433,15 @@ namespace core
 			break;
 		}
 		case ConstructionType::BoothWindow:
-			addWindowAperture(record.a, record.b, record.c, record.d, record.e,
+		{
+			auto created = addWindowAperture(record.a, record.b, record.c, record.d, record.e,
 				{ record.p, static_cast<Window::State>(record.i), static_cast<Window::Style>(record.j) }, true);
+			auto booth = static_pointer_cast<const BoothWindow>(created.object);
+			auto point = mInteractionPoints.find(booth->getPanel());
+			for (auto permission : record.controlPermissionRequirements[1])
+				point->mPermissionRequirement.set(permission - 1);
 			break;
+		}
 		case ConstructionType::Window:
 			addSectorWindow(record.a, record.b, record.c, record.d, record.e,
 				{ record.p, static_cast<Window::State>(record.i), static_cast<Window::Style>(record.j) });

@@ -10865,7 +10865,7 @@ namespace core
 	bool World::isInteractionPointPermissionEligible(InteractionPointId id) const
 	{
 		auto point = mInteractionPoints.find(id);
-		if (!point || !point->mSector || point->mBoothWindowOwner) return false;
+		if (!point || !point->mSector) return false;
 		if (auto chamber = dynamic_pointer_cast<AirlockTransit>(mSectors[point->mSector.value - 1]);
 			chamber && chamber->getControl(2) == id) return false;
 		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
@@ -10895,6 +10895,20 @@ namespace core
 		if (next == point->mPermissionRequirement) { if (diagnostic) diagnostic->clear(); return true; }
 		auto const previous = point->mPermissionRequirement;
 		point->mPermissionRequirement = next;
+		if (auto booth = lookupBoothWindow(point->mBoothWindowOwner))
+		{
+			for (auto& record : mConstructionRecords)
+				if (record.type == ConstructionType::BoothWindow && record.a == booth->getFrontLayer()
+					&& record.b == static_cast<uint32_t>(booth->getPosition().y)
+					&& record.c == static_cast<uint32_t>(booth->getPosition().x))
+				{
+					auto& stored = record.controlPermissionRequirements[1];
+					stored.clear();
+					for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+						if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+					break;
+				}
+		}
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
 			bool usesPoint = find(resource->mControls.begin(), resource->mControls.end(), id)

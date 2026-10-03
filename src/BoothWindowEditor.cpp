@@ -1,6 +1,9 @@
 #include "BoothWindowEditor.h"
 #include "DocumentEdit.h"
+#include "PermissionsPanel.h"
+#include "core/AgentTagRegistry.h"
 #include "imgui/imgui.h"
+#include <set>
 #include <stdexcept>
 
 YAML::Node makeBoothWindowClipboardObject(core::World const& world,
@@ -15,6 +18,19 @@ YAML::Node makeBoothWindowClipboardObject(core::World const& world,
 	result["width"] = 1;
 	result["height"] = 1;
 	result["initialState"] = options.initialState == core::Window::State::Open ? "Open" : "Closed";
+	auto device = std::static_pointer_cast<const core::BoothWindow>(booth);
+	auto permissions = world.getInteractionPointPermissionRequirement(device->getPanel());
+	if (!permissions.empty())
+	{
+		result["authorizationWorldIdentity"] = world.getClipboardIdentity();
+		for (auto id : permissions)
+		{
+			YAML::Node permission;
+			permission["id"] = id.value;
+			permission["name"] = world.getAccessPermissionName(id);
+			result["panelPermissionRequirement"].push_back(permission);
+		}
+	}
 	return result;
 }
 
@@ -27,17 +43,70 @@ BoothWindowClipboard readBoothWindowClipboardObject(YAML::Node const& object)
 	auto state = object["initialState"].as<std::string>();
 	if (state != "Open" && state != "Closed")
 		throw std::runtime_error("BoothWindow initial shutter state must be Open or Closed");
-	return { state == "Open" ? core::Window::State::Open : core::Window::State::Closed };
+	BoothWindowClipboard result;
+	result.initialState = state == "Open" ? core::Window::State::Open : core::Window::State::Closed;
+	if (auto requirements = object["panelPermissionRequirement"])
+	{
+		if (!requirements.IsSequence() || !object["authorizationWorldIdentity"])
+			throw std::runtime_error("Panel requirements need a sequence and originating World identity");
+		result.authorizationWorldIdentity = object["authorizationWorldIdentity"].as<std::string>();
+		if (!core::AgentTagRegistry::uuidIsValid(result.authorizationWorldIdentity))
+			throw std::runtime_error("Invalid originating World identity");
+		std::set<uint64_t> ids;
+		std::set<std::string> names;
+		for (auto entry : requirements)
+		{
+			auto id = entry["id"].as<uint64_t>();
+			auto name = entry["name"].as<std::string>();
+			if (id == 0 || id > core::AccessPermission::Capacity || !ids.insert(id).second
+				|| !core::AccessPermission::nameIsValid(name) || !names.insert(name).second)
+				throw std::runtime_error("Invalid panel Permission reference");
+			result.permissions.push_back(core::AccessPermissionId{id});
+			result.permissionNames.push_back(name);
+		}
+	}
+	return result;
 }
 
 std::shared_ptr<const core::SectorObject> pasteBoothWindow(std::shared_ptr<core::World> const& world,
 	uint32_t layer, uint32_t y, uint32_t x, BoothWindowClipboard const& payload)
 {
-	// The caller owns the surrounding clipboard/history transaction. Placement
-	// preflight is performed by World before it starts any structural mutation.
+	// Resolve every reference before placement can mutate the World.
+	auto permissions = resolveBoothWindowClipboardPermissions(*world, payload);
 	auto created = world->addBoothWindow(layer, y, x, payload.initialState);
+	auto booth = std::static_pointer_cast<const core::BoothWindow>(created.object);
+	if (!world->setInteractionPointPermissionRequirement(booth->getPanel(), permissions))
+		throw std::runtime_error("Cannot author BoothWindow panel requirements");
 	world->finishBuild();
 	return created.window.sector->getObject(created.window.index);
+}
+
+std::vector<core::AccessPermissionId> resolveBoothWindowClipboardPermissions(core::World const& world,
+	BoothWindowClipboard const& payload)
+{
+	if (payload.permissions.size() != payload.permissionNames.size()
+		|| (!payload.permissions.empty() && !core::AgentTagRegistry::uuidIsValid(payload.authorizationWorldIdentity)))
+		throw std::runtime_error("Invalid panel authorization payload");
+	std::vector<core::AccessPermissionId> result;
+	std::set<uint64_t> seen;
+	for (size_t i = 0; i < payload.permissions.size(); ++i)
+	{
+		auto id = payload.permissions[i];
+		if (!id || id.value > core::AccessPermission::Capacity
+			|| !core::AccessPermission::nameIsValid(payload.permissionNames[i]))
+			throw std::runtime_error("Malformed panel Permission reference");
+		if (payload.authorizationWorldIdentity != world.getClipboardIdentity())
+		{
+			id = {};
+			for (auto candidate : world.getAccessPermissionIds())
+				if (world.getAccessPermissionName(candidate) == payload.permissionNames[i]) id = candidate;
+		}
+		if (!world.lookupAccessPermission(id) || !seen.insert(id.value).second)
+			throw std::runtime_error("Unknown or duplicate panel Permission reference");
+		result.push_back(id);
+	}
+	if (!world.isSimulationPaused()) throw std::runtime_error("Panel requirements can only be authored while paused");
+	return result;
 }
 
 core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> const& world,
@@ -67,6 +136,7 @@ bool renderBoothWindowPanel(std::shared_ptr<core::World> const& world,
 		: state == core::Window::State::Opening ? "Opening" : "Closing",
 		device->getProgress() * 100.0f, device->getTargetOpen() ? "Open" : "Closed");
 	if (ImGui::Button("Toggle shutter")) operateBoothWindowShutter(world, object);
+	renderInteractionPermissionRequirements(world, device->getPanel());
 	if (!world->getSectorWindowOptions(booth->getFrontLayer(), object->getCellY(), object->getCellX(), 1, 1, options))
 		return false;
 	bool open = options.initialState == core::Window::State::Open;

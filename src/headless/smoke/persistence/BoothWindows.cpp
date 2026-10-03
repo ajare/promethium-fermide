@@ -14,6 +14,10 @@ namespace persistence
 		auto closed = std::static_pointer_cast<const core::BoothWindow>(world.addBoothWindow(0, 0, 2).object);
 		auto open = std::static_pointer_cast<const core::BoothWindow>(world.addBoothWindow(1, 0, 4, core::Window::State::Open).object);
 		world.finishBuild();
+		world.pauseSimulation();
+		auto a = world.addAccessPermission("Panel A"), b = world.addAccessPermission("Panel B");
+		require(world.setInteractionPointPermissionRequirement(closed->getPanel(), {a,b}), "Panel authoring failed");
+		world.resumeSimulation();
 		auto write = [](core::World const& source, bool binary) {
 			auto serialize = [&](auto writer) {
 				core::SerializationWorkData work; work.markSerializedUnmodified = false;
@@ -36,6 +40,9 @@ namespace persistence
 						require(panel && panel->getPosition().x == float(p[1]) + 0.5f
 							&& panel->getPosition().y == 0 && panel->getSector().value == booth->getBackSector()->getIndex() + 1,
 							"Round trip did not reconstruct correct owned panel");
+						require(source.getInteractionPointPermissionRequirement(device->getPanel())
+							== (p[0] == 0 ? std::vector<core::AccessPermissionId>{a,b} : std::vector<core::AccessPermissionId>{}),
+							"Document/reset/replay lost or duplicated authored protection");
 						require(object->getObjectType() == core::SectorObjectType::BoothWindow && booth->getFrontLayer() == p[0]
 							&& booth->getBackLayer() == p[0] + 1 && static_cast<uint32_t>(booth->getState()) == p[2]
 							&& !booth->isTraversalConfigured(), "Authored BoothWindow lost kind/pair/state");
@@ -71,6 +78,9 @@ namespace persistence
 		// Save a real Agent's pending panel press, not just editor commands.
 		world.resetSimulation();
 		auto actor = world.createAgent("Pending panel operator", 1, 0, 2.35f);
+		world.pauseSimulation();
+		require(world.grantAgentAccessPermission(actor, a) && world.grantAgentAccessPermission(actor, b), "Pending operator grants failed");
+		world.resumeSimulation();
 		auto panelId = world.getSimulationSnapshot().interactionPoints.front().id;
 		require(bool(world.requestInteraction(panelId, actor)), "Pending panel save fixture refused");
 		for (bool binary : {false, true})
@@ -83,14 +93,19 @@ namespace persistence
 			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
-		require(node["version"].as<int>() == 43, "BoothWindow schema not allocated");
+		require(node["version"].as<int>() == 44, "BoothWindow schema not allocated");
 		core::SerializationWorkData work;
-		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown"})
+		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown", "permissionZero", "permissionUnknown", "permissionDuplicate", "permissionShape", "permissionLegacy"})
 		{
 			auto invalid = YAML::Clone(node);
 			for (auto record : invalid["construction"]) if (record["type"].as<std::string>() == "boothWindow")
 			{
 				std::string c = change;
+				if (c == "permissionZero") record["panelPermissionRequirement"] = std::vector<unsigned>{0};
+				if (c == "permissionUnknown") record["panelPermissionRequirement"] = std::vector<unsigned>{256};
+				if (c == "permissionDuplicate") record["panelPermissionRequirement"] = std::vector<unsigned>{1,1};
+				if (c == "permissionShape") record["panelPermissionRequirement"] = "not an array";
+				if (c == "permissionLegacy") invalid["version"] = 43;
 				if (c == "width") record["cellsWide"] = 2;
 				if (c == "height") record["levelsHigh"] = 0;
 				if (c == "state") record["initialState"] = "broken";
@@ -107,6 +122,19 @@ namespace persistence
 			catch (std::exception const&) { refused = true; }
 			require(refused && write(world,false) == baseline, std::string("Malformed BoothWindow loaded or mutated target: ") + change);
 		}
+		for (unsigned invalidId : {0u, 256u, 2u})
+		{
+			auto bytes = write(world, true);
+			auto offset = bytes.find("panelPermissionRequirement");
+			require(offset != std::string::npos, "Binary panel requirement field missing");
+			offset += std::string("panelPermissionRequirement").size() + 1 + 8 + 1;
+			// Array tag, uint64 count, uint32 tag precede the first reference.
+			for (unsigned byte = 0; byte < 4; ++byte) bytes[offset + byte] = static_cast<char>((invalidId >> (8 * byte)) & 255);
+			bool refused = false; auto before = write(world, false);
+			try { auto input = core::BinarySerializer::fromString(bytes); input->deserialize(); world.deserialize(*input, work); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && write(world, false) == before, "Malformed binary panel reference partially mutated World");
+		}
 		auto malformedBinary = write(world,true);
 		auto stateOffset = malformedBinary.find("closed");
 		require(stateOffset != std::string::npos, "Binary fixture missing shutter state");
@@ -115,6 +143,14 @@ namespace persistence
 		try { auto input = core::BinarySerializer::fromString(malformedBinary); input->deserialize(); world.deserialize(*input, work); }
 		catch (std::exception const&) { binaryRefused = true; }
 		require(binaryRefused && write(world,false) == baseline, "Malformed binary BoothWindow accepted or mutated target");
+		auto previous = YAML::Clone(node); previous["version"] = 43;
+		for (auto record : previous["construction"]) if (record["type"].as<std::string>() == "boothWindow")
+			record.remove("panelPermissionRequirement");
+		auto previousReader = core::YamlSerializer::fromString(YAML::Dump(previous)); previousReader->deserialize();
+		core::World unrestricted("Previous schema",1,1);
+		require(unrestricted.deserialize(*previousReader,work), "Schema-43 BoothWindow compatibility lost");
+		for (auto const& point : unrestricted.getSimulationSnapshot().interactionPoints)
+			require(unrestricted.getInteractionPointPermissionRequirement(point.id).empty(), "Legacy panel did not default unrestricted");
 		auto legacy = YAML::Clone(node); legacy["version"] = 42;
 		YAML::Node records(YAML::NodeType::Sequence);
 		for (auto record : legacy["construction"]) if (record["type"].as<std::string>() != "boothWindow") records.push_back(record);

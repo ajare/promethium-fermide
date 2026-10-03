@@ -3403,6 +3403,7 @@ namespace
 		core::World::CreateDoorOptions door;
 		core::World::CreateBulkheadDoorOptions bulkheadDoor;
 		core::World::CreateWindowOptions window;
+		BoothWindowClipboard boothWindow;
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
 		core::World::CreateLiftOptions platformLift;
@@ -3775,7 +3776,7 @@ namespace
 		{
 			definition.type = ClipboardObjectType::BoothWindow;
 			definition.width = 1; definition.height = 1;
-			definition.window.initialState = readBoothWindowClipboardObject(object).initialState;
+			definition.boothWindow = readBoothWindowClipboardObject(object);
 		}
 		else if (type == "Window")
 		{
@@ -4091,6 +4092,7 @@ namespace
 			}
 			else if (definition.type == ClipboardObjectType::BoothWindow)
 			{
+				resolveBoothWindowClipboardPermissions(*world, definition.boothWindow);
 				if (!world->canAddBoothWindow(gUISettings.visibleLayer, y, x, definition.width, definition.height, &diagnostic))
 					throw runtime_error(diagnostic);
 			}
@@ -4177,7 +4179,7 @@ namespace
 				}
 				else if (definition.type == ClipboardObjectType::BoothWindow)
 				{
-					created = pasteBoothWindow(world, gUISettings.visibleLayer, y, x, { definition.window.initialState });
+					created = pasteBoothWindow(world, gUISettings.visibleLayer, y, x, definition.boothWindow);
 				}
 				else if (definition.type == ClipboardObjectType::Window)
 				{

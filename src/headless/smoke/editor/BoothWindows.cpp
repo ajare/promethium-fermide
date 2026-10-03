@@ -2,6 +2,7 @@
 #include "State.h"
 #include "DocumentEdit.h"
 #include "BoothWindowEditor.h"
+#include "PermissionsPanel.h"
 #include "PaletteLayout.h"
 #include "core/YamlSerializer.h"
 #include "imgui/imgui_internal.h"
@@ -78,6 +79,16 @@ namespace
 			"Runtime panel did not animate shutter");
 		require(gWorldDocumentHistory.undoCount()==historyCount && captureDocumentSnapshot(world)->yaml==authoredSnapshot,
 			"Runtime panel mutated authored history/snapshot");
+		std::string diagnostic;
+		auto permission = commitAccessPermissionAdd(world, "Operator", diagnostic);
+		require(bool(permission), "Permission registry authoring failed");
+		require(commitInteractionPermissionRequirement(world, device->getPanel(), permission, true, diagnostic),
+			"BoothWindow selection requirement editing failed");
+		auto requirement = [&](uint32_t x) {
+			auto booth = std::static_pointer_cast<const core::BoothWindow>(get(x)->getWindow());
+			return world->getInteractionPointPermissionRequirement(booth->getPanel());
+		};
+		require(requirement(2) == std::vector<core::AccessPermissionId>{permission}, "Authored panel requirement missing");
 		auto payload=makeBoothWindowClipboardObject(*world,*get(2));
 		require(payload["initialState"].as<std::string>()=="Open" && !payload["traversable"] && !payload["style"],"Clipboard leaked ordinary Window capabilities");
 		edit([&] { pasteBoothWindow(world,0,0,4,readBoothWindowClipboardObject(payload)); });
@@ -89,6 +100,26 @@ namespace
 		auto undo=[&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore),"Undo failed"); };
 		auto redo=[&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world),restore),"Redo failed"); };
 		undo(); require(!get(4),"Paste undo failed"); redo(); require(bool(get(4)),"Paste redo failed");
+		require(requirement(4) == requirement(2), "Clipboard/history lost protection");
+		undo(); undo(); require(requirement(2).empty(), "Requirement undo failed");
+		redo(); require(requirement(2) == std::vector<core::AccessPermissionId>{permission}, "Requirement redo failed");
+		redo();
+		// Foreign Worlds remap by name, never by coincident local slot; same-World
+		// rename retains identity. Missing foreign references refuse before placement.
+		auto foreign = std::make_shared<core::World>("Other", 10, 3);
+		foreign->addRoom("Front",0,0,0,9,2); foreign->addRoom("Back",1,0,0,9,2);
+		foreign->finishBuild(); foreign->pauseSimulation();
+		foreign->addAccessPermission("Unrelated"); auto mapped = foreign->addAccessPermission("Operator");
+		auto copied = pasteBoothWindow(foreign,0,0,2,readBoothWindowClipboardObject(payload));
+		auto copiedBooth = std::static_pointer_cast<const core::BoothWindow>(std::static_pointer_cast<const core::WindowSectorObject>(copied)->getWindow());
+		require(foreign->getInteractionPointPermissionRequirement(copiedBooth->getPanel()) == std::vector<core::AccessPermissionId>{mapped},
+			"Foreign clipboard reused unrelated permission identity");
+		require(foreign->deleteAccessPermission(mapped), "Foreign permission deletion failed");
+		auto foreignBefore = captureDocumentSnapshot(foreign)->yaml; bool refused = false;
+		try { pasteBoothWindow(foreign,0,0,6,readBoothWindowClipboardObject(payload)); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && captureDocumentSnapshot(foreign)->yaml == foreignBefore, "Unknown clipboard permission mutated destination");
+		require(world->renameAccessPermission(permission, "Renamed Operator"), "Permission rename failed");
 		auto indexOf=[&](auto object) { auto owner=world->getSector(0); for (uint32_t i=0;i<owner->getNumObjects();++i) if (owner->getObject(i)==object) return i; return ~0u; };
 		// Cut writes the payload before using normal deletion; paste retains initial state.
 		payload=makeBoothWindowClipboardObject(*world,*get(4));
@@ -96,7 +127,7 @@ namespace
 		require(!get(4),"Cut retained object"); undo(); require(bool(get(4)),"Cut undo failed"); redo(); require(!get(4),"Cut redo failed");
 		edit([&] { pasteBoothWindow(world,0,0,5,readBoothWindowClipboardObject(payload)); });
 		require(get(5)->getWindow()->getState()==core::Window::State::Open,"Cut/paste lost initial state");
-		for (auto field : {"width","height","initialState","style","traversable","initiallyBroken"})
+		for (auto field : {"width","height","initialState","style","traversable","initiallyBroken","panelPermissionRequirement","authorizationWorldIdentity"})
 		{
 			auto malformed=YAML::Clone(payload);
 			if (std::string(field)=="initialState") malformed[field]="Broken"; else malformed[field]=2;
@@ -111,6 +142,14 @@ namespace
 		edit([&] { world->applyObjectMove(plan); }); require(bool(get(3)) && !get(2),"Move lost BoothWindow");
 		undo(); require(bool(get(2)) && !get(3),"Move undo failed"); redo(); require(bool(get(3)) && !get(2),"Move redo failed");
 		world->resetSimulation(); panels(); require(get(3)->getWindow()->getState()==core::Window::State::Open,"Reset lost authored state");
+		require(requirement(3) == std::vector<core::AccessPermissionId>{permission} && requirement(5) == requirement(3),
+			"Move/reset/replay lost panel requirements");
+		world->pauseSimulation();
+		require(commitAccessPermissionDelete(world, permission, diagnostic), "Permission deletion failed");
+		require(requirement(3).empty() && requirement(5).empty(), "Deletion left dangling panel references");
+		undo(); require(requirement(3) == std::vector<core::AccessPermissionId>{permission}, "Deletion undo lost protection");
+		redo(); require(requirement(3).empty(), "Deletion redo failed");
+		world->resetSimulation(); panels(); require(requirement(3).empty(), "Replay restored deleted reference");
 	}
 }
 void editor_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)

@@ -1,4 +1,4 @@
-# BoothWindows (#334, #335, #336)
+# BoothWindows (#334, #335, #336, #337)
 
 BoothWindow is a fixed one-cell-wide, one-Level-high service aperture authored on
 Layer L, with its back side on L+1. Both sides require an occupiable Room,
@@ -66,13 +66,32 @@ newly ineligible queued Agents receive Cancelled outcomes, not auto-approach or 
 late press. Other Interaction points, including Lift selectors, retain auto-approach.
 
 The panel has no Sector object, physical Button, or renderer primitive and cannot be
-independently placed/deleted. Access permission requirement authoring is deferred;
-the owned panel is unrestricted by default and ineligible for direct requirements.
+independently placed/deleted. The owned panel is unrestricted by default.
 Construction, movement, save/load, clipboard, history, replay, and reset reconstruct
 exactly one panel on the correct back side. Deletion and invalidating structural
 edits clear outstanding requests and operations; request/operation handles are not
 reused within the World. Only authored BoothWindow configuration persists, never
 pending presses or runtime shutter state.
+
+## Panel Access permissions (#337)
+
+Selection exposes the existing Required Access permissions editor for the invisible
+back-side panel. Use `World::setInteractionPointPermissionRequirement()` while
+paused; requirements are stored on the authored BoothWindow, not replay-order panel
+handles. Every member is required using current effective direct and Permission-set
+grants. Permission adherence never bypasses authorization, side, reach, or mobility.
+
+Admission and physical press activation use normal Interaction authorization:
+missing grants produce Rejected requests with missing-permission details, no toggle
+and no Agent movement. Loss after the physical press does not revoke its accepted
+operation or interrupt shutter travel; later presses check current grants. Deleting
+an Access permission clears live and authored panel references. Replay, reset, move,
+and history reconstruct the requirement on exactly one owned panel.
+
+Clipboard carries the originating World identity and permission IDs/names. In the
+same World IDs survive rename; between Worlds names remap to destination identities.
+Unknown, duplicate, or malformed requirements refuse before placement rather than
+silently discarding protection. No permissions are implicitly created.
 
 ## Persistence
 
@@ -88,12 +107,18 @@ and binary share this authored schema and atomic document validation:
   cellsWide: 1
   levelsHigh: 1
   initialState: closed
+  panelPermissionRequirement: [1, 2] # World-local Access permission IDs (schema 44)
 ```
 
 `initialState` is `closed` or `open`. Traversability, glass style, and Broken
 fields are unsupported, even when their values appear neutral. Older schema
 versions cannot carry BoothWindow records. Ordinary Window and Door records
 remain unchanged, and documents without BoothWindows remain compatible.
+Schema **44** adds `panelPermissionRequirement`; older BoothWindow documents default
+to unrestricted panels, but cannot carry this field. Both formats reject unknown,
+zero, out-of-range, duplicate, and malformed references during document preflight.
+Owned panels are excluded from replay-order `interactionPermissionRequirements`
+serialization so authored protection is reconstructed only from its owner.
 
 ## Presentation and checks
 
