@@ -29,6 +29,9 @@ namespace core
 		// Dense, deterministic slot assigned by the owning Graph after build.
 		uint32_t mSearchIndex{ ~uint32_t{ 0 } };
 
+		// Derived authored identity for safe route rebinding across graph replacement.
+		std::string mTopologyKey;
+
 		VertexType mType;
 
 		VertexSubType mSubType;
@@ -63,6 +66,8 @@ namespace core
 		uint32_t getId() const;
 
 		uint32_t getSearchIndex() const;
+
+		std::string const& getTopologyKey() const { return mTopologyKey; }
 
 		VertexType getType() const;
 

@@ -27,6 +27,7 @@ endfunction()
 set(core_names
     observation
     furniture/retainedDepth
+    furniture/topologyEdits
     clearPausedPathDoesNotResume
     pauseTraversingEdgePreservesPosition
     pauseMovingToVertexPreservesPosition

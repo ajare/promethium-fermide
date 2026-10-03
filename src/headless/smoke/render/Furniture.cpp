@@ -206,6 +206,28 @@ namespace
 				require(agentFirst < drawing.commands().size() && deskLast < agentFirst,
 					"Stationary/paused Agent rendered behind equal-depth Furniture");
 			}
+			auto stationary = agent->getGlobalPosition();
+			require(deskWorld->editFurniture(deskWorld->furniture().front().id, 4.25f, 0,
+				"Moved artwork", &diagnostic, 1), diagnostic);
+			agent = deskWorld->lookupAgent(agentId).entity;
+			require(agent->getGlobalPosition() == stationary && agent->getLocalDepth() == 2,
+				"Moved/depth-edited artwork changed stationary render history");
+			WorldDrawList edited({{0,0},{800,600}});
+			renderSector(deskWorld->getSector(deskRoom), 0, LayerRenderStyle::Solid, false, ImColor(192,192,255), &edited);
+			size_t artworkLast = 0, walkerFirst = edited.commands().size();
+			for (size_t i = 0; i < edited.commands().size(); ++i)
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&edited.commands()[i]);
+					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+				{
+					if (triangle->texcoords[0].x >= 256.f / 320) artworkLast = i;
+					else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+						walkerFirst = std::min(walkerFirst, i);
+				}
+			require(walkerFirst < artworkLast, "Edited artwork did not render in front of retained deeper Agent");
+			require(deskWorld->removeFurniture(deskWorld->furniture().front().id, &diagnostic), diagnostic);
+			agent = deskWorld->lookupAgent(agentId).entity;
+			require(agent->getGlobalPosition() == stationary && agent->getLocalDepth() == 2,
+				"Furniture deletion changed stationary rendering history");
 		}
 		// A chair attached in the middle of the desk's front route renders using
 		// the actual traversal depth, without relying on equal-cost route choice.

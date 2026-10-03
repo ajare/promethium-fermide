@@ -447,6 +447,21 @@ namespace core
 		// A route destination retained when pauseSimulation tears down live
 		// traversal. Each Agent that had a path keeps one until resumeSimulation
 		// replays it onto the rebuilt graph.
+		struct TopologyPathNode
+		{
+			uint32_t sectorIndex;
+			Vector2 position;
+			VertexType type;
+			VertexSubType subType;
+			std::string key;
+			EdgeType edgeType;
+			int depth;
+			bool furnitureRoute;
+			float cumulativePerceivedCost;
+			std::optional<float> objectiveDurationSeconds;
+			std::optional<EvaluatedRouteCost> diagnosticCost;
+		};
+
 		struct TopologyPathIntent
 		{
 			MarkerId destinationMarker{};
@@ -454,6 +469,11 @@ namespace core
 			Vector2 destinationPosition;
 			Vector2 destinationLocalPosition;
 			bool wasPathing{ false };
+			// Values only: neither a paused intent nor a planning goal may keep the
+			// retired graph alive. Rebinding requires unchanged geometry and depth.
+			std::vector<TopologyPathNode> retainedNodes;
+			std::optional<RouteDiagnosticContext> retainedContext;
+			bool resumeLocalTraversal{ false };
 			// A continuous stair crossing can resume from its physical pause position
 			// instead of walking back to the edge's source Vertex.
 			bool resumeContinuousTraversal{ false };
@@ -1073,6 +1093,11 @@ namespace core
 			uint64_t escalatorTraversalSequence{ 0 };
 			uint64_t routeJourneySequence{ 0 };
 			int localDepth{ 0 };
+			Vector2 resetPosition;
+			uint32_t resetLayer;
+			int resetDepth;
+			MarkerId resetDestinationMarker;
+			bool resetPathActive;
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried

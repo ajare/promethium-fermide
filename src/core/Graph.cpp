@@ -396,6 +396,7 @@ namespace core
 					mVertices.push_back(vertex);
 					mSectorVertexLookup[sector.get()].push_back(vertex);
 				}
+				vertex->mTopologyKey = "furniture:" + std::to_string(instance.id) + ":" + point.key;
 				authored.emplace(point.key, vertex);
 				if (point.external)
 				{
@@ -440,6 +441,7 @@ namespace core
 			if (replacesLeft && replacesRight) continue;
 			auto anchor = make_shared<SectorMarkerVertex>(sector,
 				position.x - sector->getCellX(), position.y - sector->getCellY());
+			anchor->mTopologyKey = port.vertex->getTopologyKey() + ":floor";
 			vertices.push_back(anchor);
 			addEdge(make_shared<SectorEdge>(), anchor, port.vertex, false);
 		}
@@ -486,6 +488,7 @@ namespace core
 						auto sector = left->getSector();
 						junction = make_shared<SectorMarkerVertex>(sector,
 							x - sector->getCellX(), y - sector->getCellY());
+						junction->mTopologyKey = left->getTopologyKey() + ":cut:" + right->getTopologyKey();
 						route.cuts.push_back(junction);
 						mVertices.push_back(junction);
 						mSectorVertexLookup[sector.get()].push_back(junction);
@@ -668,6 +671,8 @@ namespace core
 		}
 
 		auto markerObject = std::dynamic_pointer_cast<MarkerSectorObject>(marker);
+		if (markerObject)
+			markerVertex->mTopologyKey = "marker:" + std::to_string(markerObject->getMarker()->getId().value);
 		if (markerObject && mwWorld->isFurnitureMarker(markerObject->getMarker()->getId()))
 		{
 			for (auto const& instance : mwWorld->furniture())
@@ -683,6 +688,7 @@ namespace core
 			auto anchor = make_shared<SectorMarkerVertex>(obj.sector,
 				markerVertex->getPosition().x - obj.sector->getCellX(),
 				markerVertex->getPosition().y - obj.sector->getCellY());
+			anchor->mTopologyKey = "marker-floor:" + std::to_string(markerObject->getMarker()->getId().value);
 			addEdge(make_shared<SectorEdge>(), anchor, markerVertex, false);
 			mSectorVertexLookup[obj.sector.get()].push_back(markerVertex);
 			mVertices.push_back(markerVertex);

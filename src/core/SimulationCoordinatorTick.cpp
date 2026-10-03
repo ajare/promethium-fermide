@@ -801,8 +801,45 @@ namespace core
 			// so reactivation later does not resurrect a route the pause had
 			// already torn down.
 			if (!agent || !agent->isActive() || !agent->getSector()) continue;
-			if (agent->mState == Agent::State::RoutePlanning) continue;
 			auto& goal = mWorld.mMovementGoals[id];
+			// Match the retained suffix by authored identity as well as geometry.
+			// Ambiguous anonymous vertices are deliberately not interchangeable.
+			auto retained = make_shared<Path>();
+			retained->diagnosticContext = intent.retainedContext;
+			for (auto const& saved : intent.retainedNodes)
+			{
+				shared_ptr<const Vertex> vertex;
+				for (auto const& candidate : mWorld.mGraph->getVertices())
+				{
+					auto sector = candidate->getSector();
+					if (!sector || sector->getIndex() != saved.sectorIndex
+						|| candidate->getPosition() != saved.position
+						|| candidate->getType() != saved.type || candidate->getSubType() != saved.subType
+						|| candidate->getTopologyKey() != saved.key) continue;
+					if (vertex) { vertex.reset(); break; }
+					vertex = candidate;
+				}
+				if (!vertex) { retained->nodes.clear(); break; }
+				shared_ptr<const Edge> edge;
+				if (!retained->nodes.empty())
+				{
+					for (auto const& candidate : vertex->getEdges())
+						if (candidate->getOtherVertex(vertex) == retained->nodes.back().targetVertex
+							&& candidate->getType() == saved.edgeType && candidate->getLocalDepth() == saved.depth
+							&& candidate->isFurnitureRoute() == saved.furnitureRoute)
+						{ edge = candidate; break; }
+					if (!edge) { retained->nodes.clear(); break; }
+				}
+				retained->nodes.push_back({ edge, vertex, saved.cumulativePerceivedCost,
+					saved.objectiveDurationSeconds, saved.diagnosticCost });
+			}
+			goal.retainedPath = retained->nodes.empty() ? nullptr : retained;
+			goal.retainedFromNode = 0;
+			if (agent->mState == Agent::State::RoutePlanning)
+			{
+				goal.fallbackIntent = intent;
+				continue;
+			}
 			if (goal.cancelling) continue;
 			if (!goal.marker) goal.marker = intent.destinationMarker;
 			goal.startPathing = intent.wasPathing;
@@ -816,7 +853,8 @@ namespace core
 
 	void SimulationCoordinator::cancelAllTraversalForTopologyRebuild()
 	{
-		mWorld.mPausedPathIntents.clear();
+		// Repeated edits while paused must not discard intent already captured
+		// by the first pause (or retain a planning suffix on a retired graph).
 		for (auto const& [id, agent] : mWorld.mAgents.entries())
 		{
 			// Airlock admission/occupancy is a fixed journey, not a new route
@@ -833,12 +871,21 @@ namespace core
 						airlockJourney = true;
 			}
 			if (airlockJourney) continue;
-			if (agent->mPath.path && !agent->mPath.path->nodes.empty())
+			auto path = agent->mPath.path;
+			auto from = agent->mPath.targetNode;
+			if (agent->mState == Agent::State::RoutePlanning)
+				if (auto goal = mWorld.mMovementGoals.find(id); goal != mWorld.mMovementGoals.end())
+				{
+					path = std::move(goal->second.retainedPath);
+					from = goal->second.retainedFromNode;
+				}
+			if (path && !path->nodes.empty())
 			{
-				auto destination = agent->mPath.path->nodes.back().targetVertex;
+				auto destination = path->nodes.back().targetVertex;
 				if (destination && destination->getSector())
 				{
 					auto& intent = mWorld.mPausedPathIntents[id];
+					intent.retainedNodes.clear();
 					for (uint32_t i = 0; i < destination->getSector()->getNumObjects(); ++i)
 						if (auto object = dynamic_pointer_cast<MarkerSectorObject>(destination->getSector()->getObject(i));
 							object && mWorld.mGraph->getVertexForObject(object) == destination)
@@ -847,8 +894,38 @@ namespace core
 						(uint64_t)destination->getSector()->getIndex() + 1 };
 					intent.destinationPosition = destination->getPosition();
 					intent.destinationLocalPosition = destination->getPosition() - destination->getSector()->getPosition();
-					intent.wasPathing = agent->mState != Agent::State::Idle;
-					intent.routeDiagnostics = pathing::getRouteDiagnostics(*agent->mPath.path);
+					intent.wasPathing = agent->mState == Agent::State::RoutePlanning
+						? mWorld.mMovementGoals.at(id).startPathing : agent->mState != Agent::State::Idle;
+					intent.routeDiagnostics = pathing::getRouteDiagnostics(*path);
+					intent.retainedContext = path->diagnosticContext;
+					if (agent->mState == Agent::State::RoutePlanning)
+					{
+						auto const& previous = mWorld.mMovementGoals.at(id).fallbackIntent;
+						if (previous)
+						{
+							intent.resumeLocalTraversal = previous->resumeLocalTraversal;
+							intent.resumeContinuousTraversal = previous->resumeContinuousTraversal;
+							intent.traversalEdgeType = previous->traversalEdgeType;
+							intent.traversalSourcePosition = previous->traversalSourcePosition;
+							intent.traversalDestinationPosition = previous->traversalDestinationPosition;
+						}
+					}
+					else intent.resumeLocalTraversal = agent->mState == Agent::State::TraversingEdge
+						&& agent->mTraversalTask && agent->mTraversalTask->edge
+						&& agent->mTraversalTask->edge->getType() == EdgeType::Location
+						&& agent->mTraversalTask->sourceVertex->getSector()
+							== agent->mTraversalTask->destinationVertex->getSector();
+					for (size_t node = from; node < path->nodes.size(); ++node)
+					{
+						auto const& item = path->nodes[node];
+						auto sector = item.targetVertex->getSector();
+						if (!sector) { intent.retainedNodes.clear(); break; }
+						intent.retainedNodes.push_back({ sector->getIndex(), item.targetVertex->getPosition(),
+							item.targetVertex->getType(), item.targetVertex->getSubType(), item.targetVertex->getTopologyKey(),
+							item.edge ? item.edge->getType() : EdgeType::Location,
+							item.edge ? item.edge->getLocalDepth() : 0, item.edge && item.edge->isFurnitureRoute(),
+							item.cumulativePerceivedCost, item.objectiveDurationSeconds, item.diagnosticCost });
+					}
 					if (agent->mState == Agent::State::TraversingEdge && agent->mTraversalTask
 						&& agent->mTraversalTask->edge && agent->mTraversalTask->sourceVertex
 						&& agent->mTraversalTask->destinationVertex)

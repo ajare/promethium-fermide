@@ -3,6 +3,7 @@
 #include "core/World.h"
 #include "core/Edge.h"
 #include "core/Location.h"
+#include "core/Marker.h"
 #include "core/Path.h"
 #include "core/Pathing.h"
 #include "core/AgentTagRegistry.h"
@@ -681,6 +682,7 @@ namespace core
 		mPathStartPosition = {};
 		mResetPosition = {};
 		mLocalDepth = mResetLocalDepth = 0;
+		mResetDestinationMarker = {};
 		mResetPath.reset();
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
@@ -1242,6 +1244,10 @@ namespace core
 		mResetPosition = mPosition;
 		mResetLocalDepth = mLocalDepth;
 		mResetPath = path;
+		mResetDestinationMarker = {};
+		if (path && !path->nodes.empty())
+			if (auto marker = dynamic_pointer_cast<Marker>(path->nodes.back().targetVertex->getObject()))
+				mResetDestinationMarker = marker->getId();
 		mResetPathActive = startPathing;
 		assignPath(std::move(path), startPathing, true);
 	}
@@ -1354,6 +1360,7 @@ namespace core
 		clearRuntimePath();
 		mResetPosition = mPosition;
 		mResetLocalDepth = mLocalDepth;
+		mResetDestinationMarker = {};
 		mResetPath.reset();
 		mResetPathActive = false;
 		modify();

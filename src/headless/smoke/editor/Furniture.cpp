@@ -266,6 +266,45 @@ namespace
 		require(deskHistory.redo(captureDocumentSnapshot(desks, deskHistory), restoreDesk)
 			&& desks->furniture().front().localDepth == 4 && desks->furniture().front().marker == deskSeat,
 			"Depth edit redo lost depth or Marker identity");
+		auto walkerId = desks->createAgent("History visitor", deskRoom, 0, 0.5f);
+		auto walker = desks->lookupAgent(walkerId).entity;
+		std::shared_ptr<const core::Vertex> seat;
+		for (auto const& vertex : desks->getGraph()->getVertices())
+			if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+				marker && marker->getId() == deskSeat) seat = vertex;
+		walker->setPath(desks->getGraph()->calculatePath(walker, seat), true);
+		require(desks->resumeSimulation(), "History movement resume failed"); desks->advanceTicks(10);
+		auto moving = walker->getGlobalPosition(); desks->pauseSimulation();
+		require(editSelectedFurniture(desks, deskId, 4.125f, 0, false, "Moved", diagnostic, deskHistory, 5), diagnostic);
+		walker = desks->lookupAgent(walkerId).entity;
+		require(walker->getGlobalPosition() == moving && walker->getLocalDepth() == 0,
+			"Editor action teleported underway Agent");
+		require(deskHistory.undo(captureDocumentSnapshot(desks, deskHistory), restoreDesk), "Moving destination undo failed");
+		require(deskHistory.redo(captureDocumentSnapshot(desks, deskHistory), restoreDesk), "Moving destination redo failed");
+		walker = desks->lookupAgent(walkerId).entity;
+		core::World::TopologyPathIntent intent;
+		require(walker->getGlobalPosition().x == 0.5f && desks->getPausedPathIntent(*walker, intent)
+			&& intent.destinationMarker == deskSeat, "History lost authored origin or stable destination intent");
+		require(desks->resumeSimulation(), "Restored history resume failed"); desks->advanceTicks(2000);
+		require(walker->getGlobalPosition().x == 4.875f && walker->getLocalDepth() == 5,
+			"History destination did not reach moved Furniture");
+		walker->clearPath(); desks->pauseSimulation();
+		auto stationary = walker->getGlobalPosition();
+		require(editSelectedFurniture(desks, deskId, 4.125f, 0, false, "New depth", diagnostic, deskHistory, 7), diagnostic);
+		for (bool redo : { false, true })
+		{
+			require(redo ? deskHistory.redo(captureDocumentSnapshot(desks, deskHistory), restoreDesk)
+				: deskHistory.undo(captureDocumentSnapshot(desks, deskHistory), restoreDesk), "Stationary depth history failed");
+			walker = desks->lookupAgent(walkerId).entity;
+			require(walker->getGlobalPosition() == stationary && walker->getLocalDepth() == 5
+				&& desks->furniture().front().marker == deskSeat, "Depth history changed stationary position/depth/identity");
+		}
+		require(deleteSelectedFurniture(desks, deskId, diagnostic, deskHistory), diagnostic);
+		require(deskHistory.undo(captureDocumentSnapshot(desks, deskHistory), restoreDesk), "Stationary deletion undo failed");
+		require(deskHistory.redo(captureDocumentSnapshot(desks, deskHistory), restoreDesk), "Stationary deletion redo failed");
+		walker = desks->lookupAgent(walkerId).entity;
+		require(walker->getGlobalPosition() == stationary && walker->getLocalDepth() == 5
+			&& !desks->lookupMarker(deskSeat), "Deletion history changed retained stationary history");
 		ImGui::GetIO().DisplaySize = {800, 600}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture actions");
 		renderFurniturePanel(world, path, world->getSector(room));

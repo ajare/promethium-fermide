@@ -572,7 +572,8 @@ namespace core
 		// Version 42 retains detached original wall ends after Airlock edits.
 		// Version 45 adds Furniture instance Local depth.
 		// Version 46 pairs authored Agent positions with retained Local depth.
-		serializer.writeUint32("version", 46);
+		// Version 47 preserves authored Path destination identity through edits.
+		serializer.writeUint32("version", 47);
 		serializer.writeUint64("nextFurnitureId", mNextFurnitureId);
 		if (mFurnitureCatalogue)
 		{
@@ -720,14 +721,24 @@ namespace core
 			auto const resetDepth = agent->mResetPosition.sector()
 				? agent->mResetLocalDepth : agent->mLocalDepth;
 			if (resetDepth != 0) serializer.writeInt32("localDepth", resetDepth);
-			if (agent->mResetPath && !agent->mResetPath->nodes.empty())
+			shared_ptr<const Vertex> destination;
+			if (agent->mResetDestinationMarker)
 			{
-				auto const& destination = agent->mResetPath->nodes.back().targetVertex;
-				if (!destination || !destination->getSector())
+				for (auto const& vertex : mGraph->getVertices())
+					if (auto marker = dynamic_pointer_cast<Marker>(vertex->getObject());
+						marker && marker->getId() == agent->mResetDestinationMarker) { destination = vertex; break; }
+			}
+			else if (agent->mResetPath && !agent->mResetPath->nodes.empty())
+				destination = agent->mResetPath->nodes.back().targetVertex;
+			if (destination)
+			{
+				if (!destination->getSector())
 				{
 					throw SerializationException("Cannot serialize an Agent path without a destination Sector");
 				}
 				serializer.beginMap("path");
+				if (agent->mResetDestinationMarker)
+					serializer.writeUint64("destinationMarker", agent->mResetDestinationMarker.value);
 				serializer.writeUint32("destinationSector", destination->getSector()->getIndex());
 				serializer.writeFloat("destinationLocalX", destination->getSectorOffset().x);
 				serializer.writeFloat("destinationLocalY", destination->getSectorOffset().y);
@@ -1251,7 +1262,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 46)
+		if (version < 1 || version > 47)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2088,6 +2099,13 @@ namespace core
 				destinationLocalX = serializer.readFloat("destinationLocalX");
 				destinationLocalY = serializer.readFloat("destinationLocalY");
 				pathActive = serializer.readBool("active");
+				if (serializer.hasField("destinationMarker"))
+				{
+					if (version < 47) throw SerializationException("Path Marker identity requires World schema 47 or later");
+					agent->mResetDestinationMarker = MarkerId{ serializer.readUint64("destinationMarker") };
+					if (!agent->mResetDestinationMarker)
+						throw SerializationException("Path destination Marker identity cannot be zero");
+				}
 				serializer.endMap();
 			}
 			serializer.endMap();
@@ -2204,8 +2222,14 @@ namespace core
 					auto const& destinationSector = mSectors[*entry.destinationSectorIndex];
 					auto destinationPosition = destinationSector->getPosition()
 						+ Vector2{ entry.destinationLocalX, entry.destinationLocalY };
-					auto destination = mGraph->getClosestVertexInSector(
-						destinationSector.get(), destinationPosition);
+					shared_ptr<const Vertex> destination;
+					if (rawAgent->mResetDestinationMarker)
+					{
+						for (auto const& vertex : mGraph->getVertices())
+							if (auto marker = dynamic_pointer_cast<Marker>(vertex->getObject());
+								marker && marker->getId() == rawAgent->mResetDestinationMarker) { destination = vertex; break; }
+					}
+					else destination = mGraph->getClosestVertexInSector(destinationSector.get(), destinationPosition);
 					// The document persists destination intent, not an authoritative route
 					// or perceived total. In particular, do not search while tag-supplied
 					// routing properties are still unavailable (#221).
@@ -2297,6 +2321,8 @@ namespace core
 			route.agent->assignPath(std::move(route.path), route.active, false);
 			route.agent->mResetPath = route.agent->mPath.path;
 			route.agent->mResetPathActive = route.active;
+			if (auto marker = dynamic_pointer_cast<Marker>(route.agent->mResetPath->nodes.back().targetVertex->getObject()))
+				route.agent->mResetDestinationMarker = marker->getId();
 		}
 		mPendingRestoredPathIntents.clear();
 	}
@@ -2383,6 +2409,8 @@ namespace core
 		bool preserveBehaviourRuntime)
 	{
 		invalidateSimulationSnapshot();
+		if (preserveBehaviourRuntime)
+			mSimulationCoordinator.cancelAllTraversalForTopologyRebuild();
 		if (!preserveBehaviourRuntime)
 		{
 			mAgentBehaviourRuntime->teardownAll(*this,
@@ -2884,7 +2912,11 @@ namespace core
 				agent->mRoutePersistenceSample,
 				agent->mRuntimeDirectGrantAdditions, agent->mRuntimeDirectGrantRemovals,
 				agent->mRuntimePermissionSetAdditions, agent->mRuntimePermissionSetRemovals,
-				agent->mEscalatorTraversalSequence, agent->mRouteJourneySequence, agent->getLocalDepth() });
+				agent->mEscalatorTraversalSequence, agent->mRouteJourneySequence, agent->getLocalDepth(),
+				agent->mResetPosition.sector() ? agent->mResetPosition.global() : agent->getGlobalPosition(),
+				agent->mResetPosition.sector() ? agent->mResetPosition.sector()->getLayerIndex() : sector->getLayerIndex(),
+				agent->mResetPosition.sector() ? agent->mResetLocalDepth : agent->getLocalDepth(),
+				agent->mResetDestinationMarker, agent->mResetPathActive });
 		}
 		return carried;
 	}
@@ -2977,6 +3009,15 @@ namespace core
 			// Escalator and route-journey draws stay on the uninterrupted run's
 			// stream, exactly like the route-planning stream above (#328).
 			raw->mLocalDepth = saved.localDepth;
+			auto resetSector = saved.resetLayer < mLayers.size()
+				? getSectorAtPosition(saved.resetLayer, saved.resetPosition.x, saved.resetPosition.y) : nullptr;
+			if (resetSector)
+			{
+				raw->mResetPosition = SectorPosition(resetSector.get(), saved.resetPosition - resetSector->getPosition());
+				raw->mResetLocalDepth = saved.resetDepth;
+			}
+			raw->mResetDestinationMarker = saved.resetDestinationMarker;
+			raw->mResetPathActive = saved.resetPathActive;
 			raw->mEscalatorTraversalSequence = saved.escalatorTraversalSequence;
 			raw->mRouteJourneySequence = saved.routeJourneySequence;
 			if (saved.behaviourAssignment)
@@ -3543,6 +3584,13 @@ namespace core
 			if (carried.sectorIndex < impact.sectorRemoved.size()
 				&& impact.sectorRemoved[carried.sectorIndex]) continue;
 			if (carried.layer > plan.layerIndex) carried.layer -= 1;
+			if (carried.resetLayer > plan.layerIndex) carried.resetLayer -= 1;
+			else if (carried.resetLayer == plan.layerIndex)
+			{
+				carried.resetLayer = carried.layer;
+				carried.resetPosition = carried.position;
+				carried.resetDepth = carried.localDepth;
+			}
 			agents.push_back(carried);
 		}
 

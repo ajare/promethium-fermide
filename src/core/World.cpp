@@ -8142,6 +8142,7 @@ namespace core
 			candidate->build();
 			candidate->validate();
 			validateTraversalTopology(*candidate);
+			mSimulationCoordinator.cancelAllTraversalForTopologyRebuild();
 			mGraph = std::move(candidate);
 			mTopologyDirty = false;
 			mTopologyValid = true;

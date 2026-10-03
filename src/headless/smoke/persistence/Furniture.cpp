@@ -18,6 +18,65 @@ namespace persistence
 		demo->advanceTicks(600);
 		require(std::abs(demo->getSimulationSnapshot().agents.front().globalPosition.x - 2.75f) < 0.01f, "Demo Agent cannot reach chair");
 		auto root = context.temporaryRoot();
+		// Coincident destinations must restore by Marker identity, not nearest
+		// coordinates. Replay preserves authored origin/depth independently of
+		// the underway physical position and of the moved destination.
+		{
+			auto path = root / "movement.furniture.yaml";
+			std::filesystem::copy_file(context.fixture("resources/test-worlds/desk.furniture.yaml"), path);
+			core::World movement("Movement documents", 14, 2);
+			auto sector = movement.addRoom("Room", 0, 0, 0, 14, 1);
+			movement.attachFurnitureCatalogue("movement.furniture.yaml", core::FurnitureCatalogue::load(path));
+			auto first = movement.placeFurniture(sector, "desk", 2, 0, "First", 2);
+			auto second = movement.placeFurniture(sector, "desk", 2, 0, "Second", 6);
+			auto target = movement.furniture().back().marker;
+			movement.finishBuild();
+			auto id = movement.createAgent("Visitor", sector, 0, 0.5f);
+			auto visitor = movement.lookupAgent(id).entity;
+			auto findTarget = [&]() {
+				for (auto const& vertex : movement.getGraph()->getVertices())
+					if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+						marker && marker->getId() == target) return vertex;
+				return std::shared_ptr<const core::Vertex>{};
+			};
+			visitor->setPath(movement.getGraph()->calculatePath(visitor, findTarget()), true);
+			movement.advanceTicks(10);
+			auto physical = visitor->getGlobalPosition();
+			movement.pauseSimulation();
+			std::string diagnostic;
+			require(movement.editFurniture(first, 2, 0, "Unrelated", &diagnostic), diagnostic);
+			visitor = movement.lookupAgent(id).entity;
+			require(visitor->getGlobalPosition() == physical, "Replay teleported underway Agent");
+			for (auto extension : { "world.yaml", "world" })
+			{
+				auto filename = root / (std::string("movement.") + extension);
+				movement.saveTo(filename.string());
+				auto loaded = core::loadWorldDocument(filename);
+				auto restored = loaded->lookupAgent(id).entity;
+				require(restored->getGlobalPosition().x == 0.5f && restored->getLocalDepth() == 0
+					&& restored->getPath(), "Replay/save lost authored origin, depth or Path");
+				auto marker = std::dynamic_pointer_cast<core::Marker>(restored->getPath()->nodes.back().targetVertex->getObject());
+				require(marker && marker->getId() == target, "Coincident restored Path changed destination identity");
+				loaded->advanceTicks(2000);
+				require(restored->getGlobalPosition().x == 2.75f && restored->getLocalDepth() == 6,
+					"Restored Path reached the wrong coincident Furniture depth");
+				loaded->resetSimulation(); restored = loaded->lookupAgent(id).entity;
+				marker = std::dynamic_pointer_cast<core::Marker>(restored->getPath()->nodes.back().targetVertex->getObject());
+				require(marker && marker->getId() == target, "Reset changed coincident destination identity");
+			}
+			require(movement.editFurniture(second, 7, 0, "Moved target", &diagnostic, 8), diagnostic);
+			for (auto extension : { "world.yaml", "world" })
+			{
+				auto filename = root / (std::string("moved.") + extension);
+				movement.saveTo(filename.string());
+				auto loaded = core::loadWorldDocument(filename);
+				auto restored = loaded->lookupAgent(id).entity;
+				require(restored->getGlobalPosition().x == 0.5f && restored->getPath(), "Moved saved Path lost origin/intent");
+				loaded->advanceTicks(2000);
+				require(restored->getGlobalPosition().x == 7.75f && restored->getLocalDepth() == 8,
+					"Saved Marker intent did not follow moved Furniture");
+			}
+		}
 		auto cataloguePath = root / "chair.furniture.yaml";
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
 		auto world = std::make_shared<core::World>("Chair document", 8, 2);

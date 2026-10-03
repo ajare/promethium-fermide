@@ -1,4 +1,4 @@
-# Catalogue-backed Furniture (#348–#357)
+# Catalogue-backed Furniture (#348–#358)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
@@ -273,11 +273,42 @@ primary improvements, inferred departures, runtime entry and stationary context,
 access/control refusal, forbidden and last-resort Mobility, remote device state,
 valid-Path persistence and repeated-run determinism use production seams.
 
+## Movement through topology edits (#358)
+
+Furniture movement, Local-depth edits and deletion preserve an Agent's physical
+position and incoming depth, including stationary Agents and deeper side-route
+walkers. A moved usable Marker keeps its identity; an idle Agent does not acquire
+new intent merely because that Marker moved. Ongoing destination intent follows
+its new position through normal Route planning, with ordinary Route loss if the
+destination disappears or no feasible replacement exists.
+
+Pause captures the remaining Path as pointer-free vertex/edge descriptions.
+Graph replacement rebinds an unchanged suffix by authored identity, geometry,
+edge kind and depth; it never transfers a private coincident front/back vertex
+to a different route. Rebound Paths are evaluated at planning expiry using normal
+feasibility and Route persistence. Invalid suffixes bypass persistence. Neither
+rebuilding nor planning completion changes physical position or retained depth;
+the next edge acquires depth only when traversal begins. Continuous walking
+resumes without retreating to its source, and zero-length depth boundaries and
+Sector-entry depth resets retain their existing semantics. Repeated paused edits
+preserve the planning interval and never leave retired graph references in a
+planning suffix.
+
+World schema 47 adds stable `destinationMarker` identity to saved authored Paths.
+This disambiguates coincident Furniture destinations and follows moved points
+without changing the authored-position/depth save/reset contract into a runtime
+checkpoint. Structural replay carries that authored origin and intent separately
+from the ongoing physical position. Schema 46 and earlier Paths still use their
+legacy positional restoration. YAML, binary and editor history use the same
+restoration seam. Referenced deletion and supporting-floor removal retain their
+existing preflight/no-mutation contracts.
+
 ## Headless checks
 
 - `pf-smoke-routing --check furniture/depthContinuity`
 - `pf-smoke-routing --check furniture/sectorDepthContinuity`
 - `pf-smoke-simulation --check furniture/retainedDepth`
+- `pf-smoke-simulation --check furniture/topologyEdits`
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
 - `pf-smoke-world --check furniture/deskRoutes`
@@ -357,3 +388,14 @@ skipped. Focused composition Paths, affected modules and CLI contracts, editor
 history, movement/removal permutations, repeated builds, construction replay,
 and YAML/binary round trips passed. `git diff --check` passed. Windows validation
 is not claimed.
+
+## #358 validation
+
+Final incremental default builds and complete CTest inventories passed in Linux
+GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
+(82 tests each), using the same four build trees and parallelism 4. Displays were
+unset and the optional vendored GUI capability test was explicitly skipped.
+Focused topology-edit, coincident attachment/rebinding, planning, Route loss,
+authored YAML/binary restoration, editor history and render-command checks passed,
+as did affected-module/CLI contracts and the ownership audit. `git diff --check`
+passed. Windows validation is not claimed.

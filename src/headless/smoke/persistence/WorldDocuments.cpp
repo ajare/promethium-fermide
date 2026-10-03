@@ -64,7 +64,7 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 46") != std::string::npos
+		require(yaml.find("version: 47") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -130,7 +130,12 @@ namespace persistence
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 46", "version: 14");
+		replaceAll("version: 47", "version: 14");
+		if (auto field = legacyYaml.find("destinationMarker:"); field != std::string::npos)
+		{
+			auto begin = legacyYaml.rfind('\n', field) + 1;
+			legacyYaml.erase(begin, legacyYaml.find('\n', field) - begin + 1);
+		}
 		replaceAll("levelsHigh", "decksHigh");
 		replaceAll("levelIndex", "deckIndex");
 		replaceAll("topLevelHeight", "topDeckHeight");

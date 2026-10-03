@@ -564,6 +564,7 @@ namespace core
 		agent->mResetPosition = agent->mPosition;
 		agent->mResetLocalDepth = agent->mLocalDepth;
 		agent->mResetPath.reset();
+		agent->mResetDestinationMarker = {};
 		agent->mResetPathActive = false;
 		releaseTraversalOwnership(id);
 
@@ -596,11 +597,18 @@ namespace core
 			}
 			if (agent->mState != Agent::State::RoutePlanning) continue;
 			if (goal.voluntaryPlanningStartedTick == mWorld.getSimulationTick()) continue;
-			// Invalidity permanently upgrades this episode without sampling again.
+			// Ordinary voluntary episodes keep their permanent invalidation rule.
+			// A topology-rebound suffix, however, is evaluated at expiry only.
+			if (goal.retainedPath && (!goal.fallbackIntent || goal.fallbackIntent->retainedNodes.empty())
+				&& !pathing::comparePathSuffixCosts(*agent, *mWorld.mGraph,
+					*goal.retainedPath, goal.retainedFromNode, *goal.retainedPath, goal.retainedFromNode))
+				goal.retainedPath.reset();
+			if (--agent->mRoutePlanningRemainingTicks != 0) continue;
+			// Validate retained topology only when the episode expires: rebinding
+			// is not an early route decision or a new planning interval.
 			if (goal.retainedPath && !pathing::comparePathSuffixCosts(*agent, *mWorld.mGraph,
 				*goal.retainedPath, goal.retainedFromNode, *goal.retainedPath, goal.retainedFromNode))
 				goal.retainedPath.reset();
-			if (--agent->mRoutePlanningRemainingTicks != 0) continue;
 			agent->clearRuntimePath();
 			shared_ptr<const Vertex> target;
 			for (auto const& sector : mWorld.mSectors)
@@ -645,6 +653,10 @@ namespace core
 					auto retained = std::move(goal.retainedPath);
 					agent->assignPath(std::move(retained), goal.startPathing, false);
 					agent->mPath.targetNode = goal.retainedFromNode;
+					if (goal.startPathing && goal.fallbackIntent
+						&& (goal.fallbackIntent->resumeLocalTraversal || goal.fallbackIntent->resumeContinuousTraversal)
+						&& agent->mPath.targetNode + 1 < agent->mPath.path->nodes.size())
+						agent->mState = Agent::State::WaitingForTraversal;
 					continue;
 				}
 			}

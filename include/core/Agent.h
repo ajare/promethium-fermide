@@ -349,6 +349,7 @@ namespace core
 		int mResetLocalDepth{ 0 };
 		std::shared_ptr<Path> mResetPath;
 		bool mResetPathActive{ false };
+		MarkerId mResetDestinationMarker{};
 
 		uint32_t mFlags;
 
