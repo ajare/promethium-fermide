@@ -131,6 +131,18 @@ set(core_names
     airlocks/localQueueObservations
     airlocks/exitSideReadmission
     airlocks/pauseResetAndPersistence
+    securityScanners/editSafety
+    securityScanners/committedInterruptions
+    securityScanners/admissionAuthorizationChanges
+    securityScanners/localRouteObservations
+    securityScanners/automaticJourneys
+    securityScanners/configuration
+    securityScanners/contentionAndReuse
+    securityScanners/abandonedAdmission
+    securityScanners/defensiveOccupancy
+    securityScanners/presenceAndEmptyTimeout
+    securityScanners/resetAndLoad
+    securityScanners/destinationAndMobilityGates
     boothWindows/runtimeTimingAndReversal
     boothWindows/runtimeLifecycle
     boothWindows/typedInteractionActivation

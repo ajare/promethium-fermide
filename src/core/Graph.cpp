@@ -30,6 +30,7 @@
 // Edges
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/WindowEdge.h"
 #include "core/DoorEdge.h"
 #include "core/ForceBridgeEdge.h"
@@ -428,7 +429,9 @@ namespace core
 			// between the two endpoints, but must never create a Sector-edge bypass.
 			if (vertices[i]->getSector() != vertices[j]->getSector()
 				&& (vertices[i]->getSector()->getType() == SectorType::Airlock
-					|| vertices[j]->getSector()->getType() == SectorType::Airlock)) continue;
+					|| vertices[j]->getSector()->getType() == SectorType::Airlock
+					|| vertices[i]->getSector()->getType() == SectorType::SecurityScanner
+					|| vertices[j]->getSector()->getType() == SectorType::SecurityScanner)) continue;
 
 			// Create Edge between i & j
 			if (vertexType0 == VertexType::Location && vertexType1 == VertexType::Location)
@@ -448,7 +451,7 @@ namespace core
 					addEdge(make_shared<GapEdge>(), vertices[i], vertices[j], connectZ);
 				}
 				else if (vertexSubType0 == VertexSubType::BulkheadDoor && vertexSubType1 == VertexSubType::BulkheadDoor
-					&& !static_pointer_cast<BulkheadDoorVertex>(vertices[i])->getBulkheadDoor()->isAirlockOwned())
+					&& !static_pointer_cast<BulkheadDoorVertex>(vertices[i])->getBulkheadDoor()->isChamberOwned())
 				{
 					auto bulkheadVertex = dynamic_pointer_cast<BulkheadDoorVertex>(vertices[i]);
 					auto bulkheadDoor = bulkheadVertex->getBulkheadDoor();
@@ -698,6 +701,11 @@ namespace core
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), chamber), verts[0], verts[1], false);
 		else if (auto rightChamber = dynamic_pointer_cast<AirlockTransit>(obj.adjacent[1]); rightChamber)
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), rightChamber), verts[0], verts[1], false);
+
+		if (auto scanner = dynamic_pointer_cast<SecurityScannerTransit>(obj.adjacent[0]); scanner)
+			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scanner), verts[0], verts[1], false);
+		else if (auto scannerRight = dynamic_pointer_cast<SecurityScannerTransit>(obj.adjacent[1]); scannerRight)
+			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scannerRight), verts[0], verts[1], false);
 
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_LEFT]);
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_RIGHT]);

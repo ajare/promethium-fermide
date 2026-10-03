@@ -52,6 +52,7 @@ namespace core
 		// The coordinator owns no entities; it drives the registries below and
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
+		friend struct WorldAgentRestorationTestAccess;
 
 	public:
 
@@ -357,9 +358,11 @@ namespace core
 			[[nodiscard]] bool requiresConfirmation() const { return !consequences.empty(); }
 		};
 
+		// Both stationary chamber types share validated construction replay.
 		struct AirlockEditPlan
 		{
 			bool valid = false, remove = false;
+			bool scanner = false, leftToRight = true;
 			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
 			std::string diagnostic;
 		};
@@ -843,6 +846,7 @@ namespace core
 			// (ADR 0003).
 			Facade,
 			Airlock,
+			SecurityScanner,
 			BoothWindow
 		};
 
@@ -862,6 +866,7 @@ namespace core
 			uint32_t a{ 0 }, b{ 0 }, c{ 0 }, d{ 0 }, e{ 0 }, f{ 0 }, g{ 0 }, h{ 0 };
 			int32_t i{ 0 }, j{ 0 };
 			float x{ 0.0f }, y{ 0.0f }, z{ 0.0f };
+			float scannerSensorDistance{ 0.5f };
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
 			// Door: the activation mode the Door had before the editor's Buttons
@@ -1737,6 +1742,18 @@ namespace core
 		bool canAgentEnterAirlock(TraversalResourceId resource, SectorId approach,
 			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		bool isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		using SecurityScannerEditPlan = AirlockEditPlan;
+		SecurityScannerEditPlan planResizeSecurityScanner(uint32_t sectorIndex, uint32_t x,
+			uint32_t y, uint32_t width, bool leftToRight) const;
+		SecurityScannerEditPlan planRemoveSecurityScanner(uint32_t sectorIndex) const;
+		uint32_t applySecurityScannerEdit(SecurityScannerEditPlan const& plan);
+		bool setSecurityScannerConfiguration(uint32_t sectorIndex, float sensorDistance,
+			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
+		bool canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			std::string* diagnostic = nullptr) const;
+		uint32_t addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			bool leftToRight = true);
 
 		CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options);
 

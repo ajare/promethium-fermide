@@ -35,6 +35,7 @@ namespace render_smoke
 
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAirlocks(std::vector<smoke::Check>& checks);
+	void registerSecurityScanners(std::vector<smoke::Check>& checks);
 	void registerSerializationRendering(std::vector<smoke::Check>& checks);
 	void registerDrawOrder(std::vector<smoke::Check>& checks);
 	void registerDoorOpenApart(std::vector<smoke::Check>& checks);

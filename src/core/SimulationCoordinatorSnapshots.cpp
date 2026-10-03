@@ -8,6 +8,7 @@
 #include "core/BulkheadDoor.h"
 #include "core/World.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/Coordination.h"
 #include "core/ExtensibleObject.h"
 #include "core/OpenableObject.h"
@@ -573,6 +574,31 @@ namespace core
 					for (auto owner : resource->mCrossingOwners) if (owner) state.crossings.push_back(owner);
 				}
 				result.airlocks.push_back(std::move(state));
+			}
+		for (auto const& sector : mWorld.mSectors)
+			if (auto chamber = std::dynamic_pointer_cast<const SecurityScannerTransit>(sector))
+			{
+				SecurityScannerSnapshot state;
+				state.sector = SectorId{ (uint64_t)sector->getIndex() + 1 };
+				state.leftToRight = chamber->isLeftToRight();
+				state.phase = chamber->getPhaseName();
+				state.remainingSeconds = chamber->getRemainingSeconds();
+				state.scanProgress = chamber->getScanProgress();
+				state.occupant = chamber->getOccupant();
+				for (int side = 0; side < 2; ++side)
+					switch (chamber->getDoor(side)->getState())
+					{
+					case OpenableObject::State::Closed: state.doors[side] = DoorSnapshotState::Closed; break;
+					case OpenableObject::State::Opening: state.doors[side] = DoorSnapshotState::Opening; break;
+					case OpenableObject::State::Open: state.doors[side] = DoorSnapshotState::Open; break;
+					case OpenableObject::State::Closing: state.doors[side] = DoorSnapshotState::Closing; break;
+					}
+				if (auto resource = mWorld.mTraversalResources.find(chamber->getTraversalResourceId()))
+				{
+					for (auto owner : resource->mAdmissionReservations) if (owner) state.reservations.push_back(owner);
+					for (auto owner : resource->mCrossingOwners) if (owner) state.crossings.push_back(owner);
+				}
+				result.securityScanners.push_back(std::move(state));
 			}
 		for (auto const& [id, agent] : mWorld.mAgents.entries())
 		{

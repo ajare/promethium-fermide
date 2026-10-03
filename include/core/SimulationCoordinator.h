@@ -41,6 +41,8 @@ namespace core
 	public:
 
 		void advanceAirlocks();
+		void advanceSecurityScanners();
+		void allocateSecurityScannerTraversal(TraversalRequestId request, TraversalResource& resource);
 		void allocateAirlockTraversal(TraversalRequestId request, TraversalResource& resource);
 		bool acceptAirlockCommand(DeviceCommand const& command);
 

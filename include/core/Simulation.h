@@ -293,6 +293,19 @@ namespace core
 		std::vector<TraversalRequestId> crossings;
 	};
 
+	struct SecurityScannerSnapshot
+	{
+		SectorId sector;
+		bool leftToRight{ true };
+		std::string phase;
+		float remainingSeconds{ 0 };
+		float scanProgress{ 0 };
+		std::array<DoorSnapshotState, 2> doors{};
+		AgentId occupant;
+		std::vector<TraversalRequestId> reservations;
+		std::vector<TraversalRequestId> crossings;
+	};
+
 	struct SimulationSnapshot
 	{
 		uint64_t tick{ 0 };
@@ -309,6 +322,7 @@ namespace core
 		std::vector<TraversalRequestSnapshot> traversalRequests;
 		std::vector<TraversalPermitSnapshot> traversalPermits;
 		std::vector<AirlockSnapshot> airlocks;
+		std::vector<SecurityScannerSnapshot> securityScanners;
 	};
 
 	// These phases are always entered in declaration order for each fixed tick.

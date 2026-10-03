@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/OccupantPacking.h"
@@ -7921,6 +7922,13 @@ namespace core
 		// Clearing authored route intent is not permission to discard a committed
 		// Airlock passenger. Runtime cancellation completes the opposite exit.
 		if (agent->getSector() && agent->getSector()->getType() == SectorType::Airlock) return false;
+		if (agent->getSector() && agent->getSector()->getType() == SectorType::SecurityScanner)
+		{
+			mSimulationCoordinator.cancelAgentMovement(id, false);
+			agent->clearPath();
+			modify();
+			return true;
+		}
 		mSimulationCoordinator.clearAgentMovementForBehaviourEdit(id);
 		agent->clearPath();
 		modify();
@@ -7966,7 +7974,7 @@ namespace core
 			require(resource != nullptr, format("Edge {} references removed traversal resource {}",
 				edge->getId(), id.value));
 			bool compatible = edge->getType() == EdgeType::Door || edge->getType() == EdgeType::BulkheadDoor
-				? resource->mDoor != nullptr || resource->mAirlock != nullptr
+				? resource->mDoor != nullptr || resource->mAirlock != nullptr || resource->mSecurityScanner != nullptr
 				: edge->getType() == EdgeType::Window ? resource->mWindow != nullptr
 				: edge->getType() == EdgeType::ForceBridge ? resource->mForceBridge != nullptr
 				: edge->getType() == EdgeType::Ladder || edge->getType() == EdgeType::LadderMount
@@ -8412,8 +8420,10 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
-		if (sector.getType() == SectorType::Airlock)
-			throw invalid_argument("Agents must enter Airlock chambers through coordinated traversal");
+		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::SecurityScanner)
+			throw invalid_argument(sector.getType() == SectorType::SecurityScanner
+				? "Agents cannot be placed inside authored Security scanners"
+				: "Agents must enter Airlock chambers through coordinated traversal");
 		if (canAgentAccessLocation(sector, agent)) return;
 		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
 		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());
@@ -12587,6 +12597,17 @@ namespace core
 		auto resource = mTraversalResources.find(resourceId);
 		if (!resource) return 0.0f;
 
+		if (resource->mSecurityScanner)
+		{
+			// Only the entry approach queue is observable: neither occupancy,
+			// reservations nor a remote live phase are route-planning knowledge.
+			size_t ahead = 0;
+			for (auto const& lane : resource->mQueueLanes)
+				if (lane.sector == sourceSector) ahead += lane.queue.size();
+			auto const& chamber = *resource->mSecurityScanner;
+			return static_cast<float>(ahead) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+				+ chamber.getPreDelaySeconds() + chamber.getScanSeconds() + chamber.getPostPauseSeconds());
+		}
 		if (resource->mAirlock)
 		{
 			// Only this approach's queue is locally observable. Opposing demand

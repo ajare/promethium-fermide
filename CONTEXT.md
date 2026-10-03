@@ -38,7 +38,7 @@ A location whose perimeter walls are all open. It is occupiable, hosts every obj
 A non-occupiable Sector that exists only to be seen through Windows and other apertures from the Layer in front. It carries one opaque colour, hosts no objects, owns no walkable floor, and takes no part in traversal. Where a Window looks into a sector, that sector is its Background - no separate domain noun is minted for it.
 
 **Transit**:
-A static sector that connects Locations through one or more Stops, such as a lift shaft, shuttle route, ladder, stairwell, or Airlock. Its landing Locations are on the Layer immediately in front, except for an Airlock, which connects Locations on its own Layer; within a lift or shuttle Transit, an Agent may also occupy a specific Transport vehicle or Carriage.
+A static sector that connects Locations through one or more Stops, such as a lift shaft, shuttle route, ladder, stairwell, or Airlock. Its landing Locations are on the Layer immediately in front, except for an Airlock or Security scanner, which connects Locations on its own Layer; within a lift or shuttle Transit, an Agent may also occupy a specific Transport vehicle or Carriage.
 
 **Stairwell**:
 A compact stair transit that may connect several consecutive levels using alternating flights.
@@ -161,6 +161,10 @@ _Avoid_: Door, when the same-Layer distinction matters
 **Airlock**:
 A stationary, capacity-limited Sector connecting Rooms or Corridors on the same Layer through two interlocked Bulkhead Doors, at least one of which remains fully closed. Its chamber holds one Agent per cell of horizontal length, and each admitted batch exits opposite its entry side after a closed-door cycle.
 _Avoid_: Transport vehicle, paired ordinary Bulkhead Doors
+
+**Security scanner**:
+A directional, capacity-one stationary chamber between Rooms or Corridors on the same Layer, bounded by two interlocked Bulkhead Doors. Its entry and exit sides are fixed independently of its horizontal length.
+_Avoid_: Airlock, paired ordinary Bulkhead Doors
 
 **Airlock cycle**:
 The waiting interval that begins when both Airlock Bulkhead Doors are fully closed and must complete before either may open.

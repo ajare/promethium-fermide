@@ -26,12 +26,12 @@ namespace core
 	uint32_t Door::getCellsWide() const { return mCellsWide; }
 	void Door::setHeight(Height height)
 	{
-		if (mAirlockOwned) return;
+		if (isChamberOwned()) return;
 		mHeight = height;
 		setSize({ getSize().x, height == Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT });
 	}
 	Door::OpenStyle Door::getOpenStyle() const { return mOpenStyle; }
-	void Door::setOpenStyle(OpenStyle style) { if (!mAirlockOwned) mOpenStyle = style; }
+	void Door::setOpenStyle(OpenStyle style) { if (!isChamberOwned()) mOpenStyle = style; }
 
 	std::shared_ptr<const Sector> Door::getSector(uint32_t pairSide) const
 	{
@@ -54,7 +54,7 @@ namespace core
 	void Door::configureTraversal(DoorActivationMode mode, TraversalResourceId resource,
 		float holdOpenTime)
 	{
-		if (mAirlockOwned) return;
+		if (isChamberOwned()) return;
 		mActivationMode = mode;
 		mTraversalResource = resource;
 		mHoldOpenTime = std::max(0.0f, holdOpenTime);
@@ -79,19 +79,19 @@ namespace core
 		return agent ? agent->rememberedDeviceCondition(mTraversalResource) : std::nullopt;
 	}
 
-	bool Door::open() { return !mAirlockOwned && !mBroken && OpenableObject::open(); }
-	bool Door::close() { return !mAirlockOwned && !mBroken && OpenableObject::close(); }
+	bool Door::open() { return !isChamberOwned() && !mBroken && OpenableObject::open(); }
+	bool Door::close() { return !isChamberOwned() && !mBroken && OpenableObject::close(); }
 
 	bool Door::requestOpen()
 	{
-		if (mAirlockOwned || mBroken) return false;
+		if (isChamberOwned() || mBroken) return false;
 		if (isOpen() || isOpening()) return true;
 		return open();
 	}
 
 	bool Door::requestClose()
 	{
-		if (mAirlockOwned || mBroken || mOpenLeaseCount != 0 || mObstructed) return false;
+		if (isChamberOwned() || mBroken || mOpenLeaseCount != 0 || mObstructed) return false;
 		if (isClosed() || isClosing()) return true;
 		return close();
 	}
@@ -100,7 +100,7 @@ namespace core
 	{
 		// Airlock Doors are shared by two Sector object lists. Only their
 		// coordinator advances them, exactly once per simulated tick.
-		if (!mAirlockOwned) advanceCoordinatedMotion(frameTime);
+		if (!isChamberOwned()) advanceCoordinatedMotion(frameTime);
 	}
 
 	void Door::advanceCoordinatedMotion(float frameTime)

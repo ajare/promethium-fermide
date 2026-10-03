@@ -33,6 +33,8 @@ set(names
     carriageDoors
     carriageImages
     airlocks/chamberAndControls
+    securityScanners/chamberCommandStream
+    securityScanners/beamSweeps
     boothWindows/staticPresentationAndNestedClipping
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations

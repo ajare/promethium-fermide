@@ -163,6 +163,8 @@ set(editor_names
     routing/historyAndClipboard
     airlocks/structuralHistory
     airlocks/editorCommands
+    securityScanners/editorCommandsAndHistory
+    securityScanners/structuralHistory
     boothWindows/historyAndClipboard
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation

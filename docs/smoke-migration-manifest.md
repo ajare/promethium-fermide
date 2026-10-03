@@ -217,6 +217,7 @@ because they do not own smoke-check execution.
 | `smoke/render/BrokenExtensibles.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/simulation/BrokenExtensibles.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Airlocks.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/SecurityScanners.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/BoothWindows.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/world/BoothWindows.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/Airlocks.cpp` | module-owned | `pf-smoke-world` |
@@ -226,6 +227,10 @@ because they do not own smoke-check execution.
 | `smoke/render/Airlocks.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/BoothWindows.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/editor/Airlocks.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/world/SecurityScanners.cpp` | module-owned | `pf-smoke-world` |
+| `smoke/persistence/SecurityScanners.cpp` | module-owned | `pf-smoke-persistence` |
+| `smoke/render/SecurityScanners.cpp` | module-owned | `pf-smoke-render` |
+| `smoke/editor/SecurityScanners.cpp` | module-owned | `pf-smoke-editor` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

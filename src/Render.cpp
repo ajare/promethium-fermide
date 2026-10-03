@@ -15,6 +15,7 @@
 #include "core/Facade.h"
 #include "core/World.h"
 #include "core/AirlockTransit.h"
+#include "core/SecurityScannerTransit.h"
 #include "core/Location.h"
 #include "core/LadderTransit.h"
 #include "core/LiftTransit.h"
@@ -1736,7 +1737,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		switch (sectorType)
 		{
 		case core::SectorType::Location: kind = static_pointer_cast<const core::Location>(sector)->isCorridor() ? "corridor" : "room"; break;
-		case core::SectorType::Airlock: kind = "corridor"; break;
+		case core::SectorType::Airlock:
+		case core::SectorType::SecurityScanner: kind = "corridor"; break;
 		case core::SectorType::Ladder: kind = "ladder"; break;
 		case core::SectorType::Lift: kind = "lift"; break;
 		// The rail corridor is static architecture; carriage images are rendered
@@ -1773,6 +1775,25 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Sector-specific
 	switch (sector->getType())
 	{
+	case core::SectorType::SecurityScanner:
+	{
+		if (isDrawnSolid(style))
+		{
+			auto chamber = static_pointer_cast<const core::SecurityScannerTransit>(sector);
+			float centreX = (bounds0.x + bounds1.x) * 0.5f;
+			float centreY = (bounds0.y + bounds1.y) * 0.5f;
+			float half = min((bounds1.x - bounds0.x) * 0.3f, 30.0f);
+			float direction = chamber->isLeftToRight() ? 1.0f : -1.0f;
+			ImVec2 tip{ centreX + direction * half, centreY };
+			drawList->AddLine({ centreX - direction * half, centreY }, tip, IM_COL32_WHITE, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
+			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, "Capacity: 1");
+			auto readout = std::format("{}: {:.1f} s", chamber->getPhaseName(), chamber->getRemainingSeconds());
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 20 }, IM_COL32_WHITE, readout.c_str());
+		}
+		break;
+	}
 	case core::SectorType::Airlock:
 	{
 		auto chamber = static_pointer_cast<const core::AirlockTransit>(sector);
@@ -1861,6 +1882,23 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// front; the wireframe overlay pass must not expose them.
 	if (shouldRenderSectorAgents(sector->getType(), style))
 		renderSectorAgents(sector, drawList);
+
+	// Scan overlays follow occupants, and share the production scan clock. The
+	// triangular wave is independent of the chamber's authored travel direction.
+	if (sector->getType() == core::SectorType::SecurityScanner && isDrawnSolid(style))
+	{
+		auto chamber = static_pointer_cast<const core::SecurityScannerTransit>(sector);
+		if (chamber->getPhase() == core::SecurityScannerPhase::Scanning)
+		{
+			float progress = chamber->getScanProgress();
+			float sweep = 1.0f - std::abs(2.0f * progress - 1.0f);
+			float x = bounds0.x + (bounds1.x - bounds0.x) * sweep;
+			float y = bounds1.y + (bounds0.y - bounds1.y) * sweep;
+			auto colour = IM_COL32(255, 0, 0, 128);
+			drawList->AddLine({ bounds0.x, y }, { bounds1.x, y }, colour, 4.0f);
+			drawList->AddLine({ x, bounds1.y }, { x, bounds0.y }, colour, 4.0f);
+		}
+	}
 
 	// Render ceiling
 	// A Background has no floor, ceiling or walls - its colour is the whole
