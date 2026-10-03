@@ -1170,6 +1170,7 @@ namespace core
 		if (authored && mWorld && pos.sector())
 			mWorld->validateAgentLocationPlacement(*pos.sector(), *this);
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
+		if (pos.sector() != mPosition.sector()) mLocalDepth = 0;
 		mPosition = pos;
 		if (authored)
 		{
@@ -1687,7 +1688,8 @@ namespace core
 				mTraversalTask->escalatorWalking = unit < getEffectiveEscalatorWalkingChance().value;
 			}
 			syncStandingRouteObservation();
-			mLocalDepth = mTraversalTask->edge->getLocalDepth();
+			if (mTraversalTask->destinationVertex->getSector().get() == getSector())
+				mLocalDepth = mTraversalTask->edge->getLocalDepth();
 			mState = State::TraversingEdge;
 		}
 	}

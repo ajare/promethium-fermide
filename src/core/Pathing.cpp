@@ -554,8 +554,11 @@ namespace core
 							duration = *current.duration + *cost->objectiveDurationSeconds;
 							if (!std::isfinite(*duration)) throw std::invalid_argument("Route duration is not finite");
 						}
-						auto const depth = (*arc.edge)->getLocalDepth();
-						auto const gap = std::abs(int64_t{ depth } - int64_t{ current.depth });
+						// Sector-local axes are unrelated. Crossing establishes a fresh
+						// baseline, not a depth movement from the source's last route.
+						auto const crossing = vertices[current.vertex]->getSector() != vertices[arc.targetSlot]->getSector();
+						auto const depth = crossing ? 0 : (*arc.edge)->getLocalDepth();
+						auto const gap = crossing ? int64_t{ 0 } : std::abs(int64_t{ depth } - int64_t{ current.depth });
 						offer({ arc.targetSlot, depth, total, current.change + static_cast<uint64_t>(gap),
 							duration, entry.label, arcIndex });
 					}

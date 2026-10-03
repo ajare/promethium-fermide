@@ -78,6 +78,7 @@ set(core_names
     uncertainRoutesSurviveWorldReset
     populationRouting
     furniture/depthContinuity
+    furniture/sectorDepthContinuity
     actualPositionChoosesManualAlternative
     walkingAndBulkhead
     observedQueue

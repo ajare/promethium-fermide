@@ -180,9 +180,30 @@ Perceived route costs and objective durations are unchanged. Private authored
 Furniture edges are never split as ordinary floor by inferred-source seeding:
 coincident front/back routes are not interchangeable floor attachments.
 
+## Cross-Sector depth continuity (#354)
+
+Each Sector has an independent Local-depth axis. A boundary traversal contributes
+no cross-axis numerical depth change and establishes arrival depth 0; subsequent
+edges in that Sector are compared against that fresh baseline. This applies on
+every entry, including repeated visits, same-Layer Location boundaries and
+adjacent-Layer thresholds. Total primary Perceived route cost still wins before
+the secondary depth objective. Runtime retains source context during boundary
+crossing and resets it when Sector entry commits; stationary/departure context
+then follows the destination's own routes. Local depth does not change Layer,
+threshold timing, visibility, Mobility, Access permissions, Route observations,
+or Route persistence.
+
+The cross-Sector headless check enumerates complete Paths independently and
+compares their primary cost and reset-baseline depth-change score. Room,
+Corridor and Facade journeys, three-Layer Door journeys, repeated visits, tiny
+primary improvements, inferred departures, runtime entry and stationary context,
+access/control refusal, forbidden and last-resort Mobility, remote device state,
+valid-Path persistence and repeated-run determinism use production seams.
+
 ## Headless checks
 
 - `pf-smoke-routing --check furniture/depthContinuity`
+- `pf-smoke-routing --check furniture/sectorDepthContinuity`
 - `pf-smoke-simulation --check furniture/retainedDepth`
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
@@ -228,3 +249,13 @@ simulation-selected routes after topology replay, affected modules and CLI
 contracts passed. The stationary render fixture explicitly uses its depth-2 seat
 branch instead of assuming an inferred source approach acquires that depth.
 `git diff --check` passed. Windows validation is not claimed.
+
+## #354 validation
+
+Final incremental default builds and complete CTest inventories passed in Linux
+GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
+(82 tests each), in the same four build trees listed above. Displays were unset;
+the optional vendored GUI capability test was explicitly skipped. Focused
+cross-Sector scenarios and affected Routing, Simulation, Permissions, Transports
+and Render modules/contracts passed. `git diff --check` passed. Windows
+validation is not claimed.
