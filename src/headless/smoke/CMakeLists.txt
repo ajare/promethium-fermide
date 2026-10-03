@@ -286,7 +286,7 @@ pf_add_smoke_module(pf-smoke-routing
         routing/RestoredPaths.cpp
         routing/IsolatedSectors.cpp
         routing/Mobility.cpp
-        routing/Workspace.cpp
+        routing/Workspace.cpp routing/DepthContinuity.cpp
         routing/ThresholdRouteCost.cpp
         routing/StairRouteCost.cpp
         routing/LiftRouteCost.cpp

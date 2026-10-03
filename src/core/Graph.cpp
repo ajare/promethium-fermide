@@ -392,6 +392,7 @@ namespace core
 			{
 				auto edge = make_shared<SectorEdge>();
 				edge->mLocalDepth = connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0;
+				edge->mFurnitureRoute = true;
 				addEdge(edge, authored.at(connection.from), authored.at(connection.to), false);
 			}
 			if (definition.sideRoutes)
@@ -1695,7 +1696,8 @@ namespace core
 			for (auto const& edge : vertex->getEdges())
 			{
 				auto const target = edge->getOtherVertex(vertex);
-				if (edge->getType() != EdgeType::Location || vertex->getSearchIndex() >= target->getSearchIndex()
+				if (edge->getType() != EdgeType::Location || edge->isFurnitureRoute()
+					|| vertex->getSearchIndex() >= target->getSearchIndex()
 					|| vertex->getSector() != target->getSector()) continue;
 				auto const a = vertex->getPosition(), b = target->getPosition();
 				mSourceRows[vertex->getSector().get()][a.y].intervals.push_back(

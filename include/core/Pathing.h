@@ -41,6 +41,7 @@ namespace core
 			size_t inputIndex;
 		};
 		std::vector<DirectedArc> directedArcs;
+		[[nodiscard]] bool hasLocalDepthRoutes() const { return mHasLocalDepthRoutes; }
 		void invalidateTopology();
 		[[nodiscard]] uint64_t getDirectedFactsBuildCount() const { return mDirectedFactsBuildCount; }
 		[[nodiscard]] size_t getScratchBytes() const;
@@ -95,6 +96,7 @@ namespace core
 		uint64_t mScratchAllocationCount{ 0 };
 		uint64_t mDirectedFactsBuildCount{ 0 };
 		bool mTopologyCaptured = false;
+		bool mHasLocalDepthRoutes = false;
 		Graph const* mGraph = nullptr; // Borrowed from the owner for this decision.
 		std::vector<size_t> mInputArcs;
 		std::vector<RouteTraversalInputs> mInputs;

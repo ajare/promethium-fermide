@@ -181,7 +181,10 @@ namespace
 				if (auto marker = std::dynamic_pointer_cast<core::MarkerSectorObject>(deskWorld->getSector(deskRoom)->getObject(i));
 					marker && marker->getMarker()->getId() == deskWorld->furniture().front().marker)
 					seat = deskWorld->getGraph()->getVertexForObject(marker);
-			agent->setPath(deskWorld->getGraph()->calculatePath(agent, seat), true);
+			// Rendering needs a known incoming edge, not an inferred-source
+			// approach directly to the nearest seat with no Graph edge to adopt.
+			auto seatApproach = seat->getEdges().front()->getOtherVertex(seat);
+			agent->setPath(deskWorld->getGraph()->calculatePath(agent, seatApproach, seat), true);
 			deskWorld->resumeSimulation();
 			for (int tick = 0; tick < 1200 && agent->getState() != core::Agent::State::Idle; ++tick) deskWorld->advanceTicks(1);
 			require(agent->getState() == core::Agent::State::Idle && agent->getGlobalPosition() == seat->getPosition()

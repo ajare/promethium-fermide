@@ -34,6 +34,7 @@ namespace core
 		auto const oldArcsCapacity = directedArcs.capacity();
 		routeOffsets.resize(graph.getVertices().size() + 1);
 		directedArcs.clear();
+		mHasLocalDepthRoutes = false;
 		auto const oldInputCapacity = mInputArcs.capacity();
 		mInputArcs.clear();
 		mInputArcs.reserve(graph.getEdges().size() * 2);
@@ -43,6 +44,7 @@ namespace core
 			routeOffsets[vertex->getSearchIndex()] = directedArcs.size();
 			for (auto const& edge : vertex->getEdges())
 			{
+				mHasLocalDepthRoutes |= edge->getLocalDepth() != 0;
 				auto const target = edge->getOtherVertex(vertex);
 				auto const length = edge->getLength();
 				// Relax every non-walking traversal to zero, including all fast
@@ -457,6 +459,126 @@ namespace core
 				return std::make_shared<Path>(Path{ std::move(nodes), std::nullopt });
 			}
 
+			// Local depth is arrival context, not a vertex property. Each (vertex,
+			// incoming depth) needs its own label: a worse prefix can have a better
+			// continuation. Strict lexicographic improvements prevent equal-cost
+			// connectors from creating predecessor cycles. Ordinary depth-0 graphs
+			// retain the dense reusable search below.
+			std::shared_ptr<Path> findDepthContinuousPath(Graph const* graph,
+				uint32_t targetSlot, PathfindingWorkspace& workspace,
+				RouteDecisionContext const& context, uint32_t sourceSlot, bool floorSource)
+			{
+				struct Label
+				{
+					uint32_t vertex;
+					int depth;
+					float cost;
+					uint64_t change;
+					std::optional<float> duration;
+					size_t parent;
+					std::optional<size_t> arc;
+				};
+				struct Pending
+				{
+					double priority;
+					uint64_t change;
+					size_t label;
+					bool operator<(Pending const& other) const
+					{
+						if (priority != other.priority) return priority > other.priority;
+						if (change != other.change) return change > other.change;
+						return label > other.label;
+					}
+				};
+				auto const& vertices = graph->getVertices();
+				std::vector<Label> labels;
+				std::vector<std::vector<size_t>> arrivals(vertices.size());
+				std::priority_queue<Pending> pending;
+				auto offer = [&](Label candidate)
+				{
+					auto& atVertex = arrivals[candidate.vertex];
+					auto found = std::find_if(atVertex.begin(), atVertex.end(), [&](size_t i)
+						{ return labels[i].depth == candidate.depth; });
+					if (found != atVertex.end())
+					{
+						auto const& previous = labels[*found];
+						if (candidate.cost > previous.cost || (candidate.cost == previous.cost
+							&& candidate.change >= previous.change)) return;
+					}
+					// Keep immutable predecessor labels, even when an arrival improves.
+					auto const index = labels.size();
+					labels.push_back(candidate);
+					if (found == atVertex.end()) atVertex.push_back(index);
+					else *found = index;
+					pending.push({ candidate.cost, candidate.change, index });
+				};
+				for (uint32_t slot = 0; slot < vertices.size(); ++slot)
+					if (workspace.visitGenerations[slot] == workspace.getGeneration())
+						offer({ slot, context.localDepth, workspace.scores[slot], 0,
+							workspace.durations[slot], labels.size(), std::nullopt });
+				std::optional<size_t> best;
+				while (!pending.empty())
+				{
+					auto const entry = pending.top();
+					pending.pop();
+					auto const current = labels[entry.label];
+					if (best && entry.priority > labels[*best].cost) break;
+					auto const& atVertex = arrivals[current.vertex];
+					if (std::find(atVertex.begin(), atVertex.end(), entry.label) == atVertex.end()) continue;
+					if (current.vertex == targetSlot)
+					{
+						if (!best || current.cost < labels[*best].cost
+							|| (current.cost == labels[*best].cost && current.change < labels[*best].change))
+							best = entry.label;
+						continue;
+					}
+					if (blocksPathing(vertices[current.vertex]))
+					{
+						auto const isOrigin = floorSource
+							? vertices[current.vertex]->getPosition().distanceTo(context.agent->getGlobalPosition()) < 0.001f
+							: current.vertex == sourceSlot;
+						if (!isOrigin) continue;
+					}
+					++workspace.work.expandedVertices;
+					for (auto arcIndex = workspace.routeOffsets[current.vertex];
+						arcIndex < workspace.routeOffsets[current.vertex + 1]; ++arcIndex)
+					{
+						auto const& arc = workspace.directedArcs[arcIndex];
+						auto const& cost = workspace.evaluateArc(arcIndex);
+						if (!cost) continue;
+						auto const total = current.cost + cost->perceivedCost;
+						if (!std::isfinite(total)) throw std::invalid_argument("Cumulative route cost is not finite");
+						std::optional<float> duration;
+						if (current.duration && cost->objectiveDurationSeconds)
+						{
+							duration = *current.duration + *cost->objectiveDurationSeconds;
+							if (!std::isfinite(*duration)) throw std::invalid_argument("Route duration is not finite");
+						}
+						auto const depth = (*arc.edge)->getLocalDepth();
+						auto const gap = std::abs(int64_t{ depth } - int64_t{ current.depth });
+						offer({ arc.targetSlot, depth, total, current.change + static_cast<uint64_t>(gap),
+							duration, entry.label, arcIndex });
+					}
+				}
+				if (!best) return nullptr;
+				std::vector<PathNode> nodes;
+				auto index = *best;
+				while (labels[index].arc)
+				{
+					auto const& label = labels[index];
+					auto const arc = *label.arc;
+					nodes.push_back({ *workspace.directedArcs[arc].edge, vertices[label.vertex],
+						label.cost, label.duration, workspace.routeCosts[arc] });
+					index = label.parent;
+				}
+				auto const& origin = labels[index];
+				EvaluatedRouteCost sourceCost{ origin.cost, origin.duration, {} };
+				sourceCost.components.movement = origin.cost;
+				nodes.push_back({ nullptr, vertices[origin.vertex], origin.cost, origin.duration, sourceCost });
+				std::reverse(nodes.begin(), nodes.end());
+				return std::make_shared<Path>(Path{ std::move(nodes), std::nullopt });
+			}
+
 			template<typename EffectiveProperty>
 			RoutingPropertyProvenance provenance(EffectiveProperty const& property)
 			{
@@ -603,7 +725,11 @@ namespace core
 				}
 				else seed(source, 0.0f);
 
-				while (!workspace.frontierEmpty())
+				std::shared_ptr<Path> depthPath;
+				if (workspace.hasLocalDepthRoutes())
+					depthPath = findDepthContinuousPath(graph, targetSlot, workspace,
+						searchContext, sourceSlot, floorSource);
+				while (!workspace.hasLocalDepthRoutes() && !workspace.frontierEmpty())
 				{
 					auto const currentSlot = workspace.get();
 					if (currentSlot == targetSlot) break;
@@ -654,7 +780,7 @@ namespace core
 						std::chrono::steady_clock::now() - scoringStarted).count();
 				}
 
-				auto path = reconstructPath(graph, targetSlot, workspace);
+				auto path = workspace.hasLocalDepthRoutes() ? depthPath : reconstructPath(graph, targetSlot, workspace);
 				if (path)
 				{
 					path->diagnosticContext = RouteDiagnosticContext{

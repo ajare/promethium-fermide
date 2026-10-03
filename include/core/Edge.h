@@ -33,6 +33,7 @@ namespace core
 
 		EdgeType mType;
 		int mLocalDepth{ 0 };
+		bool mFurnitureRoute{ false };
 
 		// Endpoint Vertices are owned by the owning Graph (and, transitively, by
 		// its World).  They are referenced weakly so the Vertex <-> Edge adjacency
@@ -77,6 +78,9 @@ namespace core
 		[[nodiscard]] std::shared_ptr<const Vertex> getOtherVertex(std::shared_ptr<const Vertex> vertex) const;
 
 		int getLocalDepth() const { return mLocalDepth; }
+		// Only ordinary floor edges may be split by an inferred virtual source.
+		// Coincident private Furniture routes are not interchangeable floor.
+		bool isFurnitureRoute() const { return mFurnitureRoute; }
 		float getLength() const;
 		float getDirectedRise(Vertex const& target) const;
 		uint32_t getStandingRouteAgents() const { return mStandingRouteAgents; }

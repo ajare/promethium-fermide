@@ -77,6 +77,7 @@ set(core_names
     sourceIndexesFollowWalkwayEdits
     uncertainRoutesSurviveWorldReset
     populationRouting
+    furniture/depthContinuity
     actualPositionChoosesManualAlternative
     walkingAndBulkhead
     observedQueue

@@ -1,8 +1,8 @@
-# Catalogue-backed Furniture (#348–#352)
+# Catalogue-backed Furniture (#348–#353)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
-placement/editing. Complete-Path depth continuity, overlapping-route composition
+placement/editing and complete-Path depth continuity. Overlapping-route composition
 and catalogue migration remain later tickets. There is no sitting state or seat
 reservation.
 
@@ -141,7 +141,7 @@ are unchanged. Agents adopt their active edge depth at traversal start; depth-ch
 waypoints are not skipped. Larger depths render first, and Furniture renders before
 Agents at equal depth, under the existing Layer visibility and aperture clips.
 Thus a depth-2 walker is in front of the depth-2 desk, while a depth-3 walker is behind it.
-No depth-continuity preference has been added to route cost or search.
+Complete-Path depth continuity is described below; it does not change edge route costs.
 
 ## Retained Agent depth (#352)
 
@@ -151,7 +151,7 @@ idling, pause/resume and structural replay retain the incoming depth; a newly
 placed Agent has depth 0. Depth-changing waypoints cannot be skipped, including
 coincident topology-only connections. Ordinary same-depth skipping is unchanged.
 The immutable production `RouteDecisionContext::localDepth` captures departure
-context; it does not yet implement a depth-continuity preference.
+context for complete-Path depth-continuity selection.
 
 World schema 46 pairs each saved authored Agent position with its Local depth.
 As before, World save/reset restores authored positions and destination intent,
@@ -162,8 +162,27 @@ start's depth, not a mismatched runtime depth. Older documents default to depth 
 YAML and binary restoration, Reset simulation and topology replay follow these
 same lifecycle conventions.
 
+## Complete-Path depth continuity (#353)
+
+For alternative complete Paths, routing first minimizes total Perceived route cost.
+Only an exactly equal primary cost is tied by the total sum of absolute numerical
+Local-depth changes, including retained departure depth into the first edge. A
+new Agent starts from depth 0; stationary arrival and departure retain history.
+Depth is not an epsilon cost penalty, and a locally nearest-depth outgoing edge
+need not be the best complete Path.
+
+Search keeps distinct incoming depths at shared vertices and compares complete
+Paths lexicographically. Strict improvements and finite arrival states terminate
+coincident connectors and equal-cost alternatives deterministically. Graphs with
+only depth-0 edges keep the existing reusable primary-cost search; depth-bearing
+graphs use lexicographic Dijkstra. Feasibility, two-pass Mobility handling,
+Perceived route costs and objective durations are unchanged. Private authored
+Furniture edges are never split as ordinary floor by inferred-source seeding:
+coincident front/back routes are not interchangeable floor attachments.
+
 ## Headless checks
 
+- `pf-smoke-routing --check furniture/depthContinuity`
 - `pf-smoke-simulation --check furniture/retainedDepth`
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
@@ -197,3 +216,15 @@ all checks were non-interactive, and the optional vendored GUI capability test
 was explicitly skipped. Focused retained-depth simulation, stationary render,
 affected module and CLI-contract checks passed; `git diff --check` passed.
 Windows validation is not claimed.
+
+## #353 validation
+
+Final incremental default builds and complete CTest inventories passed in Linux
+GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
+(82 tests each), in the same four build trees listed above. Displays were unset;
+the optional vendored GUI capability test was explicitly skipped. Complete-Path
+reference scenarios, repeated-run determinism, inferred stationary departures,
+simulation-selected routes after topology replay, affected modules and CLI
+contracts passed. The stationary render fixture explicitly uses its depth-2 seat
+branch instead of assuming an inferred source approach acquires that depth.
+`git diff --check` passed. Windows validation is not claimed.

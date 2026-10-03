@@ -15,6 +15,7 @@ namespace routing_smoke
 	void registerIsolatedSectors(std::vector<smoke::Check>& checks);
 	void registerMobility(std::vector<smoke::Check>& checks);
 	void registerWorkspace(std::vector<smoke::Check>& checks);
+	void registerDepthContinuity(std::vector<smoke::Check>& checks);
 	void registerThresholdRouteCost(std::vector<smoke::Check>& checks);
 	void registerStairRouteCost(std::vector<smoke::Check>& checks);
 	void registerLiftRouteCost(std::vector<smoke::Check>& checks);
