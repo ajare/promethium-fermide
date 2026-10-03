@@ -83,7 +83,6 @@ namespace core
 			std::vector<uint32_t> segmentOfCell;
 
 			// Sector reported when the matching Segment is flushed.
-			std::vector<uint32_t> flushSector;
 
 			// Vertices and the ordered Sectors collected per Segment. A Sector with
 			// no authored topology still needs a synthetic Vertex when an open wall
@@ -149,7 +148,8 @@ namespace core
 
 		bool doVerticesCrossSector(uint32_t prevIndex, uint32_t nextIndex, int layerIndex, uint32_t nextX, uint32_t y) const;
 
-		void processSectorVertices(VertexList& vertices, std::shared_ptr<const Sector> prevSector, uint32_t layerIndex, uint32_t y);
+		void processSectorVertices(VertexList& vertices, uint32_t layerIndex, uint32_t y,
+			uint32_t runStart, uint32_t runEnd);
 
 		void processMarker(ObjectData const& obj, RowVertices& row);
 

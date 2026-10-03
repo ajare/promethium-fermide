@@ -29,12 +29,17 @@ namespace core
 	}
 
 	bool World::canPlaceFurniture(uint32_t sectorIndex, std::string const& key,
-		float x, float y, std::string const& name, std::string* diagnostic) const
+		float x, float y, std::string const& name, std::string* diagnostic, int localDepth) const
 	{
 		auto reject = [&](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
 		if (!mFurnitureCatalogue) return reject("No Furniture catalogue is loaded");
 		auto definition = mFurnitureCatalogue->definition(key);
 		if (!definition) return reject("Missing Furniture definition: " + key);
+		if (localDepth < 0) return reject("Furniture Local depth must be non-negative");
+		for (auto const& edge : definition->edges)
+			if (edge.depthOffset && (int64_t{ localDepth } + *edge.depthOffset < 0
+				|| int64_t{ localDepth } + *edge.depthOffset > std::numeric_limits<int>::max()))
+				return reject("Furniture resolved edge depth must be non-negative and representable");
 		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]
 			|| !isLocationLike(mSectors[sectorIndex]->getType()))
 			return reject("Furniture requires a Room, Corridor or Facade");
@@ -55,10 +60,10 @@ namespace core
 		for (auto const& instance : mFurniture)
 		{
 			auto const& other = *mFurnitureCatalogue->definition(instance.definitionKey);
-			if (instance.sector == sectorIndex && x + definition->minX < instance.x + other.maxX
+			if (instance.sector == sectorIndex && instance.localDepth == localDepth && x + definition->minX < instance.x + other.maxX
 				&& x + definition->maxX > instance.x + other.minX
 				&& y + definition->minY < instance.y + other.maxY && y + definition->maxY > instance.y + other.minY)
-				return reject("Furniture footprint overlaps at depth 0: " + instance.name);
+				return reject("Furniture footprint overlaps at Local depth " + std::to_string(localDepth) + ": " + instance.name);
 		}
 		std::string reason;
 		auto trimmed = Marker::trimName(name);
@@ -71,7 +76,7 @@ namespace core
 				if (!Marker::nameIsValid(markerName, &reason)) return reject("Invalid usable Marker name: " + reason);
 				if (markerNameTaken(markerName)) return reject("A Marker with this name already exists");
 			}
-			if (!canAddSectorMarker(sectorIndex, static_cast<uint32_t>(y), x + point.x, &reason)) return reject(reason);
+			if (!canAddSectorMarkerImpl(sectorIndex, static_cast<uint32_t>(y), x + point.x, &reason, true)) return reject(reason);
 		}
 		if (!mDeserializingConstruction && (!mNextFurnitureId || !mNextMarkerId
 			|| definition->usablePoints.size() > std::numeric_limits<uint64_t>::max() - mNextMarkerId + 1))
@@ -82,14 +87,14 @@ namespace core
 	}
 
 	uint64_t World::placeFurniture(uint32_t sector, std::string const& key,
-		float x, float y, std::string const& name)
+		float x, float y, std::string const& name, int localDepth)
 	{
 		std::string diagnostic;
-		if (!canPlaceFurniture(sector, key, x, y, name, &diagnostic))
+		if (!canPlaceFurniture(sector, key, x, y, name, &diagnostic, localDepth))
 			throw WorldException(this, diagnostic);
 		auto const& definition = *mFurnitureCatalogue->definition(key);
 		ConstructionRecord record{ ConstructionType::Furniture };
-		record.a = sector; record.x = x; record.y = y;
+		record.a = sector; record.x = x; record.y = y; record.furnitureDepth = localDepth;
 		record.name = Marker::trimName(name); record.definitionKey = key;
 		auto next = mNextMarkerId;
 		for (auto const& point : definition.usablePoints)
@@ -102,7 +107,7 @@ namespace core
 	}
 
 	bool World::canEditFurniture(uint64_t id, float x, float y,
-		std::string const& name, std::string* diagnostic) const
+		std::string const& name, std::string* diagnostic, std::optional<int> localDepth) const
 	{
 		auto reject = [&](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
 		if (!mSimulationPaused) return reject("Pause the simulation before editing Furniture");
@@ -111,7 +116,7 @@ namespace core
 			return record.type == ConstructionType::Furniture && record.furnitureId == id;
 		});
 		if (found == records.end()) return reject("The Furniture instance no longer exists");
-		found->x = x; found->y = y; found->name = Marker::trimName(name);
+		found->x = x; found->y = y; found->name = Marker::trimName(name); found->furnitureDepth = localDepth.value_or(found->furnitureDepth);
 		try
 		{
 			auto candidate = makeCandidateWorld();
@@ -125,16 +130,17 @@ namespace core
 	}
 
 	bool World::editFurniture(uint64_t id, float x, float y,
-		std::string const& name, std::string* diagnostic)
+		std::string const& name, std::string* diagnostic, std::optional<int> localDepth)
 	{
-		if (!canEditFurniture(id, x, y, name, diagnostic)) return false;
+		if (!canEditFurniture(id, x, y, name, diagnostic, localDepth)) return false;
 		auto records = mConstructionRecords;
 		for (auto& record : records)
 			if (record.type == ConstructionType::Furniture && record.furnitureId == id)
 			{
 				auto trimmed = Marker::trimName(name);
-				if (record.x == x && record.y == y && record.name == trimmed) return false;
-				record.x = x; record.y = y; record.name = std::move(trimmed);
+				auto depth = localDepth.value_or(record.furnitureDepth);
+				if (record.x == x && record.y == y && record.name == trimmed && record.furnitureDepth == depth) return false;
+				record.x = x; record.y = y; record.name = std::move(trimmed); record.furnitureDepth = depth;
 				break;
 			}
 		// No sector translation: carried Agents stay at their physical positions.
@@ -218,7 +224,7 @@ namespace core
 		// Geometry and overlap use exactly the authoring contract. The independent
 		// saved Marker name may differ from its initial generated name.
 		std::string diagnostic;
-		if (!canPlaceFurniture(record.a, record.definitionKey, record.x, record.y, record.name, &diagnostic))
+		if (!canPlaceFurniture(record.a, record.definitionKey, record.x, record.y, record.name, &diagnostic, record.furnitureDepth))
 			throw WorldException(this, "Furniture '" + record.name + "' (" + std::to_string(record.furnitureId) + "): " + diagnostic);
 		if (!record.furnitureId || std::any_of(mFurniture.begin(), mFurniture.end(),
 			[&](auto const& i) { return i.id == record.furnitureId; }))
@@ -230,12 +236,12 @@ namespace core
 		{
 			for (auto const& [saved, point] : points)
 				addSectorMarkerRestored(record.a, static_cast<uint32_t>(record.y), record.x + point->x,
-					saved->marker, saved->name, saved->properties);
+					saved->marker, saved->name, saved->properties, nullptr, true);
 		}
 		catch (...) { mDeserializingConstruction = old; throw; }
 		mDeserializingConstruction = old;
 		mFurniture.push_back({ record.furnitureId, record.a, record.x, record.y,
-			record.definitionKey, record.name, record.furnitureDestinations, record.furnitureDestinations.front().marker });
+			record.definitionKey, record.name, record.furnitureDestinations, record.furnitureDestinations.front().marker, record.furnitureDepth });
 		recordConstruction(record);
 	}
 }

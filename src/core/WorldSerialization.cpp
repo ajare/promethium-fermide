@@ -479,6 +479,7 @@ namespace core
 			serializer.writeString("name", record.name);
 			serializer.writeFloat("x", record.x);
 			serializer.writeFloat("y", record.y);
+			serializer.writeInt32("localDepth", record.furnitureDepth);
 			serializer.beginArray("destinations");
 			for (auto const& point : record.furnitureDestinations)
 			{
@@ -569,8 +570,8 @@ namespace core
 		// Version 40 adds authored same-Layer Airlock chambers and prior wall states.
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
-		// Version 44 stores every stable-key Furniture destination.
-		serializer.writeUint32("version", 44);
+		// Version 45 adds Furniture instance Local depth.
+		serializer.writeUint32("version", 45);
 		serializer.writeUint64("nextFurnitureId", mNextFurnitureId);
 		if (mFurnitureCatalogue)
 		{
@@ -1135,6 +1136,9 @@ namespace core
 			record.name = serializer.readString("name");
 			record.x = serializer.readFloat("x");
 			record.y = serializer.readFloat("y");
+			if (version < 45 && serializer.hasField("localDepth"))
+				throw SerializationException("Furniture Local depth requires World schema 45 or later");
+			record.furnitureDepth = version >= 45 ? serializer.readInt32("localDepth") : 0;
 			if (version >= 44)
 			{
 				serializer.beginArray("destinations");
@@ -1243,7 +1247,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 44)
+		if (version < 1 || version > 45)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2780,7 +2784,7 @@ namespace core
 				agent->mRoutePersistenceSample,
 				agent->mRuntimeDirectGrantAdditions, agent->mRuntimeDirectGrantRemovals,
 				agent->mRuntimePermissionSetAdditions, agent->mRuntimePermissionSetRemovals,
-				agent->mEscalatorTraversalSequence, agent->mRouteJourneySequence });
+				agent->mEscalatorTraversalSequence, agent->mRouteJourneySequence, agent->getLocalDepth() });
 		}
 		return carried;
 	}
@@ -2872,6 +2876,7 @@ namespace core
 			raw->mRuntimePermissionSetRemovals = saved.runtimePermissionSetRemovals;
 			// Escalator and route-journey draws stay on the uninterrupted run's
 			// stream, exactly like the route-planning stream above (#328).
+			raw->mLocalDepth = saved.localDepth;
 			raw->mEscalatorTraversalSequence = saved.escalatorTraversalSequence;
 			raw->mRouteJourneySequence = saved.routeJourneySequence;
 			if (saved.behaviourAssignment)

@@ -3,6 +3,8 @@
 #include "ObjectTileset.h"
 #include "UISettings.h"
 #include "core/World.h"
+#include "core/Agent.h"
+#include <fstream>
 #include <yaml-cpp/yaml.h>
 
 extern UISettings gUISettings;
@@ -105,6 +107,74 @@ namespace
 		require(layouts->editFurniture(sofa, 3.625f, 0, "Moved sofa", &diagnostic), diagnostic);
 		require(layouts->editFurniture(larger, 11.875f, 0, "Moved larger", &diagnostic), diagnostic);
 		checkLayouts(LayerRenderStyle::Solid, {{0,0},{800,600}});
+		// Exercise each active route independently: depth 2 must be in front of
+		// the desk at depth 2; depth 3 must be behind it. Higher artwork depth
+		// renders first even when placement order is the reverse.
+		for (bool backRoute : { false, true })
+		{
+			auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/desk.furniture.yaml").string());
+			yaml["furnitureCatalogue"]["definitions"][0]["edges"].remove(backRoute ? 1 : 4);
+			auto filename = context.temporaryRoot() / (backRoute ? "back.furniture.yaml" : "front.furniture.yaml");
+			{ std::ofstream file(filename); file << yaml; }
+			auto deskWorld = std::make_shared<core::World>("Desk draw ordering", 8, 2);
+			auto deskRoom = deskWorld->addRoom("Room", 0, 0, 0, 8, 1);
+			deskWorld->attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
+			deskWorld->placeFurniture(deskRoom, "desk", 2, 0, "Desk", 2);
+			uint32_t exitId = 0;
+			deskWorld->addSectorMarker(deskRoom, 0, 0.5f, "Entrance");
+			deskWorld->addSectorMarker(deskRoom, 0, 6.5f, "Exit", &exitId);
+			deskWorld->finishBuild();
+			auto agent = deskWorld->lookupAgent(deskWorld->createAgent("Walker", deskRoom, 0, 0.5f)).entity;
+			agent->setPath(deskWorld->getGraph()->calculatePath(agent, deskWorld->getGraph()->getVertexByIdentifier(exitId)), true);
+			for (int tick = 0; tick < 600 && agent->getGlobalPosition().x < 3; ++tick) deskWorld->advanceTicks(1);
+			require(agent->getGlobalPosition().x >= 3 && agent->getGlobalPosition().x < 3.1f
+				&& agent->getLocalDepth() == (backRoute ? 3 : 2), "Walker did not enter chosen side route");
+			deskWorld->pauseSimulation();
+			// Topology replay must not teleport or lose the active visual depth.
+			auto position = agent->getGlobalPosition(); auto agentId = deskWorld->getAgentId(agent);
+			deskWorld->placeFurniture(deskRoom, "desk", 2.125f, 0, "Deeper artwork", 4);
+			deskWorld->finishBuild();
+			agent = deskWorld->lookupAgent(agentId).entity;
+			require(agent->getGlobalPosition() == position && agent->getLocalDepth() == (backRoute ? 3 : 2),
+				"Unrelated Furniture placement changed Agent position/depth");
+			RenderWorldScope deskScope(deskWorld);
+			for (auto style : { LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden })
+			{
+				WorldDrawList::ClipRectangle clip{{150,450},{240,590}};
+				WorldDrawList drawing(clip);
+				renderSector(deskWorld->getSector(deskRoom), 0, style, false, ImColor(192,192,255), &drawing);
+				size_t deskFirst = drawing.commands().size(), deskLast = 0;
+				size_t deepLast = 0, agentFirst = drawing.commands().size(), agentLast = 0;
+				unsigned deskTriangles = 0, deepTriangles = 0, agentTriangles = 0;
+				for (size_t i = 0; i < drawing.commands().size(); ++i)
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
+						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					{
+						if (triangle->texcoords[0].x >= 256.f / 320)
+						{
+							float x = std::min({ triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x });
+							if (x == 2 * CORE_CELL_WIDTH_PIXELS || x == 3 * CORE_CELL_WIDTH_PIXELS)
+							{ ++deskTriangles; deskFirst = std::min(deskFirst, i); deskLast = i; }
+							else { ++deepTriangles; deepLast = i; }
+						}
+						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
+						else continue;
+						require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x
+							&& triangle->clip.minimum.y == clip.minimum.y && triangle->clip.maximum.y == clip.maximum.y,
+							"Depth-ordered content escaped Layer aperture clipping");
+					}
+				if (style == LayerRenderStyle::Wireframe || style == LayerRenderStyle::Hidden)
+					require(!deskTriangles && !deepTriangles && !agentTriangles, "Local depth exposed content on a hidden/wireframe Layer");
+				else
+				{
+					require(deskTriangles == 4 && deepTriangles == 4 && agentTriangles == 2, "Desk/Agent commands missing");
+					require(deepLast < deskFirst && deepLast < agentFirst, "Larger Local depth did not render first");
+					require(backRoute ? agentLast < deskFirst : deskLast < agentFirst,
+						"Active front/back route did not render on the correct side of the desk");
+				}
+			}
+		}
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 }

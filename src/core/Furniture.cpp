@@ -41,11 +41,8 @@ namespace core
 				d.label = entry["label"].as<std::string>();
 				auto tiles = entry["tiles"];
 				auto points = entry["usablePoints"];
-				if (!tiles.IsSequence() || tiles.size() == 0 || !points.IsSequence() || points.size() == 0
-					|| entry["edges"] || entry["vertices"])
-					throw SerializationException("Furniture requires artwork tiles and usable points, without side routes");
-				if (entry["depth"] && entry["depth"].as<int>() != 0)
-					throw SerializationException("Furniture currently requires fixed depth 0");
+				if (!tiles.IsSequence() || tiles.size() == 0 || !points.IsSequence() || points.size() == 0)
+					throw SerializationException("Furniture requires artwork tiles and usable points");
 				std::set<std::pair<int, int>> offsets;
 				bool first = true;
 				for (auto tile : tiles)
@@ -74,6 +71,45 @@ namespace core
 						|| !keys.insert(p.key).second || !labels.insert(p.label).second)
 						throw SerializationException("Invalid Furniture usable point key, label or floor-height offset");
 					d.usablePoints.push_back(std::move(p));
+				}
+				d.sideRoutes = entry["sideRoutes"] ? entry["sideRoutes"].as<bool>() : false;
+				if (d.sideRoutes && !entry["vertices"])
+					throw SerializationException("Furniture side routes require explicit vertices and edges");
+				if (entry["vertices"] || entry["edges"])
+				{
+					auto vertices = entry["vertices"], edges = entry["edges"];
+					if (!vertices.IsSequence() || vertices.size() == 0 || !edges.IsSequence())
+						throw SerializationException("Furniture routes require explicit vertices and edges");
+					std::set<std::string> vertexKeys, boundPoints;
+					for (auto vertex : vertices)
+					{
+						FurnitureRoutingVertex v{ vertex["key"].as<std::string>(), vertex["x"].as<float>(),
+							vertex["usablePoint"] ? vertex["usablePoint"].as<std::string>() : "",
+							vertex["external"] ? vertex["external"].as<bool>() : false };
+						if (v.key.empty() || !vertexKeys.insert(v.key).second || !std::isfinite(v.x)
+							|| v.x < d.minX || v.x > d.maxX || (vertex["y"] && vertex["y"].as<float>() != 0))
+							throw SerializationException("Invalid Furniture routing vertex");
+						if (!v.usablePoint.empty())
+						{
+							auto point = std::find_if(d.usablePoints.begin(), d.usablePoints.end(),
+								[&](auto const& p) { return p.key == v.usablePoint && p.x == v.x; });
+							if (point == d.usablePoints.end() || !boundPoints.insert(v.usablePoint).second)
+								throw SerializationException("Invalid Furniture usable vertex binding");
+						}
+						d.vertices.push_back(std::move(v));
+					}
+					if (boundPoints.size() != d.usablePoints.size())
+						throw SerializationException("Every Furniture usable point needs an explicit vertex");
+					std::set<std::pair<std::string, std::string>> connections;
+					for (auto edge : edges)
+					{
+						FurnitureRoutingEdge e{ edge["from"].as<std::string>(), edge["to"].as<std::string>(), {} };
+						if (edge["depthOffset"]) e.depthOffset = edge["depthOffset"].as<int>();
+						if (!vertexKeys.contains(e.from) || !vertexKeys.contains(e.to) || e.from == e.to
+							|| !connections.emplace(std::min(e.from, e.to), std::max(e.from, e.to)).second)
+							throw SerializationException("Invalid or duplicate Furniture routing edge");
+						d.edges.push_back(std::move(e));
+					}
 				}
 				if (d.key.empty() || !Marker::nameIsValid(d.label, &diagnostic))
 					throw SerializationException("Invalid Furniture definition key or label");

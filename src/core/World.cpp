@@ -6815,6 +6815,12 @@ namespace core
 	bool World::canAddSectorMarker(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
 		string* diagnostic) const
 	{
+		return canAddSectorMarkerImpl(sectorIndex, levelIndex, xOffset, diagnostic, false);
+	}
+
+	bool World::canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
+		string* diagnostic, bool allowCoincident) const
+	{
 		auto reject = [diagnostic](string reason)
 		{
 			if (diagnostic) *diagnostic = std::move(reason);
@@ -6842,7 +6848,7 @@ namespace core
 			auto markerObject = dynamic_pointer_cast<MarkerSectorObject>(sector->getObject(i));
 			if (!markerObject) continue;
 			auto marker = markerObject->getMarker();
-			if (marker->getCellY() == cellY
+			if (!allowCoincident && marker->getCellY() == cellY
 				&& fabs(marker->getCellX() + marker->getOffset() - globalX) <= 0.05f)
 				return reject("A Marker already exists at this position");
 		}
@@ -7033,7 +7039,7 @@ namespace core
 
 	World::CreateObjectResult World::addSectorMarkerRestored(uint32_t sectorIndex,
 		uint32_t levelIndex, float xOffset, MarkerId id, string name,
-		MarkerProperties properties, uint32_t* vertexIdentifier)
+		MarkerProperties properties, uint32_t* vertexIdentifier, bool allowCoincident)
 	{
 		invalidateSimulationSnapshot();
 		string diagnostic;
@@ -7041,7 +7047,7 @@ namespace core
 		if (properties & ~markerPropertyBit(MarkerProperty::BlocksPathing))
 			throw WorldException(this, "Marker properties contain unknown bits");
 		if (lookupMarker(id)) throw WorldException(this, "Marker ID is already in use");
-		if (!canAddSectorMarker(sectorIndex, levelIndex, xOffset, &diagnostic))
+		if (!canAddSectorMarkerImpl(sectorIndex, levelIndex, xOffset, &diagnostic, allowCoincident))
 			throw WorldException(this, "World::addSectorMarker - " + diagnostic);
 		name = Marker::trimName(name);
 		if (!Marker::nameIsValid(name, &diagnostic))

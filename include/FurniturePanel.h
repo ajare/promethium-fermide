@@ -11,10 +11,11 @@ bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint32_t sector, std::string const& key, float x, float y, bool snapX,
 	std::string const& name, std::string& diagnostic,
-	DocumentHistory& history = gWorldDocumentHistory);
+	DocumentHistory& history = gWorldDocumentHistory, int localDepth = 0);
 bool editSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint64_t id, float x, float y, bool snapX, std::string const& name,
-	std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
+	std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory,
+	std::optional<int> localDepth = std::nullopt);
 bool deleteSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint64_t id, std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
 void renderFurniturePanel(std::shared_ptr<core::World> const& world,

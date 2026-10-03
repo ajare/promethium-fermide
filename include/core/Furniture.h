@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 #include "core/EntityId.h"
@@ -20,11 +21,27 @@ namespace core
 		std::string key, label;
 		float x{ 0.5f };
 	};
+	struct FurnitureRoutingVertex
+	{
+		std::string key;
+		float x{ 0 };
+		// A usable-point key binds this vertex to its World-owned Marker.
+		std::string usablePoint;
+		bool external{ false };
+	};
+	struct FurnitureRoutingEdge
+	{
+		std::string from, to;
+		std::optional<int> depthOffset; // absent means fixed 0
+	};
 	struct FurnitureDefinition
 	{
 		std::string key, label;
 		std::vector<FurnitureTile> tiles;
 		std::vector<FurnitureUsablePoint> usablePoints;
+		std::vector<FurnitureRoutingVertex> vertices;
+		std::vector<FurnitureRoutingEdge> edges;
+		bool sideRoutes{ false }; // replace the ordinary floor span
 		// Full artwork rectangle, including transparent pixels and layout gaps.
 		int minX{ 0 }, minY{ 0 }, maxX{ 0 }, maxY{ 0 };
 	};
@@ -61,5 +78,6 @@ namespace core
 		std::vector<FurnitureDestination> destinations;
 		// First destination retained for compatibility with the chair authoring API.
 		MarkerId marker{};
+		int localDepth{ 0 };
 	};
 }

@@ -121,6 +121,37 @@ namespace
 			&& layouts->furniture()[0].destinations[1].marker == sofa.destinations[1].marker
 			&& layouts->lookupMarker(sofa.destinations[1].marker)->getName() == "Right seat independently renamed",
 			"Multi-point delete undo changed identity or name");
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/desk.furniture.yaml"), path.parent_path() / "desk.furniture.yaml");
+		auto desks = std::make_shared<core::World>("Desk editor", 8, 2);
+		auto deskRoom = desks->addRoom("Room", 0, 0, 0, 8, 1);
+		desks->finishBuild(); desks->pauseSimulation(); desks->saveTo(path.string());
+		DocumentHistory deskHistory;
+		require(selectFurnitureCatalogue(desks, path, "desk.furniture.yaml", diagnostic, deskHistory), diagnostic);
+		require(placeSelectedFurniture(desks, deskRoom, "desk", 2.125f, 0, false, "Desk", diagnostic, deskHistory, 2), diagnostic);
+		auto deskId = desks->furniture().front().id; auto deskSeat = desks->furniture().front().marker;
+		require(desks->furniture().front().localDepth == 2 && desks->getMarkerIds().size() == 1,
+			"Editor did not place chosen depth or exposed routing-only destinations");
+		require(placeSelectedFurniture(desks, deskRoom, "desk", 2.125f, 0, false, "Behind", diagnostic, deskHistory, 3), diagnostic);
+		auto depthBefore = captureDocumentSnapshot(desks, deskHistory)->yaml;
+		count = deskHistory.undoCount();
+		for (int invalidDepth : { -1, 3 })
+			require(!editSelectedFurniture(desks, deskId, 2.125f, 0, false, "Desk", diagnostic, deskHistory, invalidDepth)
+				&& !diagnostic.empty() && deskHistory.undoCount() == count
+				&& captureDocumentSnapshot(desks, deskHistory)->yaml == depthBefore, "Refused depth edit mutated history/document");
+		require(!placeSelectedFurniture(desks, deskRoom, "desk", 5, 0, false, "Negative", diagnostic, deskHistory, -1)
+			&& deskHistory.undoCount() == count, "Negative placement acquired history");
+		require(editSelectedFurniture(desks, deskId, 2.125f, 0, false, "Desk", diagnostic, deskHistory, 4), diagnostic);
+		auto deskCatalogue = desks->furnitureCatalogue();
+		auto restoreDesk = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = deskCatalogue;
+			auto restored = desks->deserialize(*reader, work); desks->pauseSimulation(); return restored;
+		};
+		require(deskHistory.undo(captureDocumentSnapshot(desks, deskHistory), restoreDesk)
+			&& desks->furniture().front().localDepth == 2, "Depth edit undo failed");
+		require(deskHistory.redo(captureDocumentSnapshot(desks, deskHistory), restoreDesk)
+			&& desks->furniture().front().localDepth == 4 && desks->furniture().front().marker == deskSeat,
+			"Depth edit redo lost depth or Marker identity");
 		ImGui::GetIO().DisplaySize = {800, 600}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture actions");
 		renderFurniturePanel(world, path, world->getSector(room));

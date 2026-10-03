@@ -26,14 +26,14 @@ bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 
 bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint32_t sector, std::string const& key, float x, float y, bool snapX,
-	std::string const& name, std::string& diagnostic, DocumentHistory& history)
+	std::string const& name, std::string& diagnostic, DocumentHistory& history, int localDepth)
 {
 	if (snapX && std::isfinite(x)) x = std::round(x);
-	if (!world || !world->canPlaceFurniture(sector, key, x, y, name, &diagnostic)) return false;
+	if (!world || !world->canPlaceFurniture(sector, key, x, y, name, &diagnostic, localDepth)) return false;
 	try
 	{
 		auto before = captureDocumentSnapshot(world, history);
-		world->placeFurniture(sector, key, x, y, name);
+		world->placeFurniture(sector, key, x, y, name, localDepth);
 		world->finishBuild();
 		commitDocumentEdit(std::move(before), history);
 		diagnostic.clear(); return true;
@@ -43,14 +43,14 @@ bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
 
 bool editSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint64_t id, float x, float y, bool snapX, std::string const& name,
-	std::string& diagnostic, DocumentHistory& history)
+	std::string& diagnostic, DocumentHistory& history, std::optional<int> localDepth)
 {
 	if (snapX && std::isfinite(x)) x = std::round(x);
-	if (!world || !world->canEditFurniture(id, x, y, name, &diagnostic)) return false;
+	if (!world || !world->canEditFurniture(id, x, y, name, &diagnostic, localDepth)) return false;
 	try
 	{
 		auto before = captureDocumentSnapshot(world, history);
-		if (!world->editFurniture(id, x, y, name, &diagnostic)) return false;
+		if (!world->editFurniture(id, x, y, name, &diagnostic, localDepth)) return false;
 		commitDocumentEdit(std::move(before), history);
 		return true;
 	}
@@ -77,6 +77,7 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 	if (!world || !ImGui::CollapsingHeader("Furniture")) return;
 	static char filename[256] = "chair.furniture.yaml", name[256] = "Chair";
 	static float x = 0, y = 0;
+	static int localDepth = 0;
 	static bool snap = true;
 	static std::string key, diagnostic;
 	ImGui::InputText("Catalogue beside World", filename, sizeof(filename));
@@ -105,7 +106,7 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 				ImGui::PushID(static_cast<int>(entry.id));
 				if (ImGui::Selectable(entry.name.c_str(), entry.id == instanceId))
 				{
-					instanceId = entry.id; x = entry.x; y = entry.y;
+					instanceId = entry.id; x = entry.x; y = entry.y; localDepth = entry.localDepth;
 					std::snprintf(name, sizeof(name), "%s", entry.name.c_str());
 				}
 				ImGui::PopID();
@@ -115,12 +116,13 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 		ImGui::InputText("Instance name", name, sizeof(name));
 		ImGui::InputFloat("Furniture x (Location-local)", &x);
 		ImGui::InputFloat("Supporting Level (Location-local)", &y);
+		ImGui::InputInt("Furniture Local depth", &localDepth);
 		ImGui::Checkbox("Snap Furniture x", &snap);
 		ImGui::TextUnformatted("Select a Room, Corridor or Facade on the canvas.");
 		if (instanceId)
 		{
 			if (ImGui::Button("Apply Furniture edit"))
-				editSelectedFurniture(world, instanceId, x, y, snap, name, diagnostic);
+				editSelectedFurniture(world, instanceId, x, y, snap, name, diagnostic, gWorldDocumentHistory, localDepth);
 			ImGui::SameLine();
 			if (ImGui::Button("Delete Furniture"))
 				if (deleteSelectedFurniture(world, instanceId, diagnostic)) instanceId = 0;
@@ -129,7 +131,7 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 		else if (ImGui::Button("Place Furniture"))
 		{
 			if (!selected) diagnostic = "Select a Location before placing Furniture";
-			else placeSelectedFurniture(world, selected->getIndex(), key, x, y, snap, name, diagnostic);
+			else placeSelectedFurniture(world, selected->getIndex(), key, x, y, snap, name, diagnostic, gWorldDocumentHistory, localDepth);
 		}
 	}
 	if (!diagnostic.empty()) ImGui::TextWrapped("%s", diagnostic.c_str());

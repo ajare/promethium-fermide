@@ -206,6 +206,8 @@ namespace core
 
 	public:
 
+		int getLocalDepth() const { return mLocalDepth; }
+
 		struct EdgeTraversalData
 		{
 			std::shared_ptr<Sector> curSector, nextSector;
@@ -238,6 +240,7 @@ namespace core
 	private:
 
 		std::string mName;
+		int mLocalDepth{ 0 };
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };

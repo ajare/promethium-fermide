@@ -69,6 +69,13 @@ Resources:
         DependentResource:
           id: "Artwork"
           ref: "ObjectAtlas"
+    - type: "FurnitureCatalogue"
+      name: "DeskCatalogue"
+      location: "test-worlds/desk.furniture.yaml"
+      DependentResources:
+        DependentResource:
+          id: "Artwork"
+          ref: "ObjectAtlas"
     - type: "AgentTagRegistry"
       name: "TestAgentTags"
       location: "test-worlds/test.tags.yaml"
@@ -89,6 +96,13 @@ Resources:
         DependentResource:
           id: "Furniture"
           ref: "ChairCatalogue"
+    - type: "World"
+      name: "DeskDemo"
+      location: "test-worlds/desk.world.yaml"
+      DependentResources:
+        DependentResource:
+          id: "Furniture"
+          ref: "DeskCatalogue"
     - type: "World"
       name: "DoorTest"
       location: "test-worlds/door-test-1.world.yaml"

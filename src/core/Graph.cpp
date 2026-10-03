@@ -347,25 +347,59 @@ namespace core
 		}
 	}
 
-	void Graph::processSectorVertices(VertexList& vertices, shared_ptr<const Sector> prevSector, uint32_t layerIndex, uint32_t y)
+	void Graph::processSectorVertices(VertexList& vertices, uint32_t layerIndex, uint32_t y,
+		uint32_t runStart, uint32_t runEnd)
 	{
-		// If there are no vertices, then either we've just started, or we've just processed a Location which
-		// doesn't have any.
-		if (vertices.empty())
+		// Furniture's private graph is never inserted into the ordinary row chain.
+		// Only designated external points get a fixed-0 floor attachment.
+		std::vector<std::pair<shared_ptr<const Sector>, std::pair<float, float>>> furnitureSpans;
+		for (auto const& instance : mwWorld->furniture())
 		{
-			if (prevSector)
+			auto sector = mwWorld->_getSector(instance.sector);
+			auto const& definition = *mwWorld->furnitureCatalogue()->definition(instance.definitionKey);
+			if (definition.vertices.empty() || sector->getLayerIndex() != layerIndex
+				|| sector->getCellY() + instance.y != y
+				|| sector->getCellX() + instance.x + definition.minX < runStart
+				|| sector->getCellX() + instance.x + definition.minX >= runEnd) continue;
+			map<string, shared_ptr<Vertex>> authored;
+			for (auto const& point : definition.vertices)
 			{
-				mBuildLog.push_back({
-					"Graph",
-					~0u,
-					LogLevel::Warning,
-					format("Sector '{}' on level {}, layer {} has no vertices.", prevSector->getName(), y, layerIndex)
-				});
+				shared_ptr<Vertex> vertex;
+				if (!point.usablePoint.empty())
+				{
+					auto saved = find_if(instance.destinations.begin(), instance.destinations.end(),
+						[&](auto const& p) { return p.key == point.usablePoint; });
+					for (uint32_t slot = 0; slot < sector->getNumObjects(); ++slot)
+						if (auto object = dynamic_pointer_cast<MarkerSectorObject>(sector->_getObject(slot));
+							object && object->getMarker()->getId() == saved->marker)
+							vertex = mSectorObjectVertexLookup.at(object).front();
+				}
+				else
+				{
+					vertex = make_shared<SectorMarkerVertex>(sector, instance.x + point.x, instance.y);
+					mVertices.push_back(vertex);
+					mSectorVertexLookup[sector.get()].push_back(vertex);
+				}
+				authored.emplace(point.key, vertex);
+				if (point.external)
+				{
+					auto anchor = make_shared<SectorMarkerVertex>(sector, instance.x + point.x, instance.y);
+					vertices.push_back(anchor);
+					addEdge(make_shared<SectorEdge>(), anchor, vertex, false);
+				}
 			}
-
-			return;
+			for (auto const& connection : definition.edges)
+			{
+				auto edge = make_shared<SectorEdge>();
+				edge->mLocalDepth = connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0;
+				addEdge(edge, authored.at(connection.from), authored.at(connection.to), false);
+			}
+			if (definition.sideRoutes)
+				furnitureSpans.push_back({ sector, { sector->getCellX() + instance.x + definition.minX,
+					sector->getCellX() + instance.x + definition.maxX } });
 		}
 
+		if (vertices.empty()) return;
 		stable_sort(vertices.begin(), vertices.end(), [](auto a, auto b) {
 			return a->getPosition().x < b->getPosition().x;
 		});
@@ -430,6 +464,15 @@ namespace core
 			if (vertices[i]->getSector() != vertices[j]->getSector()
 				&& (vertices[i]->getSector()->getType() == SectorType::Airlock
 					|| vertices[j]->getSector()->getType() == SectorType::Airlock)) continue;
+
+			// Replace the ordinary floor across a routed Furniture footprint. Even
+			// unrelated row objects inside the span cannot supply a floor bypass.
+			bool insideFurniture = false;
+			for (auto const& [sector, span] : furnitureSpans)
+				if (vertices[i]->getSector() == sector && vertices[j]->getSector() == sector
+					&& vertices[i]->getPosition().x < span.second && vertices[j]->getPosition().x > span.first
+					&& vertices[i]->getPosition().x != vertices[j]->getPosition().x) insideFurniture = true;
+			if (insideFurniture) continue;
 
 			// Create Edge between i & j
 			if (vertexType0 == VertexType::Location && vertexType1 == VertexType::Location)
@@ -524,6 +567,15 @@ namespace core
 		auto markerObject = std::dynamic_pointer_cast<MarkerSectorObject>(marker);
 		if (markerObject && mwWorld->isFurnitureMarker(markerObject->getMarker()->getId()))
 		{
+			for (auto const& instance : mwWorld->furniture())
+				if (std::any_of(instance.destinations.begin(), instance.destinations.end(), [&](auto const& p) {
+					return p.marker == markerObject->getMarker()->getId(); })
+					&& !mwWorld->furnitureCatalogue()->definition(instance.definitionKey)->vertices.empty())
+				{
+					mSectorVertexLookup[obj.sector.get()].push_back(markerVertex);
+					mVertices.push_back(markerVertex);
+					return; // Explicit usable-vertex connectivity only.
+				}
 			// A seat is a destination branch, never the mandatory floor chain.
 			auto anchor = make_shared<SectorMarkerVertex>(obj.sector,
 				markerVertex->getPosition().x - obj.sector->getCellX(),
@@ -1185,7 +1237,6 @@ namespace core
 					if (!doVerticesCrossSector(prevSectorIndex, sectorIndex, layerIndex, x, y))
 					{
 						// Close off the run built so far and open the next one.
-						row.flushSector.push_back(prevSectorIndex);
 						row.segments.emplace_back();
 						row.sectors.emplace_back();
 						++segment;
@@ -1197,8 +1248,6 @@ namespace core
 						row.sectors[segment].push_back(sectorIndex);
 					prevSectorIndex = sectorIndex;
 				}
-
-				row.flushSector.push_back(prevSectorIndex);
 
 				rows[layerIndex].push_back(std::move(row));
 			}
@@ -1274,10 +1323,11 @@ namespace core
 				}
 			}
 
-			auto const flushSector = row.flushSector[segment];
-			auto prevSector = flushSector != ~0u ? mwWorld->getSector(flushSector) : nullptr;
-
-			processSectorVertices(vertices, prevSector, row.layerIndex, row.y);
+			auto begin = lower_bound(row.segmentOfCell.begin(), row.segmentOfCell.end(), segment);
+			auto end = upper_bound(begin, row.segmentOfCell.end(), segment);
+			processSectorVertices(vertices, row.layerIndex, row.y,
+				static_cast<uint32_t>(begin - row.segmentOfCell.begin()),
+				static_cast<uint32_t>(end - row.segmentOfCell.begin()));
 		}
 	}
 

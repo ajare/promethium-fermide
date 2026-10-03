@@ -893,6 +893,7 @@ namespace core
 			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
 			uint64_t furnitureId{ 0 };
+			int furnitureDepth{ 0 };
 			std::string definitionKey{};
 			std::vector<FurnitureDestination> furnitureDestinations{};
 		};
@@ -1071,6 +1072,7 @@ namespace core
 			// above: structural replay is not Reset (#328).
 			uint64_t escalatorTraversalSequence{ 0 };
 			uint64_t routeJourneySequence{ 0 };
+			int localDepth{ 0 };
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried
@@ -1269,9 +1271,11 @@ namespace core
 		CreateObjectResult createMarker(uint32_t layerIndex, uint32_t x, uint32_t y,
 			float xOffset, MarkerId id, std::string name, MarkerProperties properties,
 			uint32_t* vertexIdentifier = nullptr);
+		bool canAddSectorMarkerImpl(uint32_t sectorIndex, uint32_t levelIndex, float xOffset,
+			std::string* diagnostic, bool allowCoincident) const;
 		CreateObjectResult addSectorMarkerRestored(uint32_t sectorIndex,
 			uint32_t levelIndex, float xOffset, MarkerId id, std::string name,
-			MarkerProperties properties = 0, uint32_t* vertexIdentifier = nullptr);
+			MarkerProperties properties = 0, uint32_t* vertexIdentifier = nullptr, bool allowCoincident = false);
 
 		CreateObjectResult createForceBridge(uint32_t layerIndex, uint32_t x, uint32_t y, CreateForceBridgeOptions const& options);
 
@@ -2722,15 +2726,15 @@ namespace core
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
 		bool canEditFurniture(uint64_t id, float x, float y, std::string const& name,
-			std::string* diagnostic = nullptr) const;
+			std::string* diagnostic = nullptr, std::optional<int> localDepth = std::nullopt) const;
 		bool editFurniture(uint64_t id, float x, float y, std::string const& name,
-			std::string* diagnostic = nullptr);
+			std::string* diagnostic = nullptr, std::optional<int> localDepth = std::nullopt);
 		bool canRemoveFurniture(uint64_t id, std::string* diagnostic = nullptr) const;
 		bool removeFurniture(uint64_t id, std::string* diagnostic = nullptr);
 		bool canPlaceFurniture(uint32_t sector, std::string const& definition,
-			float x, float y, std::string const& name, std::string* diagnostic = nullptr) const;
+			float x, float y, std::string const& name, std::string* diagnostic = nullptr, int localDepth = 0) const;
 		uint64_t placeFurniture(uint32_t sector, std::string const& definition,
-			float x, float y, std::string const& name);
+			float x, float y, std::string const& name, int localDepth = 0);
 		void saveTo(std::string const& filepath);
 
 		// Rendering supplies elapsed wall time here.  It is accumulated and only

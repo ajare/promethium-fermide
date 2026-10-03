@@ -32,6 +32,7 @@ namespace core
 		uint32_t mRoutingIndex = 0;
 
 		EdgeType mType;
+		int mLocalDepth{ 0 };
 
 		// Endpoint Vertices are owned by the owning Graph (and, transitively, by
 		// its World).  They are referenced weakly so the Vertex <-> Edge adjacency
@@ -75,6 +76,7 @@ namespace core
 
 		[[nodiscard]] std::shared_ptr<const Vertex> getOtherVertex(std::shared_ptr<const Vertex> vertex) const;
 
+		int getLocalDepth() const { return mLocalDepth; }
 		float getLength() const;
 		float getDirectedRise(Vertex const& target) const;
 		uint32_t getStandingRouteAgents() const { return mStandingRouteAgents; }

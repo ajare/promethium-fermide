@@ -284,9 +284,159 @@ namespace
 			&& diagnostic.find("Seat visitor 1") != std::string::npos && snapshot(world) == before,
 			"Deletion did not protect every owned destination atomically");
 	}
+	void deskRoutes(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto fixture = context.fixture("resources/test-worlds/desk.furniture.yaml");
+		auto catalogue = core::FurnitureCatalogue::load(fixture);
+		int baselineArrival = 0;
+		for (int depth : { 0, 2, 5 })
+		{
+			core::World world("Isolated desk", 8, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+			auto id = world.placeFurniture(room, "desk", 2.125f, 0, "Desk", depth);
+			uint32_t leftId = 0, rightId = 0;
+			world.addSectorMarker(room, 0, 0.5f, "Entrance", &leftId);
+			world.addSectorMarker(room, 0, 6.5f, "Exit", &rightId);
+			world.finishBuild();
+			auto graph = world.getGraph(); core::Agent query("Query");
+			auto left = graph->getVertexByIdentifier(leftId), right = graph->getVertexByIdentifier(rightId);
+			auto path = graph->calculatePath(&query, left, right);
+			require(path != nullptr, "Desk severed circulation");
+			bool side = false;
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getLength() == 1.5f)
+				{
+					side = true;
+					require(node.edge->getLocalDepth() == depth || node.edge->getLocalDepth() == depth + 1,
+						"Desk used an ordinary floor shortcut");
+				}
+			require(side, "Desk Path did not use an authored side edge");
+			unsigned front = 0, back = 0;
+			std::shared_ptr<const core::Vertex> seat, disconnected;
+			for (auto const& v : graph->getVertices())
+			{
+				if (v->getPosition().x == 2.875f)
+				{
+					if (v->getEdges().empty()) disconnected = v;
+					else seat = v;
+				}
+			}
+			for (auto const& edge : graph->getEdges())
+			{
+				if (edge->getLength() == 1.5f)
+				{
+					front += edge->getLocalDepth() == depth;
+					back += edge->getLocalDepth() == depth + 1;
+				}
+				else if (edge->getLength() == 0.25f) require(edge->getLocalDepth() == 0, "Unassigned approaches moved with instance depth");
+			}
+			require(front == 1 && back == 1 && seat && disconnected, "Explicit route layout/depth resolution was lost");
+			require(!graph->calculatePath(&query, left, disconnected), "Coincidence invented internal connectivity");
+			require(graph->calculatePath(&query, left, seat) && graph->calculatePath(&query, seat, right), "Seat cannot be reached/departed");
+			for (auto const& node : path->nodes) require(node.targetVertex != seat, "Blocks pathing seat became a through-waypoint");
+			require(world.getMarkerIds().size() == 3, "Routing-only vertices appeared as behaviour destinations");
+			auto agentId = world.createAgent("Walker", room, 0, 0.5f);
+			auto agent = world.lookupAgent(agentId).entity;
+			agent->setPath(graph->calculatePath(agent, right), true);
+			bool traversed = false;
+			int arrival = 0;
+			for (int tick = 0; tick < 1200; ++tick)
+			{
+				world.advanceTicks(1);
+				if (!arrival && std::abs(agent->getGlobalPosition().x - 6.5f) < 0.0001f) arrival = tick + 1;
+				if (agent->getGlobalPosition().x > 2.5f && agent->getGlobalPosition().x < 3.5f)
+				{
+					traversed = true;
+					require(agent->getLocalDepth() == depth || agent->getLocalDepth() == depth + 1,
+						"Active traversal did not adopt side edge depth");
+					require(agent->getGlobalPosition().y == 0 && agent->getSector()->getLayerIndex() == 0,
+						"Local depth changed physical geometry or Layer");
+				}
+			}
+			require(traversed && std::abs(agent->getGlobalPosition().x - 6.5f) < 0.01f, "Desk traversal did not arrive: x=" + std::to_string(agent->getGlobalPosition().x)
+				+ " state=" + std::to_string(static_cast<int>(agent->getState())) + " seen=" + std::to_string(traversed));
+			if (depth == 0) baselineArrival = arrival;
+			require(arrival == baselineArrival, "Local depth altered physical traversal duration");
+			world.pauseSimulation();
+			auto before = snapshot(world); std::string diagnostic;
+			require(!world.editFurniture(id, 2.125f, 0, "Desk", &diagnostic, -1) && snapshot(world) == before,
+				"Negative instance depth edit was not atomic");
+			world.placeFurniture(room, "desk", 2.125f, 0, "Overlapping artwork", depth + 2);
+			world.finishBuild(); world.pauseSimulation();
+			before = snapshot(world);
+			require(!world.editFurniture(id, 2.125f, 0, "Desk", &diagnostic, depth + 2) && snapshot(world) == before,
+				"Same-depth footprint edit was not atomic");
+		}
+		// Removing a front/back edge cannot be repaired by coordinate coincidence.
+		// Force each side independently, and also exercise signed relative offsets.
+		for (int variant = 0; variant < 4; ++variant)
+		{
+			auto yaml = YAML::LoadFile(fixture.string());
+			auto definition = yaml["furnitureCatalogue"]["definitions"][0];
+			definition["edges"].remove(variant == 0 ? 1 : 4);
+			if (variant == 2) definition["edges"][1]["depthOffset"] = -3;
+			if (variant == 3)
+			{
+				definition["sideRoutes"] = false;
+				definition["vertices"] = YAML::Load("[{key: left, x: 0, external: true}, {key: seat, x: 0.75, usablePoint: seat}]");
+				definition["edges"] = YAML::Load("[{from: left, to: seat, depthOffset: 0}]");
+			}
+			auto filename = context.temporaryRoot() / ("side" + std::to_string(variant) + ".furniture.yaml");
+			{ std::ofstream file(filename); file << yaml; }
+			core::World world("One side", 8, 2); auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
+			std::string diagnostic;
+			if (variant == 2)
+			{
+				auto before = snapshot(world);
+				require(!world.canPlaceFurniture(room, "desk", 2, 0, "Desk", &diagnostic, 2)
+					&& diagnostic.find("resolved edge") != std::string::npos && snapshot(world) == before,
+					"Negative resolved edge depth accepted");
+				continue;
+			}
+			world.placeFurniture(room, "desk", 2, 0, "Desk", 2);
+			uint32_t a = 0, b = 0; world.addSectorMarker(room, 0, 0.5f, "Left", &a); world.addSectorMarker(room, 0, 6.5f, "Right", &b);
+			world.finishBuild(); core::Agent query("Query");
+			auto path = world.getGraph()->calculatePath(&query, world.getGraph()->getVertexByIdentifier(a), world.getGraph()->getVertexByIdentifier(b));
+			require(path != nullptr, "Remaining explicit side was unusable");
+			if (variant == 3)
+			{
+				for (auto const& node : path->nodes) if (node.edge)
+					require(node.edge->getLocalDepth() == 0, "Definition without side routes lost ordinary floor routing");
+				continue;
+			}
+			bool side = false;
+			for (auto const& node : path->nodes) if (node.edge && node.edge->getLength() == 1.5f
+				&& node.edge->getVertex(0)->getPosition().x >= 2)
+			{ side = true; require(node.edge->getLocalDepth() == (variant == 0 ? 3 : 2), "Removed side or floor shortcut remained usable"); }
+			require(side, "Selected Path avoided the remaining authored side");
+		}
+		core::World protectedWorld("Protected desk", 8, 2);
+		auto frontRoom = protectedWorld.addRoom("Approach", 0, 0, 0, 8, 1);
+		auto backRoom = protectedWorld.addRoom("Protected", 1, 0, 0, 8, 1);
+		protectedWorld.addSectorDoor(0, 0, 0);
+		protectedWorld.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+		protectedWorld.placeFurniture(backRoom, "desk", 2, 0, "Desk", 2);
+		uint32_t destinationId = 0; protectedWorld.addSectorMarker(backRoom, 0, 6.5f, "Destination", &destinationId);
+		protectedWorld.finishBuild(); protectedWorld.pauseSimulation();
+		auto permission = protectedWorld.addAccessPermission("Room access"); std::string diagnostic;
+		require(protectedWorld.setLocationPermissionRequirement(backRoom, { permission }, &diagnostic), diagnostic);
+		auto agentId = protectedWorld.createAgent("Visitor", frontRoom, 0, 0.5f);
+		auto agent = protectedWorld.lookupAgent(agentId).entity;
+		auto destination = protectedWorld.getGraph()->getVertexByIdentifier(destinationId);
+		require(!protectedWorld.getGraph()->calculatePath(agent, destination), "Desk routes bypassed Location permission requirements");
+		require(protectedWorld.grantAgentAccessPermission(agentId, permission, &diagnostic), diagnostic);
+		require(protectedWorld.getGraph()->calculatePath(agent, destination) != nullptr, "Authorized desk route unavailable");
+		core::MobilityProfile mobility; mobility.set(core::TraversalKind::Door, core::MobilityUse::CannotUse);
+		require(protectedWorld.setAgentIndividualMobilityProfile(agentId, mobility, &diagnostic), diagnostic);
+		require(!protectedWorld.getGraph()->calculatePath(agent, destination), "Furniture depth bypassed Door Mobility constraints");
+	}
 }
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/chair", chair });
 	checks.push_back({ "furniture/layouts", layouts });
+	checks.push_back({ "furniture/deskRoutes", deskRoutes });
 }

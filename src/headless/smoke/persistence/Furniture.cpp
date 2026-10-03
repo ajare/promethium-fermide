@@ -130,9 +130,60 @@ namespace persistence
 		auto reordered = core::loadWorldDocument(root / "layouts.world.yaml");
 		require(reordered->furniture()[0].destinations[0].marker == sofaPoints[0].marker
 			&& reordered->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination", "Catalogue ordering retargeted point identities");
-		// Schema-43 chair fixtures still load, while newly written layouts use schema 44.
+		// Schema-43 chair fixtures still load with default Local depth 0.
 		require(core::loadWorldDocument(context.fixture("resources/test-worlds/chair.world.yaml"))->furniture().size() == 3,
 			"Schema-43 chair compatibility was lost");
+		auto deskDemo = core::loadWorldDocument(context.fixture("resources/test-worlds/desk.world.yaml"));
+		require(deskDemo->furniture().size() == 1 && deskDemo->furniture().front().localDepth == 2,
+			"Required isolated desk demonstration is incomplete");
+		deskDemo->advanceTicks(1200);
+		require(std::abs(deskDemo->getSimulationSnapshot().agents.front().globalPosition.x - 6.5f) < 0.01f,
+			"Demonstration Agent did not traverse the desk");
+		// Both document representations resolve desk edge offsets from the saved instance depth.
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/desk.furniture.yaml"), root / "desk.furniture.yaml");
+		auto desk = std::make_shared<core::World>("Desk documents", 8, 2);
+		auto deskRoom = desk->addRoom("Room", 0, 0, 0, 8, 1);
+		desk->attachFurnitureCatalogue("desk.furniture.yaml", core::FurnitureCatalogue::load(root / "desk.furniture.yaml"));
+		auto deskId = desk->placeFurniture(deskRoom, "desk", 2.125f, 0, "Desk", 2);
+		auto deskSeat = desk->furniture().front().marker;
+		desk->finishBuild(); desk->pauseSimulation();
+		require(desk->editFurniture(deskId, 2.125f, 0, "Desk", &diagnostic, 4), diagnostic);
+		desk->placeFurniture(deskRoom, "desk", 2.125f, 0, "Overlapping artwork", 6);
+		desk->finishBuild(); desk->pauseSimulation();
+		for (auto filename : { "desk.world.yaml", "desk.world" })
+		{
+			desk->saveTo((root / filename).string());
+			auto loaded = core::loadWorldDocument(root / filename);
+			require(loaded->furniture().front().localDepth == 4 && loaded->furniture().front().marker == deskSeat,
+				"Desk depth/identity lost on document round trip");
+			bool front = false, back = false;
+			for (auto const& edge : loaded->getGraph()->getEdges()) if (edge->getLength() == 1.5f)
+			{ front |= edge->getLocalDepth() == 4; back |= edge->getLocalDepth() == 5; }
+			require(front && back, "Loaded desk did not resolve current relative route depths");
+			loaded->resetSimulation();
+			require(loaded->furniture().front().localDepth == 4, "Reset lost authored Local depth");
+		}
+		auto deskYaml = YAML::LoadFile((root / "desk.world.yaml").string());
+		auto refuseDesk = [&](YAML::Node const& invalid, std::string const& fragment) {
+			auto filename = root / "invalid-desk.world.yaml";
+			{ std::ofstream file(filename); file << invalid; }
+			try { (void)core::loadWorldDocument(filename); }
+			catch (std::exception const& error) { require(std::string(error.what()).find(fragment) != std::string::npos, error.what()); return; }
+			require(false, "Invalid saved desk depth was accepted");
+		};
+		auto invalidDesk = YAML::Clone(deskYaml);
+		// Construction records are the shared YAML/binary authority.
+		for (auto record : invalidDesk["construction"])
+			if (record["type"].as<std::string>() == "furniture") record["localDepth"] = -1;
+		refuseDesk(invalidDesk, "non-negative");
+		invalidDesk = YAML::Clone(deskYaml);
+		for (auto record : invalidDesk["construction"])
+			if (record["type"].as<std::string>() == "furniture") record["localDepth"] = 4;
+		refuseDesk(invalidDesk, "overlaps");
+		auto revisedDesk = YAML::LoadFile((root / "desk.furniture.yaml").string());
+		revisedDesk["furnitureCatalogue"]["definitions"][0]["edges"][1]["depthOffset"] = -5;
+		{ std::ofstream file(root / "desk.furniture.yaml"); file << revisedDesk; }
+		refuseDesk(deskYaml, "resolved edge depth");
 		// Portable references survive moving the complete project directory.
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);

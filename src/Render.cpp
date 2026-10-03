@@ -98,7 +98,7 @@ ImColor SelectedColour = ImColor(255, 255, 0);
 #define RENDER_SECTOR_OBJECTS_INFRONT 2
 
 void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, bool renderEdges, ImColor colour, WorldDrawList* drawList);
-void renderSectorAgents(shared_ptr<const core::Sector> sector, WorldDrawList* drawList);
+void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawList* drawList);
 
 void renderTransitThroughApertures(shared_ptr<const core::Sector> const& transit, uint32_t behindLayer,
 	std::vector<TransitAperture> const& apertures, WorldDrawList* drawList);
@@ -1293,26 +1293,6 @@ void renderSelected(shared_ptr<const core::Object> object, int /* layer */, bool
 
 void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRenderStyle style, int flags, WorldDrawList* drawList)
 {
-	if ((flags & RENDER_SECTOR_OBJECTS_INFRONT) && gRenderWorld && gRenderWorld->furnitureCatalogue())
-	{
-		for (auto const& instance : gRenderWorld->furniture())
-		{
-			if (instance.sector != sector->getIndex()) continue;
-			auto definition = gRenderWorld->furnitureCatalogue()->definition(instance.definitionKey);
-			if (!definition) continue; // Loaded Worlds validate the reference.
-			for (auto const& tile : definition->tiles)
-			{
-				core::Vector2 top{ sector->getCellX() + instance.x + tile.x, sector->getCellY() + instance.y + tile.y + 1 };
-				core::Vector2 bottom{ top.x + 1, top.y - 1 };
-				transformPosition(top); transformPosition(bottom);
-				if (style == LayerRenderStyle::Wireframe)
-					drawList->AddRect({ top.x, top.y }, { bottom.x, bottom.y }, ForeLocationColour);
-				else if (!drawObjectSprite(tile.image.c_str(), drawList,
-					{ top.x, top.y }, { bottom.x, bottom.y }))
-					throw std::runtime_error("Missing Furniture Image-set region: " + tile.image);
-			}
-		}
-	}
 	// Sort so that Ladders and Lifts are rendered first, as these need to be behind everything else.
 	auto sortedObjects = sector->getSortedObjects([](auto obj1, auto obj2)
 	{
@@ -1498,7 +1478,7 @@ void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core:
 	// afterwards so no physical control can be painted in front of them.
 	for (auto const& sector : sectors)
 	{
-		renderSectorAgents(sector, drawList);
+		renderSectorDepthContent(sector, drawList);
 	}
 }
 
@@ -1649,13 +1629,32 @@ void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
 	}
 }
 
-void renderSectorAgents(shared_ptr<const core::Sector> sector, WorldDrawList* drawList)
+void renderSectorDepthContent(shared_ptr<const core::Sector> sector, WorldDrawList* drawList)
 {
-	auto const& agents = sector->getAgents();
-
-	for (auto agent : agents)
+	// One ordered content pass, under the caller's existing Layer/aperture clip.
+	struct Content { int depth; core::FurnitureInstance const* furniture; core::Agent const* agent; };
+	vector<Content> content;
+	if (gRenderWorld && gRenderWorld->furnitureCatalogue())
+		for (auto const& instance : gRenderWorld->furniture())
+			if (instance.sector == sector->getIndex()) content.push_back({ instance.localDepth, &instance, nullptr });
+	for (auto agent : sector->getAgents()) content.push_back({ agent->getLocalDepth(), nullptr, agent });
+	stable_sort(content.begin(), content.end(), [](auto const& a, auto const& b) {
+		if (a.depth != b.depth) return a.depth > b.depth;
+		return a.furniture && !b.furniture;
+	});
+	for (auto const& entry : content)
 	{
-		renderAgent(agent, drawList);
+		if (entry.agent) { renderAgent(entry.agent, drawList); continue; }
+		auto const& instance = *entry.furniture;
+		auto const& definition = *gRenderWorld->furnitureCatalogue()->definition(instance.definitionKey);
+		for (auto const& tile : definition.tiles)
+		{
+			core::Vector2 top{ sector->getCellX() + instance.x + tile.x, sector->getCellY() + instance.y + tile.y + 1 };
+			core::Vector2 bottom{ top.x + 1, top.y - 1 };
+			transformPosition(top); transformPosition(bottom);
+			if (!drawObjectSprite(tile.image.c_str(), drawList, { top.x, top.y }, { bottom.x, bottom.y }))
+				throw std::runtime_error("Missing Furniture Image-set region: " + tile.image);
+		}
 	}
 }
 
@@ -1841,7 +1840,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Window rendering call this with a clip rectangle active from the Layer in
 	// front; the wireframe overlay pass must not expose them.
 	if (shouldRenderSectorAgents(sector->getType(), style))
-		renderSectorAgents(sector, drawList);
+		renderSectorDepthContent(sector, drawList);
 
 	// Render ceiling
 	// A Background has no floor, ceiling or walls - its colour is the whole
@@ -1932,7 +1931,7 @@ void renderLocationContentAboveTransit(shared_ptr<const core::Sector> const& loc
 		renderSectorObjects(location, layer, LayerRenderStyle::Solid,
 			RENDER_SECTOR_OBJECTS_BEHIND | RENDER_SECTOR_OBJECTS_INFRONT, drawList);
 	}
-	renderSectorAgents(location, drawList);
+	renderSectorDepthContent(location, drawList);
 }
 
 //
@@ -1955,7 +1954,7 @@ void renderTransitInAperture(shared_ptr<const core::Sector> const& transit, uint
 	{
 		renderStaircase(
 			static_pointer_cast<const core::StaircaseTransit>(transit)->getStaircase(), drawList);
-		renderSectorAgents(transit, drawList);
+		renderSectorDepthContent(transit, drawList);
 		return;
 	}
 

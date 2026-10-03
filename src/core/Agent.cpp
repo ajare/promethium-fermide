@@ -1482,7 +1482,8 @@ namespace core
 		while (vertexB < mPath.path->nodes.size())
 		{
 			auto const& node = mPath.path->nodes[vertexB];
-			if (!node.targetVertex || requiresActionAtSource(node.edge)) return vertexA;
+			if (!node.targetVertex || requiresActionAtSource(node.edge)
+				|| node.edge->getLocalDepth() != (nodeA.edge ? nodeA.edge->getLocalDepth() : 0)) return vertexA;
 			if (node.targetVertex->getPosition().distanceTo(positionA) > 0.001f) break;
 			++vertexB;
 		}
@@ -1677,6 +1678,7 @@ namespace core
 				mTraversalTask->escalatorWalking = unit < getEffectiveEscalatorWalkingChance().value;
 			}
 			syncStandingRouteObservation();
+			mLocalDepth = mTraversalTask->edge->getLocalDepth();
 			mState = State::TraversingEdge;
 		}
 	}

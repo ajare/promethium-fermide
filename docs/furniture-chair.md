@@ -1,17 +1,18 @@
-# Catalogue-backed Furniture (#348–#350)
+# Catalogue-backed Furniture (#348–#351)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
-authored usable points and fixed-depth-0 routing. Local-depth editing, explicit
-side routes and catalogue migration remain later tickets. There is no sitting
-state or seat reservation.
+authored usable points, explicit isolated front/back routes and Local-depth
+placement/editing. Complete-Path depth continuity, overlapping-route composition
+and catalogue migration remain later tickets. There is no sitting state or seat
+reservation.
 
 ## Authoring
 
 Save a World, put a manually authored `.furniture.yaml` catalogue beside it, then
 expand **Furniture** in the World panel. Enter its basename and load it, select a
 definition, select a Room, Corridor or Facade on the canvas, enter the instance
-name and Location-local x/supporting Level, and click **Place Furniture** while
-paused. The optional snap toggle rounds x only; y must always be floor-aligned.
+name, Location-local x/supporting Level and non-negative Local depth, and click
+**Place Furniture** while paused. The optional snap toggle rounds x only; y must always be floor-aligned.
 Refusals appear inline, without dialogs. Catalogue selection and placement use
 normal document history.
 
@@ -30,11 +31,15 @@ Ground or Walkway support. Fractional x, boundary-touching chairs and elevated
 Walkways are supported; gaps, overhangs, fractional y, non-finite positions,
 same-depth overlap, Backgrounds and Transits are refused before mutation.
 
+Artwork may overlap at different instance Local depths. Coincident owned Markers
+remain distinct destinations; visual overlap never connects their private vertices.
+
 Each authored usable point owns an independently named World Marker. Its initial name is
 `<instance name> <usable label>`, validated in the existing Marker namespace. It
 appears in the ordinary behaviour destination selectors and defaults to **Blocks
-pathing**. The graph connects it as a destination branch off an ordinary floor
-anchor, so it remains reachable and departable without severing circulation.
+pathing**. For definitions without explicit vertices, the graph connects it as a
+destination branch off an ordinary floor anchor, so it remains reachable and departable without
+severing circulation. Explicit definitions use only their authored edges.
 Independent movement or deletion of its owned Marker is refused.
 
 ## Safe instance edits (#349)
@@ -44,7 +49,7 @@ panel. While paused, change its name, Location-local x or supporting Level and
 click **Apply Furniture edit**, or click **Delete Furniture**. Edits and deletion
 use ordinary document undo/redo. Movement stays inside the owning Location and
 rigidly translates artwork and every owned point; it cannot cross a
-Floor/Walkway gap, overhang the Location or overlap another chair.
+Floor/Walkway gap, overhang the Location or overlap Furniture at the same Local depth.
 
 Instance names generate point names only at placement. Renaming an instance does
 not rewrite its Marker name. Rename the owned Marker through ordinary **Marker
@@ -59,16 +64,17 @@ Marker and refuses without mutation or history. Unreferenced deletion removes
 both instance and destination, preserving other authored object slots and never
 reusing the deleted identities. Walkway removal, Location deletion and resizing
 that would crop or invalidate Furniture refuse with blocking instance names.
-Delete or relocate the blocking Furniture before removing its support. Non-zero
-Local-depth lifecycle behaviour remains a later topology ticket.
+Delete or relocate the blocking Furniture before removing its support. Local-depth
+changes share the same preflight/history actions and preserve owned Marker identities. Negative instance/resolved edge depths and same-depth footprint
+overlaps are refused before mutation.
 
 ## Documents
 
-World schema 44 stores a catalogue basename/expected UUID reference, instance
-identity/name/placement/definition key, a `destinations` array containing every
-usable-point key and Marker identity/name/properties, and a non-reused instance
-identity allocator. Schema-43 chair documents remain readable. YAML `.world.yaml` and
-binary `.world` documents use the same construction records. They resolve the
+World schema 45 stores a catalogue basename/expected UUID reference, instance
+identity/name/placement/Local depth/definition key, a `destinations` array containing
+every usable-point key and Marker identity/name/properties, and a non-reused instance
+identity allocator. Schema-43 chair and schema-44 multi-point documents remain
+readable with default Local depth 0. YAML `.world.yaml` and binary `.world` documents use the same construction records. They resolve the
 current catalogue on reopening, not an embedded definition snapshot. Worlds
 without Furniture have no catalogue dependency. Move the World and its catalogue
 together to preserve portable references; a missing catalogue, missing definition,
@@ -103,10 +109,45 @@ points together; referenced deletion and invalid placement are atomic refusals.
 The existing first-destination `marker` convenience member is retained for chair
 API compatibility; `destinations` exposes the complete stable-key layout.
 
+## Explicit desk routes (#351)
+
+`resources/test-worlds/desk.furniture.yaml` and `desk.world.yaml` demonstrate an
+isolated two-tile desk using existing placeholder Image-set artwork. The catalogue
+adds `vertices` and `edges` alongside `usablePoints`:
+
+- Each vertex has a unique `key`, finite `x` offset within the footprint (including
+  its right boundary), and optional `y: 0`. A `usablePoint` binding names exactly
+  one existing usable-point key at its authored x. Every usable point must be
+  bound exactly once. Other vertices are routing-only, never behaviour destinations.
+- `external: true` explicitly designates a fixed-0 attachment to the surrounding
+  floor. Undesignated vertices are private even when coordinates coincide.
+- Each bidirectional edge names `from` and `to` vertex keys. Missing `depthOffset`
+  means fixed Local depth 0; a signed `depthOffset` resolves relative to the
+  instance depth. Unknown endpoints, self edges and duplicate connections fail
+  catalogue loading. Missing edges are never inferred.
+- `sideRoutes: true` declares that the authored routes replace ordinary floor
+  edges across the complete artwork width. Definitions without side routes retain
+  ordinary floor routing, including definitions with depth-assigned seat branches.
+  The desk explicitly joins its fixed-0 left/right approaches to front (`depthOffset: 0`) and back (`depthOffset: 1`) routes. At
+  instance depth 2 these resolve to front 2 and back 3, with no ordinary bypass.
+- Instance Local depth and every resolved edge depth must be non-negative and
+  fit an integer. Invalid placement, movement, depth edits and document replay
+  fail atomically. Different-depth artwork overlap is allowed; this slice does
+  not split or compose overlapping private routes.
+
+Local depth is a render-order integer local to a Location, not a Layer or physical
+coordinate. Edge geometry, walking duration, permissions and Mobility constraints
+are unchanged. Agents adopt their active edge depth at traversal start; depth-changing
+waypoints are not skipped. Larger depths render first, and Furniture renders before
+Agents at equal depth, under the existing Layer visibility and aperture clips.
+Thus a depth-2 walker is in front of the depth-2 desk, while a depth-3 walker is behind it.
+No depth-continuity preference has been added to route cost or search.
+
 ## Headless checks
 
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
+- `pf-smoke-world --check furniture/deskRoutes`
 - `pf-smoke-persistence --check furniture/documents`
 - `pf-smoke-render --check furniture/chairCommands`
 - `pf-smoke-editor --check furniture/chairActions`
@@ -114,3 +155,15 @@ API compatibility; `destinations` exposes the complete stable-key layout.
 The checks use the existing World/document, CPU draw-command, and production
 editor-action seams, isolated temporary roots and deterministic simulation ticks.
 They require no OS windows, dialogs or GPU.
+
+## #351 validation
+
+Full incremental default builds and complete CTest inventories passed in Linux
+GUI Release (`build-linux`, 85 tests), GUI Debug (`build-debug`, 85 tests),
+headless Release (`build-linux-validation/release-headless`, 82 tests), and
+headless Debug with `PF_HIGH_ANALYSIS=ON`
+(`build-linux-validation/debug-headless`, 82 tests), using `--parallel 4` and
+`ctest -j 4`. Displays were unset; the optional vendored GUI capability test was
+explicitly skipped in each configuration. Focused Furniture checks and affected
+module/CLI contracts passed. `git diff --check` passed. Windows validation is not
+claimed.
