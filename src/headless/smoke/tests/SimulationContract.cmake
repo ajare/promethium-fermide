@@ -151,6 +151,14 @@ set(core_names
     runScaledWorld
 )
 
+if(DEFINED LANE)
+    set(lane_binary "${SIMULATION}")
+    set(lane_module simulation)
+    set(lane_names ${core_names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${SIMULATION}")

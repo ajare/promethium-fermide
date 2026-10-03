@@ -123,6 +123,14 @@ set(names
     staircasesConnectAdjacentCorridorsAndRoundTripRendering
     laddersCanBeValidatedEditedAndDeletedRendering
 )
+if(DEFINED LANE)
+    set(lane_binary "${RENDER}")
+    set(lane_module render)
+    set(lane_names ${names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 list(LENGTH names count)
 string(JOIN "\n" listing ${names})
 invoke(0 "^${listing}\n$" --list)

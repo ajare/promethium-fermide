@@ -99,6 +99,14 @@ set(core_names
     inferredPathSourceDoesNotMakeAgentDoubleBack
 )
 
+if(DEFINED LANE)
+    set(lane_binary "${ROUTING}")
+    set(lane_module routing)
+    set(lane_names ${core_names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${ROUTING}")

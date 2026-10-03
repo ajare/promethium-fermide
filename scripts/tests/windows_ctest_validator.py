@@ -21,7 +21,8 @@ class InventoryTests(unittest.TestCase):
             exe = Path(self.root.name) / 'Debug' / f'pf-smoke-{module}.exe'
             exe.parent.mkdir(exist_ok=True)
             exe.touch()
-            labels = ['smoke', 'core' if module in v.CORE else module]
+            labels = ['smoke', 'functional', 'validation-fast',
+                      'core' if module in v.CORE else module]
             if module == 'metrics':
                 labels.append('http')
             self.inventory['tests'].append({'name': f'smoke-{module}', 'command': [str(exe)],

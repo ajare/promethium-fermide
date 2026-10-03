@@ -72,6 +72,14 @@ set(core_names
     unknownAndRenamedAuthorizationNamesAreDiagnosed
 )
 
+if(DEFINED LANE)
+    set(lane_binary "${BEHAVIOURS}")
+    set(lane_module behaviours)
+    set(lane_names ${core_names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 foreach(tier IN ITEMS core)
     if(tier STREQUAL "core")
         set(binary "${BEHAVIOURS}")

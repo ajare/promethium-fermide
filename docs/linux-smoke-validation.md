@@ -6,6 +6,14 @@ unset, Render and Editor checks use CPU-only ImGui, and Startup deliberately use
 an unavailable SDL driver and rejects abnormal child termination. **Windows
 validation is not claimed here; it remains delegated to #279.**
 
+## Validation lanes
+
+See [smoke validation lanes](smoke-validation-lanes.md) for explicit fast-development
+and unfiltered exhaustive-final commands, artifact-risk selections, scheduler
+accounting, and Debug/Release timing evidence. Unfiltered CTest retains all stress
+assertions. The incremental helper defaults to `--lane fast`; choose `--lane final`
+for selected modules' exhaustive contracts.
+
 ## Incremental smoke validation
 
 From the repository root, select a required build configuration and one or more
@@ -25,7 +33,9 @@ scripts/validate_linux_smoke.sh --list
 
 The script incrementally configures its existing
 `build-linux-validation/<debug|release>` tree, builds only the selected
-`pf-smoke-*` targets, and runs their direct CTest entries. Use `--build-dir path`
+`pf-smoke-*` targets and the harness probe, and runs their selected lane's
+functional/CLI/isolation CTest entries. `--lane final` additionally runs their
+exhaustive contracts. Use `--build-dir path`
 to select another persistent build tree. GUI support remains enabled so the
 Startup set and its editor subprocess are available from the same tree. Displays
 are unset for every run.
@@ -54,10 +64,10 @@ analysis:
 Use direct module commands for active smoke work:
 
 ```sh
-cmake --build build-linux --target pf-smoke-routing --parallel
+cmake --build build-linux --target pf-smoke-routing pf-smoke-harness-probe --parallel
 build-linux/bin/x64/Release/pf-smoke-routing --list
 build-linux/bin/x64/Release/pf-smoke-routing --check populationRouting
-ctest --test-dir build-linux -R '^smoke-routing(-contract)?$' --output-on-failure
+ctest --test-dir build-linux -R '^smoke-routing($|-)' -L '^validation-fast$' --output-on-failure
 ```
 
 The old `prometheum-fermide-headless --...` forms are compatibility examples only.

@@ -1,6 +1,18 @@
 # Direct smoke runtime validation on Windows (#308)
 
 Build the [MSVC Debug/Release matrix](windows-smoke-build-validation.md) first.
+For routine development and final/CI selection, see
+[validation lanes](smoke-validation-lanes.md):
+
+```bat
+python scripts\validate_ctest_lane.py --build-tree out\msvc-smoke\gui --config Debug --lane fast --parallel 8
+python scripts\validate_ctest_lane.py --build-tree out\msvc-smoke\gui --config Release --lane final --parallel 8
+```
+
+Run both lanes in both configurations for final evidence. Unfiltered CTest and
+`validate_windows_ctest.py` remain exhaustive; registration timeouts preserve
+larger MSVC Debug budgets and internal concurrency has CTest processor accounting.
+
 Then run the direct executables, independently of the source/build/startup cwd:
 
 ```bat

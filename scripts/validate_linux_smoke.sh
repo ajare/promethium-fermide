@@ -22,7 +22,7 @@ SMOKE_TESTS=(
 
 print_usage() {
     cat <<EOF
-Usage: $(basename "$0") --config Debug|Release [--build-dir path] TEST [TEST ...]
+Usage: $(basename "$0") --config Debug|Release [--build-dir path] [--lane fast|final] TEST [TEST ...]
        $(basename "$0") --list
 
 Incrementally configures, builds, and runs the selected Linux smoke-test sets.
@@ -32,6 +32,9 @@ Arguments:
   --config Debug|Release  Required build configuration.
   --build-dir path        Build directory. Defaults to
                           build-linux-validation/<debug|release>.
+  --lane fast|final       Default fast: functional + bounded CLI/isolation.
+                          final also runs expensive exhaustive stress contracts
+                          (eight internal processes, accounted by CTest).
   --list                  List these arguments and the available test sets.
   --help                  Show this help.
 
@@ -58,6 +61,7 @@ fi
 CONFIG=""
 BUILD_DIR=""
 LIST_ONLY=0
+LANE=fast
 SELECTED=()
 
 while (( $# > 0 )); do
@@ -70,6 +74,11 @@ while (( $# > 0 )); do
         --build-dir)
             (( $# >= 2 )) || usage_error "--build-dir requires a path."
             BUILD_DIR="$2"
+            shift 2
+            ;;
+        --lane)
+            (( $# >= 2 )) || usage_error "--lane requires fast or final."
+            LANE="$2"
             shift 2
             ;;
         --list|--help|-h)
@@ -94,6 +103,7 @@ if (( LIST_ONLY )); then
     exit 0
 fi
 
+[[ "$LANE" == fast || "$LANE" == final ]] || usage_error "--lane must be fast or final."
 [[ "$CONFIG" == Debug || "$CONFIG" == Release ]] || \
     usage_error "--config must be specified as Debug or Release."
 (( ${#SELECTED[@]} > 0 )) || usage_error "specify at least one smoke-test set."
@@ -137,7 +147,7 @@ cmake -S "$ROOT" -B "$BUILD_DIR" \
     -DBUILD_TESTING=ON \
     -DPF_BUILD_GUI=ON
 
-TARGETS=()
+TARGETS=(pf-smoke-harness-probe)
 REGEX_PARTS=()
 for test in "${SELECTED[@]}"; do
     TARGETS+=("pf-smoke-$test")
@@ -148,5 +158,10 @@ cmake --build "$BUILD_DIR" --config "$CONFIG" \
     --target "${TARGETS[@]}" --parallel "$JOBS"
 
 regex="$(IFS='|'; printf '%s' "${REGEX_PARTS[*]}")"
+LANE_ARGS=()
+if [[ "$LANE" == fast ]]; then
+    LANE_ARGS=(-L '^validation-fast$')
+fi
 ctest --test-dir "$BUILD_DIR" --build-config "$CONFIG" \
-    -R "^smoke-($regex)$" --parallel "$JOBS" --output-on-failure
+    -R "^smoke-($regex)($|(-cli|-concurrency)?-contract$)" "${LANE_ARGS[@]}" \
+    --parallel "$JOBS" --output-on-failure

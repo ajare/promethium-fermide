@@ -60,6 +60,7 @@ def audit_inventory(inventory, gui, config):
                 expected = {'smoke', 'metrics', 'http'}
             if module == 'startup':
                 expected = {'smoke', 'startup', 'graphics', 'subprocess', 'gui'}
+            expected |= {'functional', 'validation-fast'}
             if test['name'] != f'smoke-{module}' or set(properties.get('LABELS', [])) != expected:
                 raise RuntimeError(f'wrong module name/labels: {test}')
             if Path(command[0]).parent.name != config:

@@ -103,6 +103,14 @@ set(names boothWindows/authoredRoundTripAndMalformedRecords airlocks/authoredRou
     staircaseEditsReturnTheStaircaseOwnLayer
     restorationPreservesStatePathsAndLifetimes
 )
+if(DEFINED LANE)
+    set(lane_binary "${PERSISTENCE}")
+    set(lane_module persistence)
+    set(lane_names ${names})
+    include("${CMAKE_CURRENT_LIST_DIR}/ContractLane.cmake")
+    return()
+endif()
+
 set(posix_names transactional-symlink-target transactional-symlink-temp transactional-permissions)
 list(LENGTH names passes)
 set(skips 0)
