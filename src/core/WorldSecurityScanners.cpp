@@ -1,5 +1,5 @@
 #include "core/World.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/Exceptions.h"
 
 namespace core
@@ -91,10 +91,10 @@ namespace core
 
 	bool World::setChamberConfiguration(uint32_t index, float sensor, float pre, float scan, float post)
 	{
-		if (!mSimulationPaused || !SecurityScannerTransit::validConfiguration(sensor, pre, scan, post)
+		if (!mSimulationPaused || !ChamberTransit::validConfiguration(sensor, pre, scan, post)
 			|| index >= mSectors.size()) return false;
-		auto chamber = std::dynamic_pointer_cast<SecurityScannerTransit>(mSectors[index]);
-		if (!chamber) return false;
+		auto chamber = std::dynamic_pointer_cast<ChamberTransit>(mSectors[index]);
+		if (!chamber || chamber->getSubtype() != ChamberSubtype::SecurityScanner) return false;
 		for (auto& record : mConstructionRecords)
 			if (record.type == ConstructionType::Chamber && record.layer == chamber->getLayerIndex()
 				&& record.a == chamber->getCellY() && record.b == chamber->getCellX())
@@ -107,23 +107,6 @@ namespace core
 				markModified(); invalidateSimulationSnapshot(); return true;
 			}
 		return false;
-	}
-
-	bool World::canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x,
-		uint32_t width, std::string* diagnostic) const
-	{
-		return canAddChamber(layer, y, x, width, diagnostic);
-	}
-
-	uint32_t World::addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x,
-		uint32_t width, bool leftToRight)
-	{
-		return addChamber(layer, y, x, width, leftToRight);
-	}
-
-	bool World::setSecurityScannerConfiguration(uint32_t index, float sensor, float pre, float scan, float post)
-	{
-		return setChamberConfiguration(index, sensor, pre, scan, post);
 	}
 
 	bool World::isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const

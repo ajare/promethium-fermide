@@ -10,7 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/OccupantPacking.h"

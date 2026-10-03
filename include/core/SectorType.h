@@ -17,8 +17,7 @@ namespace core
 		Stairwell,
 		Staircase,
 		Airlock,
-		Chamber,
-		SecurityScanner = Chamber // Temporary compatibility identity, not another Sector.
+		Chamber
 	};
 
 	std::string getSectorTypeString(SectorType type);

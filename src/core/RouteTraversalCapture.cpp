@@ -6,7 +6,7 @@
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/LadderEdge.h"
 #include "core/LadderMountEdge.h"
 #include "core/StaircaseEdge.h"
@@ -243,7 +243,8 @@ namespace core
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
 			result.mobilityKind = TraversalKind::Door;
 			if (result.type == EdgeType::BulkheadDoor)
-				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mSecurityScanner)
+				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mSecurityScanner;
+					chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
 				{
 					result.securityScanner = true;
 					result.boarding = target->getSector().get() == chamber.get();

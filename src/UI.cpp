@@ -2823,9 +2823,9 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			// A cached scanner drag plan must not turn a running edit into a pause.
-			if (!plan.scanner && !world->isSimulationPaused()) world->pauseSimulation();
-			auto index = plan.scanner ? world->applyChamberEdit(plan) : world->applyAirlockEdit(plan);
+			// A cached Chamber drag plan must not turn a running edit into a pause.
+			if (!plan.chamber && !world->isSimulationPaused()) world->pauseSimulation();
+			auto index = plan.chamber ? world->applyChamberEdit(plan) : world->applyAirlockEdit(plan);
 			gUISettings.worldPaused = true;
 			gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
 			gSelectedAgent = nullptr; gSelectedSectorObject.reset();

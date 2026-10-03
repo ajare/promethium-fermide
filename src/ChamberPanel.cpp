@@ -64,6 +64,8 @@ std::optional<core::World::ChamberEditPlan> drawChamberSelectionPanel(
 		structural = world->planRemoveChamber(chamber.getIndex());
 	ImGui::EndDisabled();
 
+	// Common Sector controls are independent of the subtype-specific section.
+	if (chamber.getSubtype() != core::ChamberSubtype::SecurityScanner) return structural;
 	ImGui::Separator();
 	ImGui::TextUnformatted("Security Scanner");
 	ImGui::BeginDisabled(!world->isSimulationPaused());

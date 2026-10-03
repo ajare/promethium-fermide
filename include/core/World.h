@@ -363,7 +363,7 @@ namespace core
 		struct AirlockEditPlan
 		{
 			bool valid = false, remove = false;
-			bool scanner = false, leftToRight = true;
+			bool chamber = false, leftToRight = true;
 			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
 			std::string diagnostic;
 		};
@@ -848,7 +848,6 @@ namespace core
 			Facade,
 			Airlock,
 			Chamber,
-			SecurityScanner = Chamber,
 			BoothWindow
 		};
 
@@ -1757,19 +1756,6 @@ namespace core
 			std::string* diagnostic = nullptr, ChamberSubtype subtype = ChamberSubtype::SecurityScanner) const;
 		uint32_t addChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
 			bool leftToRight = true, ChamberSubtype subtype = ChamberSubtype::SecurityScanner);
-
-		// Temporary editor/source compatibility interfaces; no separate scanner state.
-		using SecurityScannerEditPlan = AirlockEditPlan;
-		SecurityScannerEditPlan planResizeSecurityScanner(uint32_t sectorIndex, uint32_t x,
-			uint32_t y, uint32_t width, bool leftToRight) const;
-		SecurityScannerEditPlan planRemoveSecurityScanner(uint32_t sectorIndex) const;
-		uint32_t applySecurityScannerEdit(SecurityScannerEditPlan const& plan);
-		bool setSecurityScannerConfiguration(uint32_t sectorIndex, float sensorDistance,
-			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
-		bool canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
-			std::string* diagnostic = nullptr) const;
-		uint32_t addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
-			bool leftToRight = true);
 
 		CreateShuttleResult addShuttle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t cellsWide, CreateShuttleOptions const& options);
 

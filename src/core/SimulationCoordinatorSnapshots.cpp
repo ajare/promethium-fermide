@@ -8,7 +8,7 @@
 #include "core/BulkheadDoor.h"
 #include "core/World.h"
 #include "core/AirlockTransit.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/Coordination.h"
 #include "core/ExtensibleObject.h"
 #include "core/OpenableObject.h"
@@ -576,7 +576,8 @@ namespace core
 				result.airlocks.push_back(std::move(state));
 			}
 		for (auto const& sector : mWorld.mSectors)
-			if (auto chamber = std::dynamic_pointer_cast<const SecurityScannerTransit>(sector))
+			if (auto chamber = std::dynamic_pointer_cast<const ChamberTransit>(sector);
+				chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
 			{
 				SecurityScannerSnapshot state;
 				state.sector = SectorId{ (uint64_t)sector->getIndex() + 1 };

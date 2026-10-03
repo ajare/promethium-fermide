@@ -1,6 +1,6 @@
 #include "core/World.h"
 #include "core/AirlockTransit.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/RestorationTiming.h"
 #include "core/WorldDocument.h"
 #include "core/AgentBehaviourRegistry.h"
@@ -998,7 +998,7 @@ namespace core
 			record.p = serializer.readBool("leftWasOpen"); record.q = serializer.readBool("rightWasOpen");
 			record.scannerSensorDistance = serializer.readFloat("sensorDistance");
 			if (serializer.readUint32("levelsHigh") != 1 || serializer.readUint32("capacity") != 1
-				|| !SecurityScannerTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z)
+				|| !ChamberTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z)
 				|| serializer.hasField("initiallyBroken") || serializer.hasField("leftControlPermissionRequirement")
 				|| serializer.hasField("rightControlPermissionRequirement"))
 				throw SerializationException("Invalid Security scanner configuration");
@@ -2441,10 +2441,10 @@ namespace core
 		}
 		case ConstructionType::Chamber:
 		{
-			if (!isSupportedChamberSubtype(record.chamberSubtype) || record.d > 1 || !SecurityScannerTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z))
+			if (!isSupportedChamberSubtype(record.chamberSubtype) || record.d > 1 || !ChamberTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z))
 				throw SerializationException("Invalid Security scanner replay configuration");
 			auto index = addChamber(record.layer, record.a, record.b, record.c, record.d != 0, record.chamberSubtype);
-			auto chamber = std::static_pointer_cast<SecurityScannerTransit>(mSectors[index]);
+			auto chamber = std::static_pointer_cast<ChamberTransit>(mSectors[index]);
 			chamber->mSensorDistance = record.scannerSensorDistance;
 			chamber->mPreDelaySeconds = record.x; chamber->mScanSeconds = record.y; chamber->mPostPauseSeconds = record.z;
 			for (auto const& door : chamber->mDoors) door->setAutomaticSensorDistance(record.scannerSensorDistance);
@@ -4349,10 +4349,10 @@ namespace core
 	bool World::prepareAirlockEdit(AirlockEditPlan const& plan,
 		vector<ConstructionRecord>& records, string& diagnostic) const
 	{
-		if (plan.scanner && !mSimulationPaused)
+		if (plan.chamber && !mSimulationPaused)
 		{ diagnostic = "Chamber structural editing requires a paused simulation"; return false; }
-		auto type = plan.scanner ? SectorType::Chamber : SectorType::Airlock;
-		auto constructionType = plan.scanner ? ConstructionType::Chamber : ConstructionType::Airlock;
+		auto type = plan.chamber ? SectorType::Chamber : SectorType::Airlock;
+		auto constructionType = plan.chamber ? ConstructionType::Chamber : ConstructionType::Airlock;
 		if (plan.sectorIndex >= mSectors.size()
 			|| mSectors[plan.sectorIndex]->getType() != type)
 		{ diagnostic = "Only the selected chamber type can be edited"; return false; }
@@ -4415,12 +4415,12 @@ namespace core
 			if (plan.remove) records = std::move(without);
 			else
 			{
-				bool valid = plan.scanner
-					? candidate->canAddSecurityScanner(edited.layer, plan.y, plan.x, plan.width, &diagnostic)
+				bool valid = plan.chamber
+					? candidate->canAddChamber(edited.layer, plan.y, plan.x, plan.width, &diagnostic, edited.chamberSubtype)
 					: candidate->canAddAirlock(edited.layer, plan.y, plan.x, plan.width, edited.x, &diagnostic);
 				if (!valid) return false;
 				edited.a = plan.y; edited.b = plan.x; edited.c = plan.width;
-				if (plan.scanner) edited.d = plan.leftToRight ? 1 : 0;
+				if (plan.chamber) edited.d = plan.leftToRight ? 1 : 0;
 				for (int side = 0; side < 2; ++side)
 				{
 					auto endX = side == 0 ? plan.x - 1 : plan.x + plan.width;
@@ -4444,7 +4444,7 @@ namespace core
 		uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const
 	{
 		ChamberEditPlan plan;
-		plan.scanner = true; plan.leftToRight = leftToRight;
+		plan.chamber = true; plan.leftToRight = leftToRight;
 		plan.sectorIndex = index; plan.x = x; plan.y = y; plan.width = width;
 		vector<ConstructionRecord> records;
 		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
@@ -4454,7 +4454,7 @@ namespace core
 	World::ChamberEditPlan World::planRemoveChamber(uint32_t index) const
 	{
 		ChamberEditPlan plan;
-		plan.scanner = true; plan.remove = true; plan.sectorIndex = index;
+		plan.chamber = true; plan.remove = true; plan.sectorIndex = index;
 		vector<ConstructionRecord> records;
 		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
 		return plan;
@@ -4462,24 +4462,8 @@ namespace core
 
 	uint32_t World::applyChamberEdit(ChamberEditPlan const& plan)
 	{
-		if (!plan.scanner) throw WorldException(this, "Not a Security scanner edit plan");
+		if (!plan.chamber) throw WorldException(this, "Not a Chamber edit plan");
 		return applyAirlockEdit(plan);
-	}
-
-	World::SecurityScannerEditPlan World::planResizeSecurityScanner(uint32_t index,
-		uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const
-	{
-		return planResizeChamber(index, x, y, width, leftToRight);
-	}
-
-	World::SecurityScannerEditPlan World::planRemoveSecurityScanner(uint32_t index) const
-	{
-		return planRemoveChamber(index);
-	}
-
-	uint32_t World::applySecurityScannerEdit(SecurityScannerEditPlan const& plan)
-	{
-		return applyChamberEdit(plan);
 	}
 
 	World::AirlockEditPlan World::planResizeAirlock(uint32_t index, uint32_t x,

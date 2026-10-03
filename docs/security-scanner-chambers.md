@@ -151,11 +151,13 @@ and ownership. Detached open-wall restoration records remain supported.
 `World::canAddChamber` / `addChamber` support an explicit `ChamberSubtype`,
 defaulting creation to `SecurityScanner`. `setChamberConfiguration`,
 `planResizeChamber`, `planRemoveChamber`, and `applyChamberEdit` retain the
-existing paused, validated, transactional scanner edit semantics. The old
-SecurityScanner World interfaces and Transit/Sector identity aliases forward to
-the same Chamber; they do not allocate another traversal resource or copy state.
-`ChamberTransit::getSubtype()` exposes the immutable subtype. Scanner-specific
-journey snapshots and rendering remain available to existing callers.
+existing paused, validated, transactional scanner edit semantics.
+`ChamberTransit::getSubtype()` exposes the immutable subtype. Chamber is the sole
+Sector and construction identity; the temporary SecurityScanner World interfaces
+and Transit/Sector aliases have been removed. Legacy `securityScanner` document
+recognition remains supported permanently and migrates to Chamber on load.
+Scanner-specific phases, journey snapshots, configuration, and rendering retain
+their behavior names and dispatch on the Security Scanner subtype.
 
 ## Headless checks
 

@@ -115,6 +115,13 @@ namespace persistence
 						auto input = core::YamlSerializer::fromString(YAML::Dump(legacyNode)); input->deserialize();
 						core::SerializationWorkData work; core::World migrated("Migrated", 1, 1);
 						require(migrated.deserialize(*input, work), "Legacy scanner migration refused");
+						assertAuthored(migrated);
+						// Migrated records must support the same Chamber editing/replay commands.
+						migrated.pauseSimulation();
+						index = migrated.applyChamberEdit(migrated.planResizeChamber(index, 2, 1, width, !direction));
+						require(std::dynamic_pointer_cast<const core::ChamberTransit>(migrated.getSector(index))->isLeftToRight() == !direction,
+							"Migrated Chamber reversal refused");
+						index = migrated.applyChamberEdit(migrated.planResizeChamber(index, 2, 1, width, direction));
 						assertAuthored(migrated); journey(migrated);
 						auto output = core::YamlSerializer::toString(); migrated.serialize(*output, work); output->serialize();
 						auto savedNode = YAML::Load(output->getSerializedString());
@@ -129,6 +136,19 @@ namespace persistence
 							}
 						}
 						require(foundChamber, "Migration did not save Chamber identity");
+						// Reopen the new representation after migration and authored replay,
+						// including the binary format; no scanner identity alias is needed.
+						for (bool binary : { false, true })
+						{
+							auto binaryOutput = core::BinarySerializer::toString();
+							migrated.serialize(*binaryOutput, work); binaryOutput->serialize();
+							std::unique_ptr<core::Serializer> savedInput = binary
+								? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(binaryOutput->getSerializedString()))
+								: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(output->getSerializedString()));
+							savedInput->deserialize(); core::World reopened("Reopened migrated Chamber", 1, 1);
+							require(reopened.deserialize(*savedInput, work), "Migrated Chamber new-format round trip refused");
+							assertAuthored(reopened);
+						}
 					}
 					for (auto field : { "subtype", "capacity", "preDelaySeconds", "scanSeconds", "postPauseSeconds", "sensorDistance", "cellsWide", "levelsHigh", "layer", "x", "y", "leftToRight", "leftWasOpen" })
 						for (bool missing : { false, true })

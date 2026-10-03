@@ -7,7 +7,7 @@
 #include "core/Vertex.h"
 #include "core/Agent.h"
 #include "core/AirlockTransit.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/RouteTraversalInputs.h"
 #include "core/Exceptions.h"
 
@@ -30,7 +30,7 @@ namespace core
 	{
 	}
 
-	BulkheadDoorEdge::BulkheadDoorEdge(shared_ptr<BulkheadDoor> door, shared_ptr<SecurityScannerTransit> scanner)
+	BulkheadDoorEdge::BulkheadDoorEdge(shared_ptr<BulkheadDoor> door, shared_ptr<ChamberTransit> scanner)
 		: Edge(EdgeType::BulkheadDoor), mDoor(door), mSecurityScanner(std::move(scanner)) {}
 
 	BulkheadDoorEdge::BulkheadDoorEdge(uint32_t id, shared_ptr<BulkheadDoor> door)

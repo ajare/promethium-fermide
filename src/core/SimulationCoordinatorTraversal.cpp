@@ -5,7 +5,7 @@
 
 #include "core/Agent.h"
 #include "core/AirlockTransit.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/World.h"
 #include "core/Coordination.h"
 #include "core/Edge.h"
@@ -93,7 +93,8 @@ namespace core
 		// Interior walking is held at the centre until the automatic scan finishes.
 		if (request->mSourceSector == request->mDestinationSector
 			&& request->mSourceSector.value <= mWorld.mSectors.size())
-			if (auto chamber = std::dynamic_pointer_cast<SecurityScannerTransit>(mWorld.mSectors[request->mSourceSector.value - 1]))
+			if (auto chamber = std::dynamic_pointer_cast<ChamberTransit>(mWorld.mSectors[request->mSourceSector.value - 1]);
+				chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
 			{
 				auto actor = mWorld.mAgents.find(request->mOwner);
 				if (!actor || chamber->mOccupant != request->mOwner) { denyTraversalRequest(requestId); return; }

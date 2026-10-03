@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include "core/SimulationCoordinator.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/BulkheadDoor.h"
@@ -39,7 +39,8 @@ namespace core
 		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
 		{
 			(void)id;
-			if (!resource->mSecurityScanner) continue;
+			if (!resource->mSecurityScanner
+				|| resource->mSecurityScanner->getSubtype() != ChamberSubtype::SecurityScanner) continue;
 			auto& chamber = *resource->mSecurityScanner;
 			auto& entry = *chamber.mDoors[chamber.getEntrySide()];
 			auto& exit = *chamber.mDoors[chamber.getExitSide()];

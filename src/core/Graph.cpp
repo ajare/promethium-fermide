@@ -30,7 +30,7 @@
 // Edges
 #include "core/BulkheadDoorEdge.h"
 #include "core/AirlockTransit.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/WindowEdge.h"
 #include "core/DoorEdge.h"
 #include "core/ForceBridgeEdge.h"
@@ -702,9 +702,9 @@ namespace core
 		else if (auto rightChamber = dynamic_pointer_cast<AirlockTransit>(obj.adjacent[1]); rightChamber)
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), rightChamber), verts[0], verts[1], false);
 
-		if (auto scanner = dynamic_pointer_cast<SecurityScannerTransit>(obj.adjacent[0]); scanner)
+		if (auto scanner = dynamic_pointer_cast<ChamberTransit>(obj.adjacent[0]); scanner && scanner->getSubtype() == ChamberSubtype::SecurityScanner)
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scanner), verts[0], verts[1], false);
-		else if (auto scannerRight = dynamic_pointer_cast<SecurityScannerTransit>(obj.adjacent[1]); scannerRight)
+		else if (auto scannerRight = dynamic_pointer_cast<ChamberTransit>(obj.adjacent[1]); scannerRight && scannerRight->getSubtype() == ChamberSubtype::SecurityScanner)
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scannerRight), verts[0], verts[1], false);
 
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_LEFT]);
