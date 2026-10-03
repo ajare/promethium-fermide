@@ -823,7 +823,7 @@ existing checks, Simulation now owns 55 stable selectors.
 
 | Former legacy group | Module source | Selectable checks |
 | --- | --- | ---: |
-| Pause position | `smoke/simulation/Pause.cpp` | 5 |
+| Pause position and retained Furniture depth | `smoke/simulation/Pause.cpp` | 6 |
 | Non-finite and boundary timing | `smoke/simulation/Timing.cpp` | 9 |
 | World teardown and topology replacement | `smoke/simulation/Teardown.cpp` | 4 |
 

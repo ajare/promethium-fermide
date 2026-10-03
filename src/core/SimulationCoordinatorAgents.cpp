@@ -562,6 +562,7 @@ namespace core
 		mWorld.mPausedPathIntents.erase(id);
 		agent->clearRuntimePath();
 		agent->mResetPosition = agent->mPosition;
+		agent->mResetLocalDepth = agent->mLocalDepth;
 		agent->mResetPath.reset();
 		agent->mResetPathActive = false;
 		releaseTraversalOwnership(id);

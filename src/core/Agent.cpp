@@ -680,6 +680,7 @@ namespace core
 		mPath = {};
 		mPathStartPosition = {};
 		mResetPosition = {};
+		mLocalDepth = mResetLocalDepth = 0;
 		mResetPath.reset();
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
@@ -920,6 +921,11 @@ namespace core
 		effective.sourceTag = mRouteFamiliaritySample->sourceTag;
 		effective.propertyRevision = mRouteFamiliaritySample->propertyRevision;
 		return effective;
+	}
+
+	int routeAgentLocalDepth(Agent const* agent)
+	{
+		return agent ? agent->getLocalDepth() : 0;
 	}
 
 	uint64_t Agent::getRouteJourneyIdentity(Vertex const* destination) const
@@ -1168,6 +1174,7 @@ namespace core
 		if (authored)
 		{
 			mResetPosition = pos;
+			mLocalDepth = mResetLocalDepth = 0;
 			modify();
 		}
 	}
@@ -1232,6 +1239,7 @@ namespace core
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		mResetPosition = mPosition;
+		mResetLocalDepth = mLocalDepth;
 		mResetPath = path;
 		mResetPathActive = startPathing;
 		assignPath(std::move(path), startPathing, true);
@@ -1344,6 +1352,7 @@ namespace core
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		clearRuntimePath();
 		mResetPosition = mPosition;
+		mResetLocalDepth = mLocalDepth;
 		mResetPath.reset();
 		mResetPathActive = false;
 		modify();
@@ -1483,7 +1492,7 @@ namespace core
 		{
 			auto const& node = mPath.path->nodes[vertexB];
 			if (!node.targetVertex || requiresActionAtSource(node.edge)
-				|| node.edge->getLocalDepth() != (nodeA.edge ? nodeA.edge->getLocalDepth() : 0)) return vertexA;
+				|| node.edge->getLocalDepth() != (nodeA.edge ? nodeA.edge->getLocalDepth() : mLocalDepth)) return vertexA;
 			if (node.targetVertex->getPosition().distanceTo(positionA) > 0.001f) break;
 			++vertexB;
 		}

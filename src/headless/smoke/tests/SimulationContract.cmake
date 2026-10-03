@@ -26,6 +26,7 @@ endfunction()
 
 set(core_names
     observation
+    furniture/retainedDepth
     clearPausedPathDoesNotResume
     pauseTraversingEdgePreservesPosition
     pauseMovingToVertexPreservesPosition

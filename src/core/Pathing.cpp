@@ -113,7 +113,7 @@ namespace core
 			input.observationSector, input.walkSpeed, input.world, input.climbSpeed,
 			input.allowFallbackMobility, input.perceptionKey, input.observationEpoch,
 			input.mobilityProfile ? input.mobilityProfile : std::optional<MobilityProfile>{
-				input.agent ? input.agent->getEffectiveMobilityProfile().value : MobilityProfile{} } });
+				input.agent ? input.agent->getEffectiveMobilityProfile().value : MobilityProfile{} }, input.localDepth });
 		auto resize = [this](auto& storage, size_t size)
 		{
 			auto const capacity = storage.capacity();
@@ -139,7 +139,7 @@ namespace core
 	{
 		auto const c = *mDecision;
 		mDecision.emplace(RouteDecisionContext{ c.agent, c.profile, c.policy, c.observationSector,
-			c.walkSpeed, c.world, c.climbSpeed, true, c.perceptionKey, c.observationEpoch, c.mobilityProfile });
+			c.walkSpeed, c.world, c.climbSpeed, true, c.perceptionKey, c.observationEpoch, c.mobilityProfile, c.localDepth });
 		// Feasibility is part of the cache key. Keep exactly the same captured
 		// observations, but never reuse first-pass exclusions in the fallback pass.
 		nextCostGeneration();
@@ -669,7 +669,7 @@ namespace core
 			RouteDecisionContext const fallbackContext{ agent, profile,
 				context.policy, context.observationSector, context.walkSpeed,
 				context.world, context.climbSpeed,
-				true, perceptionKey, 0, context.mobilityProfile };
+				true, perceptionKey, 0, context.mobilityProfile, context.localDepth };
 			workspace.allowFallbackMobility();
 			return runSearch(fallbackContext);
 		}

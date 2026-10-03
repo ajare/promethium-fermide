@@ -4,6 +4,7 @@
 #include "UISettings.h"
 #include "core/World.h"
 #include "core/Agent.h"
+#include "core/MarkerSectorObject.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
@@ -173,6 +174,34 @@ namespace
 					require(backRoute ? agentLast < deskFirst : deskLast < agentFirst,
 						"Active front/back route did not render on the correct side of the desk");
 				}
+			}
+			// Arrive at Furniture, then render the retained depth with no active edge.
+			std::shared_ptr<const core::Vertex> seat;
+			for (uint32_t i = 0; i < deskWorld->getSector(deskRoom)->getNumObjects(); ++i)
+				if (auto marker = std::dynamic_pointer_cast<core::MarkerSectorObject>(deskWorld->getSector(deskRoom)->getObject(i));
+					marker && marker->getMarker()->getId() == deskWorld->furniture().front().marker)
+					seat = deskWorld->getGraph()->getVertexForObject(marker);
+			agent->setPath(deskWorld->getGraph()->calculatePath(agent, seat), true);
+			deskWorld->resumeSimulation();
+			for (int tick = 0; tick < 1200 && agent->getState() != core::Agent::State::Idle; ++tick) deskWorld->advanceTicks(1);
+			require(agent->getState() == core::Agent::State::Idle && agent->getGlobalPosition() == seat->getPosition()
+				&& agent->getLocalDepth() == 2, "Stationary Furniture arrival lost incoming depth");
+			for (bool paused : { false, true })
+			{
+				if (paused) deskWorld->pauseSimulation();
+				WorldDrawList drawing({{0,0},{800,600}});
+				renderSector(deskWorld->getSector(deskRoom), 0, LayerRenderStyle::Solid, false, ImColor(192,192,255), &drawing);
+				size_t deskLast = 0, agentFirst = drawing.commands().size();
+				for (size_t i = 0; i < drawing.commands().size(); ++i)
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
+						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					{
+						if (triangle->texcoords[0].x >= 256.f / 320) deskLast = i;
+						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+							agentFirst = std::min(agentFirst, i);
+					}
+				require(agentFirst < drawing.commands().size() && deskLast < agentFirst,
+					"Stationary/paused Agent rendered behind equal-depth Furniture");
 			}
 		}
 		clearObjectTileset(); ImGui::EndFrame();

@@ -1,4 +1,4 @@
-# Catalogue-backed Furniture (#348–#351)
+# Catalogue-backed Furniture (#348–#352)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
@@ -143,8 +143,28 @@ Agents at equal depth, under the existing Layer visibility and aperture clips.
 Thus a depth-2 walker is in front of the depth-2 desk, while a depth-3 walker is behind it.
 No depth-continuity preference has been added to route cost or search.
 
+## Retained Agent depth (#352)
+
+Starting an edge adopts its integer Local depth immediately, with no interpolation,
+physical displacement, extra movement duration or route-cost penalty. Arrival,
+idling, pause/resume and structural replay retain the incoming depth; a newly
+placed Agent has depth 0. Depth-changing waypoints cannot be skipped, including
+coincident topology-only connections. Ordinary same-depth skipping is unchanged.
+The immutable production `RouteDecisionContext::localDepth` captures departure
+context; it does not yet implement a depth-continuity preference.
+
+World schema 46 pairs each saved authored Agent position with its Local depth.
+As before, World save/reset restores authored positions and destination intent,
+not a runtime simulation checkpoint. Setting a Path or clearing it authors the
+current position and its retained depth; explicitly repositioning an Agent starts
+new depth-0 history. Saving an underway route restores its authored start and that
+start's depth, not a mismatched runtime depth. Older documents default to depth 0.
+YAML and binary restoration, Reset simulation and topology replay follow these
+same lifecycle conventions.
+
 ## Headless checks
 
+- `pf-smoke-simulation --check furniture/retainedDepth`
 - `pf-smoke-world --check furniture/chair`
 - `pf-smoke-world --check furniture/layouts`
 - `pf-smoke-world --check furniture/deskRoutes`
@@ -167,3 +187,13 @@ headless Debug with `PF_HIGH_ANALYSIS=ON`
 explicitly skipped in each configuration. Focused Furniture checks and affected
 module/CLI contracts passed. `git diff --check` passed. Windows validation is not
 claimed.
+
+## #352 validation
+
+Final incremental default builds and complete CTest inventories passed in Linux
+GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
+(82 tests each), in the same four build trees listed above. Displays were unset,
+all checks were non-interactive, and the optional vendored GUI capability test
+was explicitly skipped. Focused retained-depth simulation, stationary render,
+affected module and CLI-contract checks passed; `git diff --check` passed.
+Windows validation is not claimed.

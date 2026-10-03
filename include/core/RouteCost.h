@@ -232,6 +232,8 @@ namespace core
 	// Constructed once per synchronous query. Agent observations are confined to
 	// input capture; demand evaluation consumes value-only traversal inputs and
 	// this frozen profile/policy, never live Agent or resource state.
+	[[nodiscard]] int routeAgentLocalDepth(Agent const* agent);
+
 	struct RouteDecisionContext
 	{
 		Agent const* const agent;
@@ -248,5 +250,8 @@ namespace core
 		uint64_t const observationEpoch = 0;
 		// Populated once at snapshot capture; direct diagnostic callers may omit it.
 		std::optional<MobilityProfile> const mobilityProfile = std::nullopt;
+		// Snapshot the departure depth, including stationary incoming-edge history.
+		// This is context only: it adds no route cost or continuity preference.
+		int const localDepth = routeAgentLocalDepth(agent);
 	};
 }

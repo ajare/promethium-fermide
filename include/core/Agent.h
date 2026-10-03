@@ -346,6 +346,7 @@ namespace core
 		// Simulation advances mPosition/mPath, while serialization and Reset use
 		// this immutable baseline.
 		SectorPosition mResetPosition;
+		int mResetLocalDepth{ 0 };
 		std::shared_ptr<Path> mResetPath;
 		bool mResetPathActive{ false };
 

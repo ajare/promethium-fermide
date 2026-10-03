@@ -571,7 +571,8 @@ namespace core
 		// Version 41 adds independent outside Airlock control requirements.
 		// Version 42 retains detached original wall ends after Airlock edits.
 		// Version 45 adds Furniture instance Local depth.
-		serializer.writeUint32("version", 45);
+		// Version 46 pairs authored Agent positions with retained Local depth.
+		serializer.writeUint32("version", 46);
 		serializer.writeUint64("nextFurnitureId", mNextFurnitureId);
 		if (mFurnitureCatalogue)
 		{
@@ -716,6 +717,9 @@ namespace core
 			serializer.writeUint32("sector", sector->getIndex());
 			serializer.writeFloat("localX", resetPosition.local().x);
 			serializer.writeFloat("localY", resetPosition.local().y);
+			auto const resetDepth = agent->mResetPosition.sector()
+				? agent->mResetLocalDepth : agent->mLocalDepth;
+			if (resetDepth != 0) serializer.writeInt32("localDepth", resetDepth);
 			if (agent->mResetPath && !agent->mResetPath->nodes.empty())
 			{
 				auto const& destination = agent->mResetPath->nodes.back().targetVertex;
@@ -1247,7 +1251,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 45)
+		if (version < 1 || version > 46)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1995,6 +1999,12 @@ namespace core
 			auto const sectorIndex = serializer.readUint32("sector");
 			auto const localX = serializer.readFloat("localX");
 			auto const localY = serializer.readFloat("localY");
+			if (version < 46 && serializer.hasField("localDepth"))
+				throw SerializationException("Agent Local depth requires World schema 46 or later");
+			agent->mLocalDepth = agent->mResetLocalDepth = version >= 46
+				? serializer.readInt32("localDepth", true, 0) : 0;
+			if (agent->mLocalDepth < 0)
+				throw SerializationException("Agent Local depth must be non-negative");
 			optional<uint32_t> destinationSectorIndex;
 			float destinationLocalX{ 0.0f };
 			float destinationLocalY{ 0.0f };
