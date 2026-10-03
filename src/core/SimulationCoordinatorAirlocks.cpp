@@ -53,6 +53,27 @@ namespace core
 			for (auto const& door : chamber.mDoors) door->advanceCoordinatedMotion(World::getFixedTimestep());
 			auto occupied = std::any_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto id) { return (bool)id; });
 			auto crossing = std::any_of(resource->mCrossingOwners.begin(), resource->mCrossingOwners.end(), [](auto id) { return (bool)id; });
+			auto reserveBoarders = [&](int side) {
+				for (auto waiting : resource->mQueueLanes[side].queue)
+				{
+					if (chamber.mBoardingMembers == resource->mCapacity) break;
+					auto request = mWorld.mTraversalRequests.find(waiting);
+					if (!request || request->mState != TraversalRequestState::Pending
+						|| request->mCapacityPosition < resource->mCapacity) continue;
+					auto slot = side == 0 ? resource->mCapacity - 1 - chamber.mBoardingMembers : chamber.mBoardingMembers;
+					resource->mAdmissionReservations[slot] = waiting;
+					request->mCapacityPosition = slot;
+					++chamber.mBoardingMembers;
+					resource->mAirlockEntrySide = side;
+				}
+				if (chamber.mBoardingMembers == resource->mCapacity) chamber.mBoardingWindowRemainingTicks = 0;
+			};
+			if (chamber.mBoardingWindowRemainingTicks)
+			{
+				--chamber.mBoardingWindowRemainingTicks;
+				if (chamber.mBoardingWindowRemainingTicks && chamber.mActiveSide >= 0 && !chamber.mClosing)
+					reserveBoarders(chamber.mActiveSide);
+			}
 			auto reserved = std::any_of(resource->mAdmissionReservations.begin(), resource->mAdmissionReservations.end(), [](auto id) { return (bool)id; });
 			if (chamber.mActiveSide >= 0)
 			{
@@ -66,13 +87,15 @@ namespace core
 					if (!occupied) { resource->mAirlockEntrySide = -1; chamber.mExitRequested = false; }
 					continue;
 				}
-				bool close = chamber.mClosing || (occupied && !reserved && chamber.mActiveSide == resource->mAirlockEntrySide)
+				bool close = chamber.mClosing || (occupied && !reserved && !chamber.mBoardingWindowRemainingTicks
+					&& chamber.mActiveSide == resource->mAirlockEntrySide)
 					|| (!occupied && !reserved && door.isOpen() && door.getOpenWaitTime() <= 0);
 				if (close && !crossing && !door.isObstructed() && door.getOpenLeaseCount() == 0
 					&& !door.isClosed() && !door.isClosing())
 				{
 					// The shared crossing owner protects either threshold until commit.
 					chamber.mClosing = true;
+					chamber.mBoardingWindowRemainingTicks = 0;
 					door.mState = OpenableObject::State::Closing;
 				}
 				continue;
@@ -102,20 +125,13 @@ namespace core
 			{
 				if (!occupied)
 				{
-					// Freeze the existing queue, not future arrivals. Reserve every slot
-					// before opening so partial boarding cannot overbook the chamber.
-					uint32_t member = 0;
-					for (auto waiting : resource->mQueueLanes[side].queue)
-					{
-						auto request = mWorld.mTraversalRequests.find(waiting);
-						if (!request || request->mState != TraversalRequestState::Pending) continue;
-						if (member == resource->mCapacity) break;
-						auto slot = side == 0 ? resource->mCapacity - 1 - member : member;
-						resource->mAdmissionReservations[slot] = waiting;
-						request->mCapacityPosition = slot;
-						++member;
-					}
-					if (member) resource->mAirlockEntrySide = side;
+					// Keep unused slots available during opening and the normal open
+					// dwell. A fixed deadline prevents arrivals extending service forever.
+					chamber.mBoardingMembers = 0;
+					chamber.mBoardingWindowRemainingTicks = secondsToTicks(
+						chamber.mDoors[side]->getOpenCloseTime() + chamber.mDoors[side]->getTimeBeforeClosing(),
+						World::getFixedTimestep());
+					reserveBoarders(side);
 				}
 				chamber.mActiveSide = side;
 				chamber.mOutsideRequests[side] = false;

@@ -13,6 +13,9 @@ namespace core
 		friend class SimulationCoordinator;
 		TraversalResourceId mTraversalResource;
 		uint64_t mCycleRemainingTicks{ 0 };
+		uint64_t mBoardingWindowRemainingTicks{ 0 };
+		// Cumulative selections, including cancelled reservations: never refill a slot.
+		uint32_t mBoardingMembers{ 0 };
 		int mActiveSide{ -1 };
 		bool mClosing{ false };
 		bool mExitRequested{ false };

@@ -36,7 +36,7 @@ namespace
 			agent->setPath(world.getGraph()->calculatePath(agent,
 				world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
 			bool reached = false;
-			for (unsigned tick = 0; tick < 1600 && !reached; ++tick)
+			for (unsigned tick = 0; tick < 2200 && !reached; ++tick)
 			{
 				world.advanceTick();
 				auto state = world.getSimulationSnapshot().airlocks.at(0);
@@ -165,6 +165,97 @@ namespace
 					require(boarded && exited && cycled && agent->getState() == core::Agent::State::Idle, "Airlock journey stalled: state=" + std::to_string((int)agent->getState())
 						+ " sector=" + std::to_string(agent->getSector()->getIndex()) + " boarded=" + std::to_string(boarded) + " cycled=" + std::to_string(cycled));
 				}
+	}
+
+	void approachingBatch(smoke::Context const&)
+	{
+		for (int side : { 0, 1 })
+		{
+			core::World world("Spaced Airlock arrivals", 16, 6);
+			uint32_t ends[] = { world.addCorridor(0, 1, 2, 5, 1), world.addCorridor(0, 1, 10, 4, 1) };
+			world.addAirlock(0, 1, 7, 3, 3);
+			auto marker = world.addSectorMarker(ends[1 - side], 0, 3.0f);
+			auto markerId = std::static_pointer_cast<core::MarkerSectorObject>(marker.sector->getObject(marker.index))->getMarker()->getId();
+			world.finishBuild();
+			std::vector<core::AgentId> agents;
+			for (float x : { 0.3125f, 1.5f, 2.578125f })
+			{
+				auto id = world.createAgent("Approaching traveller", ends[side], 0, side ? 4.0f - x : x);
+				agents.push_back(id);
+				require(world.moveAgentToMarker(id, markerId).accepted(), "Spaced arrival Marker command refused");
+			}
+			size_t peak = 0;
+			bool completed = false;
+			for (unsigned tick = 0; tick < 7000; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().airlocks.at(0);
+				require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Spaced arrival interlock violated");
+				require(state.occupants.size() + state.reservations.size() <= 3, "Spaced arrival overbooked chamber");
+				peak = std::max(peak, state.occupants.size());
+				completed = std::all_of(agents.begin(), agents.end(), [&](auto id) {
+					auto agent = world.lookupAgent(id).entity;
+					return agent->getSector()->getIndex() == ends[1 - side] && agent->getState() == core::Agent::State::Idle;
+				});
+				if (completed) break;
+			}
+			require(peak == 3, "Spaced arrivals never filled capacity: peak=" + std::to_string(peak));
+			require(completed, "Spaced arrivals failed to reach Marker");
+		}
+	}
+
+	void boardingDeadline(smoke::Context const&)
+	{
+		for (int side : { 0, 1 })
+		{
+			core::World world("Bounded boarding", 20, 2);
+			uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 8, 1), world.addRoom("Right", 0, 0, 11, 8, 1) };
+			world.addAirlock(0, 0, 8, 3, 1);
+			auto markers = std::array{ world.addSectorMarker(ends[0], 0, 4), world.addSectorMarker(ends[1], 0, 4) };
+			world.finishBuild();
+			auto add = [&](int origin) {
+				auto id = world.createAgent("Deadline traveller", ends[origin], 0, origin ? 0.5f : 7.5f);
+				auto agent = world.lookupAgent(id).entity;
+				auto marker = markers[1 - origin];
+				agent->setPath(world.getGraph()->calculatePath(agent, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+				return id;
+			};
+			auto first = add(side);
+			core::AgentId opposite, late;
+			uint64_t openedAt = 0;
+			auto const window = core::secondsToTicks(CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME + CORE_BULKHEAD_DOOR_STAY_OPEN_TIME, world.getFixedTimestep());
+			bool closed = false, completed = false;
+			for (unsigned tick = 0; tick < 9000; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().airlocks.at(0);
+				require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Deadline interlock violated");
+				if (!openedAt && state.entrySide == side)
+				{
+					openedAt = world.getSimulationTick();
+					opposite = add(1 - side);
+				}
+				if (openedAt && !late && world.getSimulationTick() >= openedAt + window)
+					late = add(side);
+				if (openedAt && !closed)
+				{
+					for (auto occupant : state.occupants) require(occupant == first, "Post-deadline/opposing arrival joined batch");
+					if (state.doors[side] == core::DoorSnapshotState::Closing)
+					{
+						require(world.getSimulationTick() >= openedAt + window, "Underfilled batch closed before deadline");
+						require(world.getSimulationTick() <= openedAt + window + 2, "Underfilled batch extended deadline");
+						closed = true;
+					}
+				}
+				if (late && world.lookupAgent(late).entity->getSector()->getIndex() == ends[1 - side])
+				{
+					require(world.lookupAgent(opposite).entity->getSector()->getIndex() == ends[side], "Late arrival overtook opposing queue");
+					completed = true; break;
+				}
+			}
+			// The late Agent may only enter a subsequent batch.
+			require(closed && completed, "Underfilled/deferred batch stalled");
+		}
 	}
 
 	void batches(smoke::Context const&)
@@ -768,12 +859,14 @@ namespace
 								"Remote live entrance authorized route");
 					}
 			observer->setPath(opportunistic, true); scene.world.resumeSimulation();
-			for (uint32_t wait = 0; wait < 1200; ++wait)
+			bool admitted = false, arrived = false;
+			for (uint32_t wait = 0; wait < 3000; ++wait)
 			{
 				auto next = scene.step();
-				require(std::find(next.occupants.begin(), next.occupants.end(), id) == next.occupants.end(),
-					"Non-adherence bypassed fixed batch admission");
+				admitted = admitted || std::find(next.occupants.begin(), next.occupants.end(), id) != next.occupants.end();
+				if (observer->getSector()->getIndex() == scene.right) { arrived = true; break; }
 			}
+			require(admitted && arrived, "Eligible local observer did not use spare boarding-window capacity");
 			return;
 		}
 		throw std::runtime_error("Local adherence fixture did not open entrance");
@@ -1031,6 +1124,8 @@ void registerAirlocks(std::vector<smoke::Check>& checks)
 	checks.push_back({ "airlocks/structuralEditSafety", editSafety });
 	checks.push_back({ "airlocks/singleAgentJourneys", journeys });
 	checks.push_back({ "airlocks/batchesAndOpposingQueues", batches });
+	checks.push_back({ "airlocks/approachingBatch", approachingBatch });
+	checks.push_back({ "airlocks/boardingDeadline", boardingDeadline });
 	checks.push_back({ "airlocks/lostReservationDoesNotRefill", lostReservation });
 	checks.push_back({ "airlocks/interruptedJourneys", interruptedJourneys });
 	checks.push_back({ "airlocks/abandonedBoarding", abandonedBoarding });

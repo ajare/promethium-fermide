@@ -30,7 +30,8 @@ conventions are unchanged.
 
 At least one Door stays fully closed on every tick. Admission waits for a fully
 open entrance, and its crossing authority protects closure until boarding
-completes. Boarding closes the entrance; the authored cycle starts precisely
+completes. Once the boarding window has ended and selected Agents have boarded,
+the entrance closes; the authored cycle starts precisely
 when both Doors become fully closed. Neither Door opens before that cycle
 finishes. The internal interaction serves the committed opposite exit. Capacity
 is retained throughout exit crossing and released only on completed exit; the
@@ -51,7 +52,7 @@ the ordinary two-pass route selection and permits its selected journey.
 Closed or unobserved entrances require authorized outside operation. An adhering
 Agent also declines a protected locally open entrance; a non-adhering Agent may
 consider it usable without acquiring operation permission. Neither willingness
-nor grants bypass fixed admission, direction, capacity, or interlocks. The opposite
+nor grants bypass coordinated admission, direction, capacity, or interlocks. The opposite
 Room or Corridor's Location requirement is checked before admission independently
 of control requirements and adherence. Once admitted, later grant loss or tighter
 control/Location requirements cannot revoke the committed opposite exit.
@@ -75,9 +76,18 @@ timing, both door states, control identities, entry side, reservations, crossing
 requests, occupants, and availability. Existing Agent/request/permit snapshots
 expose traversal progress. Rendering shows occupants and remaining cycle seconds.
 
-Fixed capacity-limited batches and opposing ticket-ordered queues are supported
-(#324). Cancelled, inactive, or expired pre-entry members lose their reservations
-without replacement within that batch. If nobody enters, the entrance honours
+Capacity-limited batches and opposing ticket-ordered queues are supported.
+The oldest waiting ticket chooses the entry side. Same-direction arrivals may
+reserve previously unused slots during a bounded boarding window, including
+while the entrance opens. Membership freezes when capacity has been selected or
+when the opening time plus normal Bulkhead open dwell expires (currently 6 + 5
+simulated seconds from opening start). Arrivals never extend this deadline;
+selected Agents may finish boarding after it. An underfilled batch does not wait
+indefinitely for more Agents. Opposing queues wait for the committed batch to exit.
+
+Cancelled, inactive, or expired pre-entry members lose their reservations
+without replacement within that batch, even while other never-selected slots
+remain available. If nobody enters, the entrance honours
 its normal Bulkhead timeout, closes, and cycles without an internal press (#325).
 
 Occupants retain capacity, physical position when inactive, and the exit opposite

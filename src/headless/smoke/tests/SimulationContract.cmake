@@ -114,6 +114,8 @@ set(core_names
     airlocks/structuralEditSafety
     airlocks/singleAgentJourneys
     airlocks/batchesAndOpposingQueues
+    airlocks/approachingBatch
+    airlocks/boardingDeadline
     airlocks/lostReservationDoesNotRefill
     airlocks/interruptedJourneys
     airlocks/abandonedBoarding
