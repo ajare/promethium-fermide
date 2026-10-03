@@ -77,9 +77,9 @@ namespace core
 			return false;
 		}
 
-		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::SecurityScanner)
+		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::Chamber)
 		{
-			diagnostic = sector.getType() == SectorType::SecurityScanner
+			diagnostic = sector.getType() == SectorType::Chamber
 				? "Agents cannot be placed inside authored Security scanners"
 				: "Agents must enter Airlock chambers through coordinated traversal";
 			return false;
@@ -165,13 +165,14 @@ namespace core
 		case ConstructionType::Background: return "background";
 		case ConstructionType::Facade: return "facade";
 		case ConstructionType::Airlock: return "airlock";
-		case ConstructionType::SecurityScanner: return "securityScanner";
+		case ConstructionType::Chamber: return "chamber";
 		}
 		throw SerializationException("Unknown World construction record type");
 	}
 
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
+		if (name == "securityScanner") return ConstructionType::Chamber; // Legacy scanner migration.
 		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::BoothWindow); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
@@ -194,7 +195,7 @@ namespace core
 		case ConstructionType::Lift:
 		case ConstructionType::Shuttle:
 		case ConstructionType::Airlock:
-		case ConstructionType::SecurityScanner:
+		case ConstructionType::Chamber:
 			return true;
 		default:
 			return false;
@@ -340,7 +341,10 @@ namespace core
 			serializer.writeUint32("initialStop", record.g);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			writeDestinationRequirements(); break;
-		case ConstructionType::SecurityScanner:
+		case ConstructionType::Chamber:
+			if (!isSupportedChamberSubtype(record.chamberSubtype))
+				throw SerializationException("Unsupported Chamber subtype");
+			serializer.writeString("subtype", "securityScanner");
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
 			serializer.writeUint32("cellsWide", record.c);
@@ -585,7 +589,8 @@ namespace core
 		// Version 43 adds directional capacity-one authored Security scanners.
 		// Version 43 adds distinct non-traversable BoothWindow authored records.
 		// Version 44 adds authored BoothWindow panel requirements.
-		serializer.writeUint32("version", 44);
+		// Version 45 expands scanner records into Chamber with an explicit subtype.
+		serializer.writeUint32("version", 45);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -902,7 +907,8 @@ namespace core
 				optional, defaultValue);
 		};
 
-		record.type = constructionTypeFromName(serializer.readString("type"));
+		auto const typeName = serializer.readString("type");
+		record.type = constructionTypeFromName(typeName);
 		if (serializer.hasField("locationPermissionRequirement"))
 		{
 			if (version < 32)
@@ -968,8 +974,20 @@ namespace core
 				record.initiallyBroken = serializer.readBool("initiallyBroken");
 			}
 			break;
-		case ConstructionType::SecurityScanner:
-			if (version < 43) throw SerializationException("Security scanners require World schema version 43 or later");
+		case ConstructionType::Chamber:
+			if (typeName == "chamber")
+			{
+				if (version < 45) throw SerializationException("Chambers require World schema version 45 or later");
+				if (serializer.readString("subtype") != "securityScanner")
+					throw SerializationException("Unsupported Chamber subtype");
+			}
+			else
+			{
+				if (version < 43) throw SerializationException("Security scanners require World schema version 43 or later");
+				if (serializer.hasField("subtype") && serializer.readString("subtype") != "securityScanner")
+					throw SerializationException("Unsupported Chamber subtype");
+			}
+			record.chamberSubtype = ChamberSubtype::SecurityScanner;
 			record.layer = serializer.readUint32("layer");
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("cellsWide");
@@ -1260,7 +1278,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 44)
+		if (version < 1 || version > 45)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2421,11 +2439,11 @@ namespace core
 			addLift(transitLayer(record), record.a, record.b, options);
 			break;
 		}
-		case ConstructionType::SecurityScanner:
+		case ConstructionType::Chamber:
 		{
-			if (record.d > 1 || !SecurityScannerTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z))
+			if (!isSupportedChamberSubtype(record.chamberSubtype) || record.d > 1 || !SecurityScannerTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z))
 				throw SerializationException("Invalid Security scanner replay configuration");
-			auto index = addSecurityScanner(record.layer, record.a, record.b, record.c, record.d != 0);
+			auto index = addChamber(record.layer, record.a, record.b, record.c, record.d != 0, record.chamberSubtype);
 			auto chamber = std::static_pointer_cast<SecurityScannerTransit>(mSectors[index]);
 			chamber->mSensorDistance = record.scannerSensorDistance;
 			chamber->mPreDelaySeconds = record.x; chamber->mScanSeconds = record.y; chamber->mPostPauseSeconds = record.z;
@@ -3065,11 +3083,11 @@ namespace core
 			case ConstructionType::Lift:
 			case ConstructionType::Shuttle:
 			case ConstructionType::Airlock:
-			case ConstructionType::SecurityScanner:
+			case ConstructionType::Chamber:
 			{
 				bool const frontLayerTransit = isTransitRecord(record.type);
 				bool const transit = frontLayerTransit || record.type == ConstructionType::Airlock
-					|| record.type == ConstructionType::SecurityScanner;
+					|| record.type == ConstructionType::Chamber;
 				auto const layer = producerIndex < mSectors.size() && mSectors[producerIndex]
 						? mSectors[producerIndex]->getLayerIndex() : layerIndex;
 				keep = layer != layerIndex && !(frontLayerTransit && layer == behind);
@@ -3145,7 +3163,7 @@ namespace core
 			case ConstructionType::Lift:
 			case ConstructionType::Shuttle:
 			case ConstructionType::Airlock:
-			case ConstructionType::SecurityScanner:
+			case ConstructionType::Chamber:
 			case ConstructionType::Door:
 				// These records carry the Layer they are authored on, so a deletion in
 				// front of them has to pull that Layer forward with every other one.
@@ -4333,8 +4351,8 @@ namespace core
 	{
 		if (plan.scanner && !mSimulationPaused)
 		{ diagnostic = "Chamber structural editing requires a paused simulation"; return false; }
-		auto type = plan.scanner ? SectorType::SecurityScanner : SectorType::Airlock;
-		auto constructionType = plan.scanner ? ConstructionType::SecurityScanner : ConstructionType::Airlock;
+		auto type = plan.scanner ? SectorType::Chamber : SectorType::Airlock;
+		auto constructionType = plan.scanner ? ConstructionType::Chamber : ConstructionType::Airlock;
 		if (plan.sectorIndex >= mSectors.size()
 			|| mSectors[plan.sectorIndex]->getType() != type)
 		{ diagnostic = "Only the selected chamber type can be edited"; return false; }
@@ -4422,10 +4440,10 @@ namespace core
 		return true;
 	}
 
-	World::SecurityScannerEditPlan World::planResizeSecurityScanner(uint32_t index,
+	World::ChamberEditPlan World::planResizeChamber(uint32_t index,
 		uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const
 	{
-		SecurityScannerEditPlan plan;
+		ChamberEditPlan plan;
 		plan.scanner = true; plan.leftToRight = leftToRight;
 		plan.sectorIndex = index; plan.x = x; plan.y = y; plan.width = width;
 		vector<ConstructionRecord> records;
@@ -4433,19 +4451,35 @@ namespace core
 		return plan;
 	}
 
-	World::SecurityScannerEditPlan World::planRemoveSecurityScanner(uint32_t index) const
+	World::ChamberEditPlan World::planRemoveChamber(uint32_t index) const
 	{
-		SecurityScannerEditPlan plan;
+		ChamberEditPlan plan;
 		plan.scanner = true; plan.remove = true; plan.sectorIndex = index;
 		vector<ConstructionRecord> records;
 		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
 		return plan;
 	}
 
-	uint32_t World::applySecurityScannerEdit(SecurityScannerEditPlan const& plan)
+	uint32_t World::applyChamberEdit(ChamberEditPlan const& plan)
 	{
 		if (!plan.scanner) throw WorldException(this, "Not a Security scanner edit plan");
 		return applyAirlockEdit(plan);
+	}
+
+	World::SecurityScannerEditPlan World::planResizeSecurityScanner(uint32_t index,
+		uint32_t x, uint32_t y, uint32_t width, bool leftToRight) const
+	{
+		return planResizeChamber(index, x, y, width, leftToRight);
+	}
+
+	World::SecurityScannerEditPlan World::planRemoveSecurityScanner(uint32_t index) const
+	{
+		return planRemoveChamber(index);
+	}
+
+	uint32_t World::applySecurityScannerEdit(SecurityScannerEditPlan const& plan)
+	{
+		return applyChamberEdit(plan);
 	}
 
 	World::AirlockEditPlan World::planResizeAirlock(uint32_t index, uint32_t x,

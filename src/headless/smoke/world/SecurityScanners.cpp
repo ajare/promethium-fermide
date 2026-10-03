@@ -1,5 +1,5 @@
 #include "Checks.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/World.h"
 #include "core/Graph.h"
 #include "core/YamlSerializer.h"
@@ -43,28 +43,28 @@ namespace
 					require(world.deserialize(*input, work), "Open wall fixture refused");
 				}
 				world.pauseSimulation();
-				auto index = world.addSecurityScanner(1, 0, 3, 3, direction);
+				auto index = world.addChamber(1, 0, 3, 3, direction);
 				world.finishBuild(); world.pauseSimulation();
-				require(world.setSecurityScannerConfiguration(index, 9, 0, 0.1f, 10), "Edit fixture configuration refused");
+				require(world.setChamberConfiguration(index, 9, 0, 0.1f, 10), "Edit fixture configuration refused");
 				world.markSaved(); auto baseline = saved(world);
-				auto stale = world.planResizeSecurityScanner(index, 4, 1, 4, !direction);
+				auto stale = world.planResizeChamber(index, 4, 1, 4, !direction);
 				world.resumeSimulation();
-				require(!world.planRemoveSecurityScanner(index).valid, "Running deletion planned");
+				require(!world.planRemoveChamber(index).valid, "Running deletion planned");
 				bool refused = false;
-				try { world.applySecurityScannerEdit(stale); } catch (core::Exception const&) { refused = true; }
+				try { world.applyChamberEdit(stale); } catch (core::Exception const&) { refused = true; }
 				require(refused && saved(world) == baseline && !world.isModified(), "Running edit mutated authored state");
 				world.pauseSimulation();
 				for (auto geometry : { std::array<uint32_t, 3>{ 0, 0, 3 }, { 3, 0, 0 }, { 3, 0, 4 }, { 3, 3, 3 }, { ~0u, 0, 3 } })
 				{
-					auto plan = world.planResizeSecurityScanner(index, geometry[0], geometry[1], geometry[2], direction);
+					auto plan = world.planResizeChamber(index, geometry[0], geometry[1], geometry[2], direction);
 					require(!plan.valid && !plan.diagnostic.empty(), "Invalid scanner edit planned");
 					refused = false;
-					try { world.applySecurityScannerEdit(plan); } catch (core::Exception const&) { refused = true; }
+					try { world.applyChamberEdit(plan); } catch (core::Exception const&) { refused = true; }
 					require(refused && saved(world) == baseline && !world.isModified()
 						&& world.isTraversalTopologyValid(), "Invalid scanner edit not atomic");
 				}
 				auto check = [&](uint32_t row, bool forward) {
-					auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+					auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
 					require(chamber && chamber->getCellX() == 3 + row && chamber->getCellY() == row
 						&& chamber->getCellsWide() == 3 + row && chamber->getCapacity() == 1
 						&& chamber->isLeftToRight() == forward && chamber->getLayerIndex() == 1
@@ -80,7 +80,7 @@ namespace
 				};
 				for (uint32_t row = 0; row < 3; ++row)
 				{
-					index = world.applySecurityScannerEdit(world.planResizeSecurityScanner(index, 3 + row, row, 3 + row, !direction));
+					index = world.applyChamberEdit(world.planResizeChamber(index, 3 + row, row, 3 + row, !direction));
 					check(row, !direction);
 					for (uint32_t old = 0; old < row; ++old)
 						for (uint32_t side = 0; side < 2; ++side)
@@ -101,7 +101,7 @@ namespace
 					world.pauseSimulation(); check(2, !direction);
 					world.resetSimulation(); world.pauseSimulation(); check(2, !direction);
 				}
-				require(world.applySecurityScannerEdit(world.planRemoveSecurityScanner(index)) == ~0u, "Delete refused");
+				require(world.applyChamberEdit(world.planRemoveChamber(index)) == ~0u, "Delete refused");
 				require(world.getNumSectors() == 6 && world.getSimulationSnapshot().traversalResources.empty(), "Deleted scanner resources survived");
 				for (uint32_t sector = 0; sector < 6; ++sector)
 					require(world.getSector(sector)->getNumObjects() == 0 && world.getSector(sector)->getEndType(0, sector % 2 ? 0 : 1)
@@ -126,10 +126,13 @@ namespace
 						auto right = neighbours & 2 ? world.addCorridor(layer, 1, 3 + width, 3, 1)
 							: world.addRoom("Right", layer, 1, 3 + width, 3, 1);
 						auto marker = world.addSectorMarker(right, 0, 1.5f);
-						auto index = world.addSecurityScanner(layer, 1, 3, width, direction);
+						auto index = world.addChamber(layer, 1, 3, width, direction);
 						world.finishBuild(); world.pauseSimulation();
-						auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
-						require(chamber && chamber->getCapacity() == 1 && chamber->getCellsWide() == width
+						auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
+						require(chamber && chamber->getType() == core::SectorType::Chamber
+							&& chamber->getSubtype() == core::ChamberSubtype::SecurityScanner
+							&& core::getSectorTypeString(chamber->getType()) == "Chamber"
+							&& chamber->getCapacity() == 1 && chamber->getCellsWide() == width
 							&& chamber->getLevelsHigh() == 1 && chamber->getLayerIndex() == layer
 							&& chamber->isLeftToRight() == direction && chamber->isTraversalAvailable(), "Scanner identity/geometry/direction/capacity");
 						require(chamber->getPreDelaySeconds() == 1 && chamber->getScanSeconds() == 2
@@ -151,7 +154,7 @@ namespace
 							require(refused, "Direct scanner Agent creation accepted");
 						}
 						bool refused = false;
-						try { const_cast<core::SecurityScannerTransit*>(chamber.get())->enterAgent(actor, 0, 0.5f); }
+						try { const_cast<core::ChamberTransit*>(chamber.get())->enterAgent(actor, 0, 0.5f); }
 						catch (std::exception const&) { refused = true; }
 						require(refused && actor->getSector()->getIndex() == left, "Direct scanner relocation accepted");
 						require(!world.planResizeLocation(index, 3, 1, width, 1).valid && !world.planRemoveLocation(index).valid
@@ -188,14 +191,23 @@ namespace
 		world.addRoom("Left", 0, 0, 0, 2, 1); world.addCorridor(0, 0, 5, 2, 1);
 		world.finishBuild(); world.pauseSimulation(); world.markSaved();
 		auto baseline = saved(world);
+		std::string subtypeDiagnostic;
+		auto unsupportedSubtype = static_cast<core::ChamberSubtype>(123);
+		require(!world.canAddChamber(0, 0, 2, 3, &subtypeDiagnostic, unsupportedSubtype)
+			&& !subtypeDiagnostic.empty(), "Unsupported Chamber subtype passed preflight");
+		bool subtypeRefused = false;
+		try { world.addChamber(0, 0, 2, 3, true, unsupportedSubtype); }
+		catch (core::Exception const&) { subtypeRefused = true; }
+		require(subtypeRefused && saved(world) == baseline && !world.isModified()
+			&& world.getSimulationSnapshot().traversalResources.empty(), "Unsupported subtype partially authored a Chamber");
 		for (auto geometry : { std::array<uint32_t, 4>{ 0, 0, 2, 0 }, { 0, 0, 0, 5 },
 			{ 0, 0, 1, 4 }, { 0, 0, 2, ~0u }, { 2, 0, 2, 3 }, { 0, 3, 2, 3 },
 			{ 1, 0, 2, 3 }, { 0, 1, 2, 3 }, { 0, 0, 3, 2 } })
 		{
 			std::string diagnostic; auto [layer, y, x, width] = geometry;
-			require(!world.canAddSecurityScanner(layer, y, x, width, &diagnostic) && !diagnostic.empty(), "Scanner preflight accepted invalid placement");
+			require(!world.canAddChamber(layer, y, x, width, &diagnostic) && !diagnostic.empty(), "Scanner preflight accepted invalid placement");
 			bool refused = false;
-			try { world.addSecurityScanner(layer, y, x, width); } catch (core::Exception const&) { refused = true; }
+			try { world.addChamber(layer, y, x, width); } catch (core::Exception const&) { refused = true; }
 			require(refused && saved(world) == baseline && !world.isModified() && world.isTraversalTopologyValid(), "Invalid scanner placement was not atomic");
 		}
 		for (bool facade : { false, true })
@@ -203,7 +215,7 @@ namespace
 			core::World unsupported("Unsupported neighbour", 8, 2);
 			unsupported.addRoom("Left", 0, 0, 0, 2, 1);
 			if (facade) unsupported.addFacade(0, 0, 4, 2, 1); else unsupported.addBackground(0, 0, 4, 2, 1);
-			require(!unsupported.canAddSecurityScanner(0, 0, 2, 2), "Scanner accepted non Room/Corridor neighbour");
+			require(!unsupported.canAddChamber(0, 0, 2, 2), "Scanner accepted non Room/Corridor neighbour");
 		}
 	}
 }

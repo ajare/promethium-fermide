@@ -9,12 +9,12 @@
 
 namespace core
 {
-	float SecurityScannerTransit::getRemainingSeconds() const
+	float ChamberTransit::getRemainingSeconds() const
 	{
 		return mRemainingTicks * World::getFixedTimestep();
 	}
 
-	std::string SecurityScannerTransit::getPhaseName() const
+	std::string ChamberTransit::getPhaseName() const
 	{
 		switch (mPhase)
 		{

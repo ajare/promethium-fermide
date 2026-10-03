@@ -1,8 +1,10 @@
 #include "WorldChecks.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 #include "core/World.h"
+#include "core/Graph.h"
+#include "core/Agent.h"
 #include <yaml-cpp/yaml.h>
 
 namespace persistence
@@ -27,12 +29,13 @@ namespace persistence
 						auto reader = core::YamlSerializer::fromString(YAML::Dump(node)); reader->deserialize();
 						require(world.deserialize(*reader, work), "Open-end fixture refused"); world.pauseSimulation();
 					}
-					auto index = world.addSecurityScanner(1, 1, 2, width, direction);
+					auto index = world.addChamber(1, 1, 2, width, direction);
 					world.finishBuild(); world.pauseSimulation();
-					require(world.setSecurityScannerConfiguration(index, 12345, 0, 0.1f, 10), "Scanner configuration refused");
+					require(world.setChamberConfiguration(index, 12345, 0, 0.1f, 10), "Scanner configuration refused");
 					auto assertAuthored = [&](core::World const& source) {
-						auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(source.getSector(index));
-						require(chamber && chamber->getLayerIndex() == 1 && chamber->getCellY() == 1
+						auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(source.getSector(index));
+						require(chamber && chamber->getType() == core::SectorType::Chamber
+							&& chamber->getSubtype() == core::ChamberSubtype::SecurityScanner && chamber->getLayerIndex() == 1 && chamber->getCellY() == 1
 							&& chamber->getCellX() == 2 && chamber->getCellsWide() == width && chamber->getCapacity() == 1
 							&& chamber->isLeftToRight() == direction && chamber->getPreDelaySeconds() == 0
 							&& chamber->getScanSeconds() == 0.1f && chamber->getPostPauseSeconds() == 10
@@ -52,6 +55,35 @@ namespace persistence
 						};
 						return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
 					};
+					auto journey = [&](core::World& loaded) {
+						loaded.pauseSimulation();
+						auto source = direction ? 0u : 1u, destination = 1 - source;
+						auto marker = loaded.addSectorMarker(destination, 0, 1.0f);
+						loaded.finishBuild();
+						auto id = loaded.createAgent("Loaded traveller", source, 0, 1.0f);
+						auto actor = loaded.lookupAgent(id).entity;
+						auto path = loaded.getGraph()->calculatePath(actor,
+							loaded.getGraph()->getVertexForObject(marker.sector->getObject(marker.index)));
+						require(bool(path), "Loaded Chamber did not route its authored direction");
+						actor->setPath(path, true); loaded.resumeSimulation();
+						bool scanned = false, exited = false;
+						// Four six-second Door movements plus ten-second post-pause and walking.
+						for (unsigned tick = 0; tick < 4800; ++tick)
+						{
+							loaded.advanceTick();
+							auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(loaded.getSector(index));
+							require(chamber->getAgents().size() <= 1
+								&& (chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed()), "Loaded Chamber capacity/interlock lost");
+							scanned = scanned || chamber->getPhase() == core::SecurityScannerPhase::Scanning;
+							if (actor->getSector()->getIndex() == destination && chamber->getPhase() == core::SecurityScannerPhase::Idle)
+							{ exited = true; break; }
+						}
+						require(scanned && exited, "Loaded Chamber did not complete an automatic scanner journey: width="
+							+ std::to_string(width) + " direction=" + std::to_string(direction) + " phase="
+							+ std::dynamic_pointer_cast<const core::ChamberTransit>(loaded.getSector(index))->getPhaseName()
+							+ " sector=" + std::to_string(actor->getSector()->getIndex()) + " scanned=" + std::to_string(scanned));
+						loaded.pauseSimulation(); require(loaded.removeAgent(id).removed, "Journey cleanup refused");
+					};
 					for (bool binary : { false, true })
 					{
 						std::unique_ptr<core::Serializer> reader = binary
@@ -59,23 +91,51 @@ namespace persistence
 							: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(write(false)));
 						reader->deserialize(); core::SerializationWorkData work; core::World loaded("Loaded", 1, 1);
 						require(loaded.deserialize(*reader, work), "Scanner round trip refused"); assertAuthored(loaded);
+						journey(loaded);
 						loaded.resetSimulation(); assertAuthored(loaded);
 						loaded.pauseSimulation(); loaded.addLayer(); assertAuthored(loaded);
 						// Same-Layer relationships survive deleting the Layer in front.
 						require(loaded.applyDeleteLayer(loaded.planDeleteLayer(0)), "Scanner Layer deletion refused");
-						auto shifted = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(loaded.getSector(index));
+						auto shifted = std::dynamic_pointer_cast<const core::ChamberTransit>(loaded.getSector(index));
 						require(shifted && shifted->getLayerIndex() == 0 && shifted->getCapacity() == 1
 							&& shifted->getDoor(0)->isClosed(), "Scanner Layer compaction lost ownership");
 					}
 					world.resetSimulation(); assertAuthored(world);
 					auto baseline = write(false);
 					auto node = YAML::Load(baseline);
-					for (auto field : { "capacity", "preDelaySeconds", "scanSeconds", "postPauseSeconds", "sensorDistance", "cellsWide", "levelsHigh", "layer", "x", "y", "leftToRight", "leftWasOpen" })
+					for (auto record : node["construction"])
+						if (record["type"].as<std::string>() == "chamber")
+							require(record["subtype"].as<std::string>() == "securityScanner", "Chamber subtype not persisted explicitly");
+					for (unsigned version : { 43u, 44u })
+					{
+						auto legacyNode = YAML::Clone(node); legacyNode["version"] = version;
+						for (auto record : legacyNode["construction"])
+							if (record["type"].as<std::string>() == "chamber")
+							{ record["type"] = "securityScanner"; record.remove("subtype"); }
+						auto input = core::YamlSerializer::fromString(YAML::Dump(legacyNode)); input->deserialize();
+						core::SerializationWorkData work; core::World migrated("Migrated", 1, 1);
+						require(migrated.deserialize(*input, work), "Legacy scanner migration refused");
+						assertAuthored(migrated); journey(migrated);
+						auto output = core::YamlSerializer::toString(); migrated.serialize(*output, work); output->serialize();
+						auto savedNode = YAML::Load(output->getSerializedString());
+						bool foundChamber = false;
+						for (auto record : savedNode["construction"])
+						{
+							require(record["type"].as<std::string>() != "securityScanner", "Migration saved legacy scanner identity");
+							if (record["type"].as<std::string>() == "chamber")
+							{
+								foundChamber = true;
+								require(record["subtype"].as<std::string>() == "securityScanner", "Migrated Chamber lost subtype on save");
+							}
+						}
+						require(foundChamber, "Migration did not save Chamber identity");
+					}
+					for (auto field : { "subtype", "capacity", "preDelaySeconds", "scanSeconds", "postPauseSeconds", "sensorDistance", "cellsWide", "levelsHigh", "layer", "x", "y", "leftToRight", "leftWasOpen" })
 						for (bool missing : { false, true })
 						{
 							auto invalid = YAML::Clone(node);
 							for (auto record : invalid["construction"])
-								if (record["type"].as<std::string>() == "securityScanner")
+								if (record["type"].as<std::string>() == "chamber")
 								{
 									if (missing) record.remove(field);
 									else if (std::string(field) == "leftWasOpen") record[field] = !open;
@@ -95,7 +155,7 @@ namespace persistence
 							if (std::string(field) != "scanSeconds" && std::string(value) == "0.099") continue;
 							auto invalid = YAML::Clone(node);
 							for (auto record : invalid["construction"])
-								if (record["type"].as<std::string>() == "securityScanner") record[field] = YAML::Load(value);
+								if (record["type"].as<std::string>() == "chamber") record[field] = YAML::Load(value);
 							bool refused = false;
 							try { auto reader = core::YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize(); core::SerializationWorkData work; world.deserialize(*reader, work); }
 							catch (std::exception const&) { refused = true; }

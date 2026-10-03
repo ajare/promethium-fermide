@@ -22,6 +22,7 @@
 #include "core/Location.h"
 #include "core/Marker.h"
 #include "core/SectorType.h"
+#include "core/ChamberSubtype.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
 #include "core/Window.h"
@@ -846,7 +847,8 @@ namespace core
 			// (ADR 0003).
 			Facade,
 			Airlock,
-			SecurityScanner,
+			Chamber,
+			SecurityScanner = Chamber,
 			BoothWindow
 		};
 
@@ -866,6 +868,7 @@ namespace core
 			uint32_t a{ 0 }, b{ 0 }, c{ 0 }, d{ 0 }, e{ 0 }, f{ 0 }, g{ 0 }, h{ 0 };
 			int32_t i{ 0 }, j{ 0 };
 			float x{ 0.0f }, y{ 0.0f }, z{ 0.0f };
+			ChamberSubtype chamberSubtype{ ChamberSubtype::SecurityScanner };
 			float scannerSensorDistance{ 0.5f };
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
@@ -1743,6 +1746,19 @@ namespace core
 			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
 		bool isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		using ChamberEditPlan = AirlockEditPlan;
+		ChamberEditPlan planResizeChamber(uint32_t sectorIndex, uint32_t x,
+			uint32_t y, uint32_t width, bool leftToRight) const;
+		ChamberEditPlan planRemoveChamber(uint32_t sectorIndex) const;
+		uint32_t applyChamberEdit(ChamberEditPlan const& plan);
+		bool setChamberConfiguration(uint32_t sectorIndex, float sensorDistance,
+			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
+		bool canAddChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			std::string* diagnostic = nullptr, ChamberSubtype subtype = ChamberSubtype::SecurityScanner) const;
+		uint32_t addChamber(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
+			bool leftToRight = true, ChamberSubtype subtype = ChamberSubtype::SecurityScanner);
+
+		// Temporary editor/source compatibility interfaces; no separate scanner state.
 		using SecurityScannerEditPlan = AirlockEditPlan;
 		SecurityScannerEditPlan planResizeSecurityScanner(uint32_t sectorIndex, uint32_t x,
 			uint32_t y, uint32_t width, bool leftToRight) const;

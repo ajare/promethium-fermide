@@ -1231,7 +1231,7 @@ namespace core
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
-		if (!getSector() || getSector()->getType() != SectorType::SecurityScanner)
+		if (!getSector() || getSector()->getType() != SectorType::Chamber)
 			mResetPosition = mPosition;
 		mResetPath = path;
 		mResetPathActive = startPathing;
@@ -1251,7 +1251,7 @@ namespace core
 				mRouteJourneyDestinationVertexId = destination->getId();
 			}
 		};
-		if (mWorld && getSector() && getSector()->getType() == SectorType::SecurityScanner)
+		if (mWorld && getSector() && getSector()->getType() == SectorType::Chamber)
 		{
 			// Destination intent is independent of the already admitted journey.
 			// Capture a replacement destination for planning after the forward exit,
@@ -1363,7 +1363,7 @@ namespace core
 		if (mWorld
 			&& mWorld->agentBehaviourOwnsMovement(mWorld->getAgentId(this))) return;
 		clearRuntimePath();
-		if (!getSector() || getSector()->getType() != SectorType::SecurityScanner)
+		if (!getSector() || getSector()->getType() != SectorType::Chamber)
 			mResetPosition = mPosition;
 		mResetPath.reset();
 		mResetPathActive = false;
@@ -1477,9 +1477,9 @@ namespace core
 	uint32_t Agent::getSkippablePathTarget(uint32_t vertexA) const
 	{
 		if (!mPath.path || !getSector() || vertexA + 1 >= mPath.path->nodes.size()) return vertexA;
-		if (getSector()->getType() == SectorType::SecurityScanner
+		if (getSector()->getType() == SectorType::Chamber
 			|| (mPath.path->nodes[vertexA].targetVertex
-				&& mPath.path->nodes[vertexA].targetVertex->getSector()->getType() == SectorType::SecurityScanner)) return vertexA;
+				&& mPath.path->nodes[vertexA].targetVertex->getSector()->getType() == SectorType::Chamber)) return vertexA;
 		auto const& nodeA = mPath.path->nodes[vertexA];
 		if (!nodeA.targetVertex
 			|| nodeA.targetVertex->getSubType() == VertexSubType::Interactable) return vertexA;
@@ -1621,7 +1621,7 @@ namespace core
 		auto destinationSector = mTraversalTask->destinationVertex->getSector();
 		if (destinationSector.get() != getSector()
 			&& getSector()->getType() != SectorType::Airlock
-			&& getSector()->getType() != SectorType::SecurityScanner
+			&& getSector()->getType() != SectorType::Chamber
 			&& !mWorld->canAgentAccessLocation(*destinationSector, *this))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
@@ -1735,7 +1735,7 @@ namespace core
 		// reservation merely to reconsider a still-valid route while the door opens.
 		if (request.entity->hasCapacityPosition()
 			&& (mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Airlock
-				|| mTraversalTask->destinationVertex->getSector()->getType() == SectorType::SecurityScanner)) return;
+				|| mTraversalTask->destinationVertex->getSector()->getType() == SectorType::Chamber)) return;
 		auto const& policy = mWorld->getTraversalWaitingPolicy();
 		auto waited = mWorld->getSimulationTick() - request.entity->getQueuedAtTick();
 		if (waited < policy.minimumReplanWaitTicks

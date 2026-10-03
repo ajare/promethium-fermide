@@ -1,6 +1,6 @@
 # Security scanner chambers (#339, #340, #341, #342, #343, #344, #345)
 
-The palette's **Scanner** tool creates a distinct same-Layer Security scanner.
+The palette's **Scanner** tool creates a same-Layer Chamber with the Security Scanner subtype through temporary compatibility interfaces. Chamber is the domain identity; Airlock remains separate. The existing editor tool and panel are unchanged in this expansion stage (#364).
 Drag horizontally across empty whole cells between adjoining walkable Room or
 Corridor ends. The complete requested footprint must be free; it is never carved
 or shortened. Drag direction fixes entry and exit, including single-cell drags.
@@ -127,9 +127,13 @@ optional beams consume the unchanged public geometry/progress seams.
 
 ## Persistence and history
 
-World schema **43** persists `securityScanner` construction records: Layer,
-Level, geometry, direction, authored sensing/timing, fixed capacity, and original adjoining wall
-states. Replay generates exactly two protected shared Bulkhead Doors from that
+World schema **45** persists `chamber` construction records with required
+`subtype: securityScanner`: Layer, Level, geometry, direction, authored
+sensing/timing, fixed capacity, and original adjoining wall states. Legacy schema
+43/44 `securityScanner` records migrate to that subtype without configuration loss.
+Missing or unsupported Chamber subtypes are rejected before replay, leaving the
+target World unchanged. Saving omits transient journey work and loading clears
+it as before. Replay generates exactly two protected shared Bulkhead Doors from that
 record, never separate ordinary Door records. YAML and binary documents use the
 same validated schema; older scanner-free Worlds remain readable. Invalid
 geometry/configuration, missing fields, wall-restoration contradictions, and
@@ -139,6 +143,17 @@ configuration is rejected rather than silently dropped.
 Creation, move, resize, reversal, and deletion use normal document snapshots/history. Undo removes the chamber and
 both Doors and restores original wall states; redo reconstructs configuration
 and ownership. Detached open-wall restoration records remain supported.
+
+## Production interfaces
+
+`World::canAddChamber` / `addChamber` support an explicit `ChamberSubtype`,
+defaulting creation to `SecurityScanner`. `setChamberConfiguration`,
+`planResizeChamber`, `planRemoveChamber`, and `applyChamberEdit` retain the
+existing paused, validated, transactional scanner edit semantics. The old
+SecurityScanner World interfaces and Transit/Sector identity aliases forward to
+the same Chamber; they do not allocate another traversal resource or copy state.
+`ChamberTransit::getSubtype()` exposes the immutable subtype. Scanner-specific
+journey snapshots and rendering remain available to existing callers.
 
 ## Headless checks
 

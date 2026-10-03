@@ -13,7 +13,7 @@ namespace core
 		friend struct RouteTraversalInputs;
 		std::shared_ptr<BulkheadDoor> mDoor;
 		std::shared_ptr<class AirlockTransit> mAirlock;
-		std::shared_ptr<class SecurityScannerTransit> mSecurityScanner;
+		std::shared_ptr<class ChamberTransit> mSecurityScanner;
 
 	public:
 
@@ -24,7 +24,7 @@ namespace core
 			std::shared_ptr<class AirlockTransit> airlock = {});
 
 		BulkheadDoorEdge(std::shared_ptr<BulkheadDoor> door,
-			std::shared_ptr<class SecurityScannerTransit> scanner);
+			std::shared_ptr<class ChamberTransit> scanner);
 
 		[[nodiscard]] std::shared_ptr<Edge> copyWithoutVertices() override;
 

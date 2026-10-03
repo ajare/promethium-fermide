@@ -430,8 +430,8 @@ namespace core
 			if (vertices[i]->getSector() != vertices[j]->getSector()
 				&& (vertices[i]->getSector()->getType() == SectorType::Airlock
 					|| vertices[j]->getSector()->getType() == SectorType::Airlock
-					|| vertices[i]->getSector()->getType() == SectorType::SecurityScanner
-					|| vertices[j]->getSector()->getType() == SectorType::SecurityScanner)) continue;
+					|| vertices[i]->getSector()->getType() == SectorType::Chamber
+					|| vertices[j]->getSector()->getType() == SectorType::Chamber)) continue;
 
 			// Create Edge between i & j
 			if (vertexType0 == VertexType::Location && vertexType1 == VertexType::Location)

@@ -5,7 +5,7 @@
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/Graph.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/YamlSerializer.h"
 #include "imgui/IconsFontAwesome5.h"
 #include <cmath>
@@ -31,18 +31,18 @@ namespace
 				auto world = std::make_shared<core::World>("Scanner beams", width + 8, 2);
 				uint32_t ends[] = { world->addRoom("Left", 0, 0, 0, 3, 1), world->addCorridor(0, 0, width + 3, 3, 1) };
 				world->addRoom("Old left", 0, 1, 0, 2, 1); world->addCorridor(0, 1, 3, 2, 1);
-				auto index = world->addSecurityScanner(0, 1, 2, 1, !direction);
+				auto index = world->addChamber(0, 1, 2, 1, !direction);
 				world->finishBuild(); world->pauseSimulation();
-				index = world->applySecurityScannerEdit(world->planResizeSecurityScanner(index, 3, 0, width, direction));
+				index = world->applyChamberEdit(world->planResizeChamber(index, 3, 0, width, direction));
 				auto marker = world->addSectorMarker(ends[direction ? 1 : 0], 0, 1.5f);
 				world->finishBuild(); world->resumeSimulation();
 				auto id = world->createAgent("Traveller", ends[direction ? 0 : 1], 0, 1.5f);
 				auto actor = world->lookupAgent(id).entity;
 				actor->setPath(world->getGraph()->calculatePath(actor,
 					world->getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
-				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(index));
+				auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world->getSector(index));
 				auto inspect = [&](std::shared_ptr<core::World> const& rendered) {
-					auto scanner = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(rendered->getSector(index));
+					auto scanner = std::dynamic_pointer_cast<const core::ChamberTransit>(rendered->getSector(index));
 					WorldDrawList drawing({ { 0, 0 }, { 1600, 720 } }); renderWorld(rendered, &drawing);
 					std::vector<WorldDrawList::Line> found;
 					bool agentDrawn = false;
@@ -113,7 +113,7 @@ namespace
 				require(start && outbound && midpoint && returning && finish && completion && phases.size() == 11,
 					"Beam journey omitted sweep samples or non-scanning phases");
 				world->resetSimulation();
-				chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(index));
+				chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world->getSector(index));
 				require(world->resumeSimulation(), "Beam reset resume refused");
 				for (unsigned tick = 0; tick < 2000 && chamber->getPhase() != core::SecurityScannerPhase::Scanning; ++tick) world->advanceTick();
 				require(chamber->getPhase() == core::SecurityScannerPhase::Scanning, "Reset beam fixture did not scan");
@@ -137,9 +137,9 @@ namespace
 				auto world = std::make_shared<core::World>("Scanner drawing", 12, 2);
 				uint32_t ends[] = { world->addRoom("Left", 0, 0, 0, 2, 1), world->addCorridor(0, 0, 2 + width, 2, 1) };
 				world->addRoom("Old left", 0, 1, 0, 3, 1); world->addCorridor(0, 1, 4, 2, 1);
-				auto index = world->addSecurityScanner(0, 1, 3, 1, !direction);
+				auto index = world->addChamber(0, 1, 3, 1, !direction);
 				world->finishBuild(); world->pauseSimulation();
-				index = world->applySecurityScannerEdit(world->planResizeSecurityScanner(index, 2, 0, width, direction));
+				index = world->applyChamberEdit(world->planResizeChamber(index, 2, 0, width, direction));
 				auto marker = world->addSectorMarker(ends[direction ? 1 : 0], 0, 1.0f); world->finishBuild();
 				world->resumeSimulation();
 				gSelectedSector = world->getSector(index);
@@ -175,7 +175,7 @@ namespace
 				auto id = world->createAgent("Traveller", ends[direction ? 0 : 1], 0, 1.0f);
 				auto actor = world->lookupAgent(id).entity;
 				actor->setPath(world->getGraph()->calculatePath(actor, world->getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
-				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(index));
+				auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world->getSector(index));
 				for (unsigned tick = 0; tick < 2000 && chamber->getPhase() != core::SecurityScannerPhase::Scanning; ++tick) world->advanceTick();
 				require(chamber->getPhase() == core::SecurityScannerPhase::Scanning, "Render journey did not reach scan");
 				WorldDrawList scanDrawing({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &scanDrawing);
@@ -184,7 +184,7 @@ namespace
 					if (auto text = std::get_if<WorldDrawList::Text>(&command)) countdown = countdown || text->value == "Scanning: 2.0 s";
 				require(countdown, "Canvas omitted live phase/countdown readout");
 				world->advanceTicks(2400); world->pauseSimulation();
-				world->applySecurityScannerEdit(world->planRemoveSecurityScanner(index)); gSelectedSector.reset();
+				world->applyChamberEdit(world->planRemoveChamber(index)); gSelectedSector.reset();
 				WorldDrawList deleted({ { 0, 0 }, { 1600, 720 } }); renderWorld(world, &deleted);
 				for (auto const& command : deleted.commands())
 				{

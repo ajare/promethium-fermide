@@ -4,9 +4,14 @@
 
 namespace core
 {
-	bool World::canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x,
-		uint32_t width, std::string* diagnostic) const
+	bool World::canAddChamber(uint32_t layer, uint32_t y, uint32_t x,
+		uint32_t width, std::string* diagnostic, ChamberSubtype subtype) const
 	{
+		if (!isSupportedChamberSubtype(subtype))
+		{
+			if (diagnostic) *diagnostic = "Unsupported Chamber subtype";
+			return false;
+		}
 		// Same footprint and walkable Room/Corridor ends as an Airlock; no controls.
 		std::string reason;
 		bool valid = canAddAirlock(layer, y, x, width, 3.0f, &reason);
@@ -19,13 +24,13 @@ namespace core
 		return valid;
 	}
 
-	uint32_t World::addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x,
-		uint32_t width, bool leftToRight)
+	uint32_t World::addChamber(uint32_t layer, uint32_t y, uint32_t x,
+		uint32_t width, bool leftToRight, ChamberSubtype subtype)
 	{
 		std::string diagnostic;
-		if (!canAddSecurityScanner(layer, y, x, width, &diagnostic))
+		if (!canAddChamber(layer, y, x, width, &diagnostic, subtype))
 			throw WorldException(this, diagnostic);
-		beginStructuralEdit("addSecurityScanner");
+		beginStructuralEdit("addChamber");
 		auto grid = getLayer(layer);
 		std::vector<TransitStop> stops;
 		std::array<SectorEndType, 2> previous;
@@ -38,8 +43,8 @@ namespace core
 				(int)(y - neighbour->getCellY()) });
 		}
 		auto index = (uint32_t)mSectors.size();
-		auto chamber = std::make_shared<SecurityScannerTransit>(index, layer, x, y,
-			width, leftToRight, stops, previous);
+		auto chamber = std::make_shared<ChamberTransit>(index, layer, x, y,
+			width, leftToRight, stops, previous, subtype);
 		mSectors.push_back(chamber);
 		auto resourceId = mTraversalResources.add(std::unique_ptr<TraversalResource>(new TraversalResource("Security scanner journey")));
 		auto resource = mTraversalResources.find(resourceId);
@@ -73,7 +78,8 @@ namespace core
 				lane.positions.push_back({ side == CORE_SIDE_LEFT ? x - 0.5f - cell : x + width + 0.5f + cell, (float)y });
 			lane.positionOwners.resize(lane.positions.size());
 		}
-		ConstructionRecord record{ ConstructionType::SecurityScanner };
+		ConstructionRecord record{ ConstructionType::Chamber };
+		record.chamberSubtype = subtype;
 		record.layer = layer; record.a = y; record.b = x; record.c = width;
 		record.d = leftToRight ? 1 : 0;
 		record.x = chamber->getPreDelaySeconds(); record.y = chamber->getScanSeconds();
@@ -83,14 +89,14 @@ namespace core
 		return index;
 	}
 
-	bool World::setSecurityScannerConfiguration(uint32_t index, float sensor, float pre, float scan, float post)
+	bool World::setChamberConfiguration(uint32_t index, float sensor, float pre, float scan, float post)
 	{
 		if (!mSimulationPaused || !SecurityScannerTransit::validConfiguration(sensor, pre, scan, post)
 			|| index >= mSectors.size()) return false;
 		auto chamber = std::dynamic_pointer_cast<SecurityScannerTransit>(mSectors[index]);
 		if (!chamber) return false;
 		for (auto& record : mConstructionRecords)
-			if (record.type == ConstructionType::SecurityScanner && record.layer == chamber->getLayerIndex()
+			if (record.type == ConstructionType::Chamber && record.layer == chamber->getLayerIndex()
 				&& record.a == chamber->getCellY() && record.b == chamber->getCellX())
 			{
 				record.scannerSensorDistance = chamber->mSensorDistance = sensor;
@@ -101,6 +107,23 @@ namespace core
 				markModified(); invalidateSimulationSnapshot(); return true;
 			}
 		return false;
+	}
+
+	bool World::canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x,
+		uint32_t width, std::string* diagnostic) const
+	{
+		return canAddChamber(layer, y, x, width, diagnostic);
+	}
+
+	uint32_t World::addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x,
+		uint32_t width, bool leftToRight)
+	{
+		return addChamber(layer, y, x, width, leftToRight);
+	}
+
+	bool World::setSecurityScannerConfiguration(uint32_t index, float sensor, float pre, float scan, float post)
+	{
+		return setChamberConfiguration(index, sensor, pre, scan, post);
 	}
 
 	bool World::isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const

@@ -328,7 +328,7 @@ namespace core
 		std::shared_ptr<Shuttle> mShuttle;
 		std::shared_ptr<Stairwell> mStairwell;
 		std::shared_ptr<class AirlockTransit> mAirlock;
-		std::shared_ptr<class SecurityScannerTransit> mSecurityScanner;
+		std::shared_ptr<class ChamberTransit> mSecurityScanner;
 		// Owned here, not by the chamber: Path edges reference the chamber.
 		std::shared_ptr<class Path> mScannerCommittedPath;
 		std::shared_ptr<class Path> mScannerAdmittedPath;

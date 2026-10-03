@@ -7922,7 +7922,7 @@ namespace core
 		// Clearing authored route intent is not permission to discard a committed
 		// Airlock passenger. Runtime cancellation completes the opposite exit.
 		if (agent->getSector() && agent->getSector()->getType() == SectorType::Airlock) return false;
-		if (agent->getSector() && agent->getSector()->getType() == SectorType::SecurityScanner)
+		if (agent->getSector() && agent->getSector()->getType() == SectorType::Chamber)
 		{
 			mSimulationCoordinator.cancelAgentMovement(id, false);
 			agent->clearPath();
@@ -8420,8 +8420,8 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
-		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::SecurityScanner)
-			throw invalid_argument(sector.getType() == SectorType::SecurityScanner
+		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::Chamber)
+			throw invalid_argument(sector.getType() == SectorType::Chamber
 				? "Agents cannot be placed inside authored Security scanners"
 				: "Agents must enter Airlock chambers through coordinated traversal");
 		if (canAgentAccessLocation(sector, agent)) return;

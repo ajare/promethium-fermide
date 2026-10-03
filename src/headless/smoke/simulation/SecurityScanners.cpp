@@ -1,6 +1,6 @@
 #include "Checks.h"
 #include "core/World.h"
-#include "core/SecurityScannerTransit.h"
+#include "core/ChamberTransit.h"
 #include "core/Graph.h"
 #include "core/Agent.h"
 #include "core/Path.h"
@@ -70,7 +70,7 @@ namespace
 					world.addRoom("Left", 0, row, 0, 4, 1);
 					world.addCorridor(0, row, stage == 4 && row == 1 ? 7 : 6, 4, 1);
 				}
-				auto index = world.addSecurityScanner(0, 0, 4, 2, forward);
+				auto index = world.addChamber(0, 0, 4, 2, forward);
 				auto source = forward ? 0u : 1u, destination = 1 - source;
 				auto marker = world.addSectorMarker(destination, 0, 2.0f);
 				auto reverseMarker = world.addSectorMarker(source, 0, 1.0f);
@@ -103,14 +103,14 @@ namespace
 				{
 					auto before = world.getSimulationSnapshot().securityScanners.at(0);
 					world.markSaved();
-					for (auto plan : { world.planResizeSecurityScanner(index, 4, 1, 2, forward),
-						world.planResizeSecurityScanner(index, 4, 1, 3, forward),
-						world.planResizeSecurityScanner(index, 4, 0, 2, !forward), world.planRemoveSecurityScanner(index) })
+					for (auto plan : { world.planResizeChamber(index, 4, 1, 2, forward),
+						world.planResizeChamber(index, 4, 1, 3, forward),
+						world.planResizeChamber(index, 4, 0, 2, !forward), world.planRemoveChamber(index) })
 					{
 						require(!plan.valid, "Occupied/crossing scanner edit planned");
 						plan.valid = true;
 						bool refused = false;
-						try { world.applySecurityScannerEdit(plan); } catch (core::Exception const&) { refused = true; }
+						try { world.applyChamberEdit(plan); } catch (core::Exception const&) { refused = true; }
 						require(refused && !world.isModified() && world.getNumSectors() == 5, "Forged occupied plan mutated World");
 					}
 					world.advanceTicks(60);
@@ -122,18 +122,18 @@ namespace
 				}
 				else
 				{
-					auto stale = world.planRemoveSecurityScanner(index);
+					auto stale = world.planRemoveChamber(index);
 					world.resumeSimulation(); world.advanceTicks(1);
 					bool refused = false;
-					try { world.applySecurityScannerEdit(stale); } catch (core::Exception const&) { refused = true; }
+					try { world.applyChamberEdit(stale); } catch (core::Exception const&) { refused = true; }
 					require(refused, "Running stale scanner plan accepted");
 					world.pauseSimulation();
-					auto plan = stage == 5 ? world.planRemoveSecurityScanner(index)
-						: world.planResizeSecurityScanner(index, 4,
+					auto plan = stage == 5 ? world.planRemoveChamber(index)
+						: world.planResizeChamber(index, 4,
 							stage == 6 ? 0 : 1, stage == 4 ? 3 : 2, stage == 6 ? !forward : forward);
 					require(plan.valid, "Reserved empty scanner edit refused");
 					require(world.getSimulationSnapshot().traversalRequests.size() >= 2, "Edit fixture omitted waiting ticket");
-					index = world.applySecurityScannerEdit(plan);
+					index = world.applyChamberEdit(plan);
 					auto state = world.getSimulationSnapshot();
 					require(state.traversalRequests.empty() && state.traversalPermits.empty(), "Scanner edit retained requests/permits");
 					if (stage == 5)
@@ -142,7 +142,7 @@ namespace
 					{
 						require(state.securityScanners.at(0).reservations.empty() && !state.securityScanners.at(0).occupant
 							&& state.securityScanners.at(0).crossings.empty(), "Scanner edit retained stale admission");
-						if (stage != 6) index = world.applySecurityScannerEdit(world.planResizeSecurityScanner(index, 4, 0, 2, forward));
+						if (stage != 6) index = world.applyChamberEdit(world.planResizeChamber(index, 4, 0, 2, forward));
 					}
 				}
 				world.resumeSimulation(); agent = world.lookupAgent(id).entity;
@@ -176,7 +176,7 @@ namespace
 			{
 				core::World world("Scanner contention", width + 16, 2);
 				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 7, 1), world.addCorridor(0, 0, width + 7, 7, 1) };
-				auto index = world.addSecurityScanner(0, 0, 7, width, direction);
+				auto index = world.addChamber(0, 0, 7, width, direction);
 				int entry = direction ? 0 : 1, exit = 1 - entry;
 				auto destination = markerId(world.addSectorMarker(ends[exit], 0, 3.5f));
 				world.finishBuild();
@@ -277,7 +277,7 @@ namespace
 				core::World world("Scanner abandonment", 14, 2);
 				auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
 				auto right = world.addCorridor(0, 0, 8, 5, 1);
-				auto index = world.addSecurityScanner(0, 0, 5, 3);
+				auto index = world.addChamber(0, 0, 5, 3);
 				auto destination = markerId(world.addSectorMarker(right, 0, 2.5f)); world.finishBuild();
 				auto first = world.createAgent("Abandon", left, 0, 4.5f);
 				require(world.moveAgentToMarker(first, destination).accepted(), "Abandon command refused");
@@ -330,7 +330,7 @@ namespace
 				{
 					core::World world("Committed scanner exit", 16, 2);
 					uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 5, 1), world.addCorridor(0, 0, 8, 5, 1) };
-					auto index = world.addSecurityScanner(0, 0, 5, 3, direction);
+					auto index = world.addChamber(0, 0, 5, 3, direction);
 					int entry = direction ? 0 : 1, exit = 1 - entry;
 					auto destination = markerId(world.addSectorMarker(ends[exit], 0, 3.5f));
 					auto replacement = markerId(world.addSectorMarker(ends[exit], 0, 1.5f));
@@ -420,7 +420,7 @@ namespace
 			core::World world("Interrupted admission", 14, 2);
 			auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
 			auto right = world.addCorridor(0, 0, 8, 5, 1);
-			auto index = world.addSecurityScanner(0, 0, 5, 3);
+			auto index = world.addChamber(0, 0, 5, 3);
 			auto destination = markerId(world.addSectorMarker(right, 0, 2.5f)); world.finishBuild(); world.pauseSimulation();
 			auto key = world.addAccessPermission("Entry eligibility");
 			auto id = world.createAgent("Boarder", left, 0, 4.5f);
@@ -460,13 +460,13 @@ namespace
 			core::World world("Scanner alternatives", 40, 2);
 			auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
 			auto right = world.addRoom("Right", 0, 0, 5, 35, 1);
-			auto index = world.addSecurityScanner(0, 0, 3, 2);
+			auto index = world.addChamber(0, 0, 3, 2);
 			world.addRoom("Detour", 1, 0, 0, 40, 1);
 			world.addSectorDoor(0, 0, 0, {}); world.addSectorDoor(0, 0, detour, {});
 			auto marker = world.addSectorMarker(right, 0, 1.5f); world.finishBuild(); world.pauseSimulation();
 			auto id = world.createAgent("Chooser", left, 0, 2.5f);
 			auto actor = world.lookupAgent(id).entity;
-			auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+			auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
 			auto target = world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index));
 			auto choose = [&] {
 				auto path = world.getGraph()->calculatePath(actor, target); require(bool(path), "Scanner alternative unavailable");
@@ -516,7 +516,7 @@ namespace
 		core::World world("Defensive occupancy", 14, 2);
 		auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
 		auto right = world.addCorridor(0, 0, 8, 5, 1);
-		auto index = world.addSecurityScanner(0, 0, 5, 3);
+		auto index = world.addChamber(0, 0, 5, 3);
 		auto destination = markerId(world.addSectorMarker(right, 0, 2.5f)); world.finishBuild();
 		auto traveller = world.createAgent("Traveller", left, 0, 4.5f);
 		require(world.moveAgentToMarker(traveller, destination).accepted(), "Defensive fixture command refused");
@@ -544,11 +544,11 @@ namespace
 			auto snapshot = world.getSimulationSnapshot();
 			require(world.lookupAgent(waiting).entity->getSector()->getIndex() == left, "Fault admitted another Agent");
 			for (auto const& request : snapshot.traversalRequests)
-				if (request.resource == std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index))->getTraversalResourceId())
+				if (request.resource == std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index))->getTraversalResourceId())
 					require(request.state != core::TraversalRequestState::Granted, "Fault issued a traversal permit");
 		}
 		auto state = world.getSimulationSnapshot().securityScanners.at(0);
-		auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+		auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
 		require(state.phase == "Occupancy violation: multiple Agents" && !chamber->isTraversalAvailable()
 			&& state.remainingSeconds == 0 && state.scanProgress == 0 && state.reservations.empty() && state.crossings.empty()
 			&& state.doors[0] == core::DoorSnapshotState::Closed && state.doors[1] == core::DoorSnapshotState::Closed,
@@ -569,18 +569,18 @@ namespace
 			{
 				core::World world("Scanner sensor", 10, 2);
 				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 3, 1), world.addCorridor(0, 0, 5, 3, 1) };
-				auto index = world.addSecurityScanner(0, 0, 3, 2, direction);
+				auto index = world.addChamber(0, 0, 3, 2, direction);
 				int entry = direction ? 0 : 1;
 				int side = entryApproach ? entry : 1 - entry;
 				auto away = markerId(world.addSectorMarker(ends[side], 0, 1.5f)); world.finishBuild();
-				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+				auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
 				auto id = world.createAgent("Presence only", ends[side], 0, 1.5f);
 				auto actor = world.lookupAgent(id).entity;
 				auto halfDoor = chamber->getDoor(side)->getSize().x * 0.5f;
 				float target = (side ? 5.0f : 3.0f) + (side ? 1 : -1) * (gap + halfDoor + actor->getWidth() * 0.5f);
 				// Recreate at the exact nearest-edge gap using the public placement API.
 				world.pauseSimulation();
-				require(world.setSecurityScannerConfiguration(index, sensor, 1, 2, 1), "Sensor endpoint refused");
+				require(world.setChamberConfiguration(index, sensor, 1, 2, 1), "Sensor endpoint refused");
 				require(world.removeAgent(id).removed, "Sensor fixture removal refused");
 				id = world.createAgent("Presence only", ends[side], 0, target - world.getSector(ends[side])->getPosition().x);
 				require(world.resumeSimulation(), "Sensor resume refused");
@@ -617,7 +617,7 @@ namespace
 			{
 				core::World world("Scanner destination permission", 10, 2);
 				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 3, 1), world.addCorridor(0, 0, 5, 3, 1) };
-				world.addSecurityScanner(0, 0, 3, 2, direction);
+				world.addChamber(0, 0, 3, 2, direction);
 				int entry = direction ? 0 : 1, exit = 1 - entry;
 				auto marker = world.addSectorMarker(ends[exit], 0, 1.5f); world.finishBuild(); world.pauseSimulation();
 				auto id = world.createAgent("Traveller", ends[entry], 0, entry ? 0.5f : 2.5f);
@@ -652,7 +652,7 @@ namespace
 			{
 				core::World world("Scanner restoration", 12, 2);
 				world.addRoom("Left", 0, 0, 0, 3, 1); auto right = world.addCorridor(0, 0, 6, 3, 1);
-				auto index = world.addSecurityScanner(0, 0, 3, 3);
+				auto index = world.addChamber(0, 0, 3, 3);
 				auto marker = world.addSectorMarker(right, 0, 1.5f); world.finishBuild();
 				auto id = world.createAgent("Traveller", 0, 0, 2.5f);
 				auto actor = world.lookupAgent(id).entity;
@@ -665,7 +665,7 @@ namespace
 				require(reached, "Restoration fixture stalled before " + stage);
 				world.pauseSimulation();
 				auto frozen = world.getSimulationSnapshot().securityScanners.at(0);
-				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+				auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
 				float doorPositions[] = { chamber->getDoor(0)->getOpenPercentage(), chamber->getDoor(1)->getOpenPercentage() };
 				world.advanceTicks(100);
 				auto after = world.getSimulationSnapshot().securityScanners.at(0);
@@ -716,20 +716,20 @@ namespace
 			core::World world("Configured scan", 12, 2);
 			auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
 			auto right = world.addCorridor(0, 0, 5, 3, 1);
-			auto index = world.addSecurityScanner(0, 0, 3, 2);
+			auto index = world.addChamber(0, 0, 3, 2);
 			auto target = world.addSectorMarker(right, 0, 1.5f);
 			auto destination = markerId(target);
 			world.finishBuild(); world.pauseSimulation();
-			require(world.setSecurityScannerConfiguration(index, 0.5f, pre, scan, post), "Timing endpoint refused");
+			require(world.setChamberConfiguration(index, 0.5f, pre, scan, post), "Timing endpoint refused");
 			world.markSaved();
 			for (float bad : { -1.0f, 11.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
 			{
-				require(!world.setSecurityScannerConfiguration(index, 0.5f, bad, scan, post)
-					&& !world.setSecurityScannerConfiguration(index, 0.5f, pre, bad, post)
-					&& !world.setSecurityScannerConfiguration(index, 0.5f, pre, scan, bad), "Invalid timing accepted");
-				if (bad < 0 || !std::isfinite(bad)) require(!world.setSecurityScannerConfiguration(index, bad, pre, scan, post), "Invalid sensor accepted");
+				require(!world.setChamberConfiguration(index, 0.5f, bad, scan, post)
+					&& !world.setChamberConfiguration(index, 0.5f, pre, bad, post)
+					&& !world.setChamberConfiguration(index, 0.5f, pre, scan, bad), "Invalid timing accepted");
+				if (bad < 0 || !std::isfinite(bad)) require(!world.setChamberConfiguration(index, bad, pre, scan, post), "Invalid sensor accepted");
 			}
-			require(!world.setSecurityScannerConfiguration(index, 0.5f, pre, 0.099f, post) && !world.isModified(), "Rejected edit mutated document");
+			require(!world.setChamberConfiguration(index, 0.5f, pre, 0.099f, post) && !world.isModified(), "Rejected edit mutated document");
 			auto actor = world.createAgent("Traveller", left, 0, 2.5f);
 			auto entity = world.lookupAgent(actor).entity;
 			auto path = world.getGraph()->calculatePath(entity, world.getGraph()->getVertexForObject(target.sector->getObject(target.index)));
@@ -745,7 +745,7 @@ namespace
 			require(std::abs(estimated - (3 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME + pre + scan + post)) < 0.0001f,
 				"Route estimate ignored authored timings");
 			require(world.moveAgentToMarker(actor, destination).accepted() && world.resumeSimulation(), "Configured journey refused");
-			require(!world.setSecurityScannerConfiguration(index, 1, 1, 1, 1), "Running edit accepted");
+			require(!world.setChamberConfiguration(index, 1, 1, 1, 1), "Running edit accepted");
 			std::map<std::string, uint64_t> starts;
 			bool edited = false;
 			for (unsigned tick = 0; tick < 5000; ++tick)
@@ -760,7 +760,7 @@ namespace
 					if (!edited)
 					{
 						edited = true; world.pauseSimulation();
-						require(world.setSecurityScannerConfiguration(index, 100, 1, 2, 1), "Paused active edit refused");
+						require(world.setChamberConfiguration(index, 100, 1, 2, 1), "Paused active edit refused");
 						world.advanceTicks(100);
 						auto frozen = world.getSimulationSnapshot().securityScanners.at(0);
 						require(frozen.remainingSeconds == state.remainingSeconds && frozen.scanProgress == state.scanProgress, "Paused edit changed active clock");
@@ -806,7 +806,7 @@ namespace
 			{
 				core::World world("Scanner journey", width + 8, 2);
 				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 3, 1), world.addCorridor(0, 0, width + 3, 3, 1) };
-				auto index = world.addSecurityScanner(0, 0, 3, width, direction);
+				auto index = world.addChamber(0, 0, 3, width, direction);
 				int entry = direction ? 0 : 1, exit = 1 - entry;
 				auto marker = world.addSectorMarker(ends[exit], 0, 1.5f);
 				auto reverseMarker = world.addSectorMarker(ends[entry], 0, 1.5f);
@@ -833,7 +833,7 @@ namespace
 				auto reverse = world.lookupAgent(reverseId).entity;
 				auto reverseTarget = world.getGraph()->getVertexForObject(reverseMarker.sector->getObject(reverseMarker.index));
 				require(!world.getGraph()->calculatePath(reverse, reverseTarget), "Reverse topology admitted scanner");
-				auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world.getSector(index));
+				auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
 				std::map<std::string, uint64_t> starts;
 				std::string previous;
 				bool boarded = false, exited = false, reverseGate = false, reverseDenied = false, paused = false;
