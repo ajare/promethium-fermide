@@ -8,6 +8,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import smoke_lane as lane
 
 build, config, probe = sys.argv[1:]

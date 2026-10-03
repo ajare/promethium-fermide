@@ -1,5 +1,9 @@
 # Smoke validation lanes (#331)
 
+See [bounded validation and recovery](validation-recovery.md) for `--run-timeout`,
+`--build-timeout`, process ownership and logs. The lane validator also accepts
+`--rerun-failed` for guarded focused feedback, never as final verification.
+
 Unfiltered CTest still runs **all** coverage. Development selection is explicit;
 there is no default exclusion and no scenario assertion was removed.
 

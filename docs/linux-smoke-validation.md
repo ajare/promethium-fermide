@@ -1,5 +1,10 @@
 # Linux modular smoke validation
 
+See [bounded validation and recovery](validation-recovery.md) for run/build budgets,
+process ownership, interruption handling, logs, and guarded `--rerun-failed`.
+`--lane final all` builds the default inventory; use the unfiltered final CTest
+lane afterwards for complete standalone/dependency coverage.
+
 This is the active Linux build and validation procedure for the completed smoke
 migration. It is entirely non-interactive: `DISPLAY` and `WAYLAND_DISPLAY` are
 unset, Render and Editor checks use CPU-only ImGui, and Startup deliberately uses

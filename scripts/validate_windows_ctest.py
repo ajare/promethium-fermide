@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+import validation_run as validation
 
 CORE = {'agent', 'agent-tags', 'behaviours', 'permissions', 'persistence',
         'routing', 'simulation', 'transports', 'world'}
@@ -29,10 +30,19 @@ def run(command, log, env=None):
     print(subprocess.list2cmdline(command), flush=True)
     start = time.monotonic()
     with log.open('w', encoding='utf-8') as stream:
-        result = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT,
-                                env=env, timeout=7200)
-    if result.returncode:
-        raise RuntimeError(f'command failed ({result.returncode}); see {log}')
+        if command[0] == 'ctest':
+            command = command.copy()
+            index = command.index('--output-junit')
+            xml = Path(command[index + 1])
+            del command[index:index + 2]
+            code = validation.ctest(command, command[command.index('--test-dir') + 1],
+                                    command[command.index('-C') + 1], xml=xml,
+                                    stdout=stream, stderr=subprocess.STDOUT, env=env)
+        else:
+            code = validation.run(command, stdout=stream, stderr=subprocess.STDOUT,
+                                  env=env).returncode
+    if code:
+        raise RuntimeError(f'command failed ({code}); see {log}')
     return round(time.monotonic() - start, 2)
 
 
@@ -199,6 +209,7 @@ def main():
     parser.add_argument('--build-tree', type=Path, required=True)
     parser.add_argument('--gui', choices=('on', 'off'), required=True)
     parser.add_argument('--parallel', type=int, default=8)
+    validation.arguments(parser, default=14400)
     args = parser.parse_args()
     if sys.platform != 'win32' or args.parallel < 2:
         parser.error('requires Windows/MSVC and parallelism >= 2')
@@ -206,6 +217,9 @@ def main():
     ctypes.windll.kernel32.SetErrorMode(0x8003)
     build = args.build_tree.resolve()
     source = Path(__file__).resolve().parents[1]
+    status = validation.supervise(args, [build])
+    if status is not None:
+        return status
     logs = build / 'ctest-validation'
     logs.mkdir(exist_ok=True)
     env = os.environ.copy()
@@ -216,13 +230,13 @@ def main():
     for config in ('Debug', 'Release'):
         run(['cmake', '--build', str(build), '--config', config, '--parallel', '4'],
             logs / f'{config}-default-build.log')
-        inventory = json.loads(subprocess.check_output(
-            ['ctest', '--test-dir', str(build), '-C', config, '--show-only=json-v1'], text=True))
+        inventory = json.loads(validation.output(
+            ['ctest', '--test-dir', str(build), '-C', config, '--show-only=json-v1'], text=True, timeout=30, env=env))
         (logs / f'{config}-inventory.json').write_text(json.dumps(inventory, indent=2) + '\n')
         direct = audit_inventory(inventory, args.gui == 'on', config)
         checks = {}
         for module, exe in direct.items():
-            checks[module] = subprocess.check_output([exe, '--list'], text=True, timeout=30).splitlines()
+            checks[module] = validation.output([exe, '--list'], text=True, timeout=30).splitlines()
         dependencies = audit_dependencies(file_api(build, config))
         (logs / f'{config}-dependencies.json').write_text(json.dumps(dependencies, indent=2) + '\n')
         results[config] = {'tests': len(inventory['tests']), 'checks': checks, 'runs': {}}
@@ -230,7 +244,7 @@ def main():
             xml = logs / f'{config}-{kind}.xml'
             elapsed = run(['ctest', '--test-dir', str(build), '-C', config,
                            '--output-on-failure', '--verbose', '-j', str(jobs),
-                           '--timeout', '600', '--test-output-size-passed', '1048576',
+                           '--test-output-size-passed', '1048576',
                            '--test-output-size-failed', '1048576', '--output-junit', str(xml)],
                           logs / f'{config}-{kind}.log', env)
             suite = ET.parse(xml).getroot()

@@ -1,5 +1,9 @@
 # Modular smoke builds on Windows
 
+See [bounded validation and recovery](validation-recovery.md) for configurable
+run/build budgets, per-tree ownership, Windows Job Object cleanup, retained logs,
+and outer coding-agent timeout guidance.
+
 Ticket #307 covers **build** validation. Direct module CLI, fixture,
 temporary-directory and concurrency validation is covered by
 [#308 runtime validation](windows-smoke-runtime-validation.md). Broader subprocess,

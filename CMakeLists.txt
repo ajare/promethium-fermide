@@ -628,6 +628,10 @@ if(BUILD_TESTING)
     add_test(NAME headless-tools-cli-contract COMMAND ${PF_TOOLS_CONTRACT_COMMAND} --cli)
     set_tests_properties(headless-tools-cli-contract PROPERTIES
         TIMEOUT 90 LABELS "tools;headless;validation-fast;validation-cli")
+    add_test(NAME validation-lifecycle-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/validation_run.py")
+    set_tests_properties(validation-lifecycle-contract PROPERTIES
+        TIMEOUT 60 LABELS "harness;validation-fast")
     add_test(NAME smoke-lanes-contract COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/smoke_lanes.py"
         "${CMAKE_BINARY_DIR}" "$<CONFIG>"

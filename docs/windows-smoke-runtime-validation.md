@@ -1,5 +1,10 @@
 # Direct smoke runtime validation on Windows (#308)
 
+See [bounded validation and recovery](validation-recovery.md) for run/build budgets,
+owned-child cleanup, interrupted-run diagnostics, and the focused-repair/final
+workflow. Runtime direct-process limits are configurable with
+`--subprocess-timeout` (default 300 s); CTest registrations retain their own limits.
+
 Build the [MSVC Debug/Release matrix](windows-smoke-build-validation.md) first.
 For routine development and final/CI selection, see
 [validation lanes](smoke-validation-lanes.md):
