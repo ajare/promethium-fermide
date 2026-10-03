@@ -34,6 +34,7 @@ set(names
     carriageImages
     airlocks/chamberAndControls
     securityScanners/chamberCommandStream
+    securityScanners/beamSweeps
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

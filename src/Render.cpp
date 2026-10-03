@@ -1844,6 +1844,23 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	if (shouldRenderSectorAgents(sector->getType(), style))
 		renderSectorAgents(sector, drawList);
 
+	// Scan overlays follow occupants, and share the production scan clock. The
+	// triangular wave is independent of the chamber's authored travel direction.
+	if (sector->getType() == core::SectorType::SecurityScanner && isDrawnSolid(style))
+	{
+		auto chamber = static_pointer_cast<const core::SecurityScannerTransit>(sector);
+		if (chamber->getPhase() == core::SecurityScannerPhase::Scanning)
+		{
+			float progress = chamber->getScanProgress();
+			float sweep = 1.0f - std::abs(2.0f * progress - 1.0f);
+			float x = bounds0.x + (bounds1.x - bounds0.x) * sweep;
+			float y = bounds1.y + (bounds0.y - bounds1.y) * sweep;
+			auto colour = IM_COL32(255, 0, 0, 128);
+			drawList->AddLine({ bounds0.x, y }, { bounds1.x, y }, colour, 4.0f);
+			drawList->AddLine({ x, bounds1.y }, { x, bounds0.y }, colour, 4.0f);
+		}
+	}
+
 	// Render ceiling
 	// A Background has no floor, ceiling or walls - its colour is the whole
 	// surface, and a per-sector black border would break the seamless surface

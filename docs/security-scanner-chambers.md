@@ -1,4 +1,4 @@
-# Security scanner chambers (#339, #340)
+# Security scanner chambers (#339, #340, #341)
 
 The palette's **Scanner** tool creates a distinct same-Layer Security scanner.
 Drag horizontally across empty whole cells between adjoining walkable Room or
@@ -31,7 +31,7 @@ Selection exposes phase, remaining timed-phase duration, direction, occupancy,
 and normalized scan progress. The canvas shows phase/countdown, direction, and
 capacity. Progress is zero before scanning, increases deterministically from
 zero to one during the scan, and stays one through exit until the next opening.
-This is the stable seam for later beam graphics and timing configuration. Route
+This is the stable seam for beam graphics and later timing configuration. Route
 duration estimates include automatic opening, entry closure, and the four-second
 sequence without fictitious button motion or interaction costs.
 
@@ -42,7 +42,17 @@ Generated Doors cannot be independently operated, configured, moved, or deleted.
 Direct Agent creation/placement/relocation inside is refused. Scanner move,
 resize, delete, and reversal remain unsupported, including while occupied.
 
-Beam graphics, fair admission policy, configurable sensing/timing, interrupted
+## Scan beams
+
+During Scanning only, the canvas draws two simultaneous translucent red beams
+above the occupant: a full-width horizontal beam sweeps ceiling → floor → ceiling,
+and a full-height vertical beam sweeps left → right → left. Both complete one
+out-and-back sweep over the scan duration, independent of travel direction and
+chamber width (including one cell). Positions consume only public normalized scan
+progress; there is no renderer clock. Pause freezes the beams, and reset/load
+removes them. Pre-delay, post-pause, and all other phases show no beams.
+
+Fair admission policy, configurable sensing/timing, interrupted
 journey recovery, and structural editing are separate follow-up tickets.
 
 ## Persistence and history
@@ -71,6 +81,7 @@ and ownership. Detached open-wall restoration records remain supported.
 - `pf-smoke-persistence --check securityScanners/authoredRoundTripAndReplay`
 - `pf-smoke-editor --check securityScanners/editorCommandsAndHistory`
 - `pf-smoke-render --check securityScanners/chamberCommandStream`
+- `pf-smoke-render --check securityScanners/beamSweeps`
 
 Checks exercise World commands, real Paths, fixed ticks, snapshots, Selection
 readouts, rendering command streams, undo/redo, YAML/binary load, reset, replay,
