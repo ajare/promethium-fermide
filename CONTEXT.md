@@ -163,12 +163,16 @@ A stationary, capacity-limited Sector connecting Rooms or Corridors on the same 
 _Avoid_: Transport vehicle, paired ordinary Bulkhead Doors
 
 **Chamber**:
-A stationary Transit connecting Rooms or Corridors on the same Layer through interlocked Bulkhead Doors. It has a required subtype that defines its admission and journey behaviour; Security Scanner is the sole supported subtype and the creation default, while Airlock remains separate.
+A stationary Transit connecting Rooms or Corridors on the same Layer through interlocked Bulkhead Doors. It has a required subtype that defines its admission and journey behaviour; Security Scanner is the creation default; Decontamination Chamber admits width-capacity batches, while Airlock remains separate.
 _Avoid_: Airlock, Transport vehicle
 
 **Security Scanner**:
 A directional, capacity-one Chamber subtype connecting Rooms or Corridors on the same Layer through two interlocked Bulkhead Doors, with fixed entry and exit sides independent of its horizontal length. It automatically scans the admitted Agent before releasing it through the exit.
 _Avoid_: Airlock, paired ordinary Bulkhead Doors, security checkpoint when referring to this chamber
+
+**Decontamination Chamber**:
+A directional Chamber subtype with one Agent of capacity per horizontal cell. It admits a batch, performs a shared decontamination sequence with both Bulkhead Doors closed, and releases the batch through its fixed exit.
+_Avoid_: Airlock, Security Scanner
 
 **Airlock cycle**:
 The waiting interval that begins when both Airlock Bulkhead Doors are fully closed and must complete before either may open.

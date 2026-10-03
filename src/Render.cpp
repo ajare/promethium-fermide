@@ -1518,6 +1518,10 @@ void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core:
 	// afterwards so no physical control can be painted in front of them.
 	for (auto const& sector : sectors)
 	{
+		// Chamber occupants were already drawn below their processing overlay.
+		// This foreground restoration must not repaint them above the white quad.
+		if (auto chamber = dynamic_pointer_cast<const core::ChamberTransit>(sector);
+			chamber && chamber->getDecontaminationOpacity() > 0) continue;
 		renderSectorAgents(sector, drawList);
 	}
 }
@@ -1778,7 +1782,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	case core::SectorType::Chamber:
 	{
 		auto chamber = static_pointer_cast<const core::ChamberTransit>(sector);
-		if (chamber->getSubtype() == core::ChamberSubtype::SecurityScanner && isDrawnSolid(style))
+		if (isDrawnSolid(style))
 		{
 			float centreX = (bounds0.x + bounds1.x) * 0.5f;
 			float centreY = (bounds0.y + bounds1.y) * 0.5f;
@@ -1788,7 +1792,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			drawList->AddLine({ centreX - direction * half, centreY }, tip, IM_COL32_WHITE, 2);
 			drawList->AddLine(tip, { tip.x - direction * 8, centreY - 6 }, IM_COL32_WHITE, 2);
 			drawList->AddLine(tip, { tip.x - direction * 8, centreY + 6 }, IM_COL32_WHITE, 2);
-			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, "Capacity: 1");
+			auto capacity = std::format("Capacity: {}", chamber->getJourneyCapacity());
+			drawList->AddText({ bounds0.x + 4, bounds1.y + 4 }, IM_COL32_WHITE, capacity.c_str());
 			auto readout = std::format("{}: {:.1f} s", chamber->getPhaseName(), chamber->getRemainingSeconds());
 			drawList->AddText({ bounds0.x + 4, bounds1.y + 20 }, IM_COL32_WHITE, readout.c_str());
 		}
@@ -1898,6 +1903,15 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 			auto colour = IM_COL32(255, 0, 0, 128);
 			drawList->AddLine({ bounds0.x, y }, { bounds1.x, y }, colour, 4.0f);
 			drawList->AddLine({ x, bounds1.y }, { x, bounds0.y }, colour, 4.0f);
+		}
+		else if (chamber->getDecontaminationOpacity() > 0)
+		{
+			auto alpha = (int)std::lround(chamber->getDecontaminationOpacity() * 255.0f);
+			drawList->AddRectFilled({ bounds0.x, bounds1.y }, { bounds1.x, bounds0.y }, IM_COL32(255, 255, 255, alpha));
+			// Generated Doors belong to neighbouring Sectors and may already have
+			// been painted. Restore their visible leaves above the interior effect.
+			for (int side = 0; side < 2; ++side)
+				renderBulkheadDoor(chamber->getDoor(side), layer, style, false, drawList);
 		}
 	}
 

@@ -344,13 +344,13 @@ namespace core
 		case ConstructionType::Chamber:
 			if (!isSupportedChamberSubtype(record.chamberSubtype))
 				throw SerializationException("Unsupported Chamber subtype");
-			serializer.writeString("subtype", "securityScanner");
+			serializer.writeString("subtype", record.chamberSubtype == ChamberSubtype::Decontamination ? "decontamination" : "securityScanner");
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
 			serializer.writeUint32("cellsWide", record.c);
 			serializer.writeUint32("levelsHigh", 1);
 			serializer.writeBool("leftToRight", record.d != 0);
-			serializer.writeUint32("capacity", 1);
+			serializer.writeUint32("capacity", record.chamberSubtype == ChamberSubtype::Decontamination ? record.c : 1);
 			serializer.writeFloat("preDelaySeconds", record.x);
 			serializer.writeFloat("scanSeconds", record.y);
 			serializer.writeFloat("postPauseSeconds", record.z);
@@ -590,7 +590,8 @@ namespace core
 		// Version 43 adds distinct non-traversable BoothWindow authored records.
 		// Version 44 adds authored BoothWindow panel requirements.
 		// Version 45 expands scanner records into Chamber with an explicit subtype.
-		serializer.writeUint32("version", 45);
+		// Version 46 adds width-capacity Decontamination Chambers.
+		serializer.writeUint32("version", 46);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -978,8 +979,9 @@ namespace core
 			if (typeName == "chamber")
 			{
 				if (version < 45) throw SerializationException("Chambers require World schema version 45 or later");
-				if (serializer.readString("subtype") != "securityScanner")
-					throw SerializationException("Unsupported Chamber subtype");
+				auto subtype = serializer.readString("subtype");
+				if (subtype == "decontamination" && version >= 46) record.chamberSubtype = ChamberSubtype::Decontamination;
+				else if (subtype != "securityScanner") throw SerializationException("Unsupported Chamber subtype");
 			}
 			else
 			{
@@ -987,7 +989,6 @@ namespace core
 				if (serializer.hasField("subtype") && serializer.readString("subtype") != "securityScanner")
 					throw SerializationException("Unsupported Chamber subtype");
 			}
-			record.chamberSubtype = ChamberSubtype::SecurityScanner;
 			record.layer = serializer.readUint32("layer");
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("cellsWide");
@@ -997,7 +998,7 @@ namespace core
 			record.z = serializer.readFloat("postPauseSeconds");
 			record.p = serializer.readBool("leftWasOpen"); record.q = serializer.readBool("rightWasOpen");
 			record.scannerSensorDistance = serializer.readFloat("sensorDistance");
-			if (serializer.readUint32("levelsHigh") != 1 || serializer.readUint32("capacity") != 1
+			if (serializer.readUint32("levelsHigh") != 1 || serializer.readUint32("capacity") != (record.chamberSubtype == ChamberSubtype::Decontamination ? record.c : 1)
 				|| !ChamberTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z)
 				|| serializer.hasField("initiallyBroken") || serializer.hasField("leftControlPermissionRequirement")
 				|| serializer.hasField("rightControlPermissionRequirement"))
@@ -1278,7 +1279,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 45)
+		if (version < 1 || version > 46)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -4384,6 +4385,12 @@ namespace core
 		if (selected == records.size() || records[selected].type != constructionType)
 		{ diagnostic = "The chamber no longer has an authored definition"; return false; }
 		auto edited = records[selected];
+		if (plan.subtype)
+		{
+			if (!plan.chamber || !isSupportedChamberSubtype(*plan.subtype))
+			{ diagnostic = "Unsupported Chamber subtype"; return false; }
+			edited.chamberSubtype = *plan.subtype;
+		}
 		auto chamber = static_pointer_cast<const Transit>(mSectors[plan.sectorIndex]);
 		// The saved restoration flags are authoritative, including documents
 		// whose originally open walls have no separate RemoveWall record.
@@ -4446,6 +4453,20 @@ namespace core
 		ChamberEditPlan plan;
 		plan.chamber = true; plan.leftToRight = leftToRight;
 		plan.sectorIndex = index; plan.x = x; plan.y = y; plan.width = width;
+		vector<ConstructionRecord> records;
+		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
+		return plan;
+	}
+
+	World::ChamberEditPlan World::planSetChamberSubtype(uint32_t index, ChamberSubtype subtype) const
+	{
+		ChamberEditPlan plan;
+		plan.chamber = true; plan.sectorIndex = index; plan.subtype = subtype;
+		if (index >= mSectors.size()) return plan;
+		auto chamber = dynamic_pointer_cast<const ChamberTransit>(mSectors[index]);
+		if (!chamber) return plan;
+		plan.x = chamber->getCellX(); plan.y = chamber->getCellY();
+		plan.width = chamber->getCellsWide(); plan.leftToRight = chamber->isLeftToRight();
 		vector<ConstructionRecord> records;
 		plan.valid = prepareAirlockEdit(plan, records, plan.diagnostic);
 		return plan;

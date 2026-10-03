@@ -244,7 +244,7 @@ namespace core
 			result.mobilityKind = TraversalKind::Door;
 			if (result.type == EdgeType::BulkheadDoor)
 				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mSecurityScanner;
-					chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
+					chamber)
 				{
 					result.securityScanner = true;
 					result.boarding = target->getSector().get() == chamber.get();

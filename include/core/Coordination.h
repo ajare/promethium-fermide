@@ -332,6 +332,7 @@ namespace core
 		// Owned here, not by the chamber: Path edges reference the chamber.
 		std::shared_ptr<class Path> mScannerCommittedPath;
 		std::shared_ptr<class Path> mScannerAdmittedPath;
+		std::map<AgentId, std::shared_ptr<class Path>> mChamberCommittedPaths, mChamberAdmittedPaths;
 		int mAirlockEntrySide{ -1 };
 		// Lift coordinators are separate from their landing-door resources. The
 		// latter point back to the coordinator and one stop.

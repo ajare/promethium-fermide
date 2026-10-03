@@ -24,12 +24,13 @@ namespace core
 		case SecurityScannerPhase::Positioning: return "Positioning";
 		case SecurityScannerPhase::EntryClosing: return "Entry closing";
 		case SecurityScannerPhase::PreDelay: return "Pre-delay";
-		case SecurityScannerPhase::Scanning: return "Scanning";
+		case SecurityScannerPhase::Scanning: return mSubtype == ChamberSubtype::Decontamination ? "Decontaminating" : "Scanning";
 		case SecurityScannerPhase::PostPause: return "Post-pause";
 		case SecurityScannerPhase::ExitOpening: return "Exit opening";
 		case SecurityScannerPhase::Exiting: return "Exiting";
 		case SecurityScannerPhase::ExitClosing: return "Exit closing";
-		case SecurityScannerPhase::OccupancyViolation: return "Occupancy violation: multiple Agents";
+		case SecurityScannerPhase::OccupancyViolation: return mSubtype == ChamberSubtype::Decontamination
+			? "Occupancy violation: capacity exceeded" : "Occupancy violation: multiple Agents";
 		}
 		return "Idle";
 	}
@@ -39,29 +40,29 @@ namespace core
 		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
 		{
 			(void)id;
-			if (!resource->mSecurityScanner
-				|| resource->mSecurityScanner->getSubtype() != ChamberSubtype::SecurityScanner) continue;
+			if (!resource->mSecurityScanner) continue;
 			auto& chamber = *resource->mSecurityScanner;
 			auto& entry = *chamber.mDoors[chamber.getEntrySide()];
 			auto& exit = *chamber.mDoors[chamber.getExitSide()];
 			// Physical occupancy is authoritative even if a restored document's
 			// capacity ledger is inconsistent. Latch the fault until reset; never
-			// finish a multi-Agent scan or issue another permit.
-			if (chamber.getAgents().size() > 1)
+			// process an over-capacity batch or issue another permit.
+			if (chamber.getAgents().size() > resource->mCapacity)
 			{
 				chamber.mPhase = SecurityScannerPhase::OccupancyViolation;
 				chamber.mRemainingTicks = 0;
 				chamber.mScanProgress = 0;
 			}
 			if (!chamber.isTraversalAvailable()) continue;
-			if (auto actor = mWorld.mAgents.find(chamber.mOccupant); actor && resource->mScannerCommittedPath
-				&& ((actor->mPath.path != resource->mScannerAdmittedPath && actor->mPath.path != resource->mScannerCommittedPath)
+			for (auto const& [owner, committedPath] : resource->mChamberCommittedPaths)
+			if (auto actor = mWorld.mAgents.find(owner); actor && committedPath
+				&& ((actor->mPath.path != resource->mChamberAdmittedPaths[owner] && actor->mPath.path != committedPath)
 					|| actor->mState == Agent::State::Idle))
 			{
 				// Intent may disappear, but physical membership and occupied capacity
 				// remain authoritative. Never route an occupant back through entry.
 				actor->cancelTraversal();
-				actor->mPath.path = resource->mScannerCommittedPath;
+				actor->mPath.path = committedPath;
 				actor->mPath.targetNode = 0;
 				actor->mState = Agent::State::WaitingForTraversal;
 			}
@@ -84,7 +85,8 @@ namespace core
 			// Reconcile abandoned claims before choosing a successor. In particular,
 			// pause retains boarders, but an inactive or detached boarder must not
 			// hold the only slot indefinitely.
-			if (auto reserved = resource->mAdmissionReservations[0])
+			for (auto& reservation : resource->mAdmissionReservations)
+			if (auto reserved = reservation)
 			{
 				auto request = mWorld.mTraversalRequests.find(reserved);
 				auto actor = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
@@ -94,25 +96,34 @@ namespace core
 					|| (request->mState != TraversalRequestState::Pending && request->mState != TraversalRequestState::Granted))
 				{
 					cancelTraversal(reserved, request ? request->mPermit : TraversalPermitId{});
-					resource->mAdmissionReservations[0] = {};
+					reservation = {};
 					crossing = (bool)resource->mCrossingOwners[0];
 				}
 			}
-			// Queue lanes are sorted by stable ticket, not Agent identity or
-			// physical position. Reserve exactly one oldest eligible entry ticket.
+			bool batch = chamber.getSubtype() == ChamberSubtype::Decontamination;
+			if (batch && chamber.mBoardingWindowRemainingTicks) --chamber.mBoardingWindowRemainingTicks;
+			// Stable ticket order, with farthest standing slots filled first.
 			if ((chamber.mPhase == SecurityScannerPhase::Idle || chamber.mPhase == SecurityScannerPhase::EntryOpening
-				|| chamber.mPhase == SecurityScannerPhase::Boarding) && chamber.getAgents().empty() && !crossing && !resource->mOccupants[0]
-				&& !resource->mAdmissionReservations[0] && exit.isClosed())
+				|| chamber.mPhase == SecurityScannerPhase::Boarding)
+				&& (!batch ? chamber.getAgents().empty() && !crossing :
+					chamber.mPhase == SecurityScannerPhase::Idle || chamber.mBoardingWindowRemainingTicks > 0)
+				&& exit.isClosed())
 				for (auto waiting : resource->mQueueLanes[chamber.getEntrySide()].queue)
 				{
 					auto request = mWorld.mTraversalRequests.find(waiting);
 					auto actor = request ? mWorld.mAgents.find(request->mOwner) : nullptr;
 					if (!actor || !actor->isActive() || request->mState != TraversalRequestState::Pending
 						|| agentForbidsTraversal(actor, TraversalKind::Door)
+						|| request->mCapacityPosition < resource->mCapacity
 						|| !nearEntry(*actor) || !mWorld.canAgentAccessLocation(*chamber.getStop(chamber.getExitSide()).sector, *actor)) continue;
-					resource->mAdmissionReservations[0] = waiting;
-					request->mCapacityPosition = 0;
-					break;
+					for (uint32_t rank = 0; rank < resource->mCapacity; ++rank)
+					{
+						auto slot = chamber.isLeftToRight() ? resource->mCapacity - 1 - rank : rank;
+						if (resource->mOccupants[slot] || resource->mAdmissionReservations[slot]) continue;
+						resource->mAdmissionReservations[slot] = waiting;
+						request->mCapacityPosition = slot;
+						break;
+					}
 				}
 			auto beginTimer = [&](SecurityScannerPhase phase, uint64_t ticks)
 			{
@@ -133,6 +144,7 @@ namespace core
 					chamber.mActivePreTicks = secondsToTicks(chamber.getPreDelaySeconds(), World::getFixedTimestep());
 					chamber.mActiveScanTicks = secondsToTicks(chamber.getScanSeconds(), World::getFixedTimestep());
 					chamber.mActivePostTicks = secondsToTicks(chamber.getPostPauseSeconds(), World::getFixedTimestep());
+					chamber.mBoardingWindowRemainingTicks = secondsToTicks(entry.getOpenCloseTime() + entry.getTimeBeforeClosing(), World::getFixedTimestep());
 					entry.mState = OpenableObject::State::Opening;
 					chamber.mPhase = SecurityScannerPhase::EntryOpening;
 				}
@@ -141,7 +153,21 @@ namespace core
 				if (entry.isOpen()) chamber.mPhase = SecurityScannerPhase::Boarding;
 				break;
 			case SecurityScannerPhase::Boarding:
-				if (!resource->mAdmissionReservations[0] && !crossing && entry.getOpenWaitTime() <= 0)
+				if (batch)
+				{
+					bool reserved = std::any_of(resource->mAdmissionReservations.begin(), resource->mAdmissionReservations.end(), [](auto id) { return (bool)id; });
+					bool full = std::all_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto id) { return (bool)id; });
+					bool positioned = true;
+					for (uint32_t slot = 0; slot < resource->mCapacity; ++slot)
+						if (auto actor = mWorld.mAgents.find(resource->mOccupants[slot]))
+							positioned = positioned && actor->getGlobalPosition().distanceTo(chamber.getPosition() + resource->mCapacityPositions[slot]) <= 0.001f;
+					if (!reserved && !crossing && positioned && (full || !chamber.mBoardingWindowRemainingTicks))
+					{
+						entry.mState = OpenableObject::State::Closing;
+						chamber.mPhase = SecurityScannerPhase::EntryClosing;
+					}
+				}
+				else if (!resource->mAdmissionReservations[0] && !crossing && entry.getOpenWaitTime() <= 0)
 				{
 					entry.mState = OpenableObject::State::Closing;
 					chamber.mPhase = SecurityScannerPhase::EntryClosing;
@@ -207,7 +233,8 @@ namespace core
 		auto side = entry ? chamber.getEntrySide() : chamber.getExitSide();
 		if ((entry && request->mSourceSector != resource.mQueueLanes[side].sector)
 			|| (!entry && (request->mSourceSector != SectorId{ (uint64_t)chamber.getIndex() + 1 }
-				|| request->mDestinationSector != resource.mQueueLanes[side].sector || resource.mOccupants[0] != request->mOwner)))
+				|| request->mDestinationSector != resource.mQueueLanes[side].sector
+				|| std::find(resource.mOccupants.begin(), resource.mOccupants.end(), request->mOwner) == resource.mOccupants.end())))
 		{
 			denyTraversalRequest(id);
 			return;
@@ -218,7 +245,8 @@ namespace core
 			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
 			return;
 		}
-		if (entry && (!chamber.getAgents().empty() || resource.mOccupants[0] || resource.mAdmissionReservations[0] != id
+		if (entry && (request->mCapacityPosition >= resource.mCapacity
+			|| resource.mOccupants[request->mCapacityPosition] || resource.mAdmissionReservations[request->mCapacityPosition] != id
 			|| chamber.mPhase != SecurityScannerPhase::Boarding)) return;
 		if (!entry && chamber.mPhase != SecurityScannerPhase::Exiting) return;
 		if (!chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed() || resource.mCrossingOwners[0]) return;

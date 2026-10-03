@@ -577,7 +577,7 @@ namespace core
 			}
 		for (auto const& sector : mWorld.mSectors)
 			if (auto chamber = std::dynamic_pointer_cast<const ChamberTransit>(sector);
-				chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
+				chamber)
 			{
 				SecurityScannerSnapshot state;
 				state.sector = SectorId{ (uint64_t)sector->getIndex() + 1 };
@@ -598,6 +598,7 @@ namespace core
 				{
 					for (auto owner : resource->mAdmissionReservations) if (owner) state.reservations.push_back(owner);
 					for (auto owner : resource->mCrossingOwners) if (owner) state.crossings.push_back(owner);
+					for (auto owner : resource->mOccupants) if (owner) state.occupants.push_back(owner);
 				}
 				result.securityScanners.push_back(std::move(state));
 			}

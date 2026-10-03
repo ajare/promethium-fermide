@@ -12,6 +12,7 @@
 #include "core/Exceptions.h"
 #include "core/Marker.h"
 #include "core/MarkerSectorObject.h"
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <limits>
@@ -799,8 +800,74 @@ namespace
 		}
 	}
 
+	void decontaminationJourneys()
+	{
+		for (uint32_t width : { 1u, 3u })
+			for (bool forward : { false, true })
+				for (uint32_t count : { 1u, width + 1 })
+				{
+					core::World world("Decontamination batches", width + 12, 2);
+					world.addRoom("Left", 0, 0, 0, 5, 1);
+					world.addCorridor(0, 0, 5 + width, 5, 1);
+					auto index = world.addChamber(0, 0, 5, width, forward, core::ChamberSubtype::Decontamination);
+					world.pauseSimulation();
+					require(world.setChamberConfiguration(index, 5, 0.1f, 2, 0.1f), "Decontamination configuration refused");
+					auto source = forward ? 0u : 1u, destination = 1 - source;
+					auto marker = world.addSectorMarker(destination, 0, 2.0f);
+					world.finishBuild();
+					std::vector<core::AgentId> agents;
+					for (uint32_t i = 0; i < count; ++i)
+					{
+						auto id = world.createAgent("Batch traveller", source, 0, forward ? 4.0f - i * 0.5f : 1.0f + i * 0.5f);
+						auto actor = world.lookupAgent(id).entity;
+						auto path = world.getGraph()->calculatePath(actor, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index)));
+						require(bool(path), "Decontamination forward route missing"); actor->setPath(path, true); agents.push_back(id);
+					}
+					world.resumeSimulation();
+					auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world.getSector(index));
+					require(chamber->getCapacity() == width, "Decontamination capacity is not cell width");
+					uint32_t peak = 0, cycles = 0; bool processing = false, paused = false;
+					for (unsigned tick = 0; tick < 12000; ++tick)
+					{
+						world.advanceTick();
+						auto state = world.getSimulationSnapshot().securityScanners.at(0);
+						require(state.occupants.size() + state.reservations.size() <= width && state.crossings.size() <= 1,
+							"Decontamination overbooked slots or crossing");
+						require(chamber->getDoor(0)->isClosed() || chamber->getDoor(1)->isClosed(), "Decontamination interlock lost");
+						peak = std::max(peak, (uint32_t)state.occupants.size());
+						bool now = chamber->getPhase() == core::SecurityScannerPhase::Scanning;
+						if (now && !processing) ++cycles;
+						processing = now;
+						if (now)
+						{
+							require(!state.occupants.empty() && chamber->getDoor(0)->isClosed() && chamber->getDoor(1)->isClosed(), "Unsealed batch processing");
+							std::vector<float> positions;
+							for (auto actor : chamber->getAgents()) positions.push_back(actor->getGlobalPosition().x);
+							std::sort(positions.begin(), positions.end());
+							for (size_t i = 1; i < positions.size(); ++i) require(positions[i] - positions[i - 1] >= 0.99f, "Batch standing slots overlap");
+							require(!world.planSetChamberSubtype(index, core::ChamberSubtype::SecurityScanner).valid, "Running subtype switch accepted");
+							if (!paused && chamber->getScanProgress() >= 0.25f)
+							{
+								auto opacity = chamber->getDecontaminationOpacity(); world.pauseSimulation(); world.advanceTicks(100);
+								require(chamber->getDecontaminationOpacity() == opacity, "Paused white fade advanced");
+								require(!world.planSetChamberSubtype(index, core::ChamberSubtype::SecurityScanner).valid, "Occupied subtype switch accepted");
+								for (auto owner : state.occupants) require(world.clearAgentPath(owner), "Batch committed Path cancellation refused");
+								world.resumeSimulation(); paused = true;
+							}
+						}
+						bool exited = true;
+						for (auto id : agents) exited = exited && world.lookupAgent(id).entity->getSector()->getIndex() == destination;
+						if (exited && chamber->getPhase() == core::SecurityScannerPhase::Idle) break;
+					}
+					for (auto id : agents) require(world.lookupAgent(id).entity->getSector()->getIndex() == destination, "Batch occupant did not exit");
+					require(peak == std::min(width, count) && cycles == (count + width - 1) / width && paused,
+						"Batch fill/deadline/reuse failed: peak=" + std::to_string(peak) + " cycles=" + std::to_string(cycles));
+				}
+	}
+
 	void journeys(smoke::Context const&)
 	{
+		decontaminationJourneys();
 		for (uint32_t width : { 1u, 2u, 5u })
 			for (bool direction : { false, true })
 			{

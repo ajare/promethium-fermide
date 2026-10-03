@@ -21,6 +21,7 @@ namespace core
 		TraversalResourceId mTraversalResource;
 		SecurityScannerPhase mPhase{ SecurityScannerPhase::Idle };
 		uint64_t mRemainingTicks{ 0 };
+		uint64_t mBoardingWindowRemainingTicks{ 0 };
 		AgentId mOccupant;
 		float mScanProgress{ 0 };
 		float mSensorDistance{ 0.5f }, mPreDelaySeconds{ 1 }, mScanSeconds{ 2 }, mPostPauseSeconds{ 1 };
@@ -37,13 +38,19 @@ namespace core
 			std::array<SectorEndType, 2> previousEnds,
 			ChamberSubtype subtype = ChamberSubtype::SecurityScanner)
 			: Transit(SectorType::Chamber, "Chamber", layer, index, x, y, 0, 0,
-				(float)width, CORE_CORRIDOR_HEIGHT, width, 1, CORE_CORRIDOR_HEIGHT, 1, stops)
+				(float)width, CORE_CORRIDOR_HEIGHT, width, 1, CORE_CORRIDOR_HEIGHT, subtype == ChamberSubtype::Decontamination ? width : 1, stops)
 			, mLeftToRight(leftToRight), mPreviousEnds(previousEnds), mSubtype(subtype)
 		{
 			if (!isSupportedChamberSubtype(subtype)) throw std::invalid_argument("Unsupported Chamber subtype");
 		}
 
 		ChamberSubtype getSubtype() const { return mSubtype; }
+		uint32_t getJourneyCapacity() const { return getCapacity(); }
+		float getDecontaminationOpacity() const
+		{
+			if (mSubtype != ChamberSubtype::Decontamination || mPhase != SecurityScannerPhase::Scanning) return 0;
+			return mScanProgress <= 0.25f ? mScanProgress * 4.0f : (1.0f - mScanProgress) / 0.75f;
+		}
 		bool isLeftToRight() const { return mLeftToRight; }
 		int getEntrySide() const { return mLeftToRight ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT; }
 		int getExitSide() const { return 1 - getEntrySide(); }
@@ -66,7 +73,7 @@ namespace core
 		AgentId getOccupant() const { return mOccupant; }
 		SectorEndType getPreviousEnd(int side) const { return mPreviousEnds.at(side); }
 		std::shared_ptr<const BulkheadDoor> getDoor(int side) const { return mDoors.at(side); }
-		std::string getDescription() const override { return "Chamber (Security scanner)"; }
+		std::string getDescription() const override { return mSubtype == ChamberSubtype::Decontamination ? "Chamber (Decontamination)" : "Chamber (Security scanner)"; }
 		bool sectorSupportsObjectType(SectorObjectType) const override { return false; }
 	};
 }

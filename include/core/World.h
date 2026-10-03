@@ -364,6 +364,7 @@ namespace core
 		{
 			bool valid = false, remove = false;
 			bool chamber = false, leftToRight = true;
+			std::optional<ChamberSubtype> subtype;
 			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
 			std::string diagnostic;
 		};
@@ -1749,6 +1750,7 @@ namespace core
 		ChamberEditPlan planResizeChamber(uint32_t sectorIndex, uint32_t x,
 			uint32_t y, uint32_t width, bool leftToRight) const;
 		ChamberEditPlan planRemoveChamber(uint32_t sectorIndex) const;
+		ChamberEditPlan planSetChamberSubtype(uint32_t sectorIndex, ChamberSubtype subtype) const;
 		uint32_t applyChamberEdit(ChamberEditPlan const& plan);
 		bool setChamberConfiguration(uint32_t sectorIndex, float sensorDistance,
 			float preDelaySeconds, float scanSeconds, float postPauseSeconds);

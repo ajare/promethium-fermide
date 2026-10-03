@@ -12605,7 +12605,8 @@ namespace core
 			for (auto const& lane : resource->mQueueLanes)
 				if (lane.sector == sourceSector) ahead += lane.queue.size();
 			auto const& chamber = *resource->mSecurityScanner;
-			return static_cast<float>(ahead) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+			auto capacity = std::max<size_t>(1, resource->mCapacity);
+			return static_cast<float>((ahead + capacity - 1) / capacity) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
 				+ chamber.getPreDelaySeconds() + chamber.getScanSeconds() + chamber.getPostPauseSeconds());
 		}
 		if (resource->mAirlock)

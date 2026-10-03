@@ -42,13 +42,17 @@ std::optional<core::World::ChamberEditPlan> drawChamberSelectionPanel(
 {
 	std::optional<core::World::ChamberEditPlan> structural;
 	ImGui::TextUnformatted("Chamber");
-	// The required subtype has exactly one supported choice. Selecting it is
-	// deliberately a no-op: never reset configuration or capture document history.
+	bool decontamination = chamber.getSubtype() == core::ChamberSubtype::Decontamination;
 	ImGui::BeginDisabled(!world->isSimulationPaused());
-	if (ImGui::BeginCombo("Subtype", "Security Scanner"))
+	if (ImGui::BeginCombo("Subtype", decontamination ? "Decontamination Chamber" : "Security Scanner"))
 	{
-		ImGui::Selectable("Security Scanner", true);
-		ImGui::SetItemDefaultFocus();
+		for (auto subtype : { core::ChamberSubtype::SecurityScanner, core::ChamberSubtype::Decontamination })
+		{
+			bool selected = chamber.getSubtype() == subtype;
+			if (ImGui::Selectable(subtype == core::ChamberSubtype::Decontamination ? "Decontamination Chamber" : "Security Scanner", selected) && !selected)
+				structural = world->planSetChamberSubtype(chamber.getIndex(), subtype);
+			if (selected) ImGui::SetItemDefaultFocus();
+		}
 		ImGui::EndCombo();
 	}
 	int x = (int)chamber.getCellX(), y = (int)chamber.getCellY();
@@ -65,9 +69,8 @@ std::optional<core::World::ChamberEditPlan> drawChamberSelectionPanel(
 	ImGui::EndDisabled();
 
 	// Common Sector controls are independent of the subtype-specific section.
-	if (chamber.getSubtype() != core::ChamberSubtype::SecurityScanner) return structural;
 	ImGui::Separator();
-	ImGui::TextUnformatted("Security Scanner");
+	ImGui::TextUnformatted(decontamination ? "Decontamination Chamber" : "Security Scanner");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	if (ImGui::Checkbox("Left to right", &direction))
 		structural = world->planResizeChamber(chamber.getIndex(),
@@ -75,9 +78,9 @@ std::optional<core::World::ChamberEditPlan> drawChamberSelectionPanel(
 	float sensor = chamber.getSensorDistance(), pre = chamber.getPreDelaySeconds();
 	float scan = chamber.getScanSeconds(), post = chamber.getPostPauseSeconds();
 	bool edit = ImGui::InputFloat("Sensor distance (World units)", &sensor);
-	edit = ImGui::SliderFloat("Pre-scan delay (seconds)", &pre, 0, 10) || edit;
-	edit = ImGui::SliderFloat("Complete scan duration (seconds)", &scan, 0.1f, 10) || edit;
-	edit = ImGui::SliderFloat("Post-scan pause (seconds)", &post, 0, 10) || edit;
+	edit = ImGui::SliderFloat(decontamination ? "Pre-decontamination delay (seconds)" : "Pre-scan delay (seconds)", &pre, 0, 10) || edit;
+	edit = ImGui::SliderFloat(decontamination ? "Decontamination duration (seconds)" : "Complete scan duration (seconds)", &scan, 0.1f, 10) || edit;
+	edit = ImGui::SliderFloat(decontamination ? "Post-decontamination pause (seconds)" : "Post-scan pause (seconds)", &post, 0, 10) || edit;
 	if (edit)
 	{
 		auto before = captureDocumentSnapshot(world, history);
@@ -86,15 +89,15 @@ std::optional<core::World::ChamberEditPlan> drawChamberSelectionPanel(
 	}
 	ImGui::EndDisabled();
 	ImGui::Text("Direction: %s", chamber.isLeftToRight() ? "Left to right" : "Right to left");
-	ImGui::Text("Capacity: %u", chamber.getCapacity());
+	ImGui::Text("Capacity: %u", chamber.getJourneyCapacity());
 	ImGui::Text("Pre-delay: %.1f s", chamber.getPreDelaySeconds());
-	ImGui::Text("Complete scan: %.1f s", chamber.getScanSeconds());
+	ImGui::Text(decontamination ? "Decontamination: %.1f s" : "Complete scan: %.1f s", chamber.getScanSeconds());
 	ImGui::Text("Post-pause: %.1f s", chamber.getPostPauseSeconds());
 	ImGui::Text("Sensor distance: %.1f units", chamber.getSensorDistance());
 	ImGui::Text("Phase: %s", chamber.getPhaseName().c_str());
 	ImGui::Text("Remaining: %.1f s", chamber.getRemainingSeconds());
-	ImGui::Text("Occupancy: %u / 1", chamber.getOccupant() ? 1u : 0u);
-	ImGui::Text("Scan progress: %.0f%%", chamber.getScanProgress() * 100.0f);
+	ImGui::Text("Occupancy: %u / %u", (unsigned)chamber.getAgents().size(), chamber.getJourneyCapacity());
+	ImGui::Text(decontamination ? "Decontamination progress: %.0f%%" : "Scan progress: %.0f%%", chamber.getScanProgress() * 100.0f);
 	ImGui::TextDisabled("Automatic journey; structural edits require an empty, paused chamber");
 	return structural;
 }
