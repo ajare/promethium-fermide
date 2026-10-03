@@ -356,14 +356,12 @@ namespace core
 		struct FurniturePort
 		{
 			uint64_t instance;
-			bool replacesFloor;
 			shared_ptr<Vertex> vertex;
 			std::vector<int> depths;
 		};
 		struct FurnitureRoute
 		{
 			uint64_t instance;
-			bool replacesFloor;
 			int depth;
 			shared_ptr<Vertex> from, to;
 			VertexList cuts;
@@ -401,7 +399,7 @@ namespace core
 				authored.emplace(point.key, vertex);
 				if (point.external)
 				{
-					FurniturePort port{ instance.id, definition.sideRoutes, vertex, {} };
+					FurniturePort port{ instance.id, vertex, {} };
 					for (auto const& connection : definition.edges)
 						if (connection.from == point.key || connection.to == point.key)
 						{
@@ -409,24 +407,41 @@ namespace core
 							if (find(port.depths.begin(), port.depths.end(), depth) == port.depths.end())
 								port.depths.push_back(depth);
 						}
-					if (find(port.depths.begin(), port.depths.end(), 0) != port.depths.end())
-					{
-						auto anchor = make_shared<SectorMarkerVertex>(sector, instance.x + point.x, instance.y);
-						vertices.push_back(anchor);
-						addEdge(make_shared<SectorEdge>(), anchor, vertex, false);
-					}
 					ports.push_back(std::move(port));
 				}
 			}
 			for (auto const& connection : definition.edges)
 			{
-				routes.push_back({ instance.id, definition.sideRoutes,
+				routes.push_back({ instance.id,
 					connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0,
 					authored.at(connection.from), authored.at(connection.to), {} });
 			}
 			if (definition.sideRoutes)
 				furnitureSpans.push_back({ sector, { sector->getCellX() + instance.x + definition.minX,
 					sector->getCellX() + instance.x + definition.maxX } });
+		}
+
+		// Attach to ordinary floor only where it exists on at least one side.
+		// An internal boundary (including two touching replacement spans) is not
+		// a floor junction. Collect all spans first so no later instance can
+		// resurrect an anchor inside the combined coverage.
+		for (auto const& port : ports)
+		{
+			if (find(port.depths.begin(), port.depths.end(), 0) == port.depths.end()) continue;
+			auto sector = port.vertex->getSector();
+			auto position = port.vertex->getPosition();
+			bool replacesLeft = false, replacesRight = false;
+			for (auto const& [owner, span] : furnitureSpans)
+				if (owner == sector)
+				{
+					replacesLeft |= span.first < position.x && position.x <= span.second;
+					replacesRight |= span.first <= position.x && position.x < span.second;
+				}
+			if (replacesLeft && replacesRight) continue;
+			auto anchor = make_shared<SectorMarkerVertex>(sector,
+				position.x - sector->getCellX(), position.y - sector->getCellY());
+			vertices.push_back(anchor);
+			addEdge(make_shared<SectorEdge>(), anchor, port.vertex, false);
 		}
 
 		auto connectPort = [&](shared_ptr<Vertex> const& from, shared_ptr<Vertex> const& to, int depth) {
@@ -441,7 +456,7 @@ namespace core
 			for (size_t j = i + 1; j < ports.size(); ++j)
 			{
 				auto const& a = ports[i]; auto const& b = ports[j];
-				if (a.instance == b.instance || (a.replacesFloor && b.replacesFloor)
+				if (a.instance == b.instance
 					|| a.vertex->getSector() != b.vertex->getSector()
 					|| a.vertex->getPosition() != b.vertex->getPosition()) continue;
 				for (auto depth : a.depths)
@@ -454,7 +469,7 @@ namespace core
 			if (left->getPosition().x > right->getPosition().x) swap(left, right);
 			for (auto const& port : ports)
 			{
-				if (port.instance == route.instance || (port.replacesFloor && route.replacesFloor)
+				if (port.instance == route.instance
 					|| port.vertex->getSector() != left->getSector()
 					|| find(port.depths.begin(), port.depths.end(), route.depth) == port.depths.end()) continue;
 				auto x = port.vertex->getPosition().x;

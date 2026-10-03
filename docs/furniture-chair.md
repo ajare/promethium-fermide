@@ -1,10 +1,10 @@
-# Catalogue-backed Furniture (#348–#355)
+# Catalogue-backed Furniture (#348–#356)
 
 Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
 placement/editing, matching-depth external attachments and complete-Path depth
-continuity. Composition of two replacement spans and catalogue migration remain
-later tickets. There is no sitting state or seat
+continuity and composed floor replacement spans. Catalogue migration remains
+later work. There is no sitting state or seat
 reservation.
 
 ## Authoring
@@ -169,8 +169,31 @@ an inferred front/back shortcut. Usable Markers retain Blocks pathing semantics,
 identity and independent names. Attachments are derived on build, movement,
 undo/redo, deletion, Reset and YAML/binary reopening; no additional saved graph
 or schema is introduced. Furniture movement leaves Agents' physical positions
-and retained depths alone. This slice deliberately does not connect two
-route-replacing instances; composition of their replacement spans is later work.
+and retained depths alone. Two route-replacing instances follow the same explicit attachment rules, as
+described below.
+
+## Composed replacement spans (#356)
+
+`resources/test-worlds/composition.furniture.yaml` supplies wide and narrow
+replacement layouts with matching resolved depth-2 routes at instance depths 2
+and 3. Partially overlapping, nested and boundary-touching spans compose through
+designated ports only. A matching port can attach to another definition's route
+interior; a private endpoint, mismatched depth or artwork intersection cannot.
+
+Floor suppression considers every replacement span together before adding any
+floor attachment. Depth-0 external ports acquire ordinary floor anchors only
+where floor remains on at least one side. Boundaries inside another replacement,
+and shared boundaries with replacement coverage on both sides, are not floor
+junctions. Explicit matching-depth port connections remain possible there;
+ordinary Markers at those internal boundaries do not gain inferred connectivity.
+
+Movement and deletion rebuild coverage from the remaining instances, restoring
+floor only outside their replacement spans and dropping only removed graph
+contributions. Same-depth rectangular overlap is still refused atomically;
+different-depth overlap and boundary contact remain valid. No document schema,
+extra saved graph, movement timing or editor action is introduced. Construction
+replay, repeated builds, undo/redo, Reset and YAML/binary reopening derive the
+same authored network.
 
 ## Retained Agent depth (#352)
 
@@ -238,10 +261,12 @@ valid-Path persistence and repeated-run determinism use production seams.
 - `pf-smoke-world --check furniture/layouts`
 - `pf-smoke-world --check furniture/deskRoutes`
 - `pf-smoke-world --check furniture/attachments`
+- `pf-smoke-world --check furniture/composition`
 - `pf-smoke-persistence --check furniture/documents`
 - `pf-smoke-render --check furniture/chairCommands`
 - `pf-smoke-editor --check furniture/chairActions`
 - `pf-smoke-editor --check furniture/attachmentActions`
+- `pf-smoke-editor --check furniture/compositionActions`
 
 The checks use the existing World/document, CPU draw-command, and production
 editor-action seams, isolated temporary roots and deterministic simulation ticks.
@@ -300,3 +325,14 @@ GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
 skipped. Focused attachment, editor history, YAML/binary replay, physical traversal
 and render-command checks passed, together with affected module/CLI contracts.
 `git diff --check` passed. Windows validation is not claimed.
+
+## #356 validation
+
+Final incremental default builds and complete CTest inventories passed in Linux
+GUI Release and Debug (85 tests each), headless Release and high-analysis Debug
+(82 tests each), in the four build trees listed above, using parallelism 4.
+Displays were unset; the optional vendored GUI capability test was explicitly
+skipped. Focused composition Paths, affected modules and CLI contracts, editor
+history, movement/removal permutations, repeated builds, construction replay,
+and YAML/binary round trips passed. `git diff --check` passed. Windows validation
+is not claimed.

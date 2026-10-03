@@ -165,6 +165,7 @@ set(editor_names
     airlocks/editorCommands
     furniture/chairActions
     furniture/attachmentActions
+    furniture/compositionActions
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation
     background/theColourEditCarriesNoAlphaChannel

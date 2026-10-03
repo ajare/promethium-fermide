@@ -66,6 +66,61 @@ namespace
 		connected(true);
 	}
 
+	void compositionActions(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto path = context.temporaryRoot() / "composition.world.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/composition.furniture.yaml"), path.parent_path() / "composition.furniture.yaml");
+		auto world = std::make_shared<core::World>("Composition editor", 12, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 12, 1);
+		world->addSectorMarker(room, 0, 0.5f, "Entrance");
+		world->addSectorMarker(room, 0, 5, "Internal boundary");
+		world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
+		DocumentHistory history; std::string diagnostic;
+		require(selectFurnitureCatalogue(world, path, "composition.furniture.yaml", diagnostic, history), diagnostic);
+		require(placeSelectedFurniture(world, room, "outer", 2, 0, false, "Outer", diagnostic, history, 2), diagnostic);
+		require(placeSelectedFurniture(world, room, "inner", 5, 0, false, "Inner", diagnostic, history, 3), diagnostic);
+		auto inner = world->furniture().back(); auto catalogue = world->furnitureCatalogue();
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto restored = world->deserialize(*reader, work); world->pauseSimulation(); return restored;
+		};
+		auto check = [&] {
+			std::shared_ptr<const core::Vertex> entrance, seat, boundary;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+				if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(world->getSector(room)->getObject(i)); object)
+				{
+					auto vertex = world->getGraph()->getVertexForObject(object);
+					if (object->getMarker()->getName() == "Entrance") entrance = vertex;
+					if (object->getMarker()->getName() == "Internal boundary") boundary = vertex;
+					if (object->getMarker()->getId() == inner.marker) seat = vertex;
+				}
+			core::Agent query("Query");
+			require(seat && world->getGraph()->calculatePath(&query, entrance, seat)
+				&& !world->getGraph()->calculatePath(&query, entrance, boundary), "History lost composition or restored internal floor attachment");
+		};
+		check();
+		auto before = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
+		require(!placeSelectedFurniture(world, room, "inner", 3, 0, false, "Refused", diagnostic, history, 2), "Same-depth placement accepted");
+		require(!editSelectedFurniture(world, inner.id, 3, 0, false, "Refused", diagnostic, history, 2), "Same-depth depth/movement edit accepted");
+		require(history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == before,
+			"Composition refusal mutated instances, destinations or history");
+		require(history.undo(captureDocumentSnapshot(world, history), restore) && !world->lookupMarker(inner.marker), "Composition placement undo failed");
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Composition placement redo failed"); check();
+		for (float x : {3.f, 6.f})
+		{
+			require(editSelectedFurniture(world, inner.id, x, 0, false, "Moved", diagnostic, history), diagnostic); check();
+			require(history.undo(captureDocumentSnapshot(world, history), restore), "Composition movement undo failed"); check();
+			require(history.redo(captureDocumentSnapshot(world, history), restore), "Composition movement redo failed"); check();
+		}
+		for (auto id : {world->furniture().front().id, inner.id})
+		{
+			require(deleteSelectedFurniture(world, id, diagnostic, history), diagnostic);
+			require(history.undo(captureDocumentSnapshot(world, history), restore), "Composition deletion undo failed"); check();
+		}
+	}
+
 	void chairActions(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -221,4 +276,5 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });
+	checks.push_back({ "furniture/compositionActions", compositionActions });
 }

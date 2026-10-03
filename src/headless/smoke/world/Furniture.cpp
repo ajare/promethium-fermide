@@ -394,6 +394,149 @@ namespace
 		}
 	}
 
+	void composition(smoke::Context const& context)
+	{
+		using smoke::require;
+		std::string outcomes[4][4];
+		for (int shape = 0; shape < 4; ++shape)
+			for (int variant = 0; variant < 4; ++variant)
+				for (bool reverse : { false, true })
+		{
+			auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/composition.furniture.yaml").string());
+			auto definitions = yaml["furnitureCatalogue"]["definitions"];
+			if (variant == 1)
+				for (auto edge : definitions[1]["edges"])
+					if (edge["depthOffset"]) edge["depthOffset"] = 1;
+			if (variant == 2)
+			{
+				definitions[1]["vertices"][0]["external"] = false;
+				definitions[1]["vertices"][3]["external"] = false;
+			}
+			if (variant == 3)
+			{
+				definitions[0]["vertices"].push_back(YAML::Load("{key: gap, x: 2.5}"));
+				definitions[0]["edges"][2]["from"] = "gap";
+			}
+			if (reverse)
+			{
+				auto first = YAML::Clone(definitions[0]);
+				definitions[0] = YAML::Clone(definitions[1]); definitions[1] = first;
+			}
+			auto filename = context.temporaryRoot() / "composition.furniture.yaml";
+			{ std::ofstream file(filename); file << yaml; }
+			core::World world("Composed replacements", 16, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 16, 1);
+			world.attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
+			// Partial overlap, containment, shared boundary and coincident left boundary.
+			float innerX = shape == 0 ? 5.f : shape == 1 ? 3.f : shape == 2 ? 6.f : 2.f;
+			uint64_t outerId = 0, innerId = 0;
+			if (reverse) innerId = world.placeFurniture(room, "inner", innerX, 0, "Inner", 3);
+			outerId = world.placeFurniture(room, "outer", 2, 0, "Outer", 2);
+			if (!reverse) innerId = world.placeFurniture(room, "inner", innerX, 0, "Inner", 3);
+			uint32_t leftId = 0, rightId = 0, internalId = 0;
+			world.addSectorMarker(room, 0, 0.5f, "Entrance", &leftId);
+			world.addSectorMarker(room, 0, 14.5f, "Exit", &rightId);
+			world.addSectorMarker(room, 0, shape == 2 ? 6.f : innerX, "Internal floor point", &internalId);
+			world.finishBuild(); world.pauseSimulation();
+			auto point = [&](std::string const& name) {
+				std::shared_ptr<const core::Vertex> vertex;
+				for (uint32_t i = 0; i < world.getSector(room)->getNumObjects(); ++i)
+					if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(world.getSector(room)->getObject(i));
+						object && object->getMarker()->getName() == name) vertex = world.getGraph()->getVertexForObject(object);
+				return vertex;
+			};
+			auto check = [&](bool throughExpected, bool seatExpected, bool internalExpected) {
+				auto graph = world.getGraph(); core::Agent query("Query");
+				auto left = point("Entrance"), right = point("Exit");
+				auto through = graph->calculatePath(&query, left, right);
+				require(bool(through) == throughExpected, "Replacement union acquired a bypass or lost authored circulation: shape=" + std::to_string(shape)
+					+ " variant=" + std::to_string(variant) + " actual=" + std::to_string(bool(through)));
+				if (through)
+				{
+					std::map<int, float> distances;
+					for (auto const& node : through->nodes) if (node.edge)
+						distances[node.edge->getLocalDepth()] += node.edge->getLength();
+					std::string outcome;
+					for (auto const& [depth, length] : distances)
+						if (length > 0) outcome += std::to_string(depth) + ":" + std::to_string(length) + ";";
+					if (outcomes[shape][variant].empty()) outcomes[shape][variant] = outcome;
+					require(outcomes[shape][variant] == outcome, "Processing order/rebuild/replay changed Path geometry or depth");
+				}
+				if (through)
+					for (auto const& node : through->nodes)
+						if (node.edge && node.edge->getLength() > 0)
+						{
+							auto a = node.edge->getVertex(0)->getPosition().x;
+							auto b = node.edge->getVertex(1)->getPosition().x;
+							if (std::min(a, b) >= 2.25f && std::max(a, b) <= 5.75f)
+								require(node.edge->getLocalDepth() == 2, "Path used an unassigned floor/cross-depth shortcut");
+						}
+				auto instance = std::find_if(world.furniture().begin(), world.furniture().end(),
+					[&](auto const& f) { return f.id == innerId; });
+				if (instance != world.furniture().end())
+				{
+					std::shared_ptr<const core::Vertex> seat;
+					for (uint32_t i = 0; i < world.getSector(room)->getNumObjects(); ++i)
+						if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(world.getSector(room)->getObject(i));
+							object && object->getMarker()->getId() == instance->marker) seat = graph->getVertexForObject(object);
+					require(seat && bool(graph->calculatePath(&query, left, seat)) == seatExpected,
+						"Composed ports ignored designation or matching depth: shape=" + std::to_string(shape) + " variant=" + std::to_string(variant));
+					if (through) for (auto const& node : through->nodes)
+						require(node.targetVertex != seat, "Owned blocking destination became a shortcut");
+				}
+				require(bool(graph->calculatePath(&query, left, point("Internal floor point"))) == internalExpected,
+					"Replacement boundary invented a floor junction");
+			};
+			bool connected = variant != 2 && (variant == 0 || shape == 2 || shape == 3 || (variant == 3 && shape == 1));
+			if (variant == 3 && shape == 2) connected = false;
+			bool through = variant == 3 ? shape == 1 : shape == 0 ? variant == 0 : shape == 2 ? variant != 2 : true;
+			check(through, connected, shape == 3);
+			for (int rebuild = 0; rebuild < 2; ++rebuild)
+			{
+				require(world.rebuildTraversalTopology(), world.getTopologyDiagnostic());
+				check(through, connected, shape == 3);
+			}
+			world.applyLocationEdit(world.planResizeLocation(room, 0, 0, 16, 2));
+			check(through, connected, shape == 3);
+			auto before = snapshot(world); std::string diagnostic;
+			require(!world.editFurniture(innerId, 3, 0, "Refused", &diagnostic, 2)
+				&& snapshot(world) == before, "Same-depth edit mutated composed destinations");
+			require(!world.canPlaceFurniture(room, "inner", 3, 0, "Refused", &diagnostic, 2)
+				&& snapshot(world) == before, "Same-depth placement was admitted");
+			// Exercise the opposite movement/removal order as well.
+			if (reverse)
+			{
+				require(world.editFurniture(outerId, 8, 0, "Moved outer", &diagnostic), diagnostic);
+				core::Agent movedQuery("Moved query");
+				require(bool(world.getGraph()->calculatePath(&movedQuery, point("Entrance"), point("Exit"))) == (variant != 2 && variant != 3),
+					"Outer movement restored a bypass or lost remaining contributions");
+				require(world.removeFurniture(outerId, &diagnostic), diagnostic);
+				core::Agent query("Query");
+				require(bool(world.getGraph()->calculatePath(&query, point("Entrance"), point("Exit"))) == (variant != 2),
+					"Removing outer damaged remaining inner routes or restored a bypass");
+				require(world.removeFurniture(innerId, &diagnostic), diagnostic);
+				require(world.getGraph()->calculatePath(&query, point("Entrance"), point("Exit")) != nullptr,
+					"Reverse removal did not restore floor");
+				continue;
+			}
+			// Moving/removing either piece rebuilds only the surviving authored network.
+			require(world.editFurniture(innerId, 8, 0, "Moved", &diagnostic), diagnostic);
+			core::Agent movedQuery("Moved query");
+			require(bool(world.getGraph()->calculatePath(&movedQuery, point("Entrance"), point("Exit"))) == (variant != 2 && variant != 3),
+				"Inner movement restored a bypass or lost remaining contributions");
+			require(world.removeFurniture(innerId, &diagnostic), diagnostic);
+			auto graph = world.getGraph(); core::Agent query("Query");
+			require(bool(graph->calculatePath(&query, point("Entrance"), point("Exit")))
+				== (variant != 3), "Removing inner restored a bypass through remaining outer");
+			require(world.removeFurniture(outerId, &diagnostic), diagnostic);
+			graph = world.getGraph();
+			auto restored = graph->calculatePath(&query, point("Entrance"), point("Exit"));
+			require(restored != nullptr, "Removing all replacements did not restore ordinary circulation");
+			for (auto const& node : restored->nodes) if (node.edge)
+				require(node.edge->getLocalDepth() == 0, "Deleted instance left a route contribution");
+		}
+	}
+
 	void deskRoutes(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -550,4 +693,5 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "furniture/layouts", layouts });
 	checks.push_back({ "furniture/deskRoutes", deskRoutes });
 	checks.push_back({ "furniture/attachments", attachments });
+	checks.push_back({ "furniture/composition", composition });
 }

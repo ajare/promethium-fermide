@@ -226,6 +226,46 @@ namespace persistence
 					"Reopened attachment failed physical arrival");
 			}
 		}
+		// Composed replacement coverage is derived, never serialized as graph state.
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/composition.furniture.yaml"), root / "composition.furniture.yaml");
+		for (float x : {3.f, 5.f, 6.f})
+		{
+			auto composed = std::make_shared<core::World>("Composed documents", 12, 2);
+			auto host = composed->addRoom("Room", 0, 0, 0, 12, 1);
+			composed->attachFurnitureCatalogue("composition.furniture.yaml", core::FurnitureCatalogue::load(root / "composition.furniture.yaml"));
+			composed->placeFurniture(host, "inner", x, 0, "Inner", 3);
+			composed->placeFurniture(host, "outer", 2, 0, "Outer", 2);
+			composed->addSectorMarker(host, 0, 0.5f, "Entrance");
+			composed->addSectorMarker(host, 0, 10.5f, "Exit");
+			composed->addSectorMarker(host, 0, x, "Internal boundary");
+			composed->finishBuild(); composed->pauseSimulation();
+			auto owned = composed->furniture().front().marker;
+			require(composed->renameMarker(owned, "Composed destination", &diagnostic), diagnostic);
+			for (auto filename : {"composition.world.yaml", "composition.world"})
+			{
+				composed->saveTo((root / filename).string());
+				auto loaded = core::loadWorldDocument(root / filename);
+				for (bool reset : {false, true})
+				{
+					if (reset) loaded->resetSimulation();
+					std::shared_ptr<const core::Vertex> entrance, exit, boundary, seat;
+					for (uint32_t i = 0; i < loaded->getSector(host)->getNumObjects(); ++i)
+						if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(loaded->getSector(host)->getObject(i)); object)
+						{
+							auto vertex = loaded->getGraph()->getVertexForObject(object);
+							auto name = object->getMarker()->getName();
+							if (name == "Entrance") entrance = vertex;
+							if (name == "Exit") exit = vertex;
+							if (name == "Internal boundary") boundary = vertex;
+							if (object->getMarker()->getId() == owned) seat = vertex;
+						}
+					core::Agent query("Query"); auto graph = loaded->getGraph();
+					require(graph->calculatePath(&query, entrance, exit) && graph->calculatePath(&query, entrance, seat)
+						&& !graph->calculatePath(&query, entrance, boundary), "Round trip/reset changed composed coverage or attachment");
+					require(loaded->lookupMarker(owned)->getName() == "Composed destination", "Composed destination identity/name changed");
+				}
+			}
+		}
 		// Portable references survive moving the complete project directory.
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);

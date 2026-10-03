@@ -29,6 +29,7 @@ set(checks
     furniture/layouts
     furniture/deskRoutes
     furniture/attachments
+    furniture/composition
     markerPlacementEnforcesPaletteCoreRules
     corridorDoorPlacementEnforcesPaletteRules
     objectMoveValidatesAndRebuildsOnceCommitted
