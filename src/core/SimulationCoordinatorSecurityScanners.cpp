@@ -102,10 +102,15 @@ namespace core
 					request->mCapacityPosition = 0;
 					break;
 				}
-			auto beginTimer = [&](SecurityScannerPhase phase, float seconds)
+			auto beginTimer = [&](SecurityScannerPhase phase, uint64_t ticks)
 			{
 				chamber.mPhase = phase;
-				chamber.mRemainingTicks = secondsToTicks(seconds, World::getFixedTimestep());
+				chamber.mRemainingTicks = ticks;
+			};
+			auto openExit = [&]()
+			{
+				exit.mState = OpenableObject::State::Opening;
+				chamber.mPhase = SecurityScannerPhase::ExitOpening;
 			};
 			switch (chamber.mPhase)
 			{
@@ -113,6 +118,9 @@ namespace core
 				if (presence && entry.isClosed() && exit.isClosed())
 				{
 					chamber.mScanProgress = 0;
+					chamber.mActivePreTicks = secondsToTicks(chamber.getPreDelaySeconds(), World::getFixedTimestep());
+					chamber.mActiveScanTicks = secondsToTicks(chamber.getScanSeconds(), World::getFixedTimestep());
+					chamber.mActivePostTicks = secondsToTicks(chamber.getPostPauseSeconds(), World::getFixedTimestep());
 					entry.mState = OpenableObject::State::Opening;
 					chamber.mPhase = SecurityScannerPhase::EntryOpening;
 				}
@@ -138,24 +146,29 @@ namespace core
 			case SecurityScannerPhase::EntryClosing:
 				if (entry.isClosed() && exit.isClosed())
 				{
-					if (chamber.mOccupant) beginTimer(SecurityScannerPhase::PreDelay, chamber.getPreDelaySeconds());
+					if (chamber.mOccupant)
+						beginTimer(chamber.mActivePreTicks ? SecurityScannerPhase::PreDelay : SecurityScannerPhase::Scanning,
+							chamber.mActivePreTicks ? chamber.mActivePreTicks : chamber.mActiveScanTicks);
 					else chamber.mPhase = SecurityScannerPhase::Idle;
 				}
 				break;
 			case SecurityScannerPhase::PreDelay:
 				if (chamber.mRemainingTicks && --chamber.mRemainingTicks == 0)
-					beginTimer(SecurityScannerPhase::Scanning, chamber.getScanSeconds());
+					beginTimer(SecurityScannerPhase::Scanning, chamber.mActiveScanTicks);
 				break;
 			case SecurityScannerPhase::Scanning:
 				if (chamber.mRemainingTicks) --chamber.mRemainingTicks;
-				chamber.mScanProgress = 1.0f - (float)chamber.mRemainingTicks / secondsToTicks(chamber.getScanSeconds(), World::getFixedTimestep());
-				if (!chamber.mRemainingTicks) beginTimer(SecurityScannerPhase::PostPause, chamber.getPostPauseSeconds());
+				chamber.mScanProgress = 1.0f - (float)chamber.mRemainingTicks / chamber.mActiveScanTicks;
+				if (!chamber.mRemainingTicks)
+				{
+					if (chamber.mActivePostTicks) beginTimer(SecurityScannerPhase::PostPause, chamber.mActivePostTicks);
+					else openExit();
+				}
 				break;
 			case SecurityScannerPhase::PostPause:
 				if (chamber.mRemainingTicks && --chamber.mRemainingTicks == 0 && entry.isClosed())
 				{
-					exit.mState = OpenableObject::State::Opening;
-					chamber.mPhase = SecurityScannerPhase::ExitOpening;
+					openExit();
 				}
 				break;
 			case SecurityScannerPhase::ExitOpening:

@@ -29,13 +29,14 @@ namespace persistence
 					}
 					auto index = world.addSecurityScanner(1, 1, 2, width, direction);
 					world.finishBuild(); world.pauseSimulation();
+					require(world.setSecurityScannerConfiguration(index, 12345, 0, 0.1f, 10), "Scanner configuration refused");
 					auto assertAuthored = [&](core::World const& source) {
 						auto chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(source.getSector(index));
 						require(chamber && chamber->getLayerIndex() == 1 && chamber->getCellY() == 1
 							&& chamber->getCellX() == 2 && chamber->getCellsWide() == width && chamber->getCapacity() == 1
-							&& chamber->isLeftToRight() == direction && chamber->getPreDelaySeconds() == 1
-							&& chamber->getScanSeconds() == 2 && chamber->getPostPauseSeconds() == 1
-							&& chamber->getSensorDistance() == 0.5f, "Scanner authored data lost");
+							&& chamber->isLeftToRight() == direction && chamber->getPreDelaySeconds() == 0
+							&& chamber->getScanSeconds() == 0.1f && chamber->getPostPauseSeconds() == 10
+							&& chamber->getSensorDistance() == 12345, "Scanner authored data lost");
 						require(chamber->getPreviousEnd(0) == (open ? core::SectorEndType::None : core::SectorEndType::Wall)
 							&& chamber->getPreviousEnd(1) == core::SectorEndType::Wall, "Scanner wall restoration lost");
 						for (int side = 0; side < 2; ++side)
@@ -86,6 +87,19 @@ namespace persistence
 							catch (std::exception const&) { refused = true; }
 							require(refused && write(false) == baseline, "Malformed scanner accepted or changed target World");
 							assertAuthored(world);
+						}
+					for (auto field : { "sensorDistance", "preDelaySeconds", "scanSeconds", "postPauseSeconds" })
+						for (auto value : { ".nan", ".inf", "-.inf", "11", "0.099" })
+						{
+							if (std::string(field) == "sensorDistance" && (std::string(value) == "11" || std::string(value) == "0.099")) continue;
+							if (std::string(field) != "scanSeconds" && std::string(value) == "0.099") continue;
+							auto invalid = YAML::Clone(node);
+							for (auto record : invalid["construction"])
+								if (record["type"].as<std::string>() == "securityScanner") record[field] = YAML::Load(value);
+							bool refused = false;
+							try { auto reader = core::YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize(); core::SerializationWorkData work; world.deserialize(*reader, work); }
+							catch (std::exception const&) { refused = true; }
+							require(refused && write(false) == baseline, "Invalid loaded timing mutated World");
 						}
 					// A scanner cannot be smuggled into an older schema.
 					node["version"] = 42; bool refused = false;

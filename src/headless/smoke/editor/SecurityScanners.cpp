@@ -69,6 +69,17 @@ namespace
 					require(chamber && chamber->getNumObjects() == 2 && chamber->getDoor(0)->isClosed()
 						&& chamber->getDoor(1)->isSecurityScannerOwned() && chamber->isLeftToRight() == draft.leftToRight
 						&& chamber->getCapacity() == 1 && chamber->getScanSeconds() == 2, "Scanner redo lost configuration/devices");
+					world->pauseSimulation();
+					auto propertyBefore = captureDocumentSnapshot(world, history);
+					require(world->setSecurityScannerConfiguration(index, 20, 10, 0.1f, 0), "Property edit refused");
+					commitDocumentEdit(std::move(propertyBefore), history);
+					require(history.undo(captureDocumentSnapshot(world, history), restore), "Property undo refused");
+					chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(index));
+					require(chamber->getSensorDistance() == 0.5f && chamber->getScanSeconds() == 2, "Property undo lost defaults");
+					require(history.redo(captureDocumentSnapshot(world, history), restore), "Property redo refused");
+					chamber = std::dynamic_pointer_cast<const core::SecurityScannerTransit>(world->getSector(index));
+					require(chamber->getSensorDistance() == 20 && chamber->getPreDelaySeconds() == 10
+						&& chamber->getScanSeconds() == 0.1f && chamber->getPostPauseSeconds() == 0, "Property redo lost values");
 					world->markSaved(); auto baseline = captureDocumentSnapshot(world, history)->yaml;
 					for (auto invalid : { planSecurityScannerDrag(*world, 0, 2, 0, 4, 1),
 						planSecurityScannerDrag(*world, 0, 2, 0, 4, 0), planSecurityScannerDrag(*world, 0, -1, 0, 4, 0) })
@@ -77,7 +88,7 @@ namespace
 						bool refused = false;
 						try { commitSecurityScannerDraft(*world, 0, invalid); } catch (core::Exception const&) { refused = true; }
 						require(refused && captureDocumentSnapshot(world, history)->yaml == baseline && !world->isModified()
-							&& history.undoCount() == 1, "Invalid palette drag mutated document/history");
+							&& history.undoCount() == 2, "Invalid palette drag mutated document/history");
 					}
 				}
 	}

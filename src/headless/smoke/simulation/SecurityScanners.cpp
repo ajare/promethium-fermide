@@ -14,6 +14,7 @@
 #include "core/MarkerSectorObject.h"
 #include <cmath>
 #include <map>
+#include <limits>
 
 namespace core
 {
@@ -245,7 +246,8 @@ namespace
 	{
 		for (bool direction : { false, true })
 			for (bool entryApproach : { false, true })
-			for (float gap : { 0.49f, 0.51f })
+			for (float sensor : { 0.0f, 0.25f, 0.5f, 1.0f })
+			for (float gap : { std::max(0.0f, sensor - 0.01f), sensor, sensor + 0.01f })
 			{
 				core::World world("Scanner sensor", 10, 2);
 				uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 3, 1), world.addCorridor(0, 0, 5, 3, 1) };
@@ -259,7 +261,9 @@ namespace
 				auto halfDoor = chamber->getDoor(side)->getSize().x * 0.5f;
 				float target = (side ? 5.0f : 3.0f) + (side ? 1 : -1) * (gap + halfDoor + actor->getWidth() * 0.5f);
 				// Recreate at the exact nearest-edge gap using the public placement API.
-				world.pauseSimulation(); require(world.removeAgent(id).removed, "Sensor fixture removal refused");
+				world.pauseSimulation();
+				require(world.setSecurityScannerConfiguration(index, sensor, 1, 2, 1), "Sensor endpoint refused");
+				require(world.removeAgent(id).removed, "Sensor fixture removal refused");
 				id = world.createAgent("Presence only", ends[side], 0, target - world.getSector(ends[side])->getPosition().x);
 				require(world.resumeSimulation(), "Sensor resume refused");
 				require(world.moveAgentToMarker(id, away).accepted(), "Passing Agent command refused");
@@ -276,7 +280,7 @@ namespace
 						&& state.remainingSeconds == 0 && state.doors[1 - entry] == core::DoorSnapshotState::Closed,
 						"Empty presence opening scanned or violated interlock");
 				}
-				require(opened == (entryApproach && gap < 0.5f) && (!opened || closed), "Entry/exit sensor boundary or empty opening timeout incorrect");
+				require(opened == (entryApproach && gap <= sensor) && (!opened || closed), "Entry/exit sensor boundary or empty opening timeout incorrect");
 				if (opened)
 				{
 					auto hold = core::secondsToTicks(CORE_BULKHEAD_DOOR_STAY_OPEN_TIME, world.getFixedTimestep());
@@ -385,6 +389,96 @@ namespace
 					require(restoredAgent->getSector()->getIndex() == right, "Reset/load could not complete restored routed journey");
 				}
 			}
+	}
+
+	void configuration(smoke::Context const&)
+	{
+		for (float pre : { 0.0f, 10.0f }) for (float scan : { 0.1f, 10.0f }) for (float post : { 0.0f, 10.0f })
+		{
+			core::World world("Configured scan", 12, 2);
+			auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
+			auto right = world.addCorridor(0, 0, 5, 3, 1);
+			auto index = world.addSecurityScanner(0, 0, 3, 2);
+			auto target = world.addSectorMarker(right, 0, 1.5f);
+			auto destination = markerId(target);
+			world.finishBuild(); world.pauseSimulation();
+			require(world.setSecurityScannerConfiguration(index, 0.5f, pre, scan, post), "Timing endpoint refused");
+			world.markSaved();
+			for (float bad : { -1.0f, 11.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
+			{
+				require(!world.setSecurityScannerConfiguration(index, 0.5f, bad, scan, post)
+					&& !world.setSecurityScannerConfiguration(index, 0.5f, pre, bad, post)
+					&& !world.setSecurityScannerConfiguration(index, 0.5f, pre, scan, bad), "Invalid timing accepted");
+				if (bad < 0 || !std::isfinite(bad)) require(!world.setSecurityScannerConfiguration(index, bad, pre, scan, post), "Invalid sensor accepted");
+			}
+			require(!world.setSecurityScannerConfiguration(index, 0.5f, pre, 0.099f, post) && !world.isModified(), "Rejected edit mutated document");
+			auto actor = world.createAgent("Traveller", left, 0, 2.5f);
+			auto entity = world.lookupAgent(actor).entity;
+			auto path = world.getGraph()->calculatePath(entity, world.getGraph()->getVertexForObject(target.sector->getObject(target.index)));
+			core::RouteDecisionContext remote{ entity, {}, {}, nullptr, entity->getWalkSpeed(), &world };
+			float estimated = 0;
+			for (auto const& node : path->nodes)
+				if (node.edge && node.edge->getType() == core::EdgeType::BulkheadDoor)
+				{
+					auto facts = node.edge->getDirectedTraversalFacts(node.targetVertex, remote);
+					estimated += facts.components.expectedWaitSeconds;
+					require(facts.components.interactionUnits == 0, "Configured route retained button assumptions");
+				}
+			require(std::abs(estimated - (3 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME + pre + scan + post)) < 0.0001f,
+				"Route estimate ignored authored timings");
+			require(world.moveAgentToMarker(actor, destination).accepted() && world.resumeSimulation(), "Configured journey refused");
+			require(!world.setSecurityScannerConfiguration(index, 1, 1, 1, 1), "Running edit accepted");
+			std::map<std::string, uint64_t> starts;
+			bool edited = false;
+			for (unsigned tick = 0; tick < 5000; ++tick)
+			{
+				world.advanceTick(); safeCapacity(world, index);
+				auto state = world.getSimulationSnapshot().securityScanners.at(0);
+				starts.emplace(state.phase, world.getSimulationTick());
+				if (state.phase == "Scanning")
+				{
+					auto duration = core::secondsToTicks(scan, world.getFixedTimestep()) * world.getFixedTimestep();
+					require(std::abs(state.scanProgress - (1 - state.remainingSeconds / duration)) < 0.0001f, "Configured progress incorrect");
+					if (!edited)
+					{
+						edited = true; world.pauseSimulation();
+						require(world.setSecurityScannerConfiguration(index, 100, 1, 2, 1), "Paused active edit refused");
+						world.advanceTicks(100);
+						auto frozen = world.getSimulationSnapshot().securityScanners.at(0);
+						require(frozen.remainingSeconds == state.remainingSeconds && frozen.scanProgress == state.scanProgress, "Paused edit changed active clock");
+						require(world.resumeSimulation(), "Configured resume refused");
+					}
+				}
+				if (starts.count("Exit opening")) break;
+			}
+			require(edited && starts.count("Exit opening"), "Configured scan stalled");
+			if (pre) require(starts.at("Scanning") - starts.at("Pre-delay") == core::secondsToTicks(pre, world.getFixedTimestep()), "Pre-delay finished early");
+			else require(!starts.count("Pre-delay"), "Zero pre-delay added pause");
+			auto scanEnd = post ? starts.at("Post-pause") : starts.at("Exit opening");
+			require(scanEnd - starts.at("Scanning") == core::secondsToTicks(scan, world.getFixedTimestep()), "Scan finished early");
+			if (post) require(starts.at("Exit opening") - scanEnd == core::secondsToTicks(post, world.getFixedTimestep()), "Post-pause finished early");
+			else require(!starts.count("Post-pause"), "Zero post-pause added delay");
+			bool idle = false;
+			for (unsigned tick = 0; tick < 2000; ++tick)
+			{
+				world.advanceTick();
+				if (world.getSimulationSnapshot().securityScanners.at(0).phase == "Idle") { idle = true; break; }
+			}
+			require(idle, "First configured journey did not exit");
+			auto next = world.createAgent("Next scan", left, 0, 2.5f);
+			require(world.moveAgentToMarker(next, destination).accepted(), "Next scan command refused");
+			starts.clear();
+			for (unsigned tick = 0; tick < 2000; ++tick)
+			{
+				world.advanceTick();
+				auto state = world.getSimulationSnapshot().securityScanners.at(0);
+				starts.emplace(state.phase, world.getSimulationTick());
+				if (state.phase == "Exit opening") break;
+			}
+			require(starts.count("Exit opening") && starts.at("Scanning") - starts.at("Pre-delay") == core::secondsToTicks(1, world.getFixedTimestep())
+				&& starts.at("Post-pause") - starts.at("Scanning") == core::secondsToTicks(2, world.getFixedTimestep())
+				&& starts.at("Exit opening") - starts.at("Post-pause") == core::secondsToTicks(1, world.getFixedTimestep()), "Next scan did not use edited timings");
+		}
 	}
 
 	void journeys(smoke::Context const&)
@@ -526,6 +620,7 @@ namespace
 void registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "securityScanners/automaticJourneys", journeys });
+	checks.push_back({ "securityScanners/configuration", configuration });
 	checks.push_back({ "securityScanners/contentionAndReuse", contention });
 	checks.push_back({ "securityScanners/abandonedAdmission", abandonment });
 	checks.push_back({ "securityScanners/defensiveOccupancy", occupancyViolation });

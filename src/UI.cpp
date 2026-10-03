@@ -6739,8 +6739,25 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		switch (gSelectedSector->getType())
 		{
 		case core::SectorType::SecurityScanner:
-			drawSecurityScannerSelectionPanel(*static_pointer_cast<const core::SecurityScannerTransit>(gSelectedSector));
+		{
+			auto chamber = static_pointer_cast<const core::SecurityScannerTransit>(gSelectedSector);
+			drawSecurityScannerSelectionPanel(*chamber);
+			float sensor = chamber->getSensorDistance(), pre = chamber->getPreDelaySeconds();
+			float scan = chamber->getScanSeconds(), post = chamber->getPostPauseSeconds();
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			bool edit = ImGui::InputFloat("Sensor distance (World units)", &sensor);
+			edit = ImGui::SliderFloat("Pre-scan delay (seconds)", &pre, 0, 10) || edit;
+			edit = ImGui::SliderFloat("Complete scan duration (seconds)", &scan, 0.1f, 10) || edit;
+			edit = ImGui::SliderFloat("Post-scan pause (seconds)", &post, 0, 10) || edit;
+			if (edit)
+			{
+				auto undo = captureDocumentSnapshot(world);
+				if (world->setSecurityScannerConfiguration(chamber->getIndex(), sensor, pre, scan, post))
+					commitDocumentEdit(std::move(undo));
+			}
+			ImGui::EndDisabled();
 			break;
+		}
 		case core::SectorType::Airlock:
 		{
 			auto chamber = static_pointer_cast<const core::AirlockTransit>(gSelectedSector);

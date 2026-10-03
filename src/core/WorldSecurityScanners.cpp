@@ -83,6 +83,26 @@ namespace core
 		return index;
 	}
 
+	bool World::setSecurityScannerConfiguration(uint32_t index, float sensor, float pre, float scan, float post)
+	{
+		if (!mSimulationPaused || !SecurityScannerTransit::validConfiguration(sensor, pre, scan, post)
+			|| index >= mSectors.size()) return false;
+		auto chamber = std::dynamic_pointer_cast<SecurityScannerTransit>(mSectors[index]);
+		if (!chamber) return false;
+		for (auto& record : mConstructionRecords)
+			if (record.type == ConstructionType::SecurityScanner && record.layer == chamber->getLayerIndex()
+				&& record.a == chamber->getCellY() && record.b == chamber->getCellX())
+			{
+				record.scannerSensorDistance = chamber->mSensorDistance = sensor;
+				record.x = chamber->mPreDelaySeconds = pre;
+				record.y = chamber->mScanSeconds = scan;
+				record.z = chamber->mPostPauseSeconds = post;
+				for (auto const& door : chamber->mDoors) door->setAutomaticSensorDistance(sensor);
+				markModified(); invalidateSimulationSnapshot(); return true;
+			}
+		return false;
+	}
+
 	bool World::isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const
 	{
 		if (auto bulkhead = std::dynamic_pointer_cast<const BulkheadDoorSectorObject>(object))

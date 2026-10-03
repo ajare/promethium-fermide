@@ -860,6 +860,7 @@ namespace core
 			uint32_t a{ 0 }, b{ 0 }, c{ 0 }, d{ 0 }, e{ 0 }, f{ 0 }, g{ 0 }, h{ 0 };
 			int32_t i{ 0 }, j{ 0 };
 			float x{ 0.0f }, y{ 0.0f }, z{ 0.0f };
+			float scannerSensorDistance{ 0.5f };
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
 			// Door: the activation mode the Door had before the editor's Buttons
@@ -1731,6 +1732,8 @@ namespace core
 			AgentId agent, bool locallyObserved) const;
 		bool isAirlockOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
 		bool isChamberOwnedObject(std::shared_ptr<const SectorObject> const& object) const;
+		bool setSecurityScannerConfiguration(uint32_t sectorIndex, float sensorDistance,
+			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
 		bool canAddSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,
 			std::string* diagnostic = nullptr) const;
 		uint32_t addSecurityScanner(uint32_t layer, uint32_t y, uint32_t x, uint32_t width,

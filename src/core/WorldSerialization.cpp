@@ -349,7 +349,7 @@ namespace core
 			serializer.writeFloat("preDelaySeconds", record.x);
 			serializer.writeFloat("scanSeconds", record.y);
 			serializer.writeFloat("postPauseSeconds", record.z);
-			serializer.writeFloat("sensorDistance", 0.5f);
+			serializer.writeFloat("sensorDistance", record.scannerSensorDistance);
 			serializer.writeBool("leftWasOpen", record.p);
 			serializer.writeBool("rightWasOpen", record.q);
 			break;
@@ -962,8 +962,9 @@ namespace core
 			record.y = serializer.readFloat("scanSeconds");
 			record.z = serializer.readFloat("postPauseSeconds");
 			record.p = serializer.readBool("leftWasOpen"); record.q = serializer.readBool("rightWasOpen");
-			if (serializer.readUint32("levelsHigh") != 1 || serializer.readUint32("capacity") != 1 || record.x != 1.0f
-				|| record.y != 2.0f || record.z != 1.0f || serializer.readFloat("sensorDistance") != 0.5f
+			record.scannerSensorDistance = serializer.readFloat("sensorDistance");
+			if (serializer.readUint32("levelsHigh") != 1 || serializer.readUint32("capacity") != 1
+				|| !SecurityScannerTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z)
 				|| serializer.hasField("initiallyBroken") || serializer.hasField("leftControlPermissionRequirement")
 				|| serializer.hasField("rightControlPermissionRequirement"))
 				throw SerializationException("Invalid Security scanner configuration");
@@ -2380,10 +2381,13 @@ namespace core
 		}
 		case ConstructionType::SecurityScanner:
 		{
-			if (record.d > 1 || record.x != 1 || record.y != 2 || record.z != 1)
+			if (record.d > 1 || !SecurityScannerTransit::validConfiguration(record.scannerSensorDistance, record.x, record.y, record.z))
 				throw SerializationException("Invalid Security scanner replay configuration");
 			auto index = addSecurityScanner(record.layer, record.a, record.b, record.c, record.d != 0);
 			auto chamber = std::static_pointer_cast<SecurityScannerTransit>(mSectors[index]);
+			chamber->mSensorDistance = record.scannerSensorDistance;
+			chamber->mPreDelaySeconds = record.x; chamber->mScanSeconds = record.y; chamber->mPostPauseSeconds = record.z;
+			for (auto const& door : chamber->mDoors) door->setAutomaticSensorDistance(record.scannerSensorDistance);
 			if ((chamber->getPreviousEnd(0) == SectorEndType::None) != record.p
 				|| (chamber->getPreviousEnd(1) == SectorEndType::None) != record.q)
 				throw SerializationException("Invalid Security scanner wall restoration");

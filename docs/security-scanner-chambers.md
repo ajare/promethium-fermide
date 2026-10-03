@@ -1,4 +1,4 @@
-# Security scanner chambers (#339, #340, #341, #342)
+# Security scanner chambers (#339, #340, #341, #342, #343)
 
 The palette's **Scanner** tool creates a distinct same-Layer Security scanner.
 Drag horizontally across empty whole cells between adjoining walkable Room or
@@ -64,18 +64,35 @@ Agents** phase, clears scan timing/progress, and stops Door motion and further
 admission until reset. Selection and snapshots report the phase; it is never a
 successful multi-Agent scan. Public placement still refuses scanner occupants.
 
-Configurable sensing/timing, interrupted occupied-journey recovery, and structural
-editing are separate follow-up tickets.
+## Authored sensing and timing
+
+While globally paused, Selection edits sensor distance, pre-scan delay, complete
+out-and-back scan duration, and post-scan pause through the World configuration
+command and normal document history. Sensor distance is finite and non-negative,
+with no fixed upper bound; pre/post pauses are in [0,10] seconds and scan duration
+in [0.1,10] seconds. Defaults remain 0.5 units and 1s/2s/1s. Invalid command or
+loaded values are rejected atomically.
+
+The sequence snapshots all three timings when entry opening begins. Edits during
+an occupied global pause apply to the next sequence, not the active countdown or
+progress. Durations round upward to fixed ticks; zero pre/post delays skip their
+phases without an intentional pause. Public scan progress uses the effective
+active duration, so beam consumers need no separate clock. Route estimates use
+the authored timings and automatic Door motion, with no Airlock cycle or Buttons
+assumptions.
+
+Interrupted occupied-journey recovery and structural editing remain separate
+follow-up tickets.
 
 ## Persistence and history
 
 World schema **43** persists `securityScanner` construction records: Layer,
-Level, geometry, direction, fixed defaults/capacity, and original adjoining wall
+Level, geometry, direction, authored sensing/timing, fixed capacity, and original adjoining wall
 states. Replay generates exactly two protected shared Bulkhead Doors from that
 record, never separate ordinary Door records. YAML and binary documents use the
 same validated schema; older scanner-free Worlds remain readable. Invalid
 geometry/configuration, missing fields, wall-restoration contradictions, and
-scanners in older schemas are rejected transactionally. Unsupported non-default
+scanners in older schemas are rejected transactionally. Non-default sensing/timing is retained by both formats and replay; unsupported
 configuration is rejected rather than silently dropped.
 
 Creation uses normal document snapshots/history. Undo removes the chamber and
@@ -87,6 +104,7 @@ and ownership. Detached open-wall restoration records remain supported.
 - `pf-smoke-world --check securityScanners/chambers`
 - `pf-smoke-world --check securityScanners/preflight`
 - `pf-smoke-simulation --check securityScanners/automaticJourneys`
+- `pf-smoke-simulation --check securityScanners/configuration`
 - `pf-smoke-simulation --check securityScanners/contentionAndReuse`
 - `pf-smoke-simulation --check securityScanners/abandonedAdmission`
 - `pf-smoke-simulation --check securityScanners/defensiveOccupancy`
