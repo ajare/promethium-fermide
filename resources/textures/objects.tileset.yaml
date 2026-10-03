@@ -29,6 +29,14 @@ sprites:
     cell: [0, 1]
     content: [6, 80, 52, 48]
     tintable: false
+  booth-window-open:
+    cell: [4, 1]
+    content: [6, 80, 52, 48]
+    tintable: false
+  booth-window-closed:
+    cell: [4, 1]
+    content: [6, 16, 52, 48]
+    tintable: false
   agent:
     cell: [1, 1]
     content: [19, 88, 26, 72]

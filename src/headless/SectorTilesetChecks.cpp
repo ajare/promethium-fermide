@@ -62,6 +62,18 @@ int main(int argc, char** argv)
                 minX = std::min(minX, x); maxX = std::max(maxX, x);
                 minY = std::min(minY, y); maxY = std::max(maxY, y);
             }
+        for (auto name : {"booth-window-open", "booth-window-closed"}) {
+            auto const& region = objects.sprites.at(name).region;
+            bool const open = std::string(name) == "booth-window-open";
+            for (int y = 5; y < region.height - 5; ++y)
+                for (int x = 5; x < region.width - 5; ++x) {
+                    auto const alpha = pixels[((region.y + y) * imageWidth + region.x + x) * 4 + 3];
+                    if (alpha != (open ? 0 : 255)) {
+                        stbi_image_free(pixels);
+                        throw std::runtime_error("BoothWindow must have an empty open centre and opaque closed shutter");
+                    }
+                }
+        }
         stbi_image_free(pixels);
         // Allow only the anti-aliased edge fringe; transparent layout padding
         // must not shrink the carriage inside its physical three-cell shape.

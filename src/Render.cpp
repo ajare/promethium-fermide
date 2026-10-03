@@ -930,7 +930,9 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 
 	auto windowStyle = window->getStyle();
 
-	switch (windowStyle)
+	bool const booth = window->isBoothWindow();
+	bool const shutterClosed = booth && window->getState() == core::Window::State::Closed;
+	if (!shutterClosed || style == LayerRenderStyle::Wireframe) switch (windowStyle)
 	{
 	case core::Window::Style::Clear:
 		renderWindowClear(window, layer, style, selected, drawList);
@@ -945,17 +947,24 @@ void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRe
 		break;
 	}
 
-	if (style == LayerRenderStyle::Solid && hasObjectTileset())
+	if ((style == LayerRenderStyle::Solid || (booth && style == LayerRenderStyle::Aperture)) && hasObjectTileset())
 	{
 		core::Vector2 from, to;
 		window->getFullShape(from, to);
 		transformPosition(from);
 		transformPosition(to);
-		auto const sprite = windowStyle == core::Window::Style::Clear ? "window-clear"
+		auto const sprite = booth ? (shutterClosed ? "booth-window-closed" : "booth-window-open")
+			: windowStyle == core::Window::Style::Clear ? "window-clear"
 			: windowStyle == core::Window::Style::Frosted ? "window-frosted" : "window-tinted";
 		drawObjectSprite(sprite, drawList, {from.x, from.y}, {to.x, to.y});
 	}
 
+	if (shutterClosed && isDrawnSolid(style) && !hasObjectTileset())
+	{
+		core::Vector2 from, to;
+		window->getFullShape(from, to); transformPosition(from); transformPosition(to);
+		drawList->AddRectFilled({from.x, from.y}, {to.x, to.y}, ImColor(70, 80, 90));
+	}
 	if (selected)
 	{
 		core::Vector2 bounds0, bounds1;
@@ -1412,6 +1421,7 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 			}
 			break;
 
+		case core::SectorObjectType::BoothWindow:
 		case core::SectorObjectType::Window:
 			if (flags & RENDER_SECTOR_OBJECTS_BEHIND)
 			{

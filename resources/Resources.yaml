@@ -53,6 +53,8 @@ Resources:
               - { name: "window-clear", x: "198", y: "80", width: "52", height: "48" }
               - { name: "window-frosted", x: "262", y: "80", width: "52", height: "48" }
               - { name: "window-tinted", x: "6", y: "240", width: "52", height: "48" }
+              - { name: "booth-window-open", x: "262", y: "240", width: "52", height: "48" }
+              - { name: "booth-window-closed", x: "262", y: "176", width: "52", height: "48" }
               - { name: "agent", x: "83", y: "248", width: "26", height: "72" }
               - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
               - { name: "platform-lift", x: "192", y: "310", width: "64", height: "10" }

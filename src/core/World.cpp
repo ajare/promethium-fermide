@@ -2972,7 +2972,7 @@ namespace core
 		};
 	}
 
-	World::CreateObjectResult World::createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier)
+	World::CreateObjectResult World::createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier, bool boothWindow)
 	{
 		invalidateSimulationSnapshot();
 		string caller = format("World::createWindow({}, {}, {}, {}, {})", layerIndex, x, y, cellsWide, levelsHigh);
@@ -3004,7 +3004,7 @@ namespace core
 		}
 
 		// Create window in fore Location and add to back
-		auto windowIndex = foreSector->createWindow(foreSector, backSector, x, y, cellsWide, levelsHigh, vertexIdentifier);
+		auto windowIndex = foreSector->createWindow(foreSector, backSector, x, y, cellsWide, levelsHigh, vertexIdentifier, boothWindow);
 
 		if (backSector)
 		{
@@ -3013,7 +3013,7 @@ namespace core
 
 		return {
 			windowIndex,
-			SectorObjectType::Window,
+			boothWindow ? SectorObjectType::BoothWindow : SectorObjectType::Window,
 			foreSector
 		};
 	}
@@ -6408,9 +6408,18 @@ namespace core
 	World::CreateWindowResult World::addSectorWindow(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions const& options)
 	{
-		invalidateSimulationSnapshot();
+		return addWindowAperture(layerIndex, y, x, cellsWide, levelsHigh, options, false);
+	}
+
+	World::CreateWindowResult World::addWindowAperture(uint32_t layerIndex, uint32_t y, uint32_t x,
+		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions const& options, bool boothWindow)
+	{
 		string diagnostic;
-		if (!canAddSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
+		if (boothWindow && (options.traversable || options.style != Window::Style::Clear
+			|| (options.initialState != Window::State::Open && options.initialState != Window::State::Closed)))
+			throw WorldException(this, "BoothWindow supports only non-traversable Open or Closed shutters");
+		if (!(boothWindow ? canAddBoothWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic)
+			: canAddSectorWindow(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic)))
 			throw WorldException(this, diagnostic);
 		if (options.traversable)
 		{
@@ -6436,7 +6445,7 @@ namespace core
 		auto layer = getLayer(layerIndex);
 
 		// Create window
-		auto createdWindow = createWindow(layerIndex, x, y, cellsWide, levelsHigh);
+		auto createdWindow = createWindow(layerIndex, x, y, cellsWide, levelsHigh, nullptr, boothWindow);
 		auto windowIndex = createdWindow.index;
 		auto windowObjType = createdWindow.type;
 		auto windowSector = createdWindow.sector;
@@ -6457,10 +6466,10 @@ namespace core
 				auto& cellDef = layer->getCellDefinition(ix, iy);
 
 				cellDef.sectorObjectIndex = windowIndex;
-				cellDef.sectorObjectType = SectorObjectType::Window;
+				cellDef.sectorObjectType = windowObjType;
 			}
 
-		ConstructionRecord record{ ConstructionType::Window };
+		ConstructionRecord record{ boothWindow ? ConstructionType::BoothWindow : ConstructionType::Window };
 		record.a = layerIndex; record.b = y; record.c = x; record.d = cellsWide; record.e = levelsHigh;
 		record.p = options.traversable;
 		record.i = static_cast<int32_t>(options.initialState);
@@ -6469,13 +6478,54 @@ namespace core
 		return { { windowIndex, windowObjType, windowSector }, window, traversalResource };
 	}
 
+	bool World::canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
+		uint32_t width, uint32_t height, string* diagnostic) const
+	{
+		auto reject = [&](string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (width != 1 || height != 1) return reject("BoothWindow requires a fixed one-cell-wide, one-Level-high footprint");
+		if (layer >= getLayerCount() || layer + 1 >= getLayerCount())
+			return reject("BoothWindow needs an adjacent Layer behind it");
+		if (x >= mCellsWide || y >= mLevelsHigh) return reject("BoothWindow position is outside the World");
+		for (auto side : { layer, layer + 1 })
+		{
+			auto const& cell = mLayers[side]->getCellDefinition(x, y);
+			if (cell.sectorIndex == ~0u || !isLocationLike(mSectors[cell.sectorIndex]->getType()))
+				return reject(format("BoothWindow requires a Room, Corridor, or Facade on Layer {}", side));
+			if (cell.floorType == CellFloorType::None || cell.floorType == CellFloorType::ForceBridge)
+				return reject(format("BoothWindow requires a walkable approach on Layer {} at Level {}", side, y));
+		}
+		return canAddSectorWindow(layer, y, x, width, height, diagnostic);
+	}
+
+	World::CreateWindowResult World::addBoothWindow(uint32_t layer, uint32_t y, uint32_t x, Window::State state)
+	{
+		return addWindowAperture(layer, y, x, 1, 1, { false, state, Window::Style::Clear }, true);
+	}
+
+	bool World::setBoothWindowInitialState(uint32_t layer, uint32_t y, uint32_t x, Window::State state)
+	{
+		if (state != Window::State::Open && state != Window::State::Closed)
+			throw WorldException(this, "BoothWindow initial state must be Open or Closed");
+		auto records = mConstructionRecords;
+		for (auto& record : records)
+			if (record.type == ConstructionType::BoothWindow && record.a == layer && record.b == y && record.c == x)
+			{
+				if (record.i == static_cast<int32_t>(state)) return false;
+				record.i = static_cast<int32_t>(state);
+				rebuildFromConstructionRecords(std::move(records));
+				modify();
+				return true;
+			}
+		return false;
+	}
+
 	bool World::getSectorWindowOptions(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions& options) const
 	{
 		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
 			[&](ConstructionRecord const& record)
 			{
-				return record.type == ConstructionType::Window && record.a == layerIndex
+				return (record.type == ConstructionType::Window || record.type == ConstructionType::BoothWindow) && record.a == layerIndex
 					&& record.b == y && record.c == x && record.d == cellsWide
 					&& record.e == levelsHigh;
 			});
@@ -6545,9 +6595,9 @@ namespace core
 				|| right.bulkheadIndices[CORE_SIDE_LEFT] != ~0u)
 				return reject("A Bulkhead Door already occupies this boundary");
 			if (left.sectorObjectType == SectorObjectType::Door
-				|| left.sectorObjectType == SectorObjectType::Window
+				|| isWindowAperture(left.sectorObjectType)
 				|| right.sectorObjectType == SectorObjectType::Door
-				|| right.sectorObjectType == SectorObjectType::Window)
+				|| isWindowAperture(right.sectorObjectType))
 				return reject("Another object blocks Bulkhead Door placement");
 			validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
 				SectorObjectType::BulkheadDoor, left.sectorIndex);
@@ -6604,11 +6654,11 @@ namespace core
 
 		// Check that there are no Doors or Windows in cells X and X-1, as there won't
 		// be space for them.
-		if (cellDef0.sectorObjectType == SectorObjectType::Door || cellDef0.sectorObjectType == SectorObjectType::Window)
+		if (cellDef0.sectorObjectType == SectorObjectType::Door || isWindowAperture(cellDef0.sectorObjectType))
 		{
 			throw WorldException(this, format("{} - cell at {}, {} has an object blocking the Bulkhead door", caller, cx0, y));
 		}
-		if (cellDef1.sectorObjectType == SectorObjectType::Door || cellDef1.sectorObjectType == SectorObjectType::Window)
+		if (cellDef1.sectorObjectType == SectorObjectType::Door || isWindowAperture(cellDef1.sectorObjectType))
 		{
 			throw WorldException(this, format("{} - cell at {}, {} has an object blocking the Bulkhead door", caller, cx1, y));
 		}
@@ -11609,9 +11659,10 @@ namespace core
 	TraversalResourceId World::createWindowTraversalResource(string const& name,
 		shared_ptr<Window> window)
 	{
+		if (!window || window->isBoothWindow())
+			throw invalid_argument("A Window crossing resource requires an ordinary Window, not a BoothWindow");
 		invalidateSimulationSnapshot();
 		beginStructuralEdit("createWindowTraversalResource");
-		if (!window) throw invalid_argument("A window traversal resource requires a Window");
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(
 			new TraversalResource(name, std::move(window))));
 		SimulationEvent event;

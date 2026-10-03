@@ -37,6 +37,7 @@ int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks(std::begin(existingChecks), std::end(existingChecks));
 	registerAirlocks(checks);
+	registerBoothWindows(checks);
 	registerObjectEditing(checks);
 	registerFloorsAndWalls(checks);
 	registerTopology(checks);

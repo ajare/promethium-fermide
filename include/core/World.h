@@ -839,7 +839,8 @@ namespace core
 			// producing record, replayed with all wall ends open intrinsically
 			// (ADR 0003).
 			Facade,
-			Airlock
+			Airlock,
+			BoothWindow
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -984,6 +985,9 @@ namespace core
 
 		std::vector<ConstructionRecord> canonicalConstructionRecords(
 			std::vector<ConstructionRecord> records) const;
+
+		void removeBoothWindowsAtSupport(std::vector<ConstructionRecord>& records,
+			uint32_t layer, uint32_t x, uint32_t y) const;
 
 		void rebuildFromConstructionRecords(std::vector<ConstructionRecord> records,
 			uint32_t movedSectorIndex = ~0u, int deltaX = 0, int deltaY = 0);
@@ -1239,7 +1243,9 @@ namespace core
 		CreateObjectResult createDoor(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide,
 			Door::Height height = Door::Height::Regular, uint32_t* vertexIdentifier = nullptr);
 
-		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr);
+		CreateObjectResult createWindow(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, uint32_t* vertexIdentifier = nullptr, bool boothWindow = false);
+		CreateWindowResult addWindowAperture(uint32_t layer, uint32_t y, uint32_t x,
+			uint32_t width, uint32_t height, CreateWindowOptions const& options, bool boothWindow);
 
 		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side);
 
@@ -1864,6 +1870,12 @@ namespace core
 
 		bool getSectorWindowOptions(uint32_t layerIndex, uint32_t y, uint32_t x,
 			uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions& options) const;
+
+		bool canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
+			uint32_t width = 1, uint32_t height = 1, std::string* diagnostic = nullptr) const;
+		CreateWindowResult addBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
+			Window::State initialState = Window::State::Closed);
+		bool setBoothWindowInitialState(uint32_t layer, uint32_t y, uint32_t x, Window::State state);
 
 		bool removeSectorWindow(uint32_t sectorIndex, uint32_t objectIndex);
 

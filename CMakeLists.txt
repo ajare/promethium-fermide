@@ -423,6 +423,7 @@ add_library(pf-agent-editing STATIC
     src/AgentGroupsPanel.cpp
     src/AgentGroupAssignmentPanel.cpp
     src/AgentClipboard.cpp
+    src/BoothWindowEditor.cpp
     src/AgentTagAssignmentPanel.cpp
     src/TagsPanel.cpp
     src/BehavioursPanel.cpp

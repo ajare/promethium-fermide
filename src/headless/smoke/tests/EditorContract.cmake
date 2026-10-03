@@ -163,6 +163,7 @@ set(editor_names
     routing/historyAndClipboard
     airlocks/structuralHistory
     airlocks/editorCommands
+    boothWindows/historyAndClipboard
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation
     background/theColourEditCarriesNoAlphaChannel

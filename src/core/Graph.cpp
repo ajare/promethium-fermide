@@ -1452,7 +1452,7 @@ namespace core
 			return door && door->getFrontLayer() == frontLayer && door->getBackLayer() == backLayer;
 		}
 
-		if (type == SectorObjectType::Window)
+		if (isWindowAperture(type))
 		{
 			auto const windowObject = dynamic_pointer_cast<WindowSectorObject>(object);
 			if (!windowObject) return false;
@@ -1514,10 +1514,10 @@ namespace core
 			}
 		}
 
-		if (frontProcessable && frontCell.sectorObjectType == SectorObjectType::Window
+		if (frontProcessable && isWindowAperture(frontCell.sectorObjectType)
 			&& isLeftMostObjectCell(frontLayer, x, y, frontCell)
 			&& thresholdBelongsToPair(mwWorld->_getSector(frontCell.sectorIndex),
-				frontCell.sectorObjectIndex, SectorObjectType::Window, frontLayer, backLayer))
+				frontCell.sectorObjectIndex, frontCell.sectorObjectType, frontLayer, backLayer))
 		{
 			auto const frontSector = mwWorld->_getSector(frontCell.sectorIndex);
 			auto const sharedObject = frontSector->_getObject(frontCell.sectorObjectIndex);
@@ -1525,7 +1525,7 @@ namespace core
 			processWindow(front, interLayerVertexLookup, rows[frontLayer][y]);
 
 			auto const windowObject = dynamic_pointer_cast<WindowSectorObject>(sharedObject);
-			if (backProcessable && windowObject && windowObject->getWindow()->isTraversalConfigured())
+			if (backProcessable && windowObject && (windowObject->getWindow()->isTraversalConfigured() || windowObject->getWindow()->isBoothWindow()))
 			{
 				auto const backSector = mwWorld->_getSector(backCell.sectorIndex);
 				auto const backIndex = indexOfSharedObject(backSector, sharedObject);

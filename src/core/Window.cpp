@@ -114,12 +114,16 @@ namespace core
 
 	void Window::setState(State state, Style style)
 	{
+		if (isBoothWindow() && ((state != State::Open && state != State::Closed) || style != Style::Clear))
+			throw invalid_argument("BoothWindow supports only Open or Closed shutters without glass styles");
 		mState = state;
 		mStyle = style;
 	}
 
 	void Window::configureTraversal(bool enabled, TraversalResourceId resource)
 	{
+		if (isBoothWindow() && (enabled || resource))
+			throw invalid_argument("BoothWindow is never traversable");
 		mTraversalConfigured = enabled;
 		mTraversalResource = enabled ? resource : TraversalResourceId{};
 	}
