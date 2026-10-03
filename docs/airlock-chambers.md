@@ -23,7 +23,11 @@ A lone Agent can route through the chamber in either direction. Both threshold
 edges reference one Airlock Traversal resource, which owns queue tickets,
 admission reservations, crossing authority, and occupants. Fixed buttons target
 the Airlock, never individual Doors. Outside buttons request entry from their
-own side; the exit opposite entry opens automatically after the closed-door cycle. Authored Agent
+own side; the exit opposite entry opens automatically after the closed-door cycle.
+An accepted outside call is shared by that side's queue until entry opens.
+Later Agents and replanning waiters do not press again while the call is pending,
+even if the original caller leaves the queue. Each subsequent batch needs a new
+call; opposite-side calls remain independent. Authored Agent
 placement inside the chamber remains refused: entry must establish occupancy
 through coordinated traversal. Ordinary Bulkheads and other Transit landing
 conventions are unchanged.

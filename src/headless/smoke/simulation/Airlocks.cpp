@@ -206,6 +206,65 @@ namespace
 		}
 	}
 
+	void sharedOutsideCall(smoke::Context const&)
+	{
+		for (int side : { 0, 1 })
+		for (bool cancelCaller : { false, true })
+		{
+			core::World world("Shared outside call", 20, 2);
+			uint32_t ends[] = { world.addRoom("Left", 0, 0, 0, 8, 1), world.addRoom("Right", 0, 0, 11, 8, 1) };
+			world.addAirlock(0, 0, 8, 3, 10);
+			auto marker = world.addSectorMarker(ends[1 - side], 0, 4);
+			world.finishBuild();
+			std::vector<core::AgentId> agents;
+			for (unsigned member = 0; member < 6; ++member)
+			{
+				auto id = world.createAgent("Waiting traveller", ends[side], 0, side ? 0.5f : 7.5f);
+				agents.push_back(id);
+				auto agent = world.lookupAgent(id).entity;
+				agent->setPath(world.getGraph()->calculatePath(agent, world.getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+			}
+			std::set<core::InteractionRequestId> presses, attempts;
+			core::AgentId cancelled;
+			unsigned batches = 0;
+			bool completed = false;
+			int previousEntry = -1;
+			for (unsigned tick = 0; tick < 12000; ++tick)
+			{
+				world.advanceTick();
+				auto snapshot = world.getSimulationSnapshot();
+				auto state = snapshot.airlocks.at(0);
+				require(state.doors[0] == core::DoorSnapshotState::Closed || state.doors[1] == core::DoorSnapshotState::Closed, "Shared call interlock violated");
+				require(state.occupants.size() + state.reservations.size() <= 3, "Shared call overbooked chamber");
+				if (state.entrySide >= 0 && previousEntry < 0) ++batches;
+				previousEntry = state.entrySide;
+				for (auto const& request : snapshot.interactionRequests)
+					if (request.point == state.controls[side])
+					{
+						attempts.insert(request.id);
+						if (request.result != core::InteractionResult::Succeeded || !presses.insert(request.id).second) continue;
+						// The second call waits through the post-exit cycle. Its
+						// acceptance must survive the physical caller leaving the queue.
+						if (cancelCaller && presses.size() == 2)
+						{
+							require(state.entrySide < 0 && !state.cycleComplete, "Call did not wait through cycling");
+							cancelled = request.actor;
+							require(world.cancelAgentMovement(cancelled).accepted(), "Accepted caller cancellation refused");
+						}
+					}
+				completed = std::all_of(agents.begin(), agents.end(), [&](auto id) {
+					return id == cancelled || world.lookupAgent(id).entity->getSector()->getIndex() == ends[1 - side];
+				});
+				if (completed) break;
+			}
+			require(completed && batches == 2, "Shared call fixture failed to complete two batches");
+			require(presses.size() == batches && attempts.size() == batches, "Outside button was pressed again despite an accepted call: presses="
+				+ std::to_string(presses.size()) + " attempts=" + std::to_string(attempts.size()) + " batches=" + std::to_string(batches));
+			if (cancelCaller) require(cancelled && world.lookupAgent(cancelled).entity->getSector()->getIndex() == ends[side],
+				"Cancelled caller did not remain outside");
+		}
+	}
+
 	void boardingDeadline(smoke::Context const&)
 	{
 		for (int side : { 0, 1 })
@@ -1138,6 +1197,7 @@ void registerAirlocks(std::vector<smoke::Check>& checks)
 	checks.push_back({ "airlocks/batchesAndOpposingQueues", batches });
 	checks.push_back({ "airlocks/approachingBatch", approachingBatch });
 	checks.push_back({ "airlocks/boardingDeadline", boardingDeadline });
+	checks.push_back({ "airlocks/sharedOutsideCall", sharedOutsideCall });
 	checks.push_back({ "airlocks/lostReservationDoesNotRefill", lostReservation });
 	checks.push_back({ "airlocks/interruptedJourneys", interruptedJourneys });
 	checks.push_back({ "airlocks/abandonedBoarding", abandonedBoarding });

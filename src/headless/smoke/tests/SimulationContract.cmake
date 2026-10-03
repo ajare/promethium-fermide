@@ -116,6 +116,7 @@ set(core_names
     airlocks/batchesAndOpposingQueues
     airlocks/approachingBatch
     airlocks/boardingDeadline
+    airlocks/sharedOutsideCall
     airlocks/lostReservationDoesNotRefill
     airlocks/interruptedJourneys
     airlocks/abandonedBoarding

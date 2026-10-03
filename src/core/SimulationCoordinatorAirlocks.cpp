@@ -197,7 +197,11 @@ namespace core
 			if (chamber.mActiveSide == resource.mAirlockEntrySide || !chamber.isCycleComplete()
 				|| actor->getGlobalPosition().distanceTo(target) > 0.001f) return;
 		}
-		bool const needsOperation = entry && resource.mAirlockEntrySide < 0;
+		// An accepted outside call belongs to this side of the chamber, not
+		// to the caller's traversal request. Later waiters (and replans) share
+		// it while the chamber finishes cycling, without pressing again.
+		bool const needsOperation = entry && resource.mAirlockEntrySide < 0
+			&& !chamber.mOutsideRequests[side];
 		if (needsOperation && !request->mPreparationRequested)
 		{
 			if (resource.mActivePreparation && resource.mPreparationOperator != id) return;
