@@ -984,7 +984,6 @@ namespace core
 			std::vector<PhysicalControlCandidate> candidates;
 			uint32_t defaultCandidate{ 0 };
 			uint32_t currentCandidate{ 0 };
-			float edgeInset{ 0.0f };
 			Vector2 interactionOffset{};
 			bool hasInteractionOffset{ false };
 			physicalControl::Owner owner{};
@@ -1416,12 +1415,6 @@ namespace core
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
 
 		CreateObjectResult _createForceBridgeButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index = nullptr);
-
-		CreateObjectResult _createLadderButton(std::shared_ptr<const Sector> sector,
-			uint32_t x, uint32_t y, int side, uint32_t flags,
-			uint32_t* index = nullptr, bool insetWithinCell = false);
-
-		CreateObjectResult _createPlatformLiftButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index = nullptr);
 
 		uint32_t addLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
 

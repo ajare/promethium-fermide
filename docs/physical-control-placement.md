@@ -1,4 +1,4 @@
-# Physical-control placement boundary (#426) and wall-safe authoring (#427)
+# Physical-control placement
 
 `core/PhysicalControlPlacement.h` separates value-only candidate generation and
 allocation from World application. `WorldPhysicalControls.cpp` owns creation,
@@ -172,3 +172,36 @@ undo/redo reconstructing and removing mixed stacks; production draw commands and
 hit testing cover mixed Lift and Shuttle stacks. Existing transport authoring,
 permission, admission and clipboard/reconstruction contracts remain in the final
 validation matrix; no new unsupported transport clipboard capability is added.
+
+## Ladder endpoints and Platform lift Stops (#432)
+
+Extensible Room Ladders and Ladder Transits now contribute one independently
+allocated control per endpoint. Each prefers host `X+1` at offset `0.0`, falling
+back only to `X` at offset `0.0` in its landing Location. Non-extensible Ladders
+retain no controls. Endpoint and host support must be Ground or Walkway, never
+Force Bridge support. The old within-cell Ladder inset has been removed.
+
+Platform lift Stops independently prefer `X+W` at offset `0.0`, otherwise `X`
+at offset `0.0`. Both hosts retain the same Location/floor/boundary checks;
+adjoining approach support is permanent (`X+W` for right, `X-1` for left) and
+belongs to that Location. Different Stops may use opposite sides. Stop discovery,
+configuration consequences and supported movement no longer require one common
+side. Queue lanes also choose supported sides independently per Stop, using
+authored support rather than runtime motion or conflict-driven Button assignment.
+
+Both owner types use their complete authored footprint and endpoint/Stop Level
+as canonical keys. They join migrated controls in same-Location stacks, preserving
+each extension/call command, permission requirement, Interaction point identity
+and normal-height shared approach. Creation preflights all endpoint/Stop demands
+before structural mutation; existing detached replay handles configuration,
+geometry/support/wall edits, deletion, loading and document history. Protected
+Ladder requirements read the existing uint64 binary wire representation with
+validated narrowing; other owners' wire formats are unchanged.
+
+Coverage exercises independent Room/Transit endpoints, meeting Ladder stacks,
+opposite-side Platform Stops, permanent support, mixed Door/Platform/Ladder stacks
+in reversed creation orders, protected selected Agent operations and Ladder
+traversal, stationary placement during motion, transactional wall/load/creation
+refusals, YAML/binary replay, clipboard-style authored reconstruction, document
+undo/redo and production draw/hit targeting. Existing transport movement,
+structural reconciliation and operation contracts remain in the validation matrix.

@@ -566,8 +566,72 @@ namespace
 		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == unstacked, "Transport move redo retained previous assignment");
 	}
 
+	void checkEndpointPlacementHistory()
+	{
+		using namespace core;
+		auto world = std::make_shared<World>("Endpoint history", 8, 5);
+		auto room = world->addRoom("Room", 0, 0, 0, 1, 5);
+		world->addSectorWalkway(room, 2, 0); world->addSectorWalkway(room, 4, 0);
+		auto lower = world->addRoomLadder(room, 0, 0, {0, true, false});
+		world->finishBuild(); world->pauseSimulation(); DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(room)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+				require(vertex && vertex->getPosition() == Vector2{0, static_cast<float>(object->getCellY())}, "Endpoint history raised approach");
+				result.push_back(button->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.y < b.y; }); return result;
+		};
+		auto initial = positions(); auto before = captureDocumentSnapshot(world, history);
+		// Clipboard-style authoring copies configuration, never derived placements.
+		World::CreateLadderOptions copied;
+		require(world->getRoomLadderOptions(room, lower.ladder.index, copied), "Ladder clipboard options unavailable");
+		world->addRoomLadder(room, 2, 0, copied); world->finishBuild(); commitDocumentEdit(before, history);
+		auto stacked = positions(); require(stacked.size() == 4 && stacked[1].x == stacked[2].x
+			&& stacked[1].y < stacked[2].y, "Copied Ladder endpoints did not stack");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == initial, "Ladder clipboard undo retained stack");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Ladder clipboard redo changed placement");
+
+		world = std::make_shared<World>("Platform history", 8, 5);
+		room = world->addRoom("Room", 0, 0, 0, 8, 5);
+		for (auto x : {3u, 4u}) world->addSectorWalkway(room, 2, x);
+		for (auto x : {2u, 3u}) world->addSectorWalkway(room, 4, x);
+		World::CreateLiftOptions options; options.stopOffsets = {0, 2, 4};
+		auto lift = world->addSectorPlatformLift(room, 0, 3, options); world->finishBuild(); world->pauseSimulation(); history.clear();
+		auto platformPositions = [&]
+		{
+			std::vector<Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(room)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (button) result.push_back(button->getPosition() + button->getSize() * 0.5f);
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.y < b.y; }); return result;
+		};
+		auto allStops = platformPositions(); before = captureDocumentSnapshot(world, history);
+		options.stopOffsets = {0, 4}; auto plan = world->planPlatformLiftEdit(room, lift.lift.index, options);
+		require(plan.valid, "Opposite-side Platform configuration refused"); world->applyPlatformLiftEdit(plan); commitDocumentEdit(before, history);
+		auto fewerStops = platformPositions(); require(fewerStops.size() == 2 && fewerStops[0].x == 4 && fewerStops[1].x == 3, "Stop edit lost independent sides");
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && platformPositions() == allStops, "Platform undo changed candidates");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && platformPositions() == fewerStops, "Platform redo changed candidates");
+	}
+
 	void checkLiftOwnedDoor()
 	{
+		checkEndpointPlacementHistory();
 		checkTransportPlacementHistory(false);
 		auto world = std::make_shared<core::World>("Lift door panel", 16, 3);
 		auto const hall = world->addRoom("Lift Hall", 0, 0, 0, 16, 3);

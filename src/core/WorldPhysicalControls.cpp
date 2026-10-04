@@ -70,13 +70,14 @@ namespace core
 	{
 		using namespace physicalControl;
 		bool transport = demand.owner.type == OwnerType::Lift || demand.owner.type == OwnerType::Shuttle;
+		bool endpoint = demand.owner.type == OwnerType::Ladder || demand.owner.type == OwnerType::PlatformLift;
 		if (!demand.hasOwner || (demand.owner.type != OwnerType::Door
-			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport)) return demand;
+			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport && !endpoint)) return demand;
 		auto const& host = demand.owner.hostingLocation;
 		auto const& geometry = demand.owner.geometry;
-		auto doorwayX = transport ? demand.owner.role.x : geometry.x;
+		auto doorwayX = transport || endpoint ? demand.owner.role.x : geometry.x;
 		auto doorwayWidth = demand.owner.type == OwnerType::Shuttle ? 1u : geometry.width;
-		vector<Candidate> candidates = demand.owner.type == OwnerType::Door || transport
+		vector<Candidate> candidates = demand.owner.type == OwnerType::Door || transport || endpoint
 			? vector<Candidate>{ Candidate::explicitHost(doorwayX + doorwayWidth, 0, CORE_SIDE_LEFT),
 				Candidate::explicitHost(doorwayX, 0, CORE_SIDE_LEFT) }
 			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2, CORE_SIDE_MIDDLE) };
@@ -90,6 +91,21 @@ namespace core
 			auto const& cell = mLayers[host.layer]->getCellDefinition(x, y);
 			if (cell.sectorIndex == ~0u || ((!mDeserializingConstruction || mResolvingPhysicalControls)
 				&& !cell.isTraversableOnFoot())) continue;
+			if (endpoint && (!mDeserializingConstruction || mResolvingPhysicalControls))
+			{
+				auto permanent = [](CellDefinition const& support)
+				{ return support.floorType == CellFloorType::Ground || support.floorType == CellFloorType::Walkway; };
+				// A Platform's left host is in its footprint; its approach support
+				// is the adjoining cell, never the moving platform itself.
+				auto supportX = demand.owner.type == OwnerType::PlatformLift && x == geometry.x
+					? (x == 0 ? ~0u : x - 1) : x;
+				if (supportX >= getCellsWide() || supportX == unsupportedX) continue;
+				auto const& support = mLayers[host.layer]->getCellDefinition(supportX, y);
+				if (support.sectorIndex != cell.sectorIndex || !permanent(support)) continue;
+				if (demand.owner.type == OwnerType::Ladder
+					&& (geometry.x == unsupportedX
+						|| !permanent(mLayers[host.layer]->getCellDefinition(geometry.x, y)))) continue;
+			}
 			auto sector = mSectors[cell.sectorIndex];
 			if (!isLocationLike(sector->getType()) || sector->getCellX() != host.x
 				|| sector->getCellY() != host.baseLevel || sector->getCellsWide() != host.width
@@ -345,8 +361,6 @@ namespace core
 				else if (slot == ~0u) slot = placement.objectIndex;
 				else throw WorldException(this, "Physical-control slot assignment collided with an existing control");
 				float centerX = candidate.centreX();
-				if (candidate.side == CORE_SIDE_LEFT) centerX += placement.edgeInset;
-				else if (candidate.side == CORE_SIDE_RIGHT) centerX -= placement.edgeInset;
 				float adjustment = 0.0f;
 				if (controls.size() > 1 && candidate.quarterOffset < 0)
 				{

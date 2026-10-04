@@ -442,6 +442,31 @@ namespace
 			}
 		}
 
+		// Ladder endpoints and Platform Stops share the production draw/hit seam.
+		{
+			core::World world("Endpoint artwork", 8, 3);
+			world.addRoom("Neighbour", 0, 0, 0, 1, 3);
+			auto host = world.addRoom("Room", 0, 0, 1, 2, 3);
+			world.addSectorWalkway(host, 2, 0); world.addSectorWalkway(host, 2, 1);
+			world.addRoomLadder(host, 0, 1, {0, true, false});
+			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			world.addSectorPlatformLift(host, 0, 0, options); world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(host), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			require(visibleGeometry(drawList).buttonFillTriangles == 8, "Endpoint stacks omitted independent artwork");
+			uint32_t count = 0;
+			for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(host)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				require(centre.x == 2 && world.getObjectAtPosition(0, centre.x, centre.y) == button,
+					"Endpoint stack targeting diverged from artwork"); ++count;
+			}
+			require(count == 4, "Endpoint draw fixture lost controls");
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

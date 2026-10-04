@@ -1540,8 +1540,206 @@ namespace
 	}
 }
 
+namespace
+{
+	void independentEndpointControls()
+	{
+		using namespace core;
+		auto centreX = [](World::CreateObjectResult const& control)
+		{
+			auto b = control.sector->getObject(control.index)->_getObject();
+			return b->getPosition().x + b->getSize().x * 0.5f;
+		};
+		{
+			World world("Independent Transit endpoints", 6, 4);
+			world.addRoom("Low", 0, 0, 0, 4, 1);
+			world.addRoom("High", 0, 3, 2, 1, 1);
+			auto ladder = world.addLadder(1, 0, 2, {4, true, false}); world.finishBuild();
+			require(centreX(ladder.controls[0]) == 3 && centreX(ladder.controls[1]) == 2, "Transit endpoints inherited one side");
+		}
+		{
+			World world("Transit refusal", 6, 4);
+			world.addRoom("Low", 0, 0, 0, 4, 1);
+			world.addRoom("High left", 0, 3, 0, 2, 1);
+			world.addRoom("High", 0, 3, 2, 1, 1);
+			world.addRoom("High right", 0, 3, 3, 1, 1);
+			world.finishBuild(); auto graph = world.getGraph(); auto count = world.getNumSectors(); bool refused = false;
+			try { world.addLadder(1, 0, 2, {4, true, false}); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getNumSectors() == count && world.getGraph() == graph, "Invalid Ladder creation partially mutated World");
+		}
+		{
+			World world("Endpoint wall transaction", 8, 3);
+			auto neighbour = world.addRoom("Left", 0, 0, 0, 4, 3);
+			auto host = world.addRoom("Host", 0, 0, 4, 1, 3);
+			world.addRoom("Right", 0, 0, 5, 3, 3); world.addSectorWalkway(host, 2, 0);
+			world.removeLocationWall(neighbour, 0, CORE_SIDE_RIGHT); world.removeLocationWall(neighbour, 2, CORE_SIDE_RIGHT);
+			world.addRoomLadder(host, 0, 0, {0, true, false}); world.finishBuild(); world.pauseSimulation();
+			auto graph = world.getGraph(); auto buttons = buttonsIn(world, host); bool refused = false;
+			try { world.addLocationWall(neighbour, 2, CORE_SIDE_RIGHT); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && buttonsIn(world, host) == buttons, "Endpoint wall refusal changed controls/graph");
+			SerializationWorkData data; auto writer = YamlSerializer::toString(); world.serialize(*writer, data); writer->serialize();
+			auto invalid = YAML::Load(writer->getSerializedString()); YAML::Node records(YAML::NodeType::Sequence);
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() != "removeWall") records.push_back(record);
+			invalid["construction"] = records;
+			auto reader = YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize(); refused = false;
+			try { refused = !world.deserialize(*reader, data); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && buttonsIn(world, host) == buttons, "Invalid endpoint load was not transactional");
+		}
+		{
+			World world("Independent Room endpoints", 6, 4);
+			auto room = world.addRoom("Room", 0, 0, 0, 5, 4);
+			world.addSectorWalkway(room, 3, 2);
+			auto fixed = world.addRoomLadder(room, 0, 2);
+			require(!fixed.controls[0].interactionPoint && !fixed.controls[1].interactionPoint
+				&& buttonsIn(world, room).empty(), "Non-extensible Ladder gained controls");
+			world.finishBuild(); world.pauseSimulation(); world.removeRoomLadder(room, fixed.ladder.index);
+			auto ladder = world.addRoomLadder(room, 0, 2, {0, true, false}); world.finishBuild();
+			require(centreX(ladder.controls[0]) == 3 && centreX(ladder.controls[1]) == 2, "Room endpoints inherited one side");
+			world.pauseSimulation(); world.addSectorWalkway(room, 3, 3); world.finishBuild();
+			auto controls = buttonsIn(world, room);
+			require(controls.size() == 2 && controls[0]->getPosition().x == controls[1]->getPosition().x,
+				"New endpoint support did not restore preferred candidate");
+		}
+		{
+			World world("Stacked Ladder endpoints", 6, 5);
+			auto room = world.addRoom("Room", 0, 0, 0, 1, 5);
+			world.addSectorWalkway(room, 2, 0); world.addSectorWalkway(room, 4, 0);
+			auto lower = world.addRoomLadder(room, 0, 0, {0, true, false});
+			auto upper = world.addRoomLadder(room, 2, 0, {0, true, false}); world.finishBuild();
+			auto a = lower.controls[1].sector->getObject(lower.controls[1].index);
+			auto b = upper.controls[0].sector->getObject(upper.controls[0].index);
+			auto ba = a->_getObject(); auto bb = b->_getObject();
+			require(centreX(lower.controls[1]) == 0 && centreX(upper.controls[0]) == 0
+				&& std::abs(bb->getPosition().y - ba->getPosition().y - ba->getSize().y * 1.25f) < 0.00001f, "Meeting Ladder endpoints did not stack canonically");
+			auto va = world.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(a));
+			auto vb = world.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(b));
+			require(va && va == vb && va->getPosition() == Vector2{0, 2}, "Ladder endpoints lost shared approach");
+			world.pauseSimulation(); world.removeRoomLadder(room, upper.ladder.index);
+			require(buttonsIn(world, room).size() == 2, "Ladder deletion retained endpoint control");
+		}
+		{
+			World world("Opposite Platform Stops", 8, 5);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 5);
+			for (auto x : {3u, 4u}) world.addSectorWalkway(room, 2, x);
+			for (auto x : {2u, 3u}) world.addSectorWalkway(room, 4, x);
+			World::CreateLiftOptions options; options.stopOffsets = {0, 2, 4};
+			require(world.canAddPlatformLift(room, 3, options), "Opposite-side Stops refused");
+			auto lift = world.addSectorPlatformLift(room, 0, 3, options); world.finishBuild();
+			require(centreX(lift.buttons[0]) == 4 && centreX(lift.buttons[1]) == 4 && centreX(lift.buttons[2]) == 3, "Platform inherited a common Stop side");
+			world.pauseSimulation(); auto edit = world.planPlatformLiftEdit(room, lift.lift.index, options);
+			require(edit.valid, "Independent Stop configuration refused: " + edit.diagnostic); world.applyPlatformLiftEdit(edit);
+		}
+		{
+			World world("Permanent endpoint support", 8, 3);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 3);
+			world.addSectorWalkway(room, 2, 3); world.addSectorWalkway(room, 2, 5);
+			World::CreateForceBridgeOptions bridge; bridge.extensible = false; bridge.controlCount = 0;
+			world.addSectorForceBridge(room, 2, 4, bridge);
+			World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			require(!world.canAddPlatformLift(room, 3, options), "Platform accepted retractable adjoining support");
+			auto before = world.getSector(room)->getNumObjects(); bool refused = false;
+			try { world.addSectorPlatformLift(room, 0, 3, options); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getSector(room)->getNumObjects() == before, "Invalid Platform creation left partial controls");
+			auto ladder = world.addRoomLadder(room, 0, 3, {0, true, false}); world.finishBuild();
+			require(centreX(ladder.controls[0]) == 4 && centreX(ladder.controls[1]) == 3, "Ladder used temporary endpoint host support");
+		}
+		for (bool reverse : {false, true})
+		{
+			World world("Mixed endpoint stack", 8, 3);
+			world.addRoom("Neighbour", 1, 0, 0, 1, 3);
+			auto room = world.addRoom("Room", 1, 0, 1, 2, 3);
+			world.addRoom("Front", 0, 0, 0, 8, 3);
+			world.addSectorWalkway(room, 2, 0); world.addSectorWalkway(room, 2, 1);
+			world.pauseSimulation();
+			auto ladderPermission = world.addAccessPermission("Ladder"); auto callPermission = world.addAccessPermission("Call");
+			World::CreateLadderOptions ladderOptions{0, true, false}; ladderOptions.controlPermissionRequirements[0] = {ladderPermission};
+			World::CreateLiftOptions liftOptions; liftOptions.stopOffsets = {0, 2}; liftOptions.initialStop = 1;
+			liftOptions.landingControlPermissionRequirements = {{callPermission}, {}};
+			if (reverse) world.addRoomLadder(room, 0, 1, ladderOptions);
+			world.addSectorPlatformLift(room, 0, 0, liftOptions);
+			if (!reverse) world.addRoomLadder(room, 0, 1, ladderOptions);
+			world.addSectorDoor(0, 0, 1, World::RemoteControlledDoor1Options); world.finishBuild();
+			auto verify = [&](World const& scene)
+			{
+				auto buttons = buttonsIn(scene, room); std::erase_if(buttons, [](auto b) { return b->getPosition().y >= 2; });
+				std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+				require(buttons.size() == 3, "Mixed endpoint stack omitted controls"); std::shared_ptr<const Vertex> approach;
+				for (uint32_t i = 0; i < scene.getSector(room)->getNumObjects(); ++i)
+				{
+					auto object = scene.getSector(room)->getObject(i);
+					if (!object || object->getCellY() != 0 || object->getObjectType() != SectorObjectType::InteractionPoint) continue;
+					auto vertex = scene.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+					require(vertex && vertex->getPosition() == Vector2{2, 0}, "Mixed endpoint approach moved upward");
+					if (approach) require(approach == vertex, "Mixed endpoints duplicated approach");
+					approach = vertex;
+				}
+				for (uint32_t rank = 0; rank < buttons.size(); ++rank)
+				{
+					auto button = buttons[rank]; auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(centre.x == 2 && std::abs(button->getPosition().y - CORE_BUTTON_Y_OFFSET - rank * button->getSize().y * 1.25f) < 0.00001f, "Mixed endpoint order/spacing changed");
+					require(scene.getObjectAtPosition(1, centre.x, centre.y) == button, "Mixed endpoint targeting selected wrong member");
+					require(scene.lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition() == Vector2{2, 0}, "Mixed interaction moved upward");
+				}
+				require(scene.getInteractionPointPermissionRequirement(buttons[1]->getInteractionPointId()) == std::vector<AccessPermissionId>{callPermission}
+					&& scene.getInteractionPointPermissionRequirement(buttons[2]->getInteractionPointId()) == std::vector<AccessPermissionId>{ladderPermission}, "Endpoint permissions merged/swapped");
+				return buttons;
+			};
+			auto buttons = verify(world); SerializationWorkData data;
+			auto replay = [&]<typename SerializerType>()
+			{
+				auto writer = SerializerType::toString(); world.serialize(*writer, data); writer->serialize();
+				auto reader = SerializerType::fromString(writer->getSerializedString()); reader->deserialize(); World loaded("Placeholder", 1, 1);
+				require(loaded.deserialize(*reader, data), "Endpoint replay failed"); verify(loaded);
+			};
+			replay.template operator()<YamlSerializer>(); replay.template operator()<BinarySerializer>();
+			world.pauseSimulation(); auto actor = world.createAgent("Caller", room, 0, 2.0f);
+			world.grantAgentAccessPermission(actor, callPermission); require(world.resumeSimulation(), "Endpoint topology invalid");
+			auto denied = world.requestInteraction(buttons[2]->getInteractionPointId(), actor);
+			require(world.lookupInteractionRequest(denied).entity->getResult() == InteractionResult::Rejected, "Protected Ladder operation bypassed");
+			auto request = world.requestInteraction(buttons[1]->getInteractionPointId(), actor);
+			for (uint32_t tick = 0; tick < 100; ++tick)
+			{
+				world.advanceTick(); verify(world);
+				require(world.lookupAgent(actor).entity->getGlobalPosition().y == 0, "Agent climbed Button stack");
+			}
+			auto result = world.lookupInteractionRequest(request);
+			require(result && result.entity->getOperations().size() == 1, "Platform call merged endpoint operations: "
+				+ (result ? std::to_string(static_cast<int>(result.entity->getResult())) : "missing"));
+			world.pauseSimulation(); auto climber = world.createAgent("Extender", room, 0, 2.0f);
+			world.grantAgentAccessPermission(climber, ladderPermission); world.resumeSimulation();
+			auto deniedCall = world.requestInteraction(buttons[1]->getInteractionPointId(), climber);
+			require(world.lookupInteractionRequest(deniedCall).entity->getResult() == InteractionResult::Rejected, "Protected Platform call bypassed");
+			auto extension = world.requestInteraction(buttons[2]->getInteractionPointId(), climber);
+			for (uint32_t tick = 0; tick < 10; ++tick) { world.advanceTick(); verify(world); }
+			auto extended = world.lookupInteractionRequest(extension);
+			require(extended && extended.entity->getOperations().size() == 1, "Selected Ladder control did not retain extension command: "
+				+ (extended ? std::to_string(static_cast<int>(extended.entity->getResult())) : "missing"));
+			world.resetSimulation();
+			auto agent = world.lookupAgent(climber).entity;
+			auto target = world.getGraph()->getClosestVertexInSector(world.getSector(room).get(), {2.5f, 2});
+			auto path = world.getGraph()->calculatePath(agent, target);
+			require(bool(path), "Stacked Ladder lost authorized Agent route"); agent->setPath(path, true);
+			bool selectedEndpoint = false;
+			for (uint32_t tick = 0; tick < 4000; ++tick)
+			{
+				world.advanceTick(); verify(world);
+				for (auto const& interaction : world.getSimulationSnapshot().interactionRequests)
+					if (interaction.actor == climber && interaction.result != InteractionResult::Rejected)
+					{
+						require(interaction.point == buttons[2]->getInteractionPointId(), "Ladder intent operated another stacked control");
+						selectedEndpoint = true;
+					}
+				if (agent->getState() == Agent::State::Idle) break;
+			}
+			require(selectedEndpoint && agent->getGlobalPosition().y == 2, "Selected stacked Ladder traversal did not complete");
+		}
+	}
+}
+
 void runDoorTwoSidedButtonSmokeChecks()
 {
+	independentEndpointControls();
 	deterministicTransportControls();
 	placementBoundaryPreservesLegacyPolicy();
 	canonicalOrderContract();

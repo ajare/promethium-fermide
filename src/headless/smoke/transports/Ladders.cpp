@@ -76,17 +76,17 @@ namespace
 		if (movedIndex == ~0u || !world.getRoomLadderOptions(room, movedIndex, options)
 			|| !options.extensible || options.startExtended
 			|| options.directionalBatchLimit != 2) return false;
-		uint32_t insetControls = 0;
+		uint32_t endpointControls = 0;
 		for (uint32_t i = 0; i < rebuiltRoom->getNumObjects(); ++i)
 		{
 			auto control = rebuiltRoom->getObject(i);
 			if (!control || control->getObjectType() != core::SectorObjectType::InteractionPoint
-				|| control->getCellX() != 3 || (control->getCellY() != 0 && control->getCellY() != 3)) continue;
+				|| control->getCellX() != 4 || (control->getCellY() != 0 && control->getCellY() != 3)) continue;
 			auto button = control->_getObject();
 			float centerX = button->getPosition().x + button->getSize().x * 0.5f;
-			if (std::abs(centerX - 3.8f) < 0.0001f) ++insetControls;
+			if (std::abs(centerX - 4.0f) < 0.0001f) ++endpointControls;
 		}
-		if (insetControls != 2) return false;
+		if (endpointControls != 2) return false;
 		if (!world.removeRoomLadder(room, movedIndex)) return false;
 		rebuiltRoom = world.getSector(room);
 		for (uint32_t i = 0; i < rebuiltRoom->getNumObjects(); ++i)
@@ -99,7 +99,7 @@ namespace
 		{
 			auto button = control.sector->getObject(control.index)->_getObject();
 			float centerX = button->getPosition().x + button->getSize().x * 0.5f;
-			if (std::abs(centerX - 4.2f) >= 0.0001f) return false;
+			if (std::abs(centerX - 4.0f) >= 0.0001f) return false;
 		}
 		return true;
 	}

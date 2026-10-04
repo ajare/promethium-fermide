@@ -677,12 +677,12 @@ namespace persistence
 			->getLadder()->getCurrentShape(retractedMin, retractedMax);
 		require(std::abs((retractedMax.y - retractedMin.y) - 0.2f) < 0.0001f,
 			"Retracted Ladders were not rendered at the minimum 0.2 length");
-		require(std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 4.2f) < 0.0001f
-			&& std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 4.2f) < 0.0001f,
-			"Left-side Ladder controls were not placed at the cell's 0.2 offset");
-		require(std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 0.8f) < 0.0001f
-			&& std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 0.8f) < 0.0001f,
-			"Right-side Ladder controls were not placed at the cell's 0.8 offset");
+		require(std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 4.0f) < 0.0001f
+			&& std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 4.0f) < 0.0001f,
+			"Fallback Ladder controls were not placed at X offset zero");
+		require(std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 1.0f) < 0.0001f
+			&& std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 1.0f) < 0.0001f,
+			"Preferred Ladder controls were not placed at X+1 offset zero");
 
 		core::World world("Ladder editing", 10, 5);
 		std::vector<uint32_t> corridors;

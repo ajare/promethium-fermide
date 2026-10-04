@@ -967,12 +967,17 @@ namespace core
 			}
 			serializer.endArray();
 		};
-		auto readControlRequirement = [&](size_t slot, char const* field)
+		auto readControlRequirement = [&](size_t slot, char const* field, bool wide = false)
 		{
 			if (version < 27 || !serializer.hasField(field)) return;
 			serializer.beginArray(field);
 			while (serializer.nextArrayItem())
-				record.controlPermissionRequirements[slot].push_back(serializer.readUint32(""));
+			{
+				auto permission = wide ? serializer.readUint64("") : serializer.readUint32("");
+				if (permission == 0 || permission > std::numeric_limits<uint32_t>::max())
+					throw SerializationException("Invalid control Access permission ID");
+				record.controlPermissionRequirements[slot].push_back(static_cast<uint32_t>(permission));
+			}
 			serializer.endArray();
 		};
 		auto readRenamedUint32 = [&](char const* field, char const* legacyField)
@@ -1016,8 +1021,8 @@ namespace core
 			record.q = serializer.readBool("startExtended");
 			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
 			record.d = serializer.readUint32("directionalBatchLimit");
-			readControlRequirement(0, "lowControlPermissionRequirement");
-			readControlRequirement(1, "highControlPermissionRequirement"); break;
+			readControlRequirement(0, "lowControlPermissionRequirement", true);
+			readControlRequirement(1, "highControlPermissionRequirement", true); break;
 		case ConstructionType::Stairwell:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -1276,8 +1281,8 @@ namespace core
 			record.p = serializer.readBool("extensible"); record.q = serializer.readBool("startExtended");
 			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
 			record.e = serializer.readUint32("directionalBatchLimit");
-			readControlRequirement(0, "lowControlPermissionRequirement");
-			readControlRequirement(1, "highControlPermissionRequirement"); break;
+			readControlRequirement(0, "lowControlPermissionRequirement", true);
+			readControlRequirement(1, "highControlPermissionRequirement", true); break;
 		case ConstructionType::PlatformLift:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("cellsWide");
@@ -6008,13 +6013,8 @@ namespace core
 			}
 			auto candidates = getPlatformLiftStopCandidates(owner->getIndex(), plan.x - room->getCellX());
 			uint32_t lowest = ~0u;
-			auto layer = mLayers[room->getLayerIndex()];
-			bool groundLeft = plan.x > room->getCellX0() + 1
-				&& layer->getCellDefinition(plan.x - 1, plan.y).isTraversableOnFoot();
-			bool groundRight = plan.x + 1 < room->getCellX1()
-				&& layer->getCellDefinition(plan.x + 1, plan.y).isTraversableOnFoot();
 			for (auto const& stop : candidates)
-				if ((groundLeft && stop.leftButton) || (groundRight && stop.rightButton))
+				if (stop.leftButton || stop.rightButton)
 				{ lowest = stop.levelOffset; break; }
 			if (lowest == ~0u)
 			{
@@ -6914,30 +6914,7 @@ namespace core
 		for (auto stop : current.stopOffsets)
 			if (find(desired.begin(), desired.end(), stop) == desired.end())
 				plan.consequences.push_back(format("Remove PlatformLift landing, button, pathing, and stop at level {}", stop));
-		auto room = mSectors[sectorIndex];
-		auto candidates = getPlatformLiftStopCandidates(sectorIndex,
-			object->getCellX() - room->getCellX());
-		auto buttonSide = [&](vector<uint32_t> const& stops)
-		{
-			auto layer = mLayers[room->getLayerIndex()];
-			auto x = object->getCellX();
-			bool left = x > room->getCellX0() + 1
-				&& layer->getCellDefinition(x - 1, room->getCellY()).isTraversableOnFoot();
-			bool right = x + 1 < room->getCellX1()
-				&& layer->getCellDefinition(x + 1, room->getCellY()).isTraversableOnFoot();
-			for (size_t i = 1; i < stops.size(); ++i)
-			{
-				auto found = find_if(candidates.begin(), candidates.end(), [&](auto const& value)
-					{ return value.levelOffset == stops[i]; });
-				left = left && found != candidates.end() && found->leftButton;
-				right = right && found != candidates.end() && found->rightButton;
-			}
-			return right ? CORE_SIDE_RIGHT : left ? CORE_SIDE_LEFT : CORE_SIDE_MIDDLE;
-		};
-		auto oldSide = buttonSide(current.stopOffsets), newSide = buttonSide(desired);
-		if (oldSide != newSide && newSide != CORE_SIDE_MIDDLE)
-			plan.consequences.push_back(format("Move all PlatformLift landing buttons to the {} side",
-				newSide == CORE_SIDE_LEFT ? "left" : "right"));
+		plan.consequences.push_back("Recalculate PlatformLift controls independently at every Stop");
 		vector<ConstructionRecord> records;
 		plan.valid = preparePlatformLiftEdit(plan, records, plan.diagnostic);
 		return plan;
