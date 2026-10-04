@@ -64,7 +64,8 @@ namespace core
 		// Targets the World-owned Airlock Sector, never one of its owned Doors.
 		RequestAirlock,
 		SetBoothWindowState,
-		ToggleBoothWindow
+		ToggleBoothWindow,
+		PressDumbwaiterLanding
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -88,7 +89,8 @@ namespace core
 	};
 
 	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow
-	// is an activation, never coalesced, and resolves its target exactly once.
+	// and PressDumbwaiterLanding are activations, never coalesced. A landing
+	// press reserves busy at acceptance; a toggle resolves its target once.
 	struct DeviceCommand
 	{
 		DeviceCommandType type{ DeviceCommandType::SetSectorLights };
@@ -97,6 +99,7 @@ namespace core
 		TraversalResourceId traversalResource{};
 		uint32_t stopIndex{ ~0u };
 		BoothWindowId boothWindow{};
+		DumbwaiterId dumbwaiter{};
 
 		friend bool operator==(DeviceCommand const&, DeviceCommand const&) = default;
 	};

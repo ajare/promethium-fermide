@@ -2322,6 +2322,15 @@ namespace core
 				sector->mAgents.erase(agent.get());
 			}
 		}
+		std::vector<SimulationEvent> cancelledDumbwaiters;
+		for (auto const& sector : mSectors)
+			if (auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector); unit && unit->isBusy())
+			{
+				auto previousEventCount = mEvents.size();
+				mSimulationCoordinator.resetDumbwaiter(*unit);
+				if (!preserveBehaviourRuntime && mEvents.size() > previousEventCount)
+					cancelledDumbwaiters.push_back(mEvents.back());
+			}
 		mAgents = {};
 		mAgentIds.clear();
 		// Agent groups are deliberately not cleared here. Every reset-and-replay
@@ -2392,6 +2401,12 @@ namespace core
 		mTickOperations.clear();
 		mCurrentPhase = SimulationPhase::None;
 		if (!preserveBehaviourRuntime) mEvents.clear();
+		for (auto& event : cancelledDumbwaiters)
+		{
+			event.sequence = mNextEventSequence++;
+			event.tick = mSimulationTick;
+			mEvents.push_back(std::move(event));
+		}
 		mTraversalWaitingPolicy = {};
 		mTraversalGeometryPolicy = {};
 		mBuildFinished = false;

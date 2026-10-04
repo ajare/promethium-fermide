@@ -20,7 +20,7 @@ namespace
 		for (uint32_t initial : {0u, 1u})
 		{
 			auto world = dumbwaiter_fixture::make();
-			world->addDumbwaiter(1, 0, 2, {initial, 2}); world->finishBuild();
+			auto id = world->addDumbwaiter(1, 0, 2, {initial, 2}); world->finishBuild();
 			for (uint32_t layer : {0u, 1u})
 			{
 				gUISettings.visibleLayer = layer;
@@ -56,6 +56,53 @@ namespace
 				triangle && triangle->colour == IM_COL32(180, 190, 205, 255)) ++car;
 			require(car == 2, "Wireframe leaked a second filled car over landing Layer");
 			gUISettings.renderNextLayerWireframe = false;
+			auto unit = world->lookupDumbwaiter(id);
+			require(bool(unit), "Runtime render fixture lost unit");
+			world->resumeSimulation(); world->pressDumbwaiterLanding(unit->getId(), initial);
+			unsigned elapsed = 0;
+			for (unsigned ticks : {12u, 48u, 108u, 168u, 192u, 216u})
+			{
+				require(world->advanceTicks(ticks - elapsed), "Runtime render tick failed"); elapsed = ticks;
+				for (uint32_t layer : {0u, 1u})
+				{
+					gUISettings.visibleLayer = layer;
+					WorldDrawList motion({{0, 0}, {1200, 800}}); renderWorld(world, &motion);
+					unsigned busy = 0, carCount = 0, here = 0, elsewhere = 0;
+					float low = 10000, high = -10000;
+					for (auto const& command : motion.commands())
+						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+						{
+							if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
+							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here;
+							if (triangle->colour == IM_COL32(200, 160, 80, 255)) ++elsewhere;
+							if (triangle->colour == IM_COL32(180, 190, 205, 255))
+							{
+								++carCount;
+								for (auto p : triangle->positions) { low = std::min(low, p.y); high = std::max(high, p.y); }
+								if (layer == 0)
+								{
+									auto shutter = ticks <= 48 ? unit->getAperture(initial) : unit->getAperture(1 - initial);
+									auto fullHeight = 48.0f * 38 / 48;
+									require(triangle->clip.maximum.x - triangle->clip.minimum.x < 52
+										&& triangle->clip.maximum.y - triangle->clip.minimum.y <= fullHeight * shutter->getProgress() + 0.001f,
+										"Moving car escaped current shutter/depth clip");
+								}
+							}
+						}
+					if (layer == 1)
+						require(carCount == 2 && std::abs(low - (800 - (unit->getCarPosition().y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f
+							&& std::abs(high - (800 - (unit->getCarPosition().y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f,
+							"Production shaft car did not follow physical intermediate position");
+					else
+					{
+						if (ticks >= 48 && ticks <= 168) require(carCount == 0, "Closed travel apertures expose moving car");
+						else require(carCount == 2, "Uncovered aperture lost car");
+					}
+					require(busy == (layer == 0 && ticks < 216 ? 4u : 0u)
+						&& here == (layer == 0 && ticks == 216 ? 2u : 0u) && elsewhere == here,
+						"Buttons did not show both busy until arrival fully opened");
+				}
+			}
 		}
 		{
 			auto world = dumbwaiter_fixture::make(0, true, 2);

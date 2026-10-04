@@ -1,11 +1,23 @@
 #include "core/World.h"
 #include "core/Exceptions.h"
+#include "core/StaircaseTransit.h"
+#include "core/Agent.h"
+#include "core/ExtensibleObject.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
 namespace core
 {
+	DeviceOperationId World::pressDumbwaiterLanding(DumbwaiterId id, uint32_t stop)
+	{
+		DeviceCommand command;
+		command.type = DeviceCommandType::PressDumbwaiterLanding;
+		command.dumbwaiter = id;
+		command.stopIndex = stop;
+		return submitDeviceCommand(command);
+	}
+
 	bool World::hasDumbwaiters() const
 	{
 		return std::any_of(mSectors.begin(), mSectors.end(), [](auto const& sector)
@@ -110,8 +122,15 @@ namespace core
 			if (record.type == ConstructionType::Dumbwaiter && record.dumbwaiterId == id)
 			{
 				if (record.c == options.initialStop && record.x == options.travelSeconds) return false;
+				// Configuration is device-local, not a whole-World replay. In
+				// particular it must not reset unrelated Agents or moving devices.
+				auto unit = std::const_pointer_cast<Dumbwaiter>(lookupDumbwaiter(id));
+				unit->mInitialStop = options.initialStop;
+				unit->mTravelSeconds = options.travelSeconds;
+				mSimulationCoordinator.resetDumbwaiter(*unit);
 				record.c = options.initialStop; record.x = options.travelSeconds;
-				rebuildFromConstructionRecords(std::move(records));
+				mConstructionRecords = std::move(records);
+				modify();
 				return true;
 			}
 		return false;
@@ -151,7 +170,91 @@ namespace core
 			}
 			records.push_back(std::move(record));
 		}
-		rebuildFromConstructionRecords(std::move(records));
+		// Validate the authored result before mutation, but do not replay the
+		// live World: that would reset unrelated devices and their operations.
+		auto candidate = makeCandidateWorld();
+		candidate->mDeserializingConstruction = true;
+		for (auto const& record : records) candidate->applyConstructionRecord(record);
+		candidate->finishBuild();
+		beginStructuralEdit("removeDumbwaiter");
+		mSimulationCoordinator.resetDumbwaiter(*std::const_pointer_cast<Dumbwaiter>(unit));
+		for (uint32_t stop = 0; stop < 2; ++stop)
+		{
+			auto booth = unit->getAperture(stop);
+			mBoothWindows.erase(booth->getDeviceId());
+			auto landing = std::const_pointer_cast<Sector>(unit->getStop(stop).sector);
+			for (auto& object : landing->mObjects)
+				if (auto window = std::dynamic_pointer_cast<WindowSectorObject>(object);
+					window && window->getWindow() == booth) object.reset();
+			auto& front = mLayers[unit->getLayerIndex() - 1]->getCellDefinition(unit->getCellX(), unit->getCellY() + stop);
+			front.sectorObjectType = SectorObjectType::None;
+			front.sectorObjectIndex = ~0u;
+			mLayers[unit->getLayerIndex()]->getCellDefinition(unit->getCellX(), unit->getCellY() + stop) = {};
+		}
+		auto remap = [removedIndex](SectorId& sector)
+		{
+			if (sector.value == uint64_t(removedIndex) + 1) sector = {};
+			else if (sector.value > uint64_t(removedIndex) + 1) --sector.value;
+		};
+		for (auto& layer : mLayers)
+			for (uint32_t y = 0; y < mLevelsHigh; ++y)
+				for (uint32_t x = 0; x < mCellsWide; ++x)
+				{
+					auto& cell = layer->getCellDefinition(x, y);
+					if (cell.occupied() && cell.sectorIndex > removedIndex) --cell.sectorIndex;
+				}
+		mSectors.erase(mSectors.begin() + removedIndex);
+		for (uint32_t index = removedIndex; index < mSectors.size(); ++index)
+		{
+			mSectors[index]->mIndex = index;
+			if (auto stairs = std::dynamic_pointer_cast<StaircaseTransit>(mSectors[index]))
+				stairs->getStaircase()->mSectorIndex = index;
+		}
+		for (auto const& [pointId, point] : mInteractionPoints.entries())
+		{
+			(void)pointId; remap(point->mSector);
+			for (auto& binding : point->mBindings) remap(binding.command.target);
+		}
+		for (auto const& [operationId, operation] : mDeviceOperations.entries())
+		{ (void)operationId; remap(operation->mCommand.target); }
+		for (auto const& [resourceId, resource] : mTraversalResources.entries())
+		{
+			(void)resourceId; remap(resource->mLiftSector); remap(resource->mLadderSector);
+			for (auto& stop : resource->mLiftStops) remap(stop.locationSector);
+			for (auto& door : resource->mShuttleDoors) remap(door.locationSector);
+			for (auto& lane : resource->mQueueLanes) remap(lane.sector);
+			for (auto& sector : resource->mDoorRouteObservationKey.sectors) remap(sector);
+			if (resource->mExtensible)
+			{
+				std::set<SectorId> controls;
+				for (auto sector : resource->mExtensible->mExtensionControlSectors) { remap(sector); controls.insert(sector); }
+				resource->mExtensible->mExtensionControlSectors = std::move(controls);
+			}
+		}
+		for (auto& [agentId, intent] : mPausedPathIntents)
+		{ (void)agentId; remap(intent.destinationSector); }
+		for (auto& [agentId, goal] : mMovementGoals)
+		{
+			(void)agentId; remap(goal.sector);
+			if (goal.fallbackIntent) remap(goal.fallbackIntent->destinationSector);
+		}
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			std::map<uint32_t, DeviceCondition> conditions;
+			for (auto const& [index, condition] : agent->mRememberedEscalatorConditions)
+				conditions.emplace(index > removedIndex ? index - 1 : index, condition);
+			agent->mRememberedEscalatorConditions = std::move(conditions);
+		}
+		for (auto& control : mPhysicalControlPlacements)
+			if (control.sectorIndex > removedIndex) --control.sectorIndex;
+		auto removedRecord = std::find_if(mConstructionRecords.begin(), mConstructionRecords.end(),
+			[id](auto const& record) { return record.type == ConstructionType::Dumbwaiter && record.dumbwaiterId == id; });
+		auto recordIndex = size_t(removedRecord - mConstructionRecords.begin());
+		for (auto& [point, requirement] : mAuthoredControlRequirements)
+		{ (void)point; if (requirement.constructionRecord > recordIndex) ++requirement.constructionRecord; }
+		mConstructionRecords = std::move(records);
+		finishBuild();
 		return true;
 	}
 }

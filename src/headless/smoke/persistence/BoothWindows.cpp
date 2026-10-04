@@ -20,6 +20,30 @@ namespace persistence
 			};
 			return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
 		};
+		for (uint32_t initial : {0u, 1u}) for (unsigned ticks : {0u, 12u, 80u, 180u})
+		{
+			auto running = dumbwaiter_fixture::make();
+			auto device = running->addDumbwaiter(1, 0, 2, {initial, 2}); running->finishBuild();
+			auto idleYaml = write(*running, false), idleBinary = write(*running, true);
+			running->resumeSimulation(); running->pressDumbwaiterLanding(device, initial);
+			require(running->advanceTicks(ticks), "Mid-cycle save setup failed");
+			for (bool binary : {false, true})
+			{
+				auto data = write(*running, binary);
+				require(data == (binary ? idleBinary : idleYaml), "Mid-cycle document contains runtime motion or requests");
+				std::unique_ptr<core::Serializer> reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				reader->deserialize(); core::SerializationWorkData work; core::World restored("Restored", 1, 1);
+				require(restored.deserialize(*reader, work), "Mid-cycle document refused");
+				auto unit = restored.lookupDumbwaiter(device);
+				require(unit && !unit->isBusy() && unit->getCarPosition().y == float(initial)
+					&& unit->getAperture(initial)->getProgress() == 1 && unit->getAperture(1 - initial)->getProgress() == 0
+					&& restored.getSimulationSnapshot().deviceOperations.empty(), "Load restored in-flight state instead of authored initial state");
+				auto operation = restored.pressDumbwaiterLanding(device, 1 - initial);
+				require(restored.advanceTicks(216) && restored.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded,
+					"Mid-cycle document did not restore an operable unit");
+			}
+		}
 		auto baseline = write(*world, false);
 		for (bool binary : {false, true})
 		{

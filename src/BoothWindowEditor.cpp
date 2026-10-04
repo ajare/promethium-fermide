@@ -125,11 +125,23 @@ bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
 {
 	ImGui::Text("Dumbwaiter identity: %llu", static_cast<unsigned long long>(unit->getId().value));
 	ImGui::TextUnformatted("Fixed 1 x 2 shaft; one empty car; two adjacent-Level Stops. No passengers.");
-	ImGui::Text("Car Level: %u", unit->getCellY() + unit->getInitialStop());
-	ImGui::TextDisabled("Landing buttons are not operational in this authoring slice.");
+	ImGui::Text("Phase: %s; car Level: %.3f", unit->getPhaseName(), unit->getCarPosition().y);
 	for (uint32_t stop = 0; stop < 2; ++stop)
-		ImGui::Text("%s: %s; shutter %s", stop == 0 ? "Lower" : "Upper",
-			unit->getStop(stop).sector->getName().c_str(), stop == unit->getInitialStop() ? "Open" : "Closed");
+	{
+		auto booth = unit->getAperture(stop);
+		auto state = booth->getState();
+		ImGui::Text("%s: %s; shutter %s (%.0f%%)", stop == 0 ? "Lower" : "Upper",
+			unit->getStop(stop).sector->getName().c_str(), state == core::Window::State::Open ? "Open"
+			: state == core::Window::State::Closed ? "Closed" : state == core::Window::State::Opening ? "Opening" : "Closing",
+			booth->getProgress() * 100);
+		ImGui::BeginDisabled(unit->isBusy());
+		if (ImGui::Button(stop == 0 ? "Press lower landing" : "Press upper landing"))
+			world->pressDumbwaiterLanding(unit->getId(), stop);
+		ImGui::EndDisabled();
+	}
+	if (auto operation = world->lookupDeviceOperation(unit->getOperation()); operation)
+		ImGui::Text("Operation: %llu (%s)", static_cast<unsigned long long>(unit->getOperation().value),
+			operation.entity->getState() == core::DeviceOperationState::Running ? "Running" : "Pending");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	int initial = static_cast<int>(unit->getInitialStop());
 	float seconds = unit->getTravelSeconds();

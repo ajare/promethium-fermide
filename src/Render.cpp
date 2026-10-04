@@ -963,8 +963,10 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 		core::Vector2 buttonMin{position.x + 0.82f, position.y + 0.10f};
 		core::Vector2 buttonMax{position.x + 0.88f, position.y + 0.20f};
 		transformPosition(buttonMin); transformPosition(buttonMax);
-		drawList->AddRectFilled({buttonMin.x, buttonMax.y}, {buttonMax.x, buttonMin.y},
-			booth->getProgress() == 1 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255));
+		auto unit = gRenderWorld ? gRenderWorld->lookupDumbwaiter(booth->getDumbwaiterOwner()) : nullptr;
+		auto colour = unit && unit->isBusy() ? IM_COL32(220, 80, 80, 255)
+			: booth->getProgress() == 1 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255);
+		drawList->AddRectFilled({buttonMin.x, buttonMax.y}, {buttonMax.x, buttonMin.y}, colour);
 	}
 }
 

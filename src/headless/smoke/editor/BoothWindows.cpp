@@ -35,7 +35,7 @@ namespace
 			ImGui::End(); ImGui::Render();
 		};
 		frame();
-		auto click = [&](char const* label) {
+		auto click = [&](char const* label, bool slider = true) {
 			auto window = ImGui::FindWindowByName("Dumbwaiter Selection"); auto control = window->GetID(label);
 			bool found = false; ImVec2 point;
 			for (float y = 35; y < 400 && !found; y += 7) for (float x = 15; x < 400 && !found; x += 15)
@@ -44,7 +44,7 @@ namespace
 				if (ImGui::GetHoveredID() == control) { found = true; point = {x, y}; }
 			}
 			require(found, std::string("Missing Dumbwaiter Selection control: ") + label);
-			io.AddMousePosEvent(point.x + 100, point.y); frame();
+			io.AddMousePosEvent(point.x + (slider ? 100 : 0), point.y); frame();
 			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
 		};
 		click("Travel time (seconds)");
@@ -65,9 +65,23 @@ namespace
 		bool refused = false; try { makeBoothWindowClipboardObject(*world, *aperture); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "Owned aperture can be copied independently");
-		// No enabled nonfunctional button press is exposed by the actual panel.
-		require(world->getSimulationSnapshot().deviceOperations.empty(), "Static Selection introduced device work");
-		click("Delete Dumbwaiter");
+		auto authored = captureDocumentSnapshot(world)->yaml;
+		auto historyCount = gWorldDocumentHistory.undoCount();
+		click("Press lower landing", false);
+		require(world->lookupDumbwaiter(id)->isBusy() && world->getSimulationSnapshot().deviceOperations.size() == 1,
+			"Actual runtime Selection did not submit typed landing press");
+		require(world->resumeSimulation() && world->advanceTicks(12), "Runtime Selection cycle setup failed");
+		world->pauseSimulation(); frame();
+		require(world->lookupDumbwaiter(id)->getPhase() == core::DumbwaiterPhase::Closing
+			&& captureDocumentSnapshot(world)->yaml == authored && gWorldDocumentHistory.undoCount() == historyCount,
+			"Runtime Selection press authored progress/history");
+		world->configureDumbwaiter(id, {1, 0.1f});
+		click("Press upper landing", false);
+		require(world->resumeSimulation() && world->advanceTicks(102), "Runtime Selection upper send failed");
+		world->pauseSimulation(); frame();
+		require(world->lookupDumbwaiter(id)->getCarPosition().y == 0 && !world->lookupDumbwaiter(id)->isBusy(),
+			"Selection upper control did not send to lower landing and open arrival");
+		click("Delete Dumbwaiter", false);
 		require(!world->lookupDumbwaiter(id) && gWorldDocumentHistory.undoCount() == 3, "Selection whole-unit deletion failed");
 		undo(); require(world->lookupDumbwaiter(id)->getAperture(0)->getDumbwaiterOwner() == id, "Delete undo lost owned children");
 		redo(); require(!world->lookupDumbwaiter(id), "Delete redo failed");

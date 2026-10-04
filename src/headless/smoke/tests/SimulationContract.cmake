@@ -148,6 +148,8 @@ set(core_names
     boothWindows/typedInteractionActivation
     boothWindows/backSideAgentPanel
     boothWindows/ownedPanelLifecycle
+    dumbwaiters/interlockedCallSendAndTiming
+    dumbwaiters/pauseAndCancellation
     runScaledWorld
 )
 

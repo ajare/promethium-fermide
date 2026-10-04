@@ -189,6 +189,7 @@ namespace core
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
 			if (command.type != DeviceCommandType::ToggleBoothWindow
+				&& command.type != DeviceCommandType::PressDumbwaiterLanding
 				&& !broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
 			{
@@ -207,7 +208,8 @@ namespace core
 			: command.type == DeviceCommandType::SelectShuttleDestination ? "Select shuttle destination"
 				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock"
 				: command.type == DeviceCommandType::ToggleBoothWindow ? "Toggle BoothWindow shutter"
-				: command.type == DeviceCommandType::SetBoothWindowState ? "Set BoothWindow shutter target" : "Device command";
+				: command.type == DeviceCommandType::SetBoothWindowState ? "Set BoothWindow shutter target"
+				: command.type == DeviceCommandType::PressDumbwaiterLanding ? "Press Dumbwaiter landing" : "Device command";
 		if (!missing.empty())
 		{
 			name += ": missing Access permissions";
@@ -446,6 +448,37 @@ namespace core
 
 	DeviceOperationId SimulationCoordinator::submitDeviceCommand(DeviceCommand const& command)
 	{
+		if (command.type == DeviceCommandType::PressDumbwaiterLanding)
+		{
+			auto unit = std::const_pointer_cast<Dumbwaiter>(mWorld.lookupDumbwaiter(command.dumbwaiter));
+			if (!unit || command.stopIndex > 1) return {};
+			mWorld.invalidateSimulationSnapshot();
+			auto id = findOrCreateDeviceOperation(command, {});
+			auto operation = mWorld.mDeviceOperations.find(id);
+			if (unit->isBusy()) operation->mState = DeviceOperationState::Rejected;
+			else
+			{
+				// Admission reserves the whole cycle before any physical tick. A
+				// press is never coalesced, queued, reversed, or replayed later.
+				unit->mOperation = id;
+				unit->mDestination = 1 - unit->mCurrentStop;
+				unit->mTravelTicks = 0;
+				unit->mPhase = DumbwaiterPhase::Closing;
+				operation->mActivated = true;
+				operation->mState = DeviceOperationState::Running;
+				auto departure = std::const_pointer_cast<BoothWindow>(unit->mApertures[unit->mCurrentStop]);
+				departure->mTargetOpen = false;
+				departure->refreshState();
+			}
+			// Publish the admission outcome immediately, including busy refusal.
+			SimulationEvent event;
+			event.sequence = mWorld.mNextEventSequence++;
+			event.tick = mWorld.mSimulationTick;
+			event.type = SimulationEventType::DeviceOperationChanged;
+			event.deviceOperation = makeDeviceOperationSnapshot(id, *operation);
+			mWorld.mEvents.push_back(std::move(event));
+			return id;
+		}
 		// Editor activation uses exactly the same operations as Interaction bindings.
 		// No Agent, admission resource, or document/history mutation is involved.
 		if ((command.type != DeviceCommandType::SetBoothWindowState
@@ -633,6 +666,7 @@ namespace core
 				}
 				continue;
 			}
+			if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding) continue;
 			if (operation->mState != DeviceOperationState::Running)
 			{
 				continue;
@@ -748,6 +782,7 @@ namespace core
 				booth->refreshState();
 			}
 		}
+		advanceDumbwaiters();
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 			if (operation->mState == DeviceOperationState::Running
 				&& (operation->mCommand.type == DeviceCommandType::SetBoothWindowState
@@ -758,6 +793,79 @@ namespace core
 					touchDeviceOperation(id, *operation);
 					operation->mState = DeviceOperationState::Succeeded;
 				}
+	}
+
+	void SimulationCoordinator::resetDumbwaiter(Dumbwaiter& unit)
+	{
+		mWorld.invalidateSimulationSnapshot();
+		if (auto operation = mWorld.mDeviceOperations.find(unit.mOperation);
+			operation && (operation->mState == DeviceOperationState::Running || operation->mState == DeviceOperationState::Pending))
+		{
+			operation->mState = DeviceOperationState::Cancelled;
+			SimulationEvent event;
+			event.sequence = mWorld.mNextEventSequence++;
+			event.tick = mWorld.mSimulationTick;
+			event.type = SimulationEventType::DeviceOperationChanged;
+			event.deviceOperation = makeDeviceOperationSnapshot(unit.mOperation, *operation);
+			mWorld.mEvents.push_back(std::move(event));
+		}
+		unit.mOperation = {};
+		unit.mPhase = DumbwaiterPhase::Idle;
+		unit.mCurrentStop = unit.mInitialStop;
+		unit.mCarOffset = float(unit.mInitialStop);
+		unit.mTravelTicks = 0;
+		for (uint32_t stop = 0; stop < 2; ++stop)
+		{
+			auto booth = std::const_pointer_cast<BoothWindow>(unit.mApertures[stop]);
+			booth->mTargetOpen = stop == unit.mInitialStop;
+			booth->mProgress = booth->mTargetOpen ? 1.0f : 0.0f;
+			booth->refreshState();
+		}
+	}
+
+	void SimulationCoordinator::advanceDumbwaiters()
+	{
+		for (auto const& sector : mWorld.mSectors)
+		{
+			auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector);
+			if (!unit || !unit->isBusy()) continue;
+			switch (unit->mPhase)
+			{
+			case DumbwaiterPhase::Closing:
+				if (unit->mApertures[unit->mCurrentStop]->getProgress() == 0)
+					unit->mPhase = DumbwaiterPhase::Travelling;
+				break;
+			case DumbwaiterPhase::Travelling:
+			{
+				++unit->mTravelTicks;
+				auto amount = std::min(1.0f, float(unit->mTravelTicks) * World::getFixedTimestep() / unit->mTravelSeconds);
+				if (amount > 1.0f - 1e-6f) amount = 1;
+				unit->mCarOffset = float(unit->mCurrentStop) + (float(unit->mDestination) - float(unit->mCurrentStop)) * amount;
+				if (amount == 1)
+				{
+					unit->mCurrentStop = unit->mDestination;
+					unit->mPhase = DumbwaiterPhase::Opening;
+					auto arrival = std::const_pointer_cast<BoothWindow>(unit->mApertures[unit->mCurrentStop]);
+					arrival->mTargetOpen = true;
+					arrival->refreshState();
+				}
+				break;
+			}
+			case DumbwaiterPhase::Opening:
+				if (unit->mApertures[unit->mCurrentStop]->getProgress() == 1)
+				{
+					if (auto operation = mWorld.mDeviceOperations.find(unit->mOperation))
+					{
+						touchDeviceOperation(unit->mOperation, *operation);
+						operation->mState = DeviceOperationState::Succeeded;
+					}
+					unit->mOperation = {};
+					unit->mPhase = DumbwaiterPhase::Idle;
+				}
+				break;
+			default: break;
+			}
+		}
 	}
 
 	void SimulationCoordinator::pressPhysicalControl(InteractionPointId pointId)

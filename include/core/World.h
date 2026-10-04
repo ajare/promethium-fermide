@@ -2633,9 +2633,10 @@ namespace core
 
 		EntityRemovalResult removeInteractionRequest(InteractionRequestId id);
 
-		// Activate a BoothWindow editor/device command without an authored edit.
+		// Activate a BoothWindow or Dumbwaiter user command without an authored edit.
 		// Other device commands continue to activate through Interaction points.
 		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+		DeviceOperationId pressDumbwaiterLanding(DumbwaiterId id, uint32_t stop);
 		std::shared_ptr<const BoothWindow> lookupBoothWindow(BoothWindowId id) const;
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);

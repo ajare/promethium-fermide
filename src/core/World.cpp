@@ -8205,6 +8205,10 @@ namespace core
 			candidate->validate();
 			validateTraversalTopology(*candidate);
 			mGraph = std::move(candidate);
+			if (mTopologyDirty)
+				for (auto const& sector : mSectors)
+					if (auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector))
+						mSimulationCoordinator.resetDumbwaiter(*unit);
 			mTopologyDirty = false;
 			mTopologyValid = true;
 			mTopologyDiagnostic.clear();
