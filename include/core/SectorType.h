@@ -17,7 +17,8 @@ namespace core
 		Stairwell,
 		Staircase,
 		Airlock,
-		Chamber
+		Chamber,
+		Dumbwaiter
 	};
 
 	std::string getSectorTypeString(SectorType type);

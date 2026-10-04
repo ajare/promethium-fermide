@@ -120,11 +120,42 @@ core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> c
 	return world->submitDeviceCommand(command);
 }
 
+bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<const core::Dumbwaiter> const& unit)
+{
+	ImGui::Text("Dumbwaiter identity: %llu", static_cast<unsigned long long>(unit->getId().value));
+	ImGui::TextUnformatted("Fixed 1 x 2 shaft; one empty car; two adjacent-Level Stops. No passengers.");
+	ImGui::Text("Car Level: %u", unit->getCellY() + unit->getInitialStop());
+	ImGui::TextDisabled("Landing buttons are not operational in this authoring slice.");
+	for (uint32_t stop = 0; stop < 2; ++stop)
+		ImGui::Text("%s: %s; shutter %s", stop == 0 ? "Lower" : "Upper",
+			unit->getStop(stop).sector->getName().c_str(), stop == unit->getInitialStop() ? "Open" : "Closed");
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	int initial = static_cast<int>(unit->getInitialStop());
+	float seconds = unit->getTravelSeconds();
+	bool changed = ImGui::Combo("Initial Stop", &initial, "Lower\0Upper\0");
+	changed = ImGui::SliderFloat("Travel time (seconds)", &seconds, 0.1f, 60.0f) || changed;
+	bool remove = ImGui::Button("Delete Dumbwaiter");
+	ImGui::EndDisabled();
+	if (!changed && !remove) return false;
+	auto before = captureDocumentSnapshot(world);
+	bool result = remove ? world->removeDumbwaiter(unit->getId())
+		: world->configureDumbwaiter(unit->getId(), {static_cast<uint32_t>(initial), seconds});
+	if (result) commitDocumentEdit(std::move(before));
+	return result;
+}
+
 bool renderBoothWindowPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::WindowSectorObject> const& object)
 {
 	auto booth = object->getWindow();
 	core::World::CreateWindowOptions options;
+	if (auto owned = std::dynamic_pointer_cast<const core::BoothWindow>(booth); owned && owned->getDumbwaiterOwner())
+	{
+		ImGui::TextUnformatted("Dumbwaiter-owned BoothWindow");
+		ImGui::TextDisabled("Edit or delete the complete unit on its shaft Layer. No independent shutter control.");
+		return false;
+	}
 	ImGui::TextUnformatted("BoothWindow");
 	ImGui::Text("Position: %u, %u; Layer pair: %u / %u", object->getCellX(), object->getCellY(),
 		booth->getFrontLayer(), booth->getBackLayer());

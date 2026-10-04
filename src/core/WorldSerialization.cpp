@@ -152,6 +152,7 @@ namespace core
 		case ConstructionType::Door: return "door";
 		case ConstructionType::Window: return "window";
 		case ConstructionType::BoothWindow: return "boothWindow";
+		case ConstructionType::Dumbwaiter: return "dumbwaiter";
 		case ConstructionType::BulkheadDoor: return "bulkheadDoor";
 		case ConstructionType::LightSwitch: return "lightSwitch";
 		case ConstructionType::ForceBridge: return "forceBridge";
@@ -173,7 +174,7 @@ namespace core
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
 		if (name == "securityScanner") return ConstructionType::Chamber; // Legacy scanner migration.
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::BoothWindow); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Dumbwaiter); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -196,6 +197,7 @@ namespace core
 		case ConstructionType::Shuttle:
 		case ConstructionType::Airlock:
 		case ConstructionType::Chamber:
+		case ConstructionType::Dumbwaiter:
 			return true;
 		default:
 			return false;
@@ -423,6 +425,14 @@ namespace core
 					serializer.endArray();
 				}
 			break;
+		case ConstructionType::Dumbwaiter:
+			serializer.writeUint64("id", record.dumbwaiterId.value);
+			serializer.writeUint32("layer", record.layer);
+			serializer.writeUint32("y", record.a);
+			serializer.writeUint32("x", record.b);
+			serializer.writeUint32("initialStop", record.c);
+			serializer.writeFloat("travelSeconds", record.x);
+			break;
 		case ConstructionType::BoothWindow:
 			if (record.d != 1 || record.e != 1 || record.p || record.j != 0
 				|| (record.i != 0 && record.i != 2))
@@ -591,7 +601,9 @@ namespace core
 		// Version 44 adds authored BoothWindow panel requirements.
 		// Version 45 expands scanner records into Chamber with an explicit subtype.
 		// Version 46 adds width-capacity Decontamination Chambers.
-		serializer.writeUint32("version", 46);
+		// Version 47 adds complete authored Dumbwaiter units and stable identity.
+		serializer.writeUint32("version", 47);
+		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
 		serializer.writeUint32("cellsWide", mCellsWide);
@@ -1092,6 +1104,17 @@ namespace core
 					serializer.endArray();
 				}
 			break;
+		case ConstructionType::Dumbwaiter:
+			if (version < 47) throw SerializationException("Dumbwaiter requires World schema version 47");
+			record.dumbwaiterId = DumbwaiterId{serializer.readUint64("id")};
+			record.layer = readLayer("layer");
+			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
+			record.c = serializer.readUint32("initialStop"); record.x = serializer.readFloat("travelSeconds");
+			if (serializer.hasField("cellsWide") || serializer.hasField("levelsHigh")
+				|| serializer.hasField("stopOffsets") || serializer.hasField("traversable")
+				|| serializer.hasField("initiallyBroken"))
+				throw SerializationException("Dumbwaiter dimensions, Stops and non-passenger identity are fixed");
+			break;
 		case ConstructionType::BoothWindow:
 		{
 			if (version < 43) throw SerializationException("BoothWindow requires World schema version 43");
@@ -1279,7 +1302,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 46)
+		if (version < 1 || version > 47)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1472,6 +1495,13 @@ namespace core
 			}
 		}
 
+		uint64_t highestDumbwaiterId = 0;
+		for (auto const& record : records)
+			if (record.type == ConstructionType::Dumbwaiter)
+				highestDumbwaiterId = std::max(highestDumbwaiterId, record.dumbwaiterId.value);
+		auto nextDumbwaiterId = version >= 47 ? serializer.readUint64("nextDumbwaiterId") : uint64_t{1};
+		if (nextDumbwaiterId == 0 || nextDumbwaiterId <= highestDumbwaiterId)
+			throw SerializationException("Invalid next Dumbwaiter identity");
 		uint64_t nextMarkerId = highestMarkerId == numeric_limits<uint64_t>::max()
 			? 0 : highestMarkerId + 1;
 		if (version >= 11)
@@ -1894,6 +1924,7 @@ namespace core
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;
+		mNextDumbwaiterId = std::max(mNextDumbwaiterId, nextDumbwaiterId);
 		mAgentTagRegistryReference = std::move(agentTagRegistryReference);
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
 		mAgentTagRegistry.reset();
@@ -2502,6 +2533,9 @@ namespace core
 				}
 			break;
 		}
+		case ConstructionType::Dumbwaiter:
+			createDumbwaiter(record.layer, record.a, record.b, {record.c, record.x}, record.dumbwaiterId);
+			break;
 		case ConstructionType::BoothWindow:
 		{
 			auto created = addWindowAperture(record.a, record.b, record.c, record.d, record.e,
@@ -3028,6 +3062,7 @@ namespace core
 	vector<World::ConstructionRecord> World::recordsWithoutLayer(uint32_t layerIndex,
 		LayerDeleteImpact& impact) const
 	{
+		if (hasDumbwaiters()) throw WorldException(this, "Delete Dumbwaiters before deleting Layers; unit reconciliation is not yet supported");
 		impact = {};
 		impact.sectorRemoved.assign(mSectors.size(), false);
 
@@ -3203,6 +3238,7 @@ namespace core
 	vector<World::ConstructionRecord> World::recordsWithoutLevel(uint32_t level,
 		vector<bool>& removed, vector<string>& consequences) const
 	{
+		if (hasDumbwaiters()) throw WorldException(this, "Delete Dumbwaiters before deleting Levels; unit reconciliation is not yet supported");
 		removed.assign(mSectors.size(), false);
 		for (auto const& sector : mSectors)
 			if (sector) removed[sector->getIndex()] = sector->getCellY() <= level
@@ -4894,6 +4930,11 @@ namespace core
 		vector<ConstructionRecord>& records, uint32_t& newSectorIndex,
 		string& diagnostic) const
 	{
+		for (auto const& sector : mSectors)
+			if (auto unit = dynamic_pointer_cast<const Dumbwaiter>(sector))
+				for (uint32_t stop = 0; stop < 2; ++stop)
+					if (unit->getStop(stop).sector->getIndex() == plan.sectorIndex)
+					{ diagnostic = "Delete the dependent Dumbwaiter before editing its landing Location footprint"; return false; }
 		auto createsSector = [](ConstructionType type)
 		{
 			return constructionTypeCreatesSector(type);
@@ -5323,6 +5364,9 @@ namespace core
 			return false;
 		}
 
+		if (auto window = dynamic_pointer_cast<const WindowSectorObject>(object))
+			if (auto booth = dynamic_pointer_cast<const BoothWindow>(window->getWindow()); booth && booth->getDumbwaiterOwner())
+			{ diagnostic = "Dumbwaiter-owned apertures cannot be moved independently"; return false; }
 		if (isChamberOwnedObject(object))
 		{
 			diagnostic = isAirlockOwnedObject(object) ? "Airlock-owned Doors and controls are fixed"
@@ -6773,6 +6817,7 @@ namespace core
 		if (!object) return false;
 
 		auto window = object->getWindow();
+		if (auto booth = dynamic_pointer_cast<BoothWindow>(window); booth && booth->getDumbwaiterOwner()) return false;
 		auto sourceX = object->getCellX();
 		auto sourceY = object->getCellY();
 		auto sourceLayer = object->getSector()->getLayerIndex();

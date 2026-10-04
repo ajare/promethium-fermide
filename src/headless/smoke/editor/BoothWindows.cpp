@@ -7,9 +7,71 @@
 #include "core/YamlSerializer.h"
 #include "imgui/imgui_internal.h"
 #include <cmath>
+#include "../support/DumbwaiterFixture.h"
 
 namespace
 {
+	void dumbwaiterHistory(smoke::Context const&)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = dumbwaiter_fixture::make(); gWorldDocumentHistory.clear();
+		auto before = captureDocumentSnapshot(world);
+		auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild();
+		commitDocumentEdit(std::move(before));
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData work;
+			bool result = world->deserialize(*input, work); world->pauseSimulation(); return result;
+		};
+		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dumbwaiter undo failed"); };
+		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dumbwaiter redo failed"); };
+		undo(); require(!world->lookupDumbwaiter(id), "Creation undo retained unit");
+		redo(); require(bool(world->lookupDumbwaiter(id)), "Creation redo lost unit identity");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1400, 900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		auto frame = [&] {
+			ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1000, 600});
+			ImGui::Begin("Dumbwaiter Selection");
+			if (auto unit = world->lookupDumbwaiter(id)) renderDumbwaiterPanel(world, unit);
+			ImGui::End(); ImGui::Render();
+		};
+		frame();
+		auto click = [&](char const* label) {
+			auto window = ImGui::FindWindowByName("Dumbwaiter Selection"); auto control = window->GetID(label);
+			bool found = false; ImVec2 point;
+			for (float y = 35; y < 400 && !found; y += 7) for (float x = 15; x < 400 && !found; x += 15)
+			{
+				io.AddMousePosEvent(x, y); frame(); frame();
+				if (ImGui::GetHoveredID() == control) { found = true; point = {x, y}; }
+			}
+			require(found, std::string("Missing Dumbwaiter Selection control: ") + label);
+			io.AddMousePosEvent(point.x + 100, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		click("Travel time (seconds)");
+		require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2 && gWorldDocumentHistory.undoCount() == 2,
+			"Actual Selection slider did not author history");
+		undo(); require(world->lookupDumbwaiter(id)->getTravelSeconds() == 2, "Timing undo failed");
+		redo(); require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2, "Timing redo failed");
+		auto unit = world->lookupDumbwaiter(id);
+		auto owner = unit->getStop(0).sector;
+		std::shared_ptr<const core::WindowSectorObject> aperture; uint32_t index = ~0u;
+		for (uint32_t i = 0; i < owner->getNumObjects(); ++i)
+			if (auto object = std::dynamic_pointer_cast<const core::WindowSectorObject>(owner->getObject(i)); object && object->getCellY() == 0)
+			{ aperture = object; index = i; }
+		require(aperture && !world->removeSectorWindow(owner->getIndex(), index)
+			&& !world->planMoveSectorObject(owner->getIndex(), index, 3, 0).valid
+			&& !world->planResizeSectorWindow(owner->getIndex(), index, 2, 0, 2, 1).valid,
+			"Owned child exposed independent editing");
+		bool refused = false; try { makeBoothWindowClipboardObject(*world, *aperture); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "Owned aperture can be copied independently");
+		// No enabled nonfunctional button press is exposed by the actual panel.
+		require(world->getSimulationSnapshot().deviceOperations.empty(), "Static Selection introduced device work");
+		click("Delete Dumbwaiter");
+		require(!world->lookupDumbwaiter(id) && gWorldDocumentHistory.undoCount() == 3, "Selection whole-unit deletion failed");
+		undo(); require(world->lookupDumbwaiter(id)->getAperture(0)->getDumbwaiterOwner() == id, "Delete undo lost owned children");
+		redo(); require(!world->lookupDumbwaiter(id), "Delete redo failed");
+	}
 	void historyAndClipboard(smoke::Context const&)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -154,5 +216,6 @@ namespace
 }
 void editor_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"dumbwaiters/selectionAndHistory", dumbwaiterHistory});
 	checks.push_back({"boothWindows/historyAndClipboard",historyAndClipboard});
 }

@@ -5,6 +5,8 @@
 #include "core/WindowVertex.h"
 #include "core/YamlSerializer.h"
 #include <cmath>
+#include <limits>
+#include "../support/DumbwaiterFixture.h"
 
 namespace
 {
@@ -14,6 +16,121 @@ namespace
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		work.markSerializedUnmodified = false; world.serialize(*writer, work); writer->serialize();
 		return writer->getSerializedString();
+	}
+	void dumbwaiters(smoke::Context const&)
+	{
+		using namespace dumbwaiter_fixture;
+		for (unsigned kind = 0; kind < 3; ++kind) for (bool shared : {false, true})
+			for (uint32_t layer : {1u, 2u, 3u}) for (uint32_t initial : {0u, 1u})
+			{
+				auto world = make(kind, shared, layer);
+				auto id = world->addDumbwaiter(layer, 0, 2, {initial, 2}); world->finishBuild();
+				auto unit = world->lookupDumbwaiter(id);
+				require(unit && unit->getCellsWide() == 1 && unit->getLevelsHigh() == 2
+					&& unit->getNumStops() == 2 && unit->getCapacity() == 0
+					&& unit->getInitialStop() == initial && unit->getTravelSeconds() == 2
+					&& unit->getCarPosition().y == float(initial), "Wrong authored unit/defaults");
+				for (uint32_t stop = 0; stop < 2; ++stop)
+				{
+					auto aperture = unit->getAperture(stop);
+					require(aperture && aperture->getDumbwaiterOwner() == id && !aperture->getPanel()
+						&& aperture->getFrontLayer() == layer - 1 && aperture->getBackLayer() == layer
+						&& aperture->getProgress() == (stop == initial ? 1.0f : 0.0f)
+						&& !aperture->isTraversalConfigured(), "Wrong owned aperture/initial shutter");
+					core::DeviceCommand command; command.type = core::DeviceCommandType::ToggleBoothWindow;
+					command.boothWindow = aperture->getDeviceId();
+					require(!world->submitDeviceCommand(command), "Owned shutter accepted independent toggle");
+				}
+				for (auto const& vertex : world->getGraph()->getVertices())
+					require(vertex->getSector() != unit, "Shaft acquired a walkable approach");
+				std::string diagnostic;
+				require(!world->canPlaceAgentInLocation(unit->getIndex(), {}, {}, &diagnostic), "Agent can enter shaft");
+				auto snapshot = world->getSimulationSnapshot();
+				require(snapshot.traversalResources.empty() && snapshot.interactionPoints.empty()
+					&& snapshot.deviceOperations.empty(), "Unit introduced passenger/control work");
+				world->pauseSimulation(); auto before = yaml(*world); world->markSaved();
+				for (float seconds : {0.0f, 0.09f, 60.1f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+				{
+					bool refused = false; try { world->configureDumbwaiter(id, {0, seconds}); }
+					catch (std::exception const&) { refused = true; }
+					require(refused && yaml(*world) == before && !world->isModified(), "Invalid timing mutated World");
+				}
+				for (float seconds : {0.1f, 60.0f})
+				{
+					require(world->configureDumbwaiter(id, {1, seconds}), "Timing endpoint refused");
+					require(world->lookupDumbwaiter(id)->getTravelSeconds() == seconds, "Timing endpoint lost");
+				}
+				world->resetSimulation(); world->pauseSimulation();
+				require(world->lookupDumbwaiter(id)->getAperture(1)->getProgress() == 1, "Reset lost authored initial Stop");
+				require(!world->planRemoveLocation(0).valid, "Unsupported landing removal not refused");
+				require(world->removeDumbwaiter(id) && !world->lookupDumbwaiter(id), "Whole unit deletion failed");
+				for (uint32_t sector = 0; sector < world->getNumSectors(); ++sector)
+					for (uint32_t object = 0; object < world->getSector(sector)->getNumObjects(); ++object)
+						require(!std::dynamic_pointer_cast<const core::WindowSectorObject>(world->getSector(sector)->getObject(object)), "Deletion left orphan aperture");
+				auto replacement = world->addDumbwaiter(layer, 0, 2); world->finishBuild();
+				require(replacement != id && world->lookupDumbwaiter(replacement)->getInitialStop() == 0, "Identity reused/default not lower");
+			}
+		{
+			core::World world("Force Bridge refusal", 6, 3);
+			auto room = world.addRoom("Landing", 0, 0, 0, 5, 2);
+			world.addSectorWalkway(room, 1, 1); world.addSectorWalkway(room, 1, 3);
+			world.addSectorForceBridge(room, 1, 2, {1, CORE_SIDE_LEFT, true, true, 1});
+			world.finishBuild(); world.pauseSimulation(); auto before = yaml(world);
+			std::string diagnostic; require(!world.canAddDumbwaiter(1, 0, 2, {}, &diagnostic), "Force Bridge support admitted");
+			bool refused = false; try { world.addDumbwaiter(1, 0, 2); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(world) == before, "Force Bridge refusal mutated World");
+		}
+		{
+			core::World world("Upper bound", 6, 4);
+			world.addRoom("Lower", 0, 2, 2, 1, 1); world.addFacade(0, 3, 2, 1, 1);
+			auto id = world.addDumbwaiter(1, 2, 2); world.finishBuild(); world.pauseSimulation();
+			require(world.lookupDumbwaiter(id)->getCarPosition().y == 2, "Valid upper World bound refused");
+			auto before = yaml(world);
+			bool refused = false; try { world.configureDumbwaiter(id, {2, 2}); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(world) == before, "Invalid initial Stop mutated World");
+			require(!world.planDeleteLayer(0).valid && !world.planDeleteLevel(2).valid, "Unsupported dimension edit admitted");
+		}
+		{
+			auto world = make(); auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild(); world->pauseSimulation();
+			auto before = yaml(*world); bool refused = false;
+			try { world->removeSectorWalkway(0, 0); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(*world) == before && world->lookupDumbwaiter(id), "Support removal left a corrupt unit");
+			auto stale = world->lookupDumbwaiter(id)->getAperture(0)->getDeviceId();
+			require(world->removeDumbwaiter(id) && !world->lookupBoothWindow(stale), "Deletion left stale child identity");
+		}
+		{
+			auto world = make(); auto first = world->addDumbwaiter(1, 0, 2);
+			auto landing = world->addRoom("Second landing", 0, 0, 4, 1, 2);
+			world->addSectorWalkway(landing, 1, 0); auto second = world->addDumbwaiter(1, 0, 4);
+			world->addRoom("Standalone front", 0, 0, 0, 2, 1);
+			world->addRoom("Standalone back", 1, 0, 0, 2, 1);
+			auto standalone = world->addBoothWindow(0, 0, 0); world->finishBuild(); world->pauseSimulation();
+			auto plan = world->planMoveSectorObject(standalone.window.sector->getIndex(), standalone.window.index, 1, 0);
+			require(plan.valid, "Dumbwaiter changed unrelated standalone movement: " + plan.diagnostic);
+			world->applyObjectMove(plan);
+			require(world->lookupDumbwaiter(first) && world->lookupDumbwaiter(second), "Surrounding edit lost unit identities");
+			require(world->removeDumbwaiter(first) && world->lookupDumbwaiter(second)
+				&& world->lookupDumbwaiter(second)->getAperture(0)->getDumbwaiterOwner() == second,
+				"Deleting one unit corrupted later producers or sibling ownership");
+			require(world->removeDumbwaiter(second), "Sibling deletion failed");
+		}
+		for (unsigned failure = 0; failure < 7; ++failure)
+		{
+			auto world = make();
+			if (failure == 0) world->addBackground(1, 0, 2, 1, 2);
+			if (failure == 1) world->removeSectorWalkway(0, 0);
+			if (failure == 2)
+			{
+				world->addRoom("Back", 1, 0, 2, 1, 2);
+				world->addSectorWindow(0, 0, 2, 1, 1);
+			}
+			world->finishBuild(); world->pauseSimulation(); world->markSaved(); auto before = yaml(*world);
+			auto layer = failure == 3 ? 0u : failure == 4 ? 99u : 1u;
+			auto y = failure == 5 ? 3u : 0u, x = failure == 6 ? 6u : 2u;
+			std::string diagnostic; require(!world->canAddDumbwaiter(layer, y, x, {}, &diagnostic) && !diagnostic.empty(), "Invalid placement accepted");
+			bool refused = false; try { world->addDumbwaiter(layer, y, x); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(*world) == before && !world->isModified() && world->isTraversalTopologyValid(), "Placement refusal mutated World");
+		}
 	}
 	void placement(smoke::Context const&)
 	{
@@ -150,6 +267,7 @@ namespace
 }
 void registerBoothWindows(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"dumbwaiters/authoredWorld", dumbwaiters});
 	checks.push_back({"boothWindows/placementAndTopology", placement});
 	checks.push_back({"boothWindows/atomicRefusal", refusal});
 	checks.push_back({"boothWindows/lifecycle", lifecycle});

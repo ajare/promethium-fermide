@@ -67,7 +67,10 @@ namespace core
 			bool validTarget = false;
 			if (binding.command.type == DeviceCommandType::SetBoothWindowState
 				|| binding.command.type == DeviceCommandType::ToggleBoothWindow)
-				validTarget = bool(mWorld.lookupBoothWindow(binding.command.boothWindow));
+				{
+				auto booth = mWorld.lookupBoothWindow(binding.command.boothWindow);
+				validTarget = booth && !booth->getDumbwaiterOwner();
+			}
 			else if (binding.command.type == DeviceCommandType::SetSectorLights)
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
 			else if (binding.command.type == DeviceCommandType::RequestAirlock)
@@ -448,6 +451,7 @@ namespace core
 		if ((command.type != DeviceCommandType::SetBoothWindowState
 			&& command.type != DeviceCommandType::ToggleBoothWindow)
 			|| !mWorld.lookupBoothWindow(command.boothWindow)) return {};
+		if (mWorld.lookupBoothWindow(command.boothWindow)->getDumbwaiterOwner()) return {};
 		mWorld.invalidateSimulationSnapshot();
 		auto id = findOrCreateDeviceOperation(command, {});
 		mWorld.mDeviceOperations.find(id)->mActivated = true;

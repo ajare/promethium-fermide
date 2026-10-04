@@ -251,6 +251,7 @@ namespace
 		Lift,
 		Shuttle,
 		Airlock,
+		Dumbwaiter,
 		Chamber
 	};
 
@@ -1155,6 +1156,12 @@ namespace
 				result.width, result.height, &result.diagnostic);
 			return result;
 		}
+		if (gPaint.tool == PaintTool::Dumbwaiter)
+		{
+			PaintRectangle result{false, (uint32_t)gPaint.anchorX, (uint32_t)gPaint.anchorY, 1, 2, {}};
+			result.valid = world->canAddDumbwaiter(gPaint.layer, result.y, result.x, {}, &result.diagnostic);
+			return result;
+		}
 		if (gPaint.tool == PaintTool::Chamber)
 		{
 			auto draft = planChamberDrag(*world, gPaint.layer, gPaint.anchorPosition.x,
@@ -1571,6 +1578,8 @@ namespace
 		auto markerMin = paletteSlotMin(trayTopLeft, PaletteSlot::Marker);
 		auto doorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Door);
 		auto bulkheadDoorMin = paletteSlotMin(trayTopLeft, PaletteSlot::BulkheadDoor);
+		auto dumbMin = paletteSlotMin(trayTopLeft, PaletteSlot::Dumbwaiter);
+		auto dumbMax = paletteSlotMax(trayTopLeft, PaletteSlot::Dumbwaiter);
 		auto boothMin = paletteSlotMin(trayTopLeft, PaletteSlot::BoothWindow);
 		auto boothMax = paletteSlotMax(trayTopLeft, PaletteSlot::BoothWindow);
 		auto windowMin = paletteSlotMin(trayTopLeft, PaletteSlot::Window);
@@ -1614,6 +1623,7 @@ namespace
 		bool staircaseHovered = gWorldHovered && pointInRect(io.MousePos, staircaseMin, staircaseMax);
 		bool airlockHovered = gWorldHovered && pointInRect(io.MousePos, airlockMin, airlockMax);
 		bool scannerHovered = gWorldHovered && pointInRect(io.MousePos, scannerMin, scannerMax);
+		bool dumbHovered = gWorldHovered && pointInRect(io.MousePos, dumbMin, dumbMax);
 		bool backOnlyDisabled = gUISettings.visibleLayer == 0;
 		if (overTray) paletteConsumedMouse = true;
 
@@ -1646,7 +1656,7 @@ namespace
 
 		if (gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging
 			&& (roomHovered || facadeHovered || corridorHovered || backgroundHovered || ladderHovered
-				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered || scannerHovered))
+				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered || scannerHovered || dumbHovered))
 		{
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -1660,7 +1670,7 @@ namespace
 					: backgroundHovered ? "Paint Background" : ladderHovered ? "Paint Ladder"
 					: stairwellHovered ? "Paint Stairwell" : staircaseHovered ? "Paint Staircase"
 					: liftHovered ? "Paint Lift" : airlockHovered ? "Paint Airlock"
-					: scannerHovered ? "Paint Chamber" : "Paint Shuttle");
+					: dumbHovered ? "Paint Dumbwaiter (fixed 1 x 2)" : scannerHovered ? "Paint Chamber" : "Paint Shuttle");
 
 			if (io.MouseClicked[0] && !gViewPan.dragging
 				&& !((ladderHovered || stairwellHovered || staircaseHovered || liftHovered || shuttleHovered)
@@ -1674,7 +1684,7 @@ namespace
 					: stairwellHovered ? PaintTool::Stairwell
 					: staircaseHovered ? PaintTool::Staircase
 					: liftHovered ? PaintTool::Lift : airlockHovered ? PaintTool::Airlock
-					: scannerHovered ? PaintTool::Chamber : PaintTool::Shuttle;
+					: dumbHovered ? PaintTool::Dumbwaiter : scannerHovered ? PaintTool::Chamber : PaintTool::Shuttle;
 				gPaint.tool = gPaint.tool == clickedTool ? PaintTool::None : clickedTool;
 				gPaint.dragging = false;
 				resetPegman();
@@ -1704,6 +1714,7 @@ namespace
 			staircaseHovered, backOnlyDisabled);
 		drawPaintButton(airlockMin, airlockMax, "Airlock", PaintTool::Airlock, airlockHovered, false);
 		drawPaintButton(scannerMin, scannerMax, "Chamber", PaintTool::Chamber, scannerHovered, false);
+		drawPaintButton(dumbMin, dumbMax, "Dumbwaiter", PaintTool::Dumbwaiter, dumbHovered, backOnlyDisabled);
 		drawBulkheadDoorIcon(drawList, bulkheadDoorMin, bulkheadDoorMax, yellow);
 		drawWindowIcon(drawList, windowMin, windowMax, yellow);
 		drawList->AddRect(boothMin, boothMax, yellow, 3.0f);
@@ -1816,6 +1827,12 @@ namespace
 							auto index = commitChamberDraft(*world, gPaint.layer, draft);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
+						}
+						else if (tool == PaintTool::Dumbwaiter)
+						{
+							auto id = world->addDumbwaiter(gPaint.layer, paintRectangle.y, paintRectangle.x);
+							setSelectionMode(UISettings::SelectionMode::Sector);
+							gSelectedSector = world->lookupDumbwaiter(id);
 						}
 						else if (tool == PaintTool::Airlock)
 						{
@@ -6756,6 +6773,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			type = gSelectedSector->getTopLevelHeight() == CORE_CORRIDOR_HEIGHT
 				? "Corridor" : "Room";
 			break;
+		case core::SectorType::Dumbwaiter: type = "Dumbwaiter"; break;
 		case core::SectorType::Lift: type = "Lift"; break;
 		case core::SectorType::Shuttle: type = "Shuttle"; break;
 		case core::SectorType::Airlock: type = "Airlock"; break;
@@ -6780,6 +6798,16 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 		switch (gSelectedSector->getType())
 		{
+		case core::SectorType::Dumbwaiter:
+		{
+			auto unit = static_pointer_cast<const core::Dumbwaiter>(gSelectedSector);
+			if (renderDumbwaiterPanel(world, unit))
+			{
+				gSelectedSector = world->lookupDumbwaiter(unit->getId());
+				gSelectedSectorObject.reset();
+			}
+			break;
+		}
 		case core::SectorType::Chamber:
 		{
 			auto chamber = static_pointer_cast<const core::ChamberTransit>(gSelectedSector);

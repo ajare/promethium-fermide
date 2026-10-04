@@ -26,7 +26,7 @@ function(invoke status expected)
     endif()
 endfunction()
 
-set(names boothWindows/authoredRoundTripAndMalformedRecords airlocks/authoredRoundTripAndReplay securityScanners/authoredRoundTripAndReplay yaml-primitives binary-contract yaml-file transactional-bytes
+set(names dumbwaiters/authoredRoundTripAndMalformedRecords boothWindows/authoredRoundTripAndMalformedRecords airlocks/authoredRoundTripAndReplay securityScanners/authoredRoundTripAndReplay yaml-primitives binary-contract yaml-file transactional-bytes
     world-document-formats yaml-errors checked-in-world document-paths
     transactional-late-failure transactional-predictable-path
     transactional-symlink-target transactional-symlink-temp transactional-permissions

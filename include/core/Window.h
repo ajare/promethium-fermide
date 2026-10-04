@@ -112,6 +112,7 @@ namespace core
 		friend class World;
 		friend class SimulationCoordinator;
 		BoothWindowId mDeviceId;
+		DumbwaiterId mDumbwaiterOwner;
 		InteractionPointId mPanel;
 		float mProgress{ 0.0f };
 		bool mTargetOpen{ false };
@@ -122,6 +123,7 @@ namespace core
 		BoothWindow(uint32_t x, uint32_t y, std::shared_ptr<const Sector> sectors[2])
 			: Window(x, y, 1, 1, sectors) {}
 		bool isBoothWindow() const override { return true; }
+		DumbwaiterId getDumbwaiterOwner() const { return mDumbwaiterOwner; }
 		BoothWindowId getDeviceId() const { return mDeviceId; }
 		InteractionPointId getPanel() const { return mPanel; }
 		float getProgress() const { return mProgress; }

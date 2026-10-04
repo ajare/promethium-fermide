@@ -8420,6 +8420,8 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
+		if (sector.getType() == SectorType::Dumbwaiter)
+			throw invalid_argument("Agents cannot enter a Dumbwaiter shaft or car");
 		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::Chamber)
 			throw invalid_argument(sector.getType() == SectorType::Chamber
 				? "Agents cannot be placed inside authored Security scanners"

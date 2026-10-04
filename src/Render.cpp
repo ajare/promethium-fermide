@@ -956,6 +956,16 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 	drawList->PopClipRect();
 	if (!drawObjectSprite("booth-window-open", drawList, topLeft, bottomRight))
 		drawList->AddRect(topLeft, bottomRight, ImColor(148, 162, 170), 0.0f, 0, 2.0f);
+	if (booth->getDumbwaiterOwner())
+	{
+		// The button fits in the aperture's right inset, inside the landing cell.
+		auto position = booth->getPosition();
+		core::Vector2 buttonMin{position.x + 0.82f, position.y + 0.10f};
+		core::Vector2 buttonMax{position.x + 0.88f, position.y + 0.20f};
+		transformPosition(buttonMin); transformPosition(buttonMax);
+		drawList->AddRectFilled({buttonMin.x, buttonMax.y}, {buttonMax.x, buttonMin.y},
+			booth->getProgress() == 1 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255));
+	}
 }
 
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -1744,7 +1754,8 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 		case core::SectorType::Airlock:
 		case core::SectorType::Chamber: kind = "corridor"; break;
 		case core::SectorType::Ladder: kind = "ladder"; break;
-		case core::SectorType::Lift: kind = "lift"; break;
+		case core::SectorType::Lift:
+		case core::SectorType::Dumbwaiter: kind = "lift"; break;
 		// The rail corridor is static architecture; carriage images are rendered
 		// separately at the Shuttle's current position.
 		case core::SectorType::Shuttle: kind = "lift"; break;
@@ -1779,6 +1790,19 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// Sector-specific
 	switch (sector->getType())
 	{
+	case core::SectorType::Dumbwaiter:
+		if (isDrawnSolid(style))
+		{
+			auto unit = static_pointer_cast<const core::Dumbwaiter>(sector);
+			auto position = unit->getCarPosition();
+			core::Vector2 low{position.x + 0.1f, position.y + 0.18f};
+			core::Vector2 high{position.x + 0.9f, position.y + 0.55f};
+			transformPosition(low); transformPosition(high);
+			// Procedural empty car: normal sector recursion supplies depth and clipping.
+			drawList->AddRectFilled({low.x, high.y}, {high.x, low.y}, IM_COL32(180, 190, 205, 255));
+			drawList->AddRect({low.x, high.y}, {high.x, low.y}, IM_COL32(60, 70, 85, 255), 0, 0, 2);
+		}
+		break;
 	case core::SectorType::Chamber:
 	{
 		auto chamber = static_pointer_cast<const core::ChamberTransit>(sector);

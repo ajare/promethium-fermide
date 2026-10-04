@@ -1,0 +1,32 @@
+#pragma once
+#include "core/World.h"
+#include "core/YamlSerializer.h"
+
+namespace dumbwaiter_fixture
+{
+	inline std::shared_ptr<core::World> make(unsigned kind = 0, bool shared = true, uint32_t shaftLayer = 1)
+	{
+		auto world = std::make_shared<core::World>("Dumbwaiter", 6, 4);
+		while (world->getLayerCount() <= shaftLayer) world->addLayer();
+		if (shared && kind != 1)
+		{
+			auto location = kind == 2 ? world->addFacade(shaftLayer - 1, 0, 2, 1, 2)
+				: world->addRoom("Landing", shaftLayer - 1, 0, 2, 1, 2);
+			world->addSectorWalkway(location, 1, 0);
+		}
+		else for (uint32_t y = 0; y < 2; ++y)
+		{
+			if (kind == 1) world->addCorridor(shaftLayer - 1, y, 2, 1, 1);
+			else if (kind == 2) world->addFacade(shaftLayer - 1, y, 2, 1, 1);
+			else world->addRoom("Landing", shaftLayer - 1, y, 2, 1, 1);
+		}
+		world->finishBuild(); world->pauseSimulation();
+		return world;
+	}
+	inline std::string yaml(core::World const& world)
+	{
+		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
+		work.markSerializedUnmodified = false; world.serialize(*writer, work); writer->serialize();
+		return writer->getSerializedString();
+	}
+}

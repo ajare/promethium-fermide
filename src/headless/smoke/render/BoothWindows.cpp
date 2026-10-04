@@ -5,10 +5,76 @@
 #include "UISettings.h"
 #include "core/World.h"
 #include <cmath>
+#include "../support/DumbwaiterFixture.h"
 
 extern UISettings gUISettings;
 namespace
 {
+	void dumbwaiterPresentation(smoke::Context const&)
+	{
+		using smoke::require;
+		ImGui::GetIO().DisplaySize = {1200, 800}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
+		gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 800;
+		gUISettings.worldZoom = 1; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
+		gUISettings.renderNextLayerWireframe = false;
+		for (uint32_t initial : {0u, 1u})
+		{
+			auto world = dumbwaiter_fixture::make();
+			world->addDumbwaiter(1, 0, 2, {initial, 2}); world->finishBuild();
+			for (uint32_t layer : {0u, 1u})
+			{
+				gUISettings.visibleLayer = layer;
+				WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+				unsigned car = 0, here = 0, elsewhere = 0;
+				for (auto const& command : drawing.commands())
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+					{
+						if (triangle->colour == IM_COL32(180, 190, 205, 255))
+						{
+							++car;
+							if (layer == 0) require(triangle->clip.minimum.x > 2.1f * 64
+								&& triangle->clip.maximum.x < 2.9f * 64
+								&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48,
+								"Car escaped owned aperture clipping");
+							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > 64,
+								"Selected shaft car incorrectly aperture-clipped");
+						}
+						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255))
+						{
+							for (auto p : triangle->positions) require(p.x >= 2.92f * 64 - 0.01f && p.x <= 2.98f * 64 + 0.01f,
+								"Landing button requires neighbouring cell or covers aperture");
+							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here; else ++elsewhere;
+						}
+					}
+				require(car == 2, "Initial car missing or duplicated in production draw commands");
+				require(here == (layer == 0 ? 2u : 0u) && elsewhere == here, "Landing buttons not visible exclusively on landing Layer");
+			}
+			gUISettings.visibleLayer = 0; gUISettings.renderNextLayerWireframe = true;
+			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			unsigned car = 0;
+			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(180, 190, 205, 255)) ++car;
+			require(car == 2, "Wireframe leaked a second filled car over landing Layer");
+			gUISettings.renderNextLayerWireframe = false;
+		}
+		{
+			auto world = dumbwaiter_fixture::make(0, true, 2);
+			world->addRoom("Front", 0, 0, 2, 1, 2);
+			world->addSectorWindow(0, 0, 2, 1, 2);
+			world->addDumbwaiter(2, 0, 2); world->finishBuild();
+			gUISettings.visibleLayer = 0;
+			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			unsigned car = 0;
+			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(180, 190, 205, 255))
+			{
+				++car; require(triangle->clip.minimum.x > 2.1f * 64 && triangle->clip.maximum.x < 2.9f * 64
+					&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48, "Nested aperture clipping leaked car geometry");
+			}
+			require(car == 2, "Recursive aperture lost initial car");
+		}
+		ImGui::Render();
+	}
 	void presentation(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -113,5 +179,6 @@ namespace
 }
 void render_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"dumbwaiters/initialPresentationAndClipping", isolated<dumbwaiterPresentation>});
 	checks.push_back({"boothWindows/staticPresentationAndNestedClipping", isolated<presentation>});
 }

@@ -26,6 +26,7 @@
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
 #include "core/Window.h"
+#include "core/Dumbwaiter.h"
 #include "core/WindowSectorObject.h"
 #include "core/Graph.h"
 #include "core/Log.h"
@@ -103,6 +104,22 @@ namespace core
 			CreateObjectResult controls[2];
 			TraversalResourceId traversalResource;
 		};
+
+		struct CreateDumbwaiterOptions
+		{
+			uint32_t initialStop{ 0 };
+			float travelSeconds{ 2.0f };
+		};
+		bool canAddDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options, std::string* diagnostic = nullptr) const;
+		DumbwaiterId addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options);
+		DumbwaiterId addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x)
+		{ return addDumbwaiter(shaftLayer, y, x, CreateDumbwaiterOptions{}); }
+		std::shared_ptr<const Dumbwaiter> lookupDumbwaiter(DumbwaiterId id) const;
+		bool configureDumbwaiter(DumbwaiterId id, CreateDumbwaiterOptions const& options);
+		bool removeDumbwaiter(DumbwaiterId id);
+		bool hasDumbwaiters() const;
 
 		struct CreateWindowOptions
 		{
@@ -745,6 +762,7 @@ namespace core
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
 		// Runtime-only device identities, independent of movement admission.
 		uint64_t mNextBoothWindowId{ 1 };
+		uint64_t mNextDumbwaiterId{ 1 };
 		std::map<BoothWindowId, std::weak_ptr<BoothWindow>> mBoothWindows;
 
 		EntityRegistry<TraversalResourceId, TraversalResource> mTraversalResources;
@@ -849,7 +867,8 @@ namespace core
 			Facade,
 			Airlock,
 			Chamber,
-			BoothWindow
+			BoothWindow,
+			Dumbwaiter
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -898,6 +917,7 @@ namespace core
 			// uses name above and c for its MarkerProperties bitfield. Zero identity
 			// occurs only while migrating versions 1-10.
 			MarkerId markerId{};
+			DumbwaiterId dumbwaiterId{};
 		};
 
 		ConstructionRecord const* findLocationPermissionRecord(uint32_t sectorIndex) const;
@@ -937,6 +957,8 @@ namespace core
 		bool deserializeImpl(Serializer& serializer, SerializationWorkData& workData) override;
 
 		void recordConstruction(ConstructionRecord record);
+		DumbwaiterId createDumbwaiter(uint32_t layer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options, DumbwaiterId id);
 
 		static std::string constructionTypeName(ConstructionType type);
 

@@ -190,7 +190,11 @@ _Avoid_: Door width, doorway width, when referring to the arrival band
 A threshold, similar to a Door, that connects two adjacent layers and is authored on the front layer of the pair. It always looks into the layer directly behind it, so it can never sit on the back-most layer.
 
 **BoothWindow**:
-A one-cell-wide, one-cell-high service aperture between two Locations on adjacent Layers, with an openable shutter and an approach point on each side. It never permits movement between Layers; Agents operate its shutter through an invisible Interaction point on its back side.
+A one-cell-wide, one-cell-high service aperture with an openable shutter between two Locations on adjacent Layers, or an owned aperture from a Dumbwaiter landing into its shaft. It never permits movement between Layers; standalone BoothWindows have a back-side shutter Interaction point, while Dumbwaiter-owned apertures belong to the complete unit.
+
+**Dumbwaiter**:
+A non-passenger object-service lift with one car in a fixed one-cell-wide shaft spanning two adjacent Levels, two owned BoothWindows, and landing buttons. Agents never enter its shaft or car.
+_Avoid_: Passenger Lift, lazy waiter
 
 **Walkway**:
 A traversable floor within a multi-level room, above that room's ground-level floor.

@@ -3,9 +3,81 @@
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 #include <yaml-cpp/yaml.h>
+#include "../support/DumbwaiterFixture.h"
 
 namespace persistence
 {
+	void dumbwaiters(smoke::Context const&)
+	{
+		using smoke::require;
+		auto world = dumbwaiter_fixture::make();
+		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.1f}); world->finishBuild();
+		auto write = [](core::World const& source, bool binary)
+		{
+			auto serialize = [&](auto writer) {
+				core::SerializationWorkData work; work.markSerializedUnmodified = false;
+				source.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+			};
+			return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
+		};
+		auto baseline = write(*world, false);
+		for (bool binary : {false, true})
+		{
+			auto data = write(*world, binary);
+			std::unique_ptr<core::Serializer> input = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			input->deserialize(); core::SerializationWorkData work; core::World loaded("Loaded", 1, 1);
+			require(loaded.deserialize(*input, work), "Dumbwaiter document refused");
+			auto unit = loaded.lookupDumbwaiter(id);
+			require(unit && unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.1f
+				&& unit->getCellX() == 2 && unit->getCellY() == 0 && unit->getLayerIndex() == 1
+				&& unit->getAperture(0)->getProgress() == 0 && unit->getAperture(1)->getProgress() == 1,
+				"Round trip lost placement/configuration/initial shutters");
+			loaded.resetSimulation(); loaded.pauseSimulation();
+			require(loaded.lookupDumbwaiter(id)->getAperture(1)->getProgress() == 1, "Reset lost authored state");
+			require(loaded.removeDumbwaiter(id), "Loaded deletion failed");
+			auto next = loaded.addDumbwaiter(1, 0, 2); require(next.value > id.value, "Loaded identity reused");
+		}
+		auto node = YAML::Load(baseline);
+		for (auto change : {"zeroId", "duplicate", "stop", "nan", "timingLow", "timingHigh", "bounds", "layer", "width", "stops", "legacy", "nextId", "support"})
+		{
+			auto invalid = YAML::Clone(node); std::string c = change;
+			for (auto record : invalid["construction"])
+			{
+				if (c == "support" && record["type"].as<std::string>() == "walkway") record["xOffset"] = 1;
+				if (record["type"].as<std::string>() != "dumbwaiter") continue;
+				if (c == "zeroId") record["id"] = 0;
+				if (c == "stop") record["initialStop"] = 2;
+				if (c == "nan") record["travelSeconds"] = ".nan";
+				if (c == "timingLow") record["travelSeconds"] = 0.09;
+				if (c == "timingHigh") record["travelSeconds"] = 60.01;
+				if (c == "bounds") record["y"] = 3;
+				if (c == "layer") record["layer"] = 0;
+				if (c == "width") record["cellsWide"] = 2;
+				if (c == "stops") record["stopOffsets"] = std::vector<unsigned>{0, 1, 2};
+			}
+			if (c == "duplicate") invalid["construction"].push_back(YAML::Clone(invalid["construction"][2]));
+			if (c == "legacy") invalid["version"] = 46;
+			if (c == "nextId") invalid["nextDumbwaiterId"] = id.value;
+			bool refused = false;
+			try { auto input = core::YamlSerializer::fromString(YAML::Dump(invalid)); input->deserialize(); core::SerializationWorkData work; world->deserialize(*input, work); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && write(*world, false) == baseline, "Malformed Dumbwaiter YAML mutated target: " + c);
+		}
+		auto bytes = write(*world, true);
+		auto offset = bytes.find("travelSeconds"); require(offset != std::string::npos, "Missing binary timing field");
+		offset += std::string("travelSeconds").size() + 1;
+		for (unsigned i = 0; i < 4; ++i) bytes[offset + i] = 0;
+		bool refused = false;
+		try { auto input = core::BinarySerializer::fromString(bytes); input->deserialize(); core::SerializationWorkData work; world->deserialize(*input, work); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && write(*world, false) == baseline, "Malformed binary timing mutated target");
+		// The implementation-time baseline remains loadable with no new authored objects.
+		auto legacyWorld = dumbwaiter_fixture::make(); auto legacy = YAML::Load(write(*legacyWorld, false));
+		legacy["version"] = 46; legacy.remove("nextDumbwaiterId");
+		auto reader = core::YamlSerializer::fromString(YAML::Dump(legacy)); reader->deserialize(); core::SerializationWorkData work;
+		core::World loaded("Baseline", 1, 1); require(loaded.deserialize(*reader, work) && !loaded.hasDumbwaiters(), "Schema-46 compatibility lost");
+	}
 	void boothWindows(smoke::Context const&)
 	{
 		using smoke::require;
@@ -93,7 +165,7 @@ namespace persistence
 			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
-		require(node["version"].as<int>() == 46, "BoothWindow schema not allocated");
+		require(node["version"].as<int>() == 47, "BoothWindow schema not allocated");
 		core::SerializationWorkData work;
 		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown", "permissionZero", "permissionUnknown", "permissionDuplicate", "permissionShape", "permissionLegacy"})
 		{

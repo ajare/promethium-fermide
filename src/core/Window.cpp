@@ -114,6 +114,8 @@ namespace core
 
 	void Window::setState(State state, Style style)
 	{
+		if (isBoothWindow() && static_cast<BoothWindow const*>(this)->getDumbwaiterOwner())
+			throw invalid_argument("Dumbwaiter-owned shutters cannot be independently edited");
 		if (isBoothWindow() && ((state != State::Open && state != State::Closed) || style != Style::Clear))
 			throw invalid_argument("BoothWindow supports only Open or Closed shutters without glass styles");
 		mState = state;
