@@ -25,6 +25,8 @@ struct UISettings
 
 	bool renderGrid{ false };
 
+	bool renderMarkers{ true };
+
 	bool renderGraph{ false };
 
 	// The viewport always draws the selected Layer solid. This controls whether the

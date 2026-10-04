@@ -1,0 +1,188 @@
+# #359: fractional placements, overlapping replacement spans and Walkway support.
+version: 50
+nextDumbwaiterId: 1
+name: Furniture integration demonstration
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 3
+layers: 2
+layerNames:
+- Showroom
+- Facade
+furnitureCatalogue:
+  filename: furniture-integration.furniture.yaml
+  expectedUuid: f834cb53-36cd-4d0a-920d-4a2acfbe6592
+nextFurnitureId: 7
+nextMarkerId: 11
+nextAgentGroupId: 1
+agentGroups: []
+construction:
+- type: room
+  name: Showroom
+  layer: 0
+  y: 0
+  x: 0
+  cellsWide: 12
+  levelsHigh: 3
+  topLevelHeight: 0.9
+- type: corridor
+  layer: 0
+  y: 0
+  x: 12
+  cellsWide: 4
+  levelsHigh: 1
+  topLevelHeight: 0.9
+- type: facade
+  name: Facade
+  layer: 1
+  y: 0
+  x: 0
+  cellsWide: 12
+  levelsHigh: 3
+  topLevelHeight: 0.9
+- type: walkway
+  sectorIndex: 0
+  levelIndex: 1
+  xOffset: 7
+- type: walkway
+  sectorIndex: 0
+  levelIndex: 1
+  xOffset: 8
+- type: walkway
+  sectorIndex: 0
+  levelIndex: 1
+  xOffset: 9
+- type: walkway
+  sectorIndex: 0
+  levelIndex: 1
+  xOffset: 10
+- type: furniture
+  sectorIndex: 0
+  id: 1
+  definition: chair
+  name: Reading chair
+  x: 0.25
+  y: 0
+  localDepth: 0
+  destinations:
+  - usablePoint: seat
+    markerId: 1
+    markerName: Reading chair Seat
+    properties: 1
+- type: furniture
+  sectorIndex: 0
+  id: 2
+  definition: desk
+  name: Desk
+  x: 2.125
+  y: 0
+  localDepth: 2
+  destinations: []
+- type: furniture
+  sectorIndex: 0
+  id: 3
+  definition: sofa
+  name: Overlapping sofa
+  x: 3.125
+  y: 0
+  localDepth: 3
+  destinations:
+  - usablePoint: left
+    markerId: 3
+    markerName: Overlapping sofa Left seat
+    properties: 1
+  - usablePoint: right
+    markerId: 4
+    markerName: Overlapping sofa Right seat
+    properties: 1
+- type: furniture
+  sectorIndex: 0
+  id: 4
+  definition: sofa
+  name: Walkway sofa
+  x: 7.125
+  y: 1
+  localDepth: 3
+  destinations:
+  - usablePoint: left
+    markerId: 5
+    markerName: Walkway sofa Left seat
+    properties: 1
+  - usablePoint: right
+    markerId: 6
+    markerName: Walkway sofa Right seat
+    properties: 1
+- type: furniture
+  sectorIndex: 1
+  id: 5
+  definition: chair
+  name: Corridor chair
+  x: 0.25
+  y: 0
+  localDepth: 0
+  destinations:
+  - usablePoint: seat
+    markerId: 7
+    markerName: Corridor chair Seat
+    properties: 1
+- type: furniture
+  sectorIndex: 2
+  id: 6
+  definition: chair
+  name: Facade chair
+  x: 2.25
+  y: 0
+  localDepth: 0
+  destinations:
+  - usablePoint: seat
+    markerId: 8
+    markerName: Facade chair Seat
+    properties: 1
+- type: marker
+  sectorIndex: 0
+  levelIndex: 0
+  xOffset: 9.5
+  id: 9
+  name: Exit
+  properties: 0
+- type: door
+  layer: 0
+  y: 0
+  x: 10
+  width: 1
+  foreControl: false
+  backControl: false
+  activationMode: automatic
+  holdOpenSeconds: 3
+  crossingLanes: 1
+  openStyle: openUp
+agents:
+- id: 1
+  agent:
+    name: Showroom walker
+    flags: 0
+  sector: 0
+  localX: 1.5
+  localY: 0
+  path:
+    destinationSector: 0
+    destinationLocalX: 9.5
+    destinationLocalY: 0
+    destinationMarker: 9
+    active: true
+- id: 2
+  agent:
+    name: Front-route observer
+    flags: 0
+  sector: 0
+  localX: 2.875
+  localY: 0
+  localDepth: 2
+- id: 3
+  agent:
+    name: Back-route observer
+    flags: 0
+  sector: 0
+  localX: 2.875
+  localY: 0
+  localDepth: 3

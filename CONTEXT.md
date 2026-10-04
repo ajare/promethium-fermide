@@ -336,6 +336,18 @@ The visual manner in which a Door's leaf or leaves reveal its threshold: OpenUp,
 A place where an agent can request one or more typed device commands, usually represented by a physical button or switch.
 _Avoid_: Device controller, traversal controller
 
+**Button**:
+A physical control representing an Interaction point, owned by the object or Location that requires it. It belongs to one cell even when its visible shape extends slightly into a neighbouring cell.
+
+**Button stack**:
+A vertical group of physical Buttons in one Location that share a horizontal position and one approach vertex. Each Button retains its own Interaction point, Device commands, and Permission requirement.
+
+**Control approach side**:
+The Location-side approach from which an object's control is operated, distinct from the control's horizontal placement beside the object.
+
+**Control placement side**:
+The horizontal left or right side of an object or its endpoint on which its control is placed, distinct from the approach from which it is operated.
+
 **Broken**:
 A condition of a moving traversal device in which operation is unavailable, with device-specific consequences for passage. A Broken Door or extensible device retains its physical position, a Broken transport cannot provide journeys, and a Broken Escalator is a stationary Staircase.
 _Avoid_: Forbidden traversal, which describes an Agent's Mobility use rather than device condition

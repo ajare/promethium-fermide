@@ -94,6 +94,23 @@ namespace persistence
 					"Mid-cycle document did not restore an operable unit");
 			}
 		}
+		{
+			auto legacyWorld = dumbwaiter_fixture::make();
+			auto legacyId = legacyWorld->addDumbwaiter(1, 0, 2);
+			auto marker = legacyWorld->addSectorMarker(0, 0, 0.5f);
+			require(legacyWorld->removeSectorMarker(0, marker.index), "Legacy layout removal fixture failed");
+			auto legacyNode = YAML::Load(write(*legacyWorld, false));
+			legacyNode.remove("dumbwaiterPhysicalButtons");
+			for (auto record : legacyNode["construction"])
+				if (record["type"].as<std::string>() == "removeMarker")
+					record["objectIndex"] = record["objectIndex"].as<unsigned>() - 2;
+			auto reader = core::YamlSerializer::fromString(YAML::Dump(legacyNode)); reader->deserialize();
+			core::World migrated("Old landing controls", 1, 1); core::SerializationWorkData data;
+			require(migrated.deserialize(*reader, data) && migrated.lookupDumbwaiter(legacyId),
+				"Legacy landing layout did not remap later Marker removals by identity");
+			require(YAML::Load(write(migrated, false))["dumbwaiterPhysicalButtons"].as<bool>(),
+				"Migrated landing layout was not recorded on save");
+		}
 		auto baseline = write(*world, false);
 		for (bool binary : {false, true})
 		{

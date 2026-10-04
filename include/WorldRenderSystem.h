@@ -17,5 +17,6 @@ void destroyWorldRenderSystem();
 
 // Renders one CPU command stream into the MPP-owned offscreen target and
 // returns its OpenGL texture name for composition by ImGui.
+enum class WorldCanvas { World, LocationPlan };
 std::uint32_t renderWorldCommands(WorldDrawList const& commands,
-	ImVec2 canvasPosition, ImVec2 canvasSize);
+	ImVec2 canvasPosition, ImVec2 canvasSize, WorldCanvas canvas = WorldCanvas::World);

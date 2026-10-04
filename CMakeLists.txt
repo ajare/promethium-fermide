@@ -390,6 +390,7 @@ target_compile_features(pf-imgui-cpu PUBLIC cxx_std_20)
 add_library(pf-render STATIC
     src/Render.cpp
     src/WorldDrawList.cpp
+    src/LocationPlanRender.cpp
     src/SectorTileset.cpp
     src/ObjectTileset.cpp
 )
@@ -431,9 +432,10 @@ add_library(pf-agent-editing STATIC
     src/AgentBehaviourAssignmentPanel.cpp
     src/MarkerPanel.cpp
     src/FurniturePanel.cpp
+    src/LocationPlan.cpp
     src/PermissionsPanel.cpp
 )
-target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu)
+target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu pf-render)
 target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
 target_compile_definitions(pf-agent-editing PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>

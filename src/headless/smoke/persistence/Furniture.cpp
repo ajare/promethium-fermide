@@ -16,13 +16,32 @@ namespace persistence
 		using smoke::require;
 		auto root = context.temporaryRoot() / "demonstration";
 		std::filesystem::create_directory(root);
-		auto cataloguePath = root / "furniture.furniture.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.yaml"), cataloguePath);
+		auto cataloguePath = root / "furniture-integration.furniture.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture-integration.furniture.yaml"), cataloguePath);
+		// Fresh authoring must not allocate any Marker for a circulation-only desk.
+		core::World circulation("Desk without destinations", 8, 2);
+		auto room = circulation.addRoom("Room", 0, 0, 0, 8, 1);
+		circulation.attachFurnitureCatalogue("furniture-integration.furniture.yaml", core::FurnitureCatalogue::load(cataloguePath));
+		auto deskId = circulation.placeFurniture(room, "desk", 2, 0, "Desk", 2);
+		circulation.finishBuild(); circulation.pauseSimulation();
+		require(circulation.getMarkerIds().empty() && circulation.furniture().front().destinations.empty()
+			&& !circulation.furniture().front().marker, "Desk placement allocated a usable Marker");
+		for (auto extension : {"world.yaml", "world"})
+		{
+			auto output = root / (std::string("circulation.") + extension);
+			circulation.saveTo(output.string());
+			auto loaded = core::loadWorldDocument(output);
+			require(loaded->furniture().front().id == deskId && loaded->getMarkerIds().empty()
+				&& loaded->furniture().front().destinations.empty() && !loaded->furniture().front().marker,
+				"Desk save/reopen invented destinations");
+		}
 		auto source = root / "demo.world.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.world.yaml"), source);
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture-integration.world.yaml"), source);
 		auto world = core::loadWorldDocument(source);
 		require(world->furniture().size() == 6, "Required complete Furniture demonstration is missing instances");
 		auto desk = world->furniture()[1];
+		require(desk.destinations.empty() && !desk.marker,
+			"Circulation-only desk created usable Markers");
 		auto sofa = world->furniture()[2];
 		auto walkerId = world->getSimulationSnapshot().agents.front().id;
 		auto walker = world->lookupAgent(walkerId).entity;
@@ -53,7 +72,7 @@ namespace persistence
 		// formats must resolve current geometry and preserve independent names/IDs.
 		auto portable = context.temporaryRoot() / "portable-demonstration";
 		std::filesystem::rename(root, portable);
-		auto catalogue = YAML::LoadFile((portable / "furniture.furniture.yaml").string());
+		auto catalogue = YAML::LoadFile((portable / "furniture-integration.furniture.yaml").string());
 		auto definitions = catalogue["furnitureCatalogue"]["definitions"];
 		definitions[1]["label"] = "Revised sofa";
 		definitions[1]["usablePoints"][1]["label"] = "Revised right seat";
@@ -61,11 +80,12 @@ namespace persistence
 		for (auto vertex : definitions[1]["vertices"])
 			if (vertex["key"].as<std::string>() == "rightSeat") vertex["x"] = 1.625f;
 		definitions[0]["usablePoints"].push_back(YAML::Load("{key: extra, label: Extra, x: 0.75}"));
-		{ std::ofstream file(portable / "furniture.furniture.yaml"); file << catalogue; }
+		{ std::ofstream file(portable / "furniture-integration.furniture.yaml"); file << catalogue; }
 		for (auto extension : {"world.yaml", "world"})
 		{
 			auto loaded = core::loadWorldDocument(portable / (std::string("authored.") + extension));
 			require(loaded->furniture()[1].id == desk.id && loaded->furniture()[1].x == 2.25f
+				&& loaded->furniture()[1].destinations.empty() && !loaded->furniture()[1].marker
 				&& loaded->furniture()[2].destinations[1].marker == target
 				&& loaded->lookupMarker(target)->getName() == "Chosen sofa destination"
 				&& loaded->furniture()[0].destinations.size() == 2,

@@ -861,8 +861,15 @@ inline bool shouldRenderSectorAgents(core::SectorType /* sectorType */, LayerRen
 	return isDrawnSolid(style);
 }
 
+// Authored destinations must be actual World-owned Markers, not routing-only
+// vertices (which can also have VertexType::SectorMarker).
+bool isMarkerPathTarget(core::World const& world, core::Vertex const& vertex);
+std::shared_ptr<const core::Vertex> markerPathTargetAtPosition(core::World const& world,
+	uint32_t layer, core::Vector2 position, float radius);
+
 void renderGraph(std::shared_ptr<const core::Graph> graph,
-	std::shared_ptr<const core::World> world, WorldDrawList* drawList);
+	std::shared_ptr<const core::World> world, WorldDrawList* drawList,
+	bool markerTargetsOnly = false);
 
 // Ordinary Agents use their effective inherited Colour (or the editor
 // fallback); selection always wins with its fixed gold highlight.

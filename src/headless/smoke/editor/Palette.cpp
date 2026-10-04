@@ -57,6 +57,29 @@ namespace
 		}
 	}
 
+	void furnitureRowFits()
+	{
+		auto closed = paletteTraySize(); auto open = paletteTraySize(true);
+		require(open.x == closed.x && open.y == closed.y + PaletteSlotSize + PaletteGap,
+			"Conditional Furniture row changed ordinary tool geometry");
+		for (int column = 0; column < paletteColumnCount(); ++column)
+		{
+			auto min = paletteFurnitureSlotMin(TrayTopLeft, column);
+			require(min.x >= TrayTopLeft.x + PalettePadding
+				&& min.x + PaletteSlotWidth <= TrayTopLeft.x + open.x - PalettePadding
+				&& min.y + PaletteSlotSize <= TrayTopLeft.y + open.y - PalettePadding,
+				"Furniture slot escapes tray");
+			if (column) require(paletteFurnitureSlotMin(TrayTopLeft, column - 1).x + PaletteSlotWidth < min.x,
+				"Furniture slots overlap");
+			for (int index = 0; index < static_cast<int>(PaletteSlot::Count); ++index)
+				require(paletteSlotMax(TrayTopLeft, slotAt(index)).y < min.y,
+					"Furniture row overlaps existing tools");
+		}
+		auto clamped = paletteClampTopLeft({0, 0}, {1600, 1000}, {1600, 1000}, true);
+		require(clamped.x + open.x == 1600 && clamped.y + open.y == 1000,
+			"Expanded tray clamp uses closed height");
+	}
+
 	// The final two bottom-row tools must land inside the compact tray.
 	void roomLadderAndPlatformLiftFitInsideTheTray()
 	{
@@ -260,7 +283,7 @@ namespace
 
 void editor_smoke::registerPalette(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "palette/everySlotFitsInsideTheTray", [](smoke::Context const&) { State state; everySlotFitsInsideTheTray(); } });
+	checks.push_back({ "palette/everySlotFitsInsideTheTray", [](smoke::Context const&) { State state; everySlotFitsInsideTheTray(); furnitureRowFits(); } });
 	checks.push_back({ "palette/roomLadderAndPlatformLiftFitInsideTheTray", [](smoke::Context const&) { State state; roomLadderAndPlatformLiftFitInsideTheTray(); } });
 	checks.push_back({ "palette/rowsAreContiguous", [](smoke::Context const&) { State state; rowsAreContiguous(); } });
 	checks.push_back({ "palette/noTwoSlotsOverlap", [](smoke::Context const&) { State state; noTwoSlotsOverlap(); } });

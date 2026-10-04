@@ -9,6 +9,7 @@ int main(int argc, char** argv)
 	std::vector<smoke::Check> checks{
 		{ "walls", isolated<[](smoke::Context const&) { runWallRenderSmokeChecks(); }> },
 		{ "agentPaths", isolated<agentPaths> },
+		{ "agentPathTargets", isolated<agentPathTargets> },
 		{ "carriageDoors", isolated<carriageDoors> },
 		{ "carriageImages", isolated<carriageImages> },
 	};

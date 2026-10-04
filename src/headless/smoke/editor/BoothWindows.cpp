@@ -3,9 +3,11 @@
 #include "DocumentEdit.h"
 #include "core/Agent.h"
 #include "core/Button.h"
+#include "core/Exceptions.h"
 #include "BoothWindowEditor.h"
 #include "PermissionsPanel.h"
 #include "PaletteLayout.h"
+#include "UI.h"
 #include "core/YamlSerializer.h"
 #include "imgui/imgui_internal.h"
 #include <cmath>
@@ -243,6 +245,18 @@ namespace
 		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.5f}); world->finishBuild();
 		auto a = world->addAccessPermission("Lower"), b = world->addAccessPermission("Shared");
 		auto unit = world->lookupDumbwaiter(id);
+		require(isCanvasSelectableSectorType(unit->getType()) && isSectorTypeMovable(unit->getType())
+			&& !isSectorTypeResizable(unit->getType()), "Dumbwaiter must be selectable and move-only on the canvas");
+		require(shouldDrawCanvasSectorEditOverlay(unit->getLayerIndex(), 1)
+			&& !shouldDrawCanvasSectorEditOverlay(unit->getLayerIndex(), 0),
+			"Dumbwaiter drag overlay must stay on the shaft Layer");
+		auto rejectedBefore = captureDocumentSnapshot(world)->yaml;
+		auto illegalDrop = world->planMoveDumbwaiter(id, 1, 0, 3);
+		require(!illegalDrop.valid && !illegalDrop.diagnostic.empty(), "Unsupported canvas drop accepted");
+		bool dropRefused = false;
+		try { world->applyDumbwaiterMove(illegalDrop); } catch (core::Exception const&) { dropRefused = true; }
+		require(dropRefused && captureDocumentSnapshot(world)->yaml == rejectedBefore,
+			"Illegal canvas drop changed the authored unit");
 		world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {a,b});
 		world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {b});
 		auto light = world->addSectorLightSwitch(unit->getStop(0).sector->getIndex(), 0);

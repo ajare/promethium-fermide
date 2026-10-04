@@ -263,8 +263,32 @@ void renderGrid(shared_ptr<const core::World> const& world, ImColor const& colou
 }
 
 
+bool isMarkerPathTarget(core::World const& world, core::Vertex const& vertex)
+{
+	auto marker = dynamic_pointer_cast<core::Marker>(vertex.getObject());
+	auto sector = vertex.getSector();
+	return marker && world.lookupMarker(marker->getId()) == marker && sector
+		&& sector->getIndex() < world.getNumSectors() && world.getSector(sector->getIndex()) == sector;
+}
+
+shared_ptr<const core::Vertex> markerPathTargetAtPosition(core::World const& world,
+	uint32_t layer, core::Vector2 position, float radius)
+{
+	if (!(radius > 0)) return {};
+	shared_ptr<const core::Vertex> closest;
+	float distance = radius * radius;
+	if (auto graph = world.getGraph())
+		for (auto const& vertex : graph->getVertices())
+			if (isMarkerPathTarget(world, *vertex) && vertex->getSector()->getLayerIndex() == layer)
+			{
+				auto candidateDistance = position.distanceToSq(vertex->getPosition());
+				if (candidateDistance < distance) { distance = candidateDistance; closest = vertex; }
+			}
+	return closest;
+}
+
 void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::World> world,
-	WorldDrawList* drawList)
+	WorldDrawList* drawList, bool markerTargetsOnly)
 {
 	if (!gUISettings.renderGraph || !drawList)
 	{
@@ -287,7 +311,9 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 	
 		if (sector)
 		{
-			closestVertex = graph->getClosestVertexInSector(sector.get(), mousePos);
+			closestVertex = markerTargetsOnly
+				? markerPathTargetAtPosition(*world, layer, mousePos, FLT_MAX)
+				: graph->getClosestVertexInSector(sector.get(), mousePos);
 		}
 	}
 
@@ -295,7 +321,7 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 	const float yBump = -2;
 	float lineThickness = -yBump + 1;
 
-	for (auto const& edge : edges)
+	if (!markerTargetsOnly) for (auto const& edge : edges)
 	{
 		auto v0 = edge->getVertex(0);
 		auto v1 = edge->getVertex(1);
@@ -376,7 +402,8 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 
 	for (auto vertex : vertices)
 	{
-		if (vertex->getSector()->getLayerIndex() != layer)
+		if (vertex->getSector()->getLayerIndex() != layer
+			|| (markerTargetsOnly && !isMarkerPathTarget(*world, *vertex)))
 		{
 			continue;
 		}
@@ -1069,7 +1096,7 @@ void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */
 void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, LayerRenderStyle style,
 	bool selected, WorldDrawList* drawList)
 {
-	if (style != LayerRenderStyle::Solid) return;
+	if (!gUISettings.renderMarkers || style != LayerRenderStyle::Solid) return;
 	auto point = marker->getPosition();
 	point.x += marker->getOffset();
 	point.y += MarkerFloorLift;
@@ -1091,6 +1118,16 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 		drawList->AddText(font, fontSize, topLeft, ImColor(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
 }
 
+
+void renderFurnitureMarkers(shared_ptr<const core::Sector> const& sector, uint32_t layer,
+	LayerRenderStyle style, WorldDrawList* drawList)
+{
+	if (!gRenderWorld || style != LayerRenderStyle::Solid) return;
+	for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		if (auto object = std::dynamic_pointer_cast<const core::MarkerSectorObject>(sector->getObject(index));
+			object && gRenderWorld->isFurnitureMarker(object->getMarker()->getId()))
+			renderMarker(object->getMarker(), layer, style, object == gSelectedSectorObject, drawList);
+}
 
 void renderForceBridge(shared_ptr<const core::ForceBridge> forceBridge, uint32_t /* layer */,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -1448,8 +1485,10 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 		case core::SectorObjectType::Marker:
 			if (flags & RENDER_SECTOR_OBJECTS_INFRONT)
 			{
-				renderMarker(static_pointer_cast<const core::MarkerSectorObject>(object)->getMarker(),
-					layer, style, selected, drawList);
+				auto marker = static_pointer_cast<const core::MarkerSectorObject>(object)->getMarker();
+				// Owned Markers are editor overlays, drawn after Furniture artwork.
+				if (!gRenderWorld || !gRenderWorld->isFurnitureMarker(marker->getId()))
+					renderMarker(marker, layer, style, selected, drawList);
 			}
 			break;
 
@@ -1532,6 +1571,7 @@ void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core:
 		if (auto chamber = dynamic_pointer_cast<const core::ChamberTransit>(sector);
 			chamber && chamber->getDecontaminationOpacity() > 0) continue;
 		renderSectorDepthContent(sector, drawList);
+		renderFurnitureMarkers(sector, layer, LayerRenderStyle::Solid, drawList);
 	}
 }
 
@@ -1929,6 +1969,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// front; the wireframe overlay pass must not expose them.
 	if (shouldRenderSectorAgents(sector->getType(), style))
 		renderSectorDepthContent(sector, drawList);
+	renderFurnitureMarkers(sector, layer, style, drawList);
 
 	// Scan overlays follow occupants, and share the production scan clock. The
 	// triangular wave is independent of the chamber's authored travel direction.
@@ -2047,6 +2088,7 @@ void renderLocationContentAboveTransit(shared_ptr<const core::Sector> const& loc
 			RENDER_SECTOR_OBJECTS_BEHIND | RENDER_SECTOR_OBJECTS_INFRONT, drawList);
 	}
 	renderSectorDepthContent(location, drawList);
+	if (isDrawnSolid(style)) renderFurnitureMarkers(location, layer, LayerRenderStyle::Solid, drawList);
 }
 
 //

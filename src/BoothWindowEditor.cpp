@@ -241,6 +241,7 @@ bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
 {
 	ImGui::Text("Dumbwaiter identity: %llu", static_cast<unsigned long long>(unit->getId().value));
 	ImGui::TextUnformatted("Fixed 1 x 2 shaft; one empty car; two adjacent-Level Stops. No passengers.");
+	ImGui::TextDisabled("Drag the shaft in Sector selection mode to move the whole unit.");
 	ImGui::Text("Phase: %s; car Level: %.3f", unit->getPhaseName(), unit->getCarPosition().y);
 	for (uint32_t stop = 0; stop < 2; ++stop)
 	{

@@ -41,8 +41,8 @@ namespace core
 				d.label = entry["label"].as<std::string>();
 				auto tiles = entry["tiles"];
 				auto points = entry["usablePoints"];
-				if (!tiles.IsSequence() || tiles.size() == 0 || !points.IsSequence() || points.size() == 0)
-					throw SerializationException("Furniture requires artwork tiles and usable points");
+				if (!tiles.IsSequence() || tiles.size() == 0 || !points.IsSequence())
+					throw SerializationException("Furniture requires artwork tiles and a usable-points list (which may be empty)");
 				std::set<std::pair<int, int>> offsets;
 				bool first = true;
 				for (auto tile : tiles)
@@ -64,7 +64,8 @@ namespace core
 				std::set<std::string> keys, labels;
 				for (auto point : points)
 				{
-					FurnitureUsablePoint p{ point["key"].as<std::string>(), point["label"].as<std::string>(), point["x"].as<float>() };
+					FurnitureUsablePoint p{ point["key"].as<std::string>(), point["label"].as<std::string>(), point["x"].as<float>(),
+						point["blocksPathing"] ? point["blocksPathing"].as<bool>() : true };
 					if ((point["y"] && point["y"].as<float>() != 0) || !std::isfinite(p.x)
 						|| p.x < d.minX || p.x >= d.maxX || p.key.empty()
 						|| !Marker::nameIsValid(p.label, &diagnostic) || Marker::trimName(p.label) != p.label

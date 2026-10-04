@@ -132,6 +132,7 @@ namespace core
 		bool configureDumbwaiter(DumbwaiterId id, CreateDumbwaiterOptions const& options);
 		bool removeDumbwaiter(DumbwaiterId id);
 		bool hasDumbwaiters() const;
+		bool isDumbwaiterOwnedControl(std::shared_ptr<const SectorObject> const& object) const;
 
 		struct CreateWindowOptions
 		{

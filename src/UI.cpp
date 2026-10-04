@@ -92,6 +92,7 @@
 #include "Exceptions.h"
 #include "WorldViewportDrag.h"
 #include "WorldViewportZoom.h"
+#include "LocationPlan.h"
 
 
 extern spdlog::logger* gLogger;
@@ -110,6 +111,8 @@ static std::deque<core::LogMessage> gLogMessages;
 using namespace std;
 
 
+static LocationPlan gLocationPlan;
+static uint32_t gSelectedWorldLevel{};
 static bool gWorldHovered{ false };
 static bool gPegmanConsumesLeftMouse{ false };
 
@@ -318,6 +321,8 @@ namespace
 		bool ladder{ false };
 		bool stairwell{ false };
 		bool airlock{ false };
+		bool dumbwaiter{ false };
+		core::World::DumbwaiterMovePlan dumbwaiterPreview;
 		core::World::AirlockEditPlan airlockPreview;
 		ResizeEdge edge{ ResizeEdge::None };
 		ImVec2 pressPosition{};
@@ -1291,6 +1296,7 @@ namespace
 			auto created = world->addSectorMarker(target.sector->getIndex(),
 				target.levelOffset, target.localX);
 			world->finishBuild();
+			gUISettings.renderMarkers = true;
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -1553,15 +1559,19 @@ namespace
 			if (gPegman.feetY <= gPegman.floorY) landPegman(world);
 		}
 
-		auto const traySize = paletteTraySize();
+		bool const furnitureRow = gLocationPlan.isOpen(world);
+		auto const traySize = paletteTraySize(furnitureRow);
 		auto const trayHomeTopLeft = canvasPos + canvasSize
 			- ImVec2(PaletteInset, PaletteInset) - traySize;
 		auto const trayTopLeft = paletteClampTopLeft(canvasPos, canvasSize,
-			trayHomeTopLeft + gPaletteTrayOffset);
+			trayHomeTopLeft + gPaletteTrayOffset, furnitureRow);
 		auto const trayBottomRight = trayTopLeft + traySize;
 		// The grip is the tray minus its buttons: the padding and the slot gaps.
 		bool overTray = gWorldHovered && pointInRect(io.MousePos, trayTopLeft, trayBottomRight);
-		bool overGrip = overTray && !paletteButtonAt(trayTopLeft, io.MousePos);
+		auto const furnitureMin = paletteFurnitureSlotMin(trayTopLeft, 0);
+		bool overFurniture = furnitureRow && overTray && io.MousePos.y >= furnitureMin.y
+			&& io.MousePos.y < furnitureMin.y + PaletteSlotSize;
+		bool overGrip = overTray && !overFurniture && !paletteButtonAt(trayTopLeft, io.MousePos);
 		auto roomMin = paletteSlotMin(trayTopLeft, PaletteSlot::Room);
 		auto facadeMin = paletteSlotMin(trayTopLeft, PaletteSlot::Facade);
 		auto corridorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Corridor);
@@ -1612,6 +1622,10 @@ namespace
 			: overGrip ? IM_COL32(251, 188, 4, 150) : borderColour;
 		drawList->AddRectFilled(trayTopLeft, trayBottomRight, trayColour, 5.0f);
 		drawList->AddRect(trayTopLeft, trayBottomRight, trayBorder, 5.0f);
+		if (furnitureRow)
+			paletteConsumedMouse = gLocationPlan.renderPaletteRow(world, *drawList, trayTopLeft,
+				gWorldHovered && gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging)
+				|| paletteConsumedMouse;
 
 		bool roomHovered = gWorldHovered && pointInRect(io.MousePos, roomMin, roomMax);
 		bool facadeHovered = gWorldHovered && pointInRect(io.MousePos, facadeMin, facadeMax);
@@ -1641,7 +1655,7 @@ namespace
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 			gPaletteTrayOffset = paletteClampTopLeft(canvasPos, canvasSize,
-				io.MousePos - gTrayDrag.grab) - trayHomeTopLeft;
+				io.MousePos - gTrayDrag.grab, furnitureRow) - trayHomeTopLeft;
 			if (!io.MouseDown[0]) gTrayDrag.dragging = false;
 		}
 
@@ -2635,6 +2649,21 @@ namespace
 		}
 
 		openWorld(world, selectedPath.get());
+	}
+
+	optional<string> chooseFurnitureCataloguePath()
+	{
+		nfdu8char_t* selectedPathRaw{ nullptr };
+		nfdu8filteritem_t const filters[] = { { "Furniture catalogue", "furniture.yaml" } };
+		auto const directory = filesystem::path(gWorldFilepath).parent_path().string();
+		auto const result = NFD_OpenDialogU8(&selectedPathRaw, filters, 1,
+			directory.empty() ? nullptr : directory.c_str());
+		unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(selectedPathRaw, NFD_FreePathU8);
+		if (result == NFD_CANCEL) return nullopt;
+		if (result == NFD_ERROR)
+			throw runtime_error(string("Could not choose a Furniture catalogue: ")
+				+ (NFD_GetError() ? NFD_GetError() : "unknown native dialog error"));
+		return string(selectedPath.get());
 	}
 
 	optional<string> chooseAgentTagRegistryPath()
@@ -4689,6 +4718,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			if (gSelectingAgentPathDestination && gSelectedAgent)
 			{
+				if (!isMarkerPathTarget(*world, *gHoveredVertex)) return;
 				auto path = graph->calculatePath(gSelectedAgent, nullptr, gHoveredVertex);
 				if (path)
 				{
@@ -4703,7 +4733,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 			}
 			else if (ImGui::GetIO().KeyCtrl)
 			{
-				if (gSelectedAgent)
+				if (gSelectedAgent && isMarkerPathTarget(*world, *gHoveredVertex))
 				{
 					auto path = graph->calculatePath(gSelectedAgent, nullptr, gHoveredVertex);
 					applyAgentPathEdit(world, gSelectedAgent, std::move(path), false, false);
@@ -4738,6 +4768,8 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			setSelectionMode(UISettings::SelectionMode::Sector);
 			gSelectedSector = gHoveredSector;
+			gSelectedWorldLevel = static_cast<uint32_t>(std::max(0.0f,
+				std::floor(screenToWorld(ImGui::GetIO().MousePos).y)));
 			gSelectedAgent = nullptr;
 			gSelectedVertex.reset();
 			gSelectedSectorObject.reset();
@@ -5034,6 +5066,7 @@ void renderMenu(shared_ptr<core::World>& world)
 				ImGui::EndMenu();
 			}
 			ImGui::MenuItem("Grid", "G", &gUISettings.renderGrid);
+			ImGui::MenuItem("Show markers", nullptr, &gUISettings.renderMarkers);
 			ImGui::MenuItem("Show next layer wireframe", "F3", &gUISettings.renderNextLayerWireframe);
 			ImGui::MenuItem("World graph", "F4", &gUISettings.renderGraph);
 			ImGui::MenuItem("Highlight nearest vertex", "F5", &gUISettings.highlightNearestVertex);
@@ -5111,6 +5144,8 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 	imgui::ToggleButton("ToggleNextLayerWireframe", "Next layer wireframe", &gUISettings.renderNextLayerWireframe);
 	ImGui::SameLine();
 	imgui::ToggleButton("ToggleGraph", "World graph", &gUISettings.renderGraph);
+	ImGui::SameLine();
+	imgui::ToggleButton("ToggleMarkers", "Show markers", &gUISettings.renderMarkers);
 	ImGui::SameLine();
 	imgui::ToggleButton("Agent Debug", "Agent debug", &gUISettings.renderAgentDebug);
 
@@ -5772,6 +5807,14 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
 	shared_ptr<const core::SectorObject> object)
 {
+	if (world->isDumbwaiterOwnedControl(object))
+	{
+		ImGui::TextUnformatted("Dumbwaiter-owned landing Button");
+		ImGui::TextDisabled("Moves with the complete Dumbwaiter unit.");
+		auto button = static_pointer_cast<const core::Button>(object->_getObject());
+		renderInteractionPermissionRequirements(world, button->getInteractionPointId());
+		return;
+	}
 	if (world->isAirlockOwnedObject(object))
 	{
 		ImGui::TextUnformatted("Airlock-owned button");
@@ -6777,6 +6820,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 	if (gSelectedSector)
 	{
+		gLocationPlan.renderSelectionAction(world, gSelectedSector, gSelectedWorldLevel);
 		// A Background is not a place an agent can be, so it gets its own minimal
 		// panel rather than the generic Sector readout with its "Agents:" line.
 		if (gSelectedSector->getType() == core::SectorType::Background)
@@ -7439,7 +7483,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	if (gSelectingAgentPathDestination)
 	{
 		ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
-			"Select a destination vertex (Escape to cancel)");
+			"Select a destination Marker (Escape to cancel)");
 		if (ImGui::Button("Cancel path selection")) endAgentPathSelection();
 	}
 	else
@@ -7568,8 +7612,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	{
 		ImGui::Text("Selected vertex: %s", gSelectedVertex->getDescription().c_str());
 		auto const behaviourOwnsMovement = world->agentBehaviourOwnsMovement(id);
-		ImGui::BeginDisabled(behaviourOwnsMovement);
-		if (ImGui::Button("Path to selected vertex"))
+		ImGui::BeginDisabled(behaviourOwnsMovement || !isMarkerPathTarget(*world, *gSelectedVertex));
+		if (ImGui::Button("Path to selected Marker"))
 		{
 			auto newPath = world->getGraph()->calculatePath(gSelectedAgent, gSelectedVertex);
 			if (newPath)
@@ -7872,7 +7916,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		renderAgentView(world);
 	}
 
-	renderFurniturePanel(world, gWorldFilepath, gSelectedSector);
+	renderFurniturePanel(world, gWorldFilepath, [] { return chooseFurnitureCataloguePath(); });
 	renderSelectedObjectPanel(world);
 	renderSelectedAgentPanel(world);
 
@@ -8241,26 +8285,18 @@ namespace
 		return true;
 	}
 
-	// The Sector types the editor can resize by dragging one of their edges.
-	bool isSectorTypeResizable(core::SectorType type)
-	{
-		return type == core::SectorType::Location
-			|| type == core::SectorType::Facade
-			|| type == core::SectorType::Background
-			|| type == core::SectorType::Lift
-			|| type == core::SectorType::Shuttle
-			|| type == core::SectorType::Ladder
-			|| type == core::SectorType::Stairwell
-			|| type == core::SectorType::Airlock || type == core::SectorType::Chamber;
-	}
-
 	ResizeEdge hoveredResizeEdge(shared_ptr<const core::Sector> const& sector, ImVec2 mouse)
 	{
-		if (!sector || !isSectorTypeResizable(sector->getType())) return ResizeEdge::None;
+		if (!sector || !isSectorTypeMovable(sector->getType())) return ResizeEdge::None;
 		auto topLeft = worldToScreen({ (float)sector->getCellX(),
 			(float)(sector->getCellY() + sector->getLevelsHigh()) });
 		auto bottomRight = worldToScreen({ (float)(sector->getCellX() + sector->getCellsWide()),
 			(float)sector->getCellY() });
+		// Fixed-size units move from anywhere inside their footprint, never resize.
+		if (!isSectorTypeResizable(sector->getType()))
+			return mouse.x >= topLeft.x && mouse.x <= bottomRight.x
+				&& mouse.y >= topLeft.y && mouse.y <= bottomRight.y
+				? ResizeEdge::Move : ResizeEdge::None;
 		constexpr float tolerance = 6.0f;
 		struct Candidate { ResizeEdge edge; float distance; };
 		vector<Candidate> candidates;
@@ -8434,9 +8470,9 @@ namespace
 		return ResizeEdge::None;
 	}
 
-	// The cells the selection occupies when the editor can resize it by
-	// dragging: a resizable Sector, or a Window or Door SectorObject. False
-	// when the selection cannot be resized, or is not on the Layer being drawn.
+	// The cells the selection occupies when the editor can move or resize it by
+	// dragging: an editable Sector, or a Window or Door SectorObject. False
+	// when the selection cannot be dragged, or is not on the Layer being drawn.
 	bool selectedResizeFootprint(uint32_t& cellX, uint32_t& cellY, uint32_t& cellsWide,
 		uint32_t& levelsHigh)
 	{
@@ -8445,7 +8481,7 @@ namespace
 			if (!gSelectedSector
 				|| !shouldDrawCanvasSectorEditOverlay(gSelectedSector->getLayerIndex(),
 					(uint32_t)gUISettings.visibleLayer)
-				|| !isSectorTypeResizable(gSelectedSector->getType()))
+				|| !isSectorTypeMovable(gSelectedSector->getType()))
 				return false;
 			cellX = gSelectedSector->getCellX();
 			cellY = gSelectedSector->getCellY();
@@ -8530,7 +8566,8 @@ namespace
 			return;
 		}
 
-		if (world->isChamberOwnedObject(gSelectedSectorObject)
+		if (world->isDumbwaiterOwnedControl(gSelectedSectorObject)
+			|| world->isChamberOwnedObject(gSelectedSectorObject)
 			|| world->isLiftOwnedDoor(gSelectedSectorObject)
 			|| world->isBulkheadDoorOwnedControl(gSelectedSectorObject)
 			|| world->isLiftOwnedControl(gSelectedSectorObject)
@@ -8718,6 +8755,7 @@ namespace
 				gUISettings.worldPaused = true;
 			}
 			gSectorResize.dragging = true;
+			gSectorResize.dumbwaiter = sectorType == core::SectorType::Dumbwaiter;
 			gSectorResize.lift = selectedLift;
 			gSectorResize.shuttle = selectedShuttle;
 			gSectorResize.ladder = selectedLadder;
@@ -8730,7 +8768,11 @@ namespace
 			gSectorResize.originalY = gSelectedSector->getCellY();
 			gSectorResize.originalWidth = gSelectedSector->getCellsWide();
 			gSectorResize.originalHeight = gSelectedSector->getLevelsHigh();
-			if (gSectorResize.airlock)
+			if (gSectorResize.dumbwaiter)
+				gSectorResize.dumbwaiterPreview = world->planMoveDumbwaiter(
+					static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId(),
+					gSelectedSector->getLayerIndex(), gSectorResize.originalY, gSectorResize.originalX);
+			else if (gSectorResize.airlock)
 				gSectorResize.airlockPreview = gSelectedSector->getType() == core::SectorType::Chamber
 					? world->planResizeChamber(gSelectedSector->getIndex(), gSectorResize.originalX,
 						gSectorResize.originalY, gSectorResize.originalWidth,
@@ -8833,7 +8875,13 @@ namespace
 				}
 			}
 		}
-		if (gSectorResize.airlock)
+		if (gSectorResize.dumbwaiter)
+		{
+			gSectorResize.dumbwaiterPreview = world->planMoveDumbwaiter(
+				static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId(),
+				gSelectedSector->getLayerIndex(), (uint32_t)bottom, (uint32_t)left);
+		}
+		else if (gSectorResize.airlock)
 		{
 			if (gSectorResize.airlockPreview.x != (uint32_t)left
 				|| gSectorResize.airlockPreview.y != (uint32_t)bottom
@@ -8903,6 +8951,31 @@ namespace
 				&& right - left == (int)gSectorResize.originalWidth
 				&& top - bottom == (int)gSectorResize.originalHeight;
 			if (unchanged) resetSectorResize();
+			else if (gSectorResize.dumbwaiter)
+			{
+				auto const plan = gSectorResize.dumbwaiterPreview;
+				try
+				{
+					if (!plan.valid)
+						core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, plan.diagnostic);
+					else
+					{
+						auto undo = captureDocumentSnapshot(world);
+						if (world->applyDumbwaiterMove(plan))
+						{
+							gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
+							gSelectedAgent = nullptr; gSelectedSectorObject.reset();
+							gSelectedSector = world->lookupDumbwaiter(plan.id);
+							commitDocumentEdit(std::move(undo));
+						}
+					}
+				}
+				catch (core::Exception const& error)
+				{ core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, error.getMessage()); }
+				catch (std::exception const& error)
+				{ core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, error.what()); }
+				resetSectorResize();
+			}
 			else if (gSectorResize.airlock) commitAirlockEdit(world, gSectorResize.airlockPreview);
 			else if (gSectorResize.lift && !gSectorResize.liftPreview.valid)
 			{
@@ -8972,7 +9045,7 @@ namespace
 			}
 		}
 
-		// The whole footprint of the selected resizable object is boxed in
+		// The whole footprint of the selected draggable object is boxed in
 		// yellow while the cursor is inside it, showing the cells a drag works
 		// on.
 		if (gWorldHovered && !gSectorResize.dragging && !gObjectMove.dragging
@@ -8996,7 +9069,13 @@ namespace
 		bool hasPlan = false, valid = false, remove = false;
 		uint32_t x = 0, y = 0, width = 0, height = 0;
 		string diagnostic;
-		if (gSectorResize.airlock && (gSectorResize.dragging || gSectorResize.airlockPreview.width))
+		if (gSectorResize.dumbwaiter && gSectorResize.dragging)
+		{
+			auto const& plan = gSectorResize.dumbwaiterPreview;
+			hasPlan = true; valid = plan.valid; x = plan.x; y = plan.y;
+			width = 1; height = 2; diagnostic = plan.diagnostic;
+		}
+		else if (gSectorResize.airlock && (gSectorResize.dragging || gSectorResize.airlockPreview.width))
 		{
 			auto const& plan = gSectorResize.airlockPreview;
 			hasPlan = true; valid = plan.valid; x = plan.x; y = plan.y;
@@ -9249,18 +9328,19 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		gLastWorldCursor = mousePos;
 		// Hit-test in reverse visual order. Graph vertices are rendered over agents,
 		// agents over sector objects, and sector objects over their owning sector.
-		// While picking an agent's path destination only vertices are selectable,
-		// with a slightly enlarged target radius to make them easier to pick.
+		// While picking an Agent's path destination only actual Marker vertices
+		// are selectable, with a slightly enlarged radius to make them easier to pick.
 		float vertexRadius = RENDER_VERTEX_SIZE
 			/ ((float)CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom);
 		if (gSelectingAgentPathDestination) vertexRadius *= 1.5f;
 		if (gUISettings.renderGraph)
-			gHoveredVertex = graph->getVertexAtPosition(gUISettings.visibleLayer, mousePos.x,
-				mousePos.y, vertexRadius);
+			gHoveredVertex = gSelectingAgentPathDestination
+				? markerPathTargetAtPosition(*world, gUISettings.visibleLayer, mousePos, vertexRadius)
+				: graph->getVertexAtPosition(gUISettings.visibleLayer, mousePos.x, mousePos.y, vertexRadius);
 		if (!gSelectingAgentPathDestination && !gHoveredVertex)
 			gHoveredAgent = world->getAgentAtPosition(gUISettings.visibleLayer,
 				mousePos.x, mousePos.y);
-		if (!gHoveredVertex && !gHoveredAgent)
+		if (!gSelectingAgentPathDestination && !gHoveredVertex && !gHoveredAgent)
 		{
 			gHoveredSectorObject = markerAtScreenPosition(world, ImGui::GetIO().MousePos);
 			if (!gHoveredSectorObject)
@@ -9317,7 +9397,7 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	auto worldBottomRight = worldToScreen({ (float)world->getCellsWide(), 0.0f });
 	drawList->PushClipRect(worldTopLeft, worldBottomRight, true);
 	renderWorld(world, drawList);
-	renderGraph(graph, world, drawList);
+	renderGraph(graph, world, drawList, gSelectingAgentPathDestination);
 	renderSelectedAgentPath(world.get(), drawList);
 	drawSectorEditOverlay(drawList);
 	if (gAgentMove.dragging)
@@ -9389,6 +9469,7 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 
 	if (!world)
 	{
+		gLocationPlan.close();
 		ImGui::Begin("World");
 		ImGui::TextDisabled("No World is open.");
 		ImGui::TextUnformatted("Choose File > New or File > Open to begin.");
@@ -9400,4 +9481,11 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 	renderStatusBar(world);
 	renderControlsWindow(world, graph, pathingAgent);
 	renderWorldWindow(world, graph);
+	gLocationPlan.render(world, [](WorldDrawList const& commands, ImVec2 position, ImVec2 size)
+	{
+		auto texture = renderWorldCommands(commands, position, size, WorldCanvas::LocationPlan);
+		ImGui::GetWindowDrawList()->AddImage(
+			reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
+			position, {position.x + size.x, position.y + size.y}, {0, 1}, {1, 0});
+	});
 }

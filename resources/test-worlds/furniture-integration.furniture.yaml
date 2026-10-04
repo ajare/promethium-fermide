@@ -1,11 +1,10 @@
-# Required bundled teaching catalogue; keys and UUID are stable.
+# Integration catalogue: explicit depth-2 sofa ports compose with the desk front route.
 furnitureCatalogue:
   version: 1
-  uuid: 7ad3b31e-c85b-43ac-90ba-359359359359
+  uuid: f834cb53-36cd-4d0a-920d-4a2acfbe6592
   definitions:
   - key: chair
     label: Chair
-    sideRoutes: true
     tiles:
     - x: 0
       y: 0
@@ -15,45 +14,8 @@ furnitureCatalogue:
     - key: seat
       label: Seat
       x: 0.5
-      blocksPathing: false
-    vertices:
-    - key: approachLeft
-      x: 0
-      external: true
-    - key: approachRight
-      x: 1
-      external: true
-    - key: frontLeft
-      x: 0.125
-    - key: frontRight
-      x: 0.875
-    - key: backLeft
-      x: 0.125
-    - key: backRight
-      x: 0.875
-    - key: seat
-      x: 0.5
-      usablePoint: seat
-    edges:
-    - from: approachLeft
-      to: frontLeft
-    - from: frontLeft
-      to: seat
-      depthOffset: 0
-    - from: seat
-      to: frontRight
-      depthOffset: 0
-    - from: frontRight
-      to: approachRight
-    - from: approachLeft
-      to: backLeft
-    - from: backLeft
-      to: backRight
-      depthOffset: 1
-    - from: backRight
-      to: approachRight
   - key: sofa
-    label: Sofa
+    label: Two-seat sofa
     sideRoutes: true
     tiles:
     - x: 0
@@ -68,11 +30,9 @@ furnitureCatalogue:
     - key: left
       label: Left seat
       x: 0.5
-      blocksPathing: false
     - key: right
       label: Right seat
       x: 1.5
-      blocksPathing: false
     vertices:
     - key: left
       x: 0
@@ -80,10 +40,6 @@ furnitureCatalogue:
     - key: frontLeft
       x: 0.25
     - key: frontRight
-      x: 1.75
-    - key: backLeft
-      x: 0.25
-    - key: backRight
       x: 1.75
     - key: right
       x: 2
@@ -97,26 +53,22 @@ furnitureCatalogue:
     edges:
     - from: left
       to: frontLeft
-    - from: left
-      to: backLeft
     - from: frontLeft
-      to: leftSeat
-      depthOffset: 0
-    - from: leftSeat
-      to: rightSeat
-      depthOffset: 0
-    - from: rightSeat
       to: frontRight
-      depthOffset: 0
+      depthOffset: -1
     - from: frontRight
       to: right
-    - from: backLeft
-      to: backRight
-      depthOffset: 1
-    - from: backRight
+    - from: left
       to: right
+      depthOffset: -1
+    - from: left
+      to: leftSeat
+      depthOffset: -1
+    - from: left
+      to: rightSeat
+      depthOffset: -1
   - key: desk
-    label: Desk
+    label: Desk with front and back routes
     sideRoutes: true
     tiles:
     - x: 0

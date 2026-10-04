@@ -22,37 +22,38 @@ namespace
 	void demonstration(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture.world.yaml"));
+		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-integration.world.yaml"));
 		require(world->furniture().size() == 6 && world->furniture()[3].y == 1
 			&& world->furniture()[2].destinations.size() == 2
-			&& world->furniture()[2].destinations[0].marker != world->furniture()[2].destinations[1].marker,
+			&& world->furniture()[2].destinations[0].marker != world->furniture()[2].destinations[1].marker
+			&& world->furniture()[1].destinations.empty() && !world->furniture()[1].marker,
 			"Required demonstration lost Walkway support or distinct sofa destinations");
 		std::shared_ptr<const core::Vertex> exit;
 		for (auto const& vertex : world->getGraph()->getVertices())
-			if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject()); marker && marker->getName() == "Desk Far side") exit = vertex;
+			if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject()); marker && marker->getName() == "Exit") exit = vertex;
 		require(exit != nullptr, "Required demo Exit Marker is missing");
 		for (auto const& entry : world->getSimulationSnapshot().agents)
 		{
 			auto agent = world->lookupAgent(entry.id).entity;
 			if (agent->getName() == "Showroom walker") continue;
-			auto depth = agent->getLocalDepth();
 			auto path = world->getGraph()->calculatePath(agent, exit);
 			require(path != nullptr, "Stationary demonstration observer cannot depart");
 			bool side = false;
 			for (auto const& node : path->nodes)
-				if (node.edge && node.edge->getLength() > 0 && node.edge->getVertex(0)->getPosition().x >= 2.375f
-					&& node.edge->getVertex(1)->getPosition().x <= 3.875f)
+				if (node.edge && node.edge->getLength() > 0
+					&& std::min(node.edge->getVertex(0)->getPosition().x, node.edge->getVertex(1)->getPosition().x) < 4.125f
+					&& std::max(node.edge->getVertex(0)->getPosition().x, node.edge->getVertex(1)->getPosition().x) > 2.125f)
 				{
 					side = true;
-					require(node.edge->getLocalDepth() == depth, "Equal-cost demo departure lost retained depth continuity: " + agent->getName()
-						+ " selected=" + std::to_string(node.edge->getLocalDepth()) + " x=" + std::to_string(node.edge->getVertex(0)->getPosition().x));
+					require(node.edge->getLocalDepth() == 2 || node.edge->getLocalDepth() == 3,
+						"Demo departure bypassed the authored Furniture side routes");
 				}
 			require(side, "Demo observer avoided the explicit front/back routes");
 			agent->setPath(path, true);
 		}
 		world->advanceTicks(1800);
 		for (auto const& entry : world->getSimulationSnapshot().agents)
-			require(entry.globalPosition.x == (world->lookupAgent(entry.id).entity->getName() == "Showroom walker" ? 9.5f : 3.875f),
+			require(entry.globalPosition.x == 9.5f,
 				"Bundled demo journey did not arrive normally");
 	}
 
@@ -200,8 +201,108 @@ namespace
 		auto next = world.placeFurniture(room, "chair", 5.25f, 0, "Replacement");
 		require(next > id && world.furniture().back().marker.value > seat.value, "Deletion reused identities");
 	}
+	void usablePointDefaults(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto cataloguePath = context.temporaryRoot() / "pass-through.furniture.yaml";
+		// Pin the routes/defaults under test; the user-facing demo catalogue is editable.
+		auto source = context.fixture("src/headless/smoke/fixtures/usable-points.furniture.yaml");
+		auto catalogue = core::FurnitureCatalogue::load(source);
+		require(!catalogue->definition("chair")->usablePoints.front().blocksPathing,
+			"Test chair seat must default to non-blocking");
+		core::World chairWorld("One-seat sofa", 8, 2);
+		auto chairRoom = chairWorld.addRoom("Room", 0, 0, 0, 8, 1);
+		chairWorld.attachFurnitureCatalogue(source.filename().string(), catalogue);
+		chairWorld.placeFurniture(chairRoom, "chair", 2, 0, "Chair", 2);
+		auto chairSeat = chairWorld.furniture().front().marker;
+		uint32_t chairEntrance = 0, chairExit = 0;
+		chairWorld.addSectorMarker(chairRoom, 0, 0.5f, "Entrance", &chairEntrance);
+		chairWorld.addSectorMarker(chairRoom, 0, 6.5f, "Exit", &chairExit);
+		chairWorld.finishBuild(); chairWorld.pauseSimulation();
+		core::Agent chairQuery("Query");
+		for (bool reverse : {false, true})
+		{
+			auto graph = chairWorld.getGraph();
+			auto path = graph->calculatePath(&chairQuery, graph->getVertexByIdentifier(reverse ? chairExit : chairEntrance),
+				graph->getVertexByIdentifier(reverse ? chairEntrance : chairExit));
+			require(path != nullptr, "Chair severed circulation");
+			bool throughSeat = false;
+			for (auto const& node : path->nodes)
+				if (auto marker = std::dynamic_pointer_cast<core::Marker>(node.targetVertex->getObject()); marker && marker->getId() == chairSeat)
+				{
+					throughSeat = true;
+					require(node.edge && node.edge->getLocalDepth() == 1, "Chair seat route is not in front");
+				}
+			require(throughSeat, "Chair front route did not pass through its non-blocking seat");
+		}
+		std::string chairDiagnostic;
+		require(chairWorld.setMarkerProperties(chairSeat, core::markerPropertyBit(core::MarkerProperty::BlocksPathing), &chairDiagnostic), chairDiagnostic);
+		auto chairGraph = chairWorld.getGraph();
+		auto backPath = chairGraph->calculatePath(&chairQuery, chairGraph->getVertexByIdentifier(chairEntrance), chairGraph->getVertexByIdentifier(chairExit));
+		require(backPath != nullptr, "Chair has no separate back route");
+		bool behind = false;
+		for (auto const& node : backPath->nodes) if (node.edge && node.edge->getLocalDepth() == 3) behind = true;
+		require(behind, "Blocking the chair seat did not leave the back route available");
+
+		// Omit the new chair default in this private copy to retain compatibility coverage.
+		auto defaultYaml = YAML::LoadFile(source.string());
+		defaultYaml["furnitureCatalogue"]["definitions"][0]["usablePoints"][0].remove("blocksPathing");
+		{ std::ofstream file(cataloguePath); file << defaultYaml; }
+		core::World world("Pass-through sofa seats", 8, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+		world.attachFurnitureCatalogue(cataloguePath.filename().string(), core::FurnitureCatalogue::load(cataloguePath));
+		world.placeFurniture(room, "sofa", 2, 0, "Sofa", 2);
+		auto seats = world.furniture().front().destinations;
+		for (auto const& point : seats)
+			require(!world.lookupMarker(point.marker)->hasProperty(core::MarkerProperty::BlocksPathing),
+				"Sofa usable-point blocksPathing:false was ignored");
+		world.placeFurniture(room, "chair", 7, 0, "Chair", 2);
+		require(world.lookupMarker(world.furniture().back().marker)->hasProperty(core::MarkerProperty::BlocksPathing),
+			"Omitted blocksPathing must default to true");
+		uint32_t entrance = 0, exit = 0;
+		world.addSectorMarker(room, 0, 0.5f, "Entrance", &entrance);
+		world.addSectorMarker(room, 0, 6.5f, "Exit", &exit);
+		world.finishBuild(); world.pauseSimulation();
+		auto graph = world.getGraph(); core::Agent query("Query");
+		auto from = graph->getVertexByIdentifier(entrance), to = graph->getVertexByIdentifier(exit);
+		auto path = graph->calculatePath(&query, from, to);
+		require(path != nullptr, "Sofa seat chain severed front circulation");
+		std::vector<core::MarkerId> visited;
+		for (auto const& node : path->nodes)
+			if (auto marker = std::dynamic_pointer_cast<core::Marker>(node.targetVertex->getObject());
+				marker && world.isFurnitureMarker(marker->getId())) visited.push_back(marker->getId());
+		require(visited == std::vector<core::MarkerId>{seats[0].marker, seats[1].marker},
+			"Front circulation did not pass through both sofa seats");
+		for (auto const& vertex : graph->getVertices())
+			if (auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+				marker && (marker->getId() == seats[0].marker || marker->getId() == seats[1].marker))
+				require(graph->calculatePath(&query, from, vertex) != nullptr, "Pass-through seat is not a selectable destination");
+		std::string diagnostic;
+		require(world.setMarkerProperties(seats[0].marker, core::markerPropertyBit(core::MarkerProperty::BlocksPathing), &diagnostic), diagnostic);
+		// A newly added catalogue point must also use its default during reconciliation.
+		auto yaml = YAML::LoadFile(cataloguePath.string());
+		auto sofa = yaml["furnitureCatalogue"]["definitions"][1];
+		sofa["usablePoints"].push_back(YAML::Load("{key: extra, label: Extra, x: 1.625, blocksPathing: false}"));
+		sofa["vertices"].push_back(YAML::Load("{key: extra, x: 1.625, usablePoint: extra}"));
+		sofa["edges"].push_back(YAML::Load("{from: rightSeat, to: extra, depthOffset: -1}"));
+		{ std::ofstream file(cataloguePath); file << yaml; }
+		for (auto extension : {"world.yaml", "world"})
+		{
+			auto filename = context.temporaryRoot() / (std::string("pass-through.") + extension);
+			world.saveTo(filename.string());
+			auto loaded = core::loadWorldDocument(filename);
+			require(loaded->lookupMarker(seats[0].marker)->hasProperty(core::MarkerProperty::BlocksPathing)
+				&& !loaded->lookupMarker(seats[1].marker)->hasProperty(core::MarkerProperty::BlocksPathing),
+				"Catalogue defaults overwrote authored Marker properties on reopen");
+			require(loaded->furniture().front().destinations.size() == 3
+				&& !loaded->lookupMarker(loaded->furniture().front().destinations.back().marker)->hasProperty(core::MarkerProperty::BlocksPathing),
+				"Catalogue reconciliation ignored the new usable point's non-blocking default");
+		}
+	}
+
 	void layouts(smoke::Context const& context)
 	{
+		usablePointDefaults(context);
 		using smoke::require;
 		core::World world("Multi-point layouts", 20, 5);
 		auto room = world.addRoom("Room", 0, 0, 0, 20, 5);

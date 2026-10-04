@@ -84,6 +84,20 @@ Resources:
           id: "Furniture"
           ref: "FurnitureCatalogue"
     - type: "FurnitureCatalogue"
+      name: "FurnitureIntegrationCatalogue"
+      location: "test-worlds/furniture-integration.furniture.yaml"
+      DependentResources:
+        DependentResource:
+          id: "Artwork"
+          ref: "ObjectAtlas"
+    - type: "World"
+      name: "FurnitureIntegrationDemo"
+      location: "test-worlds/furniture-integration.world.yaml"
+      DependentResources:
+        DependentResource:
+          id: "Furniture"
+          ref: "FurnitureIntegrationCatalogue"
+    - type: "FurnitureCatalogue"
       name: "ChairCatalogue"
       location: "test-worlds/chair.furniture.yaml"
       DependentResources:

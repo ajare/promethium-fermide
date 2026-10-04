@@ -25,6 +25,13 @@ namespace core
 		return unit && stop < 2 ? requestInteraction(unit->getLandingButton(stop), actor) : InteractionRequestId{};
 	}
 
+	bool World::isDumbwaiterOwnedControl(std::shared_ptr<const SectorObject> const& object) const
+	{
+		auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+		auto point = button ? mInteractionPoints.find(button->getInteractionPointId()) : nullptr;
+		return point && bool(point->mDumbwaiterOwner);
+	}
+
 	bool World::hasDumbwaiters() const
 	{
 		return std::any_of(mSectors.begin(), mSectors.end(), [](auto const& sector)
