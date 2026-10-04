@@ -27,15 +27,15 @@ namespace
 		for (auto resource : manifest["Resources"]["Resource"])
 		{
 			auto name = resource["name"].as<std::string>();
-			if (name == "FurnitureDemo") demoDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureCatalogue";
-			if (name == "FurnitureCatalogue") catalogueDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "ObjectAtlas";
+			if (name == "FurnitureIntegrationDemo") demoDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "FurnitureIntegrationCatalogue";
+			if (name == "FurnitureIntegrationCatalogue") catalogueDependency = resource["DependentResources"]["DependentResource"]["ref"].as<std::string>() == "ObjectAtlas";
 			if (name == "ObjectAtlas")
 				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
 					tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		}
 		require(demoDependency && catalogueDependency, "Required bundled Furniture resource dependencies are missing");
 		require(std::filesystem::is_regular_file(context.fixture("resources/textures/objects.png")), "Required placeholder atlas is missing");
-		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture.world.yaml"));
+		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-integration.world.yaml"));
 		for (auto const& [key, definition] : world->furnitureCatalogue()->definitions())
 			for (auto const& tile : definition.tiles)
 			{

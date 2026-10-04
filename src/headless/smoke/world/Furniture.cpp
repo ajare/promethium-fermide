@@ -22,7 +22,7 @@ namespace
 	void demonstration(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture.world.yaml"));
+		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-integration.world.yaml"));
 		require(world->furniture().size() == 6 && world->furniture()[3].y == 1
 			&& world->furniture()[2].destinations.size() == 2
 			&& world->furniture()[2].destinations[0].marker != world->furniture()[2].destinations[1].marker
@@ -205,13 +205,14 @@ namespace
 	{
 		using smoke::require;
 		auto cataloguePath = context.temporaryRoot() / "pass-through.furniture.yaml";
-		auto source = context.fixture("resources/test-worlds/furniture.furniture.yaml");
+		// Pin the routes/defaults under test; the user-facing demo catalogue is editable.
+		auto source = context.fixture("src/headless/smoke/fixtures/usable-points.furniture.yaml");
 		auto catalogue = core::FurnitureCatalogue::load(source);
 		require(!catalogue->definition("chair")->usablePoints.front().blocksPathing,
-			"Bundled chair seat must default to non-blocking");
+			"Test chair seat must default to non-blocking");
 		core::World chairWorld("One-seat sofa", 8, 2);
 		auto chairRoom = chairWorld.addRoom("Room", 0, 0, 0, 8, 1);
-		chairWorld.attachFurnitureCatalogue("furniture.furniture.yaml", catalogue);
+		chairWorld.attachFurnitureCatalogue(source.filename().string(), catalogue);
 		chairWorld.placeFurniture(chairRoom, "chair", 2, 0, "Chair", 2);
 		auto chairSeat = chairWorld.furniture().front().marker;
 		uint32_t chairEntrance = 0, chairExit = 0;

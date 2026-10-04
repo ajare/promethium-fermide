@@ -1,8 +1,14 @@
 # Furniture demonstration (#359)
 
-Open `resources/test-worlds/furniture.world.yaml` in the editor. Keep
-`furniture.furniture.yaml` beside it; the bundled `FurnitureDemo` resource depends
-on `FurnitureCatalogue`, which depends on `ObjectAtlas` and its placeholder PNG.
+`resources/test-worlds/furniture.world.yaml` is the compact editable chair/desk
+sample (`FurnitureDemo`, with `furniture.furniture.yaml` beside it).
+
+For the complete integration tour below, open
+`resources/test-worlds/furniture-integration.world.yaml`. Keep
+`furniture-integration.furniture.yaml` beside it; the bundled
+`FurnitureIntegrationDemo` resource depends on `FurnitureIntegrationCatalogue`,
+which depends on `ObjectAtlas` and its placeholder PNG. Its separate catalogue
+keeps the explicit overlapping-route layout independent of the compact sample.
 The chair, sofa halves and desk halves are full 64 × 160 World-tile regions in
 `resources/Resources.yaml`. No production-quality artwork is intended.
 
@@ -18,14 +24,13 @@ Facade each contain a chair. The automatic Door at x=10 connects the Showroom
 to the Facade; entry resets the independent Sector Local-depth baseline to 0.
 
 Run the simulation to watch **Showroom walker** traverse the composed routes
-and reach **Exit**. The two stationary observers share the desk's Seat position
+and reach **Exit**. The two stationary observers share a position within the desk span
 but retain depths 2 and 3. The depth-3 observer is behind the desk; the depth-2
-observer is in front. Select either observer and target **Desk Far side** using
-the ordinary Marker destination controls. The explicitly connected front/back
-alternatives have equal distance/cost: the front observer chooses depth 2 and the
-back observer chooses depth 3. The coincident connectors add no physical distance
-or depth-animation time. Both may arrive at the same destination concurrently;
-there is no sitting state, occupancy limit, queue or reservation.
+observer is in front. The desk is circulation-only and owns no destination
+Markers. Select either observer and target **Exit** using the ordinary Marker
+destination controls to depart along the explicit side routes. Both may arrive
+at the same destination concurrently; there is no sitting state, occupancy
+limit, queue or reservation.
 
 Use the World panel's Furniture header to select the catalogue with its native
 file picker. While paused, open the Corridor's Location plan and drag another
@@ -63,8 +68,8 @@ rules. In particular:
   Author all internal/depth-changing edges explicitly. `sideRoutes: true`
   replaces the full floor span; overlapping spans cannot restore a floor bypass.
 - Usable points default to Blocks pathing, preventing them from being intermediate
-  waypoints while allowing arrival and departure. The desk Seat and Far side
-  explicitly connect alternative routes for destination/origin use only.
+  waypoints while allowing arrival and departure. The integration sofa seats are
+  destination branches; its exposed depth-2 ports provide through-circulation.
 
 ## Safe edits and diagnostics
 
@@ -98,8 +103,12 @@ and unique temporary roots are retained:
 - Render `furniture/demoCommands`: manifest dependencies, required tile regions,
   overlapping sample artwork, retained front/behind Agents and Layer/aperture
   command clipping, without a GPU or image-snapshot comparison.
-- Editor `furniture/demoActions`: production placement/edit/history actions,
-  independent Marker rename/target and both-format save/reopen/arrival.
+- Editor `furniture/demoActions`: compact-sample production placement/edit/history
+  actions, independent Marker rename/target and both-format save/reopen/arrival.
+
+The World, Persistence and Render integration checks use
+`furniture-integration.world.yaml` and its dedicated catalogue. Keep their rich
+layout intact rather than reducing assertions when the compact sample changes.
 
 Existing Routing, Simulation, World, Persistence, Render and Editor coverage
 continues to cover permissions, Mobility, Facades, topology edits and legacy
