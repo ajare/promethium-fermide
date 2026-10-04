@@ -2,9 +2,39 @@
 #include "core/SectorType.h"
 #include <algorithm>
 #include <string>
+#include <cmath>
+#include <limits>
+#include "PaletteLayout.h"
+#include "FurniturePanel.h"
 
 namespace
 {
+	std::string placementName(core::World const& world, core::FurnitureDefinition const& definition)
+	{
+		size_t limit = core::Marker::MaxNameBytes;
+		for (auto const& point : definition.usablePoints)
+		{
+			if (point.label.size() + 1 >= core::Marker::MaxNameBytes) return {};
+			limit = std::min(limit, core::Marker::MaxNameBytes - point.label.size() - 1);
+		}
+		for (uint64_t number = 1;; ++number)
+		{
+			auto suffix = number == 1 ? std::string{} : " " + std::to_string(number);
+			if (suffix.size() >= limit) return {};
+			auto base = core::Marker::trimName(definition.label);
+			// Truncate on a UTF-8 boundary and reserve space for owned Marker labels.
+			if (base.size() > limit - suffix.size()) base.resize(limit - suffix.size());
+			while (!base.empty() && !core::Marker::nameIsValid(base, nullptr)) base.pop_back();
+			auto name = core::Marker::trimName(base) + suffix;
+			bool taken = std::any_of(world.furniture().begin(), world.furniture().end(),
+				[&](auto const& instance) { return instance.name == name; });
+			for (auto id : world.getMarkerIds())
+				for (auto const& point : definition.usablePoints)
+					taken = taken || world.lookupMarker(id)->getName() == name + " " + point.label;
+			if (!taken) return name;
+		}
+	}
+
 	bool ownsLocation(std::shared_ptr<core::World> const& world,
 		std::shared_ptr<const core::Sector> const& location)
 	{
@@ -18,6 +48,7 @@ bool LocationPlan::open(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::Sector> const& location, uint32_t worldLevel)
 {
 	if (!ownsLocation(world, location)) return false;
+	cancelDrag();
 	mWorld = world; mLocation = location; mDepthRows = 4;
 	mWorldLevel = std::clamp(worldLevel, location->getCellY(),
 		location->getCellY() + location->getLevelsHigh() - 1);
@@ -27,6 +58,7 @@ bool LocationPlan::open(std::shared_ptr<core::World> const& world,
 
 void LocationPlan::close()
 {
+	cancelDrag(); mPage = 0; mRowCatalogue.reset();
 	mOpen = false; mFocus = false; mWorld.reset(); mLocation.reset();
 }
 
@@ -47,13 +79,85 @@ std::shared_ptr<const core::Sector> LocationPlan::target(std::shared_ptr<core::W
 			&& candidate->getCellY() == location->getCellY()
 			&& candidate->getCellsWide() == location->getCellsWide()
 			&& candidate->getLevelsHigh() == location->getLevelsHigh())
+		{
+			cancelDrag();
 			mLocation = location = candidate;
+		}
 	}
 	if (!mOpen || mWorld.lock() != world || !ownsLocation(world, location))
 	{
 		close(); return {};
 	}
 	return location;
+}
+
+void LocationPlan::cancelDrag()
+{
+	mDragArmed = mDragging = false; mDragCatalogue.reset(); mDragKey.clear();
+}
+
+bool LocationPlan::isOpen(std::shared_ptr<core::World> const& world)
+{
+	return static_cast<bool>(target(world));
+}
+
+bool LocationPlan::renderPaletteRow(std::shared_ptr<core::World> const& world,
+	WorldDrawList& commands, ImVec2 trayTopLeft, bool hovered)
+{
+	if (!isOpen(world)) return false;
+	auto catalogue = world->furnitureCatalogue();
+	if (mRowCatalogue.lock() != catalogue)
+	{
+		mPage = 0; mRowCatalogue = catalogue; cancelDrag();
+	}
+	auto const& io = ImGui::GetIO();
+	if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(1)) cancelDrag();
+	if (mDragArmed && ImGui::IsMouseDragging(0)) mDragging = true;
+	if (mDragging) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+	auto count = catalogue ? catalogue->definitions().size() : 0;
+	int capacity = count > static_cast<size_t>(paletteColumnCount()) ? paletteColumnCount() - 1 : paletteColumnCount();
+	if (!count)
+	{
+		auto min = paletteFurnitureSlotMin(trayTopLeft, 0);
+		commands.AddText(min, IM_COL32(180, 180, 190, 255),
+			catalogue ? "No Furniture definitions" : "No Furniture catalogue");
+	}
+	size_t index = 0;
+	if (catalogue) for (auto const& [key, definition] : catalogue->definitions())
+	{
+		if (index++ < mPage * capacity || index > (mPage + 1) * capacity) continue;
+		auto min = paletteFurnitureSlotMin(trayTopLeft, static_cast<int>((index - 1) % capacity));
+		ImVec2 max{min.x + PaletteSlotWidth, min.y + PaletteSlotSize};
+		bool over = hovered && io.MousePos.x >= min.x && io.MousePos.x < max.x
+			&& io.MousePos.y >= min.y && io.MousePos.y < max.y;
+		commands.AddRect(min, max, over ? IM_COL32(251, 188, 4, 255) : IM_COL32(180, 180, 190, 180), 3);
+		commands.PushClipRect(min, max, true);
+		commands.AddText({min.x + 4, min.y + 10}, IM_COL32_WHITE, definition.label.c_str());
+		commands.PopClipRect();
+		if (over)
+		{
+			ImGui::SetTooltip("Drag %s into Location plan", definition.label.c_str());
+			if (ImGui::IsMouseClicked(0))
+			{
+				mDragArmed = true; mDragging = false; mDragKey = key;
+				mDragCatalogue = catalogue;
+			}
+		}
+	}
+	if (count > static_cast<size_t>(capacity))
+	{
+		auto min = paletteFurnitureSlotMin(trayTopLeft, capacity);
+		ImVec2 max{min.x + PaletteSlotWidth, min.y + PaletteSlotSize};
+		commands.AddRect(min, max, IM_COL32(180, 180, 190, 180), 3);
+		commands.AddText({min.x + 4, min.y + 10}, IM_COL32_WHITE, "Next page");
+		if (hovered && io.MousePos.x >= min.x && io.MousePos.x < max.x
+			&& io.MousePos.y >= min.y && io.MousePos.y < max.y && ImGui::IsMouseClicked(0))
+			mPage = (mPage + 1) % ((count + capacity - 1) / capacity);
+	}
+	auto row = paletteFurnitureSlotMin(trayTopLeft, 0);
+	return mDragArmed || (hovered && io.MousePos.x >= row.x
+		&& io.MousePos.x < trayTopLeft.x + paletteTraySize(true).x - PalettePadding
+		&& io.MousePos.y >= row.y && io.MousePos.y < row.y + PaletteSlotSize);
 }
 
 void LocationPlan::renderSelectionAction(std::shared_ptr<core::World> const& world,
@@ -63,7 +167,8 @@ void LocationPlan::renderSelectionAction(std::shared_ptr<core::World> const& wor
 		open(world, selection, worldLevel);
 }
 
-void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter const& present)
+void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter const& present,
+	DocumentHistory& history)
 {
 	auto location = target(world);
 	if (!location) return;
@@ -97,9 +202,39 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			ImGui::InvisibleButton("##LocationPlanViewport", size);
 			WorldDrawList commands({position, {position.x + size.x, position.y + size.y}});
 			renderLocationPlanGrid(commands, *location, position, size, mDepthRows, world.get(), mWorldLevel);
+			if (mDragging && mDragCatalogue.lock() == world->furnitureCatalogue())
+			{
+				auto catalogue = world->furnitureCatalogue();
+				auto definition = catalogue ? catalogue->definition(mDragKey) : nullptr;
+				auto mouse = ImGui::GetIO().MousePos;
+				float left = position.x + 48, right = position.x + size.x - 12;
+				float top = position.y + 8, bottom = position.y + size.y - 28;
+				if (definition && right > left && bottom > top && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
+					&& mouse.x >= left && mouse.x < right && mouse.y >= top && mouse.y < bottom)
+				{
+					// World X is snapped first; translate only after snapping. Shift
+					// deliberately has no effect on new-definition drops.
+					float x = std::round(location->getCellX()
+						+ (mouse.x - left) * location->getCellsWide() / (right - left)) - location->getCellX();
+					auto depthValue = std::floor(double(bottom - mouse.y) * mDepthRows / double(bottom - top));
+					int depth = static_cast<int>(std::min(depthValue, double(std::numeric_limits<int>::max())));
+					float y = static_cast<float>(mWorldLevel - location->getCellY());
+					auto name = placementName(*world, *definition);
+					std::string diagnostic;
+					bool valid = world->canPlaceFurniture(location->getIndex(), mDragKey, x, y, name, &diagnostic, depth);
+					renderLocationPlanPreview(commands, *location, *definition, x, depth, valid, position, size, mDepthRows);
+					if (!valid) ImGui::SetTooltip("%s", diagnostic.c_str());
+					if (ImGui::IsMouseReleased(0) && valid)
+						if (placeSelectedFurniture(world, location->getIndex(), mDragKey, x, y, false,
+							name, diagnostic, history, depth))
+							mDepthRows = std::max(mDepthRows, locationPlanDepthRows(*world, *location, mWorldLevel));
+				}
+			}
 			present(commands, position, size);
 		}
 	}
 	ImGui::End();
+	if (mDragArmed && (!ImGui::GetIO().MouseDown[0]
+		|| mDragCatalogue.lock() != world->furnitureCatalogue())) cancelDrag();
 	if (!mOpen) close();
 }

@@ -1559,15 +1559,19 @@ namespace
 			if (gPegman.feetY <= gPegman.floorY) landPegman(world);
 		}
 
-		auto const traySize = paletteTraySize();
+		bool const furnitureRow = gLocationPlan.isOpen(world);
+		auto const traySize = paletteTraySize(furnitureRow);
 		auto const trayHomeTopLeft = canvasPos + canvasSize
 			- ImVec2(PaletteInset, PaletteInset) - traySize;
 		auto const trayTopLeft = paletteClampTopLeft(canvasPos, canvasSize,
-			trayHomeTopLeft + gPaletteTrayOffset);
+			trayHomeTopLeft + gPaletteTrayOffset, furnitureRow);
 		auto const trayBottomRight = trayTopLeft + traySize;
 		// The grip is the tray minus its buttons: the padding and the slot gaps.
 		bool overTray = gWorldHovered && pointInRect(io.MousePos, trayTopLeft, trayBottomRight);
-		bool overGrip = overTray && !paletteButtonAt(trayTopLeft, io.MousePos);
+		auto const furnitureMin = paletteFurnitureSlotMin(trayTopLeft, 0);
+		bool overFurniture = furnitureRow && overTray && io.MousePos.y >= furnitureMin.y
+			&& io.MousePos.y < furnitureMin.y + PaletteSlotSize;
+		bool overGrip = overTray && !overFurniture && !paletteButtonAt(trayTopLeft, io.MousePos);
 		auto roomMin = paletteSlotMin(trayTopLeft, PaletteSlot::Room);
 		auto facadeMin = paletteSlotMin(trayTopLeft, PaletteSlot::Facade);
 		auto corridorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Corridor);
@@ -1618,6 +1622,10 @@ namespace
 			: overGrip ? IM_COL32(251, 188, 4, 150) : borderColour;
 		drawList->AddRectFilled(trayTopLeft, trayBottomRight, trayColour, 5.0f);
 		drawList->AddRect(trayTopLeft, trayBottomRight, trayBorder, 5.0f);
+		if (furnitureRow)
+			paletteConsumedMouse = gLocationPlan.renderPaletteRow(world, *drawList, trayTopLeft,
+				gWorldHovered && gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging)
+				|| paletteConsumedMouse;
 
 		bool roomHovered = gWorldHovered && pointInRect(io.MousePos, roomMin, roomMax);
 		bool facadeHovered = gWorldHovered && pointInRect(io.MousePos, facadeMin, facadeMax);
@@ -1647,7 +1655,7 @@ namespace
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 			gPaletteTrayOffset = paletteClampTopLeft(canvasPos, canvasSize,
-				io.MousePos - gTrayDrag.grab) - trayHomeTopLeft;
+				io.MousePos - gTrayDrag.grab, furnitureRow) - trayHomeTopLeft;
 			if (!io.MouseDown[0]) gTrayDrag.dragging = false;
 		}
 

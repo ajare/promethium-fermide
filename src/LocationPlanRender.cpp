@@ -4,6 +4,26 @@
 #include <set>
 #include <cmath>
 
+void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
+	core::FurnitureDefinition const& definition, float x, int depth, bool valid,
+	ImVec2 position, ImVec2 size, uint32_t depthRows)
+{
+	if (size.x <= 64 || size.y <= 40 || !location.getCellsWide()) return;
+	float left = position.x + 48, right = position.x + size.x - 12;
+	float top = position.y + 8, bottom = position.y + size.y - 28;
+	float cellWidth = (right - left) / location.getCellsWide();
+	float rowHeight = (bottom - top) / std::max(depthRows, 4u);
+	ImVec2 min{left + (x + definition.minX) * cellWidth, bottom - (float(depth) + 1) * rowHeight};
+	ImVec2 max{left + (x + definition.maxX) * cellWidth, bottom - float(depth) * rowHeight};
+	commands.PushClipRect({left, top}, {right, bottom}, true);
+	commands.AddRectFilled(min, max, valid ? IM_COL32(80, 200, 120, 65) : IM_COL32(244, 67, 54, 65));
+	commands.AddRect(min, max, valid ? IM_COL32(80, 200, 120, 255) : IM_COL32(244, 67, 54, 255), 0, 0, 2);
+	commands.PushClipRect(min, max, true);
+	commands.AddText({min.x + 4, min.y + 3}, IM_COL32_WHITE, definition.label.c_str());
+	commands.PopClipRect();
+	commands.PopClipRect();
+}
+
 uint32_t locationPlanDepthRows(core::World const& world, core::Sector const& location,
 	uint32_t worldLevel)
 {

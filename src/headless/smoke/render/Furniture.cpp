@@ -472,6 +472,35 @@ namespace
 		}
 		require(near(commands.GetClipRectMin().x, 100) && near(commands.GetClipRectMax().y, 220),
 			"Plan changed the caller's clip stack");
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		for (bool valid : {true, false})
+		{
+			WorldDrawList preview({{100, 60}, {360, 220}});
+			renderLocationPlanPreview(preview, *world->getSector(room), *catalogue->definition("chair"),
+				1, 0, valid, {80, 40}, {320, 240}, 4);
+			unsigned lines = 0, triangles = 0, labels = 0;
+			for (auto const& command : preview.commands())
+			{
+				if (auto line = std::get_if<WorldDrawList::Line>(&command))
+				{
+					++lines;
+					require(line->colour == (valid ? IM_COL32(80, 200, 120, 255) : IM_COL32(244, 67, 54, 255)),
+						"Preview does not distinguish authoritative validity");
+					require(line->from.x >= 193 && line->from.x <= 258 && line->from.y >= 201 && line->from.y <= 252
+						&& near(line->clip.maximum.y, 220) && near(line->clip.minimum.x, 128),
+						"Preview lost snapped World-X/depth-row geometry or caller clipping");
+				}
+				if (std::get_if<WorldDrawList::Triangle>(&command)) ++triangles;
+				if (auto text = std::get_if<WorldDrawList::Text>(&command))
+				{
+					++labels; require(text->value == "Chair" && near(text->clip.minimum.x, 193)
+						&& near(text->clip.maximum.x, 258), "Preview label escaped footprint");
+				}
+			}
+			require(lines == 4 && triangles == 2 && labels == 1, "Preview footprint/label missing");
+			require(near(preview.GetClipRectMin().x, 100) && near(preview.GetClipRectMax().y, 220),
+				"Preview changed caller clip stack");
+		}
 		WorldDrawList empty({{0, 0}, {1, 1}});
 		renderLocationPlanGrid(empty, *world->getSector(room), {0, 0}, {0, 0});
 		require(empty.commands().empty(), "Empty viewport recorded plan geometry");

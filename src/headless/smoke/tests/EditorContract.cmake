@@ -164,6 +164,7 @@ set(editor_names
     airlocks/structuralHistory
     airlocks/editorCommands
     locationPlan/workflow
+    locationPlan/placement
     furniture/demoActions
     furniture/chairActions
     furniture/catalogueReattachmentHistory

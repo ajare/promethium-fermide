@@ -2,6 +2,7 @@
 #include "State.h"
 #include "FurniturePanel.h"
 #include "LocationPlan.h"
+#include "PaletteLayout.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "core/YamlSerializer.h"
@@ -463,6 +464,170 @@ namespace
 }
 namespace
 {
+	void locationPlanPlacement(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = std::make_shared<core::World>("Plan placement", 24, 8);
+		auto room = world->addRoom("Pinned", 1, 3, 7, 6, 3);
+		auto other = world->addRoom("Other", 0, 0, 0, 6, 1);
+		for (uint32_t x = 0; x < 4; ++x) world->addSectorWalkway(room, 1, x);
+		world->finishBuild(); world->pauseSimulation();
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
+		DocumentHistory history;
+		LocationPlan plan; require(plan.open(world, world->getSector(room), 4), "Cannot open placement plan");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1600, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImVec2 tray{20, 430}, viewport{}, viewportSize{};
+		std::vector<std::string> rowLabels, depths;
+		unsigned previews = 0, invalidPreviews = 0;
+		bool paletteHovered = true;
+		auto frame = [&]
+		{
+			rowLabels.clear(); depths.clear(); previews = invalidPreviews = 0;
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos({10, 420}); ImGui::SetNextWindowSize({1300, 200});
+			ImGui::Begin("Palette workflow", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			ImGui::InvisibleButton("##WorldCanvas", ImGui::GetContentRegionAvail());
+			WorldDrawList row({{0, 0}, {1600, 1000}});
+			plan.renderPaletteRow(world, row, tray, paletteHovered);
+			for (auto const& command : row.commands())
+				if (auto text = std::get_if<WorldDrawList::Text>(&command)) rowLabels.push_back(text->value);
+			ImGui::End();
+			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
+			plan.render(world, [&](WorldDrawList const& commands, ImVec2 pos, ImVec2 size)
+			{
+				viewport = pos; viewportSize = size;
+				for (auto const& command : commands.commands())
+				{
+					if (auto text = std::get_if<WorldDrawList::Text>(&command))
+						if (std::abs(text->position.x - pos.x - 16) < .01f) depths.push_back(text->value);
+					if (auto line = std::get_if<WorldDrawList::Line>(&command))
+						{
+							if (line->colour == IM_COL32(80, 200, 120, 255) || line->colour == IM_COL32(244, 67, 54, 255)) ++previews;
+							if (line->colour == IM_COL32(244, 67, 54, 255)) ++invalidPreviews;
+						}
+				}
+			}, history);
+			ImGui::GetCurrentContext()->NextWindowData.ClearFlags(); ImGui::Render();
+		};
+		frame(); frame();
+		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
+		auto slot = paletteFurnitureSlotMin(tray, 0);
+		auto start = [&]
+		{
+			paletteHovered = true; mouse({slot.x + 20, slot.y + 18});
+			io.AddMouseButtonEvent(0, true); frame();
+			paletteHovered = false;
+		};
+		auto point = [&](float x, float depth)
+		{
+			return ImVec2{viewport.x + 48 + x * (viewportSize.x - 60) / 6,
+				viewport.y + viewportSize.y - 28 - (depth + .5f) * (viewportSize.y - 36) / depths.size()};
+		};
+		auto release = [&] { io.AddMouseButtonEvent(0, false); frame(); frame(); };
+		require(rowLabels == std::vector<std::string>{"Chair"}, "Palette does not reflect catalogue");
+		// Neither palette focus nor ordinary Selection changes the pinned target.
+		start(); mouse(point(1.3f, 3));
+		require(previews == 4 && world->furniture().empty() && history.undoCount() == 0,
+			"Preview missing or mutated authored state");
+		require(invalidPreviews == 0, "Supported drop preview is marked invalid");
+		io.AddKeyEvent(ImGuiMod_Shift, true); frame(); release();
+		require(world->furniture().size() == 1 && world->furniture().back().sector == room
+			&& world->furniture().back().x == 1 && world->furniture().back().y == 1
+			&& world->furniture().back().localDepth == 3 && world->furniture().back().name == "Chair"
+			&& history.undoCount() == 1 && depths.size() == 5,
+			"Shift drop did not snap, convert Level, expand depth, or commit exactly once");
+		auto first = world->furniture().back();
+		start(); mouse(point(2.2f, 2)); release();
+		require(world->furniture().back().name == "Chair 2" && history.undoCount() == 2,
+			"Repeated drop did not generate a unique name");
+		io.AddKeyEvent(ImGuiMod_Shift, false); frame();
+		auto second = world->furniture().back();
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto result = world->deserialize(*reader, work); world->pauseSimulation(); return result;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore) && world->furniture().size() == 1,
+			"Drop undo failed"); frame();
+		require(history.redo(captureDocumentSnapshot(world, history), restore) && world->furniture().back().id == second.id
+			&& world->furniture().back().marker == second.marker && world->furniture().front().marker == first.marker,
+			"Drop redo changed instance/Marker identities"); frame();
+		world->addSectorMarker(other, 0, .5f, "Chair 3 Seat"); world->finishBuild();
+		start(); mouse(point(0, 0)); release();
+		require(world->furniture().back().name == "Chair 4", "Generated name collided with a standalone owned-Marker name");
+		auto reject = [&](ImVec2 destination, bool onGrid = true)
+		{
+			auto before = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
+			start(); mouse(destination);
+			require(onGrid ? invalidPreviews == 4 : previews == 0,
+				"Rejected drop did not show invalid preview, or another surface accepted it");
+			release();
+			require(captureDocumentSnapshot(world, history)->yaml == before && history.undoCount() == count,
+				"Rejected drop mutated World or history");
+		};
+		reject(point(1, 3)); // overlap
+		reject(point(4, 1)); // unsupported upper-Level Floor
+		reject(point(5.8f, 0)); // snapped outside Location
+		reject({50, 300}, false); // another UI/World surface
+		reject({viewport.x + 20, viewport.y + 20}, false); // grid label margin
+		// Replacement catalogue invalidates an in-flight drag even with the same key.
+		start(); mouse(point(0, 0));
+		std::string diagnostic;
+		while (!world->furniture().empty())
+			require(deleteSelectedFurniture(world, world->furniture().back().id, diagnostic, history), diagnostic);
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
+		auto count = history.undoCount(); release();
+		require(world->furniture().empty() && history.undoCount() == count, "Stale catalogue drag placed Furniture");
+		start(); mouse(point(0, 0)); release();
+		require(world->furniture().size() == 1 && world->furniture().back().sector != other,
+			"Reattached catalogue cannot place into pinned Location");
+		auto root = context.temporaryRoot() / "location-plan-placement";
+		std::filesystem::create_directories(root);
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), root / "chair.furniture.yaml");
+		auto path = root / "plan.world.yaml"; world->saveTo(path.string());
+		auto reopened = core::loadWorldDocument(path);
+		require(reopened->furniture().size() == 1 && reopened->furniture().front().marker == world->furniture().front().marker
+			&& reopened->furniture().front().y == 1, "Plan placement did not survive ordinary save/reopen");
+		while (!world->furniture().empty())
+			require(deleteSelectedFurniture(world, world->furniture().back().id, diagnostic, history), diagnostic);
+		// A catalogue wider than the tray is paged, never compressed/overlapped.
+		auto many = YAML::LoadFile(context.fixture("resources/test-worlds/chair.furniture.yaml").string());
+		auto prototype = YAML::Clone(many["furnitureCatalogue"]["definitions"][0]);
+		many["furnitureCatalogue"]["definitions"] = YAML::Node(YAML::NodeType::Sequence);
+		for (unsigned i = 0; i < 15; ++i)
+		{
+			auto entry = YAML::Clone(prototype); entry["key"] = "chair" + std::to_string(10 + i);
+			entry["label"] = "Chair " + std::to_string(10 + i);
+			many["furnitureCatalogue"]["definitions"].push_back(entry);
+		}
+		auto manyPath = root / "many.furniture.yaml";
+		{ std::ofstream output(manyPath); output << many; }
+		catalogue = core::FurnitureCatalogue::readFile(manyPath);
+		world->attachFurnitureCatalogue("many.furniture.yaml", catalogue); frame();
+		require(rowLabels.size() == 12 && rowLabels.front() == "Chair 10" && rowLabels.back() == "Next page",
+			"Large catalogue row does not fit tray or reset on replacement");
+		auto next = paletteFurnitureSlotMin(tray, paletteColumnCount() - 1);
+		paletteHovered = true; mouse({next.x + 20, next.y + 18});
+		io.AddMouseButtonEvent(0, true); frame(); release();
+		require(rowLabels.size() == 5 && rowLabels.front() == "Chair 21" && rowLabels[3] == "Chair 24",
+			"Catalogue definitions beyond first page are inaccessible");
+		start(); mouse(point(0, 0)); release();
+		require(world->furniture().size() == 1 && world->furniture().back().definitionKey == "chair21",
+			"Paged palette placed the wrong definition");
+		start(); mouse(point(1, 0));
+		world = std::make_shared<core::World>("No catalogue", 10, 4);
+		auto emptyRoom = world->addRoom("Empty", 0, 0, 0, 6, 1); world->finishBuild();
+		release(); require(rowLabels.empty() && world->furniture().empty(), "Replacement World retained stale plan/row/drag");
+		require(plan.open(world, world->getSector(emptyRoom), 0), "Cannot open empty-catalogue plan"); frame();
+		require(rowLabels == std::vector<std::string>{"No Furniture catalogue"} && plan.isOpen(world),
+			"Absent catalogue removed plan row or retained definitions");
+		plan.close(); frame(); require(rowLabels.empty(), "Closing plan retained third row");
+	}
+
 	void locationPlanWorkflow(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -644,6 +809,7 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/demoActions", demoActions });
 	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });
+	checks.push_back({ "locationPlan/placement", locationPlanPlacement });
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });

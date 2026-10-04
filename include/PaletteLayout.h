@@ -100,14 +100,15 @@ inline constexpr int paletteRowCount()
 	return tallest;
 }
 
-inline constexpr ImVec2 paletteTraySize()
+inline constexpr ImVec2 paletteTraySize(bool furnitureRow = false)
 {
 	return ImVec2(PalettePadding * 2.0f
 			+ PaletteSlotWidth * static_cast<float>(paletteColumnCount())
 			+ PaletteGap * static_cast<float>(paletteColumnCount() - 1),
 		PaletteTopMargin + PalettePadding
 			+ PaletteSlotSize * static_cast<float>(paletteRowCount())
-			+ PaletteGap * static_cast<float>(paletteRowCount() - 1));
+			+ PaletteGap * static_cast<float>(paletteRowCount() - 1)
+			+ (furnitureRow ? PaletteSlotSize + PaletteGap : 0.0f));
 }
 
 inline constexpr ImVec2 paletteSlotMin(ImVec2 trayTopLeft, PaletteSlot slot)
@@ -122,6 +123,14 @@ inline constexpr ImVec2 paletteSlotMax(ImVec2 trayTopLeft, PaletteSlot slot)
 {
 	return ImVec2(paletteSlotMin(trayTopLeft, slot).x + PaletteSlotWidth,
 		paletteSlotMin(trayTopLeft, slot).y + PaletteSlotSize);
+}
+
+// The Furniture row pages through catalogue entries; the last slot is Next
+// when needed. Use the same columns and gaps as the ordinary tools.
+inline constexpr ImVec2 paletteFurnitureSlotMin(ImVec2 trayTopLeft, int column)
+{
+	return {trayTopLeft.x + PalettePadding + column * (PaletteSlotWidth + PaletteGap),
+		trayTopLeft.y + PaletteTopMargin + 2 * (PaletteSlotSize + PaletteGap)};
 }
 
 // MPP's canvas text renderer uses a fixed 16-pixel font. Its renderText()
@@ -168,9 +177,9 @@ inline constexpr ImVec2 paletteLabelPosition(ImVec2 slotMin, ImVec2 slotMax,
 // collapses onto the canvas' top-left corner: the tray stays anchored there
 // and the canvas clips its overflow instead of the tray sliding away.
 inline constexpr ImVec2 paletteClampTopLeft(ImVec2 canvasMin, ImVec2 canvasSize,
-	ImVec2 trayTopLeft)
+	ImVec2 trayTopLeft, bool furnitureRow = false)
 {
-	auto const traySize = paletteTraySize();
+	auto const traySize = paletteTraySize(furnitureRow);
 	auto const clampAxis = [](float value, float limitMin, float limitMax)
 	{
 		return value < limitMin ? limitMin : (value > limitMax ? limitMax : value);
