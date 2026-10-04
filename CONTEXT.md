@@ -393,3 +393,65 @@ _Avoid_: World document, tile-set metadata
 **Image set**:
 A Willpower resource that names rectangular regions of one atlas image. Whether a region is tintable or repeated is a World-renderer semantic rather than a separate resource type.
 _Avoid_: Tile set
+
+## Station systems
+
+**Station systems**:
+A World's coupled electrical power, environmental control and life support, thermal control, and monitoring services. Their resource inventories, processing capacities, demands, and exchanges determine available service and resource endurance.
+
+**Biological population**:
+An aggregate of living crops or algae within the environmental control and life support system, with its own living biomass and resource exchanges. Crop and algae populations are distinct; their growth, respiration, harvest, and losses depend on available resources and environmental conditions.
+
+**Living biomass**:
+The dry mass of living material in a Biological population. It is distinct from stored harvested food and from the installation's Growing capacity.
+
+**Growing capacity**:
+The installation limits within which a Biological population can be supported, including illuminated growing area for crops or active culture volume for algae. It is distinct from the population's current Living biomass.
+
+**Crew demand**:
+The aggregate resource requirements and metabolic loads of a declared crew population at a declared activity level. It is distinct from the movement and behaviour of individual Agents.
+
+**Unmet demand**:
+The portion of a resource or service requirement that cannot be supplied. It is reported separately from actual consumption and does not count as material available for recovery.
+
+**Protected resource reserve**:
+The portion of a usable resource inventory withheld from discretionary use to preserve a declared critical service. Surplus transfers must preserve that reserve and the supplying service's required process resources.
+
+**Fuel-cell reactant stores**:
+Dedicated hydrogen and oxygen inventories available to fuel-cell generation, distinct from life-support inventories. They may receive controlled surplus transfers from life support, but fuel cells cannot automatically draw on protected breathing oxygen.
+
+**Resource store**:
+A capacity-limited inventory of a specified material held by the Station systems. Its usable contents change through deliveries, production, consumption, transfers, and losses; material awaiting treatment or quality clearance is not automatically usable.
+
+**Resupply delivery**:
+An external addition of declared resource quantities at a scheduled simulation time, optionally recurring. A delivery cannot silently overfill a Resource store; quantities that cannot be accepted remain explicitly accounted for.
+
+**Critical station service**:
+A station service whose declared minimum demand and necessary support services are protected ahead of discretionary demand. If available supply cannot meet that minimum, the deficit remains Unmet demand rather than silently becoming permissible curtailment.
+
+**Service priority**:
+The declared ordering used to allocate constrained station resources and curtail discretionary demand. It does not override physical capacity, safety limits, or protected minimums.
+
+**Atmosphere compartment**:
+A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. The initial station model distinguishes one normal and one hazardous compartment; their material inventories remain segregated, and exchanges or losses must be explicitly accounted for.
+
+**Thermal reservoir**:
+A body or aggregate of material whose stored thermal energy and thermal capacity determine its temperature over time. Its ability to absorb heat is finite and constrained by the temperature limits of the services it supports.
+
+**Thermal service class**:
+A cooling service distinguished by its permitted interface temperatures and compatible heat-transfer requirements. Spare cooling capacity in one class is not automatically usable by another class.
+
+**Microbial processor**:
+An aggregate biological waste-treatment or nutrient-recovery process within life support, with finite processing capacity and a condition that affects its performance. Its material and heat exchanges, unrecoverable residues, and dependence on operating conditions are accounted for separately from crop and algae populations.
+
+**Nutrient inventory**:
+The quantities of nutrient elements held in stores or incorporated into food, living biomass, and waste. Nitrogen, phosphorus, and potassium are accounted for separately, with other minerals grouped in the initial model; total elemental inventory is distinct from nutrients currently available for biological uptake.
+
+**External equipment load group**:
+A named aggregate of station equipment outside the Station systems, with declared electrical, thermal, and material exchanges, an operating profile, and service priorities. It excludes equipment whose demands are already calculated within the Station systems; its initially authored inputs may later be supplied by World equipment.
+
+**Terminal waste**:
+Material designated for disposal after resource recovery, including unrecoverable residue and recovered material that cannot fit in its appropriate Resource store. Normal and hazardous waste remain segregated in finite storage; storage exhaustion constrains affected processing rather than deleting material.
+
+**Scheduled waste ejection**:
+The removal of available, disposal-ready Terminal waste to space at declared simulation times. Ejected material leaves station inventories and is recorded as a material loss; material awaiting required treatment is not eligible.
