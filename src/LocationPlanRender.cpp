@@ -47,7 +47,7 @@ uint32_t locationPlanDepthRows(core::World const& world, core::Sector const& loc
 }
 
 void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& location,
-	ImVec2 position, ImVec2 size, uint32_t depthRows, core::World const* world, uint32_t worldLevel)
+	ImVec2 position, ImVec2 size, uint32_t depthRows, core::World const* world, uint32_t worldLevel, uint64_t selectedId)
 {
 	depthRows = std::max(depthRows, 4u);
 	if (size.x <= 64 || size.y <= 40 || !location.getCellsWide()) return;
@@ -110,7 +110,8 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 			float const y0 = bottom - (static_cast<float>(instance.localDepth) + 1) * rowHeight;
 			float const y1 = bottom - instance.localDepth * rowHeight;
 			commands.AddRectFilled({x0, y0}, {x1, y1}, IM_COL32(55, 90, 120, 255));
-			commands.AddRect({x0, y0}, {x1, y1}, IM_COL32(140, 190, 220, 255));
+			commands.AddRect({x0, y0}, {x1, y1}, instance.id == selectedId
+				? IM_COL32(251, 188, 4, 255) : IM_COL32(140, 190, 220, 255));
 			// Keep a long label from covering adjacent footprints.
 			commands.PushClipRect({x0, y0}, {x1, y1}, true);
 			commands.AddText({x0 + 4, y0 + 3}, IM_COL32_WHITE, instance.name.c_str());

@@ -525,6 +525,22 @@ namespace
 			renderLocationPlanGrid(list, *furnished->getSector(sector), {0, 0}, {400, 300}, rows, furnished.get(), level);
 			return list;
 		};
+		WorldDrawList selected({{0, 0}, {400, 300}});
+		renderLocationPlanGrid(selected, *furnished->getSector(host), {0, 0}, {400, 300}, 5,
+			furnished.get(), 3, furnished->furniture().front().id);
+		unsigned highlight = 0;
+		for (auto const& command : selected.commands())
+			if (auto line = std::get_if<WorldDrawList::Line>(&command);
+				line && line->colour == IM_COL32(251, 188, 4, 255))
+			{
+				++highlight;
+				require(near(line->clip.minimum.x, 48) && near(line->clip.maximum.y, 272),
+					"Selected footprint highlight escaped grid clipping");
+				require(line->from.x >= 48 + .25f * 340 / 6 - .01f
+					&& line->from.x <= 48 + 3.25f * 340 / 6 + .01f,
+					"Selection highlighted another instance or ignored its footprint");
+			}
+		require(highlight == 4, "Selected instance did not receive exactly one footprint outline");
 		auto ground = draw(host, 3, 5);
 		unsigned points = 0, footprints = 0, shaded = 0;
 		for (auto const& command : ground.commands())

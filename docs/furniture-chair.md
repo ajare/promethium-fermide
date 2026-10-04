@@ -91,6 +91,24 @@ Delete or relocate the blocking Furniture before removing its support. Local-dep
 changes share the same preflight/history actions and preserve owned Marker identities. Negative instance/resolved edge depths and same-depth footprint
 overlaps are refused before mutation.
 
+## Location plan selection and movement (#442)
+
+Open **Location plan** from Selection for a Room, Corridor, or Facade. The plan
+stays pinned to that Location and displays one supporting Level. Click a labelled
+Furniture footprint to select it in the existing **Furniture** controls; selecting
+another Location does not retarget the plan.
+
+While paused, left-drag an existing footprint to preview movement. X snaps to
+whole World cells unless Shift is currently held; pressing or releasing Shift
+updates the preview immediately. Local depth always uses non-negative integer
+rows, and the supporting Level and owning Location do not change. Green previews
+are valid; red previews show the existing edit-validation diagnostic. Release
+inside the grid to commit one undoable edit. Invalid releases, release outside the
+grid, Escape, or right-click leave the original instance unchanged. Movement
+preserves owned Marker identities and names. The depth range expands as needed
+and does not shrink automatically. Reconstruction, deletion, or catalogue changes
+cancel stale gestures and selections.
+
 ## Documents
 
 World schema 45 stores a catalogue basename/expected UUID reference, instance

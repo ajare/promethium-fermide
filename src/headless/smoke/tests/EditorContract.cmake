@@ -163,9 +163,10 @@ set(editor_names
     routing/historyAndClipboard
     airlocks/structuralHistory
     airlocks/editorCommands
+    furniture/demoActions
     locationPlan/workflow
     locationPlan/placement
-    furniture/demoActions
+    locationPlan/movement
     furniture/chairActions
     furniture/catalogueReattachmentHistory
     furniture/attachmentActions

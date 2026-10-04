@@ -4,6 +4,40 @@
 #include <algorithm>
 #include <cstdio>
 
+namespace
+{
+	std::weak_ptr<core::World> furnitureSelectionWorld;
+	std::weak_ptr<const core::Sector> furnitureSelectionSector;
+	std::weak_ptr<const core::FurnitureCatalogue> furnitureSelectionCatalogue;
+	uint64_t furnitureSelectionId{}, furnitureSelectionRevision{};
+}
+
+core::FurnitureInstance const* selectedFurnitureInstance(std::shared_ptr<core::World> const& world)
+{
+	if (world && furnitureSelectionWorld.lock() == world
+		&& furnitureSelectionCatalogue.lock() == world->furnitureCatalogue())
+		for (auto const& entry : world->furniture())
+			if (entry.id == furnitureSelectionId && entry.sector < world->getNumSectors()
+				&& furnitureSelectionSector.lock() == world->getSector(entry.sector)) return &entry;
+	furnitureSelectionId = 0;
+	return nullptr;
+}
+
+bool selectFurnitureInstance(std::shared_ptr<core::World> const& world, uint64_t id)
+{
+	++furnitureSelectionRevision;
+	furnitureSelectionId = 0;
+	if (world) for (auto const& entry : world->furniture())
+		if (entry.id == id)
+		{
+			furnitureSelectionWorld = world; furnitureSelectionId = id;
+			furnitureSelectionSector = world->getSector(entry.sector);
+			furnitureSelectionCatalogue = world->furnitureCatalogue();
+			return true;
+		}
+	return false;
+}
+
 bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath, std::string const& filename,
 	std::string& diagnostic, DocumentHistory& history)
@@ -50,7 +84,10 @@ bool editSelectedFurniture(std::shared_ptr<core::World> const& world,
 	try
 	{
 		auto before = captureDocumentSnapshot(world, history);
+		auto selected = selectedFurnitureInstance(world);
+		bool retainSelection = selected && selected->id == id;
 		if (!world->editFurniture(id, x, y, name, &diagnostic, localDepth)) return false;
+		if (retainSelection) selectFurnitureInstance(world, id);
 		commitDocumentEdit(std::move(before), history);
 		return true;
 	}
@@ -84,6 +121,11 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 	static std::string loadedFilename;
 	if (filenameWorld.lock() != world || loadedFilename != world->furnitureCatalogueFilename())
 	{
+		if (filenameWorld.lock() != world)
+		{
+			x = y = 0; localDepth = 0; snap = true; key.clear(); diagnostic.clear();
+			std::snprintf(name, sizeof(name), "%s", "Chair");
+		}
 		filenameWorld = world;
 		loadedFilename = world->furnitureCatalogueFilename();
 		std::snprintf(filename, sizeof(filename), "%s",
@@ -106,20 +148,29 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 				if (ImGui::Selectable(entry.label.c_str(), entryKey == key)) key = entryKey;
 			ImGui::EndCombo();
 		}
-		static uint64_t instanceId = 0;
-		static core::World const* selectionWorld = nullptr;
-		if (selectionWorld != world.get()) { selectionWorld = world.get(); instanceId = 0; }
-		auto instance = std::find_if(world->furniture().begin(), world->furniture().end(),
-			[&](auto const& entry) { return entry.id == instanceId; });
-		if (instance == world->furniture().end()) instanceId = 0;
+		static core::FurnitureInstance displayed;
+		static uint64_t displayedRevision{};
+		auto instance = selectedFurnitureInstance(world);
+		auto instanceId = instance ? instance->id : 0;
+		if (instance && (displayedRevision != furnitureSelectionRevision
+			|| displayed.id != instanceId || displayed.x != instance->x
+			|| displayed.y != instance->y || displayed.localDepth != instance->localDepth
+			|| displayed.name != instance->name))
+		{
+			displayedRevision = furnitureSelectionRevision;
+			displayed = *instance; x = instance->x; y = instance->y; localDepth = instance->localDepth;
+			std::snprintf(name, sizeof(name), "%s", instance->name.c_str());
+		}
+		if (!instance) displayed.id = 0;
 		if (ImGui::BeginCombo("Furniture instance", instanceId ? instance->name.c_str() : "New instance"))
 		{
-			if (ImGui::Selectable("New instance", instanceId == 0)) instanceId = 0;
+			if (ImGui::Selectable("New instance", instanceId == 0)) { selectFurnitureInstance(world, 0); instanceId = 0; }
 			for (auto const& entry : world->furniture())
 			{
 				ImGui::PushID(static_cast<int>(entry.id));
 				if (ImGui::Selectable(entry.name.c_str(), entry.id == instanceId))
 				{
+					selectFurnitureInstance(world, entry.id); displayed = entry;
 					instanceId = entry.id; x = entry.x; y = entry.y; localDepth = entry.localDepth;
 					std::snprintf(name, sizeof(name), "%s", entry.name.c_str());
 				}
@@ -139,7 +190,7 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 				editSelectedFurniture(world, instanceId, x, y, snap, name, diagnostic, gWorldDocumentHistory, localDepth);
 			ImGui::SameLine();
 			if (ImGui::Button("Delete Furniture"))
-				if (deleteSelectedFurniture(world, instanceId, diagnostic)) instanceId = 0;
+				if (deleteSelectedFurniture(world, instanceId, diagnostic)) selectFurnitureInstance(world, 0);
 			ImGui::TextUnformatted("Owned Markers may be renamed in Marker Selection; layout belongs to Furniture.");
 		}
 		else if (ImGui::Button("Place Furniture"))

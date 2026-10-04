@@ -93,7 +93,7 @@ std::shared_ptr<const core::Sector> LocationPlan::target(std::shared_ptr<core::W
 
 void LocationPlan::cancelDrag()
 {
-	mDragArmed = mDragging = false; mDragCatalogue.reset(); mDragKey.clear();
+	mDragArmed = mDragging = false; mDragCatalogue.reset(); mDragKey.clear(); mMoveId = 0;
 }
 
 bool LocationPlan::isOpen(std::shared_ptr<core::World> const& world)
@@ -188,7 +188,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			{
 				auto level = location->getCellY() + offset;
 				auto label = std::to_string(level);
-				if (ImGui::Selectable(label.c_str(), level == mWorldLevel)) mWorldLevel = level;
+				if (ImGui::Selectable(label.c_str(), level == mWorldLevel)) { cancelDrag(); mWorldLevel = level; }
 				if (level == mWorldLevel) ImGui::SetItemDefaultFocus();
 			}
 			ImGui::EndCombo();
@@ -201,8 +201,68 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 		{
 			ImGui::InvisibleButton("##LocationPlanViewport", size);
 			WorldDrawList commands({position, {position.x + size.x, position.y + size.y}});
-			renderLocationPlanGrid(commands, *location, position, size, mDepthRows, world.get(), mWorldLevel);
-			if (mDragging && mDragCatalogue.lock() == world->furnitureCatalogue())
+			auto selected = selectedFurnitureInstance(world);
+			renderLocationPlanGrid(commands, *location, position, size, mDepthRows, world.get(), mWorldLevel,
+				selected ? selected->id : 0);
+			auto catalogue = world->furnitureCatalogue();
+			auto const& io = ImGui::GetIO();
+			float left = position.x + 48, right = position.x + size.x - 12;
+			float top = position.y + 8, bottom = position.y + size.y - 28;
+			bool over = right > left && bottom > top
+				&& ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
+				&& io.MousePos.x >= left && io.MousePos.x < right
+				&& io.MousePos.y >= top && io.MousePos.y < bottom;
+			float mouseX = right > left ? (io.MousePos.x - left) * location->getCellsWide() / (right - left) : 0;
+			int mouseDepth = bottom > top ? static_cast<int>(std::clamp(std::floor(
+				double(bottom - io.MousePos.y) * mDepthRows / (bottom - top)), 0.0,
+				double(std::numeric_limits<int>::max()))) : 0;
+			if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(1)) cancelDrag();
+			if (over && !mDragArmed && ImGui::IsMouseClicked(0) && catalogue)
+			{
+				// Reverse draw order makes coincident footprints select the visible instance.
+				for (auto it = world->furniture().rbegin(); it != world->furniture().rend(); ++it)
+				{
+					auto definition = catalogue->definition(it->definitionKey);
+					if (!definition || it->sector != location->getIndex()
+						|| location->getCellY() + it->y != mWorldLevel || it->localDepth != mouseDepth
+						|| mouseX < it->x + definition->minX || mouseX >= it->x + definition->maxX) continue;
+					selectFurnitureInstance(world, it->id);
+					mMoveId = it->id; mMoveOriginal = *it;
+					mMoveOffsetX = mouseX - it->x; mMoveOffsetDepth = mouseDepth - it->localDepth;
+					mDragCatalogue = catalogue; break;
+				}
+			}
+			if (mMoveId)
+			{
+				auto instance = selectedFurnitureInstance(world);
+				if (!instance || instance->id != mMoveId || mDragCatalogue.lock() != catalogue
+					|| instance->x != mMoveOriginal.x || instance->y != mMoveOriginal.y
+					|| instance->localDepth != mMoveOriginal.localDepth || instance->name != mMoveOriginal.name)
+					cancelDrag();
+				else if (ImGui::IsMouseDragging(0) || mDragging)
+				{
+					mDragging = true;
+					float x = mouseX - mMoveOffsetX;
+					if (!io.KeyShift) x = std::round(location->getCellX() + x) - location->getCellX();
+					int depth = std::max(0, mouseDepth - mMoveOffsetDepth);
+					std::string diagnostic;
+					bool valid = world->canEditFurniture(mMoveId, x, instance->y, instance->name, &diagnostic, depth);
+					if (over)
+					{
+						renderLocationPlanPreview(commands, *location, *catalogue->definition(instance->definitionKey),
+							x, depth, valid, position, size, mDepthRows);
+						if (!valid) ImGui::SetTooltip("%s", diagnostic.c_str());
+						if (ImGui::IsMouseReleased(0) && valid
+							&& (x != instance->x || depth != instance->localDepth))
+						{
+							if (editSelectedFurniture(world, mMoveId, x, instance->y, false, instance->name, diagnostic, history, depth))
+								selectFurnitureInstance(world, mMoveId);
+							mDepthRows = std::max(mDepthRows, locationPlanDepthRows(*world, *location, mWorldLevel));
+						}
+					}
+				}
+			}
+			if (mDragging && !mMoveId && mDragCatalogue.lock() == world->furnitureCatalogue())
 			{
 				auto catalogue = world->furnitureCatalogue();
 				auto definition = catalogue ? catalogue->definition(mDragKey) : nullptr;
@@ -234,7 +294,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 		}
 	}
 	ImGui::End();
-	if (mDragArmed && (!ImGui::GetIO().MouseDown[0]
+	if ((mDragArmed || mMoveId) && (!ImGui::GetIO().MouseDown[0]
 		|| mDragCatalogue.lock() != world->furnitureCatalogue())) cancelDrag();
 	if (!mOpen) close();
 }

@@ -35,6 +35,10 @@ private:
 	std::string mDragKey;
 	size_t mPage{};
 	bool mDragArmed{}, mDragging{};
+	uint64_t mMoveId{};
+	core::FurnitureInstance mMoveOriginal;
+	float mMoveOffsetX{};
+	int mMoveOffsetDepth{};
 	void cancelDrag();
 };
 
@@ -42,7 +46,7 @@ private:
 // The viewport is also intersected with the caller's clip by the recorder.
 void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& location,
 	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows = 4,
-	core::World const* world = nullptr, uint32_t worldLevel = 0);
+	core::World const* world = nullptr, uint32_t worldLevel = 0, uint64_t selectedId = 0);
 
 void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
 	core::FurnitureDefinition const& definition, float x, int depth, bool valid,

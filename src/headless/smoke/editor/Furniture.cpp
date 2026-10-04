@@ -11,6 +11,7 @@
 #include "core/MarkerSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
 #include <fstream>
+#include <limits>
 #include <yaml-cpp/yaml.h>
 
 namespace
@@ -628,6 +629,141 @@ namespace
 		plan.close(); frame(); require(rowLabels.empty(), "Closing plan retained third row");
 	}
 
+	void locationPlanMovement(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = std::make_shared<core::World>("Movement", 24, 8);
+		auto room = world->addRoom("Pinned", 1, 3, 2, 8, 3);
+		auto other = world->addRoom("Other", 0, 0, 0, 8, 1);
+		for (uint32_t x = 0; x < 6; ++x) world->addSectorWalkway(room, 1, x);
+		world->finishBuild(); world->pauseSimulation();
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
+		auto id = world->placeFurniture(room, "chair", 1.25f, 1, "Selected chair", 0);
+		world->placeFurniture(room, "chair", 4, 1, "Obstacle", 1);
+		auto marker = world->furniture().front().marker;
+		require(world->renameMarker(marker, "Authored seat"), "Cannot rename owned Marker");
+		DocumentHistory history; LocationPlan plan;
+		require(plan.open(world, world->getSector(room), 4), "Cannot open movement plan");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1600, 1000}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImVec2 viewport{}, size{}; size_t rows = 4; unsigned validLines = 0, invalidLines = 0, selectionLines = 0;
+		float previewX = 0;
+		auto frame = [&]
+		{
+			rows = 0; validLines = invalidLines = selectionLines = 0; previewX = std::numeric_limits<float>::max();
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
+			plan.render(world, [&](WorldDrawList const& commands, ImVec2 p, ImVec2 s)
+			{
+				viewport = p; size = s;
+				for (auto const& command : commands.commands())
+				{
+					if (auto text = std::get_if<WorldDrawList::Text>(&command))
+						if (std::abs(text->position.x - p.x - 16) < .01f) ++rows;
+					if (auto line = std::get_if<WorldDrawList::Line>(&command))
+					{
+						if (line->colour == IM_COL32(80, 200, 120, 255))
+						{
+							++validLines;
+							previewX = std::min(previewX, (line->from.x - p.x - 48) * 8 / (s.x - 60));
+						}
+						if (line->colour == IM_COL32(244, 67, 54, 255)) ++invalidLines;
+						if (line->colour == IM_COL32(251, 188, 4, 255)) ++selectionLines;
+					}
+				}
+			}, history);
+			ImGui::GetCurrentContext()->NextWindowData.ClearFlags(); ImGui::Render();
+		};
+		frame(); frame();
+		auto point = [&](float x, float depth) { return ImVec2{viewport.x + 48 + x * (size.x - 60) / 8,
+			viewport.y + size.y - 28 - (depth + .5f) * (size.y - 36) / rows}; };
+		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
+		auto start = [&] { auto const& instance = world->furniture().front(); mouse(point(instance.x + .5f, instance.localDepth));
+			io.AddMouseButtonEvent(0, true); frame(); };
+		auto release = [&] { io.AddMouseButtonEvent(0, false); frame(); frame(); };
+		start(); release();
+		require(selectedFurnitureInstance(world) && selectedFurnitureInstance(world)->id == id && selectionLines == 4
+			&& history.undoCount() == 0, "Plan click did not share/highlight selection or created an edit: selected="
+			+ std::to_string(selectedFurnitureInstance(world) ? selectedFurnitureInstance(world)->id : 0)
+			+ " lines=" + std::to_string(selectionLines) + " rows=" + std::to_string(rows));
+		// Existing controls must receive the plan's selection even with another Location selected.
+		std::string text;
+		io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		ImGui::NewFrame(); ImGui::SetNextWindowPos({950, 10}); ImGui::SetNextWindowSize({600, 700});
+		ImGui::Begin("Movement controls"); ImGui::LogToClipboard();
+		ImGui::SetNextItemOpen(true); renderFurniturePanel(world, {}, world->getSector(other));
+		ImGui::LogFinish(); ImGui::End(); ImGui::Render();
+		require(text.find("Selected chair") != std::string::npos && text.find("Apply Furniture edit") != std::string::npos
+			&& text.find("{ 1.250 } Furniture x") != std::string::npos
+			&& text.find("{ 1.000 } Supporting Level") != std::string::npos,
+			"Plan selection did not populate existing controls");
+		frame();
+		auto before = captureDocumentSnapshot(world, history)->yaml;
+		start(); mouse(point(2.8f, 3));
+		require(validLines == 4 && captureDocumentSnapshot(world, history)->yaml == before && history.undoCount() == 0,
+			"Valid movement preview mutated state or was not presented");
+		require(std::abs(previewX - 2) < .001f, "Ordinary movement preview did not snap X");
+		io.AddKeyEvent(ImGuiMod_Shift, true); frame();
+		require(std::abs(previewX - 2.3f) < .01f, "Pressing Shift did not immediately unsnap the preview: " + std::to_string(previewX));
+		io.AddKeyEvent(ImGuiMod_Shift, false); frame();
+		require(std::abs(previewX - 2) < .001f, "Releasing Shift did not immediately snap the preview"); release();
+		require(world->furniture().front().x == 2 && world->furniture().front().localDepth == 3
+			&& world->furniture().front().y == 1 && world->furniture().front().sector == room
+			&& history.undoCount() == 1 && rows == 5 && selectedFurnitureInstance(world)
+			&& selectedFurnitureInstance(world)->id == id, "Shift release did not snap or retain target/Level/one-edit expansion");
+		start(); io.AddKeyEvent(ImGuiMod_Shift, true); frame(); mouse(point(3.875f, 2)); release();
+		require(std::abs(world->furniture().front().x - 3.375f) < .001f && world->furniture().front().localDepth == 2
+			&& history.undoCount() == 2 && rows == 5, "Shift movement lost fractional X/integer depth or shrank range");
+		io.AddKeyEvent(ImGuiMod_Shift, false); frame();
+		require(world->furniture().front().id == id && world->furniture().front().marker == marker
+			&& world->lookupMarker(marker)->getName() == "Authored seat", "Movement changed instance or Marker identity/name");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto result = world->deserialize(*reader, work); world->pauseSimulation(); return result;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Movement undo failed"); frame();
+		require(world->furniture().front().x == 2 && world->furniture().front().localDepth == 3
+			&& !selectedFurnitureInstance(world), "Undo lost position/depth or retained stale selection");
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Movement redo failed"); frame();
+		require(world->furniture().front().id == id && world->furniture().front().marker == marker
+			&& std::abs(world->furniture().front().x - 3.375f) < .001f, "Redo changed identity/position");
+		auto root = context.temporaryRoot() / "location-plan-movement";
+		std::filesystem::create_directories(root);
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), root / "chair.furniture.yaml");
+		auto path = root / "movement.world.yaml"; world->saveTo(path.string());
+		auto reopened = core::loadWorldDocument(path);
+		require(reopened->furniture().front().id == id && reopened->furniture().front().marker == marker
+			&& reopened->furniture().front().localDepth == 2 && reopened->furniture().front().y == 1
+			&& std::abs(reopened->furniture().front().x - 3.375f) < .001f
+			&& reopened->lookupMarker(marker)->getName() == "Authored seat", "Moved Furniture did not survive save/reopen");
+		auto reject = [&](float x, int depth)
+		{
+			auto snapshot = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
+			start(); mouse(point(x + .5f, depth));
+			require(invalidLines == 4, "Invalid movement preview not presented"); release();
+			require(captureDocumentSnapshot(world, history)->yaml == snapshot && history.undoCount() == count,
+				"Rejected movement changed authored state, topology or history");
+		};
+		reject(4, 1); reject(6, 0); reject(7, 0);
+		start(); mouse(point(2.5f, 0));
+		auto count = history.undoCount(); auto snapshot = captureDocumentSnapshot(world, history);
+		require(restore(*snapshot), "Cannot reconstruct World during drag"); release();
+		require(history.undoCount() == count && std::abs(world->furniture().front().x - 3.375f) < .001f,
+			"Reconstructed World accepted stale drag");
+		start(); mouse(point(2.5f, 0));
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		require(restore(*captureDocumentSnapshot(world, history)), "Cannot reload catalogue through World reconstruction"); release();
+		require(!selectedFurnitureInstance(world) && history.undoCount() == count, "Catalogue switch retained selection/gesture");
+		start(); mouse(point(2.5f, 0)); std::string diagnostic;
+		require(world->removeFurniture(id, &diagnostic), diagnostic); release();
+		require(!selectedFurnitureInstance(world) && history.undoCount() == count, "Deleted instance retained selection/gesture");
+		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
+	}
+
 	void locationPlanWorkflow(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -810,6 +946,7 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "furniture/demoActions", demoActions });
 	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });
 	checks.push_back({ "locationPlan/placement", locationPlanPlacement });
+	checks.push_back({ "locationPlan/movement", locationPlanMovement });
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });

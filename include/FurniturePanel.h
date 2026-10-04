@@ -5,6 +5,10 @@
 #include "core/World.h"
 #include "DocumentEdit.h"
 
+// Shared transient instance identity; stale World, Sector or catalogue clears it.
+bool selectFurnitureInstance(std::shared_ptr<core::World> const& world, uint64_t id);
+core::FurnitureInstance const* selectedFurnitureInstance(std::shared_ptr<core::World> const& world);
+
 bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath, std::string const& filename,
 	std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
