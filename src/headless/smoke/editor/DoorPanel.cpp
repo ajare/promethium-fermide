@@ -189,6 +189,12 @@ namespace
 		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
 		auto save = [&]
 		{
+			if (bulkhead)
+			{
+				auto points = world->getSimulationSnapshot().interactionPoints;
+				require(points.size() == 2 && points[0].position == core::Vector2{4.75f, 0}
+					&& points[1].position == core::Vector2{5.25f, 0}, "Bulkhead editor/history changed inset approaches");
+			}
 			core::SerializationWorkData work; work.markSerializedUnmodified = false;
 			auto writer = core::YamlSerializer::toString(); world->serialize(*writer, work); writer->serialize();
 			return writer->getSerializedString();
@@ -253,6 +259,29 @@ namespace
 			"Door initial Broken undo failed");
 		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored,
 			"Door initial Broken redo failed");
+		if (bulkhead)
+		{
+			// Supported configuration and generic clipboard paste use authored
+			// options through the production World APIs, not copied Button positions.
+			auto owner = world->getSector(0); uint32_t index = ~0u;
+			for (uint32_t i = 0; i < owner->getNumObjects(); ++i)
+				if (auto candidate = owner->getObject(i); candidate && candidate->getObjectType() == core::SectorObjectType::BulkheadDoor) index = i;
+			core::World::CreateBulkheadDoorOptions copied;
+			require(world->getSectorBulkheadDoorOptions(0, index, copied), "Bulkhead clipboard source lost options");
+			auto changed = copied; changed.controls[0] = false;
+			world->applySectorBulkheadDoorOptions(0, index, changed); world->finishBuild(); world->pauseSimulation();
+			auto points = world->getSimulationSnapshot().interactionPoints;
+			require(points.size() == 1 && points[0].position == core::Vector2{5.25f, 0}, "Bulkhead configuration transferred its remaining control");
+			world->addRoom("Paste left", 0, 1, 0, 5, 1); world->addRoom("Paste right", 0, 1, 5, 6, 1);
+			world->addSectorBulkheadDoor(0, 1, 5, CORE_SIDE_LEFT, copied); world->finishBuild(); world->pauseSimulation();
+			points = world->getSimulationSnapshot().interactionPoints;
+			require(points.size() == 3 && points[1].position == core::Vector2{4.75f, 1}
+				&& points[2].position == core::Vector2{5.25f, 1}, "Bulkhead clipboard mirror failed to derive destination insets");
+			auto graph = world->getGraph(); auto count = gWorldDocumentHistory.undoCount(); bool refused = false;
+			try { world->addSectorBulkheadDoor(0, 1, 5, CORE_SIDE_LEFT, copied); } catch (std::exception const&) { refused = true; }
+			require(refused && world->getGraph() == graph && gWorldDocumentHistory.undoCount() == count,
+				"Refused Bulkhead clipboard paste changed graph/history");
+		}
 	}
 
 	void checkWallSafeDocumentEdits()

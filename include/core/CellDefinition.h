@@ -30,7 +30,8 @@ namespace core
 
 		// Representative controls: one registration per cell side.
 		uint32_t controls[3] = { ~0u, ~0u, ~0u };
-		// Additional independently owned controls sharing a registered approach.
+		// Additional independently owned controls sharing a cell-side registration,
+		// either at distinct inset centres or in a coincident vertical stack.
 		std::vector<uint32_t> stackedControls;
 
 		// Index of Bulkhead doors on either side.

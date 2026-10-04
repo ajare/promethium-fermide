@@ -38,10 +38,24 @@ namespace core
 				return reject("Airlock neighbours must have adjoining walkable ends");
 			auto end = sector->getEndType(y - sector->getCellY(), 1 - side);
 			if (end == SectorEndType::BulkheadDoor || cell.bulkheadIndices[1 - side] != ~0u
-				|| cell.hasObject() || cell.controls[1 - side] != ~0u
-				|| cell.controls[CORE_SIDE_MIDDLE] != ~0u)
+				|| cell.hasObject())
 				return reject("An object or control blocks the Airlock entrance");
 		}
+		try
+		{
+			std::vector<physicalControl::Demand> demands;
+			for (int side = 0; side < CORE_NUM_SIDES; ++side)
+			{
+				auto endX = side == CORE_SIDE_LEFT ? x - 1 : x + width;
+				demands.push_back(insetControlDemand(getSector(grid->getCellDefinition(endX, y).sectorIndex),
+					physicalControl::OwnerType::Airlock, { layer, x, y, width, 1 }, y, side));
+			}
+			// The left threshold borders currently empty cells; only the right
+			// threshold can block an existing offset-zero candidate.
+			validatePhysicalControlAdditions(demands, x + width);
+		}
+		catch (Exception const& error) { return reject(error.getMessage()); }
+		catch (std::exception const& error) { return reject(error.what()); }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -99,8 +113,10 @@ namespace core
 			for (uint32_t cell = 0; cell < neighbour->getCellsWide(); ++cell)
 				lane.positions.push_back({ side == CORE_SIDE_LEFT ? x - 0.5f - cell : x + width + 0.5f + cell, (float)y });
 			lane.positionOwners.resize(lane.positions.size());
+			auto demand = insetControlDemand(neighbour, physicalControl::OwnerType::Airlock,
+				{ layer, x, y, width, 1 }, y, side);
 			auto control = createPhysicalControl("Airlock outside button", layer,
-				side == CORE_SIDE_LEFT ? x - 1 : x + width, y, CORE_SIDE_MIDDLE, CORE_BUTTON_F_AUTO_REENABLE);
+				y, demand, CORE_BUTTON_F_AUTO_REENABLE);
 			DeviceCommand command;
 			command.type = DeviceCommandType::RequestAirlock;
 			command.target = SectorId{ (uint64_t)index + 1 }; command.stopIndex = side;

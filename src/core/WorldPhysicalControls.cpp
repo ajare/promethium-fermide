@@ -25,14 +25,28 @@ namespace core
 		return validPhysicalControlDemand(std::move(demand), y);
 	}
 
-	void World::validatePhysicalControlAdditions(vector<physicalControl::Demand> const& demands) const
+	physicalControl::Demand World::insetControlDemand(shared_ptr<const Sector> sector,
+		physicalControl::OwnerType type, physicalControl::Geometry geometry,
+		uint32_t y, int side) const
+	{
+		physicalControl::Demand demand;
+		demand.hasOwner = true;
+		demand.owner = { type, geometry,
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() },
+			{ static_cast<uint32_t>(side), geometry.x, y } };
+		return validPhysicalControlDemand(std::move(demand), y);
+	}
+
+	void World::validatePhysicalControlAdditions(vector<physicalControl::Demand> const& demands,
+		uint32_t blockedX) const
 	{
 		map<pair<uint32_t, uint32_t>, vector<physicalControl::Demand>> rows;
 		for (auto const& demand : demands)
 			rows[{demand.owner.hostingLocation.layer, demand.owner.role.level}].push_back(demand);
 		for (auto const& [row, additions] : rows)
 		{
-			auto plan = planPhysicalControls(row.first, ~0u, row.second);
+			auto plan = planPhysicalControls(row.first, ~0u, row.second, nullptr, blockedX);
 			plan.demands.insert(plan.demands.end(), additions.begin(), additions.end());
 			try { (void)physicalControl::allocateCanonical(plan.demands); }
 			catch (runtime_error const& error) { throw WorldException(this, error.what()); }
@@ -71,8 +85,10 @@ namespace core
 		using namespace physicalControl;
 		bool transport = demand.owner.type == OwnerType::Lift || demand.owner.type == OwnerType::Shuttle;
 		bool endpoint = demand.owner.type == OwnerType::Ladder || demand.owner.type == OwnerType::PlatformLift;
+		bool bridge = demand.owner.type == OwnerType::ForceBridge;
+		bool inset = bridge || demand.owner.type == OwnerType::BulkheadDoor || demand.owner.type == OwnerType::Airlock;
 		if (!demand.hasOwner || (demand.owner.type != OwnerType::Door
-			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport && !endpoint)) return demand;
+			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport && !endpoint && !inset)) return demand;
 		auto const& host = demand.owner.hostingLocation;
 		auto const& geometry = demand.owner.geometry;
 		auto doorwayX = transport || endpoint ? demand.owner.role.x : geometry.x;
@@ -81,6 +97,13 @@ namespace core
 			? vector<Candidate>{ Candidate::explicitHost(doorwayX + doorwayWidth, 0, CORE_SIDE_LEFT),
 				Candidate::explicitHost(doorwayX, 0, CORE_SIDE_LEFT) }
 			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2, CORE_SIDE_MIDDLE) };
+		if (inset)
+		{
+			bool left = demand.owner.role.order == CORE_SIDE_LEFT;
+			candidates = { Candidate::explicitHost(left ? geometry.x - 1
+				: geometry.x + (demand.owner.type == OwnerType::BulkheadDoor ? 0 : geometry.width),
+				left ? 3 : 1, CORE_SIDE_MIDDLE) };
+		}
 		demand.candidates.clear();
 		demand.defaultCandidate = ~0u;
 		for (auto const& candidate : candidates)
@@ -91,7 +114,7 @@ namespace core
 			auto const& cell = mLayers[host.layer]->getCellDefinition(x, y);
 			if (cell.sectorIndex == ~0u || ((!mDeserializingConstruction || mResolvingPhysicalControls)
 				&& !cell.isTraversableOnFoot())) continue;
-			if (endpoint && (!mDeserializingConstruction || mResolvingPhysicalControls))
+			if ((endpoint || bridge) && (!mDeserializingConstruction || mResolvingPhysicalControls))
 			{
 				auto permanent = [](CellDefinition const& support)
 				{ return support.floorType == CellFloorType::Ground || support.floorType == CellFloorType::Walkway; };
@@ -110,15 +133,19 @@ namespace core
 			if (!isLocationLike(sector->getType()) || sector->getCellX() != host.x
 				|| sector->getCellY() != host.baseLevel || sector->getCellsWide() != host.width
 				|| sector->getLevelsHigh() != host.height) continue;
-			if (candidate.quarterOffset == 0 && (!mDeserializingConstruction || mResolvingPhysicalControls))
+			if ((candidate.quarterOffset == 0 || bridge) && (!mDeserializingConstruction || mResolvingPhysicalControls))
 			{
-				if (x == blockedX) continue;
-				bool blocked = cell.bulkheadIndices[CORE_SIDE_LEFT] != ~0u;
-				if (x > 0)
+				// Insets never straddle host ends. A bridge additionally requires
+				// an unobstructed connection from its permanent support to the span.
+				auto boundaryX = bridge && demand.owner.role.order == CORE_SIDE_LEFT ? x + 1 : x;
+				if (boundaryX == blockedX) continue;
+				auto const& boundaryCell = mLayers[host.layer]->getCellDefinition(boundaryX, y);
+				bool blocked = boundaryCell.bulkheadIndices[CORE_SIDE_LEFT] != ~0u;
+				if (boundaryX > 0)
 				{
-					auto const& previous = mLayers[host.layer]->getCellDefinition(x - 1, y);
+					auto const& previous = mLayers[host.layer]->getCellDefinition(boundaryX - 1, y);
 					blocked |= previous.bulkheadIndices[CORE_SIDE_RIGHT] != ~0u;
-					if (x != openedX && previous.sectorIndex != ~0u && previous.sectorIndex != cell.sectorIndex)
+					if (boundaryX != openedX && previous.sectorIndex != ~0u && previous.sectorIndex != boundaryCell.sectorIndex)
 					{
 						auto other = mSectors[previous.sectorIndex];
 						blocked |= sector->getEndType(y - sector->getCellY(), CORE_SIDE_LEFT) == SectorEndType::Wall
@@ -357,9 +384,11 @@ namespace core
 				auto const& candidate = placement.candidates[placement.currentCandidate];
 				auto& cell = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y);
 				auto& slot = cell.controls[candidate.side];
-				if (stack && rank > 0) cell.stackedControls.push_back(placement.objectIndex);
-				else if (slot == ~0u) slot = placement.objectIndex;
-				else throw WorldException(this, "Physical-control slot assignment collided with an existing control");
+				// Registration side is not a physical slot: distinct quarter-cell
+				// centres (and coincident stack members) can share a host/side.
+				// Feasibility was already checked by absolute centre in the allocator.
+				if (slot == ~0u) slot = placement.objectIndex;
+				else cell.stackedControls.push_back(placement.objectIndex);
 				float centerX = candidate.centreX();
 				float adjustment = 0.0f;
 				if (controls.size() > 1 && candidate.quarterOffset < 0)

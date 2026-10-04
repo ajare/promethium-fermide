@@ -467,6 +467,47 @@ namespace
 			require(count == 4, "Endpoint draw fixture lost controls");
 		}
 
+		// Fixed-side owners retain separately visible and targetable inset shapes.
+		for (int kind = 0; kind < 3; ++kind)
+		{
+			core::World world("Fixed inset artwork", 10, 3);
+			std::vector<std::pair<uint32_t, std::vector<float>>> hosts;
+			if (kind == 2)
+			{
+				auto room = world.addRoom("Room", 0, 0, 0, 8, 3);
+				world.addSectorWalkway(room, 1, 1); world.addSectorWalkway(room, 1, 4);
+				world.addSectorForceBridge(room, 1, 2, {2, CORE_SIDE_LEFT, true, false, 2});
+				hosts.push_back({room, {1.75f, 4.25f}});
+			}
+			else
+			{
+				auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
+				auto right = world.addRoom("Right", 0, 0, kind == 0 ? 3 : 5, 3, 1);
+				if (kind == 0) world.addSectorBulkheadDoor(0, 0, 3, CORE_SIDE_LEFT);
+				else world.addAirlock(0, 0, 3, 2);
+				hosts = {{left, {2.75f}}, {right, {kind == 0 ? 3.25f : 5.25f}}};
+			}
+			world.finishBuild();
+			for (auto const& [host, expected] : hosts)
+			{
+				WorldDrawList drawList(kViewportClip);
+				renderSector(world.getSector(host), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
+				require(visibleGeometry(drawList).buttonFillTriangles == static_cast<int>(expected.size() * 2),
+					"Inset owner omitted physical Button artwork");
+				std::vector<float> centres;
+				for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+				{
+					auto object = world.getSector(host)->getObject(i);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					centres.push_back(centre.x);
+					require(world.getObjectAtPosition(0, centre.x, centre.y) == button, "Inset artwork targets a different object");
+				}
+				std::sort(centres.begin(), centres.end()); require(centres == expected, "Inset artwork moved off approved support");
+			}
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

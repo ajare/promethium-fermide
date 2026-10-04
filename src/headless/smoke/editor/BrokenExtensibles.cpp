@@ -4,15 +4,75 @@
 #include "DoorPanel.h"
 #include "DocumentEdit.h"
 #include "core/YamlSerializer.h"
+#include "core/Button.h"
+#include <algorithm>
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 
 namespace
 {
+	void bridgeInsetHistory()
+	{
+		using smoke::require;
+		auto world = std::make_shared<core::World>("Bridge document insets", 12, 3);
+		auto room = world->addRoom("Room", 0, 0, 0, 12, 3);
+		for (auto x : {0u, 1u, 4u, 5u, 8u, 9u, 10u, 11u}) world->addSectorWalkway(room, 1, x);
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto edit = [&](auto action)
+		{
+			auto before = captureDocumentSnapshot(world, history); action(); world->finishBuild(); world->pauseSimulation();
+			commitDocumentEdit(std::move(before), history);
+		};
+		auto verify = [&](std::vector<float> expected)
+		{
+			std::vector<float> actual;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(room)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				actual.push_back(button->getPosition().x + button->getSize().x * 0.5f);
+				require(world->lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition()
+					== core::Vector2{actual.back(), 1}, "Bridge history elevated or relocated approach");
+			}
+			std::sort(actual.begin(), actual.end()); require(actual == expected, "Bridge editor/history changed endpoint demand/insets");
+		};
+		core::World::CreateForceBridgeResult created;
+		core::World::CreateForceBridgeOptions options{2, CORE_SIDE_RIGHT, true, false, 1};
+		edit([&] { created = world->addSectorForceBridge(room, 1, 2, options); }); verify({4.25f});
+		// Supported Selection configuration edits reconstruct exactly the requested
+		// endpoints, not previous Button placement or the extension origin.
+		options.controlCount = 2;
+		edit([&] { world->applySectorForceBridgeOptions(room, created.forceBridge.index, options); }); verify({1.75f, 4.25f});
+		// Clipboard copy/paste mirror: the production generic UI reads the authored
+		// options and passes them to the same World preflight/add API.
+		core::World::CreateForceBridgeOptions copied;
+		require(world->getSectorForceBridgeOptions(room, created.forceBridge.index, copied), "Clipboard source lost authored Bridge options");
+		edit([&] { world->addSectorForceBridge(room, 1, 6, copied); }); verify({1.75f, 4.25f, 5.75f, 8.25f});
+		auto before = captureDocumentSnapshot(world, history); auto graph = world->getGraph(); bool refused = false;
+		try { world->addSectorForceBridge(room, 1, 6, copied); } catch (std::exception const&) { refused = true; }
+		require(refused && world->getGraph() == graph && captureDocumentSnapshot(world, history)->yaml == before->yaml
+			&& history.undoCount() == 3, "Refused Bridge paste changed document/history");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {}); world->pauseSimulation(); return bool(world);
+		};
+		for (auto expected : {std::vector<float>{1.75f, 4.25f}, {4.25f}, {}})
+		{
+			require(history.undo(*captureDocumentSnapshot(world, history), restore), "Bridge document undo failed"); verify(expected);
+		}
+		for (auto expected : {std::vector<float>{4.25f}, {1.75f, 4.25f}, {1.75f, 4.25f, 5.75f, 8.25f}})
+		{
+			require(history.redo(*captureDocumentSnapshot(world, history), restore), "Bridge document redo failed"); verify(expected);
+		}
+	}
+
 	void controlsAndHistory()
 	{
 		using namespace broken_extensible;
 		using smoke::require;
+		bridgeInsetHistory();
 		for (auto kind : { Kind::RoomLadder, Kind::TransitLadder, Kind::Bridge })
 		{
 			Scene scene(kind);

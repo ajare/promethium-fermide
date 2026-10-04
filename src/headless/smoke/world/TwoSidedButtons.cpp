@@ -34,6 +34,8 @@
 
 #include "core/World.h"
 #include "core/Button.h"
+#include "core/AirlockTransit.h"
+#include "core/ForceBridgeSectorObject.h"
 #include "core/BulkheadDoor.h"
 #include "core/BulkheadDoorSectorObject.h"
 #include "core/Graph.h"
@@ -1737,8 +1739,217 @@ namespace
 	}
 }
 
+namespace
+{
+	// #433: fixed candidates use the same authoring/replay boundary as movable
+	// Door-rule candidates, but may never transfer approach or endpoint.
+	void fixedInsetControls()
+	{
+		using namespace core;
+		auto centre = [](std::shared_ptr<const Button> button)
+		{ return button->getPosition().x + button->getSize().x * 0.5f; };
+		auto verify = [&](World const& world, uint32_t host, std::vector<float> expected)
+		{
+			auto buttons = buttonsIn(world, host);
+			require(buttons.size() == expected.size(), "Inset owner changed control demand");
+			std::vector<float> actual;
+			for (auto button : buttons)
+			{
+				actual.push_back(centre(button));
+				auto position = button->getPosition() + button->getSize() * 0.5f;
+				require(world.getObjectAtPosition(world.getSector(host)->getLayerIndex(), position.x, position.y) == button,
+					"Inset control targeting disagrees with artwork");
+				auto point = world.lookupInteractionPoint(button->getInteractionPointId());
+				require(point && point.entity->getPosition() == Vector2{centre(button),
+					std::floor(button->getPosition().y)},
+					"Inset interaction approach differs from its walkable position");
+			}
+			for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(host)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto vertex = world.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+				require(vertex && vertex->getPosition() == world.lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition(),
+					"Inset control omitted its production graph approach");
+			}
+			std::sort(actual.begin(), actual.end()); std::sort(expected.begin(), expected.end());
+			require(actual == expected, "Inset owner used an unapproved candidate");
+			return buttons;
+		};
+		auto replay = [&]<typename SerializerType>(World& world, auto check)
+		{
+			SerializationWorkData data;
+			auto writer = SerializerType::toString(); world.serialize(*writer, data); writer->serialize();
+			auto reader = SerializerType::fromString(writer->getSerializedString()); reader->deserialize();
+			World loaded("Placeholder", 1, 1);
+			require(loaded.deserialize(*reader, data), "Fixed inset reconstruction failed"); check(loaded);
+		};
+		// Quarter-cell centres are not cell-side registration slots. Three
+		// independent controls can occupy one cell without merging or stacking.
+		for (bool reverse : {false, true})
+		{
+			World world("Three distinct inset approaches", 6, 2);
+			world.addRoom("Left", 0, 0, 0, 2, 1);
+			auto middle = world.addRoom("Middle", 0, 0, 2, 1, 1);
+			world.addRoom("Right", 0, 0, 3, 2, 1);
+			if (!reverse) world.addSectorLightSwitch(middle, 0);
+			world.addSectorBulkheadDoor(0, 0, reverse ? 3 : 2, CORE_SIDE_LEFT);
+			world.addSectorBulkheadDoor(0, 0, reverse ? 2 : 3, CORE_SIDE_LEFT);
+			if (reverse) world.addSectorLightSwitch(middle, 0);
+			world.finishBuild();
+			auto check = [&](World const& scene) { verify(scene, middle, {2.25f, 2.5f, 2.75f}); };
+			check(world); replay.template operator()<YamlSerializer>(world, check); replay.template operator()<BinarySerializer>(world, check);
+		}
+		// One-cell hosts, retained walls at both ends, asymmetric authored demand
+		// and independent authorization. Opening never frees a placement side.
+		for (auto demand : {std::array<bool, 2>{true, false}, {false, true}, {true, true}})
+		{
+			World world("Walled Bulkhead insets", 8, 2);
+			world.addRoom("Beyond left", 0, 0, 0, 2, 1);
+			auto left = world.addRoom("Left", 0, 0, 2, 1, 1);
+			auto right = world.addRoom("Right", 0, 0, 3, 1, 1);
+			world.addRoom("Beyond right", 0, 0, 4, 2, 1);
+			world.pauseSimulation(); auto lp = world.addAccessPermission("Left operator"); auto rp = world.addAccessPermission("Right operator");
+			World::CreateBulkheadDoorOptions options;
+			options.controls[0] = demand[0]; options.controls[1] = demand[1];
+			if (demand[0]) options.controlPermissionRequirements[0] = {lp};
+			if (demand[1]) options.controlPermissionRequirements[1] = {rp};
+			auto created = world.addSectorBulkheadDoor(0, 0, 3, CORE_SIDE_LEFT, options); world.finishBuild();
+			auto check = [&](World const& scene)
+			{
+				verify(scene, left, demand[0] ? std::vector<float>{2.75f} : std::vector<float>{});
+				verify(scene, right, demand[1] ? std::vector<float>{3.25f} : std::vector<float>{});
+				for (int side = 0; side < 2; ++side)
+					if (demand[side])
+					{
+						auto button = buttonsIn(scene, side == 0 ? left : right).front();
+						require(scene.getInteractionPointPermissionRequirement(button->getInteractionPointId())
+							== std::vector<AccessPermissionId>{side == 0 ? lp : rp}, "Bulkhead transferred approach authorization");
+					}
+			};
+			check(world); replay.template operator()<YamlSerializer>(world, check); replay.template operator()<BinarySerializer>(world, check);
+			world.pauseSimulation(); world.removeLocationWall(left, 0, CORE_SIDE_LEFT); world.finishBuild(); check(world);
+			world.pauseSimulation(); world.addLocationWall(left, 0, CORE_SIDE_LEFT); world.finishBuild(); check(world);
+			auto door = std::dynamic_pointer_cast<const BulkheadDoorSectorObject>(world.getSector(created.door.sector->getIndex())->getObject(created.door.index))->getDoor();
+			door->open(); door->update(100); require(door->isOpen(), "Bulkhead did not open"); check(world);
+			door->close(); door->update(100); check(world);
+			world.pauseSimulation();
+			int side = demand[0] ? 0 : 1; auto button = buttonsIn(world, side == 0 ? left : right).front();
+			auto actor = world.createAgent("Operator", side == 0 ? left : right, 0, side == 0 ? 0.75f : 0.25f);
+			world.resumeSimulation();
+			auto denied = world.requestInteraction(button->getInteractionPointId(), actor);
+			require(world.lookupInteractionRequest(denied).entity->getResult() == InteractionResult::Rejected, "Inset bypassed Bulkhead authorization");
+			require(world.setAgentRuntimeAccessPermissionGrant(actor, side == 0 ? lp : rp, true), "Bulkhead grant failed");
+			auto request = world.requestInteraction(button->getInteractionPointId(), actor);
+			auto initialRequest = world.lookupInteractionRequest(request);
+			require(initialRequest && initialRequest.entity->getResult() != InteractionResult::Rejected,
+				"Authorized Bulkhead interaction was rejected");
+			bool operated = initialRequest.entity->getOperations().size() == 1, opened = false;
+			for (uint32_t tick = 0; tick < 600; ++tick)
+			{
+				world.advanceTick(); check(world); opened |= door->isOpen();
+				if (auto result = world.lookupInteractionRequest(request))
+					operated |= result.entity->getOperations().size() == 1;
+			}
+			require(operated && opened, "Inset lost its OpenDoor command");
+		}
+		{
+			World world("Walled Airlock insets", 8, 2);
+			world.addRoom("Beyond left", 0, 0, 0, 1, 1);
+			auto left = world.addRoom("Left", 0, 0, 1, 1, 1);
+			auto right = world.addRoom("Right", 0, 0, 4, 1, 1);
+			world.addRoom("Beyond right", 0, 0, 5, 1, 1);
+			auto index = world.addAirlock(0, 0, 2, 2); world.finishBuild();
+			auto check = [&](World const& scene)
+			{
+				verify(scene, left, {1.75f}); verify(scene, right, {4.25f});
+				require(buttonsIn(scene, index).empty() && scene.getSimulationSnapshot().interactionPoints.size() == 2,
+					"Airlock generated inside/owned-Bulkhead controls");
+			};
+			check(world); replay.template operator()<YamlSerializer>(world, check); replay.template operator()<BinarySerializer>(world, check);
+			world.pauseSimulation(); world.removeLocationWall(right, 0, CORE_SIDE_RIGHT); world.finishBuild(); check(world);
+			world.pauseSimulation(); world.addLocationWall(right, 0, CORE_SIDE_RIGHT); world.finishBuild(); check(world);
+		}
+		{
+			World world("Bridge walls beyond supports", 8, 3);
+			world.addRoom("Left neighbour", 0, 0, 0, 2, 3);
+			auto room = world.addRoom("Room", 0, 0, 2, 4, 3);
+			world.addRoom("Right neighbour", 0, 0, 6, 2, 3);
+			world.addSectorWalkway(room, 1, 0); world.addSectorWalkway(room, 1, 3);
+			world.addSectorForceBridge(room, 1, 1, {2, CORE_SIDE_LEFT, true, false, 2}); world.finishBuild();
+			verify(world, room, {2.75f, 5.25f});
+			SerializationWorkData data; auto writer = YamlSerializer::toString(); world.serialize(*writer, data); writer->serialize();
+			auto invalid = YAML::Load(writer->getSerializedString()); YAML::Node records(YAML::NodeType::Sequence);
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() != "walkway" || record["xOffset"].as<uint32_t>() != 0) records.push_back(record);
+			invalid["construction"] = records;
+			auto reader = YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize();
+			auto graph = world.getGraph(); auto buttons = buttonsIn(world, room); bool refused = false;
+			try { refused = !world.deserialize(*reader, data); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && buttonsIn(world, room) == buttons,
+				"Invalid bridge-support load was not transactional");
+		}
+		for (int side : {CORE_SIDE_LEFT, CORE_SIDE_RIGHT})
+			for (uint32_t count : {1u, 2u})
+			{
+				World world("Permanent bridge insets", 10, 3);
+				auto room = world.addRoom("Room", 0, 0, 0, 8, 3);
+				for (auto x : {0u, 1u, 4u, 5u, 6u, 7u}) world.addSectorWalkway(room, 1, x);
+				world.pauseSimulation();
+				auto lp = world.addAccessPermission("Left endpoint"); auto rp = world.addAccessPermission("Right endpoint");
+				World::CreateForceBridgeOptions options{2, side, true, false, count};
+				options.controlPermissionRequirements[side] = {side == 0 ? lp : rp};
+				if (count == 2) options.controlPermissionRequirements[1 - side] = {side == 0 ? rp : lp};
+				auto made = world.addSectorForceBridge(room, 1, 2, options); world.finishBuild();
+				auto expected = count == 2 ? std::vector<float>{1.75f, 4.25f} : std::vector<float>{side == 0 ? 1.75f : 4.25f};
+				auto check = [&](World const& scene)
+				{
+					for (auto button : verify(scene, room, expected))
+						require(scene.getInteractionPointPermissionRequirement(button->getInteractionPointId())
+							== std::vector<AccessPermissionId>{centre(button) < 2 ? lp : rp}, "Bridge endpoint authorization transferred/merged");
+				};
+				check(world); replay.template operator()<YamlSerializer>(world, check); replay.template operator()<BinarySerializer>(world, check);
+				auto device = std::dynamic_pointer_cast<const ForceBridgeSectorObject>(made.forceBridge.sector->getObject(made.forceBridge.index))->getForceBridge();
+				auto buttons = buttonsIn(world, room);
+				world.pauseSimulation(); auto graph = world.getGraph(); bool refused = false;
+				auto support = std::as_const(world).getLayer(0)->getCellDefinition(side == 0 ? 1 : 4, 1).floorIndex;
+				try { refused = !world.removeSectorWalkway(room, support); } catch (std::exception const&) { refused = true; }
+				require(refused && world.getGraph() == graph && buttonsIn(world, room) == buttons, "Bridge support removal was not atomic");
+				check(world);
+				// Only the authored endpoint can prepare a retracted one-control bridge.
+				auto actor = world.createAgent("Crossing", room, 1, side == 0 ? 0.5f : 6.5f);
+				require(world.grantAgentAccessPermission(actor, side == 0 ? lp : rp), "Bridge endpoint grant failed");
+				if (count == 1)
+				{
+					auto opposite = world.createAgent("Opposite", room, 1, side == 0 ? 6.5f : 0.5f);
+					world.grantAgentAccessPermission(opposite, side == 0 ? lp : rp);
+					auto destination = world.getGraph()->getClosestVertexInSector(world.getSector(room).get(), {side == 0 ? 0.5f : 6.5f, 1});
+					require(!world.getGraph()->calculatePath(world.lookupAgent(opposite).entity, destination), "One-control bridge gained opposite-end preparation");
+				}
+				auto agent = world.lookupAgent(actor).entity;
+				auto target = world.getGraph()->getClosestVertexInSector(world.getSector(room).get(), {side == 0 ? 6.5f : 0.5f, 1});
+				auto path = world.getGraph()->calculatePath(agent, target); require(bool(path), "Inset bridge lost preparation route");
+				agent->setPath(path, true); world.resumeSimulation(); bool operated = false;
+				for (uint32_t tick = 0; tick < 4000; ++tick)
+				{
+					world.advanceTick(); check(world);
+					for (auto const& request : world.getSimulationSnapshot().interactionRequests)
+						if (request.actor == actor && request.result != InteractionResult::Rejected)
+						{
+							require(request.point == made.controls[0].interactionPoint, "Bridge used opposite endpoint control"); operated = true;
+						}
+					if (agent->getState() == Agent::State::Idle) break;
+				}
+				require(operated && device->isExtended() && agent->getGlobalPosition().distanceTo(target->getPosition()) < 0.001f,
+					"Bridge inset preparation/crossing failed");
+			}
+	}
+}
+
 void runDoorTwoSidedButtonSmokeChecks()
 {
+	fixedInsetControls();
 	independentEndpointControls();
 	deterministicTransportControls();
 	placementBoundaryPreservesLegacyPolicy();

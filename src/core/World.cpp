@@ -4760,9 +4760,10 @@ namespace core
 	World::CreateObjectResult World::_createBulkheadDoorButton(shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index)
 	{
 		invalidateSimulationSnapshot();
-		uint32_t buttonX = side == CORE_SIDE_LEFT ? sector->getCellX1() : sector->getCellX0();
-
-		auto obj = createPhysicalControl("BulkheadDoor button", sector->getLayerIndex(), buttonX, y, CORE_SIDE_MIDDLE, 0);
+		uint32_t thresholdX = side == CORE_SIDE_LEFT ? sector->getCellX1() + 1 : sector->getCellX0();
+		auto demand = insetControlDemand(sector, physicalControl::OwnerType::BulkheadDoor,
+			{ sector->getLayerIndex(), thresholdX, y, 2, 1 }, y, side);
+		auto obj = createPhysicalControl("BulkheadDoor button", sector->getLayerIndex(), y, demand, 0);
 
 		if (index)
 		{
@@ -4775,13 +4776,9 @@ namespace core
 	World::CreateObjectResult World::_createForceBridgeButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index)
 	{
 		invalidateSimulationSnapshot();
-		string caller = format("_createForceBridgeButton(<sector>, {}, {}, {}, {}, {}, <index>)", x, y, cellsWide, side, flags);
-		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
-
-		// Check position of button cell
-		validateCellIsInSector(caller, buttonX, y, sector);
-
-		auto obj = createPhysicalControl("ForceBridge button", sector->getLayerIndex(), buttonX, y, side, flags);
+		auto demand = insetControlDemand(sector, physicalControl::OwnerType::ForceBridge,
+			{ sector->getLayerIndex(), x, y, cellsWide, 1 }, y, side);
+		auto obj = createPhysicalControl("ForceBridge button", sector->getLayerIndex(), y, demand, flags);
 
 		if (index)
 		{
@@ -6349,7 +6346,13 @@ namespace core
 				SectorObjectType::BulkheadDoor, left.sectorIndex);
 			validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
 				SectorObjectType::BulkheadDoor, right.sectorIndex);
-			validatePhysicalControlBoundary(layerIndex, y, side == CORE_SIDE_LEFT ? x : x + 1);
+			vector<physicalControl::Demand> demands;
+			for (int controlSide = 0; controlSide < CORE_NUM_SIDES; ++controlSide)
+				if (options.controls[controlSide])
+					demands.push_back(insetControlDemand(mSectors[controlSide == CORE_SIDE_LEFT ? left.sectorIndex : right.sectorIndex],
+						physicalControl::OwnerType::BulkheadDoor, { layerIndex, thresholdX, y, 2, 1 }, y, controlSide));
+			validatePhysicalControlBoundary(layerIndex, y, thresholdX);
+			validatePhysicalControlAdditions(demands, thresholdX);
 		}
 		catch (Exception const& error) { return reject(error.getMessage()); }
 		catch (exception const& error) { return reject(error.what()); }
@@ -7044,6 +7047,18 @@ namespace core
 			return reject("The Force Bridge requires Ground or a Walkway on its left");
 		if (!supported(layer->getCellDefinition(x + options.width, y)))
 			return reject("The Force Bridge requires Ground or a Walkway on its right");
+		try
+		{
+			validateSectorForceBridgeOptions("World::canAddSectorForceBridge", options);
+			vector<physicalControl::Demand> demands;
+			for (uint32_t i = 0; i < options.controlCount; ++i)
+				demands.push_back(insetControlDemand(room, physicalControl::OwnerType::ForceBridge,
+					{ room->getLayerIndex(), x, y, options.width, 1 }, y,
+					i == 0 ? options.fromSide : 1 - options.fromSide));
+			validatePhysicalControlAdditions(demands);
+		}
+		catch (Exception const& error) { return reject(error.getMessage()); }
+		catch (exception const& error) { return reject(error.what()); }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -7057,7 +7072,6 @@ namespace core
 			throw WorldException(this, format("{} - {}", caller, diagnostic));
 		beginStructuralEdit("addSectorForceBridge");
 		ASSERT_SIDE_OK(options.fromSide);
-		validateSectorForceBridgeOptions(caller, options);
 
 		auto sector = _getSector(sectorIndex);
 		auto layerIndex = sector->getLayerIndex();

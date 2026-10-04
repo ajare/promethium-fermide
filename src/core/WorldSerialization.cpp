@@ -1261,8 +1261,12 @@ namespace core
 					if (!serializer.hasField(field)) continue;
 					serializer.beginArray(field);
 					while (serializer.nextArrayItem())
-						record.controlPermissionRequirements[controlSide].push_back(
-							serializer.readUint32(""));
+					{
+						auto permission = serializer.readUint64("");
+						if (permission == 0 || permission > std::numeric_limits<uint32_t>::max())
+							throw SerializationException("Invalid control Access permission ID");
+						record.controlPermissionRequirements[controlSide].push_back(static_cast<uint32_t>(permission));
+					}
 					serializer.endArray();
 				}
 			break;
@@ -1273,8 +1277,8 @@ namespace core
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("width");
 			record.i = readSide("fromSide"); record.p = serializer.readBool("extensible");
 			record.q = serializer.readBool("startExtended"); record.e = serializer.readUint32("controlCount");
-			readControlRequirement(0, "leftControlPermissionRequirement");
-			readControlRequirement(1, "rightControlPermissionRequirement"); break;
+			readControlRequirement(0, "leftControlPermissionRequirement", true);
+			readControlRequirement(1, "rightControlPermissionRequirement", true); break;
 		case ConstructionType::SectorLadder:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = readRenamedUint32("levelsHigh", "decksHigh");

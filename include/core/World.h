@@ -1354,7 +1354,11 @@ namespace core
 		physicalControl::Demand transportControlDemand(std::shared_ptr<const Sector> sector,
 			physicalControl::OwnerType type, physicalControl::Geometry geometry,
 			uint32_t x, uint32_t y, uint32_t width) const;
-		void validatePhysicalControlAdditions(std::vector<physicalControl::Demand> const& demands) const;
+		physicalControl::Demand insetControlDemand(std::shared_ptr<const Sector> sector,
+			physicalControl::OwnerType type, physicalControl::Geometry geometry,
+			uint32_t y, int side) const;
+		void validatePhysicalControlAdditions(std::vector<physicalControl::Demand> const& demands,
+			uint32_t blockedX = ~0u) const;
 		physicalControl::Demand doorControlDemand(std::shared_ptr<const Sector> sector,
 			uint32_t x, uint32_t y, uint32_t width, uint32_t role = 0) const;
 		physicalControl::Demand validPhysicalControlDemand(physicalControl::Demand demand,
