@@ -3284,7 +3284,7 @@ namespace core
 			raw->mPose = saved.pose;
 			if (saved.occupiedUsablePoint)
 			{
-				if (furnitureMarkerAction(saved.occupiedUsablePoint) == UsablePointAction::Sit)
+				if (furnitureMarkerAction(saved.occupiedUsablePoint))
 					raw->mOccupiedUsablePoint = saved.occupiedUsablePoint;
 				else raw->mPose = Pose::Standing;
 			}

@@ -730,6 +730,10 @@ namespace core
 
 		Pose getPose() const { return mPose; }
 		float getPoseHeightScale() const { return mPose == Pose::Sitting ? 0.6f : 1.0f; }
+		// Keep routing/physics at the central point; align the body at Bed x + 0.75.
+		float getPoseRenderXOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? -0.25f : 0.f; }
+		// Lift the body onto the mattress without changing the supporting Floor.
+		float getPoseRenderYOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? 0.25f : 0.f; }
 
 		float getHeight() const;
 

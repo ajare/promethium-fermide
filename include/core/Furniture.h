@@ -16,7 +16,7 @@ namespace core
 		int x{ 0 }, y{ 0 };
 		std::string imageSet, image;
 	};
-	enum class UsablePointAction { Sit };
+	enum class UsablePointAction { Sit, Lying };
 
 	struct FurnitureUsablePoint
 	{

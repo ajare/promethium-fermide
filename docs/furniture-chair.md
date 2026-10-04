@@ -171,13 +171,17 @@ for tall artwork. Point order and display labels are not identities. The editor'
 snap toggle rounds only the instance x origin, leaving all point offsets rigid.
 It never rounds or permits fractional y.
 
-A usable point may specify `action: Sit`. Core simulation sets an Agent's runtime
-Pose to Sitting when it physically arrives at that furniture-owned Marker as its
+A usable point may specify `action: Sit` or `action: Lying`. Core simulation sets an Agent's runtime
+Pose to Sitting or Lying respectively when it physically arrives at that furniture-owned Marker as its
 Path destination; intermediate traversal never fires the action. Omission means
 no action, and unknown action values fail catalogue loading. Starting another
 Path restores Standing. Actions require no Lua changes and are read from the
 catalogue rather than persisted in the World; existing catalogues remain unchanged.
-Sitting also claims the usable point (#448): first arrival wins. Other Agents
+Both actions also claim the usable point (#448): first arrival wins.
+The bundled Bed spans two cells and has one central usable point at `x: 1`
+with `action: Lying`; its artwork and Lying pose both have the head on the right.
+An Agent occupying the Bed renders at Bed x + 0.75 and 0.25 World units above its supporting Floor;
+this mattress offset does not change its physical bounds or routing position. Other Agents
 cannot route to an Occupied Marker, and existing Paths targeting it are
 hard-invalidated into Route planning and ordinary Route loss, regardless of
 Route persistence. Occupancy does not block intermediate traversal (subject to
@@ -186,7 +190,7 @@ Reset, or deleting the seated Agent releases the claim; deactivation and
 pause/resume retain it. Claims are runtime-only: YAML and binary reloads start
 with every usable point free.
 Moving Furniture (including a Local-depth change) or deleting it while paused
-restores its seated Agents to Standing and releases their claims (#449), without
+restores its seated or lying Agents to Standing and releases their claims (#449), without
 moving the Agents from their physical positions. Unaffected sitters retain their
 Pose and claims through structural replay; rename-only and rejected edits do
 not release seats. Occupancy itself never refuses a Furniture edit.

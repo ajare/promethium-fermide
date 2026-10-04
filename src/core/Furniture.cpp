@@ -73,9 +73,10 @@ namespace core
 						throw SerializationException("Invalid Furniture usable point key, label or floor-height offset");
 					if (point["action"])
 					{
-						if (!point["action"].IsScalar() || point["action"].as<std::string>() != "Sit")
-							throw SerializationException("Unknown Furniture usable-point action for " + d.key + ":" + p.key);
-						p.action = UsablePointAction::Sit;
+						auto const action = point["action"].IsScalar() ? point["action"].as<std::string>() : "";
+						if (action == "Sit") p.action = UsablePointAction::Sit;
+						else if (action == "Lying") p.action = UsablePointAction::Lying;
+						else throw SerializationException("Unknown Furniture usable-point action for " + d.key + ":" + p.key);
 					}
 					d.usablePoints.push_back(std::move(p));
 				}

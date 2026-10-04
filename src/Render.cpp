@@ -1605,6 +1605,10 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	core::Vector2 pos0, pos1;
 
 	bounds.getCurrentShape(pos0, pos1);
+	pos0.x += agent->getPoseRenderXOffset();
+	pos1.x += agent->getPoseRenderXOffset();
+	pos0.y += agent->getPoseRenderYOffset();
+	pos1.y += agent->getPoseRenderYOffset();
 
 	transformPosition(pos0);
 	transformPosition(pos1);

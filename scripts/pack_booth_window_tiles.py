@@ -5,8 +5,8 @@ from PIL import Image, ImageDraw
 
 path = Path(__file__).resolve().parents[1] / "resources/textures/objects.png"
 image = Image.open(path).convert("RGBA")
-if image.size != (320, 640):
-    raise ValueError("Expected the bundled 320x640 ObjectAtlas")
+if image.width != 320 or image.height < 640:
+    raise ValueError("Expected the bundled ObjectAtlas with at least four rows")
 draw = ImageDraw.Draw(image)
 for y, closed in ((560, False), (496, True)):
     draw.rectangle((262, y, 313, y + 47), fill=(0, 0, 0, 0))

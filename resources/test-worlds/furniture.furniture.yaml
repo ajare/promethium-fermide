@@ -16,6 +16,7 @@ furnitureCatalogue:
       label: Seat
       x: 0.5
       blocksPathing: false
+      action: Sit
     vertices:
     - key: approachLeft
       x: 0
@@ -69,10 +70,12 @@ furnitureCatalogue:
       label: Left seat
       x: 0.5
       blocksPathing: false
+      action: Sit
     - key: right
       label: Right seat
       x: 1.5
       blocksPathing: false
+      action: Sit
     vertices:
     - key: left
       x: 0
@@ -115,6 +118,30 @@ furnitureCatalogue:
       depthOffset: 1
     - from: backRight
       to: right
+  - key: bed
+    label: Bed
+    sideRoutes: true
+    tiles:
+    - {x: 0, y: 0, imageSet: ObjectAtlas, image: bed-left}
+    - {x: 1, y: 0, imageSet: ObjectAtlas, image: bed-right}
+    usablePoints:
+    - {key: middle, label: Middle, x: 1, blocksPathing: false, action: Lying}
+    vertices:
+    - {key: left, x: 0, external: true}
+    - {key: right, x: 2, external: true}
+    - {key: frontLeft, x: 0.125}
+    - {key: frontRight, x: 1.875}
+    - {key: backLeft, x: 0.125}
+    - {key: backRight, x: 1.875}
+    - {key: middle, x: 1, usablePoint: middle}
+    edges:
+    - {from: left, to: frontLeft}
+    - {from: frontLeft, to: middle, depthOffset: 0}
+    - {from: middle, to: frontRight, depthOffset: 0}
+    - {from: frontRight, to: right}
+    - {from: left, to: backLeft}
+    - {from: backLeft, to: backRight, depthOffset: 1}
+    - {from: backRight, to: right}
   - key: desk
     label: Desk
     sideRoutes: true

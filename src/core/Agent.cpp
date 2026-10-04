@@ -1445,10 +1445,11 @@ namespace core
 		if (!destination || destination->getSector().get() != getSector()
 			|| getGlobalPosition().distanceTo(destination->getPosition()) > 0.001f) return;
 		auto marker = std::dynamic_pointer_cast<Marker>(destination->getObject());
-		if (marker && mWorld->furnitureMarkerAction(marker->getId()) == UsablePointAction::Sit)
+		auto const action = marker ? mWorld->furnitureMarkerAction(marker->getId()) : std::nullopt;
+		if (action)
 		{
 			if (mWorld->claimUsablePoint(mWorld->getAgentId(this), marker->getId()))
-				mPose = Pose::Sitting;
+				mPose = *action == UsablePointAction::Lying ? Pose::Lying : Pose::Sitting;
 			else mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 		}
 	}

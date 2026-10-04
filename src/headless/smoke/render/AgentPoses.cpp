@@ -9,6 +9,70 @@
 extern UISettings gUISettings;
 namespace
 {
+	void bedRenderOffset(smoke::Context const& context)
+	{
+		using smoke::require;
+		ImGui::GetIO().DisplaySize = {800, 600};
+		ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build();
+		ImGui::NewFrame();
+		gUISettings.worldViewportWidth = 800; gUISettings.worldViewportHeight = 600;
+		gUISettings.worldViewportX = 0; gUISettings.worldViewportY = 0;
+		gUISettings.xOffset = 0; gUISettings.yOffset = 0;
+		gUISettings.renderAgentDebug = false;
+		core::World world("Bed offset", 8, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+		world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(
+			context.fixture("resources/test-worlds/furniture.furniture.yaml")));
+		world.placeFurniture(room, "bed", 3, 0, "Bed");
+		world.addSectorMarker(room, 0, 6.5f, "Exit"); world.finishBuild();
+		auto id = world.createAgent("Sleeper", room, 0, 0.5f);
+		require(world.moveAgentToMarker(id, world.furniture()[0].destinations[0].marker).accepted(), "Bed move refused");
+		world.advanceTicks(1800);
+		auto* sleeper = world.lookupAgent(id).entity;
+		require(sleeper->getPose() == core::Pose::Lying && sleeper->getPoseRenderYOffset() == 0.25f
+			&& sleeper->getGlobalPosition().x + sleeper->getPoseRenderXOffset() == 3.75f,
+			"Occupied Bed did not set mattress offset");
+		auto position = sleeper->getGlobalPosition();
+		auto referenceId = world.createAgent("Floor reference", room, 0, 4.f);
+		auto* reference = world.lookupAgent(referenceId).entity;
+		core::AgentPoseTestAccess::set(*reference, core::Pose::Lying);
+		require(reference->getGlobalPosition() == position && reference->getPoseRenderYOffset() == 0.f
+			&& reference->getPoseRenderXOffset() == 0.f,
+			"Bed offset changed physical position or free Lying pose");
+		for (bool sprite : {false, true})
+		{
+			clearObjectTileset();
+			if (sprite)
+			{
+				ObjectTileset tiles; tiles.width = 64; tiles.height = 160;
+				tiles.sprites.emplace("agent", ObjectSprite{{0, 0, 64, 160}, true});
+				setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+			}
+			for (float zoom : {1.f, 2.f})
+			{
+				gUISettings.worldZoom = zoom;
+				WorldDrawList floor(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
+				WorldDrawList bed(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
+				renderAgent(reference, &floor); renderAgent(sleeper, &bed);
+				require(!floor.commands().empty() && floor.commands().size() == bed.commands().size(), "Bed offset changed body geometry");
+				for (size_t i = 0; i < floor.commands().size(); ++i)
+				{
+					auto const& a = std::get<WorldDrawList::Triangle>(floor.commands()[i]);
+					auto const& b = std::get<WorldDrawList::Triangle>(bed.commands()[i]);
+					for (int v = 0; v < 3; ++v)
+						require(std::abs(a.positions[v].x - b.positions[v].x - 0.25f * CORE_CELL_WIDTH_PIXELS * zoom) < 0.01f
+							&& std::abs(a.positions[v].y - b.positions[v].y - 0.25f * CORE_LEVEL_HEIGHT_PIXELS * zoom) < 0.01f,
+							"Bed body must render at Bed x + 0.75 and Floor y + 0.25 in sprite and glyph rendering");
+				}
+			}
+		}
+		require(world.moveAgentToMarker(id, world.getMarkerIds().back()).accepted(), "Bed departure refused");
+		world.advanceTicks(1800);
+		require(sleeper->getPose() == core::Pose::Standing && sleeper->getPoseRenderYOffset() == 0.f
+			&& sleeper->getPoseRenderXOffset() == 0.f, "Bed departure retained offset");
+		clearObjectTileset(); ImGui::EndFrame();
+	}
+
 	void agentPoses(smoke::Context const&)
 	{
 		using smoke::require;
@@ -107,5 +171,8 @@ namespace
 namespace render_smoke
 {
 	void registerAgentPoses(std::vector<smoke::Check>& checks)
-	{ checks.push_back({"agentPoses", isolated<agentPoses>}); }
+	{
+		checks.push_back({"agentPoses", isolated<agentPoses>});
+		checks.push_back({"furniture/bedRenderOffset", isolated<bedRenderOffset>});
+	}
 }

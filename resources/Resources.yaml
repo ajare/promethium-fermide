@@ -63,6 +63,8 @@ Resources:
               - { name: "sofa-right", x: "64", y: "480", width: "64", height: "160" }
               - { name: "desk-left", x: "128", y: "480", width: "64", height: "160" }
               - { name: "desk-right", x: "192", y: "480", width: "64", height: "160" }
+              - { name: "bed-left", x: "0", y: "640", width: "64", height: "160" }
+              - { name: "bed-right", x: "64", y: "640", width: "64", height: "160" }
               - { name: "platform-lift", x: "192", y: "310", width: "64", height: "10" }
               - { name: "shuttle-car-left", x: "0", y: "320", width: "64", height: "160" }
               - { name: "shuttle-car-middle", x: "64", y: "320", width: "64", height: "160" }

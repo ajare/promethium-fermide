@@ -28,9 +28,15 @@ namespace
 		auto const& points = catalogue->definition("chair")->usablePoints;
 		require(points[0].action == core::UsablePointAction::Sit && !points[1].action,
 			"Sit or omitted usable-point action parsed incorrectly");
+		auto bundled = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/furniture.furniture.yaml"));
+		auto bed = bundled->definition("bed");
+		require(bed && bed->maxX - bed->minX == 2 && bed->maxY - bed->minY == 1
+			&& bed->usablePoints.size() == 1 && bed->usablePoints[0].x == 1.f
+			&& bed->usablePoints[0].action == core::UsablePointAction::Lying,
+			"Bed must span two cells with one central Lying usable point");
 		auto legacy = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
 		require(!legacy->definition("chair")->usablePoints[0].action, "Legacy chair gained an action");
-		for (auto value : {"Stand", "sit", "''", "null", "[]", "{}"})
+		for (auto value : {"Stand", "sit", "lying", "Lie", "''", "null", "[]", "{}"})
 		{
 			auto yaml = YAML::LoadFile(source.string());
 			yaml["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["action"] = YAML::Load(value);

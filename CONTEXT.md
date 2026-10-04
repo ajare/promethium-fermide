@@ -150,11 +150,11 @@ The condition in which an Agent's selected destination has no valid Path, either
 _Avoid_: Replan, which recalculates a Path to the same destination
 
 **Usable-point action**:
-The action an Agent performs automatically when it arrives at a Furniture usable point as its Path destination, authored per usable point in the Furniture definition. Sit is the only action so far; a usable point without an authored action performs none.
+The action an Agent performs automatically when it arrives at a Furniture usable point as its Path destination, authored per usable point in the Furniture definition. Sit and Lying are the available actions; a usable point without an authored action performs none.
 _Avoid_: Agent behaviour, which directs destination choice rather than arrival effects
 
 **Occupied**:
-The runtime state of a usable point claimed by a seated Agent. An Occupied usable point is an invalid Path destination for every other Agent until the claim is released, but remains usable as an intermediate waypoint.
+The runtime state of a usable point claimed by a seated or lying Agent. An Occupied usable point is an invalid Path destination for every other Agent until the claim is released, but remains usable as an intermediate waypoint.
 _Avoid_: Occupant, which describes an Agent inside a shared resource; Reservation, which is an exclusive traversal permission
 
 **Skippable path vertex**:

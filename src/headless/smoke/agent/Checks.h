@@ -26,6 +26,7 @@ namespace agent_smoke
 	void registerActivationEditor(std::vector<smoke::Check>& checks);
 	void registerGroupClipboardEditor(std::vector<smoke::Check>& checks);
 	void registerColourEditor(std::vector<smoke::Check>& checks);
+	void registerPoseEditor(std::vector<smoke::Check>& checks);
 	void registerWalkSpeedEditor(std::vector<smoke::Check>& checks);
 	void registerHeightEditor(std::vector<smoke::Check>& checks);
 }

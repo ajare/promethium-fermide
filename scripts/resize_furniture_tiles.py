@@ -12,8 +12,8 @@ from PIL import Image
 
 def resize_furniture(path):
     atlas = Image.open(path).convert("RGBA")
-    if atlas.size != (320, 640):
-        raise ValueError("Expected the bundled 320x640 ObjectAtlas")
+    if atlas.width != 320 or atlas.height < 640:
+        raise ValueError("Expected the bundled ObjectAtlas with at least four rows")
     # Resize joined sofa/desk tiles together to preserve the centre seam.
     for name, box, size in (
         ("chair", (256, 160, 320, 320), (21, 44)),

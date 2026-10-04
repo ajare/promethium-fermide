@@ -64,6 +64,96 @@ namespace
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/actions", actions });
+	checks.push_back({ "furniture/bedLyingLifecycle", [](smoke::Context const& context)
+	{
+		using smoke::require;
+		auto source = context.fixture("resources/test-worlds/furniture.furniture.yaml");
+		for (int scenario = 0; scenario < 3; ++scenario)
+		{
+			core::World world("Bed arrival", 16, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 16, 1);
+			world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(source));
+			auto bed = world.placeFurniture(room, "bed", 3, 0, "Bed");
+			auto otherBed = world.placeFurniture(room, "bed", 10, 0, "Other bed");
+			require(bed && otherBed, "Bed placement failed");
+			world.addSectorMarker(room, 0, 8.5f, "Exit");
+			world.finishBuild();
+			auto middle = world.furniture()[0].destinations[0].marker;
+			auto exit = world.getMarkerIds().back();
+			auto id = world.createAgent("Sleeper", room, 0, scenario == 1 ? 8.5f : 0.5f);
+			auto* agent = world.lookupAgent(id).entity;
+			require(world.moveAgentToMarker(id, scenario == 2 ? exit : middle).accepted(), "Bed move refused");
+			require(agent->getPose() == core::Pose::Standing, "Lying fired before arrival");
+			for (int tick = 0; tick < 1800; ++tick)
+			{
+				world.advanceTicks(1);
+				if (agent->getPose() == core::Pose::Lying)
+					require(scenario != 2 && agent->getGlobalPosition().x == 4.f, "Lying fired away from destination");
+			}
+			if (scenario == 2)
+			{
+				require(agent->getState() == core::Agent::State::Idle && agent->getGlobalPosition().x == 8.5f
+					&& agent->getPose() == core::Pose::Standing && !world.usablePointOccupant(middle),
+					"Pass-through triggered Bed action");
+				continue;
+			}
+			require(agent->getPose() == core::Pose::Lying && world.usablePointOccupant(middle) == id
+				&& world.getSimulationSnapshot().agents[0].pose == core::Pose::Lying, "Bed arrival did not lie down and claim point");
+			auto other = world.createAgent("Other", room, 0, 7.5f);
+			world.moveAgentToMarker(other, middle);
+			world.advanceTicks(1800);
+			require(world.usablePointOccupant(middle) == id
+				&& world.lookupAgent(other).entity->getPose() == core::Pose::Standing
+				&& !world.lookupAgent(other).entity->getPath(), "Occupied Bed allowed another arrival");
+			world.pauseSimulation();
+			require(world.editFurniture(otherBed, 11, 0, "Moved"), "Unrelated Bed edit refused");
+			agent = world.lookupAgent(id).entity;
+			require(agent->getPose() == core::Pose::Lying && world.usablePointOccupant(middle) == id,
+				"Structural replay lost unaffected Lying pose or claim");
+			std::filesystem::copy_file(source, context.temporaryRoot() / "furniture.furniture.yaml",
+				std::filesystem::copy_options::overwrite_existing);
+			for (auto suffix : {".world.yaml", ".world"})
+			{
+				auto file = context.temporaryRoot() / (std::string("bed") + suffix);
+				world.saveTo(file.string());
+				auto loaded = core::loadWorldDocument(file);
+				require(loaded->lookupAgent(id).entity->getPose() == core::Pose::Standing
+					&& !loaded->usablePointOccupant(middle), "Bed Pose or occupancy survived reload");
+			}
+			if (scenario == 0)
+			{
+				require(world.resumeSimulation(), "Bed resume refused");
+				require(world.moveAgentToMarker(id, exit).accepted(), "Bed departure refused");
+				world.advanceTicks(1800);
+				require(world.lookupAgent(id).entity->getPose() == core::Pose::Standing && !world.usablePointOccupant(middle),
+					"Bed departure did not stand and release claim");
+			}
+			else
+			{
+				auto position = agent->getGlobalPosition();
+				require(world.editFurniture(bed, 4, 0, "Moved bed"), "Occupied Bed move refused");
+				agent = world.lookupAgent(id).entity;
+				require(agent->getPose() == core::Pose::Standing && agent->getGlobalPosition() == position
+					&& !world.usablePointOccupant(middle), "Bed move did not stand in place and release claim");
+			}
+		}
+	} });
+	checks.push_back({ "furniture/authoredChairArrival", [](smoke::Context const& context)
+	{
+		using smoke::require;
+		auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/furniture-test-1.world.yaml"));
+		auto* agent = world->lookupAgent(core::AgentId{1}).entity;
+		require(agent != nullptr, "Chair arrival Agent missing");
+		require(world->resumeSimulation(), "Chair arrival simulation resume refused");
+		require(world->moveAgentToMarker(core::AgentId{1}, world->furniture()[0].destinations[0].marker).accepted(),
+			"Chair destination move refused");
+		world->advanceTicks(1800);
+		require(agent->getState() == core::Agent::State::Idle, "Agent did not arrive at chair");
+		auto const& chair = world->furniture()[0];
+		auto const chairX = world->getSector(chair.sector)->getPosition().x + chair.x + 0.5f;
+		require(agent->getGlobalPosition().x == chairX, "Agent did not reach chair seat: x=" + std::to_string(agent->getGlobalPosition().x));
+		require(agent->getPose() == core::Pose::Sitting, "Agent arrived at chair but Pose is not Sitting");
+	} });
 	checks.push_back({ "furniture/seatedEdits", [](smoke::Context const& context)
 	{
 		using smoke::require;

@@ -30,6 +30,7 @@
 #include "DocumentEdit.h"
 #include "DoorPanel.h"
 #include "AgentGroupsPanel.h"
+#include "AgentPosePanel.h"
 #include "PermissionsPanel.h"
 #include "AgentGroupAssignmentPanel.h"
 #include "AgentTagAssignmentPanel.h"
@@ -7573,6 +7574,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		state = "Inactive (not simulated)";
 	}
 	ImGui::Text("State: %s", state);
+
+	renderAgentPose(*gSelectedAgent);
 
 	auto const& path = gSelectedAgent->getPath();
 	if (path)
