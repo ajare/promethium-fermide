@@ -4,6 +4,7 @@
 #include "ObjectTileset.h"
 #include "UISettings.h"
 #include "core/World.h"
+#include "core/Graph.h"
 #include <cmath>
 #include "../support/DumbwaiterFixture.h"
 
@@ -102,6 +103,50 @@ namespace
 						&& here == (layer == 0 && ticks == 216 ? 2u : 0u) && elsewhere == here,
 						"Buttons did not show both busy until arrival fully opened");
 				}
+			}
+		}
+		for (unsigned edit = 0; edit < 4; ++edit)
+		{
+			auto world = dumbwaiter_fixture::make(0, true, 2); world->addLayer();
+			auto id = world->addDumbwaiter(2, 0, 2, {1, 2}); world->finishBuild();
+			auto authored = dumbwaiter_fixture::yaml(*world);
+			world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(80), "Render reconciliation fixture failed"); world->pauseSimulation();
+			if (edit == 0) world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
+			if (edit == 1) world->applyDeleteLayer(world->planDeleteLayer(0));
+			if (edit == 2) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 2, 2));
+			if (edit == 3) world->applyDeleteLevel(world->planDeleteLevel(0));
+			for (bool restored : {false, true})
+			{
+				if (restored)
+				{
+					auto reader = core::YamlSerializer::fromString(authored); reader->deserialize(); core::SerializationWorkData work;
+					require(world->deserialize(*reader, work), "Render restoration refused"); world->pauseSimulation();
+				}
+				auto unit = world->lookupDumbwaiter(id);
+				for (uint32_t layer = 0; layer < world->getLayerCount(); ++layer)
+				{
+					gUISettings.visibleLayer = layer; WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+					unsigned car = 0, buttons = 0, busy = 0;
+					for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+					{
+						if (triangle->colour == IM_COL32(180, 190, 205, 255))
+						{
+							++car; require(bool(unit), "Deleted car remains in production draw commands");
+							for (auto p : triangle->positions) require(p.y >= 800 - 1.55f * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= 800 - 1.18f * CORE_LEVEL_HEIGHT_PIXELS + 0.001f, "Reconciled car retained in-flight position");
+							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * 64
+								&& triangle->clip.maximum.x < 2.9f * 64, "Restored car escaped aperture clip");
+						}
+						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255)) ++buttons;
+						if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
+					}
+					bool visible = unit && (layer == unit->getLayerIndex() || layer + 1 == unit->getLayerIndex());
+					require(car == (visible ? 2u : 0u) && buttons == (unit && layer + 1 == unit->getLayerIndex() ? 4u : 0u)
+						&& busy == 0, "Reconciled/restored presentation duplicated components or retained busy buttons");
+				}
+				if (unit) for (auto const& vertex : world->getGraph()->getVertices())
+					require(vertex->getSector() != unit, "Restored shaft became traversable");
+				require(world->getSimulationSnapshot().traversalResources.empty(), "Reconciliation introduced passenger resources");
 			}
 		}
 		{

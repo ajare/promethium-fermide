@@ -25,6 +25,51 @@ namespace persistence
 			};
 			return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
 		};
+		for (unsigned edit = 0; edit < 7; ++edit)
+		{
+			auto source = dumbwaiter_fixture::make(0, true, 2); source->addLayer();
+			auto deviceId = source->addDumbwaiter(2, 0, 2, {1, 0.37f}); source->finishBuild();
+			auto lowerPermission = source->addAccessPermission("Lower"), upperPermission = source->addAccessPermission("Upper");
+			auto unit = source->lookupDumbwaiter(deviceId);
+			source->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {lowerPermission});
+			source->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {upperPermission});
+			source->pressDumbwaiterLanding(deviceId, 0); source->resumeSimulation();
+			require(source->advanceTicks(60), "Edited document cycle fixture failed"); source->pauseSimulation();
+			if (edit == 0) source->applyWalkwayEdit(source->planRemoveSectorWalkway(0, 0));
+			if (edit == 1) source->applyLocationEdit(source->planRemoveLocation(0));
+			if (edit == 2) source->applyLocationEdit(source->planResizeLocation(0, 2, 0, 2, 2));
+			if (edit == 3) source->applyDeleteLayer(source->planDeleteLayer(0));
+			if (edit == 4) source->applyDeleteLayer(source->planDeleteLayer(2));
+			if (edit == 5) source->applyDeleteLevel(source->planDeleteLevel(0));
+			if (edit == 6) source->applyDeleteLevel(source->planDeleteLevel(3));
+			bool survives = edit == 2 || edit == 3 || edit == 6;
+			for (bool binary : {false, true})
+			{
+				auto data = write(*source, binary);
+				std::unique_ptr<core::Serializer> input = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				input->deserialize(); core::SerializationWorkData work; core::World loaded("Edited", 1, 1);
+				require(loaded.deserialize(*input, work), "Edited document refused"); loaded.pauseSimulation();
+				unit = loaded.lookupDumbwaiter(deviceId);
+				require(bool(unit) == survives && loaded.getSimulationSnapshot().interactionPoints.size() == (survives ? 2u : 0u),
+					"Edited document persisted orphan children or control relationships");
+				if (!unit) continue;
+				require(unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.37f && !unit->isBusy()
+					&& unit->getAperture(1)->getProgress() == 1 && unit->getAperture(0)->getProgress() == 0
+					&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{lowerPermission}
+					&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upperPermission},
+					"Edited roundtrip lost coherent authored configuration");
+				auto actor = loaded.createAgent("Restored operator", unit->getStop(1).sector->getIndex(),
+					float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+				loaded.grantAgentAccessPermission(actor, upperPermission);
+				require(bool(loaded.requestDumbwaiterLanding(deviceId, 1, actor)), "Restored Agent landing refused");
+				loaded.resumeSimulation(); require(loaded.advanceTicks(130), "Restored Agent operation failed");
+				require(!unit->isBusy() && unit->getCarPosition().y == 0, "Restored Agent control not operable");
+				auto operation = loaded.pressDumbwaiterLanding(deviceId, 0);
+				require(loaded.advanceTicks(119) && loaded.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded,
+					"Restored user control not operable");
+			}
+		}
 		for (uint32_t initial : {0u, 1u}) for (unsigned ticks : {0u, 12u, 80u, 180u})
 		{
 			auto running = dumbwaiter_fixture::make();

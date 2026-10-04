@@ -1,4 +1,4 @@
-# Dumbwaiters (#375–#378)
+# Dumbwaiters (#375–#379)
 
 A Dumbwaiter is a non-passenger, fixed 1-cell-wide, 2-Level-high Transit. Paint
 **Dumbwaiter** on a shaft Layer behind two supported landing cells at the same x
@@ -43,12 +43,10 @@ surviving Dumbwaiters; pause alone and refused edits do not. Reset/load restore
 authored initial state. Runtime controls do not change documents or history.
 
 Owned apertures have no back-side panel and cannot be independently edited,
-resized, moved, copied, deleted or toggled. Delete the complete unit first when
-changing its landing Location footprints or removing Levels/Layers. Independent
-owned-aperture movement remains refused; use whole-unit movement instead. Unrelated
-objects retain normal editing. Removing required Walkway support is transactionally
-refused. Dependent deletion/reconciliation of surrounding footprints remains
-assigned to #379.
+resized, moved, copied, deleted or toggled. Independent owned-aperture movement
+remains refused; use whole-unit movement instead. Surrounding structural edits
+reconcile the complete dependent unit as described below; unrelated objects retain
+normal editing.
 
 World schema **47** adds one `dumbwaiter` construction record carrying stable
 World-owned `id`, shaft `layer`, lower `y`, `x`, `initialStop` (0/1) and
@@ -125,7 +123,39 @@ on the unit's authored producer; children are derived afresh during replay.
 Undo/redo, Reset, YAML and binary load restore coherent authored placement and
 initial presentation without stale runtime handles. Schema 48 and older remain
 loadable. Whole-unit deletion removes movement records and preserves surviving
-object slots. No dependent footprint deletion or resizing is introduced here.
+object slots.
+
+## Surrounding structural edits (#379)
+
+Public Location and Walkway edit plans expose dependent whole-unit deletion in
+normal editor consequences. Removing either landing Location, cropping its cell,
+or removing its permanent Walkway support removes the shaft, car, both apertures,
+both buttons and outstanding work together. A resize that retains both supported
+landing cells retains the unit. Existing safety refusals (occupied Walkways,
+active connected resources, invalid footprints) still apply before commitment.
+
+Level deletion removes intersecting Sectors and units dependent on removed landing
+Locations; surviving units above the deletion compact down with both adjacent
+Stops. Layer deletion removes units on that Layer and on the Layer immediately
+behind it, and compacts surviving units with their landing Layer. Canonical replay
+keeps whole-unit moves in order with Transit producers. Surrounding reconciliation
+rebuilds previously moved survivors at their final placement, retaining historical
+aperture slots as tombstones where their Location survives. Removing obsolete
+landing support therefore cannot strand a currently supported unit or replay an
+old shaft over a reused site.
+
+Successful reconciliation cancels accepted operations and pending Agent presses,
+with cancellation events observable through `consumeSimulationEvents`. Surviving
+units restore authored timing, initial Stop and derived shutters; removed/restored
+shutter and landing-control handles are invalid and callers must refresh them.
+Rejected edits leave in-flight work untouched. Pause and permission-only changes
+remain non-destructive. Unrelated Agent runtime properties, grants and replay state
+follow the existing structural-edit preservation policy, not Simulation Reset.
+
+Ordinary document undo/redo restores complete authored units, including both
+independent landing requirements. YAML/binary save/reopen and Reset replay the
+edited authored result, never orphan children or in-flight work. No schema bump
+is required: child components remain derived from the unit record.
 
 Headless coverage is in World, Persistence, Editor and Render's BoothWindows
 translation units and Simulation's Dumbwaiters translation unit, using real public

@@ -245,26 +245,158 @@ namespace core
 		return false;
 	}
 
-	bool World::removeDumbwaiter(DumbwaiterId id)
+	std::set<DumbwaiterId> World::locationEditDumbwaiters(LocationEditPlan const& plan) const
 	{
-		auto unit = lookupDumbwaiter(id);
-		if (!unit) return false;
-		if (!mSimulationPaused) throw WorldException(this, "Dumbwaiter deletion requires pauseSimulation()");
-		auto removedIndex = unit->getIndex();
-		std::vector<ConstructionRecord> records;
-		for (auto record : mConstructionRecords)
-		{
-			if ((record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
-				&& record.dumbwaiterId == id)
-			{
-				// Keep front-Location object slots stable after removing owned apertures.
+		std::set<DumbwaiterId> removed;
+		auto location = mSectors[plan.sectorIndex];
+		for (auto const& sector : mSectors)
+			if (auto unit = std::dynamic_pointer_cast<const Dumbwaiter>(sector))
 				for (uint32_t stop = 0; stop < 2; ++stop)
 				{
-					ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-					tombstone.a = mLayers[record.layer - 1]->getCellDefinition(record.b, record.a + stop).sectorIndex;
-					if (tombstone.a > removedIndex) --tombstone.a;
-					records.push_back(std::move(tombstone));
+					if (unit->getStop(stop).sector != location) continue;
+					auto x = unit->getCellX(), y = unit->getCellY() + stop;
+					bool supported = !plan.remove && x >= plan.x && x - plan.x < plan.cellsWide
+						&& y >= plan.y && y - plan.y < plan.levelsHigh;
+					if (supported && y != plan.y)
+					{
+						supported = false;
+						for (auto const& record : mConstructionRecords)
+							if (record.type == ConstructionType::Walkway && record.a == plan.sectorIndex
+								&& plan.x + record.c == x && plan.y + record.b == y) supported = true;
+					}
+					if (!supported) removed.insert(unit->getId());
 				}
+		return removed;
+	}
+
+	std::array<uint32_t, 2> World::dumbwaiterRecordLandings(ConstructionRecord const& record) const
+	{
+		std::array<uint32_t, 2> owners{~0u, ~0u};
+		uint32_t index = 0;
+		// Use authored producer footprints, not the live cells: a moved unit's
+		// earlier apertures still consumed object slots at its previous landings.
+		for (auto const& source : mConstructionRecords)
+		{
+			if (!constructionTypeCreatesSector(source.type)) continue;
+			bool room = source.type == ConstructionType::Room;
+			if (room || source.type == ConstructionType::Corridor || source.type == ConstructionType::Facade)
+			{
+				auto layer = room ? source.a : source.layer;
+				auto y = room ? source.b : source.a;
+				auto x = room ? source.c : source.b;
+				auto width = room ? source.d : source.c;
+				auto height = room ? source.e : source.d;
+				if (layer == record.layer - 1 && record.b >= x && record.b - x < width)
+					for (uint32_t stop = 0; stop < 2; ++stop)
+						if (record.a + stop >= y && record.a + stop - y < height) owners[stop] = index;
+			}
+			++index;
+		}
+		return owners;
+	}
+
+	void World::reconcileDumbwaiterReplay(std::vector<ConstructionRecord>& records,
+		std::vector<uint32_t>& originalToReplay) const
+	{
+		std::map<DumbwaiterId, size_t> lastMove;
+		std::map<DumbwaiterId, ConstructionRecord> authored;
+		std::map<DumbwaiterId, uint32_t> producers;
+		uint32_t producer = 0;
+		for (size_t i = 0; i < records.size(); ++i)
+		{
+			auto const& record = records[i];
+			if (record.type == ConstructionType::Dumbwaiter)
+			{
+				authored.emplace(record.dumbwaiterId, record);
+				producers.emplace(record.dumbwaiterId, producer);
+			}
+			if (record.type == ConstructionType::MoveDumbwaiter) lastMove[record.dumbwaiterId] = i;
+			if (constructionTypeCreatesSector(record.type)) ++producer;
+		}
+		if (lastMove.empty()) return;
+		// Historical placements only consumed aperture slots. Rebuild each moved
+		// survivor at its final placement, after its destination Locations exist.
+		// This lets an edit remove obsolete landing support without invalidating
+		// a unit whose current landings remain supported.
+		std::map<DumbwaiterId, std::vector<std::array<uint32_t, 2>>> historicalOwners;
+		for (auto const& record : mConstructionRecords)
+			if (record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
+				historicalOwners[record.dumbwaiterId].push_back(dumbwaiterRecordLandings(record));
+		std::map<DumbwaiterId, size_t> occurrence;
+		struct Item { ConstructionRecord record; uint32_t producer{~0u}; };
+		std::vector<Item> output;
+		uint32_t oldProducer = 0;
+		for (size_t i = 0; i < records.size(); ++i)
+		{
+			auto record = records[i];
+			auto index = constructionTypeCreatesSector(record.type) ? oldProducer++ : ~0u;
+			if ((record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
+				&& lastMove.contains(record.dumbwaiterId))
+			{
+				auto id = record.dumbwaiterId;
+				auto const& owners = historicalOwners.at(id).at(occurrence[id]++);
+				if (i != lastMove.at(id))
+				{
+					for (auto owner : owners)
+						if (owner < originalToReplay.size() && originalToReplay[owner] != ~0u)
+						{
+							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
+							tombstone.a = originalToReplay[owner]; output.push_back({std::move(tombstone)});
+						}
+					continue;
+				}
+				auto final = authored.at(id);
+				final.layer = record.layer; final.a = record.a; final.b = record.b;
+				output.push_back({std::move(final), producers.at(id)});
+			}
+			else output.push_back({std::move(record), index});
+		}
+		std::vector<uint32_t> remap(producer, ~0u);
+		uint32_t next = 0;
+		for (auto const& item : output) if (item.producer != ~0u) remap[item.producer] = next++;
+		records.clear();
+		for (auto& item : output)
+		{
+			auto& record = item.record;
+			switch (record.type)
+			{
+			case ConstructionType::LightSwitch: case ConstructionType::ForceBridge:
+			case ConstructionType::SectorLadder: case ConstructionType::PlatformLift:
+			case ConstructionType::Walkway: case ConstructionType::Marker:
+			case ConstructionType::RemoveWall: case ConstructionType::RemoveMarker:
+			case ConstructionType::ObjectTombstone:
+				record.a = remap.at(record.a); break;
+			default: break;
+			}
+			records.push_back(std::move(record));
+		}
+		for (auto& index : originalToReplay) if (index != ~0u) index = remap.at(index);
+	}
+
+	void World::removeDumbwaiterRecords(std::vector<ConstructionRecord>& records,
+		std::set<DumbwaiterId> const& removed, std::vector<uint32_t>* mapping) const
+	{
+		std::vector<uint32_t> sectorMap(mSectors.size(), ~0u);
+		uint32_t producer = 0, next = 0;
+		for (auto const& record : records)
+			if (constructionTypeCreatesSector(record.type))
+			{
+				if (record.type != ConstructionType::Dumbwaiter || !removed.contains(record.dumbwaiterId))
+					sectorMap[producer] = next++;
+				++producer;
+			}
+		std::vector<ConstructionRecord> retained;
+		for (auto record : records)
+		{
+			if ((record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
+				&& removed.contains(record.dumbwaiterId))
+			{
+				for (auto owner : dumbwaiterRecordLandings(record))
+					if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
+					{
+						ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
+						tombstone.a = sectorMap[owner]; retained.push_back(std::move(tombstone));
+					}
 				continue;
 			}
 			switch (record.type)
@@ -274,12 +406,24 @@ namespace core
 			case ConstructionType::Walkway: case ConstructionType::Marker:
 			case ConstructionType::RemoveWall: case ConstructionType::RemoveMarker:
 			case ConstructionType::ObjectTombstone:
-				if (record.a > removedIndex) --record.a;
-				break;
+				if (record.a >= sectorMap.size() || sectorMap[record.a] == ~0u) continue;
+				record.a = sectorMap[record.a]; break;
 			default: break;
 			}
-			records.push_back(std::move(record));
+			retained.push_back(std::move(record));
 		}
+		records = std::move(retained);
+		if (mapping) *mapping = std::move(sectorMap);
+	}
+
+	bool World::removeDumbwaiter(DumbwaiterId id)
+	{
+		auto unit = lookupDumbwaiter(id);
+		if (!unit) return false;
+		if (!mSimulationPaused) throw WorldException(this, "Dumbwaiter deletion requires pauseSimulation()");
+		auto removedIndex = unit->getIndex();
+		auto records = mConstructionRecords;
+		removeDumbwaiterRecords(records, {id});
 		// Validate the authored result before mutation, but do not replay the
 		// live World: that would reset unrelated devices and their operations.
 		auto candidate = makeCandidateWorld();

@@ -298,8 +298,101 @@ namespace
 		}
 	}
 
+	void surroundingEdits()
+	{
+		using namespace dumbwaiter_fixture;
+		for (unsigned phaseTicks : {0u, 12u, 80u, 180u})
+		for (unsigned action = 0; action < 12; ++action)
+		{
+			auto world = make(0, action == 0 || action == 3 || action == 4 || action == 9, 2);
+			world->addLayer();
+			auto id = world->addDumbwaiter(2, 0, 2, {1, 2});
+			auto unrelated = world->addRoom("Unaffected", 3, 2, 4, 1, 1);
+			world->finishBuild();
+			auto actor = world->createAgent("Unaffected", unrelated, 0, 0.5f);
+			auto permission = world->addAccessPermission("Runtime grant");
+			world->setAgentRuntimeAccessPermissionGrant(actor, permission, true);
+			world->setAgentIndividualWaitingAversion(actor, 1.4f);
+			auto unit = world->lookupDumbwaiter(id);
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {permission});
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {permission});
+			auto oldButton = unit->getLandingButton(0), oldUpperButton = unit->getLandingButton(1);
+			auto oldShutter = unit->getAperture(0)->getDeviceId();
+			auto operation = world->pressDumbwaiterLanding(id, 0);
+			world->resumeSimulation(); require(world->advanceTicks(phaseTicks), "Structural phase setup failed"); world->pauseSimulation();
+			world->consumeSimulationEvents();
+			auto authored = yaml(*world); auto position = unit->getCarPosition(); auto phase = unit->getPhase();
+			auto invalid = world->planResizeLocation(0, 2, 0, 9, 2);
+			require(!invalid.valid, "Invalid surrounding plan accepted");
+			bool refused = false; try { world->applyLocationEdit(invalid); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(*world) == authored && unit->getCarPosition() == position
+				&& unit->getPhase() == phase && unit->getOperation() == operation
+				&& world->consumeSimulationEvents().empty(), "Rejected surrounding edit mutated/cancelled work");
+			bool survives = action == 4 || action == 7 || action == 8 || action == 9;
+			std::vector<core::SimulationEvent> events;
+			if (action == 0) world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
+			if (action == 1 || action == 2) world->applyLocationEdit(world->planRemoveLocation(action - 1));
+			if (action == 3) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 1, 1));
+			if (action == 4) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 2, 2));
+			if (action == 5) world->applyDeleteLevel(world->planDeleteLevel(0));
+			if (action == 6) world->applyDeleteLayer(world->planDeleteLayer(1));
+			if (action == 7) world->applyDeleteLayer(world->planDeleteLayer(0));
+			if (action == 8) world->applyDeleteLevel(world->planDeleteLevel(3));
+			if (action == 10) world->applyDeleteLevel(world->planDeleteLevel(1));
+			if (action == 11) world->applyDeleteLayer(world->planDeleteLayer(2));
+			if (action == 9)
+			{
+				// Pending Agent work is cancelled even when the unit is idle.
+				world->configureDumbwaiter(id, {0, 2});
+				auto operatorId = world->createAgent("Pending", 0, 0, 0.5f);
+				world->grantAgentAccessPermission(operatorId, permission);
+				auto request = world->requestDumbwaiterLanding(id, 0, operatorId);
+				require(bool(request), "Pending reconciliation fixture refused");
+				world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 2, 2));
+				require(!world->lookupInteractionRequest(request), "Replay retained pending interaction ownership");
+				events = world->consumeSimulationEvents();
+				bool cancelledRequest = false;
+				for (auto const& event : events)
+					if (event.type == core::SimulationEventType::InteractionRequestChanged
+						&& event.interactionRequest.id == request && event.interactionRequest.result == core::InteractionResult::Cancelled) cancelledRequest = true;
+				require(cancelledRequest, "Pending cancellation not observable after replay");
+			}
+			bool cancelled = false;
+			auto committedEvents = world->consumeSimulationEvents();
+			events.insert(events.end(), committedEvents.begin(), committedEvents.end());
+			for (auto const& event : events)
+				if (event.type == core::SimulationEventType::DeviceOperationChanged
+					&& event.deviceOperation.id == operation && event.deviceOperation.state == DeviceOperationState::Cancelled) cancelled = true;
+			require(cancelled && !world->lookupInteractionPoint(oldButton) && !world->lookupInteractionPoint(oldUpperButton)
+				&& !world->lookupBoothWindow(oldShutter), "Reconciliation lost cancellation or reused stale controls");
+			unit = world->lookupDumbwaiter(id);
+			require(bool(unit) == survives && world->isTraversalTopologyValid(), "Wrong dependent unit survival");
+			require(!world->requestInteraction(oldButton, actor), "Stale landing handle still accepts requests");
+			auto restoredActor = world->lookupAgent(actor).entity;
+			require(restoredActor && restoredActor->getIndividualWaitingAversion() == std::optional<float>{1.4f}
+				&& world->getAgentEffectiveAccessGrants(actor) == std::vector<core::AccessPermissionId>{permission},
+				"Structural Dumbwaiter edit lost unrelated runtime grants/Agent");
+			if (unit)
+			{
+				auto initial = action == 9 ? 0u : 1u;
+				require(!unit->isBusy() && unit->getCarPosition().y == float(initial)
+					&& unit->getAperture(initial)->getProgress() == 1 && unit->getAperture(1-initial)->getProgress() == 0
+					&& unit->getNumStops() == 2 && unit->getAperture(0)->getBackLayer() == unit->getAperture(0)->getFrontLayer()+1,
+					"Survivor failed authored reset/adjacency");
+				for (uint32_t stop = 0; stop < 2; ++stop)
+					require(world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop)) == std::vector<core::AccessPermissionId>{permission},
+						"Survivor lost landing permission");
+				require(bool(world->pressDumbwaiterLanding(id, 0)), "Survivor user control refused");
+			}
+			else require(!world->pressDumbwaiterLanding(id, 0) && world->getSimulationSnapshot().interactionPoints.empty(), "Removed unit left live controls");
+			world->resetSimulation(); world->pauseSimulation();
+			require(bool(world->lookupDumbwaiter(id)) == survives, "Canonical replay restored orphan/deleted unit");
+		}
+	}
+
 	void lifecycle(smoke::Context const&)
 	{
+		surroundingEdits();
 		for (unsigned phaseTicks : {12u, 80u, 180u}) for (uint32_t initial : {0u, 1u})
 		{
 			Fixture f(initial); auto operation = f.world->pressDumbwaiterLanding(f.id, 0); f.ticks(phaseTicks);

@@ -12,6 +12,58 @@
 
 namespace
 {
+	void surroundingEditHistory()
+	{
+		using smoke::require;
+		for (unsigned edit = 0; edit < 8; ++edit)
+		{
+			auto world = dumbwaiter_fixture::make(0, edit != 1 && edit != 2, 2); world->addLayer();
+			auto id = world->addDumbwaiter(2, 0, 2, {1, 0.37f}); world->finishBuild();
+			auto lower = world->addAccessPermission("Lower"), upper = world->addAccessPermission("Upper");
+			auto unit = world->lookupDumbwaiter(id);
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {lower});
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {upper});
+			world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "History cycle fixture failed");
+			world->pauseSimulation(); gWorldDocumentHistory.clear();
+			auto button = unit->getLandingButton(0);
+			auto before = captureDocumentSnapshot(world);
+			if (edit == 0) world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
+			if (edit == 1 || edit == 2) world->applyLocationEdit(world->planRemoveLocation(edit - 1));
+			if (edit == 3) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 1, 1));
+			if (edit == 4) world->applyDeleteLayer(world->planDeleteLayer(1));
+			if (edit == 5) world->applyDeleteLevel(world->planDeleteLevel(0));
+			if (edit == 6) world->applyDeleteLayer(world->planDeleteLayer(0));
+			if (edit == 7) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 2, 2));
+			commitDocumentEdit(std::move(before));
+			auto restore = [&](DocumentSnapshot const& snapshot) {
+				auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData work;
+				bool result = world->deserialize(*input, work); world->pauseSimulation(); return result;
+			};
+			require(gWorldDocumentHistory.undoCount() == 1 && !world->lookupInteractionPoint(button), "Dependent edit not undoable/stale handle retained");
+			require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dependent deletion undo failed");
+			unit = world->lookupDumbwaiter(id);
+			require(unit && unit->getLayerIndex() == 2 && unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.37f
+				&& !unit->isBusy() && unit->getAperture(1)->getProgress() == 1 && unit->getAperture(0)->getProgress() == 0
+				&& !world->lookupInteractionPoint(button), "Undo restored stale runtime ownership or incomplete unit");
+			for (uint32_t stop = 0; stop < 2; ++stop)
+				require(world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop)) == std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper},
+					"Dependent deletion undo lost button requirements");
+			auto actor = world->createAgent("Restored", unit->getStop(1).sector->getIndex(),
+				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+			world->grantAgentAccessPermission(actor, upper);
+			require(bool(world->requestDumbwaiterLanding(id, 1, actor)), "Undo-restored Agent control refused");
+			world->resumeSimulation(); require(world->advanceTicks(130) && !unit->isBusy() && unit->getCarPosition().y == 0, "Undo-restored Agent operation failed");
+			world->pauseSimulation();
+			require(bool(world->pressDumbwaiterLanding(id, 0)), "Undo-restored user control refused");
+			require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dependent deletion redo failed");
+			unit = world->lookupDumbwaiter(id);
+			require(bool(unit) == (edit >= 6) && world->getSimulationSnapshot().interactionPoints.size() == (edit >= 6 ? 2u : 0u),
+				"Redo restored orphan apertures/buttons");
+			world->resetSimulation(); world->pauseSimulation();
+			require(bool(world->lookupDumbwaiter(id)) == (edit >= 6), "History canonical replay lost dependency edits");
+		}
+	}
+
 	void dumbwaiterHistory(smoke::Context const&)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -97,6 +149,7 @@ namespace
 		require(!world->lookupDumbwaiter(id) && gWorldDocumentHistory.undoCount() == 4, "Selection whole-unit deletion failed");
 		undo(); require(world->lookupDumbwaiter(id)->getAperture(0)->getDumbwaiterOwner() == id, "Delete undo lost owned children");
 		redo(); require(!world->lookupDumbwaiter(id), "Delete redo failed");
+		surroundingEditHistory();
 	}
 	void dumbwaiterPermissionHistory(smoke::Context const&)
 	{

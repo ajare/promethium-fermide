@@ -2356,12 +2356,13 @@ namespace core
 		}
 		std::vector<SimulationEvent> cancelledDumbwaiters;
 		for (auto const& sector : mSectors)
-			if (auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector); unit && unit->isBusy())
+			if (auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector))
 			{
 				auto previousEventCount = mEvents.size();
 				mSimulationCoordinator.resetDumbwaiter(*unit);
-				if (!preserveBehaviourRuntime && mEvents.size() > previousEventCount)
-					cancelledDumbwaiters.push_back(mEvents.back());
+				if (!preserveBehaviourRuntime)
+					cancelledDumbwaiters.insert(cancelledDumbwaiters.end(),
+						mEvents.begin() + previousEventCount, mEvents.end());
 			}
 		mAgents = {};
 		mAgentIds.clear();
@@ -2394,7 +2395,11 @@ namespace core
 			mPermissionSets = {};
 		}
 		mAuthoredControlRequirements.clear();
+		// Dumbwaiter landing handles are runtime ownership, never replay-order
+		// identities. A rebuild must not let an old button operate a new unit.
+		auto nextPoint = mNextDumbwaiterId > 1 ? mInteractionPoints.nextId() : uint64_t{1};
 		mInteractionPoints = {};
+		mInteractionPoints.restoreNextId(nextPoint);
 		auto const nextInteractionRequest = mInteractionRequests.nextId();
 		mInteractionRequests = {};
 		mInteractionRequests.restoreNextId(nextInteractionRequest);
@@ -2751,7 +2756,8 @@ namespace core
 			if (isLocation(item.record.type) || isBackground(item.record.type)
 				|| isLocationPrerequisite(item.record.type))
 				locations.push_back(std::move(item));
-			else if (createsSector(item.record.type)) transits.push_back(std::move(item));
+			else if (createsSector(item.record.type) || item.record.type == ConstructionType::MoveDumbwaiter)
+				transits.push_back(std::move(item));
 			else other.push_back(std::move(item));
 		}
 		vector<Item> ordered;
@@ -3121,7 +3127,6 @@ namespace core
 	vector<World::ConstructionRecord> World::recordsWithoutLayer(uint32_t layerIndex,
 		LayerDeleteImpact& impact) const
 	{
-		if (hasDumbwaiters()) throw WorldException(this, "Delete Dumbwaiters before deleting Layers; unit reconciliation is not yet supported");
 		impact = {};
 		impact.sectorRemoved.assign(mSectors.size(), false);
 
@@ -3140,7 +3145,7 @@ namespace core
 		{
 			return type == ConstructionType::Ladder || type == ConstructionType::Stairwell
 				|| type == ConstructionType::Staircase || type == ConstructionType::Lift
-				|| type == ConstructionType::Shuttle;
+				|| type == ConstructionType::Shuttle || type == ConstructionType::Dumbwaiter;
 		};
 		auto isSectorReference = [](ConstructionType type)
 		{
@@ -3179,6 +3184,7 @@ namespace core
 			case ConstructionType::Shuttle:
 			case ConstructionType::Airlock:
 			case ConstructionType::Chamber:
+			case ConstructionType::Dumbwaiter:
 			{
 				bool const frontLayerTransit = isTransitRecord(record.type);
 				bool const transit = frontLayerTransit || record.type == ConstructionType::Airlock
@@ -3193,6 +3199,12 @@ namespace core
 				else if (record.type == ConstructionType::Background) ++impact.backgroundsRemoved;
 				else ++impact.locationsRemoved;
 				++producerIndex;
+				break;
+			}
+			case ConstructionType::MoveDumbwaiter:
+			{
+				auto unit = lookupDumbwaiter(record.dumbwaiterId);
+				keep = unit && sectorMap[unit->getIndex()] != ~0u;
 				break;
 			}
 			case ConstructionType::Door:
@@ -3238,7 +3250,18 @@ namespace core
 
 		for (size_t i = 0; i < mConstructionRecords.size(); ++i)
 		{
-			if (!keepRecord[i]) continue;
+			if (!keepRecord[i])
+			{
+				auto const& record = mConstructionRecords[i];
+				if (record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
+					for (auto owner : dumbwaiterRecordLandings(record))
+						if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
+						{
+							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
+							tombstone.a = sectorMap[owner]; records.push_back(std::move(tombstone));
+						}
+				continue;
+			}
 
 			auto record = mConstructionRecords[i];
 			switch (record.type)
@@ -3259,6 +3282,8 @@ namespace core
 			case ConstructionType::Shuttle:
 			case ConstructionType::Airlock:
 			case ConstructionType::Chamber:
+			case ConstructionType::Dumbwaiter:
+			case ConstructionType::MoveDumbwaiter:
 			case ConstructionType::Door:
 				// These records carry the Layer they are authored on, so a deletion in
 				// front of them has to pull that Layer forward with every other one.
@@ -3272,6 +3297,7 @@ namespace core
 			records.push_back(std::move(record));
 		}
 
+		reconcileDumbwaiterReplay(records, sectorMap);
 		return records;
 	}
 
@@ -3297,7 +3323,6 @@ namespace core
 	vector<World::ConstructionRecord> World::recordsWithoutLevel(uint32_t level,
 		vector<bool>& removed, vector<string>& consequences) const
 	{
-		if (hasDumbwaiters()) throw WorldException(this, "Delete Dumbwaiters before deleting Levels; unit reconciliation is not yet supported");
 		removed.assign(mSectors.size(), false);
 		for (auto const& sector : mSectors)
 			if (sector) removed[sector->getIndex()] = sector->getCellY() <= level
@@ -3349,6 +3374,27 @@ namespace core
 		uint32_t producer = 0;
 		for (auto record : mConstructionRecords)
 		{
+			if (record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
+			{
+				auto unit = lookupDumbwaiter(record.dumbwaiterId);
+				if (!unit || removed[unit->getIndex()])
+				{
+					if (record.type == ConstructionType::Dumbwaiter) ++producer;
+					for (auto owner : dumbwaiterRecordLandings(record))
+						if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
+						{
+							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
+							tombstone.a = sectorMap[owner]; records.push_back(std::move(tombstone));
+						}
+					continue;
+				}
+				if (record.type == ConstructionType::MoveDumbwaiter)
+				{
+					if (record.a > level) --record.a;
+					records.push_back(std::move(record));
+					continue;
+				}
+			}
 			if (constructionTypeCreatesSector(record.type))
 			{
 				if (removed[producer++]) continue;
@@ -3378,6 +3424,7 @@ namespace core
 			}
 			records.push_back(std::move(record));
 		}
+		reconcileDumbwaiterReplay(records, sectorMap);
 		return records;
 	}
 
@@ -3489,6 +3536,9 @@ namespace core
 		plan.doorsRemoved = impact.doorsRemoved;
 		plan.windowsRemoved = impact.windowsRemoved;
 		plan.windowsStranded = impact.windowsStranded;
+		for (auto const& sector : mSectors)
+			if (sector && sector->getType() == SectorType::Dumbwaiter && impact.sectorRemoved[sector->getIndex()])
+				plan.consequences.push_back("Delete dependent Dumbwaiter (shaft, car, apertures and buttons)");
 
 		if (plan.locationsRemoved > 0)
 			plan.consequences.push_back(format("Delete {} Sector{} on {}",
@@ -4989,11 +5039,13 @@ namespace core
 		vector<ConstructionRecord>& records, uint32_t& newSectorIndex,
 		string& diagnostic) const
 	{
-		for (auto const& sector : mSectors)
-			if (auto unit = dynamic_pointer_cast<const Dumbwaiter>(sector))
-				for (uint32_t stop = 0; stop < 2; ++stop)
-					if (unit->getStop(stop).sector->getIndex() == plan.sectorIndex)
-					{ diagnostic = "Delete the dependent Dumbwaiter before editing its landing Location footprint"; return false; }
+		auto const removedDumbwaiters = locationEditDumbwaiters(plan);
+		auto sourceRecords = mConstructionRecords;
+		vector<uint32_t> originalToSource(mSectors.size());
+		for (uint32_t i = 0; i < originalToSource.size(); ++i) originalToSource[i] = i;
+		reconcileDumbwaiterReplay(sourceRecords, originalToSource);
+		vector<uint32_t> sourceToOriginal(mSectors.size());
+		for (uint32_t i = 0; i < originalToSource.size(); ++i) sourceToOriginal[originalToSource[i]] = i;
 		auto createsSector = [](ConstructionType type)
 		{
 			return constructionTypeCreatesSector(type);
@@ -5028,11 +5080,25 @@ namespace core
 
 		try
 		{
-			for (auto source : mConstructionRecords)
+			for (auto source : sourceRecords)
 			{
 				auto const producer = createsSector(source.type);
 				auto const sourceSectorIndex = producer ? oldSectorIndex++ : ~0u;
-				if (producer && sourceSectorIndex == plan.sectorIndex)
+				auto const originalSectorIndex = producer ? sourceToOriginal[sourceSectorIndex] : ~0u;
+				if ((source.type == ConstructionType::Dumbwaiter || source.type == ConstructionType::MoveDumbwaiter)
+					&& removedDumbwaiters.contains(source.dumbwaiterId))
+				{
+					for (auto owner : dumbwaiterRecordLandings(source))
+						if (owner < originalToSource.size() && sectorMap[originalToSource[owner]] != ~0u)
+						{
+							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
+							tombstone.a = sectorMap[originalToSource[owner]];
+							candidate->applyConstructionRecord(tombstone);
+							records.push_back(std::move(tombstone));
+						}
+					continue;
+				}
+				if (producer && originalSectorIndex == plan.sectorIndex)
 				{
 					if (plan.remove) continue;
 					if (source.type == ConstructionType::Corridor)
@@ -5075,7 +5141,7 @@ namespace core
 					for (auto const& [id, resource] : mTraversalResources.entries())
 					{
 						(void)id;
-						if (resource->mLift && resource->mLiftSector.value == (uint64_t)sourceSectorIndex + 1)
+						if (resource->mLift && resource->mLiftSector.value == (uint64_t)originalSectorIndex + 1)
 						{
 							source.g = resource->mLiftCurrentStop;
 							break;
@@ -5124,7 +5190,7 @@ namespace core
 					for (auto const& [id, resource] : mTraversalResources.entries())
 					{
 						(void)id;
-						if (resource->mShuttle && resource->mLiftSector.value == (uint64_t)sourceSectorIndex + 1)
+						if (resource->mShuttle && resource->mLiftSector.value == (uint64_t)originalSectorIndex + 1)
 						{
 							source.f = resource->mLiftCurrentStop;
 							break;
@@ -5249,7 +5315,7 @@ namespace core
 				if (producer)
 				{
 					sectorMap[sourceSectorIndex] = before;
-					if (sourceSectorIndex == plan.sectorIndex) newSectorIndex = before;
+					if (originalSectorIndex == plan.sectorIndex) newSectorIndex = before;
 				}
 				records.push_back(std::move(source));
 			}
@@ -6635,7 +6701,9 @@ namespace core
 				&& booth->getCellY()==walkway->getCellY()
 				&& (booth->getWindow()->getFrontLayer()==mSectors[sectorIndex]->getLayerIndex()
 					|| booth->getWindow()->getBackLayer()==mSectors[sectorIndex]->getLayerIndex()))
-				plan.consequences.push_back("Delete BoothWindow losing its walkable approach");
+				plan.consequences.push_back(dynamic_pointer_cast<const BoothWindow>(booth->getWindow())->getDumbwaiterOwner()
+					? "Delete dependent Dumbwaiter (shaft, car, apertures and buttons)"
+					: "Delete BoothWindow losing its walkable approach");
 		for (uint32_t i = 0; i < mSectors[sectorIndex]->getNumObjects(); ++i)
 		{
 			auto liftObject = dynamic_pointer_cast<const LiftSectorObject>(mSectors[sectorIndex]->getObject(i));
@@ -6682,6 +6750,14 @@ namespace core
 			}
 		}
 		records=std::move(retained);
+		set<DumbwaiterId> removed;
+		for (auto const& sector : mSectors)
+			if (auto unit = dynamic_pointer_cast<const Dumbwaiter>(sector);
+				unit && unit->getLayerIndex() == layer + 1 && unit->getCellX() == x
+				&& y >= unit->getCellY() && y - unit->getCellY() < 2) removed.insert(unit->getId());
+		vector<uint32_t> sectorMap;
+		removeDumbwaiterRecords(records, removed, &sectorMap);
+		reconcileDumbwaiterReplay(records, sectorMap);
 	}
 
 	bool World::removeSectorWalkway(uint32_t sectorIndex, uint32_t objectIndex)
@@ -6975,6 +7051,12 @@ namespace core
 					&& (x != object->getCellX() || y != object->getCellY()))
 				{
 					uint32_t sourceLevel = object->getCellY() - object->getSector()->getCellY();
+					for (auto const& sector : mSectors)
+						if (auto unit = dynamic_pointer_cast<const Dumbwaiter>(sector);
+							unit && unit->getLayerIndex() == object->getSector()->getLayerIndex() + 1
+							&& unit->getCellX() == object->getCellX() && object->getCellY() >= unit->getCellY()
+							&& object->getCellY() - unit->getCellY() < 2)
+							plan.consequences.push_back("Delete dependent Dumbwaiter (shaft, car, apertures and buttons)");
 					for (auto const& record : mConstructionRecords)
 						if (record.type == ConstructionType::PlatformLift && record.a == sectorIndex
 							&& mSectors[sectorIndex]->getCellX() + record.c == object->getCellX()
@@ -7279,6 +7361,8 @@ namespace core
 		}
 		vector<ConstructionRecord> records;
 		uint32_t ignored;
+		for (auto id : locationEditDumbwaiters(plan))
+			plan.consequences.push_back(format("Delete dependent Dumbwaiter {} (shaft, car, apertures and buttons)", id.value));
 		plan.valid = prepareLocationEdit(plan, records, ignored, plan.diagnostic);
 		return plan;
 	}
@@ -7386,6 +7470,8 @@ namespace core
 		}
 		vector<ConstructionRecord> records;
 		uint32_t ignored;
+		for (auto id : locationEditDumbwaiters(plan))
+			plan.consequences.push_back(format("Delete dependent Dumbwaiter {} (shaft, car, apertures and buttons)", id.value));
 		plan.valid = prepareLocationEdit(plan, records, ignored, plan.diagnostic);
 		return plan;
 	}

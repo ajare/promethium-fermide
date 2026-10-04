@@ -1036,6 +1036,12 @@ namespace core
 		std::vector<ConstructionRecord> canonicalConstructionRecords(
 			std::vector<ConstructionRecord> records) const;
 
+		std::set<DumbwaiterId> locationEditDumbwaiters(LocationEditPlan const& plan) const;
+		std::array<uint32_t, 2> dumbwaiterRecordLandings(ConstructionRecord const& record) const;
+		void removeDumbwaiterRecords(std::vector<ConstructionRecord>& records,
+			std::set<DumbwaiterId> const& removed, std::vector<uint32_t>* sectorMap = nullptr) const;
+		void reconcileDumbwaiterReplay(std::vector<ConstructionRecord>& records,
+			std::vector<uint32_t>& originalToReplay) const;
 		void removeBoothWindowsAtSupport(std::vector<ConstructionRecord>& records,
 			uint32_t layer, uint32_t x, uint32_t y) const;
 

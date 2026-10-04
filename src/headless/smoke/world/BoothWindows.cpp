@@ -62,7 +62,8 @@ namespace
 				}
 				world->resetSimulation(); world->pauseSimulation();
 				require(world->lookupDumbwaiter(id)->getAperture(1)->getProgress() == 1, "Reset lost authored initial Stop");
-				require(!world->planRemoveLocation(0).valid, "Unsupported landing removal not refused");
+				auto removal = kind == 2 ? world->planRemoveFacade(0) : world->planRemoveLocation(0);
+				require(removal.valid, "Dependent landing removal preflight refused: " + removal.diagnostic);
 				require(world->removeDumbwaiter(id) && !world->lookupDumbwaiter(id), "Whole unit deletion failed");
 				for (uint32_t sector = 0; sector < world->getNumSectors(); ++sector)
 					for (uint32_t object = 0; object < world->getSector(sector)->getNumObjects(); ++object)
@@ -88,15 +89,14 @@ namespace
 			auto before = yaml(world);
 			bool refused = false; try { world.configureDumbwaiter(id, {2, 2}); } catch (std::exception const&) { refused = true; }
 			require(refused && yaml(world) == before, "Invalid initial Stop mutated World");
-			require(!world.planDeleteLayer(0).valid && !world.planDeleteLevel(2).valid, "Unsupported dimension edit admitted");
+			require(!world.planDeleteLayer(0).valid && world.planDeleteLevel(2).valid, "Dimension edit preflight incorrect");
 		}
 		{
 			auto world = make(); auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild(); world->pauseSimulation();
-			auto before = yaml(*world); bool refused = false;
-			try { world->removeSectorWalkway(0, 0); } catch (std::exception const&) { refused = true; }
-			require(refused && yaml(*world) == before && world->lookupDumbwaiter(id), "Support removal left a corrupt unit");
 			auto stale = world->lookupDumbwaiter(id)->getAperture(0)->getDeviceId();
-			require(world->removeDumbwaiter(id) && !world->lookupBoothWindow(stale), "Deletion left stale child identity");
+			auto plan = world->planRemoveSectorWalkway(0, 0);
+			require(plan.valid && !plan.consequences.empty() && world->applyWalkwayEdit(plan)
+				&& !world->lookupDumbwaiter(id) && !world->lookupBoothWindow(stale), "Support removal left a corrupt unit");
 		}
 		{
 			auto world = make(); auto first = world->addDumbwaiter(1, 0, 2);
@@ -113,6 +113,58 @@ namespace
 				&& world->lookupDumbwaiter(second)->getAperture(0)->getDumbwaiterOwner() == second,
 				"Deleting one unit corrupted later producers or sibling ownership");
 			require(world->removeDumbwaiter(second), "Sibling deletion failed");
+		}
+		for (unsigned kind = 0; kind < 3; ++kind) for (uint32_t landing : {0u, 1u})
+		{
+			auto world = make(kind, false, 2); world->addLayer();
+			auto id = world->addDumbwaiter(2, 0, 2);
+			auto other = world->addRoom("Other", 3, 0, 4, 1, 1);
+			world->addSectorMarker(other, 0, 0.5f); world->finishBuild(); world->pauseSimulation();
+			auto plan = kind == 2 ? world->planRemoveFacade(landing) : world->planRemoveLocation(landing);
+			require(plan.valid && !plan.consequences.empty(), "Each landing deletion preflight failed: " + plan.diagnostic);
+			world->applyLocationEdit(plan);
+			require(!world->lookupDumbwaiter(id) && world->getSimulationSnapshot().interactionPoints.empty(), "Each landing deletion left dependent children");
+			world->resetSimulation(); world->pauseSimulation();
+			auto otherSector = world->getSectorAtPosition(3, 4, 0);
+			require(!world->lookupDumbwaiter(id) && otherSector && otherSector->getNumObjects() == 1
+				&& otherSector->getObject(0)->getObjectType() == core::SectorObjectType::Marker, "Deletion remapping lost unrelated authored object");
+		}
+		{
+			core::World world("Moved support", 6, 3);
+			auto room = world.addRoom("Landing", 0, 0, 2, 2, 2);
+			world.addSectorWalkway(room, 1, 0);
+			auto id = world.addDumbwaiter(1, 0, 2);
+			world.addSectorMarker(room, 0, 1.5f); world.finishBuild(); world.pauseSimulation();
+			auto plan = world.planMoveSectorObject(room, 0, 3, 1);
+			require(plan.valid, "Supported surrounding Walkway move refused: " + plan.diagnostic);
+			world.applyObjectMove(plan);
+			require(!world.lookupDumbwaiter(id) && world.getSimulationSnapshot().interactionPoints.empty(), "Support relocation left unsupported unit");
+			world.resetSimulation(); world.pauseSimulation();
+			auto landing = world.getSectorAtPosition(0, 2, 0);
+			require(landing && landing->getObject(3) && landing->getObject(3)->getObjectType() == core::SectorObjectType::Marker,
+				"Dependent deletion shifted later object slots");
+		}
+		for (uint32_t level : {0u, 1u})
+		{
+			core::World world("Level compaction", 6, 5); world.addLayer();
+			world.addRoom("Lower", 1, 2, 2, 1, 1); world.addCorridor(1, 3, 2, 1, 1);
+			auto id = world.addDumbwaiter(2, 2, 2, {1, 0.5f}); world.finishBuild(); world.pauseSimulation();
+			world.pressDumbwaiterLanding(id, 0);
+			world.applyDeleteLevel(world.planDeleteLevel(level));
+			auto unit = world.lookupDumbwaiter(id);
+			require(unit && unit->getCellY() == 1 && unit->getCarPosition().y == 2 && unit->getStop(0).sector->getCellY() == 1
+				&& unit->getStop(1).sector->getCellY() == 2 && unit->getAperture(1)->getProgress() == 1, "Level compaction broke Stop adjacency/initial state");
+			world.resetSimulation(); world.pauseSimulation();
+			require(world.lookupDumbwaiter(id)->getCellY() == 1, "Level compaction not persisted in replay");
+		}
+		{
+			auto world = make(); auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild();
+			auto actor = world->createAgent("Support occupant", 0, 1, 0.5f);
+			auto operation = world->pressDumbwaiterLanding(id, 1);
+			auto before = yaml(*world); bool refused = false;
+			try { world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0)); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(*world) == before && world->lookupDumbwaiter(id)->getOperation() == operation
+				&& world->lookupAgent(actor), "Rejected support edit deleted/cancelled dependent unit");
 		}
 		for (unsigned failure = 0; failure < 7; ++failure)
 		{
@@ -132,8 +184,10 @@ namespace
 			require(refused && yaml(*world) == before && !world->isModified() && world->isTraversalTopologyValid(), "Placement refusal mutated World");
 		}
 	}
+	void canonicalDumbwaiterReplay();
 	void dumbwaiterMoves(smoke::Context const&)
 	{
+		canonicalDumbwaiterReplay();
 		using namespace dumbwaiter_fixture;
 		for (unsigned ticks : {0u, 12u, 60u, 100u})
 		{
@@ -228,6 +282,47 @@ namespace
 			require(!world->lookupDumbwaiter(id) && world->lookupDumbwaiter(sibling), "Moved-unit deletion replay broke sibling");
 		}
 	}
+	void canonicalDumbwaiterReplay()
+	{
+		using namespace dumbwaiter_fixture;
+		auto world = make(); auto first = world->addDumbwaiter(1, 0, 2, {1, 0.5f});
+		addLandings(*world, 1, 4);
+		world->addCorridor(0, 0, 0, 1, 1); world->addCorridor(0, 1, 0, 1, 1);
+		world->finishBuild(); world->pauseSimulation();
+		require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(first, 1, 0, 4)), "Canonical replay move fixture failed");
+		auto second = world->addDumbwaiter(1, 0, 2);
+		auto ladder = world->addLadder(1, 0, 0, {2, false, true}); world->finishBuild(); world->pauseSimulation();
+		auto plan = world->planResizeLadder(ladder.ladder.sector->getIndex(), 0, 0, {2, false, true});
+		require(plan.valid, "Canonical construction preflight lost Dumbwaiter chronology: " + plan.diagnostic);
+		world->applyLadderEdit(plan);
+		require(world->lookupDumbwaiter(first)->getCellX() == 4 && world->lookupDumbwaiter(second)->getCellX() == 2,
+			"Canonical construction replay lost complete unit placements");
+		world->resetSimulation(); world->pauseSimulation();
+		require(world->lookupDumbwaiter(first)->getAperture(1)->getProgress() == 1 && world->lookupDumbwaiter(second), "Canonical Reset lost coherent units");
+		world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
+		require(world->lookupDumbwaiter(first) && !world->lookupDumbwaiter(second), "Support edit lost surviving moved unit");
+		for (unsigned edit = 0; edit < 5; ++edit)
+		{
+			auto movedWorld = make(0, true, 2);
+			auto id = movedWorld->addDumbwaiter(2, 0, 2, {1, 0.37f});
+			addLandings(*movedWorld, 4, 4, 2); movedWorld->finishBuild(); movedWorld->pauseSimulation();
+			require(movedWorld->applyDumbwaiterMove(movedWorld->planMoveDumbwaiter(id, 4, 2, 4)), "Historical landing fixture move failed");
+			if (edit == 0) movedWorld->applyWalkwayEdit(movedWorld->planRemoveSectorWalkway(0, 0));
+			if (edit == 1) movedWorld->applyLocationEdit(movedWorld->planRemoveLocation(0));
+			if (edit == 2) movedWorld->applyDeleteLevel(movedWorld->planDeleteLevel(0));
+			if (edit == 3 || edit == 4) movedWorld->applyDeleteLayer(movedWorld->planDeleteLayer(edit - 2));
+			auto expectedLayer = edit >= 3 ? 3u : 4u, expectedY = edit == 2 ? 1u : 2u;
+			auto unit = movedWorld->lookupDumbwaiter(id);
+			require(unit && unit->getLayerIndex() == expectedLayer && unit->getCellY() == expectedY
+				&& unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.37f, "Obsolete landing removal lost supported final placement");
+			movedWorld->resetSimulation(); movedWorld->pauseSimulation();
+			core::World loaded("Edited moved unit", 1, 1); auto input = core::YamlSerializer::fromString(yaml(*movedWorld));
+			input->deserialize(); core::SerializationWorkData work;
+			require(loaded.deserialize(*input, work) && loaded.lookupDumbwaiter(id)->getLayerIndex() == expectedLayer
+				&& loaded.lookupDumbwaiter(id)->getCellY() == expectedY, "Edited final placement could not replay/reopen");
+		}
+	}
+
 	void placement(smoke::Context const&)
 	{
 		for (uint32_t front : {0u, 1u, 2u}) for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b)
