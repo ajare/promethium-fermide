@@ -12,6 +12,7 @@
 
 
 #include "core/Defines.h"
+#include "core/PhysicalControlPlacement.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
 #include "core/PermissionSet.h"
@@ -972,11 +973,7 @@ namespace core
 		std::vector<ConstructionRecord> mConstructionRecords;
 		bool mDeserializingConstruction{ false };
 
-		struct PhysicalControlCandidate
-		{
-			uint32_t cellX{ 0 };
-			int side{ CORE_SIDE_MIDDLE };
-		};
+		using PhysicalControlCandidate = physicalControl::Candidate;
 
 		struct PhysicalControlPlacement
 		{
@@ -990,6 +987,8 @@ namespace core
 			float edgeInset{ 0.0f };
 			Vector2 interactionOffset{};
 			bool hasInteractionOffset{ false };
+			physicalControl::Owner owner{};
+			bool hasOwner{ false };
 		};
 
 		std::vector<PhysicalControlPlacement> mPhysicalControlPlacements;
@@ -1347,7 +1346,14 @@ namespace core
 		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags, uint32_t* vertexIdentifier = nullptr,
 			uint32_t alternateX = ~0u, int alternateSide = -1);
 
+		// Common production boundary for incremental owner migration. Explicit
+		// candidates and authored owner keys do not enable the future policy.
+		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
+			uint32_t y, physicalControl::Demand const& demand, uint32_t flags,
+			uint32_t* vertexIdentifier = nullptr);
 		void reflowPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y);
+		void applyPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y,
+			std::vector<uint32_t> const& row, std::vector<uint32_t> const& assignment);
 		void bindPhysicalControl(CreateObjectResult& control, InteractionPointId point);
 		InteractionPointId createPhysicalControlInteractionPoint(std::string const& name,
 			CreateObjectResult& control, float standingY, float reach,

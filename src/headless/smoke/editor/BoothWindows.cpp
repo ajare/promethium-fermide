@@ -2,6 +2,7 @@
 #include "State.h"
 #include "DocumentEdit.h"
 #include "core/Agent.h"
+#include "core/Button.h"
 #include "BoothWindowEditor.h"
 #include "PermissionsPanel.h"
 #include "PaletteLayout.h"
@@ -68,7 +69,11 @@ namespace
 	{
 		editor_smoke::State state; using smoke::require;
 		auto world = dumbwaiter_fixture::make(); gWorldDocumentHistory.clear();
-		dumbwaiter_fixture::addLandings(*world, 1, 4); world->finishBuild();
+		dumbwaiter_fixture::addLandings(*world, 1, 4);
+		world->addRoom("Button history front", 0, 0, 0, 2, 1);
+		world->addRoom("Button history back", 1, 0, 0, 2, 1);
+		world->addSectorDoor(0, 0, 0, core::World::RemoteControlledDoor1Options);
+		world->finishBuild();
 		auto before = captureDocumentSnapshot(world);
 		auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild();
 		commitDocumentEdit(std::move(before));
@@ -78,8 +83,24 @@ namespace
 		};
 		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dumbwaiter undo failed"); };
 		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dumbwaiter redo failed"); };
+		auto placement = [&] {
+			std::vector<core::Vector2> positions;
+			for (uint32_t s = 0; s < world->getNumSectors(); ++s)
+				for (uint32_t o = 0; o < world->getSector(s)->getNumObjects(); ++o)
+				{
+					auto object = world->getSector(s)->getObject(o);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					positions.push_back(button->getPosition());
+					positions.push_back(world->lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition());
+				}
+			return positions;
+		};
+		auto originalPlacement = placement();
+		require(originalPlacement.size() == 4, "History fixture must contain two physical Buttons/approaches");
 		undo(); require(!world->lookupDumbwaiter(id), "Creation undo retained unit");
 		redo(); require(bool(world->lookupDumbwaiter(id)), "Creation redo lost unit identity");
+		require(placement() == originalPlacement, "Undo/redo reconstruction changed Button or approach placement");
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1400, 900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
 		auto frame = [&] {

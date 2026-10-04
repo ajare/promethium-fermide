@@ -132,6 +132,77 @@ namespace
 			std::string(what) + ": a Door Button did not inherit the Door's authored Layer");
 	}
 
+	void placementBoundaryPreservesLegacyPolicy()
+	{
+		using namespace core::physicalControl;
+		auto right = legacyCandidates(3, CORE_SIDE_RIGHT, 2, CORE_SIDE_LEFT);
+		require(right.size() == 2 && right[0].centreKey() == 16
+			&& right[1].centreKey() == 8, "Legacy candidate generation changed");
+		Demand flexible{ right, 0, 0, {}, false };
+		Demand fixed{ legacyCandidates(4, CORE_SIDE_LEFT), 0, 0, {}, false };
+		// Distinct registrations with coincident centres must still use legacy
+		// separation, not the future stacking/canonical policy.
+		require(allocateLegacy({ flexible, fixed }) == std::vector<uint32_t>{1, 0},
+			"Legacy allocator no longer separates coincident registrations");
+		flexible.currentCandidate = 1;
+		require(allocateLegacy({ flexible }) == std::vector<uint32_t>{1},
+			"Prefactor activated preferred-side canonical reassignment");
+		require(flexible.currentCandidate == 1 && flexible.candidates[0].cellX == 3,
+			"Allocation mutated its input demand");
+		bool refused = false;
+		try { (void)allocateLegacy({ fixed, fixed }); }
+		catch (std::runtime_error const&) { refused = true; }
+		require(refused, "Duplicate legacy slots must remain impossible");
+
+		for (int offset = 0; offset < 4; ++offset)
+		{
+			auto candidate = Candidate::explicitHost(4, offset, CORE_SIDE_MIDDLE);
+			require(candidate.cellX == 4 && candidate.centreX() == 4 + offset * 0.25f,
+				"Explicit host/quarter-cell centre changed ownership or coordinate");
+		}
+		refused = false;
+		try { (void)Candidate::explicitHost(4, 4, CORE_SIDE_LEFT); }
+		catch (std::invalid_argument const&) { refused = true; }
+		require(refused, "Explicit offset 1.0 must use the next host cell");
+
+		// Every stationary owner has the same ID-free geometry/role contract.
+		for (auto type : { OwnerType::Airlock, OwnerType::BulkheadDoor, OwnerType::Door,
+			OwnerType::Dumbwaiter, OwnerType::ForceBridge, OwnerType::Ladder,
+			OwnerType::Lift, OwnerType::LocationLightSwitch, OwnerType::PlatformLift, OwnerType::Shuttle })
+		{
+			flexible.hasOwner = true;
+			flexible.owner = { type, { 1, 2, 0, 3, 2 }, { 0, 0, 0, 8, 2 }, { 1, 4, 1 } };
+			require(allocateLegacy({ flexible }) == std::vector<uint32_t>{1},
+				"Owner metadata changed legacy policy");
+		}
+	}
+
+	void authoredPlacementPositionsRemainUnchanged()
+	{
+		for (uint32_t width : {1u, 2u})
+			for (bool fallback : {false, true})
+			{
+				auto options = core::World::RemoteControlledDoor1Options;
+				options.width = width;
+				uint32_t doorX = fallback ? 8 - width : 2;
+				auto scene = buildTwoRoomScene("Legacy button positions", 8, 0, &options, doorX);
+				auto front = buttonsIn(*scene.world, scene.frontSector);
+				auto back = buttonsIn(*scene.world, scene.backSector);
+				require(front.size() == 1 && back.size() == 1, "Required approach control lost");
+				float frontX = fallback ? static_cast<float>(doorX) : static_cast<float>(doorX + width);
+				for (auto const& [button, expected] : {std::pair{front[0], frontX},
+					std::pair{back[0], static_cast<float>(doorX + width)}})
+				{
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(std::abs(centre.x - expected) < 0.00001f,
+						"One/multi-cell legacy preferred/fallback position changed");
+					auto point = scene->lookupInteractionPoint(button->getInteractionPointId());
+					require(point && std::abs(point.entity->getPosition().x - expected) < 0.00001f,
+						"Production interaction approach drifted from its Button");
+				}
+			}
+	}
+
 	void addingAButtonGivesBothSidesOne()
 	{
 		Scene scene = buildTwoRoomScene("Add door button");
@@ -334,6 +405,17 @@ namespace
 		require(buttonsIn(*loaded, loadedDoor.object->getDoor()->getFrontSector()->getIndex()).size() == 1
 			&& buttonsIn(*loaded, loadedDoor.object->getDoor()->getBackSector()->getIndex()).size() == 1,
 			"The loaded Door did not keep one Button per side");
+		for (auto sector : { scene.frontSector, scene.backSector })
+		{
+			auto before = buttonsIn(*scene.world, sector)[0];
+			auto after = buttonsIn(*loaded, sector)[0];
+			require(before->getPosition() == after->getPosition() && before->getSize() == after->getSize(),
+				"Save/load reconstruction changed physical Button geometry");
+			auto beforePoint = scene->lookupInteractionPoint(before->getInteractionPointId());
+			auto afterPoint = loaded->lookupInteractionPoint(after->getInteractionPointId());
+			require(beforePoint && afterPoint && beforePoint.entity->getPosition() == afterPoint.entity->getPosition(),
+				"Save/load reconstruction changed interaction approach position");
+		}
 		require(loaded->canRemoveSectorDoorButton(loadedDoor.sectorIndex, loadedDoor.objectIndex),
 			"The loaded Door lost its Buttons' removal provenance");
 	}
@@ -408,6 +490,8 @@ namespace
 
 void runDoorTwoSidedButtonSmokeChecks()
 {
+	placementBoundaryPreservesLegacyPolicy();
+	authoredPlacementPositionsRemainUnchanged();
 	addingAButtonGivesBothSidesOne();
 	addingCompletesALegacyOneSidedDoor();
 	addRefusesWhenASideHasNoSpace();
