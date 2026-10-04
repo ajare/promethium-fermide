@@ -688,6 +688,7 @@ namespace core
 		mEscalatorTraversalSequence = 0;
 		mRememberedEscalatorConditions.clear();
 		mRememberedDeviceConditions.clear();
+		mOccupiedUsablePoint = {};
 		mPose = Pose::Standing;
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
@@ -1401,11 +1402,15 @@ namespace core
 			return;
 		}
 
+		mOccupiedUsablePoint = {};
 		mPose = Pose::Standing;
 		cancelTraversal();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::MovingToVertex;
-		if (mWorld && !mWorld->canAgentAccessLocation(*mPath.path->nodes.back().targetVertex->getSector(), *this))
+		auto marker = std::dynamic_pointer_cast<Marker>(mPath.path->nodes.back().targetVertex->getObject());
+		auto occupant = mWorld && marker ? mWorld->usablePointOccupant(marker->getId()) : AgentId{};
+		if (mWorld && ((occupant && occupant != mWorld->getAgentId(this))
+			|| !mWorld->canAgentAccessLocation(*mPath.path->nodes.back().targetVertex->getSector(), *this)))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 			return;
@@ -1441,7 +1446,11 @@ namespace core
 			|| getGlobalPosition().distanceTo(destination->getPosition()) > 0.001f) return;
 		auto marker = std::dynamic_pointer_cast<Marker>(destination->getObject());
 		if (marker && mWorld->furnitureMarkerAction(marker->getId()) == UsablePointAction::Sit)
-			mPose = Pose::Sitting;
+		{
+			if (mWorld->claimUsablePoint(mWorld->getAgentId(this), marker->getId()))
+				mPose = Pose::Sitting;
+			else mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+		}
 	}
 
 	bool Agent::nextPathNode()
@@ -1452,6 +1461,7 @@ namespace core
 		if (!mPath.path || mPath.targetNode >= mPath.path->nodes.size() - 1)
 		{
 			performDestinationAction();
+			if (mState == State::RoutePlanning) return true;
 			mState = State::Idle;
 			mPath.path = nullptr;
 			mPath.targetNode = 0;

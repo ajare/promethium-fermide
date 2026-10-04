@@ -245,6 +245,8 @@ namespace core
 		int mLocalDepth{ 0 };
 		// Runtime bodily stance, deliberately absent from serialization.
 		Pose mPose{ Pose::Standing };
+		// Runtime-only claim; deletion releases it with the Agent.
+		MarkerId mOccupiedUsablePoint{};
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };

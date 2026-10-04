@@ -635,6 +635,11 @@ namespace core
 			node_type source, node_type target)
 		{
 			if (!graph || (!agent && !source)) return nullptr;
+			if (graph->getWorld() && target)
+				if (auto marker = std::dynamic_pointer_cast<Marker>(target->getObject()))
+					if (auto occupant = graph->getWorld()->usablePointOccupant(marker->getId());
+						occupant && (!agent || occupant != graph->getWorld()->getAgentId(agent)))
+						return nullptr;
 			if (agent && graph->getWorld() && target)
 			{
 				auto sector = target->getSector();

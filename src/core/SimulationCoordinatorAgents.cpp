@@ -436,6 +436,28 @@ namespace core
 				|| agent.mState == Agent::State::AwaitingTraversalCommit);
 	}
 
+	bool SimulationCoordinator::claimUsablePoint(AgentId id, MarkerId marker)
+	{
+		auto agent = mWorld.mAgents.find(id);
+		if (!agent || mWorld.furnitureMarkerAction(marker) != UsablePointAction::Sit) return false;
+		auto occupant = mWorld.usablePointOccupant(marker);
+		if (occupant && occupant != id) return false;
+		agent->mOccupiedUsablePoint = marker;
+		mWorld.invalidateSimulationSnapshot();
+		for (auto const& [otherId, other] : mWorld.mAgents.entries())
+		{
+			if (otherId == id) continue;
+			auto goal = mWorld.mMovementGoals.find(otherId);
+			if (goal != mWorld.mMovementGoals.end() && goal->second.marker == marker)
+				goal->second.retainedPath.reset();
+			if (other->mPath.path && !other->mPath.path->nodes.empty())
+				if (auto destination = std::dynamic_pointer_cast<Marker>(other->mPath.path->nodes.back().targetVertex->getObject());
+					destination && destination->getId() == marker)
+					replanAgentAfterAuthorizationRefusal(otherId);
+		}
+		return true;
+	}
+
 	void SimulationCoordinator::replanAgentAfterAuthorizationRefusal(AgentId id, bool retainPath)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -662,7 +684,7 @@ namespace core
 				}
 			}
 			goal.retainedPath.reset();
-			if (target && agent->getSector() == target->getSector().get()
+			if (path && target && agent->getSector() == target->getSector().get()
 				&& agent->getGlobalPosition() == target->getPosition()
 				&& mWorld.canAgentAccessLocation(*target->getSector(), *agent)) continue;
 			if (path && !path->nodes.empty())

@@ -79,6 +79,7 @@ set(core_names
     populationRouting
     furniture/depthContinuity
     furniture/sectorDepthContinuity
+    furniture/seatRouting
     actualPositionChoosesManualAlternative
     walkingAndBulkhead
     observedQueue

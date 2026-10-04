@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "core/World.h"
 #include "core/Agent.h"
+#include "core/AgentTagRegistryDocument.h"
 
 namespace
 {
@@ -63,4 +64,55 @@ namespace
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/actions", actions });
+	checks.push_back({ "furniture/occupancyLifecycle", [](smoke::Context const& context)
+	{
+		using smoke::require;
+		for (int release = 0; release < 3; ++release)
+		{
+			core::World world("Seat lifecycle", 8, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			world.placeFurniture(room, "chair", 3, 0, "Chair");
+			world.addSectorMarker(room, 0, 6.5f, "Exit");
+			world.finishBuild();
+			auto seat = world.furniture()[0].destinations[0].marker;
+			auto exit = world.getMarkerIds().back();
+			auto id = world.createAgent("Sitter", room, 0, 0.5f);
+			require(world.moveAgentToMarker(id, seat).accepted(), "Seat move refused");
+			world.advanceTicks(1800);
+			require(world.usablePointOccupant(seat) == id && world.lookupAgent(id).entity->getPose() == core::Pose::Sitting,
+				"Sitting did not claim usable point");
+			if (release == 0)
+			{
+				std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml"),
+					context.temporaryRoot() / "sit.furniture.yaml", std::filesystem::copy_options::overwrite_existing);
+				for (auto suffix : { ".world.yaml", ".world" })
+				{
+					auto file = context.temporaryRoot() / (std::string("occupied") + suffix);
+					world.saveTo(file.string());
+					auto loaded = core::loadWorldDocument(file);
+					require(!loaded->usablePointOccupant(seat), "Occupancy survived save/load");
+					require(world.usablePointOccupant(seat) == id, "Saving released live claim");
+				}
+			}
+			world.setAgentActive(id, false);
+			world.advanceTicks(100);
+			require(world.usablePointOccupant(seat) == id, "Deactivation released seat");
+			world.pauseSimulation();
+			require(world.usablePointOccupant(seat) == id, "Pause released seat");
+			require(world.resumeSimulation(), "Resume refused");
+			require(world.usablePointOccupant(seat) == id, "Resume released seat");
+			world.setAgentActive(id, true);
+			if (release == 0)
+			{
+				require(world.moveAgentToMarker(id, exit).accepted(), "Departure refused");
+				for (int tick = 0; tick < 600 && world.usablePointOccupant(seat); ++tick) world.advanceTicks(1);
+				require(world.lookupAgent(id).entity->getPose() == core::Pose::Standing, "Departure did not stand");
+			}
+			else if (release == 1) world.resetSimulation();
+			else require(world.removeAgent(id).removed, "Sitter deletion refused");
+			require(!world.usablePointOccupant(seat), "Lifecycle trigger did not release claim");
+		}
+	} });
 }

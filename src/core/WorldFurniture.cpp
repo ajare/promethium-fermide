@@ -43,6 +43,19 @@ namespace core
 		return {};
 	}
 
+	AgentId World::usablePointOccupant(MarkerId marker) const
+	{
+		if (marker)
+			for (auto const& [id, agent] : mAgents.entries())
+				if (agent->mOccupiedUsablePoint == marker) return id;
+		return {};
+	}
+
+	bool World::claimUsablePoint(AgentId agent, MarkerId marker)
+	{
+		return mSimulationCoordinator.claimUsablePoint(agent, marker);
+	}
+
 	bool World::canPlaceFurniture(uint32_t sectorIndex, std::string const& key,
 		float x, float y, std::string const& name, std::string* diagnostic, int localDepth) const
 	{

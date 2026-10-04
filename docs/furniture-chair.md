@@ -177,7 +177,14 @@ Path destination; intermediate traversal never fires the action. Omission means
 no action, and unknown action values fail catalogue loading. Starting another
 Path restores Standing. Actions require no Lua changes and are read from the
 catalogue rather than persisted in the World; existing catalogues remain unchanged.
-Seat occupancy is a separate follow-up (#448).
+Sitting also claims the usable point (#448): first arrival wins. Other Agents
+cannot route to an Occupied Marker, and existing Paths targeting it are
+hard-invalidated into Route planning and ordinary Route loss, regardless of
+Route persistence. Occupancy does not block intermediate traversal (subject to
+the Marker's separate `blocksPathing` property). Beginning a new Path, simulation
+Reset, or deleting the seated Agent releases the claim; deactivation and
+pause/resume retain it. Claims are runtime-only: YAML and binary reloads start
+with every usable point free.
 
 A usable point may specify `blocksPathing: false` to make its Marker usable as
 both a destination and an intermediate waypoint. Omitted `blocksPathing` defaults
