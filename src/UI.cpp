@@ -2651,6 +2651,21 @@ namespace
 		openWorld(world, selectedPath.get());
 	}
 
+	optional<string> chooseFurnitureCataloguePath()
+	{
+		nfdu8char_t* selectedPathRaw{ nullptr };
+		nfdu8filteritem_t const filters[] = { { "Furniture catalogue", "furniture.yaml" } };
+		auto const directory = filesystem::path(gWorldFilepath).parent_path().string();
+		auto const result = NFD_OpenDialogU8(&selectedPathRaw, filters, 1,
+			directory.empty() ? nullptr : directory.c_str());
+		unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(selectedPathRaw, NFD_FreePathU8);
+		if (result == NFD_CANCEL) return nullopt;
+		if (result == NFD_ERROR)
+			throw runtime_error(string("Could not choose a Furniture catalogue: ")
+				+ (NFD_GetError() ? NFD_GetError() : "unknown native dialog error"));
+		return string(selectedPath.get());
+	}
+
 	optional<string> chooseAgentTagRegistryPath()
 	{
 		nfdu8char_t* selectedPathRaw{ nullptr };
@@ -7901,7 +7916,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		renderAgentView(world);
 	}
 
-	renderFurniturePanel(world, gWorldFilepath, gSelectedSector);
+	renderFurniturePanel(world, gWorldFilepath, [] { return chooseFurnitureCataloguePath(); });
 	renderSelectedObjectPanel(world);
 	renderSelectedAgentPanel(world);
 

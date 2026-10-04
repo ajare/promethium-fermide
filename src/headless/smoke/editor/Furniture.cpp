@@ -127,38 +127,113 @@ namespace
 			ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({900, 700});
 			ImGui::Begin("Reopened Furniture catalogue", nullptr, ImGuiWindowFlags_NoSavedSettings);
 			ImGui::LogToClipboard(); ImGui::SetNextItemOpen(true);
-			renderFurniturePanel(world, path, world->getSector(0));
+			renderFurniturePanel(world, path);
 			ImGui::LogFinish(); ImGui::End(); ImGui::Render();
-			require(text.find("{ " + filename + " }") != std::string::npos,
+			require(text.find("Catalogue: " + filename) != std::string::npos,
 				"Furniture panel does not display the loaded catalogue: " + text);
 		};
 		panelShows("furniture.furniture.yaml");
-		// Drive the actual panel button before making any definition selection.
-		auto placeButton = ImGui::FindWindowByName("Reopened Furniture catalogue")->GetID("Place Furniture");
-		bool found = false; ImVec2 buttonPosition;
-		for (float y = 35; y < 550 && !found; y += 8)
-			for (float x = 15; x < 200 && !found; x += 16)
-			{
-				io.AddMousePosEvent(x, y); panelShows("furniture.furniture.yaml"); panelShows("furniture.furniture.yaml");
-				if (ImGui::GetHoveredID() == placeButton) { found = true; buttonPosition = {x, y}; }
-			}
-		require(found, "Furniture placement button is missing");
-		io.AddMousePosEvent(buttonPosition.x, buttonPosition.y);
-		io.AddMouseButtonEvent(0, true); panelShows("furniture.furniture.yaml");
-		io.AddMouseButtonEvent(0, false); panelShows("furniture.furniture.yaml");
-		require(world->furniture().size() == 1 && world->furniture().front().definitionKey == "chair",
-			"Default Chair placement failed: " + text);
-		require(world->removeFurniture(world->furniture().front().id, &diagnostic), "Cannot clean up placed chair: " + diagnostic);
+		require(text.find("Select Furniture catalogue...") != std::string::npos
+			&& text.find("Place Furniture") == std::string::npos && text.find("Furniture definition") == std::string::npos,
+			"Catalogue panel still exposes Furniture editing controls: " + text);
 		require(selectFurnitureCatalogue(world, path, "layouts.furniture.yaml", diagnostic, history), diagnostic);
 		panelShows("layouts.furniture.yaml");
-		require(text.find("{ Larger layout } Furniture definition") != std::string::npos,
-			"Catalogue change left a stale Furniture definition selected: " + text);
+		require(text.find("Furniture definition") == std::string::npos,
+			"Catalogue change reintroduced Furniture editing controls: " + text);
 		require(selectFurnitureCatalogue(world, path, "chair.furniture.yaml", diagnostic, history), diagnostic);
 		panelShows("chair.furniture.yaml");
 		world = core::loadWorldDocument(path);
 		panelShows("furniture.furniture.yaml");
 		// Release the callback's borrowed string before this check returns.
 		io.ClipboardUserData = previousClipboardData; io.SetClipboardTextFn = previousSetClipboardText;
+	}
+
+	void cataloguePicker(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto root = context.temporaryRoot() / "catalogue-picker";
+		std::filesystem::create_directories(root / "elsewhere");
+		for (auto filename : {"chair.furniture.yaml", "desk.furniture.yaml"})
+			std::filesystem::copy_file(context.fixture(std::string("resources/test-worlds/") + filename), root / filename);
+		std::filesystem::copy_file(root / "chair.furniture.yaml", root / "elsewhere/chair.furniture.yaml");
+		std::filesystem::copy_file(root / "chair.furniture.yaml", root / "wrong.yaml");
+		{ std::ofstream output(root / "broken.furniture.yaml"); output << "not a catalogue"; }
+		auto path = root / "picker.world.yaml";
+		auto world = std::make_shared<core::World>("Picker", 8, 2);
+		world->addRoom("Room", 0, 0, 0, 8, 1); world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
+		DocumentHistory history;
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1000, 800}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		std::optional<std::string> picked; unsigned choices = 0; bool pickerError = false;
+		auto frame = [&]
+		{
+			text.clear(); ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({600, 350});
+			ImGui::Begin("Catalogue picker test"); ImGui::LogToClipboard(); ImGui::SetNextItemOpen(true);
+			renderFurniturePanel(world, path, [&]() -> std::optional<std::string>
+			{
+				++choices;
+				if (pickerError) throw std::runtime_error("Native picker failed");
+				return picked;
+			}, history);
+			ImGui::LogFinish(); ImGui::End(); ImGui::Render();
+		};
+		frame(); frame();
+		auto button = ImGui::FindWindowByName("Catalogue picker test")->GetID("Select Furniture catalogue...");
+		ImVec2 buttonPosition{}; bool found = false;
+		for (float y = 35; y < 140 && !found; y += 8)
+			for (float x = 20; x < 270 && !found; x += 16)
+			{
+				io.AddMousePosEvent(x, y); frame(); frame();
+				if (ImGui::GetHoveredID() == button) { found = true; buttonPosition = {x, y}; }
+			}
+		require(found, "Catalogue picker button is missing");
+		auto click = [&]
+		{
+			io.AddMousePosEvent(buttonPosition.x, buttonPosition.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame(); frame();
+		};
+		picked = (root / "chair.furniture.yaml").string(); click();
+		require(choices == 1 && world->furnitureCatalogueFilename() == "chair.furniture.yaml"
+			&& history.undoCount() == 1 && world->furniture().empty(), "Picker did not attach the selected catalogue as one edit");
+		for (auto label : {"Furniture definition", "Furniture instance", "Instance name", "Furniture x", "Supporting Level",
+			"Furniture Local depth", "Snap Furniture", "Place Furniture", "Apply Furniture edit", "Delete Furniture", "Catalogue beside World"})
+			require(text.find(label) == std::string::npos, "Catalogue-only header retained editing control: " + std::string(label));
+		auto unchanged = captureDocumentSnapshot(world, history)->yaml;
+		picked.reset(); click();
+		require(choices == 2 && captureDocumentSnapshot(world, history)->yaml == unchanged && history.undoCount() == 1,
+			"Cancelled picker mutated the document/history");
+		for (auto file : {"elsewhere/chair.furniture.yaml", "wrong.yaml", "broken.furniture.yaml"})
+		{
+			picked = (root / file).string(); click();
+			require(captureDocumentSnapshot(world, history)->yaml == unchanged && history.undoCount() == 1
+				&& text.find("Catalogue: chair.furniture.yaml") != std::string::npos,
+				"Rejected picker selection changed the catalogue/history");
+			if (std::string(file).starts_with("elsewhere"))
+				require(text.find("beside the World") != std::string::npos, "Outside-directory selection lost its diagnostic");
+		}
+		pickerError = true; click(); pickerError = false;
+		require(text.find("Native picker failed") != std::string::npos && history.undoCount() == 1,
+			"Picker exception escaped the panel or committed history");
+		picked = (root / "desk.furniture.yaml").string(); click();
+		require(world->furnitureCatalogueFilename() == "desk.furniture.yaml" && history.undoCount() == 2
+			&& text.find("Native picker failed") == std::string::npos, "Successful selection retained an error or missed history");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto loaded = deserializeDocumentSnapshot(snapshot, world, path);
+			if (!loaded) return false;
+			world = std::move(loaded); return true;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Picker catalogue undo failed"); frame();
+		require(text.find("Catalogue: chair.furniture.yaml") != std::string::npos, "Panel did not refresh catalogue after undo");
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Picker catalogue redo failed"); frame();
+		require(text.find("Catalogue: desk.furniture.yaml") != std::string::npos, "Panel did not refresh catalogue after redo");
+		auto savedPath = path; path.clear(); auto beforeChoices = choices; click();
+		require(choices == beforeChoices && history.undoCount() == 2 && text.find("Save the World") != std::string::npos,
+			"Unsaved World opened a catalogue picker or mutated history");
+		path = savedPath;
+		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
 	}
 
 	void attachmentActions(smoke::Context const& context)
@@ -459,7 +534,7 @@ namespace
 			&& !desks->lookupMarker(deskSeat), "Deletion history changed retained stationary history");
 		ImGui::GetIO().DisplaySize = {800, 600}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture actions");
-		renderFurniturePanel(world, path, world->getSector(room));
+		renderFurniturePanel(world, path);
 		ImGui::End(); ImGui::EndFrame();
 	}
 }
@@ -716,7 +791,7 @@ namespace
 		editor_smoke::State state; using smoke::require;
 		auto world = std::make_shared<core::World>("Movement", 24, 8);
 		auto room = world->addRoom("Pinned", 1, 3, 2, 8, 3);
-		auto other = world->addRoom("Other", 0, 0, 0, 8, 1);
+		world->addRoom("Other", 0, 0, 0, 8, 1);
 		for (uint32_t x = 0; x < 6; ++x) world->addSectorWalkway(room, 1, x);
 		world->finishBuild(); world->pauseSimulation();
 		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
@@ -769,18 +844,17 @@ namespace
 			&& history.undoCount() == 0, "Plan click did not share/highlight selection or created an edit: selected="
 			+ std::to_string(selectedFurnitureInstance(world) ? selectedFurnitureInstance(world)->id : 0)
 			+ " lines=" + std::to_string(selectionLines) + " rows=" + std::to_string(rows));
-		// Existing controls must receive the plan's selection even with another Location selected.
+		// Catalogue-only controls must leave the plan's selection untouched.
 		std::string text;
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		ImGui::NewFrame(); ImGui::SetNextWindowPos({950, 10}); ImGui::SetNextWindowSize({600, 700});
 		ImGui::Begin("Movement controls"); ImGui::LogToClipboard();
-		ImGui::SetNextItemOpen(true); renderFurniturePanel(world, {}, world->getSector(other));
+		ImGui::SetNextItemOpen(true); renderFurniturePanel(world, {});
 		ImGui::LogFinish(); ImGui::End(); ImGui::Render();
-		require(text.find("Selected chair") != std::string::npos && text.find("Apply Furniture edit") != std::string::npos
-			&& text.find("{ 1.250 } Furniture x") != std::string::npos
-			&& text.find("{ 1.000 } Supporting Level") != std::string::npos,
-			"Plan selection did not populate existing controls");
+		require(text.find("Apply Furniture edit") == std::string::npos && text.find("Furniture x") == std::string::npos
+			&& selectedFurnitureInstance(world) && selectedFurnitureInstance(world)->id == id,
+			"Catalogue-only panel exposed editing or disturbed plan selection");
 		frame();
 		auto before = captureDocumentSnapshot(world, history)->yaml;
 		start(); mouse(point(2.8f, 3));
@@ -1178,5 +1252,6 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });
+	checks.push_back({ "furniture/cataloguePicker", cataloguePicker });
 	checks.push_back({ "furniture/compositionActions", compositionActions });
 }

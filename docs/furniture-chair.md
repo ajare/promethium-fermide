@@ -18,12 +18,18 @@ compatibility and focused regression examples.
 ## Authoring
 
 Save a World, put a manually authored `.furniture.yaml` catalogue beside it, then
-expand **Furniture** in the World panel. Enter its basename and load it, select a
-definition, select a Room, Corridor or Facade on the canvas, enter the instance
-name, Location-local x/supporting Level and non-negative Local depth, and click
-**Place Furniture** while paused. The optional snap toggle rounds x only; y must always be floor-aligned.
-Refusals appear inline, without dialogs. Catalogue selection and placement use
-normal document history.
+expand **Furniture** in the World panel and choose **Select Furniture catalogue...**.
+The native file picker starts beside the World and filters `.furniture.yaml` files.
+Catalogues outside that directory are refused; only the basename is persisted.
+Cancellation changes nothing, and load failures appear inline. The header contains
+only catalogue selection and its current filename, not Furniture editing controls.
+Catalogue selection uses normal document history.
+
+Select a Room, Corridor or Facade and open **Location plan**. While paused, drag a
+definition from its palette row into the grid to place an automatically named
+instance on the displayed Level and integer Local depth. New placements snap to
+whole World-cell X. Placement refusals appear in the preview, and valid releases
+use normal document history.
 
 `resources/test-worlds/chair.furniture.yaml` describes the format. Catalogue UUID,
 definition key and usable-point key are reference identities, not display labels.
@@ -67,12 +73,13 @@ and definitions without `sideRoutes` retain ordinary floor routing.
 
 ## Safe instance edits (#349)
 
-Select an existing instance in the **Furniture instance** selector in the World
-panel. While paused, change its name, Location-local x or supporting Level and
-click **Apply Furniture edit**, or click **Delete Furniture**. Edits and deletion
-use ordinary document undo/redo. Movement stays inside the owning Location and
-rigidly translates artwork and every owned point; it cannot cross a
-Floor/Walkway gap, overhang the Location or overlap Furniture at the same Local depth.
+Select an existing footprint in **Location plan**. While paused, drag it to change
+X or Local depth, holding Shift for fractional X, or use **Delete selected Furniture**.
+Edits and deletion use ordinary document undo/redo. Movement stays on the same
+supporting Level inside the owning Location and rigidly translates artwork and
+every owned point; it cannot cross a Floor/Walkway gap, overhang the Location or
+overlap Furniture at the same Local depth. The World panel no longer exposes
+instance editing controls.
 
 Instance names generate point names only at placement. Renaming an instance does
 not rewrite its Marker name. Rename the owned Marker through ordinary **Marker
@@ -95,8 +102,8 @@ overlaps are refused before mutation.
 
 Open **Location plan** from Selection for a Room, Corridor, or Facade. The plan
 stays pinned to that Location and displays one supporting Level. Click a labelled
-Furniture footprint to select it in the existing **Furniture** controls; selecting
-another Location does not retarget the plan.
+Furniture footprint to select and highlight it; selecting another Location does
+not retarget the plan.
 
 While paused, left-drag an existing footprint to preview movement. X snaps to
 whole World cells unless Shift is currently held; pressing or releasing Shift

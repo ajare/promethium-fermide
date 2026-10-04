@@ -172,6 +172,7 @@ set(editor_names
     furniture/chairActions
     furniture/catalogueReattachmentHistory
     furniture/attachmentActions
+    furniture/cataloguePicker
     furniture/compositionActions
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory

@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include "core/World.h"
@@ -22,5 +23,8 @@ bool editSelectedFurniture(std::shared_ptr<core::World> const& world,
 	std::optional<int> localDepth = std::nullopt);
 bool deleteSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint64_t id, std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
+// Platform dialogs stay in the GUI; headless tests drive the same panel seam.
+using FurnitureCataloguePathChooser = std::function<std::optional<std::string>()>;
 void renderFurniturePanel(std::shared_ptr<core::World> const& world,
-	std::filesystem::path const& worldPath, std::shared_ptr<const core::Sector> const& selected);
+	std::filesystem::path const& worldPath, FurnitureCataloguePathChooser const& choosePath = {},
+	DocumentHistory& history = gWorldDocumentHistory);

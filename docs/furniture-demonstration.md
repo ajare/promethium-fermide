@@ -27,9 +27,11 @@ back observer chooses depth 3. The coincident connectors add no physical distanc
 or depth-animation time. Both may arrive at the same destination concurrently;
 there is no sitting state, occupancy limit, queue or reservation.
 
-While paused, use the Furniture panel to place another chair in the Corridor,
-turn horizontal snapping off, move it fractionally, rename it, and edit its Local
-depth. Rename its destination separately through Marker Selection. Undo/redo uses
+Use the World panel's Furniture header to select the catalogue with its native
+file picker. While paused, open the Corridor's Location plan and drag another
+chair from the palette into the grid. Hold Shift while moving its footprint for
+fractional X, or move it to another Local-depth row. Rename its destination
+separately through Marker Selection. Undo/redo uses
 normal document history. Save and reopen as either `.world.yaml` or `.world`.
 Save/reset restores authored Agent positions, retained depth and Marker intent,
 not an underway simulation checkpoint. Furniture movement leaves live Agent
