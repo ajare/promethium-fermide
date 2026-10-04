@@ -1,0 +1,698 @@
+{
+  "parent": 385,
+  "repository": "ajare/promethium-fermide",
+  "featureLabel": "feature:space-spation-systems",
+  "tickets": [
+    {
+      "slice": "1a",
+      "number": 386,
+      "id": 5697628356,
+      "url": "https://github.com/ajare/promethium-fermide/issues/386",
+      "title": "Station systems: Run an opt-in station instance with the World clock",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "1b",
+      "number": 387,
+      "id": 5697628446,
+      "url": "https://github.com/ajare/promethium-fermide/issues/387",
+      "title": "Station systems: Author and persist station starting conditions",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:high"
+      ],
+      "blockedBy": [
+        386
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "1c",
+      "number": 388,
+      "id": 5697628526,
+      "url": "https://github.com/ajare/promethium-fermide/issues/388",
+      "title": "Station systems: Contain station script failures",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        386
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "2a",
+      "number": 389,
+      "id": 5697628680,
+      "url": "https://github.com/ajare/promethium-fermide/issues/389",
+      "title": "Station systems: Configure and inspect finite resource stores",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:high"
+      ],
+      "blockedBy": [
+        387,
+        388
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "2b",
+      "number": 390,
+      "id": 5697628843,
+      "url": "https://github.com/ajare/promethium-fermide/issues/390",
+      "title": "Station systems: Transfer resources without violating limits",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        389
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "2c",
+      "number": 391,
+      "id": 5697628926,
+      "url": "https://github.com/ajare/promethium-fermide/issues/391",
+      "title": "Station systems: Account for constituent materials in compound resources",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        390
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "3",
+      "number": 392,
+      "id": 5697629016,
+      "url": "https://github.com/ajare/promethium-fermide/issues/392",
+      "title": "Station systems: Schedule resource deliveries",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        390
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "4",
+      "number": 393,
+      "id": 5697629101,
+      "url": "https://github.com/ajare/promethium-fermide/issues/393",
+      "title": "Station systems: Supply external equipment loads from solar generation",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        390
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "5",
+      "number": 394,
+      "id": 5697629207,
+      "url": "https://github.com/ajare/promethium-fermide/issues/394",
+      "title": "Station systems: Bridge electrical deficits with batteries",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:high"
+      ],
+      "blockedBy": [
+        393
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "6",
+      "number": 395,
+      "id": 5697629287,
+      "url": "https://github.com/ajare/promethium-fermide/issues/395",
+      "title": "Station systems: Accumulate heat and reject it through radiators",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        393
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "7a",
+      "number": 396,
+      "id": 5697629358,
+      "url": "https://github.com/ajare/promethium-fermide/issues/396",
+      "title": "Station systems: Circulate coolant and provide freeze-protection heating",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        395
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "7b",
+      "number": 397,
+      "id": 5697629427,
+      "url": "https://github.com/ajare/promethium-fermide/issues/397",
+      "title": "Station systems: Provide chilled thermal services",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        396
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "7c",
+      "number": 398,
+      "id": 5697629652,
+      "url": "https://github.com/ajare/promethium-fermide/issues/398",
+      "title": "Station systems: Ride through cooling deficits with finite thermal buffers",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        396
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "8",
+      "number": 399,
+      "id": 5697629738,
+      "url": "https://github.com/ajare/promethium-fermide/issues/399",
+      "title": "Station systems: Generate electricity from finite primary fuel",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        394,
+        397
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "9",
+      "number": 400,
+      "id": 5697629822,
+      "url": "https://github.com/ajare/promethium-fermide/issues/400",
+      "title": "Station systems: Simulate normal and hazardous atmospheres",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        395
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "10",
+      "number": 401,
+      "id": 5697629909,
+      "url": "https://github.com/ajare/promethium-fermide/issues/401",
+      "title": "Station systems: Consume crew supplies and produce balanced metabolic returns",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        391,
+        400
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "11",
+      "number": 402,
+      "id": 5697629989,
+      "url": "https://github.com/ajare/promethium-fermide/issues/402",
+      "title": "Station systems: Recover and qualify water",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        397,
+        400
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "12",
+      "number": 403,
+      "id": 5697630062,
+      "url": "https://github.com/ajare/promethium-fermide/issues/403",
+      "title": "Station systems: Store and eject terminal waste",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        392
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "13",
+      "number": 404,
+      "id": 5697630147,
+      "url": "https://github.com/ajare/promethium-fermide/issues/404",
+      "title": "Station systems: Produce oxygen and manage captured CO2",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        391,
+        402
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "14",
+      "number": 405,
+      "id": 5697630237,
+      "url": "https://github.com/ajare/promethium-fermide/issues/405",
+      "title": "Station systems: Recover carbon through Sabatier and methane processing",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        403,
+        404
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "15",
+      "number": 406,
+      "id": 5697630468,
+      "url": "https://github.com/ajare/promethium-fermide/issues/406",
+      "title": "Station systems: Run fuel-cell backup from dedicated reactant stores",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        394,
+        404
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "16a",
+      "number": 407,
+      "id": 5697630575,
+      "url": "https://github.com/ajare/promethium-fermide/issues/407",
+      "title": "Station systems: Recover nutrients from organic waste",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        401,
+        402,
+        403
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "16b",
+      "number": 408,
+      "id": 5697630662,
+      "url": "https://github.com/ajare/promethium-fermide/issues/408",
+      "title": "Station systems: Degrade and restore microbial processing",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        407
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "17a",
+      "number": 409,
+      "id": 5697630772,
+      "url": "https://github.com/ajare/promethium-fermide/issues/409",
+      "title": "Station systems: Grow and respire a resource-limited crop population",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        401,
+        402,
+        403
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "17b",
+      "number": 410,
+      "id": 5697630874,
+      "url": "https://github.com/ajare/promethium-fermide/issues/410",
+      "title": "Station systems: Harvest crops and account for biological losses",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        409
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "18",
+      "number": 411,
+      "id": 5697630946,
+      "url": "https://github.com/ajare/promethium-fermide/issues/411",
+      "title": "Station systems: Grow and harvest algae",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        410
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "19",
+      "number": 412,
+      "id": 5697631052,
+      "url": "https://github.com/ajare/promethium-fermide/issues/412",
+      "title": "Station systems: Enforce hazardous treatment and containment boundaries",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        402,
+        403
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "20",
+      "number": 413,
+      "id": 5697631122,
+      "url": "https://github.com/ajare/promethium-fermide/issues/413",
+      "title": "Station systems: Schedule outages and capacity reductions",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        392,
+        396
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "21",
+      "number": 414,
+      "id": 5697631289,
+      "url": "https://github.com/ajare/promethium-fermide/issues/414",
+      "title": "Station systems: Perform resource-constrained maintenance",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        402,
+        403,
+        413
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "22a",
+      "number": 415,
+      "id": 5697631430,
+      "url": "https://github.com/ajare/promethium-fermide/issues/415",
+      "title": "Station systems: Dispatch generation and protect electrical reserves",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        399,
+        406,
+        413
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "22b",
+      "number": 416,
+      "id": 5697631499,
+      "url": "https://github.com/ajare/promethium-fermide/issues/416",
+      "title": "Station systems: Protect cross-system service dependencies",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        408,
+        411,
+        412,
+        415
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "22c",
+      "number": 417,
+      "id": 5697631585,
+      "url": "https://github.com/ajare/promethium-fermide/issues/417",
+      "title": "Station systems: Recover services without oscillation or overload",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        416
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "23",
+      "number": 418,
+      "id": 5697631665,
+      "url": "https://github.com/ajare/promethium-fermide/issues/418",
+      "title": "Station systems: Show bounded trends and incident history",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        393,
+        400
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "24a",
+      "number": 419,
+      "id": 5697631749,
+      "url": "https://github.com/ajare/promethium-fermide/issues/419",
+      "title": "Station systems: Explain current resource endurance",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        392,
+        394,
+        400
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "24b",
+      "number": 420,
+      "id": 5697631819,
+      "url": "https://github.com/ajare/promethium-fermide/issues/420",
+      "title": "Station systems: Forecast scheduled resource balance and resupply needs",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        417,
+        419
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "25",
+      "number": 421,
+      "id": 5697631890,
+      "url": "https://github.com/ajare/promethium-fermide/issues/421",
+      "title": "Station systems: Expose microbial and carbon-loop effects in coordinated operation",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        405,
+        417
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "26a",
+      "number": 422,
+      "id": 5697631966,
+      "url": "https://github.com/ajare/promethium-fermide/issues/422",
+      "title": "Station systems: Ship one reconciled reference station",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        398,
+        414,
+        420,
+        421
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "26b",
+      "number": 423,
+      "id": 5697632037,
+      "url": "https://github.com/ajare/promethium-fermide/issues/423",
+      "title": "Station systems: Ship reference emergency and recovery scenarios",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:medium",
+        "priority:medium"
+      ],
+      "blockedBy": [
+        418,
+        422
+      ],
+      "dependenciesSet": true
+    },
+    {
+      "slice": "26c",
+      "number": 424,
+      "id": 5697632110,
+      "url": "https://github.com/ajare/promethium-fermide/issues/424",
+      "title": "Station systems: Demonstrate long-duration stability and repeatability",
+      "labels": [
+        "ready-for-agent",
+        "feature:space-spation-systems",
+        "difficulty:hard",
+        "priority:high"
+      ],
+      "blockedBy": [
+        423
+      ],
+      "dependenciesSet": true
+    }
+  ],
+  "verified": true
+}

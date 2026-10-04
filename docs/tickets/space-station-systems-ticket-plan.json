@@ -1,0 +1,658 @@
+{
+  "parent": 385,
+  "repository": "ajare/promethium-fermide",
+  "featureLabel": "feature:space-spation-systems",
+  "tickets": [
+    {
+      "slice": "1a",
+      "title": "Station systems: Run an opt-in station instance with the World clock",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [],
+      "what": "Enable an isolated Station systems instance for a World and observe it ticking in its own ImGui window using the existing World time controls.",
+      "acceptance": [
+        "Station systems are disabled by default; enabled Worlds instantiate four independent Lua system objects through sandboxed runtime plumbing without fake Agents or mutable World exposure.",
+        "Use SimulationCoordinator and the World facade with existing fixed ticks/time scale; pause freezes station time and reset recreates instances. No rendering-driven or independent station clock.",
+        "A separate top-level ImGui window is toggled by menu and toolbar, shows active-World status and elapsed simulation time, and can close without disabling simulation.",
+        "Bundled Lua assets use application resource management; multiple Worlds do not share mutable state. Public snapshots/events support deterministic headless verification; no low-level test-only API."
+      ]
+    },
+    {
+      "slice": "1b",
+      "title": "Station systems: Author and persist station starting conditions",
+      "difficulty": "medium",
+      "priority": "high",
+      "blockedBy": [
+        "1a"
+      ],
+      "what": "Edit the implemented station settings through structured controls and save/reopen a reproducible World scenario rather than live Lua state.",
+      "acceptance": [
+        "Persist authored enablement and implemented settings with backward-compatible World schema defaults; old Worlds remain disabled and no arbitrary Lua table/VM is serialized.",
+        "Edits require pause; applying to a started run requires confirmed whole-World reset. Cancellation preserves authored and live state; pause/resume preserves state in memory.",
+        "Load/reset reconstruct initial state. Integrate document dirty state, validated edits and history/replay without resurrecting stale Lua instances.",
+        "Test round-trips, malformed input, failed writes, legacy loading, reset confirmation and cancellation through existing document/editor seams. Do not add speculative configuration for all later processes."
+      ]
+    },
+    {
+      "slice": "1c",
+      "title": "Station systems: Contain station script failures",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "1a"
+      ],
+      "what": "See explicit diagnostics and a paused World when model execution fails instead of silently continuing with partially updated station state.",
+      "acceptance": [
+        "Bound Lua execution and memory/resource use using existing scripting safety principles; diagnose exceptions, budget exhaustion and non-finite output.",
+        "Stage station tick work and validate before commitment so a failed step neither partially applies state nor advances station time independently of World time.",
+        "Physical shortages are valid simulation outcomes and do not trigger software-error pause; headless failure is machine-observable through the existing World seam.",
+        "Test failures after an attempted mutation, multiple-World isolation, reset after failure and deterministic successful replay. Keep Agent-behaviour semantics unchanged."
+      ]
+    },
+    {
+      "slice": "2a",
+      "title": "Station systems: Configure and inspect finite resource stores",
+      "difficulty": "medium",
+      "priority": "high",
+      "blockedBy": [
+        "1b",
+        "1c"
+      ],
+      "what": "Author finite starting resources and inspect current quantities separately from their capacities and starting settings.",
+      "acceptance": [
+        "Declare resource identity, units, capacity, starting inventory and qualified/unqualified quantities; invalid or non-finite configuration is rejected before running.",
+        "Starting inventory cannot exceed capacity or be negative; current inventory is runtime state, not an authored edit.",
+        "Show units, usable versus held inventory, capacity and initial versus current state in the separate window; save configuration and reconstruct on load/reset.",
+        "Test zero/empty/full stores, malformed values, isolated Worlds and no runtime dirtying of authored documents."
+      ]
+    },
+    {
+      "slice": "2b",
+      "title": "Station systems: Transfer resources without violating limits",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "2a"
+      ],
+      "what": "Configure a bounded resource-transfer scenario and observe conserved movement, protected reserves and blocked destinations.",
+      "acceptance": [
+        "Transfers preserve material, cannot overdraw available/qualified inventory or protected reserves, and respect destination capacity. Backpressure never deletes material.",
+        "Apply competing transfers in declared deterministic order or deterministic allocation and commit atomically; rejected/partial transfers and unmet requests are visible.",
+        "Publish per-store flows and boundary balance residuals with explicit numerical tolerances; material violations pause through the integrated error mechanism, not silent clamping.",
+        "Demonstrate two-store transfer and simultaneous competing requests through authored configuration, UI results and World ticks; reset reproduces outcomes."
+      ]
+    },
+    {
+      "slice": "2c",
+      "title": "Station systems: Account for constituent materials in compound resources",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "2b"
+      ],
+      "what": "Author compound-resource compositions and see their constituent inventory remain conserved across exchanges.",
+      "acceptance": [
+        "Support declared food/biomass/waste compositions, moisture and energy terms where represented; use a documented dry-mass basis for living biomass.",
+        "Track nitrogen, phosphorus and potassium separately plus grouped other minerals; bound nutrient nitrogen is not freely interchangeable with atmospheric nitrogen.",
+        "Validate composition and conversion balances at declared boundaries, report constituent residuals, and reject impossible configured yields rather than creating material.",
+        "Exercise compound transfers and balanced/unbalanced conversion fixtures through World configuration/results; preserve constituent totals under partial transfer and capacity refusal."
+      ]
+    },
+    {
+      "slice": "3",
+      "title": "Station systems: Schedule resource deliveries",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "2b"
+      ],
+      "what": "Schedule one-off or recurring resource deliveries and observe accepted supplies, rejected excess and the next arrival.",
+      "acceptance": [
+        "Deliveries add only specified resources at simulation times, respect qualification/store limits and explicitly account for unaccepted quantities without silent overflow.",
+        "Define reusable deterministic scenario event ordering, including coincident events, and execute each due occurrence once under accelerated update batching.",
+        "Expose schedule editing, next occurrence and delivery outcomes; reset/load restart authored schedules without replay duplication on ordinary pause/resume.",
+        "Test empty/full destinations, recurrence boundaries, simultaneous deliveries, zero quantities and World time-scale behaviour."
+      ]
+    },
+    {
+      "slice": "4",
+      "title": "Station systems: Supply external equipment loads from solar generation",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "2b"
+      ],
+      "what": "Configure solar capacity and named equipment loads and observe delivered power and unmet demand through illumination/eclipse cycles.",
+      "acceptance": [
+        "External equipment groups declare electrical demand/profile, heat, thermal class, material exchanges, critical floor, priority and allowed curtailment. Establish extensible service-demand and availability contracts without counting internal equipment twice.",
+        "Solar production follows configured capacity and illumination; allocated power cannot exceed generation. Zero installed capacity disables a source and unmet critical minima remain explicit.",
+        "Do not silently supply missing cooling: distinguish unmet cooling and admit only feasible configured operation. Early electrical demos can use explicitly declared exported energy/heat boundaries rather than hidden infinite sinks.",
+        "Show actual/requested service, source output and operating profiles; test conservation, prioritization, eclipse transitions and stable allocation order."
+      ]
+    },
+    {
+      "slice": "5",
+      "title": "Station systems: Bridge electrical deficits with batteries",
+      "difficulty": "medium",
+      "priority": "high",
+      "blockedBy": [
+        "4"
+      ],
+      "what": "Observe finite batteries support loads during an eclipse and recharge when generation permits.",
+      "acceptance": [
+        "Separate nameplate and usable energy; apply state-of-charge/reserve limits and charge/discharge power constraints at consistent boundaries.",
+        "Account for charge/discharge efficiency, losses and stored energy; prohibit free energy or reserve double-counting and make reserve policy visible.",
+        "Battery demand/output integrates with existing load allocation rather than a second power budget; expose energy, power, reserve and shortfall.",
+        "Test exhaustion, saturation, power-limited ride-through, losses, zero capacity and deterministic repeated eclipse cycles."
+      ]
+    },
+    {
+      "slice": "6",
+      "title": "Station systems: Accumulate heat and reject it through radiators",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "4"
+      ],
+      "what": "Observe equipment and cabin thermal reservoirs warm or cool under explicit heat inputs and environment-dependent radiator rejection.",
+      "acceptance": [
+        "Track thermal energy, effective thermal capacity and temperature using stable World-time integration with declared tolerances.",
+        "Distinguish temperature-compatible service classes; account for environmental radiation, absorbed heat, emitting temperature and radiator/view assumptions without promising physical distribution modelling.",
+        "Route electrical equipment heat once; explicitly account for exported/stored energy and emitted heat rather than treating every electrical input as duplicate local heat.",
+        "Expose temperatures, heat flows and limits; test analytic heating/cooling cases, incompatible classes, hot/cold profiles and equivalent update batching."
+      ]
+    },
+    {
+      "slice": "7a",
+      "title": "Station systems: Circulate coolant and provide freeze-protection heating",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "6"
+      ],
+      "what": "Observe powered circulation and heating maintain service only while appropriate power and coolant are available.",
+      "acceptance": [
+        "Track finite loop-specific coolant, normal/hazardous segregation and compatible heat-only exchange; coolant is not potable or nutrient water.",
+        "Calculate pump/heater demand and resulting heat once, subject to supplied electricity, fluid inventory and equipment limits.",
+        "Insufficient coolant or electricity reduces actual circulation/cooling/heating; exposed freeze/temperature limits and unmet service are visible without inventing flow.",
+        "Test blackout, coolant loss inputs, heater capacity, isolated inventories and balanced electrical/thermal exchanges through World snapshots."
+      ]
+    },
+    {
+      "slice": "7b",
+      "title": "Station systems: Provide chilled thermal services",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "7a"
+      ],
+      "what": "Run chillers that supply compatible cold services while consuming real electricity and rejecting condenser heat.",
+      "acceptance": [
+        "Use configured cooling capacity, COP assumptions and temperature interfaces; condenser heat equals extracted heat plus work and applicable auxiliaries at consistent boundaries.",
+        "Couple cooling admission with available power, circulation and heat sink. Solve/bound allocation deterministically without a circular assumption of unlimited power or cooling.",
+        "Publish cold-side duty, work, condenser heat and unmet demand by class; reject incompatible spare thermal capacity.",
+        "Test electricity-limited and sink-limited cooling, zero capacity, temperature incompatibility and transient supply loss without double-counting heat."
+      ]
+    },
+    {
+      "slice": "7c",
+      "title": "Station systems: Ride through cooling deficits with finite thermal buffers",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "7a"
+      ],
+      "what": "Observe finite thermal storage absorb a cooling deficit, reach its limit and recover when rejection becomes available.",
+      "acceptance": [
+        "Configure sensible or explicitly modelled phase-change buffer capacity, initial energy state and usable temperature limits; stored energy is distinct from instantaneous temperature.",
+        "Buffer access requires configured circulation or explicit passive transfer; blackout cannot access a powered-only buffer for free.",
+        "Expose available capacity, charging/discharging and exhaustion; recovery consumes real rejection capacity and cannot reset storage instantly.",
+        "Test analytic deficit integrals, partly depleted starts, transfer limits, exhaustion and repeated outage/recovery cycles."
+      ]
+    },
+    {
+      "slice": "8",
+      "title": "Station systems: Generate electricity from finite primary fuel",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "5",
+        "7b"
+      ],
+      "what": "Run fuelled generators whose output depends on fuel, startup energy and cooling rather than an unlimited power setting.",
+      "acceptance": [
+        "Configure fuel inventory/energy, conversion efficiency, output/ramp limits and startup profile; include fuel consumption and generator waste heat.",
+        "Start only with supported startup energy and qualified cooling; zero installed capacity disables the source.",
+        "Retain configured shutdown heat and cooling needs after electrical output stops, without claiming reactor physics or nuclear qualification.",
+        "Expose startup/running/shutdown states and limits; test failed starts, fuel depletion, cooling loss, ramp limits and full electrical/thermal/fuel balance."
+      ]
+    },
+    {
+      "slice": "9",
+      "title": "Station systems: Simulate normal and hazardous atmospheres",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "6"
+      ],
+      "what": "Observe pressure, composition, humidity and temperature evolve in separately configured normal and hazardous compartments.",
+      "acceptance": [
+        "Configure volume, gas masses, water vapour, temperature and occupancy/load assignment; calculate absolute pressure and partial pressures with documented assumptions.",
+        "Account for gas leakage and scheduled airlock losses by mass, including recovered versus lost gas where configured; no unexplained disposal or automatic cross-compartment mixing.",
+        "Couple atmospheric thermal state to thermal reservoirs and expose meaningful units and initial versus current conditions; pressure setpoints alone do not prove containment.",
+        "Test analytic mixtures, leakage, zero/low inventory, vapour constraints, compartment isolation and deterministic scheduled losses."
+      ]
+    },
+    {
+      "slice": "10",
+      "title": "Station systems: Consume crew supplies and produce balanced metabolic returns",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "2c",
+        "9"
+      ],
+      "what": "Configure crew population/activity and observe finite supplies turn into explicitly balanced metabolic returns and unmet demand.",
+      "acceptance": [
+        "Account for food/water/oxygen consumption, CO2, moisture, urine/organic waste and metabolic heat with declared compositions and coefficients.",
+        "Under partial supply, distinguish requested from actual consumption; do not generate nominal waste from absent material. Document simplified starvation accounting without inventing physiology.",
+        "Keep crew inputs independent of Agents, movement, health, death and behaviour. Retain outputs in appropriate finite stores/compartments, never discard them silently.",
+        "Show demand and actual exchanges; test nominal and missing food/water/oxygen cases, nutrient/element conservation and no Agent mutation."
+      ]
+    },
+    {
+      "slice": "11",
+      "title": "Station systems: Recover and qualify water",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "7b",
+        "9"
+      ],
+      "what": "Process initially supplied wastewater or condensate into usable water with finite capacity, treatment costs and explicit quality holds.",
+      "acceptance": [
+        "Model collection and condensation with compatible cooling and latent heat routing; do not add latent duty twice to the same energy boundary.",
+        "Treatment consumes configured electricity/consumables and respects throughput, source inventory and destination capacities; retained concentrates remain accounted for pending disposal capability.",
+        "Distinguish raw, treated, held and accepted potable/process inventory; insufficient quality evidence blocks release and hazardous input remains segregated.",
+        "Expose recovery ratio with boundary/interval, retained inventory and costs; test limited cooling/power, exhaustion, full destinations and quality failures. This slice can run without crew processing."
+      ]
+    },
+    {
+      "slice": "12",
+      "title": "Station systems: Store and eject terminal waste",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "3"
+      ],
+      "what": "Store normal and hazardous terminal waste separately and remove only eligible material on a configured schedule.",
+      "acceptance": [
+        "Waste stores have finite capacity and treatment/disposal-ready states; full destinations refuse/backpressure inflow rather than delete material.",
+        "Eject only available eligible quantities at scheduled times; record ejected material as external loss and preserve held/untreated waste.",
+        "Retain recovered resources in appropriate stores until capacity is reached; not-immediately-needed material is not automatically terminal waste.",
+        "Test coincident deliveries/ejection, recurrence, empty/full stores and held waste. Ejection is a scenario input, not a simulated safe trajectory or navigation certification."
+      ]
+    },
+    {
+      "slice": "13",
+      "title": "Station systems: Produce oxygen and manage captured CO2",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "2c",
+        "11"
+      ],
+      "what": "Operate electrolysis and finite CO2 capture against actual water, power, cooling and storage availability.",
+      "acceptance": [
+        "Electrolysis has balanced water consumption and oxygen/hydrogen products with finite throughput and explicit heat/chemical-energy accounting.",
+        "Supply atmosphere or qualified gas stores through bounded transfers; protect life-support reserves and retain or constrain excess products rather than delete them.",
+        "CO2 removal/capture uses finite capacity and applicable regeneration/consumable demand; captured gas is inventory, not vanished carbon.",
+        "Expose actual production/capture and unmet atmospheric service; test exhausted inputs, product saturation, unavailable power/cooling and reaction balances."
+      ]
+    },
+    {
+      "slice": "14",
+      "title": "Station systems: Recover carbon through Sabatier and methane processing",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "12",
+        "13"
+      ],
+      "what": "Convert captured carbon dioxide and hydrogen into recovered water and carbon through explicitly balanced reaction stages.",
+      "acceptance": [
+        "Track Sabatier CO2/H2 inputs and methane/water products; methane processing returns hydrogen and produces solid carbon with declared capacity/energy/thermal costs.",
+        "Combined processing retains net hydrogen demand; recycled hydrogen never becomes free continuing reactant supply.",
+        "Water enters appropriate treatment; carbon goes to configured useful store or terminal waste when surplus. Blocked product destinations constrain throughput.",
+        "Show per-stage flows and net resource balance; test reactant exhaustion, full destinations, disabled stages and integrated stoichiometry."
+      ]
+    },
+    {
+      "slice": "15",
+      "title": "Station systems: Run fuel-cell backup from dedicated reactant stores",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "5",
+        "13"
+      ],
+      "what": "Generate backup electricity from finite dedicated hydrogen and oxygen while preserving life-support resources.",
+      "acceptance": [
+        "Configure independent reactant starting stores and source capacity/efficiency; electricity, water, heat and consumed reactants balance.",
+        "Allow controlled surplus transfers from ECLSS only after protected breathing oxygen and process requirements; never draw protected oxygen implicitly.",
+        "Send product water through treatment and require cooling; integrate battery/load service so backup is limited by usable reactants and electrical ratings.",
+        "Test exhaustion, reserve-transfer refusal, blocked water destination and electrolysis/fuel-cell cycle losses; expose backup endurance and actual output."
+      ]
+    },
+    {
+      "slice": "16a",
+      "title": "Station systems: Recover nutrients from organic waste",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "10",
+        "11",
+        "12"
+      ],
+      "what": "Use a healthy finite-capacity microbial processor to recover nutrients and water from human/organic waste.",
+      "acceptance": [
+        "Declare feedstock compositions and processing yields with separate nutrient N/P/K and grouped minerals; atmospheric N2 cannot substitute without a configured process.",
+        "Account for required oxygen, CO2, electricity, heat, water, consumables and unrecoverable residue; no cost-free nutrient conversion.",
+        "Recover into finite qualified stores, route only surplus/residue to waste and propagate backpressure from saturated destinations.",
+        "Expose processed mass/recovery and limiting inputs; test elemental balance, finite throughput, absent feedstock and power/temperature eligibility without dynamic condition modelling yet."
+      ]
+    },
+    {
+      "slice": "16b",
+      "title": "Station systems: Degrade and restore microbial processing",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "16a"
+      ],
+      "what": "Observe microbial capacity change with adverse conditions and recover only through declared time/resources or replacement stock.",
+      "acceptance": [
+        "Track aggregate processor condition from configured starvation, temperature and consumable-exhaustion rules; mark biological coefficients as provisional assumptions.",
+        "Condition constrains actual processing and cannot create or delete feedstock, microbial material or stored nutrients without accounted exchanges.",
+        "Recovery is bounded and may require configured biological stock/resources; do not instantly restore capacity or simulate individual organisms.",
+        "Show condition, limiting cause and restoration progress; test adversity/recovery cycles and continued conservation through reduced performance."
+      ]
+    },
+    {
+      "slice": "17a",
+      "title": "Station systems: Grow and respire a resource-limited crop population",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "10",
+        "11",
+        "12"
+      ],
+      "what": "Grow a crop population from configured living biomass using real light, gas, water, nutrients and compatible temperatures.",
+      "acceptance": [
+        "Separate dry living biomass from growing area/capacity and stored food; use declared composition and clearly labelled biological assumptions.",
+        "Growth is limited by actual delivered light/power, CO2, water, each tracked nutrient and temperature; account for respiration, oxygen exchange, moisture and heat.",
+        "Maintain finite growing capacity and essential circulation dependencies; no free photosynthesis during darkness or missing inputs. Harvest is deferred and growth stops at capacity.",
+        "Expose growth/respiration and limiting resources; test darkness, single-nutrient depletion, capacity saturation and material/energy accounting using starting nutrient supplies without requiring microbial recycling."
+      ]
+    },
+    {
+      "slice": "17b",
+      "title": "Station systems: Harvest crops and account for biological losses",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "17a"
+      ],
+      "what": "Harvest food and recoverable biomass and observe living biomass decline under explicitly modelled adverse conditions.",
+      "acceptance": [
+        "Configure harvest timing/rules and edible/non-edible yield; remove actual living material and preserve its declared constituents into food and waste stores.",
+        "Account for adverse-condition biomass loss and returned gases/waste/water using explicit balanced assumptions, not silent deletion.",
+        "Full food/waste destinations constrain harvest or route explicit surplus through eligible waste paths; recovery cannot recreate lost biomass for free.",
+        "Show harvests, food production, waste and losses; test simultaneous harvest/growth events, starvation/death rules and coupled crew consumption."
+      ]
+    },
+    {
+      "slice": "18",
+      "title": "Station systems: Grow and harvest algae",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "17b"
+      ],
+      "what": "Run a separate algae culture using the established biological lifecycle with its own installation limits and harvest allocation.",
+      "acceptance": [
+        "Keep algae biomass, culture volume, capacity, coefficients and condition independent of crops, while reusing safe shared lifecycle/accounting behaviour.",
+        "Track culture circulation, light, gas, nutrient and temperature demands; partition harvested biomass into declared food/recovery/waste destinations conservatively.",
+        "No shared mutable population state, unlimited output at zero capacity or free production during shortages.",
+        "Expose both populations distinctly and test independent starvation, culture capacity, harvesting and combined resource competition."
+      ]
+    },
+    {
+      "slice": "19",
+      "title": "Station systems: Enforce hazardous treatment and containment boundaries",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "11",
+        "12"
+      ],
+      "what": "Operate isolated hazardous processing and reserves with qualified recovery transfers and explicit quarantine.",
+      "acceptance": [
+        "Use separate atmosphere/water/coolant inventories and protected hazardous reserves; heat-only interfaces never transfer coolant/material.",
+        "Distinguish filtration, treatment evidence and release clearance. Unknown/failed clearance holds material; generic recovery commands cannot bypass the hold.",
+        "Qualified treated transfers respect destination capacity; disposal-ready hazardous waste remains segregated. Pressure targets alone do not establish containment.",
+        "Expose independent reserves, holds and unmet containment demand; test accidental-cross-transfer refusal, cleared recovery, full waste stores and heat exchange without mass mixing."
+      ]
+    },
+    {
+      "slice": "20",
+      "title": "Station systems: Schedule outages and capacity reductions",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "3",
+        "7a"
+      ],
+      "what": "Schedule deterministic outages for registered installations and observe constrained service and explicit restoration events.",
+      "acceptance": [
+        "Use stable installation identities and shared availability contracts that later generators/processors can register with, not hard-coded special cases.",
+        "One-off/recurring capacity changes respect World time and deterministic event order; restore declared availability without replenishing fuel, consumables, buffers or biomass.",
+        "Availability loss changes actual admitted operation and relevant power/heat/material flows; no output continues from an unavailable process.",
+        "Expose schedule/state and events; test power/circulation loss, overlapping changes, reset/replay and accelerated timing."
+      ]
+    },
+    {
+      "slice": "21",
+      "title": "Station systems: Perform resource-constrained maintenance",
+      "difficulty": "hard",
+      "priority": "medium",
+      "blockedBy": [
+        "11",
+        "12",
+        "20"
+      ],
+      "what": "Schedule timed maintenance whose completion requires declared tools, spare parts and consumables.",
+      "acceptance": [
+        "Declare prerequisites, duration and explicit inventory requirements; reusable tools are not consumed unless configured as consumables, and absent prerequisites prevent free completion.",
+        "Define deterministic reservation/consumption and interruption rules so overlapping work cannot double-spend parts or tools.",
+        "Isolate/update affected installation availability and account for removed parts/used materials into appropriate waste; restoration does not replenish supplies for free.",
+        "Expose progress and blocking reasons; test missing tools/parts, interruption, simultaneous jobs, actual resource use and post-maintenance restoration without Agent assignments."
+      ]
+    },
+    {
+      "slice": "22a",
+      "title": "Station systems: Dispatch generation and protect electrical reserves",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "8",
+        "15",
+        "20"
+      ],
+      "what": "Automatically bridge source losses, start available backup and allocate electrical service while protecting declared reserves.",
+      "acceptance": [
+        "Coordinate batteries, thermal sources, solar and fuel cells using actual startup/ramp, fuel, cooling and power limits; no sustained supply fabricated by dispatch.",
+        "Honor load priorities/critical floors and protected reserves; publish any unmet critical demand rather than relabel it optional.",
+        "Expose operating modes and alarms and record dispatch/curtailment actions; physical model errors remain separate from operational shortages.",
+        "Test source trips, backup unavailability, exhausted reserves and ordinary curtailment through integrated World scenarios."
+      ]
+    },
+    {
+      "slice": "22b",
+      "title": "Station systems: Protect cross-system service dependencies",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "16b",
+        "18",
+        "19",
+        "22a"
+      ],
+      "what": "Admit or curtail operations without cutting essential support services for protected loads.",
+      "acceptance": [
+        "Resolve declared power/cooling/material dependencies conservatively; admission requires compatible actual services and protected reserves, not independent nameplate totals.",
+        "Protect containment, biological circulation, critical sensing/control demand where modelled and shutdown cooling even when related experiments/lights/generation output stop.",
+        "Handle competing dependencies deterministically without circular free supply; expose reasons and unmet critical minima.",
+        "Test lighting curtailment with preserved circulation, hazardous shortages, generator cooling shortfall and microbial loss under coordinated operation."
+      ]
+    },
+    {
+      "slice": "22c",
+      "title": "Station systems: Recover services without oscillation or overload",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "22b"
+      ],
+      "what": "Restore equipment and reserves in safe stages after a shortage clears.",
+      "acceptance": [
+        "Establish qualified cooling/protection and source startup prerequisites before restoring heat-producing loads; account for surge/startup demand where configured.",
+        "Use declared hysteresis, dwell and restoration rules to prevent rapid shedding/reconnection oscillation; replenish reserves without overloading services.",
+        "Recovery actions remain bounded by actual resources and do not bypass quality holds, containment or physical limits.",
+        "Show recovery stage/actions and test fluctuating capacity, partially depleted buffers/stores, repeated incidents and failed restart prerequisites."
+      ]
+    },
+    {
+      "slice": "23",
+      "title": "Station systems: Show bounded trends and incident history",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "4",
+        "9"
+      ],
+      "what": "Inspect station resource/service trends and a chronological incident/event history in the separate window.",
+      "acceptance": [
+        "Bound storage for trends/events with explicit retention/downsampling behaviour under accelerated World time; no unbounded per-tick history.",
+        "Show units, simulation timestamps, actual versus requested values and subsystem identity; support event types from later features through a stable presentation contract.",
+        "Visibility/plotting and UI update frequency cannot mutate state or change simulated results. Indicate gaps/retention limits rather than implying complete history.",
+        "Test long runs, toggling window visibility, active-World switches and distinct editor contexts without state leaks."
+      ]
+    },
+    {
+      "slice": "24a",
+      "title": "Station systems: Explain current resource endurance",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "3",
+        "5",
+        "9"
+      ],
+      "what": "See conditional endurance estimates from usable inventory and observed net depletion together with reserves and next deliveries.",
+      "acceptance": [
+        "Distinguish physical total, usable/qualified inventory and protected reserve; use explicit current-rate/static assumptions and declared observation interval.",
+        "Report unstable/unknown or bounded estimates for near-zero, changing or uncertain net rates instead of unjustified infinite endurance.",
+        "Show per-resource constraints and next-delivery context without claiming a universal survival countdown or forecasting future profiles yet.",
+        "Test depletion, net production, zero demand, sudden rate changes, unavailable inventory and battery energy/power distinctions."
+      ]
+    },
+    {
+      "slice": "24b",
+      "title": "Station systems: Forecast scheduled resource balance and resupply needs",
+      "difficulty": "hard",
+      "priority": "medium",
+      "blockedBy": [
+        "22c",
+        "24a"
+      ],
+      "what": "Project inventory and shortfalls under declared load/resupply scenarios and explain the replenishment needed.",
+      "acceptance": [
+        "Extend static estimates to configured demand/production profiles and future deliveries using explicitly bounded model assumptions; account for store capacities and accepted delivery quantities.",
+        "Publish projected inventory at resupply, resource shortfalls and limiting services with scenario/uncertainty labels; do not present uncertain biology as guaranteed recovery.",
+        "Forecasting must not mutate live inventories, advance the real World, consume deterministic streams or become an unbounded computation.",
+        "Test known analytic profile/delivery cases, delayed resupply, changing service availability and conservation of projected exchanges; document approximation limits."
+      ]
+    },
+    {
+      "slice": "25",
+      "title": "Station systems: Expose microbial and carbon-loop effects in coordinated operation",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "14",
+        "22c"
+      ],
+      "what": "Demonstrate recycling changes propagating through gases, nutrient supply, biology, power allocation and alarms.",
+      "acceptance": [
+        "Run coupled World scenarios combining carbon recovery, microbial processing, crops/algae, crew demand and supervision rather than separate standalone fixtures.",
+        "Reduced recovery changes actual dependent resources/services; include non-human CO2 sources and net Sabatier hydrogen need without duplicate accounting.",
+        "Resolve demonstrated integration defects and surface limiting processes/actions in subsystem views and alarms; retain normal/hazardous segregation and finite waste backpressure.",
+        "Test closed-accounting nominal operation, processor loss and recovery, nutrient-limited growth and carbon-stage constraints with deterministic outcomes."
+      ]
+    },
+    {
+      "slice": "26a",
+      "title": "Station systems: Ship one reconciled reference station",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "7c",
+        "21",
+        "24b",
+        "25"
+      ],
+      "what": "Load one packaged editable reference configuration that demonstrates the implemented system with internally consistent budgets.",
+      "acceptance": [
+        "Reconcile one equipment/resource register, source/load/thermal budgets and starting inventories; do not sum incompatible source-spec examples or duplicate growth/auxiliary/reserve margins.",
+        "Record coefficient provenance, units and provisional biological/process/thermal assumptions. Explicitly address water makeup/recovery, hazardous autonomy, hydrogen/carbon balance and microbial participation.",
+        "Package the configuration through application resources and show assumptions/limits in editor context; accept intentional operational shortages while rejecting physically inconsistent inputs.",
+        "Demonstrate a reproducible normal-operation scenario with accounting summaries and documented scope/qualification limits."
+      ]
+    },
+    {
+      "slice": "26b",
+      "title": "Station systems: Ship reference emergency and recovery scenarios",
+      "difficulty": "medium",
+      "priority": "medium",
+      "blockedBy": [
+        "23",
+        "26a"
+      ],
+      "what": "Select reproducible reference scenarios showing delayed resupply, failures, maintenance and recovery with expected visible outcomes.",
+      "acceptance": [
+        "Provide authored variants for resupply delay, power/cooling outages, constrained waste storage/ejection and maintenance/recovery, using implemented mechanisms rather than scripted hidden resources.",
+        "Document expected limiting services, key event ordering and bounded outcome ranges with provisional assumptions; traces show why outcomes occur.",
+        "Verify pause/reset/load and closing the results window preserve lifecycle semantics; scenario results use existing World and editor seams.",
+        "Do not certify safe disposal trajectories, hardware redundancy, human safety or indefinite self-sufficiency from conceptual examples."
+      ]
+    },
+    {
+      "slice": "26c",
+      "title": "Station systems: Demonstrate long-duration stability and repeatability",
+      "difficulty": "hard",
+      "priority": "high",
+      "blockedBy": [
+        "26b"
+      ],
+      "what": "Run the reference station over long simulated durations without numerical drift, hidden resource creation or unbounded retained history.",
+      "acceptance": [
+        "Define reproducible long-duration workloads and declared material/energy residual tolerances, tracking finite values, inventory bounds and scheduling correctness.",
+        "Check bounded runtime/history memory and equivalent outcomes across supported World update batching/time-scale paths, including reset and multi-World isolation.",
+        "Fix demonstrated stability defects without masking them with silent clamping or relaxing conservation to hide errors; report performance/assumption limitations.",
+        "Use public snapshots/events/diagnostics and existing headless infrastructure; these are model regressions, not flight or engineering qualification."
+      ]
+    }
+  ]
+}
