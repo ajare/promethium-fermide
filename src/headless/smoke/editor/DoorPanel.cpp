@@ -658,8 +658,66 @@ namespace
 		require(history.redo(*captureDocumentSnapshot(world, history), restore) && platformPositions() == fewerStops, "Platform redo changed candidates");
 	}
 
+	void checkMixedPlacementHistory()
+	{
+		using namespace core;
+		auto world = std::make_shared<World>("Mixed clipboard/history", 8, 5);
+		world->addRoom("Neighbour", 1, 0, 0, 1, 5);
+		auto room = world->addRoom("Room", 1, 0, 1, 2, 5);
+		world->addRoom("Front", 0, 0, 0, 8, 5);
+		world->addSectorWalkway(room, 4, 0); world->addSectorWalkway(room, 4, 1);
+		World::CreateLiftOptions liftOptions; liftOptions.stopOffsets = {0, 4};
+		world->addSectorPlatformLift(room, 0, 1, liftOptions);
+		world->addRoomLadder(room, 0, 0, {0, true, false});
+		world->addSectorDoor(0, 0, 1, World::RemoteControlledDoor1Options);
+		world->finishBuild(); world->pauseSimulation(); DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<Vector2> result;
+			for (uint32_t slot = 0; slot < world->getSector(room)->getNumObjects(); ++slot)
+			{
+				auto object = world->getSector(room)->getObject(slot);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (button && object->getCellY() == 0) result.push_back(button->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b)
+			{ return a.x < b.x || (a.x == b.x && a.y < b.y); }); return result;
+		};
+		auto initial = positions(); auto before = captureDocumentSnapshot(world, history);
+		// The same option readback and World authoring used by ordinary Door
+		// clipboard placement adds a fourth member to a mixed-family stack.
+		World::CreateDoorOptions copied;
+		require(world->getSectorDoorOptions(0, 0, 1, 1, copied), "Mixed clipboard readback failed");
+		world->addSectorDoor(0, 0, 2, copied); world->finishBuild(); commitDocumentEdit(before, history);
+		auto pasted = positions(); require(pasted.size() == 4 && pasted.front().x == pasted.back().x,
+			"Clipboard placement did not reflow mixed owners jointly");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == initial, "Mixed paste undo changed placement");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == pasted, "Mixed paste redo changed placement");
+		world->markSaved(); history.markSaved();
+		auto saved = captureDocumentSnapshot(world, history); auto graph = world->getGraph();
+		auto state = history.currentStateId(); auto undoCount = history.undoCount(); bool refused = false;
+		try { world->addSectorWalkway(room, 2, 0); } catch (std::exception const&) { refused = true; }
+		require(refused && world->getGraph() == graph && positions() == pasted && !world->isModified()
+			&& !world->isTraversalTopologyDirty() && world->isTraversalTopologyValid()
+			&& captureDocumentSnapshot(world, history)->yaml == saved->yaml
+			&& history.currentStateId() == state && history.undoCount() == undoCount && !history.isModified(),
+			"Failed mixed support edit changed document, graph or history");
+		before = captureDocumentSnapshot(world, history);
+		world->removeLocationWall(room, 0, CORE_SIDE_LEFT); world->finishBuild(); commitDocumentEdit(before, history);
+		auto split = positions(); require(split.size() == 4 && split.front().x < split.back().x, "Mixed wall edit did not split stacks");
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == pasted, "Mixed wall undo did not merge stacks");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == split, "Mixed wall redo did not restore canonical sides");
+	}
+
 	void checkLiftOwnedDoor()
 	{
+		checkMixedPlacementHistory();
 		checkEndpointPlacementHistory();
 		checkTransportPlacementHistory(false);
 		auto world = std::make_shared<core::World>("Lift door panel", 16, 3);

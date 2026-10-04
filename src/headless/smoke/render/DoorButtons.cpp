@@ -467,6 +467,48 @@ namespace
 			require(count == 4, "Endpoint draw fixture lost controls");
 		}
 
+		// #435: render and hit-test the final mixed placement after a structural
+		// wall edit, not just the initial stack. Neither member may keep stale
+		// vertical artwork when the canonical assignment splits the stack.
+		{
+			core::World world("Mixed structural artwork", 8, 3);
+			world.addRoom("Neighbour", 1, 0, 0, 1, 3);
+			auto host = world.addRoom("Room", 1, 0, 1, 2, 3);
+			world.addSectorWalkway(host, 2, 0); world.addSectorWalkway(host, 2, 1);
+			world.addRoomLadder(host, 0, 1, {0, true, false});
+			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			world.addSectorPlatformLift(host, 0, 0, options);
+			world.addRoom("Front", 0, 0, 0, 8, 3);
+			world.addSectorDoor(0, 0, 1, core::World::RemoteControlledDoor1Options); world.finishBuild();
+			for (bool opened : {false, true, false})
+			{
+				world.pauseSimulation();
+				if (opened) world.removeLocationWall(host, 0, CORE_SIDE_LEFT);
+				else if (world.getSector(host)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::None)
+					world.addLocationWall(host, 0, CORE_SIDE_LEFT);
+				world.finishBuild();
+				WorldDrawList drawList(kViewportClip);
+				renderSector(world.getSector(host), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+				auto geometry = visibleGeometry(drawList);
+				require(geometry.buttonFillTriangles == 8 && geometry.buttonOutlineLines == 4, "Mixed reflow lost rendered controls");
+				uint32_t lower = 0;
+				for (uint32_t slot = 0; slot < world.getSector(host)->getNumObjects(); ++slot)
+				{
+					auto object = world.getSector(host)->getObject(slot);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(world.getObjectAtPosition(1, centre.x, centre.y) == button, "Structural reflow retained stale hit geometry");
+					if (object->getCellY() == 0)
+					{
+						if (centre.x == 1) ++lower;
+						if (opened && centre.x == 1) require(button->getPosition().y == CORE_BUTTON_Y_OFFSET, "Separated control retained stack height");
+					}
+				}
+				require(lower == (opened ? 1u : 0u), "Draw fixture did not restore canonical side after wall edit");
+			}
+		}
+
 		// Fixed-side owners retain separately visible and targetable inset shapes.
 		for (int kind = 0; kind < 3; ++kind)
 		{

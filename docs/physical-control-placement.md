@@ -229,3 +229,28 @@ cover opposite sides, mixed protected stacks in reversed creation orders, shared
 normal-height approaches, selected Agent operations, invalid walls/support,
 transactional compatibility refusal, whole-unit history/clipboard/replay, and
 production draw/hit geometry. See [Dumbwaiters](dumbwaiters.md) for runtime contracts.
+
+## Mixed structural edits (#435)
+
+All migrated stationary owners participate in the same Layer/Level allocation;
+wall edits plan that complete row once, not once per Sector. Sector/object edits,
+control demand, support changes and reconstruction use the existing detached
+construction validation and final canonical reflow. Runtime motion and threshold
+opening remain outside placement inputs. Removed walls do not relax hosting
+Location ownership; Bulkhead thresholds remain blocking regardless of opening.
+
+Adding a Walkway to a built World can change Ladder endpoints and Platform Stops.
+Its complete detached replay now succeeds before any live structural edit is
+started: a refused new endpoint with no valid host/support leaves the document
+clean, graph/topology valid and resumable, and editor history unchanged.
+
+Production coverage includes a World containing every physical owner family,
+shared-wall edits and YAML/binary reconstruction; mixed Door/Platform/Ladder
+four-member stacks, fifth-demand refusals, splitting/remerging after wall edits,
+deletion and preferred-side restoration; independently protected selected
+operations after reflow and preservation of requests on impossible edits.
+Document clipboard-style authored placement, undo/redo and failed support edits
+exercise the real snapshot/history seams. Render command-stream and visible hit
+checks verify mixed stacks before and after structural wall changes. Existing
+owner-specific support, geometry, configuration, Location, runtime and permission
+checks remain part of the full validation matrix.

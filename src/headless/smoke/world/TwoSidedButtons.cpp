@@ -1947,8 +1947,217 @@ namespace
 	}
 }
 
+namespace
+{
+	// #435: four mixed controls must reassign together; the fifth demand is
+	// feasible only while the shared wall is removed. No derived positions are
+	// copied or retained during structural reconstruction.
+	void allOwnerReconstruction()
+	{
+		using namespace core;
+		World world("All stationary control families", 40, 5);
+		auto room = world.addRoom("Devices", 0, 0, 0, 8, 5);
+		world.addRoom("Door back", 1, 0, 0, 8, 5);
+		for (auto x : {1u, 4u}) world.addSectorWalkway(room, 1, x);
+		for (auto x : {5u, 6u, 7u}) world.addSectorWalkway(room, 2, x);
+		world.addSectorForceBridge(room, 1, 2, {2, CORE_SIDE_LEFT, true, false, 2});
+		world.addRoomLadder(room, 0, 5, {0, true, false});
+		World::CreateLiftOptions platform; platform.stopOffsets = {0, 2};
+		world.addSectorPlatformLift(room, 0, 6, platform);
+		world.addSectorDoor(0, 0, 0, World::RemoteControlledDoor1Options);
+		world.addSectorLightSwitch(room, 0);
+		auto dumb = world.addRoom("Dumbwaiter hall", 0, 0, 8, 2, 2);
+		world.addSectorWalkway(dumb, 1, 1);
+		world.addDumbwaiter(1, 0, 9);
+		auto hall = world.addRoom("Lift hall", 0, 0, 10, 2, 3);
+		world.addSectorWalkway(hall, 2, 1);
+		World::CreateLiftOptions lift; lift.stopOffsets = {0, 2}; world.addLift(1, 0, 11, lift);
+		world.addRoom("Shuttle hall", 0, 0, 12, 14, 1);
+		World::CreateShuttleOptions shuttle{1, 3, {0, 4}, 0}; world.addShuttle(1, 0, 13, 7, shuttle);
+		world.addRoom("Ladder lower", 0, 0, 26, 2, 1);
+		world.addRoom("Ladder upper", 0, 2, 26, 2, 1);
+		world.addLadder(1, 0, 26, {3, true, false});
+		world.addRoom("Airlock left", 0, 0, 28, 2, 1);
+		world.addRoom("Airlock right", 0, 0, 32, 2, 1);
+		world.addAirlock(0, 0, 30, 2);
+		world.addSectorBulkheadDoor(0, 0, 8, CORE_SIDE_LEFT);
+		world.finishBuild(); world.pauseSimulation();
+		auto layout = [](World const& scene)
+		{
+			std::vector<std::tuple<uint32_t, float, float>> result;
+			for (uint32_t sector = 0; sector < scene.getNumSectors(); ++sector)
+				for (auto button : buttonsIn(scene, sector))
+				{
+					auto point = scene.lookupInteractionPoint(button->getInteractionPointId());
+					require(bool(point), "All-owner reflow omitted interaction identity");
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(scene.getObjectAtPosition(scene.getSector(sector)->getLayerIndex(), centre.x, centre.y) == button,
+						"All-owner reflow lost independently targetable geometry");
+					result.emplace_back(scene.getSector(sector)->getLayerIndex(), centre.x, button->getPosition().y);
+				}
+			std::sort(result.begin(), result.end()); return result;
+		};
+		auto prior = layout(world); require(prior.size() == 21, "All-owner fixture omitted a control family");
+		// Removed walls do not let either landing move its Button to the other
+		// Location. Bulkhead insets remain blockers elsewhere in the same row.
+		world.removeLocationWall(dumb, 0, CORE_SIDE_RIGHT); world.finishBuild();
+		require(layout(world) == prior, "Mixed row crossed approach Locations after wall removal");
+		SerializationWorkData data;
+		auto replay = [&]<typename Serializer>()
+		{
+			auto writer = Serializer::toString(); world.serialize(*writer, data); writer->serialize();
+			auto reader = Serializer::fromString(writer->getSerializedString()); reader->deserialize(); World loaded("Placeholder", 1, 1);
+			require(loaded.deserialize(*reader, data) && layout(loaded) == prior, "All-owner mixed reconstruction changed placement");
+		};
+		replay.template operator()<YamlSerializer>(); replay.template operator()<BinarySerializer>();
+		world.pauseSimulation(); world.addLocationWall(dumb, 0, CORE_SIDE_RIGHT); world.finishBuild();
+		require(layout(world) == prior, "All-owner wall restoration retained stale placement");
+	}
+
+	void mixedStructuralReflow()
+	{
+		using namespace core;
+		for (bool reverse : {false, true})
+		{
+			World world("Mixed structural reflow", 12, 5); world.addLayer();
+			auto front = world.addRoom("Front", 0, 0, 0, 12, 5);
+			world.addSectorWalkway(front, 2, 1); world.addSectorWalkway(front, 2, 2);
+			world.addRoom("Neighbour", 1, 0, 0, 1, 5);
+			auto room = world.addRoom("Room", 1, 0, 1, 2, 5);
+			auto back = world.addRoom("Back", 2, 0, 2, 1, 5);
+			world.addSectorWalkway(back, 2, 0);
+			for (auto level : {2u, 4u})
+				for (auto x : {0u, 1u}) world.addSectorWalkway(room, level, x);
+			world.pauseSimulation();
+			auto callPermission = world.addAccessPermission("Platform call");
+			auto ladderPermission = world.addAccessPermission("Ladder extension");
+			World::CreateLiftOptions platform; platform.stopOffsets = {0, 2}; platform.initialStop = 0;
+			platform.landingControlPermissionRequirements = {{}, {callPermission}};
+			World::CreateLadderOptions ladder{0, true, false}; ladder.controlPermissionRequirements[0] = {ladderPermission}; ladder.controlPermissionRequirements[1] = {ladderPermission};
+			if (reverse) world.addRoomLadder(room, 2, 1, ladder);
+			world.addSectorPlatformLift(room, 0, 0, platform);
+			world.addRoomLadder(room, 0, 1, ladder);
+			if (!reverse) world.addRoomLadder(room, 2, 1, ladder);
+			world.addSectorDoor(0, 2, 1, World::RemoteControlledDoor1Options);
+			world.addSectorLightSwitch(room, 0);
+			world.finishBuild(); world.pauseSimulation();
+			auto row = [&](World const& scene)
+			{
+				auto buttons = buttonsIn(scene, room);
+				std::erase_if(buttons, [](auto b) { return (b->getPosition().y < 2 || b->getPosition().y >= 3) || b->getPosition().x + b->getSize().x * 0.5f == 1.5f; });
+				std::sort(buttons.begin(), buttons.end(), [](auto a, auto b)
+				{ return std::tuple{a->getPosition().x, a->getPosition().y} < std::tuple{b->getPosition().x, b->getPosition().y}; });
+				return buttons;
+			};
+			auto verify = [&](World const& scene, std::vector<float> centres)
+			{
+				auto buttons = row(scene); require(buttons.size() == centres.size(), "Mixed reflow omitted a demand");
+				std::map<float, std::shared_ptr<const Vertex>> approaches;
+				for (size_t i = 0; i < buttons.size(); ++i)
+				{
+					auto button = buttons[i]; auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(centre.x == centres[i], "Mixed reflow did not minimise stacks/preferences: count " + std::to_string(buttons.size()) + " member " + std::to_string(i) + " expected " + std::to_string(centres[i]) + " got " + std::to_string(centre.x));
+					auto point = scene.lookupInteractionPoint(button->getInteractionPointId());
+					require(point && point.entity->getPosition() == Vector2{centre.x, 2}, "Mixed reflow elevated interaction");
+					require(scene.getObjectAtPosition(1, centre.x, centre.y) == button, "Mixed reflow lost independent targeting");
+					for (uint32_t slot = 0; slot < scene.getSector(room)->getNumObjects(); ++slot)
+					{
+						auto object = scene.getSector(room)->getObject(slot);
+						if (!object || object->_getObject() != button) continue;
+						auto vertex = scene.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+						require(vertex && vertex->getPosition() == Vector2{centre.x, 2}, "Mixed reflow lost normal graph approach");
+						if (approaches.contains(centre.x)) require(approaches[centre.x] == vertex, "Mixed stack duplicated approach");
+						approaches[centre.x] = vertex;
+					}
+				}
+				return buttons;
+			};
+			verify(world, {2, 2, 2, 2});
+			auto graph = world.getGraph(); auto prior = row(world); auto modified = world.isModified();
+			bool refused = false;
+			try { world.addSectorDoor(0, 2, 2, World::RemoteControlledDoor1Options); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && row(world) == prior && world.isModified() == modified,
+				"Fifth mixed Button creation was not atomic");
+			world.removeLocationWall(room, 2, CORE_SIDE_LEFT); world.finishBuild();
+			verify(world, {1, 2, 2, 2});
+			world.pauseSimulation(); auto extra = world.addSectorDoor(0, 2, 2, World::RemoteControlledDoor1Options); world.finishBuild();
+			auto buttons = verify(world, {1, 2, 2, 2, 2});
+			// Canonical order puts Door at 1, and Platform before the other
+			// Door and both Ladders at 2. Permissions remain operation-specific.
+			require(world.getInteractionPointPermissionRequirement(buttons[1]->getInteractionPointId()) == std::vector<AccessPermissionId>{callPermission}, "Reflow swapped Platform authorization");
+			require(world.getInteractionPointPermissionRequirement(buttons[4]->getInteractionPointId()) == std::vector<AccessPermissionId>{ladderPermission}, "Reflow swapped Ladder authorization");
+			world.pauseSimulation(); auto actor = world.createAgent("Caller", room, 2, 1.0f);
+			world.grantAgentAccessPermission(actor, callPermission); world.resumeSimulation();
+			auto denied = world.requestInteraction(buttons[4]->getInteractionPointId(), actor);
+			require(world.lookupInteractionRequest(denied).entity->getResult() == InteractionResult::Rejected, "Reflow merged stacked permissions");
+			auto selected = world.requestInteraction(buttons[1]->getInteractionPointId(), actor);
+			world.advanceTick(); world.pauseSimulation(); world.markSaved();
+			graph = world.getGraph(); prior = row(world); modified = world.isModified();
+			auto request = world.lookupInteractionRequest(selected).entity;
+			auto result = request->getResult(); auto operations = request->getOperations();
+			refused = false;
+			try { world.addLocationWall(room, 2, CORE_SIDE_LEFT); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && row(world) == prior && world.isModified() == modified
+				&& world.lookupInteractionRequest(selected).entity == request && request->getResult() == result && request->getOperations() == operations,
+				"Impossible mixed wall restoration mutated layout/topology/operations");
+			for (uint32_t tick = 0; tick < 100; ++tick)
+			{
+				world.resumeSimulation(); world.advanceTick(); verify(world, {1, 2, 2, 2, 2});
+				require(world.lookupAgent(actor).entity->getGlobalPosition().y == 2, "Reflow raised stacked-control Agent");
+			}
+			require(request->getOperations().size() == 1, "Selected reflowed Platform control lost/merged commands");
+			require(world.setAgentRuntimeAccessPermissionGrant(actor, ladderPermission, true), "Ladder runtime grant failed");
+			auto extension = world.requestInteraction(buttons[4]->getInteractionPointId(), actor);
+			auto extensionRequest = world.lookupInteractionRequest(extension).entity;
+			require(extensionRequest && extensionRequest->getResult() != InteractionResult::Rejected, "Selected reflowed Ladder control refused authorized actor");
+			for (uint32_t tick = 0; tick < 30 && extensionRequest->getOperations().empty(); ++tick) world.advanceTick();
+			require(extensionRequest->getOperations().size() == 1 && world.lookupAgent(actor).entity->getGlobalPosition().y == 2,
+				"Selected reflowed Ladder merged commands or elevated its actor");
+			verify(world, {1, 2, 2, 2, 2});
+			world.pauseSimulation();
+			SerializationWorkData data;
+			auto replay = [&]<typename Serializer>()
+			{
+				auto writer = Serializer::toString(); world.serialize(*writer, data); writer->serialize();
+				auto reader = Serializer::fromString(writer->getSerializedString()); reader->deserialize();
+				World loaded("Placeholder", 1, 1); require(loaded.deserialize(*reader, data), "Mixed reconstruction failed");
+				verify(loaded, {1, 2, 2, 2, 2});
+			};
+			replay.template operator()<YamlSerializer>(); replay.template operator()<BinarySerializer>();
+			// Removing the extra Door makes restoring the wall feasible again.
+			require(world.removeSectorDoor(extra.door.sector->getIndex(), extra.door.index), "Mixed Door deletion failed");
+			verify(world, {1, 2, 2, 2});
+			world.pauseSimulation(); world.addLocationWall(room, 2, CORE_SIDE_LEFT); world.finishBuild();
+			verify(world, {2, 2, 2, 2});
+		}
+		// Adding support shortens the Ladder, but its new upper endpoint would
+		// have neither a wall-safe left host nor permanent right support. The
+		// detached mixed replay must fail without starting a live structural edit.
+		World world("Mixed support refusal", 8, 5);
+		world.addRoom("Neighbour", 1, 0, 0, 1, 5);
+		auto room = world.addRoom("Room", 1, 0, 1, 2, 5);
+		world.addRoom("Front", 0, 0, 0, 8, 5);
+		world.addSectorWalkway(room, 4, 0); world.addSectorWalkway(room, 4, 1);
+		World::CreateLiftOptions options; options.stopOffsets = {0, 4};
+		world.addSectorPlatformLift(room, 0, 1, options);
+		world.addRoomLadder(room, 0, 0, {0, true, false});
+		world.addSectorDoor(0, 0, 1, World::RemoteControlledDoor1Options);
+		world.finishBuild(); world.pauseSimulation(); world.markSaved();
+		auto graph = world.getGraph(); auto buttons = buttonsIn(world, room);
+		auto generation = world.getTopologyGeneration(); bool refused = false;
+		try { world.addSectorWalkway(room, 2, 0); } catch (std::exception const&) { refused = true; }
+		require(refused && world.getGraph() == graph && buttonsIn(world, room) == buttons && !world.isModified()
+			&& !world.isTraversalTopologyDirty() && world.isTraversalTopologyValid() && world.getTopologyGeneration() == generation,
+			"Refused mixed support edit dirtied topology/document or changed derived controls");
+		require(world.resumeSimulation(), "Refused support edit broke resumable topology");
+	}
+}
+
 void runDoorTwoSidedButtonSmokeChecks()
 {
+	allOwnerReconstruction();
+	mixedStructuralReflow();
 	fixedInsetControls();
 	independentEndpointControls();
 	deterministicTransportControls();

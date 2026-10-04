@@ -4662,10 +4662,8 @@ namespace core
 		auto wallSector = _getSector(sectorIndex);
 		auto const boundaryX = side == CORE_SIDE_LEFT ? wallSector->getCellX()
 			: wallSector->getCellX() + wallSector->getCellsWide();
-		for (auto const& rowSector : mSectors)
-			if (rowSector && rowSector->getLayerIndex() == wallSector->getLayerIndex())
-				(void)planPhysicalControls(wallSector->getLayerIndex(), rowSector->getIndex(),
-					wallSector->getCellY() + levelIndex, nullptr, ~0u, boundaryX);
+		(void)planPhysicalControls(wallSector->getLayerIndex(), ~0u,
+			wallSector->getCellY() + levelIndex, nullptr, ~0u, boundaryX);
 		beginStructuralEdit("removeLocationWall");
 
 		auto sector = _getSector(sectorIndex);
@@ -6564,7 +6562,11 @@ namespace core
 		// every Ladder in this column can shorten to the newly nearest Walkway.
 		if (mBuildFinished && !mDeserializingConstruction)
 		{
-			beginStructuralEdit("addSectorWalkway");
+			// The detached replay below validates all affected control families,
+			// including new Ladder endpoints and Platform Stops. Do not dirty the
+			// live topology before that validation succeeds.
+			if (!mSimulationPaused)
+				throw WorldException(this, "addSectorWalkway is a structural edit and requires pauseSimulation() before it can run");
 			auto room = _getSector(sectorIndex);
 			for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 			{
