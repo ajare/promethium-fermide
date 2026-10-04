@@ -6,9 +6,8 @@
 
 namespace core::physicalControl
 {
-	// Authored data only. Runtime identities are deliberately absent. These keys
-	// are available to future policy implementations, but legacy allocation does
-	// not sort by them or change its history-preserving tie breaks.
+	// Authored data only. Runtime identities are deliberately absent. Legacy
+	// owners retain their policy until migrated to explicit candidates.
 	enum class OwnerType { Airlock, BulkheadDoor, Door, Dumbwaiter, ForceBridge,
 		Ladder, Lift, LocationLightSwitch, PlatformLift, Shuttle };
 	struct Geometry
@@ -50,4 +49,7 @@ namespace core::physicalControl
 	// Legacy policy only: no new host rules, canonical ordering or stacking.
 	// Returns an assignment without modifying demands or production objects.
 	std::vector<uint32_t> allocateLegacy(std::vector<Demand> const& demands);
+	// One Layer/Level, across all hosting Locations. Explicit controls require
+	// distinct absolute centres; legacy-only components retain legacy policy.
+	std::vector<uint32_t> allocateCanonical(std::vector<Demand> const& demands);
 }

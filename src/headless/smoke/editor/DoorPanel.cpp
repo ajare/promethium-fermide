@@ -309,6 +309,50 @@ namespace
 			"Production document redo lost wall-safe placement/approaches");
 	}
 
+	void checkCanonicalDocumentHistory()
+	{
+		auto world = std::make_shared<core::World>("Canonical history", 12, 2);
+		world->addLayer();
+		world->addRoom("Front", 0, 0, 0, 12, 1);
+		auto middle = world->addRoom("Middle", 1, 0, 0, 6, 1);
+		world->addRoom("Back", 2, 0, 0, 12, 1);
+		auto wide = core::World::RemoteControlledDoor1Options; wide.width = 2;
+		world->addSectorDoor(0, 0, 2, wide);
+		world->addSectorDoor(1, 0, 3, core::World::RemoteControlledDoor1Options);
+		world->addSectorDoor(0, 0, 4, core::World::RemoteControlledDoor1Options);
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<float> result;
+			for (uint32_t i = 0; i < world->getSector(middle)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(middle)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (button) result.push_back(world->lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition().x);
+			}
+			std::sort(result.begin(), result.end()); return result;
+		};
+		auto initial = captureDocumentSnapshot(world, history);
+		// The same production option readback and creation seams used by Door
+		// clipboard placement; no derived Button position is copied.
+		core::World::CreateDoorOptions copied;
+		require(world->getSectorDoorOptions(1, 0, 3, 1, copied), "Door clipboard readback failed");
+		world->addSectorDoor(1, 0, 5, copied); world->finishBuild();
+		commitDocumentEdit(initial, history);
+		require(positions() == std::vector<float>{2, 3, 4, 5}, "Clipboard-style placement missed simultaneous reflow");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore)
+			&& positions() == std::vector<float>{3, 4, 5}, "Undo did not restore canonical preferences");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore)
+			&& positions() == std::vector<float>{2, 3, 4, 5}, "Redo depended on previous Button placement");
+	}
+
 	void checkExistingButtonsCanBeRemoved()
 	{
 		auto world = std::make_shared<core::World>("Door button checkbox", 12, 3);
@@ -333,6 +377,7 @@ namespace
 		ImGui::End();
 		ImGui::Render();
 		checkWallSafeDocumentEdits();
+		checkCanonicalDocumentHistory();
 	}
 
 	void checkLiftOwnedDoor()

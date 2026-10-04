@@ -287,6 +287,38 @@ namespace
 				"Production rendering did not centre wide Door fallback on its host boundary");
 		}
 
+		// Cross-owner reassignment must move production artwork as well as the
+		// interaction approach. Only the Layer-1 authored Button is filled.
+		{
+			core::World world("Reassigned artwork", 12, 2);
+			world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 12, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 0, 12, 1);
+			world.addRoom("Back", 2, 0, 0, 12, 1);
+			world.addSectorDoor(1, 0, 3, core::World::RemoteControlledDoor1Options);
+			auto check = [&](float expected)
+			{
+				WorldDrawList drawList(kViewportClip);
+				renderSector(world.getSector(middle), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+				float minX = 1e10f, maxX = -1e10f; int triangles = 0;
+				for (auto const& command : drawList.commands())
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+						triangle && isButtonFillTriangle(*triangle) && survivesClip(boundsOf(triangle->positions, 3, 0), triangle->clip))
+					{
+						++triangles;
+						for (auto p : triangle->positions) { minX = std::min(minX, p.x); maxX = std::max(maxX, p.x); }
+					}
+				require(triangles == 2 && std::abs((minX + maxX) * 0.5f - expected * CORE_CELL_WIDTH_PIXELS) < 0.001f,
+					"Renderer retained a previous control assignment");
+			};
+			world.finishBuild(); world.pauseSimulation(); check(4);
+			auto options = core::World::RemoteControlledDoor1Options; options.width = 2;
+			auto earlier = world.addSectorDoor(0, 0, 2, options);
+			world.finishBuild(); check(3);
+			world.removeSectorDoor(earlier.door.sector->getIndex(), earlier.door.index);
+			world.finishBuild(); check(4);
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

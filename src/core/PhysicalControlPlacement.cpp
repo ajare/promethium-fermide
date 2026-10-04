@@ -4,6 +4,7 @@
 #include <set>
 #include <stdexcept>
 #include <utility>
+#include <tuple>
 
 namespace core::physicalControl
 {
@@ -151,4 +152,98 @@ namespace core::physicalControl
 
 		return assignment;
 	}
+	vector<uint32_t> allocateCanonical(vector<Demand> const& demands)
+	{
+		auto key = [](Owner const& owner)
+		{
+			auto const& g = owner.geometry;
+			auto const& h = owner.hostingLocation;
+			auto const& r = owner.role;
+			return tuple{ g.x, owner.type, g.layer, g.baseLevel, g.width, g.height,
+				h.layer, h.x, h.baseLevel, h.width, h.height, r.order, r.x, r.level };
+		};
+		vector<uint32_t> order, assignment(demands.size());
+		for (uint32_t i = 0; i < demands.size(); ++i) order.push_back(i);
+		stable_sort(order.begin(), order.end(), [&](auto a, auto b)
+		{
+			if (demands[a].hasOwner != demands[b].hasOwner) return demands[a].hasOwner;
+			return demands[a].hasOwner && key(demands[a].owner) < key(demands[b].owner);
+		});
+		for (size_t i = 1; i < order.size(); ++i)
+			if (demands[order[i]].hasOwner && demands[order[i - 1]].hasOwner
+				&& key(demands[order[i]].owner) == key(demands[order[i - 1]].owner))
+				throw runtime_error("Indistinguishable duplicate physical-control definitions");
+
+		auto connected = [&](uint32_t a, uint32_t b)
+		{
+			for (auto const& x : demands[a].candidates)
+				for (auto const& y : demands[b].candidates)
+					if (x.centreKey() == y.centreKey()) return true;
+			return false;
+		};
+		vector<bool> visited(demands.size());
+		for (auto root : order)
+		{
+			if (visited[root]) continue;
+			vector<uint32_t> component{ root };
+			visited[root] = true;
+			for (size_t i = 0; i < component.size(); ++i)
+				for (auto other : order)
+					if (!visited[other] && connected(component[i], other))
+					{ visited[other] = true; component.push_back(other); }
+			// Restore the complete authored ordering after connectivity discovery.
+			vector<uint32_t> sorted;
+			for (auto index : order)
+				if (find(component.begin(), component.end(), index) != component.end()) sorted.push_back(index);
+			component = std::move(sorted);
+			bool migrated = any_of(component.begin(), component.end(), [&](auto i) { return demands[i].hasOwner; });
+			if (!migrated)
+			{
+				vector<Demand> legacy;
+				for (auto i : component) legacy.push_back(demands[i]);
+				auto choices = allocateLegacy(legacy);
+				for (size_t i = 0; i < component.size(); ++i) assignment[component[i]] = choices[i];
+				continue;
+			}
+
+			vector<uint32_t> choice(component.size()), best;
+			uint32_t bestPenalty = ~0u;
+			function<void(uint32_t, uint32_t)> search = [&](uint32_t depth, uint32_t penalty)
+			{
+				// Preferred-first enumeration in canonical order makes the first
+				// minimum-penalty solution the lexicographic winner. Previous
+				// placements never enter the migrated objective.
+				if (!best.empty() && penalty >= bestPenalty) return;
+				if (depth == component.size()) { best = choice; bestPenalty = penalty; return; }
+				auto const& demand = demands[component[depth]];
+				vector<uint32_t> candidates;
+				for (uint32_t i = 0; i < demand.candidates.size(); ++i) candidates.push_back(i);
+				stable_sort(candidates.begin(), candidates.end(), [&](auto a, auto b)
+				{
+					auto preferred = demand.hasOwner ? demand.defaultCandidate : demand.currentCandidate;
+					return (a == preferred) > (b == preferred);
+				});
+				for (auto candidate : candidates)
+				{
+					auto const& position = demand.candidates[candidate];
+					bool collision = false;
+					for (uint32_t i = 0; i < depth; ++i)
+					{
+						auto const& other = demands[component[i]];
+						auto const& occupied = other.candidates[choice[i]];
+						collision |= (position.cellX == occupied.cellX && position.side == occupied.side)
+							|| (position.centreKey() == occupied.centreKey() && (demand.hasOwner || other.hasOwner));
+					}
+					if (collision) continue;
+					choice[depth] = candidate;
+					search(depth + 1, penalty + (demand.hasOwner && candidate != demand.defaultCandidate));
+				}
+			};
+			search(0, 0);
+			if (best.empty()) throw runtime_error("Physical controls require distinct positions (stacking is not supported)");
+			for (size_t i = 0; i < component.size(); ++i) assignment[component[i]] = best[i];
+		}
+		return assignment;
+	}
+
 }

@@ -417,6 +417,161 @@ namespace
 		require(!move.valid, "Unsupported Door movement must be rejected");
 	}
 
+	void canonicalOrderContract()
+	{
+		using namespace core::physicalControl;
+		Demand earlier{ { Candidate::explicitHost(3, 0, CORE_SIDE_LEFT), Candidate::explicitHost(2, 0, CORE_SIDE_LEFT) },
+			0, 1, { OwnerType::Door, {0, 2, 0, 1, 1}, {1, 0, 0, 8, 1}, {0, 2, 0} }, true };
+		// Exercise every field of the approved tuple, including hosting-Location
+		// fields (physical coincidence must not be scoped by their ownership).
+		for (int field = 0; field < 14; ++field)
+		{
+			auto later = earlier;
+			auto& g = later.owner.geometry; auto& h = later.owner.hostingLocation; auto& r = later.owner.role;
+			switch (field)
+			{
+			case 0: ++g.x; break;
+			case 1: later.owner.type = OwnerType::Dumbwaiter; break;
+			case 2: ++g.layer; break;
+			case 3: ++g.baseLevel; break;
+			case 4: ++g.width; break;
+			case 5: ++g.height; break;
+			case 6: ++h.layer; break;
+			case 7: ++h.x; break;
+			case 8: ++h.baseLevel; break;
+			case 9: ++h.width; break;
+			case 10: ++h.height; break;
+			case 11: ++r.order; break;
+			case 12: ++r.x; break;
+			case 13: ++r.level; break;
+			}
+			require(allocateCanonical({earlier, later}) == std::vector<uint32_t>{0, 1}
+				&& allocateCanonical({later, earlier}) == std::vector<uint32_t>{1, 0},
+				"Canonical tuple tie depends on creation order or previous placement: " + std::to_string(field));
+		}
+		bool refused = false;
+		try { (void)allocateCanonical({earlier, earlier}); }
+		catch (std::runtime_error const&) { refused = true; }
+		require(refused, "Indistinguishable duplicate definitions were ordered by insertion");
+	}
+
+	void canonicalSideReassignment()
+	{
+		// Four Doors across three Layers. The last control has only its left
+		// host; admitting it requires A and C to change sides simultaneously.
+		for (bool reverse : { false, true })
+		{
+			core::World world("Canonical reassignment", 12, 2);
+			world.addLayer();
+			world.addRoom("Front left", 0, 0, 0, 4, 1);
+			world.addRoom("Front right", 0, 0, 4, 8, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 0, 6, 1);
+			world.addRoom("Back", 2, 0, 0, 12, 1);
+			world.pauseSimulation();
+			core::AccessPermissionId permissions[4];
+			for (uint32_t i = 0; i < 4; ++i) permissions[i] = world.addAccessPermission("Control " + std::to_string(i));
+			core::World::CreateObjectResult doors[4];
+			auto add = [&](uint32_t i)
+			{
+				auto options = core::World::RemoteControlledDoor1Options;
+				options.width = i == 0 ? 2 : 1;
+				options.controlPermissionRequirements[i % 2 == 0 ? 1 : 0] = { permissions[i] };
+				doors[i] = world.addSectorDoor(i % 2, 0, i + 2, options).door;
+			};
+			if (reverse) { for (uint32_t i = 4; i-- > 0;) add(i); }
+			else { for (uint32_t i = 0; i < 3; ++i) add(i); }
+			world.finishBuild(); world.pauseSimulation();
+			auto centres = [&]
+			{
+				std::vector<float> result;
+				for (auto button : buttonsIn(world, middle))
+					result.push_back((button->getPosition() + button->getSize() * 0.5f).x);
+				std::sort(result.begin(), result.end()); return result;
+			};
+			std::vector<core::InteractionPointId> retained;
+			for (auto button : buttonsIn(world, middle)) retained.push_back(button->getInteractionPointId());
+			if (!reverse)
+			{
+				require(centres() == std::vector<float>{3, 4, 5}, "Preferred-side tie did not favour earlier owner X");
+				add(3); world.finishBuild();
+			}
+			require(centres() == std::vector<float>{2, 3, 4, 5}, "Simultaneous side reassignment was missed");
+			for (auto id : retained) require(bool(world.lookupInteractionPoint(id)), "Reassignment replaced an existing interaction identity");
+			core::InteractionPointId points[4];
+			core::TraversalResourceId resources[4];
+			for (uint32_t i = 0; i < 4; ++i)
+			{
+				auto door = std::dynamic_pointer_cast<const core::DoorSectorObject>(doors[i].sector->getObject(doors[i].index));
+				resources[i] = door->getDoor()->getTraversalResourceId();
+				auto resource = world.lookupTraversalResource(resources[i]);
+				bool found = false;
+				for (auto pointId : resource.entity->getControls())
+				{
+					auto point = world.lookupInteractionPoint(pointId);
+					if (point.entity->getSector().value != uint64_t(middle) + 1) continue;
+					found = true; points[i] = pointId;
+					require(point.entity->getPosition().x == float(i + 2), "Creation order changed selected control's assignment");
+					require(world.getInteractionPointPermissionRequirement(pointId) == std::vector<core::AccessPermissionId>{permissions[i]},
+						"Reassignment merged or lost independent authorization");
+				}
+				require(found, "Required independent control was lost");
+			}
+			for (auto button : buttonsIn(world, middle))
+			{
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				auto point = world.lookupInteractionPoint(button->getInteractionPointId());
+				require(point && point.entity->getPosition().x == centre.x, "Interaction targeting retained an old position");
+				std::shared_ptr<const core::SectorObject> selected;
+				require(world.getObjectAtPosition(1, centre.x, centre.y, &selected) == button,
+					"Hit targeting selected another reassigned control");
+				uint32_t approaches = 0;
+				for (auto vertex : world.getGraph()->getVertices())
+					if (vertex->getObject() == button)
+					{
+						++approaches;
+						require(vertex->getPosition() == point.entity->getPosition(), "Graph retained a previous approach position");
+					}
+				require(approaches == 1, "Reassignment merged or omitted a graph approach");
+			}
+			auto before = world.getGraph();
+			auto shape = centres();
+			auto options = core::World::RemoteControlledDoor1Options;
+			bool refused = false;
+			// Another Door at x=2 on Layer 1 has only {2,3}, both occupied.
+			try { world.addSectorDoor(1, 0, 2, options); }
+			catch (core::Exception const&) { refused = true; }
+			require(refused && world.getGraph() == before && centres() == shape,
+				"Unsatisfiable cross-owner layout was not refused atomically");
+			auto actor = world.createAgent("Selected control operator", middle, 0, 3.0f);
+			require(world.grantAgentAccessPermission(actor, permissions[1]), "Could not authorize selected control");
+			require(world.resumeSimulation(), "Reassigned scene could not resume");
+			auto denied = world.requestInteraction(points[0], actor);
+			auto rejected = world.lookupInteractionRequest(denied);
+			require(rejected && rejected.entity->getResult() == core::InteractionResult::Rejected
+				&& rejected.entity->getMissingPermissions() == std::vector<core::AccessPermissionId>{permissions[0]}
+				&& rejected.entity->getOperations().empty(), "Reassignment bypassed another control's authorization");
+			auto requested = world.requestInteraction(points[1], actor);
+			auto admitted = world.lookupInteractionRequest(requested);
+			require(admitted && admitted.entity->getOperations().size() == 1, "Selected reassigned control lost its command");
+			auto operation = world.lookupDeviceOperation(admitted.entity->getOperations().front().first);
+			require(operation && operation.entity->getCommand().type == core::DeviceCommandType::OpenDoor
+				&& operation.entity->getCommand().traversalResource == resources[1], "Reassignment operated a different owner");
+			world.advanceTicks(300); world.pauseSimulation();
+			core::SerializationWorkData data;
+			auto writer = core::YamlSerializer::toString(); world.serialize(*writer, data); writer->serialize();
+			core::World loaded("Placeholder", 1, 1);
+			auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+			require(loaded.deserialize(*reader, data), "Canonical layout did not load/replay");
+			std::vector<float> restored;
+			for (auto button : buttonsIn(loaded, middle)) restored.push_back((button->getPosition() + button->getSize() * 0.5f).x);
+			std::sort(restored.begin(), restored.end());
+			require(restored == shape, "Replay changed canonical layout");
+			require(world.removeSectorDoor(doors[3].sector->getIndex(), doors[3].index), "Door deletion refused");
+			world.finishBuild();
+			require(centres() == std::vector<float>{3, 4, 5}, "Deletion retained previous side assignments");
+		}
+	}
+
 	void addingAButtonGivesBothSidesOne()
 	{
 		Scene scene = buildTwoRoomScene("Add door button");
@@ -708,6 +863,8 @@ namespace
 void runDoorTwoSidedButtonSmokeChecks()
 {
 	placementBoundaryPreservesLegacyPolicy();
+	canonicalOrderContract();
+	canonicalSideReassignment();
 	wallSafeAuthoring();
 	wallSafeSupportAndBulkheads();
 	authoredPlacementPositionsRemainUnchanged();

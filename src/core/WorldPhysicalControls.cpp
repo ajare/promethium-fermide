@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <format>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include "core/World.h"
 #include "core/ButtonSectorObject.h"
@@ -35,6 +36,7 @@ namespace core
 				Candidate::explicitHost(geometry.x, 0, CORE_SIDE_LEFT) }
 			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2, CORE_SIDE_MIDDLE) };
 		demand.candidates.clear();
+		demand.defaultCandidate = ~0u;
 		for (auto const& candidate : candidates)
 		{
 			auto x = candidate.cellX;
@@ -64,46 +66,37 @@ namespace core
 				}
 				if (blocked) continue;
 			}
+			if (candidate.centreKey() == candidates.front().centreKey())
+				demand.defaultCandidate = static_cast<uint32_t>(demand.candidates.size());
 			demand.candidates.push_back(candidate);
 		}
 		if (demand.candidates.empty()) throw WorldException(this, "No valid host/support for required physical control");
-		demand.defaultCandidate = demand.currentCandidate = 0;
+		demand.currentCandidate = 0;
 		return demand;
 	}
 
 	World::PhysicalControlPlan World::planPhysicalControls(uint32_t layer, uint32_t sector,
 		uint32_t y, physicalControl::Demand const* extra, uint32_t blockedX, uint32_t openedX, uint32_t unsupportedX) const
 	{
+		(void)sector; // Physical coincidence is Layer/Level-wide, not Sector-local.
 		PhysicalControlPlan plan;
 		for (uint32_t i = 0; i < mPhysicalControlPlacements.size(); ++i)
 		{
 			auto const& p = mPhysicalControlPlacements[i];
-			if (p.layerIndex != layer || p.sectorIndex != sector || p.cellY != y) continue;
+			if (p.layerIndex != layer || p.cellY != y) continue;
 			plan.row.push_back(i);
 			plan.demands.push_back(validPhysicalControlDemand({ p.candidates, p.defaultCandidate,
 				p.currentCandidate, p.owner, p.hasOwner }, y, blockedX, openedX, unsupportedX));
 		}
 		if (extra) plan.demands.push_back(validPhysicalControlDemand(*extra, y, blockedX, openedX, unsupportedX));
-		try { plan.assignment = physicalControl::allocateLegacy(plan.demands); }
+		try { plan.assignment = physicalControl::allocateCanonical(plan.demands); }
 		catch (runtime_error const& error) { throw WorldException(this, error.what()); }
-		// This slice introduces neither stacking nor legacy horizontal nudges for
-		// migrated owners. Coincident explicit controls must be refused.
-		for (size_t i = 0; i < plan.demands.size(); ++i)
-			for (size_t j = 0; j < i; ++j)
-			{
-				auto const& a = plan.demands[i].candidates[plan.assignment[i]];
-				auto const& b = plan.demands[j].candidates[plan.assignment[j]];
-				if (a.centreKey() == b.centreKey() && (a.quarterOffset >= 0 || b.quarterOffset >= 0))
-					throw WorldException(this, "Physical controls require distinct positions (stacking is not supported)");
-			}
 		return plan;
 	}
 
 	void World::validatePhysicalControlBoundary(uint32_t layer, uint32_t y, uint32_t blockedX) const
 	{
-		for (auto const& sector : mSectors)
-			if (sector && sector->getLayerIndex() == layer)
-				(void)planPhysicalControls(layer, sector->getIndex(), y, nullptr, blockedX);
+		(void)planPhysicalControls(layer, ~0u, y, nullptr, blockedX);
 	}
 
 	void World::validatePhysicalControlSectorCreation(uint32_t layer, uint32_t x, uint32_t y,
@@ -125,13 +118,13 @@ namespace core
 	void World::reflowAllPhysicalControls(bool finalPolicy)
 	{
 		// Plan every row first: a failure must not partly move other controls.
-		map<pair<uint32_t, uint32_t>, uint32_t> rows;
-		for (auto const& p : mPhysicalControlPlacements) rows[{p.sectorIndex, p.cellY}] = p.layerIndex;
+		set<pair<uint32_t, uint32_t>> rows;
+		for (auto const& p : mPhysicalControlPlacements) rows.emplace(p.layerIndex, p.cellY);
 		mResolvingPhysicalControls = finalPolicy;
 		try
 		{
-			for (auto const& [row, layer] : rows) (void)planPhysicalControls(layer, row.first, row.second);
-			for (auto const& [row, layer] : rows) reflowPhysicalControls(layer, row.first, row.second);
+			for (auto const& [layer, y] : rows) (void)planPhysicalControls(layer, ~0u, y);
+			for (auto const& [layer, y] : rows) reflowPhysicalControls(layer, ~0u, y);
 		}
 		catch (...) { mResolvingPhysicalControls = false; throw; }
 		mResolvingPhysicalControls = false;
@@ -154,8 +147,7 @@ namespace core
 		string caller = "World::createPhysicalControl";
 		auto validated = validPhysicalControlDemand(demand, y);
 		auto candidates = validated.candidates;
-		if (candidates.empty() || demand.defaultCandidate >= candidates.size()
-			|| demand.currentCandidate >= candidates.size())
+		if (candidates.empty() || validated.currentCandidate >= candidates.size())
 			throw WorldException(this, "Physical control requires valid candidates");
 		for (auto const& candidate : candidates)
 			if (candidate.side < CORE_SIDE_LEFT || candidate.side > CORE_SIDE_MIDDLE
@@ -175,12 +167,10 @@ namespace core
 			if (cell.controls[candidate.side] == ~0u && initialCandidate == ~0u)
 				initialCandidate = i;
 		}
-		if (demand.hasOwner)
-		{
-			auto plan = planPhysicalControls(layerIndex, sectorIndex, y, &validated);
-			initialCandidate = plan.assignment.back();
-		}
-		if (initialCandidate == ~0u || demand.hasOwner)
+		// Preflight legacy additions too: they may displace migrated controls on
+		// this Layer/Level, and refusal must precede object creation.
+		auto plan = planPhysicalControls(layerIndex, sectorIndex, y, &validated);
+		initialCandidate = plan.assignment.back();
 		{
 			// Include the not-yet-created control in the row optimization. This can
 			// move a flexible existing control out of the required slot before the
@@ -229,8 +219,7 @@ namespace core
 		for (uint32_t i = 0; i < mPhysicalControlPlacements.size(); ++i)
 		{
 			auto const& placement = mPhysicalControlPlacements[i];
-			if (placement.layerIndex == layerIndex && placement.sectorIndex == sectorIndex
-				&& placement.cellY == y)
+			if (placement.layerIndex == layerIndex && placement.cellY == y)
 				row.push_back(i);
 		}
 		if (row.empty()) return;
@@ -259,6 +248,7 @@ namespace core
 	void World::applyPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y,
 		vector<uint32_t> const& row, vector<uint32_t> const& assignment)
 	{
+		(void)sectorIndex;
 		for (uint32_t i = 0; i < row.size(); ++i)
 			mPhysicalControlPlacements[row[i]].currentCandidate = assignment[i];
 		auto centerKey = [](PhysicalControlCandidate const& candidate) { return candidate.centreKey(); };
@@ -306,7 +296,7 @@ namespace core
 					else if (candidate.side == CORE_SIDE_LEFT) adjustment = -0.025f;
 				}
 				auto control = static_pointer_cast<ButtonSectorObject>(
-					mSectors[sectorIndex]->_getObject(placement.objectIndex));
+					mSectors[placement.sectorIndex]->_getObject(placement.objectIndex));
 				control->_setCellPosition(candidate.cellX, y);
 				auto button = static_pointer_cast<Button>(control->_getObject());
 				button->_setPlacement(centerX, y + CORE_BUTTON_Y_OFFSET, adjustment);
