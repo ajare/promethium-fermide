@@ -224,6 +224,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/simulation/Airlocks.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/SecurityScanners.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/BoothWindows.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/Dumbwaiters.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/world/BoothWindows.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/Airlocks.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/persistence/BoothWindows.cpp` | module-owned | `pf-smoke-persistence` |

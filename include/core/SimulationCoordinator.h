@@ -13,6 +13,7 @@
 namespace core
 {
 	class World;
+	class Dumbwaiter;
 	class Agent;
 	class Edge;
 	class Vertex;
@@ -181,6 +182,9 @@ namespace core
 		// Device-operation lifecycle. Commands coalesce: one accepted command is
 		// shared by every requester, and the operation outlives no requester.
 		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+		void advanceDumbwaiters();
+		void resetDumbwaiter(Dumbwaiter& unit);
+		void admitDumbwaiterPress(DeviceOperationId id, DeviceOperation& operation);
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 

@@ -4,11 +4,204 @@
 #include "ObjectTileset.h"
 #include "UISettings.h"
 #include "core/World.h"
+#include "core/Graph.h"
 #include <cmath>
+#include "../support/DumbwaiterFixture.h"
 
 extern UISettings gUISettings;
 namespace
 {
+	void dumbwaiterPresentation(smoke::Context const&)
+	{
+		using smoke::require;
+		ImGui::GetIO().DisplaySize = {1200, 800}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
+		gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 800;
+		gUISettings.worldZoom = 1; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
+		gUISettings.renderNextLayerWireframe = false;
+		for (uint32_t initial : {0u, 1u})
+		{
+			auto world = dumbwaiter_fixture::make();
+			auto id = world->addDumbwaiter(1, 0, 2, {initial, 2}); world->finishBuild();
+			for (uint32_t layer : {0u, 1u})
+			{
+				gUISettings.visibleLayer = layer;
+				WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+				unsigned car = 0, here = 0, elsewhere = 0;
+				for (auto const& command : drawing.commands())
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+					{
+						if (triangle->colour == IM_COL32(180, 190, 205, 255))
+						{
+							++car;
+							if (layer == 0) require(triangle->clip.minimum.x > 2.1f * 64
+								&& triangle->clip.maximum.x < 2.9f * 64
+								&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48,
+								"Car escaped owned aperture clipping");
+							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > 64,
+								"Selected shaft car incorrectly aperture-clipped");
+						}
+						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255))
+						{
+							for (auto p : triangle->positions) require(p.x >= 2.92f * 64 - 0.01f && p.x <= 2.98f * 64 + 0.01f,
+								"Landing button requires neighbouring cell or covers aperture");
+							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here; else ++elsewhere;
+						}
+					}
+				require(car == 2, "Initial car missing or duplicated in production draw commands");
+				require(here == (layer == 0 ? 2u : 0u) && elsewhere == here, "Landing buttons not visible exclusively on landing Layer");
+			}
+			gUISettings.visibleLayer = 0; gUISettings.renderNextLayerWireframe = true;
+			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			unsigned car = 0;
+			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(180, 190, 205, 255)) ++car;
+			require(car == 2, "Wireframe leaked a second filled car over landing Layer");
+			gUISettings.renderNextLayerWireframe = false;
+			auto unit = world->lookupDumbwaiter(id);
+			require(bool(unit), "Runtime render fixture lost unit");
+			world->resumeSimulation(); world->pressDumbwaiterLanding(unit->getId(), initial);
+			unsigned elapsed = 0;
+			for (unsigned ticks : {12u, 48u, 108u, 168u, 192u, 216u})
+			{
+				require(world->advanceTicks(ticks - elapsed), "Runtime render tick failed"); elapsed = ticks;
+				for (uint32_t layer : {0u, 1u})
+				{
+					gUISettings.visibleLayer = layer;
+					WorldDrawList motion({{0, 0}, {1200, 800}}); renderWorld(world, &motion);
+					unsigned busy = 0, carCount = 0, here = 0, elsewhere = 0;
+					float low = 10000, high = -10000;
+					for (auto const& command : motion.commands())
+						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+						{
+							if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
+							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here;
+							if (triangle->colour == IM_COL32(200, 160, 80, 255)) ++elsewhere;
+							if (triangle->colour == IM_COL32(180, 190, 205, 255))
+							{
+								++carCount;
+								for (auto p : triangle->positions) { low = std::min(low, p.y); high = std::max(high, p.y); }
+								if (layer == 0)
+								{
+									auto shutter = ticks <= 48 ? unit->getAperture(initial) : unit->getAperture(1 - initial);
+									auto fullHeight = 48.0f * 38 / 48;
+									require(triangle->clip.maximum.x - triangle->clip.minimum.x < 52
+										&& triangle->clip.maximum.y - triangle->clip.minimum.y <= fullHeight * shutter->getProgress() + 0.001f,
+										"Moving car escaped current shutter/depth clip");
+								}
+							}
+						}
+					if (layer == 1)
+						require(carCount == 2 && std::abs(low - (800 - (unit->getCarPosition().y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f
+							&& std::abs(high - (800 - (unit->getCarPosition().y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS)) < 0.001f,
+							"Production shaft car did not follow physical intermediate position");
+					else
+					{
+						if (ticks >= 48 && ticks <= 168) require(carCount == 0, "Closed travel apertures expose moving car");
+						else require(carCount == 2, "Uncovered aperture lost car");
+					}
+					require(busy == (layer == 0 && ticks < 216 ? 4u : 0u)
+						&& here == (layer == 0 && ticks == 216 ? 2u : 0u) && elsewhere == here,
+						"Buttons did not show both busy until arrival fully opened");
+				}
+			}
+		}
+		for (unsigned edit = 0; edit < 4; ++edit)
+		{
+			auto world = dumbwaiter_fixture::make(0, true, 2); world->addLayer();
+			auto id = world->addDumbwaiter(2, 0, 2, {1, 2}); world->finishBuild();
+			auto authored = dumbwaiter_fixture::yaml(*world);
+			world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(80), "Render reconciliation fixture failed"); world->pauseSimulation();
+			if (edit == 0) world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
+			if (edit == 1) world->applyDeleteLayer(world->planDeleteLayer(0));
+			if (edit == 2) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 2, 2));
+			if (edit == 3) world->applyDeleteLevel(world->planDeleteLevel(0));
+			for (bool restored : {false, true})
+			{
+				if (restored)
+				{
+					auto reader = core::YamlSerializer::fromString(authored); reader->deserialize(); core::SerializationWorkData work;
+					require(world->deserialize(*reader, work), "Render restoration refused"); world->pauseSimulation();
+				}
+				auto unit = world->lookupDumbwaiter(id);
+				for (uint32_t layer = 0; layer < world->getLayerCount(); ++layer)
+				{
+					gUISettings.visibleLayer = layer; WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+					unsigned car = 0, buttons = 0, busy = 0;
+					for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+					{
+						if (triangle->colour == IM_COL32(180, 190, 205, 255))
+						{
+							++car; require(bool(unit), "Deleted car remains in production draw commands");
+							for (auto p : triangle->positions) require(p.y >= 800 - 1.55f * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= 800 - 1.18f * CORE_LEVEL_HEIGHT_PIXELS + 0.001f, "Reconciled car retained in-flight position");
+							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * 64
+								&& triangle->clip.maximum.x < 2.9f * 64, "Restored car escaped aperture clip");
+						}
+						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255)) ++buttons;
+						if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
+					}
+					bool visible = unit && (layer == unit->getLayerIndex() || layer + 1 == unit->getLayerIndex());
+					require(car == (visible ? 2u : 0u) && buttons == (unit && layer + 1 == unit->getLayerIndex() ? 4u : 0u)
+						&& busy == 0, "Reconciled/restored presentation duplicated components or retained busy buttons");
+				}
+				if (unit) for (auto const& vertex : world->getGraph()->getVertices())
+					require(vertex->getSector() != unit, "Restored shaft became traversable");
+				require(world->getSimulationSnapshot().traversalResources.empty(), "Reconciliation introduced passenger resources");
+			}
+		}
+		{
+			auto world = dumbwaiter_fixture::make(0, true, 2);
+			world->addRoom("Front", 0, 0, 2, 1, 2);
+			world->addSectorWindow(0, 0, 2, 1, 2);
+			world->addDumbwaiter(2, 0, 2); world->finishBuild();
+			gUISettings.visibleLayer = 0;
+			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			unsigned car = 0;
+			for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(180, 190, 205, 255))
+			{
+				++car; require(triangle->clip.minimum.x > 2.1f * 64 && triangle->clip.maximum.x < 2.9f * 64
+					&& triangle->clip.maximum.y - triangle->clip.minimum.y < 48, "Nested aperture clipping leaked car geometry");
+			}
+			require(car == 2, "Recursive aperture lost initial car");
+		}
+		{
+			auto world = dumbwaiter_fixture::make();
+			dumbwaiter_fixture::addLandings(*world, 3, 0, 2);
+			dumbwaiter_fixture::addLandings(*world, 1, 4);
+			auto id = world->addDumbwaiter(1,0,2,{1,0.5f}); world->finishBuild();
+			require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id,3,2,0)), "Render movement fixture failed");
+			world->addDumbwaiter(1,0,4,{1,0.5f}); world->finishBuild();
+			for (uint32_t layer = 0; layer < 4; ++layer)
+			{
+				gUISettings.visibleLayer = layer;
+				WorldDrawList drawing({{0,0},{1200,800}}); renderWorld(world,&drawing);
+				unsigned cars = 0, buttons = 0; float x = layer < 2 ? 4.0f : 0.0f, y = layer < 2 ? 1.0f : 3.0f;
+				for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+				{
+					if (triangle->colour == IM_COL32(180,190,205,255))
+					{
+						++cars;
+						for (auto p : triangle->positions)
+							require(p.x > x * 64 && p.x < (x + 1) * 64
+								&& p.y >= 800 - (y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= 800 - (y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
+								"Moved/pasted car rendered at old shaft/Level");
+						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * 64
+							&& triangle->clip.maximum.x < (x + 0.9f) * 64, "Moved/pasted car lost landing aperture clip");
+					}
+					if (triangle->colour == IM_COL32(80,200,120,255) || triangle->colour == IM_COL32(200,160,80,255))
+					{
+						++buttons;
+						for (auto p : triangle->positions) require(p.x >= (x + 0.92f) * 64 - 0.01f
+							&& p.x <= (x + 0.98f) * 64 + 0.01f, "Old-location landing button remains");
+					}
+				}
+				require(cars == 2 && buttons == (layer % 2 == 0 ? 4u : 0u), "Moved/pasted rendering duplicated/lost components");
+			}
+		}
+		ImGui::Render();
+	}
 	void presentation(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -113,5 +306,6 @@ namespace
 }
 void render_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"dumbwaiters/initialPresentationAndClipping", isolated<dumbwaiterPresentation>});
 	checks.push_back({"boothWindows/staticPresentationAndNestedClipping", isolated<presentation>});
 }

@@ -1,4 +1,8 @@
 #include "BoothWindowEditor.h"
+#include "core/Agent.h"
+#include "core/MobilityProfile.h"
+#include <algorithm>
+#include <cmath>
 #include "DocumentEdit.h"
 #include "PermissionsPanel.h"
 #include "core/AgentTagRegistry.h"
@@ -88,12 +92,14 @@ std::vector<core::AccessPermissionId> resolveBoothWindowClipboardPermissions(cor
 		|| (!payload.permissions.empty() && !core::AgentTagRegistry::uuidIsValid(payload.authorizationWorldIdentity)))
 		throw std::runtime_error("Invalid panel authorization payload");
 	std::vector<core::AccessPermissionId> result;
-	std::set<uint64_t> seen;
+	std::set<uint64_t> seen, sourceIds;
+	std::set<std::string> sourceNames;
 	for (size_t i = 0; i < payload.permissions.size(); ++i)
 	{
 		auto id = payload.permissions[i];
-		if (!id || id.value > core::AccessPermission::Capacity
-			|| !core::AccessPermission::nameIsValid(payload.permissionNames[i]))
+		if (!id || id.value > core::AccessPermission::Capacity || !sourceIds.insert(id.value).second
+			|| !core::AccessPermission::nameIsValid(payload.permissionNames[i])
+			|| !sourceNames.insert(payload.permissionNames[i]).second)
 			throw std::runtime_error("Malformed panel Permission reference");
 		if (payload.authorizationWorldIdentity != world.getClipboardIdentity())
 		{
@@ -109,6 +115,89 @@ std::vector<core::AccessPermissionId> resolveBoothWindowClipboardPermissions(cor
 	return result;
 }
 
+YAML::Node makeDumbwaiterClipboardObject(core::World const& world, core::Dumbwaiter const& unit)
+{
+	if (!world.lookupDumbwaiter(unit.getId()) || world.lookupDumbwaiter(unit.getId()).get() != &unit)
+		throw std::runtime_error("Dumbwaiter has no authored definition");
+	YAML::Node result;
+	result["width"] = 1; result["height"] = 2;
+	result["initialStop"] = unit.getInitialStop(); result["travelSeconds"] = unit.getTravelSeconds();
+	result["authorizationWorldIdentity"] = world.getClipboardIdentity();
+	for (uint32_t stop = 0; stop < 2; ++stop)
+	{
+		auto field = stop == 0 ? "lowerLandingPermissionRequirement" : "upperLandingPermissionRequirement";
+		result[field] = YAML::Node(YAML::NodeType::Sequence);
+		for (auto id : world.getInteractionPointPermissionRequirement(unit.getLandingButton(stop)))
+		{
+			YAML::Node permission;
+			permission["id"] = id.value; permission["name"] = world.getAccessPermissionName(id);
+			result[field].push_back(permission);
+		}
+	}
+	return result;
+}
+
+std::string makeDumbwaiterClipboardText(core::World const& world, core::Dumbwaiter const& unit, bool cut)
+{
+	YAML::Node document;
+	auto root = document["prometheumClipboard"];
+	root["version"] = 1; root["type"] = "Dumbwaiter";
+	root["operation"] = cut ? "cut" : "copy";
+	root["object"] = makeDumbwaiterClipboardObject(world, unit);
+	return YAML::Dump(document);
+}
+
+DumbwaiterClipboard readDumbwaiterClipboardObject(YAML::Node const& object)
+{
+	if (!object.IsMap()) throw std::runtime_error("Invalid Dumbwaiter clipboard object");
+	for (auto field : object)
+	{
+		auto name = field.first.as<std::string>();
+		if (name != "type" && name != "width" && name != "height" && name != "initialStop"
+			&& name != "travelSeconds" && name != "authorizationWorldIdentity"
+			&& name != "lowerLandingPermissionRequirement" && name != "upperLandingPermissionRequirement")
+			throw std::runtime_error("Dumbwaiter clipboard contains unsupported authored/runtime fields");
+	}
+	DumbwaiterClipboard result;
+	if (object["width"].as<uint32_t>() != 1 || object["height"].as<uint32_t>() != 2)
+		throw std::runtime_error("Dumbwaiter requires a fixed 1x2 footprint");
+	result.options.initialStop = object["initialStop"].as<uint32_t>();
+	result.options.travelSeconds = object["travelSeconds"].as<float>();
+	if (result.options.initialStop > 1 || !std::isfinite(result.options.travelSeconds)
+		|| result.options.travelSeconds < 0.1f || result.options.travelSeconds > 60)
+		throw std::runtime_error("Invalid Dumbwaiter initial Stop or travel time");
+	for (uint32_t stop = 0; stop < 2; ++stop)
+	{
+		// Share the established identity/name reference reader, without creating grants.
+		YAML::Node panel;
+		panel["width"] = 1; panel["height"] = 1; panel["initialState"] = "Closed";
+		panel["authorizationWorldIdentity"] = object["authorizationWorldIdentity"];
+		auto field = stop == 0 ? "lowerLandingPermissionRequirement" : "upperLandingPermissionRequirement";
+		if (!object[field]) throw std::runtime_error("Both Dumbwaiter landing requirements are required");
+		panel["panelPermissionRequirement"] = object[field];
+		result.landingPermissions[stop] = readBoothWindowClipboardObject(panel);
+	}
+	return result;
+}
+
+core::World::CreateDumbwaiterOptions resolveDumbwaiterClipboardPermissions(core::World const& world,
+	DumbwaiterClipboard const& payload)
+{
+	auto options = payload.options;
+	for (uint32_t stop = 0; stop < 2; ++stop)
+		options.landingPermissionRequirements[stop] = resolveBoothWindowClipboardPermissions(world, payload.landingPermissions[stop]);
+	return options;
+}
+
+core::DumbwaiterId pasteDumbwaiter(std::shared_ptr<core::World> const& world,
+	uint32_t layer, uint32_t y, uint32_t x, DumbwaiterClipboard const& payload)
+{
+	auto options = resolveDumbwaiterClipboardPermissions(*world, payload);
+	auto id = world->addDumbwaiter(layer, y, x, options);
+	world->finishBuild();
+	return id;
+}
+
 core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::WindowSectorObject> const& object)
 {
@@ -120,11 +209,102 @@ core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> c
 	return world->submitDeviceCommand(command);
 }
 
+void renderDumbwaiterAgentActions(std::shared_ptr<core::World> const& world, core::AgentId id)
+{
+	auto actor = world->lookupAgent(id).entity;
+	if (!actor) return;
+	// Manual operation is stationary and independent of Paths.
+	for (uint32_t index = 0; index < world->getNumSectors(); ++index)
+		if (auto unit = std::dynamic_pointer_cast<const core::Dumbwaiter>(world->getSector(index)))
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto point = world->lookupInteractionPoint(unit->getLandingButton(stop)).entity;
+				if (actor->getSector() != unit->getStop(stop).sector.get()) continue;
+				auto grants = world->getAgentEffectiveAccessGrants(id);
+				auto requirements = world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop));
+				bool authorized = std::all_of(requirements.begin(), requirements.end(), [&](auto permission)
+					{ return std::find(grants.begin(), grants.end(), permission) != grants.end(); });
+				bool eligible = actor->isActive() && !core::agentForbidsButtons(actor)
+					&& authorized && !unit->isBusy()
+					&& (actor->getState() == core::Agent::State::Idle || actor->getState() == core::Agent::State::WaitingForTraversal)
+					&& actor->getGlobalPosition().distanceTo(point->getPosition()) <= point->getReach();
+				ImGui::PushID(static_cast<int>(index)); ImGui::PushID(static_cast<int>(stop));
+				ImGui::BeginDisabled(!eligible);
+				if (ImGui::Button(stop == 0 ? "Agent: press lower Dumbwaiter landing" : "Agent: press upper Dumbwaiter landing"))
+					world->requestDumbwaiterLanding(unit->getId(), stop, id);
+				ImGui::EndDisabled(); ImGui::PopID(); ImGui::PopID();
+			}
+}
+
+bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<const core::Dumbwaiter> const& unit)
+{
+	ImGui::Text("Dumbwaiter identity: %llu", static_cast<unsigned long long>(unit->getId().value));
+	ImGui::TextUnformatted("Fixed 1 x 2 shaft; one empty car; two adjacent-Level Stops. No passengers.");
+	ImGui::Text("Phase: %s; car Level: %.3f", unit->getPhaseName(), unit->getCarPosition().y);
+	for (uint32_t stop = 0; stop < 2; ++stop)
+	{
+		auto booth = unit->getAperture(stop);
+		auto state = booth->getState();
+		ImGui::Text("%s: %s; shutter %s (%.0f%%)", stop == 0 ? "Lower" : "Upper",
+			unit->getStop(stop).sector->getName().c_str(), state == core::Window::State::Open ? "Open"
+			: state == core::Window::State::Closed ? "Closed" : state == core::Window::State::Opening ? "Opening" : "Closing",
+			booth->getProgress() * 100);
+		ImGui::BeginDisabled(unit->isBusy());
+		if (ImGui::Button(stop == 0 ? "Press lower landing" : "Press upper landing"))
+			world->pressDumbwaiterLanding(unit->getId(), stop);
+		ImGui::EndDisabled();
+		ImGui::PushID(static_cast<int>(stop));
+		renderInteractionPermissionRequirements(world, unit->getLandingButton(stop));
+		ImGui::PopID();
+	}
+	if (auto operation = world->lookupDeviceOperation(unit->getOperation()); operation)
+		ImGui::Text("Operation: %llu (%s)", static_cast<unsigned long long>(unit->getOperation().value),
+			operation.entity->getState() == core::DeviceOperationState::Running ? "Running" : "Pending");
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	int initial = static_cast<int>(unit->getInitialStop());
+	float seconds = unit->getTravelSeconds();
+	bool changed = ImGui::Combo("Initial Stop", &initial, "Lower\0Upper\0");
+	changed = ImGui::SliderFloat("Travel time (seconds)", &seconds, 0.1f, 60.0f) || changed;
+	bool remove = ImGui::Button("Delete Dumbwaiter");
+	static std::weak_ptr<const core::Dumbwaiter> moveSelection;
+	static int destination[3];
+	if (moveSelection.lock() != unit)
+	{
+		moveSelection = unit;
+		destination[0] = static_cast<int>(unit->getLayerIndex());
+		destination[1] = static_cast<int>(unit->getCellX());
+		destination[2] = static_cast<int>(unit->getCellY());
+	}
+	ImGui::InputInt("Destination shaft Layer", &destination[0]);
+	ImGui::InputInt("Destination x", &destination[1]);
+	ImGui::InputInt("Destination lower Level", &destination[2]);
+	auto plan = world->planMoveDumbwaiter(unit->getId(), static_cast<uint32_t>(destination[0]),
+		static_cast<uint32_t>(destination[2]), static_cast<uint32_t>(destination[1]));
+	ImGui::BeginDisabled(!plan.valid);
+	bool move = ImGui::Button("Move Dumbwaiter");
+	ImGui::EndDisabled();
+	if (!plan.valid) ImGui::TextWrapped("%s", plan.diagnostic.c_str());
+	ImGui::EndDisabled();
+	if (!changed && !remove && !move) return false;
+	auto before = captureDocumentSnapshot(world);
+	bool result = remove ? world->removeDumbwaiter(unit->getId())
+		: move ? world->applyDumbwaiterMove(plan) : world->configureDumbwaiter(unit->getId(), {static_cast<uint32_t>(initial), seconds});
+	if (result) commitDocumentEdit(std::move(before));
+	return result;
+}
+
 bool renderBoothWindowPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::WindowSectorObject> const& object)
 {
 	auto booth = object->getWindow();
 	core::World::CreateWindowOptions options;
+	if (auto owned = std::dynamic_pointer_cast<const core::BoothWindow>(booth); owned && owned->getDumbwaiterOwner())
+	{
+		ImGui::TextUnformatted("Dumbwaiter-owned BoothWindow");
+		ImGui::TextDisabled("Edit or delete the complete unit on its shaft Layer. No independent shutter control.");
+		return false;
+	}
 	ImGui::TextUnformatted("BoothWindow");
 	ImGui::Text("Position: %u, %u; Layer pair: %u / %u", object->getCellX(), object->getCellY(),
 		booth->getFrontLayer(), booth->getBackLayer());

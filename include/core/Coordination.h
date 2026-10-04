@@ -64,7 +64,8 @@ namespace core
 		// Targets the World-owned Airlock Sector, never one of its owned Doors.
 		RequestAirlock,
 		SetBoothWindowState,
-		ToggleBoothWindow
+		ToggleBoothWindow,
+		PressDumbwaiterLanding
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -88,7 +89,8 @@ namespace core
 	};
 
 	// Desired-state commands are idempotent and coalescible. ToggleBoothWindow
-	// is an activation, never coalesced, and resolves its target exactly once.
+	// and PressDumbwaiterLanding are activations, never coalesced. A landing
+	// press reserves busy at acceptance; a toggle resolves its target once.
 	struct DeviceCommand
 	{
 		DeviceCommandType type{ DeviceCommandType::SetSectorLights };
@@ -97,6 +99,7 @@ namespace core
 		TraversalResourceId traversalResource{};
 		uint32_t stopIndex{ ~0u };
 		BoothWindowId boothWindow{};
+		DumbwaiterId dumbwaiter{};
 
 		friend bool operator==(DeviceCommand const&, DeviceCommand const&) = default;
 	};
@@ -130,6 +133,7 @@ namespace core
 
 		std::string mName;
 		BoothWindowId mBoothWindowOwner;
+		DumbwaiterId mDumbwaiterOwner;
 		SectorId mSector;
 		Vector2 mPosition;
 		float mReach{ 0.25f };
@@ -164,8 +168,9 @@ namespace core
 		SectorId getSector() const { return mSector; }
 		Vector2 const& getPosition() const { return mPosition; }
 		float getReach() const { return mReach; }
-		// Owned BoothWindow panels never auto-approach; other controls retain their policy.
-		bool requiresReachAtRequest() const { return bool(mBoothWindowOwner); }
+		// Owned service-device controls never auto-approach; other controls retain their policy.
+		bool requiresReachAtRequest() const { return bool(mBoothWindowOwner) || bool(mDumbwaiterOwner); }
+		DumbwaiterId getDumbwaiterOwner() const { return mDumbwaiterOwner; }
 		BoothWindowId getBoothWindowOwner() const { return mBoothWindowOwner; }
 		uint64_t getDurationTicks() const { return mDurationTicks; }
 		InteractionRequestId getActiveRequest() const { return mActiveRequest; }

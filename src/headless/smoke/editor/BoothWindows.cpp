@@ -1,15 +1,312 @@
 #include "Checks.h"
 #include "State.h"
 #include "DocumentEdit.h"
+#include "core/Agent.h"
 #include "BoothWindowEditor.h"
 #include "PermissionsPanel.h"
 #include "PaletteLayout.h"
 #include "core/YamlSerializer.h"
 #include "imgui/imgui_internal.h"
 #include <cmath>
+#include "../support/DumbwaiterFixture.h"
 
 namespace
 {
+	void surroundingEditHistory()
+	{
+		using smoke::require;
+		for (unsigned edit = 0; edit < 8; ++edit)
+		{
+			auto world = dumbwaiter_fixture::make(0, edit != 1 && edit != 2, 2); world->addLayer();
+			auto id = world->addDumbwaiter(2, 0, 2, {1, 0.37f}); world->finishBuild();
+			auto lower = world->addAccessPermission("Lower"), upper = world->addAccessPermission("Upper");
+			auto unit = world->lookupDumbwaiter(id);
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {lower});
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {upper});
+			world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "History cycle fixture failed");
+			world->pauseSimulation(); gWorldDocumentHistory.clear();
+			auto button = unit->getLandingButton(0);
+			auto before = captureDocumentSnapshot(world);
+			if (edit == 0) world->applyWalkwayEdit(world->planRemoveSectorWalkway(0, 0));
+			if (edit == 1 || edit == 2) world->applyLocationEdit(world->planRemoveLocation(edit - 1));
+			if (edit == 3) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 1, 1));
+			if (edit == 4) world->applyDeleteLayer(world->planDeleteLayer(1));
+			if (edit == 5) world->applyDeleteLevel(world->planDeleteLevel(0));
+			if (edit == 6) world->applyDeleteLayer(world->planDeleteLayer(0));
+			if (edit == 7) world->applyLocationEdit(world->planResizeLocation(0, 2, 0, 2, 2));
+			commitDocumentEdit(std::move(before));
+			auto restore = [&](DocumentSnapshot const& snapshot) {
+				auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData work;
+				bool result = world->deserialize(*input, work); world->pauseSimulation(); return result;
+			};
+			require(gWorldDocumentHistory.undoCount() == 1 && !world->lookupInteractionPoint(button), "Dependent edit not undoable/stale handle retained");
+			require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dependent deletion undo failed");
+			unit = world->lookupDumbwaiter(id);
+			require(unit && unit->getLayerIndex() == 2 && unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.37f
+				&& !unit->isBusy() && unit->getAperture(1)->getProgress() == 1 && unit->getAperture(0)->getProgress() == 0
+				&& !world->lookupInteractionPoint(button), "Undo restored stale runtime ownership or incomplete unit");
+			for (uint32_t stop = 0; stop < 2; ++stop)
+				require(world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop)) == std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper},
+					"Dependent deletion undo lost button requirements");
+			auto actor = world->createAgent("Restored", unit->getStop(1).sector->getIndex(),
+				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+			world->grantAgentAccessPermission(actor, upper);
+			require(bool(world->requestDumbwaiterLanding(id, 1, actor)), "Undo-restored Agent control refused");
+			world->resumeSimulation(); require(world->advanceTicks(130) && !unit->isBusy() && unit->getCarPosition().y == 0, "Undo-restored Agent operation failed");
+			world->pauseSimulation();
+			require(bool(world->pressDumbwaiterLanding(id, 0)), "Undo-restored user control refused");
+			require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dependent deletion redo failed");
+			unit = world->lookupDumbwaiter(id);
+			require(bool(unit) == (edit >= 6) && world->getSimulationSnapshot().interactionPoints.size() == (edit >= 6 ? 2u : 0u),
+				"Redo restored orphan apertures/buttons");
+			world->resetSimulation(); world->pauseSimulation();
+			require(bool(world->lookupDumbwaiter(id)) == (edit >= 6), "History canonical replay lost dependency edits");
+		}
+	}
+
+	void dumbwaiterHistory(smoke::Context const&)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = dumbwaiter_fixture::make(); gWorldDocumentHistory.clear();
+		dumbwaiter_fixture::addLandings(*world, 1, 4); world->finishBuild();
+		auto before = captureDocumentSnapshot(world);
+		auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild();
+		commitDocumentEdit(std::move(before));
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData work;
+			bool result = world->deserialize(*input, work); world->pauseSimulation(); return result;
+		};
+		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Dumbwaiter undo failed"); };
+		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Dumbwaiter redo failed"); };
+		undo(); require(!world->lookupDumbwaiter(id), "Creation undo retained unit");
+		redo(); require(bool(world->lookupDumbwaiter(id)), "Creation redo lost unit identity");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1400, 900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		auto frame = [&] {
+			ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({1000, 600});
+			ImGui::Begin("Dumbwaiter Selection");
+			if (auto unit = world->lookupDumbwaiter(id)) renderDumbwaiterPanel(world, unit);
+			ImGui::End(); ImGui::Render();
+		};
+		frame();
+		auto click = [&](char const* label, bool slider = true) {
+			auto window = ImGui::FindWindowByName("Dumbwaiter Selection"); auto control = window->GetID(label);
+			bool found = false; ImVec2 point;
+			for (float y = 35; y < 575 && !found; y += 7) for (float x = 15; x < 900 && !found; x += 15)
+			{
+				io.AddMousePosEvent(x, y); frame(); frame();
+				if (ImGui::GetHoveredID() == control) { found = true; point = {x, y}; }
+			}
+			require(found, std::string("Missing Dumbwaiter Selection control: ") + label);
+			io.AddMousePosEvent(point.x + (slider ? 100 : 0), point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		click("Travel time (seconds)");
+		require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2 && gWorldDocumentHistory.undoCount() == 2,
+			"Actual Selection slider did not author history");
+		undo(); require(world->lookupDumbwaiter(id)->getTravelSeconds() == 2, "Timing undo failed");
+		redo(); require(world->lookupDumbwaiter(id)->getTravelSeconds() != 2, "Timing redo failed");
+		auto unit = world->lookupDumbwaiter(id);
+		auto owner = unit->getStop(0).sector;
+		std::shared_ptr<const core::WindowSectorObject> aperture; uint32_t index = ~0u;
+		for (uint32_t i = 0; i < owner->getNumObjects(); ++i)
+			if (auto object = std::dynamic_pointer_cast<const core::WindowSectorObject>(owner->getObject(i)); object && object->getCellY() == 0)
+			{ aperture = object; index = i; }
+		require(aperture && !world->removeSectorWindow(owner->getIndex(), index)
+			&& !world->planMoveSectorObject(owner->getIndex(), index, 3, 0).valid
+			&& !world->planResizeSectorWindow(owner->getIndex(), index, 2, 0, 2, 1).valid,
+			"Owned child exposed independent editing");
+		bool refused = false; try { makeBoothWindowClipboardObject(*world, *aperture); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "Owned aperture can be copied independently");
+		auto authored = captureDocumentSnapshot(world)->yaml;
+		auto historyCount = gWorldDocumentHistory.undoCount();
+		click("Press lower landing", false);
+		require(world->lookupDumbwaiter(id)->isBusy() && world->getSimulationSnapshot().deviceOperations.size() == 1,
+			"Actual runtime Selection did not submit typed landing press");
+		require(world->resumeSimulation() && world->advanceTicks(12), "Runtime Selection cycle setup failed");
+		world->pauseSimulation(); frame();
+		require(world->lookupDumbwaiter(id)->getPhase() == core::DumbwaiterPhase::Closing
+			&& captureDocumentSnapshot(world)->yaml == authored && gWorldDocumentHistory.undoCount() == historyCount,
+			"Runtime Selection press authored progress/history");
+		world->configureDumbwaiter(id, {1, 0.1f});
+		click("Press upper landing", false);
+		require(world->resumeSimulation() && world->advanceTicks(102), "Runtime Selection upper send failed");
+		world->pauseSimulation(); frame();
+		require(world->lookupDumbwaiter(id)->getCarPosition().y == 0 && !world->lookupDumbwaiter(id)->isBusy(),
+			"Selection upper control did not send to lower landing and open arrival");
+		click("Destination x", false);
+		io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+		io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+		io.AddInputCharactersUTF8("4"); frame();
+		io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		click("Move Dumbwaiter", false);
+		require(world->lookupDumbwaiter(id)->getCellX() == 4 && gWorldDocumentHistory.undoCount() == 3,
+			"Actual Selection whole-unit movement did not commit history");
+		undo(); require(world->lookupDumbwaiter(id)->getCellX() == 2, "Selection move undo failed");
+		redo(); require(world->lookupDumbwaiter(id)->getCellX() == 4, "Selection move redo failed");
+		click("Delete Dumbwaiter", false);
+		require(!world->lookupDumbwaiter(id) && gWorldDocumentHistory.undoCount() == 4, "Selection whole-unit deletion failed");
+		undo(); require(world->lookupDumbwaiter(id)->getAperture(0)->getDumbwaiterOwner() == id, "Delete undo lost owned children");
+		redo(); require(!world->lookupDumbwaiter(id), "Delete redo failed");
+		surroundingEditHistory();
+	}
+	void dumbwaiterPermissionHistory(smoke::Context const&)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = dumbwaiter_fixture::make(); auto id = world->addDumbwaiter(1, 0, 2);
+		world->finishBuild(); world->pauseSimulation(); gWorldDocumentHistory.clear();
+		std::string diagnostic;
+		auto a = commitAccessPermissionAdd(world, "Lower", diagnostic);
+		auto b = commitAccessPermissionAdd(world, "Upper", diagnostic);
+		auto requirements = [&](uint32_t stop) { return world->getInteractionPointPermissionRequirement(world->lookupDumbwaiter(id)->getLandingButton(stop)); };
+		require(commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), a, true, diagnostic)
+			&& commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(1), b, true, diagnostic), diagnostic);
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData data;
+			bool result = world->deserialize(*input, data); world->pauseSimulation(); return result;
+		};
+		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Requirement undo failed"); };
+		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Requirement redo failed"); };
+		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Independent requirement undo failed");
+		redo(); require(requirements(1) == std::vector<core::AccessPermissionId>{b}, "Requirement redo failed");
+		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = gWorldDocumentHistory.undoCount();
+		require(!commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), core::AccessPermissionId{255}, true, diagnostic)
+			&& captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count,
+			"Invalid editor reference mutated document/history");
+		auto actor = world->createAgent("Manual operator", 0, 0, 0.5f);
+		require(world->grantAgentAccessPermission(actor, a), "Manual operator grant failed");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1400,900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImGuiID control = 0;
+		auto frame = [&] {
+			ImGui::NewFrame(); ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({900,600});
+			ImGui::Begin("Agent Selection Dumbwaiter");
+			ImGui::PushID(static_cast<int>(world->lookupDumbwaiter(id)->getIndex())); ImGui::PushID(0);
+			control = ImGui::GetID("Agent: press lower Dumbwaiter landing"); ImGui::PopID(); ImGui::PopID();
+			renderDumbwaiterAgentActions(world, actor); ImGui::End(); ImGui::Render();
+		};
+		frame(); bool found = false; ImVec2 point;
+		for (float y = 35; y < 180 && !found; y += 7) for (float x = 15; x < 500 && !found; x += 15)
+		{
+			io.AddMousePosEvent(x,y); frame(); frame();
+			if (ImGui::GetHoveredID() == control) { found = true; point = {x,y}; }
+		}
+		require(found, "Manual Agent Selection action inaccessible");
+		snapshot = captureDocumentSnapshot(world)->yaml; count = gWorldDocumentHistory.undoCount();
+		io.AddMousePosEvent(point.x,point.y); frame(); io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame();
+		require(world->getSimulationSnapshot().interactionRequests.size() == 1 && !world->lookupDumbwaiter(id)->isBusy(), "Manual action bypassed typed interaction activation");
+		world->resumeSimulation(); require(world->advanceTicks(80), "Manual Agent cycle failed"); world->pauseSimulation();
+		auto unit = world->lookupDumbwaiter(id); auto position = unit->getCarPosition(); auto operation = unit->getOperation();
+		require(captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count, "Manual action authored history");
+		require(commitInteractionPermissionRequirement(world, unit->getLandingButton(0), b, true, diagnostic), diagnostic);
+		require(unit->getCarPosition() == position && unit->getOperation() == operation && unit->isBusy(), "Editor permission edit reset active cycle");
+		world->resumeSimulation(); while (unit->isBusy()) require(world->advanceTick(), "Cycle continuation failed"); world->pauseSimulation();
+		require(unit->getCarPosition().y == 1 && unit->getAperture(1)->getProgress() == 1, "Permission edit interrupted accepted cycle");
+		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a}, "Permission-only undo lost original requirement");
+		redo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a,b}, "Permission-only redo failed");
+		// Both independent landing requirements are removed by normal registry deletion, with undo/redo.
+		require(commitAccessPermissionDelete(world, b, diagnostic), diagnostic);
+		require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Deletion left dangling landing requirements");
+		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a,b} && requirements(1) == std::vector<core::AccessPermissionId>{b}, "Deletion undo lost landing requirements");
+		redo(); world->resetSimulation(); world->pauseSimulation();
+		require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Reset replay restored deleted requirement");
+	}
+
+	void dumbwaiterMoveClipboard(smoke::Context const&)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = dumbwaiter_fixture::make();
+		dumbwaiter_fixture::addLandings(*world, 1, 4);
+		dumbwaiter_fixture::addLandings(*world, 3, 0, 2);
+		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.5f}); world->finishBuild();
+		auto a = world->addAccessPermission("Lower"), b = world->addAccessPermission("Shared");
+		auto unit = world->lookupDumbwaiter(id);
+		world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {a,b});
+		world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {b});
+		world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "Copy cycle setup failed");
+		world->pauseSimulation(); gWorldDocumentHistory.clear();
+		auto envelope = YAML::Load(makeDumbwaiterClipboardText(*world, *unit))["prometheumClipboard"];
+		require(envelope["version"].as<unsigned>() == 1 && envelope["type"].as<std::string>() == "Dumbwaiter"
+			&& envelope["operation"].as<std::string>() == "copy", "Editor clipboard envelope is not parseable by the production workflow");
+		auto node = envelope["object"];
+		auto payload = readDumbwaiterClipboardObject(node);
+		require(node["initialStop"].as<unsigned>() == 1 && node["travelSeconds"].as<float>() == 0.5f
+			&& !node["id"] && !node["operation"] && !node["phase"], "Clipboard leaked runtime state/device identity");
+		world->renameAccessPermission(a, "Renamed Lower");
+		auto originalOperation = unit->getOperation(); auto position = unit->getCarPosition();
+		auto before = captureDocumentSnapshot(world);
+		auto copy = pasteDumbwaiter(world, 1, 0, 4, payload); commitDocumentEdit(std::move(before));
+		auto pasted = world->lookupDumbwaiter(copy);
+		require(copy != id && !pasted->isBusy() && pasted->getCarPosition() == core::Vector2{4,1}
+			&& pasted->getAperture(1)->getProgress() == 1 && unit->getCarPosition() == position
+			&& unit->getOperation() == originalOperation && unit->isBusy(), "Mid-cycle paste cloned/reset live source progress");
+		require(world->getInteractionPointPermissionRequirement(pasted->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}
+			&& world->getInteractionPointPermissionRequirement(pasted->getLandingButton(1)) == std::vector<core::AccessPermissionId>{b},
+			"Same-World copy failed rename-stable identity resolution");
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData data;
+			bool result = world->deserialize(*input, data); world->pauseSimulation(); return result;
+		};
+		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Unit clipboard/move undo failed"); };
+		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Unit clipboard/move redo failed"); };
+		undo(); require(!world->lookupDumbwaiter(copy), "Paste undo retained unit");
+		redo(); require(world->lookupDumbwaiter(copy) && world->getSimulationSnapshot().interactionPoints.size() == 4, "Paste redo lost/duplicated child ownership");
+		before = captureDocumentSnapshot(world);
+		require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(copy, 3, 2, 0)), "Editor move refused");
+		commitDocumentEdit(std::move(before));
+		undo(); require(world->lookupDumbwaiter(copy)->getLayerIndex() == 1, "Move undo lost placement");
+		redo(); require(world->lookupDumbwaiter(copy)->getLayerIndex() == 3
+			&& world->lookupDumbwaiter(copy)->getCarPosition() == core::Vector2{0,3}, "Move redo lost placement/initial state");
+		world->resetSimulation(); world->pauseSimulation(); pasted = world->lookupDumbwaiter(copy);
+		require(world->getInteractionPointPermissionRequirement(pasted->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b},
+			"Move history/replay lost requirements");
+		auto actor = world->createAgent("Restored operator", pasted->getStop(1).sector->getIndex(), 0, 0.5f);
+		world->grantAgentAccessPermission(actor, b); auto request = world->requestDumbwaiterLanding(copy, 1, actor);
+		require(bool(request), "Restored landing Agent request refused"); world->resumeSimulation(); require(world->advanceTicks(128), "Restored Agent cycle failed"); world->pauseSimulation();
+		require(world->lookupDumbwaiter(copy)->getCarPosition().y == 2 && !world->lookupDumbwaiter(copy)->isBusy(), "Restored Agent button did not operate unit");
+
+		auto foreign = dumbwaiter_fixture::make(2, false, 3);
+		foreign->addAccessPermission("Unrelated"); auto mappedB = foreign->addAccessPermission("Shared"), mappedA = foreign->addAccessPermission("Lower");
+		auto foreignId = pasteDumbwaiter(foreign, 3, 0, 2, payload);
+		auto foreignUnit = foreign->lookupDumbwaiter(foreignId);
+		auto lower = foreign->getInteractionPointPermissionRequirement(foreignUnit->getLandingButton(0));
+		require(lower == std::vector<core::AccessPermissionId>{mappedB,mappedA}
+			&& foreign->getInteractionPointPermissionRequirement(foreignUnit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{mappedB},
+			"Cross-World paste reused unrelated grants instead of resolving both landing names");
+		dumbwaiter_fixture::addLandings(*foreign, 3, 4); foreign->finishBuild();
+		auto foreignBefore = captureDocumentSnapshot(foreign)->yaml; bool refused = false;
+		auto unresolvedUpper = payload; unresolvedUpper.landingPermissions[1].permissionNames = {"Missing upper"};
+		try { pasteDumbwaiter(foreign, 3, 0, 4, unresolvedUpper); } catch (std::exception const&) { refused = true; }
+		require(refused && captureDocumentSnapshot(foreign)->yaml == foreignBefore, "Upper resolution failure partially placed lower/configuration");
+		foreign->deleteAccessPermission(mappedB);
+		foreignBefore = captureDocumentSnapshot(foreign)->yaml; refused = false;
+		try { pasteDumbwaiter(foreign, 3, 0, 4, payload); } catch (std::exception const&) { refused = true; }
+		require(refused && captureDocumentSnapshot(foreign)->yaml == foreignBefore, "Unresolved upper requirement partially pasted/granted");
+		for (auto field : {"width", "height", "initialStop", "travelSeconds", "authorizationWorldIdentity",
+			"lowerLandingPermissionRequirement", "upperLandingPermissionRequirement", "operation"})
+		{
+			auto invalid = YAML::Clone(node); invalid[field] = "malformed";
+			auto snapshot = captureDocumentSnapshot(world)->yaml; auto history = gWorldDocumentHistory.undoCount(); refused = false;
+			try { pasteDumbwaiter(world, 1, 0, 4, readDumbwaiterClipboardObject(invalid)); } catch (std::exception const&) { refused = true; }
+			require(refused && captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == history,
+				"Malformed unit clipboard mutated document/history");
+		}
+		for (uint32_t stop = 0; stop < 2; ++stop)
+		{
+			auto invalid = YAML::Clone(node); auto field = stop == 0 ? "lowerLandingPermissionRequirement" : "upperLandingPermissionRequirement";
+			invalid[field].push_back(YAML::Clone(invalid[field][0])); refused = false;
+			try { readDumbwaiterClipboardObject(invalid); } catch (std::exception const&) { refused = true; }
+			require(refused, "Duplicate clipboard requirement accepted");
+		}
+		// Destination refusal must preserve an existing accepted cycle, document and history.
+		unit = world->lookupDumbwaiter(id); auto operation = world->pressDumbwaiterLanding(id, 0);
+		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = gWorldDocumentHistory.undoCount(); refused = false;
+		try { pasteDumbwaiter(world, 1, 0, 2, payload); } catch (std::exception const&) { refused = true; }
+		require(refused && captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count
+			&& unit->getOperation() == operation && unit->isBusy(), "Invalid paste reset existing cycle/history");
+	}
+
 	void historyAndClipboard(smoke::Context const&)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -154,5 +451,8 @@ namespace
 }
 void editor_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"dumbwaiters/selectionAndHistory", dumbwaiterHistory});
+	checks.push_back({"dumbwaiters/wholeUnitMoveAndClipboard", dumbwaiterMoveClipboard});
+	checks.push_back({"dumbwaiters/landingPermissionHistoryAndAgentSelection", dumbwaiterPermissionHistory});
 	checks.push_back({"boothWindows/historyAndClipboard",historyAndClipboard});
 }

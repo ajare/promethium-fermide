@@ -31,6 +31,7 @@ namespace core
 	CORE_DEFINE_ENTITY_ID(InteractionRequestId);
 	CORE_DEFINE_ENTITY_ID(DeviceOperationId);
 	CORE_DEFINE_ENTITY_ID(BoothWindowId);
+	CORE_DEFINE_ENTITY_ID(DumbwaiterId);
 	CORE_DEFINE_ENTITY_ID(TraversalResourceId);
 	CORE_DEFINE_ENTITY_ID(DoorOpenLeaseId);
 	CORE_DEFINE_ENTITY_ID(DoorSensorId);
