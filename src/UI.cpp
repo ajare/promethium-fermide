@@ -92,6 +92,7 @@
 #include "Exceptions.h"
 #include "WorldViewportDrag.h"
 #include "WorldViewportZoom.h"
+#include "LocationPlan.h"
 
 
 extern spdlog::logger* gLogger;
@@ -110,6 +111,8 @@ static std::deque<core::LogMessage> gLogMessages;
 using namespace std;
 
 
+static LocationPlan gLocationPlan;
+static uint32_t gSelectedWorldLevel{};
 static bool gWorldHovered{ false };
 static bool gPegmanConsumesLeftMouse{ false };
 
@@ -4741,6 +4744,8 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			setSelectionMode(UISettings::SelectionMode::Sector);
 			gSelectedSector = gHoveredSector;
+			gSelectedWorldLevel = static_cast<uint32_t>(std::max(0.0f,
+				std::floor(screenToWorld(ImGui::GetIO().MousePos).y)));
 			gSelectedAgent = nullptr;
 			gSelectedVertex.reset();
 			gSelectedSectorObject.reset();
@@ -6791,6 +6796,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 	if (gSelectedSector)
 	{
+		gLocationPlan.renderSelectionAction(world, gSelectedSector, gSelectedWorldLevel);
 		// A Background is not a place an agent can be, so it gets its own minimal
 		// panel rather than the generic Sector readout with its "Agents:" line.
 		if (gSelectedSector->getType() == core::SectorType::Background)
@@ -9438,6 +9444,7 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 
 	if (!world)
 	{
+		gLocationPlan.close();
 		ImGui::Begin("World");
 		ImGui::TextDisabled("No World is open.");
 		ImGui::TextUnformatted("Choose File > New or File > Open to begin.");
@@ -9449,4 +9456,11 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 	renderStatusBar(world);
 	renderControlsWindow(world, graph, pathingAgent);
 	renderWorldWindow(world, graph);
+	gLocationPlan.render(world, [](WorldDrawList const& commands, ImVec2 position, ImVec2 size)
+	{
+		auto texture = renderWorldCommands(commands, position, size, WorldCanvas::LocationPlan);
+		ImGui::GetWindowDrawList()->AddImage(
+			reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
+			position, {position.x + size.x, position.y + size.y}, {0, 1}, {1, 0});
+	});
 }

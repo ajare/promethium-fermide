@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "State.h"
 #include "FurniturePanel.h"
+#include "LocationPlan.h"
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "core/YamlSerializer.h"
@@ -460,9 +461,136 @@ namespace
 		ImGui::End(); ImGui::EndFrame();
 	}
 }
+namespace
+{
+	void locationPlanWorkflow(smoke::Context const&)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = std::make_shared<core::World>("Plan editor", 20, 8);
+		auto room = world->addRoom("Pinned room", 1, 3, 7, 4, 3);
+		auto corridor = world->addCorridor(0, 1, 2, 5, 1);
+		auto facade = world->addFacade("Retargeted facade", 0, 0, 10, 4, 1);
+		auto background = world->addBackground(1, 0, 0, 2, 1);
+		world->addRoom("Lower landing", 0, 0, 15, 2, 1);
+		world->addRoom("Upper landing", 0, 1, 15, 2, 1);
+		auto transit = world->addLadder(1, 0, 15, {2, false, true}).ladder.sector->getIndex();
+		world->finishBuild(); world->pauseSimulation();
+		auto authoredBefore = captureDocumentSnapshot(world, DocumentHistory{})->yaml;
+		LocationPlan plan;
+		auto selection = world->getSector(room);
+		uint32_t selectedLevel = 4;
+		auto& io = ImGui::GetIO();
+		io.IniFilename = nullptr; io.LogFilename = nullptr; io.DisplaySize = {1000, 800};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text;
+		io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		ImVec2 actionPosition; unsigned presentations = 0;
+		auto frame = [&]
+		{
+			text.clear(); presentations = 0;
+			ImGui::NewFrame();
+			ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({250, 100});
+			ImGui::Begin("Selection workflow", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			plan.renderSelectionAction(world, selection, selectedLevel);
+			auto rect = ImGui::GetCurrentContext()->LastItemData.Rect;
+			actionPosition = {(rect.Min.x + rect.Max.x) / 2, (rect.Min.y + rect.Max.y) / 2};
+			ImGui::End();
+			auto selectionText = text;
+			text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
+			plan.render(world, [&](WorldDrawList const& commands, ImVec2, ImVec2)
+			{
+				++presentations;
+				require(!commands.commands().empty(), "Open plan did not present a command stream");
+			});
+			// If the plan is closed it does not consume next-window settings.
+			ImGui::GetCurrentContext()->NextWindowData.ClearFlags();
+			ImGui::LogFinish(); text += selectionText; ImGui::Render();
+		};
+		auto click = [&](ImVec2 position)
+		{
+			io.AddMousePosEvent(position.x, position.y); frame(); frame();
+			io.AddMouseButtonEvent(0, true); frame();
+			io.AddMouseButtonEvent(0, false); frame();
+		};
+		for (auto index : {room, corridor, facade, background, transit})
+		{
+			selection = world->getSector(index); frame();
+			bool eligible = index == room || index == corridor || index == facade;
+			require((text.find("Location plan") != std::string::npos) == eligible,
+				"Selection Location-plan eligibility is incorrect");
+		}
+		selection = world->getSector(room); frame(); click(actionPosition); frame();
+		require(presentations == 1 && text.find("Location: Pinned room") != std::string::npos
+			&& text.find("{ 4 } Level") != std::string::npos && text.find("Layer: 1") != std::string::npos,
+			"Selection did not open the plan on selected World Level/Layer: " + text);
+		selection = world->getSector(facade); frame();
+		require(text.find("Location: Pinned room") != std::string::npos,
+			"Ordinary Selection retargeted a pinned plan");
+		// Change the Level via real combo and selectable mouse input.
+		auto* window = ImGui::FindWindowByName("Location plan");
+		auto comboId = window->GetID("Level");
+		auto findHovered = [&](ImGuiID id, ImVec2 min, ImVec2 max)
+		{
+			for (float y = min.y; y < max.y; y += 5)
+				for (float x = min.x; x < max.x; x += 16)
+				{
+					io.AddMousePosEvent(x, y); frame(); frame();
+					if (ImGui::GetHoveredID() == id) return ImVec2{x, y};
+				}
+			throw std::runtime_error("Cannot find Location plan control " + std::to_string(id)
+				+ " within " + std::to_string(min.x) + "," + std::to_string(min.y)
+				+ " to " + std::to_string(max.x) + "," + std::to_string(max.y) + ": " + text);
+		};
+		click(findHovered(comboId, {310, 65}, {870, 125})); frame(); frame();
+		auto* popup = ImGui::FindWindowByName("##Combo_00");
+		require(popup && popup->Active, "Level selector did not open");
+		click(findHovered(popup->GetID("5"), popup->Pos,
+			{popup->Pos.x + popup->Size.x, popup->Pos.y + popup->Size.y}));
+		frame();
+		require(text.find("{ 5 } Level") != std::string::npos,
+			"Multi-Level Room selector did not switch World Level: " + text);
+		frame(); click(actionPosition); frame();
+		require(presentations == 1 && text.find("Location: Retargeted facade") != std::string::npos
+			&& text.find("{ 0 } Level") != std::string::npos,
+			"Explicit opening did not retarget the single window");
+		window = ImGui::FindWindowByName("Location plan");
+		click({window->Pos.x + window->Size.x - 10, window->Pos.y + 10});
+		frame(); require(presentations == 0, "Window close still presents the plan");
+		require(captureDocumentSnapshot(world, DocumentHistory{})->yaml == authoredBefore,
+			"Read-only plan interaction changed the World document");
+		selection = world->getSector(corridor); selectedLevel = 1; frame(); click(actionPosition); frame();
+		require(presentations == 1 && text.find("{ 1 } Level") != std::string::npos, "Reopening failed");
+		auto heldOldTarget = selection;
+		// Same World object, new Sectors, as used by document history replay.
+		auto snapshot = captureDocumentSnapshot(world, DocumentHistory{});
+		auto reader = core::YamlSerializer::fromString(snapshot->yaml); reader->deserialize();
+		core::SerializationWorkData work;
+		require(world->deserialize(*reader, work), "Cannot reconstruct plan World");
+		frame(); require(presentations == 0, "History reconstruction retained stale target");
+		require(!plan.open(world, heldOldTarget, 1), "Opening accepted a stale Location");
+		selection = world->getSector(room); selectedLevel = 4; frame(); click(actionPosition); frame();
+		require(presentations == 1, "Cannot reopen reconstructed World");
+		auto replacement = std::make_shared<core::World>("Replacement", 20, 8);
+		replacement->addRoom("Same index", 1, 3, 7, 4, 3); replacement->finishBuild();
+		world = replacement; frame(); require(presentations == 0, "World replacement retained stale plan");
+		selection = world->getSector(0); frame(); click(actionPosition); frame();
+		require(presentations == 1, "Cannot open replacement World plan");
+		world->pauseSimulation();
+		auto removal = world->planRemoveLocation(0);
+		require(removal.valid, "Cannot delete target Location");
+		world->applyLocationEdit(removal);
+		frame(); require(presentations == 0, "Target deletion retained stale plan");
+		world.reset(); frame(); require(presentations == 0, "No-World plan did not close");
+		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
+	}
+}
 void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/demoActions", demoActions });
+	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });

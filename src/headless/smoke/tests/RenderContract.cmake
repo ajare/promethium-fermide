@@ -35,6 +35,7 @@ set(names
     airlocks/chamberAndControls
     furniture/chairCommands
     furniture/demoCommands
+    locationPlan/grid
     securityScanners/chamberCommandStream
     securityScanners/beamSweeps
     dumbwaiters/initialPresentationAndClipping

@@ -271,7 +271,7 @@ namespace
 				mScene->unload();
 				mScene.reset();
 			}
-			mTarget.reset();
+			for (auto& target : mTargets) target.reset();
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
 			clearSectorTileset();
@@ -284,15 +284,16 @@ namespace
 			mMppLogger.reset();
 		}
 
-		uint32_t render(WorldDrawList const& commandList, ImVec2 origin, ImVec2 size)
+		uint32_t render(WorldDrawList const& commandList, ImVec2 origin, ImVec2 size, WorldCanvas canvas)
 		{
 			auto const width = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.x)));
 			auto const height = static_cast<std::size_t>(std::max(1.0f, std::ceil(size.y)));
-			ensureTarget(width, height);
+			auto& target = mTargets[static_cast<std::size_t>(canvas)];
+			ensureTarget(target, width, height, canvas);
 			auto segments = buildSegments(commandList);
 			prepareSlots(segments, origin);
 
-			mRenderSystem->pushRenderTarget(mTarget);
+			mRenderSystem->pushRenderTarget(target);
 			mRenderSystem->setViewport(0, 0, width, height);
 			mRenderSystem->clearScreen(mScene->getClearColour());
 			mRenderSystem->setProjection2dOrthographic();
@@ -328,7 +329,7 @@ namespace
 			setNativeLineWidth(*mRenderSystem, 1.0f);
 			mRenderSystem->popRenderTarget();
 
-			return static_cast<mpp::RenderTexture*>(mTarget.get())->getId();
+			return static_cast<mpp::RenderTexture*>(target.get())->getId();
 		}
 
 	private:
@@ -542,13 +543,15 @@ namespace
 			slot.lines.reset();
 		}
 
-		void ensureTarget(std::size_t width, std::size_t height)
+		void ensureTarget(mpp::RenderTargetPtr& target, std::size_t width,
+			std::size_t height, WorldCanvas canvas)
 		{
-			if (!mTarget)
-				mTarget = mRenderSystem->createRenderTexture(
-					"WorldCanvas.Target", width, height, 1, false);
-			else if (mTarget->getWidth() != width || mTarget->getHeight() != height)
-				static_cast<mpp::RenderTexture*>(mTarget.get())->resize(width, height);
+			if (!target)
+				target = mRenderSystem->createRenderTexture(
+					canvas == WorldCanvas::World ? "WorldCanvas.Target" : "LocationPlan.Target",
+					width, height, 1, false);
+			else if (target->getWidth() != width || target->getHeight() != height)
+				static_cast<mpp::RenderTexture*>(target.get())->resize(width, height);
 			mScene->setViewport(0, 0, width, height);
 		}
 
@@ -579,7 +582,9 @@ namespace
 		std::map<std::filesystem::path, std::shared_ptr<FurnitureCatalogueResource>>
 			mFurnitureCatalogueResources;
 		mpp::ScenePtr mScene;
-		mpp::RenderTargetPtr mTarget;
+		// Both images are composited later by ImGui, so neither canvas may
+		// overwrite the other's offscreen texture during the same frame.
+		mpp::RenderTargetPtr mTargets[2];
 		std::vector<Slot> mSlots;
 		WorldRenderSlotAllocator mSlotAllocator;
 		// Draw in command-stream order, independently of pooled batch identity.
@@ -609,8 +614,8 @@ void destroyWorldRenderSystem()
 }
 
 std::uint32_t renderWorldCommands(WorldDrawList const& commands,
-	ImVec2 canvasPosition, ImVec2 canvasSize)
+	ImVec2 canvasPosition, ImVec2 canvasSize, WorldCanvas canvas)
 {
 	if (!gSystem) throw std::runtime_error("The World render system is not initialised");
-	return gSystem->render(commands, canvasPosition, canvasSize);
+	return gSystem->render(commands, canvasPosition, canvasSize, canvas);
 }

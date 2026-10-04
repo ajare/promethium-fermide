@@ -1,4 +1,5 @@
 #include "Checks.h"
+#include "LocationPlan.h"
 #include "Render.h"
 #include "ObjectTileset.h"
 #include "UISettings.h"
@@ -422,8 +423,62 @@ namespace
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 }
+namespace
+{
+	void locationPlanGrid(smoke::Context const&)
+	{
+		using smoke::require;
+		auto world = std::make_shared<core::World>("Plan grid", 20, 8);
+		auto room = world->addRoom("Offset", 1, 3, 7, 4, 3);
+		world->finishBuild();
+		// Smaller caller clip must survive the plan's own viewport clip.
+		WorldDrawList commands({{100, 60}, {360, 220}});
+		renderLocationPlanGrid(commands, *world->getSector(room), {80, 40}, {320, 240});
+		std::vector<WorldDrawList::Text> depths, columns;
+		unsigned vertical = 0, horizontal = 0;
+		auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+		for (auto const& command : commands.commands())
+		{
+			if (auto text = std::get_if<WorldDrawList::Text>(&command))
+			{
+				require(near(text->clip.minimum.x, 100) && near(text->clip.minimum.y, 60)
+					&& near(text->clip.maximum.x, 360) && near(text->clip.maximum.y, 220),
+					"Plan labels escaped the intersected viewport");
+				(near(text->position.x, 96) ? depths : columns).push_back(*text);
+			}
+			if (auto line = std::get_if<WorldDrawList::Line>(&command))
+			{
+				require(near(line->clip.minimum.x, 100) && near(line->clip.maximum.x, 360)
+					&& near(line->clip.minimum.y, 60) && near(line->clip.maximum.y, 220),
+					"Plan grid escaped the intersected viewport");
+				if (near(line->from.x, line->to.x)) ++vertical;
+				if (near(line->from.y, line->to.y)) ++horizontal;
+			}
+		}
+		require(vertical == 5 && horizontal == 5 && depths.size() == 4 && columns.size() == 5,
+			"Empty plan does not show four depth rows and the Location footprint");
+		for (unsigned i = 0; i < 4; ++i)
+		{
+			require(depths[i].value == std::to_string(i), "Plan depth labels are not 0–3");
+			if (i) require(depths[i].position.y < depths[i-1].position.y,
+				"Local depth 0 is not at the bottom");
+		}
+		for (unsigned i = 0; i < 5; ++i)
+		{
+			require(columns[i].value == std::to_string(7 + i), "Plan labels are not World X");
+			if (i) require(columns[i].position.x > columns[i-1].position.x,
+				"World X does not increase to the right");
+		}
+		require(near(commands.GetClipRectMin().x, 100) && near(commands.GetClipRectMax().y, 220),
+			"Plan changed the caller's clip stack");
+		WorldDrawList empty({{0, 0}, {1, 1}});
+		renderLocationPlanGrid(empty, *world->getSector(room), {0, 0}, {0, 0});
+		require(empty.commands().empty(), "Empty viewport recorded plan geometry");
+	}
+}
 void render_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/chairCommands", isolated<chairCommands> });
 	checks.push_back({ "furniture/demoCommands", isolated<demoCommands> });
+	checks.push_back({ "locationPlan/grid", isolated<locationPlanGrid> });
 }
