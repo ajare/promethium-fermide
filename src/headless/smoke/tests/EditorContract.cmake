@@ -165,6 +165,7 @@ set(editor_names
     airlocks/editorCommands
     furniture/demoActions
     furniture/chairActions
+    furniture/catalogueReattachmentHistory
     furniture/attachmentActions
     furniture/compositionActions
     securityScanners/editorCommandsAndHistory

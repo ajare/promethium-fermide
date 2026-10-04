@@ -2398,14 +2398,8 @@ namespace
 			shared_ptr<core::World> loaded;
 			auto restore = [&loaded, &world](DocumentSnapshot const& target)
 			{
-				loaded = make_shared<core::World>("Loading", 1, 1);
-				auto serializer = core::YamlSerializer::fromString(target.yaml);
-				serializer->deserialize();
-				core::SerializationWorkData workData;
-				workData.furnitureCatalogue = world->furnitureCatalogue();
-				if (!workData.furnitureCatalogue && !gWorldFilepath.empty())
-					workData.documentDirectory = filesystem::path(gWorldFilepath).parent_path();
-				if (!loaded->deserialize(*serializer, workData)) return false;
+				loaded = deserializeDocumentSnapshot(target, world, gWorldFilepath);
+				if (!loaded) return false;
 				core::loadAndAttachAgentTagRegistry(*loaded, gWorldFilepath);
 				core::loadAndAttachAgentBehaviourRegistry(*loaded, gWorldFilepath);
 				return true;

@@ -58,6 +58,44 @@ namespace
 		}
 	}
 
+	void catalogueReattachmentHistory(smoke::Context const& context)
+	{
+		editor_smoke::State state;
+		using smoke::require;
+		auto root = context.temporaryRoot() / "catalogue-reattachment";
+		std::filesystem::create_directory(root);
+		auto path = root / "catalogue-history.world.yaml";
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"),
+			root / "chair.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/layouts.furniture.yaml"),
+			root / "layouts.furniture.yaml");
+		auto world = std::make_shared<core::World>("Catalogue history", 8, 2);
+		world->addRoom("Room", 0, 0, 0, 8, 1);
+		world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
+		DocumentHistory history;
+		std::string diagnostic;
+		require(selectFurnitureCatalogue(world, path, "chair.furniture.yaml", diagnostic, history), diagnostic);
+		auto const chairUuid = world->furnitureCatalogue()->uuid();
+		require(selectFurnitureCatalogue(world, path, "layouts.furniture.yaml", diagnostic, history), diagnostic);
+		auto const layoutsUuid = world->furnitureCatalogue()->uuid();
+		require(chairUuid != layoutsUuid, "Catalogue reattachment regression needs distinct UUIDs");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto loaded = deserializeDocumentSnapshot(snapshot, world, path);
+			if (!loaded) return false;
+			world = std::move(loaded);
+			return true;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore)
+			&& world->furnitureCatalogueFilename() == "chair.furniture.yaml"
+			&& world->furnitureCatalogue()->uuid() == chairUuid,
+			"Undo did not reattach the snapshot's Furniture catalogue");
+		require(history.redo(captureDocumentSnapshot(world, history), restore)
+			&& world->furnitureCatalogueFilename() == "layouts.furniture.yaml"
+			&& world->furnitureCatalogue()->uuid() == layoutsUuid,
+			"Redo did not reattach the snapshot's Furniture catalogue");
+	}
+
 	void attachmentActions(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -364,6 +402,7 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/demoActions", demoActions });
 	checks.push_back({ "furniture/chairActions", chairActions });
+	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });
 	checks.push_back({ "furniture/compositionActions", compositionActions });
 }
