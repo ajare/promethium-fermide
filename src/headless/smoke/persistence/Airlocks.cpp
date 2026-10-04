@@ -49,6 +49,31 @@ namespace persistence
 						"Legacy permission reference retargeted after internal button removal");
 			};
 			check(migrated); migrated.resetSimulation(); check(migrated);
+			// Also feed handle-only compatibility data through the production
+			// binary reader, not just a newly migrated writer's stable records.
+			auto binaryOutput = core::BinarySerializer::toString();
+			legacySource.serialize(*binaryOutput, work); binaryOutput->serialize();
+			auto legacyBinary = binaryOutput->getSerializedString();
+			auto requirementField = [&](bool populated)
+			{
+				auto output = core::BinarySerializer::toString(); output->beginMap("");
+				output->beginArray("interactionPermissionRequirements");
+				if (populated) for (uint64_t id : {4u, 7u})
+				{
+					output->beginMap(""); output->writeUint64("interactionPoint", id);
+					output->beginArray("permissions"); output->writeUint64("", key.value);
+					output->endArray(); output->endMap();
+				}
+				output->endArray(); output->endMap(); output->serialize();
+				auto bytes = output->getSerializedString();
+				return bytes.substr(bytes.find("interactionPermissionRequirements"));
+			};
+			auto empty = requirementField(false); auto at = legacyBinary.find(empty);
+			require(at != std::string::npos, "Binary legacy requirement field missing");
+			legacyBinary.replace(at, empty.size(), requirementField(true));
+			auto binaryInput = core::BinarySerializer::fromString(legacyBinary); binaryInput->deserialize();
+			require(migrated.deserialize(*binaryInput, work), "Binary handle-only compatibility refused");
+			check(migrated); migrated.resetSimulation(); check(migrated);
 			for (bool binary : { false, true })
 			{
 				auto save = [&](auto output) {

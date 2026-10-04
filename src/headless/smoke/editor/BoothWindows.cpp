@@ -245,6 +245,23 @@ namespace
 		auto unit = world->lookupDumbwaiter(id);
 		world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {a,b});
 		world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {b});
+		auto light = world->addSectorLightSwitch(unit->getStop(0).sector->getIndex(), 0);
+		world->finishBuild(); world->pauseSimulation();
+		require(world->setInteractionPointPermissionRequirement(light.interactionPoint, {a,b}), "Mixed light protection refused");
+		auto lightPosition = world->lookupInteractionPoint(light.interactionPoint).entity->getPosition();
+		auto checkLight = [&]
+		{
+			unsigned count = 0;
+			for (auto const& point : world->getSimulationSnapshot().interactionPoints)
+				if (point.name == "Light switch")
+				{
+					++count;
+					require(point.position == lightPosition
+						&& world->getInteractionPointPermissionRequirement(point.id) == std::vector<core::AccessPermissionId>{a,b},
+						"Mixed clipboard/history retargeted unrelated light geometry or permissions");
+				}
+			require(count == 1, "Mixed reconstruction omitted/duplicated the light control");
+		};
 		world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "Copy cycle setup failed");
 		world->pauseSimulation(); gWorldDocumentHistory.clear();
 		auto envelope = YAML::Load(makeDumbwaiterClipboardText(*world, *unit))["prometheumClipboard"];
@@ -267,12 +284,12 @@ namespace
 			"Same-World copy failed rename-stable identity resolution");
 		auto restore = [&](DocumentSnapshot const& snapshot) {
 			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData data;
-			bool result = world->deserialize(*input, data); world->pauseSimulation(); return result;
+			bool result = world->deserialize(*input, data); world->pauseSimulation(); checkLight(); return result;
 		};
 		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Unit clipboard/move undo failed"); };
 		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Unit clipboard/move redo failed"); };
 		undo(); require(!world->lookupDumbwaiter(copy), "Paste undo retained unit");
-		redo(); require(world->lookupDumbwaiter(copy) && world->getSimulationSnapshot().interactionPoints.size() == 4, "Paste redo lost/duplicated child ownership");
+		redo(); require(world->lookupDumbwaiter(copy) && world->getSimulationSnapshot().interactionPoints.size() == 5, "Paste redo lost/duplicated child ownership");
 		require(dumbwaiter_fixture::control(*world, id, 0)->getCellX() == 3
 			&& dumbwaiter_fixture::control(*world, id, 1)->getCellX() == 2
 			&& dumbwaiter_fixture::control(*world, copy, 0)->getCellX() == 5,
@@ -283,7 +300,8 @@ namespace
 		undo(); require(world->lookupDumbwaiter(copy)->getLayerIndex() == 1, "Move undo lost placement");
 		redo(); require(world->lookupDumbwaiter(copy)->getLayerIndex() == 3
 			&& world->lookupDumbwaiter(copy)->getCarPosition() == core::Vector2{0,3}, "Move redo lost placement/initial state");
-		world->resetSimulation(); world->pauseSimulation(); pasted = world->lookupDumbwaiter(copy);
+		world->resetSimulation(); world->pauseSimulation(); pasted = world->lookupDumbwaiter(copy); checkLight();
+		require(!world->lookupInteractionPoint(light.interactionPoint), "Reconstruction reused a stale control handle");
 		require(world->getInteractionPointPermissionRequirement(pasted->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b},
 			"Move history/replay lost requirements");
 		auto actor = world->createAgent("Restored operator", pasted->getStop(1).sector->getIndex(), 0, 0.0f);

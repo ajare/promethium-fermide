@@ -987,11 +987,14 @@ namespace core
 			Vector2 interactionOffset{};
 			bool hasInteractionOffset{ false };
 			physicalControl::Owner owner{};
-			bool hasOwner{ false };
 		};
 
+		PhysicalControlPlacement const* physicalControlPlacement(InteractionPointId point) const;
 		std::vector<PhysicalControlPlacement> mPhysicalControlPlacements;
 		bool mResolvingPhysicalControls{ false };
+		// Current record ordinal during detached/live replay, independent of the
+		// not-yet-adopted construction log. Used for stable landing permissions.
+		size_t mConstructionReplayIndex{ 0 };
 
 	private:
 
@@ -1268,7 +1271,6 @@ namespace core
 		bool validateStaircaseEndpoint(uint32_t layerIndex, uint32_t x, uint32_t y, bool upperEndpoint,
 			int riseSide, std::string& diagnostic) const;
 
-		void validateCellHasNoPhysicalControl(std::string const& caller, uint32_t layerIndex, uint32_t x, uint32_t y, int side) const;
 
 		void validateCellTraversableOnFoot(std::string const& caller, std::string const& desiredObject, uint32_t layerIndex, uint32_t x, uint32_t y) const;
 
@@ -1343,11 +1345,7 @@ namespace core
 
 		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side);
 
-		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags, uint32_t* vertexIdentifier = nullptr,
-			uint32_t alternateX = ~0u, int alternateSide = -1);
-
-		// Common production boundary for incremental owner migration. Explicit
-		// candidates and authored owner keys do not enable the future policy.
+		// All stationary physical owners use authored canonical demands.
 		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
 			uint32_t y, physicalControl::Demand const& demand, uint32_t flags,
 			uint32_t* vertexIdentifier = nullptr);

@@ -1586,18 +1586,7 @@ namespace core
 				processMarker(obj, row);
 			}
 
-			for (int side = 0; side < 3; ++side)
-			{
-				if (cellDef.controls[side] != ~0u)
-				{
-					ObjectData obj = { cellDef.controls[side], layerIndex, x, y,
-						mwWorld->_getSector(cellDef.sectorIndex), {} };
-
-					processInteractionPoint(obj, row);
-				}
-			}
-
-			for (auto index : cellDef.stackedControls)
+			for (auto index : cellDef.physicalControls)
 			{
 				ObjectData obj = { index, layerIndex, x, y,
 					mwWorld->_getSector(cellDef.sectorIndex), {} };

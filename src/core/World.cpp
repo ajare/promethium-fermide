@@ -2349,17 +2349,6 @@ namespace core
 		}
 	}
 
-	void World::validateCellHasNoPhysicalControl(string const& caller, uint32_t layerIndex, uint32_t x, uint32_t y, int side) const
-	{
-		auto layer = getLayer(layerIndex);
-		auto const& cellDef = layer->getCellDefinition(x, y);
-
-		if (cellDef.controls[side] != ~0u)
-		{
-			throw WorldException(this, format("{} - cell at {},{} (side {}) has a physical control.", caller, x, y, side));
-		}
-	}
-
 
 	void World::validateCellTraversableOnFoot(string const& caller, string const& desiredObject, uint32_t layerIndex, uint32_t x, uint32_t y) const
 	{
@@ -4225,7 +4214,7 @@ namespace core
 			if (i < options.landingControlPermissionRequirements.size())
 				for (auto permission : options.landingControlPermissionRequirements[i])
 					mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
-			mAuthoredControlRequirements[point] = { mConstructionRecords.size(), i };
+			mAuthoredControlRequirements[point] = { mDeserializingConstruction ? mConstructionReplayIndex : mConstructionRecords.size(), i };
 			landing->mControls.push_back(point);
 			liftResource->mLiftStops[i].callControl = point;
 
@@ -4503,7 +4492,7 @@ namespace core
 				if (doorIndex < options.landingControlPermissionRequirements.size())
 					for (auto permission : options.landingControlPermissionRequirements[doorIndex])
 						mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
-				mAuthoredControlRequirements[point] = { mConstructionRecords.size(), doorIndex };
+				mAuthoredControlRequirements[point] = { mDeserializingConstruction ? mConstructionReplayIndex : mConstructionRecords.size(), doorIndex };
 				landing->mControls.push_back(point);
 				if (!shuttleResource->mLiftStops[stop].callControl)
 					shuttleResource->mLiftStops[stop].callControl = point;
@@ -4730,8 +4719,6 @@ namespace core
 		invalidateSimulationSnapshot();
 		uint32_t buttonX = sector->getCellX() + x;
 		physicalControl::Demand demand;
-		demand.candidates = { physicalControl::Candidate::explicitHost(buttonX, 2, CORE_SIDE_MIDDLE) };
-		demand.hasOwner = true;
 		demand.owner = { physicalControl::OwnerType::LocationLightSwitch,
 			{ sector->getLayerIndex(), buttonX, y, 1, 1 },
 			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
@@ -6495,7 +6482,6 @@ namespace core
 		if (!isLocationLike(sector->getType()) || xOffset >= sector->getCellsWide())
 			throw WorldException(this, "Light switch requires an authored Location host cell");
 		physicalControl::Demand demand;
-		demand.hasOwner = true;
 		demand.owner = { physicalControl::OwnerType::LocationLightSwitch,
 			{ sector->getLayerIndex(), sector->getCellX() + xOffset, sector->getCellY(), 1, 1 },
 			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
@@ -7604,7 +7590,7 @@ namespace core
 			if (i < options.landingControlPermissionRequirements.size())
 				for (auto permission : options.landingControlPermissionRequirements[i])
 					mInteractionPoints.find(callPoint)->mPermissionRequirement.set(permission.value - 1);
-			mAuthoredControlRequirements[callPoint] = { mConstructionRecords.size(), i };
+			mAuthoredControlRequirements[callPoint] = { mDeserializingConstruction ? mConstructionReplayIndex : mConstructionRecords.size(), i };
 			resource->mLiftStops[i].callControl = callPoint;
 
 			DeviceCommand select;
@@ -8130,8 +8116,7 @@ namespace core
 		// but return the authored host SectorObject for interaction/selection.
 		for (auto const& placement : mPhysicalControlPlacements)
 		{
-			if (placement.layerIndex != layerIndex || placement.objectIndex == ~0u
-				|| placement.candidates[placement.currentCandidate].quarterOffset < 0) continue;
+			if (placement.layerIndex != layerIndex || placement.objectIndex == ~0u) continue;
 			auto object = mSectors[placement.sectorIndex]->getObject(placement.objectIndex);
 			if (!object || !object->pointInside(x, y)) continue;
 			if (sectorObject) *sectorObject = object;
@@ -10708,6 +10693,18 @@ namespace core
 					break;
 				}
 		}
+		if (auto placement = physicalControlPlacement(id);
+			placement && placement->owner.type == physicalControl::OwnerType::LocationLightSwitch)
+			for (auto& record : mConstructionRecords)
+				if (record.type == ConstructionType::LightSwitch && record.a == placement->sectorIndex
+					&& record.b + placement->owner.hostingLocation.x == placement->owner.geometry.x)
+				{
+					auto& stored = record.controlPermissionRequirements[0];
+					stored.clear();
+					for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+						if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+					break;
+				}
 		if (auto unit = lookupDumbwaiter(point->mDumbwaiterOwner))
 			for (auto& record : mConstructionRecords)
 				if (record.type == ConstructionType::Dumbwaiter && record.dumbwaiterId == unit->getId())

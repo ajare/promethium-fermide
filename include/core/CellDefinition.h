@@ -28,11 +28,9 @@ namespace core
 		
 		uint32_t sectorObjectIndex{ ~0u };
 
-		// Representative controls: one registration per cell side.
-		uint32_t controls[3] = { ~0u, ~0u, ~0u };
-		// Additional independently owned controls sharing a cell-side registration,
-		// either at distinct inset centres or in a coincident vertical stack.
-		std::vector<uint32_t> stackedControls;
+		// Every physical control hosted here, including independent stack members.
+		// Physical feasibility is determined by absolute centres, not cell slots.
+		std::vector<uint32_t> physicalControls;
 
 		// Index of Bulkhead doors on either side.
 		uint32_t bulkheadIndices[2] = { ~0u, ~0u };

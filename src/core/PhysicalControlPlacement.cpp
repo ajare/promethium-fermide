@@ -1,10 +1,9 @@
 #include "core/PhysicalControlPlacement.h"
 #include <algorithm>
 #include <functional>
-#include <set>
 #include <stdexcept>
-#include <utility>
 #include <tuple>
+#include <utility>
 
 namespace core::physicalControl
 {
@@ -12,146 +11,21 @@ namespace core::physicalControl
 
 	int64_t Candidate::centreKey() const
 	{
-		return static_cast<int64_t>(cellX) * 4 + (quarterOffset >= 0
-			? quarterOffset : side == CORE_SIDE_RIGHT ? 4 : side == CORE_SIDE_MIDDLE ? 2 : 0);
+		return static_cast<int64_t>(cellX) * 4 + quarterOffset;
 	}
 
 	float Candidate::centreX() const
 	{
-		return cellX + (quarterOffset >= 0 ? quarterOffset * 0.25f
-			: side == CORE_SIDE_RIGHT ? 1.0f : side == CORE_SIDE_MIDDLE ? 0.5f : 0.0f);
+		return cellX + quarterOffset * 0.25f;
 	}
 
-	Candidate Candidate::explicitHost(uint32_t x, int offset, int registrationSide)
+	Candidate Candidate::explicitHost(uint32_t x, int offset)
 	{
-		if (offset < 0 || offset > 3 || registrationSide < CORE_SIDE_LEFT
-			|| registrationSide > CORE_SIDE_MIDDLE)
+		if (offset < 0 || offset > 3)
 			throw invalid_argument("Invalid explicit physical-control candidate");
-		return { x, registrationSide, offset };
+		return { x, offset };
 	}
 
-	vector<Candidate> legacyCandidates(uint32_t x, int side, uint32_t alternateX, int alternateSide)
-	{
-		vector<Candidate> candidates{ { x, side } };
-		if (alternateX != ~0u && alternateSide >= CORE_SIDE_LEFT
-			&& alternateSide <= CORE_SIDE_MIDDLE && (alternateX != x || alternateSide != side))
-			candidates.push_back({ alternateX, alternateSide });
-		return candidates;
-	}
-
-	vector<uint32_t> allocateLegacy(vector<Demand> const& demands)
-	{
-		vector<uint32_t> row, assignment;
-		for (uint32_t i = 0; i < demands.size(); ++i)
-		{
-			row.push_back(i);
-			assignment.push_back(demands[i].currentCandidate);
-		}
-		auto centerKey = [](Candidate const& candidate) { return candidate.centreKey(); };
-		auto connected = [&](uint32_t left, uint32_t right)
-		{
-			for (auto const& a : demands[left].candidates)
-				for (auto const& b : demands[right].candidates)
-					if (centerKey(a) == centerKey(b)) return true;
-			return false;
-		};
-
-		vector<bool> visited(row.size(), false);
-		for (uint32_t root = 0; root < row.size(); ++root)
-		{
-			if (visited[root]) continue;
-			vector<uint32_t> component;
-			vector<uint32_t> pending{ root };
-			visited[root] = true;
-			while (!pending.empty())
-			{
-				auto local = pending.back();
-				pending.pop_back();
-				component.push_back(row[local]);
-				for (uint32_t other = 0; other < row.size(); ++other)
-				{
-					if (!visited[other] && connected(row[local], row[other]))
-					{
-						visited[other] = true;
-						pending.push_back(other);
-					}
-				}
-			}
-			sort(component.begin(), component.end());
-
-			vector<uint32_t> choice(component.size()), bestChoice;
-			set<pair<uint32_t, int>> occupiedSlots;
-			bool haveBest = false;
-			uint32_t bestUnique = 0, bestMoved = 0, bestDefaults = 0;
-			function<void(uint32_t)> search = [&](uint32_t depth)
-			{
-				if (depth != component.size())
-				{
-					auto const& placement = demands[component[depth]];
-					for (uint32_t candidateIndex = 0; candidateIndex < placement.candidates.size(); ++candidateIndex)
-					{
-						auto const& candidate = placement.candidates[candidateIndex];
-						auto slot = make_pair(candidate.cellX, candidate.side);
-						if (!occupiedSlots.insert(slot).second) continue;
-						choice[depth] = candidateIndex;
-						search(depth + 1);
-						occupiedSlots.erase(slot);
-					}
-					return;
-				}
-
-				set<int64_t> centers;
-				uint32_t moved = 0, defaults = 0;
-				for (uint32_t i = 0; i < component.size(); ++i)
-				{
-					auto const& placement = demands[component[i]];
-					centers.insert(centerKey(placement.candidates[choice[i]]));
-					moved += choice[i] != placement.currentCandidate;
-					defaults += choice[i] == placement.defaultCandidate;
-				}
-				auto unique = static_cast<uint32_t>(centers.size());
-				bool better = !haveBest || unique > bestUnique
-					|| (unique == bestUnique && moved < bestMoved);
-				if (!better && haveBest && unique == bestUnique && moved == bestMoved)
-				{
-					for (uint32_t i = 0; i < component.size(); ++i)
-					{
-						auto const& placement = demands[component[i]];
-						bool retained = choice[i] == placement.currentCandidate;
-						bool bestRetained = bestChoice[i] == placement.currentCandidate;
-						if (retained != bestRetained) { better = retained; break; }
-					}
-					if (!better)
-					{
-						bool sameRetention = true;
-						for (uint32_t i = 0; i < component.size(); ++i)
-						{
-							auto const& placement = demands[component[i]];
-							if ((choice[i] == placement.currentCandidate)
-								!= (bestChoice[i] == placement.currentCandidate))
-							{ sameRetention = false; break; }
-						}
-						if (sameRetention && (defaults > bestDefaults
-							|| (defaults == bestDefaults && choice < bestChoice))) better = true;
-					}
-				}
-				if (better)
-				{
-					haveBest = true;
-					bestUnique = unique;
-					bestMoved = moved;
-					bestDefaults = defaults;
-					bestChoice = choice;
-				}
-			};
-			search(0);
-			if (!haveBest) throw std::runtime_error("Physical-control placement constraints cannot be satisfied");
-			for (uint32_t i = 0; i < component.size(); ++i)
-				assignment[component[i]] = bestChoice[i];
-		}
-
-		return assignment;
-	}
 	bool canonicalLess(Owner const& a, Owner const& b)
 	{
 		auto key = [](Owner const& owner)
@@ -168,15 +42,20 @@ namespace core::physicalControl
 	vector<uint32_t> allocateCanonical(vector<Demand> const& demands)
 	{
 		vector<uint32_t> order, assignment(demands.size());
-		for (uint32_t i = 0; i < demands.size(); ++i) order.push_back(i);
-		stable_sort(order.begin(), order.end(), [&](auto a, auto b)
+		for (uint32_t i = 0; i < demands.size(); ++i)
 		{
-			if (demands[a].hasOwner != demands[b].hasOwner) return demands[a].hasOwner;
-			return demands[a].hasOwner && canonicalLess(demands[a].owner, demands[b].owner);
+			if (demands[i].candidates.empty()) throw runtime_error("Physical control requires candidates");
+			for (auto const& candidate : demands[i].candidates)
+				if (candidate.quarterOffset < 0 || candidate.quarterOffset > 3)
+					throw runtime_error("Invalid physical-control candidate");
+			order.push_back(i);
+		}
+		sort(order.begin(), order.end(), [&](auto a, auto b)
+		{
+			return canonicalLess(demands[a].owner, demands[b].owner);
 		});
 		for (size_t i = 1; i < order.size(); ++i)
-			if (demands[order[i]].hasOwner && demands[order[i - 1]].hasOwner
-				&& !canonicalLess(demands[order[i]].owner, demands[order[i - 1]].owner)
+			if (!canonicalLess(demands[order[i]].owner, demands[order[i - 1]].owner)
 				&& !canonicalLess(demands[order[i - 1]].owner, demands[order[i]].owner))
 				throw runtime_error("Indistinguishable duplicate physical-control definitions");
 
@@ -208,15 +87,6 @@ namespace core::physicalControl
 			for (auto index : order)
 				if (find(component.begin(), component.end(), index) != component.end()) sorted.push_back(index);
 			component = std::move(sorted);
-			bool migrated = any_of(component.begin(), component.end(), [&](auto i) { return demands[i].hasOwner; });
-			if (!migrated)
-			{
-				vector<Demand> legacy;
-				for (auto i : component) legacy.push_back(demands[i]);
-				auto choices = allocateLegacy(legacy);
-				for (size_t i = 0; i < component.size(); ++i) assignment[component[i]] = choices[i];
-				continue;
-			}
 
 			Component result{component, vector<Solution>(4)};
 			for (uint32_t capacity = 1; capacity <= 4; ++capacity)
@@ -235,8 +105,7 @@ namespace core::physicalControl
 					for (uint32_t i = 0; i < demand.candidates.size(); ++i) candidates.push_back(i);
 					stable_sort(candidates.begin(), candidates.end(), [&](auto a, auto b)
 					{
-						auto preferred = demand.hasOwner ? demand.defaultCandidate : demand.currentCandidate;
-						return (a == preferred) > (b == preferred);
+						return (a == demand.defaultCandidate) > (b == demand.defaultCandidate);
 					});
 					for (auto candidate : candidates)
 					{
@@ -247,23 +116,20 @@ namespace core::physicalControl
 						{
 							auto const& other = demands[component[i]];
 							auto const& occupied = other.candidates[choice[i]];
-							bool sameCentre = position.centreKey() == occupied.centreKey();
-							if (sameCentre && (demand.hasOwner || other.hasOwner))
+							if (position.centreKey() == occupied.centreKey())
 							{
 								auto const& a = demand.owner.hostingLocation;
 								auto const& b = other.owner.hostingLocation;
-								collision |= !demand.hasOwner || !other.hasOwner
-									|| tie(a.layer, a.x, a.baseLevel, a.width, a.height)
+								collision |= tie(a.layer, a.x, a.baseLevel, a.width, a.height)
 									!= tie(b.layer, b.x, b.baseLevel, b.width, b.height);
 								++coincident;
 							}
-							else collision |= position.cellX == occupied.cellX && position.side == occupied.side;
 						}
 						if (collision || coincident >= capacity) continue;
 						choice[depth] = candidate;
 						// Adding to any occupied position adds ONE button above a bottom,
 						// not the number of pairs within the stack.
-						search(depth + 1, stacked + (coincident != 0), penalty + (demand.hasOwner && candidate != demand.defaultCandidate));
+						search(depth + 1, stacked + (coincident != 0), penalty + (candidate != demand.defaultCandidate));
 					}
 				};
 				search(0, 0, 0);
@@ -287,5 +153,4 @@ namespace core::physicalControl
 				assignment[component.indices[i]] = component.capacities[capacity - 1].choice[i];
 		return assignment;
 	}
-
 }

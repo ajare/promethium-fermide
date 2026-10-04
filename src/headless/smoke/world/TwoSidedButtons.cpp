@@ -26,6 +26,7 @@
 #include <memory>
 #include <map>
 #include <tuple>
+#include <type_traits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -142,48 +143,31 @@ namespace
 			std::string(what) + ": a Door Button did not inherit the Door's authored Layer");
 	}
 
-	void placementBoundaryPreservesLegacyPolicy()
+	void canonicalOnlyBoundary()
 	{
 		using namespace core::physicalControl;
-		auto right = legacyCandidates(3, CORE_SIDE_RIGHT, 2, CORE_SIDE_LEFT);
-		require(right.size() == 2 && right[0].centreKey() == 16
-			&& right[1].centreKey() == 8, "Legacy candidate generation changed");
-		Demand flexible{ right, 0, 0, {}, false };
-		Demand fixed{ legacyCandidates(4, CORE_SIDE_LEFT), 0, 0, {}, false };
-		// Distinct registrations with coincident centres must still use legacy
-		// separation, not the future stacking/canonical policy.
-		require(allocateLegacy({ flexible, fixed }) == std::vector<uint32_t>{1, 0},
-			"Legacy allocator no longer separates coincident registrations");
-		flexible.currentCandidate = 1;
-		require(allocateLegacy({ flexible }) == std::vector<uint32_t>{1},
-			"Prefactor activated preferred-side canonical reassignment");
-		require(flexible.currentCandidate == 1 && flexible.candidates[0].cellX == 3,
-			"Allocation mutated its input demand");
-		bool refused = false;
-		try { (void)allocateLegacy({ fixed, fixed }); }
-		catch (std::runtime_error const&) { refused = true; }
-		require(refused, "Duplicate legacy slots must remain impossible");
-
 		for (int offset = 0; offset < 4; ++offset)
 		{
-			auto candidate = Candidate::explicitHost(4, offset, CORE_SIDE_MIDDLE);
+			auto candidate = Candidate::explicitHost(4, offset);
 			require(candidate.cellX == 4 && candidate.centreX() == 4 + offset * 0.25f,
 				"Explicit host/quarter-cell centre changed ownership or coordinate");
 		}
-		refused = false;
-		try { (void)Candidate::explicitHost(4, 4, CORE_SIDE_LEFT); }
+		bool refused = false;
+		try { (void)Candidate::explicitHost(4, 4); }
 		catch (std::invalid_argument const&) { refused = true; }
 		require(refused, "Explicit offset 1.0 must use the next host cell");
-
-		// Every stationary owner has the same ID-free geometry/role contract.
+		// Every owner uses canonical preference, with no prior-placement input.
 		for (auto type : { OwnerType::Airlock, OwnerType::BulkheadDoor, OwnerType::Door,
 			OwnerType::Dumbwaiter, OwnerType::ForceBridge, OwnerType::Ladder,
 			OwnerType::Lift, OwnerType::LocationLightSwitch, OwnerType::PlatformLift, OwnerType::Shuttle })
 		{
-			flexible.hasOwner = true;
-			flexible.owner = { type, { 1, 2, 0, 3, 2 }, { 0, 0, 0, 8, 2 }, { 1, 4, 1 } };
-			require(allocateLegacy({ flexible }) == std::vector<uint32_t>{1},
-				"Owner metadata changed legacy policy");
+			Demand demand{{Candidate::explicitHost(4, 0), Candidate::explicitHost(3, 0)}, 0,
+				{type, {1, 2, 0, 3, 2}, {0, 0, 0, 8, 2}, {1, 4, 1}}};
+			require(allocateCanonical({demand}) == std::vector<uint32_t>{0}, "Owner bypassed canonical preference");
+			refused = false;
+			try { (void)allocateCanonical({demand, demand}); }
+			catch (std::runtime_error const&) { refused = true; }
+			require(refused, "Duplicate definitions escaped canonical validation");
 		}
 	}
 
@@ -248,7 +232,7 @@ namespace
 							&& point.entity->getSector().value == uint64_t(sector) + 1,
 							"Approach ownership/position changed");
 						auto const& cell = std::as_const(world).getLayer(sector == front ? 0 : 1)->getCellDefinition((uint32_t)expected, 0);
-						require(cell.controls[CORE_SIDE_LEFT] != ~0u, "Offset-zero Button not registered in its host cell");
+						require(!cell.physicalControls.empty(), "Offset-zero Button not registered in its host cell");
 						uint32_t vertices = 0;
 						for (auto const& vertex : world.getGraph()->getVertices())
 							if (vertex->getObject() == button)
@@ -425,8 +409,8 @@ namespace
 	void canonicalOrderContract()
 	{
 		using namespace core::physicalControl;
-		Demand earlier{ { Candidate::explicitHost(3, 0, CORE_SIDE_LEFT), Candidate::explicitHost(2, 0, CORE_SIDE_LEFT) },
-			0, 1, { OwnerType::Door, {0, 2, 0, 1, 1}, {1, 0, 0, 8, 1}, {0, 2, 0} }, true };
+		Demand earlier{ { Candidate::explicitHost(3, 0), Candidate::explicitHost(2, 0) },
+			0, { OwnerType::Door, {0, 2, 0, 1, 1}, {1, 0, 0, 8, 1}, {0, 2, 0} } };
 		// Exercise every field of the approved tuple, including hosting-Location
 		// fields (physical coincidence must not be scoped by their ownership).
 		for (int field = 0; field < 14; ++field)
@@ -584,9 +568,9 @@ namespace
 		using namespace core::physicalControl;
 		auto demand = [](uint32_t ownerX, std::initializer_list<uint32_t> positions)
 		{
-			Demand d; d.hasOwner = true;
+			Demand d;
 			d.owner = {OwnerType::Door, {0, ownerX, 0, 1, 1}, {1, 0, 0, 20, 1}, {0, ownerX, 0}};
-			for (auto x : positions) d.candidates.push_back(Candidate::explicitHost(x, 0, CORE_SIDE_LEFT));
+			for (auto x : positions) d.candidates.push_back(Candidate::explicitHost(x, 0));
 			return d;
 		};
 		auto solve = [&](std::vector<Demand> const& input, std::vector<uint32_t> const& expected, char const* tier)
@@ -700,8 +684,8 @@ namespace
 	void sharedApproachStacks()
 	{
 		using namespace core::physicalControl;
-		Demand first{{Candidate::explicitHost(2, 0, CORE_SIDE_LEFT)}, 0, 0,
-			{OwnerType::Door, {0, 2, 0, 1, 1}, {1, 1, 0, 2, 1}, {1, 2, 0}}, true};
+		Demand first{{Candidate::explicitHost(2, 0)}, 0,
+			{OwnerType::Door, {0, 2, 0, 1, 1}, {1, 1, 0, 2, 1}, {1, 2, 0}}};
 		auto second = first; second.owner.geometry.layer = 1; second.owner.role.order = 0;
 		require(allocateCanonical({first, second}) == std::vector<uint32_t>{0, 0}, "Unavoidable pair refused");
 		auto third = second; third.owner.geometry.layer = 2;
@@ -1982,18 +1966,29 @@ namespace
 		world.addAirlock(0, 0, 30, 2);
 		world.addSectorBulkheadDoor(0, 0, 8, CORE_SIDE_LEFT);
 		world.finishBuild(); world.pauseSimulation();
+		for (uint32_t sector = 0; sector < world.getNumSectors(); ++sector)
+			for (auto button : buttonsIn(world, sector))
+			{
+				auto id = button->getInteractionPointId();
+				auto permission = world.addAccessPermission("Control " + std::to_string(id.value));
+				std::string diagnostic;
+				require(world.setInteractionPointPermissionRequirement(id, {permission}, &diagnostic), diagnostic);
+			}
 		auto layout = [](World const& scene)
 		{
-			std::vector<std::tuple<uint32_t, float, float>> result;
+			std::vector<std::tuple<uint32_t, float, float, std::vector<AccessPermissionId>>> result;
+			std::set<uint64_t> identities;
 			for (uint32_t sector = 0; sector < scene.getNumSectors(); ++sector)
 				for (auto button : buttonsIn(scene, sector))
 				{
 					auto point = scene.lookupInteractionPoint(button->getInteractionPointId());
-					require(bool(point), "All-owner reflow omitted interaction identity");
+					require(bool(point) && identities.insert(button->getInteractionPointId().value).second,
+						"All-owner reconstruction omitted/merged interaction identity");
 					auto centre = button->getPosition() + button->getSize() * 0.5f;
 					require(scene.getObjectAtPosition(scene.getSector(sector)->getLayerIndex(), centre.x, centre.y) == button,
 						"All-owner reflow lost independently targetable geometry");
-					result.emplace_back(scene.getSector(sector)->getLayerIndex(), centre.x, button->getPosition().y);
+					result.emplace_back(scene.getSector(sector)->getLayerIndex(), centre.x, button->getPosition().y,
+						scene.getInteractionPointPermissionRequirement(button->getInteractionPointId()));
 				}
 			std::sort(result.begin(), result.end()); return result;
 		};
@@ -2007,11 +2002,91 @@ namespace
 		{
 			auto writer = Serializer::toString(); world.serialize(*writer, data); writer->serialize();
 			auto reader = Serializer::fromString(writer->getSerializedString()); reader->deserialize(); World loaded("Placeholder", 1, 1);
-			require(loaded.deserialize(*reader, data) && layout(loaded) == prior, "All-owner mixed reconstruction changed placement");
+			try { require(loaded.deserialize(*reader, data) && layout(loaded) == prior, "All-owner mixed reconstruction changed placement"); }
+			catch (std::exception const& error) { throw std::runtime_error(std::string("All-owner current replay: ") + error.what()); }
 		};
 		replay.template operator()<YamlSerializer>(); replay.template operator()<BinarySerializer>();
+		for (int iteration = 0; iteration < 2; ++iteration)
+		{
+			world.resetSimulation();
+			require(layout(world) == prior, "All-owner construction replay changed geometry/independent permissions");
+			if (iteration == 0)
+			{
+				world.pauseSimulation(); auto extra = world.addAccessPermission("Edited after reconstruction");
+				for (uint32_t sector = 0; sector < world.getNumSectors(); ++sector)
+					for (auto button : buttonsIn(world, sector))
+					{
+						auto id = button->getInteractionPointId(); auto permissions = world.getInteractionPointPermissionRequirement(id);
+						permissions.push_back(extra);
+						require(world.setInteractionPointPermissionRequirement(id, permissions), "Reconstructed control edit refused");
+					}
+				prior = layout(world);
+			}
+		}
 		world.pauseSimulation(); world.addLocationWall(dumb, 0, CORE_SIDE_RIGHT); world.finishBuild();
 		require(layout(world) == prior, "All-owner wall restoration retained stale placement");
+
+		// Patch production-written typed fields, not private construction state.
+		// The Binary serializer is self-describing; derive each field fragment
+		// with its writer so malformed documents still have valid wire structure.
+		auto binaryField = [](std::string const& name, auto value)
+		{
+			auto writer = BinarySerializer::toString(); writer->beginMap("");
+			if constexpr (std::is_same_v<decltype(value), uint32_t>) writer->writeUint32(name, value);
+			else writer->writeString(name, value);
+			writer->endMap(); writer->serialize();
+			auto bytes = writer->getSerializedString(); auto at = bytes.find(name);
+			require(at != std::string::npos, "Binary field fragment missing");
+			return bytes.substr(at);
+		};
+		auto yamlWriter = YamlSerializer::toString(); world.serialize(*yamlWriter, data); yamlWriter->serialize();
+		auto binaryWriter = BinarySerializer::toString(); world.serialize(*binaryWriter, data); binaryWriter->serialize();
+		auto yaml = yamlWriter->getSerializedString(); auto binary = binaryWriter->getSerializedString();
+		auto graph = world.getGraph(); auto generation = world.getTopologyGeneration(); world.markSaved();
+		for (std::string type : {"door", "lift", "shuttle", "dumbwaiter", "sectorLadder", "ladder",
+			"platformLift", "forceBridge", "bulkheadDoor", "airlock", "lightSwitch"})
+		{
+			auto invalid = YAML::Load(yaml); YAML::Node selected;
+			for (YAML::Node record : invalid["construction"])
+				if (record["type"].as<std::string>() == type) { selected.reset(record); break; }
+			require(bool(selected), "All-owner invalid fixture missing " + type);
+			std::string field = selected["xOffset"] ? "xOffset" : "x";
+			auto original = selected[field].as<uint32_t>(); auto impossible = world.getCellsWide() + 1;
+			selected[field] = impossible;
+			auto malformedBinary = binary;
+			auto recordAt = malformedBinary.find(binaryField("type", type));
+			require(recordAt != std::string::npos, "Binary owner record missing");
+			auto fragment = binaryField(field, original);
+			auto fieldAt = malformedBinary.find(fragment, recordAt);
+			require(fieldAt != std::string::npos, "Binary owner geometry missing");
+			malformedBinary.replace(fieldAt, fragment.size(), binaryField(field, impossible));
+			for (bool binaryInput : {false, true})
+			{
+				std::unique_ptr<Serializer> reader = binaryInput
+					? std::unique_ptr<Serializer>(BinarySerializer::fromString(malformedBinary))
+					: std::unique_ptr<Serializer>(YamlSerializer::fromString(YAML::Dump(invalid)));
+				reader->deserialize(); bool refused = false;
+				try { refused = !world.deserialize(*reader, data); } catch (std::exception const&) { refused = true; }
+				require(refused && world.getGraph() == graph && layout(world) == prior && !world.isModified()
+					&& world.getTopologyGeneration() == generation && world.isTraversalTopologyValid(),
+					"Mixed invalid " + type + (binaryInput ? " binary" : " YAML") + " document was not transactional");
+			}
+		}
+		// Historical authored records migrate through the current policy, never
+		// an old allocator. Schema 49 predates the consolidated document schema.
+		auto historical = YAML::Load(yaml); historical["version"] = 49;
+		auto oldBinary = binary; auto version = binaryField("version", uint32_t{50});
+		auto at = oldBinary.find(version); require(at != std::string::npos, "Binary version field missing");
+		oldBinary.replace(at, version.size(), binaryField("version", uint32_t{49}));
+		for (bool binaryInput : {false, true})
+		{
+			std::unique_ptr<Serializer> reader = binaryInput
+				? std::unique_ptr<Serializer>(BinarySerializer::fromString(oldBinary))
+				: std::unique_ptr<Serializer>(YamlSerializer::fromString(YAML::Dump(historical)));
+			reader->deserialize(); World loaded("Historical", 1, 1);
+			require(loaded.deserialize(*reader, data) && layout(loaded) == prior,
+				"Historical mixed layout failed canonical migration or changed stable controls/permissions");
+		}
 	}
 
 	void mixedStructuralReflow()
@@ -2161,7 +2236,7 @@ void runDoorTwoSidedButtonSmokeChecks()
 	fixedInsetControls();
 	independentEndpointControls();
 	deterministicTransportControls();
-	placementBoundaryPreservesLegacyPolicy();
+	canonicalOnlyBoundary();
 	canonicalOrderContract();
 	canonicalSideReassignment();
 	sharedApproachStacks();

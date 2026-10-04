@@ -87,7 +87,7 @@ namespace core
 				if (source)
 					std::erase_if(plan.demands, [&](auto const& demand)
 					{
-						return demand.hasOwner && demand.owner.type == physicalControl::OwnerType::Dumbwaiter
+						return demand.owner.type == physicalControl::OwnerType::Dumbwaiter
 							&& demand.owner.geometry.layer == source->getLayerIndex()
 							&& demand.owner.geometry.x == source->getCellX()
 							&& demand.owner.geometry.baseLevel == source->getCellY();
@@ -197,8 +197,7 @@ namespace core
 				for (auto const& candidate : placement.candidates)
 				{
 					auto& cell = mLayers[placement.layerIndex]->getCellDefinition(candidate.cellX, placement.cellY);
-					if (cell.controls[candidate.side] == placement.objectIndex) cell.controls[candidate.side] = ~0u;
-					std::erase(cell.stackedControls, placement.objectIndex);
+					std::erase(cell.physicalControls, placement.objectIndex);
 				}
 				mSectors[placement.sectorIndex]->mObjects[placement.objectIndex].reset();
 				return true;

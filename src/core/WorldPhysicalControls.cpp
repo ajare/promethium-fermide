@@ -16,12 +16,10 @@ namespace core
 		uint32_t x, uint32_t y, uint32_t width) const
 	{
 		physicalControl::Demand demand;
-		demand.hasOwner = true;
 		demand.owner = { type, geometry,
 			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
 				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, x, y } };
-		demand.candidates = { physicalControl::Candidate::explicitHost(x + width, 0, CORE_SIDE_LEFT),
-			physicalControl::Candidate::explicitHost(x, 0, CORE_SIDE_LEFT) };
+		(void)width; // The shared policy derives candidates from authored geometry.
 		return validPhysicalControlDemand(std::move(demand), y);
 	}
 
@@ -30,7 +28,6 @@ namespace core
 		uint32_t y, int side) const
 	{
 		physicalControl::Demand demand;
-		demand.hasOwner = true;
 		demand.owner = { type, geometry,
 			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
 				sector->getCellsWide(), sector->getLevelsHigh() },
@@ -71,7 +68,6 @@ namespace core
 			}
 		}
 		physicalControl::Demand demand;
-		demand.hasOwner = true;
 		demand.owner = { physicalControl::OwnerType::Door,
 			{ sector->getLayerIndex() - role, x, y, width, 1 },
 			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
@@ -88,22 +84,23 @@ namespace core
 			|| demand.owner.type == OwnerType::Dumbwaiter;
 		bool bridge = demand.owner.type == OwnerType::ForceBridge;
 		bool inset = bridge || demand.owner.type == OwnerType::BulkheadDoor || demand.owner.type == OwnerType::Airlock;
-		if (!demand.hasOwner || (demand.owner.type != OwnerType::Door
-			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport && !endpoint && !inset)) return demand;
+		if (demand.owner.type != OwnerType::Door
+			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport && !endpoint && !inset)
+			throw WorldException(this, "Unknown physical-control owner");
 		auto const& host = demand.owner.hostingLocation;
 		auto const& geometry = demand.owner.geometry;
 		auto doorwayX = transport || endpoint ? demand.owner.role.x : geometry.x;
 		auto doorwayWidth = demand.owner.type == OwnerType::Shuttle ? 1u : geometry.width;
 		vector<Candidate> candidates = demand.owner.type == OwnerType::Door || transport || endpoint
-			? vector<Candidate>{ Candidate::explicitHost(doorwayX + doorwayWidth, 0, CORE_SIDE_LEFT),
-				Candidate::explicitHost(doorwayX, 0, CORE_SIDE_LEFT) }
-			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2, CORE_SIDE_MIDDLE) };
+			? vector<Candidate>{ Candidate::explicitHost(doorwayX + doorwayWidth, 0),
+				Candidate::explicitHost(doorwayX, 0) }
+			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2) };
 		if (inset)
 		{
 			bool left = demand.owner.role.order == CORE_SIDE_LEFT;
 			candidates = { Candidate::explicitHost(left ? geometry.x - 1
 				: geometry.x + (demand.owner.type == OwnerType::BulkheadDoor ? 0 : geometry.width),
-				left ? 3 : 1, CORE_SIDE_MIDDLE) };
+				left ? 3 : 1) };
 		}
 		demand.candidates.clear();
 		demand.defaultCandidate = ~0u;
@@ -160,7 +157,6 @@ namespace core
 			demand.candidates.push_back(candidate);
 		}
 		if (demand.candidates.empty()) throw WorldException(this, "No valid host/support for required physical control");
-		demand.currentCandidate = 0;
 		return demand;
 	}
 
@@ -175,11 +171,11 @@ namespace core
 			if (p.layerIndex != layer || p.cellY != y) continue;
 			// Removing aperture support deletes the complete Dumbwaiter through
 			// structural reconciliation; its owned demand does not survive the edit.
-			if (p.hasOwner && p.owner.type == physicalControl::OwnerType::Dumbwaiter
+			if (p.owner.type == physicalControl::OwnerType::Dumbwaiter
 				&& p.owner.geometry.x == unsupportedX) continue;
 			plan.row.push_back(i);
 			plan.demands.push_back(validPhysicalControlDemand({ p.candidates, p.defaultCandidate,
-				p.currentCandidate, p.owner, p.hasOwner }, y, blockedX, openedX, unsupportedX));
+				p.owner }, y, blockedX, openedX, unsupportedX));
 		}
 		if (extra) plan.demands.push_back(validPhysicalControlDemand(*extra, y, blockedX, openedX, unsupportedX));
 		try { plan.assignment = physicalControl::allocateCanonical(plan.demands); }
@@ -224,15 +220,6 @@ namespace core
 	}
 
 	World::CreateObjectResult World::createPhysicalControl(string const& name,
-		uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags,
-		uint32_t* vertexIdentifier, uint32_t alternateX, int alternateSide)
-	{
-		physicalControl::Demand demand;
-		demand.candidates = physicalControl::legacyCandidates(x, side, alternateX, alternateSide);
-		return createPhysicalControl(name, layerIndex, y, demand, flags, vertexIdentifier);
-	}
-
-	World::CreateObjectResult World::createPhysicalControl(string const& name,
 		uint32_t layerIndex, uint32_t y, physicalControl::Demand const& demand,
 		uint32_t flags, uint32_t* vertexIdentifier)
 	{
@@ -240,11 +227,10 @@ namespace core
 		string caller = "World::createPhysicalControl";
 		auto validated = validPhysicalControlDemand(demand, y);
 		auto candidates = validated.candidates;
-		if (candidates.empty() || validated.currentCandidate >= candidates.size())
+		if (candidates.empty())
 			throw WorldException(this, "Physical control requires valid candidates");
 		for (auto const& candidate : candidates)
-			if (candidate.side < CORE_SIDE_LEFT || candidate.side > CORE_SIDE_MIDDLE
-				|| candidate.quarterOffset < -1 || candidate.quarterOffset > 3)
+			if (candidate.quarterOffset < 0 || candidate.quarterOffset > 3)
 				throw WorldException(this, "Invalid physical-control candidate");
 
 		uint32_t initialCandidate = ~0u;
@@ -257,11 +243,8 @@ namespace core
 			if (sectorIndex == ~0u) sectorIndex = cell.sectorIndex;
 			else if (sectorIndex != cell.sectorIndex)
 				throw WorldException(this, format("{} - candidate positions cross Sector boundaries", caller));
-			if (cell.controls[candidate.side] == ~0u && initialCandidate == ~0u)
-				initialCandidate = i;
 		}
-		// Preflight legacy additions too: they may displace migrated controls on
-		// this Layer/Level, and refusal must precede object creation.
+		// Refusal must precede object creation.
 		auto plan = planPhysicalControls(layerIndex, sectorIndex, y, &validated);
 		initialCandidate = plan.assignment.back();
 		{
@@ -269,9 +252,8 @@ namespace core
 			// move a flexible existing control out of the required slot before the
 			// new object is constructed.
 			mPhysicalControlPlacements.push_back({ layerIndex, sectorIndex, ~0u, y,
-				candidates, demand.defaultCandidate, demand.currentCandidate });
+				candidates, validated.defaultCandidate, 0 });
 			mPhysicalControlPlacements.back().owner = demand.owner;
-			mPhysicalControlPlacements.back().hasOwner = demand.hasOwner;
 			try
 			{
 				reflowPhysicalControls(layerIndex, sectorIndex, y);
@@ -290,20 +272,17 @@ namespace core
 		auto& cellDef = mLayers[layerIndex]->getCellDefinition(initial.cellX, y);
 		auto sector = _getSector(cellDef.sectorIndex);
 
-		float centreOffset = initial.quarterOffset >= 0 ? initial.quarterOffset * 0.25f
-			: initial.side == CORE_SIDE_MIDDLE ? 0.5f : static_cast<float>(initial.side);
+		float centreOffset = initial.quarterOffset * 0.25f;
 		float xOffset = centreOffset - CORE_BUTTON_SIZE * 0.5f;
-		// Each migrated Button keeps an individually queryable graph identifier,
+		// Each Button keeps an individually queryable graph identifier,
 		// even when callers do not request it during construction.
 		uint32_t generatedIdentifier;
-		if (demand.hasOwner && !vertexIdentifier) vertexIdentifier = &generatedIdentifier;
+		if (!vertexIdentifier) vertexIdentifier = &generatedIdentifier;
 		auto controlIndex = sector->createPhysicalControl(sector, name, initial.cellX, y,
 			xOffset, CORE_BUTTON_Y_OFFSET, flags, vertexIdentifier);
-		if (cellDef.controls[initial.side] == ~0u) cellDef.controls[initial.side] = controlIndex;
 		mPhysicalControlPlacements.push_back({ layerIndex, sector->getIndex(), controlIndex, y,
-			std::move(candidates), demand.defaultCandidate, initialCandidate });
+			std::move(candidates), validated.defaultCandidate, initialCandidate });
 		mPhysicalControlPlacements.back().owner = demand.owner;
-		mPhysicalControlPlacements.back().hasOwner = demand.hasOwner;
 		reflowPhysicalControls(layerIndex, sector->getIndex(), y);
 
 		return { controlIndex, SectorObjectType::InteractionPoint, sector };
@@ -329,8 +308,8 @@ namespace core
 			auto const& p = mPhysicalControlPlacements[index];
 			for (auto const& c : p.candidates)
 			{
-				auto& slot = mLayers[layerIndex]->getCellDefinition(c.cellX, y).controls[c.side];
-				if (slot == p.objectIndex) slot = ~0u;
+				auto& controls = mLayers[layerIndex]->getCellDefinition(c.cellX, y).physicalControls;
+				std::erase(controls, p.objectIndex);
 			}
 		}
 		for (size_t i = 0; i < row.size(); ++i)
@@ -350,19 +329,9 @@ namespace core
 			mPhysicalControlPlacements[row[i]].currentCandidate = assignment[i];
 		auto centerKey = [](PhysicalControlCandidate const& candidate) { return candidate.centreKey(); };
 
-		// Replace cell-side registrations atomically after all assignments are known.
-		for (auto index : row)
-		{
-			auto const& placement = mPhysicalControlPlacements[index];
-			if (placement.objectIndex == ~0u) continue;
-			for (auto const& candidate : placement.candidates)
-			{
-				auto& slot = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y).controls[candidate.side];
-				if (slot == placement.objectIndex) slot = ~0u;
-			}
-		}
+		// Rebuild host registrations only after the entire row is assigned.
 		for (uint32_t x = 0; x < getCellsWide(); ++x)
-			mLayers[layerIndex]->getCellDefinition(x, y).stackedControls.clear();
+			mLayers[layerIndex]->getCellDefinition(x, y).physicalControls.clear();
 		map<int64_t, vector<uint32_t>> collisions;
 		for (auto index : row)
 		{
@@ -375,7 +344,7 @@ namespace core
 		{
 			(void)center;
 			auto ordered = controls;
-			bool stack = ordered.size() > 1 && mPhysicalControlPlacements[ordered.front()].hasOwner;
+			bool stack = ordered.size() > 1;
 			if (stack) sort(ordered.begin(), ordered.end(), [&](auto a, auto b)
 			{
 				return physicalControl::canonicalLess(mPhysicalControlPlacements[a].owner,
@@ -388,19 +357,9 @@ namespace core
 				if (placement.objectIndex == ~0u) continue;
 				auto const& candidate = placement.candidates[placement.currentCandidate];
 				auto& cell = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y);
-				auto& slot = cell.controls[candidate.side];
-				// Registration side is not a physical slot: distinct quarter-cell
-				// centres (and coincident stack members) can share a host/side.
-				// Feasibility was already checked by absolute centre in the allocator.
-				if (slot == ~0u) slot = placement.objectIndex;
-				else cell.stackedControls.push_back(placement.objectIndex);
+				cell.physicalControls.push_back(placement.objectIndex);
 				float centerX = candidate.centreX();
 				float adjustment = 0.0f;
-				if (controls.size() > 1 && candidate.quarterOffset < 0)
-				{
-					if (candidate.side == CORE_SIDE_RIGHT) adjustment = 0.025f;
-					else if (candidate.side == CORE_SIDE_LEFT) adjustment = -0.025f;
-				}
 				auto control = static_pointer_cast<ButtonSectorObject>(
 					mSectors[placement.sectorIndex]->_getObject(placement.objectIndex));
 				control->_setCellPosition(candidate.cellX, y);
@@ -412,14 +371,25 @@ namespace core
 					auto point = mInteractionPoints.find(button->getInteractionPointId());
 					if (point)
 					{
-						auto centre = placement.hasOwner
-							? Vector2{centerX, y + CORE_BUTTON_Y_OFFSET + button->getSize().y * 0.5f}
-							: button->getPosition() + button->getSize() * 0.5f;
+						auto centre = Vector2{centerX, y + CORE_BUTTON_Y_OFFSET + button->getSize().y * 0.5f};
 						point->mPosition = centre + placement.interactionOffset;
 					}
 				}
 			}
 		}
+	}
+
+	World::PhysicalControlPlacement const* World::physicalControlPlacement(InteractionPointId point) const
+	{
+		for (auto const& placement : mPhysicalControlPlacements)
+		{
+			if (placement.objectIndex == ~0u) continue;
+			auto object = mSectors[placement.sectorIndex]->getObject(placement.objectIndex);
+			auto control = dynamic_pointer_cast<const ButtonSectorObject>(object);
+			if (control && static_pointer_cast<const Button>(control->_getObject())->getInteractionPointId() == point)
+				return &placement;
+		}
+		return nullptr;
 	}
 
 	void World::bindPhysicalControl(CreateObjectResult& control, InteractionPointId point)
@@ -437,10 +407,8 @@ namespace core
 			auto interaction = mInteractionPoints.find(point);
 			if (interaction)
 			{
-				auto centre = placement.hasOwner
-					? Vector2{button->getPosition().x + button->getSize().x * 0.5f,
-						placement.cellY + CORE_BUTTON_Y_OFFSET + button->getSize().y * 0.5f}
-					: button->getPosition() + button->getSize() * 0.5f;
+				auto centre = Vector2{button->getPosition().x + button->getSize().x * 0.5f,
+					placement.cellY + CORE_BUTTON_Y_OFFSET + button->getSize().y * 0.5f};
 				placement.interactionOffset = interaction->mPosition - centre;
 				placement.hasInteractionOffset = true;
 			}

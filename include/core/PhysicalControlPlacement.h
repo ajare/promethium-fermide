@@ -2,12 +2,10 @@
 
 #include <cstdint>
 #include <vector>
-#include "core/Defines.h"
 
 namespace core::physicalControl
 {
-	// Authored data only. Runtime identities are deliberately absent. Legacy
-	// owners retain their policy until migrated to explicit candidates.
+	// Authored data only. Runtime identities and prior assignments are absent.
 	enum class OwnerType { Airlock, BulkheadDoor, Door, Dumbwaiter, ForceBridge,
 		Ladder, Lift, LocationLightSwitch, PlatformLift, Shuttle };
 	struct Geometry
@@ -29,28 +27,20 @@ namespace core::physicalControl
 	struct Candidate
 	{
 		uint32_t cellX{ 0 };
-		// Cell registration is separate from the physical centre coordinate.
-		int side{ CORE_SIDE_MIDDLE };
-		int quarterOffset{ -1 }; // -1 preserves legacy left/middle/right (0/2/4).
+		int quarterOffset{ 0 }; // Only 0..3; 1.0 belongs to the next host.
 		int64_t centreKey() const;
 		float centreX() const;
-		static Candidate explicitHost(uint32_t cellX, int quarterOffset, int registrationSide);
+		static Candidate explicitHost(uint32_t cellX, int quarterOffset);
 	};
 	struct Demand
 	{
 		std::vector<Candidate> candidates;
-		uint32_t defaultCandidate{ 0 }, currentCandidate{ 0 };
+		uint32_t defaultCandidate{ 0 };
 		Owner owner;
-		bool hasOwner{ false }; // Legacy callers migrate independently.
 	};
 
-	std::vector<Candidate> legacyCandidates(uint32_t x, int side,
-		uint32_t alternateX = ~0u, int alternateSide = -1);
-	// Legacy policy only: no new host rules, canonical ordering or stacking.
-	// Returns an assignment without modifying demands or production objects.
-	std::vector<uint32_t> allocateLegacy(std::vector<Demand> const& demands);
 	bool canonicalLess(Owner const& a, Owner const& b);
-	// One Layer/Level, across all hosting Locations. Migrated controls may form
-	// same-Location pairs; legacy-only components retain legacy policy.
+	// One Layer/Level, across all hosting Locations. Same-Location stacks of
+	// at most four preserve each independent control.
 	std::vector<uint32_t> allocateCanonical(std::vector<Demand> const& demands);
 }
