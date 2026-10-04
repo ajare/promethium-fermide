@@ -39,10 +39,10 @@ furnitureCatalogue:
       to: frontLeft
     - from: frontLeft
       to: seat
-      depthOffset: -1
+      depthOffset: 0
     - from: seat
       to: frontRight
-      depthOffset: -1
+      depthOffset: 0
     - from: frontRight
       to: approachRight
     - from: approachLeft
@@ -53,7 +53,7 @@ furnitureCatalogue:
     - from: backRight
       to: approachRight
   - key: sofa
-    label: Two-seat sofa
+    label: Sofa
     sideRoutes: true
     tiles:
     - x: 0
@@ -101,13 +101,13 @@ furnitureCatalogue:
       to: backLeft
     - from: frontLeft
       to: leftSeat
-      depthOffset: -1
+      depthOffset: 0
     - from: leftSeat
       to: rightSeat
-      depthOffset: -1
+      depthOffset: 0
     - from: rightSeat
       to: frontRight
-      depthOffset: -1
+      depthOffset: 0
     - from: frontRight
       to: right
     - from: backLeft
@@ -116,7 +116,7 @@ furnitureCatalogue:
     - from: backRight
       to: right
   - key: desk
-    label: Desk with front and back routes
+    label: Desk
     sideRoutes: true
     tiles:
     - x: 0

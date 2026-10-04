@@ -53,7 +53,7 @@ construction:
     id: 3
     definition: sofa
     name: Sofa
-    x: 4
+    x: 5
     y: 0
     localDepth: 1
     destinations:
@@ -72,6 +72,78 @@ construction:
     id: 4
     name: Marker 1
     properties: 0
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 13
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 10
+    cellsWide: 6
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 4
+    cellsWide: 5
+    levelsHigh: 1
+  - type: room
+    name: Room 2
+    layer: 1
+    y: 2
+    x: 6
+    cellsWide: 5
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: door
+    layer: 0
+    y: 2
+    x: 10
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 2
+    x: 6
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: window
+    layer: 0
+    y: 2
+    x: 8
+    cellsWide: 1
+    levelsHigh: 1
+    traversable: false
+    initialState: closed
+    style: clear
+  - type: lift
+    layer: 1
+    y: 1
+    x: 14
+    cellsWide: 1
+    levelsHigh: 2
+    stopOffsets: [0, 1]
+    capacity: 2
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+    destinationPermissionRequirements:
+      []
 agentGroups:
   []
 accessPermissions:
