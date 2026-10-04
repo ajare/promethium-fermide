@@ -71,6 +71,8 @@ namespace core
 				auto booth = mWorld.lookupBoothWindow(binding.command.boothWindow);
 				validTarget = booth && !booth->getDumbwaiterOwner();
 			}
+			else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
+				validTarget = mWorld.lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2;
 			else if (binding.command.type == DeviceCommandType::SetSectorLights)
 				validTarget = binding.command.target && binding.command.target.value <= mWorld.mSectors.size();
 			else if (binding.command.type == DeviceCommandType::RequestAirlock)
@@ -133,8 +135,8 @@ namespace core
 		{
 			return { false, found.diagnostic };
 		}
-		if (found.entity->mBoothWindowOwner)
-			return { false, "BoothWindow panels are owned and cannot be removed independently" };
+		if (found.entity->mBoothWindowOwner || found.entity->mDumbwaiterOwner)
+			return { false, "Device controls are owned and cannot be removed independently" };
 		if (any_of(found.entity->mBindings.begin(), found.entity->mBindings.end(), [](auto const& binding)
 			{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
 			return { false, "Airlock controls are fixed and cannot be removed independently" };
@@ -217,6 +219,12 @@ namespace core
 		}
 		auto id = mWorld.mDeviceOperations.add(unique_ptr<DeviceOperation>(new DeviceOperation(name, requester, command)));
 		if (broken) mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Failed;
+		if (command.type == DeviceCommandType::PressDumbwaiterLanding)
+		{
+			auto unit = mWorld.lookupDumbwaiter(command.dumbwaiter);
+			if (!unit || command.stopIndex > 1 || unit->isBusy())
+				mWorld.mDeviceOperations.find(id)->mState = DeviceOperationState::Rejected;
+		}
 		if (!missing.empty())
 		{
 			auto operation = mWorld.mDeviceOperations.find(id);
@@ -385,7 +393,8 @@ namespace core
 			if (auto operation = mWorld.mDeviceOperations.find(operationId))
 			{
 				operation->mRequesters.erase(request.mActor);
-				if (operation->mRequesters.empty() && (operation->mState == DeviceOperationState::Pending
+				if (!(operation->mActivated && operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
+					&& operation->mRequesters.empty() && (operation->mState == DeviceOperationState::Pending
 					|| operation->mState == DeviceOperationState::Running))
 				{
 					touchDeviceOperation(operationId, *operation);
@@ -455,21 +464,7 @@ namespace core
 			mWorld.invalidateSimulationSnapshot();
 			auto id = findOrCreateDeviceOperation(command, {});
 			auto operation = mWorld.mDeviceOperations.find(id);
-			if (unit->isBusy()) operation->mState = DeviceOperationState::Rejected;
-			else
-			{
-				// Admission reserves the whole cycle before any physical tick. A
-				// press is never coalesced, queued, reversed, or replayed later.
-				unit->mOperation = id;
-				unit->mDestination = 1 - unit->mCurrentStop;
-				unit->mTravelTicks = 0;
-				unit->mPhase = DumbwaiterPhase::Closing;
-				operation->mActivated = true;
-				operation->mState = DeviceOperationState::Running;
-				auto departure = std::const_pointer_cast<BoothWindow>(unit->mApertures[unit->mCurrentStop]);
-				departure->mTargetOpen = false;
-				departure->refreshState();
-			}
+			admitDumbwaiterPress(id, *operation);
 			// Publish the admission outcome immediately, including busy refusal.
 			SimulationEvent event;
 			event.sequence = mWorld.mNextEventSequence++;
@@ -548,7 +543,8 @@ namespace core
 		{
 			cancelInteraction(requestId);
 		}
-		if (operation->mRequesters.empty() && (operation->mState == DeviceOperationState::Pending
+		if (!(operation->mActivated && operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
+			&& operation->mRequesters.empty() && (operation->mState == DeviceOperationState::Pending
 			|| operation->mState == DeviceOperationState::Running))
 		{
 			touchDeviceOperation(id, *operation);
@@ -795,6 +791,37 @@ namespace core
 				}
 	}
 
+	void SimulationCoordinator::admitDumbwaiterPress(DeviceOperationId id, DeviceOperation& operation)
+	{
+		touchDeviceOperation(id, operation);
+		auto unit = std::const_pointer_cast<Dumbwaiter>(mWorld.lookupDumbwaiter(operation.mCommand.dumbwaiter));
+		if (operation.mState != DeviceOperationState::Pending) return;
+		if (!unit || operation.mCommand.stopIndex > 1 || unit->isBusy())
+		{
+			operation.mState = DeviceOperationState::Rejected;
+			return;
+		}
+		// Shared Agent/user gate reserves the cycle at activation. Retire all
+		// competing pending presses now, even if their point queue has not run.
+		unit->mOperation = id;
+		unit->mDestination = 1 - unit->mCurrentStop;
+		unit->mTravelTicks = 0;
+		unit->mPhase = DumbwaiterPhase::Closing;
+		operation.mActivated = true;
+		operation.mState = DeviceOperationState::Running;
+		auto departure = std::const_pointer_cast<BoothWindow>(unit->mApertures[unit->mCurrentStop]);
+		departure->mTargetOpen = false;
+		departure->refreshState();
+		for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
+			if (otherId != id && other->mState == DeviceOperationState::Pending
+				&& other->mCommand.type == DeviceCommandType::PressDumbwaiterLanding
+				&& other->mCommand.dumbwaiter == unit->getId())
+			{
+				touchDeviceOperation(otherId, *other);
+				other->mState = DeviceOperationState::Rejected;
+			}
+	}
+
 	void SimulationCoordinator::resetDumbwaiter(Dumbwaiter& unit)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -809,6 +836,12 @@ namespace core
 			event.deviceOperation = makeDeviceOperationSnapshot(unit.mOperation, *operation);
 			mWorld.mEvents.push_back(std::move(event));
 		}
+		std::vector<InteractionRequestId> requests;
+		for (auto const& [id, request] : mWorld.mInteractionRequests.entries())
+			if (request->mResult == InteractionResult::Pending
+				&& (request->mPoint == unit.getLandingButton(0) || request->mPoint == unit.getLandingButton(1)))
+				requests.push_back(id);
+		for (auto id : requests) cancelInteraction(id);
 		unit.mOperation = {};
 		unit.mPhase = DumbwaiterPhase::Idle;
 		unit.mCurrentStop = unit.mInitialStop;
@@ -1140,7 +1173,9 @@ namespace core
 					if (auto operation = mWorld.mDeviceOperations.find(operationId);
 						operation && operation->mState == DeviceOperationState::Pending)
 					{
-						operation->mActivated = true;
+						if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
+							admitDumbwaiterPress(operationId, *operation);
+						else operation->mActivated = true;
 					}
 				}
 				point->mQueue.erase(remove(point->mQueue.begin(), point->mQueue.end(), point->mActiveRequest), point->mQueue.end());

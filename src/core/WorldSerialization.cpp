@@ -432,6 +432,12 @@ namespace core
 			serializer.writeUint32("x", record.b);
 			serializer.writeUint32("initialStop", record.c);
 			serializer.writeFloat("travelSeconds", record.x);
+			for (size_t stop = 0; stop < 2; ++stop)
+			{
+				serializer.beginArray(stop == 0 ? "lowerLandingPermissionRequirement" : "upperLandingPermissionRequirement");
+				for (auto permission : record.controlPermissionRequirements[stop]) serializer.writeUint32("", permission);
+				serializer.endArray();
+			}
 			break;
 		case ConstructionType::BoothWindow:
 			if (record.d != 1 || record.e != 1 || record.p || record.j != 0
@@ -602,7 +608,8 @@ namespace core
 		// Version 45 expands scanner records into Chamber with an explicit subtype.
 		// Version 46 adds width-capacity Decontamination Chambers.
 		// Version 47 adds complete authored Dumbwaiter units and stable identity.
-		serializer.writeUint32("version", 47);
+		// Version 48 adds independent Dumbwaiter landing requirements.
+		serializer.writeUint32("version", 48);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
@@ -704,7 +711,7 @@ namespace core
 		serializer.beginArray("interactionPermissionRequirements");
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
-			if (point->mPermissionRequirement.none() || point->mBoothWindowOwner) continue;
+			if (point->mPermissionRequirement.none() || point->mBoothWindowOwner || point->mDumbwaiterOwner) continue;
 			serializer.beginMap("");
 			serializer.writeUint64("interactionPoint", pointId.value);
 			serializer.beginArray("permissions");
@@ -1110,6 +1117,15 @@ namespace core
 			record.layer = readLayer("layer");
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = serializer.readUint32("initialStop"); record.x = serializer.readFloat("travelSeconds");
+			for (size_t stop = 0; stop < 2; ++stop)
+			{
+				auto field = stop == 0 ? "lowerLandingPermissionRequirement" : "upperLandingPermissionRequirement";
+				if (serializer.hasField(field))
+				{
+					if (version < 48) throw SerializationException("Dumbwaiter landing requirements require World schema version 48");
+					readControlRequirement(stop, field);
+				}
+			}
 			if (serializer.hasField("cellsWide") || serializer.hasField("levelsHigh")
 				|| serializer.hasField("stopOffsets") || serializer.hasField("traversable")
 				|| serializer.hasField("initiallyBroken"))
@@ -1302,7 +1318,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 47)
+		if (version < 1 || version > 48)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1721,7 +1737,8 @@ namespace core
 				&& record.type != ConstructionType::SectorLadder
 				&& record.type != ConstructionType::ForceBridge
 				&& record.type != ConstructionType::Airlock
-				&& record.type != ConstructionType::BoothWindow) continue;
+				&& record.type != ConstructionType::BoothWindow
+				&& record.type != ConstructionType::Dumbwaiter) continue;
 			bool controls[2]{};
 			if (record.type == ConstructionType::Door || record.type == ConstructionType::BulkheadDoor)
 			{
@@ -1736,6 +1753,7 @@ namespace core
 				if (record.e > 1) controls[1 - record.i] = true;
 			}
 			else if (record.type == ConstructionType::BoothWindow) controls[1] = true;
+			else if (record.type == ConstructionType::Dumbwaiter) controls[0] = controls[1] = true;
 			else if (record.p || record.type == ConstructionType::Airlock) controls[0] = controls[1] = true;
 			for (size_t side = 0; side < 2; ++side)
 			{
@@ -1865,7 +1883,7 @@ namespace core
 			for (auto const& [pointId, requirement] : serializedRequirements)
 			{
 				auto point = candidate.mInteractionPoints.find(pointId);
-				if (!point || point->mBoothWindowOwner || !candidate.isInteractionPointPermissionEligible(pointId))
+				if (!point || point->mBoothWindowOwner || point->mDumbwaiterOwner || !candidate.isInteractionPointPermissionEligible(pointId))
 					throw SerializationException(format(
 						"Serialized Access permission requirement has invalid or ineligible Interaction point {}",
 						pointId.value));
@@ -2353,7 +2371,7 @@ namespace core
 			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
 				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id)
-					&& !mAuthoredControlRequirements.contains(id) && !point->mBoothWindowOwner)
+					&& !mAuthoredControlRequirements.contains(id) && !point->mBoothWindowOwner && !point->mDumbwaiterOwner)
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
@@ -2549,8 +2567,17 @@ namespace core
 			break;
 		}
 		case ConstructionType::Dumbwaiter:
-			createDumbwaiter(record.layer, record.a, record.b, {record.c, record.x}, record.dumbwaiterId);
+		{
+			auto id = createDumbwaiter(record.layer, record.a, record.b, {record.c, record.x}, record.dumbwaiterId);
+			auto unit = lookupDumbwaiter(id);
+			for (size_t stop = 0; stop < 2; ++stop)
+			{
+				auto point = mInteractionPoints.find(unit->getLandingButton(static_cast<uint32_t>(stop)));
+				for (auto permission : record.controlPermissionRequirements[stop])
+					point->mPermissionRequirement.set(permission - 1);
+			}
 			break;
+		}
 		case ConstructionType::BoothWindow:
 		{
 			auto created = addWindowAperture(record.a, record.b, record.c, record.d, record.e,

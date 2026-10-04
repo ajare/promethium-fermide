@@ -46,7 +46,7 @@ namespace
 				std::string diagnostic;
 				require(!world->canPlaceAgentInLocation(unit->getIndex(), {}, {}, &diagnostic), "Agent can enter shaft");
 				auto snapshot = world->getSimulationSnapshot();
-				require(snapshot.traversalResources.empty() && snapshot.interactionPoints.empty()
+				require(snapshot.traversalResources.empty() && snapshot.interactionPoints.size() == 2
 					&& snapshot.deviceOperations.empty(), "Unit introduced passenger/control work");
 				world->pauseSimulation(); auto before = yaml(*world); world->markSaved();
 				for (float seconds : {0.0f, 0.09f, 60.1f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})

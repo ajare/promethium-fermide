@@ -184,6 +184,7 @@ namespace core
 		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
 		void advanceDumbwaiters();
 		void resetDumbwaiter(Dumbwaiter& unit);
+		void admitDumbwaiterPress(DeviceOperationId id, DeviceOperation& operation);
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);
 

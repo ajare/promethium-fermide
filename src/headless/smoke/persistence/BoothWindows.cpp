@@ -11,7 +11,12 @@ namespace persistence
 	{
 		using smoke::require;
 		auto world = dumbwaiter_fixture::make();
-		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.1f}); world->finishBuild();
+		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.1f}); world->finishBuild(); world->pauseSimulation();
+		auto a = world->addAccessPermission("Lower A"), b = world->addAccessPermission("Lower B");
+		auto upper = world->addAccessPermission("Upper");
+		auto device = world->lookupDumbwaiter(id);
+		require(world->setInteractionPointPermissionRequirement(device->getLandingButton(0), {a,b})
+			&& world->setInteractionPointPermissionRequirement(device->getLandingButton(1), {upper}), "Landing requirements fixture failed");
 		auto write = [](core::World const& source, bool binary)
 		{
 			auto serialize = [&](auto writer) {
@@ -57,13 +62,23 @@ namespace persistence
 				&& unit->getCellX() == 2 && unit->getCellY() == 0 && unit->getLayerIndex() == 1
 				&& unit->getAperture(0)->getProgress() == 0 && unit->getAperture(1)->getProgress() == 1,
 				"Round trip lost placement/configuration/initial shutters");
+			require(loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}
+				&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upper},
+				"YAML/binary lost independent landing requirements");
 			loaded.resetSimulation(); loaded.pauseSimulation();
-			require(loaded.lookupDumbwaiter(id)->getAperture(1)->getProgress() == 1, "Reset lost authored state");
+			unit = loaded.lookupDumbwaiter(id);
+			require(unit->getAperture(1)->getProgress() == 1
+				&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}, "Reset lost authored state/requirements");
+			require(loaded.deleteAccessPermission(a), "Permission deletion failed");
+			loaded.resetSimulation(); loaded.pauseSimulation(); unit = loaded.lookupDumbwaiter(id);
+			require(loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{b}
+				&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upper},
+				"Permission deletion not retained by construction replay");
 			require(loaded.removeDumbwaiter(id), "Loaded deletion failed");
 			auto next = loaded.addDumbwaiter(1, 0, 2); require(next.value > id.value, "Loaded identity reused");
 		}
 		auto node = YAML::Load(baseline);
-		for (auto change : {"zeroId", "duplicate", "stop", "nan", "timingLow", "timingHigh", "bounds", "layer", "width", "stops", "legacy", "nextId", "support"})
+		for (auto change : {"zeroId", "duplicate", "stop", "nan", "timingLow", "timingHigh", "bounds", "layer", "width", "stops", "legacy", "nextId", "support", "unknownPermission", "zeroPermission", "duplicatePermission", "malformedPermission", "legacyPermission"})
 		{
 			auto invalid = YAML::Clone(node); std::string c = change;
 			for (auto record : invalid["construction"])
@@ -79,9 +94,14 @@ namespace persistence
 				if (c == "layer") record["layer"] = 0;
 				if (c == "width") record["cellsWide"] = 2;
 				if (c == "stops") record["stopOffsets"] = std::vector<unsigned>{0, 1, 2};
+				if (c == "unknownPermission") record["lowerLandingPermissionRequirement"] = std::vector<unsigned>{255};
+				if (c == "zeroPermission") record["upperLandingPermissionRequirement"] = std::vector<unsigned>{0};
+				if (c == "duplicatePermission") record["lowerLandingPermissionRequirement"] = std::vector<unsigned>{unsigned(a.value),unsigned(a.value)};
+				if (c == "malformedPermission") record["upperLandingPermissionRequirement"] = "not an array";
 			}
 			if (c == "duplicate") invalid["construction"].push_back(YAML::Clone(invalid["construction"][2]));
 			if (c == "legacy") invalid["version"] = 46;
+			if (c == "legacyPermission") invalid["version"] = 47;
 			if (c == "nextId") invalid["nextDumbwaiterId"] = id.value;
 			bool refused = false;
 			try { auto input = core::YamlSerializer::fromString(YAML::Dump(invalid)); input->deserialize(); core::SerializationWorkData work; world->deserialize(*input, work); }
@@ -96,6 +116,27 @@ namespace persistence
 		try { auto input = core::BinarySerializer::fromString(bytes); input->deserialize(); core::SerializationWorkData work; world->deserialize(*input, work); }
 		catch (std::exception const&) { refused = true; }
 		require(refused && write(*world, false) == baseline, "Malformed binary timing mutated target");
+		for (auto field : {"lowerLandingPermissionRequirement", "upperLandingPermissionRequirement"})
+		{
+			auto corrupt = write(*world, true); auto start = corrupt.find(field);
+			require(start != std::string::npos, "Missing binary requirement field");
+			// Array tag/count, first uint32 item tag, then its little-endian value.
+			start += std::string(field).size() + 1 + 8 + 1;
+			for (unsigned i = 0; i < 4; ++i) corrupt[start + i] = static_cast<char>(0xff);
+			bool rejected = false;
+			try { auto input = core::BinarySerializer::fromString(corrupt); input->deserialize(); core::SerializationWorkData data; world->deserialize(*input, data); }
+			catch (std::exception const&) { rejected = true; }
+			require(rejected && write(*world, false) == baseline, "Malformed binary permission reference mutated target");
+		}
+		// Schema 47 Dumbwaiters default to empty requirements.
+		auto old = YAML::Clone(node); old["version"] = 47;
+		for (auto record : old["construction"]) if (record["type"].as<std::string>() == "dumbwaiter")
+		{ record.remove("lowerLandingPermissionRequirement"); record.remove("upperLandingPermissionRequirement"); }
+		auto oldReader = core::YamlSerializer::fromString(YAML::Dump(old)); oldReader->deserialize();
+		core::SerializationWorkData oldData; core::World oldWorld("Schema 47", 1, 1);
+		require(oldWorld.deserialize(*oldReader, oldData), "Schema-47 Dumbwaiter refused");
+		for (uint32_t stop : {0u,1u}) require(oldWorld.getInteractionPointPermissionRequirement(oldWorld.lookupDumbwaiter(id)->getLandingButton(stop)).empty(),
+			"Legacy landing requirements did not default empty");
 		// The implementation-time baseline remains loadable with no new authored objects.
 		auto legacyWorld = dumbwaiter_fixture::make(); auto legacy = YAML::Load(write(*legacyWorld, false));
 		legacy["version"] = 46; legacy.remove("nextDumbwaiterId");
@@ -189,7 +230,7 @@ namespace persistence
 			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
-		require(node["version"].as<int>() == 47, "BoothWindow schema not allocated");
+		require(node["version"].as<int>() == 48, "BoothWindow schema not allocated");
 		core::SerializationWorkData work;
 		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown", "permissionZero", "permissionUnknown", "permissionDuplicate", "permissionShape", "permissionLegacy"})
 		{

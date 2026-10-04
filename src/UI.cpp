@@ -7532,6 +7532,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		}
 	}
 
+	renderDumbwaiterAgentActions(world, id);
+
 	renderRouteCostDiagnostics(world, *gSelectedAgent);
 	renderRouteExplanation(world, *gSelectedAgent);
 

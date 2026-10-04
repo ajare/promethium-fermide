@@ -1,4 +1,4 @@
-# Dumbwaiters (#375, #376)
+# Dumbwaiters (#375–#377)
 
 A Dumbwaiter is a non-passenger, fixed 1-cell-wide, 2-Level-high Transit. Paint
 **Dumbwaiter** on a shaft Layer behind two supported landing cells at the same x
@@ -15,7 +15,7 @@ the other closed. Runtime Selection exposes **Press lower landing** and **Press
 upper landing**, current phase, car Level and both shutter states/progress. The
 landing buttons show green here, amber elsewhere, or red busy at both landings.
 Car geometry is procedural and reuses the existing shaft surface and BoothWindow
-resources. There is no Agent control, passenger path, queue or traversal resource.
+resources. There is no passenger path, journey queue or traversal resource.
 
 `World::pressDumbwaiterLanding(id, stop)` (Stop 0/1) submits a typed
 `PressDumbwaiterLanding` Device command; the equivalent `submitDeviceCommand`
@@ -48,8 +48,8 @@ changing its landing Location footprints or removing Levels/Layers. Independent
 owned-aperture movement is refused pending full unit movement support; unrelated
 objects retain normal editing. Removing required Walkway support is transactionally
 refused. Full unit movement,
-clipboard, dependent deletion/reconciliation of surrounding footprints, and Agent
-eligibility/permissions remain separate follow-up tickets.
+clipboard and dependent deletion/reconciliation of surrounding footprints remain
+separate follow-up tickets.
 
 World schema **47** adds one `dumbwaiter` construction record carrying stable
 World-owned `id`, shaft `layer`, lower `y`, `x`, `initialStop` (0/1) and
@@ -60,6 +60,40 @@ Worlds remain supported. Saving before the first tick or during closing, travel 
 opening writes exactly the authored document, never runtime position, progress,
 requests or operations. No schema change is needed for the runtime-only cycle.
 Loading and Reset restore the authored presentation.
+
+## Agent landing operation (#377)
+
+Each landing owns one centred Interaction point (`getLandingButton(stop)`) at
+`(x + 0.5, Level)`, with inclusive 0.25 world-unit reach and the existing one-tick
+press duration. The visible button remains immediately right of its aperture;
+there is no shaft-side control. `World::requestDumbwaiterLanding(id, stop, actor)`
+uses the typed `PressDumbwaiterLanding` binding and ordinary Interaction outcomes.
+Agent Selection exposes a manual landing press, disabled when ineligible or busy.
+Requests never auto-approach, move the Agent, create delivery behaviour or route
+passengers.
+
+Admission and activation require an active Agent in the landing Location, within
+reach, whose current effective Buttons Mobility use is not Cannot use. Individual
+Mobility properties override tags. Each landing independently requires every
+current direct/Permission-set grant in its requirement (ADR 0015); empty is the
+default. Edit these through the landing requirements in Dumbwaiter Selection or
+`setInteractionPointPermissionRequirement`. Paused eligibility changes reject or
+cancel unactivated presses without changing car/shutter targets. Accepted cycles
+survive Agent departure/deactivation, grant loss and permission tightening;
+permission-only edits preserve physical progress and the accepted operation.
+User runtime controls remain independent of Agent eligibility but share the same
+busy/interlock gate. Simultaneous activations follow deterministic Interaction
+point order, and all competing pending presses are refused, never deferred into
+a later journey.
+
+Schema **48** adds `lowerLandingPermissionRequirement` and
+`upperLandingPermissionRequirement` arrays of Access permission IDs to the authored
+construction record. Schema-47 Dumbwaiters default to empty requirements. YAML,
+binary, construction replay, Reset and ordinary document undo/redo preserve both
+requirements; deleting a permission removes it from both. Unknown, duplicate,
+zero or malformed references are rejected transactionally. Clipboard remapping is
+out of scope until the unit move/copy ticket. Structural/configuration cancellation
+also retires pending interactions; removed devices retain no live request.
 
 Headless coverage is in World, Persistence, Editor and Render's BoothWindows
 translation units and Simulation's Dumbwaiters translation unit, using real public

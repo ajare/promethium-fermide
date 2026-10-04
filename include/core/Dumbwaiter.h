@@ -23,6 +23,7 @@ namespace core
 		uint32_t mInitialStop;
 		float mTravelSeconds;
 		std::array<std::shared_ptr<const BoothWindow>, 2> mApertures;
+		std::array<InteractionPointId, 2> mLandingButtons;
 	public:
 		Dumbwaiter(DumbwaiterId id, uint32_t index, uint32_t layer, uint32_t x, uint32_t y,
 			uint32_t initialStop, float seconds, std::vector<TransitStop> const& stops)
@@ -53,6 +54,7 @@ namespace core
 				: stop == mCurrentStop ? DumbwaiterButtonState::Here : DumbwaiterButtonState::Elsewhere;
 		}
 		DeviceOperationId getOperation() const { return mOperation; }
+		InteractionPointId getLandingButton(uint32_t stop) const { return mLandingButtons.at(stop); }
 		std::shared_ptr<const BoothWindow> getAperture(uint32_t stop) const { return mApertures.at(stop); }
 	};
 }

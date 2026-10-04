@@ -21,6 +21,8 @@ std::vector<core::AccessPermissionId> resolveBoothWindowClipboardPermissions(cor
 core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::WindowSectorObject> const& object);
 
+void renderDumbwaiterAgentActions(std::shared_ptr<core::World> const& world, core::AgentId actor);
+
 bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::Dumbwaiter> const& unit);
 

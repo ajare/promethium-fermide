@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "State.h"
 #include "DocumentEdit.h"
+#include "core/Agent.h"
 #include "BoothWindowEditor.h"
 #include "PermissionsPanel.h"
 #include "PaletteLayout.h"
@@ -86,6 +87,68 @@ namespace
 		undo(); require(world->lookupDumbwaiter(id)->getAperture(0)->getDumbwaiterOwner() == id, "Delete undo lost owned children");
 		redo(); require(!world->lookupDumbwaiter(id), "Delete redo failed");
 	}
+	void dumbwaiterPermissionHistory(smoke::Context const&)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = dumbwaiter_fixture::make(); auto id = world->addDumbwaiter(1, 0, 2);
+		world->finishBuild(); world->pauseSimulation(); gWorldDocumentHistory.clear();
+		std::string diagnostic;
+		auto a = commitAccessPermissionAdd(world, "Lower", diagnostic);
+		auto b = commitAccessPermissionAdd(world, "Upper", diagnostic);
+		auto requirements = [&](uint32_t stop) { return world->getInteractionPointPermissionRequirement(world->lookupDumbwaiter(id)->getLandingButton(stop)); };
+		require(commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), a, true, diagnostic)
+			&& commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(1), b, true, diagnostic), diagnostic);
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto input = core::YamlSerializer::fromString(snapshot.yaml); input->deserialize(); core::SerializationWorkData data;
+			bool result = world->deserialize(*input, data); world->pauseSimulation(); return result;
+		};
+		auto undo = [&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Requirement undo failed"); };
+		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Requirement redo failed"); };
+		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Independent requirement undo failed");
+		redo(); require(requirements(1) == std::vector<core::AccessPermissionId>{b}, "Requirement redo failed");
+		auto snapshot = captureDocumentSnapshot(world)->yaml; auto count = gWorldDocumentHistory.undoCount();
+		require(!commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), core::AccessPermissionId{255}, true, diagnostic)
+			&& captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count,
+			"Invalid editor reference mutated document/history");
+		auto actor = world->createAgent("Manual operator", 0, 0, 0.5f);
+		require(world->grantAgentAccessPermission(actor, a), "Manual operator grant failed");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1400,900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImGuiID control = 0;
+		auto frame = [&] {
+			ImGui::NewFrame(); ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({900,600});
+			ImGui::Begin("Agent Selection Dumbwaiter");
+			ImGui::PushID(static_cast<int>(world->lookupDumbwaiter(id)->getIndex())); ImGui::PushID(0);
+			control = ImGui::GetID("Agent: press lower Dumbwaiter landing"); ImGui::PopID(); ImGui::PopID();
+			renderDumbwaiterAgentActions(world, actor); ImGui::End(); ImGui::Render();
+		};
+		frame(); bool found = false; ImVec2 point;
+		for (float y = 35; y < 180 && !found; y += 7) for (float x = 15; x < 500 && !found; x += 15)
+		{
+			io.AddMousePosEvent(x,y); frame(); frame();
+			if (ImGui::GetHoveredID() == control) { found = true; point = {x,y}; }
+		}
+		require(found, "Manual Agent Selection action inaccessible");
+		snapshot = captureDocumentSnapshot(world)->yaml; count = gWorldDocumentHistory.undoCount();
+		io.AddMousePosEvent(point.x,point.y); frame(); io.AddMouseButtonEvent(0,true); frame(); io.AddMouseButtonEvent(0,false); frame();
+		require(world->getSimulationSnapshot().interactionRequests.size() == 1 && !world->lookupDumbwaiter(id)->isBusy(), "Manual action bypassed typed interaction activation");
+		world->resumeSimulation(); require(world->advanceTicks(80), "Manual Agent cycle failed"); world->pauseSimulation();
+		auto unit = world->lookupDumbwaiter(id); auto position = unit->getCarPosition(); auto operation = unit->getOperation();
+		require(captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count, "Manual action authored history");
+		require(commitInteractionPermissionRequirement(world, unit->getLandingButton(0), b, true, diagnostic), diagnostic);
+		require(unit->getCarPosition() == position && unit->getOperation() == operation && unit->isBusy(), "Editor permission edit reset active cycle");
+		world->resumeSimulation(); while (unit->isBusy()) require(world->advanceTick(), "Cycle continuation failed"); world->pauseSimulation();
+		require(unit->getCarPosition().y == 1 && unit->getAperture(1)->getProgress() == 1, "Permission edit interrupted accepted cycle");
+		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a}, "Permission-only undo lost original requirement");
+		redo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a,b}, "Permission-only redo failed");
+		// Both independent landing requirements are removed by normal registry deletion, with undo/redo.
+		require(commitAccessPermissionDelete(world, b, diagnostic), diagnostic);
+		require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Deletion left dangling landing requirements");
+		undo(); require(requirements(0) == std::vector<core::AccessPermissionId>{a,b} && requirements(1) == std::vector<core::AccessPermissionId>{b}, "Deletion undo lost landing requirements");
+		redo(); world->resetSimulation(); world->pauseSimulation();
+		require(requirements(0) == std::vector<core::AccessPermissionId>{a} && requirements(1).empty(), "Reset replay restored deleted requirement");
+	}
+
 	void historyAndClipboard(smoke::Context const&)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -231,5 +294,6 @@ namespace
 void editor_smoke::registerBoothWindows(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"dumbwaiters/selectionAndHistory", dumbwaiterHistory});
+	checks.push_back({"dumbwaiters/landingPermissionHistoryAndAgentSelection", dumbwaiterPermissionHistory});
 	checks.push_back({"boothWindows/historyAndClipboard",historyAndClipboard});
 }

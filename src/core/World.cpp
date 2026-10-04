@@ -8167,6 +8167,9 @@ namespace core
 					|| binding.command.type == DeviceCommandType::SetBoothWindowState)
 					require(bool(lookupBoothWindow(binding.command.boothWindow)),
 						format("Interaction point {} targets a removed BoothWindow", pointId.value));
+				else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
+					require(lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2,
+						format("Interaction point {} targets a removed Dumbwaiter", pointId.value));
 				else if (binding.command.type != DeviceCommandType::SetSectorLights)
 					require(mTraversalResources.find(binding.command.traversalResource) != nullptr,
 						format("Interaction point {} targets removed traversal resource {}",
@@ -10924,6 +10927,16 @@ namespace core
 					break;
 				}
 		}
+		if (auto unit = lookupDumbwaiter(point->mDumbwaiterOwner))
+			for (auto& record : mConstructionRecords)
+				if (record.type == ConstructionType::Dumbwaiter && record.dumbwaiterId == unit->getId())
+				{
+					auto& stored = record.controlPermissionRequirements[unit->getLandingButton(0) == id ? 0 : 1];
+					stored.clear();
+					for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+						if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+					break;
+				}
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
 			bool usesPoint = find(resource->mControls.begin(), resource->mControls.end(), id)

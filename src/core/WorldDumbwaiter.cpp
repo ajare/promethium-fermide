@@ -18,6 +18,12 @@ namespace core
 		return submitDeviceCommand(command);
 	}
 
+	InteractionRequestId World::requestDumbwaiterLanding(DumbwaiterId id, uint32_t stop, AgentId actor)
+	{
+		auto unit = lookupDumbwaiter(id);
+		return unit && stop < 2 ? requestInteraction(unit->getLandingButton(stop), actor) : InteractionRequestId{};
+	}
+
 	bool World::hasDumbwaiters() const
 	{
 		return std::any_of(mSectors.begin(), mSectors.end(), [](auto const& sector)
@@ -98,6 +104,15 @@ namespace core
 			booth->mDeviceId = BoothWindowId{mNextBoothWindowId++};
 			mBoothWindows.emplace(booth->mDeviceId, booth);
 			unit->mApertures[stop] = booth;
+			DeviceCommand press;
+			press.type = DeviceCommandType::PressDumbwaiterLanding;
+			press.dumbwaiter = id; press.stopIndex = stop;
+			unit->mLandingButtons[stop] = createInteractionPoint(
+				stop == 0 ? "Dumbwaiter lower landing" : "Dumbwaiter upper landing",
+				SectorId{uint64_t(stops[stop].sector->getIndex()) + 1},
+				{float(x) + 0.5f, float(y + stop)}, 0.25f, 0.0f,
+				{{press, InteractionBindingRequirement::Required}});
+			mInteractionPoints.find(unit->mLandingButtons[stop])->mDumbwaiterOwner = id;
 			auto& landing = mLayers[layer - 1]->getCellDefinition(x, y + stop);
 			landing.sectorObjectType = SectorObjectType::BoothWindow;
 			landing.sectorObjectIndex = created.index;
@@ -182,6 +197,9 @@ namespace core
 		{
 			auto booth = unit->getAperture(stop);
 			mBoothWindows.erase(booth->getDeviceId());
+			auto point = mInteractionPoints.find(unit->getLandingButton(stop));
+			point->mDumbwaiterOwner = {};
+			removeInteractionPoint(unit->getLandingButton(stop));
 			auto landing = std::const_pointer_cast<Sector>(unit->getStop(stop).sector);
 			for (auto& object : landing->mObjects)
 				if (auto window = std::dynamic_pointer_cast<WindowSectorObject>(object);

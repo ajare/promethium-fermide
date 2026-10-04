@@ -2637,6 +2637,7 @@ namespace core
 		// Other device commands continue to activate through Interaction points.
 		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
 		DeviceOperationId pressDumbwaiterLanding(DumbwaiterId id, uint32_t stop);
+		InteractionRequestId requestDumbwaiterLanding(DumbwaiterId id, uint32_t stop, AgentId actor);
 		std::shared_ptr<const BoothWindow> lookupBoothWindow(BoothWindowId id) const;
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);

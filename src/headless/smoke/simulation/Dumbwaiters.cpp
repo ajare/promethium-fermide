@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "../support/DumbwaiterFixture.h"
 #include "core/Agent.h"
+#include "core/AgentTagRegistry.h"
 #include <cmath>
 
 namespace
@@ -89,6 +90,214 @@ namespace
 				"Configured travel did not finish on fixed-tick boundary");
 		}
 	}
+	void agentOperation(smoke::Context const&)
+	{
+		for (uint32_t stop : {0u, 1u}) for (float x : {0.249f, 0.25f, 0.5f, 0.75f, 0.751f})
+		{
+			Fixture f;
+			auto actorId = f.world->createAgent("Operator", 0, float(stop), x);
+			auto actor = f.world->lookupAgent(actorId).entity;
+			auto position = actor->getGlobalPosition(); auto path = actor->getPath();
+			auto point = f.world->lookupInteractionPoint(f.unit->getLandingButton(stop)).entity;
+			require(point && point->getPosition() == core::Vector2{2.5f, float(stop)}
+				&& point->getReach() == 0.25f && point->getDurationTicks() == 1
+				&& point->getDumbwaiterOwner() == f.id, "Landing Interaction geometry/ownership incorrect");
+			require(!f.world->removeInteractionPoint(f.unit->getLandingButton(stop)), "Owned landing removed independently");
+			auto request = f.world->requestDumbwaiterLanding(f.id, stop, actorId);
+			bool eligible = x >= 0.25f && x <= 0.75f;
+			require(bool(request) == eligible && !f.unit->isBusy(), "Reach boundary or admission activated car incorrectly");
+			f.ticks(1);
+			require(f.unit->isBusy() == eligible && actor->getGlobalPosition() == position && actor->getPath() == path,
+				"Landing press auto-approached or changed route");
+			f.ticks(216);
+			f.position(eligible ? 1.0f : 0.0f);
+		}
+		for (unsigned scenario = 0; scenario < 7; ++scenario)
+		{
+			Fixture f; auto id = f.world->createAgent("Restricted", 0, 0, 0.5f);
+			auto actor = f.world->lookupAgent(id).entity;
+			f.world->pauseSimulation();
+			core::MobilityProfile profile; profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+			if (scenario == 0) actor->setActive(false);
+			if (scenario == 1) require(f.world->setAgentIndividualMobilityProfile(id, profile), "Buttons edit failed");
+			if (scenario == 2)
+			{
+				profile.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+				require(f.world->setAgentIndividualMobilityProfile(id, profile), "Last-resort edit failed");
+			}
+			if (scenario >= 3)
+			{
+				auto registry = core::AgentTagRegistry::create(); auto tag = registry->addAgentTag("no-buttons");
+				require(registry->addAgentTagMobilityProfile(tag) && registry->setAgentTagMobilityProfile(tag, profile), "Tag fixture failed");
+				f.world->attachAgentTagRegistry("dumbwaiter.tags.yaml", registry);
+				require(f.world->assignAgentTag(id, tag), "Tag assignment failed");
+				if (scenario >= 4) require(f.world->setAgentIndividualMobilityProfile(id, core::MobilityProfile{}), "Override failed");
+				if (scenario == 5) require(f.world->setAgentIndividualMobilityProfile(id, std::nullopt), "Override removal failed");
+				if (scenario == 6) require(registry->setAgentTagMobilityProfile(tag, {}), "Tag clearing failed");
+			}
+			f.world->resumeSimulation();
+			auto request = f.world->requestDumbwaiterLanding(f.id, 0, id);
+			bool allowed = scenario == 2 || scenario == 4 || scenario == 6;
+			require(bool(request) == allowed, "Effective Buttons precedence ignored");
+			f.ticks(2); require(f.unit->isBusy() == allowed, "Buttons refusal changed cycle");
+		}
+		for (bool otherLocation : {false, true})
+		{
+			Fixture f; f.world->pauseSimulation(); f.world->addLayer();
+			auto other = f.world->addRoom("Departure", 2, 0, 2, 1, 2); f.world->finishBuild();
+			auto id = f.world->createAgent("Departing before press", 0, 0, 0.5f);
+			f.world->resumeSimulation(); auto request = f.world->requestDumbwaiterLanding(f.id, 0, id);
+			f.world->pauseSimulation(); auto actor = f.world->lookupAgent(id).entity;
+			std::const_pointer_cast<core::Sector>(f.world->getSector(0))->exitAgent(actor);
+			std::const_pointer_cast<core::Sector>(f.world->getSector(otherLocation ? other : 0))->enterAgent(actor, 0, otherLocation ? 0.5f : 0.8f);
+			auto position = actor->getGlobalPosition(); f.world->resumeSimulation(); f.ticks(1);
+			require(f.world->lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled,
+				"Paused departure did not cancel landing press");
+			f.ticks(250); f.position(0); f.progress(0, 1);
+			require(actor->getGlobalPosition() == position && !f.unit->isBusy(), "Departed Agent auto-approached or operated later");
+		}
+		// The same coordinates in another Location do not authorize a press.
+		{
+			Fixture f; f.world->pauseSimulation();
+			f.world->addLayer();
+			auto other = f.world->addRoom("Other Location", 2, 0, 2, 1, 2);
+			f.world->finishBuild(); auto id = f.world->createAgent("Wrong Location", other, 0, 0.5f);
+			f.world->resumeSimulation();
+			require(!f.world->requestDumbwaiterLanding(f.id, 0, id), "Wrong Location pressed landing");
+			f.ticks(3); f.position(0);
+		}
+	}
+
+	void agentPermissions(smoke::Context const&)
+	{
+		for (unsigned scenario = 0; scenario < 14; ++scenario)
+		{
+			Fixture f; auto id = f.world->createAgent("Protected", 0, 0, 0.5f);
+			auto actor = f.world->lookupAgent(id).entity;
+			f.world->pauseSimulation();
+			auto a = f.world->addAccessPermission("A"), b = f.world->addAccessPermission("B");
+			auto set = f.world->addPermissionSet("Operators");
+			require(f.world->setPermissionSetAccessPermission(set, b, true), "Set fixture failed");
+			require(f.world->setInteractionPointPermissionRequirement(f.unit->getLandingButton(0), {a,b}), "Requirements failed");
+			require(f.world->getInteractionPointPermissionRequirement(f.unit->getLandingButton(1)).empty(), "Requirements leaked to other landing");
+			require(f.world->setAgentIndividualPermissionAdherence(id, false), "Adherence fixture failed");
+			if (scenario != 0) require(f.world->grantAgentAccessPermission(id, a), "Direct grant failed");
+			if (scenario >= 2)
+			{
+				if (scenario == 2) require(f.world->grantAgentAccessPermission(id, b), "All direct grant failed");
+				else require(f.world->setAgentPermissionSetAssignment(id, set, true), "Set assignment failed");
+			}
+			f.world->resumeSimulation();
+			auto request = f.world->requestDumbwaiterLanding(f.id, 0, id);
+			require(bool(request), "Authorization outcome not queryable");
+			if (scenario < 2)
+			{
+				require(f.world->lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Rejected
+					&& f.world->lookupInteractionRequest(request).entity->getMissingPermissions().size() == (scenario == 0 ? 2u : 1u),
+					"All-of authorization ignored");
+				f.ticks(3); f.position(0); require(!f.unit->isBusy(), "Unauthorized press changed target"); continue;
+			}
+			if (scenario >= 4 && scenario <= 8)
+			{
+				f.world->pauseSimulation();
+				if (scenario == 4) require(f.world->setAgentRuntimeAccessPermissionGrant(id, a, false), "Pre-press loss failed");
+				if (scenario == 5) require(f.world->setAgentRuntimePermissionSetAssignment(id, set, false), "Pre-press set loss failed");
+				if (scenario == 6) actor->setActive(false);
+				if (scenario == 7)
+				{
+					core::MobilityProfile profile; profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+					require(f.world->setAgentIndividualMobilityProfile(id, profile), "Paused Buttons loss failed");
+				}
+				if (scenario == 8)
+				{
+					auto extra = f.world->addAccessPermission("Tightened");
+					require(f.world->setInteractionPointPermissionRequirement(f.unit->getLandingButton(0), {a,b,extra}), "Tightening failed");
+				}
+				f.world->resumeSimulation(); f.ticks(1);
+				auto result = f.world->lookupInteractionRequest(request).entity->getResult();
+				require(result == core::InteractionResult::Cancelled || result == core::InteractionResult::Rejected,
+					"Paused eligibility change did not cancel/reject");
+				f.ticks(250); f.position(0); f.progress(0, 1); require(!f.unit->isBusy(), "Refused request became late cycle"); continue;
+			}
+			f.ticks(1); require(f.unit->isBusy(), "Eligible activation refused");
+			auto operation = f.unit->getOperation();
+			if (scenario >= 9)
+			{
+				f.world->pauseSimulation();
+				if (scenario == 9) actor->setActive(false);
+				if (scenario == 10)
+				{
+					auto sector = std::const_pointer_cast<core::Sector>(f.world->getSector(0));
+					sector->exitAgent(actor); sector->enterAgent(actor, 0, 0.8f);
+				}
+				if (scenario == 13) require(f.world->setAgentRuntimeAccessPermissionGrant(id, a, false), "Post-press direct loss failed");
+				if (scenario == 11) require(f.world->setAgentRuntimePermissionSetAssignment(id, set, false), "Post-press loss failed");
+				if (scenario == 12)
+				{
+					f.world->resumeSimulation(); f.ticks(80); f.world->pauseSimulation();
+					auto position = f.unit->getCarPosition(); auto phase = f.unit->getPhase();
+					auto extra = f.world->addAccessPermission("Tightened");
+					require(f.world->setInteractionPointPermissionRequirement(f.unit->getLandingButton(0), {extra}), "Post-press edit failed");
+					require(f.unit->getCarPosition() == position && f.unit->getPhase() == phase && f.unit->getOperation() == operation,
+						"Permission-only edit reset cycle progress");
+				}
+				f.world->resumeSimulation();
+			}
+			while (f.unit->isBusy()) f.ticks(1);
+			f.position(1); f.progress(1, 1);
+			require(f.world->lookupDeviceOperation(operation).entity->getState() == DeviceOperationState::Succeeded,
+				"Accepted cycle interrupted by eligibility change");
+		}
+	}
+
+	void agentRacesAndLifecycle(smoke::Context const&)
+	{
+		for (unsigned repeat = 0; repeat < 3; ++repeat) for (unsigned race = 0; race < 3; ++race)
+		{
+			Fixture f; auto a = f.world->createAgent("Lower", 0, 0, 0.5f);
+			auto b = f.world->createAgent("Upper", 0, 1, 0.5f);
+			auto first = f.world->requestDumbwaiterLanding(f.id, 1, b);
+			auto second = f.world->requestDumbwaiterLanding(f.id, 0, a);
+			core::DeviceOperationId user;
+			if (race == 0) user = f.world->pressDumbwaiterLanding(f.id, 1);
+			f.ticks(1);
+			if (race == 1) user = f.world->pressDumbwaiterLanding(f.id, 1);
+			require(f.unit->isBusy(), "Contending presses did not reserve cycle");
+			if (race == 0)
+				require(f.unit->getOperation() == user, "Earlier user activation lost admission");
+			else
+			{
+				auto op = f.world->lookupInteractionRequest(second).entity->getOperations().front().first;
+				require(f.unit->getOperation() == op, "Point-order simultaneous admission not deterministic");
+				if (race == 1) require(f.world->lookupDeviceOperation(user).entity->getState() == DeviceOperationState::Rejected, "Busy user won race");
+			}
+			require(f.world->lookupInteractionRequest(first).entity->getResult() == core::InteractionResult::Rejected,
+				"Opposite pending press not refused");
+			f.ticks(500); f.position(1); f.progress(1, 1);
+			require(!f.unit->isBusy() && f.world->getSimulationSnapshot().interactionRequests.empty()
+				&& f.world->getSimulationSnapshot().deviceOperations.empty(), "Refused press replayed or leaked ownership");
+		}
+		for (unsigned change = 0; change < 4; ++change) for (unsigned elapsed : {0u, 2u})
+		{
+			Fixture f; auto actor = f.world->createAgent("Outstanding", 0, 0, 0.5f);
+			auto point = f.unit->getLandingButton(0);
+			auto request = f.world->requestDumbwaiterLanding(f.id, 0, actor);
+			auto operation = f.world->lookupInteractionRequest(request).entity->getOperations().front().first;
+			f.ticks(elapsed); f.world->pauseSimulation();
+			if (change == 0) f.world->resetSimulation();
+			if (change == 1) require(f.world->removeDumbwaiter(f.id), "Owner deletion failed");
+			if (change == 2) require(f.world->configureDumbwaiter(f.id, {1, 1}), "Configuration cancellation failed");
+			if (change == 3) { f.world->addRoom("Structural", 0, 0, 0, 1, 1); f.world->finishBuild(); }
+			if (auto live = f.world->lookupInteractionRequest(request); live)
+				require(live.entity->getResult() != core::InteractionResult::Pending, "Structural edit retained live device request");
+			if (auto live = f.world->lookupDeviceOperation(operation); live)
+				require(live.entity->getState() == DeviceOperationState::Cancelled, "Cancellation outcome not observable");
+			if (change == 1) require(!f.world->lookupInteractionPoint(point), "Removed device retained point handle");
+			f.world->resumeSimulation(); f.ticks(250);
+			require(!f.world->lookupInteractionRequest(request) && !f.world->lookupDeviceOperation(operation), "Cancelled work not retired");
+		}
+	}
+
 	void lifecycle(smoke::Context const&)
 	{
 		for (unsigned phaseTicks : {12u, 80u, 180u}) for (uint32_t initial : {0u, 1u})
@@ -188,4 +397,7 @@ void registerDumbwaiters(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"dumbwaiters/interlockedCallSendAndTiming", journeys});
 	checks.push_back({"dumbwaiters/pauseAndCancellation", lifecycle});
+	checks.push_back({"dumbwaiters/agentLandingEligibility", agentOperation});
+	checks.push_back({"dumbwaiters/agentLandingPermissions", agentPermissions});
+	checks.push_back({"dumbwaiters/agentRacesAndOwnership", agentRacesAndLifecycle});
 }

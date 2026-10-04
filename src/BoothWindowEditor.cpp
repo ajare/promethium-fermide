@@ -1,4 +1,7 @@
 #include "BoothWindowEditor.h"
+#include "core/Agent.h"
+#include "core/MobilityProfile.h"
+#include <algorithm>
 #include "DocumentEdit.h"
 #include "PermissionsPanel.h"
 #include "core/AgentTagRegistry.h"
@@ -120,6 +123,33 @@ core::DeviceOperationId operateBoothWindowShutter(std::shared_ptr<core::World> c
 	return world->submitDeviceCommand(command);
 }
 
+void renderDumbwaiterAgentActions(std::shared_ptr<core::World> const& world, core::AgentId id)
+{
+	auto actor = world->lookupAgent(id).entity;
+	if (!actor) return;
+	// Manual operation is stationary and independent of Paths.
+	for (uint32_t index = 0; index < world->getNumSectors(); ++index)
+		if (auto unit = std::dynamic_pointer_cast<const core::Dumbwaiter>(world->getSector(index)))
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto point = world->lookupInteractionPoint(unit->getLandingButton(stop)).entity;
+				if (actor->getSector() != unit->getStop(stop).sector.get()) continue;
+				auto grants = world->getAgentEffectiveAccessGrants(id);
+				auto requirements = world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop));
+				bool authorized = std::all_of(requirements.begin(), requirements.end(), [&](auto permission)
+					{ return std::find(grants.begin(), grants.end(), permission) != grants.end(); });
+				bool eligible = actor->isActive() && !core::agentForbidsButtons(actor)
+					&& authorized && !unit->isBusy()
+					&& (actor->getState() == core::Agent::State::Idle || actor->getState() == core::Agent::State::WaitingForTraversal)
+					&& actor->getGlobalPosition().distanceTo(point->getPosition()) <= point->getReach();
+				ImGui::PushID(static_cast<int>(index)); ImGui::PushID(static_cast<int>(stop));
+				ImGui::BeginDisabled(!eligible);
+				if (ImGui::Button(stop == 0 ? "Agent: press lower Dumbwaiter landing" : "Agent: press upper Dumbwaiter landing"))
+					world->requestDumbwaiterLanding(unit->getId(), stop, id);
+				ImGui::EndDisabled(); ImGui::PopID(); ImGui::PopID();
+			}
+}
+
 bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::Dumbwaiter> const& unit)
 {
@@ -138,6 +168,9 @@ bool renderDumbwaiterPanel(std::shared_ptr<core::World> const& world,
 		if (ImGui::Button(stop == 0 ? "Press lower landing" : "Press upper landing"))
 			world->pressDumbwaiterLanding(unit->getId(), stop);
 		ImGui::EndDisabled();
+		ImGui::PushID(static_cast<int>(stop));
+		renderInteractionPermissionRequirements(world, unit->getLandingButton(stop));
+		ImGui::PopID();
 	}
 	if (auto operation = world->lookupDeviceOperation(unit->getOperation()); operation)
 		ImGui::Text("Operation: %llu (%s)", static_cast<unsigned long long>(unit->getOperation().value),

@@ -150,6 +150,9 @@ set(core_names
     boothWindows/ownedPanelLifecycle
     dumbwaiters/interlockedCallSendAndTiming
     dumbwaiters/pauseAndCancellation
+    dumbwaiters/agentLandingEligibility
+    dumbwaiters/agentLandingPermissions
+    dumbwaiters/agentRacesAndOwnership
     runScaledWorld
 )
 
