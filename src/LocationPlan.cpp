@@ -209,7 +209,8 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 		}
 		ImGui::EndDisabled();
 		if (!mDeleteDiagnostic.empty()) ImGui::TextWrapped("%s", mDeleteDiagnostic.c_str());
-		ImGui::TextUnformatted("World X / Local depth (ordering)");
+		ImGui::TextUnformatted("World X / Local depth (ordering) - edges in cyan");
+		ImGui::TextUnformatted("Vertices: usable gold / external green / other cyan");
 		auto position = ImGui::GetCursorScreenPos();
 		auto size = ImGui::GetContentRegionAvail();
 		if (size.x > 0 && size.y > 0)

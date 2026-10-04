@@ -929,13 +929,13 @@ namespace
 		std::string text;
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
-		ImVec2 actionPosition; unsigned presentations = 0;
+		ImVec2 actionPosition; unsigned presentations = 0, graphEdges = 0, graphVertices = 0;
 		std::vector<std::string> labels, depths;
 		auto hasDepth = [&](std::string const& label) { return std::find(depths.begin(), depths.end(), label) != depths.end(); };
 		auto hasLabel = [&](std::string const& label) { return std::find(labels.begin(), labels.end(), label) != labels.end(); };
 		auto frame = [&]
 		{
-			text.clear(); presentations = 0; labels.clear(); depths.clear();
+			text.clear(); presentations = graphEdges = graphVertices = 0; labels.clear(); depths.clear();
 			ImGui::NewFrame();
 			ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({250, 100});
@@ -951,11 +951,19 @@ namespace
 			{
 				++presentations;
 				for (auto const& command : commands.commands())
+				{
 					if (auto label = std::get_if<WorldDrawList::Text>(&command))
 					{
 						labels.push_back(label->value);
 						if (std::abs(label->position.x - position.x - 16) < .01f) depths.push_back(label->value);
 					}
+					if (auto edge = std::get_if<WorldDrawList::Line>(&command);
+						edge && edge->colour == IM_COL32(80, 210, 220, 255)) ++graphEdges;
+					if (auto vertex = std::get_if<WorldDrawList::Triangle>(&command);
+						vertex && (vertex->colour == IM_COL32(150, 245, 255, 255)
+							|| vertex->colour == IM_COL32(105, 230, 140, 255)
+							|| vertex->colour == IM_COL32(255, 190, 60, 255))) ++graphVertices;
+				}
 				require(!commands.commands().empty(), "Open plan did not present a command stream");
 			});
 			// If the plan is closed it does not consume next-window settings.
@@ -1015,6 +1023,8 @@ namespace
 		require(placeSelectedFurniture(world, room, "desk", 0.25f, 2, false, "Upper desk", diagnostic, history, 2), diagnostic);
 		frame(); require(hasLabel("Upper desk") && hasDepth("4") && !hasDepth("5"),
 			"Instance/vertex at depth 3 did not expose depth 4 after an external edit");
+		require(graphEdges > 0 && graphVertices > 0 && text.find("Vertices: usable gold / external green / other cyan") != std::string::npos,
+			"Production plan did not present live vertices/edges and colour legend");
 		auto upper = world->furniture().back();
 		require(editSelectedFurniture(world, upper.id, 0.5f, 2, false, "Upper desk", diagnostic, history, 5), diagnostic);
 		frame(); require(hasDepth("7") && !hasDepth("8"), "Resolved depth 6 did not expose through 7");

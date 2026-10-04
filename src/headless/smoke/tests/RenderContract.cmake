@@ -36,6 +36,7 @@ set(names
     furniture/chairCommands
     furniture/demoCommands
     locationPlan/grid
+    locationPlan/graph
     securityScanners/chamberCommandStream
     securityScanners/beamSweeps
     dumbwaiters/initialPresentationAndClipping
