@@ -412,6 +412,70 @@ namespace
 		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == separated, "Resize redo did not separate stack");
 	}
 
+	void checkLargeStackDocumentHistory()
+	{
+		for (uint32_t count : {3u, 4u})
+		{
+			auto world = std::make_shared<core::World>("Large stack document", 10, 1); world->addLayer();
+			world->addRoom("Front", 0, 0, 0, 10, 1);
+			auto middle = world->addRoom("Middle", 1, 0, 3, 2, 1);
+			world->addRoom("Back", 2, 0, 0, 10, 1);
+			world->addRoom("Retained wall", 1, 0, 0, 3, 1);
+			world->addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+			world->finishBuild(); world->pauseSimulation();
+			DocumentHistory history;
+			auto positions = [&]
+			{
+				std::vector<core::Vector2> result;
+				std::shared_ptr<const core::Vertex> approach;
+				for (uint32_t i = 0; i < world->getSector(middle)->getNumObjects(); ++i)
+				{
+					auto object = world->getSector(middle)->getObject(i);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					std::shared_ptr<const core::SectorObject> selected;
+					require(world->getObjectAtPosition(1, centre.x, centre.y, &selected) == button && selected == object,
+						"Editor selection chose another stack member");
+					auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+					require(vertex && vertex->getPosition().y == 0, "History restored an elevated approach");
+					if (approach && result.front().x == centre.x) require(approach == vertex, "History duplicated shared approach");
+					approach = vertex;
+					result.push_back(centre);
+				}
+				std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.x != b.x ? a.x < b.x : a.y < b.y; });
+				return result;
+			};
+			auto initial = captureDocumentSnapshot(world, history);
+			core::World::CreateDoorOptions copied;
+			require(world->getSectorDoorOptions(0, 0, 3, 1, copied), "Stack clipboard option readback failed");
+			// Clipboard copies authored controls, not Button geometry or approaches.
+			for (uint32_t i = 1; i < count; ++i) world->addSectorDoor(i % 2, 0, i < 2 ? 3 : 4, copied);
+			world->finishBuild();
+			commitDocumentEdit(initial, history);
+			auto stacked = positions();
+			require(stacked.size() == count && stacked.front().x == stacked.back().x && stacked.front().y < stacked.back().y, "Clipboard did not reconstruct stack");
+			auto restore = [&](DocumentSnapshot const& snapshot)
+			{
+				world = deserializeDocumentSnapshot(snapshot, world, {});
+				if (world) world->pauseSimulation();
+				return bool(world);
+			};
+			require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions().size() == 1, "Stack creation undo failed");
+			require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Stack creation redo failed");
+			auto beforeResize = captureDocumentSnapshot(world, history);
+			auto plan = world->planResizeLocation(middle, 3, 0, 3, 1);
+			require(plan.valid, "Available alternate side resize refused: " + plan.diagnostic);
+			middle = world->applyLocationEdit(plan);
+			commitDocumentEdit(beforeResize, history);
+			auto separated = positions();
+			require(separated.size() == count && separated.front().x == 4 && separated.back().x == 5
+				&& separated.back().y < stacked.back().y, "Newly available alternate side retained stack");
+			require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Resize undo did not reconstruct stack");
+			require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == separated, "Resize redo did not separate stack");
+		}
+	}
+
 	void checkExistingButtonsCanBeRemoved()
 	{
 		auto world = std::make_shared<core::World>("Door button checkbox", 12, 3);
@@ -438,6 +502,7 @@ namespace
 		checkWallSafeDocumentEdits();
 		checkCanonicalDocumentHistory();
 		checkStackDocumentHistory();
+		checkLargeStackDocumentHistory();
 	}
 
 	void checkLiftOwnedDoor()

@@ -87,20 +87,28 @@ and Location light switches now allocate jointly across each Layer/Level. The
 complete authored canonical tuple orders preference ties and stack members;
 previous placement and runtime identifiers are never allocation inputs.
 
-Collision-free assignments always win. If separation is impossible, two migrated
-controls may share a centre only within the same hosting Location. The allocator
-minimises buttons above bottoms, then non-preferred assignments (with capacity
-two, maximum stack size is already determined), then canonical preference ties.
-Indistinguishable definitions, cross-Location coincidence, and unavoidable stacks
-of three or more remain atomic refusals. Legacy-owner migration and larger stacks
-belong to subsequent tickets, not this slice.
+Collision-free assignments always win. If separation is impossible, up to four migrated
+controls may share a centre only within the same hosting Location (#430).
+Only feasible assignments are compared: all candidates must be valid, coincident
+controls must share a Location, and every stack must fit within four members.
+An over-capacity search branch is skipped, not treated as refusal of the edit.
+The allocator minimises total buttons above bottoms, then maximum stack size,
+then non-preferred assignments, then canonical preference ties. Adding a member
+to an occupied position contributes one above-bottom Button, not one per pair.
+Disconnected conflict components retain their best assignment at each capacity;
+the smallest common capacity attaining the minimum total above-bottom count is
+selected before preference optimisation. This avoids unnecessarily sacrificing
+preferred sides in a component when another component already sets the maximum.
+Indistinguishable definitions, cross-Location coincidence, invalid hosts, and
+unavoidable stacks of five or more remain atomic refusals. Legacy-owner migration
+belongs to subsequent tickets, not this slice.
 
-The lower Button stays at normal height; the upper is one Button-height plus a
-25%-height gap above it, at identical centre X. Cell registrations retain one
+The bottom Button stays at normal height; each subsequent member is one
+Button-height plus a 25%-height gap above its predecessor, at identical centre X. Cell registrations retain one
 representative plus independently owned additional members. Graph construction
-maps both SectorObjects and their individual vertex identifiers to exactly one
+maps all member SectorObjects and their individual vertex identifiers to exactly one
 normal-height approach. Visible geometry is not interaction reach geometry:
-both Interaction points keep their own identity, bindings, eligibility and
+all Interaction points keep their own identity, bindings, eligibility and
 operation-specific requirements at the walkable position. Explicit Agent requests
 and traversal intent select a control, never every control at the shared vertex.
 The editor and runtime mouse targeting use each Button's separate visible shape.
@@ -116,5 +124,13 @@ Headless coverage in `world/TwoSidedButtons.cpp`, `editor/DoorPanel.cpp`, and
 Agent approach and Door crossings without upward movement, canonical equal-X
 ordering, one graph vertex and both lookup kinds, independent hit selection,
 production draw styles/spacing, creation-order independence, YAML/binary replay,
-clipboard/history reconstruction, unstacking, and transactional triple refusal
-through authoring and invalid loading.
+clipboard/history reconstruction, unstacking, and transactional refusal
+through authoring and invalid loading. #430 extends those production seams to
+three/four members, each independently authorized and routed without upward
+Agent movement, and tests two-pair spreading and preference/canonical ties after
+wall removal. A value-only exhaustive oracle checks 7,776 five-control candidate
+layouts against all four optimisation tiers, including capacity and Location
+filtering; explicit cases cover simultaneous side changes, a feasible alternative
+to an explored fifth member, unavoidable fifth-member refusal, and the global
+maximum across disconnected conflict components. This allocator coverage does
+not migrate the blocked legacy owner types.

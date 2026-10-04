@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <map>
+#include <tuple>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -575,6 +577,124 @@ namespace
 		}
 	}
 
+	void completeOptimisation()
+	{
+		using namespace core::physicalControl;
+		auto demand = [](uint32_t ownerX, std::initializer_list<uint32_t> positions)
+		{
+			Demand d; d.hasOwner = true;
+			d.owner = {OwnerType::Door, {0, ownerX, 0, 1, 1}, {1, 0, 0, 20, 1}, {0, ownerX, 0}};
+			for (auto x : positions) d.candidates.push_back(Candidate::explicitHost(x, 0, CORE_SIDE_LEFT));
+			return d;
+		};
+		auto solve = [&](std::vector<Demand> const& input, std::vector<uint32_t> const& expected, char const* tier)
+		{
+			require(allocateCanonical(input) == expected, tier);
+			auto reversed = input; std::reverse(reversed.begin(), reversed.end());
+			auto choice = allocateCanonical(reversed); std::reverse(choice.begin(), choice.end());
+			require(choice == expected, "Creation order changed optimisation");
+		};
+		// Above-bottom count (not coincident pair count) comes before preferences.
+		solve({demand(0, {1, 0}), demand(1, {2, 1}), demand(2, {3, 2}), demand(3, {3})},
+			{1, 1, 1, 0}, "Collision-free multi-side assignment lost to a stack");
+		// Same three above-bottom members: 3+2 beats 4+1 even at extra penalty.
+		solve({demand(0, {0}), demand(1, {0}), demand(2, {1}), demand(3, {0, 1}), demand(4, {0, 1})},
+			{0, 0, 0, 0, 1}, "Maximum-stack tier did not beat preferred sides/canonical tie");
+		// Feasibility, not an early refusal: the preferred branch reaches five.
+		solve({demand(0, {0}), demand(1, {0}), demand(2, {0}), demand(3, {0}), demand(4, {0, 1})},
+			{0, 0, 0, 0, 1}, "Overcapacity branch hid a feasible assignment");
+		solve({demand(0, {0}), demand(1, {0}), demand(2, {1}), demand(3, {0, 1})},
+			{0, 0, 0, 1}, "Maximum-stack tier lost to preference");
+		// A disconnected forced four-stack sets the GLOBAL max. At that bound,
+		// the second component should retain its preferred 3+1, not force 2+2.
+		solve({demand(0, {8}), demand(1, {8}), demand(2, {8}), demand(3, {8}),
+			demand(4, {0}), demand(5, {0}), demand(6, {1}), demand(7, {0, 1})},
+			{0, 0, 0, 0, 0, 0, 0, 0}, "Disconnected components optimised maximum locally");
+
+		// Independent exhaustive oracle for every five-control layout over three
+		// centres, including fixed and reversible sides. It compares all tiers
+		// only AFTER filtering capacity and hosting-Location feasibility.
+		for (uint32_t layout = 0; layout < 7776; ++layout)
+		{
+			std::vector<Demand> input; auto code = layout;
+			for (uint32_t i = 0; i < 5; ++i)
+			{
+				auto shape = code % 6; code /= 6;
+				input.push_back(shape < 3 ? demand(i, {shape}) : demand(i, {shape - 3, (shape - 2) % 3}));
+				if (layout % 7 == 0 && i == 4) input.back().owner.hostingLocation.x = 1;
+			}
+			using Score = std::tuple<uint32_t, uint32_t, uint32_t, std::vector<uint32_t>>;
+			Score best{~0u, ~0u, ~0u, {}}; std::vector<uint32_t> expected;
+			for (uint32_t mask = 0; mask < 32; ++mask)
+			{
+				std::vector<uint32_t> choice; std::map<int64_t, std::vector<uint32_t>> groups;
+				bool valid = true; uint32_t penalty = 0;
+				for (uint32_t i = 0; i < 5; ++i)
+				{
+					auto side = (mask >> i) & 1;
+					if (side >= input[i].candidates.size()) { valid = false; break; }
+					choice.push_back(side); penalty += side;
+					groups[input[i].candidates[side].centreKey()].push_back(i);
+				}
+				uint32_t above = 0, maximum = 0;
+				for (auto const& [centre, members] : groups)
+				{
+					(void)centre;
+					uint32_t size = static_cast<uint32_t>(members.size());
+					above += size - 1; maximum = std::max(maximum, size);
+					valid &= size <= 4;
+					for (auto i : members) valid &= input[i].owner.hostingLocation.x == input[members.front()].owner.hostingLocation.x;
+				}
+				Score score{above, maximum, penalty, choice};
+				if (valid && score < best) { best = score; expected = choice; }
+			}
+			bool refused = false; std::vector<uint32_t> actual;
+			try { actual = allocateCanonical(input); } catch (std::runtime_error const&) { refused = true; }
+			require(refused == expected.empty() && actual == expected, "Allocator disagreed with exhaustive four-tier oracle: " + std::to_string(layout));
+		}
+
+		// Public authoring isolates the max tier (two pairs rather than 3+1),
+		// then preference count and canonical ties as a retained wall is removed.
+		for (bool reverse : {false, true})
+		{
+			core::World world("Optimised pairs", 10, 1); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 3, 3, 1);
+			world.addRoom("Back", 2, 0, 0, 10, 1);
+			auto neighbour = world.addRoom("Wall", 1, 0, 0, 3, 1);
+			world.pauseSimulation();
+			core::AccessPermissionId permissions[4];
+			for (uint32_t i = 0; i < 4; ++i) permissions[i] = world.addAccessPermission("Owner " + std::to_string(i));
+			for (uint32_t step = 0; step < 4; ++step)
+			{
+				uint32_t i = reverse ? 3 - step : step;
+				auto options = core::World::RemoteControlledDoor1Options;
+				options.controlPermissionRequirements[i % 2 == 0 ? 1 : 0] = {permissions[i]};
+				world.addSectorDoor(i % 2, 0, i < 2 ? 3 : 4, options);
+			}
+			world.finishBuild(); world.pauseSimulation();
+			auto check = [&](std::vector<float> const& expected)
+			{
+				auto buttons = buttonsIn(world, middle); require(buttons.size() == 4, "Optimisation dropped controls");
+				for (auto button : buttons)
+				{
+					auto requirement = world.getInteractionPointPermissionRequirement(button->getInteractionPointId());
+					auto owner = std::find(std::begin(permissions), std::end(permissions), requirement.front()) - std::begin(permissions);
+					auto point = world.lookupInteractionPoint(button->getInteractionPointId());
+					require(point && point.entity->getPosition().x == expected[owner], "Public authoring lost an optimisation tier");
+					std::shared_ptr<const core::SectorObject> object;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(world.getObjectAtPosition(1, centre.x, centre.y, &object) == button, "Optimised stack hit failed");
+					auto vertex = world.getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+					require(vertex && vertex->getPosition() == point.entity->getPosition(), "Optimised graph placement differed");
+				}
+			};
+			check({4, 4, 5, 5});
+			world.removeLocationWall(neighbour, 0, CORE_SIDE_RIGHT); world.finishBuild();
+			check({4, 3, 5, 5});
+		}
+	}
+
 	void sharedApproachStacks()
 	{
 		using namespace core::physicalControl;
@@ -585,46 +705,18 @@ namespace
 		auto third = second; third.owner.geometry.layer = 2;
 		bool refused = false;
 		try { (void)allocateCanonical({first, second, third}); } catch (std::runtime_error const&) { refused = true; }
-		require(refused, "Unavoidable triple was admitted before its interaction slice");
+		require(!refused, "Unavoidable triple was refused");
+		auto fourth = third; fourth.owner.geometry.layer = 3;
+		auto fifth = fourth; fifth.owner.geometry.layer = 4;
+		require(allocateCanonical({first, second, third, fourth}) == std::vector<uint32_t>{0, 0, 0, 0}, "Four-stack refused");
+		refused = false;
+		try { (void)allocateCanonical({first, second, third, fourth, fifth}); } catch (std::runtime_error const&) { refused = true; }
+		require(refused, "Unavoidable fifth control was admitted");
 		second.owner.hostingLocation.x = 0;
 		refused = false;
 		try { (void)allocateCanonical({first, second}); } catch (std::runtime_error const&) { refused = true; }
 		require(refused, "Stack crossed Locations");
 
-		// Three different, non-overlapping Door footprints can require the same
-		// supported host. Test the staged capacity refusal at production seams.
-		{
-			core::World world("Triple refusal", 8, 2); world.addLayer();
-			world.addRoom("Front", 0, 1, 0, 8, 1);
-			auto middle = world.addRoom("Middle", 1, 0, 0, 8, 2);
-			world.addRoom("Back", 2, 1, 0, 8, 1);
-			world.addSectorWalkway(middle, 1, 2); world.addSectorWalkway(middle, 1, 3);
-			auto options = core::World::RemoteControlledDoor1Options; options.width = 2;
-			world.addSectorDoor(0, 1, 1, options); options.width = 1;
-			world.addSectorDoor(1, 1, 3, options); world.finishBuild(); world.pauseSimulation();
-			auto graph = world.getGraph(); auto buttons = buttonsIn(world, middle);
-			core::SerializationWorkData data;
-			auto before = core::YamlSerializer::toString(); world.serialize(*before, data); before->serialize();
-			refused = false;
-			try { world.addSectorDoor(0, 1, 3, options); } catch (core::Exception const&) { refused = true; }
-			auto after = core::YamlSerializer::toString(); world.serialize(*after, data); after->serialize();
-			require(refused && graph == world.getGraph() && buttonsIn(world, middle) == buttons
-				&& before->getSerializedString() == after->getSerializedString(), "Triple refusal changed World, commands or authored data");
-			// A newly supported alternate host makes the third Door feasible.
-			world.addSectorWalkway(middle, 1, 4); world.addSectorDoor(0, 1, 3, options);
-			// Supply threshold floors too before constructing traversal queues.
-			for (uint32_t x : {0u, 1u, 5u, 6u, 7u}) world.addSectorWalkway(middle, 1, x);
-			world.finishBuild();
-			auto writer = core::YamlSerializer::toString(); world.serialize(*writer, data); writer->serialize();
-			auto invalid = YAML::Load(writer->getSerializedString()); YAML::Node records(YAML::NodeType::Sequence);
-			for (auto record : invalid["construction"])
-				if (!(record["type"].as<std::string>() == "walkway" && record["xOffset"].as<uint32_t>() != 3 && record["xOffset"].as<uint32_t>() != 2)) records.push_back(record);
-			invalid["construction"] = records;
-			auto reader = core::YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize();
-			graph = world.getGraph(); buttons = buttonsIn(world, middle); refused = false;
-			try { refused = !world.deserialize(*reader, data); } catch (std::exception const&) { refused = true; }
-			require(refused && graph == world.getGraph() && buttonsIn(world, middle) == buttons, "Invalid triple load was not transactional");
-		}
 
 		for (bool reverse : {false, true})
 		{
@@ -730,6 +822,150 @@ namespace
 			auto binaryReader = core::BinarySerializer::fromString(binary->getSerializedString()); binaryReader->deserialize();
 			require(loaded.deserialize(*binaryReader, data), "Binary stack load/replay failed"); check(loaded);
 			require(world.removeSectorDoor(doors[0].door.sector->getIndex(), doors[0].door.index), "Stack deletion refused");
+			world.finishBuild();
+			auto remaining = buttonsIn(world, middle);
+			require(remaining.size() == 1 && remaining.front()->getPosition().y == CORE_BUTTON_Y_OFFSET, "Survivor did not unstack");
+		}
+		for (uint32_t count : {3u, 4u}) for (bool reverse : {false, true})
+		{
+			core::World world("Four shared approaches", 10, 1); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 3, 2, 1);
+			world.addRoom("Back", 2, 0, 0, 10, 1);
+			world.addRoom("Retained left wall", 1, 0, 0, 3, 1);
+			world.pauseSimulation();
+			core::AccessPermissionId permissions[4];
+			core::World::CreateDoorResult doors[4];
+			for (uint32_t i = 0; i < count; ++i) permissions[i] = world.addAccessPermission("Member " + std::to_string(i));
+			// Four non-overlapping footprints, two on each adjacent Layer,
+			// all forced to the sole wall-safe host at x=4.
+			uint32_t layers[]{0, 1, 0, 1}, xs[]{3, 3, 4, 4}, widths[]{1, 1, 1, 1};
+			auto add = [&](uint32_t i)
+			{
+				auto options = core::World::RemoteControlledDoor1Options; options.width = widths[i];
+				options.controlPermissionRequirements[layers[i] == 0 ? 1 : 0] = {permissions[i]};
+				doors[i] = world.addSectorDoor(layers[i], 0, xs[i], options);
+			};
+			for (uint32_t i = 0; i < count; ++i) add(reverse ? count - i - 1 : i);
+			world.finishBuild(); world.pauseSimulation();
+			auto check = [&](core::World& scene)
+			{
+				auto buttons = buttonsIn(scene, middle);
+				require(buttons.size() == count, "Stack omitted a required Button");
+				std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+				require(buttons[0]->getPosition().y == CORE_BUTTON_Y_OFFSET
+					&& std::abs(buttons[1]->getPosition().y - buttons[0]->getPosition().y - buttons[0]->getSize().y * 1.25f) < 0.00001f
+					&& buttons[0]->getPosition().x == buttons[1]->getPosition().x, "Incorrect stack spacing");
+				std::shared_ptr<const core::Vertex> shared;
+				for (uint32_t rank = 0; rank < count; ++rank)
+				{
+					require(std::abs(buttons[rank]->getPosition().y - (CORE_BUTTON_Y_OFFSET + rank * buttons[rank]->getSize().y * 1.25f)) < 0.00001f
+						&& buttons[rank]->getPosition().x == buttons[0]->getPosition().x, "Member geometry lost canonical spacing");
+					auto button = buttons[rank]; auto point = scene.lookupInteractionPoint(button->getInteractionPointId());
+					require(point && point.entity->getPosition() == core::Vector2{4, 0}, "Upper interaction moved above walkable height");
+					require(scene.getInteractionPointPermissionRequirement(button->getInteractionPointId()) == std::vector<core::AccessPermissionId>{permissions[rank]}, "Equal-X canonical order lost owner Layer tie");
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					std::shared_ptr<const core::SectorObject> selected;
+					require(scene.getObjectAtPosition(1, centre.x, centre.y, &selected) == button, "Stack hit selected another Button");
+					auto object = std::const_pointer_cast<core::SectorObject>(selected);
+					auto vertex = scene.getGraph()->getVertexForObject(object);
+					require(vertex && vertex->getPosition() == core::Vector2{4, 0}
+						&& object->getVertexIdentifier() != ~0u
+						&& scene.getGraph()->getVertexByIdentifier(object->getVertexIdentifier()) == vertex, "Stack lookup missing");
+					if (shared) require(shared == vertex, "Stack has two production approaches"); else shared = vertex;
+				}
+				uint32_t count = 0;
+				for (auto vertex : scene.getGraph()->getVertices())
+					if (vertex->getSector()->getIndex() == middle && vertex->getPosition() == core::Vector2{4, 0}
+						&& vertex->getSubType() == core::VertexSubType::Interactable) ++count;
+				require(count == 1, "Stack duplicated graph vertex");
+				return buttons;
+			};
+			auto buttons = check(world);
+			// Failed authoring and malformed document reconstruction leave all
+			// members, identities, commands, permissions and graph untouched.
+			core::SerializationWorkData refusalData;
+			auto before = core::YamlSerializer::toString(); world.serialize(*before, refusalData); before->serialize();
+			auto graph = world.getGraph(); bool refused = false;
+			try { world.addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options); }
+			catch (core::Exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && check(world) == buttons, "Duplicate authoring changed stack");
+			auto invalid = YAML::Load(before->getSerializedString());
+			YAML::Node duplicate;
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() == "door") { duplicate = YAML::Clone(record); break; }
+			require(bool(duplicate), "Stack document has no Door record");
+			invalid["construction"].push_back(duplicate);
+			auto invalidReader = core::YamlSerializer::fromString(YAML::Dump(invalid)); invalidReader->deserialize();
+			refused = false;
+			try { refused = !world.deserialize(*invalidReader, refusalData); } catch (std::exception const&) { refused = true; }
+			auto after = core::YamlSerializer::toString(); world.serialize(*after, refusalData); after->serialize();
+			require(refused && world.getGraph() == graph && check(world) == buttons
+				&& before->getSerializedString() == after->getSerializedString(), "Invalid stack reconstruction was not atomic");
+
+			for (uint32_t rank = 0; rank < count; ++rank)
+			{
+				auto actor = world.createAgent("Operator", middle, 0, rank < 2 ? 0.7f : 1.3f);
+				require(world.grantAgentAccessPermission(actor, permissions[rank]), "Stack permission grant failed");
+				require(world.resumeSimulation(), "Stack failed topology validation");
+				auto denied = world.requestInteraction(buttons[(rank + 1) % count]->getInteractionPointId(), actor);
+				auto rejection = world.lookupInteractionRequest(denied);
+				require(rejection && rejection.entity->getResult() == core::InteractionResult::Rejected
+					&& rejection.entity->getOperations().empty(), "Shared approach merged authorization");
+				auto request = world.requestInteraction(buttons[rank]->getInteractionPointId(), actor);
+				require(bool(request), "Selected stack control refused");
+				for (int tick = 0; tick < 300; ++tick)
+				{
+					world.advanceTicks(1);
+					require(world.lookupAgent(actor).entity->getGlobalPosition().y == 0, "Agent climbed to upper Button");
+					auto progress = world.lookupInteractionRequest(request);
+					if (progress && progress.entity->getResult() != core::InteractionResult::Pending) break;
+				}
+				auto result = world.lookupInteractionRequest(request);
+				require(result && result.entity->getResult() == core::InteractionResult::Succeeded
+					&& result.entity->getOperations().size() == 1, "Selected stack operation failed at rank " + std::to_string(rank) + ": " + std::to_string(result ? int(result.entity->getResult()) : -1));
+				auto operation = world.lookupDeviceOperation(result.entity->getOperations().front().first);
+				auto door = std::dynamic_pointer_cast<const core::DoorSectorObject>(doors[rank].door.sector->getObject(doors[rank].door.index));
+				require(operation && operation.entity->getCommand().traversalResource == door->getDoor()->getTraversalResourceId(), "Stack activated wrong command");
+				// Route intent must select the required Door's control, even though
+				// the shared vertex itself carries the bottom Button's object.
+				door->getDoor()->close(); door->getDoor()->update(100);
+				auto destinationSector = layers[rank] == 0 ? door->getDoor()->getFrontSector() : door->getDoor()->getBackSector();
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					auto other = std::dynamic_pointer_cast<const core::DoorSectorObject>(doors[i].door.sector->getObject(doors[i].door.index));
+					other->getDoor()->close(); other->getDoor()->update(100);
+				}
+				auto destination = world.getGraph()->getClosestVertexInSector(destinationSector.get(), {float(xs[rank]) + 0.5f, 0});
+				auto agent = world.lookupAgent(actor).entity;
+				auto path = world.getGraph()->calculatePath(agent, destination);
+				require(bool(path), "Stack approach lost selected Door route"); agent->setPath(path, true);
+				bool selected = false;
+				for (uint32_t tick = 0; tick < 3000; ++tick)
+				{
+					world.advanceTick();
+					require(agent->getGlobalPosition().y == 0, "Routing climbed toward upper artwork");
+					for (auto const& interaction : world.getSimulationSnapshot().interactionRequests)
+						if (interaction.actor == actor && interaction.id != request && interaction.result != core::InteractionResult::Rejected)
+						{
+							require(interaction.point == buttons[rank]->getInteractionPointId(), "Route intent operated the other stacked control");
+							selected = true;
+						}
+					if (agent->getState() == core::Agent::State::Idle) break;
+				}
+				require(selected && agent->getSector() == destinationSector.get(), "Agent did not activate and cross its intended stacked Door rank " + std::to_string(rank) + " selected " + std::to_string(selected) + " sector " + std::to_string(agent->getSector()->getIndex()));
+				world.pauseSimulation();
+				world.removeAgent(actor);
+				check(world);
+			}
+			core::SerializationWorkData data; auto writer = core::YamlSerializer::toString();
+			world.serialize(*writer, data); writer->serialize();
+			core::World loaded("Placeholder", 1, 1); auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+			require(loaded.deserialize(*reader, data), "Stack load/replay failed"); check(loaded);
+			auto binary = core::BinarySerializer::toString(); world.serialize(*binary, data); binary->serialize();
+			auto binaryReader = core::BinarySerializer::fromString(binary->getSerializedString()); binaryReader->deserialize();
+			require(loaded.deserialize(*binaryReader, data), "Binary stack load/replay failed"); check(loaded);
+			for (uint32_t i = 0; i + 1 < count; ++i) require(world.removeSectorDoor(doors[i].door.sector->getIndex(), doors[i].door.index), "Stack deletion refused");
 			world.finishBuild();
 			auto remaining = buttonsIn(world, middle);
 			require(remaining.size() == 1 && remaining.front()->getPosition().y == CORE_BUTTON_Y_OFFSET, "Survivor did not unstack");
@@ -1030,6 +1266,7 @@ void runDoorTwoSidedButtonSmokeChecks()
 	canonicalOrderContract();
 	canonicalSideReassignment();
 	sharedApproachStacks();
+	completeOptimisation();
 	wallSafeAuthoring();
 	wallSafeSupportAndBulkheads();
 	authoredPlacementPositionsRemainUnchanged();

@@ -187,6 +187,12 @@ namespace core::physicalControl
 					if (x.centreKey() == y.centreKey()) return true;
 			return false;
 		};
+		// Keep the best assignment at each capacity. The maximum-stack tier is
+		// global: a forced four-stack in one disconnected component must not
+		// make another component sacrifice preferred sides to reduce its own max.
+		struct Solution { vector<uint32_t> choice; pair<uint32_t, uint32_t> score{~0u, ~0u}; };
+		struct Component { vector<uint32_t> indices; vector<Solution> capacities; };
+		vector<Component> components;
 		vector<bool> visited(demands.size());
 		for (auto root : order)
 		{
@@ -212,53 +218,73 @@ namespace core::physicalControl
 				continue;
 			}
 
-			vector<uint32_t> choice(component.size()), best;
-			pair<uint32_t, uint32_t> bestScore{~0u, ~0u};
-			function<void(uint32_t, uint32_t, uint32_t)> search = [&](uint32_t depth, uint32_t stacked, uint32_t penalty)
+			Component result{component, vector<Solution>(4)};
+			for (uint32_t capacity = 1; capacity <= 4; ++capacity)
 			{
-				// With capacity two, maximum stack size is determined by stacked.
-				// Preferred-first canonical enumeration resolves the remaining tie.
-				auto score = make_pair(stacked, penalty);
-				if (!best.empty() && score >= bestScore) return;
-				if (depth == component.size()) { best = choice; bestScore = score; return; }
-				auto const& demand = demands[component[depth]];
-				vector<uint32_t> candidates;
-				for (uint32_t i = 0; i < demand.candidates.size(); ++i) candidates.push_back(i);
-				stable_sort(candidates.begin(), candidates.end(), [&](auto a, auto b)
+				auto& best = result.capacities[capacity - 1];
+				vector<uint32_t> choice(component.size());
+				function<void(uint32_t, uint32_t, uint32_t)> search = [&](uint32_t depth, uint32_t stacked, uint32_t penalty)
 				{
-					auto preferred = demand.hasOwner ? demand.defaultCandidate : demand.currentCandidate;
-					return (a == preferred) > (b == preferred);
-				});
-				for (auto candidate : candidates)
-				{
-					auto const& position = demand.candidates[candidate];
-					bool collision = false;
-					uint32_t coincident = 0;
-					for (uint32_t i = 0; i < depth; ++i)
+					// Both costs are monotone. Preferred-first canonical enumeration
+					// resolves exact ties without using previous assignments or IDs.
+					auto score = make_pair(stacked, penalty);
+					if (!best.choice.empty() && score >= best.score) return;
+					if (depth == component.size()) { best.choice = choice; best.score = score; return; }
+					auto const& demand = demands[component[depth]];
+					vector<uint32_t> candidates;
+					for (uint32_t i = 0; i < demand.candidates.size(); ++i) candidates.push_back(i);
+					stable_sort(candidates.begin(), candidates.end(), [&](auto a, auto b)
 					{
-						auto const& other = demands[component[i]];
-						auto const& occupied = other.candidates[choice[i]];
-						bool sameCentre = position.centreKey() == occupied.centreKey();
-						if (sameCentre && (demand.hasOwner || other.hasOwner))
+						auto preferred = demand.hasOwner ? demand.defaultCandidate : demand.currentCandidate;
+						return (a == preferred) > (b == preferred);
+					});
+					for (auto candidate : candidates)
+					{
+						auto const& position = demand.candidates[candidate];
+						bool collision = false;
+						uint32_t coincident = 0;
+						for (uint32_t i = 0; i < depth; ++i)
 						{
-							auto const& a = demand.owner.hostingLocation;
-							auto const& b = other.owner.hostingLocation;
-							collision |= !demand.hasOwner || !other.hasOwner
-								|| tie(a.layer, a.x, a.baseLevel, a.width, a.height)
-								!= tie(b.layer, b.x, b.baseLevel, b.width, b.height);
-							++coincident;
+							auto const& other = demands[component[i]];
+							auto const& occupied = other.candidates[choice[i]];
+							bool sameCentre = position.centreKey() == occupied.centreKey();
+							if (sameCentre && (demand.hasOwner || other.hasOwner))
+							{
+								auto const& a = demand.owner.hostingLocation;
+								auto const& b = other.owner.hostingLocation;
+								collision |= !demand.hasOwner || !other.hasOwner
+									|| tie(a.layer, a.x, a.baseLevel, a.width, a.height)
+									!= tie(b.layer, b.x, b.baseLevel, b.width, b.height);
+								++coincident;
+							}
+							else collision |= position.cellX == occupied.cellX && position.side == occupied.side;
 						}
-						else collision |= position.cellX == occupied.cellX && position.side == occupied.side;
+						if (collision || coincident >= capacity) continue;
+						choice[depth] = candidate;
+						// Adding to any occupied position adds ONE button above a bottom,
+						// not the number of pairs within the stack.
+						search(depth + 1, stacked + (coincident != 0), penalty + (demand.hasOwner && candidate != demand.defaultCandidate));
 					}
-					if (collision || coincident > 1) continue;
-					choice[depth] = candidate;
-					search(depth + 1, stacked + coincident, penalty + (demand.hasOwner && candidate != demand.defaultCandidate));
-				}
-			};
-			search(0, 0, 0);
-			if (best.empty()) throw runtime_error("Physical controls require separation or same-Location stacks of at most two");
-			for (size_t i = 0; i < component.size(); ++i) assignment[component[i]] = best[i];
+				};
+				search(0, 0, 0);
+			}
+			if (result.capacities.back().choice.empty())
+				throw runtime_error("Physical controls require separation or same-Location stacks of at most four");
+			components.push_back(std::move(result));
 		}
+		// First minimise the additive above-bottom count, then find the smallest
+		// common capacity that attains it in every component. Only then minimise
+		// non-preferred placements and canonical preference ties.
+		uint32_t capacity = 1;
+		for (; capacity < 4; ++capacity)
+			if (all_of(components.begin(), components.end(), [&](auto const& component)
+			{
+				auto const& solution = component.capacities[capacity - 1];
+				return !solution.choice.empty() && solution.score.first == component.capacities.back().score.first;
+			})) break;
+		for (auto const& component : components)
+			for (size_t i = 0; i < component.indices.size(); ++i)
+				assignment[component.indices[i]] = component.capacities[capacity - 1].choice[i];
 		return assignment;
 	}
 

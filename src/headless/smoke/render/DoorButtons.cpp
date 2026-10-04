@@ -357,6 +357,50 @@ namespace
 				"Production draw commands lost canonical vertical geometry");
 		}
 
+		for (uint32_t count : {3u, 4u})
+		{
+			core::World world("Four-stack artwork", 10, 1); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 3, 2, 1);
+			world.addRoom("Back", 2, 0, 0, 10, 1);
+			world.addRoom("Retained wall", 1, 0, 0, 3, 1);
+			for (uint32_t i = 0; i < count; ++i)
+				world.addSectorDoor(i % 2, 0, i < 2 ? 3 : 4, core::World::RemoteControlledDoor1Options);
+			world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(middle), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			std::vector<std::shared_ptr<const core::Button>> buttons;
+			for (uint32_t i = 0; i < world.getSector(middle)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(middle)->getObject(i);
+				if (auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr) buttons.push_back(button);
+			}
+			std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+			require(buttons.size() == count, "Large stack dropped artwork");
+			for (uint32_t rank = 0; rank < count; ++rank)
+			{
+				auto centre = buttons[rank]->getPosition() + buttons[rank]->getSize() * 0.5f;
+				float screenY = gUISettings.worldViewportHeight - centre.y * CORE_LEVEL_HEIGHT_PIXELS;
+				int triangles = 0, lines = 0;
+				for (auto const& command : drawList.commands())
+				{
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && isButtonFillTriangle(*triangle))
+					{
+						auto bounds = boundsOf(triangle->positions, 3, 0);
+						if (survivesClip(bounds, triangle->clip) && std::abs((bounds.minY + bounds.maxY) * 0.5f - screenY) < 0.001f) ++triangles;
+					}
+					if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == kEnabledButtonColour)
+					{
+						ImVec2 points[]{line->from, line->to}; auto bounds = boundsOf(points, 2, 0);
+						if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip) && bounds.minY <= screenY + buttons[rank]->getSize().y * CORE_LEVEL_HEIGHT_PIXELS * 0.5f + 0.001f
+							&& bounds.maxY >= screenY - buttons[rank]->getSize().y * CORE_LEVEL_HEIGHT_PIXELS * 0.5f - 0.001f) ++lines;
+					}
+				}
+				require(rank % 2 ? triangles == 2 && lines == 0 : triangles == 0 && lines == 4,
+					"Production drawing omitted member " + std::to_string(rank) + " triangles " + std::to_string(triangles) + " lines " + std::to_string(lines) );
+			}
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{
