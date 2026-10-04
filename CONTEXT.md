@@ -149,6 +149,14 @@ _Avoid_: Obstacle, which suggests a physical collision boundary
 The condition in which an Agent's selected destination has no valid Path, either when movement first begins or after the simulation attempts to replace an invalidated Path. An Agent behaviour may respond by choosing a new destination.
 _Avoid_: Replan, which recalculates a Path to the same destination
 
+**Usable-point action**:
+The action an Agent performs automatically when it arrives at a Furniture usable point as its Path destination, authored per usable point in the Furniture definition. Sit is the only action so far; a usable point without an authored action performs none.
+_Avoid_: Agent behaviour, which directs destination choice rather than arrival effects
+
+**Occupied**:
+The runtime state of a usable point claimed by a seated Agent. An Occupied usable point is an invalid Path destination for every other Agent until the claim is released, but remains usable as an intermediate waypoint.
+_Avoid_: Occupant, which describes an Agent inside a shared resource; Reservation, which is an exclusive traversal permission
+
 **Skippable path vertex**:
 An intermediate waypoint that an agent need not physically visit when the agent and the next two physical vertices share a layer, those vertices lie horizontally on opposite sides of the agent at the same height, and no interaction, Local-depth change, or other specific action is required at the nearer vertex. Coincident topology-only vertices do not count as distinct physical waypoints.
 _Avoid_: Removing the vertex from the authored path
@@ -229,6 +237,10 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 
 **Agent**:
 A simulated person with a position, destination path, and current movement state.
+
+**Pose**:
+An Agent's runtime bodily stance: Standing (the default), Sitting, or Lying. A Pose results from a Usable-point action and reverts to Standing when the Agent begins moving again; it is simulation state, never authored. Sitting reduces the Agent's effective height; Lying currently changes appearance only.
+_Avoid_: Movement state, which describes pathing progress rather than bodily stance
 
 **Agent behaviour**:
 A reusable state-machine definition that may direct many Agents. Each assigned Agent runs an independent instance of the behaviour.
