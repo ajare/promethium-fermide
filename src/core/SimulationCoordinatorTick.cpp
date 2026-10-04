@@ -588,6 +588,7 @@ namespace core
 				|| current.localPosition != previous.localPosition
 				|| current.globalPosition != previous.globalPosition
 				|| current.state != previous.state
+				|| current.pose != previous.pose
 				|| current.active != previous.active
 				|| current.routePlanningRemainingTicks != previous.routePlanningRemainingTicks
 				|| current.intendedDestination != previous.intendedDestination

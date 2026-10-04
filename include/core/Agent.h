@@ -12,6 +12,7 @@
 
 #include "core/SectorPosition.h"
 #include "core/Shape.h"
+#include "core/Pose.h"
 #include "core/Path.h"
 #include "core/AgentTag.h"
 #include "core/AgentBehaviour.h"
@@ -199,6 +200,7 @@ namespace core
 
 	class Agent : public Serializable
 	{
+		friend struct AgentPoseTestAccess;
 		friend class World;
 		friend class AgentBehaviourRegistry;
 		friend class SimulationCoordinator;
@@ -241,6 +243,8 @@ namespace core
 
 		std::string mName;
 		int mLocalDepth{ 0 };
+		// Runtime bodily stance, deliberately absent from serialization.
+		Pose mPose{ Pose::Standing };
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };
@@ -720,6 +724,9 @@ namespace core
 		Vector2 getGlobalPosition() const;
 
 		float getWidth() const;
+
+		Pose getPose() const { return mPose; }
+		float getPoseHeightScale() const { return mPose == Pose::Sitting ? 0.6f : 1.0f; }
 
 		float getHeight() const;
 

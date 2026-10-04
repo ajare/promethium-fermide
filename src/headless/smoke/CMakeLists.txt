@@ -353,6 +353,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/RecentDocuments.cpp
         persistence/WorldDocuments.cpp
         persistence/AgentRestoration.cpp
+        persistence/AgentPoses.cpp
         persistence/Layers.cpp
         persistence/DomainReplay.cpp
         persistence/DoorDocuments.cpp
@@ -381,6 +382,7 @@ pf_add_smoke_module(pf-smoke-render
     SOURCES
         render/Main.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
         render/SerializationRendering.cpp
+        render/AgentPoses.cpp
         render/DrawOrder.cpp
         render/DoorOpenApart.cpp
         render/DoorOpenLeft.cpp

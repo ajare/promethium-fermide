@@ -221,15 +221,13 @@ void WorldDrawList::AddText(ImFont* font, float fontSize, ImVec2 position,
 			wrapWidth, fineClipRect);
 		return;
 	}
-	(void)font;
-	(void)fontSize;
 	(void)wrapWidth;
 	auto clip = currentClip();
 	if (fineClipRect)
 		clip = intersect(clip, { { fineClipRect->x, fineClipRect->y },
 			{ fineClipRect->z, fineClipRect->w } });
 	std::string value = textEnd ? std::string(text, textEnd) : std::string(text);
-	mCommands.push_back(Text{ position, colour, std::move(value), clip });
+	mCommands.push_back(Text{ position, colour, std::move(value), clip, font, fontSize });
 }
 
 void WorldDrawList::AddImage(Texture texture, ImVec2 minimum, ImVec2 maximum,
@@ -251,6 +249,70 @@ void WorldDrawList::AddImage(Texture texture, ImVec2 minimum, ImVec2 maximum,
 		colour, texture);
 	addTriangle(minimum, maximum, bottomLeft, uvMinimum, uvMaximum, uvBottomLeft,
 		colour, texture);
+}
+
+size_t WorldDrawList::geometryBookmark() const
+{
+	return mTestAdapter ? static_cast<size_t>(mTestAdapter->VtxBuffer.Size) : mCommands.size();
+}
+
+void WorldDrawList::transformGeometrySince(size_t bookmark, ImVec2 pivot,
+	ImVec2 scale, bool clockwiseQuarterTurn)
+{
+	auto transform = [&](ImVec2 p)
+	{
+		float x = (p.x - pivot.x) * scale.x;
+		float y = (p.y - pivot.y) * scale.y;
+		return clockwiseQuarterTurn ? ImVec2{pivot.x - y, pivot.y + x}
+			: ImVec2{pivot.x + x, pivot.y + y};
+	};
+	if (mTestAdapter)
+	{
+		for (size_t i = bookmark; i < static_cast<size_t>(mTestAdapter->VtxBuffer.Size); ++i)
+			mTestAdapter->VtxBuffer[static_cast<int>(i)].pos = transform(mTestAdapter->VtxBuffer[static_cast<int>(i)].pos);
+		return;
+	}
+	std::vector<Command> transformed;
+	for (size_t i = bookmark; i < mCommands.size(); ++i)
+	{
+		auto command = mCommands[i];
+		if (auto* text = std::get_if<Text>(&command); text && text->font)
+		{
+			// Tessellate before applying the stance, so glyph UVs and width
+			// remain intact. Clipping belongs to the transformed output, not
+			// the upright source glyph (a Lying body can overflow its cell).
+			ImDrawList glyphs(ImGui::GetDrawListSharedData());
+			glyphs._ResetForNewFrame();
+			glyphs.PushTextureID(text->font->ContainerAtlas->TexID);
+			glyphs.PushClipRectFullScreen();
+			glyphs.AddText(text->font, text->fontSize, text->position, text->colour, text->value.c_str());
+			for (int index = 0; index + 2 < glyphs.IdxBuffer.Size; index += 3)
+			{
+				Triangle triangle{};
+				triangle.colour = text->colour;
+				triangle.texture = Texture::FontAtlas;
+				triangle.clip = text->clip;
+				for (int v = 0; v < 3; ++v)
+				{
+					auto const& vertex = glyphs.VtxBuffer[glyphs.IdxBuffer[index + v]];
+					triangle.positions[v] = transform(vertex.pos);
+					triangle.texcoords[v] = vertex.uv;
+				}
+				transformed.push_back(triangle);
+			}
+			continue;
+		}
+		if (auto* triangle = std::get_if<Triangle>(&command))
+			for (auto& p : triangle->positions) p = transform(p);
+		else if (auto* line = std::get_if<Line>(&command))
+		{
+			line->from = transform(line->from);
+			line->to = transform(line->to);
+		}
+		transformed.push_back(std::move(command));
+	}
+	mCommands.resize(bookmark);
+	mCommands.insert(mCommands.end(), transformed.begin(), transformed.end());
 }
 
 void WorldDrawList::AddDrawCmd()

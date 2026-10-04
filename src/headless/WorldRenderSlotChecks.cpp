@@ -16,7 +16,8 @@ int main()
 	auto object = slots.acquire(Kind::ObjectTriangles);
 	auto line = slots.acquire(Kind::Lines);
 	auto secondObject = slots.acquire(Kind::ObjectTriangles);
-	require(std::set{solid, sector, object, line, secondObject}.size() == 5);
+	auto font = slots.acquire(Kind::FontTriangles);
+	require(std::set{solid, sector, object, line, secondObject, font}.size() == 6);
 	// Moving Agents change clipping and interleave different segment kinds.
 	// An unchanged per-kind high-water mark must create no new GPU batches.
 	for (unsigned frame = 0; frame < 1000; ++frame)
@@ -27,15 +28,16 @@ int main()
 		require(slots.acquire(Kind::SectorTriangles) == sector);
 		require(slots.acquire(Kind::ObjectTriangles) == secondObject);
 		require(slots.acquire(Kind::SolidTriangles) == solid);
-		require(slots.size() == 5);
+		require(slots.acquire(Kind::FontTriangles) == font);
+		require(slots.size() == 6);
 	}
 	// Shrinking a frame retains batches, and growth adds only the needed kind.
 	slots.beginFrame();
 	require(slots.acquire(Kind::Lines) == line);
 	auto extraLine = slots.acquire(Kind::Lines);
-	require(extraLine == 5 && slots.size() == 6);
+	require(extraLine == 6 && slots.size() == 7);
 	slots.beginFrame();
 	require(slots.acquire(Kind::ObjectTriangles) == object);
 	require(slots.acquire(Kind::Lines) == line);
-	require(slots.acquire(Kind::Lines) == extraLine && slots.size() == 6);
+	require(slots.acquire(Kind::Lines) == extraLine && slots.size() == 7);
 }

@@ -47,6 +47,7 @@ namespace core
 		result.localPosition = agent->getLocalPosition();
 		result.globalPosition = agent->getGlobalPosition();
 		result.active = agent->isActive();
+		result.pose = agent->getPose();
 		result.hasPath = (bool)agent->getPath();
 		if (auto goal = mWorld.mMovementGoals.find(result.id); goal != mWorld.mMovementGoals.end())
 			result.intendedDestination = goal->second.marker;

@@ -8,6 +8,7 @@
 
 #include "core/Coordination.h"
 #include "core/Vector2.h"
+#include "core/Pose.h"
 
 
 namespace core
@@ -30,6 +31,7 @@ namespace core
 		Vector2 localPosition;
 		Vector2 globalPosition;
 		AgentPathState state{ AgentPathState::Idle };
+		Pose pose{ Pose::Standing };
 		// Whether the Agent is simulated. Deactivated Agents keep their last
 		// sector and positions; every movement-state field below stays frozen
 		// at whatever it held when the Agent was deactivated (#118).

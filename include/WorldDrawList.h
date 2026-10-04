@@ -17,7 +17,8 @@ public:
 	{
 		None,
 		SectorAtlas,
-		ObjectAtlas
+		ObjectAtlas,
+		FontAtlas
 	};
 
 	struct ClipRectangle
@@ -50,6 +51,10 @@ public:
 		ImU32 colour{};
 		std::string value;
 		ClipRectangle clip;
+		// Explicit-font text can be tessellated for non-uniform stance
+		// transforms; ordinary text remains on the native MPP text path.
+		ImFont* font{};
+		float fontSize{};
 	};
 
 	struct Barrier {};
@@ -81,6 +86,12 @@ public:
 	void AddImage(Texture texture, ImVec2 minimum, ImVec2 maximum,
 		ImVec2 uvMinimum, ImVec2 uvMaximum, ImU32 colour = IM_COL32_WHITE);
 	void AddDrawCmd();
+
+	// Transform only geometry appended since the bookmark, retaining UVs and
+	// the enclosing canvas clip. Used for bodily stance, not physical bounds.
+	size_t geometryBookmark() const;
+	void transformGeometrySince(size_t bookmark, ImVec2 pivot, ImVec2 scale,
+		bool clockwiseQuarterTurn);
 
 	std::vector<Command> const& commands() const { return mCommands; }
 

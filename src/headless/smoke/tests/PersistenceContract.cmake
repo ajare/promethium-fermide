@@ -37,6 +37,7 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords boothWindows/authored
     legacyVersion3WorldYamlStillLoadsWithDefaultLayers
     version4WorldYamlStillLoads
     layerFieldsAcceptLegacyNamesAndIndices
+    agentPoses
     agentRestoreRejectsMalformedPositions
     agentRestoreRejectsBackgroundAndUnreachableDestination
     worldLayerNamesRoundTrip

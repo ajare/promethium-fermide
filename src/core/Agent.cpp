@@ -688,6 +688,7 @@ namespace core
 		mEscalatorTraversalSequence = 0;
 		mRememberedEscalatorConditions.clear();
 		mRememberedDeviceConditions.clear();
+		mPose = Pose::Standing;
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
 		mRoutePlanningRemainingTicks = 0;
@@ -1050,7 +1051,7 @@ namespace core
 
 	float Agent::getHeight() const
 	{
-		return CORE_AGENT_MAX_HEIGHT * getEffectiveHeightModifier().value;
+		return CORE_AGENT_MAX_HEIGHT * getEffectiveHeightModifier().value * getPoseHeightScale();
 	}
 
 	Shape Agent::getBounds() const
@@ -1400,6 +1401,7 @@ namespace core
 			return;
 		}
 
+		mPose = Pose::Standing;
 		cancelTraversal();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::MovingToVertex;

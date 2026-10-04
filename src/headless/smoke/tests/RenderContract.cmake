@@ -33,6 +33,7 @@ set(names
     agentPathTargets
     carriageDoors
     carriageImages
+    agentPoses
     airlocks/chamberAndControls
     furniture/chairCommands
     furniture/demoCommands

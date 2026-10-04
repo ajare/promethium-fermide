@@ -4,6 +4,7 @@
 
 namespace persistence
 {
+	void agentPoses(smoke::Context const&);
 	void dumbwaiters(smoke::Context const&);
 	void boothWindows(smoke::Context const&);
 	void airlocks(smoke::Context const&);

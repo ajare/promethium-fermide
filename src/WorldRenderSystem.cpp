@@ -272,6 +272,7 @@ namespace
 				mScene.reset();
 			}
 			for (auto& target : mTargets) target.reset();
+			mFontAtlas.reset();
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
 			clearSectorTileset();
@@ -385,9 +386,22 @@ namespace
 			setObjectTileset(std::move(objectTiles), reinterpret_cast<ImTextureID>(1));
 		}
 
-		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind) const
+		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind)
 		{
 			if (textureKind == WorldDrawList::Texture::None) return {};
+			if (textureKind == WorldDrawList::Texture::FontAtlas)
+			{
+				// The same ImGui atlas supplies glyph UVs in the CPU stream.
+				// MPP's native overlay text cannot retain a stance transform.
+				if (!mFontAtlas)
+				{
+					unsigned char* pixels{}; int width{}, height{};
+					ImGui::GetIO().Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+					mFontAtlas = mRenderSystem->createRenderTexture("world-font-atlas", width, height, 1, false);
+					static_cast<mpp::RenderTexture*>(mFontAtlas.get())->uploadData(0, pixels);
+				}
+				return std::static_pointer_cast<mpp::RenderTexture>(mFontAtlas);
+			}
 			auto set = std::dynamic_pointer_cast<resources::ImageSetResource>(
 				textureKind == WorldDrawList::Texture::SectorAtlas ? mSectorSet : mObjectSet);
 			return set->getImage()->getMppResource();
@@ -473,6 +487,8 @@ namespace
 					kind = Kind::SectorTriangles;
 				else if (segment.texture == WorldDrawList::Texture::ObjectAtlas)
 					kind = Kind::ObjectTriangles;
+				else if (segment.texture == WorldDrawList::Texture::FontAtlas)
+					kind = Kind::FontTriangles;
 				auto const slotIndex = mSlotAllocator.acquire(kind);
 				mSegmentSlots[index] = slotIndex;
 				if (slotIndex >= mSlots.size()) mSlots.emplace_back();
@@ -585,6 +601,7 @@ namespace
 		// Both images are composited later by ImGui, so neither canvas may
 		// overwrite the other's offscreen texture during the same frame.
 		mpp::RenderTargetPtr mTargets[2];
+		mpp::RenderTargetPtr mFontAtlas;
 		std::vector<Slot> mSlots;
 		WorldRenderSlotAllocator mSlotAllocator;
 		// Draw in command-stream order, independently of pooled batch identity.

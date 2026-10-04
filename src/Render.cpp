@@ -1620,7 +1620,7 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	// uniformly by Height so a narrow glyph still visibly changes size instead
 	// of remaining pinned to the unchanged width constraint.
 	auto const heightModifier = agent->getEffectiveHeightModifier().value;
-	float standardAvailableHeight = availableHeight / heightModifier;
+	float standardAvailableHeight = availableHeight / (heightModifier * agent->getPoseHeightScale());
 	float scale = min(availableWidth / max(sourceBounds.x, 1.0f),
 		standardAvailableHeight / max(sourceBounds.y, 1.0f)) * heightModifier;
 	float fontSize = sourceSize * scale;
@@ -1629,9 +1629,13 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		(pos0.x + pos1.x - iconSize.x) * 0.5f,
 		pos0.y - iconSize.y
 	};
+	auto const bodyStart = drawList->geometryBookmark();
 	if (!drawObjectSprite("agent", drawList, iconPosition,
 		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
 		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
+	if (agent->getPose() != core::Pose::Standing)
+		drawList->transformGeometrySince(bodyStart, {(pos0.x + pos1.x) * 0.5f, pos0.y},
+			{1.0f, agent->getPoseHeightScale()}, agent->getPose() == core::Pose::Lying);
 
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;
