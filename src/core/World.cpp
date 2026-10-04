@@ -7181,6 +7181,10 @@ namespace core
 		for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 		{
 			auto object = room->getObject(i);
+			// A Door's back approach may share the column, matching Door
+			// creation after Ladder authoring. Its front footprint still blocks.
+			if (auto door = dynamic_pointer_cast<const DoorSectorObject>(object);
+				door && door->getDoor()->getBackSector() == room) continue;
 			if (!object || object->getObjectType() == SectorObjectType::Walkway
 				|| object->getObjectType() == SectorObjectType::InteractionPoint) continue;
 			uint32_t const objectX0 = object->getCellX();
@@ -7429,6 +7433,10 @@ namespace core
 		for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 		{
 			auto object = room->getObject(i);
+			// A Door's back approach may share the column, matching Door
+			// creation after Platform lift authoring (#437). Keep front blockers.
+			if (auto door = dynamic_pointer_cast<const DoorSectorObject>(object);
+				door && door->getDoor()->getBackSector() == room) continue;
 			if (!object || object->getObjectType() == SectorObjectType::Walkway
 				|| object->getObjectType() == SectorObjectType::InteractionPoint) continue;
 			uint32_t objectRight = object->getCellX() + (uint32_t)ceil(object->getSize().x);

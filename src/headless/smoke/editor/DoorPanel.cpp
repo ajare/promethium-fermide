@@ -770,8 +770,11 @@ namespace
 	}
 }
 
+#include "ButtonDemo.h"
+
 void editor_smoke::registerDoorPanel(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "buttonPlacement/demonstration", [](smoke::Context const& context) { State state; checkButtonDemo(context); } });
 	checks.push_back({ "doorpanel/checkBulkheadBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(true); } });
 	checks.push_back({ "doorpanel/checkBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(); } });
 	checks.push_back({ "doorpanel/checkOrdinaryDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkOrdinaryDoor(); } });

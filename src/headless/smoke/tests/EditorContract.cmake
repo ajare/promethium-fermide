@@ -200,6 +200,7 @@ set(editor_names
     lifts/brokenControlsAndHistory
     platformLifts/brokenControlsAndHistory
     shuttles/brokenControlsAndHistory
+    buttonPlacement/demonstration
     doorpanel/checkBulkheadBrokenControlsAndHistory
     doorpanel/checkBrokenControlsAndHistory
     doorpanel/checkOrdinaryDoor

@@ -643,25 +643,37 @@ namespace
 		// then preference count and canonical ties as a retained wall is removed.
 		for (bool reverse : {false, true})
 		{
-			core::World world("Optimised pairs", 10, 1); world.addLayer();
-			world.addRoom("Front", 0, 0, 0, 10, 1);
-			auto middle = world.addRoom("Middle", 1, 0, 3, 3, 1);
-			world.addRoom("Back", 2, 0, 0, 10, 1);
-			auto neighbour = world.addRoom("Wall", 1, 0, 0, 3, 1);
+			core::World world("Optimised mixed pairs", 10, 3); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 3);
+			auto middle = world.addRoom("Middle", 1, 0, 3, 3, 3);
+			world.addRoom("Back", 2, 0, 0, 10, 3);
+			auto neighbour = world.addRoom("Wall", 1, 0, 0, 3, 3);
+			for (uint32_t x = 0; x < 3; ++x) world.addSectorWalkway(middle, 2, x);
 			world.pauseSimulation();
 			core::AccessPermissionId permissions[4];
 			for (uint32_t i = 0; i < 4; ++i) permissions[i] = world.addAccessPermission("Owner " + std::to_string(i));
 			for (uint32_t step = 0; step < 4; ++step)
 			{
 				uint32_t i = reverse ? 3 - step : step;
-				auto options = core::World::RemoteControlledDoor1Options;
-				options.controlPermissionRequirements[i % 2 == 0 ? 1 : 0] = {permissions[i]};
-				world.addSectorDoor(i % 2, 0, i < 2 ? 3 : 4, options);
+				if (i == 0)
+				{
+					core::World::CreateLadderOptions ladder{0, true, false};
+					ladder.controlPermissionRequirements[0] = {permissions[i]};
+					world.addRoomLadder(middle, 0, 0, ladder);
+				}
+				else
+				{
+					auto options = core::World::RemoteControlledDoor1Options;
+					options.controlPermissionRequirements[i < 3 ? 1 : 0] = {permissions[i]};
+					world.addSectorDoor(i < 3 ? 0 : 1, 0, i < 2 ? 3 : 4, options);
+				}
 			}
 			world.finishBuild(); world.pauseSimulation();
 			auto check = [&](std::vector<float> const& expected)
 			{
-				auto buttons = buttonsIn(world, middle); require(buttons.size() == 4, "Optimisation dropped controls");
+				auto buttons = buttonsIn(world, middle);
+				std::erase_if(buttons, [](auto button) { return button->getPosition().y >= 1; });
+				require(buttons.size() == 4, "Mixed optimisation dropped controls");
 				for (auto button : buttons)
 				{
 					auto requirement = world.getInteractionPointPermissionRequirement(button->getInteractionPointId());
@@ -677,8 +689,24 @@ namespace
 			};
 			check({4, 4, 5, 5});
 			world.removeLocationWall(neighbour, 0, CORE_SIDE_RIGHT); world.finishBuild();
-			check({4, 3, 5, 5});
+			// Equal-X Door precedes Ladder: preference-count ties favour the
+			// Door's right candidate, not creation order or previous placement.
+			check({3, 4, 5, 5});
 		}
+		// Back-side Door approaches can coexist with the two column owners,
+		// but this must not permit a front-side doorway footprint in a shaft.
+		core::World blocked("Front footprint remains blocking", 8, 3);
+		auto room = blocked.addRoom("Front", 0, 0, 0, 8, 3);
+		blocked.addRoom("Back", 1, 0, 0, 8, 3);
+		for (auto x : {3u, 4u}) blocked.addSectorWalkway(room, 2, x);
+		blocked.addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+		blocked.finishBuild(); blocked.pauseSimulation(); auto graph = blocked.getGraph();
+		bool refused = false;
+		try { blocked.addRoomLadder(room, 0, 3, {0, true, false}); } catch (std::exception const&) { refused = true; }
+		require(refused && blocked.getGraph() == graph, "Front Door footprint no longer blocks Ladder");
+		core::World::CreateLiftOptions lift; lift.stopOffsets = {0, 2}; refused = false;
+		try { blocked.addSectorPlatformLift(room, 0, 3, lift); } catch (std::exception const&) { refused = true; }
+		require(refused && blocked.getGraph() == graph, "Front Door footprint no longer blocks Platform shaft");
 	}
 
 	void sharedApproachStacks()
