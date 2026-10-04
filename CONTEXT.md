@@ -51,6 +51,10 @@ _Avoid_: Stairwell
 **Escalator**:
 A staircase whose steps move at a non-zero speed. Its movement direction determines its sole permitted travel direction and its agents' travel speed.
 
+**Local depth**:
+A sector-local non-negative integer indicating front-to-back order within one Layer, with 0 front-most and larger values farther back. Numerical differences between Local depths express an Agent's preference for depth continuity between otherwise equally good routes, not physical distance.
+_Avoid_: Layer, physical depth
+
 **Stop**:
 A place at which a transit resource connects to a location.
 
@@ -118,8 +122,23 @@ _Avoid_: Route calculation time
 An Agent property from 0.1 through 10 seconds that sets the inclusive upper bound of each Route planning interval, with a default of 3 seconds. An effective maximum below the effective minimum is treated as equal to that minimum without changing either authored property.
 _Avoid_: Route calculation timeout
 
+**Furniture**:
+An object placed in a Room, Corridor, or Facade, with a position, Local depth, and one or more individually defined movement points. Its usable points are Markers; optional side waypoints support routes in front of and behind it.
+
+**Furniture definition**:
+A reusable description of Furniture's appearance and movement-point and route layout, shared by its placed instances.
+_Avoid_: Furniture instance, TileSet
+
+**Furniture catalogue**:
+A reusable collection of Furniture definitions that may be shared by multiple Worlds.
+_Avoid_: World, Image set
+
+**Furniture instance**:
+One placed piece of Furniture with its own Location, position, Local depth, and distinct usable-point Marker identities, using a shared Furniture definition.
+_Avoid_: Furniture definition
+
 **Marker**:
-A named, World-owned authored point in a Location with stable identity and a set of Marker properties. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename. Agent behaviours cannot choose arbitrary Vertices as destinations.
+A named, World-owned authored point in a Location with stable identity and a set of Marker properties, either standalone or belonging to Furniture. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename; arbitrary routing vertices are not selectable destinations.
 _Avoid_: Vertex, destination vertex
 
 **Blocks pathing**:
@@ -131,7 +150,7 @@ The condition in which an Agent's selected destination has no valid Path, either
 _Avoid_: Replan, which recalculates a Path to the same destination
 
 **Skippable path vertex**:
-An intermediate waypoint that an agent need not physically visit when the agent and the next two physical vertices share a layer, those vertices lie horizontally on opposite sides of the agent at the same height, and no interaction or other specific action is required at the nearer vertex. Coincident topology-only vertices do not count as distinct physical waypoints.
+An intermediate waypoint that an agent need not physically visit when the agent and the next two physical vertices share a layer, those vertices lie horizontally on opposite sides of the agent at the same height, and no interaction, Local-depth change, or other specific action is required at the nearer vertex. Coincident topology-only vertices do not count as distinct physical waypoints.
 _Avoid_: Removing the vertex from the authored path
 
 **Transport journey**:
