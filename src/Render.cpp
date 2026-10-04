@@ -263,8 +263,32 @@ void renderGrid(shared_ptr<const core::World> const& world, ImColor const& colou
 }
 
 
+bool isMarkerPathTarget(core::World const& world, core::Vertex const& vertex)
+{
+	auto marker = dynamic_pointer_cast<core::Marker>(vertex.getObject());
+	auto sector = vertex.getSector();
+	return marker && world.lookupMarker(marker->getId()) == marker && sector
+		&& sector->getIndex() < world.getNumSectors() && world.getSector(sector->getIndex()) == sector;
+}
+
+shared_ptr<const core::Vertex> markerPathTargetAtPosition(core::World const& world,
+	uint32_t layer, core::Vector2 position, float radius)
+{
+	if (!(radius > 0)) return {};
+	shared_ptr<const core::Vertex> closest;
+	float distance = radius * radius;
+	if (auto graph = world.getGraph())
+		for (auto const& vertex : graph->getVertices())
+			if (isMarkerPathTarget(world, *vertex) && vertex->getSector()->getLayerIndex() == layer)
+			{
+				auto candidateDistance = position.distanceToSq(vertex->getPosition());
+				if (candidateDistance < distance) { distance = candidateDistance; closest = vertex; }
+			}
+	return closest;
+}
+
 void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::World> world,
-	WorldDrawList* drawList)
+	WorldDrawList* drawList, bool markerTargetsOnly)
 {
 	if (!gUISettings.renderGraph || !drawList)
 	{
@@ -287,7 +311,9 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 	
 		if (sector)
 		{
-			closestVertex = graph->getClosestVertexInSector(sector.get(), mousePos);
+			closestVertex = markerTargetsOnly
+				? markerPathTargetAtPosition(*world, layer, mousePos, FLT_MAX)
+				: graph->getClosestVertexInSector(sector.get(), mousePos);
 		}
 	}
 
@@ -295,7 +321,7 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 	const float yBump = -2;
 	float lineThickness = -yBump + 1;
 
-	for (auto const& edge : edges)
+	if (!markerTargetsOnly) for (auto const& edge : edges)
 	{
 		auto v0 = edge->getVertex(0);
 		auto v1 = edge->getVertex(1);
@@ -376,7 +402,8 @@ void renderGraph(shared_ptr<const core::Graph> graph, shared_ptr<const core::Wor
 
 	for (auto vertex : vertices)
 	{
-		if (vertex->getSector()->getLayerIndex() != layer)
+		if (vertex->getSector()->getLayerIndex() != layer
+			|| (markerTargetsOnly && !isMarkerPathTarget(*world, *vertex)))
 		{
 			continue;
 		}

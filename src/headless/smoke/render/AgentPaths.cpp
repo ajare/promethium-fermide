@@ -5,6 +5,8 @@
 #include "UISettings.h"
 
 #include <memory>
+#include <set>
+#include "core/Marker.h"
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -56,6 +58,64 @@ namespace
 				&& triangle->colour == colour) return true;
 		return false;
 	}
+}
+
+void agentPathTargets(smoke::Context const& context)
+{
+	auto world = std::make_shared<core::World>("Marker targets", 12, 2);
+	auto room = world->addRoom("Room", 0, 0, 0, 12, 1);
+	auto other = world->addRoom("Other Layer", 1, 0, 0, 12, 1);
+	world->addSectorMarker(room, 0, 8.5f, "Standalone target");
+	world->addSectorMarker(other, 0, 8.5f, "Other Layer target");
+	world->finishBuild(); world->pauseSimulation();
+	world->attachFurnitureCatalogue("desk.furniture.yaml",
+		core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/desk.furniture.yaml")));
+	auto id = world->placeFurniture(room, "desk", 1.25f, 0, "Desk", 2);
+	world->finishBuild();
+	auto seat = markerPathTargetAtPosition(*world, 0, {2, 0}, .1f);
+	require(seat && std::dynamic_pointer_cast<core::Marker>(seat->getObject())
+		&& isMarkerPathTarget(*world, *seat), "Furniture usable Marker was not selectable as a path target");
+	require(markerPathTargetAtPosition(*world, 0, {8.5f, 0}, .1f)
+		&& markerPathTargetAtPosition(*world, 1, {8.5f, 0}, .1f), "Standalone Marker or Layer filtering failed");
+	require(!markerPathTargetAtPosition(*world, 0, {1.5f, 0}, .1f)
+		&& !markerPathTargetAtPosition(*world, 0, {1.25f, 0}, .1f),
+		"Private Furniture vertices or external/floor anchors were selectable as destinations");
+	require(markerPathTargetAtPosition(*world, 0, {1.5f, 0}, .75f) == seat,
+		"Closer private vertex masked a nearby actual Marker target");
+	require(!markerPathTargetAtPosition(*world, 0, {5, 0}, .1f)
+		&& !markerPathTargetAtPosition(*world, 0, {2, 0}, 0), "Empty hit or zero radius selected a target");
+	core::World foreign("Foreign", 12, 2);
+	foreign.addRoom("Foreign room", 0, 0, 0, 12, 1); foreign.finishBuild();
+	require(!isMarkerPathTarget(foreign, *seat), "Another World's Marker was accepted as a target");
+
+	gUISettings = UISettings{};
+	gUISettings.renderGraph = true; gUISettings.visibleLayer = 0;
+	gUISettings.worldViewportWidth = 800; gUISettings.worldViewportHeight = 400;
+	gUISettings.xOffset = gUISettings.yOffset = 0;
+	WorldDrawList picker({{0, 0}, {800, 500}});
+	renderGraph(world->getGraph(), world, &picker, true);
+	std::set<float> targetXs;
+	for (auto const& command : picker.commands())
+		if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+		{
+			auto centre = triangle->positions[0]; targetXs.insert(centre.x);
+			require((centre.x == 2 * CORE_CELL_WIDTH_PIXELS || centre.x == 8.5f * CORE_CELL_WIDTH_PIXELS)
+				&& centre.y == 398, "Destination overlay included a non-Marker or another Layer's vertex");
+		}
+	require(targetXs.size() == 2 && lineCount(picker) == 0,
+		"Destination picker omitted Markers or rendered non-destination graph edges");
+	WorldDrawList inspection({{0, 0}, {800, 500}});
+	renderGraph(world->getGraph(), world, &inspection);
+	require(lineCount(inspection) > 0 && inspection.commands().size() > picker.commands().size(),
+		"Marker filtering leaked into ordinary graph inspection");
+
+	auto agentId = world->createAgent("Visitor", room, 0, 8.5f);
+	auto agent = world->lookupAgent(agentId).entity;
+	require(world->getGraph()->calculatePath(agent, seat) != nullptr, "Filtered Furniture seat cannot receive an actual Agent Path");
+	std::string diagnostic;
+	require(world->removeFurniture(id, &diagnostic), diagnostic);
+	require(!isMarkerPathTarget(*world, *seat) && !markerPathTargetAtPosition(*world, 0, {2, 0}, .1f),
+		"Removed/rebuilt Marker left a stale selectable target");
 }
 
 void agentPaths(smoke::Context const&)

@@ -4703,6 +4703,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			if (gSelectingAgentPathDestination && gSelectedAgent)
 			{
+				if (!isMarkerPathTarget(*world, *gHoveredVertex)) return;
 				auto path = graph->calculatePath(gSelectedAgent, nullptr, gHoveredVertex);
 				if (path)
 				{
@@ -4717,7 +4718,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 			}
 			else if (ImGui::GetIO().KeyCtrl)
 			{
-				if (gSelectedAgent)
+				if (gSelectedAgent && isMarkerPathTarget(*world, *gHoveredVertex))
 				{
 					auto path = graph->calculatePath(gSelectedAgent, nullptr, gHoveredVertex);
 					applyAgentPathEdit(world, gSelectedAgent, std::move(path), false, false);
@@ -7467,7 +7468,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	if (gSelectingAgentPathDestination)
 	{
 		ImGui::TextColored({ 1.0f, 0.75f, 0.1f, 1.0f },
-			"Select a destination vertex (Escape to cancel)");
+			"Select a destination Marker (Escape to cancel)");
 		if (ImGui::Button("Cancel path selection")) endAgentPathSelection();
 	}
 	else
@@ -7596,8 +7597,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	{
 		ImGui::Text("Selected vertex: %s", gSelectedVertex->getDescription().c_str());
 		auto const behaviourOwnsMovement = world->agentBehaviourOwnsMovement(id);
-		ImGui::BeginDisabled(behaviourOwnsMovement);
-		if (ImGui::Button("Path to selected vertex"))
+		ImGui::BeginDisabled(behaviourOwnsMovement || !isMarkerPathTarget(*world, *gSelectedVertex));
+		if (ImGui::Button("Path to selected Marker"))
 		{
 			auto newPath = world->getGraph()->calculatePath(gSelectedAgent, gSelectedVertex);
 			if (newPath)
@@ -9312,18 +9313,19 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		gLastWorldCursor = mousePos;
 		// Hit-test in reverse visual order. Graph vertices are rendered over agents,
 		// agents over sector objects, and sector objects over their owning sector.
-		// While picking an agent's path destination only vertices are selectable,
-		// with a slightly enlarged target radius to make them easier to pick.
+		// While picking an Agent's path destination only actual Marker vertices
+		// are selectable, with a slightly enlarged radius to make them easier to pick.
 		float vertexRadius = RENDER_VERTEX_SIZE
 			/ ((float)CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom);
 		if (gSelectingAgentPathDestination) vertexRadius *= 1.5f;
 		if (gUISettings.renderGraph)
-			gHoveredVertex = graph->getVertexAtPosition(gUISettings.visibleLayer, mousePos.x,
-				mousePos.y, vertexRadius);
+			gHoveredVertex = gSelectingAgentPathDestination
+				? markerPathTargetAtPosition(*world, gUISettings.visibleLayer, mousePos, vertexRadius)
+				: graph->getVertexAtPosition(gUISettings.visibleLayer, mousePos.x, mousePos.y, vertexRadius);
 		if (!gSelectingAgentPathDestination && !gHoveredVertex)
 			gHoveredAgent = world->getAgentAtPosition(gUISettings.visibleLayer,
 				mousePos.x, mousePos.y);
-		if (!gHoveredVertex && !gHoveredAgent)
+		if (!gSelectingAgentPathDestination && !gHoveredVertex && !gHoveredAgent)
 		{
 			gHoveredSectorObject = markerAtScreenPosition(world, ImGui::GetIO().MousePos);
 			if (!gHoveredSectorObject)
@@ -9380,7 +9382,7 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 	auto worldBottomRight = worldToScreen({ (float)world->getCellsWide(), 0.0f });
 	drawList->PushClipRect(worldTopLeft, worldBottomRight, true);
 	renderWorld(world, drawList);
-	renderGraph(graph, world, drawList);
+	renderGraph(graph, world, drawList, gSelectingAgentPathDestination);
 	renderSelectedAgentPath(world.get(), drawList);
 	drawSectorEditOverlay(drawList);
 	if (gAgentMove.dragging)

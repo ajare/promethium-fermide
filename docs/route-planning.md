@@ -6,6 +6,13 @@ public active Path, release uncommitted coordination ownership, and stop at the
 Agent's exact position. Committed traversals finish before planning starts. Editor
 Path authoring and manual recalculation remain immediate.
 
+The editor's **Select path destination (Ctrl+P)** picker shows and hit-tests only
+World-owned Marker vertices, including Furniture usable points. Private Furniture
+routing vertices, external ports, inferred floor anchors, and device/transit
+vertices are not destination choices. Ordinary World graph inspection remains
+unchanged. Ctrl-click path authoring and the **Path to selected Marker** action
+likewise require an actual Marker destination.
+
 Each episode uniformly samples an inclusive whole-tick interval from Minimum and
 Maximum route planning time (defaults 1 and 3 seconds; each accepts 0.1–10 seconds).
 Both effective endpoints round upward to ticks. A lower maximum is raised to the

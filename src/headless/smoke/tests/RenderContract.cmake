@@ -30,6 +30,7 @@ unset(ENV{WAYLAND_DISPLAY})
 set(names
     walls
     agentPaths
+    agentPathTargets
     carriageDoors
     carriageImages
     airlocks/chamberAndControls
