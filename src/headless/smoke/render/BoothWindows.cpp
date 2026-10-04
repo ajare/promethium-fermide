@@ -120,6 +120,41 @@ namespace
 			}
 			require(car == 2, "Recursive aperture lost initial car");
 		}
+		{
+			auto world = dumbwaiter_fixture::make();
+			dumbwaiter_fixture::addLandings(*world, 3, 0, 2);
+			dumbwaiter_fixture::addLandings(*world, 1, 4);
+			auto id = world->addDumbwaiter(1,0,2,{1,0.5f}); world->finishBuild();
+			require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id,3,2,0)), "Render movement fixture failed");
+			world->addDumbwaiter(1,0,4,{1,0.5f}); world->finishBuild();
+			for (uint32_t layer = 0; layer < 4; ++layer)
+			{
+				gUISettings.visibleLayer = layer;
+				WorldDrawList drawing({{0,0},{1200,800}}); renderWorld(world,&drawing);
+				unsigned cars = 0, buttons = 0; float x = layer < 2 ? 4.0f : 0.0f, y = layer < 2 ? 1.0f : 3.0f;
+				for (auto const& command : drawing.commands()) if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+				{
+					if (triangle->colour == IM_COL32(180,190,205,255))
+					{
+						++cars;
+						for (auto p : triangle->positions)
+							require(p.x > x * 64 && p.x < (x + 1) * 64
+								&& p.y >= 800 - (y + 0.55f) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= 800 - (y + 0.18f) * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
+								"Moved/pasted car rendered at old shaft/Level");
+						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * 64
+							&& triangle->clip.maximum.x < (x + 0.9f) * 64, "Moved/pasted car lost landing aperture clip");
+					}
+					if (triangle->colour == IM_COL32(80,200,120,255) || triangle->colour == IM_COL32(200,160,80,255))
+					{
+						++buttons;
+						for (auto p : triangle->positions) require(p.x >= (x + 0.92f) * 64 - 0.01f
+							&& p.x <= (x + 0.98f) * 64 + 0.01f, "Old-location landing button remains");
+					}
+				}
+				require(cars == 2 && buttons == (layer % 2 == 0 ? 4u : 0u), "Moved/pasted rendering duplicated/lost components");
+			}
+		}
 		ImGui::Render();
 	}
 	void presentation(smoke::Context const& context)

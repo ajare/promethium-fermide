@@ -7875,7 +7875,7 @@ namespace core
 		return liftRes;
 	}
 
-	void World::beginStructuralEdit(string const& operation)
+	void World::beginStructuralEdit(string const& operation, bool preserveOtherDumbwaiterCycles)
 	{
 		invalidateSimulationSnapshot();
 		if (mBuildFinished && !mSimulationPaused)
@@ -7884,6 +7884,8 @@ namespace core
 				"{} is a structural edit and requires pauseSimulation() before it can run", operation));
 		}
 		modify();
+		if (!preserveOtherDumbwaiterCycles)
+			mOnlyDumbwaiterTopologyEdits = false;
 		mTopologyDirty = true;
 		mTopologyValid = false;
 		mTopologyDiagnostic = "Traversal topology has unvalidated structural edits";
@@ -8208,10 +8210,11 @@ namespace core
 			candidate->validate();
 			validateTraversalTopology(*candidate);
 			mGraph = std::move(candidate);
-			if (mTopologyDirty)
+			if (mTopologyDirty && !mOnlyDumbwaiterTopologyEdits)
 				for (auto const& sector : mSectors)
 					if (auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector))
 						mSimulationCoordinator.resetDumbwaiter(*unit);
+			mOnlyDumbwaiterTopologyEdits = true;
 			mTopologyDirty = false;
 			mTopologyValid = true;
 			mTopologyDiagnostic.clear();
@@ -8281,6 +8284,7 @@ namespace core
 			buildGraph();
 			mBuildFinished = true;
 			mTopologyDirty = false;
+			mOnlyDumbwaiterTopologyEdits = true;
 			mTopologyValid = true;
 			mTopologyDiagnostic.clear();
 			++mTopologyGeneration;

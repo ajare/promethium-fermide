@@ -132,6 +132,102 @@ namespace
 			require(refused && yaml(*world) == before && !world->isModified() && world->isTraversalTopologyValid(), "Placement refusal mutated World");
 		}
 	}
+	void dumbwaiterMoves(smoke::Context const&)
+	{
+		using namespace dumbwaiter_fixture;
+		for (unsigned ticks : {0u, 12u, 60u, 100u})
+		{
+			auto world = make(); addLandings(*world,1,4);
+			auto id = world->addDumbwaiter(1,0,2,{0,0.5f}); world->finishBuild();
+			auto operation = world->pressDumbwaiterLanding(id,0);
+			world->resumeSimulation(); require(world->advanceTicks(ticks), "Phase move fixture failed"); world->pauseSimulation();
+			require(world->lookupDumbwaiter(id)->isBusy() && world->applyDumbwaiterMove(world->planMoveDumbwaiter(id,1,0,4))
+				&& world->lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Cancelled
+				&& world->lookupDumbwaiter(id)->getCarPosition() == core::Vector2{4,0}, "Move failed cancellation in an accepted phase");
+		}
+		{
+			auto world = make(); addLandings(*world,1,4);
+			auto id = world->addDumbwaiter(1,0,2); world->finishBuild();
+			auto stale = world->planMoveDumbwaiter(id,1,0,4); require(stale.valid, stale.diagnostic);
+			world->addBackground(1,0,4,1,1);
+			world->addSectorWindow(0,0,4,1,1); world->finishBuild();
+			auto operation = world->pressDumbwaiterLanding(id,0); auto before = yaml(*world); bool refused = false;
+			try { world->applyDumbwaiterMove(stale); } catch (std::exception const&) { refused = true; }
+			require(refused && yaml(*world) == before && world->lookupDumbwaiter(id)->getOperation() == operation,
+				"Stale move plan ignored new landing conflict/cancelled accepted work");
+		}
+		{
+			auto world = make(); world->addCorridor(0,2,2,1,1);
+			auto id = world->addDumbwaiter(1,0,2); world->finishBuild();
+			require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id,1,1,2)), "Overlapping self footprint movement refused");
+			world->resetSimulation(); world->pauseSimulation();
+			require(world->lookupDumbwaiter(id)->getCarPosition() == core::Vector2{2,1}
+				&& !world->getSectorAtPosition(1,2,0), "Overlapping movement/replay retained old shaft row");
+		}
+		for (unsigned kind = 0; kind < 3; ++kind)
+		{
+			auto world = make(kind);
+			addLandings(*world, 1, 4, 0, kind); addLandings(*world, 1, 0);
+			addLandings(*world, 3, 0, 2, kind);
+			auto id = world->addDumbwaiter(1, 0, 2, {1, 0.5f});
+			auto sibling = world->addDumbwaiter(1, 0, 0); world->finishBuild();
+			auto lower = world->addAccessPermission("Lower"), upper = world->addAccessPermission("Upper");
+			auto unit = world->lookupDumbwaiter(id);
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {lower});
+			world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {upper});
+			auto operation = world->pressDumbwaiterLanding(id, 0);
+			auto otherOperation = world->pressDumbwaiterLanding(sibling, 1);
+			world->resumeSimulation(); require(world->advanceTicks(60), "Move cycle setup failed"); world->pauseSimulation();
+			auto other = world->lookupDumbwaiter(sibling); auto otherPosition = other->getCarPosition();
+			auto before = yaml(*world); auto position = unit->getCarPosition(); world->markSaved();
+			for (auto destination : {std::array<uint32_t,3>{0,0,4}, {4,0,4}, {1,3,4}, {1,0,6}, {1,0,0}, {1,0,3}})
+			{
+				auto plan = world->planMoveDumbwaiter(id, destination[0], destination[1], destination[2]);
+				require(!plan.valid && !plan.diagnostic.empty(), "Invalid unit move preflight accepted");
+				bool refused = false; try { world->applyDumbwaiterMove(plan); } catch (std::exception const&) { refused = true; }
+				require(refused && yaml(*world) == before && !world->isModified() && unit->getCarPosition() == position
+					&& unit->getOperation() == operation && unit->isBusy(), "Refused move cancelled/mutated accepted cycle");
+			}
+			require(!world->applyDumbwaiterMove(world->planMoveDumbwaiter(id, 1, 0, 2)) && unit->getOperation() == operation,
+				"Same-position move reset a cycle");
+			auto staleBooth = unit->getAperture(0)->getDeviceId(); auto staleButton = unit->getLandingButton(0);
+			require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id, 1, 0, 4)), "Valid unit movement refused");
+			unit = world->lookupDumbwaiter(id);
+			require(!unit->isBusy() && unit->getCarPosition() == core::Vector2{4,1}
+				&& unit->getAperture(1)->getProgress() == 1 && unit->getAperture(0)->getProgress() == 0
+				&& world->lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Cancelled,
+				"Move did not restore authored Stop/cancel its operation");
+			require(!world->lookupBoothWindow(staleBooth) && !world->lookupInteractionPoint(staleButton)
+				&& !world->getSectorAtPosition(1,2,0) && other->getCarPosition() == otherPosition
+				&& other->getOperation() == otherOperation && other->isBusy(), "Move left stale ownership or reset unrelated unit");
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto point = world->lookupInteractionPoint(unit->getLandingButton(stop)).entity;
+				require(point->getPosition() == core::Vector2{4.5f,float(stop)}
+					&& world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop))
+					== std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper}, "Move lost button placement/requirement");
+			}
+			auto actor = world->createAgent("New landing operator", unit->getStop(1).sector->getIndex(), 0, 0.5f);
+			world->grantAgentAccessPermission(actor, upper);
+			auto request = world->requestDumbwaiterLanding(id, 1, actor);
+			require(bool(request), "Moved unit Agent request refused");
+			// A second successful move also cancels a pending press, before activation.
+			require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id, 3, 2, 0)), "Different Layer-pair movement refused");
+			require(world->lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled,
+				"Move retained pending landing request");
+			unit = world->lookupDumbwaiter(id);
+			require(unit->getCarPosition() == core::Vector2{0,3} && unit->getAperture(0)->getFrontLayer() == 2
+				&& !world->getSectorAtPosition(1,4,0), "Different Layer-pair move left old shaft");
+			auto press = world->pressDumbwaiterLanding(id, 0); world->resumeSimulation();
+			require(world->advanceTicks(126) && world->lookupDeviceOperation(press).entity->getState() == core::DeviceOperationState::Succeeded,
+				"Moved unit user control is unsafe"); world->pauseSimulation();
+			world->resetSimulation(); world->pauseSimulation(); unit = world->lookupDumbwaiter(id);
+			require(unit->getLayerIndex() == 3 && unit->getCellY() == 2 && unit->getAperture(1)->getProgress() == 1,
+				"Construction replay lost movement");
+			require(world->removeDumbwaiter(id), "Moved unit deletion failed"); world->resetSimulation(); world->pauseSimulation();
+			require(!world->lookupDumbwaiter(id) && world->lookupDumbwaiter(sibling), "Moved-unit deletion replay broke sibling");
+		}
+	}
 	void placement(smoke::Context const&)
 	{
 		for (uint32_t front : {0u, 1u, 2u}) for (unsigned a = 0; a < 3; ++a) for (unsigned b = 0; b < 3; ++b)
@@ -268,6 +364,7 @@ namespace
 void registerBoothWindows(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"dumbwaiters/authoredWorld", dumbwaiters});
+	checks.push_back({"dumbwaiters/wholeUnitMovement", dumbwaiterMoves});
 	checks.push_back({"boothWindows/placementAndTopology", placement});
 	checks.push_back({"boothWindows/atomicRefusal", refusal});
 	checks.push_back({"boothWindows/lifecycle", lifecycle});

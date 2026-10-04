@@ -943,7 +943,7 @@ agents: []
 		world.finishBuild();
 
 		auto const yaml = serializeWorld(world);
-		require(yaml.find("version: 48") != std::string::npos,
+		require(yaml.find("version: 49") != std::string::npos,
 			"The writer did not raise the version above the pre-Door-style ceiling");
 
 		bool refusedVersion = false;

@@ -153,6 +153,7 @@ namespace core
 		case ConstructionType::Window: return "window";
 		case ConstructionType::BoothWindow: return "boothWindow";
 		case ConstructionType::Dumbwaiter: return "dumbwaiter";
+		case ConstructionType::MoveDumbwaiter: return "moveDumbwaiter";
 		case ConstructionType::BulkheadDoor: return "bulkheadDoor";
 		case ConstructionType::LightSwitch: return "lightSwitch";
 		case ConstructionType::ForceBridge: return "forceBridge";
@@ -174,7 +175,7 @@ namespace core
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
 		if (name == "securityScanner") return ConstructionType::Chamber; // Legacy scanner migration.
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::Dumbwaiter); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::MoveDumbwaiter); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -425,6 +426,12 @@ namespace core
 					serializer.endArray();
 				}
 			break;
+		case ConstructionType::MoveDumbwaiter:
+			serializer.writeUint64("id", record.dumbwaiterId.value);
+			serializer.writeUint32("layer", record.layer);
+			serializer.writeUint32("y", record.a);
+			serializer.writeUint32("x", record.b);
+			break;
 		case ConstructionType::Dumbwaiter:
 			serializer.writeUint64("id", record.dumbwaiterId.value);
 			serializer.writeUint32("layer", record.layer);
@@ -609,7 +616,8 @@ namespace core
 		// Version 46 adds width-capacity Decontamination Chambers.
 		// Version 47 adds complete authored Dumbwaiter units and stable identity.
 		// Version 48 adds independent Dumbwaiter landing requirements.
-		serializer.writeUint32("version", 48);
+		// Version 49 adds chronological whole-unit Dumbwaiter moves.
+		serializer.writeUint32("version", 49);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
@@ -1111,6 +1119,12 @@ namespace core
 					serializer.endArray();
 				}
 			break;
+		case ConstructionType::MoveDumbwaiter:
+			if (version < 49) throw SerializationException("Dumbwaiter movement requires World schema version 49");
+			record.dumbwaiterId = DumbwaiterId{serializer.readUint64("id")};
+			record.layer = readLayer("layer");
+			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
+			break;
 		case ConstructionType::Dumbwaiter:
 			if (version < 47) throw SerializationException("Dumbwaiter requires World schema version 47");
 			record.dumbwaiterId = DumbwaiterId{serializer.readUint64("id")};
@@ -1318,7 +1332,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 48)
+		if (version < 1 || version > 49)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2566,6 +2580,9 @@ namespace core
 				}
 			break;
 		}
+		case ConstructionType::MoveDumbwaiter:
+			applyDumbwaiterMove(planMoveDumbwaiter(record.dumbwaiterId, record.layer, record.a, record.b));
+			break;
 		case ConstructionType::Dumbwaiter:
 		{
 			auto id = createDumbwaiter(record.layer, record.a, record.b, {record.c, record.x}, record.dumbwaiterId);

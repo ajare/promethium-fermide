@@ -3437,7 +3437,7 @@ namespace
 		}
 	}
 
-	enum class ClipboardObjectType { Agent, Door, BulkheadDoor, Window, BoothWindow, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
+	enum class ClipboardObjectType { Dumbwaiter, Agent, Door, BulkheadDoor, Window, BoothWindow, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
 	struct ClipboardDefinition
 	{
 		ClipboardObjectType type{};
@@ -3447,6 +3447,7 @@ namespace
 		core::World::CreateBulkheadDoorOptions bulkheadDoor;
 		core::World::CreateWindowOptions window;
 		BoothWindowClipboard boothWindow;
+		DumbwaiterClipboard dumbwaiter;
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
 		core::World::CreateLiftOptions platformLift;
@@ -3483,6 +3484,8 @@ namespace
 
 	bool hasClipboardSelection()
 	{
+		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector)
+			return gSelectedSector && gSelectedSector->getType() == core::SectorType::Dumbwaiter;
 		if (gUISettings.selectionMode != UISettings::SelectionMode::Object) return false;
 		if (gSelectedAgent) return true;
 		if (!gSelectedSectorObject) return false;
@@ -3564,6 +3567,8 @@ namespace
 		bool cut)
 	{
 		if (!hasClipboardSelection()) return nullopt;
+		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector)
+			return makeDumbwaiterClipboardText(*world, *static_pointer_cast<const core::Dumbwaiter>(gSelectedSector), cut);
 		YAML::Emitter output;
 		output << YAML::BeginMap << YAML::Key << "prometheumClipboard" << YAML::Value
 			<< YAML::BeginMap << YAML::Key << "version" << YAML::Value << 1
@@ -3740,7 +3745,12 @@ namespace
 		auto type = requiredYaml<string>(root, "type");
 		auto object = root["object"];
 		if (!object || !object.IsMap()) throw runtime_error("Clipboard object definition is required");
-		if (type == "Agent")
+		if (type == "Dumbwaiter")
+		{
+			definition.type = ClipboardObjectType::Dumbwaiter;
+			definition.dumbwaiter = readDumbwaiterClipboardObject(object);
+		}
+		else if (type == "Agent")
 		{
 			definition.type = ClipboardObjectType::Agent;
 			string diagnostic;
@@ -3906,6 +3916,13 @@ namespace
 
 	bool removeClipboardSelection(shared_ptr<core::World> const& world)
 	{
+		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector
+			&& gSelectedSector->getType() == core::SectorType::Dumbwaiter)
+		{
+			bool removed = world->removeDumbwaiter(static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId());
+			if (removed) gSelectedSector.reset();
+			return removed;
+		}
 		if (gSelectedAgent)
 		{
 			auto id = world->getAgentId(gSelectedAgent);
@@ -4115,7 +4132,13 @@ namespace
 			string diagnostic;
 			shared_ptr<const core::Sector> markerSector;
 			float markerOffset = 0.0f;
-			if (definition.type == ClipboardObjectType::Door)
+			if (definition.type == ClipboardObjectType::Dumbwaiter)
+			{
+				auto options = resolveDumbwaiterClipboardPermissions(*world, definition.dumbwaiter);
+				if (!world->canAddDumbwaiter(gUISettings.visibleLayer, y, x, options, &diagnostic))
+					throw runtime_error(diagnostic);
+			}
+			else if (definition.type == ClipboardObjectType::Door)
 			{
 				uint32_t landingX, landingWidth;
 				if (world->getLiftLandingGeometry(gUISettings.visibleLayer + 1, y, x, landingX, landingWidth))
@@ -4209,7 +4232,13 @@ namespace
 				if (!wasPaused) world->pauseSimulation();
 				gUISettings.worldPaused = true;
 				shared_ptr<const core::SectorObject> created;
-				if (definition.type == ClipboardObjectType::Door)
+				shared_ptr<const core::Dumbwaiter> createdUnit;
+				if (definition.type == ClipboardObjectType::Dumbwaiter)
+				{
+					auto id = pasteDumbwaiter(world, gUISettings.visibleLayer, y, x, definition.dumbwaiter);
+					createdUnit = world->lookupDumbwaiter(id);
+				}
+				else if (definition.type == ClipboardObjectType::Door)
 				{
 					auto result = world->addSectorDoor(gUISettings.visibleLayer, y, x, definition.door);
 					created = result.door.sector->getObject(result.door.index);
@@ -4267,9 +4296,9 @@ namespace
 						throw runtime_error(diagnostic);
 				}
 				world->finishBuild();
-				setSelectionMode(UISettings::SelectionMode::Object);
+				setSelectionMode(createdUnit ? UISettings::SelectionMode::Sector : UISettings::SelectionMode::Object);
 				gSelectedAgent = nullptr;
-				gSelectedSector.reset();
+				gSelectedSector = createdUnit;
 				gSelectedSectorObject = created;
 				commitDocumentEdit(std::move(undo));
 				if (definition.cut) gConsumedCutClipboard = clipboardText;

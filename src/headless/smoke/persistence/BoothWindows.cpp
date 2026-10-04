@@ -142,6 +142,47 @@ namespace persistence
 		legacy["version"] = 46; legacy.remove("nextDumbwaiterId");
 		auto reader = core::YamlSerializer::fromString(YAML::Dump(legacy)); reader->deserialize(); core::SerializationWorkData work;
 		core::World loaded("Baseline", 1, 1); require(loaded.deserialize(*reader, work) && !loaded.hasDumbwaiters(), "Schema-46 compatibility lost");
+
+		// Move into landings authored after the unit; replay must retain chronological
+		// object slots, including when a new unit subsequently occupies the old site.
+		dumbwaiter_fixture::addLandings(*world, 3, 0, 2); world->finishBuild();
+		require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id, 3, 2, 0)), "Document movement failed");
+		core::World::CreateDumbwaiterOptions copied{0, 0.5f};
+		copied.landingPermissionRequirements = {{{a,b}, {upper}}};
+		auto copy = world->addDumbwaiter(1, 0, 2, copied); world->finishBuild();
+		for (bool binary : {false,true})
+		{
+			auto data = write(*world, binary);
+			std::unique_ptr<core::Serializer> input = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			input->deserialize(); core::SerializationWorkData restoreData; core::World restored("Moved/pasted",1,1);
+			require(restored.deserialize(*input,restoreData) && write(restored,binary) == data, "Moved/pasted canonical YAML/binary round trip failed");
+			auto moved = restored.lookupDumbwaiter(id), pasted = restored.lookupDumbwaiter(copy);
+			require(moved->getLayerIndex() == 3 && moved->getCellX() == 0 && moved->getCellY() == 2
+				&& moved->getCarPosition().y == 3 && moved->getTravelSeconds() == 0.1f
+				&& pasted->getLayerIndex() == 1 && pasted->getCarPosition().y == 0
+				&& restored.getSimulationSnapshot().interactionPoints.size() == 4, "Restoration lost placement/ownership/configuration");
+			for (auto unit : {moved,pasted})
+			{
+				require(restored.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}
+					&& restored.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upper}, "Restored move/copy requirements lost");
+				auto operation = restored.pressDumbwaiterLanding(unit->getId(),0);
+				require(restored.advanceTicks(60) && write(restored,binary) == data, "Moved/pasted mid-cycle save leaked runtime references/progress");
+				require(restored.advanceTicks(unit->getId() == id ? 42 : 66)
+					&& restored.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded, "Restored moved/pasted unit cannot operate");
+			}
+		}
+		auto movedDocument = write(*world,false);
+		for (auto field : {"id", "layer", "x", "y"})
+		{
+			auto invalid = YAML::Load(movedDocument);
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() == "moveDumbwaiter") record[field] = 99;
+			bool rejected = false;
+			try { auto input = core::YamlSerializer::fromString(YAML::Dump(invalid)); input->deserialize(); core::SerializationWorkData data; world->deserialize(*input,data); }
+			catch (std::exception const&) { rejected = true; }
+			require(rejected && write(*world,false) == movedDocument, "Malformed movement record partially loaded");
+		}
 	}
 	void boothWindows(smoke::Context const&)
 	{
@@ -230,7 +271,7 @@ namespace persistence
 			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
-		require(node["version"].as<int>() == 48, "BoothWindow schema not allocated");
+		require(node["version"].as<int>() == 49, "BoothWindow schema not allocated");
 		core::SerializationWorkData work;
 		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown", "permissionZero", "permissionUnknown", "permissionDuplicate", "permissionShape", "permissionLegacy"})
 		{

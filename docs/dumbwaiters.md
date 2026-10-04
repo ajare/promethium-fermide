@@ -1,4 +1,4 @@
-# Dumbwaiters (#375–#377)
+# Dumbwaiters (#375–#378)
 
 A Dumbwaiter is a non-passenger, fixed 1-cell-wide, 2-Level-high Transit. Paint
 **Dumbwaiter** on a shaft Layer behind two supported landing cells at the same x
@@ -45,11 +45,10 @@ authored initial state. Runtime controls do not change documents or history.
 Owned apertures have no back-side panel and cannot be independently edited,
 resized, moved, copied, deleted or toggled. Delete the complete unit first when
 changing its landing Location footprints or removing Levels/Layers. Independent
-owned-aperture movement is refused pending full unit movement support; unrelated
+owned-aperture movement remains refused; use whole-unit movement instead. Unrelated
 objects retain normal editing. Removing required Walkway support is transactionally
-refused. Full unit movement,
-clipboard and dependent deletion/reconciliation of surrounding footprints remain
-separate follow-up tickets.
+refused. Dependent deletion/reconciliation of surrounding footprints remains
+assigned to #379.
 
 World schema **47** adds one `dumbwaiter` construction record carrying stable
 World-owned `id`, shaft `layer`, lower `y`, `x`, `initialStop` (0/1) and
@@ -91,9 +90,42 @@ Schema **48** adds `lowerLandingPermissionRequirement` and
 construction record. Schema-47 Dumbwaiters default to empty requirements. YAML,
 binary, construction replay, Reset and ordinary document undo/redo preserve both
 requirements; deleting a permission removes it from both. Unknown, duplicate,
-zero or malformed references are rejected transactionally. Clipboard remapping is
-out of scope until the unit move/copy ticket. Structural/configuration cancellation
+zero or malformed references are rejected transactionally. Whole-unit clipboard remapping follows the identity/name conventions below. Structural/configuration cancellation
 also retires pending interactions; removed devices retain no live request.
+
+## Whole-unit movement and clipboard (#378)
+
+Paused Dumbwaiter Selection provides destination shaft Layer, x, lower Level,
+and **Move Dumbwaiter**. `World::planMoveDumbwaiter` and
+`applyDumbwaiterMove` use the same complete destination validation as creation,
+ignoring only the moving unit's own footprint. Application rechecks stale plans.
+Invalid destinations and same-position moves leave accepted cycles and pending
+presses unchanged. Successful moves cancel that unit's work, rebuild both owned
+apertures/buttons at the new landings, and restore its authored initial Stop.
+Identity, timing and both landing requirements survive; unrelated cycles are
+not reset. The old child/control handles are invalid, so callers refresh through
+`lookupDumbwaiter` after a successful edit.
+
+Select the shaft in Sector mode and use ordinary **Copy/Cut/Paste** (including
+Ctrl+C/X/V). Paste uses the selected visible shaft Layer and cursor's lower cell.
+The clipboard contains fixed dimensions, initial Stop, travel time and both
+landing requirements, never source device identity or runtime work. Pasting a
+mid-cycle source creates a new idle unit without disturbing the source. Both
+requirements resolve before any placement: the same World resolves stable IDs
+(across renames); another World resolves exact permission names, never coincident
+local IDs. Missing, duplicate or malformed references refuse the entire paste,
+without creating permissions or grants. `CreateDumbwaiterOptions` also accepts
+both landing requirements for atomic public World creation/preflight.
+
+Schema **49** adds chronological `moveDumbwaiter` construction records (identity,
+shaft Layer, lower y and x). They preserve producer/object-slot ordering even
+when destination Locations were authored later than the unit, or another unit
+is subsequently placed at the vacated site. Configuration and requirements stay
+on the unit's authored producer; children are derived afresh during replay.
+Undo/redo, Reset, YAML and binary load restore coherent authored placement and
+initial presentation without stale runtime handles. Schema 48 and older remain
+loadable. Whole-unit deletion removes movement records and preserves surviving
+object slots. No dependent footprint deletion or resizing is introduced here.
 
 Headless coverage is in World, Persistence, Editor and Render's BoothWindows
 translation units and Simulation's Dumbwaiters translation unit, using real public

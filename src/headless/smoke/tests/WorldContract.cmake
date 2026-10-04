@@ -29,6 +29,7 @@ set(checks
     securityScanners/structuralEdits
     securityScanners/preflight
     dumbwaiters/authoredWorld
+    dumbwaiters/wholeUnitMovement
     boothWindows/placementAndTopology
     boothWindows/atomicRefusal
     boothWindows/lifecycle

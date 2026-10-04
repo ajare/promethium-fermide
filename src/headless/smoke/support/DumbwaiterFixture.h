@@ -23,6 +23,16 @@ namespace dumbwaiter_fixture
 		world->finishBuild(); world->pauseSimulation();
 		return world;
 	}
+	inline void addLandings(core::World& world, uint32_t shaftLayer, uint32_t x, uint32_t y = 0, unsigned kind = 0)
+	{
+		while (world.getLayerCount() <= shaftLayer) world.addLayer();
+		for (uint32_t stop = 0; stop < 2; ++stop)
+		{
+			if (kind == 1) world.addCorridor(shaftLayer - 1, y + stop, x, 1, 1);
+			else if (kind == 2) world.addFacade(shaftLayer - 1, y + stop, x, 1, 1);
+			else world.addRoom("Destination landing", shaftLayer - 1, y + stop, x, 1, 1);
+		}
+	}
 	inline std::string yaml(core::World const& world)
 	{
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;

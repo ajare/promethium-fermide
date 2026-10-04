@@ -109,6 +109,7 @@ namespace core
 		{
 			uint32_t initialStop{ 0 };
 			float travelSeconds{ 2.0f };
+			std::array<std::vector<AccessPermissionId>, 2> landingPermissionRequirements{};
 		};
 		bool canAddDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x,
 			CreateDumbwaiterOptions const& options, std::string* diagnostic = nullptr) const;
@@ -117,6 +118,15 @@ namespace core
 		DumbwaiterId addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x)
 		{ return addDumbwaiter(shaftLayer, y, x, CreateDumbwaiterOptions{}); }
 		std::shared_ptr<const Dumbwaiter> lookupDumbwaiter(DumbwaiterId id) const;
+		struct DumbwaiterMovePlan
+		{
+			bool valid{false};
+			std::string diagnostic;
+			DumbwaiterId id{};
+			uint32_t layer{0}, y{0}, x{0};
+		};
+		DumbwaiterMovePlan planMoveDumbwaiter(DumbwaiterId id, uint32_t shaftLayer, uint32_t y, uint32_t x) const;
+		bool applyDumbwaiterMove(DumbwaiterMovePlan const& plan);
 		bool configureDumbwaiter(DumbwaiterId id, CreateDumbwaiterOptions const& options);
 		bool removeDumbwaiter(DumbwaiterId id);
 		bool hasDumbwaiters() const;
@@ -811,6 +821,8 @@ namespace core
 		bool mBuildFinished{ false };
 		bool mSimulationPaused{ false };
 		bool mTopologyDirty{ true };
+		// Whole-unit edits already reset their own device, not unrelated cycles.
+		bool mOnlyDumbwaiterTopologyEdits{ true };
 		bool mTopologyValid{ false };
 		uint64_t mTopologyGeneration{ 0 };
 		std::string mTopologyDiagnostic;
@@ -868,7 +880,8 @@ namespace core
 			Airlock,
 			Chamber,
 			BoothWindow,
-			Dumbwaiter
+			Dumbwaiter,
+			MoveDumbwaiter
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -957,6 +970,10 @@ namespace core
 		bool deserializeImpl(Serializer& serializer, SerializationWorkData& workData) override;
 
 		void recordConstruction(ConstructionRecord record);
+		bool preflightDumbwaiter(uint32_t layer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options, DumbwaiterId ignored, std::string* diagnostic) const;
+		void attachDumbwaiter(std::shared_ptr<Dumbwaiter> const& unit);
+		void detachDumbwaiter(std::shared_ptr<const Dumbwaiter> const& unit);
 		DumbwaiterId createDumbwaiter(uint32_t layer, uint32_t y, uint32_t x,
 			CreateDumbwaiterOptions const& options, DumbwaiterId id);
 
@@ -1240,7 +1257,7 @@ namespace core
 
 		void validateShuttleOptions(std::string const& caller, CreateShuttleOptions const& options) const;
 
-		void beginStructuralEdit(std::string const& operation);
+		void beginStructuralEdit(std::string const& operation, bool preserveOtherDumbwaiterCycles = false);
 
 		// The simulation-side work of a topology rebuild - taking every live
 		// traversal apart, remembering the route each Agent was working to,
