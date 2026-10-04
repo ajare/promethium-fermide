@@ -441,11 +441,11 @@ namespace persistence
 		fallback.addRoom("Narrow back room", 1, 0, 0, 2, 1);
 		auto left = fallback.addSectorDoor(0, 0, 0, options);
 		auto right = fallback.addSectorDoor(0, 0, 1, options);
-		require(std::abs(controlCenterX(left.controls[1])
-				- controlCenterX(right.controls[1])) < 0.0001f
+		require(std::abs(controlCenterX(left.controls[1])) < 0.0001f
+			&& std::abs(controlCenterX(right.controls[1]) - 1.0f) < 0.0001f
 			&& std::abs(controlCenterY(left.controls[1])
-				- controlCenterY(right.controls[1])) > 0.049f,
-			"Unavoidable same-X controls did not use the height fallback");
+				- controlCenterY(right.controls[1])) < 0.0001f,
+			"Outer-boundary host alternative must separate ordinary controls without stacking");
 	}
 
 	void platformLiftStopDurationRoundTrips(smoke::Context const&)

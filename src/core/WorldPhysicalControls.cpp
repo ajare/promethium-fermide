@@ -10,6 +10,133 @@ namespace core
 {
 	using namespace std;
 
+	physicalControl::Demand World::doorControlDemand(shared_ptr<const Sector> sector,
+		uint32_t x, uint32_t y, uint32_t width, uint32_t role) const
+	{
+		physicalControl::Demand demand;
+		demand.hasOwner = true;
+		demand.owner = { physicalControl::OwnerType::Door,
+			{ sector->getLayerIndex() - role, x, y, width, 1 },
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() }, { role, x, y } };
+		return validPhysicalControlDemand(std::move(demand), y);
+	}
+
+	physicalControl::Demand World::validPhysicalControlDemand(physicalControl::Demand demand,
+		uint32_t y, uint32_t blockedX, uint32_t openedX, uint32_t unsupportedX) const
+	{
+		using namespace physicalControl;
+		if (!demand.hasOwner || (demand.owner.type != OwnerType::Door
+			&& demand.owner.type != OwnerType::LocationLightSwitch)) return demand;
+		auto const& host = demand.owner.hostingLocation;
+		auto const& geometry = demand.owner.geometry;
+		vector<Candidate> candidates = demand.owner.type == OwnerType::Door
+			? vector<Candidate>{ Candidate::explicitHost(geometry.x + geometry.width, 0, CORE_SIDE_LEFT),
+				Candidate::explicitHost(geometry.x, 0, CORE_SIDE_LEFT) }
+			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2, CORE_SIDE_MIDDLE) };
+		demand.candidates.clear();
+		for (auto const& candidate : candidates)
+		{
+			auto x = candidate.cellX;
+			if (x == unsupportedX) continue;
+			if (host.layer >= mLayers.size() || x >= getCellsWide() || y >= getLevelsHigh()) continue;
+			auto const& cell = mLayers[host.layer]->getCellDefinition(x, y);
+			if (cell.sectorIndex == ~0u || ((!mDeserializingConstruction || mResolvingPhysicalControls)
+				&& !cell.isTraversableOnFoot())) continue;
+			auto sector = mSectors[cell.sectorIndex];
+			if (!isLocationLike(sector->getType()) || sector->getCellX() != host.x
+				|| sector->getCellY() != host.baseLevel || sector->getCellsWide() != host.width
+				|| sector->getLevelsHigh() != host.height) continue;
+			if (candidate.quarterOffset == 0 && (!mDeserializingConstruction || mResolvingPhysicalControls))
+			{
+				if (x == blockedX) continue;
+				bool blocked = cell.bulkheadIndices[CORE_SIDE_LEFT] != ~0u;
+				if (x > 0)
+				{
+					auto const& previous = mLayers[host.layer]->getCellDefinition(x - 1, y);
+					blocked |= previous.bulkheadIndices[CORE_SIDE_RIGHT] != ~0u;
+					if (x != openedX && previous.sectorIndex != ~0u && previous.sectorIndex != cell.sectorIndex)
+					{
+						auto other = mSectors[previous.sectorIndex];
+						blocked |= sector->getEndType(y - sector->getCellY(), CORE_SIDE_LEFT) == SectorEndType::Wall
+							|| other->getEndType(y - other->getCellY(), CORE_SIDE_RIGHT) == SectorEndType::Wall;
+					}
+				}
+				if (blocked) continue;
+			}
+			demand.candidates.push_back(candidate);
+		}
+		if (demand.candidates.empty()) throw WorldException(this, "No valid host/support for required physical control");
+		demand.defaultCandidate = demand.currentCandidate = 0;
+		return demand;
+	}
+
+	World::PhysicalControlPlan World::planPhysicalControls(uint32_t layer, uint32_t sector,
+		uint32_t y, physicalControl::Demand const* extra, uint32_t blockedX, uint32_t openedX, uint32_t unsupportedX) const
+	{
+		PhysicalControlPlan plan;
+		for (uint32_t i = 0; i < mPhysicalControlPlacements.size(); ++i)
+		{
+			auto const& p = mPhysicalControlPlacements[i];
+			if (p.layerIndex != layer || p.sectorIndex != sector || p.cellY != y) continue;
+			plan.row.push_back(i);
+			plan.demands.push_back(validPhysicalControlDemand({ p.candidates, p.defaultCandidate,
+				p.currentCandidate, p.owner, p.hasOwner }, y, blockedX, openedX, unsupportedX));
+		}
+		if (extra) plan.demands.push_back(validPhysicalControlDemand(*extra, y, blockedX, openedX, unsupportedX));
+		try { plan.assignment = physicalControl::allocateLegacy(plan.demands); }
+		catch (runtime_error const& error) { throw WorldException(this, error.what()); }
+		// This slice introduces neither stacking nor legacy horizontal nudges for
+		// migrated owners. Coincident explicit controls must be refused.
+		for (size_t i = 0; i < plan.demands.size(); ++i)
+			for (size_t j = 0; j < i; ++j)
+			{
+				auto const& a = plan.demands[i].candidates[plan.assignment[i]];
+				auto const& b = plan.demands[j].candidates[plan.assignment[j]];
+				if (a.centreKey() == b.centreKey() && (a.quarterOffset >= 0 || b.quarterOffset >= 0))
+					throw WorldException(this, "Physical controls require distinct positions (stacking is not supported)");
+			}
+		return plan;
+	}
+
+	void World::validatePhysicalControlBoundary(uint32_t layer, uint32_t y, uint32_t blockedX) const
+	{
+		for (auto const& sector : mSectors)
+			if (sector && sector->getLayerIndex() == layer)
+				(void)planPhysicalControls(layer, sector->getIndex(), y, nullptr, blockedX);
+	}
+
+	void World::validatePhysicalControlSectorCreation(uint32_t layer, uint32_t x, uint32_t y,
+		uint32_t width, uint32_t height, bool walls) const
+	{
+		// Only the occupied cell immediately to the right can already host an
+		// offset-zero Button whose shape crosses the new shared boundary.
+		if (x + width >= getCellsWide()) return;
+		for (uint32_t level = y; level < y + height; ++level)
+		{
+			auto const& cell = mLayers[layer]->getCellDefinition(x + width, level);
+			if (cell.sectorIndex == ~0u) continue;
+			auto sector = mSectors[cell.sectorIndex];
+			if (walls || sector->getEndType(level - sector->getCellY(), CORE_SIDE_LEFT) == SectorEndType::Wall)
+				validatePhysicalControlBoundary(layer, level, x + width);
+		}
+	}
+
+	void World::reflowAllPhysicalControls(bool finalPolicy)
+	{
+		// Plan every row first: a failure must not partly move other controls.
+		map<pair<uint32_t, uint32_t>, uint32_t> rows;
+		for (auto const& p : mPhysicalControlPlacements) rows[{p.sectorIndex, p.cellY}] = p.layerIndex;
+		mResolvingPhysicalControls = finalPolicy;
+		try
+		{
+			for (auto const& [row, layer] : rows) (void)planPhysicalControls(layer, row.first, row.second);
+			for (auto const& [row, layer] : rows) reflowPhysicalControls(layer, row.first, row.second);
+		}
+		catch (...) { mResolvingPhysicalControls = false; throw; }
+		mResolvingPhysicalControls = false;
+	}
+
 	World::CreateObjectResult World::createPhysicalControl(string const& name,
 		uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags,
 		uint32_t* vertexIdentifier, uint32_t alternateX, int alternateSide)
@@ -25,7 +152,8 @@ namespace core
 	{
 		invalidateSimulationSnapshot();
 		string caller = "World::createPhysicalControl";
-		auto candidates = demand.candidates;
+		auto validated = validPhysicalControlDemand(demand, y);
+		auto candidates = validated.candidates;
 		if (candidates.empty() || demand.defaultCandidate >= candidates.size()
 			|| demand.currentCandidate >= candidates.size())
 			throw WorldException(this, "Physical control requires valid candidates");
@@ -47,7 +175,12 @@ namespace core
 			if (cell.controls[candidate.side] == ~0u && initialCandidate == ~0u)
 				initialCandidate = i;
 		}
-		if (initialCandidate == ~0u)
+		if (demand.hasOwner)
+		{
+			auto plan = planPhysicalControls(layerIndex, sectorIndex, y, &validated);
+			initialCandidate = plan.assignment.back();
+		}
+		if (initialCandidate == ~0u || demand.hasOwner)
 		{
 			// Include the not-yet-created control in the row optimization. This can
 			// move a flexible existing control out of the required slot before the
@@ -102,17 +235,25 @@ namespace core
 		}
 		if (row.empty()) return;
 
-		vector<physicalControl::Demand> demands;
+		auto plan = planPhysicalControls(layerIndex, sectorIndex, y);
+		// Clear old registrations before replacing candidate lists: wall/support
+		// edits may remove the previously selected candidate entirely.
 		for (auto index : row)
 		{
-			auto const& placement = mPhysicalControlPlacements[index];
-			demands.push_back({ placement.candidates, placement.defaultCandidate,
-				placement.currentCandidate, placement.owner, placement.hasOwner });
+			auto const& p = mPhysicalControlPlacements[index];
+			for (auto const& c : p.candidates)
+			{
+				auto& slot = mLayers[layerIndex]->getCellDefinition(c.cellX, y).controls[c.side];
+				if (slot == p.objectIndex) slot = ~0u;
+			}
 		}
-		vector<uint32_t> assignment;
-		try { assignment = physicalControl::allocateLegacy(demands); }
-		catch (runtime_error const& error) { throw WorldException(this, error.what()); }
-		applyPhysicalControls(layerIndex, sectorIndex, y, row, assignment);
+		for (size_t i = 0; i < row.size(); ++i)
+		{
+			auto& p = mPhysicalControlPlacements[row[i]];
+			p.candidates = std::move(plan.demands[i].candidates);
+			p.defaultCandidate = plan.demands[i].defaultCandidate;
+		}
+		applyPhysicalControls(layerIndex, sectorIndex, y, row, plan.assignment);
 	}
 
 	void World::applyPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y,
@@ -159,7 +300,7 @@ namespace core
 				if (candidate.side == CORE_SIDE_LEFT) centerX += placement.edgeInset;
 				else if (candidate.side == CORE_SIDE_RIGHT) centerX -= placement.edgeInset;
 				float adjustment = 0.0f;
-				if (controls.size() > 1)
+				if (controls.size() > 1 && candidate.quarterOffset < 0)
 				{
 					if (candidate.side == CORE_SIDE_RIGHT) adjustment = 0.025f;
 					else if (candidate.side == CORE_SIDE_LEFT) adjustment = -0.025f;

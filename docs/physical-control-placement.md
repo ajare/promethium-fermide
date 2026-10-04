@@ -1,4 +1,4 @@
-# Physical-control placement boundary (#426)
+# Physical-control placement boundary (#426) and wall-safe authoring (#427)
 
 `core/PhysicalControlPlacement.h` separates value-only candidate generation and
 allocation from World application. `WorldPhysicalControls.cpp` owns creation,
@@ -27,12 +27,51 @@ bindings, operation-specific permissions and traversal resources are unchanged.
   landings still use direct Interaction points, not Button SectorObjects; this
   refactor does not convert them.
 
-The allocator deliberately preserves the previous component order, preference
+For unmigrated owners, the allocator deliberately preserves the previous component order, preference
 for maximum separated centres, current-assignment retention, default-side tie
 breaks, and coincident-border horizontal nudges. It does **not** use Owner keys
 for sorting, change candidate validity, allocate across Locations, introduce
-vertical stacks, change transactional editing rules, or implement #425's new
-placement policy. Those changes belong to the subsequent tickets.
+vertical stacks, change transactional editing rules, or implement #425's canonical allocation/stacking policy. Those changes belong
+to the subsequent tickets.
+
+## Ordinary Doors and light switches (#427)
+
+Ordinary Door controls now use only `X+W` at offset `0.0` (preferred), or `X`
+at offset `0.0`, independently in each required approach Location. The registered
+cell is the explicit host, not the preceding Door cell. Location light switches
+remain at their authored cell, offset `0.5`, on the Location's base Level.
+Transport-owned Door controls still use legacy placement.
+
+`validPhysicalControlDemand` is the common authored host/support and boundary
+policy. Hosts must belong to the required Room, Corridor or Facade and have usable
+floor. Offset-zero candidates cannot cross retained shared Sector walls or a
+Bulkhead threshold; removed shared walls and outer boundaries do not block them,
+but they never waive host/support requirements. Bulkhead runtime opening is not
+an input. Centred switches are unaffected by cell-end walls and never relocate.
+
+World preflights creation/control additions, shared-wall restoration, incoming
+Location/Background boundaries and Walkway removal without touching live controls.
+Movement, resize, deletion and configuration use the existing detached construction
+replay validation. Replay/load defer wall/support filtering until the authored
+layout is complete; `finishBuild` plans all rows before applying placements and
+building the graph. Document restoration and clipboard Door paste use those same
+World authoring/replay seams. Impossible required controls are refused, not omitted.
+
+This slice retains the legacy row allocator for existing conflict handling; it does
+not introduce canonical multi-control allocation or stacks. Migrated controls do
+not receive legacy coincident-border nudges, and coincident explicit assignments
+are refused. Production Button geometry, graph approaches and Interaction point
+positions share the selected centre; hit testing includes the preceding-cell half
+of an offset-zero shape while returning its actual host SectorObject. Bindings,
+operation-specific permissions and runtime device behavior are unchanged.
+
+Coverage includes one/wide Doors, independent approaches, Room/Corridor/Facade
+hosts, retained/removed walls, outer-boundary host failure, missing support,
+open/closed Bulkhead thresholds, atomic authoring/wall/support/load refusals,
+move/resize, YAML replay, document undo/redo, draw commands and hit testing.
+Existing permission, routing and runtime checks remain the operation contracts.
+
+## Preparatory refactor coverage
 
 Coverage extends the existing World two-sided Button check with legacy
 preferred/fallback positions for one- and two-cell Doors, production interaction

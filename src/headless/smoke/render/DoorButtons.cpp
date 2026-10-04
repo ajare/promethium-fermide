@@ -265,6 +265,28 @@ namespace
 				"The back Button should render as a visible outline on its own Layer");
 		}
 
+		// A wide ordinary Door with no right host uses the authored left cell at
+		// offset zero. Inspect production draw commands, not mirrored geometry.
+		{
+			auto options = core::World::RemoteControlledDoor1Options;
+			options.width = 2;
+			auto fallback = buildTwoRoomScene("Boundary-owned rendering", 2, 4, &options, 4);
+			WorldDrawList drawList(kViewportClip);
+			renderSector(fallback.world->getSector(fallback.frontSector), 0,
+				LayerRenderStyle::Solid, false, roomColour, &drawList);
+			float minX = 1e10f, maxX = -1e10f;
+			int triangles = 0;
+			for (auto const& command : drawList.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && isButtonFillTriangle(*triangle))
+				{
+					++triangles;
+					for (auto const& p : triangle->positions) { minX = std::min(minX, p.x); maxX = std::max(maxX, p.x); }
+				}
+			require(triangles == 2 && std::abs((minX + maxX) * 0.5f - (4.0f * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX + gUISettings.xOffset)) < 0.001f,
+				"Production rendering did not centre wide Door fallback on its host boundary");
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

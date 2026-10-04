@@ -37,6 +37,7 @@
 
 #include "core/World.h"
 #include "core/Door.h"
+#include "core/Button.h"
 #include "core/DoorSectorObject.h"
 #include "core/Sector.h"
 #include "core/SectorObject.h"
@@ -254,6 +255,60 @@ namespace
 			"Door initial Broken redo failed");
 	}
 
+	void checkWallSafeDocumentEdits()
+	{
+		auto world = std::make_shared<core::World>("Wall-safe history", 16, 3);
+		auto left = world->addRoom("Left", 0, 1, 0, 4, 1);
+		auto front = world->addRoom("Front", 0, 1, 4, 2, 1);
+		world->addRoom("Back", 1, 1, 0, 16, 1);
+		auto created = world->addSectorDoor(0, 1, 4, core::World::RemoteControlledDoor1Options);
+		world->addSectorLightSwitch(front, 1);
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		history.markSaved();
+		auto placement = [&]
+		{
+			std::vector<core::Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(front)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(front)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				result.push_back(button->getPosition() + button->getSize() * 0.5f);
+				result.push_back(world->lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto const& a, auto const& b)
+				{ return a.x != b.x ? a.x < b.x : a.y < b.y; });
+			return result;
+		};
+		auto initial = captureDocumentSnapshot(world, history);
+		auto positions = placement();
+		require(positions.size() == 4 && positions[0].x == 5.0f && positions[2].x == 5.5f,
+			"Document fixture placement is not explicit right/centred authoring");
+		auto invalid = world->planResizeSectorDoor(front, created.door.index, 4, 1, 2, 1);
+		require(!invalid.valid && captureDocumentSnapshot(world, history)->yaml == initial->yaml
+			&& history.undoCount() == 0, "Invalid wall-safe resize dirtied document/history");
+		world->removeLocationWall(left, 0, CORE_SIDE_RIGHT);
+		auto valid = world->planResizeSectorDoor(front, created.door.index, 4, 1, 2, 1);
+		require(valid.valid, "Removed wall did not permit authored boundary host: " + valid.diagnostic);
+		world->applyObjectMove(valid);
+		commitDocumentEdit(initial, history);
+		auto edited = captureDocumentSnapshot(world, history);
+		auto changed = placement();
+		require(changed[0].x == 4.0f && changed[2].x == 5.5f,
+			"Resize failed to change Door host independently of light switch");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*edited, restore) && placement() == positions,
+			"Production document undo lost wall-safe placement/approaches");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && placement() == changed,
+			"Production document redo lost wall-safe placement/approaches");
+	}
+
 	void checkExistingButtonsCanBeRemoved()
 	{
 		auto world = std::make_shared<core::World>("Door button checkbox", 12, 3);
@@ -277,6 +332,7 @@ namespace
 			"A paused ordinary Door with Buttons cannot have them unchecked");
 		ImGui::End();
 		ImGui::Render();
+		checkWallSafeDocumentEdits();
 	}
 
 	void checkLiftOwnedDoor()

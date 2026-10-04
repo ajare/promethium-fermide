@@ -6980,6 +6980,12 @@ namespace core
 			|| !dynamic_pointer_cast<const WalkwaySectorObject>(mSectors[sectorIndex]->getObject(objectIndex)))
 		{ plan.diagnostic = "The selected Walkway no longer exists"; return plan; }
 		auto walkway = mSectors[sectorIndex]->getObject(objectIndex);
+		try
+		{
+			(void)planPhysicalControls(mSectors[sectorIndex]->getLayerIndex(), sectorIndex,
+				walkway->getCellY(), nullptr, ~0u, ~0u, walkway->getCellX());
+		}
+		catch (exception const& error) { plan.diagnostic = error.what(); return plan; }
 		plan.diagnostic = furnitureSupportDiagnostic(sectorIndex,
 			walkway->getCellX() - mSectors[sectorIndex]->getCellX(),
 			walkway->getCellY() - mSectors[sectorIndex]->getCellY());
@@ -7056,6 +7062,8 @@ namespace core
 		auto object = dynamic_pointer_cast<WalkwaySectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) return false;
+		(void)planPhysicalControls(mSectors[sectorIndex]->getLayerIndex(), sectorIndex,
+			object->getCellY(), nullptr, ~0u, ~0u, object->getCellX());
 		auto supportDiagnostic = furnitureSupportDiagnostic(sectorIndex,
 			object->getCellX() - mSectors[sectorIndex]->getCellX(),
 			object->getCellY() - mSectors[sectorIndex]->getCellY());

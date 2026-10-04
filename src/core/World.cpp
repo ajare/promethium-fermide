@@ -2582,6 +2582,15 @@ namespace core
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef0.sectorIndex);
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef1.sectorIndex);
 			}
+		if (!controlsAreExternallyBound)
+			for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (!options.controls[side]) continue;
+				auto layer = side == 0 ? layerIndex : backLayer;
+				auto sector = mSectors[mLayers[layer]->getCellDefinition(x, y).sectorIndex];
+				auto demand = doorControlDemand(sector, x, y, cellsWide, side);
+				(void)planPhysicalControls(layer, sector->getIndex(), y, &demand);
+			}
 	}
 
 	void World::validateSectorForceBridgeOptions(string const& caller, CreateForceBridgeOptions const& options) const
@@ -3268,8 +3277,11 @@ namespace core
 			throw WorldException(this, format("{} - a Corridor must be at least one cell wide", caller));
 		if (levelsHigh == 0)
 			throw WorldException(this, format("{} - a Corridor must be at least one level high", caller));
+		validateBounds(caller, x, y, cellsWide, levelsHigh);
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, true);
 		beginStructuralEdit("addCorridor");
 		auto const result = addLocation("Corridor", SectorType::Location, layerIndex, x, y, cellsWide, levelsHigh, CORE_CORRIDOR_HEIGHT, true);
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Corridor };
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
@@ -3299,9 +3311,13 @@ namespace core
 		if (levelsHigh == 0)
 			throw WorldException(this, format("{} - a Room must be at least one level high", caller));
 
+		validateLayer(caller, layerIndex);
+		validateBounds(caller, x, y, cellsWide, levelsHigh);
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, true);
 		beginStructuralEdit("addRoom");
 
 		auto const result = addLocation(name, SectorType::Location, layerIndex, x, y, cellsWide, levelsHigh, topLevelHeight, false);
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Room };
 		record.name = name;
 		record.a = layerIndex; record.b = y; record.c = x; record.d = cellsWide; record.e = levelsHigh;
@@ -3358,6 +3374,7 @@ namespace core
 		if (!canAddBackground(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
 			throw WorldException(this, diagnostic);
 
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, false);
 		beginStructuralEdit("addBackground");
 
 		auto sectorIndex = (uint32_t)mSectors.size();
@@ -3378,6 +3395,7 @@ namespace core
 			}
 		}
 
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Background };
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
@@ -3444,6 +3462,7 @@ namespace core
 		if (!canAddFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, &diagnostic))
 			throw WorldException(this, diagnostic);
 
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, false);
 		beginStructuralEdit("addFacade");
 
 		auto sectorIndex = (uint32_t)mSectors.size();
@@ -3463,6 +3482,7 @@ namespace core
 			}
 		}
 
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Facade };
 		record.name = name;
 		record.layer = layerIndex;
@@ -4596,6 +4616,12 @@ namespace core
 		if (sector->getEndType(levelIndex, side) != SectorEndType::None
 			|| neighbour->getEndType(neighbourLevel, 1 - side) != SectorEndType::None)
 			return reject("The shared boundary is not an open wall");
+		try
+		{
+			validatePhysicalControlBoundary(sector->getLayerIndex(), globalY,
+				side == CORE_SIDE_LEFT ? sector->getCellX() : sector->getCellX() + sector->getCellsWide());
+		}
+		catch (exception const& error) { return reject(error.what()); }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -4606,6 +4632,13 @@ namespace core
 		string diagnostic;
 		if (!canRemoveLocationWall(sectorIndex, levelIndex, side, &diagnostic))
 			throw WorldException(this, "World::removeLocationWall - " + diagnostic);
+		auto wallSector = _getSector(sectorIndex);
+		auto const boundaryX = side == CORE_SIDE_LEFT ? wallSector->getCellX()
+			: wallSector->getCellX() + wallSector->getCellsWide();
+		for (auto const& rowSector : mSectors)
+			if (rowSector && rowSector->getLayerIndex() == wallSector->getLayerIndex())
+				(void)planPhysicalControls(wallSector->getLayerIndex(), rowSector->getIndex(),
+					wallSector->getCellY() + levelIndex, nullptr, ~0u, boundaryX);
 		beginStructuralEdit("removeLocationWall");
 
 		auto sector = _getSector(sectorIndex);
@@ -4619,6 +4652,7 @@ namespace core
 		auto const neighbourLevel = globalY - neighbour->getCellY();
 		sector->removeEndWall(levelIndex, side);
 		neighbour->removeEndWall(neighbourLevel, 1 - side);
+		reflowAllPhysicalControls();
 
 		ConstructionRecord record{ ConstructionType::RemoveWall };
 		record.a = sectorIndex; record.b = levelIndex; record.i = side;
@@ -4646,6 +4680,7 @@ namespace core
 		auto const neighbourLevel = globalY - neighbour->getCellY();
 		sector->addEndWall(levelIndex, side);
 		neighbour->addEndWall(neighbourLevel, 1 - side);
+		reflowAllPhysicalControls();
 
 		// An open wall is persisted as a RemoveWall command. Restoring the wall
 		// removes either side's command for this same physical boundary.
@@ -4686,9 +4721,16 @@ namespace core
 		return obj;
 	}
 
-	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index)
+	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index, bool wallSafe, uint32_t approachSide)
 	{
 		invalidateSimulationSnapshot();
+		if (wallSafe)
+		{
+			auto demand = doorControlDemand(sector, x, y, cellsWide, approachSide);
+			auto obj = createPhysicalControl("Door button", sector->getLayerIndex(), y, demand, flags);
+			if (index) *index = obj.index;
+			return obj;
+		}
 		int side = ((x + cellsWide) - 1) == sector->getCellX1() ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
 		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
 		uint32_t alternateX = ~0u;
@@ -5111,10 +5153,12 @@ namespace core
 				if (x == sectors[0]->getCellX0() && x + options.width - 1 == sectors[0]->getCellX1())
 					return reject("There is no space to place the Lift call button");
 			}
-			else for (int side = 0; side < 2; ++side)
-				if (options.controls[side] && x == sectors[side]->getCellX0()
-					&& x + options.width - 1 == sectors[side]->getCellX1())
-					return reject("There is no space to place a Door Button on this side");
+			else for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (!options.controls[side]) continue;
+				auto demand = doorControlDemand(sectors[side], x, y, options.width, side);
+				(void)planPhysicalControls(sectors[side]->getLayerIndex(), sectors[side]->getIndex(), y, &demand);
+			}
 		}
 		catch (std::exception const& error)
 		{
@@ -5681,12 +5725,10 @@ namespace core
 		for (uint32_t side = 0; side < 2; ++side)
 		{
 			if (hasButton[side]) continue;
-			if (doorObject->getCellX() == sides[side]->getCellX0()
-				&& doorObject->getCellX() + door->getCellsWide() - 1 == sides[side]->getCellX1())
-			{
-				throw WorldException(this,
-					"There is no space to place Door Buttons on both sides of this Door");
-			}
+			auto demand = doorControlDemand(sides[side], doorObject->getCellX(),
+				doorObject->getCellY(), door->getCellsWide(), side);
+			(void)planPhysicalControls(sides[side]->getLayerIndex(), sides[side]->getIndex(),
+				doorObject->getCellY(), &demand);
 		}
 
 		beginStructuralEdit("addSectorDoorButton");
@@ -5695,7 +5737,7 @@ namespace core
 		{
 			if (hasButton[side]) continue;
 			auto control = _createDoorButton(sides[side], doorObject->getCellX(),
-				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE);
+				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE, nullptr, true, side);
 			// A Door Button renders like its Door: solid on the Layer the Door was
 			// authored on, an outline from every other Layer.
 			auto button = static_pointer_cast<Button>(
@@ -5762,7 +5804,21 @@ namespace core
 					&& record.b == doorObject->getCellX()
 					&& record.c == door->getCellsWide();
 			});
-		return source != mConstructionRecords.end() && !(source->p && source->q);
+		if (source == mConstructionRecords.end() || (source->p && source->q)) return false;
+		try
+		{
+			shared_ptr<const Sector> sides[] = { door->getFrontSector(), door->getBackSector() };
+			for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (side == 0 ? source->p : source->q) continue;
+				auto demand = doorControlDemand(sides[side], doorObject->getCellX(),
+					doorObject->getCellY(), door->getCellsWide(), side);
+				(void)planPhysicalControls(sides[side]->getLayerIndex(), sides[side]->getIndex(),
+					doorObject->getCellY(), &demand);
+			}
+		}
+		catch (exception const&) { return false; }
+		return true;
 	}
 
 	bool World::canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
@@ -6019,12 +6075,12 @@ namespace core
 		{
 			if (options.controls[i])
 			{
-				if (x == sectors[i]->getCellX0() && (x + options.width - 1) == sectors[i]->getCellX1())
+				if (controlsAreExternallyBound && x == sectors[i]->getCellX0() && (x + options.width - 1) == sectors[i]->getCellX1())
 				{
 					throw WorldException(this, format("{} - No space to place Buttons for Door", caller));
 				}
 
-				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index);
+				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index, !controlsAreExternallyBound, (uint32_t)i);
 				createdControls[i].type = SectorObjectType::InteractionPoint;
 				createdControls[i].sector = sectors[i];
 				// A Door Button renders like its Door: solid on the authored Layer,
@@ -6349,6 +6405,7 @@ namespace core
 				SectorObjectType::BulkheadDoor, left.sectorIndex);
 			validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
 				SectorObjectType::BulkheadDoor, right.sectorIndex);
+			validatePhysicalControlBoundary(layerIndex, y, side == CORE_SIDE_LEFT ? x : x + 1);
 		}
 		catch (Exception const& error) { return reject(error.getMessage()); }
 		catch (exception const& error) { return reject(error.what()); }
@@ -6418,6 +6475,7 @@ namespace core
 		// Update cells
 		cellDef0.bulkheadIndices[CORE_SIDE_RIGHT] = doorObject.index;
 		cellDef1.bulkheadIndices[CORE_SIDE_LEFT] = doorObject.index;
+		reflowAllPhysicalControls();
 
 		// Add buttons: place two, one of each side.
 		auto sector0 = _getSector(cellDef0.sectorIndex);
@@ -6488,9 +6546,18 @@ namespace core
 	World::CreateObjectResult World::addSectorLightSwitch(uint32_t sectorIndex, uint32_t xOffset)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addSectorLightSwitch");
 		auto sector = _getSector(sectorIndex);
-		auto ctrl = _createSectorButton("Lightswitch", sector, xOffset, 0, CORE_BUTTON_F_AUTO_REENABLE);
+		if (!isLocationLike(sector->getType()) || xOffset >= sector->getCellsWide())
+			throw WorldException(this, "Light switch requires an authored Location host cell");
+		physicalControl::Demand demand;
+		demand.hasOwner = true;
+		demand.owner = { physicalControl::OwnerType::LocationLightSwitch,
+			{ sector->getLayerIndex(), sector->getCellX() + xOffset, sector->getCellY(), 1, 1 },
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, sector->getCellX() + xOffset, sector->getCellY() } };
+		(void)planPhysicalControls(sector->getLayerIndex(), sectorIndex, sector->getCellY(), &demand);
+		beginStructuralEdit("addSectorLightSwitch");
+		auto ctrl = _createSectorButton("Lightswitch", sector, xOffset, sector->getCellY(), CORE_BUTTON_F_AUTO_REENABLE);
 
 		auto object = ctrl.sector->_getObject(ctrl.index);
 		DeviceCommand command;
@@ -8019,6 +8086,7 @@ namespace core
 	void World::finishBuild()
 	{
 		invalidateSimulationSnapshot();
+		reflowAllPhysicalControls(true);
 		if (mBuildFinished)
 		{
 			if (!mSimulationPaused)
@@ -8107,6 +8175,18 @@ namespace core
 	shared_ptr<const Object> World::getObjectAtPosition(uint32_t layerIndex, float x, float y,
 		shared_ptr<const SectorObject>* sectorObject) const
 	{
+		// Explicit boundary-owned Buttons can extend into the preceding cell.
+		// Resolve their visible geometry before cell ownership (and Door leaves),
+		// but return the authored host SectorObject for interaction/selection.
+		for (auto const& placement : mPhysicalControlPlacements)
+		{
+			if (placement.layerIndex != layerIndex || placement.objectIndex == ~0u
+				|| placement.candidates[placement.currentCandidate].quarterOffset < 0) continue;
+			auto object = mSectors[placement.sectorIndex]->getObject(placement.objectIndex);
+			if (!object || !object->pointInside(x, y)) continue;
+			if (sectorObject) *sectorObject = object;
+			return object->_getObject();
+		}
 		// An open platform is deliberately rendered a little below its nominal
 		// floor. Hit-test its current geometry before resolving the pointer through
 		// a grid cell, because that rendered strip may lie in the cell below its Room.

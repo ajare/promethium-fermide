@@ -992,6 +992,7 @@ namespace core
 		};
 
 		std::vector<PhysicalControlPlacement> mPhysicalControlPlacements;
+		bool mResolvingPhysicalControls{ false };
 
 	private:
 
@@ -1351,6 +1352,23 @@ namespace core
 		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
 			uint32_t y, physicalControl::Demand const& demand, uint32_t flags,
 			uint32_t* vertexIdentifier = nullptr);
+		physicalControl::Demand doorControlDemand(std::shared_ptr<const Sector> sector,
+			uint32_t x, uint32_t y, uint32_t width, uint32_t role = 0) const;
+		physicalControl::Demand validPhysicalControlDemand(physicalControl::Demand demand,
+			uint32_t y, uint32_t blockedX = ~0u, uint32_t openedX = ~0u,
+			uint32_t unsupportedX = ~0u) const;
+		struct PhysicalControlPlan
+		{
+			std::vector<uint32_t> row, assignment;
+			std::vector<physicalControl::Demand> demands;
+		};
+		PhysicalControlPlan planPhysicalControls(uint32_t layer, uint32_t sector, uint32_t y,
+			physicalControl::Demand const* extra = nullptr, uint32_t blockedX = ~0u,
+			uint32_t openedX = ~0u, uint32_t unsupportedX = ~0u) const;
+		void validatePhysicalControlBoundary(uint32_t layer, uint32_t y, uint32_t blockedX) const;
+		void validatePhysicalControlSectorCreation(uint32_t layer, uint32_t x, uint32_t y,
+			uint32_t width, uint32_t height, bool walls) const;
+		void reflowAllPhysicalControls(bool finalPolicy = false);
 		void reflowPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y);
 		void applyPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y,
 			std::vector<uint32_t> const& row, std::vector<uint32_t> const& assignment);
@@ -1389,7 +1407,7 @@ namespace core
 
 		CreateObjectResult _createSectorButton(std::string const& name, std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index = nullptr);
 
-		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr);
+		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, bool wallSafe = true, uint32_t approachSide = 0);
 
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
 

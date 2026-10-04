@@ -32,6 +32,11 @@
 
 #include "core/World.h"
 #include "core/Button.h"
+#include "core/BulkheadDoor.h"
+#include "core/BulkheadDoorSectorObject.h"
+#include "core/Graph.h"
+#include "core/Vertex.h"
+#include <yaml-cpp/yaml.h>
 #include "core/Coordination.h"
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
@@ -203,6 +208,215 @@ namespace
 			}
 	}
 
+	void wallSafeAuthoring()
+	{
+		for (uint32_t width : { 1u, 3u })
+			for (bool leftWall : { false, true })
+				for (bool rightHost : { false, true })
+				{
+					core::World world("Wall-safe candidates", 16, 3);
+					if (leftWall) world.addRoom("Neighbour", 0, 0, 0, 4, 1);
+					auto front = world.addRoom("Front", 0, 0, 4, width + (rightHost ? 1 : 0), 1);
+					auto back = world.addRoom("Back", 1, 0, 0, 16, 1);
+					auto options = core::World::RemoteControlledDoor1Options;
+					options.width = width;
+					auto beforeObjects = world.getSector(front)->getNumObjects();
+					bool refused = false;
+					try { world.addSectorDoor(0, 0, 4, options); }
+					catch (core::Exception const&) { refused = true; }
+					require(refused == (leftWall && !rightHost), "Door host/wall feasibility mismatch");
+					if (refused)
+					{
+						require(world.getSector(front)->getNumObjects() == beforeObjects
+							&& buttonsIn(world, back).empty(), "Refused creation partially mutated either approach");
+						continue;
+					}
+					world.finishBuild();
+					for (auto const& [sector, expected] : { std::pair{ front, rightHost ? 4.0f + width : 4.0f },
+						std::pair{ back, 4.0f + width } })
+					{
+						auto button = buttonsIn(world, sector).at(0);
+						require(std::abs((button->getPosition() + button->getSize() * 0.5f).x - expected) < 0.00001f,
+							"Independent full-width candidate not applied");
+						auto point = world.lookupInteractionPoint(button->getInteractionPointId());
+						require(point && point.entity->getPosition().x == expected
+							&& point.entity->getSector().value == uint64_t(sector) + 1,
+							"Approach ownership/position changed");
+						auto const& cell = std::as_const(world).getLayer(sector == front ? 0 : 1)->getCellDefinition((uint32_t)expected, 0);
+						require(cell.controls[CORE_SIDE_LEFT] != ~0u, "Offset-zero Button not registered in its host cell");
+						uint32_t vertices = 0;
+						for (auto const& vertex : world.getGraph()->getVertices())
+							if (vertex->getObject() == button)
+							{
+								++vertices;
+								require(vertex->getPosition() == core::Vector2{ expected, 0.0f }
+									&& vertex->getSector()->getIndex() == sector,
+									"Graph approach is not at the approved host position");
+							}
+						require(vertices == 1, "Required Button lost its unique production graph approach");
+					}
+				}
+
+		// A removed shared wall permits the left boundary, but restoring it
+		// cannot silently drop a control when the right host is absent.
+		core::World world("Wall edit transaction", 12, 3);
+		auto neighbour = world.addRoom("Left", 0, 0, 0, 4, 1);
+		auto front = world.addRoom("Front", 0, 0, 4, 2, 1);
+		world.addRoom("Back", 1, 0, 0, 12, 1);
+		world.removeLocationWall(neighbour, 0, CORE_SIDE_RIGHT);
+		auto options = core::World::RemoteControlledDoor1Options;
+		options.width = 2;
+		world.addSectorDoor(0, 0, 4, options);
+		world.finishBuild();
+		auto button = buttonsIn(world, front).at(0);
+		auto point = button->getInteractionPointId();
+		auto graph = world.getGraph();
+		auto generation = world.getTopologyGeneration();
+		bool refused = false;
+		try { world.addLocationWall(neighbour, 0, CORE_SIDE_RIGHT); }
+		catch (core::Exception const&) { refused = true; }
+		require(refused && world.getGraph() == graph && world.getTopologyGeneration() == generation
+			&& buttonsIn(world, front).at(0) == button && world.lookupInteractionPoint(point),
+			"Invalid wall restoration was not atomic");
+		require(world.getSector(front)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::None,
+			"Refused wall restoration retained a wall");
+		core::SerializationWorkData data;
+		auto writer = core::YamlSerializer::toString();
+		world.serialize(*writer, data); writer->serialize();
+		core::World loaded("Placeholder", 1, 1);
+		auto reader = core::YamlSerializer::fromString(writer->getSerializedString()); reader->deserialize();
+		loaded.deserialize(*reader, data);
+		require(buttonsIn(loaded, front).at(0)->getPosition() == button->getPosition(),
+			"Removed-wall replay changed placement");
+		auto invalid = YAML::Load(writer->getSerializedString());
+		YAML::Node records(YAML::NodeType::Sequence);
+		for (auto record : invalid["construction"])
+			if (record["type"].as<std::string>() != "removeWall") records.push_back(record);
+		invalid["construction"] = records;
+		auto invalidReader = core::YamlSerializer::fromString(YAML::Dump(invalid)); invalidReader->deserialize();
+		auto loadedGraph = loaded.getGraph();
+		refused = false;
+		try { refused = !loaded.deserialize(*invalidReader, data); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && loaded.getGraph() == loadedGraph
+			&& buttonsIn(loaded, front).at(0)->getPosition() == button->getPosition(),
+			"Invalid authored load was not transactional");
+
+		// Centred switches retain their authored cell, including a nonzero base
+		// Level, and are unaffected by shared walls on either end.
+		for (int type = 0; type < 3; ++type)
+		{
+			core::World switches("Centred switch", 12, 4);
+			switches.addRoom("Left", 0, 1, 0, 4, 1);
+			auto host = type == 0 ? switches.addRoom("Room", 0, 1, 4, 1, 1)
+				: type == 1 ? switches.addCorridor(0, 1, 4, 1, 1)
+				: switches.addFacade(0, 1, 4, 1, 1);
+			switches.addRoom("Right", 0, 1, 5, 7, 1);
+			switches.addSectorLightSwitch(host, 0);
+			switches.finishBuild();
+			auto light = buttonsIn(switches, host).at(0);
+			require((light->getPosition() + light->getSize() * 0.5f).x == 4.5f,
+				"Light switch relocated away from authored centre");
+			auto interaction = switches.lookupInteractionPoint(light->getInteractionPointId());
+			require(interaction && interaction.entity->getPosition().y == 1.0f,
+				"Switch lost authored Location base Level");
+			auto count = switches.getSector(host)->getNumObjects();
+			refused = false;
+			try { switches.addSectorLightSwitch(host, 1); }
+			catch (core::Exception const&) { refused = true; }
+			require(refused && switches.getSector(host)->getNumObjects() == count,
+				"Out-of-host switch authoring was not atomic");
+			refused = false;
+			try { switches.addSectorLightSwitch(host, 0); }
+			catch (core::Exception const&) { refused = true; }
+			require(refused && switches.getSector(host)->getNumObjects() == count,
+				"Coincident switches were stacked or partially created");
+		}
+	}
+
+	void wallSafeSupportAndBulkheads()
+	{
+		for (int type = 0; type < 3; ++type)
+		{
+			core::World world("Door host kinds", 12, 3);
+			auto front = type == 0 ? world.addRoom("Room", 0, 0, 0, 10, 1)
+				: type == 1 ? world.addCorridor(0, 0, 0, 10, 1) : world.addFacade(0, 0, 0, 10, 1);
+			world.addRoom("Back", 1, 0, 0, 12, 1);
+			auto created = world.addSectorDoor(0, 0, 2, core::World::RemoteControlledDoor1Options);
+			world.finishBuild(); world.pauseSimulation();
+			auto button = buttonsIn(world, front).at(0);
+			auto center = button->getPosition() + button->getSize() * 0.5f;
+			require(center.x == 3.0f, "Door host type changed right preference");
+			std::shared_ptr<const core::SectorObject> selected;
+			require(world.getObjectAtPosition(0, center.x - CORE_BUTTON_SIZE * 0.25f, center.y, &selected) == button
+				&& selected->getCellX() == 3, "Hit test lost boundary-owned Button's preceding-cell half");
+			// Resize and move go through production replay; width changes must use
+			// the complete new footprint rather than the old selected host.
+			auto resize = world.planResizeSectorDoor(front, created.door.index, 2, 0, 2, 1);
+			require(resize.valid, "Valid Door resize refused");
+			auto resized = world.applyObjectMove(resize);
+			require(resized && (buttonsIn(world, front).at(0)->getPosition()
+				+ buttonsIn(world, front).at(0)->getSize() * 0.5f).x == 4.0f,
+				"Resize retained stale Door control width");
+		}
+
+		core::World world("Support and controlled threshold", 12, 3);
+		auto front = world.addRoom("Front", 0, 1, 0, 12, 1);
+		auto left = world.addRoom("Left", 1, 0, 0, 4, 2);
+		auto back = world.addRoom("Back", 1, 0, 4, 2, 2);
+		for (uint32_t x = 0; x < 4; ++x) world.addSectorWalkway(left, 1, x);
+		world.addSectorWalkway(back, 1, 0);
+		world.removeLocationWall(left, 1, CORE_SIDE_RIGHT);
+		auto options = core::World::RemoteControlledDoor1Options;
+		auto created = world.addSectorDoor(0, 1, 4, options);
+		world.finishBuild(); world.pauseSimulation();
+		require((buttonsIn(world, back).at(0)->getPosition()
+			+ buttonsIn(world, back).at(0)->getSize() * 0.5f).x == 4.0f,
+			"Missing right support did not choose left in its own approach");
+		// Adding the right support reselects the preferred candidate.
+		auto walkway = world.addSectorWalkway(back, 1, 1);
+		world.finishBuild();
+		require((buttonsIn(world, back).at(0)->getPosition()
+			+ buttonsIn(world, back).at(0)->getSize() * 0.5f).x == 5.0f,
+			"Support edit failed to restore right preference");
+		core::World::CreateBulkheadDoorOptions bulkOptions;
+		bulkOptions.controls[0] = bulkOptions.controls[1] = false;
+		require(world.removeSectorWalkway(back, walkway.index), "Supported fallback Walkway removal failed");
+		require((buttonsIn(world, back).at(0)->getPosition()
+			+ buttonsIn(world, back).at(0)->getSize() * 0.5f).x == 4.0f,
+			"Support removal did not choose the remaining valid candidate");
+		auto before = world.getSector(back)->getNumObjects();
+		bool refused = false;
+		try { world.addSectorBulkheadDoor(1, 1, 4, CORE_SIDE_LEFT, bulkOptions); }
+		catch (core::Exception const&) { refused = true; }
+		require(refused && world.getSector(back)->getNumObjects() == before,
+			"New controlled threshold did not refuse impossible ordinary control atomically");
+		walkway = world.addSectorWalkway(back, 1, 1);
+		world.finishBuild();
+		auto bulk = world.addSectorBulkheadDoor(1, 1, 4, CORE_SIDE_LEFT, bulkOptions);
+		world.finishBuild();
+		auto object = std::dynamic_pointer_cast<const core::BulkheadDoorSectorObject>(bulk.door.sector->getObject(bulk.door.index));
+		auto shape = buttonsIn(world, back).at(0)->getPosition();
+		for (bool open : { false, true })
+		{
+			if (open) { object->getDoor()->open(); object->getDoor()->update(100.0f); }
+			world.finishBuild();
+			require(buttonsIn(world, back).at(0)->getPosition() == shape,
+				"Bulkhead runtime state repositioned an ordinary Button");
+			auto plan = world.planRemoveSectorWalkway(back, walkway.index);
+			require(!plan.valid, "Open/closed controlled threshold must still block fallback across it");
+			refused = false;
+			try { world.removeSectorWalkway(back, walkway.index); }
+			catch (core::Exception const&) { refused = true; }
+			require(refused && buttonsIn(world, back).at(0)->getPosition() == shape,
+				"Support removal silently dropped a required control");
+		}
+		// A move to a level without either supported candidate is a preflight
+		// refusal; the original Door, graph and interactions remain intact.
+		auto move = world.planMoveSectorObject(front, created.door.index, 4, 2);
+		require(!move.valid, "Unsupported Door movement must be rejected");
+	}
+
 	void addingAButtonGivesBothSidesOne()
 	{
 		Scene scene = buildTwoRoomScene("Add door button");
@@ -262,9 +476,12 @@ namespace
 
 	void addRefusesWhenASideHasNoSpace()
 	{
-		// The fore Room is exactly the Door's width, so no cell beside the Door
-		// can take a Button on that side.
+		// The right host is outside the required Location; a retained shared
+		// left wall also eliminates the boundary-owned left candidate.
 		Scene scene = buildTwoRoomScene("No space for a Button", 1, 5, nullptr, 5);
+		scene->pauseSimulation();
+		scene->addRoom("Left neighbour", 0, 0, 0, 5, 1);
+		scene->finishBuild();
 		require(scene.door.object->getCellX() == 5
 			&& scene.door.object->getDoor()->getCellsWide() == 1,
 			"The scene's Door should span its fore Room exactly");
@@ -286,8 +503,8 @@ namespace
 			+ buttonsIn(*scene.world, scene.backSector).size();
 		require(buttonsBefore == 0 && buttonsAfter == 0,
 			"A refused add must not leave a Button behind on either side");
-		require(scene->canAddSectorDoorButton(scene.frontSector, scene.door.objectIndex),
-			"A refused add should leave the Door addable");
+		require(!scene->canAddSectorDoorButton(scene.frontSector, scene.door.objectIndex),
+			"Editor feasibility must use the same wall-safe policy");
 	}
 
 	void secondAddIsRefused()
@@ -491,6 +708,8 @@ namespace
 void runDoorTwoSidedButtonSmokeChecks()
 {
 	placementBoundaryPreservesLegacyPolicy();
+	wallSafeAuthoring();
+	wallSafeSupportAndBulkheads();
 	authoredPlacementPositionsRemainUnchanged();
 	addingAButtonGivesBothSidesOne();
 	addingCompletesALegacyOneSidedDoor();
