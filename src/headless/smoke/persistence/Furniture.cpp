@@ -2,6 +2,7 @@
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/MarkerSectorObject.h"
+#include "core/SerializationException.h"
 #include "core/AgentTagRegistryDocument.h"
 #include "core/AgentBehaviourRegistry.h"
 #include <fstream>
@@ -164,6 +165,39 @@ namespace persistence
 				require(restored->getGlobalPosition().x == 7.75f && restored->getLocalDepth() == 8,
 					"Saved Marker intent did not follow moved Furniture");
 			}
+			// A saved Path is a document reference even without a behaviour
+			// assignment, and even when inactive. Removing its usable-point key
+			// must fail rather than idle the Agent or select a coincident new point.
+			for (bool active : { false, true })
+			{
+				visitor = movement.lookupAgent(id).entity;
+				auto route = movement.getGraph()->calculatePath(visitor, findTarget());
+				require(route != nullptr, "Removed-point regression needs a saved Path");
+				visitor->setPath(route, active);
+				for (auto extension : { "world.yaml", "world" })
+					movement.saveTo((root / (std::string(active ? "active." : "inactive.") + extension)).string());
+			}
+			auto changed = YAML::LoadFile(path.string());
+			auto definition = changed["furnitureCatalogue"]["definitions"][0];
+			definition["usablePoints"][0]["key"] = "stool";
+			for (auto vertex : definition["vertices"])
+				if (vertex["usablePoint"]) vertex["usablePoint"] = "stool";
+			{ std::ofstream file(path); file << changed; }
+			for (auto prefix : { "active.", "inactive." })
+				for (auto extension : { "world.yaml", "world" })
+				{
+					try { (void)core::loadWorldDocument(root / (std::string(prefix) + extension)); }
+					catch (core::SerializationException const& error) {
+						auto message = std::string(error.what());
+						require(message.find("Furniture 'Moved target'") != std::string::npos
+							&& message.find("definition 'desk'") != std::string::npos
+							&& message.find("removed usable point 'seat'") != std::string::npos
+							&& message.find("Agent 'Visitor'") != std::string::npos
+							&& message.find("saved Path destination") != std::string::npos, message);
+						continue;
+					}
+					require(false, "Removed saved Path destination did not fail loading");
+				}
 		}
 		auto cataloguePath = root / "chair.furniture.yaml";
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);

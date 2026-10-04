@@ -2225,6 +2225,13 @@ namespace core
 					"Serialized Agent '{}' has Agent tag assignments but the World has no Agent tag registry",
 					agent->getName()));
 			}
+			// Saved destination intent is a document reference, just like a
+			// behaviour configuration Marker. Do not downgrade a removed usable
+			// point to the ordinary missing-routing-vertex warning.
+			if (auto removed = removedFurniturePoints.find(agent->mResetDestinationMarker);
+				removed != removedFurniturePoints.end())
+				throw SerializationException(format("{}; incompatible reference in Agent '{}' ({}) saved Path destination",
+					removed->second, agent->getName(), id.value));
 			if (agent->getBehaviourAssignment())
 			{
 				// Inspect recursive authored values, even if the behaviour registry
