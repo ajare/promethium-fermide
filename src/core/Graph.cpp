@@ -423,6 +423,37 @@ namespace core
 					sector->getCellX() + instance.x + definition.maxX } });
 		}
 
+		// Use the same combined coverage for ordinary objects and port attachment.
+		// Run boundaries include walls; processable cells exclude Walkway gaps.
+		auto floorSides = [&](shared_ptr<Vertex> const& vertex) {
+			auto x = vertex->getPosition().x;
+			bool left = x > runStart && cellIsProcessable(layerIndex,
+				static_cast<uint32_t>(ceil(x) - 1), y);
+			bool right = x < runEnd && cellIsProcessable(layerIndex,
+				static_cast<uint32_t>(floor(x)), y);
+			for (auto const& [owner, span] : furnitureSpans)
+				if (owner == vertex->getSector())
+				{
+					if (span.first < x && x <= span.second) left = false;
+					if (span.first <= x && x < span.second) right = false;
+				}
+			return pair{left, right};
+		};
+		for (auto const& vertex : vertices)
+		{
+			auto [left, right] = floorSides(vertex);
+			if (left || right) continue;
+			auto x = vertex->getPosition().x;
+			if (any_of(furnitureSpans.begin(), furnitureSpans.end(), [&](auto const& entry) {
+				return entry.first == vertex->getSector()
+					&& entry.second.first <= x && x <= entry.second.second;
+			}))
+				mBuildLog.push_back({ "Graph", ~0u, LogLevel::Error,
+					format("Furniture side-route span strands '{}' in Sector '{}' at {},{}. Move the object or Furniture outside the replaced floor span.",
+						vertex->getDescription(), vertex->getSector()->getDescription(), x, y) });
+		}
+		VertexList floorPorts;
+
 		// Attach to ordinary floor only where it exists on at least one side.
 		// An internal boundary (including two touching replacement spans) is not
 		// a floor junction. Collect all spans first so no later instance can
@@ -432,14 +463,9 @@ namespace core
 			if (find(port.depths.begin(), port.depths.end(), 0) == port.depths.end()) continue;
 			auto sector = port.vertex->getSector();
 			auto position = port.vertex->getPosition();
-			bool replacesLeft = false, replacesRight = false;
-			for (auto const& [owner, span] : furnitureSpans)
-				if (owner == sector)
-				{
-					replacesLeft |= span.first < position.x && position.x <= span.second;
-					replacesRight |= span.first <= position.x && position.x < span.second;
-				}
-			if (replacesLeft && replacesRight) continue;
+			auto [left, right] = floorSides(port.vertex);
+			if (!left && !right) continue;
+			floorPorts.push_back(port.vertex);
 			auto anchor = make_shared<SectorMarkerVertex>(sector,
 				position.x - sector->getCellX(), position.y - sector->getCellY());
 			anchor->mTopologyKey = port.vertex->getTopologyKey() + ":floor";
@@ -504,6 +530,33 @@ namespace core
 			});
 			for (size_t i = 1; i < route.cuts.size(); ++i)
 				connectPort(route.cuts[i - 1], route.cuts[i], route.depth);
+		}
+
+		// A composed Furniture network may reach floor through another instance.
+		// Search only its already assembled private edges (row chaining is later).
+		set<shared_ptr<const Vertex>> attached;
+		vector<shared_ptr<const Vertex>> pending(floorPorts.begin(), floorPorts.end());
+		while (!pending.empty())
+		{
+			auto vertex = pending.back(); pending.pop_back();
+			if (!attached.insert(vertex).second) continue;
+			for (auto const& edge : vertex->getEdges())
+				pending.push_back(edge->getVertex(0) == vertex ? edge->getVertex(1) : edge->getVertex(0));
+		}
+		for (auto const& instance : mwWorld->furniture())
+		{
+			auto sector = mwWorld->_getSector(instance.sector);
+			auto const& definition = *mwWorld->furnitureCatalogue()->definition(instance.definitionKey);
+			if (!definition.sideRoutes || sector->getLayerIndex() != layerIndex
+				|| sector->getCellY() + instance.y != y
+				|| sector->getCellX() + instance.x + definition.minX < runStart
+				|| sector->getCellX() + instance.x + definition.minX >= runEnd) continue;
+			if (none_of(ports.begin(), ports.end(), [&](auto const& port) {
+				return port.instance == instance.id && attached.contains(port.vertex);
+			}))
+				mBuildLog.push_back({ "Graph", ~0u, LogLevel::Error,
+					format("Furniture '{}' in Sector '{}' has no ordinary floor attachment. Leave floor beside an external depth-zero port or connect to an attached Furniture network.",
+						instance.name, sector->getDescription()) });
 		}
 
 		if (vertices.empty()) return;

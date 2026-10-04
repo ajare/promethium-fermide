@@ -51,6 +51,20 @@ destination branch off an ordinary floor anchor, so it remains reachable and dep
 severing circulation. Explicit definitions use only their authored edges.
 Independent movement or deletion of its owned Marker is refused.
 
+### Side-route safety diagnostics (#370)
+
+A `sideRoutes` footprint replaces ordinary floor routing. Graph builds emit
+**error-level** diagnostics when that replacement strands an ordinary row object
+(Marker, Door or Window threshold, or physical interaction control), or when the
+Furniture network has no ordinary floor attachment. Diagnostics apply regardless
+of authoring order, including rebuilds and document loading; they do not refuse
+placement or automatically repair the authored World. Move the object or Furniture
+out of the replaced span, or leave floor beside an external depth-zero port.
+Wall-to-wall replacements have no attachment; a placement against just one wall
+can still attach on its other side. A composed network may attach through another
+Furniture instance. Furniture-owned destinations retain their explicit branches,
+and definitions without `sideRoutes` retain ordinary floor routing.
+
 ## Safe instance edits (#349)
 
 Select an existing instance in the **Furniture instance** selector in the World

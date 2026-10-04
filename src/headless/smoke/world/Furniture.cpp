@@ -704,6 +704,60 @@ namespace
 			{ side = true; require(node.edge->getLocalDepth() == (variant == 0 ? 3 : 2), "Removed side or floor shortcut remained usable"); }
 			require(side, "Selected Path avoided the remaining authored side");
 		}
+		// #370: either authoring order must diagnose stranded ordinary row objects.
+		for (int variant = 0; variant < 8; ++variant)
+		{
+			core::World world("Stranded row object", 8, 2);
+			auto room = world.addRoom("Front", 0, 0, 0, 8, 1);
+			world.addRoom("Back", 1, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+			auto object = [&] {
+				if (variant < 2) world.addSectorMarker(room, 0, 3, "Stranded Marker");
+				else if (variant < 4) world.addSectorDoor(0, 0, 3);
+				else if (variant < 6) world.addSectorWindow(0, 0, 3, 1, 1);
+				else world.addSectorLightSwitch(room, 3);
+			};
+			if (variant % 2 == 0) object();
+			world.placeFurniture(room, "desk", 2, 0, "Desk", 2);
+			if (variant % 2 != 0) object();
+			world.finishBuild();
+			auto const& log = world.getGraph()->getBuildLog();
+			require(std::any_of(log.begin(), log.end(), [](auto const& entry) {
+				return entry.level == core::LogLevel::Error && entry.msg.find("strands") != std::string::npos;
+			}), "Furniture silently stranded a row object, variant " + std::to_string(variant));
+		}
+		for (auto width : {2u, 3u})
+		{
+			core::World world("Wall attachment", width, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, width, 1);
+			world.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+			auto id = world.placeFurniture(room, "desk", 0, 0, "Wall desk", 2);
+			uint32_t marker = 0;
+			world.addSectorMarker(room, 0, width == 2 ? 1.0f : 2.0f, "Room Marker", &marker);
+			world.finishBuild();
+			auto const& log = world.getGraph()->getBuildLog();
+			auto unattached = std::any_of(log.begin(), log.end(), [](auto const& entry) {
+				return entry.level == core::LogLevel::Error && entry.msg.find("no ordinary floor attachment") != std::string::npos;
+			});
+			require(unattached == (width == 2), "Wall-to-wall attachment diagnostic was missing or rejected one-sided attachment");
+			if (width == 3)
+			{
+				std::shared_ptr<const core::Vertex> seat;
+				for (auto const& vertex : world.getGraph()->getVertices())
+					if (vertex->getTopologyKey() == "furniture:" + std::to_string(id) + ":seat") seat = vertex;
+				core::Agent query("Query");
+				require(seat && world.getGraph()->calculatePath(&query,
+					world.getGraph()->getVertexByIdentifier(marker), seat), "One-sided floor attachment lost its seat or boundary Marker");
+				require(std::none_of(log.begin(), log.end(), [](auto const& entry) {
+					return entry.level == core::LogLevel::Error;
+				}), "Valid one-sided Furniture generated an error");
+			}
+			world.pauseSimulation();
+			require(world.removeFurniture(id), "Unable to repair diagnosed placement");
+			world.finishBuild();
+			for (auto const& entry : world.getGraph()->getBuildLog())
+				require(entry.level != core::LogLevel::Error, "Rebuild retained a stale Furniture error after repair");
+		}
 		core::World protectedWorld("Protected desk", 8, 2);
 		auto frontRoom = protectedWorld.addRoom("Approach", 0, 0, 0, 8, 1);
 		auto backRoom = protectedWorld.addRoom("Protected", 1, 0, 0, 8, 1);
