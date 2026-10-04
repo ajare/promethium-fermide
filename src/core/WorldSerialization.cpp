@@ -1160,8 +1160,14 @@ namespace core
 					if (!serializer.hasField(field)) continue;
 					serializer.beginArray(field);
 					while (serializer.nextArrayItem())
-						record.controlPermissionRequirements[controlSide].push_back(
-							serializer.readUint32(""));
+					{
+						// Door control requirements, like manual requirements, use
+						// uint64 on the wire (including binary history snapshots).
+						auto permission = serializer.readUint64("");
+						if (permission == 0 || permission > AccessPermission::Capacity)
+							throw SerializationException("Invalid Door control Access permission ID");
+						record.controlPermissionRequirements[controlSide].push_back(static_cast<uint32_t>(permission));
+					}
 					serializer.endArray();
 				}
 			break;

@@ -193,16 +193,20 @@ namespace core
 		}
 
 		auto const& initial = candidates[initialCandidate];
-		validateCellHasNoPhysicalControl(caller, layerIndex, initial.cellX, y, initial.side);
+		// The allocator has already checked slot and pair feasibility.
 		auto& cellDef = mLayers[layerIndex]->getCellDefinition(initial.cellX, y);
 		auto sector = _getSector(cellDef.sectorIndex);
 
 		float centreOffset = initial.quarterOffset >= 0 ? initial.quarterOffset * 0.25f
 			: initial.side == CORE_SIDE_MIDDLE ? 0.5f : static_cast<float>(initial.side);
 		float xOffset = centreOffset - CORE_BUTTON_SIZE * 0.5f;
+		// Each migrated Button keeps an individually queryable graph identifier,
+		// even when callers do not request it during construction.
+		uint32_t generatedIdentifier;
+		if (demand.hasOwner && !vertexIdentifier) vertexIdentifier = &generatedIdentifier;
 		auto controlIndex = sector->createPhysicalControl(sector, name, initial.cellX, y,
 			xOffset, CORE_BUTTON_Y_OFFSET, flags, vertexIdentifier);
-		cellDef.controls[initial.side] = controlIndex;
+		if (cellDef.controls[initial.side] == ~0u) cellDef.controls[initial.side] = controlIndex;
 		mPhysicalControlPlacements.push_back({ layerIndex, sector->getIndex(), controlIndex, y,
 			std::move(candidates), demand.defaultCandidate, initialCandidate });
 		mPhysicalControlPlacements.back().owner = demand.owner;
@@ -264,28 +268,37 @@ namespace core
 				if (slot == placement.objectIndex) slot = ~0u;
 			}
 		}
+		for (uint32_t x = 0; x < getCellsWide(); ++x)
+			mLayers[layerIndex]->getCellDefinition(x, y).stackedControls.clear();
 		map<int64_t, vector<uint32_t>> collisions;
 		for (auto index : row)
 		{
 			auto& placement = mPhysicalControlPlacements[index];
 			auto const& candidate = placement.candidates[placement.currentCandidate];
-			if (placement.objectIndex != ~0u)
-			{
-				auto& slot = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y).controls[candidate.side];
-				if (slot != ~0u) throw WorldException(this, "Physical-control slot assignment collided with an existing control");
-				slot = placement.objectIndex;
-			}
 			collisions[centerKey(candidate)].push_back(index);
 		}
 
 		for (auto const& [center, controls] : collisions)
 		{
 			(void)center;
-			for (auto index : controls)
+			auto ordered = controls;
+			bool stack = ordered.size() > 1 && mPhysicalControlPlacements[ordered.front()].hasOwner;
+			if (stack) sort(ordered.begin(), ordered.end(), [&](auto a, auto b)
+			{
+				return physicalControl::canonicalLess(mPhysicalControlPlacements[a].owner,
+					mPhysicalControlPlacements[b].owner);
+			});
+			uint32_t rank = 0;
+			for (auto index : ordered)
 			{
 				auto& placement = mPhysicalControlPlacements[index];
 				if (placement.objectIndex == ~0u) continue;
 				auto const& candidate = placement.candidates[placement.currentCandidate];
+				auto& cell = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y);
+				auto& slot = cell.controls[candidate.side];
+				if (stack && rank > 0) cell.stackedControls.push_back(placement.objectIndex);
+				else if (slot == ~0u) slot = placement.objectIndex;
+				else throw WorldException(this, "Physical-control slot assignment collided with an existing control");
 				float centerX = candidate.centreX();
 				if (candidate.side == CORE_SIDE_LEFT) centerX += placement.edgeInset;
 				else if (candidate.side == CORE_SIDE_RIGHT) centerX -= placement.edgeInset;
@@ -299,13 +312,18 @@ namespace core
 					mSectors[placement.sectorIndex]->_getObject(placement.objectIndex));
 				control->_setCellPosition(candidate.cellX, y);
 				auto button = static_pointer_cast<Button>(control->_getObject());
+				if (stack) adjustment = rank++ * button->getSize().y * 1.25f;
 				button->_setPlacement(centerX, y + CORE_BUTTON_Y_OFFSET, adjustment);
 				if (placement.hasInteractionOffset)
 				{
 					auto point = mInteractionPoints.find(button->getInteractionPointId());
 					if (point)
-						point->mPosition = button->getPosition() + button->getSize() * 0.5f
-							+ placement.interactionOffset;
+					{
+						auto centre = placement.hasOwner
+							? Vector2{centerX, y + CORE_BUTTON_Y_OFFSET + button->getSize().y * 0.5f}
+							: button->getPosition() + button->getSize() * 0.5f;
+						point->mPosition = centre + placement.interactionOffset;
+					}
 				}
 			}
 		}
@@ -326,8 +344,11 @@ namespace core
 			auto interaction = mInteractionPoints.find(point);
 			if (interaction)
 			{
-				placement.interactionOffset = interaction->mPosition
-					- (button->getPosition() + button->getSize() * 0.5f);
+				auto centre = placement.hasOwner
+					? Vector2{button->getPosition().x + button->getSize().x * 0.5f,
+						placement.cellY + CORE_BUTTON_Y_OFFSET + button->getSize().y * 0.5f}
+					: button->getPosition() + button->getSize() * 0.5f;
+				placement.interactionOffset = interaction->mPosition - centre;
 				placement.hasInteractionOffset = true;
 			}
 			break;

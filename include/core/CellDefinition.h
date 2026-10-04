@@ -28,8 +28,10 @@ namespace core
 		
 		uint32_t sectorObjectIndex{ ~0u };
 
-		// Cannot have more than 3 - 1 per side
+		// Representative controls: one registration per cell side.
 		uint32_t controls[3] = { ~0u, ~0u, ~0u };
+		// Additional independently owned controls sharing a registered approach.
+		std::vector<uint32_t> stackedControls;
 
 		// Index of Bulkhead doors on either side.
 		uint32_t bulkheadIndices[2] = { ~0u, ~0u };

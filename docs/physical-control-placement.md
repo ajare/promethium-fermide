@@ -79,3 +79,42 @@ positions and save/load geometry. Editor document history checks exact ordinary 
 and approach reconstruction through undo/redo alongside Dumbwaiter edits. Existing Render, permissions,
 graph, persistence, authored-workflow and simulation suites remain the contracts
 for the unchanged production behavior.
+
+## Canonical allocation and shared approaches (#428, #429)
+
+The sections above describe the earlier slices. Migrated ordinary Door controls
+and Location light switches now allocate jointly across each Layer/Level. The
+complete authored canonical tuple orders preference ties and stack members;
+previous placement and runtime identifiers are never allocation inputs.
+
+Collision-free assignments always win. If separation is impossible, two migrated
+controls may share a centre only within the same hosting Location. The allocator
+minimises buttons above bottoms, then non-preferred assignments (with capacity
+two, maximum stack size is already determined), then canonical preference ties.
+Indistinguishable definitions, cross-Location coincidence, and unavoidable stacks
+of three or more remain atomic refusals. Legacy-owner migration and larger stacks
+belong to subsequent tickets, not this slice.
+
+The lower Button stays at normal height; the upper is one Button-height plus a
+25%-height gap above it, at identical centre X. Cell registrations retain one
+representative plus independently owned additional members. Graph construction
+maps both SectorObjects and their individual vertex identifiers to exactly one
+normal-height approach. Visible geometry is not interaction reach geometry:
+both Interaction points keep their own identity, bindings, eligibility and
+operation-specific requirements at the walkable position. Explicit Agent requests
+and traversal intent select a control, never every control at the shared vertex.
+The editor and runtime mouse targeting use each Button's separate visible shape.
+
+Deletion, newly supported/available sides, document replay, clipboard authoring,
+and history restoration recompute placement rather than retaining stacks. No
+stack geometry or shared-vertex identity is serialized. Door control permissions
+read their existing uint64 wire representation before validated narrowing, allowing
+protected stacks to round-trip through binary as well as YAML documents.
+
+Headless coverage in `world/TwoSidedButtons.cpp`, `editor/DoorPanel.cpp`, and
+`render/DoorButtons.cpp` exercises both protected commands, unauthorized refusals,
+Agent approach and Door crossings without upward movement, canonical equal-X
+ordering, one graph vertex and both lookup kinds, independent hit selection,
+production draw styles/spacing, creation-order independence, YAML/binary replay,
+clipboard/history reconstruction, unstacking, and transactional triple refusal
+through authoring and invalid loading.

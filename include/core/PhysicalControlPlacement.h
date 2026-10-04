@@ -49,7 +49,8 @@ namespace core::physicalControl
 	// Legacy policy only: no new host rules, canonical ordering or stacking.
 	// Returns an assignment without modifying demands or production objects.
 	std::vector<uint32_t> allocateLegacy(std::vector<Demand> const& demands);
-	// One Layer/Level, across all hosting Locations. Explicit controls require
-	// distinct absolute centres; legacy-only components retain legacy policy.
+	bool canonicalLess(Owner const& a, Owner const& b);
+	// One Layer/Level, across all hosting Locations. Migrated controls may form
+	// same-Location pairs; legacy-only components retain legacy policy.
 	std::vector<uint32_t> allocateCanonical(std::vector<Demand> const& demands);
 }

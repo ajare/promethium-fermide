@@ -319,6 +319,44 @@ namespace
 			world.finishBuild(); check(4);
 		}
 
+		// Equal-X controls on the middle Layer: the lower (Layer-0 owner)
+		// remains outlined, while the upper (Layer-1 owner) remains filled.
+		{
+			core::World world("Stack artwork", 6, 1); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 6, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 1, 2, 1);
+			world.addRoom("Back", 2, 0, 0, 6, 1);
+			world.addSectorDoor(1, 0, 2, core::World::RemoteControlledDoor1Options);
+			world.addSectorDoor(0, 0, 2, core::World::RemoteControlledDoor1Options);
+			world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(middle), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			auto geometry = visibleGeometry(drawList);
+			require(geometry.buttonFillTriangles == 2 && geometry.buttonOutlineLines == 4,
+				"Stack draw omitted or merged a member/style");
+			ScreenBounds fill{1e10f, -1e10f, 1e10f, -1e10f}, outline = fill;
+			auto extend = [](ScreenBounds& bounds, ImVec2 p)
+			{
+				bounds.minX = std::min(bounds.minX, p.x); bounds.maxX = std::max(bounds.maxX, p.x);
+				bounds.minY = std::min(bounds.minY, p.y); bounds.maxY = std::max(bounds.maxY, p.y);
+			};
+			for (auto const& command : drawList.commands())
+			{
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && isButtonFillTriangle(*triangle) && survivesClip(boundsOf(triangle->positions, 3, 0), triangle->clip))
+					for (auto p : triangle->positions) extend(fill, p);
+				if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == kEnabledButtonColour)
+				{
+					ImVec2 points[]{line->from, line->to};
+					if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip)) { extend(outline, line->from); extend(outline, line->to); }
+				}
+			}
+			float height = outline.maxY - outline.minY;
+			require(std::abs(fill.minX - outline.minX) < 0.001f && std::abs(fill.maxX - outline.maxX) < 0.001f
+				&& std::abs(outline.minY - fill.minY - height * 1.25f) < 0.001f,
+				"Production draw commands lost canonical vertical geometry");
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

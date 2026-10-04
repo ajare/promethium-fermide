@@ -155,7 +155,7 @@ namespace core
 
 		void processWindow(ObjectData const& obj, PositionVertexMap& interLayerVertexLookup, RowVertices& row);
 
-		void processInteractionPoint(ObjectData const& obj, RowVertices& row);
+		void processInteractionPoint(ObjectData const& obj, RowVertices& row, bool shareApproach = false);
 
 		void processBulkheadDoor(ObjectData const& obj, RowVertices& row);
 

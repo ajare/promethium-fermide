@@ -910,15 +910,30 @@ namespace core
 			other->getSector()->getLayerIndex() != windowVertex->getSector()->getLayerIndex());
 	}
 
-	void Graph::processInteractionPoint(ObjectData const& obj, RowVertices& row)
+	void Graph::processInteractionPoint(ObjectData const& obj, RowVertices& row, bool shareApproach)
 	{
 		ASSERT_INDEX_OK(obj.index);
 		auto control = obj.sector->_getObject(obj.index);
 		auto vertex = control->createVertex(control, obj.sector);
+		// Sharing topology never shares the Button or its Interaction point.
+		// Ground-anchored upper members create the same normal-height approach.
+		bool shared = false;
+		if (shareApproach)
+		{
+			for (auto const& segment : row.segments)
+				for (auto const& entry : segment)
+					if (entry.slot == SlotInteractionPoint && entry.vertex->getSector() == obj.sector
+						&& entry.vertex->getPosition() == vertex->getPosition())
+					{
+						vertex = entry.vertex;
+						shared = true;
+						break;
+					}
+		}
 		addSectorObjectVertexLookup(control, vertex);
 		if (auto identifier = control->getVertexIdentifier(); identifier != ~0u)
 			mIdentifierVertexLookup[identifier] = vertex;
-		appendRowVertex(row, obj.x, SlotInteractionPoint, vertex);
+		if (!shared) appendRowVertex(row, obj.x, SlotInteractionPoint, vertex);
 	}
 
 	void Graph::processBulkheadDoor(ObjectData const& obj, RowVertices& row)
@@ -1568,6 +1583,13 @@ namespace core
 
 					processInteractionPoint(obj, row);
 				}
+			}
+
+			for (auto index : cellDef.stackedControls)
+			{
+				ObjectData obj = { index, layerIndex, x, y,
+					mwWorld->_getSector(cellDef.sectorIndex), {} };
+				processInteractionPoint(obj, row, true);
 			}
 
 			if (cellDef.bulkheadIndices[CORE_SIDE_RIGHT] != ~0u)

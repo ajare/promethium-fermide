@@ -152,7 +152,7 @@ namespace core::physicalControl
 
 		return assignment;
 	}
-	vector<uint32_t> allocateCanonical(vector<Demand> const& demands)
+	bool canonicalLess(Owner const& a, Owner const& b)
 	{
 		auto key = [](Owner const& owner)
 		{
@@ -162,16 +162,22 @@ namespace core::physicalControl
 			return tuple{ g.x, owner.type, g.layer, g.baseLevel, g.width, g.height,
 				h.layer, h.x, h.baseLevel, h.width, h.height, r.order, r.x, r.level };
 		};
+		return key(a) < key(b);
+	}
+
+	vector<uint32_t> allocateCanonical(vector<Demand> const& demands)
+	{
 		vector<uint32_t> order, assignment(demands.size());
 		for (uint32_t i = 0; i < demands.size(); ++i) order.push_back(i);
 		stable_sort(order.begin(), order.end(), [&](auto a, auto b)
 		{
 			if (demands[a].hasOwner != demands[b].hasOwner) return demands[a].hasOwner;
-			return demands[a].hasOwner && key(demands[a].owner) < key(demands[b].owner);
+			return demands[a].hasOwner && canonicalLess(demands[a].owner, demands[b].owner);
 		});
 		for (size_t i = 1; i < order.size(); ++i)
 			if (demands[order[i]].hasOwner && demands[order[i - 1]].hasOwner
-				&& key(demands[order[i]].owner) == key(demands[order[i - 1]].owner))
+				&& !canonicalLess(demands[order[i]].owner, demands[order[i - 1]].owner)
+				&& !canonicalLess(demands[order[i - 1]].owner, demands[order[i]].owner))
 				throw runtime_error("Indistinguishable duplicate physical-control definitions");
 
 		auto connected = [&](uint32_t a, uint32_t b)
@@ -207,14 +213,14 @@ namespace core::physicalControl
 			}
 
 			vector<uint32_t> choice(component.size()), best;
-			uint32_t bestPenalty = ~0u;
-			function<void(uint32_t, uint32_t)> search = [&](uint32_t depth, uint32_t penalty)
+			pair<uint32_t, uint32_t> bestScore{~0u, ~0u};
+			function<void(uint32_t, uint32_t, uint32_t)> search = [&](uint32_t depth, uint32_t stacked, uint32_t penalty)
 			{
-				// Preferred-first enumeration in canonical order makes the first
-				// minimum-penalty solution the lexicographic winner. Previous
-				// placements never enter the migrated objective.
-				if (!best.empty() && penalty >= bestPenalty) return;
-				if (depth == component.size()) { best = choice; bestPenalty = penalty; return; }
+				// With capacity two, maximum stack size is determined by stacked.
+				// Preferred-first canonical enumeration resolves the remaining tie.
+				auto score = make_pair(stacked, penalty);
+				if (!best.empty() && score >= bestScore) return;
+				if (depth == component.size()) { best = choice; bestScore = score; return; }
 				auto const& demand = demands[component[depth]];
 				vector<uint32_t> candidates;
 				for (uint32_t i = 0; i < demand.candidates.size(); ++i) candidates.push_back(i);
@@ -227,20 +233,30 @@ namespace core::physicalControl
 				{
 					auto const& position = demand.candidates[candidate];
 					bool collision = false;
+					uint32_t coincident = 0;
 					for (uint32_t i = 0; i < depth; ++i)
 					{
 						auto const& other = demands[component[i]];
 						auto const& occupied = other.candidates[choice[i]];
-						collision |= (position.cellX == occupied.cellX && position.side == occupied.side)
-							|| (position.centreKey() == occupied.centreKey() && (demand.hasOwner || other.hasOwner));
+						bool sameCentre = position.centreKey() == occupied.centreKey();
+						if (sameCentre && (demand.hasOwner || other.hasOwner))
+						{
+							auto const& a = demand.owner.hostingLocation;
+							auto const& b = other.owner.hostingLocation;
+							collision |= !demand.hasOwner || !other.hasOwner
+								|| tie(a.layer, a.x, a.baseLevel, a.width, a.height)
+								!= tie(b.layer, b.x, b.baseLevel, b.width, b.height);
+							++coincident;
+						}
+						else collision |= position.cellX == occupied.cellX && position.side == occupied.side;
 					}
-					if (collision) continue;
+					if (collision || coincident > 1) continue;
 					choice[depth] = candidate;
-					search(depth + 1, penalty + (demand.hasOwner && candidate != demand.defaultCandidate));
+					search(depth + 1, stacked + coincident, penalty + (demand.hasOwner && candidate != demand.defaultCandidate));
 				}
 			};
-			search(0, 0);
-			if (best.empty()) throw runtime_error("Physical controls require distinct positions (stacking is not supported)");
+			search(0, 0, 0);
+			if (best.empty()) throw runtime_error("Physical controls require separation or same-Location stacks of at most two");
 			for (size_t i = 0; i < component.size(); ++i) assignment[component[i]] = best[i];
 		}
 		return assignment;
