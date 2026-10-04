@@ -4,6 +4,7 @@
 #include "core/World.h"
 #include "core/Graph.h"
 #include <algorithm>
+#include <string>
 #include <vector>
 
 namespace
@@ -86,6 +87,22 @@ namespace
 		return true;
 	}
 
+	bool graphBuildWarnsForLocationWithoutVertices()
+	{
+		core::World world("Graph diagnostics", 8, 1);
+		world.addRoom("Empty Room", 0, 0, 0, 3, 1);
+		auto const connected = world.addRoom("Connected Room", 0, 0, 3, 3, 1);
+		world.addSectorMarker(connected, 0, 1.5f, "Connected Marker");
+		world.finishBuild();
+
+		return std::count_if(world.getBuildLog().begin(), world.getBuildLog().end(),
+			[](core::LogMessage const& entry)
+			{
+				return entry.level == core::LogLevel::Warning
+					&& entry.msg == "Sector 'Empty Room' on level 0, layer 0 has no vertices.";
+			}) == 1;
+	}
+
 	bool traversalGeometryPolicyIsWorldOwned()
 	{
 		core::World configured("Configured traversal geometry", 2, 1);
@@ -125,6 +142,11 @@ void registerTopology(std::vector<smoke::Check>& checks)
 	checks.push_back({ "pausedTopologyRebuildIsAtomicAndCleansOwnership", [](smoke::Context const&)
 		{
 			smoke::require(pausedTopologyRebuildIsAtomicAndCleansOwnership(), "paused topology rebuild was not safe and atomic");
+		} });
+	checks.push_back({ "graphBuildWarnsForLocationWithoutVertices", [](smoke::Context const&)
+		{
+			smoke::require(graphBuildWarnsForLocationWithoutVertices(),
+				"an empty Location did not report its missing Graph vertices");
 		} });
 	checks.push_back({ "traversalGeometryPolicyIsWorldOwned", [](smoke::Context const&)
 		{

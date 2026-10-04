@@ -349,7 +349,7 @@ namespace core
 	}
 
 	void Graph::processSectorVertices(VertexList& vertices, uint32_t layerIndex, uint32_t y,
-		uint32_t runStart, uint32_t runEnd)
+		uint32_t runStart, uint32_t runEnd, shared_ptr<const Sector> emptyLocation)
 	{
 		// Furniture's private graph is never inserted into the ordinary row chain.
 		// External points expose only the resolved depths of their authored edges.
@@ -559,7 +559,16 @@ namespace core
 						instance.name, sector->getDescription()) });
 		}
 
-		if (vertices.empty()) return;
+		if (vertices.empty())
+		{
+			// Furniture may have supplied private vertices directly. Otherwise this
+			// single-Location run is absent from the movement graph.
+			if (emptyLocation && !mSectorVertexLookup.contains(emptyLocation.get()))
+				mBuildLog.push_back({ "Graph", ~0u, LogLevel::Warning,
+					format("Sector '{}' on level {}, layer {} has no vertices.",
+						emptyLocation->getName(), y, layerIndex) });
+			return;
+		}
 		stable_sort(vertices.begin(), vertices.end(), [](auto a, auto b) {
 			return a->getPosition().x < b->getPosition().x;
 		});
@@ -1495,9 +1504,15 @@ namespace core
 
 			auto begin = lower_bound(row.segmentOfCell.begin(), row.segmentOfCell.end(), segment);
 			auto end = upper_bound(begin, row.segmentOfCell.end(), segment);
+			shared_ptr<const Sector> emptyLocation;
+			if (row.sectors[segment].size() == 1)
+			{
+				auto candidate = mwWorld->getSector(row.sectors[segment].front());
+				if (isLocationLike(candidate->getType())) emptyLocation = std::move(candidate);
+			}
 			processSectorVertices(vertices, row.layerIndex, row.y,
 				static_cast<uint32_t>(begin - row.segmentOfCell.begin()),
-				static_cast<uint32_t>(end - row.segmentOfCell.begin()));
+				static_cast<uint32_t>(end - row.segmentOfCell.begin()), std::move(emptyLocation));
 		}
 	}
 

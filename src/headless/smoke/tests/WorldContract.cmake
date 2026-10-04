@@ -47,6 +47,7 @@ set(checks
     walkwayEditingEnforcesPlacementMovementAndOccupancyRules
     deletingWalkwayPreservesUnrelatedRoomDoor
     pausedTopologyRebuildIsAtomicAndCleansOwnership
+    graphBuildWarnsForLocationWithoutVertices
     traversalGeometryPolicyIsWorldOwned
     runMiddleLayerDeletion
 )
