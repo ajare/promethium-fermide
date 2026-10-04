@@ -32,7 +32,7 @@ private:
 	bool mOpen{};
 	bool mFocus{};
 	std::weak_ptr<const core::FurnitureCatalogue> mRowCatalogue, mDragCatalogue;
-	std::string mDragKey;
+	std::string mDragKey, mDeleteDiagnostic;
 	size_t mPage{};
 	bool mDragArmed{}, mDragging{};
 	uint64_t mMoveId{};

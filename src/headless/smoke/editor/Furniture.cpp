@@ -764,6 +764,140 @@ namespace
 		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
 	}
 
+	void locationPlanDeletion(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = std::make_shared<core::World>("Deletion", 20, 6);
+		auto room = world->addRoom("Pinned", 0, 1, 3, 6, 2);
+		auto other = world->addRoom("Other", 1, 0, 0, 6, 1);
+		world->finishBuild(); world->pauseSimulation();
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
+		auto id = world->placeFurniture(room, "chair", 1, 0, "Deep chair", 6);
+		auto marker = world->furniture().front().marker;
+		auto otherId = world->placeFurniture(other, "chair", 1, 0, "Other chair", 0);
+		std::string diagnostic;
+		require(world->renameMarker(marker, "Authored seat", &diagnostic), diagnostic);
+		auto registry = core::AgentBehaviourRegistry::create();
+		world->attachAgentBehaviourRegistry("editor.behaviours", registry);
+		auto behaviour = registry->addAgentBehaviour("Visit", "visit.lua", {
+			{ "destination", core::AgentBehaviourSchemaType::Marker, {}, true, std::nullopt }
+		});
+		auto agent = world->createAgent("Plan visitor", room, 0, .5f);
+		require(world->setAgentBehaviourAssignment(agent, behaviour, 1, {{"destination", marker}}, &diagnostic), diagnostic);
+		DocumentHistory history; LocationPlan plan;
+		require(plan.open(world, world->getSector(room), 1), "Cannot open deletion plan");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1200, 800}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text;
+		io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		ImVec2 viewport{}, size{}; unsigned rows = 0, outlines = 0;
+		std::vector<std::string> labels;
+		auto frame = [&]
+		{
+			text.clear(); rows = outlines = 0; labels.clear();
+			ImGui::NewFrame(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 420});
+			plan.render(world, [&](WorldDrawList const& commands, ImVec2 p, ImVec2 s)
+			{
+				viewport = p; size = s;
+				for (auto const& command : commands.commands())
+				{
+					if (auto label = std::get_if<WorldDrawList::Text>(&command))
+					{
+						labels.push_back(label->value);
+						if (std::abs(label->position.x - p.x - 16) < .01f) ++rows;
+					}
+					if (auto line = std::get_if<WorldDrawList::Line>(&command))
+						if (line->colour == IM_COL32(251, 188, 4, 255)) ++outlines;
+				}
+			}, history);
+			ImGui::GetCurrentContext()->NextWindowData.ClearFlags();
+			ImGui::LogFinish(); ImGui::Render();
+		};
+		auto click = [&](ImVec2 p)
+		{
+			io.AddMousePosEvent(p.x, p.y); frame(); frame();
+			io.AddMouseButtonEvent(0, true); frame();
+			io.AddMouseButtonEvent(0, false); frame(); frame();
+		};
+		frame(); frame();
+		require(rows == 8, "Deep Furniture did not expand plan before deletion");
+		click({viewport.x + 48 + 1.5f * (size.x - 60) / 6,
+			viewport.y + size.y - 28 - 6.5f * (size.y - 36) / rows});
+		require(selectedFurnitureInstance(world) && selectedFurnitureInstance(world)->id == id && outlines == 4,
+			"Plan did not select intended Furniture for deletion");
+		// Locate the production button using ImGui's item identity, not controller internals.
+		auto* window = ImGui::FindWindowByName("Location plan");
+		auto button = window->GetID("Delete selected Furniture");
+		ImVec2 deletePosition{}; bool found = false;
+		for (float y = window->Pos.y + 50; y < viewport.y && !found; y += 4)
+			for (float x = window->Pos.x + 10; x < window->Pos.x + 260; x += 16)
+			{
+				io.AddMousePosEvent(x, y); frame(); frame();
+				if (ImGui::GetHoveredID() == button) { deletePosition = {x, y}; found = true; break; }
+			}
+		require(found, "Plan does not expose deletion control");
+		auto before = captureDocumentSnapshot(world, history)->yaml;
+		click(deletePosition);
+		require(text.find("Plan visitor") != std::string::npos && text.find("destination") != std::string::npos
+			&& captureDocumentSnapshot(world, history)->yaml == before && history.undoCount() == 0
+			&& selectedFurnitureInstance(world) && selectedFurnitureInstance(world)->id == id && outlines == 4,
+			"Refused plan deletion lost diagnostic/selection/reference or changed World/history");
+		require(world->clearAgentBehaviourAssignment(agent, &diagnostic), diagnostic);
+		click(deletePosition);
+		require(world->furniture().size() == 1 && world->furniture().front().id == otherId
+			&& !world->lookupMarker(marker) && !selectedFurnitureInstance(world) && outlines == 0
+			&& history.undoCount() == 1 && rows == 8 && text.find("Plan visitor") == std::string::npos
+			&& std::find(labels.begin(), labels.end(), "Deep chair") == labels.end(),
+			"Successful deletion left owned content/selection, removed wrong instance, or shrank range");
+		// A stale selection or release cannot repeat deletion or finish a prior gesture.
+		click(deletePosition); frame();
+		require(history.undoCount() == 1 && world->furniture().size() == 1, "Stale deletion created an edit");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto result = world->deserialize(*reader, work); world->pauseSimulation(); return result;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Plan deletion undo failed"); frame();
+		require(world->furniture().front().id == id && world->furniture().front().marker == marker
+			&& world->lookupMarker(marker)->getName() == "Authored seat" && rows == 8
+			&& !selectedFurnitureInstance(world) && text.find("Location: Pinned") != std::string::npos
+			&& std::find(labels.begin(), labels.end(), "Deep chair") != labels.end(),
+			"Undo lost instance/Marker identity, pinned target, or restored presentation");
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Plan deletion redo failed"); frame();
+		require(world->furniture().size() == 1 && world->furniture().front().id == otherId
+			&& !world->lookupMarker(marker) && !selectedFurnitureInstance(world) && rows == 8
+			&& text.find("Location: Pinned") != std::string::npos,
+			"Redo left stale owned content/selection or retargeted/shrank plan");
+		// Shared panel selection outside this plan must not be deleted by its control.
+		require(selectFurnitureInstance(world, otherId), "Cannot select other Location's Furniture");
+		before = captureDocumentSnapshot(world, history)->yaml; click(deletePosition);
+		require(captureDocumentSnapshot(world, history)->yaml == before && history.undoCount() == 1
+			&& selectedFurnitureInstance(world)->id == otherId, "Pinned plan deleted unrelated selection");
+		// Reconstructed catalogue/instance selection cannot be used by a stale control.
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Cannot restore chair for stale-state check"); frame();
+		require(selectFurnitureInstance(world, id), "Cannot select restored chair");
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		require(restore(*captureDocumentSnapshot(world, history)), "Cannot reconstruct catalogue");
+		before = captureDocumentSnapshot(world, history)->yaml;
+		auto count = history.undoCount(); click(deletePosition);
+		require(!selectedFurnitureInstance(world) && captureDocumentSnapshot(world, history)->yaml == before
+			&& history.undoCount() == count && plan.isOpen(world), "Stale catalogue/instance selection was deleted");
+		require(selectFurnitureInstance(world, id), "Cannot select current chair");
+		require(world->removeFurniture(id, &diagnostic), diagnostic); click(deletePosition);
+		require(!selectedFurnitureInstance(world) && history.undoCount() == count && rows == 8,
+			"External instance deletion left actionable selection or shrank range");
+		auto replacement = std::make_shared<core::World>("Replacement", 20, 6);
+		replacement->addRoom("Pinned", 0, 1, 3, 6, 2); replacement->finishBuild();
+		world = replacement; frame();
+		require(!plan.isOpen(world) && world->furniture().empty() && history.undoCount() == count,
+			"World replacement retained deletion target");
+		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
+	}
+
 	void locationPlanWorkflow(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -947,6 +1081,7 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });
 	checks.push_back({ "locationPlan/placement", locationPlanPlacement });
 	checks.push_back({ "locationPlan/movement", locationPlanMovement });
+	checks.push_back({ "locationPlan/deletion", locationPlanDeletion });
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });
 	checks.push_back({ "furniture/attachmentActions", attachmentActions });

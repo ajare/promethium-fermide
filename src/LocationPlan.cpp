@@ -48,7 +48,7 @@ bool LocationPlan::open(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::Sector> const& location, uint32_t worldLevel)
 {
 	if (!ownsLocation(world, location)) return false;
-	cancelDrag();
+	cancelDrag(); mDeleteDiagnostic.clear();
 	mWorld = world; mLocation = location; mDepthRows = 4;
 	mWorldLevel = std::clamp(worldLevel, location->getCellY(),
 		location->getCellY() + location->getLevelsHigh() - 1);
@@ -58,7 +58,7 @@ bool LocationPlan::open(std::shared_ptr<core::World> const& world,
 
 void LocationPlan::close()
 {
-	cancelDrag(); mPage = 0; mRowCatalogue.reset();
+	cancelDrag(); mDeleteDiagnostic.clear(); mPage = 0; mRowCatalogue.reset();
 	mOpen = false; mFocus = false; mWorld.reset(); mLocation.reset();
 }
 
@@ -194,6 +194,21 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			ImGui::EndCombo();
 		}
 		mDepthRows = std::max(mDepthRows, locationPlanDepthRows(*world, *location, mWorldLevel));
+		auto instance = selectedFurnitureInstance(world);
+		bool canDeleteSelection = instance && instance->sector == location->getIndex()
+			&& location->getCellY() + instance->y == mWorldLevel;
+		ImGui::BeginDisabled(!canDeleteSelection);
+		if (ImGui::Button("Delete selected Furniture") && canDeleteSelection)
+		{
+			if (deleteSelectedFurniture(world, instance->id, mDeleteDiagnostic, history))
+			{
+				selectFurnitureInstance(world, 0);
+				cancelDrag();
+				mDeleteDiagnostic.clear();
+			}
+		}
+		ImGui::EndDisabled();
+		if (!mDeleteDiagnostic.empty()) ImGui::TextWrapped("%s", mDeleteDiagnostic.c_str());
 		ImGui::TextUnformatted("World X / Local depth (ordering)");
 		auto position = ImGui::GetCursorScreenPos();
 		auto size = ImGui::GetContentRegionAvail();
