@@ -917,8 +917,13 @@ namespace core
 				serializer.beginMap("");
 				serializer.beginArray("permissions");
 				while (serializer.nextArrayItem())
-					record.landingControlPermissionRequirements.back().push_back(
-						serializer.readUint32(""));
+				{
+					// Landing requirements use uint64 on the existing binary wire.
+					auto permission = serializer.readUint64("");
+					if (permission == 0 || permission > 256)
+						throw SerializationException("Invalid landing control Access permission ID");
+					record.landingControlPermissionRequirements.back().push_back(static_cast<uint32_t>(permission));
+				}
 				serializer.endArray();
 				serializer.endMap();
 			}

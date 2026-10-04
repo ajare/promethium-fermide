@@ -1260,8 +1260,289 @@ namespace
 
 }
 
+namespace
+{
+	void deterministicTransportControls()
+	{
+		using namespace core;
+		// Full-width Lift doorways choose independently at every authored Stop.
+		for (uint32_t width : {1u, 2u})
+		{
+			World world("Independent Lift landings", 16, 5);
+			auto lower = world.addRoom("Lower", 0, 0, 4, width, 1);
+			auto middle = world.addRoom("Middle", 0, 2, 3, width + 3, 1);
+			world.addRoom("Upper neighbour", 0, 4, 4 + width, 2, 1);
+			auto upper = world.addRoom("Upper", 0, 4, 3, width + 1, 1);
+			World::CreateLiftOptions options; options.cellsWide = width; options.stopOffsets = {0, 2, 4};
+			auto lift = world.addLift(1, 0, 4, options); world.finishBuild();
+			for (auto const& [host, expected] : {std::pair{lower, 4.0f}, std::pair{middle, 4.0f + width}, std::pair{upper, 4.0f}})
+			{
+				auto button = buttonsIn(world, host).at(0);
+				require(button->getPosition().x + button->getSize().x * 0.5f == expected, "Lift Stop did not choose independently/full-width");
+				auto point = world.lookupInteractionPoint(button->getInteractionPointId());
+				require(point && point.entity->getPosition().x == expected, "Lift approach drifted");
+			}
+			// A supported whole-unit move is rebuilt, while an impossible move is a no-op.
+			world.pauseSimulation();
+			auto before = world.getGraph();
+			auto invalid = world.planResizeLift(lift.lift.sector->getIndex(), 12, 0, width, 5);
+			require(!invalid.valid && world.getGraph() == before, "Invalid Lift move mutated graph");
+		}
+
+		// A wide Shuttle with multiple doorways retains every distinct call. A
+		// narrow first landing needs simultaneous side changes, not omitted calls.
+		{
+			World world("Multiple Shuttle calls", 24, 2);
+			auto first = world.addRoom("First", 0, 0, 0, 4, 1);
+			auto second = world.addRoom("Second", 0, 0, 10, 5, 1);
+			world.pauseSimulation();
+			std::vector<AccessPermissionId> permissions;
+			World::CreateShuttleOptions options{1, 4, {0, 10}, 0}; options.doorMask = 0b1111;
+			for (uint32_t i = 0; i < 8; ++i)
+			{
+				permissions.push_back(world.addAccessPermission("Call " + std::to_string(i)));
+				options.landingControlPermissionRequirements.push_back({permissions.back()});
+			}
+			auto shuttle = world.addShuttle(1, 0, 0, 20, options); world.finishBuild();
+			require(shuttle.doors.size() == 8 && buttonsIn(world, first).size() == 4
+				&& buttonsIn(world, second).size() == 4, "Shuttle doorway calls were merged/omitted");
+			for (uint32_t i = 0; i < 8; ++i)
+			{
+				auto const& control = shuttle.doors[i].controls[0];
+				auto button = std::dynamic_pointer_cast<const Button>(control.sector->getObject(control.index)->_getObject());
+				auto expected = i < 4 ? float(i) : float(11 + i - 4);
+				require(button && button->getPosition().x + button->getSize().x * 0.5f == expected
+					&& button->getPosition().y == CORE_BUTTON_Y_OFFSET, "Shuttle complete side reassignment/preference failed");
+				require(world.getInteractionPointPermissionRequirement(control.interactionPoint) == std::vector<AccessPermissionId>{permissions[i]}, "Doorway-specific call requirement changed");
+				auto point = world.lookupInteractionPoint(control.interactionPoint);
+				require(point && point.entity->getPosition() == Vector2{expected, 0}, "Shuttle call approach drifted");
+			}
+		}
+
+		// The Shuttle's leftmost track geometry (not its second doorway at X=10)
+		// puts its call below an incoming Door at X=9 in the canonical stack.
+		for (bool reverse : {false, true})
+		{
+			World world("Shuttle owner geometry", 20, 2); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 20, 1);
+			world.addRoom("Origin", 1, 0, 0, 3, 1);
+			world.addRoom("Neighbour", 1, 0, 8, 1, 1);
+			auto host = world.addRoom("Destination", 1, 0, 9, 2, 1);
+			World::CreateShuttleOptions options{1, 3, {0, 9}, 0};
+			World::CreateShuttleResult shuttle;
+			if (reverse) shuttle = world.addShuttle(2, 0, 0, 12, options);
+			world.addSectorDoor(0, 0, 9, World::RemoteControlledDoor1Options);
+			if (!reverse) shuttle = world.addShuttle(2, 0, 0, 12, options);
+			world.finishBuild();
+			auto buttons = buttonsIn(world, host);
+			std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+			require(buttons.size() == 2 && buttons[0]->getInteractionPointId() == shuttle.doors[1].controls[0].interactionPoint
+				&& buttons[0]->getPosition().x == buttons[1]->getPosition().x, "Canonical Shuttle owner was its generated Door/allocation ID");
+			world.pauseSimulation();
+			auto before = world.getGraph();
+			auto invalid = world.planResizeShuttle(shuttle.shuttle.sector->getIndex(), 4, 0, 12);
+			require(!invalid.valid && world.getGraph() == before, "Invalid Shuttle movement changed controls/graph");
+		}
+
+		// Both retained shared boundaries invalidate required controls before any
+		// transport, Door, interaction, IDs, or simulation pause is created.
+		for (bool shuttle : {false, true})
+		{
+			World world("Refused transport", 12, 3);
+			world.addRoom("Left", 0, 0, 0, 4, 3);
+			world.addRoom("Landing", 0, 0, 4, 1, 3);
+			world.addRoom("Right", 0, 0, 5, 7, 3);
+			world.finishBuild();
+			auto graph = world.getGraph(); auto generation = world.getTopologyGeneration(); auto sectors = world.getNumSectors();
+			bool refused = false;
+			try
+			{
+				if (shuttle) { World::CreateShuttleOptions options{1, 3, {0, 4}, 0}; options.doorMask = 1; world.addShuttle(1, 0, 4, 7, options); }
+				else { World::CreateLiftOptions options; options.stopOffsets = {0, 2}; world.addLift(1, 0, 4, options); }
+			}
+			catch (Exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && world.getTopologyGeneration() == generation
+				&& world.getNumSectors() == sectors, "Invalid transport creation was not atomic");
+		}
+
+		// Migrated transport calls join three/four-member mixed stacks without
+		// acquiring an extra horizontal offset or elevated interaction approach.
+		for (uint32_t count : {3u, 4u})
+		{
+			World world("Capacity-bounded mixed Lift stack", 10, 3); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 1);
+			world.addRoom("Neighbour", 1, 0, 0, 1, 1);
+			auto host = world.addRoom("Landing", 1, 0, 1, 2, 1);
+			world.addRoom("Upper", 1, 2, 0, 10, 1);
+			world.addRoom("Back", 2, 0, 1, 1, 1);
+			World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			world.addLift(2, 0, 2, options);
+			world.addSectorDoor(0, 0, 1, World::RemoteControlledDoor1Options);
+			world.addSectorDoor(0, 0, 2, World::RemoteControlledDoor1Options);
+			if (count == 4) world.addSectorDoor(1, 0, 1, World::RemoteControlledDoor1Options);
+			world.finishBuild();
+			auto buttons = buttonsIn(world, host);
+			std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+			require(buttons.size() == count, "Mixed transport stack capacity omitted a required call");
+			std::shared_ptr<const Vertex> approach;
+			for (uint32_t rank = 0; rank < count; ++rank)
+			{
+				auto button = buttons[rank];
+				require(button->getPosition().x + button->getSize().x * 0.5f == 2
+					&& std::abs(button->getPosition().y - CORE_BUTTON_Y_OFFSET - rank * button->getSize().y * 1.25f) < 0.00001f,
+					"Mixed transport stack spacing/centre changed");
+				auto point = world.lookupInteractionPoint(button->getInteractionPointId());
+				require(point && point.entity->getPosition() == Vector2{2, 0}, "Upper transport stack interaction moved upward");
+			}
+			for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(host)->getObject(i);
+				if (!object || !std::dynamic_pointer_cast<const Button>(object->_getObject())) continue;
+				auto vertex = world.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+				if (approach) require(vertex == approach, "Large mixed stack duplicated approaches");
+				approach = vertex;
+			}
+		}
+
+		// Removed shared walls permit an otherwise impossible landing. Restoring
+		// them, including through authored loading, must be an atomic refusal.
+		for (bool shuttle : {false, true})
+		{
+			World world("Transport structural transaction", 12, 3);
+			auto neighbour = world.addRoom("Left", 0, 0, 0, 4, 3);
+			auto host = world.addRoom("Landing", 0, 0, 4, 1, 3);
+			world.addRoom("Right", 0, 0, 5, 7, 3);
+			world.addSectorWalkway(host, 2, 0);
+			world.removeLocationWall(neighbour, 0, CORE_SIDE_RIGHT);
+			world.removeLocationWall(neighbour, 2, CORE_SIDE_RIGHT);
+			if (shuttle) { World::CreateShuttleOptions options{1, 3, {0, 4}, 0}; options.doorMask = 1; world.addShuttle(1, 0, 4, 7, options); }
+			else { World::CreateLiftOptions options; options.stopOffsets = {0, 2}; world.addLift(1, 0, 4, options); }
+			world.finishBuild(); world.pauseSimulation();
+			auto graph = world.getGraph(); auto buttons = buttonsIn(world, host); bool refused = false;
+			try { world.addLocationWall(neighbour, 0, CORE_SIDE_RIGHT); } catch (Exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && buttonsIn(world, host) == buttons, "Wall restoration partially changed transport controls");
+			SerializationWorkData data; auto writer = YamlSerializer::toString(); world.serialize(*writer, data); writer->serialize();
+			auto invalid = YAML::Load(writer->getSerializedString()); YAML::Node records(YAML::NodeType::Sequence);
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() != "removeWall") records.push_back(record);
+			invalid["construction"] = records;
+			auto reader = YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize(); refused = false;
+			try { refused = !world.deserialize(*reader, data); } catch (std::exception const&) { refused = true; }
+			require(refused && world.getGraph() == graph && buttonsIn(world, host) == buttons, "Invalid transport load was not transactional");
+		}
+
+		// A protected incoming Door and an independently protected Lift call must
+		// share a normal-height approach, not a command or permission requirement.
+		for (bool reverse : {false, true})
+		{
+			World world("Mixed transport stack", 10, 3); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 1);
+			auto neighbour = world.addRoom("Neighbour", 1, 0, 0, 1, 1);
+			auto host = world.addRoom("Landing", 1, 0, 1, 2, 1);
+			world.addRoom("Upper", 1, 2, 0, 10, 1);
+			world.pauseSimulation();
+			auto doorPermission = world.addAccessPermission("Door"); auto callPermission = world.addAccessPermission("Call");
+			auto doorOptions = World::RemoteControlledDoor1Options;
+			doorOptions.controlPermissionRequirements[1] = {doorPermission};
+			World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			options.landingControlPermissionRequirements = {{callPermission}, {}}; options.initialStop = 1;
+			World::CreateLiftResult lift;
+			if (reverse) lift = world.addLift(2, 0, 2, options);
+			world.addSectorDoor(0, 0, 1, doorOptions);
+			if (!reverse) lift = world.addLift(2, 0, 2, options);
+			world.finishBuild();
+			auto verify = [&](World const& scene)
+			{
+				auto buttons = buttonsIn(scene, host);
+				std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+				require(buttons.size() == 2 && buttons[0]->getPosition().x == buttons[1]->getPosition().x
+					&& std::abs(buttons[1]->getPosition().y - buttons[0]->getPosition().y - buttons[0]->getSize().y * 1.25f) < 0.00001f,
+					"Mixed stack was not canonical");
+				std::shared_ptr<const Vertex> approach;
+				for (uint32_t i = 0; i < scene.getSector(host)->getNumObjects(); ++i)
+				{
+					auto object = scene.getSector(host)->getObject(i);
+					if (!object || !std::dynamic_pointer_cast<const Button>(object->_getObject())) continue;
+					auto vertex = scene.getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+					require(vertex && vertex->getPosition() == Vector2{2, 0}, "Mixed stack approach elevated/moved");
+					if (approach) require(approach == vertex, "Mixed stack duplicated approach");
+					approach = vertex;
+				}
+				require(scene.getInteractionPointPermissionRequirement(buttons[0]->getInteractionPointId()) == std::vector<AccessPermissionId>{doorPermission}
+					&& scene.getInteractionPointPermissionRequirement(buttons[1]->getInteractionPointId()) == std::vector<AccessPermissionId>{callPermission}, "Mixed stack merged/swapped permissions");
+				for (auto button : buttons)
+				{
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(scene.getObjectAtPosition(1, centre.x, centre.y) == button, "Runtime targeting chose other mixed member");
+				}
+				return buttons;
+			};
+			auto buttons = verify(world);
+			world.pauseSimulation();
+			world.removeLocationWall(neighbour, 0, CORE_SIDE_RIGHT);
+			world.finishBuild();
+			auto separated = buttonsIn(world, host);
+			require(separated.size() == 2 && separated[0]->getPosition().x != separated[1]->getPosition().x
+				&& separated[0]->getPosition().y == CORE_BUTTON_Y_OFFSET && separated[1]->getPosition().y == CORE_BUTTON_Y_OFFSET,
+				"Wall removal did not separate mixed transport controls");
+			world.pauseSimulation(); world.addLocationWall(neighbour, 0, CORE_SIDE_RIGHT); world.finishBuild();
+			require(verify(world) == buttons, "Wall restoration replaced protected interaction identities");
+			SerializationWorkData data;
+			auto replay = [&]<typename SerializerType>()
+			{
+				auto writer = SerializerType::toString(); world.serialize(*writer, data); writer->serialize();
+				auto reader = SerializerType::fromString(writer->getSerializedString());
+				reader->deserialize(); World loaded("Placeholder", 1, 1);
+				require(loaded.deserialize(*reader, data), "Transport stack replay failed"); verify(loaded);
+			};
+			replay.template operator()<YamlSerializer>(); replay.template operator()<BinarySerializer>();
+			world.pauseSimulation();
+			auto actor = world.createAgent("Caller", host, 0, 2.0f);
+			require(world.grantAgentAccessPermission(actor, callPermission), "Call authorization failed");
+			require(world.resumeSimulation(), "Mixed stack topology invalid");
+			auto denied = world.requestInteraction(buttons[0]->getInteractionPointId(), actor);
+			require(world.lookupInteractionRequest(denied).entity->getResult() == InteractionResult::Rejected, "Mixed stack bypassed independent authorization");
+			auto call = world.requestInteraction(buttons[1]->getInteractionPointId(), actor);
+			for (uint32_t tick = 0; tick < 100; ++tick) world.advanceTick();
+			require(world.lookupInteractionRequest(call).entity->getOperations().size() == 1, "Landing call merged operations");
+			verify(world); // Runtime motion/opening does not move stationary controls.
+			world.resetSimulation();
+			auto upper = world.getSectorAtPosition(1, 2.0f, 2.0f);
+			auto target = world.getGraph()->getClosestVertexInSector(upper.get(), {2.5f, 2});
+			auto agent = world.lookupAgent(actor).entity;
+			auto path = world.getGraph()->calculatePath(agent, target);
+			require(bool(path), "Mixed stack lost transport route"); agent->setPath(path, true);
+			bool selectedCall = false, sawOccupiedMotion = false;
+			for (uint32_t tick = 0; tick < 8000; ++tick)
+			{
+				world.advanceTick();
+				if (agent->getSector() == world.getSector(host).get())
+					require(agent->getGlobalPosition().y == 0, "Agent climbed to stacked Lift artwork");
+				auto snapshot = world.getSimulationSnapshot();
+				for (auto const& interaction : snapshot.interactionRequests)
+					if (interaction.actor == actor && interaction.result != InteractionResult::Rejected
+						&& agent->getSector() == world.getSector(host).get())
+					{
+						require(interaction.point == buttons[1]->getInteractionPointId(), "Transport intent activated incoming protected Door");
+						selectedCall = true;
+					}
+				for (auto const& resource : snapshot.traversalResources)
+					if (resource.id == lift.traversalResource && resource.occupantCount && resource.liftMoving) sawOccupiedMotion = true;
+				verify(world);
+				if (agent->getState() == Agent::State::Idle) break;
+			}
+			require(selectedCall && sawOccupiedMotion && agent->getSector() == upper.get(), "Selected mixed-stack Lift journey did not complete");
+			world.pauseSimulation(); auto plan = world.planRemoveLift(lift.lift.sector->getIndex());
+			require(plan.valid, "Lift deletion refused"); world.applyLiftEdit(plan);
+			auto remaining = buttonsIn(world, host);
+			require(remaining.size() == 1 && remaining[0]->getPosition().y == CORE_BUTTON_Y_OFFSET, "Transport deletion did not unstack Door");
+		}
+	}
+}
+
 void runDoorTwoSidedButtonSmokeChecks()
 {
+	deterministicTransportControls();
 	placementBoundaryPreservesLegacyPolicy();
 	canonicalOrderContract();
 	canonicalSideReassignment();

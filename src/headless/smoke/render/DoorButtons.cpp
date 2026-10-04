@@ -401,6 +401,47 @@ namespace
 			}
 		}
 
+		// Transport landing calls use the same draw/selection seam as ordinary
+		// controls, including a mixed stack's independently visible shapes.
+		for (bool shuttle : {false, true})
+		{
+			core::World world("Mixed landing artwork", 12, 3); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 12, 1);
+			world.addRoom("Origin/neighbour", 1, 0, 0, 3, 1);
+			auto host = world.addRoom("Landing", 1, 0, 3, 2, 1);
+			world.addRoom("Upper", 1, 2, 0, 12, 1);
+			world.addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+			if (shuttle)
+			{
+				core::World::CreateShuttleOptions options{1, 3, {0, 3}, 0};
+				world.addShuttle(2, 0, 0, 6, options);
+			}
+			else
+			{
+				core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+				world.addLift(2, 0, 4, options);
+			}
+			world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(host), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			auto geometry = visibleGeometry(drawList);
+			require(geometry.buttonFillTriangles == 2 && geometry.buttonOutlineLines == 4,
+				"Mixed transport stack lost filled landing or outline incoming control");
+			std::vector<std::shared_ptr<const core::Button>> buttons;
+			for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(host)->getObject(i);
+				if (auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr) buttons.push_back(button);
+			}
+			require(buttons.size() == 2, "Transport stack lost shape");
+			for (auto button : buttons)
+			{
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				require(centre.x == 4 && world.getObjectAtPosition(1, centre.x, centre.y) == button,
+					"Transport stack hit target not aligned with visible shape");
+			}
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

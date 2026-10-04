@@ -11,9 +11,51 @@ namespace core
 {
 	using namespace std;
 
+	physicalControl::Demand World::transportControlDemand(shared_ptr<const Sector> sector,
+		physicalControl::OwnerType type, physicalControl::Geometry geometry,
+		uint32_t x, uint32_t y, uint32_t width) const
+	{
+		physicalControl::Demand demand;
+		demand.hasOwner = true;
+		demand.owner = { type, geometry,
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, x, y } };
+		demand.candidates = { physicalControl::Candidate::explicitHost(x + width, 0, CORE_SIDE_LEFT),
+			physicalControl::Candidate::explicitHost(x, 0, CORE_SIDE_LEFT) };
+		return validPhysicalControlDemand(std::move(demand), y);
+	}
+
+	void World::validatePhysicalControlAdditions(vector<physicalControl::Demand> const& demands) const
+	{
+		map<pair<uint32_t, uint32_t>, vector<physicalControl::Demand>> rows;
+		for (auto const& demand : demands)
+			rows[{demand.owner.hostingLocation.layer, demand.owner.role.level}].push_back(demand);
+		for (auto const& [row, additions] : rows)
+		{
+			auto plan = planPhysicalControls(row.first, ~0u, row.second);
+			plan.demands.insert(plan.demands.end(), additions.begin(), additions.end());
+			try { (void)physicalControl::allocateCanonical(plan.demands); }
+			catch (runtime_error const& error) { throw WorldException(this, error.what()); }
+		}
+	}
+
 	physicalControl::Demand World::doorControlDemand(shared_ptr<const Sector> sector,
 		uint32_t x, uint32_t y, uint32_t width, uint32_t role) const
 	{
+		// Transport doorways are thresholds, not the canonical control owner.
+		if (role == 0 && sector->getLayerIndex() + 1 < mLayers.size())
+		{
+			auto index = mLayers[sector->getLayerIndex() + 1]->getCellDefinition(x, y).sectorIndex;
+			if (index != ~0u)
+			{
+				auto transport = mSectors[index];
+				if (transport->getType() == SectorType::Lift || transport->getType() == SectorType::Shuttle)
+					return transportControlDemand(sector, transport->getType() == SectorType::Lift
+						? physicalControl::OwnerType::Lift : physicalControl::OwnerType::Shuttle,
+						{ transport->getLayerIndex(), transport->getCellX(), transport->getCellY(),
+							transport->getCellsWide(), transport->getLevelsHigh() }, x, y, width);
+			}
+		}
 		physicalControl::Demand demand;
 		demand.hasOwner = true;
 		demand.owner = { physicalControl::OwnerType::Door,
@@ -27,13 +69,16 @@ namespace core
 		uint32_t y, uint32_t blockedX, uint32_t openedX, uint32_t unsupportedX) const
 	{
 		using namespace physicalControl;
+		bool transport = demand.owner.type == OwnerType::Lift || demand.owner.type == OwnerType::Shuttle;
 		if (!demand.hasOwner || (demand.owner.type != OwnerType::Door
-			&& demand.owner.type != OwnerType::LocationLightSwitch)) return demand;
+			&& demand.owner.type != OwnerType::LocationLightSwitch && !transport)) return demand;
 		auto const& host = demand.owner.hostingLocation;
 		auto const& geometry = demand.owner.geometry;
-		vector<Candidate> candidates = demand.owner.type == OwnerType::Door
-			? vector<Candidate>{ Candidate::explicitHost(geometry.x + geometry.width, 0, CORE_SIDE_LEFT),
-				Candidate::explicitHost(geometry.x, 0, CORE_SIDE_LEFT) }
+		auto doorwayX = transport ? demand.owner.role.x : geometry.x;
+		auto doorwayWidth = demand.owner.type == OwnerType::Shuttle ? 1u : geometry.width;
+		vector<Candidate> candidates = demand.owner.type == OwnerType::Door || transport
+			? vector<Candidate>{ Candidate::explicitHost(doorwayX + doorwayWidth, 0, CORE_SIDE_LEFT),
+				Candidate::explicitHost(doorwayX, 0, CORE_SIDE_LEFT) }
 			: vector<Candidate>{ Candidate::explicitHost(geometry.x, 2, CORE_SIDE_MIDDLE) };
 		demand.candidates.clear();
 		demand.defaultCandidate = ~0u;

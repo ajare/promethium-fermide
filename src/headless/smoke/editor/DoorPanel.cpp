@@ -505,8 +505,70 @@ namespace
 		checkLargeStackDocumentHistory();
 	}
 
+	void checkTransportPlacementHistory(bool shuttle)
+	{
+		auto world = std::make_shared<core::World>("Transport placement history", 16, 3); world->addLayer();
+		world->addRoom("Front", 0, 0, 0, 16, 1);
+		world->addRoom("Origin/neighbour", 1, 0, 0, 3, 1);
+		auto host = world->addRoom("Landing", 1, 0, 3, 2, 1);
+		world->addRoom("Moved landing", 1, 0, 5, 11, 1);
+		world->addRoom("Upper", 1, 2, 0, 16, 1);
+		world->addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+		uint32_t transport;
+		if (shuttle)
+		{
+			core::World::CreateShuttleOptions options{1, 3, {0, 3}, 0};
+			transport = world->addShuttle(2, 0, 0, 6, options).shuttle.sector->getIndex();
+		}
+		else
+		{
+			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			transport = world->addLift(2, 0, 4, options).lift.sector->getIndex();
+		}
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<core::Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(host)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+				require(vertex && vertex->getPosition() == core::Vector2{4, 0}, "Transport history raised/moved approach");
+				result.push_back(button->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.y < b.y; }); return result;
+		};
+		auto stacked = positions(); require(stacked.size() == 2, "History fixture did not stack transport");
+		auto before = captureDocumentSnapshot(world, history);
+		if (shuttle)
+		{
+			auto plan = world->planResizeShuttle(transport, 6, 0, 6);
+			require(plan.valid, "Supported Shuttle move refused"); world->applyShuttleEdit(plan);
+		}
+		else
+		{
+			auto plan = world->planResizeLift(transport, 6, 0, 1, 3);
+			require(plan.valid, "Supported Lift move refused"); world->applyLiftEdit(plan);
+		}
+		commitDocumentEdit(before, history);
+		auto unstacked = positions();
+		require(unstacked.size() == 1 && unstacked.front().y == CORE_BUTTON_Y_OFFSET, "Movement retained obsolete landing stack");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Transport move undo did not reconstruct stack");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == unstacked, "Transport move redo retained previous assignment");
+	}
+
 	void checkLiftOwnedDoor()
 	{
+		checkTransportPlacementHistory(false);
 		auto world = std::make_shared<core::World>("Lift door panel", 16, 3);
 		auto const hall = world->addRoom("Lift Hall", 0, 0, 0, 16, 3);
 		for (uint32_t level = 1; level < 3; ++level)
@@ -531,6 +593,7 @@ namespace
 
 	void checkShuttleOwnedDoor()
 	{
+		checkTransportPlacementHistory(true);
 		auto world = std::make_shared<core::World>("Shuttle door panel", 32, 3);
 		world->addCorridor(0, 0, 31);
 		world->addCorridor(1, 0, 31);

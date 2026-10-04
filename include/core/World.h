@@ -1352,6 +1352,10 @@ namespace core
 		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
 			uint32_t y, physicalControl::Demand const& demand, uint32_t flags,
 			uint32_t* vertexIdentifier = nullptr);
+		physicalControl::Demand transportControlDemand(std::shared_ptr<const Sector> sector,
+			physicalControl::OwnerType type, physicalControl::Geometry geometry,
+			uint32_t x, uint32_t y, uint32_t width) const;
+		void validatePhysicalControlAdditions(std::vector<physicalControl::Demand> const& demands) const;
 		physicalControl::Demand doorControlDemand(std::shared_ptr<const Sector> sector,
 			uint32_t x, uint32_t y, uint32_t width, uint32_t role = 0) const;
 		physicalControl::Demand validPhysicalControlDemand(physicalControl::Demand demand,
@@ -1407,7 +1411,7 @@ namespace core
 
 		CreateObjectResult _createSectorButton(std::string const& name, std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index = nullptr);
 
-		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, bool wallSafe = true, uint32_t approachSide = 0);
+		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, uint32_t approachSide = 0);
 
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
 

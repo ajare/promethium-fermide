@@ -40,7 +40,7 @@ Ordinary Door controls now use only `X+W` at offset `0.0` (preferred), or `X`
 at offset `0.0`, independently in each required approach Location. The registered
 cell is the explicit host, not the preceding Door cell. Location light switches
 remain at their authored cell, offset `0.5`, on the Location's base Level.
-Transport-owned Door controls still use legacy placement.
+Transport-owned Door controls were migrated separately in #431 (see below).
 
 `validPhysicalControlDemand` is the common authored host/support and boundary
 policy. Hosts must belong to the required Room, Corridor or Facade and have usable
@@ -134,3 +134,41 @@ filtering; explicit cases cover simultaneous side changes, a feasible alternativ
 to an explored fifth member, unavoidable fifth-member refusal, and the global
 maximum across disconnected conflict components. This allocator coverage does
 not migrate the blocked legacy owner types.
+
+## Lift and Shuttle landing controls (#431)
+
+Passenger Lift and Shuttle landing calls now participate in the same complete
+allocator as ordinary Doors and light switches. Every required doorway prefers
+its `X+W` host at offset `0.0`, with only `X` at offset `0.0` as fallback. Lift
+Doorways use the full one/two-cell shaft width; each currently supported Shuttle
+Doorway is one cell wide, regardless of carriage width. Hosting Location,
+walkable support, shared walls and Bulkhead thresholds are checked independently
+at every landing. Even a full-Location doorway can use its left host when there
+is no retained shared wall there; no extra outside space is required.
+
+Canonical ownership is the Lift shaft or Shuttle track's authored geometry and
+type, not a generated Door, vehicle position or allocation ID. Roles retain the
+authored doorway X and Level, so Stop/doorway ordering is spatial. Distinct calls,
+landing permissions and traversal relationships remain unchanged; invisible
+onboard selectors produce no physical demand. Transport motion and opening do
+not reflow landing controls.
+
+Creation preflights all new landing demands jointly with existing controls before
+beginning a structural edit or constructing the transport. Shuttle doorway floor
+and occupancy checks also precede mutation. Existing detached construction
+validation/replay handles supported transport movement, Stop/doorway edits,
+removal, structural reconciliation, load and document history; final placement is
+recomputed rather than serialized. Protected landing requirements now read their
+existing uint64 binary wire representation before validated narrowing, matching
+the writer (including reset/replay snapshots).
+
+World coverage exercises independent multi-Stop and full-width Lift candidates,
+wide/multiple Shuttle doorway calls with complete side reassignment, independent
+hosting Locations, mixed protected stacks in opposite creation orders, transport
+geometry-based ordering, graph/interaction/visible targeting, YAML/binary replay,
+invalid creation/movement no-ops, selected Agent calls and occupied Lift journeys,
+and deletion unstacking. Editor document history verifies transport movement
+undo/redo reconstructing and removing mixed stacks; production draw commands and
+hit testing cover mixed Lift and Shuttle stacks. Existing transport authoring,
+permission, admission and clipboard/reconstruction contracts remain in the final
+validation matrix; no new unsupported transport clipboard capability is added.

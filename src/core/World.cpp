@@ -4060,8 +4060,6 @@ namespace core
 		if (options.cellsWide > 2)
 			throw WorldException(this, format("{} - enclosed Lift width must be one or two cells.", caller));
 
-		beginStructuralEdit("addLift");
-
 		auto levelsHigh = options.levelsHigh ? options.levelsHigh : options.stopOffsets.back() + 1;
 		if (options.stopOffsets.back() >= levelsHigh)
 			throw WorldException(this, format("{} - Lift stop is outside the shaft bounds.", caller));
@@ -4108,10 +4106,17 @@ namespace core
 				if (cellDef.hasObject() || !cellDef.markers.empty())
 					throw WorldException(this, format("{} - an object blocks the Lift landing at {},{}", caller, ix, iy));
 			}
-			if (x == getSector(levelSectorIndex)->getCellX0()
-				&& x + options.cellsWide - 1 == getSector(levelSectorIndex)->getCellX1())
-				throw WorldException(this, format("{} - there is no space for a Lift call button at level {}", caller, iy));
 		}
+		vector<physicalControl::Demand> landingDemands;
+		for (auto offset : options.stopOffsets)
+		{
+			auto level = y + offset;
+			auto location = getSector(foreLayer->getCellDefinition(x, level).sectorIndex);
+			landingDemands.push_back(transportControlDemand(location, physicalControl::OwnerType::Lift,
+				{layerIndex, x, y, options.cellsWide, levelsHigh}, x, level, options.cellsWide));
+		}
+		validatePhysicalControlAdditions(landingDemands);
+		beginStructuralEdit("addLift");
 
 		// Create lift
 		auto liftObject = createLift(layerIndex, x, y, options.cellsWide, levelsHigh, options.stopOffsets);
@@ -4282,7 +4287,6 @@ namespace core
 		// add is a true no-op and no non-finite timing reaches the tick
 		// conversion (#198).
 		validateShuttleOptions(caller, options);
-		beginStructuralEdit("addShuttle");
 		validateBounds(caller, x, y, cellsWide, 1);
 		validateLayerSpace(caller, layerIndex, x, y, cellsWide, 1);
 
@@ -4332,11 +4336,32 @@ namespace core
 					if (!supported && !options.allowPartialLandings)
 						throw WorldException(this, format("{} - door {} of carriage {} at stop offset {} has no supported landing",
 							caller, door, car, options.stopOffsets[i]));
+					if (supported)
+					{
+						validateCellTraversableOnFoot(caller, "Shuttle", layerInFront(layerIndex), cx, y);
+						if (cell.hasObject() || !cell.markers.empty())
+							throw WorldException(this, format("{} - an object blocks the Shuttle landing at {},{}", caller, cx, y));
+					}
 					hasLanding = hasLanding || supported;
 				}
 			if (!hasLanding)
 				throw WorldException(this, format("{} - stop offset {} has no supported carriage landing", caller, options.stopOffsets[i]));
 		}
+
+		vector<physicalControl::Demand> landingDemands;
+		auto authoredDoorOffsets = SimulationCoordinator::shuttleDoorOffsets(options.carWidth, options.doorMask);
+		for (auto offset : options.stopOffsets)
+			for (uint32_t car = 0; car < options.numCars; ++car)
+				for (auto doorOffset : authoredDoorOffsets)
+				{
+					auto doorwayX = x + offset + car * (options.carWidth + 1) + doorOffset;
+					auto index = foreLayer->getCellDefinition(doorwayX, y).sectorIndex;
+					if (index == ~0u || !isLocationLike(getSector(index)->getType())) continue;
+					landingDemands.push_back(transportControlDemand(getSector(index), physicalControl::OwnerType::Shuttle,
+						{layerIndex, x, y, cellsWide, 1}, doorwayX, y, 1));
+				}
+		validatePhysicalControlAdditions(landingDemands);
+		beginStructuralEdit("addShuttle");
 
 		// Create shuttle
 		auto shuttleObject = createShuttle(layerIndex, x, y, cellsWide, options.numCars, options.carWidth, options.stopOffsets);
@@ -4721,39 +4746,12 @@ namespace core
 		return obj;
 	}
 
-	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index, bool wallSafe, uint32_t approachSide)
+	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index, uint32_t approachSide)
 	{
 		invalidateSimulationSnapshot();
-		if (wallSafe)
-		{
-			auto demand = doorControlDemand(sector, x, y, cellsWide, approachSide);
-			auto obj = createPhysicalControl("Door button", sector->getLayerIndex(), y, demand, flags);
-			if (index) *index = obj.index;
-			return obj;
-		}
-		int side = ((x + cellsWide) - 1) == sector->getCellX1() ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
-		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
-		uint32_t alternateX = ~0u;
-		int alternateSide = -1;
-		if (side == CORE_SIDE_RIGHT && x > sector->getCellX0())
-		{
-			alternateX = x;
-			alternateSide = CORE_SIDE_LEFT;
-		}
-		else if (side == CORE_SIDE_LEFT && x + cellsWide - 1 < sector->getCellX1())
-		{
-			alternateX = x + cellsWide - 1;
-			alternateSide = CORE_SIDE_RIGHT;
-		}
-
-		auto obj = createPhysicalControl("Door button", sector->getLayerIndex(), buttonX, y,
-			side, flags, nullptr, alternateX, alternateSide);
-
-		if (index)
-		{
-			*index = obj.index;
-		}
-
+		auto demand = doorControlDemand(sector, x, y, cellsWide, approachSide);
+		auto obj = createPhysicalControl("Door button", sector->getLayerIndex(), y, demand, flags);
+		if (index) *index = obj.index;
 		return obj;
 	}
 
@@ -5150,8 +5148,8 @@ namespace core
 					if ((uint32_t)((int)existing.sector->getCellY() + existing.sectorOffsetY) == y)
 						return reject("This lift already has a stop on this level");
 				}
-				if (x == sectors[0]->getCellX0() && x + options.width - 1 == sectors[0]->getCellX1())
-					return reject("There is no space to place the Lift call button");
+				auto demand = doorControlDemand(sectors[0], x, y, options.width, 0);
+				(void)planPhysicalControls(layerIndex, sectors[0]->getIndex(), y, &demand);
 			}
 			else for (uint32_t side = 0; side < 2; ++side)
 			{
@@ -5737,7 +5735,7 @@ namespace core
 		{
 			if (hasButton[side]) continue;
 			auto control = _createDoorButton(sides[side], doorObject->getCellX(),
-				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE, nullptr, true, side);
+				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE, nullptr, side);
 			// A Door Button renders like its Door: solid on the Layer the Door was
 			// authored on, an outline from every other Layer.
 			auto button = static_pointer_cast<Button>(
@@ -6075,12 +6073,7 @@ namespace core
 		{
 			if (options.controls[i])
 			{
-				if (controlsAreExternallyBound && x == sectors[i]->getCellX0() && (x + options.width - 1) == sectors[i]->getCellX1())
-				{
-					throw WorldException(this, format("{} - No space to place Buttons for Door", caller));
-				}
-
-				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index, !controlsAreExternallyBound, (uint32_t)i);
+				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index, (uint32_t)i);
 				createdControls[i].type = SectorObjectType::InteractionPoint;
 				createdControls[i].sector = sectors[i];
 				// A Door Button renders like its Door: solid on the authored Layer,
