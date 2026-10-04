@@ -94,13 +94,16 @@ namespace core
 		if (request->mSourceSector == request->mDestinationSector
 			&& request->mSourceSector.value <= mWorld.mSectors.size())
 			if (auto chamber = std::dynamic_pointer_cast<ChamberTransit>(mWorld.mSectors[request->mSourceSector.value - 1]);
-				chamber && chamber->getSubtype() == ChamberSubtype::SecurityScanner)
+				chamber)
 			{
 				auto actor = mWorld.mAgents.find(request->mOwner);
-				if (!actor || chamber->mOccupant != request->mOwner) { denyTraversalRequest(requestId); return; }
+				auto resource = mWorld.mTraversalResources.find(chamber->getTraversalResourceId());
+				if (!actor || !resource) { denyTraversalRequest(requestId); return; }
+				auto slot = std::find(resource->mOccupants.begin(), resource->mOccupants.end(), request->mOwner);
+				if (slot == resource->mOccupants.end()) { denyTraversalRequest(requestId); return; }
 				if (chamber->mPhase != SecurityScannerPhase::Exiting)
 				{
-					actor->mTraversalLocalGoal = chamber->getPosition() + Vector2{ chamber->getCellsWide() * 0.5f, 0.0f };
+					actor->mTraversalLocalGoal = chamber->getPosition() + resource->mCapacityPositions[slot - resource->mOccupants.begin()];
 					return;
 				}
 				actor->mTraversalLocalGoal.reset();
@@ -436,10 +439,11 @@ namespace core
 			if (!chamber.isTraversalAvailable() || !chamber.mDoors[side]->isOpen() || !chamber.mDoors[1 - side]->isClosed()) return false;
 			if (entry)
 			{
-				if (!chamber.getAgents().empty() || resource.mAdmissionReservations[0] != requestId || resource.mOccupants[0]) return false;
-				resource.mAdmissionReservations[0] = {};
-				resource.mOccupants[0] = owner;
-				chamber.mOccupant = owner;
+				auto slot = request->mCapacityPosition;
+				if (slot >= resource.mCapacity || resource.mAdmissionReservations[slot] != requestId || resource.mOccupants[slot]) return false;
+				resource.mAdmissionReservations[slot] = {};
+				resource.mOccupants[slot] = owner;
+				if (!chamber.mOccupant) chamber.mOccupant = owner;
 				resource.mScannerAdmittedPath = agent.mPath.path;
 				resource.mScannerCommittedPath = std::make_shared<Path>();
 				// Retain only the forward chamber journey, not mutable destination
@@ -449,17 +453,27 @@ namespace core
 					resource.mScannerCommittedPath->nodes.push_back(agent.mPath.path->nodes[node]);
 					if (agent.mPath.path->nodes[node].targetVertex->getSector().get() != &chamber) break;
 				}
-				chamber.mPhase = SecurityScannerPhase::Positioning;
+				resource.mChamberAdmittedPaths[owner] = resource.mScannerAdmittedPath;
+				resource.mChamberCommittedPaths[owner] = resource.mScannerCommittedPath;
+				if (chamber.getSubtype() == ChamberSubtype::SecurityScanner)
+					chamber.mPhase = SecurityScannerPhase::Positioning;
 				request->mCapacityPosition = ~0u;
 			}
 			else
 			{
-				if (resource.mOccupants[0] != owner) return false;
-				resource.mOccupants[0] = {};
-				chamber.mOccupant = {};
-				resource.mScannerCommittedPath.reset();
-				resource.mScannerAdmittedPath.reset();
-				chamber.mPhase = SecurityScannerPhase::ExitClosing;
+				auto slot = std::find(resource.mOccupants.begin(), resource.mOccupants.end(), owner);
+				if (slot == resource.mOccupants.end()) return false;
+				*slot = {};
+				resource.mChamberCommittedPaths.erase(owner);
+				resource.mChamberAdmittedPaths.erase(owner);
+				auto remaining = std::find_if(resource.mOccupants.begin(), resource.mOccupants.end(), [](auto id) { return (bool)id; });
+				chamber.mOccupant = remaining == resource.mOccupants.end() ? AgentId{} : *remaining;
+				if (!chamber.mOccupant)
+				{
+					resource.mScannerCommittedPath.reset();
+					resource.mScannerAdmittedPath.reset();
+					chamber.mPhase = SecurityScannerPhase::ExitClosing;
+				}
 			}
 		}
 

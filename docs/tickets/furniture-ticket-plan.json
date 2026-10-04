@@ -1,0 +1,224 @@
+{
+  "parent": 347,
+  "repository": "ajare/promethium-fermide",
+  "priority": "medium",
+  "tickets": [
+    {
+      "slice": 1,
+      "title": "Furniture: place and save a catalogue-backed chair",
+      "difficulty": "hard",
+      "blockedBy": [],
+      "what": "A World author can load a manually authored Furniture catalogue, select a simple one-tile chair in the editor, place it in a supported Location, see it rendered, send an Agent to its usable Marker, and save/reopen the World. This is the first complete vertical slice, initially exercising fixed-depth-0 routing and one usable point rather than implementing later multi-tile or front/back behaviours.",
+      "acceptance": [
+        "A separate resource-managed catalogue resolves Image-set artwork and stable catalogue UUID, definition key, and usable-point key; no parallel TileSet authority or embedded definition snapshot is introduced.",
+        "Editor selection and placement work in Rooms, Corridors, and Facades; Backgrounds and Transits refuse Furniture.",
+        "The chair renders at World-tile size through existing draw commands and Layer/aperture clipping.",
+        "Placement requires floor-aligned y and continuous support across the complete chair width inside one Location; gaps, unsupported placement, and same-depth footprint overlap are refused without partial mutation.",
+        "The owned usable Marker is named through existing validation, has distinct stable World identity, appears in existing behaviour destination selectors, and defaults to Blocks pathing.",
+        "Agents can reach and leave the chair Marker, while ordinary floor circulation remains intact; a blocking seat is not inserted as a mandatory through-waypoint.",
+        "Both supported World formats persist catalogue relative reference and expected UUID, instance identity/placement/name, and usable-point Marker identity; construction replay and reopening preserve those identities.",
+        "Missing catalogue or definition and catalogue UUID mismatch fail with clear diagnostics. Existing Worlds without Furniture remain loadable without catalogue dependencies.",
+        "World/document, render-command, and editor-action headless tests verify the complete chair workflow through existing production seams; no new test-only low-level interface is required."
+      ]
+    },
+    {
+      "slice": 2,
+      "title": "Furniture: safely edit instances and owned destinations",
+      "difficulty": "medium",
+      "blockedBy": [1],
+      "what": "A World author can select, move, rename, and delete Furniture through normal document history without losing destination identities, teleporting Agents, leaving unsupported objects, or silently breaking behaviour references. Usable Markers can be renamed independently without becoming independent layout overrides.",
+      "acceptance": [
+        "Editor instance selection, movement, naming, and deletion use existing production document-edit and undo/redo mechanisms.",
+        "Movement rigidly translates artwork and owned movement points, preserves usable Marker identities and authored names, and maintains floor support and Location ownership constraints.",
+        "Instance names generate initial point names; independently edited Marker names are retained, validated in the existing World Marker namespace, and do not retarget behaviour references.",
+        "Furniture-owned points cannot be independently moved or removed in ways that override the definition layout.",
+        "Moving Furniture leaves Agents at their physical positions; a relocated destination remains the same Marker and existing planning/loss behaviour handles affected intent. Non-zero-depth lifecycle cases are covered by the later topology ticket.",
+        "Deletion refuses any instance with usable Markers referenced by Agent behaviour configurations, reporting the references and leaving the World unchanged.",
+        "Unreferenced deletion removes the instance, all owned Markers, and graph contributions together, with no orphaned destinations or reused identities.",
+        "Floor/Walkway removal refuses edits that would leave Furniture unsupported and identifies blocking instances.",
+        "Undo/redo and save/reopen preserve identities, authored names, ownership, and validation outcomes; failed edits remain genuine no-ops.",
+        "Existing headless World/document and editor-action seams exercise successful edits, refusal diagnostics, reference protection, and history restoration."
+      ]
+    },
+    {
+      "slice": 3,
+      "title": "Furniture: place multi-tile, multi-destination layouts precisely",
+      "difficulty": "medium",
+      "blockedBy": [2],
+      "what": "A World author can place a two-seat sofa or larger tile layout, select each usable destination independently, and position the whole piece with fractional x or optional horizontal grid snapping. The complete artwork rectangle governs support and overlap validation.",
+      "acceptance": [
+        "A definition composes World-tile-sized Image-set regions at integer tile offsets, supporting one-, two-, and larger-tile layouts without arbitrary scaling or special-case sofa rendering.",
+        "Each usable point is individually authored with a stable key, distinct Marker identity, initial label-derived name, and independent behaviour destination selection.",
+        "Fractional instance x and fractional point x offsets are supported in production placement, rendering, graph geometry, persistence, and editor movement.",
+        "Optional horizontal editor snapping applies to the whole instance; y remains aligned to a Floor/Walkway regardless of the toggle.",
+        "Every usable Marker and routing vertex remains at supporting floor height; no fractional vertical movement points, elevated seats, or slopes are introduced.",
+        "The entire artwork width requires continuous support at one height within one Location, including Walkway placement; overhangs, gaps, and boundary crossings are refused.",
+        "The footprint is the full tile-layout bounding rectangle, including transparent pixels and gaps; same-depth area overlap is refused while boundary touching is accepted.",
+        "Movement, naming, history, and supported-format round trips preserve all point identities and rigid offsets across a multi-point layout.",
+        "Passing Agents cannot use seat Markers as intermediate waypoints, but each remains a valid origin/destination and no seat occupancy or reservation system is introduced.",
+        "Headless placement/editor, Marker identity, path outcome, persistence, and draw-command checks cover sofa and larger layouts, both snap modes, transparency/gaps, and atomic validation failures."
+      ]
+    },
+    {
+      "slice": 4,
+      "title": "Furniture: traverse and render desk front/back routes",
+      "difficulty": "hard",
+      "blockedBy": [3],
+      "what": "A catalogue author can give an isolated desk explicit front/back routes and approaches. A World author can place it at a chosen Local depth, edit that depth, and see Agents traverse in front of or behind it rather than using an ordinary floor shortcut. This ticket establishes depth-bearing routes and visible traversal, not the subsequent complete-Path continuity preference or overlapping-route composition.",
+      "acceptance": [
+        "Definitions explicitly author usable/routing vertices, internal edges, and designated external connection points; position coincidence does not invent internal connections.",
+        "Ordinary and unassigned definition edges stay fixed at depth 0; explicitly assigned offsets resolve relative to instance depth, including desk depth 2 with front edge 2 and back edge 3.",
+        "Authored connectivity joins fixed-0 floor approaches to relative-depth routes; placement does not invent depth-changing connections.",
+        "Front/back routes replace the ordinary floor connection across the isolated desk's span, leaving no depth-0 bypass; definitions without side routes retain ordinary floor routing.",
+        "Routing-only side vertices are excluded from behaviour destination selectors and seat Markers retain their existing Blocks pathing semantics.",
+        "Editor Local-depth placement/editing and persistence enforce non-negative instance/resolved edge depth; negative results and same-depth footprint overlap are atomic refusals.",
+        "Artwork may overlap at different instance depths, with multi-object route composition deferred to its dedicated tickets rather than implicitly connecting visual overlaps.",
+        "World draw commands render larger Local depths first and Furniture before Agents at equal depth. Active traversal on depth 2 appears in front of a depth-2 desk; depth 3 appears behind it.",
+        "Local depth is not another Layer or physical dimension: existing edge geometry, traversal duration, permissions, and Mobility constraints remain authoritative.",
+        "Isolated-desk editor/document, route outcome, traversal, and render-command tests verify explicit connectivity, shortcut removal, relative-depth placement, draw ordering, and existing Layer/aperture clipping."
+      ]
+    },
+    {
+      "slice": 5,
+      "title": "Furniture: retain Agent depth throughout movement",
+      "difficulty": "medium",
+      "blockedBy": [4],
+      "what": "An Agent's visible Local depth remains correct when starting an edge, stopping at Furniture, pausing, and saving/restoring movement. Depth-changing waypoints survive movement optimisations. This ticket establishes the retained-depth contract that the later route-choice tickets use; it does not yet implement depth-continuity path preference.",
+      "acceptance": [
+        "Starting an edge immediately adopts its integer Local depth; no interpolation interval, physical distance, added movement time, or primary route-cost penalty is introduced.",
+        "A stationary Agent retains its incoming edge depth for rendering and subsequent departure context; an Agent without edge history starts at depth 0.",
+        "Pause/resume and supported World save/restoration preserve observable depth and physical movement state under established lifecycle conventions.",
+        "A waypoint where a Path changes Local depth is non-skippable even without interaction, including coincident topology-only connections.",
+        "Ordinary skippable waypoints and ordinary depth-0 movement retain existing behaviour; depth boundaries do not cause teleporting, cycling, or artificial walking delays.",
+        "Retained/current depth is available to production route-decision context without requiring private-state assertions or a new low-level test seam.",
+        "Deterministic simulation and render-command tests exercise starts, arrival, stationary rendering, departure context, pause/restoration, and zero-length depth-changing connections.",
+        "Existing movement timing and planning regression checks remain green."
+      ]
+    },
+    {
+      "slice": 6,
+      "title": "Furniture: choose depth-continuous complete Paths within a Sector",
+      "difficulty": "hard",
+      "blockedBy": [5],
+      "what": "For alternative complete Paths inside one Sector, an Agent selects minimum total Perceived route cost first and, only on an equal-cost tie, the smallest total numerical depth change. The result includes current/retained arrival context and remains globally optimal rather than choosing the nearest-depth outgoing edge greedily.",
+      "acceptance": [
+        "Complete Paths are compared lexicographically by total Perceived route cost, then total sum of absolute Local-depth changes, including the transition from current/retained depth into the first edge.",
+        "A cheaper primary-cost Path always wins despite worse continuity; no epsilon depth penalty or outgoing-edge-only greedy preference is used.",
+        "Numerical gaps matter: incoming depth 3 prefers depth 5 over depth 0 when complete primary costs and subsequent changes make that the better secondary result.",
+        "Search retains sufficient incoming-depth context at shared vertices; an equal-primary-cost arrival with a different depth is not discarded when needed for the optimal continuation.",
+        "Agent-without-history and stationary-departure cases use the depth contract established by the movement ticket.",
+        "Zero-length edges, repeated equal-cost alternatives, and depth-changing connectors terminate correctly without introducing cycles or losing global cost optimality.",
+        "World/Graph path outcomes and simulation-selected routes provide the assertion seam; tests do not lock in search containers, expansion order, or allocator internals.",
+        "Reference-style scenarios cover cheaper-but-less-continuous routes, local-greedy traps, distinct arrival depths at one vertex, and deterministic repeated runs.",
+        "Existing feasibility, perceived-cost, and routing-scale regressions remain green without introducing wall-clock pass/fail thresholds; ADRs 0014 and 0017 remain authoritative."
+      ]
+    },
+    {
+      "slice": 7,
+      "title": "Furniture: extend depth-continuous routing across Sectors",
+      "difficulty": "medium",
+      "blockedBy": [6],
+      "what": "Depth-continuous complete-Path selection works for journeys crossing Rooms, Corridors, Facades, thresholds, and Layers without treating unrelated Sector-local numbers as one global axis or weakening existing traversal constraints.",
+      "acceptance": [
+        "Entering another Sector resets its depth-continuity baseline to 0; unrelated source/destination Sector depth values are not directly compared.",
+        "Complete multi-Sector Paths still minimise total primary Perceived route cost before their correctly reset secondary depth-change objective.",
+        "Runtime boundary crossing and subsequent stationary/departure context agree with the route evaluator's Sector-entry semantics.",
+        "Same-Layer Location transitions and adjacent-Layer thresholds retain existing traversal timing and visibility behaviour; Local depth does not become another Layer.",
+        "Forbidden traversals remain excluded; last-resort Mobility passes, Room/Corridor permission requirements, Facade exceptions, and control-operation permissions retain existing meaning.",
+        "Depth preference does not reveal remote live device state, bypass Route observations, or override Route persistence for still-valid Paths.",
+        "Headless multi-Location and multi-Layer scenarios verify baseline reset, repeated visits, primary-cost dominance, access refusal, and deterministic outcomes using existing production seams.",
+        "Relevant existing permission, Mobility, threshold, and routing regressions remain green."
+      ]
+    },
+    {
+      "slice": 8,
+      "title": "Furniture: connect overlapping layouts through explicit matching-depth ports",
+      "difficulty": "medium",
+      "blockedBy": [4],
+      "what": "A chair and desk at different Local depths can form a reachable arrangement when their definitions explicitly connect through matching-depth external points. An eligible point may attach in the middle of an existing furniture route; mere artwork or edge crossing does not establish connectivity. This slice covers a route-replacing piece plus attached non-replacing Furniture, before composing two replacement spans.",
+      "acceptance": [
+        "Overlapping different-depth placements can attach only through designated external connection points at matching resolved edge depth.",
+        "An external point inside an eligible route splits that route for attachment while preserving its depth, physical geometry, objective duration, and authored connectivity.",
+        "Position coincidence, visual crossing, or mismatched depth alone creates no connection or depth-changing shortcut.",
+        "Depth switches are possible only through a definition's explicit connectivity; a chair approach cannot implicitly join a desk's back route.",
+        "Stable usable Marker identities, Blocks pathing semantics, rendering, editing, and supported-format replay remain correct after route attachment and rebuilding.",
+        "Production editor placement/movement can create and undo the connected chair/desk arrangement without stale graph contributions or Agent teleporting.",
+        "World path outcome tests distinguish reachable matching-depth attachment, unreachable mismatched ports, middle-edge splitting, and crossing-only arrangements.",
+        "Render-command and document/editor checks verify the attached arrangement without requiring the later depth-continuity preference ticket."
+      ]
+    },
+    {
+      "slice": 9,
+      "title": "Furniture: compose overlapping floor-replacement spans without shortcuts",
+      "difficulty": "hard",
+      "blockedBy": [8],
+      "what": "Two different-depth Furniture instances that both replace ordinary floor routing can overlap or contain one another while preserving each definition's authored routes. Authors can place, move, remove, save, and reopen such arrangements without resurrecting a through-furniture floor bypass or accidentally connecting routes.",
+      "acceptance": [
+        "Partially overlapping and nested replacement spans compose into one valid movement network using explicit authored routes and matching-depth external attachment rules.",
+        "Ordinary depth-0 floor connections are suppressed across the replaced spans; processing a second instance or rebuilding does not restore a shortcut through either piece.",
+        "Neither visual overlap nor replacement-interval boundaries grant unassigned internal or cross-depth connectivity.",
+        "Removing or moving one instance restores ordinary floor routing only where no remaining instance replaces it, and removes only that instance's graph contribution.",
+        "Same-depth rectangular footprint overlap remains refused on placement, movement, and depth edits; boundary contact and different-depth overlap retain their agreed semantics.",
+        "Graph outcomes are deterministic across definition/instance processing order, construction replay, repeated builds, and supported-format round trips.",
+        "Editor actions and document history recreate and undo valid composed arrangements, with validation failures leaving all instances and destinations unchanged.",
+        "Small World fixtures cover partial overlap, containment, shared boundaries, connected/unconnected ports, and removal/movement permutations by asserting reachable Paths and absence of bypasses rather than implementation internals.",
+        "Existing isolated-Furniture floor replacement, ordinary circulation, clipping, and instance-editing regressions remain green."
+      ]
+    },
+    {
+      "slice": 10,
+      "title": "Furniture: reconcile catalogue changes safely on World load",
+      "difficulty": "medium",
+      "blockedBy": [3],
+      "what": "A catalogue author can change shared definitions and a World adopts those definitions on its next load while preserving existing usable-point identities and authored names. Incompatible changes are diagnosed instead of silently changing destinations, geometry, or routing. This slice has no live reload UI.",
+      "acceptance": [
+        "World loading uses the current external catalogue with the expected UUID, not a saved layout snapshot; a replaced catalogue with coincidentally matching keys still fails identity validation.",
+        "Stable definition and usable-point keys preserve Marker identities, independently edited names, and behaviour references through catalogue label changes and entry reordering.",
+        "New usable points receive new valid Marker identities under existing non-reuse allocation rules; removed points cannot silently retarget another destination.",
+        "Removing a usable point referenced by an Agent behaviour configuration causes a clear diagnostic load failure identifying the incompatible reference.",
+        "Definition width/layout changes that invalidate floor support, Location ownership, or same-depth footprint separation fail loading rather than silently moving or omitting instances.",
+        "Missing catalogue, missing definition, malformed dependencies, and identity mismatch retain explicit failure behaviour, with no routing placeholders.",
+        "Binary and YAML World documents resolve equivalent current-definition semantics and preserve existing identities; portable references continue to work after moving the project.",
+        "Ordinary catalogue changes take effect on next load only; this ticket adds no visual definition designer, live reload, migration UI, or automatic repair.",
+        "Temporary-catalogue persistence and World identity tests cover compatible/incompatible edits, newly added points, referenced removals, portability, and legacy Worlds without Furniture through existing document seams."
+      ]
+    },
+    {
+      "slice": 11,
+      "title": "Furniture: preserve ongoing movement through topology edits",
+      "difficulty": "hard",
+      "blockedBy": [7],
+      "what": "An Agent remains physically and visually coherent when Furniture is moved, assigned a new depth, or deleted while movement is active or stationary. Graph replacement and saved/restored Paths preserve destination identity and retained depth while affected intent uses normal Route planning and Route loss.",
+      "acceptance": [
+        "Furniture topology edits preserve Agent physical positions and current/retained Local depths, including Agents stationary at Furniture and Agents on deeper front/back routes.",
+        "A moved usable Marker retains identity; an Agent is never teleported with it and routes to the new position only if its behaviour still requires that destination.",
+        "Invalidated Paths enter established Route planning and no replacement Path produces normal Route loss; no stale edge/vertex reference remains in active movement.",
+        "Agent depth changes when replacement-edge traversal starts rather than on graph rebuilding alone, with Sector-entry reset semantics preserved.",
+        "Movement/depth/deletion edits, pause/resume, undo/redo, and supported-format save/restoration maintain consistent observable positions, destination identities, and render ordering.",
+        "Referenced-Furniture deletion and supporting-floor removal remain protected, with refused edits leaving simulation/authored state unchanged under established contracts.",
+        "Still-valid Path handling retains ordinary Route persistence and feasibility rules rather than forcing arbitrary route changes solely because a graph was rebuilt.",
+        "Deterministic simulation, persistence, editor-action, and render-command scenarios cover edits while traversing, at destinations, during planning, and around restoration; zero-length depth boundaries remain non-skippable.",
+        "Existing topology-replacement lifetime, planning, route-loss, pause, and restored-Path regressions remain green."
+      ]
+    },
+    {
+      "slice": 12,
+      "title": "Furniture: ship the demonstration World and integration coverage",
+      "difficulty": "medium",
+      "blockedBy": [9, 10, 11],
+      "what": "World authors receive a bundled sample catalogue with placeholder chair, two-seat sofa, and desk artwork plus a documented demonstration World showing the complete Furniture feature. Final integration verifies portability, edited catalogue loading, overlapping route composition, depth-aware movement, and existing constraints together.",
+      "acceptance": [
+        "Required bundled assets and resource dependencies resolve a manually authored chair, two-seat sofa, and desk catalogue plus a demonstration World without production-quality-art requirements.",
+        "The demonstration exposes simple and multiple Marker destinations, fractional horizontal placement, Walkway support, different-depth overlapping Furniture, and explicit front/back paths.",
+        "Authors can observe depth-continuous equal-cost choices and Agents rendering in front/behind correctly without sitting states, occupancy limits, queues, or reservations.",
+        "Catalogue authoring documentation explains stable UUID/keys, tile offsets, floor-aligned point offsets, fixed-0 versus relative-depth edges, explicit external ports, and safe definition edits.",
+        "A complete place/edit/target/save/reopen workflow succeeds in both World formats, preserves identities, and remains portable with its external catalogue dependencies.",
+        "Integration coverage combines overlapping replacement spans, current-catalogue reconciliation, live topology edits, Sector reset, and pause/restoration rather than merely repeating isolated unit assertions.",
+        "Existing permission and Mobility constraints, Facade behaviour, Layer/aperture clipping, World formats, and legacy Furniture-free Worlds remain correct.",
+        "Missing required examples fail headless validation rather than skip; existing module ownership, fixture isolation, and no-window/no-dialog harness contracts are preserved.",
+        "Relevant World, Routing/Simulation, Persistence, Render, and Editor modules and contracts pass; checks assert public outcomes and introduce no GPU-only or wall-clock correctness dependency.",
+        "Parent-spec scope exclusions remain intact, and final delivery documents any remaining incompatibility diagnostics without introducing silent repair or additional requested features."
+      ]
+    }
+  ]
+}

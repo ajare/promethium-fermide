@@ -301,7 +301,8 @@ namespace core
 		float remainingSeconds{ 0 };
 		float scanProgress{ 0 };
 		std::array<DoorSnapshotState, 2> doors{};
-		AgentId occupant;
+		AgentId occupant; // First occupant, retained for existing scanner observers.
+		std::vector<AgentId> occupants;
 		std::vector<TraversalRequestId> reservations;
 		std::vector<TraversalRequestId> crossings;
 	};

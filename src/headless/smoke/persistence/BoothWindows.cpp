@@ -3,9 +3,240 @@
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 #include <yaml-cpp/yaml.h>
+#include "../support/DumbwaiterFixture.h"
 
 namespace persistence
 {
+	void dumbwaiters(smoke::Context const&)
+	{
+		using smoke::require;
+		auto world = dumbwaiter_fixture::make();
+		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.1f}); world->finishBuild(); world->pauseSimulation();
+		auto a = world->addAccessPermission("Lower A"), b = world->addAccessPermission("Lower B");
+		auto upper = world->addAccessPermission("Upper");
+		auto device = world->lookupDumbwaiter(id);
+		require(world->setInteractionPointPermissionRequirement(device->getLandingButton(0), {a,b})
+			&& world->setInteractionPointPermissionRequirement(device->getLandingButton(1), {upper}), "Landing requirements fixture failed");
+		auto write = [](core::World const& source, bool binary)
+		{
+			auto serialize = [&](auto writer) {
+				core::SerializationWorkData work; work.markSerializedUnmodified = false;
+				source.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+			};
+			return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
+		};
+		for (unsigned edit = 0; edit < 7; ++edit)
+		{
+			auto source = dumbwaiter_fixture::make(0, true, 2); source->addLayer();
+			auto deviceId = source->addDumbwaiter(2, 0, 2, {1, 0.37f}); source->finishBuild();
+			auto lowerPermission = source->addAccessPermission("Lower"), upperPermission = source->addAccessPermission("Upper");
+			auto unit = source->lookupDumbwaiter(deviceId);
+			source->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {lowerPermission});
+			source->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {upperPermission});
+			source->pressDumbwaiterLanding(deviceId, 0); source->resumeSimulation();
+			require(source->advanceTicks(60), "Edited document cycle fixture failed"); source->pauseSimulation();
+			if (edit == 0) source->applyWalkwayEdit(source->planRemoveSectorWalkway(0, 0));
+			if (edit == 1) source->applyLocationEdit(source->planRemoveLocation(0));
+			if (edit == 2) source->applyLocationEdit(source->planResizeLocation(0, 2, 0, 2, 2));
+			if (edit == 3) source->applyDeleteLayer(source->planDeleteLayer(0));
+			if (edit == 4) source->applyDeleteLayer(source->planDeleteLayer(2));
+			if (edit == 5) source->applyDeleteLevel(source->planDeleteLevel(0));
+			if (edit == 6) source->applyDeleteLevel(source->planDeleteLevel(3));
+			bool survives = edit == 2 || edit == 3 || edit == 6;
+			for (bool binary : {false, true})
+			{
+				auto data = write(*source, binary);
+				std::unique_ptr<core::Serializer> input = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				input->deserialize(); core::SerializationWorkData work; core::World loaded("Edited", 1, 1);
+				require(loaded.deserialize(*input, work), "Edited document refused"); loaded.pauseSimulation();
+				unit = loaded.lookupDumbwaiter(deviceId);
+				require(bool(unit) == survives && loaded.getSimulationSnapshot().interactionPoints.size() == (survives ? 2u : 0u),
+					"Edited document persisted orphan children or control relationships");
+				if (!unit) continue;
+				require(unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.37f && !unit->isBusy()
+					&& unit->getAperture(1)->getProgress() == 1 && unit->getAperture(0)->getProgress() == 0
+					&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{lowerPermission}
+					&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upperPermission},
+					"Edited roundtrip lost coherent authored configuration");
+				auto actor = loaded.createAgent("Restored operator", unit->getStop(1).sector->getIndex(),
+					float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+				loaded.grantAgentAccessPermission(actor, upperPermission);
+				require(bool(loaded.requestDumbwaiterLanding(deviceId, 1, actor)), "Restored Agent landing refused");
+				loaded.resumeSimulation(); require(loaded.advanceTicks(130), "Restored Agent operation failed");
+				require(!unit->isBusy() && unit->getCarPosition().y == 0, "Restored Agent control not operable");
+				auto operation = loaded.pressDumbwaiterLanding(deviceId, 0);
+				require(loaded.advanceTicks(119) && loaded.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded,
+					"Restored user control not operable");
+			}
+		}
+		for (uint32_t initial : {0u, 1u}) for (unsigned ticks : {0u, 12u, 80u, 180u})
+		{
+			auto running = dumbwaiter_fixture::make();
+			auto device = running->addDumbwaiter(1, 0, 2, {initial, 2}); running->finishBuild();
+			auto idleYaml = write(*running, false), idleBinary = write(*running, true);
+			running->resumeSimulation(); running->pressDumbwaiterLanding(device, initial);
+			require(running->advanceTicks(ticks), "Mid-cycle save setup failed");
+			for (bool binary : {false, true})
+			{
+				auto data = write(*running, binary);
+				require(data == (binary ? idleBinary : idleYaml), "Mid-cycle document contains runtime motion or requests");
+				std::unique_ptr<core::Serializer> reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+				reader->deserialize(); core::SerializationWorkData work; core::World restored("Restored", 1, 1);
+				require(restored.deserialize(*reader, work), "Mid-cycle document refused");
+				auto unit = restored.lookupDumbwaiter(device);
+				require(unit && !unit->isBusy() && unit->getCarPosition().y == float(initial)
+					&& unit->getAperture(initial)->getProgress() == 1 && unit->getAperture(1 - initial)->getProgress() == 0
+					&& restored.getSimulationSnapshot().deviceOperations.empty(), "Load restored in-flight state instead of authored initial state");
+				auto operation = restored.pressDumbwaiterLanding(device, 1 - initial);
+				require(restored.advanceTicks(216) && restored.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded,
+					"Mid-cycle document did not restore an operable unit");
+			}
+		}
+		auto baseline = write(*world, false);
+		for (bool binary : {false, true})
+		{
+			auto data = write(*world, binary);
+			std::unique_ptr<core::Serializer> input = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			input->deserialize(); core::SerializationWorkData work; core::World loaded("Loaded", 1, 1);
+			require(loaded.deserialize(*input, work), "Dumbwaiter document refused");
+			auto unit = loaded.lookupDumbwaiter(id);
+			require(unit && unit->getInitialStop() == 1 && unit->getTravelSeconds() == 0.1f
+				&& unit->getCellX() == 2 && unit->getCellY() == 0 && unit->getLayerIndex() == 1
+				&& unit->getAperture(0)->getProgress() == 0 && unit->getAperture(1)->getProgress() == 1,
+				"Round trip lost placement/configuration/initial shutters");
+			require(loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}
+				&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upper},
+				"YAML/binary lost independent landing requirements");
+			loaded.resetSimulation(); loaded.pauseSimulation();
+			unit = loaded.lookupDumbwaiter(id);
+			require(unit->getAperture(1)->getProgress() == 1
+				&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}, "Reset lost authored state/requirements");
+			require(loaded.deleteAccessPermission(a), "Permission deletion failed");
+			loaded.resetSimulation(); loaded.pauseSimulation(); unit = loaded.lookupDumbwaiter(id);
+			require(loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{b}
+				&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upper},
+				"Permission deletion not retained by construction replay");
+			require(loaded.removeDumbwaiter(id), "Loaded deletion failed");
+			auto next = loaded.addDumbwaiter(1, 0, 2); require(next.value > id.value, "Loaded identity reused");
+		}
+		auto node = YAML::Load(baseline);
+		// Master schema 49 predates the merged Furniture identity field.
+		auto masterLegacy = YAML::Clone(node); masterLegacy["version"] = 49;
+		masterLegacy.remove("nextFurnitureId");
+		auto masterReader = core::YamlSerializer::fromString(YAML::Dump(masterLegacy)); masterReader->deserialize();
+		core::SerializationWorkData masterData; core::World masterWorld("Schema 49", 1, 1);
+		require(masterWorld.deserialize(*masterReader, masterData) && masterWorld.lookupDumbwaiter(id)
+			&& masterWorld.getInteractionPointPermissionRequirement(masterWorld.lookupDumbwaiter(id)->getLandingButton(0))
+				== std::vector<core::AccessPermissionId>{a,b}, "Pre-merge master schema lost Dumbwaiter state");
+		for (auto change : {"zeroId", "duplicate", "stop", "nan", "timingLow", "timingHigh", "bounds", "layer", "width", "stops", "legacy", "nextId", "support", "unknownPermission", "zeroPermission", "duplicatePermission", "malformedPermission", "legacyPermission"})
+		{
+			auto invalid = YAML::Clone(node); std::string c = change;
+			for (auto record : invalid["construction"])
+			{
+				if (c == "support" && record["type"].as<std::string>() == "walkway") record["xOffset"] = 1;
+				if (record["type"].as<std::string>() != "dumbwaiter") continue;
+				if (c == "zeroId") record["id"] = 0;
+				if (c == "stop") record["initialStop"] = 2;
+				if (c == "nan") record["travelSeconds"] = ".nan";
+				if (c == "timingLow") record["travelSeconds"] = 0.09;
+				if (c == "timingHigh") record["travelSeconds"] = 60.01;
+				if (c == "bounds") record["y"] = 3;
+				if (c == "layer") record["layer"] = 0;
+				if (c == "width") record["cellsWide"] = 2;
+				if (c == "stops") record["stopOffsets"] = std::vector<unsigned>{0, 1, 2};
+				if (c == "unknownPermission") record["lowerLandingPermissionRequirement"] = std::vector<unsigned>{255};
+				if (c == "zeroPermission") record["upperLandingPermissionRequirement"] = std::vector<unsigned>{0};
+				if (c == "duplicatePermission") record["lowerLandingPermissionRequirement"] = std::vector<unsigned>{unsigned(a.value),unsigned(a.value)};
+				if (c == "malformedPermission") record["upperLandingPermissionRequirement"] = "not an array";
+			}
+			if (c == "duplicate") invalid["construction"].push_back(YAML::Clone(invalid["construction"][2]));
+			if (c == "legacy") invalid["version"] = 46;
+			if (c == "legacyPermission") invalid["version"] = 47;
+			if (c == "nextId") invalid["nextDumbwaiterId"] = id.value;
+			bool refused = false;
+			try { auto input = core::YamlSerializer::fromString(YAML::Dump(invalid)); input->deserialize(); core::SerializationWorkData work; world->deserialize(*input, work); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && write(*world, false) == baseline, "Malformed Dumbwaiter YAML mutated target: " + c);
+		}
+		auto bytes = write(*world, true);
+		auto offset = bytes.find("travelSeconds"); require(offset != std::string::npos, "Missing binary timing field");
+		offset += std::string("travelSeconds").size() + 1;
+		for (unsigned i = 0; i < 4; ++i) bytes[offset + i] = 0;
+		bool refused = false;
+		try { auto input = core::BinarySerializer::fromString(bytes); input->deserialize(); core::SerializationWorkData work; world->deserialize(*input, work); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && write(*world, false) == baseline, "Malformed binary timing mutated target");
+		for (auto field : {"lowerLandingPermissionRequirement", "upperLandingPermissionRequirement"})
+		{
+			auto corrupt = write(*world, true); auto start = corrupt.find(field);
+			require(start != std::string::npos, "Missing binary requirement field");
+			// Array tag/count, first uint32 item tag, then its little-endian value.
+			start += std::string(field).size() + 1 + 8 + 1;
+			for (unsigned i = 0; i < 4; ++i) corrupt[start + i] = static_cast<char>(0xff);
+			bool rejected = false;
+			try { auto input = core::BinarySerializer::fromString(corrupt); input->deserialize(); core::SerializationWorkData data; world->deserialize(*input, data); }
+			catch (std::exception const&) { rejected = true; }
+			require(rejected && write(*world, false) == baseline, "Malformed binary permission reference mutated target");
+		}
+		// Schema 47 Dumbwaiters default to empty requirements.
+		auto old = YAML::Clone(node); old["version"] = 47;
+		for (auto record : old["construction"]) if (record["type"].as<std::string>() == "dumbwaiter")
+		{ record.remove("lowerLandingPermissionRequirement"); record.remove("upperLandingPermissionRequirement"); }
+		auto oldReader = core::YamlSerializer::fromString(YAML::Dump(old)); oldReader->deserialize();
+		core::SerializationWorkData oldData; core::World oldWorld("Schema 47", 1, 1);
+		require(oldWorld.deserialize(*oldReader, oldData), "Schema-47 Dumbwaiter refused");
+		for (uint32_t stop : {0u,1u}) require(oldWorld.getInteractionPointPermissionRequirement(oldWorld.lookupDumbwaiter(id)->getLandingButton(stop)).empty(),
+			"Legacy landing requirements did not default empty");
+		// The implementation-time baseline remains loadable with no new authored objects.
+		auto legacyWorld = dumbwaiter_fixture::make(); auto legacy = YAML::Load(write(*legacyWorld, false));
+		legacy["version"] = 46; legacy.remove("nextDumbwaiterId"); legacy.remove("nextFurnitureId");
+		auto reader = core::YamlSerializer::fromString(YAML::Dump(legacy)); reader->deserialize(); core::SerializationWorkData work;
+		core::World loaded("Baseline", 1, 1); require(loaded.deserialize(*reader, work) && !loaded.hasDumbwaiters(), "Schema-46 compatibility lost");
+
+		// Move into landings authored after the unit; replay must retain chronological
+		// object slots, including when a new unit subsequently occupies the old site.
+		dumbwaiter_fixture::addLandings(*world, 3, 0, 2); world->finishBuild();
+		require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id, 3, 2, 0)), "Document movement failed");
+		core::World::CreateDumbwaiterOptions copied{0, 0.5f};
+		copied.landingPermissionRequirements = {{{a,b}, {upper}}};
+		auto copy = world->addDumbwaiter(1, 0, 2, copied); world->finishBuild();
+		for (bool binary : {false,true})
+		{
+			auto data = write(*world, binary);
+			std::unique_ptr<core::Serializer> input = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(data))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(data));
+			input->deserialize(); core::SerializationWorkData restoreData; core::World restored("Moved/pasted",1,1);
+			require(restored.deserialize(*input,restoreData) && write(restored,binary) == data, "Moved/pasted canonical YAML/binary round trip failed");
+			auto moved = restored.lookupDumbwaiter(id), pasted = restored.lookupDumbwaiter(copy);
+			require(moved->getLayerIndex() == 3 && moved->getCellX() == 0 && moved->getCellY() == 2
+				&& moved->getCarPosition().y == 3 && moved->getTravelSeconds() == 0.1f
+				&& pasted->getLayerIndex() == 1 && pasted->getCarPosition().y == 0
+				&& restored.getSimulationSnapshot().interactionPoints.size() == 4, "Restoration lost placement/ownership/configuration");
+			for (auto unit : {moved,pasted})
+			{
+				require(restored.getInteractionPointPermissionRequirement(unit->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}
+					&& restored.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upper}, "Restored move/copy requirements lost");
+				auto operation = restored.pressDumbwaiterLanding(unit->getId(),0);
+				require(restored.advanceTicks(60) && write(restored,binary) == data, "Moved/pasted mid-cycle save leaked runtime references/progress");
+				require(restored.advanceTicks(unit->getId() == id ? 42 : 66)
+					&& restored.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded, "Restored moved/pasted unit cannot operate");
+			}
+		}
+		auto movedDocument = write(*world,false);
+		for (auto field : {"id", "layer", "x", "y"})
+		{
+			auto invalid = YAML::Load(movedDocument);
+			for (auto record : invalid["construction"])
+				if (record["type"].as<std::string>() == "moveDumbwaiter") record[field] = 99;
+			bool rejected = false;
+			try { auto input = core::YamlSerializer::fromString(YAML::Dump(invalid)); input->deserialize(); core::SerializationWorkData data; world->deserialize(*input,data); }
+			catch (std::exception const&) { rejected = true; }
+			require(rejected && write(*world,false) == movedDocument, "Malformed movement record partially loaded");
+		}
+	}
 	void boothWindows(smoke::Context const&)
 	{
 		using smoke::require;
@@ -93,7 +324,7 @@ namespace persistence
 			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
-		require(node["version"].as<int>() == 47, "BoothWindow schema not allocated");
+		require(node["version"].as<int>() == 50, "BoothWindow schema not allocated");
 		core::SerializationWorkData work;
 		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown", "permissionZero", "permissionUnknown", "permissionDuplicate", "permissionShape", "permissionLegacy"})
 		{

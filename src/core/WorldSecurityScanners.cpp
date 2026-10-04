@@ -17,8 +17,8 @@ namespace core
 		bool valid = canAddAirlock(layer, y, x, width, 3.0f, &reason);
 		for (size_t pos = 0; (pos = reason.find("Airlock", pos)) != std::string::npos;)
 		{
-			reason.replace(pos, 7, "Security scanner");
-			pos += 16;
+			reason.replace(pos, 7, "Chamber");
+			pos += 7;
 		}
 		if (diagnostic) *diagnostic = std::move(reason);
 		return valid;
@@ -46,14 +46,15 @@ namespace core
 		auto chamber = std::make_shared<ChamberTransit>(index, layer, x, y,
 			width, leftToRight, stops, previous, subtype);
 		mSectors.push_back(chamber);
-		auto resourceId = mTraversalResources.add(std::unique_ptr<TraversalResource>(new TraversalResource("Security scanner journey")));
+		auto resourceId = mTraversalResources.add(std::unique_ptr<TraversalResource>(new TraversalResource(subtype == ChamberSubtype::Decontamination ? "Decontamination journey" : "Security scanner journey")));
 		auto resource = mTraversalResources.find(resourceId);
 		resource->mSecurityScanner = chamber;
-		resource->mCapacity = 1;
-		resource->mOccupants.resize(1);
-		resource->mAdmissionReservations.resize(1);
+		resource->mCapacity = chamber->getJourneyCapacity();
+		resource->mOccupants.resize(resource->mCapacity);
+		resource->mAdmissionReservations.resize(resource->mCapacity);
 		resource->mCrossingOwners.resize(1);
-		resource->mCapacityPositions.push_back({ width * 0.5f, 0.0f });
+		for (uint32_t slot = 0; slot < resource->mCapacity; ++slot)
+			resource->mCapacityPositions.push_back({ subtype == ChamberSubtype::Decontamination ? slot + 0.5f : width * 0.5f, 0.0f });
 		chamber->mTraversalResource = resourceId;
 		for (uint32_t cell = x; cell < x + width; ++cell)
 			grid->getCellDefinition(cell, y).sectorIndex = index;
@@ -94,7 +95,7 @@ namespace core
 		if (!mSimulationPaused || !ChamberTransit::validConfiguration(sensor, pre, scan, post)
 			|| index >= mSectors.size()) return false;
 		auto chamber = std::dynamic_pointer_cast<ChamberTransit>(mSectors[index]);
-		if (!chamber || chamber->getSubtype() != ChamberSubtype::SecurityScanner) return false;
+		if (!chamber) return false;
 		for (auto& record : mConstructionRecords)
 			if (record.type == ConstructionType::Chamber && record.layer == chamber->getLayerIndex()
 				&& record.a == chamber->getCellY() && record.b == chamber->getCellX())

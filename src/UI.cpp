@@ -252,6 +252,7 @@ namespace
 		Lift,
 		Shuttle,
 		Airlock,
+		Dumbwaiter,
 		Chamber
 	};
 
@@ -1156,6 +1157,12 @@ namespace
 				result.width, result.height, &result.diagnostic);
 			return result;
 		}
+		if (gPaint.tool == PaintTool::Dumbwaiter)
+		{
+			PaintRectangle result{false, (uint32_t)gPaint.anchorX, (uint32_t)gPaint.anchorY, 1, 2, {}};
+			result.valid = world->canAddDumbwaiter(gPaint.layer, result.y, result.x, {}, &result.diagnostic);
+			return result;
+		}
 		if (gPaint.tool == PaintTool::Chamber)
 		{
 			auto draft = planChamberDrag(*world, gPaint.layer, gPaint.anchorPosition.x,
@@ -1572,6 +1579,8 @@ namespace
 		auto markerMin = paletteSlotMin(trayTopLeft, PaletteSlot::Marker);
 		auto doorMin = paletteSlotMin(trayTopLeft, PaletteSlot::Door);
 		auto bulkheadDoorMin = paletteSlotMin(trayTopLeft, PaletteSlot::BulkheadDoor);
+		auto dumbMin = paletteSlotMin(trayTopLeft, PaletteSlot::Dumbwaiter);
+		auto dumbMax = paletteSlotMax(trayTopLeft, PaletteSlot::Dumbwaiter);
 		auto boothMin = paletteSlotMin(trayTopLeft, PaletteSlot::BoothWindow);
 		auto boothMax = paletteSlotMax(trayTopLeft, PaletteSlot::BoothWindow);
 		auto windowMin = paletteSlotMin(trayTopLeft, PaletteSlot::Window);
@@ -1615,6 +1624,7 @@ namespace
 		bool staircaseHovered = gWorldHovered && pointInRect(io.MousePos, staircaseMin, staircaseMax);
 		bool airlockHovered = gWorldHovered && pointInRect(io.MousePos, airlockMin, airlockMax);
 		bool scannerHovered = gWorldHovered && pointInRect(io.MousePos, scannerMin, scannerMax);
+		bool dumbHovered = gWorldHovered && pointInRect(io.MousePos, dumbMin, dumbMax);
 		bool backOnlyDisabled = gUISettings.visibleLayer == 0;
 		if (overTray) paletteConsumedMouse = true;
 
@@ -1647,7 +1657,7 @@ namespace
 
 		if (gPegman.phase == PalettePhase::Home && !gTrayDrag.dragging
 			&& (roomHovered || facadeHovered || corridorHovered || backgroundHovered || ladderHovered
-				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered || scannerHovered))
+				|| stairwellHovered || staircaseHovered || liftHovered || shuttleHovered || airlockHovered || scannerHovered || dumbHovered))
 		{
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -1661,7 +1671,7 @@ namespace
 					: backgroundHovered ? "Paint Background" : ladderHovered ? "Paint Ladder"
 					: stairwellHovered ? "Paint Stairwell" : staircaseHovered ? "Paint Staircase"
 					: liftHovered ? "Paint Lift" : airlockHovered ? "Paint Airlock"
-					: scannerHovered ? "Paint Chamber" : "Paint Shuttle");
+					: dumbHovered ? "Paint Dumbwaiter (fixed 1 x 2)" : scannerHovered ? "Paint Chamber" : "Paint Shuttle");
 
 			if (io.MouseClicked[0] && !gViewPan.dragging
 				&& !((ladderHovered || stairwellHovered || staircaseHovered || liftHovered || shuttleHovered)
@@ -1675,7 +1685,7 @@ namespace
 					: stairwellHovered ? PaintTool::Stairwell
 					: staircaseHovered ? PaintTool::Staircase
 					: liftHovered ? PaintTool::Lift : airlockHovered ? PaintTool::Airlock
-					: scannerHovered ? PaintTool::Chamber : PaintTool::Shuttle;
+					: dumbHovered ? PaintTool::Dumbwaiter : scannerHovered ? PaintTool::Chamber : PaintTool::Shuttle;
 				gPaint.tool = gPaint.tool == clickedTool ? PaintTool::None : clickedTool;
 				gPaint.dragging = false;
 				resetPegman();
@@ -1705,6 +1715,7 @@ namespace
 			staircaseHovered, backOnlyDisabled);
 		drawPaintButton(airlockMin, airlockMax, "Airlock", PaintTool::Airlock, airlockHovered, false);
 		drawPaintButton(scannerMin, scannerMax, "Chamber", PaintTool::Chamber, scannerHovered, false);
+		drawPaintButton(dumbMin, dumbMax, "Dumbwaiter", PaintTool::Dumbwaiter, dumbHovered, backOnlyDisabled);
 		drawBulkheadDoorIcon(drawList, bulkheadDoorMin, bulkheadDoorMax, yellow);
 		drawWindowIcon(drawList, windowMin, windowMax, yellow);
 		drawList->AddRect(boothMin, boothMax, yellow, 3.0f);
@@ -1817,6 +1828,12 @@ namespace
 							auto index = commitChamberDraft(*world, gPaint.layer, draft);
 							setSelectionMode(UISettings::SelectionMode::Sector);
 							gSelectedSector = world->getSector(index);
+						}
+						else if (tool == PaintTool::Dumbwaiter)
+						{
+							auto id = world->addDumbwaiter(gPaint.layer, paintRectangle.y, paintRectangle.x);
+							setSelectionMode(UISettings::SelectionMode::Sector);
+							gSelectedSector = world->lookupDumbwaiter(id);
 						}
 						else if (tool == PaintTool::Airlock)
 						{
@@ -3418,7 +3435,7 @@ namespace
 		}
 	}
 
-	enum class ClipboardObjectType { Agent, Door, BulkheadDoor, Window, BoothWindow, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
+	enum class ClipboardObjectType { Dumbwaiter, Agent, Door, BulkheadDoor, Window, BoothWindow, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
 	struct ClipboardDefinition
 	{
 		ClipboardObjectType type{};
@@ -3428,6 +3445,7 @@ namespace
 		core::World::CreateBulkheadDoorOptions bulkheadDoor;
 		core::World::CreateWindowOptions window;
 		BoothWindowClipboard boothWindow;
+		DumbwaiterClipboard dumbwaiter;
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
 		core::World::CreateLiftOptions platformLift;
@@ -3464,6 +3482,8 @@ namespace
 
 	bool hasClipboardSelection()
 	{
+		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector)
+			return gSelectedSector && gSelectedSector->getType() == core::SectorType::Dumbwaiter;
 		if (gUISettings.selectionMode != UISettings::SelectionMode::Object) return false;
 		if (gSelectedAgent) return true;
 		if (!gSelectedSectorObject) return false;
@@ -3545,6 +3565,8 @@ namespace
 		bool cut)
 	{
 		if (!hasClipboardSelection()) return nullopt;
+		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector)
+			return makeDumbwaiterClipboardText(*world, *static_pointer_cast<const core::Dumbwaiter>(gSelectedSector), cut);
 		YAML::Emitter output;
 		output << YAML::BeginMap << YAML::Key << "prometheumClipboard" << YAML::Value
 			<< YAML::BeginMap << YAML::Key << "version" << YAML::Value << 1
@@ -3721,7 +3743,12 @@ namespace
 		auto type = requiredYaml<string>(root, "type");
 		auto object = root["object"];
 		if (!object || !object.IsMap()) throw runtime_error("Clipboard object definition is required");
-		if (type == "Agent")
+		if (type == "Dumbwaiter")
+		{
+			definition.type = ClipboardObjectType::Dumbwaiter;
+			definition.dumbwaiter = readDumbwaiterClipboardObject(object);
+		}
+		else if (type == "Agent")
 		{
 			definition.type = ClipboardObjectType::Agent;
 			string diagnostic;
@@ -3887,6 +3914,13 @@ namespace
 
 	bool removeClipboardSelection(shared_ptr<core::World> const& world)
 	{
+		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector && gSelectedSector
+			&& gSelectedSector->getType() == core::SectorType::Dumbwaiter)
+		{
+			bool removed = world->removeDumbwaiter(static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId());
+			if (removed) gSelectedSector.reset();
+			return removed;
+		}
 		if (gSelectedAgent)
 		{
 			auto id = world->getAgentId(gSelectedAgent);
@@ -4096,7 +4130,13 @@ namespace
 			string diagnostic;
 			shared_ptr<const core::Sector> markerSector;
 			float markerOffset = 0.0f;
-			if (definition.type == ClipboardObjectType::Door)
+			if (definition.type == ClipboardObjectType::Dumbwaiter)
+			{
+				auto options = resolveDumbwaiterClipboardPermissions(*world, definition.dumbwaiter);
+				if (!world->canAddDumbwaiter(gUISettings.visibleLayer, y, x, options, &diagnostic))
+					throw runtime_error(diagnostic);
+			}
+			else if (definition.type == ClipboardObjectType::Door)
 			{
 				uint32_t landingX, landingWidth;
 				if (world->getLiftLandingGeometry(gUISettings.visibleLayer + 1, y, x, landingX, landingWidth))
@@ -4190,7 +4230,13 @@ namespace
 				if (!wasPaused) world->pauseSimulation();
 				gUISettings.worldPaused = true;
 				shared_ptr<const core::SectorObject> created;
-				if (definition.type == ClipboardObjectType::Door)
+				shared_ptr<const core::Dumbwaiter> createdUnit;
+				if (definition.type == ClipboardObjectType::Dumbwaiter)
+				{
+					auto id = pasteDumbwaiter(world, gUISettings.visibleLayer, y, x, definition.dumbwaiter);
+					createdUnit = world->lookupDumbwaiter(id);
+				}
+				else if (definition.type == ClipboardObjectType::Door)
 				{
 					auto result = world->addSectorDoor(gUISettings.visibleLayer, y, x, definition.door);
 					created = result.door.sector->getObject(result.door.index);
@@ -4248,9 +4294,9 @@ namespace
 						throw runtime_error(diagnostic);
 				}
 				world->finishBuild();
-				setSelectionMode(UISettings::SelectionMode::Object);
+				setSelectionMode(createdUnit ? UISettings::SelectionMode::Sector : UISettings::SelectionMode::Object);
 				gSelectedAgent = nullptr;
-				gSelectedSector.reset();
+				gSelectedSector = createdUnit;
 				gSelectedSectorObject = created;
 				commitDocumentEdit(std::move(undo));
 				if (definition.cut) gConsumedCutClipboard = clipboardText;
@@ -6754,6 +6800,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			type = gSelectedSector->getTopLevelHeight() == CORE_CORRIDOR_HEIGHT
 				? "Corridor" : "Room";
 			break;
+		case core::SectorType::Dumbwaiter: type = "Dumbwaiter"; break;
 		case core::SectorType::Lift: type = "Lift"; break;
 		case core::SectorType::Shuttle: type = "Shuttle"; break;
 		case core::SectorType::Airlock: type = "Airlock"; break;
@@ -6778,6 +6825,16 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 
 		switch (gSelectedSector->getType())
 		{
+		case core::SectorType::Dumbwaiter:
+		{
+			auto unit = static_pointer_cast<const core::Dumbwaiter>(gSelectedSector);
+			if (renderDumbwaiterPanel(world, unit))
+			{
+				gSelectedSector = world->lookupDumbwaiter(unit->getId());
+				gSelectedSectorObject.reset();
+			}
+			break;
+		}
 		case core::SectorType::Chamber:
 		{
 			auto chamber = static_pointer_cast<const core::ChamberTransit>(gSelectedSector);
@@ -7501,6 +7558,8 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 			ImGui::TextUnformatted("Path: <none>");
 		}
 	}
+
+	renderDumbwaiterAgentActions(world, id);
 
 	renderRouteCostDiagnostics(world, *gSelectedAgent);
 	renderRouteExplanation(world, *gSelectedAgent);

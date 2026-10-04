@@ -159,16 +159,33 @@ namespace
 			require(!GImGui->OpenPopupStack.empty(), "Subtype dropdown did not open");
 			auto popup = GImGui->OpenPopupStack.back().Window;
 			require(popup && popup->Active, "Subtype options not visible");
-			// One row, with no None/future rows. The sole option uses the subtype's literal label.
-			require(popup->ContentSize.y > 0 && popup->ContentSize.y <= ImGui::GetFrameHeightWithSpacing(),
-				"Subtype dropdown must offer exactly one option");
+			// Both supported subtypes, with no None/unsupported rows.
+			require(popup->ContentSize.y > ImGui::GetFrameHeightWithSpacing()
+				&& popup->ContentSize.y <= 2 * ImGui::GetFrameHeightWithSpacing(),
+				"Subtype dropdown must offer exactly two options");
 			io.AddMousePosEvent(popup->Pos.x + 20, popup->Pos.y + 10); frame(); frame();
 			require(ImGui::GetHoveredID() == popup->GetID("Security Scanner"),
-				"Subtype dropdown sole option is not Security Scanner");
+				"Subtype dropdown first option is not Security Scanner");
 			click({popup->Pos.x + 20, popup->Pos.y + 10});
 			require(GImGui->OpenPopupStack.empty() && captureDocumentSnapshot(world, history)->yaml == baseline
 				&& !world->isModified() && history.undoCount() == 0 && history.redoCount() == 0,
 				"Selecting active subtype changed configuration/history/dirty state");
+			click(pointFor("Subtype")); frame();
+			popup = GImGui->OpenPopupStack.back().Window;
+			click({popup->Pos.x + 20, popup->Pos.y + 10 + ImGui::GetFrameHeightWithSpacing()});
+			require(chamber()->getSubtype() == core::ChamberSubtype::Decontamination
+				&& chamber()->getCapacity() == 2 && chamber()->getSensorDistance() == 8
+				&& chamber()->getPreDelaySeconds() == 3 && chamber()->getScanSeconds() == 4
+				&& chamber()->getPostPauseSeconds() == 5 && history.undoCount() == 1,
+				"Subtype switching lost configuration/capacity/history");
+			frame();
+			require(text.find("Decontamination duration (seconds)") != std::string::npos,
+				"Decontamination controls retained scanner labels");
+			require(history.undo(captureDocumentSnapshot(world, history), restore)
+				&& captureDocumentSnapshot(world, history)->yaml == baseline, "Subtype undo lost authored configuration");
+			require(history.redo(captureDocumentSnapshot(world, history), restore)
+				&& chamber()->getSubtype() == core::ChamberSubtype::Decontamination, "Subtype redo failed");
+			require(history.undo(captureDocumentSnapshot(world, history), restore), "Subtype second undo failed");
 			click(pointFor("Left to right"));
 			require(!chamber()->isLeftToRight() && history.undoCount() == 1, "Scanner direction panel edit failed");
 			require(history.undo(captureDocumentSnapshot(world, history), restore)

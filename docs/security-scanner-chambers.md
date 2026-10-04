@@ -1,6 +1,6 @@
 # Security scanner chambers (#339, #340, #341, #342, #343, #344, #345)
 
-The palette's **Chamber** tool creates a same-Layer Chamber with the Security Scanner subtype through World-owned Chamber commands. Selection identifies the Sector as Chamber and offers a required **Subtype** dropdown containing only **Security Scanner**. Choosing the active subtype is a no-op: configuration, dirty state, and document history remain unchanged. Airlock remains separate and unchanged.
+The palette's **Chamber** tool creates a same-Layer Chamber with the Security Scanner subtype through World-owned Chamber commands. Selection identifies the Sector as Chamber and offers a required **Subtype** dropdown containing **Security Scanner** and **Decontamination Chamber**. Choosing the active subtype is a no-op: configuration, dirty state, and document history remain unchanged. Airlock remains separate and unchanged.
 Drag horizontally across empty whole cells between adjoining walkable Room or
 Corridor ends. The complete requested footprint must be free; it is never carved
 or shortened. Drag direction fixes entry and exit, including single-cell drags.
@@ -129,7 +129,7 @@ optional beams consume the unchanged public geometry/progress seams.
 
 ## Persistence and history
 
-World schema **45** persists `chamber` construction records with required
+World schema **46** persists `chamber` construction records with required
 `subtype: securityScanner`: Layer, Level, geometry, direction, authored
 sensing/timing, fixed capacity, and original adjoining wall states. Legacy schema
 43/44 `securityScanner` records migrate to that subtype without configuration loss.
@@ -150,14 +150,14 @@ and ownership. Detached open-wall restoration records remain supported.
 
 `World::canAddChamber` / `addChamber` support an explicit `ChamberSubtype`,
 defaulting creation to `SecurityScanner`. `setChamberConfiguration`,
-`planResizeChamber`, `planRemoveChamber`, and `applyChamberEdit` retain the
+`planResizeChamber`, `planSetChamberSubtype`, `planRemoveChamber`, and `applyChamberEdit` retain the
 existing paused, validated, transactional scanner edit semantics.
 `ChamberTransit::getSubtype()` exposes the immutable subtype. Chamber is the sole
 Sector and construction identity; the temporary SecurityScanner World interfaces
 and Transit/Sector aliases have been removed. Legacy `securityScanner` document
 recognition remains supported permanently and migrates to Chamber on load.
 Scanner-specific phases, journey snapshots, configuration, and rendering retain
-their behavior names and dispatch on the Security Scanner subtype.
+their behavior names; shared journey dispatch supports both Chamber subtypes. See [Decontamination Chambers](decontamination-chambers.md).
 
 ## Headless checks
 

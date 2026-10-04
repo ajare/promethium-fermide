@@ -232,6 +232,15 @@ namespace persistence
 			auto nextId = loaded->placeFurniture(room, "chair", 4, 0, "New chair");
 			require(nextId > id && loaded->furniture().back().marker.value > marker.value, "Reopening reused Furniture or Marker identity");
 		}
+		// Furniture branch schema 47 predates the merged Dumbwaiter identity field.
+		auto furnitureLegacy = YAML::LoadFile((root / "chair.world.yaml").string());
+		furnitureLegacy["version"] = 47;
+		furnitureLegacy.remove("nextDumbwaiterId");
+		{ std::ofstream file(root / "legacy-furniture.world.yaml"); file << furnitureLegacy; }
+		auto legacyFurniture = core::loadWorldDocument(root / "legacy-furniture.world.yaml");
+		require(legacyFurniture->furniture().size() == 1 && legacyFurniture->furniture().front().id == id
+			&& legacyFurniture->furniture().front().marker == marker,
+			"Pre-merge Furniture schema lost instance or Marker identity");
 		auto expectFailure = [&](std::string const& fragment) {
 			try { (void)core::loadWorldDocument(root / "chair.world.yaml"); }
 			catch (std::exception const& error) { require(std::string(error.what()).find(fragment) != std::string::npos, error.what()); return; }

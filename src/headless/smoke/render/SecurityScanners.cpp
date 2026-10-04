@@ -16,8 +16,67 @@ extern std::shared_ptr<const core::Sector> gSelectedSector;
 
 namespace
 {
+	void whitePulse()
+	{
+		using smoke::require;
+		ImGui::GetIO().DisplaySize = { 1600, 720 };
+		ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
+		gUISettings.visibleLayer = 0; gUISettings.worldViewportWidth = 1600;
+		gUISettings.worldViewportHeight = 720; gUISettings.worldZoom = 1;
+		gUISettings.xOffset = 0; gUISettings.yOffset = 0;
+		auto world = std::make_shared<core::World>("White pulse", 12, 2);
+		world->addRoom("Left", 0, 0, 0, 3, 1); world->addCorridor(0, 0, 6, 3, 1);
+		auto index = world->addChamber(0, 0, 3, 3, true, core::ChamberSubtype::Decontamination);
+		auto marker = world->addSectorMarker(1, 0, 1.5f); world->finishBuild();
+		auto id = world->createAgent("Traveller", 0, 0, 2.0f);
+		auto actor = world->lookupAgent(id).entity;
+		actor->setPath(world->getGraph()->calculatePath(actor, world->getGraph()->getVertexForObject(marker.sector->getObject(marker.index))), true);
+		auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(world->getSector(index));
+		bool rise = false, peak = false, fall = false, finished = false;
+		for (unsigned tick = 0; tick < 4800; ++tick)
+		{
+			world->advanceTick();
+			float p = chamber->getScanProgress();
+			float expected = chamber->getPhase() == core::SecurityScannerPhase::Scanning ? (p <= 0.25f ? p * 4 : (1 - p) / 0.75f) : 0;
+			require(std::abs(chamber->getDecontaminationOpacity() - expected) < 0.0001f, "White fade ratio incorrect");
+			WorldDrawList drawing({{0, 0}, {1600, 720}}); renderWorld(world, &drawing);
+			bool occupant = false; unsigned quads = 0;
+			core::Vector2 low, high; chamber->getBounds(low, high);
+			float left = low.x * CORE_CELL_WIDTH_PIXELS, right = high.x * CORE_CELL_WIDTH_PIXELS;
+			float top = 720 - high.y * CORE_LEVEL_HEIGHT_PIXELS, bottom = 720 - low.y * CORE_LEVEL_HEIGHT_PIXELS;
+			for (auto const& command : drawing.commands())
+			{
+				if (auto text = std::get_if<WorldDrawList::Text>(&command); text && text->value == ICON_FA_MALE)
+				{
+					require(quads == 0, "Chamber occupant repainted above white quad by a later render pass");
+					occupant = true;
+				}
+				if (auto line = std::get_if<WorldDrawList::Line>(&command)) require(line->colour != IM_COL32(255, 0, 0, 128), "Decontamination drew red beams");
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->texture == WorldDrawList::Texture::None)
+				{
+					bool bounds = true;
+					for (auto point : triangle->positions) bounds = bounds && (point.x == left || point.x == right) && (point.y == top || point.y == bottom);
+					if (!bounds || (triangle->colour & 0x00ffffffu) != (IM_COL32_WHITE & 0x00ffffffu)) continue;
+					require(expected > 0 && occupant && triangle->colour == IM_COL32(255, 255, 255, (int)std::lround(expected * 255)), "White quad bounds/opacity/draw order incorrect");
+					++quads;
+				}
+			}
+			require(quads == (expected > 0 ? 2u : 0u), "White pulse did not draw exactly one interior quad");
+			if (expected > 0)
+			{
+				rise = rise || (p > 0.1f && p < 0.2f); peak = peak || std::abs(p - 0.25f) < 0.001f;
+				fall = fall || (p > 0.6f && p < 0.7f);
+			}
+			finished = finished || chamber->getPhase() == core::SecurityScannerPhase::PostPause;
+			if (finished && chamber->getPhase() == core::SecurityScannerPhase::Idle) break;
+		}
+		require(rise && peak && fall && finished, "White pulse omitted rise/peak/fall/completion");
+		ImGui::EndFrame();
+	}
+
 	void beams(smoke::Context const&)
 	{
+		whitePulse();
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = { 1600, 720 };
 		ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();

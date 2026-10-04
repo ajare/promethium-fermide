@@ -34,6 +34,8 @@ namespace core
 
 		case SectorType::Airlock:
 			return "Airlock";
+		case SectorType::Dumbwaiter:
+			return "Dumbwaiter";
 		case SectorType::Chamber:
 			return "Chamber";
 

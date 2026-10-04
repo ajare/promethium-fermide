@@ -14,6 +14,55 @@ namespace persistence
 		using smoke::require;
 		for (uint32_t width : { 1u, 4u })
 			for (bool direction : { false, true })
+			{
+				core::World world("Persisted decontamination", 12, 2);
+				world.addRoom("Left", 0, 0, 0, 2, 1); world.addCorridor(0, 0, 2 + width, 3, 1);
+				auto index = world.addChamber(0, 0, 2, width, direction, core::ChamberSubtype::Decontamination);
+				world.finishBuild(); world.pauseSimulation();
+				require(world.setChamberConfiguration(index, 7, 3, 4, 5), "Decontamination configuration refused");
+				for (bool binary : { false, true })
+				{
+					core::SerializationWorkData work;
+					auto write = [&](auto writer) {
+						world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+					};
+					auto bytes = binary ? write(core::BinarySerializer::toString()) : write(core::YamlSerializer::toString());
+					std::unique_ptr<core::Serializer> reader = binary
+						? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+						: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+					reader->deserialize(); core::World loaded("Loaded decontamination", 1, 1);
+					require(loaded.deserialize(*reader, work), "Decontamination round trip refused");
+					auto assertData = [&] {
+						auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(loaded.getSector(index));
+						require(chamber && chamber->getSubtype() == core::ChamberSubtype::Decontamination
+							&& chamber->getCapacity() == width && chamber->isLeftToRight() == direction
+							&& chamber->getSensorDistance() == 7 && chamber->getPreDelaySeconds() == 3
+							&& chamber->getScanSeconds() == 4 && chamber->getPostPauseSeconds() == 5,
+							"Decontamination replay lost configuration");
+					};
+					assertData(); loaded.resetSimulation(); assertData(); loaded.pauseSimulation();
+					index = loaded.applyChamberEdit(loaded.planResizeChamber(index, 2, 0, width, direction)); assertData();
+					index = loaded.applyChamberEdit(loaded.planSetChamberSubtype(index, core::ChamberSubtype::SecurityScanner));
+					require(loaded.getSector(index)->getCapacity() == 1, "Scanner subtype switch retained batch capacity");
+					index = loaded.applyChamberEdit(loaded.planSetChamberSubtype(index, core::ChamberSubtype::Decontamination)); assertData();
+					if (!binary)
+					{
+						for (bool oldSchema : { false, true })
+						{
+							auto node = YAML::Load(bytes);
+							if (oldSchema) node["version"] = 45;
+							else for (auto record : node["construction"])
+								if (record["type"].as<std::string>() == "chamber") record["capacity"] = width + 1;
+							auto invalid = core::YamlSerializer::fromString(YAML::Dump(node)); invalid->deserialize();
+							bool refused = false;
+							try { refused = !loaded.deserialize(*invalid, work); } catch (std::exception const&) { refused = true; }
+							require(refused, "Invalid decontamination schema/capacity accepted"); assertData();
+						}
+					}
+				}
+			}
+		for (uint32_t width : { 1u, 4u })
+			for (bool direction : { false, true })
 				for (bool open : { false, true })
 				{
 					core::World world("Persisted scanner", 12, 3);

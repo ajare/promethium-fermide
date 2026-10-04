@@ -171,6 +171,9 @@ set(editor_names
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory
     securityScanners/selectionWorkflow
+    dumbwaiters/selectionAndHistory
+    dumbwaiters/wholeUnitMoveAndClipboard
+    dumbwaiters/landingPermissionHistoryAndAgentSelection
     boothWindows/historyAndClipboard
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation

@@ -7902,7 +7902,7 @@ namespace core
 		return liftRes;
 	}
 
-	void World::beginStructuralEdit(string const& operation)
+	void World::beginStructuralEdit(string const& operation, bool preserveOtherDumbwaiterCycles)
 	{
 		invalidateSimulationSnapshot();
 		if (mBuildFinished && !mSimulationPaused)
@@ -7911,6 +7911,8 @@ namespace core
 				"{} is a structural edit and requires pauseSimulation() before it can run", operation));
 		}
 		modify();
+		if (!preserveOtherDumbwaiterCycles)
+			mOnlyDumbwaiterTopologyEdits = false;
 		mTopologyDirty = true;
 		mTopologyValid = false;
 		mTopologyDiagnostic = "Traversal topology has unvalidated structural edits";
@@ -8194,6 +8196,9 @@ namespace core
 					|| binding.command.type == DeviceCommandType::SetBoothWindowState)
 					require(bool(lookupBoothWindow(binding.command.boothWindow)),
 						format("Interaction point {} targets a removed BoothWindow", pointId.value));
+				else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
+					require(lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2,
+						format("Interaction point {} targets a removed Dumbwaiter", pointId.value));
 				else if (binding.command.type != DeviceCommandType::SetSectorLights)
 					require(mTraversalResources.find(binding.command.traversalResource) != nullptr,
 						format("Interaction point {} targets removed traversal resource {}",
@@ -8233,6 +8238,11 @@ namespace core
 			validateTraversalTopology(*candidate);
 			mSimulationCoordinator.cancelAllTraversalForTopologyRebuild();
 			mGraph = std::move(candidate);
+			if (mTopologyDirty && !mOnlyDumbwaiterTopologyEdits)
+				for (auto const& sector : mSectors)
+					if (auto unit = std::dynamic_pointer_cast<Dumbwaiter>(sector))
+						mSimulationCoordinator.resetDumbwaiter(*unit);
+			mOnlyDumbwaiterTopologyEdits = true;
 			mTopologyDirty = false;
 			mTopologyValid = true;
 			mTopologyDiagnostic.clear();
@@ -8302,6 +8312,7 @@ namespace core
 			buildGraph();
 			mBuildFinished = true;
 			mTopologyDirty = false;
+			mOnlyDumbwaiterTopologyEdits = true;
 			mTopologyValid = true;
 			mTopologyDiagnostic.clear();
 			++mTopologyGeneration;
@@ -8448,6 +8459,8 @@ namespace core
 
 	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
+		if (sector.getType() == SectorType::Dumbwaiter)
+			throw invalid_argument("Agents cannot enter a Dumbwaiter shaft or car");
 		if (sector.getType() == SectorType::Airlock || sector.getType() == SectorType::Chamber)
 			throw invalid_argument(sector.getType() == SectorType::Chamber
 				? "Agents cannot be placed inside authored Security scanners"
@@ -10946,6 +10959,16 @@ namespace core
 					break;
 				}
 		}
+		if (auto unit = lookupDumbwaiter(point->mDumbwaiterOwner))
+			for (auto& record : mConstructionRecords)
+				if (record.type == ConstructionType::Dumbwaiter && record.dumbwaiterId == unit->getId())
+				{
+					auto& stored = record.controlPermissionRequirements[unit->getLandingButton(0) == id ? 0 : 1];
+					stored.clear();
+					for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+						if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+					break;
+				}
 		for (auto const& [resourceId, resource] : mTraversalResources.entries())
 		{
 			bool usesPoint = find(resource->mControls.begin(), resource->mControls.end(), id)
@@ -12633,7 +12656,8 @@ namespace core
 			for (auto const& lane : resource->mQueueLanes)
 				if (lane.sector == sourceSector) ahead += lane.queue.size();
 			auto const& chamber = *resource->mSecurityScanner;
-			return static_cast<float>(ahead) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
+			auto capacity = std::max<size_t>(1, resource->mCapacity);
+			return static_cast<float>((ahead + capacity - 1) / capacity) * (4 * CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME
 				+ chamber.getPreDelaySeconds() + chamber.getScanSeconds() + chamber.getPostPauseSeconds());
 		}
 		if (resource->mAirlock)

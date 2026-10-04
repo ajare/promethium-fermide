@@ -37,6 +37,7 @@ set(names
     furniture/demoCommands
     securityScanners/chamberCommandStream
     securityScanners/beamSweeps
+    dumbwaiters/initialPresentationAndClipping
     boothWindows/staticPresentationAndNestedClipping
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations

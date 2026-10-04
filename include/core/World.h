@@ -27,6 +27,7 @@
 #include "core/Door.h"
 #include "core/DoorSectorObject.h"
 #include "core/Window.h"
+#include "core/Dumbwaiter.h"
 #include "core/WindowSectorObject.h"
 #include "core/Graph.h"
 #include "core/Log.h"
@@ -104,6 +105,32 @@ namespace core
 			CreateObjectResult controls[2];
 			TraversalResourceId traversalResource;
 		};
+
+		struct CreateDumbwaiterOptions
+		{
+			uint32_t initialStop{ 0 };
+			float travelSeconds{ 2.0f };
+			std::array<std::vector<AccessPermissionId>, 2> landingPermissionRequirements{};
+		};
+		bool canAddDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options, std::string* diagnostic = nullptr) const;
+		DumbwaiterId addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options);
+		DumbwaiterId addDumbwaiter(uint32_t shaftLayer, uint32_t y, uint32_t x)
+		{ return addDumbwaiter(shaftLayer, y, x, CreateDumbwaiterOptions{}); }
+		std::shared_ptr<const Dumbwaiter> lookupDumbwaiter(DumbwaiterId id) const;
+		struct DumbwaiterMovePlan
+		{
+			bool valid{false};
+			std::string diagnostic;
+			DumbwaiterId id{};
+			uint32_t layer{0}, y{0}, x{0};
+		};
+		DumbwaiterMovePlan planMoveDumbwaiter(DumbwaiterId id, uint32_t shaftLayer, uint32_t y, uint32_t x) const;
+		bool applyDumbwaiterMove(DumbwaiterMovePlan const& plan);
+		bool configureDumbwaiter(DumbwaiterId id, CreateDumbwaiterOptions const& options);
+		bool removeDumbwaiter(DumbwaiterId id);
+		bool hasDumbwaiters() const;
 
 		struct CreateWindowOptions
 		{
@@ -365,6 +392,7 @@ namespace core
 		{
 			bool valid = false, remove = false;
 			bool chamber = false, leftToRight = true;
+			std::optional<ChamberSubtype> subtype;
 			uint32_t sectorIndex = ~0u, x = 0, y = 0, width = 0;
 			std::string diagnostic;
 		};
@@ -769,6 +797,7 @@ namespace core
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
 		// Runtime-only device identities, independent of movement admission.
 		uint64_t mNextBoothWindowId{ 1 };
+		uint64_t mNextDumbwaiterId{ 1 };
 		std::map<BoothWindowId, std::weak_ptr<BoothWindow>> mBoothWindows;
 
 		EntityRegistry<TraversalResourceId, TraversalResource> mTraversalResources;
@@ -817,6 +846,8 @@ namespace core
 		bool mBuildFinished{ false };
 		bool mSimulationPaused{ false };
 		bool mTopologyDirty{ true };
+		// Whole-unit edits already reset their own device, not unrelated cycles.
+		bool mOnlyDumbwaiterTopologyEdits{ true };
 		bool mTopologyValid{ false };
 		uint64_t mTopologyGeneration{ 0 };
 		std::string mTopologyDiagnostic;
@@ -874,7 +905,9 @@ namespace core
 			Airlock,
 			Furniture,
 			Chamber,
-			BoothWindow
+			BoothWindow,
+			Dumbwaiter,
+			MoveDumbwaiter
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -927,6 +960,7 @@ namespace core
 			int furnitureDepth{ 0 };
 			std::string definitionKey{};
 			std::vector<FurnitureDestination> furnitureDestinations{};
+			DumbwaiterId dumbwaiterId{};
 		};
 
 		void restoreFurniture(ConstructionRecord const& record);
@@ -969,6 +1003,12 @@ namespace core
 		bool deserializeImpl(Serializer& serializer, SerializationWorkData& workData) override;
 
 		void recordConstruction(ConstructionRecord record);
+		bool preflightDumbwaiter(uint32_t layer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options, DumbwaiterId ignored, std::string* diagnostic) const;
+		void attachDumbwaiter(std::shared_ptr<Dumbwaiter> const& unit);
+		void detachDumbwaiter(std::shared_ptr<const Dumbwaiter> const& unit);
+		DumbwaiterId createDumbwaiter(uint32_t layer, uint32_t y, uint32_t x,
+			CreateDumbwaiterOptions const& options, DumbwaiterId id);
 
 		static std::string constructionTypeName(ConstructionType type);
 
@@ -1029,6 +1069,12 @@ namespace core
 		std::vector<ConstructionRecord> canonicalConstructionRecords(
 			std::vector<ConstructionRecord> records) const;
 
+		std::set<DumbwaiterId> locationEditDumbwaiters(LocationEditPlan const& plan) const;
+		std::array<uint32_t, 2> dumbwaiterRecordLandings(ConstructionRecord const& record) const;
+		void removeDumbwaiterRecords(std::vector<ConstructionRecord>& records,
+			std::set<DumbwaiterId> const& removed, std::vector<uint32_t>* sectorMap = nullptr) const;
+		void reconcileDumbwaiterReplay(std::vector<ConstructionRecord>& records,
+			std::vector<uint32_t>& originalToReplay) const;
 		void removeBoothWindowsAtSupport(std::vector<ConstructionRecord>& records,
 			uint32_t layer, uint32_t x, uint32_t y) const;
 
@@ -1256,7 +1302,7 @@ namespace core
 
 		void validateShuttleOptions(std::string const& caller, CreateShuttleOptions const& options) const;
 
-		void beginStructuralEdit(std::string const& operation);
+		void beginStructuralEdit(std::string const& operation, bool preserveOtherDumbwaiterCycles = false);
 
 		// The simulation-side work of a topology rebuild - taking every live
 		// traversal apart, remembering the route each Agent was working to,
@@ -1790,6 +1836,7 @@ namespace core
 		ChamberEditPlan planResizeChamber(uint32_t sectorIndex, uint32_t x,
 			uint32_t y, uint32_t width, bool leftToRight) const;
 		ChamberEditPlan planRemoveChamber(uint32_t sectorIndex) const;
+		ChamberEditPlan planSetChamberSubtype(uint32_t sectorIndex, ChamberSubtype subtype) const;
 		uint32_t applyChamberEdit(ChamberEditPlan const& plan);
 		bool setChamberConfiguration(uint32_t sectorIndex, float sensorDistance,
 			float preDelaySeconds, float scanSeconds, float postPauseSeconds);
@@ -2650,9 +2697,11 @@ namespace core
 
 		EntityRemovalResult removeInteractionRequest(InteractionRequestId id);
 
-		// Activate a BoothWindow editor/device command without an authored edit.
+		// Activate a BoothWindow or Dumbwaiter user command without an authored edit.
 		// Other device commands continue to activate through Interaction points.
 		DeviceOperationId submitDeviceCommand(DeviceCommand const& command);
+		DeviceOperationId pressDumbwaiterLanding(DumbwaiterId id, uint32_t stop);
+		InteractionRequestId requestDumbwaiterLanding(DumbwaiterId id, uint32_t stop, AgentId actor);
 		std::shared_ptr<const BoothWindow> lookupBoothWindow(BoothWindowId id) const;
 
 		DeviceOperationId createDeviceOperation(std::string const& name, AgentId requester);

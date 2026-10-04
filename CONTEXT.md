@@ -51,6 +51,10 @@ _Avoid_: Stairwell
 **Escalator**:
 A staircase whose steps move at a non-zero speed. Its movement direction determines its sole permitted travel direction and its agents' travel speed.
 
+**Local depth**:
+A sector-local non-negative integer indicating front-to-back order within one Layer, with 0 front-most and larger values farther back. Numerical differences between Local depths express an Agent's preference for depth continuity between otherwise equally good routes, not physical distance.
+_Avoid_: Layer, physical depth
+
 **Stop**:
 A place at which a transit resource connects to a location.
 
@@ -118,8 +122,23 @@ _Avoid_: Route calculation time
 An Agent property from 0.1 through 10 seconds that sets the inclusive upper bound of each Route planning interval, with a default of 3 seconds. An effective maximum below the effective minimum is treated as equal to that minimum without changing either authored property.
 _Avoid_: Route calculation timeout
 
+**Furniture**:
+An object placed in a Room, Corridor, or Facade, with a position, Local depth, and one or more individually defined movement points. Its usable points are Markers; optional side waypoints support routes in front of and behind it.
+
+**Furniture definition**:
+A reusable description of Furniture's appearance and movement-point and route layout, shared by its placed instances.
+_Avoid_: Furniture instance, TileSet
+
+**Furniture catalogue**:
+A reusable collection of Furniture definitions that may be shared by multiple Worlds.
+_Avoid_: World, Image set
+
+**Furniture instance**:
+One placed piece of Furniture with its own Location, position, Local depth, and distinct usable-point Marker identities, using a shared Furniture definition.
+_Avoid_: Furniture definition
+
 **Marker**:
-A named, World-owned authored point in a Location with stable identity and a set of Marker properties. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename. Agent behaviours cannot choose arbitrary Vertices as destinations.
+A named, World-owned authored point in a Location with stable identity and a set of Marker properties, either standalone or belonging to Furniture. A Marker may be selected as an Agent behaviour's destination, and its identity survives rename; arbitrary routing vertices are not selectable destinations.
 _Avoid_: Vertex, destination vertex
 
 **Blocks pathing**:
@@ -131,7 +150,7 @@ The condition in which an Agent's selected destination has no valid Path, either
 _Avoid_: Replan, which recalculates a Path to the same destination
 
 **Skippable path vertex**:
-An intermediate waypoint that an agent need not physically visit when the agent and the next two physical vertices share a layer, those vertices lie horizontally on opposite sides of the agent at the same height, and no interaction or other specific action is required at the nearer vertex. Coincident topology-only vertices do not count as distinct physical waypoints.
+An intermediate waypoint that an agent need not physically visit when the agent and the next two physical vertices share a layer, those vertices lie horizontally on opposite sides of the agent at the same height, and no interaction, Local-depth change, or other specific action is required at the nearer vertex. Coincident topology-only vertices do not count as distinct physical waypoints.
 _Avoid_: Removing the vertex from the authored path
 
 **Transport journey**:
@@ -163,12 +182,16 @@ A stationary, capacity-limited Sector connecting Rooms or Corridors on the same 
 _Avoid_: Transport vehicle, paired ordinary Bulkhead Doors
 
 **Chamber**:
-A stationary Transit connecting Rooms or Corridors on the same Layer through interlocked Bulkhead Doors. It has a required subtype that defines its admission and journey behaviour; Security Scanner is the sole supported subtype and the creation default, while Airlock remains separate.
+A stationary Transit connecting Rooms or Corridors on the same Layer through interlocked Bulkhead Doors. It has a required subtype that defines its admission and journey behaviour; Security Scanner is the creation default; Decontamination Chamber admits width-capacity batches, while Airlock remains separate.
 _Avoid_: Airlock, Transport vehicle
 
 **Security Scanner**:
 A directional, capacity-one Chamber subtype connecting Rooms or Corridors on the same Layer through two interlocked Bulkhead Doors, with fixed entry and exit sides independent of its horizontal length. It automatically scans the admitted Agent before releasing it through the exit.
 _Avoid_: Airlock, paired ordinary Bulkhead Doors, security checkpoint when referring to this chamber
+
+**Decontamination Chamber**:
+A directional Chamber subtype with one Agent of capacity per horizontal cell. It admits a batch, performs a shared decontamination sequence with both Bulkhead Doors closed, and releases the batch through its fixed exit.
+_Avoid_: Airlock, Security Scanner
 
 **Airlock cycle**:
 The waiting interval that begins when both Airlock Bulkhead Doors are fully closed and must complete before either may open.
@@ -186,7 +209,11 @@ _Avoid_: Door width, doorway width, when referring to the arrival band
 A threshold, similar to a Door, that connects two adjacent layers and is authored on the front layer of the pair. It always looks into the layer directly behind it, so it can never sit on the back-most layer.
 
 **BoothWindow**:
-A one-cell-wide, one-cell-high service aperture between two Locations on adjacent Layers, with an openable shutter and an approach point on each side. It never permits movement between Layers; Agents operate its shutter through an invisible Interaction point on its back side.
+A one-cell-wide, one-cell-high service aperture on adjacent Layers, with an openable shutter, connecting two Locations or a Dumbwaiter shaft to its landing Location. It never permits Agent movement between Layers; a standalone BoothWindow has an approach point on each side and an invisible back-side shutter Interaction point, while a Dumbwaiter owns its apertures as part of the complete unit and controls their shutters through its landing buttons.
+
+**Dumbwaiter**:
+A non-passenger object-service lift with one car in a fixed one-cell-wide shaft spanning exactly two adjacent Levels, two owned BoothWindows, and landing buttons, with its landing Locations on the Layer immediately in front. Agents never enter its shaft or car; each landing button calls the car when it is at the other Level or sends it to the other Level when it is present.
+_Avoid_: Lazy waiter, passenger Lift
 
 **Walkway**:
 A traversable floor within a multi-level room, above that room's ground-level floor.
@@ -370,3 +397,65 @@ _Avoid_: World document, tile-set metadata
 **Image set**:
 A Willpower resource that names rectangular regions of one atlas image. Whether a region is tintable or repeated is a World-renderer semantic rather than a separate resource type.
 _Avoid_: Tile set
+
+## Station systems
+
+**Station systems**:
+A World's coupled electrical power, environmental control and life support, thermal control, and monitoring services. Their resource inventories, processing capacities, demands, and exchanges determine available service and resource endurance.
+
+**Biological population**:
+An aggregate of living crops or algae within the environmental control and life support system, with its own living biomass and resource exchanges. Crop and algae populations are distinct; their growth, respiration, harvest, and losses depend on available resources and environmental conditions.
+
+**Living biomass**:
+The dry mass of living material in a Biological population. It is distinct from stored harvested food and from the installation's Growing capacity.
+
+**Growing capacity**:
+The installation limits within which a Biological population can be supported, including illuminated growing area for crops or active culture volume for algae. It is distinct from the population's current Living biomass.
+
+**Crew demand**:
+The aggregate resource requirements and metabolic loads of a declared crew population at a declared activity level. It is distinct from the movement and behaviour of individual Agents.
+
+**Unmet demand**:
+The portion of a resource or service requirement that cannot be supplied. It is reported separately from actual consumption and does not count as material available for recovery.
+
+**Protected resource reserve**:
+The portion of a usable resource inventory withheld from discretionary use to preserve a declared critical service. Surplus transfers must preserve that reserve and the supplying service's required process resources.
+
+**Fuel-cell reactant stores**:
+Dedicated hydrogen and oxygen inventories available to fuel-cell generation, distinct from life-support inventories. They may receive controlled surplus transfers from life support, but fuel cells cannot automatically draw on protected breathing oxygen.
+
+**Resource store**:
+A capacity-limited inventory of a specified material held by the Station systems. Its usable contents change through deliveries, production, consumption, transfers, and losses; material awaiting treatment or quality clearance is not automatically usable.
+
+**Resupply delivery**:
+An external addition of declared resource quantities at a scheduled simulation time, optionally recurring. A delivery cannot silently overfill a Resource store; quantities that cannot be accepted remain explicitly accounted for.
+
+**Critical station service**:
+A station service whose declared minimum demand and necessary support services are protected ahead of discretionary demand. If available supply cannot meet that minimum, the deficit remains Unmet demand rather than silently becoming permissible curtailment.
+
+**Service priority**:
+The declared ordering used to allocate constrained station resources and curtail discretionary demand. It does not override physical capacity, safety limits, or protected minimums.
+
+**Atmosphere compartment**:
+A contained atmospheric inventory with a declared volume, gas composition, water vapour, and temperature. The initial station model distinguishes one normal and one hazardous compartment; their material inventories remain segregated, and exchanges or losses must be explicitly accounted for.
+
+**Thermal reservoir**:
+A body or aggregate of material whose stored thermal energy and thermal capacity determine its temperature over time. Its ability to absorb heat is finite and constrained by the temperature limits of the services it supports.
+
+**Thermal service class**:
+A cooling service distinguished by its permitted interface temperatures and compatible heat-transfer requirements. Spare cooling capacity in one class is not automatically usable by another class.
+
+**Microbial processor**:
+An aggregate biological waste-treatment or nutrient-recovery process within life support, with finite processing capacity and a condition that affects its performance. Its material and heat exchanges, unrecoverable residues, and dependence on operating conditions are accounted for separately from crop and algae populations.
+
+**Nutrient inventory**:
+The quantities of nutrient elements held in stores or incorporated into food, living biomass, and waste. Nitrogen, phosphorus, and potassium are accounted for separately, with other minerals grouped in the initial model; total elemental inventory is distinct from nutrients currently available for biological uptake.
+
+**External equipment load group**:
+A named aggregate of station equipment outside the Station systems, with declared electrical, thermal, and material exchanges, an operating profile, and service priorities. It excludes equipment whose demands are already calculated within the Station systems; its initially authored inputs may later be supplied by World equipment.
+
+**Terminal waste**:
+Material designated for disposal after resource recovery, including unrecoverable residue and recovered material that cannot fit in its appropriate Resource store. Normal and hazardous waste remain segregated in finite storage; storage exhaustion constrains affected processing rather than deleting material.
+
+**Scheduled waste ejection**:
+The removal of available, disposal-ready Terminal waste to space at declared simulation times. Ejected material leaves station inventories and is recorded as a material loss; material awaiting required treatment is not eligible.
