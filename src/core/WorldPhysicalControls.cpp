@@ -84,7 +84,8 @@ namespace core
 	{
 		using namespace physicalControl;
 		bool transport = demand.owner.type == OwnerType::Lift || demand.owner.type == OwnerType::Shuttle;
-		bool endpoint = demand.owner.type == OwnerType::Ladder || demand.owner.type == OwnerType::PlatformLift;
+		bool endpoint = demand.owner.type == OwnerType::Ladder || demand.owner.type == OwnerType::PlatformLift
+			|| demand.owner.type == OwnerType::Dumbwaiter;
 		bool bridge = demand.owner.type == OwnerType::ForceBridge;
 		bool inset = bridge || demand.owner.type == OwnerType::BulkheadDoor || demand.owner.type == OwnerType::Airlock;
 		if (!demand.hasOwner || (demand.owner.type != OwnerType::Door
@@ -172,6 +173,10 @@ namespace core
 		{
 			auto const& p = mPhysicalControlPlacements[i];
 			if (p.layerIndex != layer || p.cellY != y) continue;
+			// Removing aperture support deletes the complete Dumbwaiter through
+			// structural reconciliation; its owned demand does not survive the edit.
+			if (p.hasOwner && p.owner.type == physicalControl::OwnerType::Dumbwaiter
+				&& p.owner.geometry.x == unsupportedX) continue;
 			plan.row.push_back(i);
 			plan.demands.push_back(validPhysicalControlDemand({ p.candidates, p.defaultCandidate,
 				p.currentCandidate, p.owner, p.hasOwner }, y, blockedX, openedX, unsupportedX));

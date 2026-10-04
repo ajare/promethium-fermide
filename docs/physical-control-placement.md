@@ -23,9 +23,9 @@ bindings, operation-specific permissions and traversal resources are unchanged.
   lifts, Bulkheads and Airlocks can migrate separately. A transport doorway's
   owner key must describe its transport, not the generated Door. Endpoint keys
   describe the whole owning footprint, not the selected Button cell. Invisible
-  panels/selectors are not physical demands. In this source state Dumbwaiter
-  landings still use direct Interaction points, not Button SectorObjects; this
-  refactor does not convert them.
+  panels/selectors are not physical demands. At this preparatory refactor stage
+  Dumbwaiter landings used direct Interaction points; #434 subsequently migrates
+  them to physical Button SectorObjects (see below).
 
 For unmigrated owners, the allocator deliberately preserves the previous component order, preference
 for maximum separated centres, current-assignment retention, default-side tie
@@ -205,3 +205,27 @@ traversal, stationary placement during motion, transactional wall/load/creation
 refusals, YAML/binary replay, clipboard-style authored reconstruction, document
 undo/redo and production draw/hit targeting. Existing transport movement,
 structural reconciliation and operation contracts remain in the validation matrix.
+
+## Dumbwaiter landing controls (#434)
+
+Each landing now contributes a physical demand using the full authored shaft
+geometry, Dumbwaiter owner type, and landing Level role. It independently prefers
+`X+1` at offset `0.0`, with only `X` at offset `0.0` as fallback. Both aperture and
+control host support are permanent; Location and boundary filtering is shared
+with the canonical allocator. Mixed stacks retain independent commands and
+permissions, normal-height graph approaches, and separately targetable shapes.
+
+Whole-unit preflight excludes the moving unit’s old demands before evaluating
+its destination. Detachment removes physical registrations and owned objects,
+and reconstruction/dependent deletion retains two child slots per landing.
+Legacy Marker removals resolve by stable identity when the extra physical children
+shift old slots. YAML/binary requirements keep their existing wire format.
+The production renderer draws each allocated Button with existing here/elsewhere/
+busy colours rather than adding a second aperture-inset rectangle. Invisible
+standalone BoothWindow panels remain outside allocation.
+
+World, Simulation, Editor, Persistence and Render BoothWindow/Dumbwaiter checks
+cover opposite sides, mixed protected stacks in reversed creation orders, shared
+normal-height approaches, selected Agent operations, invalid walls/support,
+transactional compatibility refusal, whole-unit history/clipboard/replay, and
+production draw/hit geometry. See [Dumbwaiters](dumbwaiters.md) for runtime contracts.

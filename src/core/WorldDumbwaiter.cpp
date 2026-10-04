@@ -3,6 +3,7 @@
 #include "core/StaircaseTransit.h"
 #include "core/Agent.h"
 #include "core/ExtensibleObject.h"
+#include "core/ButtonSectorObject.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -77,6 +78,26 @@ namespace core
 			if ((landing.hasObject() && !ownAperture) || landing.bulkheadIndices[0] != ~0u || landing.bulkheadIndices[1] != ~0u)
 				return refuse("Dumbwaiter landing aperture conflicts with an existing object or threshold");
 		}
+		try
+		{
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto landing = mSectors[mLayers[layer - 1]->getCellDefinition(x, y + stop).sectorIndex];
+				auto plan = planPhysicalControls(layer - 1, ~0u, y + stop);
+				if (source)
+					std::erase_if(plan.demands, [&](auto const& demand)
+					{
+						return demand.hasOwner && demand.owner.type == physicalControl::OwnerType::Dumbwaiter
+							&& demand.owner.geometry.layer == source->getLayerIndex()
+							&& demand.owner.geometry.x == source->getCellX()
+							&& demand.owner.geometry.baseLevel == source->getCellY();
+					});
+				plan.demands.push_back(transportControlDemand(landing, physicalControl::OwnerType::Dumbwaiter,
+					{layer, x, y, 1, 2}, x, y + stop, 1));
+				(void)physicalControl::allocateCanonical(plan.demands);
+			}
+		}
+		catch (std::exception const& error) { if (diagnostic) *diagnostic = error.what(); return false; }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -144,11 +165,14 @@ namespace core
 			DeviceCommand press;
 			press.type = DeviceCommandType::PressDumbwaiterLanding;
 			press.dumbwaiter = id; press.stopIndex = stop;
-			unit->mLandingButtons[stop] = createInteractionPoint(
-				stop == 0 ? "Dumbwaiter lower landing" : "Dumbwaiter upper landing",
-				SectorId{uint64_t(unit->getStop(stop).sector->getIndex()) + 1},
-				{float(x) + 0.5f, float(y + stop)}, 0.25f, 0.0f,
-				{{press, InteractionBindingRequirement::Required}});
+			auto name = stop == 0 ? "Dumbwaiter lower landing" : "Dumbwaiter upper landing";
+			auto demand = transportControlDemand(unit->getStop(stop).sector,
+				physicalControl::OwnerType::Dumbwaiter, {layer, x, y, 1, 2}, x, y + stop, 1);
+			auto control = createPhysicalControl(name, layer - 1, y + stop, demand, 0, nullptr);
+			std::static_pointer_cast<Button>(control.sector->_getObject(control.index)->_getObject())
+				->_setThresholdLayer(layer - 1);
+			unit->mLandingButtons[stop] = createPhysicalControlInteractionPoint(name, control,
+				float(y + stop), 0.25f, 0.0f, {{press, InteractionBindingRequirement::Required}});
 			mInteractionPoints.find(unit->mLandingButtons[stop])->mDumbwaiterOwner = id;
 			auto& landing = mLayers[layer - 1]->getCellDefinition(x, y + stop);
 			landing.sectorObjectType = SectorObjectType::BoothWindow;
@@ -163,6 +187,22 @@ namespace core
 		{
 			auto booth = unit->getAperture(stop);
 			mBoothWindows.erase(booth->getDeviceId());
+			// Remove the owned physical demand and every cell registration before
+			// removing its independent Interaction point. Keep object-slot tombstones.
+			std::erase_if(mPhysicalControlPlacements, [&](auto const& placement)
+			{
+				auto object = mSectors[placement.sectorIndex]->_getObject(placement.objectIndex);
+				auto control = std::dynamic_pointer_cast<ButtonSectorObject>(object);
+				if (!control || std::static_pointer_cast<Button>(control->_getObject())->getInteractionPointId() != unit->getLandingButton(stop)) return false;
+				for (auto const& candidate : placement.candidates)
+				{
+					auto& cell = mLayers[placement.layerIndex]->getCellDefinition(candidate.cellX, placement.cellY);
+					if (cell.controls[candidate.side] == placement.objectIndex) cell.controls[candidate.side] = ~0u;
+					std::erase(cell.stackedControls, placement.objectIndex);
+				}
+				mSectors[placement.sectorIndex]->mObjects[placement.objectIndex].reset();
+				return true;
+			});
 			auto point = mInteractionPoints.find(unit->getLandingButton(stop));
 			point->mDumbwaiterOwner = {};
 			removeInteractionPoint(unit->getLandingButton(stop));
@@ -269,12 +309,13 @@ namespace core
 		return removed;
 	}
 
-	std::array<uint32_t, 2> World::dumbwaiterRecordLandings(ConstructionRecord const& record) const
+	std::array<uint32_t, 4> World::dumbwaiterRecordLandings(ConstructionRecord const& record) const
 	{
-		std::array<uint32_t, 2> owners{~0u, ~0u};
+		std::array<uint32_t, 4> owners{~0u, ~0u, ~0u, ~0u};
 		uint32_t index = 0;
 		// Use authored producer footprints, not the live cells: a moved unit's
-		// earlier apertures still consumed object slots at its previous landings.
+		// earlier apertures and Buttons still consumed slots at its previous landings.
+		// Repeat each landing owner once per owned child for tombstone replay.
 		for (auto const& source : mConstructionRecords)
 		{
 			if (!constructionTypeCreatesSector(source.type)) continue;
@@ -288,7 +329,7 @@ namespace core
 				auto height = room ? source.e : source.d;
 				if (layer == record.layer - 1 && record.b >= x && record.b - x < width)
 					for (uint32_t stop = 0; stop < 2; ++stop)
-						if (record.a + stop >= y && record.a + stop - y < height) owners[stop] = index;
+						if (record.a + stop >= y && record.a + stop - y < height) owners[stop * 2] = owners[stop * 2 + 1] = index;
 			}
 			++index;
 		}
@@ -314,11 +355,11 @@ namespace core
 			if (constructionTypeCreatesSector(record.type)) ++producer;
 		}
 		if (lastMove.empty()) return;
-		// Historical placements only consumed aperture slots. Rebuild each moved
-		// survivor at its final placement, after its destination Locations exist.
+		// Historical placements consumed aperture and physical-control slots.
+		// Rebuild each moved survivor at its final placement, after its destination Locations exist.
 		// This lets an edit remove obsolete landing support without invalidating
 		// a unit whose current landings remain supported.
-		std::map<DumbwaiterId, std::vector<std::array<uint32_t, 2>>> historicalOwners;
+		std::map<DumbwaiterId, std::vector<std::array<uint32_t, 4>>> historicalOwners;
 		for (auto const& record : mConstructionRecords)
 			if (record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
 				historicalOwners[record.dumbwaiterId].push_back(dumbwaiterRecordLandings(record));

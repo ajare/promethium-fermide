@@ -1,6 +1,7 @@
 #pragma once
 #include "core/World.h"
 #include "core/YamlSerializer.h"
+#include "core/Button.h"
 
 namespace dumbwaiter_fixture
 {
@@ -32,6 +33,28 @@ namespace dumbwaiter_fixture
 			else if (kind == 2) world.addFacade(shaftLayer - 1, y + stop, x, 1, 1);
 			else world.addRoom("Destination landing", shaftLayer - 1, y + stop, x, 1, 1);
 		}
+	}
+	inline std::shared_ptr<const core::SectorObject> control(core::World const& world,
+		core::DumbwaiterId id, uint32_t stop)
+	{
+		auto unit = world.lookupDumbwaiter(id);
+		if (!unit) return nullptr;
+		auto landing = unit->getStop(stop).sector;
+		for (uint32_t i = 0; i < landing->getNumObjects(); ++i)
+		{
+			auto object = landing->getObject(i);
+			auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+			if (button && button->getInteractionPointId() == unit->getLandingButton(stop)) return object;
+		}
+		return nullptr;
+	}
+	inline std::shared_ptr<core::World> oppositeLandings()
+	{
+		auto world = std::make_shared<core::World>("Independent landings", 6, 4);
+		world->addRoom("Lower", 0, 0, 1, 3, 1);
+		world->addRoom("Upper", 0, 1, 1, 2, 1);
+		world->finishBuild(); world->pauseSimulation();
+		return world;
 	}
 	inline std::string yaml(core::World const& world)
 	{

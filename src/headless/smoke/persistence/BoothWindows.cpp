@@ -60,7 +60,7 @@ namespace persistence
 					&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upperPermission},
 					"Edited roundtrip lost coherent authored configuration");
 				auto actor = loaded.createAgent("Restored operator", unit->getStop(1).sector->getIndex(),
-					float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+					float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.0f);
 				loaded.grantAgentAccessPermission(actor, upperPermission);
 				require(bool(loaded.requestDumbwaiterLanding(deviceId, 1, actor)), "Restored Agent landing refused");
 				loaded.resumeSimulation(); require(loaded.advanceTicks(130), "Restored Agent operation failed");
@@ -180,6 +180,37 @@ namespace persistence
 			try { auto input = core::BinarySerializer::fromString(corrupt); input->deserialize(); core::SerializationWorkData data; world->deserialize(*input, data); }
 			catch (std::exception const&) { rejected = true; }
 			require(rejected && write(*world, false) == baseline, "Malformed binary permission reference mutated target");
+		}
+		// Physical children add object slots, but legacy stable Marker removals
+		// and landing requirements must continue to name their original owners.
+		{
+			auto source = dumbwaiter_fixture::make();
+			auto device = source->addDumbwaiter(1, 0, 2); source->finishBuild();
+			auto permission = source->addAccessPermission("Legacy lower");
+			source->setInteractionPointPermissionRequirement(source->lookupDumbwaiter(device)->getLandingButton(0), {permission});
+			auto marker = source->addSectorMarker(0, 0, 0.5f); source->finishBuild(); source->pauseSimulation();
+			require(source->removeSectorMarker(0, marker.index), "Legacy Marker removal fixture failed");
+			auto legacy = YAML::Load(write(*source, false)); legacy["version"] = 49;
+			for (auto record : legacy["construction"])
+				if (record["type"].as<std::string>() == "removeMarker") record["objectIndex"] = 3;
+			auto input = core::YamlSerializer::fromString(YAML::Dump(legacy)); input->deserialize();
+			core::World restored("Legacy children", 1, 1); core::SerializationWorkData data;
+			require(restored.deserialize(*input, data) && restored.getMarkerIds().empty()
+				&& restored.getInteractionPointPermissionRequirement(restored.lookupDumbwaiter(device)->getLandingButton(0)) == std::vector{permission}
+				&& dumbwaiter_fixture::control(restored, device, 0), "Legacy child slots lost Marker or permission identity");
+			auto invalid = YAML::Clone(legacy);
+			auto neighbour = YAML::Clone(invalid["construction"][0]);
+			neighbour["name"] = "Retained left wall"; neighbour["x"] = 1;
+			invalid["construction"].push_back(neighbour);
+			auto before = write(restored, false); auto graph = restored.getGraph(); bool rejected = false;
+			try
+			{
+				auto reader = core::YamlSerializer::fromString(YAML::Dump(invalid)); reader->deserialize();
+				restored.deserialize(*reader, data);
+			}
+			catch (std::exception const&) { rejected = true; }
+			require(rejected && write(restored, false) == before && restored.getGraph() == graph,
+				"Legacy layout with no valid landing candidate was not refused transactionally");
 		}
 		// Schema 47 Dumbwaiters default to empty requirements.
 		auto old = YAML::Clone(node); old["version"] = 47;

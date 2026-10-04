@@ -50,7 +50,7 @@ namespace
 				require(world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop)) == std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper},
 					"Dependent deletion undo lost button requirements");
 			auto actor = world->createAgent("Restored", unit->getStop(1).sector->getIndex(),
-				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.0f);
 			world->grantAgentAccessPermission(actor, upper);
 			require(bool(world->requestDumbwaiterLanding(id, 1, actor)), "Undo-restored Agent control refused");
 			world->resumeSimulation(); require(world->advanceTicks(130) && !unit->isBusy() && unit->getCarPosition().y == 0, "Undo-restored Agent operation failed");
@@ -70,8 +70,8 @@ namespace
 		editor_smoke::State state; using smoke::require;
 		auto world = dumbwaiter_fixture::make(); gWorldDocumentHistory.clear();
 		dumbwaiter_fixture::addLandings(*world, 1, 4);
-		world->addRoom("Button history front", 0, 0, 0, 2, 1);
-		world->addRoom("Button history back", 1, 0, 0, 2, 1);
+		world->addRoom("Button history front", 0, 0, 0, 1, 1);
+		world->addRoom("Button history back", 1, 0, 0, 1, 1);
 		world->addSectorDoor(0, 0, 0, core::World::RemoteControlledDoor1Options);
 		world->finishBuild();
 		auto before = captureDocumentSnapshot(world);
@@ -97,7 +97,7 @@ namespace
 			return positions;
 		};
 		auto originalPlacement = placement();
-		require(originalPlacement.size() == 4, "History fixture must contain two physical Buttons/approaches");
+		require(originalPlacement.size() == 8, "History fixture must contain Door and landing Buttons/approaches");
 		undo(); require(!world->lookupDumbwaiter(id), "Creation undo retained unit");
 		redo(); require(bool(world->lookupDumbwaiter(id)), "Creation redo lost unit identity");
 		require(placement() == originalPlacement, "Undo/redo reconstruction changed Button or approach placement");
@@ -195,7 +195,7 @@ namespace
 		require(!commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), core::AccessPermissionId{255}, true, diagnostic)
 			&& captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count,
 			"Invalid editor reference mutated document/history");
-		auto actor = world->createAgent("Manual operator", 0, 0, 0.5f);
+		auto actor = world->createAgent("Manual operator", 0, 0, 0.0f);
 		require(world->grantAgentAccessPermission(actor, a), "Manual operator grant failed");
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1400,900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
@@ -237,8 +237,8 @@ namespace
 	void dumbwaiterMoveClipboard(smoke::Context const&)
 	{
 		editor_smoke::State state; using smoke::require;
-		auto world = dumbwaiter_fixture::make();
-		dumbwaiter_fixture::addLandings(*world, 1, 4);
+		auto world = dumbwaiter_fixture::oppositeLandings();
+		dumbwaiter_fixture::addLandings(*world, 1, 5);
 		dumbwaiter_fixture::addLandings(*world, 3, 0, 2);
 		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.5f}); world->finishBuild();
 		auto a = world->addAccessPermission("Lower"), b = world->addAccessPermission("Shared");
@@ -257,9 +257,9 @@ namespace
 		world->renameAccessPermission(a, "Renamed Lower");
 		auto originalOperation = unit->getOperation(); auto position = unit->getCarPosition();
 		auto before = captureDocumentSnapshot(world);
-		auto copy = pasteDumbwaiter(world, 1, 0, 4, payload); commitDocumentEdit(std::move(before));
+		auto copy = pasteDumbwaiter(world, 1, 0, 5, payload); commitDocumentEdit(std::move(before));
 		auto pasted = world->lookupDumbwaiter(copy);
-		require(copy != id && !pasted->isBusy() && pasted->getCarPosition() == core::Vector2{4,1}
+		require(copy != id && !pasted->isBusy() && pasted->getCarPosition() == core::Vector2{5,1}
 			&& pasted->getAperture(1)->getProgress() == 1 && unit->getCarPosition() == position
 			&& unit->getOperation() == originalOperation && unit->isBusy(), "Mid-cycle paste cloned/reset live source progress");
 		require(world->getInteractionPointPermissionRequirement(pasted->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b}
@@ -273,6 +273,10 @@ namespace
 		auto redo = [&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Unit clipboard/move redo failed"); };
 		undo(); require(!world->lookupDumbwaiter(copy), "Paste undo retained unit");
 		redo(); require(world->lookupDumbwaiter(copy) && world->getSimulationSnapshot().interactionPoints.size() == 4, "Paste redo lost/duplicated child ownership");
+		require(dumbwaiter_fixture::control(*world, id, 0)->getCellX() == 3
+			&& dumbwaiter_fixture::control(*world, id, 1)->getCellX() == 2
+			&& dumbwaiter_fixture::control(*world, copy, 0)->getCellX() == 5,
+			"Clipboard/history retained source sides instead of independently allocating each unit");
 		before = captureDocumentSnapshot(world);
 		require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(copy, 3, 2, 0)), "Editor move refused");
 		commitDocumentEdit(std::move(before));
@@ -282,7 +286,7 @@ namespace
 		world->resetSimulation(); world->pauseSimulation(); pasted = world->lookupDumbwaiter(copy);
 		require(world->getInteractionPointPermissionRequirement(pasted->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b},
 			"Move history/replay lost requirements");
-		auto actor = world->createAgent("Restored operator", pasted->getStop(1).sector->getIndex(), 0, 0.5f);
+		auto actor = world->createAgent("Restored operator", pasted->getStop(1).sector->getIndex(), 0, 0.0f);
 		world->grantAgentAccessPermission(actor, b); auto request = world->requestDumbwaiterLanding(copy, 1, actor);
 		require(bool(request), "Restored landing Agent request refused"); world->resumeSimulation(); require(world->advanceTicks(128), "Restored Agent cycle failed"); world->pauseSimulation();
 		require(world->lookupDumbwaiter(copy)->getCarPosition().y == 2 && !world->lookupDumbwaiter(copy)->isBusy(), "Restored Agent button did not operate unit");

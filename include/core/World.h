@@ -1069,7 +1069,7 @@ namespace core
 			std::vector<ConstructionRecord> records) const;
 
 		std::set<DumbwaiterId> locationEditDumbwaiters(LocationEditPlan const& plan) const;
-		std::array<uint32_t, 2> dumbwaiterRecordLandings(ConstructionRecord const& record) const;
+		std::array<uint32_t, 4> dumbwaiterRecordLandings(ConstructionRecord const& record) const;
 		void removeDumbwaiterRecords(std::vector<ConstructionRecord>& records,
 			std::set<DumbwaiterId> const& removed, std::vector<uint32_t>* sectorMap = nullptr) const;
 		void reconcileDumbwaiterReplay(std::vector<ConstructionRecord>& records,

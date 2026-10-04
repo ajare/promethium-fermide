@@ -2089,9 +2089,10 @@ namespace core
 					if (!object) throw SerializationException("Legacy Marker removal is dangling");
 					record.markerId = object->getMarker()->getId();
 				}
-				// Furniture point additions/removals shift later object slots. Resolve
-				// standalone Marker deletions by their validated stable identity.
-				if (furnitureLayoutChanged && record.type == ConstructionType::RemoveMarker
+				// Furniture point changes and reconstructed physical Dumbwaiter
+				// children can shift legacy object slots. Resolve standalone Marker
+				// deletions by their validated stable identity, not the old slot.
+				if ((furnitureLayoutChanged || highestDumbwaiterId != 0) && record.type == ConstructionType::RemoveMarker
 					&& record.a < candidate.mSectors.size() && candidate.mSectors[record.a])
 				{
 					auto sector = candidate.mSectors[record.a];
@@ -5790,6 +5791,9 @@ namespace core
 		if (auto window = dynamic_pointer_cast<const WindowSectorObject>(object))
 			if (auto booth = dynamic_pointer_cast<const BoothWindow>(window->getWindow()); booth && booth->getDumbwaiterOwner())
 			{ diagnostic = "Dumbwaiter-owned apertures cannot be moved independently"; return false; }
+		if (auto button = dynamic_pointer_cast<const Button>(object->_getObject()))
+			if (auto point = mInteractionPoints.find(button->getInteractionPointId()); point && point->mDumbwaiterOwner)
+			{ diagnostic = "Dumbwaiter-owned landing controls cannot be moved independently"; return false; }
 		if (isChamberOwnedObject(object))
 		{
 			diagnostic = isAirlockOwnedObject(object) ? "Airlock-owned Doors and controls are fixed"

@@ -4,6 +4,7 @@
 #include "core/Pathing.h"
 #include "core/WindowVertex.h"
 #include "core/YamlSerializer.h"
+#include "core/BinarySerializer.h"
 #include <cmath>
 #include <limits>
 #include "../support/DumbwaiterFixture.h"
@@ -17,8 +18,117 @@ namespace
 		work.markSerializedUnmodified = false; world.serialize(*writer, work); writer->serialize();
 		return writer->getSerializedString();
 	}
+	void landingPlacement()
+	{
+		using namespace dumbwaiter_fixture;
+		{
+			auto world = oppositeLandings(); auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild();
+			auto check = [&](core::World& scene)
+			{
+				for (uint32_t stop = 0; stop < 2; ++stop)
+				{
+					auto object = control(scene, id, stop);
+					require(bool(object), "Landing has no physical Button");
+					auto button = std::dynamic_pointer_cast<const core::Button>(object->_getObject());
+					auto point = scene.lookupInteractionPoint(button->getInteractionPointId()).entity;
+					auto vertex = scene.getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+					require(object->getCellX() == (stop == 0 ? 3u : 2u)
+						&& point->getPosition() == core::Vector2{stop == 0 ? 3.0f : 2.0f, float(stop)}
+						&& vertex && vertex->getPosition() == point->getPosition()
+						&& point->getDumbwaiterOwner() == id, "Landings did not choose opposite sides independently");
+					uint32_t index = ~0u;
+					for (uint32_t i = 0; i < object->getSector()->getNumObjects(); ++i)
+						if (object->getSector()->getObject(i) == object) index = i;
+					require(!scene.planMoveSectorObject(object->getSector()->getIndex(), index, 1, stop).valid,
+						"Owned landing Button moved independently");
+				}
+			};
+			check(*world); auto lower = control(*world, id, 0)->_getObject()->getPosition();
+			world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); world->advanceTicks(90);
+			require(control(*world, id, 0)->_getObject()->getPosition() == lower, "Runtime motion reflowed landing");
+			world->pauseSimulation(); core::World loaded("Loaded",1,1);
+			auto input = core::YamlSerializer::fromString(yaml(*world)); input->deserialize(); core::SerializationWorkData work;
+			require(loaded.deserialize(*input, work), "Opposite landings failed reconstruction"); check(loaded);
+		}
+		for (bool reverse : {false, true})
+		{
+			core::World world("Mixed Dumbwaiter stack", 6, 3);
+			world.addRoom("Left wall",0,0,0,1,1);
+			auto landing = world.addRoom("Landings",0,0,1,2,2); world.addSectorWalkway(landing,1,1);
+			world.addRoom("Door back",1,0,1,1,1); world.finishBuild(); world.pauseSimulation();
+			auto a = world.addAccessPermission("Door"), b = world.addAccessPermission("Lower"), c = world.addAccessPermission("Upper");
+			core::DumbwaiterId id; core::World::CreateDoorResult doorway;
+			auto addDoor = [&] { auto options = core::World::RemoteControlledDoor1Options;
+				options.controls[0]=true; options.controls[1]=false; options.controlPermissionRequirements[0]={a};
+				doorway = world.addSectorDoor(0,0,1,options); };
+			auto addUnit = [&] { core::World::CreateDumbwaiterOptions options; options.landingPermissionRequirements={std::vector{b},std::vector{c}};
+				id = world.addDumbwaiter(1,0,2,options); };
+			if (reverse) { addUnit(); addDoor(); } else { addDoor(); addUnit(); } world.finishBuild();
+			auto owned = control(world,id,0); auto button = std::dynamic_pointer_cast<const core::Button>(owned->_getObject());
+			std::shared_ptr<const core::SectorObject> doorObject = doorway.controls[0].sector->getObject(doorway.controls[0].index);
+			auto doorButton = std::dynamic_pointer_cast<const core::Button>(doorObject->_getObject());
+			require(button->getPosition().x == doorButton->getPosition().x
+				&& std::abs(button->getPosition().y - doorButton->getPosition().y - button->getSize().y * 1.25f)<0.00001f,
+				"Mixed stack did not order by owner geometry");
+			auto vertex = world.getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(owned));
+			require(vertex == world.getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(doorObject))
+				&& vertex->getPosition() == core::Vector2{2,0}, "Mixed stack lost shared normal-height approach");
+			for (auto object : {owned, doorObject})
+			{
+				auto shape = object->_getObject(); auto centre=shape->getPosition()+shape->getSize()*0.5f;
+				std::shared_ptr<const core::SectorObject> selected;
+				require(world.getObjectAtPosition(0,centre.x,centre.y,&selected)==shape && selected==object,
+					"Mixed stack manual targeting selected a different control");
+			}
+			auto unit=world.lookupDumbwaiter(id); auto actor=world.createAgent("Lower operator",landing,0,1);
+			world.grantAgentAccessPermission(actor,b);
+			auto denied=world.requestInteraction(doorButton->getInteractionPointId(),actor);
+			require(denied && world.lookupInteractionRequest(denied).entity->getResult()==core::InteractionResult::Rejected,
+				"Shared approach bypassed independent Door authorization");
+			require(world.getInteractionPointPermissionRequirement(unit->getLandingButton(1))==std::vector{c}, "Upper permission merged");
+			auto request=world.requestDumbwaiterLanding(id,0,actor); require(bool(request),"Selected landing refused");
+			world.resumeSimulation(); world.advanceTicks(1);
+			require(unit->isBusy() && world.lookupAgent(actor).entity->getGlobalPosition().y==0,
+				"Upper stack activation moved Agent upward or did not activate");
+			world.advanceTicks(300); world.pauseSimulation();
+			for (bool binary : {false, true})
+			{
+				core::SerializationWorkData data; data.markSerializedUnmodified = false;
+				auto serialize = [&](auto output)
+				{
+					world.serialize(*output, data); output->serialize();
+					return output->getSerializedString();
+				};
+				auto bytes = binary ? serialize(core::BinarySerializer::toString())
+					: serialize(core::YamlSerializer::toString());
+				std::unique_ptr<core::Serializer> input = binary
+					? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+				input->deserialize(); core::World loaded("Mixed loaded", 1, 1);
+				require(loaded.deserialize(*input, data), "Mixed protected stack load failed");
+				auto restored = control(loaded, id, 0);
+				require(restored && restored->_getObject()->getPosition() == button->getPosition()
+					&& loaded.getInteractionPointPermissionRequirement(loaded.lookupDumbwaiter(id)->getLandingButton(0)) == std::vector{b}
+					&& loaded.getInteractionPointPermissionRequirement(loaded.lookupDumbwaiter(id)->getLandingButton(1)) == std::vector{c},
+					"Mixed stack replay changed canonical geometry or independent permissions");
+			}
+			require(world.removeDumbwaiter(id),"Mixed unit deletion failed");
+			require(doorButton->getPosition().y==CORE_BUTTON_Y_OFFSET,"Deletion retained stack height");
+		}
+		{
+			auto world=make(); world->addRoom("Blocking left neighbour",0,0,1,1,2); world->finishBuild();
+			auto before=yaml(*world); auto graph=world->getGraph(); std::string diagnostic;
+			require(!world->canAddDumbwaiter(1,0,2,{},&diagnostic),"Both invalid landing candidates accepted");
+			bool refused=false; try {world->addDumbwaiter(1,0,2);} catch(std::exception const&) {refused=true;}
+			require(refused && yaml(*world)==before && world->getGraph()==graph,"Invalid landing edit was not atomic");
+			world->removeLocationWall(0,0,CORE_SIDE_LEFT); world->removeLocationWall(0,1,CORE_SIDE_LEFT);
+			auto id=world->addDumbwaiter(1,0,2); world->finishBuild();
+			require(control(*world,id,0)->getCellX()==2,"Removed shared wall did not restore left host");
+		}
+	}
 	void dumbwaiters(smoke::Context const&)
 	{
+		landingPlacement();
 		using namespace dumbwaiter_fixture;
 		for (unsigned kind = 0; kind < 3; ++kind) for (bool shared : {false, true})
 			for (uint32_t layer : {1u, 2u, 3u}) for (uint32_t initial : {0u, 1u})
@@ -102,10 +212,11 @@ namespace
 			auto world = make(); auto first = world->addDumbwaiter(1, 0, 2);
 			auto landing = world->addRoom("Second landing", 0, 0, 4, 1, 2);
 			world->addSectorWalkway(landing, 1, 0); auto second = world->addDumbwaiter(1, 0, 4);
-			world->addRoom("Standalone front", 0, 0, 0, 2, 1);
-			world->addRoom("Standalone back", 1, 0, 0, 2, 1);
+			auto front = world->addRoom("Standalone front", 0, 0, 0, 1, 2);
+			auto back = world->addRoom("Standalone back", 1, 0, 0, 1, 2);
+			world->addSectorWalkway(front, 1, 0); world->addSectorWalkway(back, 1, 0);
 			auto standalone = world->addBoothWindow(0, 0, 0); world->finishBuild(); world->pauseSimulation();
-			auto plan = world->planMoveSectorObject(standalone.window.sector->getIndex(), standalone.window.index, 1, 0);
+			auto plan = world->planMoveSectorObject(standalone.window.sector->getIndex(), standalone.window.index, 0, 1);
 			require(plan.valid, "Dumbwaiter changed unrelated standalone movement: " + plan.diagnostic);
 			world->applyObjectMove(plan);
 			require(world->lookupDumbwaiter(first) && world->lookupDumbwaiter(second), "Surrounding edit lost unit identities");
@@ -141,7 +252,7 @@ namespace
 			require(!world.lookupDumbwaiter(id) && world.getSimulationSnapshot().interactionPoints.empty(), "Support relocation left unsupported unit");
 			world.resetSimulation(); world.pauseSimulation();
 			auto landing = world.getSectorAtPosition(0, 2, 0);
-			require(landing && landing->getObject(3) && landing->getObject(3)->getObjectType() == core::SectorObjectType::Marker,
+			require(landing && landing->getObject(5) && landing->getObject(5)->getObjectType() == core::SectorObjectType::Marker,
 				"Dependent deletion shifted later object slots");
 		}
 		for (uint32_t level : {0u, 1u})
@@ -257,11 +368,11 @@ namespace
 			for (uint32_t stop = 0; stop < 2; ++stop)
 			{
 				auto point = world->lookupInteractionPoint(unit->getLandingButton(stop)).entity;
-				require(point->getPosition() == core::Vector2{4.5f,float(stop)}
+				require(point->getPosition() == core::Vector2{4.0f,float(stop)}
 					&& world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop))
 					== std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper}, "Move lost button placement/requirement");
 			}
-			auto actor = world->createAgent("New landing operator", unit->getStop(1).sector->getIndex(), 0, 0.5f);
+			auto actor = world->createAgent("New landing operator", unit->getStop(1).sector->getIndex(), 0, 0.0f);
 			world->grantAgentAccessPermission(actor, upper);
 			auto request = world->requestDumbwaiterLanding(id, 1, actor);
 			require(bool(request), "Moved unit Agent request refused");

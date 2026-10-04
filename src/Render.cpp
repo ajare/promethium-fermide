@@ -956,18 +956,6 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 	drawList->PopClipRect();
 	if (!drawObjectSprite("booth-window-open", drawList, topLeft, bottomRight))
 		drawList->AddRect(topLeft, bottomRight, ImColor(148, 162, 170), 0.0f, 0, 2.0f);
-	if (booth->getDumbwaiterOwner())
-	{
-		// The button fits in the aperture's right inset, inside the landing cell.
-		auto position = booth->getPosition();
-		core::Vector2 buttonMin{position.x + 0.82f, position.y + 0.10f};
-		core::Vector2 buttonMax{position.x + 0.88f, position.y + 0.20f};
-		transformPosition(buttonMin); transformPosition(buttonMax);
-		auto unit = gRenderWorld ? gRenderWorld->lookupDumbwaiter(booth->getDumbwaiterOwner()) : nullptr;
-		auto colour = unit && unit->isBusy() ? IM_COL32(220, 80, 80, 255)
-			: booth->getProgress() == 1 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255);
-		drawList->AddRectFilled({buttonMin.x, buttonMax.y}, {buttonMax.x, buttonMin.y}, colour);
-	}
 }
 
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -1029,13 +1017,22 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	transformPosition(bounds1);
 
 	auto colour = button->isEnabled() ? ImColor(0, 255, 128) : ImColor(192, 128, 128);
+	auto point = gRenderWorld ? gRenderWorld->lookupInteractionPoint(button->getInteractionPointId()).entity : nullptr;
+	auto unit = point ? gRenderWorld->lookupDumbwaiter(point->getDumbwaiterOwner()) : nullptr;
+	if (unit)
+	{
+		auto stop = unit->getLandingButton(0) == button->getInteractionPointId() ? 0u : 1u;
+		colour = unit->isBusy() ? ImColor(220, 80, 80)
+			: unit->getButtonState(stop) == core::DumbwaiterButtonState::Here
+				? ImColor(80, 200, 120) : ImColor(200, 160, 80);
+	}
 
 	// A Button seen from the Layer its controlling threshold was authored on is
 	// filled solid; from every other Layer it contributes the outline only,
 	// exactly like the Door it stands beside.
 	if (style == LayerRenderStyle::Solid)
 	{
-		if (!drawObjectSprite(button->isEnabled() ? "button-enabled" : "button-disabled",
+		if (unit || !drawObjectSprite(button->isEnabled() ? "button-enabled" : "button-disabled",
 			drawList, {bounds0.x, bounds0.y}, {bounds1.x, bounds1.y}))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}
