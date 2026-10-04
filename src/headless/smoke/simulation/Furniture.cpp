@@ -64,6 +64,70 @@ namespace
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/actions", actions });
+	checks.push_back({ "furniture/seatedEdits", [](smoke::Context const& context)
+	{
+		using smoke::require;
+		for (int edit = 0; edit < 3; ++edit)
+		{
+			core::World world("Seated edits", 12, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
+			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			auto chair = world.placeFurniture(room, "chair", 3, 0, "Chair");
+			world.placeFurniture(room, "chair", 8, 0, "Other");
+			world.addSectorMarker(room, 0, 10.5f, "Exit");
+			world.finishBuild();
+			auto exit = world.getMarkerIds().back();
+			auto seat = world.furniture()[0].destinations[0].marker;
+			auto otherSeat = world.furniture()[1].destinations[0].marker;
+			auto sitter = world.createAgent("Sitter", room, 0, 2.5f);
+			auto other = world.createAgent("Unaffected", room, 0, 9.5f);
+			require(world.moveAgentToMarker(sitter, seat).accepted()
+				&& world.moveAgentToMarker(other, otherSeat).accepted(), "Seat moves refused");
+			world.advanceTicks(1800);
+			require(world.usablePointOccupant(seat) == sitter && world.usablePointOccupant(otherSeat) == other,
+				"Fixture sitters did not claim seats");
+			world.pauseSimulation();
+			world.setAgentActive(other, false);
+			std::string diagnostic;
+			require(!world.editFurniture(chair, 8, 0, "Chair", &diagnostic), "Overlapping move accepted");
+			require(world.usablePointOccupant(seat) == sitter
+				&& world.lookupAgent(sitter).entity->getPose() == core::Pose::Sitting,
+				"Rejected edit changed sitter");
+			require(world.editFurniture(chair, 3, 0, "Renamed", &diagnostic), "Rename refused");
+			require(world.usablePointOccupant(seat) == sitter
+				&& world.lookupAgent(sitter).entity->getPose() == core::Pose::Sitting,
+				"Rename released unchanged seat");
+			auto position = world.lookupAgent(sitter).entity->getGlobalPosition();
+			if (edit == 2) require(world.removeFurniture(chair, &diagnostic), "Occupied chair deletion refused");
+			else require(world.editFurniture(chair, edit == 0 ? 5.f : 3.f, 0, "Renamed", &diagnostic,
+				edit == 0 ? 0 : 1), "Occupied chair move refused");
+			require(!world.usablePointOccupant(seat), "Edited seat leaked claim");
+			require(world.lookupAgent(sitter).entity->getPose() == core::Pose::Standing
+				&& world.lookupAgent(sitter).entity->getGlobalPosition() == position,
+				"Edited sitter did not stand at its original physical position");
+			require(world.usablePointOccupant(otherSeat) == other
+				&& world.lookupAgent(other).entity->getPose() == core::Pose::Sitting
+				&& !world.lookupAgent(other).entity->isActive(), "Unaffected sitter lost Pose, claim or activation");
+			if (edit == 2)
+			{
+				require(!world.lookupMarker(seat), "Deleted seat still exists");
+				chair = world.placeFurniture(room, "chair", 3, 0, "Replacement");
+				for (auto const& instance : world.furniture())
+					if (instance.id == chair) seat = instance.destinations[0].marker;
+				world.finishBuild();
+			}
+			require(world.resumeSimulation(), "Resume after seated edit refused");
+			require(world.moveAgentToMarker(sitter, exit).accepted(), "Released sitter could not depart");
+			world.advanceTicks(1800);
+			require(world.moveAgentToMarker(sitter, seat).accepted(), "Replacement/moved seat not routable");
+			world.advanceTicks(1800);
+			require(world.usablePointOccupant(seat) == sitter
+				&& world.lookupAgent(sitter).entity->getPose() == core::Pose::Sitting,
+				"Replacement/moved seat not claimable in scenario " + std::to_string(edit));
+			require(world.usablePointOccupant(otherSeat) == other, "Unaffected claim lost after resume");
+		}
+	} });
 	checks.push_back({ "furniture/occupancyLifecycle", [](smoke::Context const& context)
 	{
 		using smoke::require;

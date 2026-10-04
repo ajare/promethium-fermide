@@ -3178,7 +3178,8 @@ namespace core
 				agent->mResetPosition.sector() ? agent->mResetPosition.global() : agent->getGlobalPosition(),
 				agent->mResetPosition.sector() ? agent->mResetPosition.sector()->getLayerIndex() : sector->getLayerIndex(),
 				agent->mResetPosition.sector() ? agent->mResetLocalDepth : agent->getLocalDepth(),
-				agent->mResetDestinationMarker, agent->mResetPathActive });
+				agent->mResetDestinationMarker, agent->mResetPathActive,
+				agent->mPose, agent->mOccupiedUsablePoint });
 		}
 		return carried;
 	}
@@ -3280,6 +3281,13 @@ namespace core
 			}
 			raw->mResetDestinationMarker = saved.resetDestinationMarker;
 			raw->mResetPathActive = saved.resetPathActive;
+			raw->mPose = saved.pose;
+			if (saved.occupiedUsablePoint)
+			{
+				if (furnitureMarkerAction(saved.occupiedUsablePoint) == UsablePointAction::Sit)
+					raw->mOccupiedUsablePoint = saved.occupiedUsablePoint;
+				else raw->mPose = Pose::Standing;
+			}
 			raw->mEscalatorTraversalSequence = saved.escalatorTraversalSequence;
 			raw->mRouteJourneySequence = saved.routeJourneySequence;
 			if (saved.behaviourAssignment)
@@ -3337,6 +3345,26 @@ namespace core
 		auto agents = captureAgentsForReplay();
 		for (auto& carried : agents)
 		{
+			// Replay replaces all Agents, but only a changed seat loses its sitter.
+			// Compare authored geometry (not names): even a Local-depth-only move
+			// releases occupancy, while rejected edits never reach this seam.
+			if (carried.occupiedUsablePoint)
+			{
+				auto ownsSeat = [&](ConstructionRecord const& record) {
+					return record.type == ConstructionType::Furniture
+						&& std::any_of(record.furnitureDestinations.begin(), record.furnitureDestinations.end(),
+							[&](auto const& point) { return point.marker == carried.occupiedUsablePoint; });
+				};
+				auto before = std::find_if(mConstructionRecords.begin(), mConstructionRecords.end(), ownsSeat);
+				auto after = std::find_if(records.begin(), records.end(), ownsSeat);
+				if (before == mConstructionRecords.end() || after == records.end()
+					|| before->a != after->a || before->x != after->x || before->y != after->y
+					|| before->furnitureDepth != after->furnitureDepth || before->definitionKey != after->definitionKey)
+				{
+					carried.pose = Pose::Standing;
+					carried.occupiedUsablePoint = {};
+				}
+			}
 			if (carried.sectorIndex == movedSectorIndex)
 				carried.position += Vector2{ (float)deltaX, (float)deltaY };
 		}

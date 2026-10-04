@@ -185,6 +185,11 @@ the Marker's separate `blocksPathing` property). Beginning a new Path, simulatio
 Reset, or deleting the seated Agent releases the claim; deactivation and
 pause/resume retain it. Claims are runtime-only: YAML and binary reloads start
 with every usable point free.
+Moving Furniture (including a Local-depth change) or deleting it while paused
+restores its seated Agents to Standing and releases their claims (#449), without
+moving the Agents from their physical positions. Unaffected sitters retain their
+Pose and claims through structural replay; rename-only and rejected edits do
+not release seats. Occupancy itself never refuses a Furniture edit.
 
 A usable point may specify `blocksPathing: false` to make its Marker usable as
 both a destination and an intermediate waypoint. Omitted `blocksPathing` defaults

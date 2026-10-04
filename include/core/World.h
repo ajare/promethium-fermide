@@ -1161,6 +1161,8 @@ namespace core
 			int resetDepth;
 			MarkerId resetDestinationMarker;
 			bool resetPathActive;
+			Pose pose{ Pose::Standing };
+			MarkerId occupiedUsablePoint{};
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried
