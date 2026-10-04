@@ -171,6 +171,14 @@ for tall artwork. Point order and display labels are not identities. The editor'
 snap toggle rounds only the instance x origin, leaving all point offsets rigid.
 It never rounds or permits fractional y.
 
+A usable point may specify `action: Sit`. Core simulation sets an Agent's runtime
+Pose to Sitting when it physically arrives at that furniture-owned Marker as its
+Path destination; intermediate traversal never fires the action. Omission means
+no action, and unknown action values fail catalogue loading. Starting another
+Path restores Standing. Actions require no Lua changes and are read from the
+catalogue rather than persisted in the World; existing catalogues remain unchanged.
+Seat occupancy is a separate follow-up (#448).
+
 A usable point may specify `blocksPathing: false` to make its Marker usable as
 both a destination and an intermediate waypoint. Omitted `blocksPathing` defaults
 to `true`. This is a creation default: existing World-owned Marker properties

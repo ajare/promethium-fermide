@@ -536,6 +536,7 @@ namespace core
 		}
 
 		void startIdling();
+		void performDestinationAction();
 
 		void startPathingInternal();
 

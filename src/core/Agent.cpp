@@ -1433,6 +1433,17 @@ namespace core
 		addLogMessage(getDescription(), 0, LogLevel::Debug, format("Paused pathing"));
 	}
 
+	void Agent::performDestinationAction()
+	{
+		if (!mWorld || !mPath.path || mPath.path->nodes.empty()) return;
+		auto const& destination = mPath.path->nodes.back().targetVertex;
+		if (!destination || destination->getSector().get() != getSector()
+			|| getGlobalPosition().distanceTo(destination->getPosition()) > 0.001f) return;
+		auto marker = std::dynamic_pointer_cast<Marker>(destination->getObject());
+		if (marker && mWorld->furnitureMarkerAction(marker->getId()) == UsablePointAction::Sit)
+			mPose = Pose::Sitting;
+	}
+
 	bool Agent::nextPathNode()
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
@@ -1440,6 +1451,7 @@ namespace core
 
 		if (!mPath.path || mPath.targetNode >= mPath.path->nodes.size() - 1)
 		{
+			performDestinationAction();
 			mState = State::Idle;
 			mPath.path = nullptr;
 			mPath.targetNode = 0;
@@ -1594,6 +1606,7 @@ namespace core
 
 		if (mPath.targetNode + 1 >= mPath.path->nodes.size())
 		{
+			performDestinationAction();
 			startIdling();
 			return;
 		}

@@ -16,11 +16,14 @@ namespace core
 		int x{ 0 }, y{ 0 };
 		std::string imageSet, image;
 	};
+	enum class UsablePointAction { Sit };
+
 	struct FurnitureUsablePoint
 	{
 		std::string key, label;
 		float x{ 0.5f };
 		bool blocksPathing{ true }; // default for newly created owned Markers
+		std::optional<UsablePointAction> action{};
 	};
 	struct FurnitureRoutingVertex
 	{

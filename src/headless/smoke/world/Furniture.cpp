@@ -7,6 +7,7 @@
 #include "core/AgentTagRegistryDocument.h"
 #include <limits>
 #include "core/Exceptions.h"
+#include "core/SerializationException.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
@@ -17,6 +18,32 @@ namespace
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		work.markSerializedUnmodified = false;
 		world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+	}
+
+	void actions(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto source = context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml");
+		auto catalogue = core::FurnitureCatalogue::readFile(source);
+		auto const& points = catalogue->definition("chair")->usablePoints;
+		require(points[0].action == core::UsablePointAction::Sit && !points[1].action,
+			"Sit or omitted usable-point action parsed incorrectly");
+		auto legacy = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		require(!legacy->definition("chair")->usablePoints[0].action, "Legacy chair gained an action");
+		for (auto value : {"Stand", "sit", "''", "null", "[]", "{}"})
+		{
+			auto yaml = YAML::LoadFile(source.string());
+			yaml["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["action"] = YAML::Load(value);
+			auto file = context.temporaryRoot() / "invalid-action.furniture.yaml";
+			{ std::ofstream out(file); out << yaml; }
+			bool rejected = false;
+			try { core::FurnitureCatalogue::readFile(file); }
+			catch (core::SerializationException const& error)
+			{
+				rejected = std::string(error.what()).find("usable-point action") != std::string::npos;
+			}
+			require(rejected, "Unknown or malformed action was not explicitly rejected");
+		}
 	}
 
 	void demonstration(smoke::Context const& context)
@@ -882,6 +909,7 @@ namespace
 }
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/actions", actions });
 	checks.push_back({ "furniture/demo", demonstration });
 	checks.push_back({ "furniture/chair", chair });
 	checks.push_back({ "furniture/layouts", layouts });

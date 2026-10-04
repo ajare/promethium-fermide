@@ -2862,6 +2862,7 @@ namespace core
 		std::string const& furnitureCatalogueFilename() const { return mFurnitureCatalogueFilename; }
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
+		std::optional<UsablePointAction> furnitureMarkerAction(MarkerId id) const;
 		bool canEditFurniture(uint64_t id, float x, float y, std::string const& name,
 			std::string* diagnostic = nullptr, std::optional<int> localDepth = std::nullopt) const;
 		bool editFurniture(uint64_t id, float x, float y, std::string const& name,

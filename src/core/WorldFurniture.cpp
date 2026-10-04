@@ -28,6 +28,21 @@ namespace core
 				[id](auto const& point) { return point.marker == id; }); });
 	}
 
+	std::optional<UsablePointAction> World::furnitureMarkerAction(MarkerId id) const
+	{
+		if (!id || !mFurnitureCatalogue) return {};
+		for (auto const& instance : mFurniture)
+			for (auto const& destination : instance.destinations)
+				if (destination.marker == id)
+				{
+					if (auto definition = mFurnitureCatalogue->definition(instance.definitionKey))
+						for (auto const& point : definition->usablePoints)
+							if (point.key == destination.key) return point.action;
+					return {};
+				}
+		return {};
+	}
+
 	bool World::canPlaceFurniture(uint32_t sectorIndex, std::string const& key,
 		float x, float y, std::string const& name, std::string* diagnostic, int localDepth) const
 	{

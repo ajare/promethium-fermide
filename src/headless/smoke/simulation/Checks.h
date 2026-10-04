@@ -23,3 +23,4 @@ void registerSecurityScanners(std::vector<smoke::Check>& checks);
 void registerBoothWindows(std::vector<smoke::Check>& checks);
 void registerDumbwaiters(std::vector<smoke::Check>& checks);
 void registerScale(std::vector<smoke::Check>& checks);
+void registerFurniture(std::vector<smoke::Check>& checks);

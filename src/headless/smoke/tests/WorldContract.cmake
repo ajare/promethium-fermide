@@ -25,6 +25,7 @@ set(checks
     airlocks/structuralEdits
     airlocks/placement
     airlocks/atomicRefusalAndOwnership
+    furniture/actions
     furniture/demo
     furniture/chair
     furniture/layouts
