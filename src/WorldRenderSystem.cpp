@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -242,14 +243,20 @@ namespace
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
 			core::FurnitureCatalogue::setResourceLoader([this](std::filesystem::path const& path)
 			{
+				auto canonicalPath = std::filesystem::weakly_canonical(path);
+				if (auto found = mFurnitureCatalogueResources.find(canonicalPath);
+					found != mFurnitureCatalogueResources.end())
+					return found->second->catalogue();
+
 				static uint64_t sequence = 0;
 				auto resource = std::make_shared<FurnitureCatalogueResource>(
 					"UserFurniture" + std::to_string(++sequence), "",
-					std::filesystem::absolute(path).string(), std::map<std::string, std::string>{}, nullptr);
+					canonicalPath.string(), std::map<std::string, std::string>{}, nullptr);
 				resource->setArtwork(mObjectSet);
 				mResources->addResource(resource);
 				mResources->createResource(resource);
 				mResources->loadResource(resource);
+				mFurnitureCatalogueResources.emplace(std::move(canonicalPath), resource);
 				return resource->catalogue();
 			});
 		}
@@ -567,6 +574,10 @@ namespace
 		std::unique_ptr<resources::ResourceManager> mResources;
 		resources::ResourcePtr mSectorSet;
 		resources::ResourcePtr mObjectSet;
+		// The ResourceManager owns registered resources; this index prevents
+		// repeated World loads from registering another resource for one file.
+		std::map<std::filesystem::path, std::shared_ptr<FurnitureCatalogueResource>>
+			mFurnitureCatalogueResources;
 		mpp::ScenePtr mScene;
 		mpp::RenderTargetPtr mTarget;
 		std::vector<Slot> mSlots;
