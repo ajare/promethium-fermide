@@ -490,7 +490,14 @@ namespace core
 				}
 			break;
 		case ConstructionType::LightSwitch:
-			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("xOffset", record.b); break;
+			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("xOffset", record.b);
+			if (!record.controlPermissionRequirements[0].empty())
+			{
+				serializer.beginArray("permissionRequirement");
+				for (auto permission : record.controlPermissionRequirements[0]) serializer.writeUint64("", permission);
+				serializer.endArray();
+			}
+			break;
 		case ConstructionType::ForceBridge:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeUint32("xOffset", record.c); serializer.writeUint32("width", record.d);
@@ -755,7 +762,10 @@ namespace core
 		serializer.beginArray("interactionPermissionRequirements");
 		for (auto const& [pointId, point] : mInteractionPoints.entries())
 		{
-			if (point->mPermissionRequirement.none() || point->mBoothWindowOwner || point->mDumbwaiterOwner) continue;
+			// Physical permissions belong to authored owner/role records, never
+			// replay-order handles. Keep the wire array for standalone compatibility.
+			if (point->mPermissionRequirement.none() || point->mBoothWindowOwner || point->mDumbwaiterOwner
+				|| physicalControlPlacement(pointId)) continue;
 			serializer.beginMap("");
 			serializer.writeUint64("interactionPoint", pointId.value);
 			serializer.beginArray("permissions");
@@ -920,8 +930,13 @@ namespace core
 				serializer.beginMap("");
 				serializer.beginArray("permissions");
 				while (serializer.nextArrayItem())
-					record.landingControlPermissionRequirements.back().push_back(
-						serializer.readUint32(""));
+				{
+					// Landing requirements use uint64 on the existing binary wire.
+					auto permission = serializer.readUint64("");
+					if (permission == 0 || permission > 256)
+						throw SerializationException("Invalid landing control Access permission ID");
+					record.landingControlPermissionRequirements.back().push_back(static_cast<uint32_t>(permission));
+				}
 				serializer.endArray();
 				serializer.endMap();
 			}
@@ -965,12 +980,17 @@ namespace core
 			}
 			serializer.endArray();
 		};
-		auto readControlRequirement = [&](size_t slot, char const* field)
+		auto readControlRequirement = [&](size_t slot, char const* field, bool wide = false)
 		{
 			if (version < 27 || !serializer.hasField(field)) return;
 			serializer.beginArray(field);
 			while (serializer.nextArrayItem())
-				record.controlPermissionRequirements[slot].push_back(serializer.readUint32(""));
+			{
+				auto permission = wide ? serializer.readUint64("") : serializer.readUint32("");
+				if (permission == 0 || permission > std::numeric_limits<uint32_t>::max())
+					throw SerializationException("Invalid control Access permission ID");
+				record.controlPermissionRequirements[slot].push_back(static_cast<uint32_t>(permission));
+			}
 			serializer.endArray();
 		};
 		auto readRenamedUint32 = [&](char const* field, char const* legacyField)
@@ -1014,8 +1034,8 @@ namespace core
 			record.q = serializer.readBool("startExtended");
 			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
 			record.d = serializer.readUint32("directionalBatchLimit");
-			readControlRequirement(0, "lowControlPermissionRequirement");
-			readControlRequirement(1, "highControlPermissionRequirement"); break;
+			readControlRequirement(0, "lowControlPermissionRequirement", true);
+			readControlRequirement(1, "highControlPermissionRequirement", true); break;
 		case ConstructionType::Stairwell:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -1163,8 +1183,14 @@ namespace core
 					if (!serializer.hasField(field)) continue;
 					serializer.beginArray(field);
 					while (serializer.nextArrayItem())
-						record.controlPermissionRequirements[controlSide].push_back(
-							serializer.readUint32(""));
+					{
+						// Door control requirements, like manual requirements, use
+						// uint64 on the wire (including binary history snapshots).
+						auto permission = serializer.readUint64("");
+						if (permission == 0 || permission > AccessPermission::Capacity)
+							throw SerializationException("Invalid Door control Access permission ID");
+						record.controlPermissionRequirements[controlSide].push_back(static_cast<uint32_t>(permission));
+					}
 					serializer.endArray();
 				}
 			break;
@@ -1248,28 +1274,33 @@ namespace core
 					if (!serializer.hasField(field)) continue;
 					serializer.beginArray(field);
 					while (serializer.nextArrayItem())
-						record.controlPermissionRequirements[controlSide].push_back(
-							serializer.readUint32(""));
+					{
+						auto permission = serializer.readUint64("");
+						if (permission == 0 || permission > std::numeric_limits<uint32_t>::max())
+							throw SerializationException("Invalid control Access permission ID");
+						record.controlPermissionRequirements[controlSide].push_back(static_cast<uint32_t>(permission));
+					}
 					serializer.endArray();
 				}
 			break;
 		case ConstructionType::LightSwitch:
-			record.a = serializer.readUint32("sectorIndex"); record.b = serializer.readUint32("xOffset"); break;
+			record.a = serializer.readUint32("sectorIndex"); record.b = serializer.readUint32("xOffset");
+			readControlRequirement(0, "permissionRequirement", true); break;
 		case ConstructionType::ForceBridge:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("width");
 			record.i = readSide("fromSide"); record.p = serializer.readBool("extensible");
 			record.q = serializer.readBool("startExtended"); record.e = serializer.readUint32("controlCount");
-			readControlRequirement(0, "leftControlPermissionRequirement");
-			readControlRequirement(1, "rightControlPermissionRequirement"); break;
+			readControlRequirement(0, "leftControlPermissionRequirement", true);
+			readControlRequirement(1, "rightControlPermissionRequirement", true); break;
 		case ConstructionType::SectorLadder:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = readRenamedUint32("levelsHigh", "decksHigh");
 			record.p = serializer.readBool("extensible"); record.q = serializer.readBool("startExtended");
 			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
 			record.e = serializer.readUint32("directionalBatchLimit");
-			readControlRequirement(0, "lowControlPermissionRequirement");
-			readControlRequirement(1, "highControlPermissionRequirement"); break;
+			readControlRequirement(0, "lowControlPermissionRequirement", true);
+			readControlRequirement(1, "highControlPermissionRequirement", true); break;
 		case ConstructionType::PlatformLift:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = serializer.readUint32("cellsWide");
@@ -1641,8 +1672,6 @@ namespace core
 		if (nextFurnitureId != 0 && nextFurnitureId <= highestFurnitureId)
 			throw SerializationException("Next Furniture identity does not follow issued identities");
 
-		bool const dumbwaiterLayoutChanged = !serializer.hasField("dumbwaiterPhysicalButtons")
-			|| !serializer.readBool("dumbwaiterPhysicalButtons");
 		uint64_t highestDumbwaiterId = 0;
 		for (auto const& record : records)
 			if (record.type == ConstructionType::Dumbwaiter)
@@ -1932,7 +1961,8 @@ namespace core
 				&& record.type != ConstructionType::ForceBridge
 				&& record.type != ConstructionType::Airlock
 				&& record.type != ConstructionType::BoothWindow
-				&& record.type != ConstructionType::Dumbwaiter) continue;
+				&& record.type != ConstructionType::Dumbwaiter
+				&& record.type != ConstructionType::LightSwitch) continue;
 			bool controls[2]{};
 			if (record.type == ConstructionType::Door || record.type == ConstructionType::BulkheadDoor)
 			{
@@ -1946,6 +1976,7 @@ namespace core
 				if (record.e > 0) controls[record.i] = true;
 				if (record.e > 1) controls[1 - record.i] = true;
 			}
+			else if (record.type == ConstructionType::LightSwitch) controls[0] = true;
 			else if (record.type == ConstructionType::BoothWindow) controls[1] = true;
 			else if (record.type == ConstructionType::Dumbwaiter) controls[0] = controls[1] = true;
 			else if (record.p || record.type == ConstructionType::Airlock) controls[0] = controls[1] = true;
@@ -2073,10 +2104,10 @@ namespace core
 					if (!object) throw SerializationException("Legacy Marker removal is dangling");
 					record.markerId = object->getMarker()->getId();
 				}
-				// Furniture point additions/removals shift later object slots. Resolve
-				// standalone Marker deletions by their validated stable identity.
-				if ((furnitureLayoutChanged || (dumbwaiterLayoutChanged && highestDumbwaiterId != 0))
-					&& record.type == ConstructionType::RemoveMarker
+				// Furniture point changes and reconstructed physical Dumbwaiter
+				// children can shift legacy object slots. Resolve standalone Marker
+				// deletions by their validated stable identity, not the old slot.
+				if ((furnitureLayoutChanged || highestDumbwaiterId != 0) && record.type == ConstructionType::RemoveMarker
 					&& record.a < candidate.mSectors.size() && candidate.mSectors[record.a])
 				{
 					auto sector = candidate.mSectors[record.a];
@@ -2088,6 +2119,9 @@ namespace core
 				candidate.applyConstructionRecord(record);
 			}
 			candidate.finishBuild();
+			candidate.mConstructionRecords = records;
+			candidate.mAccessPermissions = std::move(accessPermissions);
+			candidate.pauseSimulation();
 			for (auto const& [pointId, requirement] : serializedRequirements)
 			{
 				auto point = candidate.mInteractionPoints.find(pointId);
@@ -2098,45 +2132,22 @@ namespace core
 				if (version < 41 && any_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
 					{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
 					throw SerializationException("Airlock control requirements require World schema version 41 or later");
-				// Versions 23-24 persisted generated controls only by replay-order
-				// Interaction point ID. Migrate those requirements onto the stable
-				// authored approach side before adopting the records.
-				if (version >= 25) continue;
-				for (auto const& [resourceId, resource] : candidate.mTraversalResources.entries())
-				{
-					(void)resourceId;
-					if (!resource->mDoor || find(resource->mControls.begin(),
-						resource->mControls.end(), pointId) == resource->mControls.end()) continue;
-					size_t side = 0;
-					if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(resource->mDoor))
-						side = point->mSector == SectorId{ static_cast<uint64_t>(
-							bulkhead->getSideSector(CORE_SIDE_RIGHT)->getIndex()) + 1 } ? 1 : 0;
-					else side = point->mSector == SectorId{ static_cast<uint64_t>(
-						resource->mDoor->getBackSector()->getIndex()) + 1 } ? 1 : 0;
-					for (auto& record : records)
-					{
-						bool matches = record.type == ConstructionType::Door
-							&& record.layer == resource->mDoor->getFrontLayer()
-							&& record.a == static_cast<uint32_t>(resource->mDoor->getPosition().y)
-							&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().x)
-							&& record.c == resource->mDoor->getCellsWide();
-						if (record.type == ConstructionType::BulkheadDoor)
-							matches = record.a == resource->mDoor->getFrontLayer()
-								&& record.b == static_cast<uint32_t>(resource->mDoor->getPosition().y)
-								&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
-									== static_cast<uint32_t>(round(resource->mDoor->getPosition().x
-										+ resource->mDoor->getSize().x * 0.5f));
-						if (!matches) continue;
-						auto& authored = record.controlPermissionRequirements[side];
-						authored.clear();
-						for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
-							if (requirement.test(bit)) authored.push_back(
-								static_cast<uint32_t>(bit + 1));
-						break;
-					}
-					break;
-				}
+				// Compatibility is a document-boundary migration, not a second
+				// placement or permission policy. Use the same owner/role authoring
+				// seam for old handle-only requirements (including pre-25 Doors).
+				vector<AccessPermissionId> permissions;
+				for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+					if (requirement.test(bit)) permissions.push_back(AccessPermissionId{bit + 1});
+				string diagnostic;
+				if (!candidate.setInteractionPointPermissionRequirement(pointId, permissions, &diagnostic))
+					throw SerializationException(diagnostic);
 			}
+			// Authored records are now the sole authority for migrated physical
+			// requirements; do not apply the old handle overlay a second time.
+			std::erase_if(serializedRequirements, [&](auto const& entry)
+			{ return candidate.physicalControlPlacement(entry.first) != nullptr; });
+			records = std::move(candidate.mConstructionRecords);
+			accessPermissions = std::move(candidate.mAccessPermissions);
 		}
 		catch (SerializationException const&) { throw; }
 		catch (exception const& error)
@@ -2186,6 +2197,10 @@ namespace core
 			throw SerializationException(format(
 				"Serialized next Agent group ID {} cannot be adopted by this World", nextAgentGroupId));
 		}
+		// A live World with Dumbwaiters deliberately never reuses stale control
+		// handles. Validation replay starts at 1; translate legacy wire handles
+		// by the live replay's base, without changing any authored identity.
+		auto const replayPointBase = mInteractionPoints.nextId();
 		mDeserializingConstruction = true;
 		try
 		{
@@ -2205,8 +2220,9 @@ namespace core
 		mConstructionRecords = std::move(records);
 		for (auto const& [pointId, requirement] : serializedRequirements)
 		{
-			auto point = mInteractionPoints.find(pointId);
-			if (!point || !isInteractionPointPermissionEligible(pointId))
+			auto restoredId = InteractionPointId{replayPointBase + pointId.value - 1};
+			auto point = mInteractionPoints.find(restoredId);
+			if (!point || !isInteractionPointPermissionEligible(restoredId))
 				throw SerializationException(format("Serialized Access permission requirement has invalid or ineligible Interaction point {}", pointId.value));
 			point->mPermissionRequirement = requirement;
 		}
@@ -2631,7 +2647,8 @@ namespace core
 			}
 			for (auto const& [id, point] : mInteractionPoints.entries())
 				if (point->mPermissionRequirement.any() && !authoredResourceControls.contains(id)
-					&& !mAuthoredControlRequirements.contains(id) && !point->mBoothWindowOwner && !point->mDumbwaiterOwner)
+					&& !mAuthoredControlRequirements.contains(id) && !point->mBoothWindowOwner && !point->mDumbwaiterOwner
+					&& !physicalControlPlacement(id))
 					mPendingPermissionRequirements.emplace(id, point->mPermissionRequirement);
 		}
 		else
@@ -2640,6 +2657,7 @@ namespace core
 			mPermissionSets = {};
 		}
 		mAuthoredControlRequirements.clear();
+		mConstructionReplayIndex = 0;
 		// Dumbwaiter landing handles are runtime ownership, never replay-order
 		// identities. A rebuild must not let an old button operate a new unit.
 		auto nextPoint = mNextDumbwaiterId > 1 ? mInteractionPoints.nextId() : uint64_t{1};
@@ -2874,8 +2892,13 @@ namespace core
 			break;
 		}
 		case ConstructionType::LightSwitch:
-			addSectorLightSwitch(record.a, record.b);
+		{
+			auto control = addSectorLightSwitch(record.a, record.b);
+			auto point = mInteractionPoints.find(control.interactionPoint);
+			for (auto permission : record.controlPermissionRequirements[0])
+				point->mPermissionRequirement.set(permission - 1);
 			break;
+		}
 		case ConstructionType::ForceBridge:
 		{
 			CreateForceBridgeOptions options{ record.d, record.i, record.p, record.q, record.e, {}, record.initiallyBroken };
@@ -2957,6 +2980,7 @@ namespace core
 				record.c, record.d, record.x, unpackBackgroundColour(record.f));
 			break;
 		}
+		++mConstructionReplayIndex;
 	}
 
 	vector<World::ConstructionRecord> World::canonicalConstructionRecords(
@@ -3522,7 +3546,7 @@ namespace core
 						if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
 						{
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-							tombstone.a = sectorMap[owner]; records.push_back(tombstone); records.push_back(std::move(tombstone));
+							tombstone.a = sectorMap[owner]; records.push_back(std::move(tombstone));
 						}
 				continue;
 			}
@@ -3648,7 +3672,7 @@ namespace core
 						if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
 						{
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-							tombstone.a = sectorMap[owner]; records.push_back(tombstone); records.push_back(std::move(tombstone));
+							tombstone.a = sectorMap[owner]; records.push_back(std::move(tombstone));
 						}
 					continue;
 				}
@@ -5377,8 +5401,7 @@ namespace core
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
 							tombstone.a = sectorMap[originalToSource[owner]];
 							candidate->applyConstructionRecord(tombstone);
-							candidate->applyConstructionRecord(tombstone);
-							records.push_back(tombstone); records.push_back(std::move(tombstone));
+							records.push_back(std::move(tombstone));
 						}
 					continue;
 				}
@@ -6005,13 +6028,8 @@ namespace core
 			}
 			auto candidates = getPlatformLiftStopCandidates(owner->getIndex(), plan.x - room->getCellX());
 			uint32_t lowest = ~0u;
-			auto layer = mLayers[room->getLayerIndex()];
-			bool groundLeft = plan.x > room->getCellX0() + 1
-				&& layer->getCellDefinition(plan.x - 1, plan.y).isTraversableOnFoot();
-			bool groundRight = plan.x + 1 < room->getCellX1()
-				&& layer->getCellDefinition(plan.x + 1, plan.y).isTraversableOnFoot();
 			for (auto const& stop : candidates)
-				if ((groundLeft && stop.leftButton) || (groundRight && stop.rightButton))
+				if (stop.leftButton || stop.rightButton)
 				{ lowest = stop.levelOffset; break; }
 			if (lowest == ~0u)
 			{
@@ -6911,30 +6929,7 @@ namespace core
 		for (auto stop : current.stopOffsets)
 			if (find(desired.begin(), desired.end(), stop) == desired.end())
 				plan.consequences.push_back(format("Remove PlatformLift landing, button, pathing, and stop at level {}", stop));
-		auto room = mSectors[sectorIndex];
-		auto candidates = getPlatformLiftStopCandidates(sectorIndex,
-			object->getCellX() - room->getCellX());
-		auto buttonSide = [&](vector<uint32_t> const& stops)
-		{
-			auto layer = mLayers[room->getLayerIndex()];
-			auto x = object->getCellX();
-			bool left = x > room->getCellX0() + 1
-				&& layer->getCellDefinition(x - 1, room->getCellY()).isTraversableOnFoot();
-			bool right = x + 1 < room->getCellX1()
-				&& layer->getCellDefinition(x + 1, room->getCellY()).isTraversableOnFoot();
-			for (size_t i = 1; i < stops.size(); ++i)
-			{
-				auto found = find_if(candidates.begin(), candidates.end(), [&](auto const& value)
-					{ return value.levelOffset == stops[i]; });
-				left = left && found != candidates.end() && found->leftButton;
-				right = right && found != candidates.end() && found->rightButton;
-			}
-			return right ? CORE_SIDE_RIGHT : left ? CORE_SIDE_LEFT : CORE_SIDE_MIDDLE;
-		};
-		auto oldSide = buttonSide(current.stopOffsets), newSide = buttonSide(desired);
-		if (oldSide != newSide && newSide != CORE_SIDE_MIDDLE)
-			plan.consequences.push_back(format("Move all PlatformLift landing buttons to the {} side",
-				newSide == CORE_SIDE_LEFT ? "left" : "right"));
+		plan.consequences.push_back("Recalculate PlatformLift controls independently at every Stop");
 		vector<ConstructionRecord> records;
 		plan.valid = preparePlatformLiftEdit(plan, records, plan.diagnostic);
 		return plan;
@@ -6988,6 +6983,12 @@ namespace core
 			|| !dynamic_pointer_cast<const WalkwaySectorObject>(mSectors[sectorIndex]->getObject(objectIndex)))
 		{ plan.diagnostic = "The selected Walkway no longer exists"; return plan; }
 		auto walkway = mSectors[sectorIndex]->getObject(objectIndex);
+		try
+		{
+			(void)planPhysicalControls(mSectors[sectorIndex]->getLayerIndex(), sectorIndex,
+				walkway->getCellY(), nullptr, ~0u, ~0u, walkway->getCellX());
+		}
+		catch (exception const& error) { plan.diagnostic = error.what(); return plan; }
 		plan.diagnostic = furnitureSupportDiagnostic(sectorIndex,
 			walkway->getCellX() - mSectors[sectorIndex]->getCellX(),
 			walkway->getCellY() - mSectors[sectorIndex]->getCellY());
@@ -7064,6 +7065,8 @@ namespace core
 		auto object = dynamic_pointer_cast<WalkwaySectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) return false;
+		(void)planPhysicalControls(mSectors[sectorIndex]->getLayerIndex(), sectorIndex,
+			object->getCellY(), nullptr, ~0u, ~0u, object->getCellX());
 		auto supportDiagnostic = furnitureSupportDiagnostic(sectorIndex,
 			object->getCellX() - mSectors[sectorIndex]->getCellX(),
 			object->getCellY() - mSectors[sectorIndex]->getCellY());

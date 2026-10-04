@@ -1044,13 +1044,22 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	transformPosition(bounds1);
 
 	auto colour = button->isEnabled() ? ImColor(0, 255, 128) : ImColor(192, 128, 128);
+	auto point = gRenderWorld ? gRenderWorld->lookupInteractionPoint(button->getInteractionPointId()).entity : nullptr;
+	auto unit = point ? gRenderWorld->lookupDumbwaiter(point->getDumbwaiterOwner()) : nullptr;
+	if (unit)
+	{
+		auto stop = unit->getLandingButton(0) == button->getInteractionPointId() ? 0u : 1u;
+		colour = unit->isBusy() ? ImColor(220, 80, 80)
+			: unit->getButtonState(stop) == core::DumbwaiterButtonState::Here
+				? ImColor(80, 200, 120) : ImColor(200, 160, 80);
+	}
 
 	// A Button seen from the Layer its controlling threshold was authored on is
 	// filled solid; from every other Layer it contributes the outline only,
 	// exactly like the Door it stands beside.
 	if (style == LayerRenderStyle::Solid)
 	{
-		if (!drawObjectSprite(button->isEnabled() ? "button-enabled" : "button-disabled",
+		if (unit || !drawObjectSprite(button->isEnabled() ? "button-enabled" : "button-disabled",
 			drawList, {bounds0.x, bounds0.y}, {bounds1.x, bounds1.y}))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}

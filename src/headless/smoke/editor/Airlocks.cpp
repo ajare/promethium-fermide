@@ -40,6 +40,10 @@ namespace
 			auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world->getSector(6));
 			require(chamber && chamber->getCellY() == row && chamber->getCycleSeconds() == 8
 				&& chamber->getCapacity() == (row == 2 ? 2u : 3u), "Structural undo geometry/configuration mismatch");
+			require(world->lookupInteractionPoint(chamber->getControl(0)).entity->getPosition() == core::Vector2{1.75f, static_cast<float>(row)}
+				&& world->lookupInteractionPoint(chamber->getControl(1)).entity->getPosition()
+					== core::Vector2{row == 2 ? 4.25f : 5.25f, static_cast<float>(row)},
+				"Airlock move/resize/history lost fixed outside hosts");
 		}
 		for (unsigned count = 0; count < 3; ++count)
 			require(history.redo(captureDocumentSnapshot(world, history), restore), "Structural redo failed");
@@ -92,6 +96,9 @@ namespace
 		chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(world->getSector(index));
 		require(chamber && chamber->getControl(0) && chamber->getControl(1)
 			&& chamber->getNumObjects() == 2 && chamber->getDoor(0)->isClosed(), "Redo lost generated devices");
+		require(world->lookupInteractionPoint(chamber->getControl(0)).entity->getPosition() == core::Vector2{1.75f, 0}
+			&& world->lookupInteractionPoint(chamber->getControl(1)).entity->getPosition() == core::Vector2{5.25f, 0},
+			"Airlock editor creation/redo lost approved insets");
 		world->resumeSimulation();
 		require(!world->setAirlockCycleSeconds(index, 4), "Running Airlock accepted authored property edit");
 	}

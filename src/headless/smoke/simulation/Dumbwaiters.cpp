@@ -92,19 +92,19 @@ namespace
 	}
 	void agentOperation(smoke::Context const&)
 	{
-		for (uint32_t stop : {0u, 1u}) for (float x : {0.749f, 0.75f, 1.0f, 1.25f, 1.251f})
+		for (uint32_t stop : {0u, 1u}) for (float x : {0.0f, 0.249f, 0.25f, 0.251f, 0.5f})
 		{
 			Fixture f;
 			auto actorId = f.world->createAgent("Operator", 0, float(stop), x);
 			auto actor = f.world->lookupAgent(actorId).entity;
 			auto position = actor->getGlobalPosition(); auto path = actor->getPath();
 			auto point = f.world->lookupInteractionPoint(f.unit->getLandingButton(stop)).entity;
-			require(point && point->getPosition() == core::Vector2{3.0f, float(stop)}
+			require(point && point->getPosition() == core::Vector2{2.0f, float(stop)}
 				&& point->getReach() == 0.25f && point->getDurationTicks() == 1
 				&& point->getDumbwaiterOwner() == f.id, "Landing Interaction geometry/ownership incorrect");
 			require(!f.world->removeInteractionPoint(f.unit->getLandingButton(stop)), "Owned landing removed independently");
 			auto request = f.world->requestDumbwaiterLanding(f.id, stop, actorId);
-			bool eligible = x >= 0.75f && x <= 1.25f;
+			bool eligible = x <= 0.25f;
 			require(bool(request) == eligible && !f.unit->isBusy(), "Reach boundary or admission activated car incorrectly");
 			f.ticks(1);
 			require(f.unit->isBusy() == eligible && actor->getGlobalPosition() == position && actor->getPath() == path,
@@ -114,7 +114,7 @@ namespace
 		}
 		for (unsigned scenario = 0; scenario < 7; ++scenario)
 		{
-			Fixture f; auto id = f.world->createAgent("Restricted", 0, 0, 1.0f);
+			Fixture f; auto id = f.world->createAgent("Restricted", 0, 0, 0.0f);
 			auto actor = f.world->lookupAgent(id).entity;
 			f.world->pauseSimulation();
 			core::MobilityProfile profile; profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
@@ -145,11 +145,11 @@ namespace
 		{
 			Fixture f; f.world->pauseSimulation(); f.world->addLayer();
 			auto other = f.world->addRoom("Departure", 2, 0, 2, 1, 2); f.world->finishBuild();
-			auto id = f.world->createAgent("Departing before press", 0, 0, 1.0f);
+			auto id = f.world->createAgent("Departing before press", 0, 0, 0.0f);
 			f.world->resumeSimulation(); auto request = f.world->requestDumbwaiterLanding(f.id, 0, id);
 			f.world->pauseSimulation(); auto actor = f.world->lookupAgent(id).entity;
 			std::const_pointer_cast<core::Sector>(f.world->getSector(0))->exitAgent(actor);
-			std::const_pointer_cast<core::Sector>(f.world->getSector(otherLocation ? other : 0))->enterAgent(actor, 0, otherLocation ? 0.5f : 1.3f);
+			std::const_pointer_cast<core::Sector>(f.world->getSector(otherLocation ? other : 0))->enterAgent(actor, 0, otherLocation ? 0.5f : 0.8f);
 			auto position = actor->getGlobalPosition(); f.world->resumeSimulation(); f.ticks(1);
 			require(f.world->lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled,
 				"Paused departure did not cancel landing press");
@@ -172,7 +172,7 @@ namespace
 	{
 		for (unsigned scenario = 0; scenario < 14; ++scenario)
 		{
-			Fixture f; auto id = f.world->createAgent("Protected", 0, 0, 1.0f);
+			Fixture f; auto id = f.world->createAgent("Protected", 0, 0, 0.0f);
 			auto actor = f.world->lookupAgent(id).entity;
 			f.world->pauseSimulation();
 			auto a = f.world->addAccessPermission("A"), b = f.world->addAccessPermission("B");
@@ -228,7 +228,7 @@ namespace
 				if (scenario == 10)
 				{
 					auto sector = std::const_pointer_cast<core::Sector>(f.world->getSector(0));
-					sector->exitAgent(actor); sector->enterAgent(actor, 0, 1.3f);
+					sector->exitAgent(actor); sector->enterAgent(actor, 0, 0.8f);
 				}
 				if (scenario == 13) require(f.world->setAgentRuntimeAccessPermissionGrant(id, a, false), "Post-press direct loss failed");
 				if (scenario == 11) require(f.world->setAgentRuntimePermissionSetAssignment(id, set, false), "Post-press loss failed");
@@ -254,8 +254,8 @@ namespace
 	{
 		for (unsigned repeat = 0; repeat < 3; ++repeat) for (unsigned race = 0; race < 3; ++race)
 		{
-			Fixture f; auto a = f.world->createAgent("Lower", 0, 0, 1.0f);
-			auto b = f.world->createAgent("Upper", 0, 1, 1.0f);
+			Fixture f; auto a = f.world->createAgent("Lower", 0, 0, 0.0f);
+			auto b = f.world->createAgent("Upper", 0, 1, 0.0f);
 			auto first = f.world->requestDumbwaiterLanding(f.id, 1, b);
 			auto second = f.world->requestDumbwaiterLanding(f.id, 0, a);
 			core::DeviceOperationId user;
@@ -279,7 +279,7 @@ namespace
 		}
 		for (unsigned change = 0; change < 4; ++change) for (unsigned elapsed : {0u, 2u})
 		{
-			Fixture f; auto actor = f.world->createAgent("Outstanding", 0, 0, 1.0f);
+			Fixture f; auto actor = f.world->createAgent("Outstanding", 0, 0, 0.0f);
 			auto point = f.unit->getLandingButton(0);
 			auto request = f.world->requestDumbwaiterLanding(f.id, 0, actor);
 			auto operation = f.world->lookupInteractionRequest(request).entity->getOperations().front().first;
@@ -344,7 +344,7 @@ namespace
 			{
 				// Pending Agent work is cancelled even when the unit is idle.
 				world->configureDumbwaiter(id, {0, 2});
-				auto operatorId = world->createAgent("Pending", 0, 0, 1.0f);
+				auto operatorId = world->createAgent("Pending", 0, 0, 0.0f);
 				world->grantAgentAccessPermission(operatorId, permission);
 				auto request = world->requestDumbwaiterLanding(id, 0, operatorId);
 				require(bool(request), "Pending reconciliation fixture refused");

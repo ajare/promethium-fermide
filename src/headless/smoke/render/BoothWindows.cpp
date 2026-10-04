@@ -16,7 +16,6 @@ namespace
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = {1200, 800}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
 		gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 800;
-		clearObjectTileset(); // Geometry checks below exercise the standard Button fallback.
 		gUISettings.worldZoom = 1; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
 		gUISettings.renderNextLayerWireframe = false;
 		for (uint32_t initial : {0u, 1u})
@@ -27,7 +26,7 @@ namespace
 			{
 				gUISettings.visibleLayer = layer;
 				WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
-				unsigned car = 0, buttons = 0;
+				unsigned car = 0, here = 0, elsewhere = 0;
 				for (auto const& command : drawing.commands())
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 					{
@@ -41,16 +40,16 @@ namespace
 							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > 64,
 								"Selected shaft car incorrectly aperture-clipped");
 						}
-						if (triangle->colour == IM_COL32(0, 255, 128, 255))
+						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255))
 						{
-							++buttons;
-							for (auto p : triangle->positions) require(p.x >= (3.0f - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
-								&& p.x <= (3.0f + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f,
-								"Landing Button is not the standard size at the cell border");
+							for (auto p : triangle->positions) require(p.x >= (2.0f - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
+								&& p.x <= (2.0f + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f,
+								"Landing button did not use the allocated left fallback");
+							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here; else ++elsewhere;
 						}
 					}
 				require(car == 2, "Initial car missing or duplicated in production draw commands");
-				require(buttons == (layer == 0 ? 8u : 0u), "Landing Buttons not visible exclusively on landing Layer: " + std::to_string(layer) + " count=" + std::to_string(buttons));
+				require(here == (layer == 0 ? 4u : 0u) && elsewhere == here, "Landing buttons not visible exclusively on landing Layer: " + std::to_string(layer) + "/" + std::to_string(here) + "/" + std::to_string(elsewhere));
 			}
 			gUISettings.visibleLayer = 0; gUISettings.renderNextLayerWireframe = true;
 			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
@@ -70,12 +69,14 @@ namespace
 				{
 					gUISettings.visibleLayer = layer;
 					WorldDrawList motion({{0, 0}, {1200, 800}}); renderWorld(world, &motion);
-					unsigned buttons = 0, carCount = 0;
+					unsigned busy = 0, carCount = 0, here = 0, elsewhere = 0;
 					float low = 10000, high = -10000;
 					for (auto const& command : motion.commands())
 						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 						{
-							if (triangle->colour == IM_COL32(0, 255, 128, 255)) ++buttons;
+							if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
+							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here;
+							if (triangle->colour == IM_COL32(200, 160, 80, 255)) ++elsewhere;
 							if (triangle->colour == IM_COL32(180, 190, 205, 255))
 							{
 								++carCount;
@@ -99,8 +100,50 @@ namespace
 						if (ticks >= 48 && ticks <= 168) require(carCount == 0, "Closed travel apertures expose moving car");
 						else require(carCount == 2, "Uncovered aperture lost car");
 					}
-					require(buttons == (layer == 0 ? 8u : 0u), "Standard landing Buttons disappeared during operation");
+					require(busy == (layer == 0 && ticks < 216 ? 8u : 0u)
+						&& here == (layer == 0 && ticks == 216 ? 4u : 0u) && elsewhere == here,
+						"Buttons did not show both busy until arrival fully opened");
 				}
+			}
+		}
+		// Production commands and hit targeting use allocator geometry, including
+		// opposite landing sides and a mixed Door/Dumbwaiter vertical stack.
+		for (bool mixed : {false, true})
+		{
+			auto world = mixed ? std::make_shared<core::World>("Mixed landing draw", 6, 3)
+				: dumbwaiter_fixture::oppositeLandings();
+			if (mixed)
+			{
+				world->addRoom("Left wall", 0, 0, 0, 1, 1);
+				auto landing = world->addRoom("Landings", 0, 0, 1, 2, 2); world->addSectorWalkway(landing, 1, 1);
+				world->addRoom("Door back", 1, 0, 1, 1, 1);
+				auto options = core::World::RemoteControlledDoor1Options;
+				options.controls[0] = true; options.controls[1] = false;
+				world->addSectorDoor(0, 0, 1, options);
+			}
+			auto id = world->addDumbwaiter(1, 0, 2); world->finishBuild(); gUISettings.visibleLayer = 0;
+			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto object = dumbwaiter_fixture::control(*world, id, stop); auto button = object->_getObject();
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				std::shared_ptr<const core::SectorObject> selected;
+				require(world->getObjectAtPosition(0, centre.x, centre.y, &selected) == button && selected == object,
+					"Landing draw/hit targeting disagrees with physical allocation");
+				auto colour = stop == 0 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255);
+				unsigned triangles = 0;
+				for (auto const& command : drawing.commands())
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == colour)
+					{
+						++triangles;
+						for (auto p : triangle->positions)
+							require(p.x >= button->getPosition().x * 64 - 0.001f
+								&& p.x <= (button->getPosition().x + button->getSize().x) * 64 + 0.001f
+								&& p.y >= 800 - (button->getPosition().y + button->getSize().y) * CORE_LEVEL_HEIGHT_PIXELS - 0.001f
+								&& p.y <= 800 - button->getPosition().y * CORE_LEVEL_HEIGHT_PIXELS + 0.001f,
+								"Landing rendered at old aperture inset or incorrect stack height");
+					}
+				require(triangles >= 2, "Allocated landing missing from production rendering");
 			}
 		}
 		for (unsigned edit = 0; edit < 4; ++edit)
@@ -135,7 +178,7 @@ namespace
 							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * 64
 								&& triangle->clip.maximum.x < 2.9f * 64, "Restored car escaped aperture clip");
 						}
-						if (triangle->colour == IM_COL32(0, 255, 128, 255)) ++buttons;
+						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255)) ++buttons;
 						if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
 					}
 					bool visible = unit && (layer == unit->getLayerIndex() || layer + 1 == unit->getLayerIndex());
@@ -188,11 +231,11 @@ namespace
 						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * 64
 							&& triangle->clip.maximum.x < (x + 0.9f) * 64, "Moved/pasted car lost landing aperture clip");
 					}
-					if (triangle->colour == IM_COL32(0,255,128,255))
+					if (triangle->colour == IM_COL32(80,200,120,255) || triangle->colour == IM_COL32(200,160,80,255))
 					{
 						++buttons;
-						for (auto p : triangle->positions) require(p.x >= (x + 1 - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
-							&& p.x <= (x + 1 + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f, "Old-location landing Button remains");
+						for (auto p : triangle->positions) require(p.x >= (x - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
+							&& p.x <= (x + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f, "Old-location landing button remains");
 					}
 				}
 				require(cars == 2 && buttons == (layer % 2 == 0 ? 8u : 0u), "Moved/pasted rendering duplicated/lost components");

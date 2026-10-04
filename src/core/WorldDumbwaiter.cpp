@@ -3,7 +3,7 @@
 #include "core/StaircaseTransit.h"
 #include "core/Agent.h"
 #include "core/ExtensibleObject.h"
-#include "core/Button.h"
+#include "core/ButtonSectorObject.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -70,17 +70,6 @@ namespace core
 		if (layer == 0 || layer >= getLayerCount() || x >= mCellsWide
 			|| mLevelsHigh < 2 || y >= mLevelsHigh - 1)
 			return refuse("Dumbwaiter requires a bounded 1x2 shaft behind its landing Layer");
-		bool right = false;
-		for (uint32_t stop = 0; stop < 2; ++stop)
-		{
-			auto const& landing = mLayers[layer - 1]->getCellDefinition(x, y + stop);
-			if (!landing.occupied() || !isLocationLike(mSectors[landing.sectorIndex]->getType()))
-				return refuse("Dumbwaiter landings require Rooms, Corridors, or Facades");
-			auto sector = mSectors[landing.sectorIndex];
-			if (sector->getCellsWide() < 2)
-				return refuse("Dumbwaiter landing Sectors must be at least two cells wide");
-			right = right || x == sector->getCellX();
-		}
 		for (uint32_t stop = 0; stop < 2; ++stop)
 		{
 			auto const& shaft = mLayers[layer]->getCellDefinition(x, y + stop);
@@ -89,17 +78,6 @@ namespace core
 				return refuse("Dumbwaiter shaft footprint is occupied");
 			if (!landing.occupied() || !isLocationLike(mSectors[landing.sectorIndex]->getType()))
 				return refuse("Dumbwaiter landings require Rooms, Corridors, or Facades");
-			auto sector = mSectors[landing.sectorIndex];
-			if (right && x == sector->getCellX1())
-				return refuse("Dumbwaiter landing Buttons require a shared interior cell border");
-			auto controlIndex = landing.controls[right ? CORE_SIDE_RIGHT : CORE_SIDE_LEFT];
-			if (controlIndex != ~0u)
-			{
-				auto button = std::dynamic_pointer_cast<const Button>(sector->getObject(controlIndex)->_getObject());
-				auto point = button ? mInteractionPoints.find(button->getInteractionPointId()) : nullptr;
-				if (!source || !point || point->mDumbwaiterOwner != ignored)
-					return refuse("Dumbwaiter landing Button conflicts with an existing control");
-			}
 			if (landing.floorType != CellFloorType::Ground && landing.floorType != CellFloorType::Walkway)
 				return refuse("Dumbwaiter landings require permanent walkable support");
 			bool ownAperture = source && layer == source->getLayerIndex() && x == source->getCellX()
@@ -107,6 +85,26 @@ namespace core
 			if ((landing.hasObject() && !ownAperture) || landing.bulkheadIndices[0] != ~0u || landing.bulkheadIndices[1] != ~0u)
 				return refuse("Dumbwaiter landing aperture conflicts with an existing object or threshold");
 		}
+		try
+		{
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto landing = mSectors[mLayers[layer - 1]->getCellDefinition(x, y + stop).sectorIndex];
+				auto plan = planPhysicalControls(layer - 1, ~0u, y + stop);
+				if (source)
+					std::erase_if(plan.demands, [&](auto const& demand)
+					{
+						return demand.owner.type == physicalControl::OwnerType::Dumbwaiter
+							&& demand.owner.geometry.layer == source->getLayerIndex()
+							&& demand.owner.geometry.x == source->getCellX()
+							&& demand.owner.geometry.baseLevel == source->getCellY();
+					});
+				plan.demands.push_back(transportControlDemand(landing, physicalControl::OwnerType::Dumbwaiter,
+					{layer, x, y, 1, 2}, x, y + stop, 1));
+				(void)physicalControl::allocateCanonical(plan.demands);
+			}
+		}
+		catch (std::exception const& error) { if (diagnostic) *diagnostic = error.what(); return false; }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -158,8 +156,6 @@ namespace core
 	{
 		auto layer = unit->getLayerIndex(), x = unit->getCellX(), y = unit->getCellY();
 		auto id = unit->getId();
-		int side = (x == unit->getStop(0).sector->getCellX() || x == unit->getStop(1).sector->getCellX())
-			? CORE_SIDE_RIGHT : CORE_SIDE_LEFT;
 		for (uint32_t stop = 0; stop < 2; ++stop)
 		{
 			auto& shaft = mLayers[layer]->getCellDefinition(x, y + stop);
@@ -177,7 +173,11 @@ namespace core
 			press.type = DeviceCommandType::PressDumbwaiterLanding;
 			press.dumbwaiter = id; press.stopIndex = stop;
 			auto name = stop == 0 ? "Dumbwaiter lower landing" : "Dumbwaiter upper landing";
-			auto control = createPhysicalControl(name, layer - 1, x, y + stop, side, 0);
+			auto demand = transportControlDemand(unit->getStop(stop).sector,
+				physicalControl::OwnerType::Dumbwaiter, {layer, x, y, 1, 2}, x, y + stop, 1);
+			auto control = createPhysicalControl(name, layer - 1, y + stop, demand, 0, nullptr);
+			std::static_pointer_cast<Button>(control.sector->_getObject(control.index)->_getObject())
+				->_setThresholdLayer(layer - 1);
 			unit->mLandingButtons[stop] = createPhysicalControlInteractionPoint(name, control,
 				float(y + stop), 0.25f, 0.0f, {{press, InteractionBindingRequirement::Required}});
 			mInteractionPoints.find(unit->mLandingButtons[stop])->mDumbwaiterOwner = id;
@@ -194,25 +194,25 @@ namespace core
 		{
 			auto booth = unit->getAperture(stop);
 			mBoothWindows.erase(booth->getDeviceId());
+			// Remove the owned physical demand and every cell registration before
+			// removing its independent Interaction point. Keep object-slot tombstones.
+			std::erase_if(mPhysicalControlPlacements, [&](auto const& placement)
+			{
+				auto object = mSectors[placement.sectorIndex]->_getObject(placement.objectIndex);
+				auto control = std::dynamic_pointer_cast<ButtonSectorObject>(object);
+				if (!control || std::static_pointer_cast<Button>(control->_getObject())->getInteractionPointId() != unit->getLandingButton(stop)) return false;
+				for (auto const& candidate : placement.candidates)
+				{
+					auto& cell = mLayers[placement.layerIndex]->getCellDefinition(candidate.cellX, placement.cellY);
+					std::erase(cell.physicalControls, placement.objectIndex);
+				}
+				mSectors[placement.sectorIndex]->mObjects[placement.objectIndex].reset();
+				return true;
+			});
 			auto point = mInteractionPoints.find(unit->getLandingButton(stop));
 			point->mDumbwaiterOwner = {};
 			removeInteractionPoint(unit->getLandingButton(stop));
 			auto landing = std::const_pointer_cast<Sector>(unit->getStop(stop).sector);
-			auto& cell = mLayers[unit->getLayerIndex() - 1]->getCellDefinition(unit->getCellX(), unit->getCellY() + stop);
-			for (auto& index : cell.controls)
-				if (index != ~0u)
-				{
-					auto object = landing->mObjects[index];
-					auto button = object ? std::dynamic_pointer_cast<Button>(object->_getObject()) : nullptr;
-					if (button && button->getInteractionPointId() == unit->getLandingButton(stop))
-					{
-						auto removed = index;
-						landing->mObjects[index].reset(); index = ~0u;
-						std::erase_if(mPhysicalControlPlacements, [&](auto const& placement) {
-							return placement.sectorIndex == landing->getIndex() && placement.objectIndex == removed;
-						});
-					}
-				}
 			for (auto& object : landing->mObjects)
 				if (auto window = std::dynamic_pointer_cast<WindowSectorObject>(object);
 					window && window->getWindow() == booth) object.reset();
@@ -301,7 +301,7 @@ namespace core
 				{
 					if (unit->getStop(stop).sector != location) continue;
 					auto x = unit->getCellX(), y = unit->getCellY() + stop;
-					bool supported = !plan.remove && plan.cellsWide >= 2 && x >= plan.x && x - plan.x < plan.cellsWide
+					bool supported = !plan.remove && x >= plan.x && x - plan.x < plan.cellsWide
 						&& y >= plan.y && y - plan.y < plan.levelsHigh;
 					if (supported && y != plan.y)
 					{
@@ -312,31 +312,16 @@ namespace core
 					}
 					if (!supported) removed.insert(unit->getId());
 				}
-		// A resize can force both Buttons to the other side. Remove the whole
-		// unit if that common border would now be a wall at the other landing.
-		for (auto const& sector : mSectors)
-			if (auto unit = std::dynamic_pointer_cast<const Dumbwaiter>(sector); unit && !removed.contains(unit->getId()))
-			{
-				bool right = false, touchesRight = false;
-				for (uint32_t stop = 0; stop < 2; ++stop)
-				{
-					auto landing = unit->getStop(stop).sector;
-					auto left = landing == location ? plan.x : landing->getCellX();
-					auto width = landing == location ? plan.cellsWide : landing->getCellsWide();
-					right = right || unit->getCellX() == left;
-					touchesRight = touchesRight || unit->getCellX() == left + width - 1;
-				}
-				if (right && touchesRight) removed.insert(unit->getId());
-			}
 		return removed;
 	}
 
-	std::array<uint32_t, 2> World::dumbwaiterRecordLandings(ConstructionRecord const& record) const
+	std::array<uint32_t, 4> World::dumbwaiterRecordLandings(ConstructionRecord const& record) const
 	{
-		std::array<uint32_t, 2> owners{~0u, ~0u};
+		std::array<uint32_t, 4> owners{~0u, ~0u, ~0u, ~0u};
 		uint32_t index = 0;
 		// Use authored producer footprints, not the live cells: a moved unit's
-		// earlier apertures still consumed object slots at its previous landings.
+		// earlier apertures and Buttons still consumed slots at its previous landings.
+		// Repeat each landing owner once per owned child for tombstone replay.
 		for (auto const& source : mConstructionRecords)
 		{
 			if (!constructionTypeCreatesSector(source.type)) continue;
@@ -350,7 +335,7 @@ namespace core
 				auto height = room ? source.e : source.d;
 				if (layer == record.layer - 1 && record.b >= x && record.b - x < width)
 					for (uint32_t stop = 0; stop < 2; ++stop)
-						if (record.a + stop >= y && record.a + stop - y < height) owners[stop] = index;
+						if (record.a + stop >= y && record.a + stop - y < height) owners[stop * 2] = owners[stop * 2 + 1] = index;
 			}
 			++index;
 		}
@@ -376,11 +361,11 @@ namespace core
 			if (constructionTypeCreatesSector(record.type)) ++producer;
 		}
 		if (lastMove.empty()) return;
-		// Historical placements only consumed aperture slots. Rebuild each moved
-		// survivor at its final placement, after its destination Locations exist.
+		// Historical placements consumed aperture and physical-control slots.
+		// Rebuild each moved survivor at its final placement, after its destination Locations exist.
 		// This lets an edit remove obsolete landing support without invalidating
 		// a unit whose current landings remain supported.
-		std::map<DumbwaiterId, std::vector<std::array<uint32_t, 2>>> historicalOwners;
+		std::map<DumbwaiterId, std::vector<std::array<uint32_t, 4>>> historicalOwners;
 		for (auto const& record : mConstructionRecords)
 			if (record.type == ConstructionType::Dumbwaiter || record.type == ConstructionType::MoveDumbwaiter)
 				historicalOwners[record.dumbwaiterId].push_back(dumbwaiterRecordLandings(record));
@@ -403,7 +388,7 @@ namespace core
 						if (owner < originalToReplay.size() && originalToReplay[owner] != ~0u)
 						{
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-							tombstone.a = originalToReplay[owner]; output.push_back({tombstone}); output.push_back({std::move(tombstone)});
+							tombstone.a = originalToReplay[owner]; output.push_back({std::move(tombstone)});
 						}
 					continue;
 				}
@@ -457,7 +442,7 @@ namespace core
 					if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
 					{
 						ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-						tombstone.a = sectorMap[owner]; retained.push_back(tombstone); retained.push_back(std::move(tombstone));
+						tombstone.a = sectorMap[owner]; retained.push_back(std::move(tombstone));
 					}
 				continue;
 			}

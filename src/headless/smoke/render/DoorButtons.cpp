@@ -265,6 +265,291 @@ namespace
 				"The back Button should render as a visible outline on its own Layer");
 		}
 
+		// A wide ordinary Door with no right host uses the authored left cell at
+		// offset zero. Inspect production draw commands, not mirrored geometry.
+		{
+			auto options = core::World::RemoteControlledDoor1Options;
+			options.width = 2;
+			auto fallback = buildTwoRoomScene("Boundary-owned rendering", 2, 4, &options, 4);
+			WorldDrawList drawList(kViewportClip);
+			renderSector(fallback.world->getSector(fallback.frontSector), 0,
+				LayerRenderStyle::Solid, false, roomColour, &drawList);
+			float minX = 1e10f, maxX = -1e10f;
+			int triangles = 0;
+			for (auto const& command : drawList.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && isButtonFillTriangle(*triangle))
+				{
+					++triangles;
+					for (auto const& p : triangle->positions) { minX = std::min(minX, p.x); maxX = std::max(maxX, p.x); }
+				}
+			require(triangles == 2 && std::abs((minX + maxX) * 0.5f - (4.0f * CORE_CELL_WIDTH_PIXELS + gUISettings.worldViewportX + gUISettings.xOffset)) < 0.001f,
+				"Production rendering did not centre wide Door fallback on its host boundary");
+		}
+
+		// Cross-owner reassignment must move production artwork as well as the
+		// interaction approach. Only the Layer-1 authored Button is filled.
+		{
+			core::World world("Reassigned artwork", 12, 2);
+			world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 12, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 0, 12, 1);
+			world.addRoom("Back", 2, 0, 0, 12, 1);
+			world.addSectorDoor(1, 0, 3, core::World::RemoteControlledDoor1Options);
+			auto check = [&](float expected)
+			{
+				WorldDrawList drawList(kViewportClip);
+				renderSector(world.getSector(middle), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+				float minX = 1e10f, maxX = -1e10f; int triangles = 0;
+				for (auto const& command : drawList.commands())
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+						triangle && isButtonFillTriangle(*triangle) && survivesClip(boundsOf(triangle->positions, 3, 0), triangle->clip))
+					{
+						++triangles;
+						for (auto p : triangle->positions) { minX = std::min(minX, p.x); maxX = std::max(maxX, p.x); }
+					}
+				require(triangles == 2 && std::abs((minX + maxX) * 0.5f - expected * CORE_CELL_WIDTH_PIXELS) < 0.001f,
+					"Renderer retained a previous control assignment");
+			};
+			world.finishBuild(); world.pauseSimulation(); check(4);
+			auto options = core::World::RemoteControlledDoor1Options; options.width = 2;
+			auto earlier = world.addSectorDoor(0, 0, 2, options);
+			world.finishBuild(); check(3);
+			world.removeSectorDoor(earlier.door.sector->getIndex(), earlier.door.index);
+			world.finishBuild(); check(4);
+		}
+
+		// Equal-X controls on the middle Layer: the lower (Layer-0 owner)
+		// remains outlined, while the upper (Layer-1 owner) remains filled.
+		{
+			core::World world("Stack artwork", 6, 1); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 6, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 1, 2, 1);
+			world.addRoom("Back", 2, 0, 0, 6, 1);
+			world.addSectorDoor(1, 0, 2, core::World::RemoteControlledDoor1Options);
+			world.addSectorDoor(0, 0, 2, core::World::RemoteControlledDoor1Options);
+			world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(middle), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			auto geometry = visibleGeometry(drawList);
+			require(geometry.buttonFillTriangles == 2 && geometry.buttonOutlineLines == 4,
+				"Stack draw omitted or merged a member/style");
+			ScreenBounds fill{1e10f, -1e10f, 1e10f, -1e10f}, outline = fill;
+			auto extend = [](ScreenBounds& bounds, ImVec2 p)
+			{
+				bounds.minX = std::min(bounds.minX, p.x); bounds.maxX = std::max(bounds.maxX, p.x);
+				bounds.minY = std::min(bounds.minY, p.y); bounds.maxY = std::max(bounds.maxY, p.y);
+			};
+			for (auto const& command : drawList.commands())
+			{
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && isButtonFillTriangle(*triangle) && survivesClip(boundsOf(triangle->positions, 3, 0), triangle->clip))
+					for (auto p : triangle->positions) extend(fill, p);
+				if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == kEnabledButtonColour)
+				{
+					ImVec2 points[]{line->from, line->to};
+					if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip)) { extend(outline, line->from); extend(outline, line->to); }
+				}
+			}
+			float height = outline.maxY - outline.minY;
+			require(std::abs(fill.minX - outline.minX) < 0.001f && std::abs(fill.maxX - outline.maxX) < 0.001f
+				&& std::abs(outline.minY - fill.minY - height * 1.25f) < 0.001f,
+				"Production draw commands lost canonical vertical geometry");
+		}
+
+		for (uint32_t count : {3u, 4u})
+		{
+			core::World world("Four-stack artwork", 10, 1); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 10, 1);
+			auto middle = world.addRoom("Middle", 1, 0, 3, 2, 1);
+			world.addRoom("Back", 2, 0, 0, 10, 1);
+			world.addRoom("Retained wall", 1, 0, 0, 3, 1);
+			for (uint32_t i = 0; i < count; ++i)
+				world.addSectorDoor(i % 2, 0, i < 2 ? 3 : 4, core::World::RemoteControlledDoor1Options);
+			world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(middle), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			std::vector<std::shared_ptr<const core::Button>> buttons;
+			for (uint32_t i = 0; i < world.getSector(middle)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(middle)->getObject(i);
+				if (auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr) buttons.push_back(button);
+			}
+			std::sort(buttons.begin(), buttons.end(), [](auto a, auto b) { return a->getPosition().y < b->getPosition().y; });
+			require(buttons.size() == count, "Large stack dropped artwork");
+			for (uint32_t rank = 0; rank < count; ++rank)
+			{
+				auto centre = buttons[rank]->getPosition() + buttons[rank]->getSize() * 0.5f;
+				float screenY = gUISettings.worldViewportHeight - centre.y * CORE_LEVEL_HEIGHT_PIXELS;
+				int triangles = 0, lines = 0;
+				for (auto const& command : drawList.commands())
+				{
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && isButtonFillTriangle(*triangle))
+					{
+						auto bounds = boundsOf(triangle->positions, 3, 0);
+						if (survivesClip(bounds, triangle->clip) && std::abs((bounds.minY + bounds.maxY) * 0.5f - screenY) < 0.001f) ++triangles;
+					}
+					if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == kEnabledButtonColour)
+					{
+						ImVec2 points[]{line->from, line->to}; auto bounds = boundsOf(points, 2, 0);
+						if (survivesClip(boundsOf(points, 2, line->thickness * 0.5f), line->clip) && bounds.minY <= screenY + buttons[rank]->getSize().y * CORE_LEVEL_HEIGHT_PIXELS * 0.5f + 0.001f
+							&& bounds.maxY >= screenY - buttons[rank]->getSize().y * CORE_LEVEL_HEIGHT_PIXELS * 0.5f - 0.001f) ++lines;
+					}
+				}
+				require(rank % 2 ? triangles == 2 && lines == 0 : triangles == 0 && lines == 4,
+					"Production drawing omitted member " + std::to_string(rank) + " triangles " + std::to_string(triangles) + " lines " + std::to_string(lines) );
+			}
+		}
+
+		// Transport landing calls use the same draw/selection seam as ordinary
+		// controls, including a mixed stack's independently visible shapes.
+		for (bool shuttle : {false, true})
+		{
+			core::World world("Mixed landing artwork", 12, 3); world.addLayer();
+			world.addRoom("Front", 0, 0, 0, 12, 1);
+			world.addRoom("Origin/neighbour", 1, 0, 0, 3, 1);
+			auto host = world.addRoom("Landing", 1, 0, 3, 2, 1);
+			world.addRoom("Upper", 1, 2, 0, 12, 1);
+			world.addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+			if (shuttle)
+			{
+				core::World::CreateShuttleOptions options{1, 3, {0, 3}, 0};
+				world.addShuttle(2, 0, 0, 6, options);
+			}
+			else
+			{
+				core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+				world.addLift(2, 0, 4, options);
+			}
+			world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(host), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			auto geometry = visibleGeometry(drawList);
+			require(geometry.buttonFillTriangles == 2 && geometry.buttonOutlineLines == 4,
+				"Mixed transport stack lost filled landing or outline incoming control");
+			std::vector<std::shared_ptr<const core::Button>> buttons;
+			for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(host)->getObject(i);
+				if (auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr) buttons.push_back(button);
+			}
+			require(buttons.size() == 2, "Transport stack lost shape");
+			for (auto button : buttons)
+			{
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				require(centre.x == 4 && world.getObjectAtPosition(1, centre.x, centre.y) == button,
+					"Transport stack hit target not aligned with visible shape");
+			}
+		}
+
+		// Ladder endpoints and Platform Stops share the production draw/hit seam.
+		{
+			core::World world("Endpoint artwork", 8, 3);
+			world.addRoom("Neighbour", 0, 0, 0, 1, 3);
+			auto host = world.addRoom("Room", 0, 0, 1, 2, 3);
+			world.addSectorWalkway(host, 2, 0); world.addSectorWalkway(host, 2, 1);
+			world.addRoomLadder(host, 0, 1, {0, true, false});
+			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			world.addSectorPlatformLift(host, 0, 0, options); world.finishBuild();
+			WorldDrawList drawList(kViewportClip);
+			renderSector(world.getSector(host), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
+			require(visibleGeometry(drawList).buttonFillTriangles == 8, "Endpoint stacks omitted independent artwork");
+			uint32_t count = 0;
+			for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world.getSector(host)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				require(centre.x == 2 && world.getObjectAtPosition(0, centre.x, centre.y) == button,
+					"Endpoint stack targeting diverged from artwork"); ++count;
+			}
+			require(count == 4, "Endpoint draw fixture lost controls");
+		}
+
+		// #435: render and hit-test the final mixed placement after a structural
+		// wall edit, not just the initial stack. Neither member may keep stale
+		// vertical artwork when the canonical assignment splits the stack.
+		{
+			core::World world("Mixed structural artwork", 8, 3);
+			world.addRoom("Neighbour", 1, 0, 0, 1, 3);
+			auto host = world.addRoom("Room", 1, 0, 1, 2, 3);
+			world.addSectorWalkway(host, 2, 0); world.addSectorWalkway(host, 2, 1);
+			world.addRoomLadder(host, 0, 1, {0, true, false});
+			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			world.addSectorPlatformLift(host, 0, 0, options);
+			world.addRoom("Front", 0, 0, 0, 8, 3);
+			world.addSectorDoor(0, 0, 1, core::World::RemoteControlledDoor1Options); world.finishBuild();
+			for (bool opened : {false, true, false})
+			{
+				world.pauseSimulation();
+				if (opened) world.removeLocationWall(host, 0, CORE_SIDE_LEFT);
+				else if (world.getSector(host)->getEndType(0, CORE_SIDE_LEFT) == core::SectorEndType::None)
+					world.addLocationWall(host, 0, CORE_SIDE_LEFT);
+				world.finishBuild();
+				WorldDrawList drawList(kViewportClip);
+				renderSector(world.getSector(host), 1, LayerRenderStyle::Solid, false, roomColour, &drawList);
+				auto geometry = visibleGeometry(drawList);
+				require(geometry.buttonFillTriangles == 8 && geometry.buttonOutlineLines == 4, "Mixed reflow lost rendered controls");
+				uint32_t lower = 0;
+				for (uint32_t slot = 0; slot < world.getSector(host)->getNumObjects(); ++slot)
+				{
+					auto object = world.getSector(host)->getObject(slot);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					require(world.getObjectAtPosition(1, centre.x, centre.y) == button, "Structural reflow retained stale hit geometry");
+					if (object->getCellY() == 0)
+					{
+						if (centre.x == 1) ++lower;
+						if (opened && centre.x == 1) require(button->getPosition().y == CORE_BUTTON_Y_OFFSET, "Separated control retained stack height");
+					}
+				}
+				require(lower == (opened ? 1u : 0u), "Draw fixture did not restore canonical side after wall edit");
+			}
+		}
+
+		// Fixed-side owners retain separately visible and targetable inset shapes.
+		for (int kind = 0; kind < 3; ++kind)
+		{
+			core::World world("Fixed inset artwork", 10, 3);
+			std::vector<std::pair<uint32_t, std::vector<float>>> hosts;
+			if (kind == 2)
+			{
+				auto room = world.addRoom("Room", 0, 0, 0, 8, 3);
+				world.addSectorWalkway(room, 1, 1); world.addSectorWalkway(room, 1, 4);
+				world.addSectorForceBridge(room, 1, 2, {2, CORE_SIDE_LEFT, true, false, 2});
+				hosts.push_back({room, {1.75f, 4.25f}});
+			}
+			else
+			{
+				auto left = world.addRoom("Left", 0, 0, 0, 3, 1);
+				auto right = world.addRoom("Right", 0, 0, kind == 0 ? 3 : 5, 3, 1);
+				if (kind == 0) world.addSectorBulkheadDoor(0, 0, 3, CORE_SIDE_LEFT);
+				else world.addAirlock(0, 0, 3, 2);
+				hosts = {{left, {2.75f}}, {right, {kind == 0 ? 3.25f : 5.25f}}};
+			}
+			world.finishBuild();
+			for (auto const& [host, expected] : hosts)
+			{
+				WorldDrawList drawList(kViewportClip);
+				renderSector(world.getSector(host), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
+				require(visibleGeometry(drawList).buttonFillTriangles == static_cast<int>(expected.size() * 2),
+					"Inset owner omitted physical Button artwork");
+				std::vector<float> centres;
+				for (uint32_t i = 0; i < world.getSector(host)->getNumObjects(); ++i)
+				{
+					auto object = world.getSector(host)->getObject(i);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					centres.push_back(centre.x);
+					require(world.getObjectAtPosition(0, centre.x, centre.y) == button, "Inset artwork targets a different object");
+				}
+				std::sort(centres.begin(), centres.end()); require(centres == expected, "Inset artwork moved off approved support");
+			}
+		}
+
 		// The wireframe overlay of the back Layer, as seen when the front Layer
 		// is selected: the back Button shows through as the same outline.
 		{

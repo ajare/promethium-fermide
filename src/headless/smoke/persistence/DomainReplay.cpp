@@ -441,11 +441,11 @@ namespace persistence
 		fallback.addRoom("Narrow back room", 1, 0, 0, 2, 1);
 		auto left = fallback.addSectorDoor(0, 0, 0, options);
 		auto right = fallback.addSectorDoor(0, 0, 1, options);
-		require(std::abs(controlCenterX(left.controls[1])
-				- controlCenterX(right.controls[1])) < 0.0001f
+		require(std::abs(controlCenterX(left.controls[1])) < 0.0001f
+			&& std::abs(controlCenterX(right.controls[1]) - 1.0f) < 0.0001f
 			&& std::abs(controlCenterY(left.controls[1])
-				- controlCenterY(right.controls[1])) > 0.049f,
-			"Unavoidable same-X controls did not use the height fallback");
+				- controlCenterY(right.controls[1])) < 0.0001f,
+			"Outer-boundary host alternative must separate ordinary controls without stacking");
 	}
 
 	void platformLiftStopDurationRoundTrips(smoke::Context const&)
@@ -677,12 +677,12 @@ namespace persistence
 			->getLadder()->getCurrentShape(retractedMin, retractedMax);
 		require(std::abs((retractedMax.y - retractedMin.y) - 0.2f) < 0.0001f,
 			"Retracted Ladders were not rendered at the minimum 0.2 length");
-		require(std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 4.2f) < 0.0001f
-			&& std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 4.2f) < 0.0001f,
-			"Left-side Ladder controls were not placed at the cell's 0.2 offset");
-		require(std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 0.8f) < 0.0001f
-			&& std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 0.8f) < 0.0001f,
-			"Right-side Ladder controls were not placed at the cell's 0.8 offset");
+		require(std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 4.0f) < 0.0001f
+			&& std::abs(controlCenterX(edgeLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 4.0f) < 0.0001f,
+			"Fallback Ladder controls were not placed at X offset zero");
+		require(std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_LOW]) - 1.0f) < 0.0001f
+			&& std::abs(controlCenterX(interiorLadder.controls[CORE_LADDER_ENDPOINT_HIGH]) - 1.0f) < 0.0001f,
+			"Preferred Ladder controls were not placed at X+1 offset zero");
 
 		core::World world("Ladder editing", 10, 5);
 		std::vector<uint32_t> corridors;

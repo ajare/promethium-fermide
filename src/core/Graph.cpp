@@ -575,10 +575,15 @@ namespace core
 
 		auto numVertices = (uint32_t)vertices.size();
 
+		// Ordinary Bulkheads also own explicit threshold edges. Keep row
+		// connections within their approaches even when inset controls intervene.
+		vector<shared_ptr<BulkheadDoor>> bulkheads;
+		for (auto const& vertex : vertices)
+			if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorVertex>(vertex))
+				if (!bulkhead->getBulkheadDoor()->isChamberOwned()) bulkheads.push_back(bulkhead->getBulkheadDoor());
 		// A Force Bridge owns the only edge which may cross the centre of its
 		// span. Interaction-point vertices can lie between its endpoints; ordinary
-		// row adjacency must not connect through those vertices and bypass the
-		// bridge's traversal resource.
+		// row adjacency must not bypass the bridge's traversal resource.
 		map<shared_ptr<SectorObject>, pair<float, float>> forceBridgeSpans;
 		for (auto const& vertex : vertices)
 		{
@@ -628,6 +633,16 @@ namespace core
 			auto vertexSubType0 = vertices[i]->getSubType();
 			auto vertexSubType1 = vertices[j]->getSubType();
 
+			// Insets may sort between ordinary Bulkhead endpoints too. Only the
+			// explicit threshold edge may connect its two approach Locations.
+			if (any_of(bulkheads.begin(), bulkheads.end(), [&](auto const& door)
+				{
+					return (vertices[i]->getSector() == door->getSideSector(CORE_SIDE_LEFT)
+						&& vertices[j]->getSector() == door->getSideSector(CORE_SIDE_RIGHT))
+						|| (vertices[j]->getSector() == door->getSideSector(CORE_SIDE_LEFT)
+							&& vertices[i]->getSector() == door->getSideSector(CORE_SIDE_RIGHT));
+				})) continue;
+
 			// Airlock thresholds are connected explicitly. Fixed buttons can sort
 			// between the two endpoints, but must never create a Sector-edge bypass.
 			if (vertices[i]->getSector() != vertices[j]->getSector()
@@ -661,14 +676,6 @@ namespace core
 				if (crossesAir)
 				{
 					addEdge(make_shared<GapEdge>(), vertices[i], vertices[j], connectZ);
-				}
-				else if (vertexSubType0 == VertexSubType::BulkheadDoor && vertexSubType1 == VertexSubType::BulkheadDoor
-					&& !static_pointer_cast<BulkheadDoorVertex>(vertices[i])->getBulkheadDoor()->isChamberOwned())
-				{
-					auto bulkheadVertex = dynamic_pointer_cast<BulkheadDoorVertex>(vertices[i]);
-					auto bulkheadDoor = bulkheadVertex->getBulkheadDoor();
-					
-					addEdge(make_shared<BulkheadDoorEdge>(bulkheadDoor), vertices[i], vertices[j], connectZ);
 				}
 				else if (vertexSubType0 == VertexSubType::Window && vertexSubType1 == VertexSubType::Window)
 				{
@@ -910,22 +917,38 @@ namespace core
 			other->getSector()->getLayerIndex() != windowVertex->getSector()->getLayerIndex());
 	}
 
-	void Graph::processInteractionPoint(ObjectData const& obj, RowVertices& row)
+	void Graph::processInteractionPoint(ObjectData const& obj, RowVertices& row, bool shareApproach)
 	{
 		ASSERT_INDEX_OK(obj.index);
 		auto control = obj.sector->_getObject(obj.index);
 		auto vertex = control->createVertex(control, obj.sector);
+		// Sharing topology never shares the Button or its Interaction point.
+		// Ground-anchored upper members create the same normal-height approach.
+		bool shared = false;
+		if (shareApproach)
+		{
+			for (auto const& segment : row.segments)
+				for (auto const& entry : segment)
+					if (entry.slot == SlotInteractionPoint && entry.vertex->getSector() == obj.sector
+						&& entry.vertex->getPosition() == vertex->getPosition())
+					{
+						vertex = entry.vertex;
+						shared = true;
+						break;
+					}
+		}
 		addSectorObjectVertexLookup(control, vertex);
 		if (auto identifier = control->getVertexIdentifier(); identifier != ~0u)
 			mIdentifierVertexLookup[identifier] = vertex;
-		appendRowVertex(row, obj.x, SlotInteractionPoint, vertex);
+		if (!shared) appendRowVertex(row, obj.x, SlotInteractionPoint, vertex);
 	}
 
 	void Graph::processBulkheadDoor(ObjectData const& obj, RowVertices& row)
 	{
 		ASSERT_INDEX_OK(obj.index);
 
-		// Create two Vertices for this, one on either side.  The Edge will be created later.
+		// Connect the two threshold endpoints explicitly: inset controls can sort
+		// between them, so row adjacency cannot own the controlled crossing.
 		auto door = obj.sector->_getObject(obj.index);
 	
 		shared_ptr<Vertex> verts[CORE_NUM_SIDES] = {
@@ -942,6 +965,10 @@ namespace core
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scanner), verts[0], verts[1], false);
 		else if (auto scannerRight = dynamic_pointer_cast<ChamberTransit>(obj.adjacent[1]); scannerRight)
 			addEdge(make_shared<BulkheadDoorEdge>(dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor(), scannerRight), verts[0], verts[1], false);
+
+		auto bulkhead = dynamic_pointer_cast<BulkheadDoorSectorObject>(door)->getDoor();
+		if (!bulkhead->isChamberOwned())
+			addEdge(make_shared<BulkheadDoorEdge>(bulkhead), verts[0], verts[1], false);
 
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_LEFT]);
 		addSectorObjectVertexLookup(door, verts[CORE_SIDE_RIGHT]);
@@ -1559,15 +1586,11 @@ namespace core
 				processMarker(obj, row);
 			}
 
-			for (int side = 0; side < 3; ++side)
+			for (auto index : cellDef.physicalControls)
 			{
-				if (cellDef.controls[side] != ~0u)
-				{
-					ObjectData obj = { cellDef.controls[side], layerIndex, x, y,
-						mwWorld->_getSector(cellDef.sectorIndex), {} };
-
-					processInteractionPoint(obj, row);
-				}
+				ObjectData obj = { index, layerIndex, x, y,
+					mwWorld->_getSector(cellDef.sectorIndex), {} };
+				processInteractionPoint(obj, row, true);
 			}
 
 			if (cellDef.bulkheadIndices[CORE_SIDE_RIGHT] != ~0u)

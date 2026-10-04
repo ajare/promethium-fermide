@@ -6,6 +6,7 @@
 #include <vector>
 #include "core/Agent.h"
 #include "core/World.h"
+#include "core/Button.h"
 #include "core/Graph.h"
 #include "core/LiftTransit.h"
 #include "core/LiftSectorObject.h"
@@ -391,6 +392,17 @@ namespace
 		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 24; ++tick)
 		{
 			world.advanceTick();
+			// Calls stay at authored doorways while the occupied coupled vehicle
+			// and its invisible destination selector move independently.
+			for (uint32_t stop = 0; stop < created.doors.size(); ++stop)
+			{
+				auto const& control = created.doors[stop].controls[0];
+				auto button = std::dynamic_pointer_cast<const core::Button>(control.sector->getObject(control.index)->_getObject());
+				auto point = world.lookupInteractionPoint(control.interactionPoint);
+				float expected = stop == 0 ? 2.0f : 9.0f;
+				if (!button || !point || button->getPosition().x + button->getSize().x * 0.5f != expected
+					|| button->getPosition().y != CORE_BUTTON_Y_OFFSET || point.entity->getPosition() != core::Vector2{expected, 0}) return false;
+			}
 			auto snapshot = world.getSimulationSnapshot();
 			auto shuttle = std::find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),
 				[&](auto const& resource) { return resource.id == created.traversalResource; });

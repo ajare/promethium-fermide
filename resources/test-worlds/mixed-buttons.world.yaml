@@ -1,0 +1,556 @@
+version: 50
+nextDumbwaiterId: 1
+nextFurnitureId: 1
+name: Mixed button placement
+randomSeed: 0
+cellsWide: 40
+levelsHigh: 5
+layers: 2
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+  - Level 3
+  - Level 4
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: room
+    name: Door approaches
+    layer: 0
+    y: 0
+    x: 0
+    cellsWide: 18
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 2
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 3
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 4
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 5
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 6
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 7
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 8
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 9
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 10
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 11
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 12
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 13
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 14
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 15
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 16
+  - type: walkway
+    sectorIndex: 0
+    levelIndex: 2
+    xOffset: 17
+  - type: room
+    name: Retained wall
+    layer: 1
+    y: 0
+    x: 0
+    cellsWide: 1
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: room
+    name: 2-button stack
+    layer: 1
+    y: 0
+    x: 1
+    cellsWide: 2
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 2
+    levelIndex: 2
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 2
+    levelIndex: 2
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 2
+    levelIndex: 4
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 2
+    levelIndex: 4
+    xOffset: 1
+  - type: platformLift
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 0
+    cellsWide: 1
+    stopOffsets: [0, 2]
+    landingControlPermissionRequirements:
+      - permissions:
+          - 1
+      - permissions:
+          - 1
+    capacity: 2
+    stopDurationSeconds: 10
+    destinationPermissionRequirements:
+      []
+  - type: sectorLadder
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 1
+    levelsHigh: 3
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+    lowControlPermissionRequirement:
+      - 2
+    highControlPermissionRequirement:
+      - 2
+  - type: room
+    name: Retained wall
+    layer: 1
+    y: 0
+    x: 4
+    cellsWide: 1
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: room
+    name: 3-button stack
+    layer: 1
+    y: 0
+    x: 5
+    cellsWide: 2
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 4
+    levelIndex: 2
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 4
+    levelIndex: 2
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 4
+    levelIndex: 4
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 4
+    levelIndex: 4
+    xOffset: 1
+  - type: platformLift
+    sectorIndex: 4
+    levelIndex: 0
+    xOffset: 0
+    cellsWide: 1
+    stopOffsets: [0, 2]
+    landingControlPermissionRequirements:
+      - permissions:
+          - 1
+      - permissions:
+          - 1
+    capacity: 2
+    stopDurationSeconds: 10
+    destinationPermissionRequirements:
+      []
+  - type: sectorLadder
+    sectorIndex: 4
+    levelIndex: 0
+    xOffset: 1
+    levelsHigh: 3
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+    lowControlPermissionRequirement:
+      - 2
+    highControlPermissionRequirement:
+      - 2
+  - type: door
+    layer: 0
+    y: 2
+    x: 5
+    width: 1
+    height: regular
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: room
+    name: Retained wall
+    layer: 1
+    y: 0
+    x: 8
+    cellsWide: 1
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: room
+    name: 4-button stack
+    layer: 1
+    y: 0
+    x: 9
+    cellsWide: 2
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 6
+    levelIndex: 2
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 6
+    levelIndex: 2
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 6
+    levelIndex: 4
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 6
+    levelIndex: 4
+    xOffset: 1
+  - type: platformLift
+    sectorIndex: 6
+    levelIndex: 0
+    xOffset: 0
+    cellsWide: 1
+    stopOffsets: [0, 2]
+    landingControlPermissionRequirements:
+      - permissions:
+          - 1
+      - permissions:
+          - 1
+    capacity: 2
+    stopDurationSeconds: 10
+    destinationPermissionRequirements:
+      []
+  - type: sectorLadder
+    sectorIndex: 6
+    levelIndex: 0
+    xOffset: 1
+    levelsHigh: 3
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+    lowControlPermissionRequirement:
+      - 2
+    highControlPermissionRequirement:
+      - 2
+  - type: door
+    layer: 0
+    y: 2
+    x: 9
+    width: 1
+    height: regular
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: sectorLadder
+    sectorIndex: 6
+    levelIndex: 2
+    xOffset: 1
+    levelsHigh: 3
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+    lowControlPermissionRequirement:
+      - 2
+    highControlPermissionRequirement:
+      - 2
+  - type: room
+    name: Removed wall neighbour
+    layer: 1
+    y: 0
+    x: 12
+    cellsWide: 1
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: room
+    name: Side reassignment
+    layer: 1
+    y: 0
+    x: 13
+    cellsWide: 3
+    levelsHigh: 3
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 8
+    levelIndex: 2
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 8
+    levelIndex: 2
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 8
+    levelIndex: 2
+    xOffset: 2
+  - type: removeWall
+    sectorIndex: 8
+    levelIndex: 0
+    side: left
+  - type: door
+    layer: 0
+    y: 0
+    x: 13
+    width: 1
+    height: regular
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: door
+    layer: 0
+    y: 0
+    x: 14
+    width: 1
+    height: regular
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: sectorLadder
+    sectorIndex: 8
+    levelIndex: 0
+    xOffset: 2
+    levelsHigh: 3
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+  - type: room
+    name: Independent Stops
+    layer: 0
+    y: 0
+    x: 18
+    cellsWide: 4
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 9
+    levelIndex: 2
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 9
+    levelIndex: 2
+    xOffset: 2
+  - type: walkway
+    sectorIndex: 9
+    levelIndex: 4
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 9
+    levelIndex: 4
+    xOffset: 1
+  - type: platformLift
+    sectorIndex: 9
+    levelIndex: 0
+    xOffset: 1
+    cellsWide: 1
+    stopOffsets: [0, 2, 4]
+    capacity: 2
+    stopDurationSeconds: 10
+    destinationPermissionRequirements:
+      []
+  - type: room
+    name: Inset left
+    layer: 0
+    y: 0
+    x: 24
+    cellsWide: 2
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: room
+    name: Inset right
+    layer: 0
+    y: 0
+    x: 26
+    cellsWide: 2
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: bulkheadDoor
+    layer: 0
+    y: 0
+    x: 26
+    side: left
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 1
+    automaticSensorDistance: 0.5
+  - type: lightSwitch
+    sectorIndex: 10
+    xOffset: 0
+  - type: room
+    name: Permanent bridge supports
+    layer: 0
+    y: 0
+    x: 29
+    cellsWide: 7
+    levelsHigh: 3
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 12
+    levelIndex: 1
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 12
+    levelIndex: 1
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 12
+    levelIndex: 1
+    xOffset: 4
+  - type: walkway
+    sectorIndex: 12
+    levelIndex: 1
+    xOffset: 5
+  - type: walkway
+    sectorIndex: 12
+    levelIndex: 1
+    xOffset: 6
+  - type: forceBridge
+    sectorIndex: 12
+    levelIndex: 1
+    xOffset: 2
+    width: 2
+    fromSide: left
+    extensible: true
+    startExtended: false
+    controlCount: 2
+  - type: room
+    name: Support refusal neighbour
+    layer: 1
+    y: 0
+    x: 36
+    cellsWide: 1
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: room
+    name: Atomic support refusal
+    layer: 1
+    y: 0
+    x: 37
+    cellsWide: 2
+    levelsHigh: 5
+    topLevelHeight: 0.9
+  - type: walkway
+    sectorIndex: 14
+    levelIndex: 4
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 14
+    levelIndex: 4
+    xOffset: 1
+  - type: platformLift
+    sectorIndex: 14
+    levelIndex: 0
+    xOffset: 1
+    cellsWide: 1
+    stopOffsets: [0, 4]
+    capacity: 2
+    stopDurationSeconds: 10
+    destinationPermissionRequirements:
+      []
+  - type: sectorLadder
+    sectorIndex: 14
+    levelIndex: 0
+    xOffset: 0
+    levelsHigh: 5
+    extensible: true
+    startExtended: false
+    directionalBatchLimit: 4
+agentGroups:
+  []
+accessPermissions:
+  - id: 1
+    name: Platform call
+  - id: 2
+    name: Ladder extension
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  - agent: 1
+    permissions:
+      - 1
+  - agent: 2
+    permissions:
+      - 2
+interactionPermissionRequirements:
+  []
+nextMarkerId: 1
+nextAgentGroupId: 1
+agents:
+  - id: 1
+    agent:
+      name: Caller
+      flags: 0
+    sector: 6
+    localX: 1
+    localY: 2
+  - id: 2
+    agent:
+      name: Climber
+      flags: 0
+    sector: 6
+    localX: 0.5
+    localY: 2

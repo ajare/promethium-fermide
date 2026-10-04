@@ -55,8 +55,8 @@ namespace
 					for (int side = 0; side < 2; ++side)
 					{
 						auto control = world.lookupInteractionPoint(chamber->getControl(side)).entity;
-						require(control && control->getPosition().distanceTo({ side == CORE_SIDE_LEFT ? 1.5f : 2.5f + width, 1.0f }) < 0.001f,
-							"Outside Airlock button must be centred in its adjacent cell");
+						require(control && control->getPosition().distanceTo({ side == CORE_SIDE_LEFT ? 1.75f : 2.25f + width, 1.0f }) < 0.001f,
+							"Outside Airlock button must use its approved adjacent-cell inset");
 						auto door = chamber->getDoor(side);
 						require(door && door->isClosed() && !door->isBreakable()
 							&& door->isAirlockOwned() && door->getActivationMode() == core::DoorActivationMode::Unavailable,
@@ -207,12 +207,12 @@ namespace
 			auto right = blocked.addRoom("Right", 0, 0, 5, 2, 1);
 			blocked.addSectorLightSwitch(side == CORE_SIDE_LEFT ? left : right, side == CORE_SIDE_LEFT ? 1 : 0);
 			blocked.finishBuild(); blocked.pauseSimulation(); blocked.markSaved();
-			auto before = saved(blocked);
-			require(!blocked.canAddAirlock(0, 0, 2, 3), "Airlock accepted an occupied cell-centre button slot");
-			bool refused = false;
-			try { blocked.addAirlock(0, 0, 2, 3); } catch (core::Exception const&) { refused = true; }
-			require(refused && saved(blocked) == before && !blocked.isModified() && blocked.isTraversalTopologyValid(),
-				"Button collision partially constructed an Airlock");
+			require(blocked.canAddAirlock(0, 0, 2, 3), "Distinct centred switch incorrectly blocked Airlock inset");
+			blocked.addAirlock(0, 0, 2, 3); blocked.finishBuild();
+			auto points = blocked.getSimulationSnapshot().interactionPoints;
+			require(points.size() == 3 && points[0].position.x == (side == CORE_SIDE_LEFT ? 1.5f : 5.5f)
+				&& points[1].position.x == 1.75f && points[2].position.x == 5.25f && blocked.isTraversalTopologyValid(),
+				"Airlock inset relocated/merged an existing centred light switch");
 		}
 		core::World unsupportedTransit("Unsupported Transit neighbour", 8, 3);
 		unsupportedTransit.addCorridor(0, 0, 0, 1, 1);

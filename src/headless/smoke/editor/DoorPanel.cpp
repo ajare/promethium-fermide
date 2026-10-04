@@ -37,6 +37,7 @@
 
 #include "core/World.h"
 #include "core/Door.h"
+#include "core/Button.h"
 #include "core/DoorSectorObject.h"
 #include "core/Sector.h"
 #include "core/SectorObject.h"
@@ -188,6 +189,12 @@ namespace
 		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
 		auto save = [&]
 		{
+			if (bulkhead)
+			{
+				auto points = world->getSimulationSnapshot().interactionPoints;
+				require(points.size() == 2 && points[0].position == core::Vector2{4.75f, 0}
+					&& points[1].position == core::Vector2{5.25f, 0}, "Bulkhead editor/history changed inset approaches");
+			}
 			core::SerializationWorkData work; work.markSerializedUnmodified = false;
 			auto writer = core::YamlSerializer::toString(); world->serialize(*writer, work); writer->serialize();
 			return writer->getSerializedString();
@@ -252,6 +259,250 @@ namespace
 			"Door initial Broken undo failed");
 		require(gWorldDocumentHistory.redo(gWorldDocumentHistory.capture(save()), restore) && save() == authored,
 			"Door initial Broken redo failed");
+		if (bulkhead)
+		{
+			// Supported configuration and generic clipboard paste use authored
+			// options through the production World APIs, not copied Button positions.
+			auto owner = world->getSector(0); uint32_t index = ~0u;
+			for (uint32_t i = 0; i < owner->getNumObjects(); ++i)
+				if (auto candidate = owner->getObject(i); candidate && candidate->getObjectType() == core::SectorObjectType::BulkheadDoor) index = i;
+			core::World::CreateBulkheadDoorOptions copied;
+			require(world->getSectorBulkheadDoorOptions(0, index, copied), "Bulkhead clipboard source lost options");
+			auto changed = copied; changed.controls[0] = false;
+			world->applySectorBulkheadDoorOptions(0, index, changed); world->finishBuild(); world->pauseSimulation();
+			auto points = world->getSimulationSnapshot().interactionPoints;
+			require(points.size() == 1 && points[0].position == core::Vector2{5.25f, 0}, "Bulkhead configuration transferred its remaining control");
+			world->addRoom("Paste left", 0, 1, 0, 5, 1); world->addRoom("Paste right", 0, 1, 5, 6, 1);
+			world->addSectorBulkheadDoor(0, 1, 5, CORE_SIDE_LEFT, copied); world->finishBuild(); world->pauseSimulation();
+			points = world->getSimulationSnapshot().interactionPoints;
+			require(points.size() == 3 && points[1].position == core::Vector2{4.75f, 1}
+				&& points[2].position == core::Vector2{5.25f, 1}, "Bulkhead clipboard mirror failed to derive destination insets");
+			auto graph = world->getGraph(); auto count = gWorldDocumentHistory.undoCount(); bool refused = false;
+			try { world->addSectorBulkheadDoor(0, 1, 5, CORE_SIDE_LEFT, copied); } catch (std::exception const&) { refused = true; }
+			require(refused && world->getGraph() == graph && gWorldDocumentHistory.undoCount() == count,
+				"Refused Bulkhead clipboard paste changed graph/history");
+		}
+	}
+
+	void checkWallSafeDocumentEdits()
+	{
+		auto world = std::make_shared<core::World>("Wall-safe history", 16, 3);
+		auto left = world->addRoom("Left", 0, 1, 0, 4, 1);
+		auto front = world->addRoom("Front", 0, 1, 4, 2, 1);
+		world->addRoom("Back", 1, 1, 0, 16, 1);
+		auto created = world->addSectorDoor(0, 1, 4, core::World::RemoteControlledDoor1Options);
+		world->addSectorLightSwitch(front, 1);
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		history.markSaved();
+		auto placement = [&]
+		{
+			std::vector<core::Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(front)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(front)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				result.push_back(button->getPosition() + button->getSize() * 0.5f);
+				result.push_back(world->lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto const& a, auto const& b)
+				{ return a.x != b.x ? a.x < b.x : a.y < b.y; });
+			return result;
+		};
+		auto initial = captureDocumentSnapshot(world, history);
+		auto positions = placement();
+		require(positions.size() == 4 && positions[0].x == 5.0f && positions[2].x == 5.5f,
+			"Document fixture placement is not explicit right/centred authoring");
+		auto invalid = world->planResizeSectorDoor(front, created.door.index, 4, 1, 2, 1);
+		require(!invalid.valid && captureDocumentSnapshot(world, history)->yaml == initial->yaml
+			&& history.undoCount() == 0, "Invalid wall-safe resize dirtied document/history");
+		world->removeLocationWall(left, 0, CORE_SIDE_RIGHT);
+		auto valid = world->planResizeSectorDoor(front, created.door.index, 4, 1, 2, 1);
+		require(valid.valid, "Removed wall did not permit authored boundary host: " + valid.diagnostic);
+		world->applyObjectMove(valid);
+		commitDocumentEdit(initial, history);
+		auto edited = captureDocumentSnapshot(world, history);
+		auto changed = placement();
+		require(changed[0].x == 4.0f && changed[2].x == 5.5f,
+			"Resize failed to change Door host independently of light switch");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*edited, restore) && placement() == positions,
+			"Production document undo lost wall-safe placement/approaches");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && placement() == changed,
+			"Production document redo lost wall-safe placement/approaches");
+	}
+
+	void checkCanonicalDocumentHistory()
+	{
+		auto world = std::make_shared<core::World>("Canonical history", 12, 2);
+		world->addLayer();
+		world->addRoom("Front", 0, 0, 0, 12, 1);
+		auto middle = world->addRoom("Middle", 1, 0, 0, 6, 1);
+		world->addRoom("Back", 2, 0, 0, 12, 1);
+		auto wide = core::World::RemoteControlledDoor1Options; wide.width = 2;
+		world->addSectorDoor(0, 0, 2, wide);
+		world->addSectorDoor(1, 0, 3, core::World::RemoteControlledDoor1Options);
+		world->addSectorDoor(0, 0, 4, core::World::RemoteControlledDoor1Options);
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<float> result;
+			for (uint32_t i = 0; i < world->getSector(middle)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(middle)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (button) result.push_back(world->lookupInteractionPoint(button->getInteractionPointId()).entity->getPosition().x);
+			}
+			std::sort(result.begin(), result.end()); return result;
+		};
+		auto initial = captureDocumentSnapshot(world, history);
+		// The same production option readback and creation seams used by Door
+		// clipboard placement; no derived Button position is copied.
+		core::World::CreateDoorOptions copied;
+		require(world->getSectorDoorOptions(1, 0, 3, 1, copied), "Door clipboard readback failed");
+		world->addSectorDoor(1, 0, 5, copied); world->finishBuild();
+		commitDocumentEdit(initial, history);
+		require(positions() == std::vector<float>{2, 3, 4, 5}, "Clipboard-style placement missed simultaneous reflow");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore)
+			&& positions() == std::vector<float>{3, 4, 5}, "Undo did not restore canonical preferences");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore)
+			&& positions() == std::vector<float>{2, 3, 4, 5}, "Redo depended on previous Button placement");
+	}
+
+	void checkStackDocumentHistory()
+	{
+		auto world = std::make_shared<core::World>("Stack document", 6, 1); world->addLayer();
+		world->addRoom("Front", 0, 0, 0, 6, 1);
+		auto middle = world->addRoom("Middle", 1, 0, 1, 2, 1);
+		world->addRoom("Back", 2, 0, 0, 6, 1);
+		world->addSectorDoor(0, 0, 2, core::World::RemoteControlledDoor1Options);
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<core::Vector2> result;
+			std::shared_ptr<const core::Vertex> approach;
+			for (uint32_t i = 0; i < world->getSector(middle)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(middle)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto centre = button->getPosition() + button->getSize() * 0.5f;
+				std::shared_ptr<const core::SectorObject> selected;
+				require(world->getObjectAtPosition(1, centre.x, centre.y, &selected) == button && selected == object,
+					"Editor selection chose another stack member");
+				auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+				require(vertex && vertex->getPosition().y == 0, "History restored an elevated approach");
+				if (approach && result.front().x == centre.x) require(approach == vertex, "History duplicated shared approach");
+				approach = vertex;
+				result.push_back(centre);
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.x != b.x ? a.x < b.x : a.y < b.y; });
+			return result;
+		};
+		auto initial = captureDocumentSnapshot(world, history);
+		core::World::CreateDoorOptions copied;
+		require(world->getSectorDoorOptions(0, 0, 2, 1, copied), "Stack clipboard option readback failed");
+		// Clipboard copies authored controls, not Button geometry or approaches.
+		world->addSectorDoor(1, 0, 2, copied); world->finishBuild();
+		commitDocumentEdit(initial, history);
+		auto stacked = positions();
+		require(stacked.size() == 2 && stacked[0].x == stacked[1].x && stacked[0].y < stacked[1].y, "Clipboard did not reconstruct stack");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions().size() == 1, "Stack creation undo failed");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Stack creation redo failed");
+		auto beforeResize = captureDocumentSnapshot(world, history);
+		auto plan = world->planResizeLocation(middle, 1, 0, 3, 1);
+		require(plan.valid, "Available alternate side resize refused: " + plan.diagnostic);
+		middle = world->applyLocationEdit(plan);
+		commitDocumentEdit(beforeResize, history);
+		auto separated = positions();
+		require(separated.size() == 2 && separated[0].x == 2 && separated[1].x == 3
+			&& separated[0].y == separated[1].y, "Newly available alternate side retained stack");
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Resize undo did not reconstruct stack");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == separated, "Resize redo did not separate stack");
+	}
+
+	void checkLargeStackDocumentHistory()
+	{
+		for (uint32_t count : {3u, 4u})
+		{
+			auto world = std::make_shared<core::World>("Large stack document", 10, 1); world->addLayer();
+			world->addRoom("Front", 0, 0, 0, 10, 1);
+			auto middle = world->addRoom("Middle", 1, 0, 3, 2, 1);
+			world->addRoom("Back", 2, 0, 0, 10, 1);
+			world->addRoom("Retained wall", 1, 0, 0, 3, 1);
+			world->addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+			world->finishBuild(); world->pauseSimulation();
+			DocumentHistory history;
+			auto positions = [&]
+			{
+				std::vector<core::Vector2> result;
+				std::shared_ptr<const core::Vertex> approach;
+				for (uint32_t i = 0; i < world->getSector(middle)->getNumObjects(); ++i)
+				{
+					auto object = world->getSector(middle)->getObject(i);
+					auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+					if (!button) continue;
+					auto centre = button->getPosition() + button->getSize() * 0.5f;
+					std::shared_ptr<const core::SectorObject> selected;
+					require(world->getObjectAtPosition(1, centre.x, centre.y, &selected) == button && selected == object,
+						"Editor selection chose another stack member");
+					auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+					require(vertex && vertex->getPosition().y == 0, "History restored an elevated approach");
+					if (approach && result.front().x == centre.x) require(approach == vertex, "History duplicated shared approach");
+					approach = vertex;
+					result.push_back(centre);
+				}
+				std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.x != b.x ? a.x < b.x : a.y < b.y; });
+				return result;
+			};
+			auto initial = captureDocumentSnapshot(world, history);
+			core::World::CreateDoorOptions copied;
+			require(world->getSectorDoorOptions(0, 0, 3, 1, copied), "Stack clipboard option readback failed");
+			// Clipboard copies authored controls, not Button geometry or approaches.
+			for (uint32_t i = 1; i < count; ++i) world->addSectorDoor(i % 2, 0, i < 2 ? 3 : 4, copied);
+			world->finishBuild();
+			commitDocumentEdit(initial, history);
+			auto stacked = positions();
+			require(stacked.size() == count && stacked.front().x == stacked.back().x && stacked.front().y < stacked.back().y, "Clipboard did not reconstruct stack");
+			auto restore = [&](DocumentSnapshot const& snapshot)
+			{
+				world = deserializeDocumentSnapshot(snapshot, world, {});
+				if (world) world->pauseSimulation();
+				return bool(world);
+			};
+			require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions().size() == 1, "Stack creation undo failed");
+			require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Stack creation redo failed");
+			auto beforeResize = captureDocumentSnapshot(world, history);
+			auto plan = world->planResizeLocation(middle, 3, 0, 3, 1);
+			require(plan.valid, "Available alternate side resize refused: " + plan.diagnostic);
+			middle = world->applyLocationEdit(plan);
+			commitDocumentEdit(beforeResize, history);
+			auto separated = positions();
+			require(separated.size() == count && separated.front().x == 4 && separated.back().x == 5
+				&& separated.back().y < stacked.back().y, "Newly available alternate side retained stack");
+			require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Resize undo did not reconstruct stack");
+			require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == separated, "Resize redo did not separate stack");
+		}
 	}
 
 	void checkExistingButtonsCanBeRemoved()
@@ -277,10 +528,198 @@ namespace
 			"A paused ordinary Door with Buttons cannot have them unchecked");
 		ImGui::End();
 		ImGui::Render();
+		checkWallSafeDocumentEdits();
+		checkCanonicalDocumentHistory();
+		checkStackDocumentHistory();
+		checkLargeStackDocumentHistory();
+	}
+
+	void checkTransportPlacementHistory(bool shuttle)
+	{
+		auto world = std::make_shared<core::World>("Transport placement history", 16, 3); world->addLayer();
+		world->addRoom("Front", 0, 0, 0, 16, 1);
+		world->addRoom("Origin/neighbour", 1, 0, 0, 3, 1);
+		auto host = world->addRoom("Landing", 1, 0, 3, 2, 1);
+		world->addRoom("Moved landing", 1, 0, 5, 11, 1);
+		world->addRoom("Upper", 1, 2, 0, 16, 1);
+		world->addSectorDoor(0, 0, 3, core::World::RemoteControlledDoor1Options);
+		uint32_t transport;
+		if (shuttle)
+		{
+			core::World::CreateShuttleOptions options{1, 3, {0, 3}, 0};
+			transport = world->addShuttle(2, 0, 0, 6, options).shuttle.sector->getIndex();
+		}
+		else
+		{
+			core::World::CreateLiftOptions options; options.stopOffsets = {0, 2};
+			transport = world->addLift(2, 0, 4, options).lift.sector->getIndex();
+		}
+		world->finishBuild(); world->pauseSimulation();
+		DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<core::Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(host)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(host)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const core::Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+				require(vertex && vertex->getPosition() == core::Vector2{4, 0}, "Transport history raised/moved approach");
+				result.push_back(button->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.y < b.y; }); return result;
+		};
+		auto stacked = positions(); require(stacked.size() == 2, "History fixture did not stack transport");
+		auto before = captureDocumentSnapshot(world, history);
+		if (shuttle)
+		{
+			auto plan = world->planResizeShuttle(transport, 6, 0, 6);
+			require(plan.valid, "Supported Shuttle move refused"); world->applyShuttleEdit(plan);
+		}
+		else
+		{
+			auto plan = world->planResizeLift(transport, 6, 0, 1, 3);
+			require(plan.valid, "Supported Lift move refused"); world->applyLiftEdit(plan);
+		}
+		commitDocumentEdit(before, history);
+		auto unstacked = positions();
+		require(unstacked.size() == 1 && unstacked.front().y == CORE_BUTTON_Y_OFFSET, "Movement retained obsolete landing stack");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Transport move undo did not reconstruct stack");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == unstacked, "Transport move redo retained previous assignment");
+	}
+
+	void checkEndpointPlacementHistory()
+	{
+		using namespace core;
+		auto world = std::make_shared<World>("Endpoint history", 8, 5);
+		auto room = world->addRoom("Room", 0, 0, 0, 1, 5);
+		world->addSectorWalkway(room, 2, 0); world->addSectorWalkway(room, 4, 0);
+		auto lower = world->addRoomLadder(room, 0, 0, {0, true, false});
+		world->finishBuild(); world->pauseSimulation(); DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(room)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (!button) continue;
+				auto vertex = world->getGraph()->getVertexForObject(std::const_pointer_cast<SectorObject>(object));
+				require(vertex && vertex->getPosition() == Vector2{0, static_cast<float>(object->getCellY())}, "Endpoint history raised approach");
+				result.push_back(button->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.y < b.y; }); return result;
+		};
+		auto initial = positions(); auto before = captureDocumentSnapshot(world, history);
+		// Clipboard-style authoring copies configuration, never derived placements.
+		World::CreateLadderOptions copied;
+		require(world->getRoomLadderOptions(room, lower.ladder.index, copied), "Ladder clipboard options unavailable");
+		world->addRoomLadder(room, 2, 0, copied); world->finishBuild(); commitDocumentEdit(before, history);
+		auto stacked = positions(); require(stacked.size() == 4 && stacked[1].x == stacked[2].x
+			&& stacked[1].y < stacked[2].y, "Copied Ladder endpoints did not stack");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == initial, "Ladder clipboard undo retained stack");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == stacked, "Ladder clipboard redo changed placement");
+
+		world = std::make_shared<World>("Platform history", 8, 5);
+		room = world->addRoom("Room", 0, 0, 0, 8, 5);
+		for (auto x : {3u, 4u}) world->addSectorWalkway(room, 2, x);
+		for (auto x : {2u, 3u}) world->addSectorWalkway(room, 4, x);
+		World::CreateLiftOptions options; options.stopOffsets = {0, 2, 4};
+		auto lift = world->addSectorPlatformLift(room, 0, 3, options); world->finishBuild(); world->pauseSimulation(); history.clear();
+		auto platformPositions = [&]
+		{
+			std::vector<Vector2> result;
+			for (uint32_t i = 0; i < world->getSector(room)->getNumObjects(); ++i)
+			{
+				auto object = world->getSector(room)->getObject(i);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (button) result.push_back(button->getPosition() + button->getSize() * 0.5f);
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b) { return a.y < b.y; }); return result;
+		};
+		auto allStops = platformPositions(); before = captureDocumentSnapshot(world, history);
+		options.stopOffsets = {0, 4}; auto plan = world->planPlatformLiftEdit(room, lift.lift.index, options);
+		require(plan.valid, "Opposite-side Platform configuration refused"); world->applyPlatformLiftEdit(plan); commitDocumentEdit(before, history);
+		auto fewerStops = platformPositions(); require(fewerStops.size() == 2 && fewerStops[0].x == 4 && fewerStops[1].x == 3, "Stop edit lost independent sides");
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && platformPositions() == allStops, "Platform undo changed candidates");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && platformPositions() == fewerStops, "Platform redo changed candidates");
+	}
+
+	void checkMixedPlacementHistory()
+	{
+		using namespace core;
+		auto world = std::make_shared<World>("Mixed clipboard/history", 8, 5);
+		world->addRoom("Neighbour", 1, 0, 0, 1, 5);
+		auto room = world->addRoom("Room", 1, 0, 1, 2, 5);
+		world->addRoom("Front", 0, 0, 0, 8, 5);
+		world->addSectorWalkway(room, 4, 0); world->addSectorWalkway(room, 4, 1);
+		World::CreateLiftOptions liftOptions; liftOptions.stopOffsets = {0, 4};
+		world->addSectorPlatformLift(room, 0, 1, liftOptions);
+		world->addRoomLadder(room, 0, 0, {0, true, false});
+		world->addSectorDoor(0, 0, 1, World::RemoteControlledDoor1Options);
+		world->finishBuild(); world->pauseSimulation(); DocumentHistory history;
+		auto positions = [&]
+		{
+			std::vector<Vector2> result;
+			for (uint32_t slot = 0; slot < world->getSector(room)->getNumObjects(); ++slot)
+			{
+				auto object = world->getSector(room)->getObject(slot);
+				auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+				if (button && object->getCellY() == 0) result.push_back(button->getPosition());
+			}
+			std::sort(result.begin(), result.end(), [](auto a, auto b)
+			{ return a.x < b.x || (a.x == b.x && a.y < b.y); }); return result;
+		};
+		auto initial = positions(); auto before = captureDocumentSnapshot(world, history);
+		// The same option readback and World authoring used by ordinary Door
+		// clipboard placement adds a fourth member to a mixed-family stack.
+		World::CreateDoorOptions copied;
+		require(world->getSectorDoorOptions(0, 0, 1, 1, copied), "Mixed clipboard readback failed");
+		world->addSectorDoor(0, 0, 2, copied); world->finishBuild(); commitDocumentEdit(before, history);
+		auto pasted = positions(); require(pasted.size() == 4 && pasted.front().x == pasted.back().x,
+			"Clipboard placement did not reflow mixed owners jointly");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			world = deserializeDocumentSnapshot(snapshot, world, {});
+			if (world) world->pauseSimulation();
+			return bool(world);
+		};
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == initial, "Mixed paste undo changed placement");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == pasted, "Mixed paste redo changed placement");
+		world->markSaved(); history.markSaved();
+		auto saved = captureDocumentSnapshot(world, history); auto graph = world->getGraph();
+		auto state = history.currentStateId(); auto undoCount = history.undoCount(); bool refused = false;
+		try { world->addSectorWalkway(room, 2, 0); } catch (std::exception const&) { refused = true; }
+		require(refused && world->getGraph() == graph && positions() == pasted && !world->isModified()
+			&& !world->isTraversalTopologyDirty() && world->isTraversalTopologyValid()
+			&& captureDocumentSnapshot(world, history)->yaml == saved->yaml
+			&& history.currentStateId() == state && history.undoCount() == undoCount && !history.isModified(),
+			"Failed mixed support edit changed document, graph or history");
+		before = captureDocumentSnapshot(world, history);
+		world->removeLocationWall(room, 0, CORE_SIDE_LEFT); world->finishBuild(); commitDocumentEdit(before, history);
+		auto split = positions(); require(split.size() == 4 && split.front().x < split.back().x, "Mixed wall edit did not split stacks");
+		require(history.undo(*captureDocumentSnapshot(world, history), restore) && positions() == pasted, "Mixed wall undo did not merge stacks");
+		require(history.redo(*captureDocumentSnapshot(world, history), restore) && positions() == split, "Mixed wall redo did not restore canonical sides");
 	}
 
 	void checkLiftOwnedDoor()
 	{
+		checkMixedPlacementHistory();
+		checkEndpointPlacementHistory();
+		checkTransportPlacementHistory(false);
 		auto world = std::make_shared<core::World>("Lift door panel", 16, 3);
 		auto const hall = world->addRoom("Lift Hall", 0, 0, 0, 16, 3);
 		for (uint32_t level = 1; level < 3; ++level)
@@ -305,6 +744,7 @@ namespace
 
 	void checkShuttleOwnedDoor()
 	{
+		checkTransportPlacementHistory(true);
 		auto world = std::make_shared<core::World>("Shuttle door panel", 32, 3);
 		world->addCorridor(0, 0, 31);
 		world->addCorridor(1, 0, 31);
@@ -330,8 +770,11 @@ namespace
 	}
 }
 
+#include "ButtonDemo.h"
+
 void editor_smoke::registerDoorPanel(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "buttonPlacement/demonstration", [](smoke::Context const& context) { State state; checkButtonDemo(context); } });
 	checks.push_back({ "doorpanel/checkBulkheadBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(true); } });
 	checks.push_back({ "doorpanel/checkBrokenControlsAndHistory", [](smoke::Context const&) { State state; ImGuiGuard guard; checkBrokenControlsAndHistory(); } });
 	checks.push_back({ "doorpanel/checkOrdinaryDoor", [](smoke::Context const&) { State state; ImGuiGuard guard; checkOrdinaryDoor(); } });

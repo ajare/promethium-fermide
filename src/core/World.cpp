@@ -2349,17 +2349,6 @@ namespace core
 		}
 	}
 
-	void World::validateCellHasNoPhysicalControl(string const& caller, uint32_t layerIndex, uint32_t x, uint32_t y, int side) const
-	{
-		auto layer = getLayer(layerIndex);
-		auto const& cellDef = layer->getCellDefinition(x, y);
-
-		if (cellDef.controls[side] != ~0u)
-		{
-			throw WorldException(this, format("{} - cell at {},{} (side {}) has a physical control.", caller, x, y, side));
-		}
-	}
-
 
 	void World::validateCellTraversableOnFoot(string const& caller, string const& desiredObject, uint32_t layerIndex, uint32_t x, uint32_t y) const
 	{
@@ -2581,6 +2570,15 @@ namespace core
 
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef0.sectorIndex);
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef1.sectorIndex);
+			}
+		if (!controlsAreExternallyBound)
+			for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (!options.controls[side]) continue;
+				auto layer = side == 0 ? layerIndex : backLayer;
+				auto sector = mSectors[mLayers[layer]->getCellDefinition(x, y).sectorIndex];
+				auto demand = doorControlDemand(sector, x, y, cellsWide, side);
+				(void)planPhysicalControls(layer, sector->getIndex(), y, &demand);
 			}
 	}
 
@@ -3065,292 +3063,6 @@ namespace core
 		};
 	}
 
-	World::CreateObjectResult World::createPhysicalControl(string const& name,
-		uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags,
-		uint32_t* vertexIdentifier, uint32_t alternateX, int alternateSide)
-	{
-		invalidateSimulationSnapshot();
-		string caller = format("World::createPhysicalControl({}, {}, {}, {}, {})", layerIndex, x, y, side, flags);
-		vector<PhysicalControlCandidate> candidates{ { x, side } };
-		if (alternateX != ~0u && alternateSide >= CORE_SIDE_LEFT
-			&& alternateSide <= CORE_SIDE_MIDDLE
-			&& (alternateX != x || alternateSide != side))
-		{
-			candidates.push_back({ alternateX, alternateSide });
-		}
-
-		uint32_t initialCandidate = ~0u;
-		uint32_t sectorIndex = ~0u;
-		for (uint32_t i = 0; i < candidates.size(); ++i)
-		{
-			auto const& candidate = candidates[i];
-			validateCellOccupied(caller, layerIndex, candidate.cellX, y);
-			auto const& cell = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y);
-			if (sectorIndex == ~0u) sectorIndex = cell.sectorIndex;
-			else if (sectorIndex != cell.sectorIndex)
-				throw WorldException(this, format("{} - candidate positions cross Sector boundaries", caller));
-			if (cell.controls[candidate.side] == ~0u && initialCandidate == ~0u)
-				initialCandidate = i;
-		}
-		if (initialCandidate == ~0u)
-		{
-			// Include the not-yet-created control in the row optimization. This can
-			// move a flexible existing control out of the required slot before the
-			// new object is constructed.
-			mPhysicalControlPlacements.push_back({ layerIndex, sectorIndex, ~0u, y,
-				candidates, 0, 0 });
-			try
-			{
-				reflowPhysicalControls(layerIndex, sectorIndex, y);
-				initialCandidate = mPhysicalControlPlacements.back().currentCandidate;
-			}
-			catch (...)
-			{
-				mPhysicalControlPlacements.pop_back();
-				throw;
-			}
-			mPhysicalControlPlacements.pop_back();
-		}
-
-		auto const& initial = candidates[initialCandidate];
-		validateCellHasNoPhysicalControl(caller, layerIndex, initial.cellX, y, initial.side);
-		auto& cellDef = mLayers[layerIndex]->getCellDefinition(initial.cellX, y);
-		auto sector = _getSector(cellDef.sectorIndex);
-
-		float xOffset = initial.side == CORE_SIDE_MIDDLE
-			? 0.5f - CORE_BUTTON_SIZE * 0.5f
-			: initial.side - CORE_BUTTON_SIZE * 0.5f;
-		auto controlIndex = sector->createPhysicalControl(sector, name, initial.cellX, y,
-			xOffset, CORE_BUTTON_Y_OFFSET, flags, vertexIdentifier);
-		cellDef.controls[initial.side] = controlIndex;
-		mPhysicalControlPlacements.push_back({ layerIndex, sector->getIndex(), controlIndex, y,
-			std::move(candidates), 0, initialCandidate });
-		reflowPhysicalControls(layerIndex, sector->getIndex(), y);
-
-		return { controlIndex, SectorObjectType::InteractionPoint, sector };
-	}
-
-	void World::reflowPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y)
-	{
-		invalidateSimulationSnapshot();
-		vector<uint32_t> row;
-		for (uint32_t i = 0; i < mPhysicalControlPlacements.size(); ++i)
-		{
-			auto const& placement = mPhysicalControlPlacements[i];
-			if (placement.layerIndex == layerIndex && placement.sectorIndex == sectorIndex
-				&& placement.cellY == y)
-				row.push_back(i);
-		}
-		if (row.empty()) return;
-
-		auto centerKey = [](PhysicalControlCandidate const& candidate)
-		{
-			return static_cast<int64_t>(candidate.cellX) * 2
-				+ (candidate.side == CORE_SIDE_RIGHT ? 2
-					: candidate.side == CORE_SIDE_MIDDLE ? 1 : 0);
-		};
-		auto connected = [&](uint32_t left, uint32_t right)
-		{
-			for (auto const& a : mPhysicalControlPlacements[left].candidates)
-				for (auto const& b : mPhysicalControlPlacements[right].candidates)
-					if (centerKey(a) == centerKey(b)) return true;
-			return false;
-		};
-
-		vector<bool> visited(row.size(), false);
-		for (uint32_t root = 0; root < row.size(); ++root)
-		{
-			if (visited[root]) continue;
-			vector<uint32_t> component;
-			vector<uint32_t> pending{ root };
-			visited[root] = true;
-			while (!pending.empty())
-			{
-				auto local = pending.back();
-				pending.pop_back();
-				component.push_back(row[local]);
-				for (uint32_t other = 0; other < row.size(); ++other)
-				{
-					if (!visited[other] && connected(row[local], row[other]))
-					{
-						visited[other] = true;
-						pending.push_back(other);
-					}
-				}
-			}
-			sort(component.begin(), component.end());
-
-			vector<uint32_t> choice(component.size()), bestChoice;
-			set<pair<uint32_t, int>> occupiedSlots;
-			bool haveBest = false;
-			uint32_t bestUnique = 0, bestMoved = 0, bestDefaults = 0;
-			function<void(uint32_t)> search = [&](uint32_t depth)
-			{
-				if (depth != component.size())
-				{
-					auto const& placement = mPhysicalControlPlacements[component[depth]];
-					for (uint32_t candidateIndex = 0; candidateIndex < placement.candidates.size(); ++candidateIndex)
-					{
-						auto const& candidate = placement.candidates[candidateIndex];
-						auto slot = make_pair(candidate.cellX, candidate.side);
-						if (!occupiedSlots.insert(slot).second) continue;
-						choice[depth] = candidateIndex;
-						search(depth + 1);
-						occupiedSlots.erase(slot);
-					}
-					return;
-				}
-
-				set<int64_t> centers;
-				uint32_t moved = 0, defaults = 0;
-				for (uint32_t i = 0; i < component.size(); ++i)
-				{
-					auto const& placement = mPhysicalControlPlacements[component[i]];
-					centers.insert(centerKey(placement.candidates[choice[i]]));
-					moved += choice[i] != placement.currentCandidate;
-					defaults += choice[i] == placement.defaultCandidate;
-				}
-				auto unique = static_cast<uint32_t>(centers.size());
-				bool better = !haveBest || unique > bestUnique
-					|| (unique == bestUnique && moved < bestMoved);
-				if (!better && haveBest && unique == bestUnique && moved == bestMoved)
-				{
-					for (uint32_t i = 0; i < component.size(); ++i)
-					{
-						auto const& placement = mPhysicalControlPlacements[component[i]];
-						bool retained = choice[i] == placement.currentCandidate;
-						bool bestRetained = bestChoice[i] == placement.currentCandidate;
-						if (retained != bestRetained) { better = retained; break; }
-					}
-					if (!better)
-					{
-						bool sameRetention = true;
-						for (uint32_t i = 0; i < component.size(); ++i)
-						{
-							auto const& placement = mPhysicalControlPlacements[component[i]];
-							if ((choice[i] == placement.currentCandidate)
-								!= (bestChoice[i] == placement.currentCandidate))
-							{ sameRetention = false; break; }
-						}
-						if (sameRetention && (defaults > bestDefaults
-							|| (defaults == bestDefaults && choice < bestChoice))) better = true;
-					}
-				}
-				if (better)
-				{
-					haveBest = true;
-					bestUnique = unique;
-					bestMoved = moved;
-					bestDefaults = defaults;
-					bestChoice = choice;
-				}
-			};
-			search(0);
-			if (!haveBest) throw WorldException(this, "Physical-control placement constraints cannot be satisfied");
-			for (uint32_t i = 0; i < component.size(); ++i)
-				mPhysicalControlPlacements[component[i]].currentCandidate = bestChoice[i];
-		}
-
-		// Replace cell-side registrations atomically after all assignments are known.
-		for (auto index : row)
-		{
-			auto const& placement = mPhysicalControlPlacements[index];
-			if (placement.objectIndex == ~0u) continue;
-			for (auto const& candidate : placement.candidates)
-			{
-				auto& slot = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y).controls[candidate.side];
-				if (slot == placement.objectIndex) slot = ~0u;
-			}
-		}
-		map<int64_t, vector<uint32_t>> collisions;
-		for (auto index : row)
-		{
-			auto& placement = mPhysicalControlPlacements[index];
-			auto const& candidate = placement.candidates[placement.currentCandidate];
-			if (placement.objectIndex != ~0u)
-			{
-				auto& slot = mLayers[layerIndex]->getCellDefinition(candidate.cellX, y).controls[candidate.side];
-				if (slot != ~0u) throw WorldException(this, "Physical-control slot assignment collided with an existing control");
-				slot = placement.objectIndex;
-			}
-			collisions[centerKey(candidate)].push_back(index);
-		}
-
-		for (auto const& [center, controls] : collisions)
-		{
-			(void)center;
-			for (auto index : controls)
-			{
-				auto& placement = mPhysicalControlPlacements[index];
-				if (placement.objectIndex == ~0u) continue;
-				auto const& candidate = placement.candidates[placement.currentCandidate];
-				float centerX = candidate.cellX + (candidate.side == CORE_SIDE_RIGHT ? 1.0f
-					: candidate.side == CORE_SIDE_MIDDLE ? 0.5f : 0.0f);
-				if (candidate.side == CORE_SIDE_LEFT) centerX += placement.edgeInset;
-				else if (candidate.side == CORE_SIDE_RIGHT) centerX -= placement.edgeInset;
-				float adjustment = 0.0f;
-				if (controls.size() > 1)
-				{
-					if (candidate.side == CORE_SIDE_RIGHT) adjustment = 0.025f;
-					else if (candidate.side == CORE_SIDE_LEFT) adjustment = -0.025f;
-				}
-				auto control = static_pointer_cast<ButtonSectorObject>(
-					mSectors[sectorIndex]->_getObject(placement.objectIndex));
-				control->_setCellPosition(candidate.cellX, y);
-				auto button = static_pointer_cast<Button>(control->_getObject());
-				button->_setPlacement(centerX, y + CORE_BUTTON_Y_OFFSET, adjustment);
-				if (placement.hasInteractionOffset)
-				{
-					auto point = mInteractionPoints.find(button->getInteractionPointId());
-					if (point)
-						point->mPosition = button->getPosition() + button->getSize() * 0.5f
-							+ placement.interactionOffset;
-				}
-			}
-		}
-	}
-
-	void World::bindPhysicalControl(CreateObjectResult& control, InteractionPointId point)
-	{
-		invalidateSimulationSnapshot();
-		control.interactionPoint = point;
-		auto object = control.sector->getObject(control.index)->_getObject();
-		auto button = dynamic_pointer_cast<Button>(object);
-		if (!button) throw logic_error("Physical control is not backed by a Button");
-		button->_setInteractionPointId(point);
-		for (auto& placement : mPhysicalControlPlacements)
-		{
-			if (placement.sectorIndex != control.sector->getIndex()
-				|| placement.objectIndex != control.index) continue;
-			auto interaction = mInteractionPoints.find(point);
-			if (interaction)
-			{
-				placement.interactionOffset = interaction->mPosition
-					- (button->getPosition() + button->getSize() * 0.5f);
-				placement.hasInteractionOffset = true;
-			}
-			break;
-		}
-	}
-
-	InteractionPointId World::createPhysicalControlInteractionPoint(string const& name,
-		CreateObjectResult& control, float standingY, float reach,
-		float durationSeconds, vector<InteractionBinding> bindings)
-	{
-		invalidateSimulationSnapshot();
-		if (!control.sector) throw invalid_argument("A physical control requires an owning sector");
-		auto sectorObject = control.sector->_getObject(control.index);
-		auto button = sectorObject ? dynamic_pointer_cast<Button>(sectorObject->_getObject()) : nullptr;
-		if (!button) throw logic_error("Physical control is not backed by a Button");
-		auto position = button->getPosition() + button->getSize() * 0.5f;
-		position.y = standingY;
-		auto point = createInteractionPoint(name,
-			SectorId{ (uint64_t)control.sector->getIndex() + 1 }, position,
-			reach, durationSeconds, std::move(bindings));
-		bindPhysicalControl(control, point);
-		return point;
-	}
-
 	World::CreateObjectResult World::createWalkway(uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t* vertexIdentifier)
 	{
 		invalidateSimulationSnapshot();
@@ -3554,8 +3266,11 @@ namespace core
 			throw WorldException(this, format("{} - a Corridor must be at least one cell wide", caller));
 		if (levelsHigh == 0)
 			throw WorldException(this, format("{} - a Corridor must be at least one level high", caller));
+		validateBounds(caller, x, y, cellsWide, levelsHigh);
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, true);
 		beginStructuralEdit("addCorridor");
 		auto const result = addLocation("Corridor", SectorType::Location, layerIndex, x, y, cellsWide, levelsHigh, CORE_CORRIDOR_HEIGHT, true);
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Corridor };
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
@@ -3585,9 +3300,13 @@ namespace core
 		if (levelsHigh == 0)
 			throw WorldException(this, format("{} - a Room must be at least one level high", caller));
 
+		validateLayer(caller, layerIndex);
+		validateBounds(caller, x, y, cellsWide, levelsHigh);
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, true);
 		beginStructuralEdit("addRoom");
 
 		auto const result = addLocation(name, SectorType::Location, layerIndex, x, y, cellsWide, levelsHigh, topLevelHeight, false);
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Room };
 		record.name = name;
 		record.a = layerIndex; record.b = y; record.c = x; record.d = cellsWide; record.e = levelsHigh;
@@ -3644,6 +3363,7 @@ namespace core
 		if (!canAddBackground(layerIndex, y, x, cellsWide, levelsHigh, &diagnostic))
 			throw WorldException(this, diagnostic);
 
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, false);
 		beginStructuralEdit("addBackground");
 
 		auto sectorIndex = (uint32_t)mSectors.size();
@@ -3664,6 +3384,7 @@ namespace core
 			}
 		}
 
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Background };
 		record.layer = layerIndex;
 		record.a = y; record.b = x; record.c = cellsWide; record.d = levelsHigh;
@@ -3730,6 +3451,7 @@ namespace core
 		if (!canAddFacade(layerIndex, y, x, cellsWide, levelsHigh, topLevelHeight, &diagnostic))
 			throw WorldException(this, diagnostic);
 
+		validatePhysicalControlSectorCreation(layerIndex, x, y, cellsWide, levelsHigh, false);
 		beginStructuralEdit("addFacade");
 
 		auto sectorIndex = (uint32_t)mSectors.size();
@@ -3749,6 +3471,7 @@ namespace core
 			}
 		}
 
+		reflowAllPhysicalControls();
 		ConstructionRecord record{ ConstructionType::Facade };
 		record.name = name;
 		record.layer = layerIndex;
@@ -3810,7 +3533,6 @@ namespace core
 	World::CreateLadderResult World::addLadder(uint32_t layerIndex, uint32_t y, uint32_t x, CreateLadderOptions const& options)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addLadder");
 		// A Ladder Transit sits on layerIndex and lands on the Layer directly in front.
 		auto const landingLayer = layerInFront(layerIndex);
 		auto transitLayer = getLayer(layerIndex);
@@ -3874,6 +3596,13 @@ namespace core
 
 		validateSectorLadderOptions(caller, options);
 
+		physicalControl::Geometry controlGeometry{ layerIndex, x, y, 1, options.levelsHigh };
+		if (options.extensible)
+			validatePhysicalControlAdditions({
+				transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1),
+				transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1) });
+		beginStructuralEdit("addLadder");
+
 		// Create ladder
 		auto sectorIndex = createLadder(layerIndex, x, y, options);
 
@@ -3916,16 +3645,12 @@ namespace core
 		CreateObjectResult createdControls[2];
 		if (options.extensible)
 		{
-			auto inwardSide = [x](shared_ptr<const Sector> const& sector)
-			{
-				return x == sector->getCellX1() ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
-			};
-			createdControls[CORE_LADDER_ENDPOINT_LOW] = _createLadderButton(
-				foreSector0, x, y0, inwardSide(foreSector0), 0, nullptr, true);
+			createdControls[CORE_LADDER_ENDPOINT_LOW] = createPhysicalControl("Ladder button", landingLayer, y0,
+				transportControlDemand(foreSector0, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), 0);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
-			createdControls[CORE_LADDER_ENDPOINT_HIGH] = _createLadderButton(
-				foreSector1, x, y1, inwardSide(foreSector1), 0, nullptr, true);
+			createdControls[CORE_LADDER_ENDPOINT_HIGH] = createPhysicalControl("Ladder button", landingLayer, y1,
+				transportControlDemand(foreSector1, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), 0);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 		}
 
@@ -4326,8 +4051,6 @@ namespace core
 		if (options.cellsWide > 2)
 			throw WorldException(this, format("{} - enclosed Lift width must be one or two cells.", caller));
 
-		beginStructuralEdit("addLift");
-
 		auto levelsHigh = options.levelsHigh ? options.levelsHigh : options.stopOffsets.back() + 1;
 		if (options.stopOffsets.back() >= levelsHigh)
 			throw WorldException(this, format("{} - Lift stop is outside the shaft bounds.", caller));
@@ -4374,10 +4097,17 @@ namespace core
 				if (cellDef.hasObject() || !cellDef.markers.empty())
 					throw WorldException(this, format("{} - an object blocks the Lift landing at {},{}", caller, ix, iy));
 			}
-			if (x == getSector(levelSectorIndex)->getCellX0()
-				&& x + options.cellsWide - 1 == getSector(levelSectorIndex)->getCellX1())
-				throw WorldException(this, format("{} - there is no space for a Lift call button at level {}", caller, iy));
 		}
+		vector<physicalControl::Demand> landingDemands;
+		for (auto offset : options.stopOffsets)
+		{
+			auto level = y + offset;
+			auto location = getSector(foreLayer->getCellDefinition(x, level).sectorIndex);
+			landingDemands.push_back(transportControlDemand(location, physicalControl::OwnerType::Lift,
+				{layerIndex, x, y, options.cellsWide, levelsHigh}, x, level, options.cellsWide));
+		}
+		validatePhysicalControlAdditions(landingDemands);
+		beginStructuralEdit("addLift");
 
 		// Create lift
 		auto liftObject = createLift(layerIndex, x, y, options.cellsWide, levelsHigh, options.stopOffsets);
@@ -4484,7 +4214,7 @@ namespace core
 			if (i < options.landingControlPermissionRequirements.size())
 				for (auto permission : options.landingControlPermissionRequirements[i])
 					mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
-			mAuthoredControlRequirements[point] = { mConstructionRecords.size(), i };
+			mAuthoredControlRequirements[point] = { mDeserializingConstruction ? mConstructionReplayIndex : mConstructionRecords.size(), i };
 			landing->mControls.push_back(point);
 			liftResource->mLiftStops[i].callControl = point;
 
@@ -4548,7 +4278,6 @@ namespace core
 		// add is a true no-op and no non-finite timing reaches the tick
 		// conversion (#198).
 		validateShuttleOptions(caller, options);
-		beginStructuralEdit("addShuttle");
 		validateBounds(caller, x, y, cellsWide, 1);
 		validateLayerSpace(caller, layerIndex, x, y, cellsWide, 1);
 
@@ -4598,11 +4327,32 @@ namespace core
 					if (!supported && !options.allowPartialLandings)
 						throw WorldException(this, format("{} - door {} of carriage {} at stop offset {} has no supported landing",
 							caller, door, car, options.stopOffsets[i]));
+					if (supported)
+					{
+						validateCellTraversableOnFoot(caller, "Shuttle", layerInFront(layerIndex), cx, y);
+						if (cell.hasObject() || !cell.markers.empty())
+							throw WorldException(this, format("{} - an object blocks the Shuttle landing at {},{}", caller, cx, y));
+					}
 					hasLanding = hasLanding || supported;
 				}
 			if (!hasLanding)
 				throw WorldException(this, format("{} - stop offset {} has no supported carriage landing", caller, options.stopOffsets[i]));
 		}
+
+		vector<physicalControl::Demand> landingDemands;
+		auto authoredDoorOffsets = SimulationCoordinator::shuttleDoorOffsets(options.carWidth, options.doorMask);
+		for (auto offset : options.stopOffsets)
+			for (uint32_t car = 0; car < options.numCars; ++car)
+				for (auto doorOffset : authoredDoorOffsets)
+				{
+					auto doorwayX = x + offset + car * (options.carWidth + 1) + doorOffset;
+					auto index = foreLayer->getCellDefinition(doorwayX, y).sectorIndex;
+					if (index == ~0u || !isLocationLike(getSector(index)->getType())) continue;
+					landingDemands.push_back(transportControlDemand(getSector(index), physicalControl::OwnerType::Shuttle,
+						{layerIndex, x, y, cellsWide, 1}, doorwayX, y, 1));
+				}
+		validatePhysicalControlAdditions(landingDemands);
+		beginStructuralEdit("addShuttle");
 
 		// Create shuttle
 		auto shuttleObject = createShuttle(layerIndex, x, y, cellsWide, options.numCars, options.carWidth, options.stopOffsets);
@@ -4742,7 +4492,7 @@ namespace core
 				if (doorIndex < options.landingControlPermissionRequirements.size())
 					for (auto permission : options.landingControlPermissionRequirements[doorIndex])
 						mInteractionPoints.find(point)->mPermissionRequirement.set(permission.value - 1);
-				mAuthoredControlRequirements[point] = { mConstructionRecords.size(), doorIndex };
+				mAuthoredControlRequirements[point] = { mDeserializingConstruction ? mConstructionReplayIndex : mConstructionRecords.size(), doorIndex };
 				landing->mControls.push_back(point);
 				if (!shuttleResource->mLiftStops[stop].callControl)
 					shuttleResource->mLiftStops[stop].callControl = point;
@@ -4882,6 +4632,12 @@ namespace core
 		if (sector->getEndType(levelIndex, side) != SectorEndType::None
 			|| neighbour->getEndType(neighbourLevel, 1 - side) != SectorEndType::None)
 			return reject("The shared boundary is not an open wall");
+		try
+		{
+			validatePhysicalControlBoundary(sector->getLayerIndex(), globalY,
+				side == CORE_SIDE_LEFT ? sector->getCellX() : sector->getCellX() + sector->getCellsWide());
+		}
+		catch (exception const& error) { return reject(error.what()); }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -4892,6 +4648,11 @@ namespace core
 		string diagnostic;
 		if (!canRemoveLocationWall(sectorIndex, levelIndex, side, &diagnostic))
 			throw WorldException(this, "World::removeLocationWall - " + diagnostic);
+		auto wallSector = _getSector(sectorIndex);
+		auto const boundaryX = side == CORE_SIDE_LEFT ? wallSector->getCellX()
+			: wallSector->getCellX() + wallSector->getCellsWide();
+		(void)planPhysicalControls(wallSector->getLayerIndex(), ~0u,
+			wallSector->getCellY() + levelIndex, nullptr, ~0u, boundaryX);
 		beginStructuralEdit("removeLocationWall");
 
 		auto sector = _getSector(sectorIndex);
@@ -4905,6 +4666,7 @@ namespace core
 		auto const neighbourLevel = globalY - neighbour->getCellY();
 		sector->removeEndWall(levelIndex, side);
 		neighbour->removeEndWall(neighbourLevel, 1 - side);
+		reflowAllPhysicalControls();
 
 		ConstructionRecord record{ ConstructionType::RemoveWall };
 		record.a = sectorIndex; record.b = levelIndex; record.i = side;
@@ -4932,6 +4694,7 @@ namespace core
 		auto const neighbourLevel = globalY - neighbour->getCellY();
 		sector->addEndWall(levelIndex, side);
 		neighbour->addEndWall(neighbourLevel, 1 - side);
+		reflowAllPhysicalControls();
 
 		// An open wall is persisted as a RemoveWall command. Restoring the wall
 		// removes either side's command for this same physical boundary.
@@ -4954,10 +4717,13 @@ namespace core
 	World::CreateObjectResult World::_createSectorButton(string const& name, shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index)
 	{
 		invalidateSimulationSnapshot();
-		auto side = CORE_SIDE_MIDDLE;
 		uint32_t buttonX = sector->getCellX() + x;
-
-		auto const& obj = createPhysicalControl(name, sector->getLayerIndex(), buttonX, y, side, flags);
+		physicalControl::Demand demand;
+		demand.owner = { physicalControl::OwnerType::LocationLightSwitch,
+			{ sector->getLayerIndex(), buttonX, y, 1, 1 },
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, buttonX, y } };
+		auto const& obj = createPhysicalControl(name, sector->getLayerIndex(), y, demand, flags);
 
 		if (index)
 		{
@@ -4967,41 +4733,22 @@ namespace core
 		return obj;
 	}
 
-	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index)
+	World::CreateObjectResult World::_createDoorButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index, uint32_t approachSide)
 	{
 		invalidateSimulationSnapshot();
-		int side = ((x + cellsWide) - 1) == sector->getCellX1() ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
-		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
-		uint32_t alternateX = ~0u;
-		int alternateSide = -1;
-		if (side == CORE_SIDE_RIGHT && x > sector->getCellX0())
-		{
-			alternateX = x;
-			alternateSide = CORE_SIDE_LEFT;
-		}
-		else if (side == CORE_SIDE_LEFT && x + cellsWide - 1 < sector->getCellX1())
-		{
-			alternateX = x + cellsWide - 1;
-			alternateSide = CORE_SIDE_RIGHT;
-		}
-
-		auto obj = createPhysicalControl("Door button", sector->getLayerIndex(), buttonX, y,
-			side, flags, nullptr, alternateX, alternateSide);
-
-		if (index)
-		{
-			*index = obj.index;
-		}
-
+		auto demand = doorControlDemand(sector, x, y, cellsWide, approachSide);
+		auto obj = createPhysicalControl("Door button", sector->getLayerIndex(), y, demand, flags);
+		if (index) *index = obj.index;
 		return obj;
 	}
 
 	World::CreateObjectResult World::_createBulkheadDoorButton(shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index)
 	{
 		invalidateSimulationSnapshot();
-		uint32_t buttonX = side == CORE_SIDE_LEFT ? sector->getCellX1() : sector->getCellX0();
-
-		auto obj = createPhysicalControl("BulkheadDoor button", sector->getLayerIndex(), buttonX, y, CORE_SIDE_MIDDLE, 0);
+		uint32_t thresholdX = side == CORE_SIDE_LEFT ? sector->getCellX1() + 1 : sector->getCellX0();
+		auto demand = insetControlDemand(sector, physicalControl::OwnerType::BulkheadDoor,
+			{ sector->getLayerIndex(), thresholdX, y, 2, 1 }, y, side);
+		auto obj = createPhysicalControl("BulkheadDoor button", sector->getLayerIndex(), y, demand, 0);
 
 		if (index)
 		{
@@ -5014,64 +4761,9 @@ namespace core
 	World::CreateObjectResult World::_createForceBridgeButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index)
 	{
 		invalidateSimulationSnapshot();
-		string caller = format("_createForceBridgeButton(<sector>, {}, {}, {}, {}, {}, <index>)", x, y, cellsWide, side, flags);
-		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
-
-		// Check position of button cell
-		validateCellIsInSector(caller, buttonX, y, sector);
-
-		auto obj = createPhysicalControl("ForceBridge button", sector->getLayerIndex(), buttonX, y, side, flags);
-
-		if (index)
-		{
-			*index = obj.index;
-		}
-
-		return obj;
-	}
-
-	World::CreateObjectResult World::_createLadderButton(shared_ptr<const Sector> sector,
-		uint32_t x, uint32_t y, int side, uint32_t flags, uint32_t* index,
-		bool insetWithinCell)
-	{
-		invalidateSimulationSnapshot();
-		string caller = format("_createLadderButton(<sector>, {}, {}, {}, {}, <index>)", x, y, side, flags);
-		uint32_t buttonX = x;
-
-		// Check position of button cell
-		validateCellIsInSector(caller, buttonX, y, sector);
-
-		auto obj = createPhysicalControl("Ladder button", sector->getLayerIndex(), buttonX, y, side, flags);
-		if (insetWithinCell)
-		{
-			for (auto& placement : mPhysicalControlPlacements)
-			{
-				if (placement.sectorIndex != obj.sector->getIndex()
-					|| placement.objectIndex != obj.index) continue;
-				placement.edgeInset = 0.2f;
-				break;
-			}
-			reflowPhysicalControls(sector->getLayerIndex(), sector->getIndex(), y);
-		}
-
-		if (index)
-		{
-			*index = obj.index;
-		}
-
-		return obj;
-	}
-
-	World::CreateObjectResult World::_createPlatformLiftButton(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index)
-	{
-		invalidateSimulationSnapshot();
-		string caller = format("_createPlatformLiftButton(<sector>, {}, {}, {}, {}, {}, <index>)", x, y, cellsWide, side, flags);
-		uint32_t buttonX = x + (side == CORE_SIDE_LEFT ? 0 : cellsWide - 1);
-
-		// Check position of button cell
-		validateCellIsInSector(caller, buttonX, y, sector);
-
-		auto obj = createPhysicalControl("Platform lift button", sector->getLayerIndex(), buttonX, y, side, flags);
+		auto demand = insetControlDemand(sector, physicalControl::OwnerType::ForceBridge,
+			{ sector->getLayerIndex(), x, y, cellsWide, 1 }, y, side);
+		auto obj = createPhysicalControl("ForceBridge button", sector->getLayerIndex(), y, demand, flags);
 
 		if (index)
 		{
@@ -5389,13 +5081,15 @@ namespace core
 					if ((uint32_t)((int)existing.sector->getCellY() + existing.sectorOffsetY) == y)
 						return reject("This lift already has a stop on this level");
 				}
-				if (x == sectors[0]->getCellX0() && x + options.width - 1 == sectors[0]->getCellX1())
-					return reject("There is no space to place the Lift call button");
+				auto demand = doorControlDemand(sectors[0], x, y, options.width, 0);
+				(void)planPhysicalControls(layerIndex, sectors[0]->getIndex(), y, &demand);
 			}
-			else for (int side = 0; side < 2; ++side)
-				if (options.controls[side] && x == sectors[side]->getCellX0()
-					&& x + options.width - 1 == sectors[side]->getCellX1())
-					return reject("There is no space to place a Door Button on this side");
+			else for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (!options.controls[side]) continue;
+				auto demand = doorControlDemand(sectors[side], x, y, options.width, side);
+				(void)planPhysicalControls(sectors[side]->getLayerIndex(), sectors[side]->getIndex(), y, &demand);
+			}
 		}
 		catch (std::exception const& error)
 		{
@@ -5962,12 +5656,10 @@ namespace core
 		for (uint32_t side = 0; side < 2; ++side)
 		{
 			if (hasButton[side]) continue;
-			if (doorObject->getCellX() == sides[side]->getCellX0()
-				&& doorObject->getCellX() + door->getCellsWide() - 1 == sides[side]->getCellX1())
-			{
-				throw WorldException(this,
-					"There is no space to place Door Buttons on both sides of this Door");
-			}
+			auto demand = doorControlDemand(sides[side], doorObject->getCellX(),
+				doorObject->getCellY(), door->getCellsWide(), side);
+			(void)planPhysicalControls(sides[side]->getLayerIndex(), sides[side]->getIndex(),
+				doorObject->getCellY(), &demand);
 		}
 
 		beginStructuralEdit("addSectorDoorButton");
@@ -5976,7 +5668,7 @@ namespace core
 		{
 			if (hasButton[side]) continue;
 			auto control = _createDoorButton(sides[side], doorObject->getCellX(),
-				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE);
+				doorObject->getCellY(), door->getCellsWide(), CORE_BUTTON_F_AUTO_REENABLE, nullptr, side);
 			// A Door Button renders like its Door: solid on the Layer the Door was
 			// authored on, an outline from every other Layer.
 			auto button = static_pointer_cast<Button>(
@@ -6043,7 +5735,21 @@ namespace core
 					&& record.b == doorObject->getCellX()
 					&& record.c == door->getCellsWide();
 			});
-		return source != mConstructionRecords.end() && !(source->p && source->q);
+		if (source == mConstructionRecords.end() || (source->p && source->q)) return false;
+		try
+		{
+			shared_ptr<const Sector> sides[] = { door->getFrontSector(), door->getBackSector() };
+			for (uint32_t side = 0; side < 2; ++side)
+			{
+				if (side == 0 ? source->p : source->q) continue;
+				auto demand = doorControlDemand(sides[side], doorObject->getCellX(),
+					doorObject->getCellY(), door->getCellsWide(), side);
+				(void)planPhysicalControls(sides[side]->getLayerIndex(), sides[side]->getIndex(),
+					doorObject->getCellY(), &demand);
+			}
+		}
+		catch (exception const&) { return false; }
+		return true;
 	}
 
 	bool World::canRemoveSectorDoorButton(uint32_t sectorIndex, uint32_t objectIndex) const
@@ -6300,12 +6006,7 @@ namespace core
 		{
 			if (options.controls[i])
 			{
-				if (x == sectors[i]->getCellX0() && (x + options.width - 1) == sectors[i]->getCellX1())
-				{
-					throw WorldException(this, format("{} - No space to place Buttons for Door", caller));
-				}
-
-				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index);
+				auto buttonObject = _createDoorButton(sectors[i], x, y, cellsWide, CORE_BUTTON_F_AUTO_REENABLE, &createdControls[i].index, (uint32_t)i);
 				createdControls[i].type = SectorObjectType::InteractionPoint;
 				createdControls[i].sector = sectors[i];
 				// A Door Button renders like its Door: solid on the authored Layer,
@@ -6630,6 +6331,13 @@ namespace core
 				SectorObjectType::BulkheadDoor, left.sectorIndex);
 			validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
 				SectorObjectType::BulkheadDoor, right.sectorIndex);
+			vector<physicalControl::Demand> demands;
+			for (int controlSide = 0; controlSide < CORE_NUM_SIDES; ++controlSide)
+				if (options.controls[controlSide])
+					demands.push_back(insetControlDemand(mSectors[controlSide == CORE_SIDE_LEFT ? left.sectorIndex : right.sectorIndex],
+						physicalControl::OwnerType::BulkheadDoor, { layerIndex, thresholdX, y, 2, 1 }, y, controlSide));
+			validatePhysicalControlBoundary(layerIndex, y, thresholdX);
+			validatePhysicalControlAdditions(demands, thresholdX);
 		}
 		catch (Exception const& error) { return reject(error.getMessage()); }
 		catch (exception const& error) { return reject(error.what()); }
@@ -6699,6 +6407,7 @@ namespace core
 		// Update cells
 		cellDef0.bulkheadIndices[CORE_SIDE_RIGHT] = doorObject.index;
 		cellDef1.bulkheadIndices[CORE_SIDE_LEFT] = doorObject.index;
+		reflowAllPhysicalControls();
 
 		// Add buttons: place two, one of each side.
 		auto sector0 = _getSector(cellDef0.sectorIndex);
@@ -6769,9 +6478,17 @@ namespace core
 	World::CreateObjectResult World::addSectorLightSwitch(uint32_t sectorIndex, uint32_t xOffset)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addSectorLightSwitch");
 		auto sector = _getSector(sectorIndex);
-		auto ctrl = _createSectorButton("Lightswitch", sector, xOffset, 0, CORE_BUTTON_F_AUTO_REENABLE);
+		if (!isLocationLike(sector->getType()) || xOffset >= sector->getCellsWide())
+			throw WorldException(this, "Light switch requires an authored Location host cell");
+		physicalControl::Demand demand;
+		demand.owner = { physicalControl::OwnerType::LocationLightSwitch,
+			{ sector->getLayerIndex(), sector->getCellX() + xOffset, sector->getCellY(), 1, 1 },
+			{ sector->getLayerIndex(), sector->getCellX(), sector->getCellY(),
+				sector->getCellsWide(), sector->getLevelsHigh() }, { 0, sector->getCellX() + xOffset, sector->getCellY() } };
+		(void)planPhysicalControls(sector->getLayerIndex(), sectorIndex, sector->getCellY(), &demand);
+		beginStructuralEdit("addSectorLightSwitch");
+		auto ctrl = _createSectorButton("Lightswitch", sector, xOffset, sector->getCellY(), CORE_BUTTON_F_AUTO_REENABLE);
 
 		auto object = ctrl.sector->_getObject(ctrl.index);
 		DeviceCommand command;
@@ -6831,7 +6548,11 @@ namespace core
 		// every Ladder in this column can shorten to the newly nearest Walkway.
 		if (mBuildFinished && !mDeserializingConstruction)
 		{
-			beginStructuralEdit("addSectorWalkway");
+			// The detached replay below validates all affected control families,
+			// including new Ladder endpoints and Platform Stops. Do not dirty the
+			// live topology before that validation succeeds.
+			if (!mSimulationPaused)
+				throw WorldException(this, "addSectorWalkway is a structural edit and requires pauseSimulation() before it can run");
 			auto room = _getSector(sectorIndex);
 			for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 			{
@@ -7314,6 +7035,18 @@ namespace core
 			return reject("The Force Bridge requires Ground or a Walkway on its left");
 		if (!supported(layer->getCellDefinition(x + options.width, y)))
 			return reject("The Force Bridge requires Ground or a Walkway on its right");
+		try
+		{
+			validateSectorForceBridgeOptions("World::canAddSectorForceBridge", options);
+			vector<physicalControl::Demand> demands;
+			for (uint32_t i = 0; i < options.controlCount; ++i)
+				demands.push_back(insetControlDemand(room, physicalControl::OwnerType::ForceBridge,
+					{ room->getLayerIndex(), x, y, options.width, 1 }, y,
+					i == 0 ? options.fromSide : 1 - options.fromSide));
+			validatePhysicalControlAdditions(demands);
+		}
+		catch (Exception const& error) { return reject(error.getMessage()); }
+		catch (exception const& error) { return reject(error.what()); }
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
@@ -7327,7 +7060,6 @@ namespace core
 			throw WorldException(this, format("{} - {}", caller, diagnostic));
 		beginStructuralEdit("addSectorForceBridge");
 		ASSERT_SIDE_OK(options.fromSide);
-		validateSectorForceBridgeOptions(caller, options);
 
 		auto sector = _getSector(sectorIndex);
 		auto layerIndex = sector->getLayerIndex();
@@ -7449,7 +7181,12 @@ namespace core
 		for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 		{
 			auto object = room->getObject(i);
-			if (!object || object->getObjectType() == SectorObjectType::Walkway) continue;
+			// A Door's back approach may share the column, matching Door
+			// creation after Ladder authoring. Its front footprint still blocks.
+			if (auto door = dynamic_pointer_cast<const DoorSectorObject>(object);
+				door && door->getDoor()->getBackSector() == room) continue;
+			if (!object || object->getObjectType() == SectorObjectType::Walkway
+				|| object->getObjectType() == SectorObjectType::InteractionPoint) continue;
 			uint32_t const objectX0 = object->getCellX();
 			uint32_t const objectX1 = objectX0 + (uint32_t)ceil(object->getSize().x) - 1;
 			if (x < objectX0 || x > objectX1) continue;
@@ -7490,7 +7227,6 @@ namespace core
 	World::CreateLadderResult World::addSectorLadder(uint32_t sectorIndex, uint32_t levelIndex, uint32_t xOffset, CreateLadderOptions const& options)
 	{
 		invalidateSimulationSnapshot();
-		beginStructuralEdit("addSectorLadder");
 		auto sector = _getSector(sectorIndex);
 		auto layerIndex = sector->getLayerIndex();
 
@@ -7529,6 +7265,13 @@ namespace core
 			validateCellTraversableOnFoot(caller, "Ladder", layerIndex, x, y0);
 			validateCellTraversableOnFoot(caller, "Ladder", layerIndex, x, y1);
 		}
+
+		physicalControl::Geometry controlGeometry{ layerIndex, x, y, 1, options.levelsHigh };
+		if (options.extensible)
+			validatePhysicalControlAdditions({
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1),
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1) });
+		beginStructuralEdit("addSectorLadder");
 
 		// Create
 		auto layer = getLayer(layerIndex);
@@ -7573,23 +7316,15 @@ namespace core
 
 		if (options.extensible)
 		{
-			if (x == sector->getCellX0() && x == sector->getCellX1())
-			{
-				throw WorldException(this, format("{} - No space to place Buttons for Ladder", caller));
-			}
-
-			// Try and place on the right of the Ladder, unless it's at the end of the Location
-			int side = x == sector->getCellX1() ? CORE_SIDE_LEFT : CORE_SIDE_RIGHT;
-
-			// Lower
-			createdControls[CORE_LADDER_ENDPOINT_LOW] = _createLadderButton(
-				ladderObject.sector, x, y0, side, 0, nullptr, true);
+			// Endpoints independently participate in the complete row allocation.
+			createdControls[CORE_LADDER_ENDPOINT_LOW] = createPhysicalControl("Ladder button", layerIndex, y0,
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y0, 1), 0);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_LOW], CORE_LADDER_ENDPOINT_LOW);
 
 
 			// Upper
-			createdControls[CORE_LADDER_ENDPOINT_HIGH] = _createLadderButton(
-				ladderObject.sector, x, y1, side, 0, nullptr, true);
+			createdControls[CORE_LADDER_ENDPOINT_HIGH] = createPhysicalControl("Ladder button", layerIndex, y1,
+				transportControlDemand(sector, physicalControl::OwnerType::Ladder, controlGeometry, x, y1, 1), 0);
 			registerExtensionControl(createdControls[CORE_LADDER_ENDPOINT_HIGH], CORE_LADDER_ENDPOINT_HIGH);
 
 		}
@@ -7626,13 +7361,17 @@ namespace core
 		if (sectorIndex >= mSectors.size()) return result;
 		auto room = dynamic_pointer_cast<const Location>(mSectors[sectorIndex]);
 		if (!room || room->isCorridor() || xOffset >= room->getCellsWide()) return result;
-		auto layer = mLayers[room->getLayerIndex()];
 		auto x = room->getCellX() + xOffset;
 		auto sideAvailable = [&](uint32_t y, int side)
 		{
-			if (side == CORE_SIDE_LEFT)
-				return x > room->getCellX0() + 1 && layer->getCellDefinition(x - 1, y).isTraversableOnFoot();
-			return x + 1 < room->getCellX1() && layer->getCellDefinition(x + 1, y).isTraversableOnFoot();
+			try
+			{
+				auto demand = transportControlDemand(room, physicalControl::OwnerType::PlatformLift,
+					{ room->getLayerIndex(), x, room->getCellY(), 1, y - room->getCellY() + 1 }, x, y, 1);
+				return any_of(demand.candidates.begin(), demand.candidates.end(), [&](auto const& candidate)
+					{ return candidate.cellX == (side == CORE_SIDE_LEFT ? x : x + 1); });
+			}
+			catch (WorldException const&) { return false; }
 		};
 		for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 		{
@@ -7669,28 +7408,37 @@ namespace core
 		if (stops.size() < 2 || stops.front() != 0)
 			return reject("A PlatformLift requires ground and at least one Walkway stop");
 		auto candidates = getPlatformLiftStopCandidates(sectorIndex, xOffset);
-		bool left = true, right = true;
 		auto x = room->getCellX() + xOffset;
 		auto layer = mLayers[room->getLayerIndex()];
-		left = x > room->getCellX0() + 1
-			&& layer->getCellDefinition(x - 1, room->getCellY()).isTraversableOnFoot();
-		right = x + 1 < room->getCellX1()
-			&& layer->getCellDefinition(x + 1, room->getCellY()).isTraversableOnFoot();
 		for (size_t i = 1; i < stops.size(); ++i)
 		{
 			auto found = find_if(candidates.begin(), candidates.end(), [&](auto const& candidate)
 				{ return candidate.levelOffset == stops[i]; });
 			if (found == candidates.end())
 				return reject(format("No Walkway exists at level {} in the PlatformLift column", stops[i]));
-			left = left && found->leftButton;
-			right = right && found->rightButton;
+			if (!found->leftButton && !found->rightButton)
+				return reject(format("No valid PlatformLift control support at level {}", stops[i]));
 		}
-		if (!left && !right) return reject("The selected stops have no common side for PlatformLift buttons");
+		try
+		{
+			vector<physicalControl::Demand> demands;
+			for (auto stop : stops)
+				demands.push_back(transportControlDemand(room, physicalControl::OwnerType::PlatformLift,
+					{ room->getLayerIndex(), x, room->getCellY(), requested.cellsWide, stops.back() + 1 },
+					x, room->getCellY() + stop, requested.cellsWide));
+			validatePhysicalControlAdditions(demands);
+		}
+		catch (WorldException const& error) { return reject(error.what()); }
 		uint32_t top = stops.back();
 		for (uint32_t i = 0; i < room->getNumObjects(); ++i)
 		{
 			auto object = room->getObject(i);
-			if (!object || object->getObjectType() == SectorObjectType::Walkway) continue;
+			// A Door's back approach may share the column, matching Door
+			// creation after Platform lift authoring (#437). Keep front blockers.
+			if (auto door = dynamic_pointer_cast<const DoorSectorObject>(object);
+				door && door->getDoor()->getBackSector() == room) continue;
+			if (!object || object->getObjectType() == SectorObjectType::Walkway
+				|| object->getObjectType() == SectorObjectType::InteractionPoint) continue;
 			uint32_t objectRight = object->getCellX() + (uint32_t)ceil(object->getSize().x);
 			uint32_t objectTop = object->getCellY() + (uint32_t)ceil(object->getSize().y);
 			if (x >= object->getCellX() && x < objectRight
@@ -7737,7 +7485,7 @@ namespace core
 			throw WorldException(this, format("{} - levelIndex={} out of bounds", caller, levelIndex));
 		}
 
-		bool buttonSidesOk[2] = { true, true };
+		physicalControl::Geometry controlGeometry{ layerIndex, x, y, options.cellsWide, options.stopOffsets.back() + 1 };
 		for (auto stopOffset : options.stopOffsets)
 		{
 			auto iy = y + stopOffset;
@@ -7749,31 +7497,6 @@ namespace core
 				validateCellTraversableOnFoot(caller, "PlatformLift", layerIndex, ix, iy);
 			}
 
-			// Check there is space for buttons.  On each stop, there needs to be, to the left or the right,
-			// an empty cell with a floor.  Check for both and left and right sides, and update variable if
-			// there is no space. 
-			if (x == 0 || (x - 1) <= sector->getCellX0() || !layer->getCellDefinition(x - 1, iy).isTraversableOnFoot())
-			{
-				buttonSidesOk[CORE_SIDE_LEFT] = false;
-			}
-			if ((x + options.cellsWide) >= sector->getCellX1() || !layer->getCellDefinition(x + 1, iy).isTraversableOnFoot())
-			{
-				buttonSidesOk[CORE_SIDE_RIGHT] = false;
-			}
-		}
-
-		int side;
-		if (buttonSidesOk[CORE_SIDE_RIGHT])
-		{
-			side = CORE_SIDE_RIGHT;
-		}
-		else if (buttonSidesOk[CORE_SIDE_LEFT])
-		{
-			side = CORE_SIDE_LEFT;
-		}
-		else
-		{
-			throw WorldException(this, format("{} - No space to place Buttons for PlatformLift", caller));
 		}
 
 		// Create
@@ -7794,9 +7517,9 @@ namespace core
 		liftRes.lift = liftObject;
 		for (auto stopOffset : options.stopOffsets)
 		{
-			CreateObjectResult control = _createPlatformLiftButton(sector, x,
-				y + stopOffset, options.cellsWide, side, CORE_BUTTON_F_AUTO_REENABLE,
-				&control.index);
+			CreateObjectResult control = createPhysicalControl("Platform lift button", layerIndex, y + stopOffset,
+				transportControlDemand(sector, physicalControl::OwnerType::PlatformLift, controlGeometry,
+					x, y + stopOffset, options.cellsWide), CORE_BUTTON_F_AUTO_REENABLE);
 			liftRes.buttons.push_back(control);
 		}
 
@@ -7824,9 +7547,16 @@ namespace core
 		resource->mQueueLanes.clear();
 		resource->mQueueLanes.resize(stops.size());
 		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
-		auto const queueDirection = side == CORE_SIDE_RIGHT ? 1.0f : -1.0f;
 		for (uint32_t stop = 0; stop < stops.size(); ++stop)
 		{
+			// Queue support is authored and independent at each Stop, not inherited
+			// from another Stop or changed by motion/control conflict reassignment.
+			auto rightX = x + options.cellsWide;
+			auto rightFloor = rightX <= sector->getCellX1()
+				? layer->getCellDefinition(rightX, y + options.stopOffsets[stop]).floorType : CellFloorType::None;
+			auto side = rightFloor == CellFloorType::Ground || rightFloor == CellFloorType::Walkway
+				? CORE_SIDE_RIGHT : CORE_SIDE_LEFT;
+			auto queueDirection = side == CORE_SIDE_RIGHT ? 1.0f : -1.0f;
 			auto& lane = resource->mQueueLanes[stop];
 			lane.sector = SectorId{ (uint64_t)sector->getIndex() + 1 };
 			lane.origin = { side == CORE_SIDE_RIGHT ? (float)(x + options.cellsWide) : (float)x,
@@ -7868,7 +7598,7 @@ namespace core
 			if (i < options.landingControlPermissionRequirements.size())
 				for (auto permission : options.landingControlPermissionRequirements[i])
 					mInteractionPoints.find(callPoint)->mPermissionRequirement.set(permission.value - 1);
-			mAuthoredControlRequirements[callPoint] = { mConstructionRecords.size(), i };
+			mAuthoredControlRequirements[callPoint] = { mDeserializingConstruction ? mConstructionReplayIndex : mConstructionRecords.size(), i };
 			resource->mLiftStops[i].callControl = callPoint;
 
 			DeviceCommand select;
@@ -8300,6 +8030,7 @@ namespace core
 	void World::finishBuild()
 	{
 		invalidateSimulationSnapshot();
+		reflowAllPhysicalControls(true);
 		if (mBuildFinished)
 		{
 			if (!mSimulationPaused)
@@ -8388,6 +8119,17 @@ namespace core
 	shared_ptr<const Object> World::getObjectAtPosition(uint32_t layerIndex, float x, float y,
 		shared_ptr<const SectorObject>* sectorObject) const
 	{
+		// Explicit boundary-owned Buttons can extend into the preceding cell.
+		// Resolve their visible geometry before cell ownership (and Door leaves),
+		// but return the authored host SectorObject for interaction/selection.
+		for (auto const& placement : mPhysicalControlPlacements)
+		{
+			if (placement.layerIndex != layerIndex || placement.objectIndex == ~0u) continue;
+			auto object = mSectors[placement.sectorIndex]->getObject(placement.objectIndex);
+			if (!object || !object->pointInside(x, y)) continue;
+			if (sectorObject) *sectorObject = object;
+			return object->_getObject();
+		}
 		// An open platform is deliberately rendered a little below its nominal
 		// floor. Hit-test its current geometry before resolving the pointer through
 		// a grid cell, because that rendered strip may lie in the cell below its Room.
@@ -10959,6 +10701,18 @@ namespace core
 					break;
 				}
 		}
+		if (auto placement = physicalControlPlacement(id);
+			placement && placement->owner.type == physicalControl::OwnerType::LocationLightSwitch)
+			for (auto& record : mConstructionRecords)
+				if (record.type == ConstructionType::LightSwitch && record.a == placement->sectorIndex
+					&& record.b + placement->owner.hostingLocation.x == placement->owner.geometry.x)
+				{
+					auto& stored = record.controlPermissionRequirements[0];
+					stored.clear();
+					for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
+						if (next.test(bit)) stored.push_back(static_cast<uint32_t>(bit + 1));
+					break;
+				}
 		if (auto unit = lookupDumbwaiter(point->mDumbwaiterOwner))
 			for (auto& record : mConstructionRecords)
 				if (record.type == ConstructionType::Dumbwaiter && record.dumbwaiterId == unit->getId())

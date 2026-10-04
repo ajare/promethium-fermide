@@ -12,6 +12,7 @@
 
 
 #include "core/Defines.h"
+#include "core/PhysicalControlPlacement.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
 #include "core/PermissionSet.h"
@@ -973,11 +974,7 @@ namespace core
 		std::vector<ConstructionRecord> mConstructionRecords;
 		bool mDeserializingConstruction{ false };
 
-		struct PhysicalControlCandidate
-		{
-			uint32_t cellX{ 0 };
-			int side{ CORE_SIDE_MIDDLE };
-		};
+		using PhysicalControlCandidate = physicalControl::Candidate;
 
 		struct PhysicalControlPlacement
 		{
@@ -988,12 +985,17 @@ namespace core
 			std::vector<PhysicalControlCandidate> candidates;
 			uint32_t defaultCandidate{ 0 };
 			uint32_t currentCandidate{ 0 };
-			float edgeInset{ 0.0f };
 			Vector2 interactionOffset{};
 			bool hasInteractionOffset{ false };
+			physicalControl::Owner owner{};
 		};
 
+		PhysicalControlPlacement const* physicalControlPlacement(InteractionPointId point) const;
 		std::vector<PhysicalControlPlacement> mPhysicalControlPlacements;
+		bool mResolvingPhysicalControls{ false };
+		// Current record ordinal during detached/live replay, independent of the
+		// not-yet-adopted construction log. Used for stable landing permissions.
+		size_t mConstructionReplayIndex{ 0 };
 
 	private:
 
@@ -1071,7 +1073,7 @@ namespace core
 			std::vector<ConstructionRecord> records) const;
 
 		std::set<DumbwaiterId> locationEditDumbwaiters(LocationEditPlan const& plan) const;
-		std::array<uint32_t, 2> dumbwaiterRecordLandings(ConstructionRecord const& record) const;
+		std::array<uint32_t, 4> dumbwaiterRecordLandings(ConstructionRecord const& record) const;
 		void removeDumbwaiterRecords(std::vector<ConstructionRecord>& records,
 			std::set<DumbwaiterId> const& removed, std::vector<uint32_t>* sectorMap = nullptr) const;
 		void reconcileDumbwaiterReplay(std::vector<ConstructionRecord>& records,
@@ -1270,7 +1272,6 @@ namespace core
 		bool validateStaircaseEndpoint(uint32_t layerIndex, uint32_t x, uint32_t y, bool upperEndpoint,
 			int riseSide, std::string& diagnostic) const;
 
-		void validateCellHasNoPhysicalControl(std::string const& caller, uint32_t layerIndex, uint32_t x, uint32_t y, int side) const;
 
 		void validateCellTraversableOnFoot(std::string const& caller, std::string const& desiredObject, uint32_t layerIndex, uint32_t x, uint32_t y) const;
 
@@ -1345,10 +1346,38 @@ namespace core
 
 		CreateObjectResult createBulkheadDoor(uint32_t layerIndex, uint32_t x, uint32_t y, int side);
 
-		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex, uint32_t x, uint32_t y, int side, uint32_t flags, uint32_t* vertexIdentifier = nullptr,
-			uint32_t alternateX = ~0u, int alternateSide = -1);
-
+		// All stationary physical owners use authored canonical demands.
+		CreateObjectResult createPhysicalControl(std::string const& name, uint32_t layerIndex,
+			uint32_t y, physicalControl::Demand const& demand, uint32_t flags,
+			uint32_t* vertexIdentifier = nullptr);
+		physicalControl::Demand transportControlDemand(std::shared_ptr<const Sector> sector,
+			physicalControl::OwnerType type, physicalControl::Geometry geometry,
+			uint32_t x, uint32_t y, uint32_t width) const;
+		physicalControl::Demand insetControlDemand(std::shared_ptr<const Sector> sector,
+			physicalControl::OwnerType type, physicalControl::Geometry geometry,
+			uint32_t y, int side) const;
+		void validatePhysicalControlAdditions(std::vector<physicalControl::Demand> const& demands,
+			uint32_t blockedX = ~0u) const;
+		physicalControl::Demand doorControlDemand(std::shared_ptr<const Sector> sector,
+			uint32_t x, uint32_t y, uint32_t width, uint32_t role = 0) const;
+		physicalControl::Demand validPhysicalControlDemand(physicalControl::Demand demand,
+			uint32_t y, uint32_t blockedX = ~0u, uint32_t openedX = ~0u,
+			uint32_t unsupportedX = ~0u) const;
+		struct PhysicalControlPlan
+		{
+			std::vector<uint32_t> row, assignment;
+			std::vector<physicalControl::Demand> demands;
+		};
+		PhysicalControlPlan planPhysicalControls(uint32_t layer, uint32_t sector, uint32_t y,
+			physicalControl::Demand const* extra = nullptr, uint32_t blockedX = ~0u,
+			uint32_t openedX = ~0u, uint32_t unsupportedX = ~0u) const;
+		void validatePhysicalControlBoundary(uint32_t layer, uint32_t y, uint32_t blockedX) const;
+		void validatePhysicalControlSectorCreation(uint32_t layer, uint32_t x, uint32_t y,
+			uint32_t width, uint32_t height, bool walls) const;
+		void reflowAllPhysicalControls(bool finalPolicy = false);
 		void reflowPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y);
+		void applyPhysicalControls(uint32_t layerIndex, uint32_t sectorIndex, uint32_t y,
+			std::vector<uint32_t> const& row, std::vector<uint32_t> const& assignment);
 		void bindPhysicalControl(CreateObjectResult& control, InteractionPointId point);
 		InteractionPointId createPhysicalControlInteractionPoint(std::string const& name,
 			CreateObjectResult& control, float standingY, float reach,
@@ -1384,17 +1413,11 @@ namespace core
 
 		CreateObjectResult _createSectorButton(std::string const& name, std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t flags, uint32_t* index = nullptr);
 
-		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr);
+		CreateObjectResult _createDoorButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t flags, uint32_t* index = nullptr, uint32_t approachSide = 0);
 
 		CreateObjectResult _createBulkheadDoorButton(std::shared_ptr<const Sector> sector, uint32_t y, int side, uint32_t* index = nullptr);
 
 		CreateObjectResult _createForceBridgeButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index = nullptr);
-
-		CreateObjectResult _createLadderButton(std::shared_ptr<const Sector> sector,
-			uint32_t x, uint32_t y, int side, uint32_t flags,
-			uint32_t* index = nullptr, bool insetWithinCell = false);
-
-		CreateObjectResult _createPlatformLiftButton(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t cellsWide, int side, uint32_t flags, uint32_t* index = nullptr);
 
 		uint32_t addLocation(std::string const& name, SectorType type, uint32_t layerIndex, uint32_t x, uint32_t y, uint32_t cellsWide, uint32_t levelsHigh, float topLevelHeight, bool isCorridor);
 

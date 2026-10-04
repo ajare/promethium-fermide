@@ -5,7 +5,9 @@ A Dumbwaiter is a non-passenger, fixed 1-cell-wide, 2-Level-high Transit. Paint
 position. Rooms, Corridors and Facades on the immediately front Layer can supply
 one shared multi-Level Location or two separate Locations. Both cells need Ground
 or Walkway support; Force Bridges, occupied shafts and conflicting apertures refuse
-placement without changing the World. No neighbouring button cell is required.
+placement without changing the World. Landing controls use the independent
+right-first placement policy below; a valid left fallback needs no neighbouring
+button cell.
 
 Selection on the shaft Layer exposes **Initial Stop** (Lower by default),
 **Travel time (seconds)** (2 by default, inclusive 0.1–60), and **Delete Dumbwaiter**.
@@ -58,12 +60,39 @@ opening writes exactly the authored document, never runtime position, progress,
 requests or operations. No schema change is needed for the runtime-only cycle.
 Loading and Reset restore the authored presentation.
 
+## Independent physical landing placement (#434)
+
+Each one-cell landing independently prefers host `X+1` at offset `0.0`, otherwise
+`X` at offset `0.0`. The host must belong to that landing Location and have Ground
+or Walkway support. Retained shared walls and controlled Bulkhead thresholds
+invalidate straddling candidates, regardless of runtime opening; removed shared
+walls and outer boundaries do not waive host/support checks.
+
+Both controls join the canonical allocator and may share same-Location stacks of
+up to four independently operated Buttons. The owning key is the complete authored
+shaft geometry and Dumbwaiter type, with lower/upper roles ordered by Level. Each
+control retains its own command, identity and permission requirement. Graph
+co-location shares a normal-height approach, not authorization or operations.
+Production rendering and mouse targeting use the physical Button shape; the old
+aperture-inset rectangle is no longer drawn. Standalone BoothWindow back-side
+panels remain invisible and are not physical allocation demands.
+
+Creation, movement, clipboard, deletion, dependent structural reconciliation,
+load, replay and undo/redo reconstruct through the same policy. Removing aperture
+support removes the complete unit and both demands; removing only a potential
+host must preserve a valid allocation or refuse the edit. Invalid edits and
+incompatible loads are transactional refusals, never missing required controls.
+Legacy landing requirements and surviving Marker identities are retained when
+physical children shift older object slots. No placement/stack state is serialized,
+and car motion never changes landing placement.
+
 ## Agent landing operation (#377)
 
-Each landing owns one centred Interaction point (`getLandingButton(stop)`) at
-`(x + 0.5, Level)`, with inclusive 0.25 world-unit reach and the existing one-tick
-press duration. The visible button remains immediately right of its aperture;
-there is no shaft-side control. `World::requestDumbwaiterLanding(id, stop, actor)`
+Each landing owns one physical Button and a distinct Interaction point
+(`getLandingButton(stop)`), with inclusive 0.25 world-unit reach and the existing
+one-tick press duration. Its Interaction point remains at the allocated centre X
+and walkable Level, even when its visible Button is stacked. There is no
+shaft-side control. `World::requestDumbwaiterLanding(id, stop, actor)`
 uses the typed `PressDumbwaiterLanding` binding and ordinary Interaction outcomes.
 Agent Selection exposes a manual landing press, disabled when ineligible or busy.
 Requests never auto-approach, move the Agent, create delivery behaviour or route
