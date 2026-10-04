@@ -80,12 +80,26 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 	static int localDepth = 0;
 	static bool snap = true;
 	static std::string key, diagnostic;
+	static std::weak_ptr<core::World> filenameWorld;
+	static std::string loadedFilename;
+	if (filenameWorld.lock() != world || loadedFilename != world->furnitureCatalogueFilename())
+	{
+		filenameWorld = world;
+		loadedFilename = world->furnitureCatalogueFilename();
+		std::snprintf(filename, sizeof(filename), "%s",
+			loadedFilename.empty() ? "chair.furniture.yaml" : loadedFilename.c_str());
+	}
 	ImGui::InputText("Catalogue beside World", filename, sizeof(filename));
 	if (ImGui::Button("Load Furniture catalogue"))
 		selectFurnitureCatalogue(world, worldPath, filename, diagnostic);
 	if (auto catalogue = world->furnitureCatalogue())
 	{
 		auto definition = catalogue->definition(key);
+		if (!definition && !catalogue->definitions().empty())
+		{
+			key = catalogue->definitions().begin()->first;
+			definition = catalogue->definition(key);
+		}
 		if (ImGui::BeginCombo("Furniture definition", definition ? definition->label.c_str() : "Select"))
 		{
 			for (auto const& [entryKey, entry] : catalogue->definitions())

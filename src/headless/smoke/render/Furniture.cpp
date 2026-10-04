@@ -102,12 +102,14 @@ namespace
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
 		world->attachFurnitureCatalogue("chair.furniture.yaml", core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/chair.furniture.yaml")));
-		auto id = world->placeFurniture(room, "chair", 2.25f, 0, "Chair"); world->finishBuild();
+		auto id = world->placeFurniture(room, "chair", 2.25f, 0, "Chair");
+		world->addSectorMarker(room, 0, 6.5f, "Standalone"); world->finishBuild();
 		float artworkX = 2.25f;
 		RenderWorldScope scope(world);
-		auto check = [&](LayerRenderStyle style, WorldDrawList::ClipRectangle clip, unsigned expected) {
+		auto check = [&](LayerRenderStyle style, WorldDrawList::ClipRectangle clip, unsigned expected, bool fullWorld = false) {
 			WorldDrawList drawing(clip);
-			renderSector(world->getSector(room), 0, style, false, ImColor(192,192,255), &drawing);
+			if (fullWorld) renderWorld(world, &drawing);
+			else renderSector(world->getSector(room), 0, style, false, ImColor(192,192,255), &drawing);
 			unsigned triangles = 0;
 			for (auto const& command : drawing.commands())
 				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
@@ -121,8 +123,48 @@ namespace
 							&& (point.y == 600 || point.y == 600 - CORE_LEVEL_HEIGHT_PIXELS), "Chair artwork was scaled or lost fractional placement");
 				}
 			require(triangles == expected, "Chair draw-command/Layer style mismatch");
+			if (expected && style == LayerRenderStyle::Solid)
+			{
+				size_t lastChair = 0, lastMarker = 0;
+				unsigned markerTriangles = 0;
+				for (size_t i = 0; i < drawing.commands().size(); ++i)
+					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
+						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+					{
+						auto u = std::min({triangle->texcoords[0].x, triangle->texcoords[1].x, triangle->texcoords[2].x});
+						auto v = std::min({triangle->texcoords[0].y, triangle->texcoords[1].y, triangle->texcoords[2].y});
+						if (u == 256.5f / 320 && v == 160.5f / 480) lastChair = i;
+						if (u == 152.5f / 320 && v == 282.5f / 480) { lastMarker = i; ++markerTriangles; }
+					}
+				require(markerTriangles >= 2 && lastMarker > lastChair + 1,
+					"Chair seat Marker is missing or obscured by Furniture artwork: marker=" + std::to_string(lastMarker)
+					+ " chair=" + std::to_string(lastChair) + " commands=" + std::to_string(drawing.commands().size()));
+			}
 		};
 		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 2);
+		gUISettings.visibleLayer = 0;
+		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 4, true);
+		require(UISettings{}.renderMarkers, "Markers must be visible by default");
+		auto markerIds = world->getMarkerIds();
+		for (bool visible : {true, false, true})
+		{
+			gUISettings.renderMarkers = visible;
+			WorldDrawList drawing({{0,0},{800,600}});
+			renderWorld(world, &drawing);
+			unsigned markerTriangles = 0, chairTriangles = 0;
+			for (auto const& command : drawing.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
+				{
+					auto u = std::min({triangle->texcoords[0].x, triangle->texcoords[1].x, triangle->texcoords[2].x});
+					auto v = std::min({triangle->texcoords[0].y, triangle->texcoords[1].y, triangle->texcoords[2].y});
+					if (u == 152.5f / 320 && v == 282.5f / 480) ++markerTriangles;
+					if (u == 256.5f / 320 && v == 160.5f / 480) ++chairTriangles;
+				}
+			require(markerTriangles == (visible ? 6u : 0u), "Marker visibility toggle missed standalone or Furniture-owned Markers");
+			require(chairTriangles == 4 && world->getMarkerIds() == markerIds,
+				"Marker visibility toggle changed Furniture rendering or Marker identities");
+		}
 		check(LayerRenderStyle::Aperture, {{150,450},{190,590}}, 2);
 		check(LayerRenderStyle::Wireframe, {{0,0},{800,600}}, 0);
 		world->pauseSimulation();
@@ -330,6 +372,7 @@ namespace
 				WorldDrawList drawing(clip);
 				renderSector(attached->getSector(attachedRoom), 0, style, false, ImColor(192,192,255), &drawing);
 				size_t deskLast = 0, agentFirst = drawing.commands().size(), agentLast = 0, chairFirst = drawing.commands().size();
+				size_t furnitureLast = 0, markerFirst = drawing.commands().size();
 				unsigned deskTriangles = 0, chairTriangles = 0, agentTriangles = 0;
 				for (size_t i = 0; i < drawing.commands().size(); ++i)
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&drawing.commands()[i]);
@@ -337,6 +380,7 @@ namespace
 					{
 						if (triangle->texcoords[0].x >= 256.f / 320)
 						{
+							furnitureLast = i;
 							auto x = std::min({triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x});
 							if (x == attached->furniture().back().x * CORE_CELL_WIDTH_PIXELS)
 							{ ++chairTriangles; chairFirst = std::min(chairFirst, i); }
@@ -344,11 +388,18 @@ namespace
 						}
 						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
 						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
+						else if (triangle->texcoords[0].x >= 152.f / 320 && triangle->texcoords[0].x < 169.f / 320
+							&& triangle->texcoords[0].y >= 282.f / 480 && triangle->texcoords[0].y < 305.f / 480)
+							markerFirst = std::min(markerFirst, i);
 						else continue;
 						require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.minimum.y == clip.minimum.y
 							&& triangle->clip.maximum.x == clip.maximum.x && triangle->clip.maximum.y == clip.maximum.y,
 							"Attached content escaped aperture clipping");
 					}
+				if (style == LayerRenderStyle::Solid)
+					require(markerFirst < drawing.commands().size() && markerFirst > furnitureLast,
+						"Overlapping desk/chair artwork obscured Furniture-owned Markers");
+				else require(markerFirst == drawing.commands().size(), "Furniture Marker overlay exposed a non-selected Layer");
 				if (style == LayerRenderStyle::Wireframe || style == LayerRenderStyle::Hidden)
 					require(!deskTriangles && !chairTriangles && !agentTriangles, "Attachment exposed hidden Layer content");
 				else

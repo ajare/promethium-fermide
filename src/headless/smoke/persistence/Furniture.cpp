@@ -18,11 +18,30 @@ namespace persistence
 		std::filesystem::create_directory(root);
 		auto cataloguePath = root / "furniture.furniture.yaml";
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.yaml"), cataloguePath);
+		// Fresh authoring must not allocate any Marker for a circulation-only desk.
+		core::World circulation("Desk without destinations", 8, 2);
+		auto room = circulation.addRoom("Room", 0, 0, 0, 8, 1);
+		circulation.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::load(cataloguePath));
+		auto deskId = circulation.placeFurniture(room, "desk", 2, 0, "Desk", 2);
+		circulation.finishBuild(); circulation.pauseSimulation();
+		require(circulation.getMarkerIds().empty() && circulation.furniture().front().destinations.empty()
+			&& !circulation.furniture().front().marker, "Desk placement allocated a usable Marker");
+		for (auto extension : {"world.yaml", "world"})
+		{
+			auto output = root / (std::string("circulation.") + extension);
+			circulation.saveTo(output.string());
+			auto loaded = core::loadWorldDocument(output);
+			require(loaded->furniture().front().id == deskId && loaded->getMarkerIds().empty()
+				&& loaded->furniture().front().destinations.empty() && !loaded->furniture().front().marker,
+				"Desk save/reopen invented destinations");
+		}
 		auto source = root / "demo.world.yaml";
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.world.yaml"), source);
 		auto world = core::loadWorldDocument(source);
 		require(world->furniture().size() == 6, "Required complete Furniture demonstration is missing instances");
 		auto desk = world->furniture()[1];
+		require(desk.destinations.empty() && !desk.marker,
+			"Circulation-only desk created usable Markers");
 		auto sofa = world->furniture()[2];
 		auto walkerId = world->getSimulationSnapshot().agents.front().id;
 		auto walker = world->lookupAgent(walkerId).entity;
@@ -66,6 +85,7 @@ namespace persistence
 		{
 			auto loaded = core::loadWorldDocument(portable / (std::string("authored.") + extension));
 			require(loaded->furniture()[1].id == desk.id && loaded->furniture()[1].x == 2.25f
+				&& loaded->furniture()[1].destinations.empty() && !loaded->furniture()[1].marker
 				&& loaded->furniture()[2].destinations[1].marker == target
 				&& loaded->lookupMarker(target)->getName() == "Chosen sofa destination"
 				&& loaded->furniture()[0].destinations.size() == 2,

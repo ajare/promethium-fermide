@@ -3,6 +3,7 @@
 #include "core/StaircaseTransit.h"
 #include "core/Agent.h"
 #include "core/ExtensibleObject.h"
+#include "core/Button.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -22,6 +23,13 @@ namespace core
 	{
 		auto unit = lookupDumbwaiter(id);
 		return unit && stop < 2 ? requestInteraction(unit->getLandingButton(stop), actor) : InteractionRequestId{};
+	}
+
+	bool World::isDumbwaiterOwnedControl(std::shared_ptr<const SectorObject> const& object) const
+	{
+		auto button = object ? std::dynamic_pointer_cast<const Button>(object->_getObject()) : nullptr;
+		auto point = button ? mInteractionPoints.find(button->getInteractionPointId()) : nullptr;
+		return point && bool(point->mDumbwaiterOwner);
 	}
 
 	bool World::hasDumbwaiters() const
@@ -62,6 +70,17 @@ namespace core
 		if (layer == 0 || layer >= getLayerCount() || x >= mCellsWide
 			|| mLevelsHigh < 2 || y >= mLevelsHigh - 1)
 			return refuse("Dumbwaiter requires a bounded 1x2 shaft behind its landing Layer");
+		bool right = false;
+		for (uint32_t stop = 0; stop < 2; ++stop)
+		{
+			auto const& landing = mLayers[layer - 1]->getCellDefinition(x, y + stop);
+			if (!landing.occupied() || !isLocationLike(mSectors[landing.sectorIndex]->getType()))
+				return refuse("Dumbwaiter landings require Rooms, Corridors, or Facades");
+			auto sector = mSectors[landing.sectorIndex];
+			if (sector->getCellsWide() < 2)
+				return refuse("Dumbwaiter landing Sectors must be at least two cells wide");
+			right = right || x == sector->getCellX();
+		}
 		for (uint32_t stop = 0; stop < 2; ++stop)
 		{
 			auto const& shaft = mLayers[layer]->getCellDefinition(x, y + stop);
@@ -70,6 +89,17 @@ namespace core
 				return refuse("Dumbwaiter shaft footprint is occupied");
 			if (!landing.occupied() || !isLocationLike(mSectors[landing.sectorIndex]->getType()))
 				return refuse("Dumbwaiter landings require Rooms, Corridors, or Facades");
+			auto sector = mSectors[landing.sectorIndex];
+			if (right && x == sector->getCellX1())
+				return refuse("Dumbwaiter landing Buttons require a shared interior cell border");
+			auto controlIndex = landing.controls[right ? CORE_SIDE_RIGHT : CORE_SIDE_LEFT];
+			if (controlIndex != ~0u)
+			{
+				auto button = std::dynamic_pointer_cast<const Button>(sector->getObject(controlIndex)->_getObject());
+				auto point = button ? mInteractionPoints.find(button->getInteractionPointId()) : nullptr;
+				if (!source || !point || point->mDumbwaiterOwner != ignored)
+					return refuse("Dumbwaiter landing Button conflicts with an existing control");
+			}
 			if (landing.floorType != CellFloorType::Ground && landing.floorType != CellFloorType::Walkway)
 				return refuse("Dumbwaiter landings require permanent walkable support");
 			bool ownAperture = source && layer == source->getLayerIndex() && x == source->getCellX()
@@ -128,6 +158,8 @@ namespace core
 	{
 		auto layer = unit->getLayerIndex(), x = unit->getCellX(), y = unit->getCellY();
 		auto id = unit->getId();
+		int side = (x == unit->getStop(0).sector->getCellX() || x == unit->getStop(1).sector->getCellX())
+			? CORE_SIDE_RIGHT : CORE_SIDE_LEFT;
 		for (uint32_t stop = 0; stop < 2; ++stop)
 		{
 			auto& shaft = mLayers[layer]->getCellDefinition(x, y + stop);
@@ -144,11 +176,10 @@ namespace core
 			DeviceCommand press;
 			press.type = DeviceCommandType::PressDumbwaiterLanding;
 			press.dumbwaiter = id; press.stopIndex = stop;
-			unit->mLandingButtons[stop] = createInteractionPoint(
-				stop == 0 ? "Dumbwaiter lower landing" : "Dumbwaiter upper landing",
-				SectorId{uint64_t(unit->getStop(stop).sector->getIndex()) + 1},
-				{float(x) + 0.5f, float(y + stop)}, 0.25f, 0.0f,
-				{{press, InteractionBindingRequirement::Required}});
+			auto name = stop == 0 ? "Dumbwaiter lower landing" : "Dumbwaiter upper landing";
+			auto control = createPhysicalControl(name, layer - 1, x, y + stop, side, 0);
+			unit->mLandingButtons[stop] = createPhysicalControlInteractionPoint(name, control,
+				float(y + stop), 0.25f, 0.0f, {{press, InteractionBindingRequirement::Required}});
 			mInteractionPoints.find(unit->mLandingButtons[stop])->mDumbwaiterOwner = id;
 			auto& landing = mLayers[layer - 1]->getCellDefinition(x, y + stop);
 			landing.sectorObjectType = SectorObjectType::BoothWindow;
@@ -167,6 +198,21 @@ namespace core
 			point->mDumbwaiterOwner = {};
 			removeInteractionPoint(unit->getLandingButton(stop));
 			auto landing = std::const_pointer_cast<Sector>(unit->getStop(stop).sector);
+			auto& cell = mLayers[unit->getLayerIndex() - 1]->getCellDefinition(unit->getCellX(), unit->getCellY() + stop);
+			for (auto& index : cell.controls)
+				if (index != ~0u)
+				{
+					auto object = landing->mObjects[index];
+					auto button = object ? std::dynamic_pointer_cast<Button>(object->_getObject()) : nullptr;
+					if (button && button->getInteractionPointId() == unit->getLandingButton(stop))
+					{
+						auto removed = index;
+						landing->mObjects[index].reset(); index = ~0u;
+						std::erase_if(mPhysicalControlPlacements, [&](auto const& placement) {
+							return placement.sectorIndex == landing->getIndex() && placement.objectIndex == removed;
+						});
+					}
+				}
 			for (auto& object : landing->mObjects)
 				if (auto window = std::dynamic_pointer_cast<WindowSectorObject>(object);
 					window && window->getWindow() == booth) object.reset();
@@ -255,7 +301,7 @@ namespace core
 				{
 					if (unit->getStop(stop).sector != location) continue;
 					auto x = unit->getCellX(), y = unit->getCellY() + stop;
-					bool supported = !plan.remove && x >= plan.x && x - plan.x < plan.cellsWide
+					bool supported = !plan.remove && plan.cellsWide >= 2 && x >= plan.x && x - plan.x < plan.cellsWide
 						&& y >= plan.y && y - plan.y < plan.levelsHigh;
 					if (supported && y != plan.y)
 					{
@@ -266,6 +312,22 @@ namespace core
 					}
 					if (!supported) removed.insert(unit->getId());
 				}
+		// A resize can force both Buttons to the other side. Remove the whole
+		// unit if that common border would now be a wall at the other landing.
+		for (auto const& sector : mSectors)
+			if (auto unit = std::dynamic_pointer_cast<const Dumbwaiter>(sector); unit && !removed.contains(unit->getId()))
+			{
+				bool right = false, touchesRight = false;
+				for (uint32_t stop = 0; stop < 2; ++stop)
+				{
+					auto landing = unit->getStop(stop).sector;
+					auto left = landing == location ? plan.x : landing->getCellX();
+					auto width = landing == location ? plan.cellsWide : landing->getCellsWide();
+					right = right || unit->getCellX() == left;
+					touchesRight = touchesRight || unit->getCellX() == left + width - 1;
+				}
+				if (right && touchesRight) removed.insert(unit->getId());
+			}
 		return removed;
 	}
 
@@ -341,7 +403,7 @@ namespace core
 						if (owner < originalToReplay.size() && originalToReplay[owner] != ~0u)
 						{
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-							tombstone.a = originalToReplay[owner]; output.push_back({std::move(tombstone)});
+							tombstone.a = originalToReplay[owner]; output.push_back({tombstone}); output.push_back({std::move(tombstone)});
 						}
 					continue;
 				}
@@ -395,7 +457,7 @@ namespace core
 					if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
 					{
 						ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-						tombstone.a = sectorMap[owner]; retained.push_back(std::move(tombstone));
+						tombstone.a = sectorMap[owner]; retained.push_back(tombstone); retained.push_back(std::move(tombstone));
 					}
 				continue;
 			}

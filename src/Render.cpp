@@ -956,18 +956,6 @@ void renderBoothWindow(shared_ptr<const core::BoothWindow> booth, uint32_t layer
 	drawList->PopClipRect();
 	if (!drawObjectSprite("booth-window-open", drawList, topLeft, bottomRight))
 		drawList->AddRect(topLeft, bottomRight, ImColor(148, 162, 170), 0.0f, 0, 2.0f);
-	if (booth->getDumbwaiterOwner())
-	{
-		// The button fits in the aperture's right inset, inside the landing cell.
-		auto position = booth->getPosition();
-		core::Vector2 buttonMin{position.x + 0.82f, position.y + 0.10f};
-		core::Vector2 buttonMax{position.x + 0.88f, position.y + 0.20f};
-		transformPosition(buttonMin); transformPosition(buttonMax);
-		auto unit = gRenderWorld ? gRenderWorld->lookupDumbwaiter(booth->getDumbwaiterOwner()) : nullptr;
-		auto colour = unit && unit->isBusy() ? IM_COL32(220, 80, 80, 255)
-			: booth->getProgress() == 1 ? IM_COL32(80, 200, 120, 255) : IM_COL32(200, 160, 80, 255);
-		drawList->AddRectFilled({buttonMin.x, buttonMax.y}, {buttonMax.x, buttonMin.y}, colour);
-	}
 }
 
 void renderWindow(shared_ptr<const core::Window> window, uint32_t layer, LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -1072,7 +1060,7 @@ void renderWalkway(shared_ptr<const core::Walkway> walkway, uint32_t /* layer */
 void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, LayerRenderStyle style,
 	bool selected, WorldDrawList* drawList)
 {
-	if (style != LayerRenderStyle::Solid) return;
+	if (!gUISettings.renderMarkers || style != LayerRenderStyle::Solid) return;
 	auto point = marker->getPosition();
 	point.x += marker->getOffset();
 	point.y += MarkerFloorLift;
@@ -1094,6 +1082,16 @@ void renderMarker(shared_ptr<const core::Marker> marker, uint32_t /* layer */, L
 		drawList->AddText(font, fontSize, topLeft, ImColor(251, 188, 4), ICON_FA_MAP_MARKER_ALT);
 }
 
+
+void renderFurnitureMarkers(shared_ptr<const core::Sector> const& sector, uint32_t layer,
+	LayerRenderStyle style, WorldDrawList* drawList)
+{
+	if (!gRenderWorld || style != LayerRenderStyle::Solid) return;
+	for (uint32_t index = 0; index < sector->getNumObjects(); ++index)
+		if (auto object = std::dynamic_pointer_cast<const core::MarkerSectorObject>(sector->getObject(index));
+			object && gRenderWorld->isFurnitureMarker(object->getMarker()->getId()))
+			renderMarker(object->getMarker(), layer, style, object == gSelectedSectorObject, drawList);
+}
 
 void renderForceBridge(shared_ptr<const core::ForceBridge> forceBridge, uint32_t /* layer */,
 	LayerRenderStyle style, bool selected, WorldDrawList* drawList)
@@ -1451,8 +1449,10 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 		case core::SectorObjectType::Marker:
 			if (flags & RENDER_SECTOR_OBJECTS_INFRONT)
 			{
-				renderMarker(static_pointer_cast<const core::MarkerSectorObject>(object)->getMarker(),
-					layer, style, selected, drawList);
+				auto marker = static_pointer_cast<const core::MarkerSectorObject>(object)->getMarker();
+				// Owned Markers are editor overlays, drawn after Furniture artwork.
+				if (!gRenderWorld || !gRenderWorld->isFurnitureMarker(marker->getId()))
+					renderMarker(marker, layer, style, selected, drawList);
 			}
 			break;
 
@@ -1535,6 +1535,7 @@ void renderThresholdsControlsAndAgentsAboveTransit(vector<shared_ptr<const core:
 		if (auto chamber = dynamic_pointer_cast<const core::ChamberTransit>(sector);
 			chamber && chamber->getDecontaminationOpacity() > 0) continue;
 		renderSectorDepthContent(sector, drawList);
+		renderFurnitureMarkers(sector, layer, LayerRenderStyle::Solid, drawList);
 	}
 }
 
@@ -1932,6 +1933,7 @@ void renderSector(shared_ptr<const core::Sector> sector, uint32_t layer, LayerRe
 	// front; the wireframe overlay pass must not expose them.
 	if (shouldRenderSectorAgents(sector->getType(), style))
 		renderSectorDepthContent(sector, drawList);
+	renderFurnitureMarkers(sector, layer, style, drawList);
 
 	// Scan overlays follow occupants, and share the production scan clock. The
 	// triangular wave is independent of the chamber's authored travel direction.
@@ -2050,6 +2052,7 @@ void renderLocationContentAboveTransit(shared_ptr<const core::Sector> const& loc
 			RENDER_SECTOR_OBJECTS_BEHIND | RENDER_SECTOR_OBJECTS_INFRONT, drawList);
 	}
 	renderSectorDepthContent(location, drawList);
+	if (isDrawnSolid(style)) renderFurnitureMarkers(location, layer, LayerRenderStyle::Solid, drawList);
 }
 
 //

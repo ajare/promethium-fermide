@@ -644,6 +644,9 @@ namespace core
 		// Version 50 combines Furniture and Dumbwaiter authored state.
 		serializer.writeUint32("version", 50);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
+		// Derived physical Buttons add landing object slots compared with the
+		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
+		if (hasDumbwaiters()) serializer.writeBool("dumbwaiterPhysicalButtons", true);
 		serializer.writeUint64("nextFurnitureId", mNextFurnitureId);
 		if (mFurnitureCatalogue)
 		{
@@ -1311,7 +1314,6 @@ namespace core
 					serializer.endMap();
 				}
 				serializer.endArray();
-				if (record.furnitureDestinations.empty()) throw SerializationException("Furniture needs destinations");
 			}
 			else record.furnitureDestinations.push_back({ serializer.readString("usablePoint"),
 				MarkerId{ serializer.readUint64("markerId") }, serializer.readString("markerName"),
@@ -1639,6 +1641,8 @@ namespace core
 		if (nextFurnitureId != 0 && nextFurnitureId <= highestFurnitureId)
 			throw SerializationException("Next Furniture identity does not follow issued identities");
 
+		bool const dumbwaiterLayoutChanged = !serializer.hasField("dumbwaiterPhysicalButtons")
+			|| !serializer.readBool("dumbwaiterPhysicalButtons");
 		uint64_t highestDumbwaiterId = 0;
 		for (auto const& record : records)
 			if (record.type == ConstructionType::Dumbwaiter)
@@ -1712,7 +1716,7 @@ namespace core
 				}
 				reservedMarkerNames.insert(markerName);
 				record.furnitureDestinations.push_back({ point.key, marker, markerName,
-					markerPropertyBit(MarkerProperty::BlocksPathing) });
+					point.blocksPathing ? markerPropertyBit(MarkerProperty::BlocksPathing) : 0 });
 				furnitureLayoutChanged = true;
 			}
 		}
@@ -2071,7 +2075,8 @@ namespace core
 				}
 				// Furniture point additions/removals shift later object slots. Resolve
 				// standalone Marker deletions by their validated stable identity.
-				if (furnitureLayoutChanged && record.type == ConstructionType::RemoveMarker
+				if ((furnitureLayoutChanged || (dumbwaiterLayoutChanged && highestDumbwaiterId != 0))
+					&& record.type == ConstructionType::RemoveMarker
 					&& record.a < candidate.mSectors.size() && candidate.mSectors[record.a])
 				{
 					auto sector = candidate.mSectors[record.a];
@@ -3517,7 +3522,7 @@ namespace core
 						if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
 						{
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-							tombstone.a = sectorMap[owner]; records.push_back(std::move(tombstone));
+							tombstone.a = sectorMap[owner]; records.push_back(tombstone); records.push_back(std::move(tombstone));
 						}
 				continue;
 			}
@@ -3643,7 +3648,7 @@ namespace core
 						if (owner < sectorMap.size() && sectorMap[owner] != ~0u)
 						{
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
-							tombstone.a = sectorMap[owner]; records.push_back(std::move(tombstone));
+							tombstone.a = sectorMap[owner]; records.push_back(tombstone); records.push_back(std::move(tombstone));
 						}
 					continue;
 				}
@@ -5372,7 +5377,8 @@ namespace core
 							ConstructionRecord tombstone{ConstructionType::ObjectTombstone};
 							tombstone.a = sectorMap[originalToSource[owner]];
 							candidate->applyConstructionRecord(tombstone);
-							records.push_back(std::move(tombstone));
+							candidate->applyConstructionRecord(tombstone);
+							records.push_back(tombstone); records.push_back(std::move(tombstone));
 						}
 					continue;
 				}
@@ -5770,6 +5776,8 @@ namespace core
 		if (auto window = dynamic_pointer_cast<const WindowSectorObject>(object))
 			if (auto booth = dynamic_pointer_cast<const BoothWindow>(window->getWindow()); booth && booth->getDumbwaiterOwner())
 			{ diagnostic = "Dumbwaiter-owned apertures cannot be moved independently"; return false; }
+		if (isDumbwaiterOwnedControl(object))
+		{ diagnostic = "Dumbwaiter-owned Buttons cannot be moved independently"; return false; }
 		if (isChamberOwnedObject(object))
 		{
 			diagnostic = isAirlockOwnedObject(object) ? "Airlock-owned Doors and controls are fixed"

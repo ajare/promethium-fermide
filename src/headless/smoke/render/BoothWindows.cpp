@@ -16,6 +16,7 @@ namespace
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = {1200, 800}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
 		gUISettings.worldViewportWidth = 1200; gUISettings.worldViewportHeight = 800;
+		clearObjectTileset(); // Geometry checks below exercise the standard Button fallback.
 		gUISettings.worldZoom = 1; gUISettings.xOffset = 0; gUISettings.yOffset = 0;
 		gUISettings.renderNextLayerWireframe = false;
 		for (uint32_t initial : {0u, 1u})
@@ -26,7 +27,7 @@ namespace
 			{
 				gUISettings.visibleLayer = layer;
 				WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
-				unsigned car = 0, here = 0, elsewhere = 0;
+				unsigned car = 0, buttons = 0;
 				for (auto const& command : drawing.commands())
 					if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 					{
@@ -40,15 +41,16 @@ namespace
 							else require(triangle->clip.maximum.x - triangle->clip.minimum.x > 64,
 								"Selected shaft car incorrectly aperture-clipped");
 						}
-						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255))
+						if (triangle->colour == IM_COL32(0, 255, 128, 255))
 						{
-							for (auto p : triangle->positions) require(p.x >= 2.92f * 64 - 0.01f && p.x <= 2.98f * 64 + 0.01f,
-								"Landing button requires neighbouring cell or covers aperture");
-							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here; else ++elsewhere;
+							++buttons;
+							for (auto p : triangle->positions) require(p.x >= (3.0f - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
+								&& p.x <= (3.0f + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f,
+								"Landing Button is not the standard size at the cell border");
 						}
 					}
 				require(car == 2, "Initial car missing or duplicated in production draw commands");
-				require(here == (layer == 0 ? 2u : 0u) && elsewhere == here, "Landing buttons not visible exclusively on landing Layer");
+				require(buttons == (layer == 0 ? 8u : 0u), "Landing Buttons not visible exclusively on landing Layer: " + std::to_string(layer) + " count=" + std::to_string(buttons));
 			}
 			gUISettings.visibleLayer = 0; gUISettings.renderNextLayerWireframe = true;
 			WorldDrawList drawing({{0, 0}, {1200, 800}}); renderWorld(world, &drawing);
@@ -68,14 +70,12 @@ namespace
 				{
 					gUISettings.visibleLayer = layer;
 					WorldDrawList motion({{0, 0}, {1200, 800}}); renderWorld(world, &motion);
-					unsigned busy = 0, carCount = 0, here = 0, elsewhere = 0;
+					unsigned buttons = 0, carCount = 0;
 					float low = 10000, high = -10000;
 					for (auto const& command : motion.commands())
 						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 						{
-							if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
-							if (triangle->colour == IM_COL32(80, 200, 120, 255)) ++here;
-							if (triangle->colour == IM_COL32(200, 160, 80, 255)) ++elsewhere;
+							if (triangle->colour == IM_COL32(0, 255, 128, 255)) ++buttons;
 							if (triangle->colour == IM_COL32(180, 190, 205, 255))
 							{
 								++carCount;
@@ -99,9 +99,7 @@ namespace
 						if (ticks >= 48 && ticks <= 168) require(carCount == 0, "Closed travel apertures expose moving car");
 						else require(carCount == 2, "Uncovered aperture lost car");
 					}
-					require(busy == (layer == 0 && ticks < 216 ? 4u : 0u)
-						&& here == (layer == 0 && ticks == 216 ? 2u : 0u) && elsewhere == here,
-						"Buttons did not show both busy until arrival fully opened");
+					require(buttons == (layer == 0 ? 8u : 0u), "Standard landing Buttons disappeared during operation");
 				}
 			}
 		}
@@ -137,11 +135,11 @@ namespace
 							if (layer + 1 == unit->getLayerIndex()) require(triangle->clip.minimum.x > 2.1f * 64
 								&& triangle->clip.maximum.x < 2.9f * 64, "Restored car escaped aperture clip");
 						}
-						if (triangle->colour == IM_COL32(80, 200, 120, 255) || triangle->colour == IM_COL32(200, 160, 80, 255)) ++buttons;
+						if (triangle->colour == IM_COL32(0, 255, 128, 255)) ++buttons;
 						if (triangle->colour == IM_COL32(220, 80, 80, 255)) ++busy;
 					}
 					bool visible = unit && (layer == unit->getLayerIndex() || layer + 1 == unit->getLayerIndex());
-					require(car == (visible ? 2u : 0u) && buttons == (unit && layer + 1 == unit->getLayerIndex() ? 4u : 0u)
+					require(car == (visible ? 2u : 0u) && buttons == (unit && layer + 1 == unit->getLayerIndex() ? 8u : 0u)
 						&& busy == 0, "Reconciled/restored presentation duplicated components or retained busy buttons");
 				}
 				if (unit) for (auto const& vertex : world->getGraph()->getVertices())
@@ -190,14 +188,14 @@ namespace
 						if (layer % 2 == 0) require(triangle->clip.minimum.x > (x + 0.1f) * 64
 							&& triangle->clip.maximum.x < (x + 0.9f) * 64, "Moved/pasted car lost landing aperture clip");
 					}
-					if (triangle->colour == IM_COL32(80,200,120,255) || triangle->colour == IM_COL32(200,160,80,255))
+					if (triangle->colour == IM_COL32(0,255,128,255))
 					{
 						++buttons;
-						for (auto p : triangle->positions) require(p.x >= (x + 0.92f) * 64 - 0.01f
-							&& p.x <= (x + 0.98f) * 64 + 0.01f, "Old-location landing button remains");
+						for (auto p : triangle->positions) require(p.x >= (x + 1 - CORE_BUTTON_SIZE * 0.5f) * 64 - 0.01f
+							&& p.x <= (x + 1 + CORE_BUTTON_SIZE * 0.5f) * 64 + 0.01f, "Old-location landing Button remains");
 					}
 				}
-				require(cars == 2 && buttons == (layer % 2 == 0 ? 4u : 0u), "Moved/pasted rendering duplicated/lost components");
+				require(cars == 2 && buttons == (layer % 2 == 0 ? 8u : 0u), "Moved/pasted rendering duplicated/lost components");
 			}
 		}
 		ImGui::Render();

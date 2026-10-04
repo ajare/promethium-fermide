@@ -318,6 +318,8 @@ namespace
 		bool ladder{ false };
 		bool stairwell{ false };
 		bool airlock{ false };
+		bool dumbwaiter{ false };
+		core::World::DumbwaiterMovePlan dumbwaiterPreview;
 		core::World::AirlockEditPlan airlockPreview;
 		ResizeEdge edge{ ResizeEdge::None };
 		ImVec2 pressPosition{};
@@ -1291,6 +1293,7 @@ namespace
 			auto created = world->addSectorMarker(target.sector->getIndex(),
 				target.levelOffset, target.localX);
 			world->finishBuild();
+			gUISettings.renderMarkers = true;
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
 			gSelectedSector.reset();
@@ -5034,6 +5037,7 @@ void renderMenu(shared_ptr<core::World>& world)
 				ImGui::EndMenu();
 			}
 			ImGui::MenuItem("Grid", "G", &gUISettings.renderGrid);
+			ImGui::MenuItem("Show markers", nullptr, &gUISettings.renderMarkers);
 			ImGui::MenuItem("Show next layer wireframe", "F3", &gUISettings.renderNextLayerWireframe);
 			ImGui::MenuItem("World graph", "F4", &gUISettings.renderGraph);
 			ImGui::MenuItem("Highlight nearest vertex", "F5", &gUISettings.highlightNearestVertex);
@@ -5111,6 +5115,8 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 	imgui::ToggleButton("ToggleNextLayerWireframe", "Next layer wireframe", &gUISettings.renderNextLayerWireframe);
 	ImGui::SameLine();
 	imgui::ToggleButton("ToggleGraph", "World graph", &gUISettings.renderGraph);
+	ImGui::SameLine();
+	imgui::ToggleButton("ToggleMarkers", "Show markers", &gUISettings.renderMarkers);
 	ImGui::SameLine();
 	imgui::ToggleButton("Agent Debug", "Agent debug", &gUISettings.renderAgentDebug);
 
@@ -5772,6 +5778,14 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 void renderLiftOwnedControlPanel(shared_ptr<core::World> const& world,
 	shared_ptr<const core::SectorObject> object)
 {
+	if (world->isDumbwaiterOwnedControl(object))
+	{
+		ImGui::TextUnformatted("Dumbwaiter-owned landing Button");
+		ImGui::TextDisabled("Moves with the complete Dumbwaiter unit.");
+		auto button = static_pointer_cast<const core::Button>(object->_getObject());
+		renderInteractionPermissionRequirements(world, button->getInteractionPointId());
+		return;
+	}
 	if (world->isAirlockOwnedObject(object))
 	{
 		ImGui::TextUnformatted("Airlock-owned button");
@@ -8241,26 +8255,18 @@ namespace
 		return true;
 	}
 
-	// The Sector types the editor can resize by dragging one of their edges.
-	bool isSectorTypeResizable(core::SectorType type)
-	{
-		return type == core::SectorType::Location
-			|| type == core::SectorType::Facade
-			|| type == core::SectorType::Background
-			|| type == core::SectorType::Lift
-			|| type == core::SectorType::Shuttle
-			|| type == core::SectorType::Ladder
-			|| type == core::SectorType::Stairwell
-			|| type == core::SectorType::Airlock || type == core::SectorType::Chamber;
-	}
-
 	ResizeEdge hoveredResizeEdge(shared_ptr<const core::Sector> const& sector, ImVec2 mouse)
 	{
-		if (!sector || !isSectorTypeResizable(sector->getType())) return ResizeEdge::None;
+		if (!sector || !isSectorTypeMovable(sector->getType())) return ResizeEdge::None;
 		auto topLeft = worldToScreen({ (float)sector->getCellX(),
 			(float)(sector->getCellY() + sector->getLevelsHigh()) });
 		auto bottomRight = worldToScreen({ (float)(sector->getCellX() + sector->getCellsWide()),
 			(float)sector->getCellY() });
+		// Fixed-size units move from anywhere inside their footprint, never resize.
+		if (!isSectorTypeResizable(sector->getType()))
+			return mouse.x >= topLeft.x && mouse.x <= bottomRight.x
+				&& mouse.y >= topLeft.y && mouse.y <= bottomRight.y
+				? ResizeEdge::Move : ResizeEdge::None;
 		constexpr float tolerance = 6.0f;
 		struct Candidate { ResizeEdge edge; float distance; };
 		vector<Candidate> candidates;
@@ -8434,9 +8440,9 @@ namespace
 		return ResizeEdge::None;
 	}
 
-	// The cells the selection occupies when the editor can resize it by
-	// dragging: a resizable Sector, or a Window or Door SectorObject. False
-	// when the selection cannot be resized, or is not on the Layer being drawn.
+	// The cells the selection occupies when the editor can move or resize it by
+	// dragging: an editable Sector, or a Window or Door SectorObject. False
+	// when the selection cannot be dragged, or is not on the Layer being drawn.
 	bool selectedResizeFootprint(uint32_t& cellX, uint32_t& cellY, uint32_t& cellsWide,
 		uint32_t& levelsHigh)
 	{
@@ -8445,7 +8451,7 @@ namespace
 			if (!gSelectedSector
 				|| !shouldDrawCanvasSectorEditOverlay(gSelectedSector->getLayerIndex(),
 					(uint32_t)gUISettings.visibleLayer)
-				|| !isSectorTypeResizable(gSelectedSector->getType()))
+				|| !isSectorTypeMovable(gSelectedSector->getType()))
 				return false;
 			cellX = gSelectedSector->getCellX();
 			cellY = gSelectedSector->getCellY();
@@ -8530,7 +8536,8 @@ namespace
 			return;
 		}
 
-		if (world->isChamberOwnedObject(gSelectedSectorObject)
+		if (world->isDumbwaiterOwnedControl(gSelectedSectorObject)
+			|| world->isChamberOwnedObject(gSelectedSectorObject)
 			|| world->isLiftOwnedDoor(gSelectedSectorObject)
 			|| world->isBulkheadDoorOwnedControl(gSelectedSectorObject)
 			|| world->isLiftOwnedControl(gSelectedSectorObject)
@@ -8718,6 +8725,7 @@ namespace
 				gUISettings.worldPaused = true;
 			}
 			gSectorResize.dragging = true;
+			gSectorResize.dumbwaiter = sectorType == core::SectorType::Dumbwaiter;
 			gSectorResize.lift = selectedLift;
 			gSectorResize.shuttle = selectedShuttle;
 			gSectorResize.ladder = selectedLadder;
@@ -8730,7 +8738,11 @@ namespace
 			gSectorResize.originalY = gSelectedSector->getCellY();
 			gSectorResize.originalWidth = gSelectedSector->getCellsWide();
 			gSectorResize.originalHeight = gSelectedSector->getLevelsHigh();
-			if (gSectorResize.airlock)
+			if (gSectorResize.dumbwaiter)
+				gSectorResize.dumbwaiterPreview = world->planMoveDumbwaiter(
+					static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId(),
+					gSelectedSector->getLayerIndex(), gSectorResize.originalY, gSectorResize.originalX);
+			else if (gSectorResize.airlock)
 				gSectorResize.airlockPreview = gSelectedSector->getType() == core::SectorType::Chamber
 					? world->planResizeChamber(gSelectedSector->getIndex(), gSectorResize.originalX,
 						gSectorResize.originalY, gSectorResize.originalWidth,
@@ -8833,7 +8845,13 @@ namespace
 				}
 			}
 		}
-		if (gSectorResize.airlock)
+		if (gSectorResize.dumbwaiter)
+		{
+			gSectorResize.dumbwaiterPreview = world->planMoveDumbwaiter(
+				static_pointer_cast<const core::Dumbwaiter>(gSelectedSector)->getId(),
+				gSelectedSector->getLayerIndex(), (uint32_t)bottom, (uint32_t)left);
+		}
+		else if (gSectorResize.airlock)
 		{
 			if (gSectorResize.airlockPreview.x != (uint32_t)left
 				|| gSectorResize.airlockPreview.y != (uint32_t)bottom
@@ -8903,6 +8921,31 @@ namespace
 				&& right - left == (int)gSectorResize.originalWidth
 				&& top - bottom == (int)gSectorResize.originalHeight;
 			if (unchanged) resetSectorResize();
+			else if (gSectorResize.dumbwaiter)
+			{
+				auto const plan = gSectorResize.dumbwaiterPreview;
+				try
+				{
+					if (!plan.valid)
+						core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, plan.diagnostic);
+					else
+					{
+						auto undo = captureDocumentSnapshot(world);
+						if (world->applyDumbwaiterMove(plan))
+						{
+							gHoveredAgent = nullptr; gHoveredSector.reset(); gHoveredSectorObject.reset();
+							gSelectedAgent = nullptr; gSelectedSectorObject.reset();
+							gSelectedSector = world->lookupDumbwaiter(plan.id);
+							commitDocumentEdit(std::move(undo));
+						}
+					}
+				}
+				catch (core::Exception const& error)
+				{ core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, error.getMessage()); }
+				catch (std::exception const& error)
+				{ core::addLogMessage("Dumbwaiter editor", 0, core::LogLevel::Error, error.what()); }
+				resetSectorResize();
+			}
 			else if (gSectorResize.airlock) commitAirlockEdit(world, gSectorResize.airlockPreview);
 			else if (gSectorResize.lift && !gSectorResize.liftPreview.valid)
 			{
@@ -8972,7 +9015,7 @@ namespace
 			}
 		}
 
-		// The whole footprint of the selected resizable object is boxed in
+		// The whole footprint of the selected draggable object is boxed in
 		// yellow while the cursor is inside it, showing the cells a drag works
 		// on.
 		if (gWorldHovered && !gSectorResize.dragging && !gObjectMove.dragging
@@ -8996,7 +9039,13 @@ namespace
 		bool hasPlan = false, valid = false, remove = false;
 		uint32_t x = 0, y = 0, width = 0, height = 0;
 		string diagnostic;
-		if (gSectorResize.airlock && (gSectorResize.dragging || gSectorResize.airlockPreview.width))
+		if (gSectorResize.dumbwaiter && gSectorResize.dragging)
+		{
+			auto const& plan = gSectorResize.dumbwaiterPreview;
+			hasPlan = true; valid = plan.valid; x = plan.x; y = plan.y;
+			width = 1; height = 2; diagnostic = plan.diagnostic;
+		}
+		else if (gSectorResize.airlock && (gSectorResize.dragging || gSectorResize.airlockPreview.width))
 		{
 			auto const& plan = gSectorResize.airlockPreview;
 			hasPlan = true; valid = plan.valid; x = plan.x; y = plan.y;

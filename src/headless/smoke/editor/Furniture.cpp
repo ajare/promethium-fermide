@@ -2,11 +2,14 @@
 #include "State.h"
 #include "FurniturePanel.h"
 #include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 #include "core/YamlSerializer.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/Agent.h"
 #include "core/MarkerSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
+#include <fstream>
+#include <yaml-cpp/yaml.h>
 
 namespace
 {
@@ -94,6 +97,65 @@ namespace
 			&& world->furnitureCatalogueFilename() == "layouts.furniture.yaml"
 			&& world->furnitureCatalogue()->uuid() == layoutsUuid,
 			"Redo did not reattach the snapshot's Furniture catalogue");
+
+		// Keep this definition-selection test independent of teaching-layout depth requirements.
+		auto sample = YAML::LoadFile(context.fixture("resources/test-worlds/furniture.furniture.yaml").string());
+		auto legacyChair = YAML::LoadFile((root / "chair.furniture.yaml").string());
+		sample["furnitureCatalogue"]["definitions"][0] = legacyChair["furnitureCatalogue"]["definitions"][0];
+		{ std::ofstream file(root / "furniture.furniture.yaml"); file << sample; }
+		require(selectFurnitureCatalogue(world, path, "furniture.furniture.yaml", diagnostic, history), diagnostic);
+		world->saveTo(path.string());
+		world = core::loadWorldDocument(path); world->pauseSimulation();
+		auto canPlaceChair = world->canPlaceFurniture(0, "chair", 2, 0, "New chair", &diagnostic, 0);
+		require(canPlaceChair, "Chair placement at x=2, Level=0, depth=0 was rejected: " + diagnostic);
+		require(world->furnitureCatalogueFilename() == "furniture.furniture.yaml",
+			"Save/reopen reverted the selected Furniture catalogue");
+		auto& io = ImGui::GetIO();
+		io.IniFilename = nullptr; io.LogFilename = nullptr; io.DisplaySize = {1000, 800};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text;
+		auto previousClipboardData = io.ClipboardUserData;
+		auto previousSetClipboardText = io.SetClipboardTextFn;
+		io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		auto panelShows = [&](std::string const& filename)
+		{
+			text.clear();
+			ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({900, 700});
+			ImGui::Begin("Reopened Furniture catalogue", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			ImGui::LogToClipboard(); ImGui::SetNextItemOpen(true);
+			renderFurniturePanel(world, path, world->getSector(0));
+			ImGui::LogFinish(); ImGui::End(); ImGui::Render();
+			require(text.find("{ " + filename + " }") != std::string::npos,
+				"Furniture panel does not display the loaded catalogue: " + text);
+		};
+		panelShows("furniture.furniture.yaml");
+		// Drive the actual panel button before making any definition selection.
+		auto placeButton = ImGui::FindWindowByName("Reopened Furniture catalogue")->GetID("Place Furniture");
+		bool found = false; ImVec2 buttonPosition;
+		for (float y = 35; y < 550 && !found; y += 8)
+			for (float x = 15; x < 200 && !found; x += 16)
+			{
+				io.AddMousePosEvent(x, y); panelShows("furniture.furniture.yaml"); panelShows("furniture.furniture.yaml");
+				if (ImGui::GetHoveredID() == placeButton) { found = true; buttonPosition = {x, y}; }
+			}
+		require(found, "Furniture placement button is missing");
+		io.AddMousePosEvent(buttonPosition.x, buttonPosition.y);
+		io.AddMouseButtonEvent(0, true); panelShows("furniture.furniture.yaml");
+		io.AddMouseButtonEvent(0, false); panelShows("furniture.furniture.yaml");
+		require(world->furniture().size() == 1 && world->furniture().front().definitionKey == "chair",
+			"Default Chair placement failed: " + text);
+		require(world->removeFurniture(world->furniture().front().id, &diagnostic), "Cannot clean up placed chair: " + diagnostic);
+		require(selectFurnitureCatalogue(world, path, "layouts.furniture.yaml", diagnostic, history), diagnostic);
+		panelShows("layouts.furniture.yaml");
+		require(text.find("{ Larger layout } Furniture definition") != std::string::npos,
+			"Catalogue change left a stale Furniture definition selected: " + text);
+		require(selectFurnitureCatalogue(world, path, "chair.furniture.yaml", diagnostic, history), diagnostic);
+		panelShows("chair.furniture.yaml");
+		world = core::loadWorldDocument(path);
+		panelShows("furniture.furniture.yaml");
+		// Release the callback's borrowed string before this check returns.
+		io.ClipboardUserData = previousClipboardData; io.SetClipboardTextFn = previousSetClipboardText;
 	}
 
 	void attachmentActions(smoke::Context const& context)

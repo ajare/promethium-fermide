@@ -1,0 +1,146 @@
+version: 50
+nextDumbwaiterId: 2
+dumbwaiterPhysicalButtons: true
+nextFurnitureId: 1
+name: dumb-waiters
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 6
+layers: 3
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+  - Level 3
+  - Level 4
+  - Level 5
+layerNames:
+  - Layer 0
+  - Layer 1
+  - Layer 2
+construction:
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 3
+    cellsWide: 4
+    levelsHigh: 1
+  - type: room
+    name: Room 1
+    layer: 1
+    y: 1
+    x: 5
+    cellsWide: 5
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: room
+    name: Room 2
+    layer: 1
+    y: 2
+    x: 5
+    cellsWide: 5
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 3
+    cellsWide: 4
+    levelsHigh: 1
+  - type: door
+    layer: 0
+    y: 1
+    x: 6
+    width: 1
+    height: regular
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    preButtonActivation: manual
+  - type: door
+    layer: 0
+    y: 2
+    x: 6
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 8
+    cellsWide: 5
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 2
+    x: 8
+    cellsWide: 5
+    levelsHigh: 1
+  - type: objectTombstone
+    sectorIndex: 1
+  - type: objectTombstone
+    sectorIndex: 4
+  - type: window
+    layer: 0
+    y: 1
+    x: 9
+    cellsWide: 1
+    levelsHigh: 1
+    traversable: false
+    initialState: closed
+    style: clear
+  - type: window
+    layer: 0
+    y: 2
+    x: 9
+    cellsWide: 1
+    levelsHigh: 1
+    traversable: false
+    initialState: closed
+    style: clear
+  - type: dumbwaiter
+    id: 1
+    layer: 2
+    y: 1
+    x: 9
+    initialStop: 0
+    travelSeconds: 2
+    lowerLandingPermissionRequirement:
+      []
+    upperLandingPermissionRequirement:
+      []
+  - type: moveDumbwaiter
+    id: 1
+    layer: 2
+    y: 1
+    x: 8
+  - type: moveDumbwaiter
+    id: 1
+    layer: 2
+    y: 1
+    x: 5
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 1
+nextAgentGroupId: 1
+agents:
+  []

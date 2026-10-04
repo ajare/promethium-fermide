@@ -2,9 +2,11 @@
 #include "State.h"
 #include "DocumentEdit.h"
 #include "core/Agent.h"
+#include "core/Exceptions.h"
 #include "BoothWindowEditor.h"
 #include "PermissionsPanel.h"
 #include "PaletteLayout.h"
+#include "UI.h"
 #include "core/YamlSerializer.h"
 #include "imgui/imgui_internal.h"
 #include <cmath>
@@ -49,7 +51,7 @@ namespace
 				require(world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop)) == std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper},
 					"Dependent deletion undo lost button requirements");
 			auto actor = world->createAgent("Restored", unit->getStop(1).sector->getIndex(),
-				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.5f);
+				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 1.0f);
 			world->grantAgentAccessPermission(actor, upper);
 			require(bool(world->requestDumbwaiterLanding(id, 1, actor)), "Undo-restored Agent control refused");
 			world->resumeSimulation(); require(world->advanceTicks(130) && !unit->isBusy() && unit->getCarPosition().y == 0, "Undo-restored Agent operation failed");
@@ -174,7 +176,7 @@ namespace
 		require(!commitInteractionPermissionRequirement(world, world->lookupDumbwaiter(id)->getLandingButton(0), core::AccessPermissionId{255}, true, diagnostic)
 			&& captureDocumentSnapshot(world)->yaml == snapshot && gWorldDocumentHistory.undoCount() == count,
 			"Invalid editor reference mutated document/history");
-		auto actor = world->createAgent("Manual operator", 0, 0, 0.5f);
+		auto actor = world->createAgent("Manual operator", 0, 0, 1.0f);
 		require(world->grantAgentAccessPermission(actor, a), "Manual operator grant failed");
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1400,900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
@@ -222,6 +224,18 @@ namespace
 		auto id = world->addDumbwaiter(1, 0, 2, {1, 0.5f}); world->finishBuild();
 		auto a = world->addAccessPermission("Lower"), b = world->addAccessPermission("Shared");
 		auto unit = world->lookupDumbwaiter(id);
+		require(isCanvasSelectableSectorType(unit->getType()) && isSectorTypeMovable(unit->getType())
+			&& !isSectorTypeResizable(unit->getType()), "Dumbwaiter must be selectable and move-only on the canvas");
+		require(shouldDrawCanvasSectorEditOverlay(unit->getLayerIndex(), 1)
+			&& !shouldDrawCanvasSectorEditOverlay(unit->getLayerIndex(), 0),
+			"Dumbwaiter drag overlay must stay on the shaft Layer");
+		auto rejectedBefore = captureDocumentSnapshot(world)->yaml;
+		auto illegalDrop = world->planMoveDumbwaiter(id, 1, 0, 3);
+		require(!illegalDrop.valid && !illegalDrop.diagnostic.empty(), "Unsupported canvas drop accepted");
+		bool dropRefused = false;
+		try { world->applyDumbwaiterMove(illegalDrop); } catch (core::Exception const&) { dropRefused = true; }
+		require(dropRefused && captureDocumentSnapshot(world)->yaml == rejectedBefore,
+			"Illegal canvas drop changed the authored unit");
 		world->setInteractionPointPermissionRequirement(unit->getLandingButton(0), {a,b});
 		world->setInteractionPointPermissionRequirement(unit->getLandingButton(1), {b});
 		world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "Copy cycle setup failed");
@@ -261,7 +275,7 @@ namespace
 		world->resetSimulation(); world->pauseSimulation(); pasted = world->lookupDumbwaiter(copy);
 		require(world->getInteractionPointPermissionRequirement(pasted->getLandingButton(0)) == std::vector<core::AccessPermissionId>{a,b},
 			"Move history/replay lost requirements");
-		auto actor = world->createAgent("Restored operator", pasted->getStop(1).sector->getIndex(), 0, 0.5f);
+		auto actor = world->createAgent("Restored operator", pasted->getStop(1).sector->getIndex(), 0, 1.0f);
 		world->grantAgentAccessPermission(actor, b); auto request = world->requestDumbwaiterLanding(copy, 1, actor);
 		require(bool(request), "Restored landing Agent request refused"); world->resumeSimulation(); require(world->advanceTicks(128), "Restored Agent cycle failed"); world->pauseSimulation();
 		require(world->lookupDumbwaiter(copy)->getCarPosition().y == 2 && !world->lookupDumbwaiter(copy)->isBusy(), "Restored Agent button did not operate unit");

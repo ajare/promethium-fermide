@@ -99,7 +99,7 @@ namespace core
 		auto next = mNextMarkerId;
 		for (auto const& point : definition.usablePoints)
 			record.furnitureDestinations.push_back({ point.key, MarkerId{ next++ }, record.name + " " + point.label,
-				markerPropertyBit(MarkerProperty::BlocksPathing) });
+				point.blocksPathing ? markerPropertyBit(MarkerProperty::BlocksPathing) : 0 });
 		record.furnitureId = mNextFurnitureId;
 		restoreFurniture(record);
 		++mNextFurnitureId; mNextMarkerId = next;
@@ -241,7 +241,8 @@ namespace core
 		catch (...) { mDeserializingConstruction = old; throw; }
 		mDeserializingConstruction = old;
 		mFurniture.push_back({ record.furnitureId, record.a, record.x, record.y,
-			record.definitionKey, record.name, record.furnitureDestinations, record.furnitureDestinations.front().marker, record.furnitureDepth });
+			record.definitionKey, record.name, record.furnitureDestinations,
+			record.furnitureDestinations.empty() ? MarkerId{} : record.furnitureDestinations.front().marker, record.furnitureDepth });
 		recordConstruction(record);
 	}
 }

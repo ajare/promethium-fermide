@@ -5,6 +5,7 @@ furnitureCatalogue:
   definitions:
   - key: chair
     label: Chair
+    sideRoutes: true
     tiles:
     - x: 0
       y: 0
@@ -14,6 +15,43 @@ furnitureCatalogue:
     - key: seat
       label: Seat
       x: 0.5
+      blocksPathing: false
+    vertices:
+    - key: approachLeft
+      x: 0
+      external: true
+    - key: approachRight
+      x: 1
+      external: true
+    - key: frontLeft
+      x: 0.125
+    - key: frontRight
+      x: 0.875
+    - key: backLeft
+      x: 0.125
+    - key: backRight
+      x: 0.875
+    - key: seat
+      x: 0.5
+      usablePoint: seat
+    edges:
+    - from: approachLeft
+      to: frontLeft
+    - from: frontLeft
+      to: seat
+      depthOffset: -1
+    - from: seat
+      to: frontRight
+      depthOffset: -1
+    - from: frontRight
+      to: approachRight
+    - from: approachLeft
+      to: backLeft
+    - from: backLeft
+      to: backRight
+      depthOffset: 1
+    - from: backRight
+      to: approachRight
   - key: sofa
     label: Two-seat sofa
     sideRoutes: true
@@ -30,9 +68,11 @@ furnitureCatalogue:
     - key: left
       label: Left seat
       x: 0.5
+      blocksPathing: false
     - key: right
       label: Right seat
       x: 1.5
+      blocksPathing: false
     vertices:
     - key: left
       x: 0
@@ -40,6 +80,10 @@ furnitureCatalogue:
     - key: frontLeft
       x: 0.25
     - key: frontRight
+      x: 1.75
+    - key: backLeft
+      x: 0.25
+    - key: backRight
       x: 1.75
     - key: right
       x: 2
@@ -53,20 +97,24 @@ furnitureCatalogue:
     edges:
     - from: left
       to: frontLeft
+    - from: left
+      to: backLeft
     - from: frontLeft
+      to: leftSeat
+      depthOffset: -1
+    - from: leftSeat
+      to: rightSeat
+      depthOffset: -1
+    - from: rightSeat
       to: frontRight
       depthOffset: -1
     - from: frontRight
       to: right
-    - from: left
+    - from: backLeft
+      to: backRight
+      depthOffset: 1
+    - from: backRight
       to: right
-      depthOffset: -1
-    - from: left
-      to: leftSeat
-      depthOffset: -1
-    - from: left
-      to: rightSeat
-      depthOffset: -1
   - key: desk
     label: Desk with front and back routes
     sideRoutes: true
@@ -79,13 +127,7 @@ furnitureCatalogue:
       y: 0
       imageSet: ObjectAtlas
       image: desk-right
-    usablePoints:
-    - key: seat
-      label: Seat
-      x: 0.75
-    - key: far
-      label: Far side
-      x: 1.75
+    usablePoints: []
     vertices:
     - key: left
       x: 0
@@ -101,12 +143,6 @@ furnitureCatalogue:
       x: 0.25
     - key: backRight
       x: 1.75
-    - key: seat
-      x: 0.75
-      usablePoint: seat
-    - key: goal
-      x: 1.75
-      usablePoint: far
     edges:
     - from: left
       to: frontLeft
@@ -122,18 +158,3 @@ furnitureCatalogue:
       depthOffset: 1
     - from: backRight
       to: right
-    - from: frontLeft
-      to: seat
-      depthOffset: 0
-    - from: seat
-      to: frontRight
-      depthOffset: 0
-    - from: seat
-      to: backRight
-      depthOffset: 1
-    - from: frontRight
-      to: goal
-      depthOffset: 0
-    - from: backRight
-      to: goal
-      depthOffset: 1

@@ -3,6 +3,7 @@
 #include "core/Graph.h"
 #include "core/Pathing.h"
 #include "core/WindowVertex.h"
+#include "core/Button.h"
 #include "core/YamlSerializer.h"
 #include <cmath>
 #include <limits>
@@ -20,6 +21,50 @@ namespace
 	void dumbwaiters(smoke::Context const&)
 	{
 		using namespace dumbwaiter_fixture;
+		// Both standard Buttons use one shared side, and placement is atomic.
+		for (unsigned layout = 0; layout < 7; ++layout)
+		{
+			core::World world("Landing borders", 6, 3);
+			world.addRoom("Lower", 0, 0, layout == 1 || layout == 3 || layout == 4 ? 2 : 0,
+				layout == 3 ? 1 : 4, 1);
+			world.addCorridor(0, 1, layout == 2 || layout == 6 ? 2 : layout == 4 ? 1 : 0,
+				layout == 4 ? 2 : layout == 6 ? 1 : 4, 1);
+			if (layout == 5) world.addDumbwaiter(1, 0, 2);
+			world.finishBuild(); world.pauseSimulation();
+			auto before = yaml(world); std::string diagnostic;
+			bool legal = layout < 3;
+			require(world.canAddDumbwaiter(1, 0, 2, {}, &diagnostic) == legal,
+				"Incorrect shared Button border or one-cell landing preflight");
+			if (!legal)
+			{
+				bool refused = false;
+				try { world.addDumbwaiter(1, 0, 2); } catch (std::exception const&) { refused = true; }
+				require(refused && yaml(world) == before, "Illegal Button layout mutated the World");
+				continue;
+			}
+			auto id = world.addDumbwaiter(1, 0, 2); world.finishBuild();
+			auto unit = world.lookupDumbwaiter(id);
+			for (uint32_t stop = 0; stop < 2; ++stop)
+			{
+				auto point = world.lookupInteractionPoint(unit->getLandingButton(stop)).entity;
+				require(point->getPosition() == core::Vector2{layout == 0 ? 2.0f : 3.0f, float(stop)},
+					"Landing Buttons did not choose left by default or shared right fallback");
+				auto landing = unit->getStop(stop).sector;
+				bool found = false;
+				for (uint32_t i = 0; i < landing->getNumObjects(); ++i)
+					if (auto object = landing->getObject(i); world.isDumbwaiterOwnedControl(object))
+					{
+						auto button = std::dynamic_pointer_cast<const core::Button>(object->_getObject());
+						require(button && button->getSize().x == CORE_BUTTON_SIZE
+							&& button->getInteractionPointId() == unit->getLandingButton(stop),
+							"Landing control is not a standard physical Button");
+						require(!world.planMoveSectorObject(landing->getIndex(), i, 1, stop).valid,
+							"Owned Button moved independently");
+						found = true;
+					}
+				require(found, "Landing has no standard owned Button object");
+			}
+		}
 		for (unsigned kind = 0; kind < 3; ++kind) for (bool shared : {false, true})
 			for (uint32_t layer : {1u, 2u, 3u}) for (uint32_t initial : {0u, 1u})
 			{
@@ -83,7 +128,7 @@ namespace
 		}
 		{
 			core::World world("Upper bound", 6, 4);
-			world.addRoom("Lower", 0, 2, 2, 1, 1); world.addFacade(0, 3, 2, 1, 1);
+			world.addRoom("Lower", 0, 2, 2, 2, 1); world.addFacade(0, 3, 2, 2, 1);
 			auto id = world.addDumbwaiter(1, 2, 2); world.finishBuild(); world.pauseSimulation();
 			require(world.lookupDumbwaiter(id)->getCarPosition().y == 2, "Valid upper World bound refused");
 			auto before = yaml(world);
@@ -100,7 +145,7 @@ namespace
 		}
 		{
 			auto world = make(); auto first = world->addDumbwaiter(1, 0, 2);
-			auto landing = world->addRoom("Second landing", 0, 0, 4, 1, 2);
+			auto landing = world->addRoom("Second landing", 0, 0, 4, 2, 2);
 			world->addSectorWalkway(landing, 1, 0); auto second = world->addDumbwaiter(1, 0, 4);
 			world->addRoom("Standalone front", 0, 0, 0, 2, 1);
 			world->addRoom("Standalone back", 1, 0, 0, 2, 1);
@@ -141,13 +186,13 @@ namespace
 			require(!world.lookupDumbwaiter(id) && world.getSimulationSnapshot().interactionPoints.empty(), "Support relocation left unsupported unit");
 			world.resetSimulation(); world.pauseSimulation();
 			auto landing = world.getSectorAtPosition(0, 2, 0);
-			require(landing && landing->getObject(3) && landing->getObject(3)->getObjectType() == core::SectorObjectType::Marker,
+			require(landing && landing->getObject(5) && landing->getObject(5)->getObjectType() == core::SectorObjectType::Marker,
 				"Dependent deletion shifted later object slots");
 		}
 		for (uint32_t level : {0u, 1u})
 		{
 			core::World world("Level compaction", 6, 5); world.addLayer();
-			world.addRoom("Lower", 1, 2, 2, 1, 1); world.addCorridor(1, 3, 2, 1, 1);
+			world.addRoom("Lower", 1, 2, 2, 2, 1); world.addCorridor(1, 3, 2, 2, 1);
 			auto id = world.addDumbwaiter(2, 2, 2, {1, 0.5f}); world.finishBuild(); world.pauseSimulation();
 			world.pressDumbwaiterLanding(id, 0);
 			world.applyDeleteLevel(world.planDeleteLevel(level));
@@ -211,7 +256,7 @@ namespace
 				"Stale move plan ignored new landing conflict/cancelled accepted work");
 		}
 		{
-			auto world = make(); world->addCorridor(0,2,2,1,1);
+			auto world = make(); world->addCorridor(0,2,2,2,1);
 			auto id = world->addDumbwaiter(1,0,2); world->finishBuild();
 			require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(id,1,1,2)), "Overlapping self footprint movement refused");
 			world->resetSimulation(); world->pauseSimulation();
@@ -234,7 +279,7 @@ namespace
 			world->resumeSimulation(); require(world->advanceTicks(60), "Move cycle setup failed"); world->pauseSimulation();
 			auto other = world->lookupDumbwaiter(sibling); auto otherPosition = other->getCarPosition();
 			auto before = yaml(*world); auto position = unit->getCarPosition(); world->markSaved();
-			for (auto destination : {std::array<uint32_t,3>{0,0,4}, {4,0,4}, {1,3,4}, {1,0,6}, {1,0,0}, {1,0,3}})
+			for (auto destination : {std::array<uint32_t,3>{0,0,4}, {4,0,4}, {1,3,4}, {1,0,6}, {1,0,0}, {1,2,4}})
 			{
 				auto plan = world->planMoveDumbwaiter(id, destination[0], destination[1], destination[2]);
 				require(!plan.valid && !plan.diagnostic.empty(), "Invalid unit move preflight accepted");
@@ -257,11 +302,11 @@ namespace
 			for (uint32_t stop = 0; stop < 2; ++stop)
 			{
 				auto point = world->lookupInteractionPoint(unit->getLandingButton(stop)).entity;
-				require(point->getPosition() == core::Vector2{4.5f,float(stop)}
+				require(point->getPosition() == core::Vector2{5.0f,float(stop)}
 					&& world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop))
 					== std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper}, "Move lost button placement/requirement");
 			}
-			auto actor = world->createAgent("New landing operator", unit->getStop(1).sector->getIndex(), 0, 0.5f);
+			auto actor = world->createAgent("New landing operator", unit->getStop(1).sector->getIndex(), 0, 1.0f);
 			world->grantAgentAccessPermission(actor, upper);
 			auto request = world->requestDumbwaiterLanding(id, 1, actor);
 			require(bool(request), "Moved unit Agent request refused");
@@ -287,7 +332,7 @@ namespace
 		using namespace dumbwaiter_fixture;
 		auto world = make(); auto first = world->addDumbwaiter(1, 0, 2, {1, 0.5f});
 		addLandings(*world, 1, 4);
-		world->addCorridor(0, 0, 0, 1, 1); world->addCorridor(0, 1, 0, 1, 1);
+		world->addCorridor(0, 0, 0, 2, 1); world->addCorridor(0, 1, 0, 2, 1);
 		world->finishBuild(); world->pauseSimulation();
 		require(world->applyDumbwaiterMove(world->planMoveDumbwaiter(first, 1, 0, 4)), "Canonical replay move fixture failed");
 		auto second = world->addDumbwaiter(1, 0, 2);

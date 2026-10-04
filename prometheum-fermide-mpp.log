@@ -1,0 +1,683 @@
+14:38:02 [INFO ] GL_ARB_debug_output initialised.
+14:38:02 [INFO ] GL_EXT_texture_rectangle initialised.
+14:38:02 [INFO ] GL version: 4.6 (Compatibility Profile) Mesa 26.0.8-1ubuntu0.3
+14:38:02 [INFO ] GLSL version: 4.60
+14:38:02 [INFO ] Renderer: Radeon 8060S Graphics (radeonsi, strix_halo, ACO, DRM 3.64, 7.0.0-34-generic)
+14:38:02 [INFO ] Vendor: AMD
+14:38:02 [INFO ] Supported point size range: 0.125 to 2048
+14:38:02 [INFO ] Supported aliased line width range: 1 to 2048
+14:38:02 [INFO ] Supported square texture size: 16384x16384
+14:38:02 [INFO ] Supported non-square texture size: 16384x16384
+14:38:02 [INFO ] Max colour attachments: 8
+14:38:02 [INFO ] Max draw buffers: 8
+14:38:02 [INFO ] Max framebuffer samples: 8
+14:38:02 [INFO ] Supported anti-aliasing MSAA mask: 0x114
+14:38:02 [INFO ] Depth range: 0 to 1
+14:38:02 [INFO ] Max anisotropy: 16
+14:38:02 [INFO ] Max recommended elements: 3000
+14:38:02 [INFO ] Max recommended vertices: 3000
+14:38:02 [INFO ] Streaming geometry: yes
+14:38:02 [INFO ] Max vertex shader uniforms: 16384
+14:38:02 [INFO ] Max geometry shader uniforms: 16384
+14:38:02 [INFO ] Max fragment shader uniforms: 16384
+14:38:02 [INFO ] Max vertex texture units: 32
+14:38:02 [INFO ] Max geometry texture units: 32
+14:38:02 [INFO ] Max fragment texture units: 32
+14:38:02 [INFO ] Max vertex attributes: 16
+14:38:02 [INFO ] Max vertex attribute stride: 2048 bytes
+14:38:02 [INFO ] Compute shaders: yes
+14:38:02 [INFO ] Multi-draw indirect: yes
+14:38:02 [INFO ] Bindless textures: yes
+14:38:02 [INFO ] Max compute work group count: 2147483646x65535x65535
+14:38:02 [INFO ] Max compute work group size: 1024x1024x1024
+14:38:02 [INFO ] Max compute work group invocations: 1024
+14:38:02 [INFO ] Max shader storage block size: 2147483647 bytes
+14:38:02 [INFO ] Max shader storage buffer bindings: 80
+14:38:02 [INFO ] Configured anti-aliasing defaults: MSAA=off, SSAA=off, TAA=false, FXAA=false
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec3[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_NORMAL (vec3[1]).
+14:38:02 [DEBUG] Vertex attribute 2: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 3: _mpp_i_COLOUR (vec4[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: Model matrix id: 7
+14:38:02 [DEBUG] - Texture: '_mpp_u_model_' id: 7
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 8
+14:38:02 [DEBUG] - Uniform normal matrix id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_NUM_LIGHTS_' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_LIGHTS_[0].position' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_LIGHTS_[0].colour' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_LIGHTS_[1].position' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_LIGHTS_[1].colour' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_AMBIENT_' id: -1
+14:38:02 [DEBUG] - Texture: 'NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'SHADOW_TYPE_AND_LIGHT_INDEX' id: -1
+14:38:02 [DEBUG] - Texture: 'POINT_POSITION_AND_RANGE' id: -1
+14:38:02 [DEBUG] - Texture: 'BIAS_AND_ENABLED' id: -1
+14:38:02 [DEBUG] - Texture: 'MAP_TEXEL_SIZE_AND_RADIUS' id: -1
+14:38:02 [DEBUG] - Texture: 'LIGHT_VIEW_PROJECTION' id: -1
+14:38:02 [DEBUG] - Uniform: ViewPosition id: 26
+14:38:02 [DEBUG] - Texture: '_mpp_u_viewPos_' id: 26
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 27
+14:38:02 [DEBUG] - Texture: '_mpp_t_SHADOW_MAP_' id: 28
+14:38:02 [DEBUG] - Texture: '_mpp_t_POINT_SHADOW_MAP_' id: 29
+14:38:02 [INFO ] Created program '__mpp_p3d_tris_p3n3t2c4__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec3[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [INFO ] Created program '__mpp_p3d_shadow_depth__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec3[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Texture: '_mpp_u_SHADOW_ALPHA_CUTOFF_' id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_SHADOW_ALPHA_FACTOR_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_SHADOW_ALPHA_MAP_' id: 10
+14:38:02 [INFO ] Created program '__mpp_p3d_alpha_shadow_depth__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec3[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: Model matrix id: 7
+14:38:02 [DEBUG] - Texture: '_mpp_u_model_' id: 7
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 8
+14:38:02 [DEBUG] - Texture: 'SHADOW_TYPE_AND_LIGHT_INDEX' id: -1
+14:38:02 [DEBUG] - Texture: 'POINT_POSITION_AND_RANGE' id: -1
+14:38:02 [DEBUG] - Texture: 'BIAS_AND_ENABLED' id: -1
+14:38:02 [DEBUG] - Texture: 'MAP_TEXEL_SIZE_AND_RADIUS' id: -1
+14:38:02 [DEBUG] - Texture: 'LIGHT_VIEW_PROJECTION' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_CASTER_CLIP_ENABLED_' id: 14
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_RETAINED_PLANE_' id: 15
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_OPENING_CENTRE_TOLERANCE_' id: 16
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_OPENING_TANGENT_HALF_WIDTH_' id: 17
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_OPENING_BITANGENT_HALF_HEIGHT_' id: 18
+14:38:02 [INFO ] Created program '__mpp_p3d_point_shadow_depth__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec3[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: Model matrix id: 7
+14:38:02 [DEBUG] - Texture: '_mpp_u_model_' id: 7
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 8
+14:38:02 [DEBUG] - Texture: 'SHADOW_TYPE_AND_LIGHT_INDEX' id: -1
+14:38:02 [DEBUG] - Texture: 'POINT_POSITION_AND_RANGE' id: -1
+14:38:02 [DEBUG] - Texture: 'BIAS_AND_ENABLED' id: -1
+14:38:02 [DEBUG] - Texture: 'MAP_TEXEL_SIZE_AND_RADIUS' id: -1
+14:38:02 [DEBUG] - Texture: 'LIGHT_VIEW_PROJECTION' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_SHADOW_ALPHA_CUTOFF_' id: 14
+14:38:02 [DEBUG] - Texture: '_mpp_u_SHADOW_ALPHA_FACTOR_' id: 15
+14:38:02 [DEBUG] - Texture: '_mpp_t_SHADOW_ALPHA_MAP_' id: 16
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_CASTER_CLIP_ENABLED_' id: 17
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_RETAINED_PLANE_' id: 18
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_OPENING_CENTRE_TOLERANCE_' id: 19
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_OPENING_TANGENT_HALF_WIDTH_' id: 20
+14:38:02 [DEBUG] - Texture: '_mpp_u_POINT_SHADOW_OPENING_BITANGENT_HALF_HEIGHT_' id: 21
+14:38:02 [INFO ] Created program '__mpp_p3d_point_alpha_shadow_depth__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_DIFFUSE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 10
+14:38:02 [INFO ] Created program '__mpp_p2d_fullscreen__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_EXPOSURE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_TONE_MAP_OPERATOR_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 12
+14:38:02 [INFO ] Created program '__mpp_p2d_tonemap__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_MODE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_EXPOSURE_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_u_DEPTH_NEAR_' id: 12
+14:38:02 [DEBUG] - Texture: '_mpp_u_DEPTH_FAR_' id: 13
+14:38:02 [DEBUG] - Texture: '_mpp_t_SOURCE_' id: 14
+14:38:02 [INFO ] Created program '__mpp_p2d_texture_diagnostic__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_THRESHOLD_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 10
+14:38:02 [INFO ] Created program '__mpp_p2d_bloom_extract__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_DIRECTION_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 10
+14:38:02 [INFO ] Created program '__mpp_p2d_bloom_blur__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_INTENSITY_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_SCENE_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_BLOOM_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_bloom_combine__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_PROJECTION_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_INVERSE_PROJECTION_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_RADIUS_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_u_INTENSITY_' id: 12
+14:38:02 [DEBUG] - Texture: '_mpp_u_BIAS_' id: 13
+14:38:02 [DEBUG] - Texture: '_mpp_u_POWER_' id: 14
+14:38:02 [DEBUG] - Texture: '_mpp_u_SAMPLE_COUNT_' id: 15
+14:38:02 [DEBUG] - Texture: '_mpp_t_DEPTH_' id: 16
+14:38:02 [INFO ] Created program '__mpp_p2d_ssao_raw__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_PROJECTION_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_INVERSE_PROJECTION_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_RADIUS_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_u_INTENSITY_' id: 12
+14:38:02 [DEBUG] - Texture: '_mpp_u_THICKNESS_' id: 13
+14:38:02 [DEBUG] - Texture: '_mpp_u_HORIZON_BIAS_' id: 14
+14:38:02 [DEBUG] - Texture: '_mpp_u_FALLOFF_START_' id: 15
+14:38:02 [DEBUG] - Texture: '_mpp_u_FALLOFF_END_' id: 16
+14:38:02 [DEBUG] - Texture: '_mpp_u_SLICE_COUNT_' id: 17
+14:38:02 [DEBUG] - Texture: '_mpp_u_STEPS_PER_SLICE_' id: 18
+14:38:02 [DEBUG] - Texture: '_mpp_u_POWER_' id: 19
+14:38:02 [DEBUG] - Texture: '_mpp_u_NORMAL_SOURCE_' id: 20
+14:38:02 [DEBUG] - Texture: '_mpp_t_DEPTH_' id: 21
+14:38:02 [DEBUG] - Texture: '_mpp_t_NORMALS_' id: 22
+14:38:02 [INFO ] Created program '__mpp_p2d_gtao_raw__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_BLUR_RADIUS_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_AMBIENT_OCCLUSION_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_DEPTH_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_ssao_blur__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_t_SCENE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_AMBIENT_OCCLUSION_' id: 10
+14:38:02 [INFO ] Created program '__mpp_p2d_ssao_combine__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_t_SCENE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_AMBIENT_OCCLUSION_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_MODULATION_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_ssao_combine_modulated__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_INVERSE_VIEW_PROJECTION_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_CAMERA_POSITION_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_ENVIRONMENT_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_environment_debug_cube__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_DIRECTION_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_OUTPUT_SIZE_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_ssaa_lanczos__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_INVERSE_CURRENT_VIEW_PROJECTION_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_PREVIOUS_VIEW_PROJECTION_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_CURRENT_COLOUR_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_t_CURRENT_DEPTH_' id: 12
+14:38:02 [DEBUG] - Texture: '_mpp_t_HISTORY_COLOUR_' id: 13
+14:38:02 [DEBUG] - Texture: '_mpp_t_HISTORY_DEPTH_' id: 14
+14:38:02 [INFO ] Created program '__mpp_p2d_taa__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 9
+14:38:02 [INFO ] Created program '__mpp_p2d_fxaa__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_FACE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_OUTPUT_SIZE_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_EQUIRECTANGULAR_' id: 11
+14:38:02 [INFO ] Created program '__mpp_ibl_equirectangular_to_cubemap__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_FACE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_OUTPUT_SIZE_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_SAMPLE_COUNT_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_t_ENVIRONMENT_' id: 12
+14:38:02 [INFO ] Created program '__mpp_ibl_diffuse_irradiance__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_FACE_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_OUTPUT_SIZE_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_ROUGHNESS_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_u_SOURCE_RESOLUTION_' id: 12
+14:38:02 [DEBUG] - Texture: '_mpp_u_SAMPLE_COUNT_' id: 13
+14:38:02 [DEBUG] - Texture: '_mpp_t_ENVIRONMENT_' id: 14
+14:38:02 [INFO ] Created program '__mpp_ibl_prefiltered_specular__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_SAMPLE_COUNT_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_OUTPUT_SIZE_' id: 10
+14:38:02 [INFO ] Created program '__mpp_ibl_brdf_integration__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_COLOUR_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_tris_text__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 2: _mpp_i_COLOUR (vec4[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_COLOUR_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 11
+14:38:02 [INFO ] Created program '__mpp_p2d_tris_text_coloured__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 2: _mpp_i_COLOUR (vec4[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 9
+14:38:02 [INFO ] Created program '__mpp_p2d_tris_Position2_TexCoord2_Colour4_7e9b79c7_1__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 2: _mpp_i_COLOUR (vec4[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 10
+14:38:02 [INFO ] Created program '__mpp_p2d_tris_Position2_TexCoord2_Colour4_98b403aa_s_2__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec4[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Uniform: point size id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_COLOUR_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 12
+14:38:02 [INFO ] Created program '__mpp_p2d_points_text__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec4[1]).
+14:38:02 [DEBUG] Vertex attribute 2: _mpp_i_COLOUR (vec4[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [DEBUG] - Uniform: point size id: 9
+14:38:02 [DEBUG] - Texture: '_mpp_u_COLOUR_' id: 10
+14:38:02 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 11
+14:38:02 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 12
+14:38:02 [INFO ] Created program '__mpp_p2d_points_text_coloured__'.
+14:38:02 [INFO ] Compiled vertex shader.
+14:38:02 [INFO ] Compiled fragment shader.
+14:38:02 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:02 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:02 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:02 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:02 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:02 [DEBUG] - Uniform: half window size id: 8
+14:38:02 [INFO ] Created program '__mpp_p2d_tris_Position2_TexCoord2_c40472d0_3__'.
+14:38:17 [INFO ] Compiled vertex shader.
+14:38:17 [INFO ] Compiled fragment shader.
+14:38:17 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:17 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:17 [DEBUG] Vertex attribute 1: _mpp_i_TEXCOORDS (vec2[1]).
+14:38:17 [DEBUG] Vertex attribute 2: _mpp_i_COLOUR (vec4[1]).
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:17 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:17 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:17 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:17 [DEBUG] - Uniform: half window size id: 8
+14:38:17 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 9
+14:38:17 [DEBUG] - Texture: '_mpp_t_TEX1_' id: 10
+14:38:17 [INFO ] Created program '__mpp_p2d_tris_Position2_TexCoord2_Colour4_7e9b79c7_s_tris_4__'.
+14:38:17 [INFO ] Compiled vertex shader.
+14:38:17 [INFO ] Compiled fragment shader.
+14:38:17 [DEBUG] Vertex attribute -1: gl_InstanceID (int[1]).
+14:38:17 [DEBUG] Vertex attribute 0: _mpp_i_POSITION (vec2[1]).
+14:38:17 [DEBUG] Vertex attribute 1: _mpp_i_COLOUR (vec4[1]).
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_NEAR_FAR_TIME' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_VIEWPORT_SIZE' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_INVERSE_PROJECTION_MATRIX' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_PROJECTION_MATRIX' id: -1
+14:38:17 [DEBUG] - Texture: 'MPP_PARTICLE_VIEW_MATRIX' id: -1
+14:38:17 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_ENABLED_' id: 5
+14:38:17 [DEBUG] - Texture: '_mpp_u_MPP_PARTICLE_MESH_TEMPLATE_' id: 6
+14:38:17 [DEBUG] - Uniform: ModelCameraProjection matrix id: 7
+14:38:17 [DEBUG] - Uniform: half window size id: 8
+14:38:17 [DEBUG] - Texture: '_mpp_u_GAMMA_' id: 9
+14:38:17 [INFO ] Created program '__mpp_p2d_lines_Position2_Colour4_ee985d78_line_5__'.
+14:41:14 [INFO ] Clearing up resources.

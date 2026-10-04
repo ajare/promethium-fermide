@@ -10,15 +10,15 @@ namespace dumbwaiter_fixture
 		while (world->getLayerCount() <= shaftLayer) world->addLayer();
 		if (shared && kind != 1)
 		{
-			auto location = kind == 2 ? world->addFacade(shaftLayer - 1, 0, 2, 1, 2)
-				: world->addRoom("Landing", shaftLayer - 1, 0, 2, 1, 2);
+			auto location = kind == 2 ? world->addFacade(shaftLayer - 1, 0, 2, 2, 2)
+				: world->addRoom("Landing", shaftLayer - 1, 0, 2, 2, 2);
 			world->addSectorWalkway(location, 1, 0);
 		}
 		else for (uint32_t y = 0; y < 2; ++y)
 		{
-			if (kind == 1) world->addCorridor(shaftLayer - 1, y, 2, 1, 1);
-			else if (kind == 2) world->addFacade(shaftLayer - 1, y, 2, 1, 1);
-			else world->addRoom("Landing", shaftLayer - 1, y, 2, 1, 1);
+			if (kind == 1) world->addCorridor(shaftLayer - 1, y, 2, 2, 1);
+			else if (kind == 2) world->addFacade(shaftLayer - 1, y, 2, 2, 1);
+			else world->addRoom("Landing", shaftLayer - 1, y, 2, 2, 1);
 		}
 		world->finishBuild(); world->pauseSimulation();
 		return world;
@@ -28,9 +28,9 @@ namespace dumbwaiter_fixture
 		while (world.getLayerCount() <= shaftLayer) world.addLayer();
 		for (uint32_t stop = 0; stop < 2; ++stop)
 		{
-			if (kind == 1) world.addCorridor(shaftLayer - 1, y + stop, x, 1, 1);
-			else if (kind == 2) world.addFacade(shaftLayer - 1, y + stop, x, 1, 1);
-			else world.addRoom("Destination landing", shaftLayer - 1, y + stop, x, 1, 1);
+			if (kind == 1) world.addCorridor(shaftLayer - 1, y + stop, x, 2, 1);
+			else if (kind == 2) world.addFacade(shaftLayer - 1, y + stop, x, 2, 1);
+			else world.addRoom("Destination landing", shaftLayer - 1, y + stop, x, 2, 1);
 		}
 	}
 	inline std::string yaml(core::World const& world)

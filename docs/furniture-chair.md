@@ -146,6 +146,24 @@ for tall artwork. Point order and display labels are not identities. The editor'
 snap toggle rounds only the instance x origin, leaving all point offsets rigid.
 It never rounds or permits fractional y.
 
+A usable point may specify `blocksPathing: false` to make its Marker usable as
+both a destination and an intermediate waypoint. Omitted `blocksPathing` defaults
+to `true`. This is a creation default: existing World-owned Marker properties
+remain authoritative on save/load, while newly reconciled usable points receive
+the catalogue default. Clear Blocks pathing in Marker Selection for existing seats.
+
+```yaml
+usablePoints:
+  - {key: left, label: Left seat, x: 0.5, blocksPathing: false}
+  - {key: right, label: Right seat, x: 1.5, blocksPathing: false}
+```
+
+The bundled sofa's front route passes through both non-blocking seat Markers;
+the bundled chair uses the same arrangement with one non-blocking seat. Both
+have separate back routes, use `sideRoutes: true`, and require instance Local
+depth 1 or greater: front edges resolve at instance depth minus 1, back edges at
+instance depth plus 1. Approach edges remain at fixed depth 0 to attach to Floor.
+
 Each destination is independently selectable and renameable using the ordinary
 Marker/behaviour UI. Renaming the instance does not rename its destinations.
 Movement, replay, history, deletion and supported-format round trips handle all
