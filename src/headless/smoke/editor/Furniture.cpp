@@ -463,7 +463,7 @@ namespace
 }
 namespace
 {
-	void locationPlanWorkflow(smoke::Context const&)
+	void locationPlanWorkflow(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
 		auto world = std::make_shared<core::World>("Plan editor", 20, 8);
@@ -475,6 +475,15 @@ namespace
 		world->addRoom("Upper landing", 0, 1, 15, 2, 1);
 		auto transit = world->addLadder(1, 0, 15, {2, false, true}).ladder.sector->getIndex();
 		world->finishBuild(); world->pauseSimulation();
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/desk.furniture.yaml"));
+		world->attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+		world->placeFurniture(room, "desk", 0.25f, 0, "Ground desk", 5);
+		DocumentHistory history; std::string diagnostic;
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto reader = core::YamlSerializer::fromString(snapshot.yaml); reader->deserialize();
+			core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
+			auto restored = world->deserialize(*reader, work); world->pauseSimulation(); return restored;
+		};
 		auto authoredBefore = captureDocumentSnapshot(world, DocumentHistory{})->yaml;
 		LocationPlan plan;
 		auto selection = world->getSector(room);
@@ -486,9 +495,12 @@ namespace
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
 		ImVec2 actionPosition; unsigned presentations = 0;
+		std::vector<std::string> labels, depths;
+		auto hasDepth = [&](std::string const& label) { return std::find(depths.begin(), depths.end(), label) != depths.end(); };
+		auto hasLabel = [&](std::string const& label) { return std::find(labels.begin(), labels.end(), label) != labels.end(); };
 		auto frame = [&]
 		{
-			text.clear(); presentations = 0;
+			text.clear(); presentations = 0; labels.clear(); depths.clear();
 			ImGui::NewFrame();
 			ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({250, 100});
@@ -500,9 +512,15 @@ namespace
 			auto selectionText = text;
 			text.clear(); ImGui::LogToClipboard();
 			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 360});
-			plan.render(world, [&](WorldDrawList const& commands, ImVec2, ImVec2)
+			plan.render(world, [&](WorldDrawList const& commands, ImVec2 position, ImVec2)
 			{
 				++presentations;
+				for (auto const& command : commands.commands())
+					if (auto label = std::get_if<WorldDrawList::Text>(&command))
+					{
+						labels.push_back(label->value);
+						if (std::abs(label->position.x - position.x - 16) < .01f) depths.push_back(label->value);
+					}
 				require(!commands.commands().empty(), "Open plan did not present a command stream");
 			});
 			// If the plan is closed it does not consume next-window settings.
@@ -526,6 +544,8 @@ namespace
 		require(presentations == 1 && text.find("Location: Pinned room") != std::string::npos
 			&& text.find("{ 4 } Level") != std::string::npos && text.find("Layer: 1") != std::string::npos,
 			"Selection did not open the plan on selected World Level/Layer: " + text);
+		require(!hasLabel("Ground desk") && hasDepth("3") && !hasDepth("4"),
+			"Other supporting Level expanded or populated the plan");
 		selection = world->getSector(facade); frame();
 		require(text.find("Location: Pinned room") != std::string::npos,
 			"Ordinary Selection retargeted a pinned plan");
@@ -552,24 +572,57 @@ namespace
 		frame();
 		require(text.find("{ 5 } Level") != std::string::npos,
 			"Multi-Level Room selector did not switch World Level: " + text);
+		require(!hasLabel("Ground desk"), "Level selector showed ground-Level Furniture");
+		require(captureDocumentSnapshot(world, DocumentHistory{})->yaml == authoredBefore,
+			"Read-only plan input changed the World document");
+		// External edits use the normal panel/history authority, not a plan-only API.
+		for (uint32_t x = 0; x < 4; ++x) world->addSectorWalkway(room, 2, x);
+		require(placeSelectedFurniture(world, room, "desk", 0.25f, 2, false, "Upper desk", diagnostic, history, 2), diagnostic);
+		frame(); require(hasLabel("Upper desk") && hasDepth("4") && !hasDepth("5"),
+			"Instance/vertex at depth 3 did not expose depth 4 after an external edit");
+		auto upper = world->furniture().back();
+		require(editSelectedFurniture(world, upper.id, 0.5f, 2, false, "Upper desk", diagnostic, history, 5), diagnostic);
+		frame(); require(hasDepth("7") && !hasDepth("8"), "Resolved depth 6 did not expose through 7");
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Plan edit undo failed");
+		frame(); require(presentations == 1 && hasLabel("Upper desk") && hasDepth("7"),
+			"Undo reconstruction lost contents or shrank the retained range");
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Plan edit redo failed");
+		frame(); require(hasLabel("Upper desk") && hasDepth("7"), "Redo reconstruction lost plan contents");
+		require(editSelectedFurniture(world, upper.id, .75f, 2, false, "Upper desk", diagnostic, history, 1), diagnostic);
+		frame(); require(hasDepth("7"), "Moving Furniture to a lower depth shrank the expanded plan");
+		require(deleteSelectedFurniture(world, upper.id, diagnostic, history), diagnostic);
+		frame(); require(!hasLabel("Upper desk") && hasDepth("7"), "Deletion failed to refresh or shrank plan");
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Plan deletion undo failed");
+		frame(); require(hasLabel("Upper desk"), "Deletion undo did not restore displayed contents");
+		// Retargeting starts a new compact range and excludes the Room's contents.
+		selection = world->getSector(facade);
 		frame(); click(actionPosition); frame();
+		require(!hasLabel("Upper desk") && !hasDepth("7"), "Retarget retained another Location's contents/range");
 		require(presentations == 1 && text.find("Location: Retargeted facade") != std::string::npos
 			&& text.find("{ 0 } Level") != std::string::npos,
 			"Explicit opening did not retarget the single window");
 		window = ImGui::FindWindowByName("Location plan");
 		click({window->Pos.x + window->Size.x - 10, window->Pos.y + 10});
 		frame(); require(presentations == 0, "Window close still presents the plan");
-		require(captureDocumentSnapshot(world, DocumentHistory{})->yaml == authoredBefore,
-			"Read-only plan interaction changed the World document");
+		selection = world->getSector(room); selectedLevel = 3; frame(); click(actionPosition); frame();
+		require(hasLabel("Ground desk") && hasDepth("7"), "Pre-existing resolved depths were hidden on opening");
 		selection = world->getSector(corridor); selectedLevel = 1; frame(); click(actionPosition); frame();
 		require(presentations == 1 && text.find("{ 1 } Level") != std::string::npos, "Reopening failed");
+		while (!world->furniture().empty())
+			require(deleteSelectedFurniture(world, world->furniture().back().id, diagnostic, history), diagnostic);
+		frame(); require(!hasLabel("Ground desk") && !hasLabel("Upper desk"), "External removal did not refresh plan");
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/layouts.furniture.yaml"));
+		world->attachFurnitureCatalogue("layouts.furniture.yaml", catalogue);
+		require(placeSelectedFurniture(world, corridor, "sofa", .25f, 0, false, "New catalogue sofa", diagnostic, history, 6), diagnostic);
+		frame(); require(hasLabel("New catalogue sofa") && hasDepth("7"),
+			"Plan retained stale catalogue definitions or failed to expand");
 		auto heldOldTarget = selection;
 		// Same World object, new Sectors, as used by document history replay.
 		auto snapshot = captureDocumentSnapshot(world, DocumentHistory{});
 		auto reader = core::YamlSerializer::fromString(snapshot->yaml); reader->deserialize();
-		core::SerializationWorkData work;
+		core::SerializationWorkData work; work.furnitureCatalogue = catalogue;
 		require(world->deserialize(*reader, work), "Cannot reconstruct plan World");
-		frame(); require(presentations == 0, "History reconstruction retained stale target");
+		frame(); require(presentations == 1, "History reconstruction failed to refresh unchanged target");
 		require(!plan.open(world, heldOldTarget, 1), "Opening accepted a stale Location");
 		selection = world->getSector(room); selectedLevel = 4; frame(); click(actionPosition); frame();
 		require(presentations == 1, "Cannot reopen reconstructed World");

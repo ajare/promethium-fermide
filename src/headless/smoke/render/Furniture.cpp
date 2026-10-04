@@ -8,6 +8,7 @@
 #include "core/MarkerSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
 #include <fstream>
+#include <tuple>
 #include <yaml-cpp/yaml.h>
 
 extern UISettings gUISettings;
@@ -425,7 +426,7 @@ namespace
 }
 namespace
 {
-	void locationPlanGrid(smoke::Context const&)
+	void locationPlanGrid(smoke::Context const& context)
 	{
 		using smoke::require;
 		auto world = std::make_shared<core::World>("Plan grid", 20, 8);
@@ -474,6 +475,100 @@ namespace
 		WorldDrawList empty({{0, 0}, {1, 1}});
 		renderLocationPlanGrid(empty, *world->getSector(room), {0, 0}, {0, 0});
 		require(empty.commands().empty(), "Empty viewport recorded plan geometry");
+
+		auto furnished = std::make_shared<core::World>("Plan contents", 24, 8);
+		auto host = furnished->addRoom("Offset host", 1, 3, 7, 6, 3);
+		auto hall = furnished->addCorridor(0, 1, 2, 6, 1);
+		auto facade = furnished->addFacade("Facade", 0, 0, 12, 6, 1);
+		furnished->addSectorWalkway(host, 1, 0);
+		furnished->addSectorWalkway(host, 1, 1);
+		furnished->addSectorWalkway(host, 1, 4);
+		furnished->finishBuild(); furnished->pauseSimulation();
+		furnished->attachFurnitureCatalogue("layouts.furniture.yaml",
+			core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/layouts.furniture.yaml")));
+		furnished->placeFurniture(host, "larger", 1.25f, 0, "Sparse footprint", 3);
+		furnished->placeFurniture(host, "sofa", 0, 1, "Upper sofa", 6);
+		furnished->placeFurniture(hall, "sofa", 1.25f, 0, "Hall sofa", 0);
+		furnished->placeFurniture(facade, "sofa", 2.25f, 0, "Facade sofa", 0);
+		auto draw = [&](uint32_t sector, uint32_t level, uint32_t rows)
+		{
+			WorldDrawList list({{0, 0}, {400, 300}});
+			renderLocationPlanGrid(list, *furnished->getSector(sector), {0, 0}, {400, 300}, rows, furnished.get(), level);
+			return list;
+		};
+		auto ground = draw(host, 3, 5);
+		unsigned points = 0, footprints = 0, shaded = 0;
+		for (auto const& command : ground.commands())
+		{
+			if (auto text = std::get_if<WorldDrawList::Text>(&command))
+			{
+				require(text->value != "Upper sofa" && text->value != "Hall sofa" && text->value != "Facade sofa",
+					"Plan included other Locations or supporting Levels");
+				if (text->value == "Sparse footprint")
+				{
+					// Negative tile offset + fractional instance X, complete sparse 3-cell width.
+					require(near(text->clip.minimum.x, 48 + .25f * 340 / 6)
+						&& near(text->clip.maximum.x, 48 + 3.25f * 340 / 6)
+						&& near(text->clip.minimum.y, 272 - 4 * 264.f / 5)
+						&& near(text->clip.maximum.y, 272 - 3 * 264.f / 5),
+						"Plan footprint/label ignored fractional X, offsets, width, or one-row depth");
+				}
+			}
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+			{
+				if (triangle->colour == IM_COL32(255, 210, 90, 255))
+				{
+					++points;
+					require(near(triangle->clip.minimum.x, 48) && near(triangle->clip.maximum.y, 272),
+						"Usable points escaped the grid clip");
+					auto centre = triangle->positions[0];
+					require(near(centre.y, 272 - 3.5f * 264 / 5)
+						&& (near(centre.x, 48 + .5f * 340 / 6)
+							|| near(centre.x, 48 + 1.625f * 340 / 6)
+							|| near(centre.x, 48 + 3.f * 340 / 6)),
+						"Usable-point indicators ignored authored fractional coordinates");
+				}
+				if (triangle->colour == IM_COL32(55, 90, 120, 255)) ++footprints;
+				if (triangle->colour == IM_COL32(65, 40, 40, 255)) ++shaded;
+			}
+		}
+		require(points == 24 && footprints == 2 && shaded == 0,
+			"Plan lost three usable points, a footprint, or shaded supported ground");
+		auto upper = draw(host, 4, 8);
+		shaded = 0;
+		for (auto const& command : upper.commands())
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(65, 40, 40, 255))
+			{
+				++shaded;
+				float minX = triangle->positions[0].x;
+				for (auto position : triangle->positions) minX = std::min(minX, position.x);
+				require(near(minX, 48 + 2 * 340.f / 6) || near(minX, 48 + 3 * 340.f / 6)
+					|| near(minX, 48 + 5 * 340.f / 6), "Supported upper Walkway shaded as a gap");
+			}
+		require(shaded == 6, "Partial upper Walkway gaps were not shaded");
+		for (auto [sector, level, label] : {std::tuple{hall, 1u, "Hall sofa"}, std::tuple{facade, 0u, "Facade sofa"}})
+		{
+			auto list = draw(sector, level, 4); bool found = false;
+			for (auto const& command : list.commands())
+				if (auto text = std::get_if<WorldDrawList::Text>(&command); text && text->value == label) found = true;
+			require(found, "Corridor/Facade Furniture missing from plan");
+		}
+		// Contents use the intersected caller clip, including a fully clipped footprint.
+		WorldDrawList clipped({{350, 0}, {380, 300}});
+		renderLocationPlanGrid(clipped, *furnished->getSector(host), {0, 0}, {400, 300}, 5, furnished.get(), 3);
+		for (auto const& command : clipped.commands())
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(55, 90, 120, 255))
+			{
+				require(near(triangle->clip.minimum.x, 350) && near(triangle->clip.maximum.x, 380),
+					"Footprint replaced the caller clip");
+				for (auto p : triangle->positions) require(p.x < triangle->clip.minimum.x,
+					"Expected footprint to be entirely invisible under its command clip");
+			}
+		require(locationPlanDepthRows(*furnished, *furnished->getSector(host), 3) == 5
+			&& locationPlanDepthRows(*furnished, *furnished->getSector(host), 4) == 8,
+			"Depth expansion ignored Level filtering or instance depth");
 	}
 }
 void render_smoke::registerFurniture(std::vector<smoke::Check>& checks)

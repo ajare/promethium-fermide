@@ -18,7 +18,7 @@ bool LocationPlan::open(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::Sector> const& location, uint32_t worldLevel)
 {
 	if (!ownsLocation(world, location)) return false;
-	mWorld = world; mLocation = location;
+	mWorld = world; mLocation = location; mDepthRows = 4;
 	mWorldLevel = std::clamp(worldLevel, location->getCellY(),
 		location->getCellY() + location->getLevelsHigh() - 1);
 	mOpen = true; mFocus = true;
@@ -32,7 +32,23 @@ void LocationPlan::close()
 
 std::shared_ptr<const core::Sector> LocationPlan::target(std::shared_ptr<core::World> const& world)
 {
-	auto location = mLocation.lock();
+	auto location = mLocation;
+	// History reconstructs Sectors in the same World. Rebind only an unchanged
+	// authored Location at the same index; replacement Worlds and changed targets
+	// close instead of silently inspecting an unrelated Sector.
+	if (mOpen && world && mWorld.lock() == world && location
+		&& !ownsLocation(world, location) && location->getIndex() < world->getNumSectors())
+	{
+		auto candidate = world->getSector(location->getIndex());
+		if (candidate && candidate->getType() == location->getType()
+			&& candidate->getName() == location->getName()
+			&& candidate->getLayerIndex() == location->getLayerIndex()
+			&& candidate->getCellX() == location->getCellX()
+			&& candidate->getCellY() == location->getCellY()
+			&& candidate->getCellsWide() == location->getCellsWide()
+			&& candidate->getLevelsHigh() == location->getLevelsHigh())
+			mLocation = location = candidate;
+	}
 	if (!mOpen || mWorld.lock() != world || !ownsLocation(world, location))
 	{
 		close(); return {};
@@ -51,6 +67,8 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 {
 	auto location = target(world);
 	if (!location) return;
+	mWorldLevel = std::clamp(mWorldLevel, location->getCellY(),
+		location->getCellY() + location->getLevelsHigh() - 1);
 	ImGui::SetNextWindowSize({600, 360}, ImGuiCond_FirstUseEver);
 	if (mFocus) { ImGui::SetNextWindowFocus(); mFocus = false; }
 	if (ImGui::Begin("Location plan", &mOpen))
@@ -70,6 +88,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			}
 			ImGui::EndCombo();
 		}
+		mDepthRows = std::max(mDepthRows, locationPlanDepthRows(*world, *location, mWorldLevel));
 		ImGui::TextUnformatted("World X / Local depth (ordering)");
 		auto position = ImGui::GetCursorScreenPos();
 		auto size = ImGui::GetContentRegionAvail();
@@ -77,7 +96,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 		{
 			ImGui::InvisibleButton("##LocationPlanViewport", size);
 			WorldDrawList commands({position, {position.x + size.x, position.y + size.y}});
-			renderLocationPlanGrid(commands, *location, position, size);
+			renderLocationPlanGrid(commands, *location, position, size, mDepthRows, world.get(), mWorldLevel);
 			present(commands, position, size);
 		}
 	}
