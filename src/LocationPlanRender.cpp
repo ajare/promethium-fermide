@@ -4,11 +4,22 @@
 #include <set>
 #include <map>
 #include <cmath>
+#include <iterator>
+#include <vector>
 #include "core/Edge.h"
 #include "core/Marker.h"
 
 namespace
 {
+	constexpr float GraphMargin = 8, VertexRadius = 3;
+	constexpr ImU32 VertexColours[]{IM_COL32(150, 245, 255, 255), IM_COL32(105, 230, 140, 255), IM_COL32(255, 190, 60, 255)};
+	struct PlanVertex
+	{
+		std::shared_ptr<const core::Vertex> vertex;
+		std::string name;
+		unsigned category;
+	};
+
 	bool onPlan(core::Vertex const& vertex, core::Sector const& location, uint32_t worldLevel)
 	{
 		auto sector = vertex.getSector();
@@ -26,6 +37,63 @@ namespace
 		if (depths.empty()) depths.insert(0);
 		return depths;
 	}
+
+	std::vector<PlanVertex> planVertices(core::World const& world, core::Sector const& location, uint32_t worldLevel)
+	{
+		std::map<std::string, std::pair<std::string, bool>> authored;
+		if (auto catalogue = world.furnitureCatalogue())
+			for (auto const& instance : world.furniture())
+			{
+				if (instance.sector != location.getIndex() || location.getCellY() + instance.y != worldLevel) continue;
+				if (auto definition = catalogue->definition(instance.definitionKey))
+					for (auto const& vertex : definition->vertices)
+						authored.emplace("furniture:" + std::to_string(instance.id) + ":" + vertex.key,
+							std::pair{instance.name + " / " + vertex.key, vertex.external});
+			}
+		std::vector<PlanVertex> result;
+		if (auto graph = world.getGraph())
+			for (auto const& vertex : graph->getVertices())
+				if (onPlan(*vertex, location, worldLevel))
+				{
+					auto marker = std::dynamic_pointer_cast<core::Marker>(vertex->getObject());
+					auto entry = authored.find(vertex->getTopologyKey());
+					result.push_back({vertex, marker ? marker->getName()
+						: entry != authored.end() ? entry->second.first : vertex->getDescription(),
+						marker ? 2u : entry != authored.end() && entry->second.second ? 1u : 0u});
+				}
+		// Coincident ports paint over ordinary anchors; usable points paint last.
+		std::stable_sort(result.begin(), result.end(), [](auto const& a, auto const& b) { return a.category < b.category; });
+		return result;
+	}
+
+	ImVec2 vertexScreen(core::Vertex const& vertex, core::Sector const& location,
+		ImVec2 position, ImVec2 size, uint32_t depthRows, int depth)
+	{
+		return {position.x + 48 + (vertex.getPosition().x - location.getCellX()) * (size.x - 60) / location.getCellsWide(),
+			position.y + size.y - 28 - static_cast<float>(depth) * (size.y - 36) / std::max(depthRows, 4u)};
+	}
+}
+
+std::optional<std::string> locationPlanVertexNameAtPosition(core::World const& world,
+	core::Sector const& location, uint32_t worldLevel, ImVec2 mouse,
+	ImVec2 position, ImVec2 size, uint32_t depthRows)
+{
+	if (size.x <= 64 || size.y <= 40 || !location.getCellsWide()
+		|| mouse.x < std::max(position.x, position.x + 48 - GraphMargin)
+		|| mouse.x >= std::min(position.x + size.x, position.x + size.x - 12 + GraphMargin)
+		|| mouse.y < position.y || mouse.y >= std::min(position.y + size.y, position.y + size.y - 28 + GraphMargin)) return {};
+	auto vertices = planVertices(world, location, worldLevel);
+	for (auto it = vertices.rbegin(); it != vertices.rend(); ++it)
+	{
+		auto depths = vertexDepths(*it->vertex);
+		for (auto depth = depths.rbegin(); depth != depths.rend(); ++depth)
+		{
+			auto p = vertexScreen(*it->vertex, location, position, size, depthRows, *depth);
+			float dx = p.x - mouse.x, dy = p.y - mouse.y;
+			if (dx * dx + dy * dy <= (VertexRadius + 2) * (VertexRadius + 2)) return it->name;
+		}
+	}
+	return {};
 }
 
 void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
@@ -151,30 +219,17 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 	// Leave breathing room outside the grid so depth-0 edges and boundary
 	// vertices retain their full stroke/radius. The outer viewport/caller clip
 	// still bounds the overlay; Furniture and input keep their existing bounds.
-	constexpr float graphMargin = 8;
-	commands.PushClipRect({left - graphMargin, top - graphMargin},
-		{right + graphMargin, bottom + graphMargin}, true);
+	commands.PushClipRect({left - GraphMargin, top - GraphMargin},
+		{right + GraphMargin, bottom + GraphMargin}, true);
 	// Draw the live graph above footprints, never reconstructing catalogue
 	// connectivity or joining coincident points. Only edges wholly on this
 	// Location/Level are shown; boundary vertices remain visible.
 	if (world) if (auto graph = world->getGraph())
 	{
-		std::set<std::string> externalVertices;
-		if (auto catalogue = world->furnitureCatalogue())
-			for (auto const& instance : world->furniture())
-			{
-				if (instance.sector != location.getIndex() || location.getCellY() + instance.y != worldLevel) continue;
-				if (auto definition = catalogue->definition(instance.definitionKey))
-					for (auto const& vertex : definition->vertices)
-						if (vertex.external)
-							// Match the authored graph identity exactly, not its inferred
-							// floor anchors/cuts or coincident private vertices.
-							externalVertices.insert("furniture:" + std::to_string(instance.id) + ":" + vertex.key);
-			}
+		auto vertices = planVertices(*world, location, worldLevel);
 		auto screen = [&](core::Vertex const& vertex, int depth)
 		{
-			return ImVec2{left + (vertex.getPosition().x - location.getCellX()) * cellWidth,
-				bottom - static_cast<float>(depth) * rowHeight};
+			return vertexScreen(vertex, location, position, size, depthRows, depth);
 		};
 		for (auto const& edge : graph->getEdges())
 		{
@@ -182,6 +237,27 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 			if (!from || !to || !onPlan(*from, location, worldLevel) || !onPlan(*to, location, worldLevel)) continue;
 			commands.AddLine(screen(*from, edge->getLocalDepth()), screen(*to, edge->getLocalDepth()),
 				IM_COL32(80, 210, 220, 255), 3);
+		}
+		// These dotted guides join projections of the same graph vertex, not
+		// graph edges or distinct vertices that happen to share a name/position.
+		// Consecutive depths form one chain; keep the dots behind all glyphs.
+		for (auto const& entry : vertices)
+		{
+			auto depths = vertexDepths(*entry.vertex);
+			for (auto it = depths.begin(); it != depths.end(); ++it)
+			{
+				auto next = std::next(it);
+				if (next == depths.end()) break;
+				auto a = screen(*entry.vertex, *next), b = screen(*entry.vertex, *it);
+				// Limit recording to visible pixels even if a caller supplies
+				// fewer rows than the live graph needs. Leave the glyphs clear.
+				auto clipMin = commands.GetClipRectMin(), clipMax = commands.GetClipRectMax();
+				if (a.x < clipMin.x || a.x > clipMax.x) continue;
+				float first = std::max(a.y + VertexRadius + 2, clipMin.y + 1);
+				float last = std::min(b.y - VertexRadius - 2, clipMax.y - 1);
+				for (float y = first; y <= last; y += 5)
+					commands.AddCircleFilled({a.x, y}, 1, IM_COL32(180, 180, 180, 200), 6);
+			}
 		}
 		// Usable points belong to the Furniture's instance-depth row, whereas
 		// their routing vertices are projected at incident edge depths. Resolve
@@ -214,21 +290,9 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 					commands.AddCircle(centre, 6, IM_COL32(255, 190, 60, 255), 16);
 				}
 			}
-		// Ports can coincide with ordinary floor anchors. Paint ordinary points
-		// first, then external ports, then usable points so their colour survives.
-		for (auto colour : {IM_COL32(150, 245, 255, 255), IM_COL32(105, 230, 140, 255), IM_COL32(255, 190, 60, 255)})
-			for (auto const& vertex : graph->getVertices())
-				if (onPlan(*vertex, location, worldLevel))
-				{
-					// Usable external ports retain their destination colour.
-					auto vertexColour = std::dynamic_pointer_cast<core::Marker>(vertex->getObject())
-						? IM_COL32(255, 190, 60, 255)
-						: externalVertices.contains(vertex->getTopologyKey()) ? IM_COL32(105, 230, 140, 255)
-						: IM_COL32(150, 245, 255, 255);
-					if (vertexColour != colour) continue;
-					for (auto depth : vertexDepths(*vertex))
-						commands.AddCircleFilled(screen(*vertex, depth), 3, colour, 8);
-				}
+		for (auto const& entry : vertices)
+			for (auto depth : vertexDepths(*entry.vertex))
+				commands.AddCircleFilled(screen(*entry.vertex, depth), VertexRadius, VertexColours[entry.category], 8);
 	}
 	commands.PopClipRect();
 	commands.PopClipRect();

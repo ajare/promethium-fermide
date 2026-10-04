@@ -167,6 +167,7 @@ set(editor_names
     locationPlan/workflow
     locationPlan/placement
     locationPlan/movement
+    locationPlan/hover
     locationPlan/deletion
     furniture/chairActions
     furniture/catalogueReattachmentHistory

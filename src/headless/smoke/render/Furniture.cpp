@@ -442,6 +442,10 @@ namespace
 		// usable point remains one circle on the instance's depth row.
 		catalogueData["furnitureCatalogue"]["definitions"][0]["edges"].push_back(
 			YAML::Load("{from: seat, to: backLeft, depthOffset: 1}"));
+		// Three projections of backLeft must form a chain with a gap for the
+		// intermediate depth's glyph, not an extra direct 0-to-3 guide.
+		catalogueData["furnitureCatalogue"]["definitions"][0]["edges"].push_back(
+			YAML::Load("{from: backLeft, to: frontRight, depthOffset: 0}"));
 		auto cataloguePath = context.temporaryRoot() / "plan-graph-links.furniture.yaml";
 		{ std::ofstream output(cataloguePath); output << catalogueData; }
 		world->attachFurnitureCatalogue(cataloguePath.filename().string(), core::FurnitureCatalogue::readFile(cataloguePath));
@@ -462,6 +466,8 @@ namespace
 		auto list = draw();
 		std::vector<WorldDrawList::Line> edges, usableLines;
 		std::vector<std::pair<ImVec2, ImU32>> vertices;
+		std::vector<ImVec2> identityDots;
+		size_t lastDot = 0;
 		size_t lastFootprint = 0, firstEdge = list.commands().size(), firstVertex = list.commands().size();
 		for (size_t i = 0; i < list.commands().size(); ++i)
 		{
@@ -486,6 +492,19 @@ namespace
 			}
 			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
 			{
+				if (triangle->colour == IM_COL32(180, 180, 180, 200))
+				{
+					identityDots.push_back(triangle->positions[0]); lastDot = i;
+					require(i > lastFootprint && near(triangle->clip.minimum.x, 120)
+						&& near(triangle->clip.minimum.y, 60) && near(triangle->clip.maximum.x, 360)
+						&& near(triangle->clip.maximum.y, 220), "Vertex identity guide escaped graph clip or covered quads");
+					for (unsigned point = 1; point < 3; ++point)
+					{
+						auto p = triangle->positions[point], centre = triangle->positions[0];
+						require(near((p.x - centre.x) * (p.x - centre.x) + (p.y - centre.y) * (p.y - centre.y), 1),
+							"Vertex identity connector did not use small dots");
+					}
+				}
 				if (triangle->colour == IM_COL32(55, 90, 120, 255)) lastFootprint = i;
 				if (triangle->colour == IM_COL32(150, 245, 255, 255)
 					|| triangle->colour == IM_COL32(105, 230, 140, 255)
@@ -530,6 +549,24 @@ namespace
 			&& hasEdge(1.25f, 1.5f, 0) && !hasEdge(1.25f, 3.25f, 0)
 			&& !hasEdge(6.5f, 6.5f, 0),
 			"Plan lost resolved front/back/seat routes or invented a floor shortcut:" + geometry);
+		require(!identityDots.empty() && lastDot < firstVertex, "Repeated vertices lost dotted guides or guides covered vertex glyphs");
+		bool seatGuide = false;
+		for (auto p : identityDots)
+		{
+			require((near(p.x, screen(1.5f, 0).x) || near(p.x, screen(3, 0).x) || near(p.x, screen(2, 0).x))
+				&& p.y >= screen(0, 3).y + 5 && p.y <= 219,
+				"Dotted guide connected another Location/Level or a single-depth vertex");
+			if (near(p.x, screen(1.5f, 0).x))
+				require(std::abs(p.y - screen(1.5f, 2).y) >= 5,
+					"Multi-depth identity guide skipped an intermediate projection instead of forming a chain");
+			if (near(p.x, screen(2, 0).x))
+			{
+				seatGuide = true;
+				require(p.y <= screen(2, 2).y - 5,
+					"Dotted guide joined the isolated coincident vertex to a distinct usable vertex");
+			}
+		}
+		require(seatGuide, "Usable vertex's repeated projections lost their identity connector");
 		require(hasVertex(1.5f, 0) && hasVertex(1.5f, 2) && hasVertex(1.5f, 3)
 			&& hasVertex(2, 0) && hasVertex(2, 2) && hasVertex(7.5f, 0),
 			"Plan lost shared multi-depth, isolated routing-only or standalone vertices");
@@ -575,14 +612,28 @@ namespace
 				edge && edge->colour == IM_COL32(80, 210, 220, 255)
 				&& near(edge->from.y, screen(0, 4).y))
 				movedRoute = movedRoute || near(edge->from.x, screen(2.5f, 4).x) || near(edge->to.x, screen(2.5f, 4).x);
+		unsigned movedDots = 0;
+		for (auto const& command : moved.commands())
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(180, 180, 180, 200))
+			{
+				++movedDots; auto p = triangle->positions[0];
+				require((near(p.x, screen(2.5f, 0).x) || near(p.x, screen(4, 0).x) || near(p.x, screen(3, 0).x))
+					&& p.y >= 61 && p.y <= 219, "Moved vertex identity guide retained stale coordinates or exceeded the caller clip");
+			}
+		require(movedDots > 0, "Rebuilt graph lost vertex identity guides");
 		require(movedRoute && locationPlanDepthRows(*world, *world->getSector(host), 2) == 7,
 			"Graph did not refresh moved Furniture coordinates/depths");
 		require(world->removeFurniture(id, &diagnostic), diagnostic);
 		auto removed = draw();
 		for (auto const& command : removed.commands())
+		{
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command))
+				require(triangle->colour != IM_COL32(180, 180, 180, 200), "Deleted Furniture left stale vertex identity guides");
 			if (auto edge = std::get_if<WorldDrawList::Line>(&command);
 				edge && edge->colour == IM_COL32(80, 210, 220, 255))
 				require(near(edge->from.y, screen(0, 0).y), "Deleted Furniture left stale graph routes");
+		}
 		// Graph visibility is independent of attaching a Furniture catalogue.
 		auto plain = std::make_shared<core::World>("Plain graph", 8, 2);
 		auto room = plain->addRoom("Plain", 0, 0, 0, 8, 1);

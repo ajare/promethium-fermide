@@ -629,6 +629,88 @@ namespace
 		plan.close(); frame(); require(rowLabels.empty(), "Closing plan retained third row");
 	}
 
+	void locationPlanHover(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world = std::make_shared<core::World>("Hover", 20, 5);
+		auto room = world->addRoom("Pinned", 0, 1, 3, 8, 2);
+		for (uint32_t x = 0; x < 8; ++x) world->addSectorWalkway(room, 1, x);
+		world->addSectorMarker(room, 0, 6.5f, "Standalone target");
+		world->addSectorMarker(room, 1, 5.5f, "Other Level target");
+		world->finishBuild(); world->pauseSimulation();
+		world->attachFurnitureCatalogue("desk.furniture.yaml",
+			core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/desk.furniture.yaml")));
+		world->placeFurniture(room, "desk", 1.25f, 0, "Desk", 2);
+		world->finishBuild();
+		auto marker = world->furniture().front().marker;
+		std::string diagnostic;
+		require(world->renameMarker(marker, "Seat % named", &diagnostic), diagnostic);
+		DocumentHistory history; LocationPlan plan;
+		require(plan.open(world, world->getSector(room), 1), "Cannot open hover plan");
+		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
+		io.DisplaySize = {1200, 900}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text;
+		io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		ImVec2 viewport{}, size{}; unsigned rows = 0;
+		auto frame = [&]
+		{
+			text.clear(); rows = 0;
+			ImGui::NewFrame(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({300, 10}); ImGui::SetNextWindowSize({600, 420});
+			plan.render(world, [&](WorldDrawList const& commands, ImVec2 p, ImVec2 s)
+			{
+				viewport = p; size = s;
+				for (auto const& command : commands.commands())
+					if (auto label = std::get_if<WorldDrawList::Text>(&command);
+						label && std::abs(label->position.x - p.x - 16) < .01f) ++rows;
+			}, history);
+			ImGui::GetCurrentContext()->NextWindowData.ClearFlags();
+			ImGui::LogFinish(); ImGui::Render();
+		};
+		frame(); frame();
+		auto point = [&](float x, float depth) { return ImVec2{viewport.x + 48 + x * (size.x - 60) / 8,
+			viewport.y + size.y - 28 - depth * (size.y - 36) / rows}; };
+		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
+		auto expectVertex = [&](float x, float depth, std::string const& name)
+		{
+			mouse(point(x, depth));
+			require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Hand && text.find(name) != std::string::npos,
+				"Vertex hover lost hand cursor or tooltip '" + name + "': " + text);
+		};
+		auto before = captureDocumentSnapshot(world, history)->yaml;
+		// A vertex at the footprint boundary is tested before the Furniture quad.
+		expectVertex(1.5f, 2, "Desk / frontLeft");
+		expectVertex(2, 2, "Seat % named");
+		auto overlap = point(2, 2); overlap.y -= 2; mouse(overlap);
+		require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Hand && text.find("Seat % named") != std::string::npos,
+			"Furniture hit testing outranked a vertex overlapping its quad");
+		// Resolve the external port, not its coincident inferred floor anchor.
+		expectVertex(1.25f, 0, "Desk / left");
+		auto margin = point(1.25f, 0); margin.y += 2; mouse(margin);
+		require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Hand && text.find("Desk / left") != std::string::npos,
+			"Depth-0 vertex was not hoverable in the graph margin");
+		expectVertex(6.5f, 0, "Standalone target");
+		mouse(point(1.8f, 2.5f));
+		require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Hand
+			&& text.find("Seat % named") == std::string::npos && text.find("Desk / frontLeft") == std::string::npos,
+			"Furniture hover lost hand cursor or retained a vertex tooltip");
+		mouse(point(5.5f, 0));
+		require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow && text.find("Other Level target") == std::string::npos,
+			"Other Level's vertex received hover feedback");
+		mouse(point(5, 2.5f)); require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow, "Empty plan kept hand cursor");
+		require(captureDocumentSnapshot(world, history)->yaml == before && history.undoCount() == 0
+			&& !selectedFurnitureInstance(world), "Hover mutated selection, World or history");
+		// Rebuild/name changes must be resolved on the next hover, not from cached vertices.
+		require(world->renameMarker(marker, "Renamed seat", &diagnostic), diagnostic);
+		expectVertex(2, 2, "Renamed seat");
+		require(world->removeFurniture(world->furniture().front().id, &diagnostic), diagnostic);
+		mouse(point(2, 2));
+		require(ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow && text.find("Renamed seat") == std::string::npos,
+			"Removed Furniture retained stale vertex or quad hover");
+		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
+	}
+
 	void locationPlanMovement(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -1091,6 +1173,7 @@ void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });
 	checks.push_back({ "locationPlan/placement", locationPlanPlacement });
 	checks.push_back({ "locationPlan/movement", locationPlanMovement });
+	checks.push_back({ "locationPlan/hover", locationPlanHover });
 	checks.push_back({ "locationPlan/deletion", locationPlanDeletion });
 	checks.push_back({ "furniture/chairActions", chairActions });
 	checks.push_back({ "furniture/catalogueReattachmentHistory", catalogueReattachmentHistory });

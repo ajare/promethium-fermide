@@ -182,6 +182,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			? location->getDescription().c_str() : location->getName().c_str());
 		ImGui::Text("Layer: %u", location->getLayerIndex());
 		auto levelLabel = std::to_string(mWorldLevel);
+		ImGui::SetNextItemWidth(256);
 		if (ImGui::BeginCombo("Level", levelLabel.c_str()))
 		{
 			for (uint32_t offset = 0; offset < location->getLevelsHigh(); ++offset)
@@ -232,6 +233,26 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			int mouseDepth = bottom > top ? static_cast<int>(std::clamp(std::floor(
 				double(bottom - io.MousePos.y) * mDepthRows / (bottom - top)), 0.0,
 				double(std::numeric_limits<int>::max()))) : 0;
+			if (!mDragging && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+			{
+				if (auto name = locationPlanVertexNameAtPosition(*world, *location, mWorldLevel,
+					io.MousePos, position, size, mDepthRows))
+				{
+					ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+					ImGui::SetTooltip("%s", name->c_str());
+				}
+				else if (over && catalogue)
+					for (auto it = world->furniture().rbegin(); it != world->furniture().rend(); ++it)
+					{
+						auto definition = catalogue->definition(it->definitionKey);
+						if (definition && it->sector == location->getIndex()
+							&& location->getCellY() + it->y == mWorldLevel && it->localDepth == mouseDepth
+							&& mouseX >= it->x + definition->minX && mouseX < it->x + definition->maxX)
+						{
+							ImGui::SetMouseCursor(ImGuiMouseCursor_Hand); break;
+						}
+					}
+			}
 			if (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(1)) cancelDrag();
 			if (over && !mDragArmed && ImGui::IsMouseClicked(0) && catalogue)
 			{

@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include "core/World.h"
 #include "WorldDrawList.h"
 #include "DocumentEdit.h"
@@ -50,6 +51,12 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 
 void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
 	core::FurnitureDefinition const& definition, float x, int depth, bool valid,
+	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows);
+
+// Vertex-first hover uses the live graph, the same projection and paint order
+// as the renderer, and includes the graph's drawing margin.
+std::optional<std::string> locationPlanVertexNameAtPosition(core::World const& world,
+	core::Sector const& location, uint32_t worldLevel, ImVec2 mouse,
 	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows);
 
 // Derived afresh from the current catalogue; no cached instance/vertex pointers.
