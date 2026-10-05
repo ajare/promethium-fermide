@@ -623,6 +623,7 @@ namespace core
 		// request is still judged from the usable point the Agent stands on.
 		AgentId mFinishingFurnitureUseAgent{};
 		bool actionAvailable(MarkerId marker, std::string_view action) const;
+		void clearUnavailableResetRequests();
 		void executeMarkerAction(AgentId agent, MarkerId marker, std::string_view action, SimulationEvent& event);
 		FurnitureInstance const* furnitureForMarker(MarkerId marker) const;
 		ActionViews actionViews(AgentId agent, MarkerId marker) const;

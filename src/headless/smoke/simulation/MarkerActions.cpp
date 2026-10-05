@@ -1077,11 +1077,77 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		catch (std::exception const&) { rejected = true; }
 		require(rejected, "Missing Action registry dependency accepted");
 	}
+
+	void authoredRequests(smoke::Context const& context)
+	{
+		auto root = context.temporaryRoot();
+
+		// A still-available authored Action request survives an Action registry
+		// reload: the reload swaps the package but must not cancel the request.
+		auto actions = root / "authored.actions.lua";
+		write(actions, package("{key='hello',name='Hello',run=function(a,w,m) w.log('authored hello') end}"));
+		auto world = worldFixture();
+		auto marker = world->getMarkerIds()[0];
+		std::string diagnostic;
+		require(world->selectActionRegistry(actions) && world->setMarkerActions(marker, {first}), "Authored action setup refused");
+		require(world->authorAgentMarkerRequest(core::AgentId{1}, marker, first, &diagnostic), "Authored action request refused: " + diagnostic);
+		write(actions, package("{key='hello',name='Renamed',run=function(a,w,m) w.log('authored hello') end}"));
+		require(world->reloadActionRegistry(actions, &diagnostic) && diagnostic.empty(), "Action reload refused: " + diagnostic);
+		auto document = root / "authored.world.yaml";
+		world->saveTo(document.string());
+		auto loaded = reopen(document, false);
+		require(loaded->agentActionDisplayName(first) == "Renamed", "Reloaded display name not persisted");
+		core::consumeLogMessages();
+		if (loaded->isSimulationPaused()) require(loaded->resumeSimulation(), "Reopened action resume refused");
+		bool arrived = false;
+		for (int tick = 0; tick < 1800 && !arrived; ++tick)
+		{
+			require(loaded->advanceTick(), "Reopened authored Action failed");
+			for (auto const& event : loaded->consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::DestinationReached)
+				{ arrived = true; require(event.selectedAction == first, "Saved Action silently became Idle"); }
+		}
+		require(arrived, "Reopened authored request did not arrive");
+
+		// A Furniture catalogue reload that removes the definition's use functions
+		// cancels an authored use-furniture request so the World round-trips.
+		auto furniture = root / "authored-use.furniture.lua";
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"), furniture,
+			std::filesystem::copy_options::overwrite_existing);
+		auto furnished = useFixture(furniture);
+		auto seat = furnished->furniture()[0].marker;
+		require(furnished->authorAgentMarkerRequest(core::AgentId{1}, seat, core::UseFurnitureAction, &diagnostic),
+			"Authored use request refused: " + diagnostic);
+		furnished->saveTo((root / "authored-use-baseline.world.yaml").string());
+		std::string source;
+		{ std::ifstream in(furniture); source.assign(std::istreambuf_iterator<char>(in), {}); }
+		auto replace = [](std::string text, std::string const& from, std::string const& to)
+		{
+			auto at = text.find(from); require(at != std::string::npos, "Furniture substitution missing");
+			text.replace(at, from.size(), to); return text;
+		};
+		std::ofstream(furniture) << replace(source, "use = use, finish_use = finish", "");
+		require(furnished->reloadFurnitureCatalogue(furniture, &diagnostic), "Furniture reload refused: " + diagnostic);
+		require(furnished->isModified(), "Clearing an authored request did not dirty the document");
+		auto useDocument = root / "authored-use.world.yaml";
+		furnished->saveTo(useDocument.string());
+		auto reloaded = reopen(useDocument, false);
+		core::consumeLogMessages();
+		if (reloaded->isSimulationPaused()) require(reloaded->resumeSimulation(), "Reopened use resume refused");
+		require(reloaded->advanceTicks(60), "Reopened use advance failed");
+		for (auto const& event : reloaded->consumeSimulationEvents())
+			require(event.type != core::SimulationEventType::DestinationReached || event.selectedAction != core::UseFurnitureAction,
+				"Cancelled authored use request re-executed after reload");
+		require(!reloaded->usablePointOccupant(seat)
+			&& reloaded->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Standing,
+			"Cancelled authored use request left occupancy or pose");
+	}
 }
 
 void registerMarkerActions(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"markerActions/reload", transactionalReload});
+	checks.push_back({"markerActions/authoredRequests", authoredRequests});
 	checks.push_back({"markerActions/registry", registryContracts});
 	checks.push_back({"markerActions/execution", execution});
 	checks.push_back({"markerActions/failures", failures});

@@ -73,6 +73,10 @@ namespace core
 							return reject("Registry selection would invalidate a behaviour Action: " + missing);
 			mActionRegistry = std::move(registry);
 			mActionRegistryFilename = source.filename().string();
+			for (auto& [id, goal] : mMovementGoals)
+				if (goal.marker && !actionAvailable(goal.marker, goal.selectedAction))
+				{ goal.actionInvalidated = true; goal.cancelling = true; }
+			clearUnavailableResetRequests();
 			markModified();
 			return true;
 		}
@@ -103,6 +107,7 @@ namespace core
 			for (auto& [id, goal] : mMovementGoals)
 				if (goal.marker && !actionAvailable(goal.marker, goal.selectedAction))
 				{ goal.actionInvalidated = true; goal.cancelling = true; }
+			clearUnavailableResetRequests();
 			if (diagnostic) diagnostic->clear();
 			return true;
 		}
@@ -166,6 +171,7 @@ namespace core
 			for (auto& [id, goal] : mMovementGoals)
 				if (goal.marker && !actionAvailable(goal.marker, goal.selectedAction))
 				{ goal.actionInvalidated = true; goal.cancelling = true; }
+			clearUnavailableResetRequests();
 			if (diagnostic) diagnostic->clear();
 			return true;
 		}
@@ -242,6 +248,18 @@ namespace core
 		markModified();
 		invalidateSimulationSnapshot();
 		return true;
+	}
+
+	void World::clearUnavailableResetRequests()
+	{
+		bool cleared = false;
+		for (auto const& [id, agent] : mAgents.entries())
+			if (agent->mResetDestinationMarker && !actionAvailable(agent->mResetDestinationMarker, agent->mResetAction))
+			{
+				agent->mResetPath.reset(); agent->mResetDestinationMarker = {}; agent->mResetPathActive = false;
+				cleared = true;
+			}
+		if (cleared) markModified();
 	}
 
 	bool World::actionAvailable(MarkerId marker, std::string_view action) const
