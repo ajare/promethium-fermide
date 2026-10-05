@@ -4,6 +4,7 @@
 #include "core/AgentTagRegistry.h"
 #include "core/YamlSerializer.h"
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -30,8 +31,35 @@ namespace
 			data.markSerializedUnmodified = false; world.serialize(*out, data); out->serialize(); return out->getSerializedString();
 		}
 	};
+	void animatedSpeed()
+	{
+		Fixture f;
+		f.world.pauseSimulation();
+		std::string diagnostic;
+		require(f.panel->getSpeed() == Panel::DefaultSpeed && !f.panel->getSpeedOverride(), "Wrong default speed");
+		for (auto speed : {0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+			require(!f.world.configureAccessPanel(f.room, f.index, f.panel->getGeometry(), &diagnostic, speed), "Invalid speed accepted");
+		require(f.world.configureAccessPanel(f.room, f.index, f.panel->getGeometry(), &diagnostic, 0.25f), "Speed override failed");
+		auto actor = f.world.createAgent("Opener", f.room, 0, 4.5f);
+		auto closer = f.world.createAgent("Closer", f.room, 0, 4.5f);
+		auto request = f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Open, actor);
+		f.world.resumeSimulation(); f.world.advanceTick(); f.world.advanceTicks(30);
+		require(f.panel->getState() == Panel::State::Opening && std::abs(f.panel->getProgress() - 0.5f) < 1e-5f, "Speed is not physical height per second");
+		f.world.pauseSimulation(); auto progress = f.panel->getProgress();
+		f.world.advanceTicks(30); require(f.panel->getProgress() == progress, "Pause advanced animation");
+		auto close = f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Close, closer);
+		f.world.resumeSimulation(); f.world.advanceTick();
+		require(bool(close) && f.panel->getState() == Panel::State::Closing && f.panel->getProgress() >= progress,
+			"Reversal teleported leaf");
+		require(f.world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Failed, "Superseded travel did not fail its required interaction");
+		f.world.advanceTicks(60); require(f.panel->getState() == Panel::State::Closed, "Reversal did not finish");
+		f.world.pauseSimulation();
+		require(f.world.configureAccessPanel(f.room, f.index, f.panel->getGeometry()), "Cannot clear speed override");
+		require(!f.panel->getSpeedOverride() && f.panel->getSpeed() == Panel::DefaultSpeed, "Default not restored");
+	}
 	void approach(smoke::Context const&)
 	{
+		animatedSpeed();
 		for (unsigned kind = 0; kind < 3; ++kind)
 			for (auto geometry : {core::AccessPanelGeometry{}, {1, 0.25f, 0.75f}, {0, 0, 1}})
 			{
@@ -57,22 +85,26 @@ namespace
 				{
 					auto before = actor->getGlobalPosition();
 					require(f.world.advanceTick(), "Approach tick failed");
-					if (f.panel->getState() == Panel::State::Open)
+					if (f.panel->getState() != Panel::State::Closed)
 						require(before.distanceTo(vertex->getPosition()) <= 0.25f, "Opened outside vertex reach");
 				}
-				require(f.panel->getState() == Panel::State::Open && actor->getGlobalPosition().x < 4.5f
+				require(f.panel->getState() == Panel::State::Opening && f.panel->getProgress() == 0 && actor->getGlobalPosition().x < 4.5f
 					&& actor->getGlobalPosition().x >= 4.25f, "No early ordinary-reach activation");
+				for (unsigned travel=0; f.panel->getState()!=Panel::State::Open && travel<180; ++travel) f.world.advanceTick();
+				require(f.panel->getState() == Panel::State::Open, "Animated opening failed");
 				require(f.world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Succeeded
 					&& f.world.lookupDeviceOperation(operation).entity->getState() == core::DeviceOperationState::Succeeded,
-					"Instant activation did not publish queryable success");
+					"Animated operation did not publish queryable success");
 				require(f.panel->getActions() == std::vector{Panel::Action::Close}, "Empty exposes extra controls/Open");
 				require(!f.world.requestInteraction(f.panel->getControl(Panel::Action::Open), second), "Unavailable action bypassed via Interaction point");
 				f.world.advanceTicks(120);
 				require(f.panel->getState() == Panel::State::Open && f.world.getGraph() == graph
 					&& graph->getVertexForObject(object) == vertex && f.saved() == bytes && !f.world.isModified(), "Open auto-closed or changed authored state/topology");
 				auto close = f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Close, second);
-				require(bool(close) && f.world.advanceTick() && f.panel->getState() == Panel::State::Closed,
-					"Second Agent could not close instantly");
+				require(bool(close) && f.world.advanceTick() && f.panel->getState() == Panel::State::Closing,
+					"Second Agent could not start closing");
+				for (unsigned travel=0; f.panel->getState()!=Panel::State::Closed && travel<180; ++travel) f.world.advanceTick();
+				require(f.panel->getState() == Panel::State::Closed, "Animated closing failed");
 				require(f.world.lookupInteractionRequest(close).entity->getResult() == core::InteractionResult::Succeeded, "Close outcome missing");
 				f.world.advanceTicks(2);
 				require(bool(f.world.requestAccessPanel(f.panel->getId(), Panel::Action::Open, second)), "Reopen refused");

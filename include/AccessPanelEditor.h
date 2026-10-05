@@ -6,6 +6,7 @@
 YAML::Node makeAccessPanelClipboardObject(core::World const& world,
 	std::shared_ptr<const core::SectorObject> const& object);
 core::AccessPanelGeometry readAccessPanelClipboardObject(YAML::Node const& object);
+std::optional<float> readAccessPanelClipboardSpeed(YAML::Node const& object);
 std::shared_ptr<const core::SectorObject> pasteAccessPanel(std::shared_ptr<core::World> const& world,
 	uint32_t sector, uint32_t levelOffset, uint32_t cellX, YAML::Node const& object, std::string& diagnostic);
 std::shared_ptr<const core::SectorObject> moveAccessPanel(std::shared_ptr<core::World> const& world,
@@ -14,10 +15,10 @@ std::shared_ptr<const core::SectorObject> moveAccessPanel(std::shared_ptr<core::
 // Production document actions used by palette and Selection.
 std::shared_ptr<const core::SectorObject> placeAccessPanel(std::shared_ptr<core::World> const& world,
 	uint32_t sector, uint32_t levelOffset, uint32_t cellX, core::AccessPanelGeometry geometry,
-	std::string& diagnostic);
+	std::string& diagnostic, std::optional<float> speed = {});
 bool editAccessPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> const& object, core::AccessPanelGeometry geometry,
-	std::string& diagnostic);
+	std::string& diagnostic, std::optional<float> speed = {});
 bool deleteAccessPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> const& object);
 struct AccessPanelAgentAction

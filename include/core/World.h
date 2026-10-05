@@ -936,6 +936,7 @@ namespace core
 			float x{ 0.0f }, y{ 0.0f }, z{ 0.0f };
 			ChamberSubtype chamberSubtype{ ChamberSubtype::SecurityScanner };
 			float scannerSensorDistance{ 0.5f };
+			std::optional<float> accessPanelSpeed{};
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
 			// Door: the activation mode the Door had before the editor's Buttons
@@ -2022,9 +2023,9 @@ namespace core
 		bool canAddAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
 			AccessPanelGeometry geometry = {}, std::string* diagnostic = nullptr) const;
 		CreateObjectResult addAccessPanel(uint32_t sectorIndex, uint32_t levelOffset,
-			uint32_t cellX, AccessPanelGeometry geometry = {});
+			uint32_t cellX, AccessPanelGeometry geometry = {}, std::optional<float> speed = {});
 		bool configureAccessPanel(uint32_t sectorIndex, uint32_t objectIndex,
-			AccessPanelGeometry geometry, std::string* diagnostic = nullptr);
+			AccessPanelGeometry geometry, std::string* diagnostic = nullptr, std::optional<float> speed = {});
 		bool removeAccessPanel(uint32_t sectorIndex, uint32_t objectIndex);
 
 		bool canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x,

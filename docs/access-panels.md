@@ -34,8 +34,10 @@ the Sector object slot, and rebuilds the graph.
 
 Drag **Access panel** from the attached-object palette row onto a supported
 cell. Object selection uses the World canvas hit-test. Selection displays
-**Empty / Open** or **Empty / Closed**, cell X, Level offset, and editable **Width**, **Height**, and
-**Y offset** fields. Delete through Selection or the existing Delete shortcut.
+**Empty / Closed**, **Opening**, **Open**, or **Closing**, cell X, Level offset, and editable **Width**, **Height**, and
+**Y offset** fields. **Override speed** enables a per-instance **Speed (units/s)**
+field; disabling it restores the shared default of 0.5 units/s. The same speed applies in both directions.
+Overrides must be finite and strictly positive. Delete through Selection or the existing Delete shortcut.
 These authored actions use document snapshot history for undo/redo. Refused
 requests do not add history or mark the World modified.
 
@@ -60,10 +62,17 @@ geometry, including zero dimensions. Eligibility is checked again before activat
 changes while pending cancel the request. Buttons' Only if no other option remains
 operable, and individual properties override inherited tag properties.
 
-After the ordinary interaction scheduling interval (one tick), Open/Close is
-instantaneous at activation, even before exact vertex arrival. Any eligible Agent
+After the ordinary interaction scheduling interval (one tick), Open/Close starts
+at activation, even before exact vertex arrival. The leaf retracts upward into its
+top edge, revealing the interior from the bottom, and closes downward. Travel time
+is physical height divided by effective speed; zero-height panels finish on the
+next active tick. Pause freezes travel. Device operations succeed only at the
+requested endpoint. Opposite requests reverse from the current position and cancel
+superseded operations; their required interactions report failure. During Opening,
+only Close is offered, and during Closing only Open; type-specific exposed actions
+are available only when fully Open. Any eligible Agent
 may Close. Panels stay Open until explicitly closed; reset reconstructs Closed.
-There is no permission requirement, auto-close, animation, admission resource,
+There is no permission requirement, auto-close, admission resource,
 walking obstruction, bounds expansion, or topology change. Open renders a dark
 interior and an inset cross, including on Facades and wireframe/zero-area indicators.
 Runtime actions do not dirty the World or add history entries. Removing a panel
@@ -72,9 +81,10 @@ IDs are not reused on replacement, reset, or editor history reconstruction.
 
 ## Persistence and scope
 
-World schema **51** appends Access panel placement, configuration, and deletion
-construction kinds. Records store owner Sector, relative cell X and Level
-offset, Empty type, and geometry. YAML and binary preserve chronology (including
+World schema **52** extends the schema-51 Access panel placement, configuration,
+and deletion construction kinds. Records store owner Sector, relative cell X and
+Level offset, Empty type, geometry, and optional speed override. Schema-51 panels
+without speed fields inherit the default. YAML and binary preserve chronology (including
 edits and delete/replacement), rebuild approaches, and reconstruct Closed.
 Schemas 1–50 without panel records remain supported. Malformed input is rejected
 in detached reconstruction before the live World is replaced.
@@ -111,18 +121,19 @@ Drag a selected panel with the existing object-movement workflow. The preview
 uses the panel's selection geometry (including zero-area indicators), and
 `planMoveSectorObject` / `applyObjectMove` share destination validation. Panels
 may move between supported cells in Rooms, Corridors, and Facades on the same
-Layer, preserving Empty type, width, height, and Y offset. Source attachments
+Layer, preserving Empty type, width, height, Y offset, and speed override. Source attachments
 are removed and the destination floor-Level approach is rebuilt.
 
 Copy/paste uses an authored-only `AccessPanel` payload: `panelType: Empty`,
-`width`, `height`, and `yOffset`. Invalid/missing/non-finite fields and extra
+`width`, `height`, `yOffset`, and optional `speed`. Old payloads without `speed`
+inherit the default. Invalid/missing/non-finite fields and extra
 runtime/ownership fields are rejected before any edit. Pasted panels have
 independent identities, approaches, and owned interactions, and start Closed.
 
 Movement uses existing detached construction replay preflight, then ownership
 reconstruction, rather than copying live vertices, controls or pending requests.
 It appends removal/placement records to retain geometry-edit chronology and
-object tombstones, without a new persistence schema. These records rebuild
+object tombstones. These records rebuild
 optional device ownership through ordinary panel creation. As with other object
 moves, selection is replaced with the returned destination object and stale
 selection references cannot edit/delete the reconstructed object. Move and paste
@@ -151,6 +162,21 @@ safety, and movement/copy persistence/replay.
 All use existing production seams; Editor and Render use CPU-only ImGui with no
 display or dialogs. See `linux-smoke-validation.md` and `validation-recovery.md`
 for the required bounded final validation lanes.
+
+## Upward animation and speed verification
+
+Access panels now render partial upward leaf travel, expose Opening/Closing
+states, and complete typed Device operations at their endpoints. Coverage includes
+physical-speed timing, pause, reversal, positive/finite speed validation, actual
+Selection speed controls and undo/redo, authored clipboard speed, movement,
+legacy schema-51 defaults, malformed YAML/binary speed rejection, and Closed
+reconstruction.
+
+GUI-enabled Release and Debug default builds and unfiltered final CTest passed:
+110 tests per configuration, zero failures, one optional GUI capability skip.
+
+- Release final CTest: `4643047b25ce411ebe60d83089768e6a`.
+- Debug final CTest: `578bae11a06543c083213082f10302b0`.
 
 ## #454 verification
 

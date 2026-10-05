@@ -573,6 +573,8 @@ namespace core
 				serializer.writeString("panelType", "empty");
 				serializer.writeFloat("width", record.x); serializer.writeFloat("height", record.y);
 				serializer.writeFloat("yOffset", record.z);
+				serializer.writeBool("hasSpeedOverride", record.accessPanelSpeed.has_value());
+				if (record.accessPanelSpeed) serializer.writeFloat("speed", *record.accessPanelSpeed);
 			}
 			break;
 		case ConstructionType::Marker:
@@ -667,8 +669,8 @@ namespace core
 		// 44, instance Local depth in 45, Agent Local depth in 46, and authored
 		// Path destination identity in 47.
 		// Version 50 combines Furniture and Dumbwaiter authored state.
-		// Version 51 adds cell-owned Closed Empty Access panels.
-		serializer.writeUint32("version", 51);
+		// Version 52 adds authored Access panel speed overrides.
+		serializer.writeUint32("version", 52);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1380,6 +1382,9 @@ namespace core
 				if (serializer.readString("panelType") != "empty") throw SerializationException("Unknown Access panel type");
 				record.x = serializer.readFloat("width"); record.y = serializer.readFloat("height"); record.z = serializer.readFloat("yOffset");
 				if (!AccessPanel::geometryIsValid({record.x, record.y, record.z})) throw SerializationException("Invalid Access panel geometry");
+				if (version >= 52 && serializer.hasField("hasSpeedOverride") && serializer.readBool("hasSpeedOverride"))
+					record.accessPanelSpeed = serializer.readFloat("speed");
+				if (!AccessPanel::speedIsValid(record.accessPanelSpeed)) throw SerializationException("Invalid Access panel speed");
 			}
 			break;
 		case ConstructionType::Marker:
@@ -1474,7 +1479,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 51)
+		if (version < 1 || version > 52)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2981,7 +2986,7 @@ namespace core
 				throw SerializationException("Access panel cell is outside its Location");
 			auto x = sector->getCellX() + record.c;
 			if (record.type == ConstructionType::AccessPanel)
-				addAccessPanel(record.a, record.b, x, {record.x, record.y, record.z});
+				addAccessPanel(record.a, record.b, x, {record.x, record.y, record.z}, record.accessPanelSpeed);
 			else
 			{
 				auto index = mLayers[sector->getLayerIndex()]->getCellDefinition(x, sector->getCellY() + record.b).accessPanel;
@@ -2990,7 +2995,7 @@ namespace core
 				else
 				{
 					std::string diagnostic;
-					if (!configureAccessPanel(record.a, index, {record.x, record.y, record.z}, &diagnostic))
+					if (!configureAccessPanel(record.a, index, {record.x, record.y, record.z}, &diagnostic, record.accessPanelSpeed))
 						throw SerializationException("Invalid Access panel edit: " + diagnostic);
 				}
 			}
@@ -5917,6 +5922,7 @@ namespace core
 			ConstructionRecord moved{ConstructionType::AccessPanel};
 			moved.a = target->getIndex(); moved.b = plan.y - target->getCellY(); moved.c = plan.x - target->getCellX();
 			moved.x = geometry.width; moved.y = geometry.height; moved.z = geometry.yOffset;
+			moved.accessPanelSpeed = panelObject->getPanel()->getSpeedOverride();
 			records.push_back(moved);
 			auto candidate = makeCandidateWorld();
 			candidate->mDeserializingConstruction = true;

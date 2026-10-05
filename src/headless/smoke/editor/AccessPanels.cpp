@@ -17,24 +17,26 @@ namespace
 		auto corridor=world->addCorridor(0,0,6,4,1); auto facade=world->addFacade(0,0,11,4,2);
 		world->addSectorWalkway(facade,1,2); world->finishBuild(); world->pauseSimulation(); gWorldDocumentHistory.clear();
 		std::string diagnostic;
-		auto source=placeAccessPanel(world,room,0,2,{0,0.25f,0.5f},diagnostic);
+		auto source=placeAccessPanel(world,room,0,2,{0,0.25f,0.5f},diagnostic,0.125f);
 		auto panel=std::static_pointer_cast<const core::AccessPanelSectorObject>(source)->getPanel();
 		auto actor=world->createAgent("Operator",room,0,2.5f);
 		require(bool(world->requestAccessPanel(panel->getId(),core::AccessPanel::Action::Open,actor)), "Clipboard Open refused");
-		world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		world->resumeSimulation(); world->advanceTicks(180); world->pauseSimulation();
 		auto payload=makeAccessPanelClipboardObject(*world,source);
-		require(payload.size()==4 && payload["panelType"].as<std::string>()=="Empty", "Clipboard copied live ownership/state");
+		require(payload.size()==5 && payload["speed"].as<float>()==0.125f && payload["panelType"].as<std::string>()=="Empty", "Clipboard copied live ownership/state");
 		world->markSaved(); auto before=captureDocumentSnapshot(world)->yaml; auto graph=world->getGraph();
 		for (auto bad : {YAML::Load("[]"), YAML::Load("{panelType: Empty}"), YAML::Load("{panelType: Equipment, width: 0, height: 0, yOffset: 0}"),
 			YAML::Load("{panelType: Empty, width: .nan, height: 0, yOffset: 0}"), YAML::Load("{panelType: Empty, width: 0, height: 1, yOffset: 1}"),
-			YAML::Load("{panelType: Empty, width: 0, height: 0, yOffset: 0, state: Open}")})
+			YAML::Load("{panelType: Empty, width: 0, height: 0, yOffset: 0, state: Open}"),
+			YAML::Load("{panelType: Empty, width: 0, height: 0, yOffset: 0, speed: 0}"),
+			YAML::Load("{panelType: Empty, width: 0, height: 0, yOffset: 0, speed: .inf}")})
 			require(!pasteAccessPanel(world,corridor,0,8,bad,diagnostic), "Malformed clipboard accepted");
 		require(!pasteAccessPanel(world,room,0,2,payload,diagnostic) && !pasteAccessPanel(world,facade,1,12,payload,diagnostic)
 			&& captureDocumentSnapshot(world)->yaml==before && world->getGraph()==graph && !world->isModified()
 			&& gWorldDocumentHistory.undoCount()==1, "Failed paste changed document/history");
 		auto copied=pasteAccessPanel(world,corridor,0,8,payload,diagnostic);
 		auto copy=std::static_pointer_cast<const core::AccessPanelSectorObject>(copied)->getPanel();
-		require(copy->getId()!=panel->getId() && copy->getGeometry()==panel->getGeometry() && copy->getState()==core::AccessPanel::State::Closed
+		require(copy->getId()!=panel->getId() && copy->getSpeedOverride()==0.125f && copy->getGeometry()==panel->getGeometry() && copy->getState()==core::AccessPanel::State::Closed
 			&& copy->getControl(core::AccessPanel::Action::Open)!=panel->getControl(core::AccessPanel::Action::Open)
 			&& gWorldDocumentHistory.undoCount()==2, "Copy reused live identity/references/state");
 		auto restore=[&](DocumentSnapshot const& snapshot) { auto loaded=deserializeDocumentSnapshot(snapshot,world,{}); if (!loaded) return false; world=loaded; world->pauseSimulation(); return true; };
@@ -53,6 +55,8 @@ namespace
 			&& !world->lookupAccessPanel(stalePanel->getId()), "Movement copied stale handles or pending requests");
 		require(moved && at(facade,13,1)==moved && !at(room,2,0) && gWorldDocumentHistory.undoCount()==3, "Move destination/history wrong");
 		undo(); require(at(room,2,0) && !at(facade,13,1), "Move undo ownership wrong"); redo(); require(!at(room,2,0) && at(facade,13,1), "Move redo ownership wrong");
+		require(std::static_pointer_cast<const core::AccessPanelSectorObject>(at(facade,13,1))->getPanel()->getSpeedOverride()==0.125f,
+			"Move/history lost authored speed");
 		world->markSaved(); before=captureDocumentSnapshot(world)->yaml; graph=world->getGraph();
 		require(!moveAccessPanel(world,stale,3,0,diagnostic) && !deleteAccessPanel(world,stale)
 			&& !moveAccessPanel(world,at(facade,13,1),8,0,diagnostic) && !moveAccessPanel(world,at(facade,13,1),12,1,diagnostic)
@@ -170,6 +174,16 @@ namespace
 		auto geometry=[&] { return std::static_pointer_cast<const core::AccessPanelSectorObject>(get())->getPanel()->getGeometry(); };
 		require(geometry().width==0 && gWorldDocumentHistory.undoCount()==2, "Selection geometry did not author history");
 		undo(); require(geometry().width==0.5f,"Geometry undo failed"); redo(); require(geometry().width==0,"Geometry redo failed");
+		auto speedOverride=[&] { return std::static_pointer_cast<const core::AccessPanelSectorObject>(get())->getPanel()->getSpeedOverride(); };
+		click("Override speed"); require(speedOverride().has_value(), "Selection override not authored");
+		click("Speed (units/s)");
+		io.AddKeyEvent(ImGuiMod_Ctrl,true); io.AddKeyEvent(ImGuiKey_A,true); frame();
+		io.AddKeyEvent(ImGuiKey_A,false); io.AddKeyEvent(ImGuiMod_Ctrl,false); io.AddInputCharactersUTF8("0.125"); frame();
+		io.AddKeyEvent(ImGuiKey_Enter,true); frame(); io.AddKeyEvent(ImGuiKey_Enter,false); frame();
+		require(speedOverride()==0.125f, "Selection speed input ignored");
+		undo(); undo(); require(!speedOverride(), "Speed undo did not restore default");
+		redo(); redo(); require(speedOverride()==0.125f, "Speed redo lost override");
+		undo(); undo();
 		auto panel=std::static_pointer_cast<const core::AccessPanelSectorObject>(get())->getPanel();
 		core::Vector2 min,max; panel->getSelectionShape(min,max); auto centre=(min+max)*0.5f;
 		std::shared_ptr<const core::SectorObject> selected;
@@ -177,12 +191,12 @@ namespace
 		world->markSaved(); auto authored = captureDocumentSnapshot(world)->yaml;
 		auto actions = accessPanelAgentActions(*world, actor);
 		require(actions.size() == 1 && actions[0].enabled && actions[0].action == core::AccessPanel::Action::Open, "Agent Open action missing");
-		click(actions[0].label.c_str()); world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		click(actions[0].label.c_str()); world->resumeSimulation(); world->advanceTicks(180); world->pauseSimulation();
 		require(panel->getState() == core::AccessPanel::State::Open && !world->isModified()
 			&& captureDocumentSnapshot(world)->yaml == authored && gWorldDocumentHistory.undoCount() == 2, "Runtime Open entered document history");
 		actions = accessPanelAgentActions(*world, actor);
 		require(actions.size() == 1 && actions[0].action == core::AccessPanel::Action::Close, "Empty menu exposes controls other than Close");
-		click(actions[0].label.c_str()); world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		click(actions[0].label.c_str()); world->resumeSimulation(); world->advanceTicks(180); world->pauseSimulation();
 		require(panel->getState() == core::AccessPanel::State::Closed && gWorldDocumentHistory.undoCount() == 2, "Close action/history regression");
 		world->setAgentActive(actor, false); actions = accessPanelAgentActions(*world, actor);
 		require(actions.size() == 1 && !actions[0].enabled, "Inactive Agent menu enabled");
@@ -196,7 +210,7 @@ namespace
 		auto restored = std::static_pointer_cast<const core::AccessPanelSectorObject>(get())->getPanel();
 		require(!world->lookupInteractionPoint(staleControl) && !world->requestInteraction(staleControl, actor)
 			&& world->requestAccessPanel(restored->getId(), core::AccessPanel::Action::Open, actor), "History restored stale/unusable owned interactions");
-		world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		world->resumeSimulation(); world->advanceTicks(180); world->pauseSimulation();
 		require(restored->getState() == core::AccessPanel::State::Open, "Reconstructed panel operation failed");
 	}
 }

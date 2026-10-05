@@ -1492,12 +1492,21 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 				if (degenerate) panel->getSelectionShape(min, max);
 				transformPosition(min); transformPosition(max);
 				if (!degenerate && isDrawnSolid(style))
-					drawList->AddRectFilled({min.x, max.y}, {max.x, min.y}, panel->getState() == core::AccessPanel::State::Open ? IM_COL32(22, 30, 40, 255) : IM_COL32(78, 92, 110, 255));
-				if (panel->getState() == core::AccessPanel::State::Open)
+					drawList->AddRectFilled({min.x, max.y}, {max.x, min.y}, IM_COL32(22, 30, 40, 255));
+				if (panel->getProgress() > 0)
 				{
 					// An inset cross distinguishes Open even in wireframe and zero-area indicators.
 					drawList->AddLine({min.x, max.y}, {max.x, min.y}, IM_COL32(100, 210, 180, 255), 2);
 					drawList->AddLine({min.x, min.y}, {max.x, max.y}, IM_COL32(100, 210, 180, 255), 2);
+				}
+				// OpenUp: the leaf retracts into the top edge, revealing the bottom first.
+				if (!degenerate && panel->getProgress() < 1)
+				{
+					auto bottom = min.y + (max.y - min.y) * panel->getProgress();
+					if (isDrawnSolid(style))
+						drawList->AddRectFilled({min.x, max.y}, {max.x, bottom}, IM_COL32(78, 92, 110, 255));
+					if (panel->getProgress() > 0)
+						drawList->AddRect({min.x, max.y}, {max.x, bottom}, IM_COL32(165, 180, 198, 255), 0, 0, 2);
 				}
 				drawList->AddRect({min.x, max.y}, {max.x, min.y},
 					selected ? IM_COL32(251, 188, 4, 255) : IM_COL32(165, 180, 198, 255), 0, 0, 2);

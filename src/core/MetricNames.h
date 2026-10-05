@@ -116,6 +116,7 @@ case DeviceCommandType::RequestAirlock: return "request_airlock";
 case DeviceCommandType::SetBoothWindowState: return "set_booth_window_state";
 case DeviceCommandType::ToggleBoothWindow: return "toggle_booth_window";
 case DeviceCommandType::PressDumbwaiterLanding: return "press_dumbwaiter_landing";
+case DeviceCommandType::SetAccessPanelState: return "set_access_panel_state";
 } return "unknown"; }
 inline std::string metricName(DoorOpenLeaseKind value) { switch(value) {
 case DoorOpenLeaseKind::Preparation: return "preparation";

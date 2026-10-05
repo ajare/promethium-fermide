@@ -16,7 +16,25 @@ namespace core
 
 	std::vector<AccessPanel::Action> AccessPanel::getActions() const
 	{
-		return mOpen ? getExposedActions() : std::vector<Action>{Action::Open};
+		return getState() == State::Open ? getExposedActions()
+			: mOpen ? std::vector<Action>{Action::Close} : std::vector<Action>{Action::Open};
+	}
+
+	bool AccessPanel::speedIsValid(std::optional<float> speed)
+	{
+		return !speed || (std::isfinite(*speed) && *speed > 0);
+	}
+
+	char const* AccessPanel::getStateName() const
+	{
+		switch (getState())
+		{
+		case State::Closed: return "Closed";
+		case State::Opening: return "Opening";
+		case State::Open: return "Open";
+		case State::Closing: return "Closing";
+		}
+		return "Closed";
 	}
 
 	bool AccessPanel::geometryIsValid(AccessPanelGeometry g)

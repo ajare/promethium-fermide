@@ -66,7 +66,26 @@ namespace
 				auto actor = world->createAgent("Operator", owner, 0, 4.5f);
 				auto graph = world->getGraph(); auto vertex = graph->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
 				require(bool(world->requestAccessPanel(panel->getId(), core::AccessPanel::Action::Open, actor)), "Render Open request refused");
-				world->resumeSimulation(); world->advanceTick();
+				world->resumeSimulation();
+				for (unsigned ticks=0; panel->getState()==core::AccessPanel::State::Closed && ticks<600; ++ticks) world->advanceTick();
+				world->advanceTicks(5);
+				if (!degenerate)
+				{
+					require(panel->getState()==core::AccessPanel::State::Opening, "Missing partial opening");
+					WorldDrawList partial({{0,0},{1200,800}});
+					renderSector(world->getSector(owner),layer,LayerRenderStyle::Solid,false,ImColor(IM_COL32_WHITE),&partial);
+					unsigned leaves=0;
+					float bottom=800-(min.y+(max.y-min.y)*panel->getProgress())*CORE_LEVEL_HEIGHT_PIXELS;
+					for (auto const& command : partial.commands())
+						if (auto t=std::get_if<WorldDrawList::Triangle>(&command); t && t->colour==IM_COL32(78,92,110,255))
+						{
+							++leaves;
+							for (auto p : t->positions) require(p.y<=bottom+0.001f && p.y>=800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f,
+								"Panel leaf did not retract upward into its top edge");
+						}
+					require(leaves==2,"Partial leaf not drawn");
+				}
+				world->advanceTicks(180);
 				require(panel->getState() == core::AccessPanel::State::Open, "Render fixture did not open");
 				for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Wireframe})
 				{

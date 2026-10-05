@@ -21,17 +21,27 @@ YAML::Node makeAccessPanelClipboardObject(core::World const& world,
 	auto geometry = wrapper->getPanel()->getGeometry();
 	YAML::Node result;
 	result["panelType"] = "Empty";
+	if (auto speed = wrapper->getPanel()->getSpeedOverride()) result["speed"] = *speed;
 	result["width"] = geometry.width; result["height"] = geometry.height; result["yOffset"] = geometry.yOffset;
 	return result;
 }
 
 core::AccessPanelGeometry readAccessPanelClipboardObject(YAML::Node const& object)
 {
-	if (!object.IsMap() || object.size() != 4 || object["panelType"].as<std::string>() != "Empty")
+	if (!object.IsMap() || object.size() != (object["speed"] ? 5u : 4u) || object["panelType"].as<std::string>() != "Empty")
 		throw std::runtime_error("Access panel clipboard requires Empty type and authored geometry only");
 	core::AccessPanelGeometry geometry{object["width"].as<float>(), object["height"].as<float>(), object["yOffset"].as<float>()};
 	if (!core::AccessPanel::geometryIsValid(geometry)) throw std::runtime_error("Invalid Access panel clipboard geometry");
+	readAccessPanelClipboardSpeed(object);
 	return geometry;
+}
+
+std::optional<float> readAccessPanelClipboardSpeed(YAML::Node const& object)
+{
+	std::optional<float> speed;
+	if (object["speed"]) speed = object["speed"].as<float>();
+	if (!core::AccessPanel::speedIsValid(speed)) throw std::runtime_error("Access panel speed must be finite and positive");
+	return speed;
 }
 
 std::shared_ptr<const core::SectorObject> pasteAccessPanel(std::shared_ptr<core::World> const& world,
@@ -40,7 +50,7 @@ std::shared_ptr<const core::SectorObject> pasteAccessPanel(std::shared_ptr<core:
 	core::AccessPanelGeometry geometry;
 	try { geometry = readAccessPanelClipboardObject(object); }
 	catch (std::exception const& error) { diagnostic = error.what(); return {}; }
-	return placeAccessPanel(world, sector, level, x, geometry, diagnostic);
+	return placeAccessPanel(world, sector, level, x, geometry, diagnostic, readAccessPanelClipboardSpeed(object));
 }
 
 std::shared_ptr<const core::SectorObject> moveAccessPanel(std::shared_ptr<core::World> const& world,
@@ -60,22 +70,23 @@ std::shared_ptr<const core::SectorObject> moveAccessPanel(std::shared_ptr<core::
 }
 
 std::shared_ptr<const core::SectorObject> placeAccessPanel(std::shared_ptr<core::World> const& world,
-	uint32_t sector, uint32_t level, uint32_t x, core::AccessPanelGeometry geometry, std::string& diagnostic)
+	uint32_t sector, uint32_t level, uint32_t x, core::AccessPanelGeometry geometry, std::string& diagnostic, std::optional<float> speed)
 {
 	if (!world->isSimulationPaused()) { diagnostic = "Pause simulation to place Access panels"; return {}; }
+	if (!core::AccessPanel::speedIsValid(speed)) { diagnostic = "Access panel speed must be finite and positive"; return {}; }
 	if (!world->canAddAccessPanel(sector,level,x,geometry,&diagnostic)) return {};
 	auto before = captureDocumentSnapshot(world);
-	auto created = world->addAccessPanel(sector,level,x,geometry); world->finishBuild();
+	auto created = world->addAccessPanel(sector,level,x,geometry,speed); world->finishBuild();
 	commitDocumentEdit(std::move(before));
 	return created.sector->getObject(created.index);
 }
 
 bool editAccessPanel(std::shared_ptr<core::World> const& world,
-	std::shared_ptr<const core::SectorObject> const& object, core::AccessPanelGeometry geometry, std::string& diagnostic)
+	std::shared_ptr<const core::SectorObject> const& object, core::AccessPanelGeometry geometry, std::string& diagnostic, std::optional<float> speed)
 {
 	auto index = indexOf(*world,object); if (index == ~0u) return false;
 	auto before = captureDocumentSnapshot(world);
-	if (!world->configureAccessPanel(object->getSector()->getIndex(),index,geometry,&diagnostic)) return false;
+	if (!world->configureAccessPanel(object->getSector()->getIndex(),index,geometry,&diagnostic,speed)) return false;
 	commitDocumentEdit(std::move(before)); return true;
 }
 
@@ -126,18 +137,29 @@ bool renderAccessPanelPanel(std::shared_ptr<core::World> const& world,
 	auto wrapper = std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(object);
 	if (!wrapper || indexOf(*world,object) == ~0u) return false;
 	auto panel = wrapper->getPanel();
-	ImGui::Text("Access panel: Empty / %s", panel->getState() == core::AccessPanel::State::Open ? "Open" : "Closed");
+	ImGui::Text("Access panel: Empty / %s", panel->getStateName());
 	ImGui::Text("Cell X: %u; Level offset: %u", panel->getCellX(), panel->getLevelOffset());
 	ImGui::TextDisabled("Use Agent Selection actions to Open or Close. Empty exposes no controls.");
 	auto geometry = panel->getGeometry();
 	ImGui::BeginDisabled(!world->isSimulationPaused());
+	ImGui::SetNextItemWidth(256.0f);
 	bool changed = ImGui::InputFloat("Width", &geometry.width);
+	ImGui::SetNextItemWidth(256.0f);
 	changed = ImGui::InputFloat("Height", &geometry.height) || changed;
+	ImGui::SetNextItemWidth(256.0f);
 	changed = ImGui::InputFloat("Y offset", &geometry.yOffset) || changed;
+	bool overrideSpeed = panel->getSpeedOverride().has_value();
+	auto speed = panel->getSpeed();
+	changed = ImGui::Checkbox("Override speed", &overrideSpeed) || changed;
+	ImGui::BeginDisabled(!overrideSpeed);
+	ImGui::SetNextItemWidth(256.0f);
+	changed = ImGui::InputFloat("Speed (units/s)", &speed) || changed;
+	ImGui::EndDisabled();
+	ImGui::TextDisabled("Default: %.3f units/s", core::AccessPanel::DefaultSpeed);
 	bool remove = ImGui::Button("Delete Access panel");
 	ImGui::EndDisabled();
 	std::string diagnostic;
-	bool result = remove ? deleteAccessPanel(world,object) : changed && editAccessPanel(world,object,geometry,diagnostic);
+	bool result = remove ? deleteAccessPanel(world,object) : changed && editAccessPanel(world,object,geometry,diagnostic, overrideSpeed ? std::optional<float>{speed} : std::nullopt);
 	if (!diagnostic.empty()) ImGui::TextWrapped("%s",diagnostic.c_str());
 	return result;
 }

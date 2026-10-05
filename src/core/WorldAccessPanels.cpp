@@ -151,8 +151,9 @@ namespace core
 	}
 
 	World::CreateObjectResult World::addAccessPanel(uint32_t index, uint32_t level,
-		uint32_t x, AccessPanelGeometry geometry)
+		uint32_t x, AccessPanelGeometry geometry, std::optional<float> speed)
 	{
+		if (!AccessPanel::speedIsValid(speed)) throw WorldException(this, "Access panel speed must be finite and positive");
 		std::string diagnostic;
 		if (!canAddAccessPanel(index, level, x, geometry, &diagnostic)) throw WorldException(this, diagnostic);
 		beginStructuralEdit("addAccessPanel");
@@ -160,6 +161,7 @@ namespace core
 		auto y = sector->getCellY() + level;
 		auto object = std::make_shared<AccessPanelSectorObject>(sector, x, y, level, geometry);
 		auto panel = std::static_pointer_cast<AccessPanel>(object->_getObject());
+		panel->mSpeedOverride = speed;
 		panel->mId = AccessPanelId{mNextAccessPanelId++};
 		mAccessPanels.emplace(panel->mId, panel);
 		for (auto action : {AccessPanel::Action::Open, AccessPanel::Action::Close})
@@ -179,19 +181,25 @@ namespace core
 		ConstructionRecord record{ConstructionType::AccessPanel};
 		record.a = index; record.b = level; record.c = x - sector->getCellX();
 		record.x = geometry.width; record.y = geometry.height; record.z = geometry.yOffset;
+		record.accessPanelSpeed = speed;
 		recordConstruction(record);
 		return {objectIndex, SectorObjectType::AccessPanel, sector};
 	}
 
 	bool World::configureAccessPanel(uint32_t index, uint32_t objectIndex,
-		AccessPanelGeometry geometry, std::string* diagnostic)
+		AccessPanelGeometry geometry, std::string* diagnostic, std::optional<float> speed)
 	{
+		if (!AccessPanel::speedIsValid(speed))
+		{
+			if (diagnostic) *diagnostic = "Access panel speed must be finite and positive";
+			return false;
+		}
 		if (index >= mSectors.size() || objectIndex >= mSectors[index]->getNumObjects()) return false;
 		auto object = std::dynamic_pointer_cast<AccessPanelSectorObject>(mSectors[index]->getObject(objectIndex));
 		if (!object) return false;
 		auto panel = std::static_pointer_cast<AccessPanel>(object->_getObject());
 		if (!validateAccessPanel(index, panel->getLevelOffset(), object->getCellX(), geometry, objectIndex, diagnostic)) return false;
-		if (panel->getGeometry() == geometry) return false;
+		if (panel->getGeometry() == geometry && panel->getSpeedOverride() == speed) return false;
 		if (mBuildFinished && !mSimulationPaused)
 		{
 			if (diagnostic) *diagnostic = "Pause simulation before editing Access panels";
@@ -199,9 +207,11 @@ namespace core
 		}
 		// Geometry does not alter the floor approach or traversal topology.
 		panel->configure(object->getCellY(), geometry);
+		panel->mSpeedOverride = speed;
 		ConstructionRecord record{ConstructionType::ConfigureAccessPanel};
 		record.a = index; record.b = panel->getLevelOffset(); record.c = object->getCellX() - mSectors[index]->getCellX();
 		record.x = geometry.width; record.y = geometry.height; record.z = geometry.yOffset;
+		record.accessPanelSpeed = speed;
 		recordConstruction(record); modify();
 		return true;
 	}

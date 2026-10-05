@@ -24,9 +24,9 @@ namespace persistence
 			auto room=moved.addRoom("Room",0,0,0,5,2); auto corridor=moved.addCorridor(0,0,6,4,1);
 			auto facade=moved.addFacade(0,0,11,4,2); moved.addSectorWalkway(facade,1,2);
 			moved.addSectorMarker(facade,1,2.25f); moved.addSectorMarker(corridor,0,0.5f);
-			auto placed=moved.addAccessPanel(room,0,2,geometry); moved.finishBuild(); moved.pauseSimulation();
+			auto placed=moved.addAccessPanel(room,0,2,geometry,0.15f); moved.finishBuild(); moved.pauseSimulation();
 			auto object=moved.applyObjectMove(moved.planMoveSectorObject(room,placed.index,13,1));
-			moved.addAccessPanel(corridor,0,8,geometry); moved.finishBuild();
+			moved.addAccessPanel(corridor,0,8,geometry,0.15f); moved.finishBuild();
 			// Surrounding replay retires the removed source panel while retaining
 			// its original tail-trimming semantics and destination indices.
 			auto resize=moved.planResizeLocation(room,1,0,5,2);
@@ -46,7 +46,7 @@ namespace persistence
 						{
 							++count; auto panel=p->getPanel(); auto vertex=loaded.getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(p));
 							require(s!=room && panel->getId()!=previous && panel->getGeometry()==geometry && panel->getState()==core::AccessPanel::State::Closed
-								&& panel->getLevelOffset()==(s==facade ? 1u : 0u) && vertex && !vertex->getEdges().empty()
+								&& panel->getSpeedOverride()==0.15f && panel->getLevelOffset()==(s==facade ? 1u : 0u) && vertex && !vertex->getEdges().empty()
 								&& vertex->getPosition()==core::Vector2{float(p->getCellX())+0.5f,float(p->getCellY())}
 								&& loaded.lookupInteractionPoint(panel->getControl(core::AccessPanel::Action::Open)), "Moved/copied panel reconstruction broken: sector="+std::to_string(s)+" vertex="+std::to_string(bool(vertex))+" edges="+std::to_string(vertex ? vertex->getEdges().size() : 0)+" geometry="+std::to_string(geometry.width)+","+std::to_string(geometry.height)+" replay="+std::to_string(replay));
 							previous=panel->getId();
@@ -54,6 +54,43 @@ namespace persistence
 					require(count==2 && loaded.canAddAccessPanel(room,0,2,geometry), "Moved source attachment persisted");
 				}
 			}
+		}
+		// Legacy records inherit the default; malformed speed overrides fail atomically.
+		{
+			core::World source("Speed persistence",8,2);
+			auto room=source.addRoom("Room",0,0,0,7,1);
+			source.addAccessPanel(room,0,3,{},0.125f); source.finishBuild();
+			auto baseline=write(source,false);
+			for (bool binary : {false,true})
+			{
+				auto bytes=write(source,binary);
+				if (binary)
+				{
+					auto at=bytes.find("speed"); require(at!=std::string::npos,"Missing binary speed");
+					for (unsigned i=0;i<4;++i) bytes[at+6+i]=0;
+				}
+				else
+				{
+					auto node=YAML::Load(bytes);
+					for (auto record : node["construction"]) if (record["type"].as<std::string>()=="accessPanel") record["speed"]=0;
+					bytes=YAML::Dump(node);
+				}
+				bool refused=false;
+				try {
+					std::unique_ptr<core::Serializer> reader=binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+						: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+					reader->deserialize(); core::SerializationWorkData work; source.deserialize(*reader,work);
+				} catch (std::exception const&) { refused=true; }
+				require(refused && write(source,false)==baseline,"Invalid persisted speed replaced live World");
+			}
+			auto legacy=YAML::Load(baseline); legacy["version"]=51;
+			for (auto record : legacy["construction"]) if (record["type"].as<std::string>()=="accessPanel")
+			{ record.remove("speed"); record.remove("hasSpeedOverride"); }
+			auto reader=core::YamlSerializer::fromString(YAML::Dump(legacy)); reader->deserialize();
+			core::World loaded("Legacy",1,1); core::SerializationWorkData work;
+			require(loaded.deserialize(*reader,work),"Legacy panel failed loading");
+			auto panel=std::static_pointer_cast<const core::AccessPanelSectorObject>(loaded.getSector(room)->getObject(0))->getPanel();
+			require(!panel->getSpeedOverride() && panel->getSpeed()==core::AccessPanel::DefaultSpeed,"Legacy speed not defaulted");
 		}
 		// Accepted surrounding structural edits must remain canonical in both formats.
 		for (bool binary : {false,true})
@@ -145,7 +182,7 @@ namespace persistence
 		auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(world.getSector(corridor)->getObject(edited.index))->getPanel();
 		world.markSaved(); auto authoredYaml = write(world, false), authoredBinary = write(world, true);
 		require(bool(world.requestAccessPanel(panel->getId(), core::AccessPanel::Action::Open, actor)), "Persistence Open request refused");
-		world.resumeSimulation(); world.advanceTick(); world.pauseSimulation();
+		world.resumeSimulation(); world.advanceTicks(180); world.pauseSimulation();
 		require(panel->getState() == core::AccessPanel::State::Open && !world.isModified()
 			&& write(world, false) == authoredYaml && write(world, true) == authoredBinary, "Temporary Open persisted as authored state");
 		for (bool binary : {false,true})
@@ -159,7 +196,7 @@ namespace persistence
 			auto restored = std::static_pointer_cast<const core::AccessPanelSectorObject>(loaded.getSector(corridor)->getObject(edited.index))->getPanel();
 			require(loaded.lookupInteractionPoint(restored->getControl(core::AccessPanel::Action::Open))
 				&& loaded.requestAccessPanel(restored->getId(), core::AccessPanel::Action::Open, actor), "Loaded owned interactions unusable");
-			loaded.resumeSimulation(); loaded.advanceTick();
+			loaded.resumeSimulation(); loaded.advanceTicks(180);
 			require(restored->getState() == core::AccessPanel::State::Open, "Loaded Agent operation failed");
 		}
 		auto baseline=write(world,false); auto node=YAML::Load(baseline); world.markSaved(); auto graph=world.getGraph();

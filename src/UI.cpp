@@ -3520,6 +3520,7 @@ namespace
 		core::World::CreateWindowOptions window;
 		BoothWindowClipboard boothWindow;
 		core::AccessPanelGeometry accessPanel;
+		std::optional<float> accessPanelSpeed;
 		DumbwaiterClipboard dumbwaiter;
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
@@ -3907,6 +3908,7 @@ namespace
 		{
 			definition.type = ClipboardObjectType::AccessPanel;
 			definition.accessPanel = readAccessPanelClipboardObject(object);
+			definition.accessPanelSpeed = readAccessPanelClipboardSpeed(object);
 		}
 		else if (type == "BoothWindow")
 		{
@@ -4341,7 +4343,7 @@ namespace
 				}
 				else if (definition.type == ClipboardObjectType::AccessPanel)
 				{
-					auto result = world->addAccessPanel(markerSector->getIndex(), y - markerSector->getCellY(), x, definition.accessPanel);
+					auto result = world->addAccessPanel(markerSector->getIndex(), y - markerSector->getCellY(), x, definition.accessPanel, definition.accessPanelSpeed);
 					created = result.sector->getObject(result.index);
 				}
 				else if (definition.type == ClipboardObjectType::BoothWindow)

@@ -681,6 +681,11 @@ namespace core
 				if (!mWorld.lookupBoothWindow(operation->mCommand.boothWindow))
 					operation->mState = DeviceOperationState::Failed;
 			}
+			else if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
+			{
+				if (!mWorld.lookupAccessPanel(operation->mCommand.accessPanel))
+					operation->mState = DeviceOperationState::Failed;
+			}
 			else if (operation->mCommand.type == DeviceCommandType::SetSectorLights
 				&& operation->mCommand.target
 				&& operation->mCommand.target.value <= mWorld.mSectors.size())
@@ -786,6 +791,27 @@ namespace core
 				booth->refreshState();
 			}
 		}
+		for (auto const& [panelId, weak] : mWorld.mAccessPanels)
+		{
+			(void)panelId;
+			if (auto panel = weak.lock())
+			{
+				auto height = panel->getGeometry().height;
+				double step = height > 0 ? double(panel->getSpeed()) * World::getFixedTimestep() / height : 1;
+				panel->mProgress = float(clamp(double(panel->mProgress) + (panel->mOpen ? step : -step), 0.0, 1.0));
+				if (!panel->mOpen && panel->mProgress < 1e-6f) panel->mProgress = 0;
+				if (panel->mOpen && panel->mProgress > 1 - 1e-6f) panel->mProgress = 1;
+			}
+		}
+		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
+			if (operation->mState == DeviceOperationState::Running
+				&& operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
+				if (auto panel = mWorld.lookupAccessPanel(operation->mCommand.accessPanel);
+					panel && panel->getProgress() == (operation->mCommand.desiredState ? 1 : 0))
+				{
+					touchDeviceOperation(id, *operation);
+					operation->mState = DeviceOperationState::Succeeded;
+				}
 		advanceDumbwaiters();
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 			if (operation->mState == DeviceOperationState::Running
@@ -1198,8 +1224,20 @@ namespace core
 							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
 							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
 								&& actor->getGlobalPosition().distanceTo(control->getPosition()) <= control->getReach();
-							operation->mState = eligible ? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
-							if (eligible) panel->mOpen = operation->mCommand.desiredState;
+							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
+							if (eligible)
+							{
+								// Reversal keeps the physical leaf position, cancelling superseded travel.
+								for (auto const& [otherId, other] : mWorld.mDeviceOperations.entries())
+									if (otherId != operationId && other->mState == DeviceOperationState::Running
+										&& other->mCommand.type == DeviceCommandType::SetAccessPanelState
+										&& other->mCommand.accessPanel == panel->getId())
+									{
+										touchDeviceOperation(otherId, *other);
+										other->mState = DeviceOperationState::Cancelled;
+									}
+								panel->mOpen = operation->mCommand.desiredState;
+							}
 						}
 						else if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
 							admitDumbwaiterPress(operationId, *operation);
