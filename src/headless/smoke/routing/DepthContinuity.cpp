@@ -50,7 +50,7 @@ namespace
 		int incoming, int expectedFirstDepth)
 	{
 		using smoke::require;
-		auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/desk.furniture.yaml").string());
+		auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
 		auto definition = yaml["furnitureCatalogue"]["definitions"][0];
 		definition["usablePoints"] = YAML::Load("[{key: history, label: History, x: 0}, {key: start, label: Start, x: 0.25}, {key: goal, label: Goal, x: 1.75}]");
 		definition["vertices"] = YAML::Load("[{key: history, x: 0, external: true, usablePoint: history}, {key: start, x: 0.25, usablePoint: start}, {key: goal, x: 1.75, usablePoint: goal}]");
@@ -190,7 +190,7 @@ namespace
 		for (bool layers : { false, true })
 		for (bool cheaper : { false, true })
 		{
-			auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/desk.furniture.yaml").string());
+			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
 			auto definition = yaml["furnitureCatalogue"]["definitions"][0];
 			definition["usablePoints"] = YAML::Load("[{key: seat, label: Seat, x: 1.75}]");
 			definition["vertices"] = YAML::Load("[{key: left, x: 0, external: true}, {key: a, x: 1}, {key: b, x: 1}, {key: seat, x: 1.75, usablePoint: seat}, {key: right, x: 2, external: true}]");

@@ -22,7 +22,7 @@ namespace
 		core::World world("Bed offset", 8, 2);
 		auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
 		world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(
-			context.fixture("resources/test-worlds/furniture.furniture.yaml")));
+			context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml")));
 		world.placeFurniture(room, "bed", 3, 0, "Bed");
 		world.addSectorMarker(room, 0, 6.5f, "Exit"); world.finishBuild();
 		auto id = world.createAgent("Sleeper", room, 0, 0.5f);

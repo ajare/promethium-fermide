@@ -16,6 +16,38 @@
 
 namespace
 {
+	void bundledLuaWorkflow(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto root = context.temporaryRoot() / "bundled-editor"; std::filesystem::create_directories(root);
+		for (auto name : {"chair", "desk", "layouts", "attachments", "composition", "furniture", "furniture-integration"})
+		{
+			auto filename = std::string(name) + ".furniture.lua";
+			std::filesystem::copy_file(context.fixture("resources/test-worlds/" + filename), root / filename);
+			auto path = root / (std::string(name) + ".world.yaml");
+			auto world = std::make_shared<core::World>("Bundled editor", 24, 3);
+			world->addRoom("Room", 0, 0, 0, 24, 2); world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
+			DocumentHistory history; std::string diagnostic;
+			require(selectFurnitureCatalogue(world, path, filename, diagnostic, history), diagnostic);
+			auto catalogue = world->furnitureCatalogue();
+			for (auto const& [key, definition] : catalogue->definitions())
+			{
+				require(placeSelectedFurniture(world, 0, key, 4.125f, 0, false, "Example", diagnostic, history, 4), diagnostic);
+				auto instance = world->furniture().back();
+				require(selectFurnitureInstance(world, instance.id), "Cannot select converted definition " + filename + "/" + key);
+				for (auto suffix : {"world.yaml", "world"})
+				{
+					auto output = root / (std::string(name) + "-" + key + "." + suffix); world->saveTo(output.string());
+					auto loaded = core::loadWorldDocument(output);
+					require(loaded->furnitureCatalogueFilename() == filename && loaded->furniture().back().id == instance.id
+						&& loaded->furniture().back().marker == instance.marker && loaded->furniture().back().localDepth == 4,
+						"Converted editor placement lost identity/depth on reopen");
+				}
+				require(deleteSelectedFurniture(world, instance.id, diagnostic, history), diagnostic);
+			}
+		}
+	}
+
 	void luaWorkflow(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -69,7 +101,7 @@ namespace
 	{
 		editor_smoke::State state; using smoke::require;
 		auto root = context.temporaryRoot();
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.yaml"), root / "furniture.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.furniture.lua"), root / "furniture.furniture.lua");
 		auto path = root / "demo.world.yaml";
 		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture.world.yaml"), path);
 		auto world = core::loadWorldDocument(path); world->pauseSimulation();
@@ -128,9 +160,9 @@ namespace
 		auto root = context.temporaryRoot() / "catalogue-reattachment";
 		std::filesystem::create_directory(root);
 		auto path = root / "catalogue-history.world.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"),
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"),
 			root / "chair.furniture.yaml");
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/layouts.furniture.yaml"),
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml"),
 			root / "layouts.furniture.yaml");
 		auto world = std::make_shared<core::World>("Catalogue history", 8, 2);
 		world->addRoom("Room", 0, 0, 0, 8, 1);
@@ -159,7 +191,7 @@ namespace
 			"Redo did not reattach the snapshot's Furniture catalogue");
 
 		// Keep this definition-selection test independent of teaching-layout depth requirements.
-		auto sample = YAML::LoadFile(context.fixture("resources/test-worlds/furniture.furniture.yaml").string());
+		auto sample = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml").string());
 		auto legacyChair = YAML::LoadFile((root / "chair.furniture.yaml").string());
 		sample["furnitureCatalogue"]["definitions"][0] = legacyChair["furnitureCatalogue"]["definitions"][0];
 		{ std::ofstream file(root / "furniture.furniture.yaml"); file << sample; }
@@ -211,7 +243,7 @@ namespace
 		auto root = context.temporaryRoot() / "catalogue-picker";
 		std::filesystem::create_directories(root / "elsewhere");
 		for (auto filename : {"chair.furniture.yaml", "desk.furniture.yaml"})
-			std::filesystem::copy_file(context.fixture(std::string("resources/test-worlds/") + filename), root / filename);
+			std::filesystem::copy_file(context.fixture(std::string("src/headless/smoke/fixtures/legacy-furniture/") + filename), root / filename);
 		std::filesystem::copy_file(root / "chair.furniture.yaml", root / "elsewhere/chair.furniture.yaml");
 		std::filesystem::copy_file(root / "chair.furniture.yaml", root / "wrong.yaml");
 		{ std::ofstream output(root / "broken.furniture.yaml"); output << "not a catalogue"; }
@@ -298,7 +330,7 @@ namespace
 		editor_smoke::State state;
 		using smoke::require;
 		auto path = context.temporaryRoot() / "attachment.world.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/attachments.furniture.yaml"), path.parent_path() / "attachments.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml"), path.parent_path() / "attachments.furniture.yaml");
 		auto world = std::make_shared<core::World>("Attachment editor", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
 		world->addSectorMarker(room, 0, 0.5f, "Entrance");
@@ -354,7 +386,7 @@ namespace
 	{
 		editor_smoke::State state; using smoke::require;
 		auto path = context.temporaryRoot() / "composition.world.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/composition.furniture.yaml"), path.parent_path() / "composition.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/composition.furniture.yaml"), path.parent_path() / "composition.furniture.yaml");
 		auto world = std::make_shared<core::World>("Composition editor", 12, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 12, 1);
 		world->addSectorMarker(room, 0, 0.5f, "Entrance");
@@ -410,7 +442,7 @@ namespace
 		editor_smoke::State state;
 		using smoke::require;
 		auto path = context.temporaryRoot() / "editor.world.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), path.parent_path() / "chair.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), path.parent_path() / "chair.furniture.yaml");
 		auto world = std::make_shared<core::World>("Chair editor", 12, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 6, 1);
 		auto corridor = world->addCorridor(0, 1, 0, 6, 1);
@@ -472,7 +504,7 @@ namespace
 			&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == protectedSnapshot,
 			"Editor deletion did not protect references without history or mutation");
 		// Exercise multi-point layouts through the same production history actions.
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/layouts.furniture.yaml"), path.parent_path() / "layouts.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml"), path.parent_path() / "layouts.furniture.yaml");
 		auto layouts = std::make_shared<core::World>("Layout editor", 20, 4);
 		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 20, 4);
 		layouts->finishBuild(); layouts->pauseSimulation(); layouts->saveTo(path.string());
@@ -519,7 +551,7 @@ namespace
 			&& layouts->furniture()[0].destinations[1].marker == sofa.destinations[1].marker
 			&& layouts->lookupMarker(sofa.destinations[1].marker)->getName() == "Right seat independently renamed",
 			"Multi-point delete undo changed identity or name");
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/desk.furniture.yaml"), path.parent_path() / "desk.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml"), path.parent_path() / "desk.furniture.yaml");
 		auto desks = std::make_shared<core::World>("Desk editor", 8, 2);
 		auto deskRoom = desks->addRoom("Room", 0, 0, 0, 8, 1);
 		desks->finishBuild(); desks->pauseSimulation(); desks->saveTo(path.string());
@@ -605,7 +637,7 @@ namespace
 		auto other = world->addRoom("Other", 0, 0, 0, 6, 1);
 		for (uint32_t x = 0; x < 4; ++x) world->addSectorWalkway(room, 1, x);
 		world->finishBuild(); world->pauseSimulation();
-		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
 		DocumentHistory history;
 		LocationPlan plan; require(plan.open(world, world->getSector(room), 4), "Cannot open placement plan");
@@ -711,7 +743,7 @@ namespace
 		std::string diagnostic;
 		while (!world->furniture().empty())
 			require(deleteSelectedFurniture(world, world->furniture().back().id, diagnostic, history), diagnostic);
-		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
 		auto count = history.undoCount(); release();
 		require(world->furniture().empty() && history.undoCount() == count, "Stale catalogue drag placed Furniture");
@@ -720,7 +752,7 @@ namespace
 			"Reattached catalogue cannot place into pinned Location");
 		auto root = context.temporaryRoot() / "location-plan-placement";
 		std::filesystem::create_directories(root);
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), root / "chair.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), root / "chair.furniture.yaml");
 		auto path = root / "plan.world.yaml"; world->saveTo(path.string());
 		auto reopened = core::loadWorldDocument(path);
 		require(reopened->furniture().size() == 1 && reopened->furniture().front().marker == world->furniture().front().marker
@@ -728,7 +760,7 @@ namespace
 		while (!world->furniture().empty())
 			require(deleteSelectedFurniture(world, world->furniture().back().id, diagnostic, history), diagnostic);
 		// A catalogue wider than the tray is paged, never compressed/overlapped.
-		auto many = YAML::LoadFile(context.fixture("resources/test-worlds/chair.furniture.yaml").string());
+		auto many = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml").string());
 		auto prototype = YAML::Clone(many["furnitureCatalogue"]["definitions"][0]);
 		many["furnitureCatalogue"]["definitions"] = YAML::Node(YAML::NodeType::Sequence);
 		for (unsigned i = 0; i < 15; ++i)
@@ -771,7 +803,7 @@ namespace
 		world->addSectorMarker(room, 1, 5.5f, "Other Level target");
 		world->finishBuild(); world->pauseSimulation();
 		world->attachFurnitureCatalogue("desk.furniture.yaml",
-			core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/desk.furniture.yaml")));
+			core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml")));
 		world->placeFurniture(room, "desk", 1.25f, 0, "Desk", 2);
 		world->finishBuild();
 		auto marker = world->furniture().front().marker;
@@ -851,7 +883,7 @@ namespace
 		world->addRoom("Other", 0, 0, 0, 8, 1);
 		for (uint32_t x = 0; x < 6; ++x) world->addSectorWalkway(room, 1, x);
 		world->finishBuild(); world->pauseSimulation();
-		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
 		auto id = world->placeFurniture(room, "chair", 1.25f, 1, "Selected chair", 0);
 		world->placeFurniture(room, "chair", 4, 1, "Obstacle", 1);
@@ -946,7 +978,7 @@ namespace
 			&& std::abs(world->furniture().front().x - 3.375f) < .001f, "Redo changed identity/position");
 		auto root = context.temporaryRoot() / "location-plan-movement";
 		std::filesystem::create_directories(root);
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), root / "chair.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), root / "chair.furniture.yaml");
 		auto path = root / "movement.world.yaml"; world->saveTo(path.string());
 		auto reopened = core::loadWorldDocument(path);
 		require(reopened->furniture().front().id == id && reopened->furniture().front().marker == marker
@@ -968,7 +1000,7 @@ namespace
 		require(history.undoCount() == count && std::abs(world->furniture().front().x - 3.375f) < .001f,
 			"Reconstructed World accepted stale drag");
 		start(); mouse(point(2.5f, 0));
-		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		require(restore(*captureDocumentSnapshot(world, history)), "Cannot reload catalogue through World reconstruction"); release();
 		require(!selectedFurnitureInstance(world) && history.undoCount() == count, "Catalogue switch retained selection/gesture");
 		start(); mouse(point(2.5f, 0)); std::string diagnostic;
@@ -984,7 +1016,7 @@ namespace
 		auto room = world->addRoom("Pinned", 0, 1, 3, 6, 2);
 		auto other = world->addRoom("Other", 1, 0, 0, 6, 1);
 		world->finishBuild(); world->pauseSimulation();
-		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		world->attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
 		auto id = world->placeFurniture(room, "chair", 1, 0, "Deep chair", 6);
 		auto marker = world->furniture().front().marker;
@@ -1093,7 +1125,7 @@ namespace
 		// Reconstructed catalogue/instance selection cannot be used by a stale control.
 		require(history.undo(captureDocumentSnapshot(world, history), restore), "Cannot restore chair for stale-state check"); frame();
 		require(selectFurnitureInstance(world, id), "Cannot select restored chair");
-		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		require(restore(*captureDocumentSnapshot(world, history)), "Cannot reconstruct catalogue");
 		before = captureDocumentSnapshot(world, history)->yaml;
 		auto count = history.undoCount(); click(deletePosition);
@@ -1123,7 +1155,7 @@ namespace
 		world->addRoom("Upper landing", 0, 1, 15, 2, 1);
 		auto transit = world->addLadder(1, 0, 15, {2, false, true}).ladder.sector->getIndex();
 		world->finishBuild(); world->pauseSimulation();
-		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/desk.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml"));
 		world->attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
 		world->placeFurniture(room, "desk", 0.25f, 0, "Ground desk", 5);
 		DocumentHistory history; std::string diagnostic;
@@ -1269,7 +1301,7 @@ namespace
 		while (!world->furniture().empty())
 			require(deleteSelectedFurniture(world, world->furniture().back().id, diagnostic, history), diagnostic);
 		frame(); require(!hasLabel("Ground desk") && !hasLabel("Upper desk"), "External removal did not refresh plan");
-		catalogue = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/layouts.furniture.yaml"));
+		catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml"));
 		world->attachFurnitureCatalogue("layouts.furniture.yaml", catalogue);
 		require(placeSelectedFurniture(world, corridor, "sofa", .25f, 0, false, "New catalogue sofa", diagnostic, history, 6), diagnostic);
 		frame(); require(hasLabel("New catalogue sofa") && hasDepth("7"),
@@ -1300,6 +1332,7 @@ namespace
 }
 void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/bundledLuaWorkflow", bundledLuaWorkflow });
 	checks.push_back({ "furniture/luaWorkflow", luaWorkflow });
 	checks.push_back({ "furniture/demoActions", demoActions });
 	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });

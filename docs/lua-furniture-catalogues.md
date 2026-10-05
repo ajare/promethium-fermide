@@ -66,9 +66,12 @@ Only the versioned `prometheum.actions.v1` host import is admitted; unrestricted
 imports, filesystem/process access and nondeterministic facilities are unavailable.
 Caught budget exhaustion still rejects the catalogue.
 
-**This slice does not execute use/finish functions or offer Use furniture.** Idle
-movement remains ordinary movement and leaves the Agent standing. Runtime use,
-cleanup and safe owning-Furniture invocation views are subsequent lifecycle work.
+**Use furniture** is derived automatically for each usable point whose definition
+provides the pair. Explicit requests invoke `use` after physical arrival; finish
+runs before departure or same-seat Action replacement. Default/explicit Idle does
+not use Furniture. The host commits staged Pose/claim effects atomically and
+ensures Standing/release cleanup even if finishing fails. See the
+[Action workflow](scripted-marker-actions.md).
 
 ## Documents and reconciliation
 
@@ -81,9 +84,11 @@ loading. Existing Floor/Walkway support, Location membership, overlap, Local-dep
 and route admission checks are unchanged.
 
 Old-format loading remains **temporary integration-branch migration scaffolding**.
-Lua files never fall back to YAML parsing. Checked-in catalogue migration, live
-reload, runtime use and final removal of the YAML loader belong to subsequent
-slices; this is not a promised shipped YAML compatibility path.
+Lua files never fall back to YAML parsing. Bundled catalogues are converted in
+#465; paused transactional reload and runtime use are implemented. Frozen legacy
+regression inputs remain under `src/headless/smoke/fixtures/legacy-furniture` until
+the separately scoped fixture-builder and loader-removal slices. This is not a
+promised shipped YAML compatibility path.
 
 ## Verification
 

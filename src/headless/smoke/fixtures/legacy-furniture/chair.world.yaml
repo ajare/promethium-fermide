@@ -7,7 +7,7 @@ levelsHigh: 2
 layers: 2
 layerNames: [Furnished Locations, Background]
 furnitureCatalogue:
-  filename: chair.furniture.lua
+  filename: chair.furniture.yaml
   expectedUuid: "e78a6c36-7902-4abc-9c90-1876058b32f3"
 nextFurnitureId: 4
 nextMarkerId: 6

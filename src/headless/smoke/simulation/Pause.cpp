@@ -15,7 +15,7 @@ namespace
 		using smoke::require;
 		auto root = context.temporaryRoot();
 		auto catalogue = root / "desk.furniture.yaml";
-		auto attached = YAML::LoadFile(context.fixture("resources/test-worlds/attachments.furniture.yaml").string());
+		auto attached = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml").string());
 		attached["furnitureCatalogue"]["definitions"][1]["edges"][0]["depthOffset"] = 2;
 		{ std::ofstream file(catalogue); file << attached; }
 		for (int repetition = 0; repetition < 2; ++repetition)
@@ -156,7 +156,7 @@ namespace
 	{
 		using smoke::require;
 		auto root = context.temporaryRoot();
-		auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/desk.furniture.yaml").string());
+		auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
 		// Include coincident topology-only depth transitions without interaction.
 		auto vertices = yaml["furnitureCatalogue"]["definitions"][0]["vertices"];
 		vertices[2]["x"] = 0;

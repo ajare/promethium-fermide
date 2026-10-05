@@ -17,7 +17,7 @@ namespace persistence
 		auto root = context.temporaryRoot() / "demonstration";
 		std::filesystem::create_directory(root);
 		auto cataloguePath = root / "furniture-integration.furniture.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture-integration.furniture.yaml"), cataloguePath);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture-integration.furniture.yaml"), cataloguePath);
 		// Fresh authoring must not allocate any Marker for a circulation-only desk.
 		core::World circulation("Desk without destinations", 8, 2);
 		auto room = circulation.addRoom("Room", 0, 0, 0, 8, 1);
@@ -36,7 +36,7 @@ namespace persistence
 				"Desk save/reopen invented destinations");
 		}
 		auto source = root / "demo.world.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/furniture-integration.world.yaml"), source);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture-integration.world.yaml"), source);
 		auto world = core::loadWorldDocument(source);
 		require(world->furniture().size() == 6, "Required complete Furniture demonstration is missing instances");
 		auto desk = world->furniture()[1];
@@ -132,7 +132,7 @@ namespace persistence
 		// the underway physical position and of the moved destination.
 		{
 			auto path = root / "movement.furniture.yaml";
-			std::filesystem::copy_file(context.fixture("resources/test-worlds/desk.furniture.yaml"), path);
+			std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml"), path);
 			core::World movement("Movement documents", 14, 2);
 			auto sector = movement.addRoom("Room", 0, 0, 0, 14, 1);
 			movement.attachFurnitureCatalogue("movement.furniture.yaml", core::FurnitureCatalogue::load(path));
@@ -220,7 +220,7 @@ namespace persistence
 				}
 		}
 		auto cataloguePath = root / "chair.furniture.yaml";
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), cataloguePath);
 		auto world = std::make_shared<core::World>("Chair document", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
 		world->attachFurnitureCatalogue("chair.furniture.yaml", core::FurnitureCatalogue::load(cataloguePath));
@@ -287,7 +287,7 @@ namespace persistence
 		legacy.saveTo((root / "legacy.world").string());
 		require(!core::loadWorldDocument(root / "legacy.world")->furnitureCatalogue(), "Unfurnished World acquired a catalogue dependency");
 		// Multi-tile layouts use the same document contract, preserving every point.
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/layouts.furniture.yaml"), root / "layouts.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml"), root / "layouts.furniture.yaml");
 		auto layouts = std::make_shared<core::World>("Layout documents", 16, 4);
 		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 16, 4);
 		layouts->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(root / "layouts.furniture.yaml"));
@@ -351,7 +351,7 @@ namespace persistence
 			&& reordered->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination", "Catalogue ordering retargeted point identities");
 		// Compatible edits reconcile by key in both formats. New points allocate
 		// beyond even deleted standalone identities and use valid unique names.
-		auto originalLayouts = YAML::LoadFile(context.fixture("resources/test-worlds/layouts.furniture.yaml").string());
+		auto originalLayouts = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml").string());
 		auto writeLayouts = [&](YAML::Node const& value) { std::ofstream file(layoutCataloguePath); file << value; };
 		auto changed = YAML::Clone(originalLayouts);
 		auto added = YAML::Load("{key: new, label: Right destination, x: 1, y: 0}");
@@ -499,7 +499,7 @@ namespace persistence
 		require(std::abs(deskDemo->getSimulationSnapshot().agents.front().globalPosition.x - 6.5f) < 0.01f,
 			"Demonstration Agent did not traverse the desk");
 		// Both document representations resolve desk edge offsets from the saved instance depth.
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/desk.furniture.yaml"), root / "desk.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml"), root / "desk.furniture.yaml");
 		auto desk = std::make_shared<core::World>("Desk documents", 8, 2);
 		auto deskRoom = desk->addRoom("Room", 0, 0, 0, 8, 1);
 		desk->attachFurnitureCatalogue("desk.furniture.yaml", core::FurnitureCatalogue::load(root / "desk.furniture.yaml"));
@@ -544,7 +544,7 @@ namespace persistence
 		{ std::ofstream file(root / "desk.furniture.yaml"); file << revisedDesk; }
 		refuseDesk(deskYaml, "resolved edge depth");
 		// Attachments are derived from current definitions in both supported formats.
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/attachments.furniture.yaml"), root / "attachments.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml"), root / "attachments.furniture.yaml");
 		auto arrangement = std::make_shared<core::World>("Attached documents", 8, 2);
 		auto arrangementRoom = arrangement->addRoom("Room", 0, 0, 0, 8, 1);
 		arrangement->attachFurnitureCatalogue("attachments.furniture.yaml", core::FurnitureCatalogue::load(root / "attachments.furniture.yaml"));
@@ -584,7 +584,7 @@ namespace persistence
 			}
 		}
 		// Composed replacement coverage is derived, never serialized as graph state.
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/composition.furniture.yaml"), root / "composition.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/composition.furniture.yaml"), root / "composition.furniture.yaml");
 		for (float x : {3.f, 5.f, 6.f})
 		{
 			auto composed = std::make_shared<core::World>("Composed documents", 12, 2);
@@ -624,7 +624,7 @@ namespace persistence
 			}
 		}
 		// Portable references survive moving the complete project directory.
-		std::filesystem::copy_file(context.fixture("resources/test-worlds/chair.furniture.yaml"), cataloguePath);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);
 		std::filesystem::rename(cataloguePath, moved / cataloguePath.filename());
 		for (auto filename : { "chair.world.yaml", "chair.world" })

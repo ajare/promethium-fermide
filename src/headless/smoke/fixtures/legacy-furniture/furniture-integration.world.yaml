@@ -10,7 +10,7 @@ layerNames:
 - Showroom
 - Facade
 furnitureCatalogue:
-  filename: furniture-integration.furniture.lua
+  filename: furniture-integration.furniture.yaml
   expectedUuid: f834cb53-36cd-4d0a-920d-4a2acfbe6592
 nextFurnitureId: 7
 nextMarkerId: 11

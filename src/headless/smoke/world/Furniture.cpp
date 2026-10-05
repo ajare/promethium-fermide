@@ -20,6 +20,136 @@ namespace
 		world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
 	}
 
+	void bundledLua(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto root = context.temporaryRoot() / "bundled-lua";
+		std::filesystem::create_directories(root);
+		auto manifest = YAML::LoadFile(context.fixture("resources/Resources.yaml").string());
+		unsigned registered = 0;
+		for (auto resource : manifest["Resources"]["Resource"])
+			if (resource["type"].as<std::string>() == "FurnitureCatalogue")
+			{
+				auto location = resource["location"].as<std::string>();
+				require(location.ends_with(".furniture.lua") && core::FurnitureCatalogue::load(context.fixture("resources/" + location)),
+					"Manifest retains an invalid/old-format bundled Furniture reference");
+				++registered;
+			}
+		require(registered == 4, "Bundled catalogue registration inventory changed");
+		auto sameInstances = [&](core::World const& expected, core::World const& actual) {
+			require(expected.furnitureCatalogue()->uuid() == actual.furnitureCatalogue()->uuid()
+				&& expected.furniture().size() == actual.furniture().size(), "Bundled catalogue/instance identities changed");
+			for (size_t i = 0; i < expected.furniture().size(); ++i)
+			{
+				auto const& a = expected.furniture()[i]; auto const& b = actual.furniture()[i];
+				require(a.id == b.id && a.sector == b.sector && a.definitionKey == b.definitionKey && a.name == b.name
+					&& a.x == b.x && a.y == b.y && a.localDepth == b.localDepth && a.marker == b.marker
+					&& a.destinations.size() == b.destinations.size(), "Bundled placement or identity changed");
+				for (size_t j = 0; j < a.destinations.size(); ++j)
+				{
+					auto const& x = a.destinations[j]; auto const& y = b.destinations[j];
+					require(x.key == y.key && x.marker == y.marker && x.name == y.name && x.properties == y.properties,
+						"Bundled owned Marker identity/name/properties changed");
+				}
+			}
+		};
+		for (auto name : {"chair", "desk", "layouts", "attachments", "composition", "furniture", "furniture-integration"})
+		{
+			auto filename = std::string(name) + ".furniture.lua";
+			auto package = root / filename;
+			std::filesystem::copy_file(context.fixture("resources/test-worlds/" + filename), package);
+			auto catalogue = core::FurnitureCatalogue::load(package);
+			auto legacy = core::FurnitureCatalogue::readFile(context.fixture(
+				"src/headless/smoke/fixtures/legacy-furniture/" + std::string(name) + ".furniture.yaml"));
+			require(catalogue->uuid() == legacy->uuid() && catalogue->definitions().size() == legacy->definitions().size(),
+				"Bundled conversion changed UUID/definition keys");
+			for (auto const& [key, definition] : catalogue->definitions())
+			{
+				auto original = *legacy->definition(key);
+				auto previous = original.usablePoints.empty() ? std::optional<core::UsablePointAction>{} : original.usablePoints.front().action;
+				for (auto& point : original.usablePoints)
+				{
+					// Audit legacy per-point intent before deliberately replacing it. No conflicting bundled uses exist.
+					if (point.action != previous)
+						throw smoke::Failure("Conflicting legacy uses: " + filename + "/" + key + "/" + point.key);
+					point.action.reset();
+				}
+				original.hasUse = key == "chair" || key == "sofa" || key == "bed";
+				require(original == definition, "Conversion changed artwork, geometry, keys, explicit routes or defaults: " + filename + "/" + key);
+				core::World world("Bundled " + key, 24, 3);
+				auto room = world.addRoom("Room", 0, 0, 0, 24, 2);
+				world.attachFurnitureCatalogue(filename, catalogue);
+				world.placeFurniture(room, key, 4.125f, 0, "Example", 4);
+				// This chair intentionally has no depth-zero Floor port: attach it to the desk's matching front route.
+				if (std::string(name) == "attachments" && key == "chair")
+					world.placeFurniture(room, "desk", 3.125f, 0, "Supporting desk", 5);
+				world.addSectorMarker(room, 0, 0.5f, "Entrance");
+				world.addSectorMarker(room, 0, 22.5f, "Exit");
+				world.finishBuild();
+				auto visitor = world.createAgent("Visitor", room, 0, 0.5f);
+				require(world.moveAgentToNamedMarker(visitor, "Exit").accepted(), "Bundled route request refused");
+				world.advanceTicks(4000);
+				require(world.lookupAgent(visitor).entity->getGlobalPosition().x == 22.5f, "Bundled explicit circulation route lost");
+				std::vector<core::AgentId> users;
+				for (auto const& destination : world.furniture().front().destinations)
+				{
+					auto id = world.createAgent("User " + destination.key, room, 0, 0.5f); users.push_back(id);
+					auto expected = std::vector<std::string>{"idle"};
+					if (definition.hasUse) expected.push_back("use-furniture");
+					require(world.availableAgentActions(destination.marker) == expected, "Bundled use availability changed");
+					require(world.moveAgentToMarker(id, destination.marker).accepted(), "Default Idle request refused");
+					world.advanceTicks(4000);
+					auto point = std::find_if(definition.usablePoints.begin(), definition.usablePoints.end(),
+						[&](auto const& p) { return p.key == destination.key; });
+					require(world.lookupAgent(id).entity->getGlobalPosition().x == 4.125f + point->x
+						&& world.lookupAgent(id).entity->getPose() == core::Pose::Standing && !world.usablePointOccupant(destination.marker),
+						"Default Idle did not arrive Standing without use: " + filename + "/" + key);
+					if (definition.hasUse)
+					{
+						require(world.moveAgentToMarker(id, destination.marker, core::UseFurnitureAction).accepted(), "Explicit bundled use refused");
+						world.advanceTicks(600);
+						require(world.lookupAgent(id).entity->getPose() == (key == "bed" ? core::Pose::Lying : core::Pose::Sitting)
+							&& world.usablePointOccupant(destination.marker) == id, "Bundled use did not set Pose/claim selected point: " + filename + "/" + key + "/" + destination.key);
+					}
+				}
+				for (size_t i = 0; i < users.size(); ++i)
+				{
+					auto marker = world.furniture().front().destinations[i].marker;
+					require(world.moveAgentToMarker(users[i], marker, core::IdleAction).accepted(), "Explicit Idle refused");
+					world.advanceTicks(600);
+					require(world.lookupAgent(users[i]).entity->getPose() == core::Pose::Standing && !world.usablePointOccupant(marker),
+						"Bundled finish did not stand/release");
+					for (size_t j = i + 1; j < users.size(); ++j)
+						if (definition.hasUse) require(world.usablePointOccupant(world.furniture().front().destinations[j].marker) == users[j],
+							"Sofa finishing released an independent seat");
+				}
+				for (auto suffix : {"world.yaml", "world"})
+				{
+					auto document = root / (std::string(name) + "-" + key + "." + suffix);
+					world.saveTo(document.string()); auto loaded = core::loadWorldDocument(document);
+					sameInstances(world, *loaded);
+					require(loaded->furnitureCatalogueFilename() == filename, "Round trip lost Lua reference");
+				}
+			}
+		}
+		for (auto name : {"chair", "desk", "furniture", "furniture-test-1", "furniture-integration"})
+		{
+			auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/" + std::string(name) + ".world.yaml"));
+			auto legacy = core::loadWorldDocument(context.fixture("src/headless/smoke/fixtures/legacy-furniture/" + std::string(name) + ".world.yaml"));
+			sameInstances(*legacy, *world);
+			for (auto suffix : {"world.yaml", "world"})
+			{
+				auto document = root / (std::string(name) + "-bundled." + suffix);
+				world->saveTo(document.string()); auto loaded = core::loadWorldDocument(document); sameInstances(*world, *loaded);
+				loaded->advanceTicks(4000);
+				if (std::string(name) == "furniture" || std::string(name) == "furniture-test-1")
+					require(loaded->lookupAgent(core::AgentId{1}).entity->getPose() ==
+						(std::string(name) == "furniture-test-1" ? core::Pose::Lying : core::Pose::Sitting),
+						"Teaching journey lost explicit Use furniture intent");
+			}
+		}
+	}
+
 	void luaObjects(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -165,13 +295,13 @@ namespace
 		auto const& points = catalogue->definition("chair")->usablePoints;
 		require(points[0].action == core::UsablePointAction::Sit && !points[1].action,
 			"Sit or omitted usable-point action parsed incorrectly");
-		auto bundled = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/furniture.furniture.yaml"));
+		auto bundled = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml"));
 		auto bed = bundled->definition("bed");
 		require(bed && bed->maxX - bed->minX == 2 && bed->maxY - bed->minY == 1
 			&& bed->usablePoints.size() == 1 && bed->usablePoints[0].x == 1.f
 			&& bed->usablePoints[0].action == core::UsablePointAction::Lying,
 			"Bed must span two cells with one central Lying usable point");
-		auto legacy = core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		auto legacy = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		require(!legacy->definition("chair")->usablePoints[0].action, "Legacy chair gained an action");
 		for (auto value : {"Stand", "sit", "lying", "Lie", "''", "null", "[]", "{}"})
 		{
@@ -230,7 +360,7 @@ namespace
 	void chair(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto catalogue = core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/chair.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
 		core::World transitWorld("Unsupported Furniture host", 4, 2);
 		transitWorld.addCorridor(0, 0, 0, 4, 1); transitWorld.addCorridor(0, 1, 0, 4, 1);
 		auto ladder = transitWorld.addLadder(1, 0, 2, {2, false, true});
@@ -477,7 +607,7 @@ namespace
 		core::World world("Multi-point layouts", 20, 5);
 		auto room = world.addRoom("Room", 0, 0, 0, 20, 5);
 		world.attachFurnitureCatalogue("layouts.furniture.yaml",
-			core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/layouts.furniture.yaml")));
+			core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml")));
 		for (uint32_t x = 7; x < 12; ++x) world.addSectorWalkway(room, 1, x);
 		for (uint32_t x = 4; x < 7; ++x) world.addSectorWalkway(room, 2, x);
 		world.addSectorWalkway(room, 2, 7); world.addSectorWalkway(room, 2, 9);
@@ -510,7 +640,7 @@ namespace
 		world.addSectorMarker(room, 0, 19.5f, "Invalid Right seat");
 		refuse("sofa", 12.5f, 0, "already exists"); // Validate the second point before issuing either identity.
 		auto malformedPath = context.temporaryRoot() / "invalid.furniture.yaml";
-		auto catalogueYaml = YAML::LoadFile(context.fixture("resources/test-worlds/layouts.furniture.yaml").string());
+		auto catalogueYaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml").string());
 		for (int variant = 0; variant < 5; ++variant)
 		{
 			auto invalid = YAML::Clone(catalogueYaml);
@@ -599,7 +729,7 @@ namespace
 		int baselineArrival = 0;
 		for (int variant = 0; variant < 11; ++variant)
 		{
-			auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/attachments.furniture.yaml").string());
+			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml").string());
 			auto desk = yaml["furnitureCatalogue"]["definitions"][0];
 			auto chair = yaml["furnitureCatalogue"]["definitions"][1];
 			// Isolate the back route: a chair must not acquire it through the front.
@@ -711,7 +841,7 @@ namespace
 			for (int variant = 0; variant < 4; ++variant)
 				for (bool reverse : { false, true })
 		{
-			auto yaml = YAML::LoadFile(context.fixture("resources/test-worlds/composition.furniture.yaml").string());
+			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/composition.furniture.yaml").string());
 			auto definitions = yaml["furnitureCatalogue"]["definitions"];
 			if (variant == 1)
 				for (auto edge : definitions[1]["edges"])
@@ -849,7 +979,7 @@ namespace
 	void deskRoutes(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto fixture = context.fixture("resources/test-worlds/desk.furniture.yaml");
+		auto fixture = context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml");
 		auto catalogue = core::FurnitureCatalogue::load(fixture);
 		int baselineArrival = 0;
 		for (int depth : { 0, 2, 5 })
@@ -1052,6 +1182,7 @@ namespace
 }
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/bundledLua", bundledLua });
 	checks.push_back({ "furniture/luaObjects", luaObjects });
 	checks.push_back({ "furniture/actions", actions });
 	checks.push_back({ "furniture/demo", demonstration });

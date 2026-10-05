@@ -72,7 +72,7 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 				core::World world("Idle arrival", 12, 2);
 				auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
 				world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(
-					context.fixture("resources/test-worlds/furniture.furniture.yaml")));
+					context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml")));
 				require(world.placeFurniture(room, definition, 3, 0, "Target") != 0, "Idle fixture placement refused");
 				world.addSectorMarker(room, 0, 8.5f, "Exit");
 				world.finishBuild();
@@ -110,7 +110,7 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "furniture/bedLyingLifecycle", [](smoke::Context const& context)
 	{
 		using smoke::require;
-		auto source = context.fixture("resources/test-worlds/furniture.furniture.yaml");
+		auto source = context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml");
 		for (int scenario = 0; scenario < 3; ++scenario)
 		{
 			core::World world("Bed arrival", 16, 2);

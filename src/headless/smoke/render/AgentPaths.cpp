@@ -69,7 +69,7 @@ void agentPathTargets(smoke::Context const& context)
 	world->addSectorMarker(other, 0, 8.5f, "Other Layer target");
 	world->finishBuild(); world->pauseSimulation();
 	world->attachFurnitureCatalogue("desk.furniture.yaml",
-		core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/desk.furniture.yaml")));
+		core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml")));
 	auto id = world->placeFurniture(room, "desk", 1.25f, 0, "Desk", 2);
 	world->finishBuild();
 	auto seat = markerPathTargetAtPosition(*world, 0, {2, 0}, .1f);

@@ -4,22 +4,22 @@ Furniture supports one-, two-, and larger-tile artwork layouts with individually
 authored usable points, explicit isolated front/back routes and Local-depth
 placement/editing, matching-depth external attachments and complete-Path depth
 continuity, composed floor replacement spans and safe catalogue reconciliation
-on World load. There is no sitting state or seat
-reservation.
+on World load. Explicit **Use furniture** invokes paired Lua definition functions;
+movement with omitted/default or explicit **Idle** never sits or lies down.
 
 ## Complete bundled demonstration (#359)
 
 See [Furniture demonstration and catalogue authoring](furniture-demonstration.md)
-for the required `furniture.world.yaml` / `furniture.furniture.yaml` teaching
+for the required `furniture.world.yaml` / `furniture.furniture.lua` teaching
 project, placeholder chair/sofa/desk artwork, front/back observers and portable
 place/edit/target/save/reopen workflow. Earlier slice fixtures below remain
 compatibility and focused regression examples.
 
 ## Authoring
 
-Save a World, put a manually authored `.furniture.yaml` catalogue beside it, then
+Save a World, put a manually authored `.furniture.lua` catalogue beside it, then
 expand **Furniture** in the World panel and choose **Select Furniture catalogue...**.
-The native file picker starts beside the World and filters `.furniture.yaml` files.
+The native file picker starts beside the World and filters `.furniture.lua` files.
 Catalogues outside that directory are refused; only the basename is persisted.
 Cancellation changes nothing, and load failures appear inline. The header contains
 only catalogue selection and its current filename, not Furniture editing controls.
@@ -31,7 +31,7 @@ instance on the displayed Level and integer Local depth. New placements snap to
 whole World-cell X. Placement refusals appear in the preview, and valid releases
 use normal document history.
 
-`resources/test-worlds/chair.furniture.yaml` describes the format. Catalogue UUID,
+`resources/test-worlds/chair.furniture.lua` describes the format. Catalogue UUID,
 definition key and usable-point key are reference identities, not display labels.
 Artwork names an existing `ObjectAtlas` Image-set region; the application resource
 manager resolves it and owns its atlas. The geometric placeholder chair is a full
@@ -146,8 +146,9 @@ remain separated from same-depth Furniture; incompatible layouts fail rather
 than moving or omitting instances. Both YAML and binary documents use this same
 reconciliation. Saving the loaded World persists the reconciled destinations and
 advanced allocation mark. Already open Worlds (including Reset and history) keep
-their loaded catalogue; there is no live reload, designer, migration UI or
-automatic geometry/reference repair.
+their loaded catalogue. Use paused **Reload Furniture catalogue** for transactional
+replacement after validation; there is no designer, migration UI or automatic
+geometry/reference repair. See [Lua catalogue authoring](lua-furniture-catalogues.md).
 
 `resources/test-worlds/chair.world.yaml` demonstrates chairs in all three supported
 Location types and an Agent visiting the reading chair. Reaching its Marker uses
@@ -155,7 +156,7 @@ ordinary movement, not a new Furniture behaviour API.
 
 ## Multi-tile layouts (#350)
 
-`resources/test-worlds/layouts.furniture.yaml` contains a two-seat sofa and a
+`resources/test-worlds/layouts.furniture.lua` contains a two-seat sofa and a
 sparse three-by-two layout. Every `tiles` entry names an `ObjectAtlas` Image-set
 region of exactly one World tile (64 × 160 pixels), at integer `x`/`y` offsets.
 Offsets may extend horizontally either side of the instance origin; artwork may
@@ -165,27 +166,33 @@ horizontal support is checked from the rectangle's left to right edge, including
 fractional end cells. Boundary touching is allowed; area overlap is not.
 
 Every `usablePoints` entry has a distinct stable `key`, a distinct initial `label`,
-a finite fractional `x` offset within the artwork width, and `y: 0`. All Markers
+a finite fractional `x` offset within the artwork width, and `y = 0`. All Markers
 and graph vertices stay at the instance's supporting Floor/Walkway height, even
 for tall artwork. Point order and display labels are not identities. The editor's
 snap toggle rounds only the instance x origin, leaving all point offsets rigid.
 It never rounds or permits fractional y.
 
-A usable point may specify `action: Sit` or `action: Lying`. Core simulation sets an Agent's runtime
-Pose to Sitting or Lying respectively when it physically arrives at that furniture-owned Marker as its
-Path destination; intermediate traversal never fires the action. Omission means
-no action, and unknown action values fail catalogue loading. Starting another
-Path restores Standing. Actions require no Lua changes and are read from the
-catalogue rather than persisted in the World; existing catalogues remain unchanged.
-Both actions also claim the usable point (#448): first arrival wins.
-The bundled Bed spans two cells and has one central usable point at `x: 1`
-with `action: Lying`; its artwork and Lying pose both have the head on the right.
+Furniture definitions return native Lua objects with paired `use` and `finish_use`
+functions, or neither. Per-point `action` fields are not accepted. See the complete
+[data/function contract](lua-furniture-catalogues.md) and [Action workflow](scripted-marker-actions.md).
+Chair and sofa `use` functions set Sitting and claim the selected Marker; bed sets
+Lying and claims. Their `finish_use` restores Standing and releases. Desk provides
+neither function, even when it has an ordinary owned movement Marker.
+
+Select **Use furniture** alongside the named Marker in Agent request controls, or
+pass `"use-furniture"` to a behaviour's `context.move_to(marker, action)` call.
+Default/explicit Idle leaves a new arrival Standing; replacing an active use with
+Idle at its seat finishes it first. Intermediate passage never invokes use.
+Claims are per usable point, so two sofa seats can be used independently. Scripts
+share stateless helpers, never mutable occupancy or instance state.
+The bundled Bed spans two cells and has one central usable point at `x = 1`;
+its artwork and Lying pose both have the head on the right.
 An Agent occupying the Bed renders at Bed x + 0.75 and 0.25 World units above its supporting Floor;
 this mattress offset does not change its physical bounds or routing position. Other Agents
 cannot route to an Occupied Marker, and existing Paths targeting it are
 hard-invalidated into Route planning and ordinary Route loss, regardless of
 Route persistence. Occupancy does not block intermediate traversal (subject to
-the Marker's separate `blocksPathing` property). Beginning a new Path, simulation
+the Marker's separate `blocksPathing` property). Physical departure (not request acceptance or Route planning), simulation
 Reset, or deleting the seated Agent releases the claim; deactivation and
 pause/resume retain it. Claims are runtime-only: YAML and binary reloads start
 with every usable point free.
@@ -195,23 +202,25 @@ moving the Agents from their physical positions. Unaffected sitters retain their
 Pose and claims through structural replay; rename-only and rejected edits do
 not release seats. Occupancy itself never refuses a Furniture edit.
 
-A usable point may specify `blocksPathing: false` to make its Marker usable as
+A usable point may specify `blocksPathing = false` to make its Marker usable as
 both a destination and an intermediate waypoint. Omitted `blocksPathing` defaults
 to `true`. This is a creation default: existing World-owned Marker properties
 remain authoritative on save/load, while newly reconciled usable points receive
 the catalogue default. Clear Blocks pathing in Marker Selection for existing seats.
 
-```yaml
-usablePoints:
-  - {key: left, label: Left seat, x: 0.5, blocksPathing: false}
-  - {key: right, label: Right seat, x: 1.5, blocksPathing: false}
+```lua
+usablePoints = {
+  {key = "left", label = "Left seat", x = 0.5, blocksPathing = false},
+  {key = "right", label = "Right seat", x = 1.5, blocksPathing = false}
+}
 ```
 
 The bundled sofa's front route passes through both non-blocking seat Markers;
 the bundled chair uses the same arrangement with one non-blocking seat. Both
-have separate back routes, use `sideRoutes: true`, and require instance Local
-depth 1 or greater: front edges resolve at instance depth minus 1, back edges at
-instance depth plus 1. Approach edges remain at fixed depth 0 to attach to Floor.
+have separate back routes and use `sideRoutes = true`. The compact teaching
+catalogue's front edges resolve at instance depth and back edges at depth plus 1;
+the integration sofa's front route uses depth minus 1, so it requires instance
+depth 1 or greater. Approach edges remain fixed at depth 0 to attach to Floor.
 
 Each destination is independently selectable and renameable using the ordinary
 Marker/behaviour UI. Renaming the instance does not rename its destinations.
@@ -222,15 +231,15 @@ API compatibility; `destinations` exposes the complete stable-key layout.
 
 ## Explicit desk routes (#351)
 
-`resources/test-worlds/desk.furniture.yaml` and `desk.world.yaml` demonstrate an
+`resources/test-worlds/desk.furniture.lua` and `desk.world.yaml` demonstrate an
 isolated two-tile desk using existing placeholder Image-set artwork. The catalogue
 adds `vertices` and `edges` alongside `usablePoints`:
 
 - Each vertex has a unique `key`, finite `x` offset within the footprint (including
-  its right boundary), and optional `y: 0`. A `usablePoint` binding names exactly
+  its right boundary), and optional `y = 0`. A `usablePoint` binding names exactly
   one existing usable-point key at its authored x. Every usable point must be
   bound exactly once. Other vertices are routing-only, never behaviour destinations.
-- `external: true` exposes the resolved depths of the vertex's incident authored
+- `external = true` exposes the resolved depths of the vertex's incident authored
   edges for attachment. Only a port with an incident depth-0 edge attaches to the
   surrounding ordinary floor. Undesignated vertices remain private even when
   coordinates coincide.
@@ -238,7 +247,7 @@ adds `vertices` and `edges` alongside `usablePoints`:
   means fixed Local depth 0; a signed `depthOffset` resolves relative to the
   instance depth. Unknown endpoints, self edges and duplicate connections fail
   catalogue loading. Missing edges are never inferred.
-- `sideRoutes: true` declares that the authored routes replace ordinary floor
+- `sideRoutes = true` declares that the authored routes replace ordinary floor
   edges across the complete artwork width. Definitions without side routes retain
   ordinary floor routing, including definitions with depth-assigned seat branches.
   The desk explicitly joins its fixed-0 left/right approaches to front (`depthOffset: 0`) and back (`depthOffset: 1`) routes. At
@@ -258,7 +267,7 @@ Complete-Path depth continuity is described below; it does not change edge route
 
 ## Matching-depth attachments (#355)
 
-`resources/test-worlds/attachments.furniture.yaml` adds a non-replacing chair
+`resources/test-worlds/attachments.furniture.lua` adds a non-replacing chair
 whose external approach exposes an authored relative-depth edge. A depth-1 chair
 at x=3.125 attaches to the middle of a depth-2 desk's front route at x=2.125:
 its approach edge has `depthOffset: 1`, resolving to the same depth 2. It does
@@ -284,7 +293,7 @@ described below.
 
 ## Composed replacement spans (#356)
 
-`resources/test-worlds/composition.furniture.yaml` supplies wide and narrow
+`resources/test-worlds/composition.furniture.lua` supplies wide and narrow
 replacement layouts with matching resolved depth-2 routes at instance depths 2
 and 3. Partially overlapping, nested and boundary-touching spans compose through
 designated ports only. A matching port can attach to another definition's route

@@ -73,7 +73,7 @@ Resources:
               - { name: "lift-car", x: "256", y: "320", width: "64", height: "160" }
     - type: "FurnitureCatalogue"
       name: "FurnitureCatalogue"
-      location: "test-worlds/furniture.furniture.yaml"
+      location: "test-worlds/furniture.furniture.lua"
       DependentResources:
         DependentResource:
           id: "Artwork"
@@ -87,7 +87,7 @@ Resources:
           ref: "FurnitureCatalogue"
     - type: "FurnitureCatalogue"
       name: "FurnitureIntegrationCatalogue"
-      location: "test-worlds/furniture-integration.furniture.yaml"
+      location: "test-worlds/furniture-integration.furniture.lua"
       DependentResources:
         DependentResource:
           id: "Artwork"
@@ -101,14 +101,14 @@ Resources:
           ref: "FurnitureIntegrationCatalogue"
     - type: "FurnitureCatalogue"
       name: "ChairCatalogue"
-      location: "test-worlds/chair.furniture.yaml"
+      location: "test-worlds/chair.furniture.lua"
       DependentResources:
         DependentResource:
           id: "Artwork"
           ref: "ObjectAtlas"
     - type: "FurnitureCatalogue"
       name: "DeskCatalogue"
-      location: "test-worlds/desk.furniture.yaml"
+      location: "test-worlds/desk.furniture.lua"
       DependentResources:
         DependentResource:
           id: "Artwork"
