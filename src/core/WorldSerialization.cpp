@@ -670,7 +670,7 @@ namespace core
 		// Path destination identity in 47.
 		// Version 50 combines Furniture and Dumbwaiter authored state.
 		// Version 52 adds authored Access panel speed overrides.
-		serializer.writeUint32("version", 52);
+		serializer.writeUint32("version", 53);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -847,6 +847,7 @@ namespace core
 				serializer.writeFloat("destinationLocalX", destination->getSectorOffset().x);
 				serializer.writeFloat("destinationLocalY", destination->getSectorOffset().y);
 				serializer.writeBool("active", agent->mResetPathActive);
+				serializer.writeString("action", std::string(IdleAction));
 				serializer.endMap();
 			}
 			serializer.endMap();
@@ -1479,7 +1480,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 52)
+		if (version < 1 || version > 53)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2320,6 +2321,8 @@ namespace core
 				destinationLocalX = serializer.readFloat("destinationLocalX");
 				destinationLocalY = serializer.readFloat("destinationLocalY");
 				pathActive = serializer.readBool("active");
+				if (serializer.hasField("action") && serializer.readString("action") != IdleAction)
+					throw SerializationException("Unavailable Agent Action in saved movement request");
 				if (serializer.hasField("destinationMarker"))
 				{
 					if (version < 47) throw SerializationException("Path Marker identity requires World schema 47 or later");

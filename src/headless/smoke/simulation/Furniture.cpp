@@ -63,6 +63,49 @@ namespace
 
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/explicitIdle", [](smoke::Context const& context)
+	{
+		using smoke::require;
+		for (auto const& definition : { "chair", "bed" })
+			for (bool explicitIdle : { false, true })
+			{
+				core::World world("Idle arrival", 12, 2);
+				auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
+				world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(
+					context.fixture("resources/test-worlds/furniture.furniture.yaml")));
+				require(world.placeFurniture(room, definition, 3, 0, "Target") != 0, "Idle fixture placement refused");
+				world.addSectorMarker(room, 0, 8.5f, "Exit");
+				world.finishBuild();
+				auto target = world.furniture().front().destinations.front().marker;
+				auto id = world.createAgent("Walker", room, 0, 0.5f);
+				world.consumeSimulationEvents();
+				require(world.availableAgentActions(target) == std::vector<std::string>{ "idle" },
+					"Legacy Furniture use appeared in available Actions");
+				require((explicitIdle ? world.moveAgentToMarker(id, target, core::IdleAction)
+					: world.moveAgentToMarker(id, target)).accepted(), "Idle request refused");
+				unsigned reached = 0;
+				for (unsigned tick = 0; tick < 1800; ++tick)
+				{
+					world.advanceTick();
+					require(world.lookupAgent(id).entity->getPose() == core::Pose::Standing
+						&& !world.usablePointOccupant(target), "Idle implicitly used Furniture");
+					for (auto const& event : world.consumeSimulationEvents())
+						if (event.type == core::SimulationEventType::DestinationReached)
+						{
+							++reached;
+							require(event.destinationMarker == target && event.selectedAction == core::IdleAction
+								&& event.agent.globalPosition.x == (std::string(definition) == "bed" ? 4.f : 3.5f),
+								"Action completed before physical arrival");
+						}
+				}
+				require(reached == 1 && world.lookupAgent(id).entity->getState() == core::Agent::State::Idle,
+					"Idle scheduled replacement work or lost arrival");
+				require(world.moveAgentToNamedMarker(id, "Exit").accepted(), "Pass-through request refused");
+				world.advanceTicks(1800);
+				require(world.lookupAgent(id).entity->getPose() == core::Pose::Standing
+					&& !world.usablePointOccupant(target), "Intermediate passage implicitly used Furniture");
+			}
+	} });
 	checks.push_back({ "furniture/actions", actions });
 	checks.push_back({ "furniture/bedLyingLifecycle", [](smoke::Context const& context)
 	{

@@ -374,7 +374,7 @@ namespace core
 			return { MovementCommandStatus::NoOp };
 		if (!mWorld.mGraph || mWorld.mTopologyDirty || !mWorld.mTopologyValid)
 			return { MovementCommandStatus::TopologyUnavailable };
-		return { behaviourCommand && mWorld.mMovementGoals.contains(id)
+		return { mWorld.mMovementGoals.contains(id)
 			? MovementCommandStatus::Superseded : MovementCommandStatus::Accepted };
 	}
 
@@ -390,9 +390,11 @@ namespace core
 			SimulationEvent event;
 			event.agent = makeAgentSnapshot(agent);
 			event.destinationMarker = old->second.marker;
+			event.selectedAction = old->second.selectedAction;
 			event.type = SimulationEventType::MovementCancelled;
-			event.movementCancellationReason = old->second.cancelling
-				? MovementCancellationReason::Explicit : MovementCancellationReason::Superseded;
+			event.movementCancellationReason = old->second.marker && !mWorld.lookupMarker(old->second.marker)
+				? MovementCancellationReason::TargetDeleted
+				: old->second.cancelling ? MovementCancellationReason::Explicit : MovementCancellationReason::Superseded;
 			mWorld.mPendingMovementOutcomes.push_back(std::move(event));
 		}
 		shared_ptr<const Vertex> target;
@@ -726,10 +728,12 @@ namespace core
 		for (auto it = mWorld.mMovementGoals.begin(); it != mWorld.mMovementGoals.end();)
 		{
 			auto id = it->first;
-			auto const& goal = it->second;
+			auto& goal = it->second;
 			auto agent = mWorld.mAgents.find(id);
 			if (!agent) { it = mWorld.mMovementGoals.erase(it); continue; }
-			if (!agent->isActive()) { ++it; continue; }
+			auto const targetDeleted = goal.marker && !mWorld.lookupMarker(goal.marker);
+			if (targetDeleted) goal.cancelling = true;
+			if (!agent->isActive() && !targetDeleted) { ++it; continue; }
 			if (goal.cancelling)
 			{
 				// Finish an in-flight crossing and any occupied resource journey first.
@@ -753,6 +757,7 @@ namespace core
 			event.phase = mWorld.mCurrentPhase;
 			event.agent = makeAgentSnapshot(agent);
 			event.destinationMarker = goal.marker;
+			event.selectedAction = goal.selectedAction;
 			event.type = goal.cancelling ? SimulationEventType::MovementCancelled
 				: goal.routeLossReason == RouteLossReason::None
 					&& (!goal.marker || mWorld.lookupMarker(goal.marker)) && agent->getSector()
@@ -765,7 +770,8 @@ namespace core
 					: goal.routeLossReason == RouteLossReason::None
 						? RouteLossReason::TopologyChanged : goal.routeLossReason;
 			else if (event.type == SimulationEventType::MovementCancelled)
-				event.movementCancellationReason = MovementCancellationReason::Explicit;
+				event.movementCancellationReason = targetDeleted
+					? MovementCancellationReason::TargetDeleted : MovementCancellationReason::Explicit;
 			it = mWorld.mMovementGoals.erase(it);
 			// Runtime observation is a separate subscription: it never drains or
 			// mutates the public simulation event queue.

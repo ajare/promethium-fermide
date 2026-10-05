@@ -7561,6 +7561,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	renderAgentAccessPermissions(world, id);
 	renderAgentRuntimeProperties(world, id);
 	renderAgentBehaviourConfigurationPanel(world, id);
+	renderAgentMovementActionSelector();
 
 	if (gSelectingAgentPathDestination)
 	{

@@ -149,9 +149,16 @@ _Avoid_: Obstacle, which suggests a physical collision boundary
 The condition in which an Agent's selected destination has no valid Path, either when movement first begins or after the simulation attempts to replace an invalidated Path. An Agent behaviour may respond by choosing a new destination.
 _Avoid_: Replan, which recalculates a Path to the same destination
 
-**Usable-point action**:
-The action an Agent performs automatically when it arrives at a Furniture usable point as its Path destination, authored per usable point in the Furniture definition. Sit and Lying are the available actions; a usable point without an authored action performs none.
-_Avoid_: Agent behaviour, which directs destination choice rather than arrival effects
+**Agent action**:
+The activity explicitly selected with an Agent's movement request to a Marker, performed only after physical arrival.
+_Avoid_: Usable-point action, which implied automatic Furniture use; Agent behaviour, which directs requests
+
+**Idle action**:
+The immutable built-in Agent action that schedules no activity on arrival. It is always available and is selected when a movement request omits its Action.
+_Avoid_: Deactivation, which stops an Agent's participation; disabling Agent behaviour
+
+**Available Agent actions**:
+The Actions offered at a Marker, including Idle and an ordered list of additional Actions. Ordinary Markers offer no additional Actions by default.
 
 **Occupied**:
 The runtime state of a usable point claimed by a seated or lying Agent. An Occupied usable point is an invalid Path destination for every other Agent until the claim is released, but remains usable as an intermediate waypoint.
@@ -239,7 +246,7 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 A simulated person with a position, destination path, and current movement state.
 
 **Pose**:
-An Agent's runtime bodily stance: Standing (the default), Sitting, or Lying. A Pose results from a Usable-point action and reverts to Standing when the Agent begins moving again; it is simulation state, never authored. Sitting reduces the Agent's effective height; Lying currently changes appearance only.
+An Agent's runtime bodily stance: Standing (the default), Sitting, or Lying. A Pose is simulation state, never authored; movement alone does not select a Furniture activity. Sitting reduces the Agent's effective height; Lying currently changes appearance only.
 _Avoid_: Movement state, which describes pathing progress rather than bodily stance
 
 **Agent behaviour**:

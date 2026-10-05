@@ -64,7 +64,7 @@ namespace persistence
 		original.serialize(*writer, workData);
 		writer->serialize();
 		auto const yaml = writer->getSerializedString();
-		require(yaml.find("version: 52") != std::string::npos
+		require(yaml.find("version: 53") != std::string::npos
 			&& yaml.find("layers: 2") != std::string::npos
 			&& yaml.find("layerNames:") != std::string::npos
 			&& yaml.find("- Layer 0") != std::string::npos
@@ -80,7 +80,8 @@ namespace persistence
 			&& yaml.find("agents") != std::string::npos
 			&& yaml.find("path:") != std::string::npos
 			&& yaml.find("destinationSector:") != std::string::npos
-			&& yaml.find("active: true") != std::string::npos,
+			&& yaml.find("active: true") != std::string::npos
+			&& yaml.find("action: idle") != std::string::npos,
 			"World YAML omitted authored structure, agents, or Agent paths");
 
 		core::World loaded("placeholder", 2, 2);
@@ -116,7 +117,30 @@ namespace persistence
 			&& std::abs(loadedAgent.entity->getPath()->nodes.back().targetVertex->getSectorOffset().x
 				- destination->getSectorOffset().x) < 0.0001f,
 			"World-owned Agent or its active path did not round-trip");
+		require(loaded.getSimulationSnapshot().agents.front().selectedAction == core::IdleAction,
+			"Document reconstruction lost Idle intent");
 		require(!loaded.isModified(), "deserialized World was unexpectedly modified");
+		for (bool invalid : { false, true })
+		{
+			auto actionYaml = yaml;
+			auto field = actionYaml.find("action: idle");
+			require(field != std::string::npos, "Missing serialized Action intent");
+			if (invalid) actionYaml.replace(field, std::string("action: idle").size(), "action: sit");
+			else
+			{
+				auto begin = actionYaml.rfind('\n', field) + 1;
+				actionYaml.erase(begin, actionYaml.find('\n', field) - begin + 1);
+			}
+			auto actionReader = core::YamlSerializer::fromString(actionYaml);
+			actionReader->deserialize();
+			core::World actionLoaded("Action document", 2, 2);
+			bool refused = false;
+			try { require(actionLoaded.deserialize(*actionReader, workData), "Action document load failed"); }
+			catch (core::SerializationException const&) { refused = true; }
+			require(refused == invalid, "Absent Action did not default to Idle or invalid Action fell back");
+			if (!invalid) require(actionLoaded.getSimulationSnapshot().agents.front().selectedAction == core::IdleAction,
+				"Missing Action field lost default Idle");
+		}
 
 		// Version 15 changed the persisted vertical-position vocabulary. Documents
 		// written by older builds retain their legacy field spellings and must
@@ -130,8 +154,13 @@ namespace persistence
 				legacyYaml.replace(at, from.size(), to);
 			}
 		};
-		replaceAll("version: 52", "version: 14");
+		replaceAll("version: 53", "version: 14");
 		if (auto field = legacyYaml.find("destinationMarker:"); field != std::string::npos)
+		{
+			auto begin = legacyYaml.rfind('\n', field) + 1;
+			legacyYaml.erase(begin, legacyYaml.find('\n', field) - begin + 1);
+		}
+		if (auto field = legacyYaml.find("action: idle"); field != std::string::npos)
 		{
 			auto begin = legacyYaml.rfind('\n', field) + 1;
 			legacyYaml.erase(begin, legacyYaml.find('\n', field) - begin + 1);

@@ -50,7 +50,10 @@ namespace core
 		result.pose = agent->getPose();
 		result.hasPath = (bool)agent->getPath();
 		if (auto goal = mWorld.mMovementGoals.find(result.id); goal != mWorld.mMovementGoals.end())
+		{
 			result.intendedDestination = goal->second.marker;
+			result.selectedAction = goal->second.selectedAction;
+		}
 		if (agent->getState() == Agent::State::RoutePlanning)
 		{
 			result.routePlanningTotalTicks = agent->getRoutePlanningTotalTicks();

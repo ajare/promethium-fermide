@@ -140,11 +140,13 @@ namespace
 			agent = world.lookupAgent(id).entity;
 			world.consumeSimulationEvents();
 			require(world.resumeSimulation(), "Deletion resume failed"); world.advanceTicks(agent->getRoutePlanningRemainingTicks() + 1);
-			bool routeLost = false;
+			bool cancelled = false;
 			for (auto const& event : world.consumeSimulationEvents())
-				routeLost |= event.type == core::SimulationEventType::RouteLost && event.destinationMarker == markerId;
-			require(routeLost && !agent->getPath() && agent->getGlobalPosition().x == 7.75f
-				&& agent->getLocalDepth() == 9, "Deleted destination did not produce normal stationary Route loss: lost=" + std::to_string(routeLost)
+				cancelled |= event.type == core::SimulationEventType::MovementCancelled
+					&& event.destinationMarker == markerId
+					&& event.movementCancellationReason == core::MovementCancellationReason::TargetDeleted;
+			require(cancelled && !agent->getPath() && agent->getGlobalPosition().x == 7.75f
+				&& agent->getLocalDepth() == 9, "Deleted destination did not cancel stationary request: cancelled=" + std::to_string(cancelled)
 					+ " x=" + std::to_string(agent->getGlobalPosition().x) + " depth=" + std::to_string(agent->getLocalDepth())
 					+ " planning=" + std::to_string(agent->getRoutePlanningRemainingTicks()));
 		}

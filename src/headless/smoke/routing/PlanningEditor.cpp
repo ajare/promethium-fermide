@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "AgentClipboard.h"
+#include "AgentBehaviourAssignmentPanel.h"
 #include "PermissionsPanel.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -108,6 +109,8 @@ namespace
 				io.DisplaySize = { 800, 600 };
 				io.Fonts->AddFontDefault(); io.Fonts->Build();
 				ImGui::NewFrame(); ImGui::Begin("Planning panel");
+				require(renderAgentMovementActionSelector() == core::IdleAction,
+					"Editor movement Action selector omitted Idle");
 				ImGui::LogToBuffer();
 				renderAgentRuntimeProperties(f.world, f.id);
 				std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();

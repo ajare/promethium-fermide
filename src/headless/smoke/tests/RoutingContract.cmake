@@ -42,6 +42,7 @@ set(core_names
     traversalReplacementAtDestination
     defaultsValidationAndIndependentOverrides
     persistenceReconciliationAndDependencies
+    explicitIdleStableMarkerRequests
     ordinaryCommands
     cancelDoorCrossing
     initialWaypointBeforeLiftCallIsSkipped

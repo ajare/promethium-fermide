@@ -33,9 +33,33 @@ namespace
 		require(world.moveAgentToMarker(id, markers[0]).status == Status::InactiveAgent, "Inactive Agent accepted");
 		require(world.setAgentActive(id, true), "Activation refused");
 		world.resumeSimulation();
-		require(world.moveAgentToMarker(id, markers[0]).accepted(), "Movement refused");
-		require(world.moveAgentToMarker(id, markers[0]).status == Status::NoOp, "Same destination not idempotent");
-		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Replacement refused");
+		world.consumeSimulationEvents();
+		require(world.availableAgentActions(markers[0]) == std::vector<std::string>{ "idle" },
+			"Ordinary Marker must offer only immutable Idle");
+		require(world.availableAgentActions({}).empty(), "Unknown Marker offered Actions");
+		require(world.moveAgentToNamedMarker(id, "End", "sit").status == Status::UnavailableAction,
+			"Unavailable Action silently fell back to Idle");
+		require(world.moveAgentToNamedMarker(id, "Missing").status == Status::UnknownMarker,
+			"Unknown authored name accepted");
+		require(world.moveAgentToNamedMarker(id, "End").accepted(), "Movement refused");
+		require(world.getSimulationSnapshot().agents.front().selectedAction == core::IdleAction,
+			"Default Idle was not retained during planning");
+		require(world.consumeSimulationEvents().empty(), "Planning invoked arrival synchronously");
+		require(world.moveAgentToMarker(id, markers[0], core::IdleAction).status == Status::NoOp,
+			"Explicit/default same destination not idempotent");
+		require(world.moveAgentToMarker(id, markers[1], core::IdleAction).status == Status::Superseded,
+			"Explicit Idle replacement refused");
+		world.advanceTick();
+		unsigned replacements = 0;
+		for (auto const& event : world.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::MovementCancelled)
+			{
+				++replacements;
+				require(event.destinationMarker == markers[0] && event.selectedAction == core::IdleAction
+					&& event.movementCancellationReason == core::MovementCancellationReason::Superseded,
+					"Replacement outcome lost Action or target");
+			}
+		require(replacements == 1, "Replacement did not publish exactly one cancellation");
 		world.advanceTicks(5);
 		world.consumeSimulationEvents();
 		require(world.cancelAgentMovement(id).accepted(), "Cancellation refused");
@@ -60,7 +84,8 @@ namespace
 		unsigned reached = 0;
 		for (auto const& event : world.consumeSimulationEvents()) reached += event.type == core::SimulationEventType::DestinationReached;
 		require(reached == 1, "Walking destination outcome missing");
-		require(world.moveAgentToMarker(id, markers[1]).accepted(), "Already-at-destination command refused");
+		require(world.moveAgentToNamedMarker(id, "Other", core::IdleAction).accepted(), "Already-at-destination command refused");
+		require(world.consumeSimulationEvents().empty(), "Same-target arrival fired at acceptance");
 		world.advanceTicks(world.lookupAgent(id).entity->getRoutePlanningRemainingTicks());
 		reached = 0;
 		for (auto const& event : world.consumeSimulationEvents()) reached += event.type == core::SimulationEventType::DestinationReached;
@@ -83,6 +108,59 @@ namespace
 		unsigned lost = 0;
 		for (auto const& event : world.consumeSimulationEvents()) lost += event.type == core::SimulationEventType::RouteLost;
 		require(lost == 1 && world.getSimulationSnapshot().traversalRequests.empty(), "Initial route loss leaked claims or outcome");
+	}
+
+	void stableMarkerRequests()
+	{
+		for (int scenario = 0; scenario < 3; ++scenario)
+		{
+			auto const remove = scenario != 0;
+			auto const reissue = scenario == 2;
+			core::World world("Stable Action target", 10, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+			auto object = world.addSectorMarker(room, 0, 8.5f, "Target");
+			world.finishBuild();
+			auto marker = world.getMarkerIds().front();
+			auto id = world.createAgent("Walker", room, 0, 0.5f);
+			world.consumeSimulationEvents();
+			require(world.moveAgentToNamedMarker(id, "Target", core::IdleAction).accepted(), "Named request refused");
+			world.advanceTicks(2);
+			world.pauseSimulation();
+			if (remove)
+			{
+				require(world.removeSectorMarker(room, object.index), "Target deletion refused");
+				world.addSectorMarker(room, 0, 2.5f, "Target");
+				require(world.getMarkerIds().front() != marker, "Name reuse reused stable identity");
+			}
+			else require(world.renameMarker(marker, "Renamed"), "Rename refused");
+			require(world.rebuildTraversalTopology(), "Target edit rebuild refused");
+			if (reissue) require(world.moveAgentToNamedMarker(id, "Target").accepted(), "New named request refused");
+			require(world.resumeSimulation(), "Resume refused");
+			world.advanceTicks(1800);
+			unsigned outcomes = 0;
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::MovementCancelled
+					|| event.type == core::SimulationEventType::DestinationReached
+					|| event.type == core::SimulationEventType::RouteLost)
+				{
+					++outcomes;
+					if (reissue && event.type == core::SimulationEventType::DestinationReached)
+					{
+						require(event.destinationMarker != marker && event.selectedAction == core::IdleAction,
+							"New named request reused the deleted identity");
+						continue;
+					}
+					require(event.destinationMarker == marker && event.selectedAction == core::IdleAction,
+						"Accepted identity or Action changed through edit");
+					require(remove ? event.type == core::SimulationEventType::MovementCancelled
+						&& event.movementCancellationReason == core::MovementCancellationReason::TargetDeleted
+						: event.type == core::SimulationEventType::DestinationReached,
+						"Rename/deletion outcome incorrect");
+				}
+			require(outcomes == (reissue ? 2u : 1u), "Target edit lost or duplicated outcome");
+			require(world.lookupAgent(id).entity->getGlobalPosition().x == (reissue ? 2.5f : remove ? 0.5f : 8.5f),
+				"Name reuse redirected accepted request");
+		}
 	}
 
 	void cancelDoorCrossing()
@@ -375,6 +453,7 @@ namespace routing_smoke
 {
 	void registerMovement(std::vector<smoke::Check>& checks)
 	{
+		checks.push_back({ "explicitIdleStableMarkerRequests", [](smoke::Context const&) { stableMarkerRequests(); } });
 		checks.push_back({ "ordinaryCommands", [](smoke::Context const&)
 		{
 			ordinaryCommands();

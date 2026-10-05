@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "core/AgentBehaviour.h"
 #include "core/EntityId.h"
@@ -18,6 +19,9 @@ bool commitAgentBehaviourAssignment(
 	std::string& diagnostic);
 bool commitAgentBehaviourClear(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, std::string& diagnostic);
+
+// Movement Actions are explicit even when Idle is the sole available choice.
+std::string_view renderAgentMovementActionSelector();
 
 // Compact picker for the Agents table and full schema-generated editor for the
 // selected-Agent panel. Marker values are always displayed and chosen by name.

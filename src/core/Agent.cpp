@@ -1440,18 +1440,9 @@ namespace core
 
 	void Agent::performDestinationAction()
 	{
-		if (!mWorld || !mPath.path || mPath.path->nodes.empty()) return;
-		auto const& destination = mPath.path->nodes.back().targetVertex;
-		if (!destination || destination->getSector().get() != getSector()
-			|| getGlobalPosition().distanceTo(destination->getPosition()) > 0.001f) return;
-		auto marker = std::dynamic_pointer_cast<Marker>(destination->getObject());
-		auto const action = marker ? mWorld->furnitureMarkerAction(marker->getId()) : std::nullopt;
-		if (action)
-		{
-			if (mWorld->claimUsablePoint(mWorld->getAgentId(this), marker->getId()))
-				mPose = *action == UsablePointAction::Lying ? Pose::Lying : Pose::Sitting;
-			else mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
-		}
+		// Idle is the only available Action in this slice. Arrival must never
+		// infer use from the Furniture catalogue's legacy usable-point action.
+		// Idle schedules nothing and leaves the assigned behaviour enabled.
 	}
 
 	bool Agent::nextPathNode()

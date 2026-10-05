@@ -110,6 +110,25 @@ return {
 		require(world.resumeSimulation(), "Could not resume after active unassignment");
 		require(world.moveAgentToMarker(id, markers[1]).accepted(),
 			"Active unassignment did not restore manual movement commands");
+		world.advanceTicks(1000);
+		world.pauseSimulation();
+		require(world.setAgentBehaviourAssignment(id, movingBehaviour,
+			registry->lookupAgentBehaviour(movingBehaviour)->getRevision(),
+			{ { "destination", markers[1] } }), "Idle-arrival behaviour assignment refused");
+		require(world.resumeSimulation(), "Idle-arrival resume refused");
+		world.consumeSimulationEvents();
+		world.advanceTicks(1000);
+		reached = 0;
+		for (auto const& event : world.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::DestinationReached)
+			{
+				++reached;
+				require(event.selectedAction == core::IdleAction, "Behaviour omission did not select Idle");
+			}
+		require(reached == 1 && world.agentBehaviourOwnsMovement(id)
+			&& world.lookupAgent(id).entity->getState() == core::Agent::State::Idle
+			&& !world.lookupAgent(id).entity->getPath() && !world.isSimulationPaused(),
+			"Idle arrival disabled behaviour or scheduled autonomous work");
 	}
 
 	void activationSuspendsStateAndFreezesTimers(smoke::Context const& context)

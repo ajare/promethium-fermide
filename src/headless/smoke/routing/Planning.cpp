@@ -73,6 +73,32 @@ namespace
 			&& f.world->getSimulationSnapshot().agents.front().intendedDestination == f.destination,
 			"Structural replay lost destination identity or restarted the timer");
 		require(f.world->resumeSimulation(), "Repeated resume failed");
+		if (removeDestination)
+		{
+			f.world->advanceTick();
+			unsigned cancelled = 0;
+			for (auto const& event : f.world->consumeSimulationEvents())
+			{
+				require(event.type != core::SimulationEventType::RouteLost, "Deletion was reported as route failure");
+				if (event.type == core::SimulationEventType::MovementCancelled)
+				{
+					++cancelled;
+					require(event.destinationMarker == f.destination
+						&& event.movementCancellationReason == core::MovementCancellationReason::TargetDeleted,
+						"Deletion cancellation reason incorrect");
+				}
+			}
+			auto snapshot = f.world->getSimulationSnapshot();
+			require(cancelled == 1 && f.agent()->getGlobalPosition() == position
+				&& f.agent()->getState() == core::Agent::State::Idle && !f.agent()->getPath()
+				&& !snapshot.agents.front().intendedDestination
+				&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(),
+				"Deleted request retained intent or ownership");
+			f.world->advanceTicks(20);
+			for (auto const& event : f.world->consumeSimulationEvents())
+				require(event.type != core::SimulationEventType::MovementCancelled, "Duplicate deletion outcome");
+			return;
+		}
 		f.world->advanceTicks(total - 3);
 		for (auto const& event : f.world->consumeSimulationEvents())
 			require(event.type != core::SimulationEventType::RouteLost
@@ -95,25 +121,11 @@ namespace
 			}
 		}
 		require(f.agent()->getGlobalPosition() == position, "Expiry moved the Agent");
-		if (removeDestination)
-		{
-			auto snapshot = f.world->getSimulationSnapshot();
-			require(lost == 1 && f.agent()->getState() == core::Agent::State::Idle
-				&& !snapshot.agents.front().intendedDestination && !f.agent()->getPath()
-				&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(),
-				"Failed mandatory replan retained intent or ownership");
-			f.world->advanceTicks(20);
-			for (auto const& event : f.world->consumeSimulationEvents())
-				require(event.type != core::SimulationEventType::RouteLost, "Duplicate Route loss");
-		}
-		else
-		{
-			require(!lost && f.agent()->getPath()
-				&& f.agent()->getState() == core::Agent::State::MovingToVertex,
-				"Successful replan did not install an active Path");
-			f.world->advanceTick();
-			require(f.agent()->getGlobalPosition() != position, "Movement did not resume on the next tick");
-		}
+		require(!lost && f.agent()->getPath()
+			&& f.agent()->getState() == core::Agent::State::MovingToVertex,
+			"Successful replan did not install an active Path");
+		f.world->advanceTick();
+		require(f.agent()->getGlobalPosition() != position, "Movement did not resume on the next tick");
 	}
 
 	void assignedIdleFallbackRestoration(bool disconnect)

@@ -158,6 +158,7 @@ set(core_names
     dumbwaiters/agentLandingEligibility
     dumbwaiters/agentLandingPermissions
     dumbwaiters/agentRacesAndOwnership
+    furniture/explicitIdle
     furniture/actions
     furniture/bedLyingLifecycle
     furniture/authoredChairArrival

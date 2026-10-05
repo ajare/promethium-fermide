@@ -604,6 +604,7 @@ namespace core
 			std::shared_ptr<Path> retainedPath;
 			uint32_t retainedFromNode{ 0 };
 			uint64_t voluntaryPlanningStartedTick{ 0 };
+			std::string selectedAction{ IdleAction };
 		};
 		std::map<AgentId, MovementGoal> mMovementGoals;
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
@@ -2151,10 +2152,17 @@ namespace core
 			float xOffset, std::string const& name, uint32_t* vertexIdentifier = nullptr);
 
 		// Runtime-only movement seam: no Path/Vertex access is needed by callers.
-		// Accepted intent reports DestinationReached or RouteLost through simulation
-		// events (including initially unreachable Markers). Same goal is a NoOp;
-		// another goal is refused until completion or explicit cancellation.
-		MovementCommandResult moveAgentToMarker(AgentId agent, MarkerId marker);
+		// Accepted intent reports DestinationReached, RouteLost or MovementCancelled
+		// through simulation events. Names resolve once, never again after edits.
+		// Idle is immutable and the only available Action in this slice.
+		// Target deletion cancels; route failure does not select a fallback Action.
+		// Same pending goal and Action is a NoOp; another goal supersedes it,
+		// publishing a distinct cancellation without interrupting committed traversal.
+		MovementCommandResult moveAgentToMarker(AgentId agent, MarkerId marker,
+			std::string_view action = IdleAction);
+		MovementCommandResult moveAgentToNamedMarker(AgentId agent, std::string const& markerName,
+			std::string_view action = IdleAction);
+		std::vector<std::string> availableAgentActions(MarkerId marker) const;
 		// Never interrupts an in-flight threshold crossing or ejects an occupant.
 		// Transport passengers finish their scheduled journey before cancellation;
 		// wait for MovementCancelled before commanding a replacement destination.

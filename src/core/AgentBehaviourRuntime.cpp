@@ -430,6 +430,7 @@ namespace core
 			{
 			case MovementCommandStatus::Accepted: return "accepted";
 			case MovementCommandStatus::Superseded: return "superseded";
+			case MovementCommandStatus::UnavailableAction: return "unavailable_action";
 			case MovementCommandStatus::NoOp: return "no_op";
 			case MovementCommandStatus::UnknownAgent: return "unknown_agent";
 			case MovementCommandStatus::InactiveAgent: return "inactive_agent";
@@ -457,7 +458,8 @@ namespace core
 		std::string_view cancellationReasonName(MovementCancellationReason reason)
 		{
 			return reason == MovementCancellationReason::Explicit ? "explicit"
-				: reason == MovementCancellationReason::Superseded ? "superseded" : "unknown";
+				: reason == MovementCancellationReason::Superseded ? "superseded"
+				: reason == MovementCancellationReason::TargetDeleted ? "target_deleted" : "unknown";
 		}
 
 		std::string_view interactionResultName(InteractionResult result)

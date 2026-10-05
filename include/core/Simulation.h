@@ -9,6 +9,7 @@
 #include "core/Coordination.h"
 #include "core/Vector2.h"
 #include "core/Pose.h"
+#include "core/AgentAction.h"
 
 
 namespace core
@@ -38,6 +39,7 @@ namespace core
 		bool active{ true };
 		bool hasPath{ false };
 		MarkerId intendedDestination{};
+		std::string selectedAction{ IdleAction };
 		uint64_t routePlanningTotalTicks{ 0 };
 		uint64_t routePlanningRemainingTicks{ 0 };
 		uint32_t targetPathNode{ 0 };
@@ -343,10 +345,10 @@ namespace core
 	enum struct MovementCommandStatus
 	{
 		Accepted, NoOp, UnknownAgent, InactiveAgent, UnknownMarker, AgentBusy,
-		TopologyUnavailable, BehaviourOwned, NoOccupiableSector, Superseded
+		TopologyUnavailable, BehaviourOwned, NoOccupiableSector, Superseded, UnavailableAction
 	};
 	enum struct RouteLossReason { None, Unreachable, TopologyChanged, DestinationRemoved };
-	enum struct MovementCancellationReason { None, Explicit, Superseded };
+	enum struct MovementCancellationReason { None, Explicit, Superseded, TargetDeleted };
 	struct MovementCommandResult
 	{
 		MovementCommandStatus status;
@@ -409,6 +411,7 @@ namespace core
 		TraversalPermitSnapshot traversalPermit;
 		// Semantic movement payload; consumers need not inspect traversal snapshots.
 		MarkerId destinationMarker{};
+		std::string selectedAction{ IdleAction };
 		RouteLossReason routeLossReason{ RouteLossReason::None };
 		MovementCancellationReason movementCancellationReason{
 			MovementCancellationReason::None };

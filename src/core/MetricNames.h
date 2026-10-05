@@ -34,6 +34,7 @@ case SimulationPhase::CleanupAndEventPublication: return "cleanup_and_event_publ
 inline std::string metricName(MovementCommandStatus value) { switch(value) {
 case MovementCommandStatus::Accepted: return "accepted";
 case MovementCommandStatus::Superseded: return "superseded";
+case MovementCommandStatus::UnavailableAction: return "unavailable_action";
 case MovementCommandStatus::NoOp: return "no_op";
 case MovementCommandStatus::UnknownAgent: return "unknown_agent";
 case MovementCommandStatus::InactiveAgent: return "inactive_agent";
@@ -53,6 +54,7 @@ inline std::string metricName(MovementCancellationReason value) { switch(value) 
 case MovementCancellationReason::None: return "none";
 case MovementCancellationReason::Explicit: return "explicit";
 case MovementCancellationReason::Superseded: return "superseded";
+case MovementCancellationReason::TargetDeleted: return "target_deleted";
 } return "unknown"; }
 inline std::string metricName(SimulationEventType value) { switch(value) {
 case SimulationEventType::AgentAdded: return "agent_added";

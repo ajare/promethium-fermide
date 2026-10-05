@@ -8494,10 +8494,26 @@ namespace core
 		return mSimulationCoordinator.getAgentId(agent);
 	}
 
-	MovementCommandResult World::moveAgentToMarker(AgentId agent, MarkerId marker)
+	MovementCommandResult World::moveAgentToMarker(AgentId agent, MarkerId marker,
+		std::string_view action)
 	{
+		if (action != IdleAction) return { MovementCommandStatus::UnavailableAction };
 		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.moveAgentToMarker(agent, marker);
+	}
+
+	MovementCommandResult World::moveAgentToNamedMarker(AgentId agent, std::string const& name,
+		std::string_view action)
+	{
+		for (auto id : getMarkerIds())
+			if (lookupMarker(id)->getName() == name) return moveAgentToMarker(agent, id, action);
+		return { MovementCommandStatus::UnknownMarker };
+	}
+
+	std::vector<std::string> World::availableAgentActions(MarkerId marker) const
+	{
+		return lookupMarker(marker) ? std::vector<std::string>{ std::string(IdleAction) }
+			: std::vector<std::string>{};
 	}
 
 	MovementCommandResult World::inspectBehaviourMoveToMarker(

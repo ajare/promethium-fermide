@@ -330,6 +330,16 @@ bool commitAgentBehaviourClear(shared_ptr<core::World> const& world,
 	return true;
 }
 
+std::string_view renderAgentMovementActionSelector()
+{
+	if (ImGui::BeginCombo("Action", "Idle"))
+	{
+		ImGui::Selectable("Idle", true);
+		ImGui::EndCombo();
+	}
+	return core::IdleAction;
+}
+
 void renderAgentBehaviourAssignmentCell(shared_ptr<core::World> const& world,
 	core::AgentId agent)
 {
