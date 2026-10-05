@@ -10,6 +10,7 @@
 
 #include "core/AgentBehaviour.h"
 #include "core/EntityId.h"
+#include "core/ScriptExecution.h"
 
 namespace core
 {
@@ -36,14 +37,7 @@ namespace core
 		size_t logBytesPerWindow{ 256u * 1024u };
 	};
 
-	enum class AgentBehaviourRuntimeFailure
-	{
-		None,
-		LuaError,
-		MemoryBudgetExceeded,
-		InstructionBudgetExceeded,
-		ConversionError
-	};
+	using AgentBehaviourRuntimeFailure = ScriptExecutionFailure;
 
 	enum class AgentBehaviourRuntimeStage
 	{
@@ -85,7 +79,7 @@ namespace core
 
 	// Ordinary C++ result returned by the Lua runtime boundary. Lua, sol2, and
 	// their implementation types are deliberately confined to the adapter's
-	// .cpp file and never enter authored-domain interfaces.
+	// private implementation and never enter authored-domain interfaces.
 	struct AgentBehaviourModulePreflight
 	{
 		bool loaded{ false };
@@ -96,16 +90,11 @@ namespace core
 
 	// Immutable C++ source representation supplied to a scratch or private
 	// per-Agent loader. The logical import name never derives a filesystem path.
-	struct AgentBehaviourHelperSource
-	{
-		std::string name;
-		std::string sourceModulePath;
-		std::string source;
-	};
+	using AgentBehaviourHelperSource = ScriptModuleSource;
 
 	// One live adapter is owned by each World. Its implementation owns that
 	// World's Lua state and private per-Agent module environments; Lua and sol2
-	// remain confined to the .cpp file. Startup callbacks queue commands and the
+	// remain confined to private implementation files. Startup callbacks queue commands and the
 	// adapter applies them through the World facade only after every callback
 	// at the boundary has returned.
 	class AgentBehaviourRuntimeAdapter

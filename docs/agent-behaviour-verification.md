@@ -98,6 +98,32 @@ ctest --test-dir build-high-analysis --output-on-failure
 Use the equivalent Visual Studio x64 generator and `--config Release` on
 Windows. The same CTest names and dependency pins apply.
 
+## Reusable protected execution (#456)
+
+`src/core/ScriptSandbox.h` and `ScriptSandbox.cpp` are private execution
+infrastructure, used by both behaviour preflight and the live per-World adapter.
+They own budget accounting/hooks, protected execution and marshalling,
+tracebacks, private deterministic environments, immutable values, declared-module
+loading, and bounded invocation-local log staging. The adapter supplies the
+reserved versioned host modules and optional opaque-handle metatable setup.
+Only value-only failure and source records are shared through
+`core/ScriptExecution.h`; Lua and sol2 do not enter domain interfaces.
+
+The behaviour adapter still owns the World runtime and per-Agent instances,
+behaviour contract/factory validation, capabilities, command/timer/random-state
+transactions, stable callback ordering, next-boundary command application and
+interactive/headless failure policy. Log staging is published only after a
+successful callback and discarded on failure, as before. There is no second
+unrestricted runtime and no Action, Furniture format, or editor change.
+
+Verification uses the existing public World/registry workflows and sandbox
+regressions, not a new low-level scripting test API: `smoke-behaviours` covers
+successful execution, private instances, scheduling, determinism, declared
+imports, instruction/heap exhaustion (including caught errors), bounded logging,
+conversion failures and containment; `smoke-behaviours-editor` supports the
+registry/assignment/reload/document workflow. Their existing exhaustive contracts
+remain the acceptance checks for this prefactor.
+
 ## Lua error-path leak checks (#329)
 
 Lua uses longjmp for errors, including allocation-budget failures. Runtime C
