@@ -613,6 +613,11 @@ namespace core
 		std::string mActionRegistryFilename;
 		std::map<MarkerId, std::vector<std::string>> mMarkerActions;
 		bool mActionExecutionFailed{ false };
+		// Set only while finishFurnitureUse executes a lifecycle callback. Departure
+		// has already moved the Agent into a navigation state, but the finishing
+		// contract runs before the physical position commits, so a staged device
+		// request is still judged from the usable point the Agent stands on.
+		AgentId mFinishingFurnitureUseAgent{};
 		bool actionAvailable(MarkerId marker, std::string_view action) const;
 		void executeMarkerAction(AgentId agent, MarkerId marker, std::string_view action, SimulationEvent& event);
 		FurnitureInstance const* furnitureForMarker(MarkerId marker) const;

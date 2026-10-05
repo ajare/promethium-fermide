@@ -253,8 +253,13 @@ namespace core
 		if (point && point->mAccessPanelOwner
 			&& !canRequestAccessPanel(point->mAccessPanelOwner,
 				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close, actorId)) return false;
+		// A finishing callback runs before physical movement commits, so the Agent
+		// is still standing at the usable point even though departure already set
+		// its movement state. Judge that one staged device request from the
+		// physical position rather than rejecting it merely because departure began.
+		bool const finishing = actorId == mFinishingFurnitureUseAgent;
 		return point && actor && actor->isActive() && !agentForbidsButtons(actor) && point->mSector
-			&& (actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal)
+			&& (finishing || actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal)
 			&& actor->getSector() == mSectors[(size_t)point->mSector.value - 1].get()
 			&& (!(requireReach || point->requiresReachAtRequest())
 				|| actor->getGlobalPosition().distanceTo(point->mPosition) <= point->mReach);

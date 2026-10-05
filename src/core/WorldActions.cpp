@@ -341,6 +341,16 @@ namespace core
 		if (!agent || !agent->mFurnitureUse) return;
 		auto use = std::move(*agent->mFurnitureUse);
 		agent->mFurnitureUse.reset();
+		// Departure has already put the Agent into a navigation state, but the
+		// finishing contract runs before the physical position commits, so mark the
+		// batch while its callback and staged effects are validated.
+		struct FinishingScope
+		{
+			AgentId& slot;
+			AgentId restore;
+			~FinishingScope() { slot = restore; }
+		} finishingScope{ mFinishingFurnitureUseAgent, mFinishingFurnitureUseAgent };
+		mFinishingFurnitureUseAgent = agentId;
 		SimulationEvent event;
 		event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 		event.destinationMarker = use.marker;
@@ -354,12 +364,10 @@ namespace core
 		invalidateSimulationSnapshot();
 		if (event.type == SimulationEventType::ActionFailed)
 		{
-			if (event.scriptFailure == ScriptExecutionFailure::None)
-			{
-				event.scriptFailure = ScriptExecutionFailure::ConversionError;
-				addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
-				mActionExecutionFailed = true;
-			}
+			// An ordinary refusal stays ordinary. The host has already restored
+			// Standing and released occupancy, and the incomplete-cleanup and Lua
+			// failure paths own the pause/headless-failure policy themselves; only
+			// those may escalate a failing finish_use into a script error.
 			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 			mPendingMovementOutcomes.push_back(std::move(event));
 		}

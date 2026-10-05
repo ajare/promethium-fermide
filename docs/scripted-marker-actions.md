@@ -494,3 +494,41 @@ undo entry and dirties the document.
 Verification: Release default build and unfiltered CTest reported **110 passed,
 0 failed**; the new check also passed in the Debug build of the affected
 targets. `git diff --check` is clean.
+
+## finish_use device requests at departure (#470)
+
+A `finish_use` callback may legitimately request a device operation, for example
+turning a reading light off when the Agent stands up. Departure finishing runs
+inside `Agent::setPosition` before the physical position commits, so the Agent is
+still at the usable point, but `startPathingInternal` had already set
+`MovingToVertex`. The staged `world.request_device` was therefore refused by the
+Idle/WaitingForTraversal eligibility gate, the atomic rejection discarded the
+staged Standing/release, and `finishFurnitureUse` escalated that ordinary
+refusal into `ScriptExecutionFailure::ConversionError`, pausing the simulation or
+failing headless advancement.
+
+`World::interactionRequestEligible` now treats the Agent whose `finish_use` is
+executing as still eligible for a device request, so both staging and the
+committed `requestInteraction` are judged from the Agent's still-physical
+position. The exception is scoped to the finishing call
+(`World::mFinishingFurnitureUseAgent`) and relaxes no other authority: sector,
+reach, activation, Mobility/Buttons, Access and typed-binding permissions still
+apply.
+
+`finishFurnitureUse` no longer rewrites an ordinary `ActionFailed` with
+`scriptFailure == None` into a conversion error. That escalation only ever fired
+for ordinary refusals, because callback failures, budget exhaustion and the
+incomplete-Standing/occupancy cleanup check already set their own classification
+and failure flag inside `applyActionResult`. If the staged pose/occupancy cleanup
+is well-formed but the device request is legitimately refused, the refusal is
+published as an ordinary `ActionFailed` with a diagnostic, the host still
+restores Standing and releases occupancy, and simulation continues.
+
+Focused public check: Simulation `markerActions/furnitureFinishDevice`. It covers
+a reachable device request admitted at physical departure that completes
+asynchronously, and an out-of-reach device request that stays an ordinary
+non-script refusal without pausing.
+
+Verification: the full Simulation smoke module reported **156 passed, 0 failed**
+in the Release tree, and the new check also passed in Debug. `git diff --check`
+is clean.

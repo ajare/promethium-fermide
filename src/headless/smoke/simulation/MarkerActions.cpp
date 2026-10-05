@@ -577,6 +577,94 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		}
 	}
 
+	void furnitureFinishDevice(smoke::Context const& context)
+	{
+		// A finish_use callback may legitimately request a device operation, such as
+		// turning a reading light off when the Agent stands up. The finishing
+		// contract runs before the physical position commits, so a request staged at
+		// departure is judged from the usable point and an ordinary refusal is not
+		// escalated into the script-failure pause/headless-failure policy.
+		auto build = [&](std::string const& finishBody, float pointX)
+		{
+			auto world = std::make_shared<core::World>("Finish device", 14, 2);
+			auto room = world->addRoom("Room", 0, 0, 0, 11, 1);
+			core::InteractionBinding binding;
+			binding.command = {core::DeviceCommandType::SetSectorLights, core::SectorId{1}, false};
+			auto point = world->createInteractionPoint("Light", core::SectorId{1},
+				{pointX, 0.f}, 0.25f, 0.05f, {binding});
+			std::ifstream input(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
+			std::string source{std::istreambuf_iterator<char>(input), {}};
+			auto begin = source.find("  world.set_pose('standing')");
+			auto end = source.find("\nend", begin);
+			require(begin != std::string::npos && end != std::string::npos, "Finish device fixture substitution missing");
+			auto body = finishBody;
+			auto placeholder = body.find("__POINT__");
+			require(placeholder != std::string::npos, "Finish device point placeholder missing");
+			body.replace(placeholder, std::string("__POINT__").size(), std::to_string(point.value));
+			source.replace(begin, end - begin, body);
+			auto path = context.temporaryRoot() / "finish-device.furniture.lua";
+			write(path, source);
+			world->attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
+			require(world->placeFurniture(room, "chair", 3, 0, "Chair"), "Finish device placement refused");
+			world->addSectorMarker(room, 0, 1.5f, "Origin");
+			world->finishBuild();
+			world->createAgent("Operator", room, 0, 1.5f);
+			world->pauseSimulation();
+			require(world->setAgentIndividualMinimumRoutePlanningTime(core::AgentId{1}, 0.1f)
+				&& world->setAgentIndividualMaximumRoutePlanningTime(core::AgentId{1}, 0.1f), "Finish device planning refused");
+			return world;
+		};
+		std::string const use(core::UseFurnitureAction);
+		auto depart = [&](core::World& world, core::AgentId agent, core::MarkerId seat)
+		{
+			require(runAction(world, agent, seat, use).type == core::SimulationEventType::DestinationReached, "Finish device use failed");
+			world.consumeSimulationEvents();
+			core::consumeLogMessages();
+			require(world.usablePointOccupant(seat) == agent, "Finish device use did not claim seat");
+			require(world.moveAgentToNamedMarker(agent, "Origin").accepted(), "Finish device departure refused");
+			auto start = world.lookupAgent(agent).entity->getGlobalPosition();
+			bool departed = false;
+			for (unsigned tick = 0; tick < 120 && !departed; ++tick)
+			{
+				require(world.advanceTick(), "Departure finishing did not preserve the ordinary failure policy");
+				departed = world.lookupAgent(agent).entity->getGlobalPosition() != start;
+			}
+			require(departed && world.lookupAgent(agent).entity->getPose() == core::Pose::Standing
+				&& !world.usablePointOccupant(seat), "Departure finishing left the use active");
+		};
+		// The reachable device request is admitted at the departure boundary even
+		// though departure already set the movement state, and completes without an
+		// ordinary refusal or a script-failure pause.
+		{
+			auto world = build("  world.set_pose('standing')\n  world.release()\n"
+				"  world.request_device(__POINT__, 'set-sector-lights')\n  world.log('finish:' .. marker.name)", 3.5f);
+			depart(*world, core::AgentId{1}, world->furniture()[0].marker);
+			require(world->advanceTicks(100), "Finish device operation did not complete");
+			bool succeeded = false, refused = false;
+			for (auto const& event : world->consumeSimulationEvents())
+			{
+				succeeded |= event.type == core::SimulationEventType::DeviceOperationChanged
+					&& event.deviceOperation.state == core::DeviceOperationState::Succeeded;
+				refused |= event.type == core::SimulationEventType::ActionFailed;
+			}
+			require(succeeded && !world->getSector(0)->areLightsOn(), "Departure finishing refused the staged device request");
+			require(!refused, "Departure finishing published a spurious refusal");
+		}
+		// An out-of-reach device request is an ordinary refusal: it must stay a
+		// non-script failure so host cleanup stands and headless advancement continues.
+		{
+			auto world = build("  world.set_pose('standing')\n  world.release()\n"
+				"  world.request_device(__POINT__, 'set-sector-lights')\n  world.log('finish:' .. marker.name)", 6.5f);
+			depart(*world, core::AgentId{1}, world->furniture()[0].marker);
+			bool refused = false;
+			for (auto const& event : world->consumeSimulationEvents())
+				refused |= event.type == core::SimulationEventType::ActionFailed
+					&& event.scriptFailure == core::ScriptExecutionFailure::None && !event.diagnostic.empty();
+			require(refused, "Ordinary finish refusal was not published as an ordinary Action failure");
+			require(world->getSector(0)->areLightsOn(), "Refused finish device changed the lights");
+		}
+	}
+
 	void furnitureStructuralEdits(smoke::Context const& context)
 	{
 		std::ifstream input(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
@@ -1003,6 +1091,7 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/deviceEffects", deviceEffects});
 	checks.push_back({"markerActions/claimCompetition", claimCompetition});
 	checks.push_back({"markerActions/furnitureUse", furnitureUse});
+	checks.push_back({"markerActions/furnitureFinishDevice", furnitureFinishDevice});
 	checks.push_back({"markerActions/furnitureStructuralEdits", furnitureStructuralEdits});
 	checks.push_back({"markerActions/furnitureFinishFailures", furnitureFinishFailures});
 	checks.push_back({"markerActions/furnitureUseCompetition", furnitureUseCompetition});
