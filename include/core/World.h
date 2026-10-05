@@ -1,4 +1,5 @@
 #pragma once
+#include "core/ActionRegistry.h"
 
 #include <string>
 #include <string_view>
@@ -605,8 +606,15 @@ namespace core
 			uint32_t retainedFromNode{ 0 };
 			uint64_t voluntaryPlanningStartedTick{ 0 };
 			std::string selectedAction{ IdleAction };
+			bool actionInvalidated{ false };
 		};
 		std::map<AgentId, MovementGoal> mMovementGoals;
+		std::shared_ptr<const ActionRegistry> mActionRegistry;
+		std::string mActionRegistryFilename;
+		std::map<MarkerId, std::vector<std::string>> mMarkerActions;
+		bool mActionExecutionFailed{ false };
+		bool actionAvailable(MarkerId marker, std::string_view action) const;
+		void executeMarkerAction(AgentId agent, MarkerId marker, std::string_view action, SimulationEvent& event);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
 		struct AgentTagRegistryReference
@@ -1174,6 +1182,7 @@ namespace core
 			int resetDepth;
 			MarkerId resetDestinationMarker;
 			bool resetPathActive;
+			std::string resetAction;
 			Pose pose{ Pose::Standing };
 			MarkerId occupiedUsablePoint{};
 		};
@@ -2163,6 +2172,15 @@ namespace core
 		MovementCommandResult moveAgentToNamedMarker(AgentId agent, std::string const& markerName,
 			std::string_view action = IdleAction);
 		std::vector<std::string> availableAgentActions(MarkerId marker) const;
+		std::shared_ptr<const ActionRegistry> const& actionRegistry() const { return mActionRegistry; }
+		std::string const& actionRegistryFilename() const { return mActionRegistryFilename; }
+		bool selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
+		bool clearActionRegistry(std::string* diagnostic = nullptr);
+		bool setMarkerActions(MarkerId marker, std::vector<std::string> actions, std::string* diagnostic = nullptr);
+		std::vector<std::string> markerActions(MarkerId marker) const;
+		std::string agentActionDisplayName(std::string_view identity) const;
+		bool authorAgentMarkerRequest(AgentId agent, MarkerId marker, std::string_view action,
+			std::string* diagnostic = nullptr);
 		// Never interrupts an in-flight threshold crossing or ejects an occupant.
 		// Transport passengers finish their scheduled journey before cancellation;
 		// wait for MovementCancelled before commanding a replacement destination.

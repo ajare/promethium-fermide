@@ -55,6 +55,7 @@ case MovementCancellationReason::None: return "none";
 case MovementCancellationReason::Explicit: return "explicit";
 case MovementCancellationReason::Superseded: return "superseded";
 case MovementCancellationReason::TargetDeleted: return "target_deleted";
+case MovementCancellationReason::ActionUnavailable: return "action_unavailable";
 } return "unknown"; }
 inline std::string metricName(SimulationEventType value) { switch(value) {
 case SimulationEventType::AgentAdded: return "agent_added";
@@ -82,6 +83,7 @@ case SimulationEventType::TopologyRebuilt: return "topology_rebuilt";
 case SimulationEventType::TopologyRebuildFailed: return "topology_rebuild_failed";
 case SimulationEventType::SimulationResumed: return "simulation_resumed";
 case SimulationEventType::DestinationReached: return "destination_reached";
+case SimulationEventType::ActionFailed: return "action_failed";
 case SimulationEventType::MovementCancelled: return "movement_cancelled";
 case SimulationEventType::RouteLost: return "route_lost";
 case SimulationEventType::AgentActivated: return "agent_activated";

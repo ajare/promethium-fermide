@@ -34,6 +34,7 @@ int main(int argc, char** argv)
 	registerBoothWindows(checks);
 	registerDumbwaiters(checks);
 	registerFurniture(checks);
+	registerMarkerActions(checks);
 	registerScale(checks);
 	return smoke::main("simulation", checks, argc, argv);
 }

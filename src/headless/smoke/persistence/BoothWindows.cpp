@@ -372,7 +372,7 @@ namespace persistence
 			require(loaded.advanceTicks(3), "Loaded panel tick failed"); assertAuthored(loaded);
 		}
 		auto node = YAML::Load(write(world, false));
-		require(node["version"].as<int>() == 53, "BoothWindow schema not allocated");
+		require(node["version"].as<int>() == 54, "BoothWindow schema not allocated");
 		core::SerializationWorkData work;
 		for (auto change : {"width", "height", "state", "glass", "traversal", "broken", "layer", "position", "legacy", "unknown", "permissionZero", "permissionUnknown", "permissionDuplicate", "permissionShape", "permissionLegacy"})
 		{

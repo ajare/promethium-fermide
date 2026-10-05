@@ -88,6 +88,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/BoothWindows.cpp
         simulation/Dumbwaiters.cpp
         simulation/Furniture.cpp
+        simulation/MarkerActions.cpp
     LIBRARIES prometheum-fermide-core pf-pause-position-support
     LABELS core
     TIMEOUT 60
@@ -425,7 +426,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/Main.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp

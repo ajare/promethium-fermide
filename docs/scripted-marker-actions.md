@@ -1,12 +1,12 @@
-# Explicit Marker movement Actions (#457)
+# Scripted Marker Actions (#457, #458)
 
 This integration-branch slice exposes movement through
 `World::moveAgentToNamedMarker(agent, name, action)` and
 `World::moveAgentToMarker(agent, marker, action)`. The default is the immutable
 built-in `core::IdleAction` identity (`idle`, displayed as **Idle**).
-`World::availableAgentActions(marker)` returns Idle only; additional Actions,
-Lua registries and Furniture use/finish callbacks belong to subsequent slices.
-Unknown Actions are refused, never silently replaced with Idle.
+`World::availableAgentActions(marker)` returns Idle followed by the Marker's
+ordered additional Lua Actions. Unknown or unassigned Actions are refused, never
+silently replaced with Idle. Furniture use/finish callbacks remain deferred.
 
 Names resolve once at acceptance to World-owned Marker identities. Rename and
 supported topology reconstruction retain the target. Deletion cancels it;
@@ -25,11 +25,12 @@ available through the public event queue independently of behaviour observation.
 Idle invokes no Furniture effects, claims no usable point, schedules nothing,
 and leaves an assigned behaviour enabled. Legacy catalogue Sit/Lying fields no
 longer cause arrival or intermediate-passage effects. The selected-Agent editor
-panel visibly offers Idle in its movement Action selector, including when
-choosing a destination Marker.
+panel visibly offers Idle and loaded custom Actions in its movement Action
+selector. The chosen destination must offer the selected Action.
 
-World schema 53 records saved Path Action intent as `action: idle` in YAML and
-binary documents. Missing Action fields resolve to Idle; unavailable values are
+World schema 54 records saved Path Action intent, registry basename/UUID and
+ordered Marker assignments in YAML and binary documents. Schema 53 introduced
+`action: idle`. Missing Action fields resolve to Idle; unavailable values are
 rejected. Reconstruction does not persist or execute Lua state. The existing
 reset/paused/history Path-intent rules remain in force.
 
@@ -64,3 +65,97 @@ and affected non-legacy coverage passed, and `git diff --check` was clean.
 Retained final CTest evidence: Release run
 `7844c529619845a2ba91b4a0df491de8`; Debug run
 `d8d9e78f66734598b1d3629f412874f7`.
+
+
+## Lua registry contract (#458)
+
+An external `example.actions.lua` returns an ordered registry:
+
+```lua
+return {
+  api_version = 1,
+  uuid = "ad603358-5ebf-45bb-a686-c3f491152c61",
+  actions = {
+    {
+      key = "greet",
+      name = "Greet",
+      run = function(agent, world, marker)
+        world.log(agent.name .. " arrived at " .. marker.name)
+      end
+    }
+  }
+}
+```
+
+Stable references are `registry-uuid:key`, never display names. Keys contain
+ASCII letters, digits, underscores or hyphens (1–128 bytes); display names are
+1–128 bytes. Duplicate keys/names, invalid UUIDs, array holes, missing/non-Lua
+functions and captured module upvalues are refused. Define one-shot callbacks
+without captured state; each invocation evaluates the accepted source in a fresh
+sandbox. Built-in `idle` / **Idle** and `use-furniture` / **Use furniture** are
+reserved; Use furniture is not yet available.
+
+Read-only userdata views expose `agent.id/name/x/y`, `world.name/tick/api_version`
+and `marker.id/name`. `world.log(message)` stages Info logging. No mutable domain
+objects, graph, filesystem/process, debug, coroutine, wall-time or random APIs
+are exposed. The immutable `prometheum.actions.v1` import identifies the host
+contract; all other imports are refused. Source is capped at 256 KiB, registry size at
+256 Actions, invocation memory at 2 MiB and execution at 100,000 instructions.
+Caught budget exhaustion remains terminal. Logs are limited to 32 messages,
+1 KiB each and 8 KiB total, with one suppression warning. Callback failure
+publishes no staged logs, emits `ActionFailed` with `scriptFailure` and a bounded
+diagnostic, pauses simulation and makes headless `advanceTick()` return false.
+
+### Authoring, history and documents
+
+Pause the World, select a Marker and enter the external `.actions.lua` path in
+its **Agent Actions** panel; **Load Action registry** validates before attachment.
+Use **Add Action**, **Up**, **Down** and **Remove** to author its ordered additional
+Actions. Select the request's Action in the selected-Agent panel, then choose its
+named destination Marker through the existing path-destination workflow. Idle
+remains the default. Registry removal clears assignments; Undo/Redo restores
+registry metadata/source dependencies, assignment order and authored request
+identity without executing callbacks during reconstruction.
+
+The public seams are `selectActionRegistry`, `setMarkerActions`,
+`availableAgentActions`, `moveAgentToNamedMarker` / `moveAgentToMarker`, and the
+paused document-authoring `authorAgentMarkerRequest`. Runtime requests remain
+transient; authored requests persist their Action. Put the registry beside the
+saved World: documents reference only its basename and expected UUID. Reopen
+validates the registry and every assigned identity; a display-name change does
+not invalidate stable keys. YAML/binary serialization contains no Lua source,
+closures or VM state. History holds immutable package dependencies, not a VM.
+Selecting the same attached reference does not reload it; live reload is #464.
+
+Availability is checked at acceptance and arrival. Assignment/package removal
+cancels pending requests at the next safe simulation boundary, preserving existing
+safe-exit handling, with `ActionUnavailable` and a diagnostic. It never substitutes
+Idle. Arrival invokes only the selected callback in stable Agent order; intermediate
+passage does not execute it. Pose, occupancy and device effects are deferred to
+#459; Agent behaviour Action selection/outcome additions are #460.
+
+Focused public checks: Simulation `markerActions/registry`, `/execution`,
+`/failures`, `/documents`, `/logging`; Editor `markerActions/workflow`. They cover
+real Lua logging, physical timing, deterministic independent Worlds/Agents,
+assignment order/deduplication, reference failures, protected budgets and rollback,
+registry/display-name/Marker identity, binary/YAML reopen and document history.
+
+
+### #458 final Linux verification
+
+The final source state built the complete default core/headless/editor inventory
+in Release and Debug (`PF_HIGH_ANALYSIS=ON` for Debug). The supervised unfiltered
+final CTest lane ran 110 tests per configuration: **103 passed, one optional GUI
+capability skipped, six failed** solely for the seven unchanged legacy
+implicit-Furniture-use checks listed above. All new Marker Action checks, Editor
+functional/exhaustive/CLI coverage, persistence, sandbox coverage, ownership audit
+and headless tools contracts passed. The restoration-benchmark timeout discovered
+during development was repaired by avoiding new Action-goal reconstruction for
+legacy Idle paths; final Debug tools coverage passed in 120.94 seconds.
+
+Final build evidence: Release `0e6a28e9bff34baaa8e9a75de3f4cfdb`, Debug
+`b540a31daa8449809b09a292792f9d86`. Final unfiltered CTest evidence: Release
+`1956c91e2509487192f0f63380d4b11b`, Debug
+`2391290974794030bc27b8c6a724ecb4`. `git diff --check` passed. No Windows
+validation is claimed; full-suite green remains the #467 integration contract,
+not a claim of this slice.

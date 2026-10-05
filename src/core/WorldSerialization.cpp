@@ -670,7 +670,7 @@ namespace core
 		// Path destination identity in 47.
 		// Version 50 combines Furniture and Dumbwaiter authored state.
 		// Version 52 adds authored Access panel speed overrides.
-		serializer.writeUint32("version", 53);
+		serializer.writeUint32("version", 54);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -682,6 +682,28 @@ namespace core
 			serializer.writeString("filename", mFurnitureCatalogueFilename);
 			serializer.writeString("expectedUuid", mFurnitureCatalogue->uuid());
 			serializer.endMap();
+		}
+		if (mActionRegistry)
+		{
+			serializer.beginMap("actionRegistry");
+			serializer.writeString("filename", mActionRegistryFilename);
+			serializer.writeString("expectedUuid", mActionRegistry->uuid());
+			serializer.endMap();
+		}
+		if (!mMarkerActions.empty())
+		{
+			serializer.beginArray("markerActions");
+			for (auto const& [marker, actions] : mMarkerActions)
+			{
+				if (!lookupMarker(marker)) continue;
+				serializer.beginMap("");
+				serializer.writeUint64("marker", marker.value);
+				serializer.beginArray("actions");
+				for (auto const& action : actions) serializer.writeString("", action);
+				serializer.endArray();
+				serializer.endMap();
+			}
+			serializer.endArray();
 		}
 		serializer.writeString("name", mName);
 		serializer.writeUint64("randomSeed", mRandomSeed);
@@ -847,7 +869,7 @@ namespace core
 				serializer.writeFloat("destinationLocalX", destination->getSectorOffset().x);
 				serializer.writeFloat("destinationLocalY", destination->getSectorOffset().y);
 				serializer.writeBool("active", agent->mResetPathActive);
-				serializer.writeString("action", std::string(IdleAction));
+				serializer.writeString("action", agent->mResetAction);
 				serializer.endMap();
 			}
 			serializer.endMap();
@@ -1480,7 +1502,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 53)
+		if (version < 1 || version > 54)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1513,6 +1535,51 @@ namespace core
 			if (!furnitureCatalogue) throw SerializationException("Missing Furniture catalogue dependency: " + furnitureFilename);
 			if (furnitureCatalogue->uuid() != expectedUuid)
 				throw SerializationException("Furniture catalogue UUID mismatch: expected " + expectedUuid + ", found " + furnitureCatalogue->uuid());
+		}
+
+		std::shared_ptr<const ActionRegistry> actionRegistry;
+		std::string actionFilename;
+		std::map<MarkerId, std::vector<std::string>> markerActions;
+		if (serializer.hasField("actionRegistry"))
+		{
+			if (version < 54) throw SerializationException("Action registries require World schema 54");
+			serializer.beginMap("actionRegistry");
+			actionFilename = serializer.readString("filename");
+			auto uuid = serializer.readString("expectedUuid");
+			serializer.endMap();
+			filesystem::path path(actionFilename);
+			if (path.has_parent_path() || actionFilename.size() <= 12 || !actionFilename.ends_with(".actions.lua"))
+				throw SerializationException("Action registry reference must be a .actions.lua basename");
+			actionRegistry = workData.actionRegistry ? workData.actionRegistry : mActionRegistry;
+			if (!actionRegistry || actionRegistry->uuid() != uuid)
+			{
+				if (workData.documentDirectory.empty()) throw SerializationException("Missing Action registry dependency: " + actionFilename);
+				actionRegistry = ActionRegistry::load(workData.documentDirectory / path);
+			}
+			if (actionRegistry->uuid() != uuid) throw SerializationException("Action registry UUID mismatch");
+		}
+		if (serializer.hasField("markerActions"))
+		{
+			if (version < 54) throw SerializationException("Marker Actions require World schema 54");
+			serializer.beginArray("markerActions");
+			while (serializer.nextArrayItem())
+			{
+				serializer.beginMap("");
+				auto marker = MarkerId{serializer.readUint64("marker")};
+				if (!marker || markerActions.contains(marker)) throw SerializationException("Duplicate or invalid Marker Action assignment");
+				auto& actions = markerActions[marker];
+				std::set<std::string> seen;
+				serializer.beginArray("actions");
+				while (serializer.nextArrayItem())
+				{
+					auto action = serializer.readString("");
+					if (!actionRegistry || !actionRegistry->find(action)) throw SerializationException("Unavailable Marker Action reference: " + action);
+					if (seen.insert(action).second) actions.push_back(std::move(action));
+				}
+				serializer.endArray();
+				serializer.endMap();
+			}
+			serializer.endArray();
 		}
 
 		optional<AgentTagRegistryReference> agentTagRegistryReference;
@@ -2186,6 +2253,8 @@ namespace core
 			// requirements; do not apply the old handle overlay a second time.
 			std::erase_if(serializedRequirements, [&](auto const& entry)
 			{ return candidate.physicalControlPlacement(entry.first) != nullptr; });
+			for (auto const& [marker, actions] : markerActions)
+				if (!candidate.lookupMarker(marker)) throw SerializationException("Marker Action assignment references a missing Marker");
 			records = std::move(candidate.mConstructionRecords);
 			accessPermissions = std::move(candidate.mAccessPermissions);
 		}
@@ -2204,6 +2273,9 @@ namespace core
 		mNextFurnitureId = nextFurnitureId;
 		mFurnitureCatalogue = std::move(furnitureCatalogue);
 		mFurnitureCatalogueFilename = std::move(furnitureFilename);
+		mActionRegistry = std::move(actionRegistry);
+		mActionRegistryFilename = std::move(actionFilename);
+		mMarkerActions = std::move(markerActions);
 		mNextDumbwaiterId = std::max(mNextDumbwaiterId, nextDumbwaiterId);
 		mAgentTagRegistryReference = std::move(agentTagRegistryReference);
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
@@ -2321,8 +2393,7 @@ namespace core
 				destinationLocalX = serializer.readFloat("destinationLocalX");
 				destinationLocalY = serializer.readFloat("destinationLocalY");
 				pathActive = serializer.readBool("active");
-				if (serializer.hasField("action") && serializer.readString("action") != IdleAction)
-					throw SerializationException("Unavailable Agent Action in saved movement request");
+				agent->mResetAction = serializer.readString("action", true, std::string(IdleAction));
 				if (serializer.hasField("destinationMarker"))
 				{
 					if (version < 47) throw SerializationException("Path Marker identity requires World schema 47 or later");
@@ -2331,6 +2402,8 @@ namespace core
 						throw SerializationException("Path destination Marker identity cannot be zero");
 				}
 				serializer.endMap();
+				if (agent->mResetAction != IdleAction && !actionAvailable(agent->mResetDestinationMarker, agent->mResetAction))
+					throw SerializationException("Unavailable Agent Action in saved movement request");
 			}
 			serializer.endMap();
 
@@ -2549,7 +2622,16 @@ namespace core
 		}
 		for (auto& route : rebuilt)
 		{
+			auto destination = route.path->nodes.back().targetVertex;
 			route.agent->assignPath(std::move(route.path), route.active, false);
+			if (route.active && route.agent->mResetDestinationMarker && route.agent->mResetAction != IdleAction)
+			{
+				auto& goal = mMovementGoals[getAgentId(route.agent)];
+				goal.marker = route.agent->mResetDestinationMarker;
+				goal.position = destination->getPosition();
+				goal.sector = SectorId{static_cast<uint64_t>(destination->getSector()->getIndex()) + 1};
+				goal.selectedAction = route.agent->mResetAction;
+			}
 			route.agent->mResetPath = route.agent->mPath.path;
 			route.agent->mResetPathActive = route.active;
 			if (auto marker = dynamic_pointer_cast<Marker>(route.agent->mResetPath->nodes.back().targetVertex->getObject()))
@@ -2774,6 +2856,9 @@ namespace core
 			candidate->setLayerName(layer, mLayerNames[layer]);
 		candidate->mFurnitureCatalogue = mFurnitureCatalogue;
 		candidate->mFurnitureCatalogueFilename = mFurnitureCatalogueFilename;
+		candidate->mActionRegistry = mActionRegistry;
+		candidate->mActionRegistryFilename = mActionRegistryFilename;
+		candidate->mMarkerActions = mMarkerActions;
 		return candidate;
 	}
 
@@ -3248,7 +3333,7 @@ namespace core
 				agent->mResetPosition.sector() ? agent->mResetPosition.global() : agent->getGlobalPosition(),
 				agent->mResetPosition.sector() ? agent->mResetPosition.sector()->getLayerIndex() : sector->getLayerIndex(),
 				agent->mResetPosition.sector() ? agent->mResetLocalDepth : agent->getLocalDepth(),
-				agent->mResetDestinationMarker, agent->mResetPathActive,
+				agent->mResetDestinationMarker, agent->mResetPathActive, agent->mResetAction,
 				agent->mPose, agent->mOccupiedUsablePoint });
 		}
 		return carried;
@@ -3351,6 +3436,7 @@ namespace core
 			}
 			raw->mResetDestinationMarker = saved.resetDestinationMarker;
 			raw->mResetPathActive = saved.resetPathActive;
+			raw->mResetAction = saved.resetAction;
 			raw->mPose = saved.pose;
 			if (saved.occupiedUsablePoint)
 			{

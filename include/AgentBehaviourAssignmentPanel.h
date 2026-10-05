@@ -21,7 +21,10 @@ bool commitAgentBehaviourClear(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, std::string& diagnostic);
 
 // Movement Actions are explicit even when Idle is the sole available choice.
-std::string_view renderAgentMovementActionSelector();
+std::string_view renderAgentMovementActionSelector(
+	std::shared_ptr<const core::World> const& world = {}, core::MarkerId marker = {});
+bool commitAgentMarkerActionRequest(std::shared_ptr<core::World> const& world,
+	core::AgentId agent, core::MarkerId marker, std::string_view action, std::string& diagnostic);
 
 // Compact picker for the Agents table and full schema-generated editor for the
 // selected-Agent panel. Marker values are always displayed and chosen by name.

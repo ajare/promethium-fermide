@@ -683,6 +683,7 @@ namespace core
 		mResetPosition = {};
 		mLocalDepth = mResetLocalDepth = 0;
 		mResetDestinationMarker = {};
+		mResetAction = "idle";
 		mResetPath.reset();
 		mResetPathActive = false;
 		mEscalatorTraversalSequence = 0;
@@ -1250,6 +1251,7 @@ namespace core
 		}
 		mResetPath = path;
 		mResetDestinationMarker = {};
+		mResetAction = "idle";
 		if (path && !path->nodes.empty())
 			if (auto marker = dynamic_pointer_cast<Marker>(path->nodes.back().targetVertex->getObject()))
 				mResetDestinationMarker = marker->getId();
@@ -1388,6 +1390,7 @@ namespace core
 			mResetLocalDepth = mLocalDepth;
 		}
 		mResetDestinationMarker = {};
+		mResetAction = "idle";
 		mResetPath.reset();
 		mResetPathActive = false;
 		modify();

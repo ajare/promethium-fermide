@@ -8497,9 +8497,10 @@ namespace core
 	MovementCommandResult World::moveAgentToMarker(AgentId agent, MarkerId marker,
 		std::string_view action)
 	{
-		if (action != IdleAction) return { MovementCommandStatus::UnavailableAction };
+		if (!lookupMarker(marker)) return { MovementCommandStatus::UnknownMarker };
+		if (!actionAvailable(marker, action)) return { MovementCommandStatus::UnavailableAction };
 		invalidateSimulationSnapshot();
-		return mSimulationCoordinator.moveAgentToMarker(agent, marker);
+		return mSimulationCoordinator.moveAgentToMarker(agent, marker, false, action);
 	}
 
 	MovementCommandResult World::moveAgentToNamedMarker(AgentId agent, std::string const& name,
@@ -8512,8 +8513,10 @@ namespace core
 
 	std::vector<std::string> World::availableAgentActions(MarkerId marker) const
 	{
-		return lookupMarker(marker) ? std::vector<std::string>{ std::string(IdleAction) }
-			: std::vector<std::string>{};
+		if (!lookupMarker(marker)) return {};
+		auto result = std::vector<std::string>{ std::string(IdleAction) };
+		for (auto const& action : markerActions(marker)) if (actionAvailable(marker, action)) result.push_back(action);
+		return result;
 	}
 
 	MovementCommandResult World::inspectBehaviourMoveToMarker(

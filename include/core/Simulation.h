@@ -10,6 +10,7 @@
 #include "core/Vector2.h"
 #include "core/Pose.h"
 #include "core/AgentAction.h"
+#include "core/ScriptExecution.h"
 
 
 namespace core
@@ -348,7 +349,7 @@ namespace core
 		TopologyUnavailable, BehaviourOwned, NoOccupiableSector, Superseded, UnavailableAction
 	};
 	enum struct RouteLossReason { None, Unreachable, TopologyChanged, DestinationRemoved };
-	enum struct MovementCancellationReason { None, Explicit, Superseded, TargetDeleted };
+	enum struct MovementCancellationReason { None, Explicit, Superseded, TargetDeleted, ActionUnavailable };
 	struct MovementCommandResult
 	{
 		MovementCommandStatus status;
@@ -383,6 +384,7 @@ namespace core
 		TopologyRebuildFailed,
 		SimulationResumed,
 		DestinationReached,
+		ActionFailed,
 		MovementCancelled,
 		RouteLost,
 		AgentActivated,
@@ -416,6 +418,7 @@ namespace core
 		MovementCancellationReason movementCancellationReason{
 			MovementCancellationReason::None };
 		std::string diagnostic;
+		ScriptExecutionFailure scriptFailure{ ScriptExecutionFailure::None };
 	};
 
 	// Non-owning observer; register/unregister on the simulation thread. Callbacks

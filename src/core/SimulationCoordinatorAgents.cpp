@@ -359,7 +359,7 @@ namespace core
 	}
 
 	MovementCommandResult SimulationCoordinator::inspectMoveAgentToMarker(
-		AgentId id, MarkerId marker, bool behaviourCommand) const
+		AgentId id, MarkerId marker, bool behaviourCommand, std::string_view action) const
 	{
 		auto agent = mWorld.mAgents.find(id);
 		if (!agent) return { MovementCommandStatus::UnknownAgent };
@@ -370,7 +370,7 @@ namespace core
 			return { MovementCommandStatus::NoOccupiableSector };
 		if (!mWorld.lookupMarker(marker)) return { MovementCommandStatus::UnknownMarker };
 		if (auto it = mWorld.mMovementGoals.find(id); it != mWorld.mMovementGoals.end()
-			&& !it->second.cancelling && it->second.marker == marker)
+			&& !it->second.cancelling && it->second.marker == marker && it->second.selectedAction == action)
 			return { MovementCommandStatus::NoOp };
 		if (!mWorld.mGraph || mWorld.mTopologyDirty || !mWorld.mTopologyValid)
 			return { MovementCommandStatus::TopologyUnavailable };
@@ -379,10 +379,10 @@ namespace core
 	}
 
 	MovementCommandResult SimulationCoordinator::moveAgentToMarker(
-		AgentId id, MarkerId marker, bool behaviourCommand)
+		AgentId id, MarkerId marker, bool behaviourCommand, std::string_view action)
 	{
 		mWorld.invalidateSimulationSnapshot();
-		auto const inspected = inspectMoveAgentToMarker(id, marker, behaviourCommand);
+		auto const inspected = inspectMoveAgentToMarker(id, marker, behaviourCommand, action);
 		if (!inspected.accepted() || inspected.status == MovementCommandStatus::NoOp) return inspected;
 		auto agent = mWorld.mAgents.find(id);
 		if (auto old = mWorld.mMovementGoals.find(id); old != mWorld.mMovementGoals.end())
@@ -394,7 +394,9 @@ namespace core
 			event.type = SimulationEventType::MovementCancelled;
 			event.movementCancellationReason = old->second.marker && !mWorld.lookupMarker(old->second.marker)
 				? MovementCancellationReason::TargetDeleted
+				: old->second.actionInvalidated ? MovementCancellationReason::ActionUnavailable
 				: old->second.cancelling ? MovementCancellationReason::Explicit : MovementCancellationReason::Superseded;
+			if (old->second.actionInvalidated) event.diagnostic = "Selected Action was removed from the target Marker";
 			mWorld.mPendingMovementOutcomes.push_back(std::move(event));
 		}
 		shared_ptr<const Vertex> target;
@@ -407,6 +409,7 @@ namespace core
 			target ? SectorId{ (uint64_t)target->getSector()->getIndex() + 1 } : SectorId{},
 			RouteLossReason::None, behaviourCommand, false, true, RouteLossReason::Unreachable,
 			std::nullopt, nullptr };
+		mWorld.mMovementGoals[id].selectedAction = action;
 		if (hasCommittedMovement(*agent))
 		{
 			mWorld.mMovementGoals[id].planningDeferred = true;
@@ -732,8 +735,10 @@ namespace core
 			auto agent = mWorld.mAgents.find(id);
 			if (!agent) { it = mWorld.mMovementGoals.erase(it); continue; }
 			auto const targetDeleted = goal.marker && !mWorld.lookupMarker(goal.marker);
-			if (targetDeleted) goal.cancelling = true;
-			if (!agent->isActive() && !targetDeleted) { ++it; continue; }
+			auto const actionRemoved = goal.actionInvalidated || (!targetDeleted && goal.marker
+				&& goal.selectedAction != IdleAction && !mWorld.actionAvailable(goal.marker, goal.selectedAction));
+			if (targetDeleted || actionRemoved) goal.cancelling = true;
+			if (!agent->isActive() && !targetDeleted && !actionRemoved) { ++it; continue; }
 			if (goal.cancelling)
 			{
 				// Finish an in-flight crossing and any occupied resource journey first.
@@ -771,7 +776,11 @@ namespace core
 						? RouteLossReason::TopologyChanged : goal.routeLossReason;
 			else if (event.type == SimulationEventType::MovementCancelled)
 				event.movementCancellationReason = targetDeleted
-					? MovementCancellationReason::TargetDeleted : MovementCancellationReason::Explicit;
+					? MovementCancellationReason::TargetDeleted : actionRemoved
+						? MovementCancellationReason::ActionUnavailable : MovementCancellationReason::Explicit;
+			if (actionRemoved) event.diagnostic = "Selected Action was removed from the target Marker";
+			if (event.type == SimulationEventType::DestinationReached)
+				mWorld.executeMarkerAction(id, goal.marker, goal.selectedAction, event);
 			it = mWorld.mMovementGoals.erase(it);
 			// Runtime observation is a separate subscription: it never drains or
 			// mutates the public simulation event queue.

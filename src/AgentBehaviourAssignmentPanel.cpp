@@ -330,14 +330,38 @@ bool commitAgentBehaviourClear(shared_ptr<core::World> const& world,
 	return true;
 }
 
-std::string_view renderAgentMovementActionSelector()
+bool commitAgentMarkerActionRequest(shared_ptr<core::World> const& world,
+	core::AgentId agent, core::MarkerId marker, std::string_view action, string& diagnostic)
 {
-	if (ImGui::BeginCombo("Action", "Idle"))
+	if (!world) { diagnostic = "No World selected"; return false; }
+	auto undo = captureDocumentSnapshot(world);
+	if (!undo) { diagnostic = "Cannot capture World history"; return false; }
+	if (!world->authorAgentMarkerRequest(agent, marker, action, &diagnostic)) return false;
+	commitDocumentEdit(std::move(undo));
+	return true;
+}
+
+std::string_view renderAgentMovementActionSelector(shared_ptr<const core::World> const& world, core::MarkerId marker)
+{
+	static string selected{core::IdleAction};
+	static std::weak_ptr<const core::World> selectedWorld;
+	if (!world || selectedWorld.lock() != world) { selected = core::IdleAction; selectedWorld = world; }
+	std::vector<string> options{string(core::IdleAction)};
+	if (world)
 	{
-		ImGui::Selectable("Idle", true);
+		if (marker) options = world->availableAgentActions(marker);
+		else if (world->actionRegistry())
+			for (auto const& definition : world->actionRegistry()->actions()) options.push_back(world->actionRegistry()->identity(definition));
+	}
+	if (std::find(options.begin(), options.end(), selected) == options.end()) selected = core::IdleAction;
+	auto preview = world ? world->agentActionDisplayName(selected) : "Idle";
+	if (ImGui::BeginCombo("Action", preview.c_str()))
+	{
+		for (auto const& action : options)
+			if (ImGui::Selectable(world ? world->agentActionDisplayName(action).c_str() : "Idle", action == selected)) selected = action;
 		ImGui::EndCombo();
 	}
-	return core::IdleAction;
+	return selected;
 }
 
 void renderAgentBehaviourAssignmentCell(shared_ptr<core::World> const& world,

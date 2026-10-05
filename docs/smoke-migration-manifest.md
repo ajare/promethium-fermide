@@ -35,6 +35,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/persistence/Furniture.cpp` | module-owned | `pf-smoke-persistence` |
 | `smoke/render/Furniture.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/editor/Furniture.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/editor/MarkerActions.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |
@@ -247,6 +248,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/render/AgentPoses.cpp` | module-owned | `pf-smoke-render` |
 | `smoke/routing/SeatOccupancy.cpp` | module-owned | `pf-smoke-routing` |
 | `smoke/simulation/Furniture.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/MarkerActions.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/editor/Airlocks.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/world/SecurityScanners.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/persistence/SecurityScanners.cpp` | module-owned | `pf-smoke-persistence` |

@@ -91,9 +91,9 @@ namespace core
 		// before the entity itself goes. A refusal leaves the Agent untouched.
 		EntityRemovalResult removeAgent(AgentId id);
 		MovementCommandResult inspectMoveAgentToMarker(AgentId agent, MarkerId marker,
-			bool behaviourCommand) const;
+			bool behaviourCommand, std::string_view action = IdleAction) const;
 		MovementCommandResult moveAgentToMarker(AgentId agent, MarkerId marker,
-			bool behaviourCommand = false);
+			bool behaviourCommand = false, std::string_view action = IdleAction);
 		MovementCommandResult inspectCancelAgentMovement(AgentId agent,
 			bool behaviourCommand) const;
 		MovementCommandResult cancelAgentMovement(AgentId agent,

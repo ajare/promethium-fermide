@@ -23,4 +23,5 @@ namespace editor_smoke
 	void registerIsolation(std::vector<smoke::Check>& checks);
 }
 
-namespace editor_smoke { void registerFurniture(std::vector<smoke::Check>& checks); }
+namespace editor_smoke { void registerFurniture(std::vector<smoke::Check>& checks);
+	void registerMarkerActions(std::vector<smoke::Check>& checks); }

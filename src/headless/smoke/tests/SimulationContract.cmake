@@ -164,6 +164,11 @@ set(core_names
     furniture/authoredChairArrival
     furniture/seatedEdits
     furniture/occupancyLifecycle
+    markerActions/registry
+    markerActions/execution
+    markerActions/failures
+    markerActions/documents
+    markerActions/logging
     runScaledWorld
 )
 

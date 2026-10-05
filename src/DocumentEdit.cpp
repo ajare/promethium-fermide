@@ -14,6 +14,14 @@ using namespace std;
 
 DocumentHistory gWorldDocumentHistory;
 
+namespace
+{
+	struct ActionSnapshotContext : DocumentSnapshotContext
+	{
+		std::shared_ptr<const core::ActionRegistry> registry;
+	};
+}
+
 optional<DocumentSnapshot> captureDocumentSnapshot(
 	shared_ptr<const core::World> const& world, DocumentHistory const& history)
 {
@@ -25,7 +33,14 @@ optional<DocumentSnapshot> captureDocumentSnapshot(
 		workData.markSerializedUnmodified = false;
 		world->serialize(*serializer, workData);
 		serializer->serialize();
-		return history.capture(serializer->getSerializedString());
+		auto snapshot = history.capture(serializer->getSerializedString());
+		if (world->actionRegistry())
+		{
+			auto context = std::make_shared<ActionSnapshotContext>();
+			context->registry = world->actionRegistry();
+			snapshot.context = std::move(context);
+		}
+		return snapshot;
 	}
 	catch (std::exception const& error)
 	{
@@ -45,6 +60,9 @@ shared_ptr<core::World> deserializeDocumentSnapshot(
 	auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
 	serializer->deserialize();
 	core::SerializationWorkData workData;
+	if (auto context = std::dynamic_pointer_cast<ActionSnapshotContext>(snapshot.context))
+		workData.actionRegistry = context->registry;
+	else if (currentWorld) workData.actionRegistry = currentWorld->actionRegistry();
 	if (!documentPath.empty())
 	{
 		workData.documentDirectory = documentPath.parent_path();

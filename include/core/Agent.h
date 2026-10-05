@@ -356,6 +356,7 @@ namespace core
 		std::shared_ptr<Path> mResetPath;
 		bool mResetPathActive{ false };
 		MarkerId mResetDestinationMarker{};
+		std::string mResetAction{ "idle" };
 
 		uint32_t mFlags;
 

@@ -11,6 +11,28 @@
 #include "core/MarkerSectorObject.h"
 #include "imgui/imgui.h"
 
+bool commitActionRegistrySelection(std::shared_ptr<core::World> const& world,
+	std::filesystem::path const& path, std::string& diagnostic)
+{
+	if (!world) { diagnostic = "No World selected"; return false; }
+	auto undo = captureDocumentSnapshot(world);
+	if (!undo) { diagnostic = "Cannot capture World history"; return false; }
+	if (!world->selectActionRegistry(path, &diagnostic)) return false;
+	commitDocumentEdit(std::move(undo));
+	return true;
+}
+
+bool commitMarkerActionAssignment(std::shared_ptr<core::World> const& world,
+	core::MarkerId marker, std::vector<std::string> actions, std::string& diagnostic)
+{
+	if (!world) { diagnostic = "No World selected"; return false; }
+	auto undo = captureDocumentSnapshot(world);
+	if (!undo) { diagnostic = "Cannot capture World history"; return false; }
+	if (!world->setMarkerActions(marker, std::move(actions), &diagnostic)) return false;
+	commitDocumentEdit(std::move(undo));
+	return true;
+}
+
 void renderMarkerEditorPanel(
 	std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> const& object,
@@ -80,6 +102,65 @@ void renderMarkerEditorPanel(
 	if (!world->isSimulationPaused()
 		&& ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("Pause the simulation to edit pathing properties");
+
+	ImGui::SeparatorText("Agent Actions");
+	ImGui::TextUnformatted("Idle (always available)");
+	static std::array<char, 1024> registryPath{};
+	ImGui::BeginDisabled(!world->isSimulationPaused());
+	ImGui::InputText("Registry (.actions.lua)", registryPath.data(), registryPath.size());
+	auto report = [&](std::string const& diagnostic)
+	{
+		if (reportError) reportError(diagnostic);
+		else core::addLogMessage("Marker editor", 0, core::LogLevel::Warning, diagnostic);
+	};
+	if (ImGui::Button("Load Action registry"))
+	{
+		std::string diagnostic;
+		if (!commitActionRegistrySelection(world, registryPath.data(), diagnostic)) report(diagnostic);
+	}
+	if (world->actionRegistry())
+	{
+		ImGui::Text("Selected: %s", world->actionRegistryFilename().c_str());
+		if (ImGui::Button("Remove registry and assignments"))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			std::string diagnostic;
+			if (undo && world->clearActionRegistry(&diagnostic)) commitDocumentEdit(std::move(undo));
+			else report(diagnostic);
+		}
+		auto assigned = world->markerActions(marker->getId());
+		for (size_t i = 0; i < assigned.size(); ++i)
+		{
+			ImGui::PushID(static_cast<int>(i));
+			ImGui::TextUnformatted(world->agentActionDisplayName(assigned[i]).c_str());
+			ImGui::SameLine();
+			bool changed = false;
+			if (ImGui::SmallButton("Up") && i > 0) { std::swap(assigned[i], assigned[i - 1]); changed = true; }
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Down") && i + 1 < assigned.size()) { std::swap(assigned[i], assigned[i + 1]); changed = true; }
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Remove")) { assigned.erase(assigned.begin() + static_cast<ptrdiff_t>(i)); changed = true; }
+			ImGui::PopID();
+			if (changed)
+			{
+				std::string diagnostic;
+				if (!commitMarkerActionAssignment(world, marker->getId(), assigned, diagnostic)) report(diagnostic);
+				break;
+			}
+		}
+		if (ImGui::BeginCombo("Add Action", "Select Action"))
+		{
+			for (auto const& definition : world->actionRegistry()->actions())
+				if (ImGui::Selectable(definition.name.c_str()))
+				{
+					assigned.push_back(world->actionRegistry()->identity(definition));
+					std::string diagnostic;
+					if (!commitMarkerActionAssignment(world, marker->getId(), assigned, diagnostic)) report(diagnostic);
+				}
+			ImGui::EndCombo();
+		}
+	}
+	ImGui::EndDisabled();
 
 	auto position = marker->getPosition();
 	position.x += marker->getOffset();

@@ -99,6 +99,7 @@ void SimulationMetricsCollector::collect(SimulationSnapshot const& s, std::vecto
         case SimulationEventType::AgentActivated: counter("agent_events", {{"event", "activated"}}); break;
         case SimulationEventType::AgentDeactivated: counter("agent_events", {{"event", "deactivated"}}); break;
         case SimulationEventType::DestinationReached: counter("agent_events", {{"event", "destination_reached"}}); break;
+        case SimulationEventType::ActionFailed: counter("agent_events", {{"event", "action_failed"}}); break;
         case SimulationEventType::MovementCancelled: counter("agent_events", {{"event", "movement_cancelled"}}); break;
         case SimulationEventType::RouteLost: counter("agent_route_loss", {{"reason", metricName(e.routeLossReason)}}); break;
         case SimulationEventType::InteractionRequestAdded:
