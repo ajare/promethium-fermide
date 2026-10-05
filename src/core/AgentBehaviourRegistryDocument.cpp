@@ -357,25 +357,61 @@ namespace core
 		}
 	}
 
+	namespace
+	{
+		struct AgentBehaviourRegistryReferenceResolution
+		{
+			std::filesystem::path canonicalDirectory;
+			std::string attachName;
+		};
+
+		// A bare reference is an application Resource name resolved through the
+		// installed resolver, falling back to a package beside the World. A
+		// reference with a directory part is a legacy explicit path.
+		AgentBehaviourRegistryReferenceResolution
+		resolveAgentBehaviourRegistryReference(
+			std::filesystem::path const& worldFilepath,
+			std::filesystem::path const& packageReference)
+		{
+			auto const savedWorld = requireSavedWorldPath(worldFilepath);
+			auto const bare = !packageReference.is_absolute()
+				&& !packageReference.has_parent_path()
+				&& packageReference.filename().string() == packageReference.string();
+			std::filesystem::path source = packageReference;
+			std::string attachName;
+			if (bare)
+			{
+				attachName = packageReference.string();
+				auto resolved = resolveCatalogSource("AgentBehaviourRegistry",
+					packageReference.string());
+				if (!resolved.empty()) source = std::move(resolved);
+				else source = savedWorld.parent_path() / packageReference;
+			}
+			auto const canonical = requireCanonicalPackageDirectory(source);
+			if (!bare)
+			{
+				if (canonical.parent_path() != savedWorld.parent_path())
+					throw SerializationException(
+						"An Agent behaviour registry package must be in the same directory as its World");
+				attachName = canonical.filename().string();
+			}
+			return { canonical, std::move(attachName) };
+		}
+	}
+
 	std::shared_ptr<AgentBehaviourRegistry> selectAndAttachAgentBehaviourRegistry(
 		World& world, std::filesystem::path const& worldFilepath,
 		std::filesystem::path const& packageDirectory)
 	{
 		if (!world.isSimulationPaused())
 			throw SerializationException("Pause the World before selecting an Agent behaviour registry");
-		auto const savedWorld = requireSavedWorldPath(worldFilepath);
-		auto const canonicalDirectory = requireCanonicalPackageDirectory(packageDirectory);
-		if (canonicalDirectory.parent_path() != savedWorld.parent_path())
-		{
-			throw SerializationException(
-				"An Agent behaviour registry package must be in the same directory as its World");
-		}
-
-		auto registry = loadSharedRegistry(canonicalDirectory);
-		auto const packageName = canonicalDirectory.filename().string();
+		auto const resolution = resolveAgentBehaviourRegistryReference(
+			worldFilepath, packageDirectory);
+		auto registry = loadSharedRegistry(resolution.canonicalDirectory);
+		auto const packageName = resolution.attachName;
 		if (world.hasAgentBehaviourRegistryReference()
 			&& !world.hasAttachedAgentBehaviourRegistry()
-			&& world.getAgentBehaviourRegistryPackageName() == packageName
+			&& world.getAgentBehaviourRegistryResourceName() == packageName
 			&& world.getExpectedAgentBehaviourRegistryUuid() == registry->getUuid())
 		{
 			// Repairing the persisted expected dependency preserves its reference and
@@ -393,20 +429,15 @@ namespace core
 	{
 		if (!world.isSimulationPaused())
 			throw SerializationException("Pause the World before replacing an Agent behaviour registry");
-		auto const savedWorld = requireSavedWorldPath(worldFilepath);
-		auto const canonicalDirectory = requireCanonicalPackageDirectory(packageDirectory);
-		if (canonicalDirectory.parent_path() != savedWorld.parent_path())
-		{
-			throw SerializationException(
-				"An Agent behaviour registry package must be in the same directory as its World");
-		}
+		auto const resolution = resolveAgentBehaviourRegistryReference(
+			worldFilepath, packageDirectory);
 
 		// loadSharedRegistry parses the complete manifest, contains every source
 		// path, and preflights the package before the destructive World method
 		// can clear a single authored value.
-		auto registry = loadSharedRegistry(canonicalDirectory);
+		auto registry = loadSharedRegistry(resolution.canonicalDirectory);
 		world.attachAgentBehaviourRegistryAndClearAssignments(
-			canonicalDirectory.filename().string(), registry);
+			resolution.attachName, registry);
 		return registry;
 	}
 
@@ -417,12 +448,17 @@ namespace core
 		std::shared_ptr<AgentBehaviourRegistry> registry;
 		try
 		{
-			auto const savedWorld = requireSavedWorldPath(worldFilepath);
-			auto const packageDirectory = savedWorld.parent_path()
-				/ world.getAgentBehaviourRegistryPackageName();
-			auto const canonical = requireCanonicalPackageDirectory(packageDirectory);
-			if (canonical.parent_path() != savedWorld.parent_path())
-				throw SerializationException("Agent behaviour package must remain beside its World");
+			auto const resourceName = world.getAgentBehaviourRegistryResourceName();
+			// The World stores a Resource name; the application resolver maps it
+			// to the manifest package directory. Legacy documents that name an
+			// adjacent package keep working through the fallback.
+			auto source = resolveCatalogSource("AgentBehaviourRegistry", resourceName);
+			if (source.empty())
+			{
+				auto const savedWorld = requireSavedWorldPath(worldFilepath);
+				source = savedWorld.parent_path() / resourceName;
+			}
+			auto const canonical = requireCanonicalPackageDirectory(source);
 			registry = loadSharedRegistry(canonical,
 				world.getExpectedAgentBehaviourRegistryUuid());
 			world.resolveAgentBehaviourRegistry(registry);

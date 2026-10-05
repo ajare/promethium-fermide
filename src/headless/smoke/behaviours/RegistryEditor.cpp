@@ -580,7 +580,7 @@ namespace
 			&& consequence.find("replacement.behaviours") != std::string::npos,
 			"Used replacement did not describe its destructive consequence");
 		require(confirmPendingAgentBehaviourRegistryChange(diagnostic)
-			&& unresolved->getAgentBehaviourRegistryPackageName()
+			&& unresolved->getAgentBehaviourRegistryResourceName()
 				== "replacement.behaviours"
 			&& unresolved->getAgentBehaviourAssignmentCount() == 0
 			&& !unresolved->getAgentBehaviourAssignment(agent)

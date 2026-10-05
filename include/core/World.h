@@ -586,7 +586,8 @@ namespace core
 		// mark remains after deletion, so an identity is never issued twice.
 		uint64_t mNextMarkerId{ 1 };
 		std::shared_ptr<const FurnitureCatalogue> mFurnitureCatalogue;
-		std::string mFurnitureCatalogueFilename;
+		// The catalogue is an application Resource (ADR 0010) resolved by name.
+		std::string mFurnitureCatalogueResourceName;
 		std::vector<FurnitureInstance> mFurniture;
 		uint64_t mNextFurnitureId{ 1 };
 		struct MovementGoal
@@ -634,23 +635,23 @@ namespace core
 
 		struct AgentTagRegistryReference
 		{
-			std::string filename;
+			std::string resourceName;
 			std::string expectedUuid;
 		};
 
 		// Agent tag definitions are an independent external document (ADR 0007).
-		// The World persists only this basename/UUID reference. The loaded
+		// The World persists only this Resource name/UUID reference. The loaded
 		// registry is deliberately not a child for dirty-state purposes.
 		std::optional<AgentTagRegistryReference> mAgentTagRegistryReference;
 		std::shared_ptr<AgentTagRegistry> mAgentTagRegistry;
 
 		// Agent behaviour definitions are an independent external package
-		// document. The World persists only this package-directory basename
-		// and expected UUID reference. The loaded registry is deliberately not a
-		// child for dirty-state purposes.
+		// document. The World persists only this Resource name and expected UUID
+		// reference. The loaded registry is deliberately not a child for
+		// dirty-state purposes.
 		struct AgentBehaviourRegistryReference
 		{
-			std::string packageName;
+			std::string resourceName;
 			std::string expectedUuid;
 		};
 		std::optional<AgentBehaviourRegistryReference> mAgentBehaviourRegistryReference;
@@ -1639,13 +1640,13 @@ namespace core
 		// Seed edits replace all live streams and are therefore paused-only.
 		bool setRandomSeed(uint64_t seed, std::string* diagnostic = nullptr);
 
-		// A World references zero or one adjacent Agent tag registry by
-		// basename and expected UUID. Attaching is an authored World change.
+		// A World references zero or one Agent tag registry Resource by name and
+		// expected UUID. Attaching is an authored World change.
 		// Resolving during open reconciles repairable modifier evolution and dirties
 		// the World only when persisted samples need repair.
 		bool hasAgentTagRegistryReference() const;
 		bool hasAttachedAgentTagRegistry() const;
-		std::string const& getAgentTagRegistryFilename() const;
+		std::string const& getAgentTagRegistryResourceName() const;
 		std::string const& getExpectedAgentTagRegistryUuid() const;
 		std::shared_ptr<AgentTagRegistry> const& getAgentTagRegistry() const;
 		uint64_t getAgentTagAssignmentCount() const;
@@ -1655,9 +1656,9 @@ namespace core
 		// Direct namespace changes are safe only while no Agent carries tag state.
 		// The explicit clearing variants are the destructive transaction used after
 		// editor confirmation; registry documents themselves are never changed.
-		void attachAgentTagRegistry(std::string filename,
+		void attachAgentTagRegistry(std::string resourceName,
 			std::shared_ptr<AgentTagRegistry> registry);
-		void attachAgentTagRegistryAndClearAssignments(std::string filename,
+		void attachAgentTagRegistryAndClearAssignments(std::string resourceName,
 			std::shared_ptr<AgentTagRegistry> registry);
 		void detachAgentTagRegistry();
 		void detachAgentTagRegistryAndClearAssignments();
@@ -1666,16 +1667,16 @@ namespace core
 		// Save As may move an intact World into an equivalent, independent tag
 		// namespace. Unlike an ordinary switch, this preserves assignments and
 		// samples, and refuses any definition or allocator difference.
-		void replaceAgentTagRegistryWithIndependentCopy(std::string filename,
+		void replaceAgentTagRegistryWithIndependentCopy(std::string resourceName,
 			std::shared_ptr<AgentTagRegistry> registry);
 
-		// A World references zero or one adjacent Agent behaviour registry
-		// package by directory basename and expected UUID. Attaching and detaching
+		// A World references zero or one Agent behaviour registry Resource by name
+		// and expected UUID. Attaching and detaching
 		// are paused-only; a detach or incompatible switch is refused while an
 		// Agent assignment depends on the namespace.
 		bool hasAgentBehaviourRegistryReference() const;
 		bool hasAttachedAgentBehaviourRegistry() const;
-		std::string const& getAgentBehaviourRegistryPackageName() const;
+		std::string const& getAgentBehaviourRegistryResourceName() const;
 		std::string const& getExpectedAgentBehaviourRegistryUuid() const;
 		std::shared_ptr<AgentBehaviourRegistry> const& getAgentBehaviourRegistry() const;
 		bool agentBehaviourConfigurationsAreValid() const
@@ -1686,11 +1687,11 @@ namespace core
 		{
 			return mAgentBehaviourDependencyDiagnostic;
 		}
-		void attachAgentBehaviourRegistry(std::string packageName,
+		void attachAgentBehaviourRegistry(std::string resourceName,
 			std::shared_ptr<AgentBehaviourRegistry> registry);
 		// Explicit destructive variants clear every authored assignment and its
 		// configuration in the same paused-only registry-reference transaction.
-		void attachAgentBehaviourRegistryAndClearAssignments(std::string packageName,
+		void attachAgentBehaviourRegistryAndClearAssignments(std::string resourceName,
 			std::shared_ptr<AgentBehaviourRegistry> registry);
 		void detachAgentBehaviourRegistry();
 		void detachAgentBehaviourRegistryAndClearAssignments();
@@ -1702,10 +1703,10 @@ namespace core
 		void markAgentBehaviourRegistryUnavailable(std::string diagnostic);
 
 		// Save As may move an intact World into an equivalent, independent
-		// behaviour package. Assignments remain unchanged while the package UUID
-		// and basename are replaced atomically.
+		// behaviour registry Resource. Assignments remain unchanged while the
+		// registry UUID and Resource name are replaced atomically.
 		void replaceAgentBehaviourRegistryWithIndependentCopy(
-			std::string packageName,
+			std::string resourceName,
 			std::shared_ptr<AgentBehaviourRegistry> registry);
 
 		// One paused-only, schema-validated authored Agent behaviour assignment.
@@ -2936,10 +2937,10 @@ namespace core
 		// only after the file write has completely succeeded; any open, write,
 		// flush, close, or replacement error throws and leaves the World and
 		// its Agents exactly as dirty as they were before the attempt.
-		void attachFurnitureCatalogue(std::string filename,
+		void attachFurnitureCatalogue(std::string resourceName,
 			std::shared_ptr<const FurnitureCatalogue> catalogue);
 		auto const& furnitureCatalogue() const { return mFurnitureCatalogue; }
-		std::string const& furnitureCatalogueFilename() const { return mFurnitureCatalogueFilename; }
+		std::string const& furnitureCatalogueResourceName() const { return mFurnitureCatalogueResourceName; }
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
 		AgentId usablePointOccupant(MarkerId id) const;

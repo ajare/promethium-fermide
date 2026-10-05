@@ -6,6 +6,29 @@ namespace core
 {
 	namespace
 	{
+		std::shared_ptr<CatalogResourceResolver> gCatalogResourceResolver;
+	}
+
+	void setCatalogResourceResolver(
+		std::shared_ptr<CatalogResourceResolver> resolver)
+	{
+		gCatalogResourceResolver = std::move(resolver);
+	}
+
+	std::shared_ptr<CatalogResourceResolver> catalogResourceResolver()
+	{
+		return gCatalogResourceResolver;
+	}
+
+	std::filesystem::path resolveCatalogSource(std::string const& type,
+		std::string const& resourceName)
+	{
+		if (!gCatalogResourceResolver || resourceName.empty()) return {};
+		return gCatalogResourceResolver->catalogSource(type, resourceName);
+	}
+
+	namespace
+	{
 		bool hasCompleteSuffix(std::string const& filename, std::string_view suffix)
 		{
 			return filename.size() > suffix.size() && filename.ends_with(suffix);

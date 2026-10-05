@@ -9,7 +9,8 @@ endfunction()
 
 add_library(pf-smoke-support STATIC support/Smoke.cpp)
 target_include_directories(pf-smoke-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support"
-    PRIVATE "${PF_INCLUDE_DIR}")
+    PRIVATE "${PF_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../support")
+target_link_libraries(pf-smoke-support PUBLIC prometheum-fermide-core)
 target_compile_definitions(pf-smoke-support PRIVATE PF_SMOKE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 target_compile_features(pf-smoke-support PUBLIC cxx_std_20)
 pf_smoke_target_policy(pf-smoke-support)

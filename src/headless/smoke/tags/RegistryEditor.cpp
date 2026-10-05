@@ -73,7 +73,7 @@ namespace
 		require(world->hasAgentTagRegistryReference()
 			&& world->hasAttachedAgentTagRegistry(),
 			"The new registry was not attached to the World");
-		require(world->getAgentTagRegistryFilename() == "station.tags.yaml",
+		require(world->getAgentTagRegistryResourceName() == "station.tags.yaml",
 			"The World did not retain a basename-only registry reference");
 		require(world->getExpectedAgentTagRegistryUuid() == registry->getUuid()
 			&& core::AgentTagRegistry::uuidIsValid(registry->getUuid()),
@@ -94,8 +94,8 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 54") != std::string::npos
-			&& worldYaml.find("filename: station.tags.yaml") != std::string::npos
+		require(worldYaml.find("version: 55") != std::string::npos
+			&& worldYaml.find("resource: station.tags.yaml") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-10 registry reference");
 
@@ -146,7 +146,7 @@ namespace
 			"The Tags panel did not enable selection for a saved World");
 		auto selected = core::selectAndAttachAgentTagRegistry(
 			*world, worldPath, registryPath);
-		require(world->getAgentTagRegistryFilename() == "shared.tags.yaml",
+		require(world->getAgentTagRegistryResourceName() == "shared.tags.yaml",
 			"Selection did not store only the registry basename");
 		require(selected->getUuid() == registry->getUuid(),
 			"Selection attached a registry with the wrong UUID");

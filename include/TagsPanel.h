@@ -56,8 +56,10 @@ bool agentTagRegistryChangePending(std::string* consequence = nullptr);
 bool confirmPendingAgentTagRegistryChange(std::string& diagnostic);
 void cancelPendingAgentTagRegistryChange();
 
-using AgentTagRegistryPathSelector
-	= std::function<std::optional<std::string>()>;
+// Lists the application Resource names (ADR 0010) the panel's registry Combo
+// offers. Platform resources stay in the GUI; headless tests supply names.
+using AgentTagRegistryResourceNames
+	= std::function<std::vector<std::string>()>;
 
 // Registry edits use a history that is separate from the World history.
 // The same shared registry instance always resolves to the same history.
@@ -325,4 +327,4 @@ void forgetAgentTagRegistryDocument(
 // undoable World edit; callers must not persist it implicitly.
 bool renderTagsPanel(std::shared_ptr<core::World> const& world,
 	std::string const& worldFilepath,
-	AgentTagRegistryPathSelector const& selectRegistryPath = {});
+	AgentTagRegistryResourceNames const& resources = {});

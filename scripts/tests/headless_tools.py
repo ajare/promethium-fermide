@@ -105,6 +105,11 @@ with tempfile.TemporaryDirectory(prefix="pf tools with spaces ") as temporary:
     # spaces on every file-backed tool, including the adjacent registry reference.
     fixture = root / "Lift fixture with spaces.world.yaml"
     shutil.copyfile(lift_fixture, fixture)
+    # The checked-in fixture names the bundled TestAgentTags Resource. This
+    # standalone tool has no application manifest, so point its reference at the
+    # adjacent registry basename the tool can resolve beside the World.
+    fixture.write_bytes(fixture.read_bytes().replace(
+        b"resource: TestAgentTags", b"resource: test.tags.yaml"))
     fixture_bytes = fixture.read_bytes()
     # The checked-in Lift fixture refers to this adjacent registry by basename.
     registry = root / "test.tags.yaml"

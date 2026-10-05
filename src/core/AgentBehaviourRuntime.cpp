@@ -2250,7 +2250,7 @@ namespace core
 					packageNameResolved = true;
 					sources.packageName = registry.mPackageDirectory
 						? registry.mPackageDirectory->filename().string()
-						: world.getAgentBehaviourRegistryPackageName();
+						: world.getAgentBehaviourRegistryResourceName();
 				}
 				definitions.push_back({ agentId, agent->getName(), behaviour->getName(),
 					&assignment, agent->isActive(),
@@ -2299,7 +2299,7 @@ namespace core
 			diagnostics.push_back({ AgentBehaviourRuntimeFailure::ConversionError,
 				AgentBehaviourRuntimeStage::Factory, {}, {}, world.mSimulationTick,
 				{}, {}, world.hasAgentBehaviourRegistryReference()
-					? world.getAgentBehaviourRegistryPackageName() : std::string{},
+					? world.getAgentBehaviourRegistryResourceName() : std::string{},
 				{}, {}, error.what(), error.what() });
 			return false;
 		}
@@ -2308,7 +2308,7 @@ namespace core
 			diagnostics.push_back({ AgentBehaviourRuntimeFailure::ConversionError,
 				AgentBehaviourRuntimeStage::Factory, {}, {}, world.mSimulationTick,
 				{}, {}, world.hasAgentBehaviourRegistryReference()
-					? world.getAgentBehaviourRegistryPackageName() : std::string{},
+					? world.getAgentBehaviourRegistryResourceName() : std::string{},
 				{}, {}, "Unknown Lua reload preflight failure",
 				"Unknown Lua reload preflight failure" });
 			return false;

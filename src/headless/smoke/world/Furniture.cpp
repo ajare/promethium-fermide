@@ -122,7 +122,7 @@ namespace
 					auto document = root / (std::string(name) + "-" + key + "." + suffix);
 					world.saveTo(document.string()); auto loaded = core::loadWorldDocument(document);
 					sameInstances(world, *loaded);
-					require(loaded->furnitureCatalogueFilename() == filename, "Round trip lost Lua reference");
+					require(loaded->furnitureCatalogueResourceName() == filename, "Round trip lost Lua reference");
 				}
 			}
 		}
@@ -221,7 +221,7 @@ namespace
 			auto document = root / (std::string("objects.") + suffix); documents.push_back(document);
 			world.saveTo(document.string());
 			auto loaded = core::loadWorldDocument(document);
-			require(loaded->furnitureCatalogueFilename() == "objects.furniture.lua"
+			require(loaded->furnitureCatalogueResourceName() == "objects.furniture.lua"
 				&& loaded->furnitureCatalogue()->uuid() == world.furnitureCatalogue()->uuid()
 				&& loaded->furniture().front().id == desk && loaded->furniture().front().marker == seat
 				&& loaded->lookupMarker(seat)->getName() == "Authored desk point"
@@ -239,18 +239,28 @@ namespace
 			auto external = root / (std::string("external") + suffix);
 			{ std::ofstream output(external); output << legacySource; }
 			auto refusesConversion = [&](auto operation) {
-				bool refused = false;
+				std::string message;
 				try { operation(); }
-				catch (std::exception const& error) { refused = std::string(error.what()).find("requires conversion to Lua") != std::string::npos; }
-				require(refused, "YAML Furniture did not report conversion required: " + external.string());
+				catch (std::exception const& error) { message = error.what(); }
+				require(message.find("requires conversion to Lua") != std::string::npos,
+					"YAML Furniture did not report conversion required: " + external.string()
+						+ " (" + message + ")");
 			};
 			refusesConversion([&] { (void)core::FurnitureCatalogue::readFile(external); });
 			refusesConversion([&] { (void)core::FurnitureCatalogue::load(external); });
-			refusesConversion([&] { world.attachFurnitureCatalogue(external.filename().string(), acceptedCatalogue); });
+			auto pathShapedRefused = false;
+			try { world.attachFurnitureCatalogue("../" + external.filename().string(), acceptedCatalogue); }
+			catch (std::exception const& error)
+			{
+				pathShapedRefused = std::string(error.what()).find("Resource name")
+					!= std::string::npos;
+			}
+			require(pathShapedRefused, "A path-shaped Furniture reference was accepted: " + external.string());
 			require(!world.reloadFurnitureCatalogue(external, &diagnostic)
 				&& diagnostic.find("requires conversion to Lua") != std::string::npos, "YAML reload lost conversion diagnostic");
 			auto oldDocument = YAML::Load(before);
-			oldDocument["furnitureCatalogue"]["filename"] = external.filename().string();
+			oldDocument["furnitureCatalogue"].remove("filename");
+			oldDocument["furnitureCatalogue"]["resource"] = external.filename().string();
 			auto document = root / "external.world.yaml";
 			{ std::ofstream output(document); output << oldDocument; }
 			refusesConversion([&] { (void)core::loadWorldDocument(document); });

@@ -118,7 +118,7 @@ namespace
 		require(world->hasAgentBehaviourRegistryReference()
 			&& world->hasAttachedAgentBehaviourRegistry(),
 			"The new registry was not attached to the World");
-		require(world->getAgentBehaviourRegistryPackageName() == "station.behaviours",
+		require(world->getAgentBehaviourRegistryResourceName() == "station.behaviours",
 			"The World did not retain a package-directory basename reference");
 		require(world->getExpectedAgentBehaviourRegistryUuid() == registry->getUuid()
 			&& core::AgentBehaviourRegistry::uuidIsValid(registry->getUuid()),
@@ -137,8 +137,8 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 54") != std::string::npos
-			&& worldYaml.find("package: station.behaviours") != std::string::npos
+		require(worldYaml.find("version: 55") != std::string::npos
+			&& worldYaml.find("resource: station.behaviours") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-12 registry reference");
 
@@ -167,9 +167,9 @@ namespace
 		core::World source("Legacy", 4, 2);
 		source.pauseSimulation();
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 54");
+		auto const version = yaml.find("version: 55");
 		require(version != std::string::npos, "The current World schema version was missing");
-		yaml.replace(version, std::string("version: 54").size(), "version: 12");
+		yaml.replace(version, std::string("version: 55").size(), "version: 12");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		loaded->pauseSimulation();
@@ -184,8 +184,8 @@ namespace
 		// Readers cap out at their own version, so a future document is refused
 		// at the version boundary instead of dropping fields it does not know.
 		auto future = serializeWorld(source);
-		auto const futureVersion = future.find("version: 54");
-		future.replace(futureVersion, std::string("version: 54").size(), "version: 55");
+		auto const futureVersion = future.find("version: 55");
+		future.replace(futureVersion, std::string("version: 55").size(), "version: 56");
 		auto refused = std::make_shared<core::World>("Loading", 1, 1);
 		refused->pauseSimulation();
 		auto futureReader = core::YamlSerializer::fromString(future);
@@ -222,7 +222,7 @@ namespace
 		world->saveTo(worldPath.string());
 		auto selected = core::selectAndAttachAgentBehaviourRegistry(
 			*world, worldPath, packageDirectory);
-		require(world->getAgentBehaviourRegistryPackageName() == "shared.behaviours",
+		require(world->getAgentBehaviourRegistryResourceName() == "shared.behaviours",
 			"Selection did not store only the package directory name");
 		require(selected->getUuid() == registry->getUuid(),
 			"Selection attached a registry with the wrong UUID");

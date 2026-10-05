@@ -11,6 +11,7 @@
 #include "core/Graph.h"
 #include "core/Path.h"
 #include "core/World.h"
+#include "ManifestResourceResolver.h"
 
 namespace pause_position
 {
@@ -166,6 +167,11 @@ namespace pause_position
 
 	void runAll()
 	{
+		// The bundled fixtures name their Agent tag registry Resource; this
+		// standalone tool installs the same manifest resolver the editor uses.
+		headless_support::installManifestCatalogResolver(
+			testWorld("staircase-test-1.world.yaml").parent_path().parent_path()
+				/ "Resources.yaml");
 		clearPausedPathDoesNotResume();
 		pauseWalkingAgent(true);
 		pauseWalkingAgent(false);
@@ -179,6 +185,9 @@ namespace pause_position
 	// location. Re-load each time so pause does not alter the next sampled run.
 	void runRepro(char const* filename)
 	{
+		headless_support::installManifestCatalogResolver(
+			std::filesystem::path(filename).parent_path().parent_path()
+				/ "Resources.yaml");
 		for (uint64_t ticks = 30; ticks <= 1800; ticks += 30)
 		{
 			auto world = core::loadWorldDocument(filename);

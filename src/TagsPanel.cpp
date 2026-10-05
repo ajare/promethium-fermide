@@ -20,6 +20,7 @@
 #include "core/AgentBehaviourRegistryDocument.h"
 #include "core/World.h"
 #include "core/WorldDocument.h"
+#include "core/WorldDocument.h"
 #include "core/Log.h"
 #include "core/YamlSerializer.h"
 #include "imgui/IconsFontAwesome5.h"
@@ -236,9 +237,13 @@ namespace
 	filesystem::path attachedRegistryPath(core::World const& world,
 		string const& worldFilepath)
 	{
-		if (worldFilepath.empty() || !world.hasAgentTagRegistryReference()) return {};
+		if (!world.hasAgentTagRegistryReference()) return {};
+		auto source = core::resolveCatalogSource("AgentTagRegistry",
+			world.getAgentTagRegistryResourceName());
+		if (!source.empty()) return source;
+		if (worldFilepath.empty()) return {};
 		return filesystem::path(worldFilepath).parent_path()
-			/ world.getAgentTagRegistryFilename();
+			/ world.getAgentTagRegistryResourceName();
 	}
 
 	void releaseRegistryIfUnused(
@@ -266,12 +271,12 @@ namespace
 			<< (samples == 1 ? "y" : "ies") << "\n";
 		if (detach)
 		{
-			text << "- detach " << world.getAgentTagRegistryFilename() << "\n"
+			text << "- detach " << world.getAgentTagRegistryResourceName() << "\n"
 				<< "The registry file will not be deleted or renamed.";
 		}
 		else
 		{
-			text << "- detach " << world.getAgentTagRegistryFilename()
+			text << "- detach " << world.getAgentTagRegistryResourceName()
 				<< " and attach " << filesystem::path(registryFilepath).filename().string()
 				<< " as the replacement registry\n"
 				<< "Neither registry file will be deleted or renamed.\n"
@@ -1450,7 +1455,7 @@ namespace
 
 	bool renderAttachedRegistry(shared_ptr<core::World> const& world,
 		string const& worldFilepath,
-		AgentTagRegistryPathSelector const& selectRegistryPath)
+		AgentTagRegistryResourceNames const& resources)
 	{
 		auto const& registry = world->getAgentTagRegistry();
 		if (!registry)
@@ -1461,45 +1466,49 @@ namespace
 
 		ImGui::TextUnformatted("Agent tag registry");
 		ImGui::SameLine();
-		ImGui::Text("%s", world->getAgentTagRegistryFilename().c_str());
+		ImGui::Text("%s", world->getAgentTagRegistryResourceName().c_str());
 		ImGui::TextDisabled("UUID %s", registry->getUuid().c_str());
 
 		string switchDiagnostic;
 		auto canSwitch = canSelectAgentTagRegistry(
 			world, worldFilepath, &switchDiagnostic);
-		if (!selectRegistryPath)
+		if (!resources)
 		{
 			canSwitch = false;
-			switchDiagnostic = "Registry file selection is unavailable";
+			switchDiagnostic = "Registry Resource selection is unavailable";
 		}
 		ImGui::BeginDisabled(!canSwitch);
-		auto const switchClicked = ImGui::Button("Switch registry");
+		auto const switchOpen = ImGui::BeginCombo(
+			"##switchAgentTagRegistry", "Switch registry");
 		ImGui::EndDisabled();
+		bool switched = false;
+		if (switchOpen)
+		{
+			for (auto const& candidate : resources())
+				if (ImGui::Selectable(candidate.c_str(),
+					candidate == world->getAgentTagRegistryResourceName()))
+				{
+					if (world->getAgentTagAssignmentCount() != 0)
+					{
+						requestAgentTagRegistrySwitch(
+							world, worldFilepath, candidate);
+					}
+					else
+					{
+						string diagnostic;
+						if (commitAgentTagRegistrySwitch(world, worldFilepath,
+							candidate, diagnostic)) switched = true;
+						else if (!diagnostic.empty())
+							core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+					}
+				}
+			ImGui::EndCombo();
+		}
 		if (!canSwitch && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip("%s", switchDiagnostic.c_str());
 		ImGui::SameLine();
 		auto const detachClicked = ImGui::Button("Detach registry");
-
-		if (switchClicked)
-		{
-			auto selectedPath = selectRegistryPath();
-			if (selectedPath)
-			{
-				if (world->getAgentTagAssignmentCount() != 0)
-				{
-					requestAgentTagRegistrySwitch(
-						world, worldFilepath, *selectedPath);
-				}
-				else
-				{
-					string diagnostic;
-					if (commitAgentTagRegistrySwitch(world, worldFilepath,
-						*selectedPath, diagnostic)) return true;
-					if (!diagnostic.empty())
-						core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
-				}
-			}
-		}
+		if (switched) return true;
 		if (detachClicked)
 		{
 			if (world->getAgentTagAssignmentCount() != 0)
@@ -1634,7 +1643,7 @@ bool commitAgentTagRegistryDetach(shared_ptr<core::World> const& world,
 	}
 	try
 	{
-		auto const filename = world->getAgentTagRegistryFilename();
+		auto const filename = world->getAgentTagRegistryResourceName();
 		auto registry = world->getAgentTagRegistry();
 		world->detachAgentTagRegistry();
 		commitDocumentEdit(std::move(undo));
@@ -1668,7 +1677,7 @@ bool commitAgentTagRegistryDetachClearingAssignments(
 	}
 	try
 	{
-		auto const filename = world->getAgentTagRegistryFilename();
+		auto const filename = world->getAgentTagRegistryResourceName();
 		auto registry = world->getAgentTagRegistry();
 		world->detachAgentTagRegistryAndClearAssignments();
 		commitDocumentEdit(std::move(undo));
@@ -1707,12 +1716,12 @@ bool commitAgentTagRegistrySwitch(shared_ptr<core::World> const& world,
 		auto previousRegistry = world->hasAttachedAgentTagRegistry()
 			? world->getAgentTagRegistry() : nullptr;
 		auto const previousFilename = world->hasAgentTagRegistryReference()
-			? world->getAgentTagRegistryFilename() : string{};
+			? world->getAgentTagRegistryResourceName() : string{};
 		auto const previousUuid = world->hasAgentTagRegistryReference()
 			? world->getExpectedAgentTagRegistryUuid() : string{};
 		auto registry = core::selectAndAttachAgentTagRegistry(
 			*world, worldFilepath, registryFilepath);
-		if (world->getAgentTagRegistryFilename() == previousFilename
+		if (world->getAgentTagRegistryResourceName() == previousFilename
 			&& world->getExpectedAgentTagRegistryUuid() == previousUuid)
 		{
 			diagnostic = "The selected Agent tag registry is already attached";
@@ -1723,7 +1732,7 @@ bool commitAgentTagRegistrySwitch(shared_ptr<core::World> const& world,
 		if (previousRegistry != registry) releaseRegistryIfUnused(previousRegistry);
 		resetTagsPanelState();
 		core::addLogMessage("Tags", 0, core::LogLevel::Info,
-			"Switched to Agent tag registry " + world->getAgentTagRegistryFilename()
+			"Switched to Agent tag registry " + world->getAgentTagRegistryResourceName()
 				+ " (" + registry->getUuid() + ")");
 		return true;
 	}
@@ -1755,12 +1764,12 @@ bool commitAgentTagRegistrySwitchClearingAssignments(
 		auto previousRegistry = world->hasAttachedAgentTagRegistry()
 			? world->getAgentTagRegistry() : nullptr;
 		auto const previousFilename = world->hasAgentTagRegistryReference()
-			? world->getAgentTagRegistryFilename() : string{};
+			? world->getAgentTagRegistryResourceName() : string{};
 		auto const previousUuid = world->hasAgentTagRegistryReference()
 			? world->getExpectedAgentTagRegistryUuid() : string{};
 		auto registry = core::selectAndAttachAgentTagRegistryClearingAssignments(
 			*world, worldFilepath, registryFilepath);
-		if (world->getAgentTagRegistryFilename() == previousFilename
+		if (world->getAgentTagRegistryResourceName() == previousFilename
 			&& world->getExpectedAgentTagRegistryUuid() == previousUuid)
 		{
 			diagnostic = "The selected Agent tag registry is already attached";
@@ -1772,7 +1781,7 @@ bool commitAgentTagRegistrySwitchClearingAssignments(
 		resetTagsPanelState();
 		core::addLogMessage("Tags", 0, core::LogLevel::Info,
 			"Cleared all Agent tag assignments and samples, then switched to "
-			+ world->getAgentTagRegistryFilename() + " (" + registry->getUuid() + ")");
+			+ world->getAgentTagRegistryResourceName() + " (" + registry->getUuid() + ")");
 		return true;
 	}
 	catch (std::exception const& error)
@@ -3005,20 +3014,42 @@ namespace
 	filesystem::path registrySavePath(WorldDocumentSaveTarget const& target)
 	{
 		if (!target.registryFilepath.empty()) return target.registryFilepath;
-		if (!target.world || target.worldFilepath.empty()
-			|| !target.world->hasAgentTagRegistryReference()) return {};
+		if (!target.world || !target.world->hasAgentTagRegistryReference()) return {};
+		// A declared Resource is written back to its manifest source and shared
+		// across Worlds; only legacy adjacent-file registries move with Save As.
+		auto source = core::resolveCatalogSource("AgentTagRegistry",
+			target.world->getAgentTagRegistryResourceName());
+		if (!source.empty()) return source;
+		if (target.worldFilepath.empty()) return {};
 		return filesystem::path(target.worldFilepath).parent_path()
-			/ target.world->getAgentTagRegistryFilename();
+			/ target.world->getAgentTagRegistryResourceName();
 	}
 
 	filesystem::path behaviourPackageSavePath(
 		WorldDocumentSaveTarget const& target)
 	{
 		if (!target.behaviourPackagePath.empty()) return target.behaviourPackagePath;
-		if (!target.world || target.worldFilepath.empty()
-			|| !target.world->hasAgentBehaviourRegistryReference()) return {};
+		if (!target.world || !target.world->hasAgentBehaviourRegistryReference()) return {};
+		auto source = core::resolveCatalogSource("AgentBehaviourRegistry",
+			target.world->getAgentBehaviourRegistryResourceName());
+		if (!source.empty()) return source;
+		if (target.worldFilepath.empty()) return {};
 		return filesystem::path(target.worldFilepath).parent_path()
-			/ target.world->getAgentBehaviourRegistryPackageName();
+			/ target.world->getAgentBehaviourRegistryResourceName();
+	}
+
+	bool registryIsResourceBacked(core::World const& world)
+	{
+		return world.hasAgentTagRegistryReference()
+			&& !core::resolveCatalogSource("AgentTagRegistry",
+				world.getAgentTagRegistryResourceName()).empty();
+	}
+
+	bool behaviourRegistryIsResourceBacked(core::World const& world)
+	{
+		return world.hasAgentBehaviourRegistryReference()
+			&& !core::resolveCatalogSource("AgentBehaviourRegistry",
+				world.getAgentBehaviourRegistryResourceName()).empty();
 	}
 
 	filesystem::path normalizedSavePath(filesystem::path path)
@@ -3126,10 +3157,11 @@ namespace
 						return refuse("The attached Agent tag registry has no file path");
 					auto const normalizedSource = normalizedSavePath(sourcePath);
 					auto const destination = path.parent_path()
-						/ target.world->getAgentTagRegistryFilename();
+						/ target.world->getAgentTagRegistryResourceName();
 					if (normalizedSource == path)
 						return refuse("The World and its Agent tag registry cannot use the same file path");
-					if (normalizedSource.parent_path() != destination.parent_path())
+					if (!registryIsResourceBacked(*target.world)
+						&& normalizedSource.parent_path() != destination.parent_path())
 					{
 						if (destination == path)
 							return refuse("The World and its Agent tag registry copy cannot use the same file path");
@@ -3153,8 +3185,9 @@ namespace
 						return refuse("The attached Agent behaviour registry has no package path");
 					auto const normalizedSource = normalizedSavePath(sourcePackage);
 					auto const destination = path.parent_path()
-						/ target.world->getAgentBehaviourRegistryPackageName();
-					if (normalizedSource.parent_path() != destination.parent_path())
+						/ target.world->getAgentBehaviourRegistryResourceName();
+					if (!behaviourRegistryIsResourceBacked(*target.world)
+						&& normalizedSource.parent_path() != destination.parent_path())
 					{
 						bool occupied{ false };
 						if (!pathIsOccupied(destination, occupied)) return false;
@@ -3164,7 +3197,7 @@ namespace
 						if (!copyDestinations.emplace(destination, &target).second)
 							return refuse("More than one dependency copy targets "
 								+ destination.string());
-						behaviourCopies.push_back({ &target,
+					behaviourCopies.push_back({ &target,
 							target.world->getAgentBehaviourRegistry(), {},
 							normalizedSource, destination,
 							target.world->isModified(), false });
@@ -3385,10 +3418,10 @@ string unsavedDocumentPromptText(WorldDocumentSaveTarget const& target)
 	}
 	if (attachedAgentTagRegistryIsModified(target.world))
 		text << "\n- Agent tag registry: "
-			<< target.world->getAgentTagRegistryFilename();
+			<< target.world->getAgentTagRegistryResourceName();
 	if (attachedAgentBehaviourRegistryIsModified(target.world))
 		text << "\n- Agent behaviour registry: "
-			<< target.world->getAgentBehaviourRegistryPackageName();
+			<< target.world->getAgentBehaviourRegistryResourceName();
 	return text.str();
 }
 
@@ -3467,10 +3500,10 @@ bool canSelectAgentTagRegistry(shared_ptr<const core::World> const& world,
 
 bool renderTagsPanel(shared_ptr<core::World> const& world,
 	string const& worldFilepath,
-	AgentTagRegistryPathSelector const& selectRegistryPath)
+	AgentTagRegistryResourceNames const& resources)
 {
 	if (world->hasAgentTagRegistryReference())
-		return renderAttachedRegistry(world, worldFilepath, selectRegistryPath);
+		return renderAttachedRegistry(world, worldFilepath, resources);
 
 	ImGui::TextDisabled("No Agent tag registry attached.");
 	string createDiagnostic;
@@ -3486,17 +3519,25 @@ bool renderTagsPanel(shared_ptr<core::World> const& world,
 	string selectDiagnostic;
 	auto canSelect = canSelectAgentTagRegistry(
 		world, worldFilepath, &selectDiagnostic);
-	if (!selectRegistryPath)
+	if (!resources)
 	{
 		canSelect = false;
-		selectDiagnostic = "Registry file selection is unavailable";
+		selectDiagnostic = "Registry Resource selection is unavailable";
 	}
 	ImGui::BeginDisabled(!canSelect);
-	auto const selectClicked = ImGui::Button("Select existing registry");
+	auto const selectOpen = ImGui::BeginCombo(
+		"##selectAgentTagRegistry", "Select existing registry");
 	ImGui::EndDisabled();
+	std::optional<std::string> selectedPath;
+	if (selectOpen)
+	{
+		for (auto const& candidate : resources())
+			if (ImGui::Selectable(candidate.c_str(), false)) selectedPath = candidate;
+		ImGui::EndCombo();
+	}
 	if (!canSelect && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", selectDiagnostic.c_str());
-	if (!createClicked && !selectClicked) return false;
+	if (!createClicked && !selectedPath) return false;
 
 	try
 	{
@@ -3507,20 +3548,18 @@ bool renderTagsPanel(shared_ptr<core::World> const& world,
 			commitDocumentEdit(std::move(undo));
 			(void)agentTagRegistryDocumentHistory(registry);
 			core::addLogMessage("Tags", 0, core::LogLevel::Info,
-				"Created Agent tag registry " + world->getAgentTagRegistryFilename()
+				"Created Agent tag registry " + world->getAgentTagRegistryResourceName()
 					+ " (" + registry->getUuid() + ")");
 			return true;
 		}
 
-		auto selectedPath = selectRegistryPath();
-		if (!selectedPath) return false;
 		auto undo = captureDocumentSnapshot(world);
 		auto registry = core::selectAndAttachAgentTagRegistry(
 			*world, worldFilepath, *selectedPath);
 		commitDocumentEdit(std::move(undo));
 		(void)agentTagRegistryDocumentHistory(registry);
 		core::addLogMessage("Tags", 0, core::LogLevel::Info,
-			"Selected Agent tag registry " + world->getAgentTagRegistryFilename()
+			"Selected Agent tag registry " + world->getAgentTagRegistryResourceName()
 				+ " (" + registry->getUuid() + ")");
 		return true;
 	}

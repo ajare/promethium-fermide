@@ -320,6 +320,52 @@ namespace core
 		}
 	}
 
+	namespace
+	{
+		struct AgentTagRegistryReferenceResolution
+		{
+			std::filesystem::path canonicalPath;
+			std::string attachName;
+			bool resourceBacked{ false };
+		};
+
+		// A bare reference is an application Resource name resolved through the
+		// installed resolver, falling back to a file beside the World. A reference
+		// with a directory part is a legacy explicit path.
+		AgentTagRegistryReferenceResolution resolveAgentTagRegistryReference(
+			std::filesystem::path const& worldFilepath,
+			std::filesystem::path const& registryReference)
+		{
+			auto const savedWorld = requireSavedWorldPath(worldFilepath);
+			auto const bare = !registryReference.is_absolute()
+				&& !registryReference.has_parent_path()
+				&& registryReference.filename().string() == registryReference.string();
+			AgentTagRegistryReferenceResolution resolution;
+			resolution.resourceBacked = bare;
+			std::filesystem::path source = registryReference;
+			if (bare)
+			{
+				resolution.attachName = registryReference.string();
+				auto resolved = resolveCatalogSource("AgentTagRegistry",
+					registryReference.string());
+				if (!resolved.empty()) source = std::move(resolved);
+				else source = savedWorld.parent_path() / registryReference;
+			}
+			requireAgentTagRegistryFilename(source);
+			resolution.canonicalPath = requireCanonicalRegularFile(
+				source, "Agent tag registry");
+			requireAgentTagRegistryFilename(resolution.canonicalPath);
+			if (!bare)
+			{
+				if (resolution.canonicalPath.parent_path() != savedWorld.parent_path())
+					throw SerializationException(
+						"An Agent tag registry must be in the same directory as its World");
+				resolution.attachName = resolution.canonicalPath.filename().string();
+			}
+			return resolution;
+		}
+	}
+
 	std::shared_ptr<AgentTagRegistry> selectAndAttachAgentTagRegistry(
 		World& world, std::filesystem::path const& worldFilepath,
 		std::filesystem::path const& registryFilepath)
@@ -329,19 +375,10 @@ namespace core
 			throw SerializationException(
 				"Cannot switch Agent tag registries while Agent tag assignments exist; use the confirmed destructive action to clear assignments and samples first");
 		}
-		requireAgentTagRegistryFilename(registryFilepath);
-		auto const savedWorld = requireSavedWorldPath(worldFilepath);
-		auto const canonicalRegistry = requireCanonicalRegularFile(
-			registryFilepath, "Agent tag registry");
-		requireAgentTagRegistryFilename(canonicalRegistry);
-		if (canonicalRegistry.parent_path() != savedWorld.parent_path())
-		{
-			throw SerializationException(
-				"An Agent tag registry must be in the same directory as its World");
-		}
-
-		auto registry = loadSharedRegistry(canonicalRegistry);
-		world.attachAgentTagRegistry(canonicalRegistry.filename().string(), registry);
+		auto const resolution = resolveAgentTagRegistryReference(
+			worldFilepath, registryFilepath);
+		auto registry = loadSharedRegistry(resolution.canonicalPath);
+		world.attachAgentTagRegistry(resolution.attachName, registry);
 		return registry;
 	}
 
@@ -349,20 +386,11 @@ namespace core
 		World& world, std::filesystem::path const& worldFilepath,
 		std::filesystem::path const& registryFilepath)
 	{
-		requireAgentTagRegistryFilename(registryFilepath);
-		auto const savedWorld = requireSavedWorldPath(worldFilepath);
-		auto const canonicalRegistry = requireCanonicalRegularFile(
-			registryFilepath, "Agent tag registry");
-		requireAgentTagRegistryFilename(canonicalRegistry);
-		if (canonicalRegistry.parent_path() != savedWorld.parent_path())
-		{
-			throw SerializationException(
-				"An Agent tag registry must be in the same directory as its World");
-		}
-
-		auto registry = loadSharedRegistry(canonicalRegistry);
+		auto const resolution = resolveAgentTagRegistryReference(
+			worldFilepath, registryFilepath);
+		auto registry = loadSharedRegistry(resolution.canonicalPath);
 		world.attachAgentTagRegistryAndClearAssignments(
-			canonicalRegistry.filename().string(), registry);
+			resolution.attachName, registry);
 		return registry;
 	}
 
@@ -370,17 +398,19 @@ namespace core
 		World& world, std::filesystem::path const& worldFilepath)
 	{
 		if (!world.hasAgentTagRegistryReference()) return {};
-		auto const savedWorld = requireSavedWorldPath(worldFilepath);
-		auto const registryPath = savedWorld.parent_path()
-			/ world.getAgentTagRegistryFilename();
-		auto const canonicalRegistry = requireCanonicalRegularFile(
-			registryPath, "Agent tag registry");
-		requireAgentTagRegistryFilename(canonicalRegistry);
-		if (canonicalRegistry.parent_path() != savedWorld.parent_path())
+		auto const resourceName = world.getAgentTagRegistryResourceName();
+		// The World stores a Resource name; the application resolver maps it to
+		// the manifest source. Legacy/hand-authored documents that name an
+		// adjacent file keep working through the fallback.
+		auto source = resolveCatalogSource("AgentTagRegistry", resourceName);
+		if (source.empty())
 		{
-			throw SerializationException(
-				"An Agent tag registry must be in the same directory as its World");
+			auto const savedWorld = requireSavedWorldPath(worldFilepath);
+			source = savedWorld.parent_path() / resourceName;
 		}
+		auto const canonicalRegistry = requireCanonicalRegularFile(
+			source, "Agent tag registry");
+		requireAgentTagRegistryFilename(canonicalRegistry);
 		auto registry = loadSharedRegistry(canonicalRegistry,
 			world.getExpectedAgentTagRegistryUuid());
 		try

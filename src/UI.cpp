@@ -2515,19 +2515,25 @@ namespace
 	string currentAgentTagRegistryFilepath(
 		shared_ptr<core::World> const& world)
 	{
-		if (!world || !world->hasAttachedAgentTagRegistry()
-			|| gWorldFilepath.empty()) return {};
+		if (!world || !world->hasAttachedAgentTagRegistry()) return {};
+		auto source = core::resolveCatalogSource("AgentTagRegistry",
+			world->getAgentTagRegistryResourceName());
+		if (!source.empty()) return source.string();
+		if (gWorldFilepath.empty()) return {};
 		return (filesystem::path(gWorldFilepath).parent_path()
-			/ world->getAgentTagRegistryFilename()).string();
+			/ world->getAgentTagRegistryResourceName()).string();
 	}
 
 	string currentAgentBehaviourRegistryPackagePath(
 		shared_ptr<core::World> const& world)
 	{
-		if (!world || !world->hasAttachedAgentBehaviourRegistry()
-			|| gWorldFilepath.empty()) return {};
+		if (!world || !world->hasAttachedAgentBehaviourRegistry()) return {};
+		auto source = core::resolveCatalogSource("AgentBehaviourRegistry",
+			world->getAgentBehaviourRegistryResourceName());
+		if (!source.empty()) return source.string();
+		if (gWorldFilepath.empty()) return {};
 		return (filesystem::path(gWorldFilepath).parent_path()
-			/ world->getAgentBehaviourRegistryPackageName()).string();
+			/ world->getAgentBehaviourRegistryResourceName()).string();
 	}
 
 	WorldDocumentSaveTarget currentDocumentSaveTarget(
@@ -2628,8 +2634,7 @@ namespace
 	}
 
 	void openWorld(shared_ptr<core::World>& world, string const& filepath,
-		bool fromRecentFiles = false)
-	{
+		bool fromRecentFiles = false)	{
 		string normalized;
 		try
 		{
@@ -2692,58 +2697,6 @@ namespace
 		}
 
 		openWorld(world, selectedPath.get());
-	}
-
-	optional<string> chooseFurnitureCataloguePath()
-	{
-		nfdu8char_t* selectedPathRaw{ nullptr };
-		nfdu8filteritem_t const filters[] = { { "Furniture catalogue", "furniture.lua" } };
-		auto const directory = filesystem::path(gWorldFilepath).parent_path().string();
-		auto const result = NFD_OpenDialogU8(&selectedPathRaw, filters, 1,
-			directory.empty() ? nullptr : directory.c_str());
-		unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(selectedPathRaw, NFD_FreePathU8);
-		if (result == NFD_CANCEL) return nullopt;
-		if (result == NFD_ERROR)
-			throw runtime_error(string("Could not choose a Furniture catalogue: ")
-				+ (NFD_GetError() ? NFD_GetError() : "unknown native dialog error"));
-		return string(selectedPath.get());
-	}
-
-	optional<string> chooseAgentTagRegistryPath()
-	{
-		nfdu8char_t* selectedPathRaw{ nullptr };
-		nfdu8filteritem_t const filters[] = { { "Agent tag registry", "tags.yaml" } };
-		filesystem::path const worldPath(gWorldFilepath);
-		auto const directory = worldPath.parent_path().string();
-		auto const result = NFD_OpenDialogU8(&selectedPathRaw, filters, 1,
-			directory.empty() ? nullptr : directory.c_str());
-		unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(
-			selectedPathRaw, NFD_FreePathU8);
-		if (result == NFD_CANCEL) return nullopt;
-		if (result == NFD_ERROR)
-		{
-			throw runtime_error(string("Could not choose an Agent tag registry: ")
-				+ (NFD_GetError() ? NFD_GetError() : "unknown native dialog error"));
-		}
-		return string(selectedPath.get());
-	}
-
-	optional<string> chooseAgentBehaviourRegistryPath()
-	{
-		nfdu8char_t* selectedPathRaw{ nullptr };
-		filesystem::path const worldPath(gWorldFilepath);
-		auto const directory = worldPath.parent_path().string();
-		auto const result = NFD_PickFolderU8(
-			&selectedPathRaw, directory.empty() ? nullptr : directory.c_str());
-		unique_ptr<nfdu8char_t, decltype(&NFD_FreePathU8)> selectedPath(
-			selectedPathRaw, NFD_FreePathU8);
-		if (result == NFD_CANCEL) return nullopt;
-		if (result == NFD_ERROR)
-		{
-			throw runtime_error(string("Could not choose an Agent behaviour registry package: ")
-				+ (NFD_GetError() ? NFD_GetError() : "unknown native dialog error"));
-		}
-		return string(selectedPath.get());
 	}
 
 	void executeFileAction(PendingFileAction action, shared_ptr<core::World>& world)
@@ -3133,7 +3086,7 @@ namespace
 				currentDocumentSaveTarget(world, gWorldFilepath));
 			if (attachedAgentBehaviourRegistryIsModified(world))
 				prompt += "\n- Agent behaviour registry package '"
-					+ world->getAgentBehaviourRegistryPackageName() + "'";
+					+ world->getAgentBehaviourRegistryResourceName() + "'";
 			ImGui::TextUnformatted(prompt.c_str());
 			if (ImGui::Button("Save All"))
 			{
@@ -7970,7 +7923,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		// Registry reference changes remain ordinary unsaved World edits. Their
 		// panel commits create World-history entries; persistence is explicit.
 		(void)renderTagsPanel(world, gWorldFilepath,
-			[] { return chooseAgentTagRegistryPath(); });
+			[] { return applicationResourceNames("AgentTagRegistry"); });
 	}
 
 	if (ImGui::CollapsingHeader("Behaviours"))
@@ -7980,7 +7933,7 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		// edited by the panel. Reference changes remain unsaved World edits.
 		ImGui::PushID("AgentBehaviourRegistry");
 		(void)renderBehavioursPanel(world, gWorldFilepath,
-			[] { return chooseAgentBehaviourRegistryPath(); });
+			[] { return applicationResourceNames("AgentBehaviourRegistry"); });
 		ImGui::PopID();
 	}
 
@@ -8002,7 +7955,8 @@ void renderWorldPanel(shared_ptr<core::World> world)
 		renderAgentView(world);
 	}
 
-	renderFurniturePanel(world, gWorldFilepath, [] { return chooseFurnitureCataloguePath(); });
+	renderFurniturePanel(world, gWorldFilepath,
+		[] { return applicationResourceNames("FurnitureCatalogue"); });
 	renderSelectedObjectPanel(world);
 	renderSelectedAgentPanel(world);
 

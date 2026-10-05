@@ -40,7 +40,7 @@ namespace
 				{
 					auto output = root / (std::string(name) + "-" + key + "." + suffix); world->saveTo(output.string());
 					auto loaded = core::loadWorldDocument(output);
-					require(loaded->furnitureCatalogueFilename() == filename && loaded->furniture().back().id == instance.id
+					require(loaded->furnitureCatalogueResourceName() == filename && loaded->furniture().back().id == instance.id
 						&& loaded->furniture().back().marker == instance.marker && loaded->furniture().back().localDepth == 4,
 						"Converted editor placement lost identity/depth on reopen");
 				}
@@ -90,7 +90,7 @@ namespace
 		{
 			auto output = root / (std::string("edited.") + suffix); world->saveTo(output.string());
 			auto loaded = core::loadWorldDocument(output);
-			require(loaded->furnitureCatalogueFilename() == "objects.furniture.lua" && loaded->furniture().front().marker == desk.marker,
+			require(loaded->furnitureCatalogueResourceName() == "objects.furniture.lua" && loaded->furniture().front().marker == desk.marker,
 				"Editor Lua save/reopen lost package or Marker identity");
 		}
 		require(deleteSelectedFurniture(world, desk.id, diagnostic, history), diagnostic);
@@ -183,11 +183,11 @@ namespace
 			return true;
 		};
 		require(history.undo(captureDocumentSnapshot(world, history), restore)
-			&& world->furnitureCatalogueFilename() == "chair.furniture.lua"
+			&& world->furnitureCatalogueResourceName() == "chair.furniture.lua"
 			&& world->furnitureCatalogue()->uuid() == chairUuid,
 			"Undo did not reattach the snapshot's Furniture catalogue");
 		require(history.redo(captureDocumentSnapshot(world, history), restore)
-			&& world->furnitureCatalogueFilename() == "layouts.furniture.lua"
+			&& world->furnitureCatalogueResourceName() == "layouts.furniture.lua"
 			&& world->furnitureCatalogue()->uuid() == layoutsUuid,
 			"Redo did not reattach the snapshot's Furniture catalogue");
 
@@ -202,7 +202,7 @@ namespace
 		world = core::loadWorldDocument(path); world->pauseSimulation();
 		auto canPlaceChair = world->canPlaceFurniture(0, "chair", 2, 0, "New chair", &diagnostic, 0);
 		require(canPlaceChair, "Chair placement at x=2, Level=0, depth=0 was rejected: " + diagnostic);
-		require(world->furnitureCatalogueFilename() == "furniture.furniture.lua",
+		require(world->furnitureCatalogueResourceName() == "furniture.furniture.lua",
 			"Save/reopen reverted the selected Furniture catalogue");
 		auto& io = ImGui::GetIO();
 		io.IniFilename = nullptr; io.LogFilename = nullptr; io.DisplaySize = {1000, 800};
@@ -212,19 +212,23 @@ namespace
 		auto previousSetClipboardText = io.SetClipboardTextFn;
 		io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
-		auto panelShows = [&](std::string const& filename)
+		auto panelShows = [&](std::string const& resourceName)
 		{
 			text.clear();
 			ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({900, 700});
 			ImGui::Begin("Reopened Furniture catalogue", nullptr, ImGuiWindowFlags_NoSavedSettings);
 			ImGui::LogToClipboard(); ImGui::SetNextItemOpen(true);
-			renderFurniturePanel(world, path);
+			renderFurniturePanel(world, path, []
+			{
+				return std::vector<std::string>{ "furniture.furniture.lua",
+					"layouts.furniture.lua", "chair.furniture.lua" };
+			});
 			ImGui::LogFinish(); ImGui::End(); ImGui::Render();
-			require(text.find("Catalogue: " + filename) != std::string::npos,
+			require(text.find("Catalogue: " + resourceName) != std::string::npos,
 				"Furniture panel does not display the loaded catalogue: " + text);
 		};
 		panelShows("furniture.furniture.lua");
-		require(text.find("Select Furniture catalogue...") != std::string::npos
+		require(text.find("Reload Furniture catalogue") != std::string::npos
 			&& text.find("Place Furniture") == std::string::npos && text.find("Furniture definition") == std::string::npos,
 			"Catalogue panel still exposes Furniture editing controls: " + text);
 		require(selectFurnitureCatalogue(world, path, "layouts.furniture.lua", diagnostic, history), diagnostic);
@@ -243,96 +247,64 @@ namespace
 	{
 		editor_smoke::State state; using smoke::require;
 		auto root = context.temporaryRoot() / "catalogue-picker";
-		std::filesystem::create_directories(root / "elsewhere");
+		std::filesystem::create_directories(root);
 		for (auto filename : {"chair.furniture.lua", "desk.furniture.lua"})
 			std::filesystem::copy_file(context.fixture(std::string("src/headless/smoke/fixtures/furniture/") + filename), root / filename);
-		std::filesystem::copy_file(root / "chair.furniture.lua", root / "elsewhere/chair.furniture.lua");
-		std::filesystem::copy_file(root / "chair.furniture.lua", root / "wrong.yaml");
-		std::string const legacySource = "furnitureCatalogue:\n  version: 1\n  definitions: []\n";
-		{ std::ofstream output(root / "external.furniture.yaml"); output << legacySource; }
 		{ std::ofstream output(root / "broken.furniture.lua"); output << "not a catalogue"; }
 		auto path = root / "picker.world.yaml";
 		auto world = std::make_shared<core::World>("Picker", 8, 2);
 		world->addRoom("Room", 0, 0, 0, 8, 1); world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
 		DocumentHistory history;
+		std::string diagnostic;
+
+		// The panel offers the Resource names as a Combo and exposes no editing controls.
 		auto& io = ImGui::GetIO(); io.IniFilename = nullptr; io.LogFilename = nullptr;
 		io.DisplaySize = {1000, 800}; io.Fonts->AddFontDefault(); io.Fonts->Build();
 		std::string text; io.ClipboardUserData = &text;
 		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
-		std::optional<std::string> picked; unsigned choices = 0; bool pickerError = false;
+		std::vector<std::string> available = { "chair.furniture.lua", "desk.furniture.lua" };
 		auto frame = [&]
 		{
 			text.clear(); ImGui::NewFrame(); ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({600, 350});
 			ImGui::Begin("Catalogue picker test"); ImGui::LogToClipboard(); ImGui::SetNextItemOpen(true);
-			renderFurniturePanel(world, path, [&]() -> std::optional<std::string>
-			{
-				++choices;
-				if (pickerError) throw std::runtime_error("Native picker failed");
-				return picked;
-			}, history);
+			renderFurniturePanel(world, path, [&]() { return available; }, history);
 			ImGui::LogFinish(); ImGui::End(); ImGui::Render();
 		};
-		frame(); frame();
-		auto button = ImGui::FindWindowByName("Catalogue picker test")->GetID("Select Furniture catalogue...");
-		ImVec2 buttonPosition{}; bool found = false;
-		for (float y = 35; y < 140 && !found; y += 8)
-			for (float x = 20; x < 270 && !found; x += 16)
-			{
-				io.AddMousePosEvent(x, y); frame(); frame();
-				if (ImGui::GetHoveredID() == button) { found = true; buttonPosition = {x, y}; }
-			}
-		require(found, "Catalogue picker button is missing");
-		auto click = [&]
-		{
-			io.AddMousePosEvent(buttonPosition.x, buttonPosition.y); frame();
-			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame(); frame();
-		};
-		picked = (root / "chair.furniture.lua").string(); click();
-		require(choices == 1 && world->furnitureCatalogueFilename() == "chair.furniture.lua"
-			&& history.undoCount() == 1 && world->furniture().empty(), "Picker did not attach the selected catalogue as one edit");
+		frame();
+		require(text.find("Select Furniture catalogue...") != std::string::npos,
+			"Catalogue Combo placeholder is missing: " + text);
+		require(selectFurnitureCatalogue(world, path, "chair.furniture.lua", diagnostic, history), diagnostic);
+		require(world->furnitureCatalogueResourceName() == "chair.furniture.lua"
+			&& history.undoCount() == 1 && world->furniture().empty(), "Catalogue selection was not one edit");
+		frame();
+		require(text.find("Catalogue: chair.furniture.lua") != std::string::npos,
+			"Panel did not show the selected Resource");
 		for (auto label : {"Furniture definition", "Furniture instance", "Instance name", "Furniture x", "Supporting Level",
 			"Furniture Local depth", "Snap Furniture", "Place Furniture", "Apply Furniture edit", "Delete Furniture", "Catalogue beside World"})
 			require(text.find(label) == std::string::npos, "Catalogue-only header retained editing control: " + std::string(label));
-		auto unchanged = captureDocumentSnapshot(world, history)->yaml;
-		picked.reset(); click();
-		require(choices == 2 && captureDocumentSnapshot(world, history)->yaml == unchanged && history.undoCount() == 1,
-			"Cancelled picker mutated the document/history");
-		for (auto file : {"elsewhere/chair.furniture.lua", "wrong.yaml", "external.furniture.yaml", "broken.furniture.lua"})
-		{
-			picked = (root / file).string(); click();
-			require(captureDocumentSnapshot(world, history)->yaml == unchanged && history.undoCount() == 1
-				&& text.find("Catalogue: chair.furniture.lua") != std::string::npos,
-				"Rejected picker selection changed the catalogue/history");
-			if (std::string(file).starts_with("elsewhere"))
-				require(text.find("beside the World") != std::string::npos, "Outside-directory selection lost its diagnostic");
-			if (std::string(file).ends_with(".yaml"))
-				require(text.find("requires conversion to Lua") != std::string::npos, "YAML picker rejection lost conversion diagnostic");
-		}
-		{
-			std::ifstream input(root / "external.furniture.yaml"); std::string bytes((std::istreambuf_iterator<char>(input)), {});
-			require(bytes == legacySource && !std::filesystem::exists(root / "external.furniture.lua"),
-				"Catalogue selection silently converted or rewrote external YAML");
-		}
-		pickerError = true; click(); pickerError = false;
-		require(text.find("Native picker failed") != std::string::npos && history.undoCount() == 1,
-			"Picker exception escaped the panel or committed history");
-		picked = (root / "desk.furniture.lua").string(); click();
-		require(world->furnitureCatalogueFilename() == "desk.furniture.lua" && history.undoCount() == 2
-			&& text.find("Native picker failed") == std::string::npos, "Successful selection retained an error or missed history");
+		auto selected = captureDocumentSnapshot(world, history)->yaml;
+		std::string reject;
+		require(!selectFurnitureCatalogue(world, path, "missing.furniture.lua", reject) && !reject.empty(), "Missing Resource was accepted");
+		require(!selectFurnitureCatalogue(world, path, "../chair.furniture.lua", reject) && !reject.empty(), "Path-shaped reference was accepted");
+		require(!selectFurnitureCatalogue(world, path, "broken.furniture.lua", reject) && !reject.empty(), "Broken catalogue was accepted");
+		require(captureDocumentSnapshot(world, history)->yaml == selected && history.undoCount() == 1,
+			"Rejected selection changed the document/history");
+		require(selectFurnitureCatalogue(world, path, "desk.furniture.lua", diagnostic, history), diagnostic);
+		require(world->furnitureCatalogueResourceName() == "desk.furniture.lua" && history.undoCount() == 2,
+			"Second selection missed history");
 		auto restore = [&](DocumentSnapshot const& snapshot)
 		{
 			auto loaded = deserializeDocumentSnapshot(snapshot, world, path);
 			if (!loaded) return false;
 			world = std::move(loaded); return true;
 		};
-		require(history.undo(captureDocumentSnapshot(world, history), restore), "Picker catalogue undo failed"); frame();
+		require(history.undo(captureDocumentSnapshot(world, history), restore), "Catalogue selection undo failed"); frame();
 		require(text.find("Catalogue: chair.furniture.lua") != std::string::npos, "Panel did not refresh catalogue after undo");
-		require(history.redo(captureDocumentSnapshot(world, history), restore), "Picker catalogue redo failed"); frame();
+		require(history.redo(captureDocumentSnapshot(world, history), restore), "Catalogue selection redo failed"); frame();
 		require(text.find("Catalogue: desk.furniture.lua") != std::string::npos, "Panel did not refresh catalogue after redo");
-		auto savedPath = path; path.clear(); auto beforeChoices = choices; click();
-		require(choices == beforeChoices && history.undoCount() == 2 && text.find("Save the World") != std::string::npos,
-			"Unsaved World opened a catalogue picker or mutated history");
-		path = savedPath;
+		path.clear(); available.clear(); frame();
+		require(text.find("Save the World before selecting a Furniture catalogue.") != std::string::npos,
+			"Unsaved World hid its save-before-selecting diagnostic");
 		io.ClipboardUserData = nullptr; io.SetClipboardTextFn = nullptr;
 	}
 

@@ -38,6 +38,14 @@ namespace persistence
 		}
 		auto source = root / "demo.world.yaml";
 		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/furniture-integration.world.yaml"), source);
+		// This scenario relocates the World with its catalogue and revises the
+		// catalogue beside it, so reference the adjacent file rather than the
+		// shared manifest Resource.
+		{
+			auto document = YAML::LoadFile(source.string());
+			document["furnitureCatalogue"]["resource"] = "furniture-integration.furniture.lua";
+			std::ofstream output(source); output << document;
+		}
 		auto world = core::loadWorldDocument(source);
 		require(world->furniture().size() == 6, "Required complete Furniture demonstration is missing instances");
 		auto desk = world->furniture()[1];
@@ -240,7 +248,7 @@ for _,vertex in ipairs(definition.vertices) do if vertex.usablePoint then vertex
 				&& loaded->furniture().front().x == 2.25f && loaded->furniture().front().name == "Renamed desk chair"
 				&& loaded->furniture().front().marker == marker
 				&& loaded->lookupMarker(marker)->getName() == "Workstation"
-				&& loaded->furnitureCatalogueFilename() == "chair.furniture.lua", "World format lost Furniture reference or identities");
+				&& loaded->furnitureCatalogueResourceName() == "chair.furniture.lua", "World format lost Furniture reference or identities");
 			loaded->resetSimulation();
 			require(loaded->furniture().front().marker == marker, "Reset lost chair Marker identity");
 			loaded->pauseSimulation();

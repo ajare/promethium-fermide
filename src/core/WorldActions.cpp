@@ -120,8 +120,7 @@ namespace core
 		if (!FurnitureCatalogue::filenameIsValid(path.filename().string()))
 			return reject("Furniture catalogue must end with .furniture.lua; YAML Furniture requires conversion to Lua");
 		if (!isSimulationPaused()) return reject("Pause the simulation before reloading");
-		if (!mFurnitureCatalogue || path.filename().string() != mFurnitureCatalogueFilename)
-			return reject("Select this catalogue before reloading it");
+		if (!mFurnitureCatalogue) return reject("Select this catalogue before reloading it");
 		try
 		{
 			auto replacement = FurnitureCatalogue::load(path);

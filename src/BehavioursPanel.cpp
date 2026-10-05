@@ -12,6 +12,7 @@
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRegistryDocument.h"
 #include "core/World.h"
+#include "core/WorldDocument.h"
 #include "core/Log.h"
 #include "core/SerializationWorkData.h"
 #include "core/YamlSerializer.h"
@@ -126,7 +127,7 @@ namespace
 			+ (assignments == 1 ? "" : "s")
 			+ " and configuration" + (assignments == 1 ? "" : "s") + ".\n";
 		if (detach)
-			result += "It will detach " + world.getAgentBehaviourRegistryPackageName() + ". ";
+			result += "It will detach " + world.getAgentBehaviourRegistryResourceName() + ". ";
 		else result += "It will replace the current reference with "
 			+ filesystem::path(packageDirectory).filename().string() + ". ";
 		result += "Registry package files will not be deleted, renamed, or rewritten.";
@@ -136,8 +137,13 @@ namespace
 	filesystem::path attachedPackagePath(core::World const& world,
 		string const& worldFilepath)
 	{
+		if (!world.hasAgentBehaviourRegistryReference()) return {};
+		auto source = core::resolveCatalogSource("AgentBehaviourRegistry",
+			world.getAgentBehaviourRegistryResourceName());
+		if (!source.empty()) return source;
+		if (worldFilepath.empty()) return {};
 		return filesystem::path(worldFilepath).parent_path()
-			/ world.getAgentBehaviourRegistryPackageName();
+			/ world.getAgentBehaviourRegistryResourceName();
 	}
 
 	void releaseRegistryIfUnused(
@@ -173,7 +179,7 @@ namespace
 
 	bool renderAttachedRegistry(shared_ptr<core::World> const& world,
 		string const& worldFilepath,
-		AgentBehaviourRegistryPathSelector const& selectPackageDirectory)
+		AgentBehaviourRegistryResourceNames const& resources)
 	{
 		auto const& registry = world->getAgentBehaviourRegistry();
 		if (!registry)
@@ -186,46 +192,52 @@ namespace
 			string selectDiagnostic;
 			auto canSelect = canSelectAgentBehaviourRegistry(
 				world, worldFilepath, &selectDiagnostic);
-			if (!selectPackageDirectory)
+			if (!resources)
 			{
 				canSelect = false;
-				selectDiagnostic = "Registry package selection is unavailable";
+				selectDiagnostic = "Registry Resource selection is unavailable";
 			}
-			ImGui::BeginDisabled(!canSelect);
-			auto const repairClicked = ImGui::Button("Repair or replace registry");
-			ImGui::EndDisabled();
-			if (!canSelect && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-				ImGui::SetTooltip("%s", selectDiagnostic.c_str());
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!world->isSimulationPaused());
-			auto const detachClicked = ImGui::Button("Detach registry");
-			ImGui::EndDisabled();
-
-			if (repairClicked)
+			auto applyCandidate = [&](string const& candidate)
 			{
 				try
 				{
-					auto selectedPath = selectPackageDirectory();
-					if (selectedPath)
-					{
-						string diagnostic;
-						if (commitAgentBehaviourRegistrySwitch(world,
-							worldFilepath, *selectedPath, diagnostic)) return true;
-						if (world->getAgentBehaviourAssignmentCount() != 0
-							&& diagnostic.find("confirmed destructive action") != string::npos)
-							requestAgentBehaviourRegistrySwitch(world,
-								worldFilepath, *selectedPath);
-						else if (!diagnostic.empty())
-							core::addLogMessage("Behaviours", 0,
-								core::LogLevel::Warning, diagnostic);
-					}
+					string diagnostic;
+					if (commitAgentBehaviourRegistrySwitch(world,
+						worldFilepath, candidate, diagnostic)) return true;
+					if (world->getAgentBehaviourAssignmentCount() != 0
+						&& diagnostic.find("confirmed destructive action") != string::npos)
+						requestAgentBehaviourRegistrySwitch(world,
+							worldFilepath, candidate);
+					else if (!diagnostic.empty())
+						core::addLogMessage("Behaviours", 0,
+							core::LogLevel::Warning, diagnostic);
 				}
 				catch (exception const& error)
 				{
 					core::addLogMessage("Behaviours", 0,
 						core::LogLevel::Error, error.what());
 				}
+				return false;
+			};
+			ImGui::BeginDisabled(!canSelect);
+			auto const repairOpen = ImGui::BeginCombo(
+				"##repairAgentBehaviourRegistry", "Repair or replace registry");
+			ImGui::EndDisabled();
+			bool repaired = false;
+			if (repairOpen)
+			{
+				for (auto const& candidate : resources())
+					if (ImGui::Selectable(candidate.c_str(), false))
+						if (applyCandidate(candidate)) repaired = true;
+				ImGui::EndCombo();
 			}
+			if (!canSelect && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+				ImGui::SetTooltip("%s", selectDiagnostic.c_str());
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			auto const detachClicked = ImGui::Button("Detach registry");
+			ImGui::EndDisabled();
+			if (repaired) return true;
 			if (detachClicked)
 			{
 				if (world->getAgentBehaviourAssignmentCount() != 0)
@@ -243,7 +255,7 @@ namespace
 
 		ImGui::TextUnformatted("Agent behaviour registry package");
 		ImGui::SameLine();
-		ImGui::Text("%s", world->getAgentBehaviourRegistryPackageName().c_str());
+		ImGui::Text("%s", world->getAgentBehaviourRegistryResourceName().c_str());
 		ImGui::TextDisabled("UUID %s", registry->getUuid().c_str());
 		ImGui::TextDisabled("Package revision %llu",
 			static_cast<unsigned long long>(registry->getPackageRevision()));
@@ -258,42 +270,51 @@ namespace
 		string switchDiagnostic;
 		auto canSwitch = canSelectAgentBehaviourRegistry(
 			world, worldFilepath, &switchDiagnostic);
-		if (!selectPackageDirectory)
+		if (!resources)
 		{
 			canSwitch = false;
-			switchDiagnostic = "Registry package selection is unavailable";
+			switchDiagnostic = "Registry Resource selection is unavailable";
 		}
+		auto switchCandidate = [&](string const& candidate)
+		{
+			try
+			{
+				string diagnostic;
+				if (commitAgentBehaviourRegistrySwitch(world, worldFilepath,
+					candidate, diagnostic)) return true;
+				if (world->getAgentBehaviourAssignmentCount() != 0
+					&& diagnostic.find("confirmed destructive action") != string::npos)
+					requestAgentBehaviourRegistrySwitch(world,
+						worldFilepath, candidate);
+				else if (!diagnostic.empty())
+					core::addLogMessage("Behaviours", 0, core::LogLevel::Warning, diagnostic);
+			}
+			catch (exception const& error)
+			{
+				core::addLogMessage("Behaviours", 0, core::LogLevel::Error, error.what());
+			}
+			return false;
+		};
 		ImGui::BeginDisabled(!canSwitch);
-		auto const switchClicked = ImGui::Button("Switch registry");
+		auto const switchOpen = ImGui::BeginCombo(
+			"##switchAgentBehaviourRegistry", "Switch registry");
 		ImGui::EndDisabled();
+		bool switched = false;
+		if (switchOpen)
+		{
+			for (auto const& candidate : resources())
+				if (ImGui::Selectable(candidate.c_str(),
+					candidate == world->getAgentBehaviourRegistryResourceName()))
+					if (switchCandidate(candidate)) switched = true;
+			ImGui::EndCombo();
+		}
 		if (!canSwitch && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 			ImGui::SetTooltip("%s", switchDiagnostic.c_str());
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!world->isSimulationPaused());
 		auto const detachClicked = ImGui::Button("Detach registry");
 		ImGui::EndDisabled();
-
-		if (switchClicked)
-		{
-			optional<string> selectedPath;
-			try { selectedPath = selectPackageDirectory(); }
-			catch (exception const& error)
-			{
-				core::addLogMessage("Behaviours", 0, core::LogLevel::Error, error.what());
-			}
-			if (selectedPath)
-			{
-				string diagnostic;
-				if (commitAgentBehaviourRegistrySwitch(world, worldFilepath,
-					*selectedPath, diagnostic)) return true;
-				if (world->getAgentBehaviourAssignmentCount() != 0
-					&& diagnostic.find("confirmed destructive action") != string::npos)
-					requestAgentBehaviourRegistrySwitch(world,
-						worldFilepath, *selectedPath);
-				else if (!diagnostic.empty())
-					core::addLogMessage("Behaviours", 0, core::LogLevel::Warning, diagnostic);
-			}
-		}
+		if (switched) return true;
 		if (detachClicked)
 		{
 			if (world->getAgentBehaviourAssignmentCount() != 0)
@@ -574,7 +595,7 @@ bool commitAgentBehaviourRegistryDetach(
 	}
 	try
 	{
-		auto const packageName = world->getAgentBehaviourRegistryPackageName();
+		auto const packageName = world->getAgentBehaviourRegistryResourceName();
 		auto registry = world->getAgentBehaviourRegistry();
 		world->detachAgentBehaviourRegistry();
 		commitDocumentEdit(std::move(undo));
@@ -609,7 +630,7 @@ bool commitAgentBehaviourRegistryDetachClearingAssignments(
 	}
 	try
 	{
-		auto const packageName = world->getAgentBehaviourRegistryPackageName();
+		auto const packageName = world->getAgentBehaviourRegistryResourceName();
 		auto registry = world->getAgentBehaviourRegistry();
 		world->detachAgentBehaviourRegistryAndClearAssignments();
 		commitDocumentEdit(std::move(undo));
@@ -649,13 +670,13 @@ bool commitAgentBehaviourRegistrySwitch(
 		auto previousRegistry = previouslyAttached
 			? world->getAgentBehaviourRegistry() : nullptr;
 		auto const previousPackage = world->hasAgentBehaviourRegistryReference()
-			? world->getAgentBehaviourRegistryPackageName() : string{};
+			? world->getAgentBehaviourRegistryResourceName() : string{};
 		auto const previousUuid = world->hasAgentBehaviourRegistryReference()
 			? world->getExpectedAgentBehaviourRegistryUuid() : string{};
 		auto registry = core::selectAndAttachAgentBehaviourRegistry(
 			*world, worldFilepath, packageDirectory);
 		auto const referenceChanged
-			= world->getAgentBehaviourRegistryPackageName() != previousPackage
+			= world->getAgentBehaviourRegistryResourceName() != previousPackage
 				|| world->getExpectedAgentBehaviourRegistryUuid() != previousUuid;
 		if (!referenceChanged && previouslyAttached)
 		{
@@ -670,7 +691,7 @@ bool commitAgentBehaviourRegistrySwitch(
 		core::addLogMessage("Behaviours", 0, core::LogLevel::Info,
 			string(referenceChanged ? "Switched to" : "Recovered")
 				+ " Agent behaviour registry package "
-				+ world->getAgentBehaviourRegistryPackageName()
+				+ world->getAgentBehaviourRegistryResourceName()
 				+ " (" + registry->getUuid() + ")");
 		return true;
 	}
@@ -708,7 +729,7 @@ bool commitAgentBehaviourRegistrySwitchClearingAssignments(
 		resetBehavioursPanelState();
 		core::addLogMessage("Behaviours", 0, core::LogLevel::Info,
 			"Cleared all Agent behaviour assignments and configurations, then switched to "
-				+ world->getAgentBehaviourRegistryPackageName()
+				+ world->getAgentBehaviourRegistryResourceName()
 				+ " (" + registry->getUuid() + ")");
 		return true;
 	}
@@ -1206,12 +1227,12 @@ bool canSelectAgentBehaviourRegistry(
 
 bool renderBehavioursPanel(shared_ptr<core::World> const& world,
 	string const& worldFilepath,
-	AgentBehaviourRegistryPathSelector const& selectPackageDirectory)
+	AgentBehaviourRegistryResourceNames const& resources)
 {
 	if (world->hasAgentBehaviourRegistryReference())
 	{
 		auto const changed = renderAttachedRegistry(
-			world, worldFilepath, selectPackageDirectory);
+			world, worldFilepath, resources);
 		return renderBehaviourDeleteConfirmation(
 			world->getAgentBehaviourRegistry())
 			|| renderRegistryChangeConfirmation() || changed;
@@ -1231,17 +1252,25 @@ bool renderBehavioursPanel(shared_ptr<core::World> const& world,
 	string selectDiagnostic;
 	auto canSelect = canSelectAgentBehaviourRegistry(
 		world, worldFilepath, &selectDiagnostic);
-	if (!selectPackageDirectory)
+	if (!resources)
 	{
 		canSelect = false;
-		selectDiagnostic = "Registry package selection is unavailable";
+		selectDiagnostic = "Registry Resource selection is unavailable";
 	}
 	ImGui::BeginDisabled(!canSelect);
-	auto const selectClicked = ImGui::Button("Select existing registry");
+	auto const selectOpen = ImGui::BeginCombo(
+		"##selectAgentBehaviourRegistry", "Select existing registry");
 	ImGui::EndDisabled();
+	optional<string> selectedPath;
+	if (selectOpen)
+	{
+		for (auto const& candidate : resources())
+			if (ImGui::Selectable(candidate.c_str(), false)) selectedPath = candidate;
+		ImGui::EndCombo();
+	}
 	if (!canSelect && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 		ImGui::SetTooltip("%s", selectDiagnostic.c_str());
-	if (!createClicked && !selectClicked) return false;
+	if (!createClicked && !selectedPath) return false;
 
 	try
 	{
@@ -1254,13 +1283,11 @@ bool renderBehavioursPanel(shared_ptr<core::World> const& world,
 			commitDocumentEdit(std::move(undo));
 			core::addLogMessage("Behaviours", 0, core::LogLevel::Info,
 				"Created Agent behaviour registry package "
-					+ world->getAgentBehaviourRegistryPackageName()
+					+ world->getAgentBehaviourRegistryResourceName()
 					+ " (" + registry->getUuid() + ")");
 			return true;
 		}
 
-		auto selectedPath = selectPackageDirectory();
-		if (!selectedPath) return false;
 		string diagnostic;
 		auto const changed = commitAgentBehaviourRegistrySwitch(world, worldFilepath,
 			*selectedPath, diagnostic);

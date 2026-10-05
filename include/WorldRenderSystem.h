@@ -2,6 +2,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "imgui/imgui.h"
 
@@ -20,3 +23,14 @@ void destroyWorldRenderSystem();
 enum class WorldCanvas { World, LocationPlan };
 std::uint32_t renderWorldCommands(WorldDrawList const& commands,
 	ImVec2 canvasPosition, ImVec2 canvasSize, WorldCanvas canvas = WorldCanvas::World);
+
+// Application Resource inventory used by the World panel's catalogue
+// selectors. Returns the declared Resource names of one type, alphabetically.
+// `type` is "FurnitureCatalogue", "AgentTagRegistry", or
+// "AgentBehaviourRegistry".
+std::vector<std::string> applicationResourceNames(std::string const& type);
+
+// Returns the manifest source (file or package directory) for a named Resource
+// of one type, or nullopt when the Resource is unknown.
+std::optional<std::filesystem::path> applicationResourceSource(
+	std::string const& type, std::string const& name);

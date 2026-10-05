@@ -126,7 +126,7 @@ namespace
 		require(commitAgentTagRegistrySwitch(world, fixture.worldPath.string(),
 			fixture.replacementPath.string(), diagnostic),
 			"An unused registry did not switch directly: " + diagnostic);
-		require(world->getAgentTagRegistryFilename() == "replacement.tags.yaml"
+		require(world->getAgentTagRegistryResourceName() == "replacement.tags.yaml"
 			&& world->getAgentTagRegistry()->getUuid() != sourceUuid
 			&& gWorldDocumentHistory.undoCount() == 1
 			&& gWorldDocumentHistory.isModified(),
@@ -135,7 +135,7 @@ namespace
 			&& world->getExpectedAgentTagRegistryUuid() == sourceUuid,
 			"Undo did not restore the original unused registry reference");
 		require(restoreWorldSnapshot(world, fixture.worldPath, true)
-			&& world->getAgentTagRegistryFilename() == "replacement.tags.yaml",
+			&& world->getAgentTagRegistryResourceName() == "replacement.tags.yaml",
 			"Redo did not restore the direct registry switch");
 
 		gWorldDocumentHistory.clear();
@@ -150,7 +150,7 @@ namespace
 			&& readText(fixture.replacementPath) == replacementText,
 			"Detaching deleted, renamed, or rewrote a registry file");
 		require(restoreWorldSnapshot(world, fixture.worldPath, false)
-			&& world->getAgentTagRegistryFilename() == "replacement.tags.yaml",
+			&& world->getAgentTagRegistryResourceName() == "replacement.tags.yaml",
 			"Undo did not reattach the directly detached registry");
 	}
 
@@ -218,7 +218,7 @@ namespace
 			fixture.worldPath.string(), fixture.replacementPath.string());
 		require(confirmPendingAgentTagRegistryChange(diagnostic),
 			"The confirmed destructive registry switch failed: " + diagnostic);
-		require(fixture.world->getAgentTagRegistryFilename()
+		require(fixture.world->getAgentTagRegistryResourceName()
 				== "replacement.tags.yaml"
 			&& fixture.world->getExpectedAgentTagRegistryUuid() != sourceUuid
 			&& fixture.world->getAgentTagAssignmentCount() == 0

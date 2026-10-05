@@ -670,7 +670,11 @@ namespace core
 		// Path destination identity in 47.
 		// Version 50 combines Furniture and Dumbwaiter authored state.
 		// Version 52 adds authored Access panel speed overrides.
-		serializer.writeUint32("version", 54);
+		// Version 55 stores Furniture, Agent tag registry, and Agent behaviour
+		// registry references as application Resource names (ADR 0010) rather
+		// than adjacent file basenames. Pre-55 documents that still carry a
+		// filename/package are read as legacy names for compatibility.
+		serializer.writeUint32("version", 55);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -679,7 +683,7 @@ namespace core
 		if (mFurnitureCatalogue)
 		{
 			serializer.beginMap("furnitureCatalogue");
-			serializer.writeString("filename", mFurnitureCatalogueFilename);
+			serializer.writeString("resource", mFurnitureCatalogueResourceName);
 			serializer.writeString("expectedUuid", mFurnitureCatalogue->uuid());
 			serializer.endMap();
 		}
@@ -721,7 +725,7 @@ namespace core
 		if (mAgentTagRegistryReference)
 		{
 			serializer.beginMap("agentTagRegistry");
-			serializer.writeString("filename", mAgentTagRegistryReference->filename);
+			serializer.writeString("resource", mAgentTagRegistryReference->resourceName);
 			serializer.writeString("expectedUuid", mAgentTagRegistryReference->expectedUuid);
 			serializer.endMap();
 		}
@@ -729,7 +733,7 @@ namespace core
 		if (mAgentBehaviourRegistryReference)
 		{
 			serializer.beginMap("agentBehaviourRegistry");
-			serializer.writeString("package", mAgentBehaviourRegistryReference->packageName);
+			serializer.writeString("resource", mAgentBehaviourRegistryReference->resourceName);
 			serializer.writeString("expectedUuid", mAgentBehaviourRegistryReference->expectedUuid);
 			serializer.endMap();
 		}
@@ -1505,7 +1509,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 54)
+		if (version < 1 || version > 55)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1517,7 +1521,7 @@ namespace core
 			? "levelsHigh" : "decksHigh");
 
 		std::shared_ptr<const FurnitureCatalogue> furnitureCatalogue;
-		std::string furnitureFilename;
+		std::string furnitureResourceName;
 		// Schemas 43-49 were emitted independently by the Furniture and
 		// Chamber/Dumbwaiter branches, so either identity field may be absent.
 		auto nextFurnitureId = version >= 50 || (version >= 43 && serializer.hasField("nextFurnitureId"))
@@ -1526,16 +1530,26 @@ namespace core
 		{
 			if (version < 43) throw SerializationException("Furniture requires World schema 43 or later");
 			serializer.beginMap("furnitureCatalogue");
-			furnitureFilename = serializer.readString("filename");
+			furnitureResourceName = serializer.hasField("resource")
+				? serializer.readString("resource") : serializer.readString("filename");
 			auto expectedUuid = serializer.readString("expectedUuid");
 			serializer.endMap();
-			filesystem::path path(furnitureFilename);
-			if (furnitureFilename.empty() || path.has_parent_path() || !FurnitureCatalogue::filenameIsValid(furnitureFilename))
-				throw SerializationException("Furniture catalogue reference must be a .furniture.lua basename; YAML Furniture requires conversion to Lua");
+			filesystem::path path(furnitureResourceName);
+			if (furnitureResourceName.empty() || path.is_absolute() || path.has_parent_path()
+				|| path.filename().string() != furnitureResourceName)
+				throw SerializationException("Furniture catalogue reference must be a Resource name");
 			furnitureCatalogue = workData.furnitureCatalogue ? workData.furnitureCatalogue : mFurnitureCatalogue;
-			if ((!furnitureCatalogue || furnitureCatalogue->uuid() != expectedUuid) && !workData.documentDirectory.empty())
-				furnitureCatalogue = FurnitureCatalogue::load(workData.documentDirectory / path);
-			if (!furnitureCatalogue) throw SerializationException("Missing Furniture catalogue dependency: " + furnitureFilename);
+			if (furnitureCatalogue && furnitureCatalogue->uuid() != expectedUuid) furnitureCatalogue.reset();
+			if (!furnitureCatalogue)
+			{
+				auto source = resolveCatalogSource("FurnitureCatalogue", furnitureResourceName);
+				if (source.empty() && !workData.documentDirectory.empty())
+					source = workData.documentDirectory / path;
+				std::error_code error;
+				if (!source.empty() && filesystem::is_regular_file(source, error) && !error)
+					furnitureCatalogue = FurnitureCatalogue::load(source);
+			}
+			if (!furnitureCatalogue) throw SerializationException("Missing Furniture catalogue dependency: " + furnitureResourceName);
 			if (furnitureCatalogue->uuid() != expectedUuid)
 				throw SerializationException("Furniture catalogue UUID mismatch: expected " + expectedUuid + ", found " + furnitureCatalogue->uuid());
 		}
@@ -1589,17 +1603,17 @@ namespace core
 		if (version >= 10 && serializer.hasField("agentTagRegistry"))
 		{
 			serializer.beginMap("agentTagRegistry");
-			auto filename = serializer.readString("filename");
+			auto resourceName = serializer.hasField("resource")
+				? serializer.readString("resource") : serializer.readString("filename");
 			auto expectedUuid = serializer.readString("expectedUuid");
 			serializer.endMap();
 
-			filesystem::path const path(filename);
-			if (filename.empty() || path.is_absolute() || path.has_parent_path()
-				|| path.filename().string() != filename
-				|| !filename.ends_with(".tags.yaml"))
+			filesystem::path const path(resourceName);
+			if (resourceName.empty() || path.is_absolute() || path.has_parent_path()
+				|| path.filename().string() != resourceName)
 			{
 				throw SerializationException(
-					"An Agent tag registry reference must be a .tags.yaml basename");
+					"An Agent tag registry reference must be a Resource name");
 			}
 			if (!AgentTagRegistry::uuidIsValid(expectedUuid))
 			{
@@ -1607,24 +1621,25 @@ namespace core
 					"The expected Agent tag registry UUID is invalid");
 			}
 			agentTagRegistryReference = AgentTagRegistryReference{
-				std::move(filename), std::move(expectedUuid) };
+				std::move(resourceName), std::move(expectedUuid) };
 		}
 
 		optional<AgentBehaviourRegistryReference> agentBehaviourRegistryReference;
 		if (version >= 12 && serializer.hasField("agentBehaviourRegistry"))
 		{
 			serializer.beginMap("agentBehaviourRegistry");
-			auto packageName = serializer.readString("package");
+			auto resourceName = serializer.hasField("resource")
+				? serializer.readString("resource") : serializer.readString("package");
 			auto expectedBehaviourUuid = serializer.readString("expectedUuid");
 			serializer.endMap();
 
-			filesystem::path const packagePath(packageName);
-			if (packageName.empty() || packagePath.is_absolute() || packagePath.has_parent_path()
-				|| packagePath.filename().string() != packageName
-				|| !packageName.ends_with(".behaviours"))
+			filesystem::path const resourcePath(resourceName);
+			if (resourceName.empty() || resourcePath.is_absolute()
+				|| resourcePath.has_parent_path()
+				|| resourcePath.filename().string() != resourceName)
 			{
 				throw SerializationException(
-					"An Agent behaviour registry reference must be a .behaviours package directory basename");
+					"An Agent behaviour registry reference must be a Resource name");
 			}
 			if (!AgentBehaviourRegistry::uuidIsValid(expectedBehaviourUuid))
 			{
@@ -1632,7 +1647,7 @@ namespace core
 					"The expected Agent behaviour registry UUID is invalid");
 			}
 			agentBehaviourRegistryReference = AgentBehaviourRegistryReference{
-				std::move(packageName), std::move(expectedBehaviourUuid) };
+				std::move(resourceName), std::move(expectedBehaviourUuid) };
 		}
 
 		auto const layerCount = serializer.readUint32("layers", true, 2);
@@ -2200,7 +2215,7 @@ namespace core
 			World candidate(name, cellsWide, levelsHigh);
 			while (candidate.getLayerCount() < layerCount) candidate.addLayer();
 			candidate.mFurnitureCatalogue = furnitureCatalogue;
-			candidate.mFurnitureCatalogueFilename = furnitureFilename;
+			candidate.mFurnitureCatalogueResourceName = furnitureResourceName;
 			candidate.mDeserializingConstruction = true;
 			for (auto& record : records)
 			{
@@ -2280,7 +2295,7 @@ namespace core
 		mNextMarkerId = nextMarkerId;
 		mNextFurnitureId = nextFurnitureId;
 		mFurnitureCatalogue = std::move(furnitureCatalogue);
-		mFurnitureCatalogueFilename = std::move(furnitureFilename);
+		mFurnitureCatalogueResourceName = std::move(furnitureResourceName);
 		mActionRegistry = std::move(actionRegistry);
 		mActionRegistryFilename = std::move(actionFilename);
 		mMarkerActions = std::move(markerActions);
@@ -2872,7 +2887,7 @@ namespace core
 		for (uint32_t layer = 2; layer < getLayerCount(); ++layer)
 			candidate->setLayerName(layer, mLayerNames[layer]);
 		candidate->mFurnitureCatalogue = mFurnitureCatalogue;
-		candidate->mFurnitureCatalogueFilename = mFurnitureCatalogueFilename;
+		candidate->mFurnitureCatalogueResourceName = mFurnitureCatalogueResourceName;
 		candidate->mActionRegistry = mActionRegistry;
 		candidate->mActionRegistryFilename = mActionRegistryFilename;
 		candidate->mMarkerActions = mMarkerActions;

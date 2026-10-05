@@ -236,7 +236,7 @@ namespace
 		auto failedWorld = failureDirectory / "failed.world";
 		auto registryBeforeFailure = reopened->getAgentBehaviourRegistry();
 		auto const packageNameBeforeFailure
-			= reopened->getAgentBehaviourRegistryPackageName();
+			= reopened->getAgentBehaviourRegistryResourceName();
 		auto const expectedUuidBeforeFailure
 			= reopened->getExpectedAgentBehaviourRegistryUuid();
 		auto const worldWasModified = reopened->isModified();
@@ -251,7 +251,7 @@ namespace
 			failureDirectory / copiedPackage.filename())
 			&& std::filesystem::is_directory(failedWorld)
 			&& reopened->getAgentBehaviourRegistry() == registryBeforeFailure
-			&& reopened->getAgentBehaviourRegistryPackageName()
+			&& reopened->getAgentBehaviourRegistryResourceName()
 				== packageNameBeforeFailure
 			&& reopened->getExpectedAgentBehaviourRegistryUuid()
 				== expectedUuidBeforeFailure

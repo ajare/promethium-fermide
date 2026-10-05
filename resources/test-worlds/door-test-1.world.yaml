@@ -8,10 +8,10 @@ layerNames:
   - Layer 0
   - Layer 1
 agentTagRegistry:
-  filename: test.tags.yaml
+  resource: TestAgentTags
   expectedUuid: 5e9a3a89-0519-4813-ae6d-3ca7362028de
 agentBehaviourRegistry:
-  package: door-test-1.behaviours
+  resource: DoorTestBehaviours
   expectedUuid: bf712409-4e4c-40c9-b0ab-72f40e22b2fd
 construction:
   - type: corridor

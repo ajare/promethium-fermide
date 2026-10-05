@@ -102,8 +102,10 @@ void resetBehavioursPanelState();
 void forgetAgentBehaviourRegistryDocument(
 	std::shared_ptr<core::AgentBehaviourRegistry> const& registry);
 
-using AgentBehaviourRegistryPathSelector
-	= std::function<std::optional<std::string>()>;
+// Lists the application Resource names (ADR 0010) the panel's registry Combo
+// offers. Platform resources stay in the GUI; headless tests supply names.
+using AgentBehaviourRegistryResourceNames
+	= std::function<std::vector<std::string>()>;
 
 // Renders attached-registry identity and behaviour definitions with
 // diagnostics, plus create/select/detach/switch/reload actions. Returns true
@@ -111,4 +113,4 @@ using AgentBehaviourRegistryPathSelector
 // edit; callers must not persist it implicitly.
 bool renderBehavioursPanel(std::shared_ptr<core::World> const& world,
 	std::string const& worldFilepath,
-	AgentBehaviourRegistryPathSelector const& selectPackageDirectory = {});
+	AgentBehaviourRegistryResourceNames const& resources = {});

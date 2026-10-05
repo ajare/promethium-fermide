@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "core/WorldDocument.h"
+#include "ManifestResourceResolver.h"
 #include "NonInteractiveProcess.h"
 
 namespace smoke
@@ -30,14 +32,20 @@ namespace smoke
 			if (std::filesystem::create_directory(candidate))
 			{
 				temporaryRoot_ = std::move(candidate);
-				return;
+				break;
 			}
 		}
-		throw Failure("Cannot create a unique smoke temporary root");
+		if (temporaryRoot_.empty())
+			throw Failure("Cannot create a unique smoke temporary root");
+
+		auto const manifest = std::filesystem::path(PF_SMOKE_SOURCE_ROOT)
+			/ "resources/Resources.yaml";
+		headless_support::installManifestCatalogResolver(manifest);
 	}
 
 	Context::~Context()
 	{
+		core::setCatalogResourceResolver({});
 		if (cleanupAttempted_) return;
 		try { cleanup(); }
 		catch (std::exception const& error)

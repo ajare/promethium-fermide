@@ -35,6 +35,7 @@
 
 #include "ApplicationResources.h"
 #include "core/Furniture.h"
+#include "core/WorldDocument.h"
 #include "ObjectTileset.h"
 #include "SectorTileset.h"
 #include "WorldDrawList.h"
@@ -190,6 +191,38 @@ namespace
 		std::vector<WorldDrawList::Text> texts;
 	};
 
+	// Maps a World's catalogue Resource name to the manifest source declared in
+	// Resources.yaml, so core's World loader can resolve Resource references
+	// without depending on the resource system.
+	class CatalogResolver final : public core::CatalogResourceResolver
+	{
+	public:
+		explicit CatalogResolver(resources::ResourceManager& manager)
+			: mManager(manager) {}
+
+		std::filesystem::path catalogSource(std::string const& type,
+			std::string const& resourceName) const override
+		{
+			for (auto const& resource : mManager.getResourcesByType(type))
+			{
+				if (!resource || resource->getName() != resourceName) continue;
+				auto source = std::filesystem::path(resource->getSource());
+				if (!source.is_absolute())
+					source = std::filesystem::path(resource->getDefinitionFile()).parent_path() / source;
+				// The manifest names a behaviour package by its inner manifest file;
+				// the file-based loader expects the package directory.
+				if (type == "AgentBehaviourRegistry"
+					&& std::filesystem::is_regular_file(source))
+					source = source.parent_path();
+				return source;
+			}
+			return {};
+		}
+
+	private:
+		resources::ResourceManager& mManager;
+	};
+
 	class WorldRenderSystem
 	{
 		struct Slot
@@ -232,6 +265,8 @@ namespace
 			mResources->addResourceLocation("Directory", resourceDirectory.string(),
 				"Resources.yaml");
 			mResources->scanLocations();
+			mCatalogResolver = std::make_shared<CatalogResolver>(*mResources);
+			core::setCatalogResourceResolver(mCatalogResolver);
 
 			mSectorSet = requireImageSet("SectorAtlas");
 			mObjectSet = requireImageSet("ObjectAtlas");
@@ -265,6 +300,8 @@ namespace
 		~WorldRenderSystem()
 		{
 			core::FurnitureCatalogue::setResourceLoader({});
+			core::setCatalogResourceResolver({});
+			mCatalogResolver.reset();
 			for (auto& slot : mSlots) remove(slot);
 			mSlots.clear();
 			if (mScene)
@@ -387,6 +424,35 @@ namespace
 			setObjectTileset(std::move(objectTiles), reinterpret_cast<ImTextureID>(1));
 		}
 
+	public:
+		std::vector<std::string> resourceNames(std::string const& type)
+		{
+			std::vector<std::string> names;
+			for (auto const& resource : mResources->getResourcesByType(type))
+				if (resource) names.push_back(resource->getName());
+			std::sort(names.begin(), names.end());
+			names.erase(std::unique(names.begin(), names.end()), names.end());
+			return names;
+		}
+
+		std::filesystem::path resourceSource(std::string const& type,
+			std::string const& name)
+		{
+			for (auto const& resource : mResources->getResourcesByType(type))
+			{
+				if (!resource || resource->getName() != name) continue;
+				auto source = std::filesystem::path(resource->getSource());
+				if (!source.is_absolute())
+					source = std::filesystem::path(resource->getDefinitionFile()).parent_path() / source;
+				if (type == "AgentBehaviourRegistry"
+					&& std::filesystem::is_regular_file(source))
+					source = source.parent_path();
+				return source;
+			}
+			return {};
+		}
+
+	private:
 		mpp::ResourcePtr texture(WorldDrawList::Texture textureKind)
 		{
 			if (textureKind == WorldDrawList::Texture::None) return {};
@@ -592,6 +658,7 @@ namespace
 		std::unique_ptr<mpp::RenderSystem> mRenderSystem;
 		std::unique_ptr<mpp::ResourceManager> mRenderResources;
 		std::unique_ptr<resources::ResourceManager> mResources;
+		std::shared_ptr<CatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mSectorSet;
 		resources::ResourcePtr mObjectSet;
 		// The ResourceManager owns registered resources; this index prevents
@@ -636,4 +703,19 @@ std::uint32_t renderWorldCommands(WorldDrawList const& commands,
 {
 	if (!gSystem) throw std::runtime_error("The World render system is not initialised");
 	return gSystem->render(commands, canvasPosition, canvasSize, canvas);
+}
+
+std::vector<std::string> applicationResourceNames(std::string const& type)
+{
+	if (!gSystem) return {};
+	return gSystem->resourceNames(type);
+}
+
+std::optional<std::filesystem::path> applicationResourceSource(
+	std::string const& type, std::string const& name)
+{
+	if (!gSystem) return std::nullopt;
+	auto source = gSystem->resourceSource(type, name);
+	if (source.empty()) return std::nullopt;
+	return source;
 }

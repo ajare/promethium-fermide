@@ -192,7 +192,7 @@ namespace
 		SavedFixture fixture(context, "same-directory");
 		auto const sourceRegistry = fixture.registry;
 		auto const sourceUuid = sourceRegistry->getUuid();
-		auto const sourceFilename = fixture.world->getAgentTagRegistryFilename();
+		auto const sourceFilename = fixture.world->getAgentTagRegistryResourceName();
 		auto const destination = fixture.temporary.path / "same-directory-copy.world.yaml";
 
 		std::string diagnostic;
@@ -201,7 +201,7 @@ namespace
 			"Same-directory Save As failed: " + diagnostic);
 		require(fixture.world->getAgentTagRegistry() == sourceRegistry
 			&& fixture.world->getExpectedAgentTagRegistryUuid() == sourceUuid
-			&& fixture.world->getAgentTagRegistryFilename() == sourceFilename,
+			&& fixture.world->getAgentTagRegistryResourceName() == sourceFilename,
 			"Same-directory Save As changed the existing registry reference");
 
 		auto reopened = core::loadWorldDocument(destination);
@@ -238,7 +238,7 @@ namespace
 		std::filesystem::create_directory(destinationDirectory);
 		auto const destinationWorld = destinationDirectory / "renamed.world";
 		auto const destinationRegistry = destinationDirectory
-			/ fixture.world->getAgentTagRegistryFilename();
+			/ fixture.world->getAgentTagRegistryResourceName();
 		require(saveWorldDocument({ copiedWorld, destinationWorld.string(),
 			fixture.registryPath.string(), &copiedHistory }, &diagnostic),
 			"Cross-directory Save As failed: " + diagnostic);
@@ -248,8 +248,8 @@ namespace
 			&& copiedRegistry->getUuid() != sourceUuid,
 			"Cross-directory Save As did not attach an independent registry UUID");
 		require(std::filesystem::is_regular_file(destinationRegistry)
-			&& copiedWorld->getAgentTagRegistryFilename()
-				== fixture.world->getAgentTagRegistryFilename()
+			&& copiedWorld->getAgentTagRegistryResourceName()
+				== fixture.world->getAgentTagRegistryResourceName()
 			&& copiedWorld->getExpectedAgentTagRegistryUuid()
 				== copiedRegistry->getUuid(),
 			"The copied World does not reference its adjacent registry copy");
@@ -344,7 +344,7 @@ namespace
 		std::filesystem::create_directory(destinationDirectory);
 		auto const destinationWorld = destinationDirectory / "copy.world.yaml";
 		auto const destinationRegistry = destinationDirectory
-			/ fixture.world->getAgentTagRegistryFilename();
+			/ fixture.world->getAgentTagRegistryResourceName();
 		{
 			std::ofstream registryOutput(destinationRegistry, std::ios::binary);
 			registryOutput << "occupied registry";

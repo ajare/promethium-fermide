@@ -39,6 +39,20 @@
 
 namespace core
 {
+	namespace
+	{
+		// An external registry/catalogue reference is an application Resource name
+		// (ADR 0010), not a file path: a non-empty name with no directory part.
+		void requireCatalogResourceName(std::string const& resourceName, char const* kind)
+		{
+			std::filesystem::path const path(resourceName);
+			if (resourceName.empty() || path.is_absolute() || path.has_parent_path()
+				|| path.filename().string() != resourceName)
+				throw std::invalid_argument(std::string("A ") + kind
+					+ " reference must be a Resource name");
+		}
+	}
+
 
 	using namespace std;
 
@@ -235,11 +249,11 @@ namespace core
 		return mAgentTagRegistry != nullptr;
 	}
 
-	string const& World::getAgentTagRegistryFilename() const
+	string const& World::getAgentTagRegistryResourceName() const
 	{
 		if (!mAgentTagRegistryReference)
 			throw runtime_error("The World has no Agent tag registry reference");
-		return mAgentTagRegistryReference->filename;
+		return mAgentTagRegistryReference->resourceName;
 	}
 
 	string const& World::getExpectedAgentTagRegistryUuid() const
@@ -300,22 +314,15 @@ namespace core
 		return count;
 	}
 
-	void World::attachAgentTagRegistry(string filename,
+	void World::attachAgentTagRegistry(string resourceName,
 		shared_ptr<AgentTagRegistry> registry)
 	{
 		invalidateSimulationSnapshot();
-		filesystem::path const path(filename);
-		if (filename.empty() || path.is_absolute() || path.has_parent_path()
-			|| path.filename().string() != filename
-			|| !filename.ends_with(".tags.yaml"))
-		{
-			throw invalid_argument(
-				"An Agent tag registry reference must be a .tags.yaml basename");
-		}
+		requireCatalogResourceName(resourceName, "Agent tag registry");
 		if (!registry || !AgentTagRegistry::uuidIsValid(registry->getUuid()))
 			throw invalid_argument("Cannot attach an invalid Agent tag registry");
 		if (mAgentTagRegistryReference
-			&& mAgentTagRegistryReference->filename == filename
+			&& mAgentTagRegistryReference->resourceName == resourceName
 			&& mAgentTagRegistryReference->expectedUuid == registry->getUuid()
 			&& mAgentTagRegistry == registry) return;
 		if (getAgentTagAssignmentCount() != 0)
@@ -327,7 +334,7 @@ namespace core
 		if (!agentTagAssignmentsAreValid(*registry, &diagnostic))
 			throw invalid_argument(diagnostic);
 
-		AgentTagRegistryReference replacement{ std::move(filename), registry->getUuid() };
+		AgentTagRegistryReference replacement{ std::move(resourceName), registry->getUuid() };
 		auto const registryChanges = mAgentTagRegistry != registry;
 		if (registryChanges) registry->registerWorld(*this);
 		if (registryChanges && mAgentTagRegistry)
@@ -337,29 +344,22 @@ namespace core
 		modify();
 	}
 
-	void World::attachAgentTagRegistryAndClearAssignments(string filename,
+	void World::attachAgentTagRegistryAndClearAssignments(string resourceName,
 		shared_ptr<AgentTagRegistry> registry)
 	{
 		invalidateSimulationSnapshot();
-		filesystem::path const path(filename);
-		if (filename.empty() || path.is_absolute() || path.has_parent_path()
-			|| path.filename().string() != filename
-			|| !filename.ends_with(".tags.yaml"))
-		{
-			throw invalid_argument(
-				"An Agent tag registry reference must be a .tags.yaml basename");
-		}
+		requireCatalogResourceName(resourceName, "Agent tag registry");
 		if (!registry || !AgentTagRegistry::uuidIsValid(registry->getUuid()))
 			throw invalid_argument("Cannot attach an invalid Agent tag registry");
 		if (mAgentTagRegistryReference
-			&& mAgentTagRegistryReference->filename == filename
+			&& mAgentTagRegistryReference->resourceName == resourceName
 			&& mAgentTagRegistryReference->expectedUuid == registry->getUuid()
 			&& mAgentTagRegistry == registry) return;
 
 		// Construct and register the replacement before changing any authored state.
 		// Everything after registration is non-refusing, so clearing assignments,
 		// clearing samples, and changing namespace commit as one operation.
-		AgentTagRegistryReference replacement{ std::move(filename), registry->getUuid() };
+		AgentTagRegistryReference replacement{ std::move(resourceName), registry->getUuid() };
 		auto const registryChanges = mAgentTagRegistry != registry;
 		if (registryChanges) registry->registerWorld(*this);
 		clearAllAgentTagAssignmentsAndSamples();
@@ -422,18 +422,11 @@ namespace core
 		rebuildRestoredAgentPaths();
 	}
 
-	void World::replaceAgentTagRegistryWithIndependentCopy(string filename,
+	void World::replaceAgentTagRegistryWithIndependentCopy(string resourceName,
 		shared_ptr<AgentTagRegistry> registry)
 	{
 		invalidateSimulationSnapshot();
-		filesystem::path const path(filename);
-		if (filename.empty() || path.is_absolute() || path.has_parent_path()
-			|| path.filename().string() != filename
-			|| !filename.ends_with(".tags.yaml"))
-		{
-			throw invalid_argument(
-				"An Agent tag registry reference must be a .tags.yaml basename");
-		}
+		requireCatalogResourceName(resourceName, "Agent tag registry");
 		if (!mAgentTagRegistry || !mAgentTagRegistryReference)
 			throw invalid_argument("The World has no attached Agent tag registry to copy");
 		if (!registry || !AgentTagRegistry::uuidIsValid(registry->getUuid()))
@@ -449,7 +442,7 @@ namespace core
 		if (!agentTagAssignmentsAreValid(*registry, &diagnostic))
 			throw invalid_argument(diagnostic);
 
-		AgentTagRegistryReference replacement{ std::move(filename), registry->getUuid() };
+		AgentTagRegistryReference replacement{ std::move(resourceName), registry->getUuid() };
 		registry->registerWorld(*this);
 		mAgentTagRegistry->unregisterWorld(*this);
 		mAgentTagRegistryReference = std::move(replacement);
@@ -467,11 +460,11 @@ namespace core
 		return mAgentBehaviourRegistry != nullptr;
 	}
 
-	string const& World::getAgentBehaviourRegistryPackageName() const
+	string const& World::getAgentBehaviourRegistryResourceName() const
 	{
 		if (!mAgentBehaviourRegistryReference)
 			throw runtime_error("The World has no Agent behaviour registry reference");
-		return mAgentBehaviourRegistryReference->packageName;
+		return mAgentBehaviourRegistryReference->resourceName;
 	}
 
 	string const& World::getExpectedAgentBehaviourRegistryUuid() const
@@ -610,24 +603,17 @@ namespace core
 		}
 	}
 
-	void World::attachAgentBehaviourRegistry(string packageName,
+	void World::attachAgentBehaviourRegistry(string resourceName,
 		shared_ptr<AgentBehaviourRegistry> registry)
 	{
 		invalidateSimulationSnapshot();
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before changing its Agent behaviour registry");
-		filesystem::path const path(packageName);
-		if (packageName.empty() || path.is_absolute() || path.has_parent_path()
-			|| path.filename().string() != packageName
-			|| !packageName.ends_with(".behaviours"))
-		{
-			throw invalid_argument(
-				"An Agent behaviour registry reference must be a .behaviours package directory basename");
-		}
+		requireCatalogResourceName(resourceName, "Agent behaviour registry");
 		if (!registry || !AgentBehaviourRegistry::uuidIsValid(registry->getUuid()))
 			throw invalid_argument("Cannot attach an invalid Agent behaviour registry");
 		if (mAgentBehaviourRegistryReference
-			&& mAgentBehaviourRegistryReference->packageName == packageName
+			&& mAgentBehaviourRegistryReference->resourceName == resourceName
 			&& mAgentBehaviourRegistryReference->expectedUuid == registry->getUuid()
 			&& mAgentBehaviourRegistry == registry) return;
 
@@ -660,9 +646,9 @@ namespace core
 				+ (details.empty() ? string{} : ":\n" + details));
 		}
 
-		AgentBehaviourRegistryReference replacement{ packageName, registry->getUuid() };
+		AgentBehaviourRegistryReference replacement{ resourceName, registry->getUuid() };
 		auto const referenceChanges = !mAgentBehaviourRegistryReference
-			|| mAgentBehaviourRegistryReference->packageName != replacement.packageName
+			|| mAgentBehaviourRegistryReference->resourceName != replacement.resourceName
 			|| mAgentBehaviourRegistryReference->expectedUuid != replacement.expectedUuid;
 		auto previousRegistry = mAgentBehaviourRegistry;
 		auto const registryChanges = previousRegistry != registry;
@@ -683,18 +669,13 @@ namespace core
 		if (referenceChanges) modify();
 	}
 
-	void World::attachAgentBehaviourRegistryAndClearAssignments(string packageName,
+	void World::attachAgentBehaviourRegistryAndClearAssignments(string resourceName,
 		shared_ptr<AgentBehaviourRegistry> registry)
 	{
 		invalidateSimulationSnapshot();
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before replacing its Agent behaviour registry");
-		filesystem::path const path(packageName);
-		if (packageName.empty() || path.is_absolute() || path.has_parent_path()
-			|| path.filename().string() != packageName
-			|| !packageName.ends_with(".behaviours"))
-			throw invalid_argument(
-				"An Agent behaviour registry reference must be a .behaviours package directory basename");
+		requireCatalogResourceName(resourceName, "Agent behaviour registry");
 		if (!registry || !AgentBehaviourRegistry::uuidIsValid(registry->getUuid()))
 			throw invalid_argument("Cannot attach an invalid Agent behaviour registry");
 
@@ -719,7 +700,7 @@ namespace core
 			previousRegistry->unregisterWorld(*this);
 		mAgentBehaviourRuntime = std::move(candidateRuntime);
 		mAgentBehaviourRegistryReference = AgentBehaviourRegistryReference{
-			std::move(packageName), registry->getUuid() };
+			std::move(resourceName), registry->getUuid() };
 		mAgentBehaviourRegistry = std::move(registry);
 		mAgentBehaviourDependencyDiagnostic.clear();
 		modify();
@@ -899,7 +880,7 @@ namespace core
 		// old dependency and runtime as well.
 		mAgentBehaviourDependencyDiagnostic = format(
 			"Agent behaviour registry dependency '{}' is unavailable. {} authored assignment{} remain{} unresolved.\n{}",
-			mAgentBehaviourRegistryReference->packageName,
+			mAgentBehaviourRegistryReference->resourceName,
 			countAgentBehaviourAssignments(),
 			countAgentBehaviourAssignments() == 1 ? "" : "s",
 			countAgentBehaviourAssignments() == 1 ? "s" : "",
@@ -908,17 +889,12 @@ namespace core
 	}
 
 	void World::replaceAgentBehaviourRegistryWithIndependentCopy(
-		string packageName, shared_ptr<AgentBehaviourRegistry> registry)
+		string resourceName, shared_ptr<AgentBehaviourRegistry> registry)
 	{
 		invalidateSimulationSnapshot();
 		if (!isSimulationPaused())
 			throw invalid_argument("Pause the World before replacing its Agent behaviour registry with a Save As copy");
-		filesystem::path const path(packageName);
-		if (packageName.empty() || path.is_absolute() || path.has_parent_path()
-			|| path.filename().string() != packageName
-			|| !packageName.ends_with(".behaviours"))
-			throw invalid_argument(
-				"An Agent behaviour registry reference must be a .behaviours package directory basename");
+		requireCatalogResourceName(resourceName, "Agent behaviour registry");
 		if (!mAgentBehaviourRegistry || !registry)
 			throw invalid_argument("Save As requires attached source and copied Agent behaviour registries");
 		if (registry == mAgentBehaviourRegistry
@@ -946,7 +922,7 @@ namespace core
 		mAgentBehaviourRuntime = std::move(candidateRuntime);
 		previous->unregisterWorld(*this);
 		mAgentBehaviourRegistryReference = AgentBehaviourRegistryReference{
-			std::move(packageName), registry->getUuid() };
+			std::move(resourceName), registry->getUuid() };
 		mAgentBehaviourRegistry = std::move(registry);
 		mAgentBehaviourDependencyDiagnostic.clear();
 		modify();

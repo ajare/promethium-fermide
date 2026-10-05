@@ -7,17 +7,17 @@
 
 namespace core
 {
-	void World::attachFurnitureCatalogue(std::string filename,
+	void World::attachFurnitureCatalogue(std::string resourceName,
 		std::shared_ptr<const FurnitureCatalogue> catalogue)
 	{
-		std::filesystem::path path(filename);
-		if (!catalogue || filename.empty() || path.has_parent_path()
-			|| !core::FurnitureCatalogue::filenameIsValid(filename))
-			throw WorldException(this, "Furniture catalogue reference must be a .furniture.lua basename; YAML Furniture requires conversion to Lua");
-		if (!mFurniture.empty() && (filename != mFurnitureCatalogueFilename || catalogue != mFurnitureCatalogue))
+		std::filesystem::path path(resourceName);
+		if (!catalogue || resourceName.empty() || path.is_absolute()
+			|| path.has_parent_path() || path.filename().string() != resourceName)
+			throw WorldException(this, "Furniture catalogue reference must be a Resource name");
+		if (!mFurniture.empty() && (resourceName != mFurnitureCatalogueResourceName || catalogue != mFurnitureCatalogue))
 			throw WorldException(this, "Cannot replace a Furniture catalogue while instances use it");
 		mFurnitureCatalogue = std::move(catalogue);
-		mFurnitureCatalogueFilename = std::move(filename);
+		mFurnitureCatalogueResourceName = std::move(resourceName);
 		modify();
 	}
 

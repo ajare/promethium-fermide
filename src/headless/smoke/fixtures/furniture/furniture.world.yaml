@@ -2,7 +2,7 @@ version: 50
 nextDumbwaiterId: 1
 nextFurnitureId: 3
 furnitureCatalogue:
-  filename: furniture.furniture.lua
+  resource: FurnitureCatalogue
   expectedUuid: 7ad3b31e-c85b-43ac-90ba-359359359359
 name: Untitled
 randomSeed: 0

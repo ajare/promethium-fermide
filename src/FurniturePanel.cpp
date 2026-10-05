@@ -1,5 +1,6 @@
 #include "FurniturePanel.h"
 #include "imgui/imgui.h"
+#include "core/WorldDocument.h"
 #include <cmath>
 
 
@@ -37,19 +38,22 @@ bool selectFurnitureInstance(std::shared_ptr<core::World> const& world, uint64_t
 }
 
 bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
-	std::filesystem::path const& worldPath, std::string const& filename,
+	std::filesystem::path const& worldPath, std::string const& resourceName,
 	std::string& diagnostic, DocumentHistory& history)
 {
 	try
 	{
 		if (!world || worldPath.empty() || !std::filesystem::is_regular_file(worldPath))
 			throw std::runtime_error("Save the World before loading a Furniture catalogue");
-		std::filesystem::path path(filename);
-		if (path.has_parent_path() || filename.empty() || !core::FurnitureCatalogue::filenameIsValid(filename))
-			throw std::runtime_error("Select a .furniture.lua catalogue beside the World; YAML Furniture requires conversion to Lua");
-		auto catalogue = core::FurnitureCatalogue::load(worldPath.parent_path() / path);
+		std::filesystem::path name(resourceName);
+		if (resourceName.empty() || name.is_absolute() || name.has_parent_path()
+			|| name.filename().string() != resourceName)
+			throw std::runtime_error("Select a Furniture catalogue Resource");
+		auto source = core::resolveCatalogSource("FurnitureCatalogue", resourceName);
+		if (source.empty()) source = worldPath.parent_path() / name;
+		auto catalogue = core::FurnitureCatalogue::load(source);
 		auto before = captureDocumentSnapshot(world, history);
-		world->attachFurnitureCatalogue(filename, std::move(catalogue));
+		world->attachFurnitureCatalogue(resourceName, std::move(catalogue));
 		commitDocumentEdit(std::move(before), history);
 		diagnostic.clear(); return true;
 	}
@@ -60,7 +64,10 @@ bool reloadSelectedFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath, std::string& diagnostic)
 {
 	if (!world || worldPath.empty()) { diagnostic = "Save the World before reloading its Furniture catalogue"; return false; }
-	return world->reloadFurnitureCatalogue(worldPath.parent_path() / world->furnitureCatalogueFilename(), &diagnostic);
+	auto const& resourceName = world->furnitureCatalogueResourceName();
+	auto source = core::resolveCatalogSource("FurnitureCatalogue", resourceName);
+	if (source.empty()) source = worldPath.parent_path() / resourceName;
+	return world->reloadFurnitureCatalogue(source, &diagnostic);
 }
 
 bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
@@ -114,7 +121,8 @@ bool deleteSelectedFurniture(std::shared_ptr<core::World> const& world,
 }
 
 void renderFurniturePanel(std::shared_ptr<core::World> const& world,
-	std::filesystem::path const& worldPath, FurnitureCataloguePathChooser const& choosePath,
+	std::filesystem::path const& worldPath,
+	FurnitureCatalogueResourceProvider const& resources,
 	DocumentHistory& history)
 {
 	if (!world || !ImGui::CollapsingHeader("Furniture")) return;
@@ -125,29 +133,25 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 	{
 		displayedWorld = world; displayedPath = worldPath; diagnostic.clear();
 	}
-	auto const& filename = world->furnitureCatalogueFilename();
-	ImGui::Text("Catalogue: %s", filename.empty() ? "None" : filename.c_str());
+	auto const& resourceName = world->furnitureCatalogueResourceName();
+	ImGui::Text("Catalogue: %s", resourceName.empty() ? "None" : resourceName.c_str());
 	std::error_code error;
 	bool saved = !worldPath.empty() && std::filesystem::is_regular_file(worldPath, error);
-	ImGui::BeginDisabled(!saved || !choosePath);
-	if (ImGui::Button("Select Furniture catalogue..."))
-		try
-		{
-			if (auto path = choosePath())
-			{
-				auto chosen = std::filesystem::absolute(std::filesystem::path(*path));
-				auto directory = std::filesystem::absolute(worldPath).parent_path();
-				if (!std::filesystem::equivalent(chosen.parent_path(), directory))
-					throw std::runtime_error("Select a .furniture.lua catalogue beside the World");
-				selectFurnitureCatalogue(world, worldPath, chosen.filename().string(), diagnostic, history);
-			}
-		}
-		catch (std::exception const& failure) { diagnostic = failure.what(); }
+	auto const available = resources ? resources() : std::vector<std::string>{};
+	ImGui::BeginDisabled(!saved || available.empty());
+	if (ImGui::BeginCombo("##furnitureCatalogueResource",
+		resourceName.empty() ? "Select Furniture catalogue..." : resourceName.c_str()))
+	{
+		for (auto const& candidate : available)
+			if (ImGui::Selectable(candidate.c_str(), candidate == resourceName))
+				selectFurnitureCatalogue(world, worldPath, candidate, diagnostic, history);
+		ImGui::EndCombo();
+	}
 	ImGui::EndDisabled();
-	ImGui::BeginDisabled(!saved || filename.empty() || !world->isSimulationPaused());
+	if (!saved) ImGui::TextUnformatted("Save the World before selecting a Furniture catalogue.");
+	ImGui::BeginDisabled(!saved || resourceName.empty() || !world->isSimulationPaused());
 	if (ImGui::Button("Reload Furniture catalogue"))
 		reloadSelectedFurnitureCatalogue(world, worldPath, diagnostic);
 	ImGui::EndDisabled();
-	if (!saved) ImGui::TextUnformatted("Save the World before selecting a Furniture catalogue.");
 	if (!diagnostic.empty()) ImGui::TextWrapped("%s", diagnostic.c_str());
 }
