@@ -383,6 +383,99 @@ bool commitAgentMarkerActionRequest(shared_ptr<core::World> const& world,
 	return true;
 }
 
+bool requestAgentMarkerAction(shared_ptr<core::World> const& world,
+	core::AgentId agent, core::MarkerId marker, std::string_view action, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!world) { diagnostic = "No World selected"; return false; }
+	// An authored request persists its Action through pause and reset and is a
+	// document edit, so it stays behind the pause gate. A live editor request
+	// against a running World is a transient runtime request: it changes no
+	// authored state, exactly as a behaviour-issued request does (#469).
+	if (world->isSimulationPaused())
+		return commitAgentMarkerActionRequest(world, agent, marker, action, diagnostic);
+	auto const result = world->moveAgentToMarker(agent, marker, action);
+	if (result.accepted()) return true;
+	switch (result.status)
+	{
+	case core::MovementCommandStatus::UnavailableAction:
+		diagnostic = "The selected Action is not available at that Marker";
+		break;
+	case core::MovementCommandStatus::UnknownMarker:
+		diagnostic = "The destination Marker is no longer available";
+		break;
+	case core::MovementCommandStatus::UnknownAgent:
+		diagnostic = "The Agent is no longer available";
+		break;
+	case core::MovementCommandStatus::InactiveAgent:
+		diagnostic = "The Agent is inactive";
+		break;
+	case core::MovementCommandStatus::AgentBusy:
+		diagnostic = "The Agent is busy";
+		break;
+	case core::MovementCommandStatus::BehaviourOwned:
+		diagnostic = "The enabled Agent behaviour owns movement";
+		break;
+	case core::MovementCommandStatus::TopologyUnavailable:
+		diagnostic = "The World topology is unavailable";
+		break;
+	case core::MovementCommandStatus::NoOccupiableSector:
+		diagnostic = "The destination cannot be occupied";
+		break;
+	case core::MovementCommandStatus::Accepted:
+	case core::MovementCommandStatus::NoOp:
+	case core::MovementCommandStatus::Superseded:
+		break;
+	}
+	if (diagnostic.empty()) diagnostic = "The movement request was refused";
+	return false;
+}
+
+bool applyAgentPathEdit(shared_ptr<core::World> const& world, core::Agent* agent,
+	shared_ptr<core::Path> path, bool startPathing, bool replaceCurrentPath,
+	std::string_view action, string& diagnostic)
+{
+	diagnostic.clear();
+	if (!world || !agent || !path)
+	{
+		diagnostic = "There is no Path edit to apply";
+		return false;
+	}
+	auto const agentId = world->getAgentId(agent);
+	if (agentId && world->agentBehaviourOwnsMovement(agentId))
+	{
+		diagnostic = "The enabled Agent behaviour owns movement";
+		return false;
+	}
+	if (!path->nodes.empty())
+		if (auto marker = dynamic_pointer_cast<core::Marker>(path->nodes.back().targetVertex->getObject()); marker && startPathing)
+		{
+			// A Marker destination is an Action request, not a bare path. The
+			// World decides whether that is an authored document edit (paused)
+			// or a transient runtime request (running), so a live editor edit
+			// keeps directing the Agent while the simulation runs (#469).
+			return requestAgentMarkerAction(world, agentId, marker->getId(), action, diagnostic);
+		}
+	auto undo = captureDocumentSnapshot(world);
+	if (!undo)
+	{
+		diagnostic = "Cannot capture World history";
+		return false;
+	}
+
+	auto const* requestedPath = path.get();
+	if (replaceCurrentPath) agent->clearPath();
+	agent->setPath(std::move(path), startPathing);
+	if (agent->getPath().get() != requestedPath)
+	{
+		diagnostic = "The Agent refused the new Path";
+		return false;
+	}
+
+	commitDocumentEdit(std::move(undo));
+	return true;
+}
+
 std::string_view renderAgentMovementActionSelector(shared_ptr<const core::World> const& world, core::MarkerId marker)
 {
 	static string selected{core::IdleAction};

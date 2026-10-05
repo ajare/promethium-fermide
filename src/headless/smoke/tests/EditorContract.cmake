@@ -181,6 +181,7 @@ set(editor_names
     markerActions/workflow
     markerActions/behaviourConfiguration
     markerActions/furnitureUseWorkflow
+    markerActions/liveDestinationEdit
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory
     securityScanners/selectionWorkflow

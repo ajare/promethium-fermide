@@ -137,31 +137,19 @@ void setSelectionMode(UISettings::SelectionMode mode);
 namespace
 {
 	std::string gSelectedMovementAction{core::IdleAction};
+
+	void reportEditorError(string const& source, string message);
+
+	// Reports the shared editor seam's diagnostic so a refused request leaves a
+	// visible message rather than only a log line (#469).
 	bool applyAgentPathEdit(shared_ptr<const core::World> const& world, core::Agent* agent,
 		shared_ptr<core::Path> path, bool startPathing, bool replaceCurrentPath)
 	{
-		if (!world || !agent || !path) return false;
-		auto const agentId = world->getAgentId(agent);
-		if (agentId && world->agentBehaviourOwnsMovement(agentId)) return false;
-		if (!path->nodes.empty())
-			if (auto marker = std::dynamic_pointer_cast<core::Marker>(path->nodes.back().targetVertex->getObject()); marker && startPathing)
-			{
-				std::string diagnostic;
-				if (commitAgentMarkerActionRequest(std::const_pointer_cast<core::World>(world), agentId,
-					marker->getId(), gSelectedMovementAction, diagnostic)) return true;
-				core::addLogMessage("Agent Action", 0, core::LogLevel::Warning, diagnostic);
-				return false;
-			}
-		auto undo = captureDocumentSnapshot(world);
-		if (!undo) return false;
-
-		auto const* requestedPath = path.get();
-		if (replaceCurrentPath) agent->clearPath();
-		agent->setPath(std::move(path), startPathing);
-		if (agent->getPath().get() != requestedPath) return false;
-
-		commitDocumentEdit(std::move(undo));
-		return true;
+		std::string diagnostic;
+		if (::applyAgentPathEdit(std::const_pointer_cast<core::World>(world), agent, std::move(path),
+			startPathing, replaceCurrentPath, gSelectedMovementAction, diagnostic)) return true;
+		if (!diagnostic.empty()) reportEditorError("Agent Action", diagnostic);
+		return false;
 	}
 
 	constexpr float PaletteInset{ 16.0f };
@@ -4805,8 +4793,10 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 				auto path = graph->calculatePath(gSelectedAgent, nullptr, gHoveredVertex);
 				if (path)
 				{
-					if (applyAgentPathEdit(world, gSelectedAgent, std::move(path), true, true))
-						endAgentPathSelection();
+					// Whether the request succeeded or was refused, the user is done
+					// choosing: a refusal has already surfaced a visible diagnostic.
+					applyAgentPathEdit(world, gSelectedAgent, std::move(path), true, true);
+					endAgentPathSelection();
 				}
 				else
 				{

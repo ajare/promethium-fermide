@@ -7,7 +7,7 @@
 #include "core/AgentBehaviour.h"
 #include "core/EntityId.h"
 
-namespace core { class World; }
+namespace core { class World; class Agent; struct Path; }
 
 // Public editor transaction seams: validation happens in World before the
 // captured snapshot is committed, so every successful assignment/configuration
@@ -25,6 +25,20 @@ std::string_view renderAgentMovementActionSelector(
 	std::shared_ptr<const core::World> const& world = {}, core::MarkerId marker = {});
 bool commitAgentMarkerActionRequest(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, core::MarkerId marker, std::string_view action, std::string& diagnostic);
+// Issues one editor movement request to a Marker through the seam that matches
+// the World's state: a paused World authors a reset-persistent document request
+// (an undoable edit), while a running World issues a transient runtime request
+// that changes no document state. Returns false with a diagnostic when refused.
+bool requestAgentMarkerAction(std::shared_ptr<core::World> const& world,
+	core::AgentId agent, core::MarkerId marker, std::string_view action, std::string& diagnostic);
+// Applies one editor path edit against the live World. When the edited path
+// ends at a Marker and starts pathing, the destination is an Action request: a
+// paused World authors a reset-persistent document request while a running
+// World issues a transient runtime request. Returns false with a diagnostic
+// when refused.
+bool applyAgentPathEdit(std::shared_ptr<core::World> const& world, core::Agent* agent,
+	std::shared_ptr<core::Path> path, bool startPathing, bool replaceCurrentPath,
+	std::string_view action, std::string& diagnostic);
 
 // Compact picker for the Agents table and full schema-generated editor for the
 // selected-Agent panel. Marker values are always displayed and chosen by name.

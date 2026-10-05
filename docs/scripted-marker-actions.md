@@ -460,3 +460,37 @@ Final build evidence: Release `fde5a62c6cf84b64838f4cee403634d4`, Debug
 `3389068a11f34a7b82ca9d477b512b38`. Final unfiltered CTest evidence: Release
 `347f20ccd3f245d9b0dbd1c3ef714548`, Debug
 `61f4b84b56014925b5623c5455e966a6`.
+
+## Live editor Marker requests (#469)
+
+Before this fix, `applyAgentPathEdit` routed every Marker destination with
+`startPathing` through the paused-only authored request seam, so clicking a
+destination Marker (or using **Path to selected Marker**) while the simulation
+ran was silently refused with only a log warning and left the editor in
+destination-selection mode. Authored request state is reset-persistent and is a
+document edit; a live editor request is not.
+
+The shared editor seam `applyAgentPathEdit` now selects the seam from the
+World's state: a paused World still authors a reset-persistent document request
+through `commitAgentMarkerActionRequest`, while a running World issues a
+transient runtime request through `World::moveAgentToMarker` with the selected
+Action, exactly as a behaviour-issued request does. The runtime path changes no
+authored state and adds no history. A refusal produces a status-specific
+diagnostic, which the editor surfaces visibly; a destination-selection attempt
+then ends whether it succeeded or was refused. `commitAgentMarkerActionRequest`
+itself still refuses while running, so only the authored request requires pause.
+
+The seam lives in `pf-agent-editing` (`requestAgentMarkerAction`,
+`applyAgentPathEdit`) so it is exercisable headlessly; the GUI keeps a thin
+wrapper that reports the returned diagnostic. Documented workflow remains:
+runtime requests are transient and authored requests persist their Action.
+
+Focused public check: Editor `markerActions/liveDestinationEdit`. It covers a
+live destination edit that starts and completes movement with no history or
+dirty state, a refused live edit that returns a diagnostic and touches no
+history, the authored seam's running refusal, and a paused edit that authors one
+undo entry and dirties the document.
+
+Verification: Release default build and unfiltered CTest reported **110 passed,
+0 failed**; the new check also passed in the Debug build of the affected
+targets. `git diff --check` is clean.

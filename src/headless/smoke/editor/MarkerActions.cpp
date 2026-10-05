@@ -302,6 +302,63 @@ namespace
 		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore)
 			&& world->markerActions(marker) == std::vector<std::string>{second,first}, "Registry removal cannot be undone");
 	}
+
+	void liveDestinationEdit(smoke::Context const&)
+	{
+		editor_smoke::State state;
+		using smoke::require;
+		auto world = std::make_shared<core::World>("Live destination", 10, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 10, 1);
+		world->addSectorMarker(room, 0, 8.5f, "Target");
+		world->finishBuild();
+		auto agent = world->createAgent("Visitor", room, 0, 1.5f);
+		auto marker = world->getMarkerIds().front();
+		auto* entity = world->lookupAgent(agent).entity;
+		auto target = world->getGraph()->getClosestVertexInSector(world->getSector(room).get(), { 8.5f, 0.5f });
+		std::string diagnostic;
+
+		// A live destination edit while running is a transient runtime request: it
+		// starts the Agent moving without pausing and authors no document state (#469).
+		require(!world->isSimulationPaused(), "Fixture did not start running");
+		auto const history = gWorldDocumentHistory.undoCount();
+		auto const wasModified = world->isModified();
+		auto path = world->getGraph()->calculatePath(entity, nullptr, target);
+		require(path && applyAgentPathEdit(world, entity, std::move(path), true, true,
+			core::IdleAction, diagnostic), "Live destination edit refused: " + diagnostic);
+		require(gWorldDocumentHistory.undoCount() == history && world->isModified() == wasModified,
+			"Live destination edit authored document state");
+		bool arrived = false;
+		for (unsigned tick = 0; tick < 1800 && !arrived; ++tick)
+		{
+			require(world->advanceTick(), "Live destination journey failed");
+			for (auto const& event : world->consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::DestinationReached)
+				{ arrived = true; require(event.selectedAction == core::IdleAction, "Live destination selected another Action"); }
+		}
+		require(arrived, "Live destination edit never arrived");
+
+		// A refused live edit surfaces a diagnostic and leaves history untouched.
+		auto const refusedHistory = gWorldDocumentHistory.undoCount();
+		path = world->getGraph()->calculatePath(entity, nullptr, target);
+		diagnostic.clear();
+		require(!applyAgentPathEdit(world, entity, std::move(path), true, true,
+			core::UseFurnitureAction, diagnostic) && !diagnostic.empty()
+			&& gWorldDocumentHistory.undoCount() == refusedHistory,
+			"Refused live edit lost its diagnostic or changed history");
+
+		// The authored, reset-persistent request still requires a pause.
+		diagnostic.clear();
+		require(!commitAgentMarkerActionRequest(world, agent, marker, core::IdleAction, diagnostic)
+			&& !diagnostic.empty(), "Authored request was accepted while running");
+		world->pauseSimulation();
+		auto const authoredHistory = gWorldDocumentHistory.undoCount();
+		path = world->getGraph()->calculatePath(entity, nullptr, target);
+		diagnostic.clear();
+		require(applyAgentPathEdit(world, entity, std::move(path), true, true, core::IdleAction, diagnostic)
+			&& gWorldDocumentHistory.undoCount() == authoredHistory + 1,
+			"Paused destination edit did not author document history: " + diagnostic);
+		require(world->isModified(), "Paused destination edit did not dirty the document");
+	}
 }
 
 void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
@@ -310,4 +367,5 @@ void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/workflow",workflow});
 	checks.push_back({"markerActions/behaviourConfiguration",behaviourConfiguration});
 	checks.push_back({"markerActions/furnitureUseWorkflow",furnitureUseWorkflow});
+	checks.push_back({"markerActions/liveDestinationEdit",liveDestinationEdit});
 }
