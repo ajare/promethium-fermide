@@ -30,6 +30,7 @@ int main(int argc, char** argv)
 	registerCrossingBands(checks);
 	registerAirlocks(checks);
 	registerSecurityScanners(checks);
+	registerAccessPanels(checks);
 	registerBoothWindows(checks);
 	registerDumbwaiters(checks);
 	registerFurniture(checks);

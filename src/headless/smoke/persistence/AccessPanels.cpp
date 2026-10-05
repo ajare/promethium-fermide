@@ -37,6 +37,13 @@ namespace persistence
 				}
 			require(count==3 && loaded.getSimulationSnapshot().traversalResources.empty(), "Deleted panel restored or new passage created");
 		};
+		auto actor = world.createAgent("Operator", corridor, 0, 2.5f);
+		auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(world.getSector(corridor)->getObject(edited.index))->getPanel();
+		world.markSaved(); auto authoredYaml = write(world, false), authoredBinary = write(world, true);
+		require(bool(world.requestAccessPanel(panel->getId(), core::AccessPanel::Action::Open, actor)), "Persistence Open request refused");
+		world.resumeSimulation(); world.advanceTick(); world.pauseSimulation();
+		require(panel->getState() == core::AccessPanel::State::Open && !world.isModified()
+			&& write(world, false) == authoredYaml && write(world, true) == authoredBinary, "Temporary Open persisted as authored state");
 		for (bool binary : {false,true})
 		{
 			auto bytes=write(world,binary);
@@ -45,6 +52,11 @@ namespace persistence
 			require(loaded.deserialize(*in,work), "Panel roundtrip refused"); assertPanels(loaded);
 			require(write(loaded,binary)==bytes, "Panel roundtrip changed authored document");
 			loaded.resetSimulation(); loaded.pauseSimulation(); assertPanels(loaded);
+			auto restored = std::static_pointer_cast<const core::AccessPanelSectorObject>(loaded.getSector(corridor)->getObject(edited.index))->getPanel();
+			require(loaded.lookupInteractionPoint(restored->getControl(core::AccessPanel::Action::Open))
+				&& loaded.requestAccessPanel(restored->getId(), core::AccessPanel::Action::Open, actor), "Loaded owned interactions unusable");
+			loaded.resumeSimulation(); loaded.advanceTick();
+			require(restored->getState() == core::AccessPanel::State::Open, "Loaded Agent operation failed");
 		}
 		auto baseline=write(world,false); auto node=YAML::Load(baseline); world.markSaved(); auto graph=world.getGraph();
 		for (auto change : {"widthLow","widthHigh","heightLow","heightHigh","offsetLow","offsetHigh","nan","inf","sum","owner","cell","level","type","duplicate","support","legacy","missing"})

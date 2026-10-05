@@ -43,15 +43,46 @@ bool deleteAccessPanel(std::shared_ptr<core::World> const& world,
 	commitDocumentEdit(std::move(before)); return true;
 }
 
+std::vector<AccessPanelAgentAction> accessPanelAgentActions(core::World const& world, core::AgentId id)
+{
+	std::vector<AccessPanelAgentAction> result;
+	auto actor = world.lookupAgent(id).entity;
+	if (!actor || !actor->getSector()) return result;
+	auto sector = actor->getSector();
+	for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+	{
+		auto object = std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(sector->getObject(i));
+		if (!object) continue;
+		auto panel = object->getPanel();
+		for (auto action : panel->getActions())
+			result.push_back({panel->getId(), action,
+				std::string(action == core::AccessPanel::Action::Open ? "Agent: Open" : "Agent: Close")
+					+ " Access panel at X " + std::to_string(panel->getCellX())
+					+ ", Level offset " + std::to_string(panel->getLevelOffset()),
+				world.canRequestAccessPanel(panel->getId(), action, id)});
+	}
+	return result;
+}
+
+void renderAccessPanelAgentActions(std::shared_ptr<core::World> const& world, core::AgentId actor)
+{
+	for (auto const& entry : accessPanelAgentActions(*world, actor))
+	{
+		ImGui::BeginDisabled(!entry.enabled);
+		if (ImGui::Button(entry.label.c_str())) world->requestAccessPanel(entry.panel, entry.action, actor);
+		ImGui::EndDisabled();
+	}
+}
+
 bool renderAccessPanelPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> const& object)
 {
 	auto wrapper = std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(object);
 	if (!wrapper || indexOf(*world,object) == ~0u) return false;
 	auto panel = wrapper->getPanel();
-	ImGui::TextUnformatted("Access panel: Empty / Closed");
+	ImGui::Text("Access panel: Empty / %s", panel->getState() == core::AccessPanel::State::Open ? "Open" : "Closed");
 	ImGui::Text("Cell X: %u; Level offset: %u", panel->getCellX(), panel->getLevelOffset());
-	ImGui::TextDisabled("Back-surface object; runtime operation and movement are not yet available.");
+	ImGui::TextDisabled("Use Agent Selection actions to Open or Close. Empty exposes no controls.");
 	auto geometry = panel->getGeometry();
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	bool changed = ImGui::InputFloat("Width", &geometry.width);

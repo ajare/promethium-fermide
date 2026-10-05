@@ -14,7 +14,8 @@ namespace
 		editor_smoke::State state; using smoke::require;
 		auto world=std::make_shared<core::World>("Panel editor",8,3);
 		auto room=world->addFacade(0,0,1,6,2); world->addSectorWalkway(room,1,2);
-		world->finishBuild(); world->pauseSimulation(); world->markSaved(); gWorldDocumentHistory.clear();
+		world->finishBuild(); auto actor = world->createAgent("Operator", room, 1, 2.5f);
+		world->pauseSimulation(); world->markSaved(); gWorldDocumentHistory.clear();
 		std::string diagnostic;
 		require(paletteSlotRow(PaletteSlot::AccessPanel)==1 && paletteSlotColumn(PaletteSlot::AccessPanel)!=paletteSlotColumn(PaletteSlot::BoothWindow), "Missing distinct panel palette slot");
 		auto before=captureDocumentSnapshot(world)->yaml; auto graph=world->getGraph();
@@ -45,6 +46,7 @@ namespace
 		auto frame=[&] {
 			ImGui::NewFrame(); ImGui::SetNextWindowPos({10,10}); ImGui::SetNextWindowSize({900,500});
 			ImGui::Begin("Access panel Selection"); if (auto selected=get()) renderAccessPanelPanel(world,selected);
+			renderAccessPanelAgentActions(world, actor);
 			ImGui::End(); ImGui::Render();
 		};
 		auto click=[&](char const* label) {
@@ -68,10 +70,30 @@ namespace
 		core::Vector2 min,max; panel->getSelectionShape(min,max); auto centre=(min+max)*0.5f;
 		std::shared_ptr<const core::SectorObject> selected;
 		require(world->getObjectAtPosition(0,centre.x,centre.y,&selected)==panel && selected==get(),"Zero-width panel not canvas-selectable");
+		world->markSaved(); auto authored = captureDocumentSnapshot(world)->yaml;
+		auto actions = accessPanelAgentActions(*world, actor);
+		require(actions.size() == 1 && actions[0].enabled && actions[0].action == core::AccessPanel::Action::Open, "Agent Open action missing");
+		click(actions[0].label.c_str()); world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		require(panel->getState() == core::AccessPanel::State::Open && !world->isModified()
+			&& captureDocumentSnapshot(world)->yaml == authored && gWorldDocumentHistory.undoCount() == 2, "Runtime Open entered document history");
+		actions = accessPanelAgentActions(*world, actor);
+		require(actions.size() == 1 && actions[0].action == core::AccessPanel::Action::Close, "Empty menu exposes controls other than Close");
+		click(actions[0].label.c_str()); world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		require(panel->getState() == core::AccessPanel::State::Closed && gWorldDocumentHistory.undoCount() == 2, "Close action/history regression");
+		world->setAgentActive(actor, false); actions = accessPanelAgentActions(*world, actor);
+		require(actions.size() == 1 && !actions[0].enabled, "Inactive Agent menu enabled");
+		world->setAgentActive(actor, true);
+		auto staleControl = panel->getControl(core::AccessPanel::Action::Open);
 		auto stale=get(); click("Delete Access panel"); require(!get() && gWorldDocumentHistory.undoCount()==3
 			&& !world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(stale)),"Selection deletion left an orphan");
 		undo(); require(get() && geometry().width==0,"Deletion undo lost panel geometry"); redo(); require(!get(),"Deletion redo retained panel");
 		require(!deleteAccessPanel(world,stale) && gWorldDocumentHistory.undoCount()==3,"Stale Selection deleted a replacement");
+		undo();
+		auto restored = std::static_pointer_cast<const core::AccessPanelSectorObject>(get())->getPanel();
+		require(!world->lookupInteractionPoint(staleControl) && !world->requestInteraction(staleControl, actor)
+			&& world->requestAccessPanel(restored->getId(), core::AccessPanel::Action::Open, actor), "History restored stale/unusable owned interactions");
+		world->resumeSimulation(); world->advanceTick(); world->pauseSimulation();
+		require(restored->getState() == core::AccessPanel::State::Open, "Reconstructed panel operation failed");
 	}
 }
 void editor_smoke::registerAccessPanels(std::vector<smoke::Check>& checks)

@@ -65,7 +65,8 @@ namespace core
 		RequestAirlock,
 		SetBoothWindowState,
 		ToggleBoothWindow,
-		PressDumbwaiterLanding
+		PressDumbwaiterLanding,
+		SetAccessPanelState
 	};
 
 	enum struct DoorOpenLeaseKind
@@ -100,6 +101,7 @@ namespace core
 		uint32_t stopIndex{ ~0u };
 		BoothWindowId boothWindow{};
 		DumbwaiterId dumbwaiter{};
+		AccessPanelId accessPanel{};
 
 		friend bool operator==(DeviceCommand const&, DeviceCommand const&) = default;
 	};
@@ -134,6 +136,7 @@ namespace core
 		std::string mName;
 		BoothWindowId mBoothWindowOwner;
 		DumbwaiterId mDumbwaiterOwner;
+		AccessPanelId mAccessPanelOwner;
 		SectorId mSector;
 		Vector2 mPosition;
 		float mReach{ 0.25f };
@@ -170,6 +173,7 @@ namespace core
 		float getReach() const { return mReach; }
 		// Owned service-device controls never auto-approach; other controls retain their policy.
 		bool requiresReachAtRequest() const { return bool(mBoothWindowOwner) || bool(mDumbwaiterOwner); }
+		AccessPanelId getAccessPanelOwner() const { return mAccessPanelOwner; }
 		DumbwaiterId getDumbwaiterOwner() const { return mDumbwaiterOwner; }
 		BoothWindowId getBoothWindowOwner() const { return mBoothWindowOwner; }
 		uint64_t getDurationTicks() const { return mDurationTicks; }

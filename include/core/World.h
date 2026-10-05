@@ -799,6 +799,8 @@ namespace core
 
 		EntityRegistry<DeviceOperationId, DeviceOperation> mDeviceOperations;
 		// Runtime-only device identities, independent of movement admission.
+		uint64_t mNextAccessPanelId{ 1 };
+		std::map<AccessPanelId, std::weak_ptr<AccessPanel>> mAccessPanels;
 		uint64_t mNextBoothWindowId{ 1 };
 		uint64_t mNextDumbwaiterId{ 1 };
 		std::map<BoothWindowId, std::weak_ptr<BoothWindow>> mBoothWindows;
@@ -2730,6 +2732,11 @@ namespace core
 		EntityRemovalResult removeInteractionPoint(InteractionPointId id);
 
 		InteractionRequestId requestInteraction(InteractionPointId point, AgentId actor);
+		// Editor history reconstructs into a new World; reserve runtime handle ranges before loading.
+		void reserveAccessPanelIdentitiesFrom(World const& previous);
+		std::shared_ptr<const AccessPanel> lookupAccessPanel(AccessPanelId id) const;
+		bool canRequestAccessPanel(AccessPanelId id, AccessPanel::Action action, AgentId actor) const;
+		InteractionRequestId requestAccessPanel(AccessPanelId id, AccessPanel::Action action, AgentId actor);
 
 		EntityLookup<InteractionRequest const> lookupInteractionRequest(InteractionRequestId id) const;
 

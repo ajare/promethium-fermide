@@ -52,6 +52,29 @@ namespace
 					renderSector(world->getSector(owner),layer,LayerRenderStyle::Wireframe,false,ImColor(IM_COL32_WHITE),&wire);
 					require(std::none_of(wire.commands().begin(),wire.commands().end(),[](auto const& c) {return std::holds_alternative<WorldDrawList::Triangle>(c);}),"Wireframe fills panel");
 				}
+				auto actor = world->createAgent("Operator", owner, 0, 3.5f);
+				auto graph = world->getGraph(); auto vertex = graph->getVertexForObject(object);
+				require(bool(world->requestAccessPanel(panel->getId(), core::AccessPanel::Action::Open, actor)), "Render Open request refused");
+				world->advanceTick();
+				require(panel->getState() == core::AccessPanel::State::Open, "Render fixture did not open");
+				for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Wireframe})
+				{
+					WorldDrawList opened({{0,0},{1200,800}});
+					renderSector(world->getSector(owner),layer,style,false,ImColor(IM_COL32_WHITE),&opened);
+					unsigned crosses = 0, openFills = 0;
+					for (auto const& command : opened.commands())
+					{
+						if (auto line = std::get_if<WorldDrawList::Line>(&command); line && line->colour == IM_COL32(100,210,180,255))
+						{
+							++crosses;
+							for (auto p : {line->from, line->to}) require(p.x >= min.x*64-0.001f && p.x <= max.x*64+0.001f
+								&& p.y >= 800-max.y*CORE_LEVEL_HEIGHT_PIXELS-0.001f && p.y <= 800-min.y*CORE_LEVEL_HEIGHT_PIXELS+0.001f, "Open expands bounds");
+						}
+						if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command); triangle && triangle->colour == IM_COL32(22,30,40,255)) ++openFills;
+					}
+					require(crosses == 2 && openFills == (!degenerate && style == LayerRenderStyle::Solid ? 2u : 0u), "Open indistinguishable on canvas/Facade/wireframe");
+				}
+				require(world->getGraph() == graph && graph->getVertexForObject(object) == vertex && panel->getGeometry() == geometry, "Presentation changed geometry/topology");
 				world->pauseSimulation(); require(world->removeAccessPanel(owner,created.index),"Render fixture deletion refused");
 				WorldDrawList after({{0,0},{1200,800}}); renderWorld(world,&after);
 				require(std::none_of(after.commands().begin(),after.commands().end(),[](auto const& c) {

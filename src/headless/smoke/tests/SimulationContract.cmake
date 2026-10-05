@@ -145,6 +145,9 @@ set(core_names
     securityScanners/presenceAndEmptyTimeout
     securityScanners/resetAndLoad
     securityScanners/destinationAndMobilityGates
+    accessPanels/approachAndInstantReach
+    accessPanels/eligibilityChanges
+    accessPanels/staleRequestCleanup
     boothWindows/runtimeTimingAndReversal
     boothWindows/runtimeLifecycle
     boothWindows/typedInteractionActivation

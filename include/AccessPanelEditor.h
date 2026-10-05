@@ -10,5 +10,15 @@ bool editAccessPanel(std::shared_ptr<core::World> const& world,
 	std::string& diagnostic);
 bool deleteAccessPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> const& object);
+struct AccessPanelAgentAction
+{
+	core::AccessPanelId panel;
+	core::AccessPanel::Action action;
+	std::string label;
+	bool enabled;
+};
+std::vector<AccessPanelAgentAction> accessPanelAgentActions(core::World const& world, core::AgentId actor);
+void renderAccessPanelAgentActions(std::shared_ptr<core::World> const& world, core::AgentId actor);
+
 bool renderAccessPanelPanel(std::shared_ptr<core::World> const& world,
 	std::shared_ptr<const core::SectorObject> const& object);

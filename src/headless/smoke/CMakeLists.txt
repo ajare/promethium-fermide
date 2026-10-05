@@ -84,6 +84,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
         simulation/Airlocks.cpp simulation/SecurityScanners.cpp
+        simulation/AccessPanels.cpp
         simulation/BoothWindows.cpp
         simulation/Dumbwaiters.cpp
         simulation/Furniture.cpp

@@ -41,6 +41,7 @@ shared_ptr<core::World> deserializeDocumentSnapshot(
 	filesystem::path const& documentPath)
 {
 	auto loaded = make_shared<core::World>("Loading", 1, 1);
+	if (currentWorld) loaded->reserveAccessPanelIdentitiesFrom(*currentWorld);
 	auto serializer = core::YamlSerializer::fromString(snapshot.yaml);
 	serializer->deserialize();
 	core::SerializationWorkData workData;

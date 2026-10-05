@@ -2690,7 +2690,7 @@ namespace core
 		mConstructionReplayIndex = 0;
 		// Dumbwaiter landing handles are runtime ownership, never replay-order
 		// identities. A rebuild must not let an old button operate a new unit.
-		auto nextPoint = mNextDumbwaiterId > 1 ? mInteractionPoints.nextId() : uint64_t{1};
+		auto nextPoint = (mNextDumbwaiterId > 1 || mNextAccessPanelId > 1) ? mInteractionPoints.nextId() : uint64_t{1};
 		mInteractionPoints = {};
 		mInteractionPoints.restoreNextId(nextPoint);
 		auto const nextInteractionRequest = mInteractionRequests.nextId();
@@ -2700,6 +2700,7 @@ namespace core
 		mDeviceOperations = {};
 		mDeviceOperations.restoreNextId(nextOperation);
 		mBoothWindows.clear(); // Do not reuse handles held by editor/device clients.
+		mAccessPanels.clear(); // Access panel and control IDs remain monotonic across reconstruction.
 		mTraversalResources = {};
 		mTraversalRequests = {};
 		mTraversalPermits = {};

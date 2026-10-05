@@ -1,9 +1,45 @@
 #include "core/World.h"
 #include "core/Exceptions.h"
+#include "core/MobilityProfile.h"
 #include <algorithm>
+#include <cmath>
 
 namespace core
 {
+	void World::reserveAccessPanelIdentitiesFrom(World const& previous)
+	{
+		if (!mSectors.empty() || mBuildFinished || previous.mNextAccessPanelId <= 1) return;
+		mNextAccessPanelId = std::max(mNextAccessPanelId, previous.mNextAccessPanelId);
+		mInteractionPoints.restoreNextId(previous.mInteractionPoints.nextId());
+		mInteractionRequests.restoreNextId(previous.mInteractionRequests.nextId());
+		mDeviceOperations.restoreNextId(previous.mDeviceOperations.nextId());
+	}
+
+	std::shared_ptr<const AccessPanel> World::lookupAccessPanel(AccessPanelId id) const
+	{
+		auto found = mAccessPanels.find(id);
+		return found == mAccessPanels.end() ? nullptr : found->second.lock();
+	}
+
+	bool World::canRequestAccessPanel(AccessPanelId id, AccessPanel::Action action, AgentId actorId) const
+	{
+		auto panel = lookupAccessPanel(id);
+		auto actor = mAgents.find(actorId);
+		if (!panel || !actor || !actor->isActive() || agentForbidsButtons(actor)) return false;
+		auto actions = panel->getActions();
+		if (std::find(actions.begin(), actions.end(), action) == actions.end()) return false;
+		auto point = mInteractionPoints.find(panel->getControl(action));
+		return point && actor->getSector() == mSectors[point->getSector().value - 1].get()
+			&& std::abs(actor->getGlobalPosition().y - point->getPosition().y) < 0.001f
+			&& (actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
+	}
+
+	InteractionRequestId World::requestAccessPanel(AccessPanelId id, AccessPanel::Action action, AgentId actor)
+	{
+		if (!canRequestAccessPanel(id, action, actor)) return {};
+		return requestInteraction(lookupAccessPanel(id)->getControl(action), actor);
+	}
+
 	bool World::validateAccessPanel(uint32_t index, uint32_t level, uint32_t x,
 		AccessPanelGeometry geometry, uint32_t ignored, std::string* diagnostic) const
 	{
@@ -57,6 +93,21 @@ namespace core
 		auto sector = mSectors[index];
 		auto y = sector->getCellY() + level;
 		auto object = std::make_shared<AccessPanelSectorObject>(sector, x, y, level, geometry);
+		auto panel = std::static_pointer_cast<AccessPanel>(object->_getObject());
+		panel->mId = AccessPanelId{mNextAccessPanelId++};
+		mAccessPanels.emplace(panel->mId, panel);
+		for (auto action : {AccessPanel::Action::Open, AccessPanel::Action::Close})
+		{
+			DeviceCommand command;
+			command.type = DeviceCommandType::SetAccessPanelState;
+			command.accessPanel = panel->mId;
+			command.desiredState = action == AccessPanel::Action::Open;
+			auto control = createInteractionPoint(command.desiredState ? "Open Access panel" : "Close Access panel",
+				SectorId{uint64_t(index) + 1}, {float(x) + 0.5f, float(y)}, 0.25f, 0,
+				{{command, InteractionBindingRequirement::Required}});
+			mInteractionPoints.find(control)->mAccessPanelOwner = panel->mId;
+			(command.desiredState ? panel->mOpenControl : panel->mCloseControl) = control;
+		}
 		auto objectIndex = sector->addSectorObject(object);
 		mLayers[sector->getLayerIndex()]->getCellDefinition(x, y).accessPanel = objectIndex;
 		ConstructionRecord record{ConstructionType::AccessPanel};
@@ -96,6 +147,23 @@ namespace core
 		auto object = std::dynamic_pointer_cast<AccessPanelSectorObject>(sector->getObject(objectIndex));
 		if (!object) return false;
 		beginStructuralEdit("removeAccessPanel");
+		auto panel = object->getPanel();
+		std::vector<InteractionPointId> controls;
+		for (auto const& [id, point] : mInteractionPoints.entries())
+			if (std::any_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
+				{ return binding.command.type == DeviceCommandType::SetAccessPanelState && binding.command.accessPanel == panel->getId(); }))
+				controls.push_back(id);
+		for (auto control : controls)
+		{
+			mInteractionPoints.find(control)->mAccessPanelOwner = {};
+			removeInteractionPoint(control);
+		}
+		std::vector<DeviceOperationId> operations;
+		for (auto const& [id, operation] : mDeviceOperations.entries())
+			if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState
+				&& operation->mCommand.accessPanel == panel->getId()) operations.push_back(id);
+		for (auto id : operations) removeDeviceOperation(id);
+		mAccessPanels.erase(panel->getId());
 		mLayers[sector->getLayerIndex()]->getCellDefinition(object->getCellX(), object->getCellY()).accessPanel = ~0u;
 		sector->removeSectorObject(objectIndex);
 		ConstructionRecord record{ConstructionType::RemoveAccessPanel};

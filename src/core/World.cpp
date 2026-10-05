@@ -7929,6 +7929,9 @@ namespace core
 				else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
 					require(lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2,
 						format("Interaction point {} targets a removed Dumbwaiter", pointId.value));
+				else if (binding.command.type == DeviceCommandType::SetAccessPanelState)
+					require(bool(lookupAccessPanel(binding.command.accessPanel)),
+						format("Interaction point {} targets a removed Access panel", pointId.value));
 				else if (binding.command.type != DeviceCommandType::SetSectorLights)
 					require(mTraversalResources.find(binding.command.traversalResource) != nullptr,
 						format("Interaction point {} targets removed traversal resource {}",
@@ -10669,7 +10672,7 @@ namespace core
 	bool World::isInteractionPointPermissionEligible(InteractionPointId id) const
 	{
 		auto point = mInteractionPoints.find(id);
-		if (!point || !point->mSector) return false;
+		if (!point || !point->mSector || point->mAccessPanelOwner) return false;
 		return none_of(point->mBindings.begin(), point->mBindings.end(), [](auto const& binding)
 		{
 			return binding.command.type == DeviceCommandType::SelectLiftDestination

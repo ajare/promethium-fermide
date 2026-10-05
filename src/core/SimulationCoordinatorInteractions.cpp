@@ -71,6 +71,8 @@ namespace core
 				auto booth = mWorld.lookupBoothWindow(binding.command.boothWindow);
 				validTarget = booth && !booth->getDumbwaiterOwner();
 			}
+			else if (binding.command.type == DeviceCommandType::SetAccessPanelState)
+				validTarget = bool(mWorld.lookupAccessPanel(binding.command.accessPanel));
 			else if (binding.command.type == DeviceCommandType::PressDumbwaiterLanding)
 				validTarget = mWorld.lookupDumbwaiter(binding.command.dumbwaiter) && binding.command.stopIndex < 2;
 			else if (binding.command.type == DeviceCommandType::SetSectorLights)
@@ -135,7 +137,7 @@ namespace core
 		{
 			return { false, found.diagnostic };
 		}
-		if (found.entity->mBoothWindowOwner || found.entity->mDumbwaiterOwner)
+		if (found.entity->mBoothWindowOwner || found.entity->mDumbwaiterOwner || found.entity->mAccessPanelOwner)
 			return { false, "Device controls are owned and cannot be removed independently" };
 		if (any_of(found.entity->mBindings.begin(), found.entity->mBindings.end(), [](auto const& binding)
 			{ return binding.command.type == DeviceCommandType::RequestAirlock; }))
@@ -190,7 +192,8 @@ namespace core
 				&& resource->mShuttle && resource->mShuttle->isBroken()));
 		for (auto const& [id, operation] : mWorld.mDeviceOperations.entries())
 		{
-			if (command.type != DeviceCommandType::ToggleBoothWindow
+			if (command.type != DeviceCommandType::SetAccessPanelState
+				&& command.type != DeviceCommandType::ToggleBoothWindow
 				&& command.type != DeviceCommandType::PressDumbwaiterLanding
 				&& !broken && missing.empty() && operation->mHasCommand && operation->mCommand == command
 				&& (operation->mState == DeviceOperationState::Pending || operation->mState == DeviceOperationState::Running))
@@ -211,7 +214,9 @@ namespace core
 				: command.type == DeviceCommandType::RequestAirlock ? "Request Airlock"
 				: command.type == DeviceCommandType::ToggleBoothWindow ? "Toggle BoothWindow shutter"
 				: command.type == DeviceCommandType::SetBoothWindowState ? "Set BoothWindow shutter target"
-				: command.type == DeviceCommandType::PressDumbwaiterLanding ? "Press Dumbwaiter landing" : "Device command";
+				: command.type == DeviceCommandType::PressDumbwaiterLanding ? "Press Dumbwaiter landing"
+				: command.type == DeviceCommandType::SetAccessPanelState
+					? (command.desiredState ? "Open Access panel" : "Close Access panel") : "Device command";
 		if (!missing.empty())
 		{
 			name += ": missing Access permissions";
@@ -253,6 +258,9 @@ namespace core
 		// than a route preference (ADR 0011), so a forbidden Agent is refused
 		// here too (#193); agentForbidsButtons keeps individual-over-tag
 		// precedence (ADR 0012) and never consults ordinary Door restrictions.
+		if (point && point->mAccessPanelOwner
+			&& !mWorld.canRequestAccessPanel(point->mAccessPanelOwner,
+				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close, actorId)) return {};
 		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor) || !point->mSector
 			|| (actor->getState() != Agent::State::Idle
 				&& actor->getState() != Agent::State::WaitingForTraversal)
@@ -1138,6 +1146,13 @@ namespace core
 					continue;
 				}
 			}
+			if (point->mAccessPanelOwner && !mWorld.canRequestAccessPanel(point->mAccessPanelOwner,
+				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close,
+				request->mActor))
+			{
+				cancelInteraction(point->mActiveRequest);
+				continue;
+			}
 			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
 				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
 				|| (point->requiresReachAtRequest()
@@ -1173,7 +1188,20 @@ namespace core
 					if (auto operation = mWorld.mDeviceOperations.find(operationId);
 						operation && operation->mState == DeviceOperationState::Pending)
 					{
-						if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
+						if (operation->mCommand.type == DeviceCommandType::SetAccessPanelState)
+						{
+							auto found = mWorld.mAccessPanels.find(operation->mCommand.accessPanel);
+							auto panel = found == mWorld.mAccessPanels.end() ? nullptr : found->second.lock();
+							touchDeviceOperation(operationId, *operation);
+							operation->mActivated = true;
+							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
+							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
+							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
+								&& actor->getGlobalPosition().distanceTo(control->getPosition()) <= control->getReach();
+							operation->mState = eligible ? DeviceOperationState::Succeeded : DeviceOperationState::Rejected;
+							if (eligible) panel->mOpen = operation->mCommand.desiredState;
+						}
+						else if (operation->mCommand.type == DeviceCommandType::PressDumbwaiterLanding)
 							admitDumbwaiterPress(operationId, *operation);
 						else operation->mActivated = true;
 					}

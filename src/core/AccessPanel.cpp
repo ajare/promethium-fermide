@@ -5,6 +5,20 @@
 
 namespace core
 {
+	std::vector<AccessPanel::Action> AccessPanel::getExposedActions() const
+	{
+		switch (getType())
+		{
+		case Type::Empty: return {Action::Close};
+		}
+		return {};
+	}
+
+	std::vector<AccessPanel::Action> AccessPanel::getActions() const
+	{
+		return mOpen ? getExposedActions() : std::vector<Action>{Action::Open};
+	}
+
 	bool AccessPanel::geometryIsValid(AccessPanelGeometry g)
 	{
 		return std::isfinite(g.width) && std::isfinite(g.height) && std::isfinite(g.yOffset)
