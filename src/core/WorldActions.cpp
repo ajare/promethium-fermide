@@ -152,6 +152,67 @@ namespace core
 			event.diagnostic = std::move(result.diagnostic);
 			addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
 			mActionExecutionFailed = true;
+			return;
 		}
+		// Shadow only host-owned values. No effects (including logging and
+		// operation events) are published until the entire batch is accepted.
+		auto pose = agent->mPose;
+		auto claim = agent->mOccupiedUsablePoint;
+		InteractionPointId device;
+		auto reject = [&](char const* diagnostic)
+		{
+			event.type = SimulationEventType::ActionFailed;
+			event.diagnostic = diagnostic; // ordinary request refusal, not a Lua failure
+		};
+		for (auto const& effect : result.effects)
+		{
+			switch (effect.type)
+			{
+			case ActionEffectType::Pose: pose = static_cast<Pose>(effect.value); break;
+			case ActionEffectType::Claim:
+				if (!isFurnitureMarker(markerId) || (claim && claim != markerId))
+				{ reject("Selected Marker is not an eligible usable point"); return; }
+				if (auto owner = usablePointOccupant(markerId); owner && owner != agentId)
+				{ reject("Usable point is occupied by another Agent"); return; }
+				claim = markerId;
+				break;
+			case ActionEffectType::Release:
+				if (!isFurnitureMarker(markerId) || claim != markerId)
+				{ reject("Only the owning Agent may release this usable point"); return; }
+				claim = {};
+				break;
+			case ActionEffectType::Device:
+			{
+				InteractionPointId pointId{effect.point};
+				auto point = mInteractionPoints.find(pointId);
+				if ((device && device != pointId) || !interactionRequestEligible(pointId, agentId, true)
+					|| !missingInteractionPermissions(*point, *agent).empty() || point->mBindings.empty())
+				{ reject("Device Interaction point is not eligible or authorized"); return; }
+				for (auto const& binding : point->mBindings)
+					if (static_cast<int>(binding.command.type) != effect.value
+						|| !missingLiftDestinationPermissions(binding.command, agentId).empty())
+					{ reject("Typed device operation is not offered or authorized"); return; }
+				for (auto const& [id, request] : mInteractionRequests.entries())
+					if (request->mActor == agentId && request->mResult == InteractionResult::Pending
+						&& request->mPoint != pointId)
+					{ reject("Agent already has another device request"); return; }
+				device = pointId;
+				break;
+			}
+			}
+		}
+		// Committed requests retain the ordinary asynchronous device/traversal
+		// authorities; scripts never submit unvalidated raw device commands.
+		if (device) requestInteraction(device, agentId);
+		if (claim != agent->mOccupiedUsablePoint)
+		{
+			if (claim) claimUsablePoint(agentId, claim);
+			else agent->mOccupiedUsablePoint = {};
+		}
+		agent->mPose = pose;
+		event.agent.pose = pose;
+		invalidateSimulationSnapshot();
+		for (auto const& log : result.logs) addLogMessage("Marker Action", 0, LogLevel::Info, log.message);
+		if (result.logsSuppressed) addLogMessage("Marker Action", 0, LogLevel::Warning, "Action logging budget exhausted");
 	}
 }

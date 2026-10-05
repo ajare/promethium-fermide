@@ -20,6 +20,7 @@ namespace core
 			std::string_view identity;
 			ActionViews const* views;
 			script::LogStaging& logs;
+			std::vector<ActionEffect> effects;
 			std::set<std::string> keys, names;
 			std::string key, name;
 		};
@@ -34,6 +35,45 @@ namespace core
 			try { staging->stageLog(LogLevel::Info, message, length); }
 			catch (...) { failed = true; }
 			if (failed) return luaL_error(state, "Action logging allocation failed");
+			return 0;
+		}
+
+		int effect(lua_State* state)
+		{
+			auto* call = static_cast<Invocation*>(lua_touserdata(state, lua_upvalueindex(1)));
+			auto type = static_cast<ActionEffectType>(lua_tointeger(state, lua_upvalueindex(2)));
+			ActionEffect command{type};
+			if (type == ActionEffectType::Pose)
+			{
+				size_t length{};
+				auto text = luaL_checklstring(state, 1, &length);
+				auto pose = std::string_view(text, length);
+				if (pose == "standing") command.value = 0;
+				else if (pose == "sitting") command.value = 1;
+				else if (pose == "lying") command.value = 2;
+				else return luaL_error(state, "Unknown Agent pose");
+			}
+			if (type == ActionEffectType::Device)
+			{
+				auto point = luaL_checkinteger(state, 1);
+				size_t length{};
+				auto text = luaL_checklstring(state, 2, &length);
+				auto kind = std::string_view(text, length);
+				static constexpr char const* kinds[]{"set-sector-lights", "open-door", "set-extended-state",
+					"call-lift", "select-lift-destination", "call-shuttle", "select-shuttle-destination",
+					"request-airlock", "set-booth-window-state", "toggle-booth-window",
+					"press-dumbwaiter-landing", "set-access-panel-state"};
+				command.value = -1;
+				for (int i = 0; i < 12; ++i) if (kind == kinds[i]) command.value = i;
+				if (point <= 0 || command.value < 0) return luaL_error(state, "Invalid typed device request");
+				command.point = static_cast<uint64_t>(point);
+			}
+			if (lua_gettop(state) != (type == ActionEffectType::Pose ? 1 : type == ActionEffectType::Device ? 2 : 0))
+				return luaL_error(state, "Action capability received unexpected arguments");
+			if (call->effects.size() >= 64) return luaL_error(state, "Action effect limit exceeded");
+			bool failed = false;
+			try { call->effects.push_back(command); } catch (...) { failed = true; }
+			if (failed) return luaL_error(state, "Action effect allocation failed");
 			return 0;
 		}
 
@@ -150,6 +190,14 @@ namespace core
 			integerField(state, "api_version", 1);
 			lua_pushlightuserdata(state, &call.logs);
 			lua_pushcclosure(state, log, 1); lua_setfield(state, -2, "log");
+			for (auto const& capability : {std::pair{"set_pose", ActionEffectType::Pose},
+				std::pair{"claim", ActionEffectType::Claim}, std::pair{"release", ActionEffectType::Release},
+				std::pair{"request_device", ActionEffectType::Device}})
+			{
+				lua_pushlightuserdata(state, &call);
+				lua_pushinteger(state, static_cast<int>(capability.second));
+				lua_pushcclosure(state, effect, 2); lua_setfield(state, -2, capability.first);
+			}
 			script::pushImmutableProxy(state);
 			lua_newtable(state);
 			stringField(state, "name", call.views->markerName);
@@ -163,7 +211,7 @@ namespace core
 		{
 			script::ScratchBudget budget(2 * 1024 * 1024, 100'000);
 			std::unique_ptr<lua_State, script::StateCloser> owner(lua_newstate(script::budgetedAllocate, &budget));
-			if (!owner) return { false, ScriptExecutionFailure::MemoryBudgetExceeded, "Cannot allocate Action sandbox" };
+			if (!owner) return { false, ScriptExecutionFailure::MemoryBudgetExceeded, "Cannot allocate Action sandbox", {}, {} };
 			auto* state = owner.get();
 			lua_atpanic(state, script::luaPanic);
 			script::ModuleLoader loader;
@@ -172,17 +220,17 @@ namespace core
 			try
 			{
 				if (script::runScratchSetup(state, &loader, nullptr, diagnostic) != LUA_OK)
-					return { false, script::failureKind(budget), diagnostic };
+					return { false, script::failureKind(budget), diagnostic, {}, {} };
 				lua_settop(state, 0);
 				lua_pushcfunction(state, invoke);
 				lua_pushlightuserdata(state, &invocation);
 				auto result = script::protectedCall(state, budget, 1, 0);
 				if (result.diagnostic.size() > 2048) result.diagnostic.resize(2048);
-				return { result.succeeded, result.failure, std::move(result.diagnostic) };
+				return { result.succeeded, result.failure, std::move(result.diagnostic), {}, {} };
 			}
 			catch (std::exception const& error)
 			{
-				return { false, script::failureKind(budget), error.what() };
+				return { false, script::failureKind(budget), error.what(), {}, {} };
 			}
 		}
 	}
@@ -202,7 +250,7 @@ namespace core
 		}
 		if (file.bad()) throw SerializationException("Cannot read Action registry");
 		script::LogStaging logs;
-		Invocation invocation{registry->mSource, &registry->mUuid, &registry->mActions, {}, nullptr, logs, {}, {}, {}, {}};
+		Invocation invocation{registry->mSource, &registry->mUuid, &registry->mActions, {}, nullptr, logs, {}, {}, {}, {}, {}};
 		auto result = evaluate(invocation);
 		if (!result.succeeded) throw SerializationException("Invalid Action registry: " + result.diagnostic);
 		return registry;
@@ -216,18 +264,19 @@ namespace core
 
 	ActionExecutionResult ActionRegistry::execute(std::string_view id, ActionViews const& views) const
 	{
-		if (!find(id)) return { false, ScriptExecutionFailure::ConversionError, "Unavailable Action identity" };
+		if (!find(id)) return { false, ScriptExecutionFailure::ConversionError, "Unavailable Action identity", {}, {} };
 		script::LogStaging logs;
 		logs.logMessageCountLimit = 32;
 		logs.logMessageByteLimit = 1024;
 		logs.logStagingByteLimit = 8192;
 		std::string uuid;
-		Invocation invocation{mSource, &uuid, nullptr, id, &views, logs, {}, {}, {}, {}};
+		Invocation invocation{mSource, &uuid, nullptr, id, &views, logs, {}, {}, {}, {}, {}};
 		auto result = evaluate(invocation);
 		if (result.succeeded)
 		{
-			for (auto const& message : logs.logs) addLogMessage("Marker Action", 0, message.level, message.message);
-			if (logs.logsSuppressed) addLogMessage("Marker Action", 0, LogLevel::Warning, "Action logging budget exhausted");
+			result.effects = std::move(invocation.effects);
+			for (auto& message : logs.logs) result.logs.push_back({std::move(message.message)});
+			result.logsSuppressed = logs.logsSuppressed;
 		}
 		return result;
 	}

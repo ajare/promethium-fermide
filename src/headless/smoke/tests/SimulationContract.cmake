@@ -169,6 +169,9 @@ set(core_names
     markerActions/failures
     markerActions/documents
     markerActions/logging
+    markerActions/atomicEffects
+    markerActions/deviceEffects
+    markerActions/claimCompetition
     runScaledWorld
 )
 

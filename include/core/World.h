@@ -1483,6 +1483,7 @@ namespace core
 
 		void updateInteractionResults();
 
+		bool interactionRequestEligible(InteractionPointId point, AgentId actor, bool requireReach = false) const;
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 
 		InteractionRequestId requestInteractionWhilePassing(InteractionPointId point, AgentId actor);

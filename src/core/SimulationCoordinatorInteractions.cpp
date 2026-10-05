@@ -246,6 +246,20 @@ namespace core
 		return id;
 	}
 
+	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId, bool requireReach) const
+	{
+		auto point = mInteractionPoints.find(pointId);
+		auto actor = mAgents.find(actorId);
+		if (point && point->mAccessPanelOwner
+			&& !canRequestAccessPanel(point->mAccessPanelOwner,
+				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close, actorId)) return false;
+		return point && actor && actor->isActive() && !agentForbidsButtons(actor) && point->mSector
+			&& (actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal)
+			&& actor->getSector() == mSectors[(size_t)point->mSector.value - 1].get()
+			&& (!(requireReach || point->requiresReachAtRequest())
+				|| actor->getGlobalPosition().distanceTo(point->mPosition) <= point->mReach);
+	}
+
 	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId)
 	{
 		mWorld.invalidateSimulationSnapshot();
@@ -258,15 +272,7 @@ namespace core
 		// than a route preference (ADR 0011), so a forbidden Agent is refused
 		// here too (#193); agentForbidsButtons keeps individual-over-tag
 		// precedence (ADR 0012) and never consults ordinary Door restrictions.
-		if (point && point->mAccessPanelOwner
-			&& !mWorld.canRequestAccessPanel(point->mAccessPanelOwner,
-				point->mBindings.front().command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close, actorId)) return {};
-		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor) || !point->mSector
-			|| (actor->getState() != Agent::State::Idle
-				&& actor->getState() != Agent::State::WaitingForTraversal)
-			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
-			|| (point->requiresReachAtRequest()
-				&& actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach))
+		if (!mWorld.interactionRequestEligible(pointId, actorId))
 		{
 			return {};
 		}

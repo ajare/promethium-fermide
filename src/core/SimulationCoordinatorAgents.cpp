@@ -444,7 +444,7 @@ namespace core
 	bool SimulationCoordinator::claimUsablePoint(AgentId id, MarkerId marker)
 	{
 		auto agent = mWorld.mAgents.find(id);
-		if (!agent || !mWorld.furnitureMarkerAction(marker)) return false;
+		if (!agent || !mWorld.isFurnitureMarker(marker)) return false;
 		auto occupant = mWorld.usablePointOccupant(marker);
 		if (occupant && occupant != id) return false;
 		agent->mOccupiedUsablePoint = marker;

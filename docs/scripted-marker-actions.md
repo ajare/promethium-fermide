@@ -1,4 +1,4 @@
-# Scripted Marker Actions (#457, #458)
+# Scripted Marker Actions (#457–#459)
 
 This integration-branch slice exposes movement through
 `World::moveAgentToNamedMarker(agent, name, action)` and
@@ -131,8 +131,8 @@ Availability is checked at acceptance and arrival. Assignment/package removal
 cancels pending requests at the next safe simulation boundary, preserving existing
 safe-exit handling, with `ActionUnavailable` and a diagnostic. It never substitutes
 Idle. Arrival invokes only the selected callback in stable Agent order; intermediate
-passage does not execute it. Pose, occupancy and device effects are deferred to
-#459; Agent behaviour Action selection/outcome additions are #460.
+passage does not execute it. Agent behaviour Action selection/outcome additions
+remain deferred to #460.
 
 Focused public checks: Simulation `markerActions/registry`, `/execution`,
 `/failures`, `/documents`, `/logging`; Editor `markerActions/workflow`. They cover
@@ -159,3 +159,68 @@ Final build evidence: Release `0e6a28e9bff34baaa8e9a75de3f4cfdb`, Debug
 `2391290974794030bc27b8c6a724ecb4`. `git diff --check` passed. No Windows
 validation is claimed; full-suite green remains the #467 integration contract,
 not a claim of this slice.
+
+## Validated atomic effects (#459)
+
+The version-1 World view adds these dot-call capabilities:
+
+```lua
+world.set_pose("sitting") -- standing, sitting or lying
+world.claim()             -- selected Furniture-owned usable-point Marker only
+world.release()           -- selected point, owned by this Agent only
+world.request_device(12, "set-sector-lights") -- World Interaction point ID and type
+```
+
+Device requests invoke the existing point's authored typed bindings, not arbitrary
+raw device commands. Supported types are `set-sector-lights`, `open-door`,
+`set-extended-state`, `call-lift`, `select-lift-destination`, `call-shuttle`,
+`select-shuttle-destination`, `request-airlock`, `set-booth-window-state`,
+`toggle-booth-window`, `press-dumbwaiter-landing`, and `set-access-panel-state`.
+All bindings on the selected Interaction point must match the requested type.
+Scripts cannot change the binding's target, desired state or destination Stop.
+At most one distinct device Interaction point is admitted per invocation, matching
+the existing one-pending-interaction-per-Agent contract; duplicate requests coalesce.
+
+An invocation stages up to 64 effects plus bounded logs. After the callback returns,
+World validates the batch against shadow Pose/claim values, selected-point ownership,
+current activation, Mobility, physical reach, Location, point eligibility, Access
+permissions, transport destination permissions and pending-interaction authority.
+No Pose, claim, request, operation event or script log is published on rejection.
+Committed requests retain existing asynchronous device outcome and traversal gates;
+operation acceptance does not grant a traversal permit or guarantee device success.
+
+Occupancy/eligibility refusal emits `ActionFailed` with a diagnostic and
+`scriptFailure == None`; it neither pauses nor fails headless advancement.
+Existing occupied-destination routing may instead report `RouteLost` before the
+callback can run. Lua exceptions or heap/instruction exhaustion discard the batch
+and retain the diagnostic/pause/headless-failure policy. Only host-owned claims
+are authoritative, scoped to one Agent and one Furniture-owned Marker. Source is
+immutable, captured module state remains forbidden and each invocation still runs
+in a fresh sandbox, including independent Furniture instances and Worlds.
+
+Focused public-seam verification: `markerActions/atomicEffects`,
+`markerActions/claimCompetition`, and `markerActions/deviceEffects`. These exercise
+committed Pose/claim/release, deterministic competitors, independent instances and
+Worlds, non-owner release refusal, pose-before-claim rollback, ordinary refusal,
+throwing/heap/instruction failures, log/request rollback, permission/Mobility/reach
+and typed-binding refusal, and observable asynchronous lighting completion.
+Existing registry/containment/determinism checks are retained. Furniture catalogue
+conversion and use/finish lifecycle, live reload and behaviour API work are not
+part of this slice.
+
+### #459 final Linux verification
+
+The final source state built the complete default core/headless/editor inventory
+in Release and Debug through the supported supervised `--lane final --build-only
+all` procedure. Unfiltered final CTest ran 110 tests in each configuration:
+**103 passed, one optional GUI capability skipped, six failed**, exclusively for
+the seven unchanged legacy implicit-Furniture-use checks listed above. All new
+Action checks, containment/determinism, permissions, asynchronous interaction,
+editor/persistence, headless tools and ownership/CLI coverage passed. Full-suite
+green remains the #467 integration contract. `git diff --check` passed; no Windows
+validation is claimed.
+
+Final build evidence: Release `289dbdc89b2d4d129c3b16dd101fd79c`, Debug
+`7dd3b38c83cb475380154508f63effe0`. Final unfiltered CTest evidence: Release
+`892a9091442c4f9aa074706a6dc22090`, Debug
+`bcdbea2cf3654aeca6982a10a15bd37c`.

@@ -4,6 +4,7 @@
 #include "core/Log.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
+#include "core/MobilityProfile.h"
 #include <fstream>
 
 namespace
@@ -84,7 +85,7 @@ namespace
 		write(path, package(R"lua({key='hello',name='Hello',run=function(agent, world, marker)
 assert(world.api_version == 1 and require('prometheum.actions.v1').api_version == 1)
 assert(agent.graph == nil and world.graph == nil and marker.vertex == nil)
-assert(agent.set_pose == nil and world.claim == nil)
+assert(agent.set_pose == nil and type(world.claim) == 'function')
 assert(io == nil and os == nil and debug == nil and coroutine == nil and load == nil)
 assert(math.random == nil and package == nil)
 assert(not pcall(function() agent.name='changed' end))
@@ -169,6 +170,187 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			require(cancelled, "Registry removal during travel did not cancel request");
 		}
 		require(runs[0] == runs[1], "Action execution is not deterministic across Worlds");
+	}
+
+	core::SimulationEvent runAction(core::World& world, core::AgentId agent, core::MarkerId marker, std::string const& action = first)
+	{
+		world.pauseSimulation();
+		require(world.moveAgentToMarker(agent, marker, action).accepted(), "Effect request refused");
+		world.consumeSimulationEvents();
+		require(world.resumeSimulation(), "Effects resume refused");
+		for (unsigned tick = 0; tick < 1800; ++tick)
+		{
+			auto advanced = world.advanceTick();
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.agent.id == agent && (event.type == core::SimulationEventType::DestinationReached
+					|| event.type == core::SimulationEventType::ActionFailed || event.type == core::SimulationEventType::RouteLost))
+					return event;
+			require(advanced, "Effect execution failed without outcome");
+		}
+		throw std::runtime_error("Missing Action effect outcome");
+	}
+
+	void atomicEffects(smoke::Context const& context)
+	{
+		std::vector<std::string> bodies{
+			"w.set_pose('sitting'); w.claim(); w.log('committed')",
+			"w.set_pose('lying'); w.claim(); w.release(); w.set_pose('standing')",
+			"w.set_pose('sitting'); w.log('rollback'); w.release()",
+			"w.set_pose('lying'); w.claim(); w.log('rollback'); error('broken')",
+			"w.set_pose('lying'); w.claim(); w.log('rollback'); while true do end",
+			"w.set_pose('lying'); w.claim(); w.log('rollback'); local t={} while true do t[#t+1]=string.rep('x',10000) end"
+		};
+		for (size_t scenario = 0; scenario < bodies.size(); ++scenario)
+		{
+			core::World world("Atomic effects", 8, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			require(world.placeFurniture(room, "chair", 3, 0, "Chair") != 0, "Effects Furniture refused");
+			world.finishBuild();
+			auto marker = world.furniture()[0].destinations[0].marker;
+			auto agent = world.createAgent("Operator", room, 0, 0.5f);
+			world.pauseSimulation();
+			auto path = context.temporaryRoot() / ("effects" + std::to_string(scenario) + ".actions.lua");
+			write(path, package("{key='hello',name='Hello',run=function(a,w,m) " + bodies[scenario] + " end}"));
+			require(world.selectActionRegistry(path) && world.setMarkerActions(marker, {first}), "Effects package refused");
+			core::consumeLogMessages();
+			auto event = runAction(world, agent, marker);
+			if (scenario < 2)
+			{
+				require(event.type == core::SimulationEventType::DestinationReached, "Successful effects rejected");
+				require(world.lookupAgent(agent).entity->getPose() == (scenario == 0 ? core::Pose::Sitting : core::Pose::Standing), "Wrong committed Pose");
+				require(world.usablePointOccupant(marker) == (scenario == 0 ? agent : core::AgentId{}), "Wrong committed claim");
+				if (scenario == 0)
+				{
+					auto other = world.createAgent("Contender", room, 0, 0.5f);
+					auto competition = runAction(world, other, marker);
+					require(competition.type == core::SimulationEventType::RouteLost || competition.type == core::SimulationEventType::ActionFailed,
+						"Competing request bypassed occupied destination");
+					require(competition.scriptFailure == core::ScriptExecutionFailure::None
+						&& world.lookupAgent(other).entity->getPose() == core::Pose::Standing, "Competition crashed or partially posed Agent");
+					require(world.usablePointOccupant(marker) == agent, "Competition stole claim");
+				}
+			}
+			else
+			{
+				require(event.type == core::SimulationEventType::ActionFailed, "Failed batch reported success");
+				require((event.scriptFailure == core::ScriptExecutionFailure::None) == (scenario == 2), "Ordinary release refusal became script crash");
+				require(world.isSimulationPaused() == (scenario >= 3), "Wrong failure pause policy");
+				require(world.lookupAgent(agent).entity->getPose() == core::Pose::Standing && !world.usablePointOccupant(marker), "Batch leaked Pose/claim");
+				for (auto const& log : core::consumeLogMessages()) require(log.msg != "rollback", "Rejected batch logged");
+			}
+		}
+	}
+
+	void claimCompetition(smoke::Context const& context)
+	{
+		auto path = context.temporaryRoot() / "competition.actions.lua";
+		write(path, package("{key='hello',name='Claim',run=function(a,w,m) w.set_pose('sitting'); w.claim() end},"
+			"{key='other',name='Release',run=function(a,w,m) w.set_pose('standing'); w.release() end}"));
+		for (unsigned run = 0; run < 2; ++run)
+		{
+			core::World world("Competition", 10, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			require(world.placeFurniture(room, "chair", 3, 0, "First chair")
+				&& world.placeFurniture(room, "chair", 6, 0, "Second chair"), "Competition placement refused");
+			world.finishBuild();
+			auto seat = world.furniture()[0].destinations[0].marker;
+			auto otherSeat = world.furniture()[1].destinations[0].marker;
+			auto owner = world.createAgent("Owner", room, 0, 3.5f);
+			auto contender = world.createAgent("Contender", room, 0, 3.5f);
+			auto independent = world.createAgent("Independent", room, 0, 6.5f);
+			world.pauseSimulation();
+			for (auto id : {owner, contender, independent})
+			{
+				require(world.setAgentIndividualMinimumRoutePlanningTime(id, 0.1f)
+					&& world.setAgentIndividualMaximumRoutePlanningTime(id, 0.1f), "Competition planning refused");
+			}
+			require(world.selectActionRegistry(path) && world.setMarkerActions(seat, {first,second})
+				&& world.setMarkerActions(otherSeat, {first,second}), "Competition registry refused");
+			for (auto id : {owner, contender}) require(world.moveAgentToMarker(id, seat, first).accepted(), "Competing request refused");
+			require(world.moveAgentToMarker(independent, otherSeat, first).accepted(), "Independent claim refused");
+			require(world.resumeSimulation(), "Competition resume refused");
+			bool failed = false;
+			for (unsigned tick = 0; tick < 600; ++tick)
+			{
+				require(world.advanceTick(), "Claim conflict crashed simulation");
+				for (auto const& event : world.consumeSimulationEvents())
+					if (event.agent.id == contender && (event.type == core::SimulationEventType::ActionFailed
+						|| event.type == core::SimulationEventType::RouteLost))
+					{
+						failed = true;
+						require(event.scriptFailure == core::ScriptExecutionFailure::None, "Claim conflict was a script error");
+					}
+			}
+			require(failed && world.usablePointOccupant(seat) == owner && world.usablePointOccupant(otherSeat) == independent,
+				"Claim competition was nondeterministic or leaked across Furniture instances: " + std::to_string(failed)
+				+ ":" + std::to_string(world.usablePointOccupant(seat).value) + ":" + std::to_string(world.usablePointOccupant(otherSeat).value));
+			require(world.lookupAgent(contender).entity->getPose() == core::Pose::Standing, "Pose-before-claim conflict leaked Pose");
+			// A non-owner's release request cannot free the occupied target.
+			auto refused = runAction(world, contender, seat, second);
+			require(refused.type != core::SimulationEventType::DestinationReached && world.usablePointOccupant(seat) == owner,
+				"Non-owner release freed another Agent's claim");
+			auto released = runAction(world, owner, seat, second);
+			require(released.type == core::SimulationEventType::DestinationReached && !world.usablePointOccupant(seat)
+				&& world.lookupAgent(owner).entity->getPose() == core::Pose::Standing, "Owner could not release claim");
+			require(world.usablePointOccupant(otherSeat) == independent, "Release affected another Furniture instance");
+		}
+	}
+
+	void deviceEffects(smoke::Context const& context)
+	{
+		for (unsigned scenario = 0; scenario < 8; ++scenario)
+		{
+			auto world = worldFixture();
+			auto marker = world->getMarkerIds()[0];
+			core::InteractionBinding binding;
+			binding.command = {core::DeviceCommandType::SetSectorLights, core::SectorId{1}, false};
+			auto point = world->createInteractionPoint("Action light control", core::SectorId{1},
+				{scenario == 4 ? 8.5f : 6.5f, 0.f}, 0.25f, 0.05f, {binding});
+			if (scenario == 5)
+			{
+				auto permission = world->addAccessPermission("Protected");
+				require(world->setInteractionPointPermissionRequirement(point, {permission}), "Device requirement refused");
+			}
+			if (scenario == 7)
+			{
+				core::MobilityProfile profile;
+				profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+				require(world->setAgentIndividualMobilityProfile(core::AgentId{1}, profile), "Mobility restriction refused");
+			}
+			auto path = context.temporaryRoot() / ("device" + std::to_string(scenario) + ".actions.lua");
+			auto body = "w.set_pose('sitting'); w.request_device(" + std::to_string(point.value)
+				+ ", '" + (scenario == 6 ? "open-door" : "set-sector-lights") + "'); w.log('device')";
+			if (scenario == 1) body += "; w.claim()"; // ordinary Marker cannot be claimed
+			if (scenario == 2) body += "; error('broken')";
+			if (scenario == 3) body += "; while true do end";
+			write(path, package("{key='hello',name='Hello',run=function(a,w,m) " + body + " end}"));
+			require(world->selectActionRegistry(path) && world->setMarkerActions(marker, {first}), "Device package refused");
+			core::consumeLogMessages();
+			auto event = runAction(*world, core::AgentId{1}, marker);
+			if (scenario == 0)
+			{
+				require(event.type == core::SimulationEventType::DestinationReached, "Device effects rejected: " + event.diagnostic + " at " + std::to_string(event.agent.globalPosition.y));
+				require(world->advanceTicks(100), "Device progression failed");
+				bool succeeded = false;
+				for (auto const& outcome : world->consumeSimulationEvents())
+					succeeded |= outcome.type == core::SimulationEventType::DeviceOperationChanged
+						&& outcome.deviceOperation.state == core::DeviceOperationState::Succeeded;
+				require(succeeded && !world->getSector(0)->areLightsOn(), "Typed device outcome not observable");
+			}
+			else
+			{
+				require(event.type == core::SimulationEventType::ActionFailed, "Invalid device batch accepted");
+				auto const& snapshot = world->getSimulationSnapshot();
+				require(snapshot.deviceOperations.empty() && snapshot.interactionRequests.empty(), "Rejected invocation published device work");
+				require(world->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Standing
+					&& world->getSector(0)->areLightsOn(), "Device rollback changed simulation");
+				for (auto const& log : core::consumeLogMessages()) require(log.msg != "device", "Device rejection published log");
+			}
+		}
 	}
 
 	void failures(smoke::Context const& context)
@@ -314,4 +496,7 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/failures", failures});
 	checks.push_back({"markerActions/documents", documents});
 	checks.push_back({"markerActions/logging", boundedLogging});
+	checks.push_back({"markerActions/atomicEffects", atomicEffects});
+	checks.push_back({"markerActions/deviceEffects", deviceEffects});
+	checks.push_back({"markerActions/claimCompetition", claimCompetition});
 }

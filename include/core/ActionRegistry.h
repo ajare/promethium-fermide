@@ -23,11 +23,24 @@ namespace core
 		float x{}, y{};
 	};
 
+	enum class ActionEffectType { Pose, Claim, Release, Device };
+	struct ActionEffect
+	{
+		ActionEffectType type;
+		// Pose: 0 Standing, 1 Sitting, 2 Lying. Device: typed command kind.
+		int value{};
+		uint64_t point{};
+	};
+	struct ActionLog { std::string message; };
+
 	struct ActionExecutionResult
 	{
 		bool succeeded{ false };
 		ScriptExecutionFailure failure{ ScriptExecutionFailure::None };
 		std::string diagnostic;
+		std::vector<ActionEffect> effects;
+		std::vector<ActionLog> logs;
+		bool logsSuppressed{ false };
 	};
 
 	// Immutable authored metadata/source. Each invocation creates a fresh sandbox;
