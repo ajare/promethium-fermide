@@ -2571,6 +2571,11 @@ namespace core
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef0.sectorIndex);
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef1.sectorIndex);
 			}
+		for (auto layer : {layerIndex, backLayer})
+			validatePanelWallRectangle(mLayers[layer]->getCellDefinition(x, y).sectorIndex,
+				{float(x) + CORE_DOOR_X_INSET, float(y)},
+				{float(x + cellsWide) - CORE_DOOR_X_INSET, float(y)
+					+ (options.height == Door::Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT)});
 		if (!controlsAreExternallyBound)
 			for (uint32_t side = 0; side < 2; ++side)
 			{
@@ -5152,6 +5157,15 @@ namespace core
 					&& record.a == y && record.b == x && record.c == width;
 			});
 		if (found == mConstructionRecords.rend()) return false;
+		try
+		{
+			for (auto layer : {layerIndex, layerIndex + 1})
+				validatePanelWallRectangle(mLayers[layer]->getCellDefinition(x, y).sectorIndex,
+					{float(x) + CORE_DOOR_X_INSET, float(y)},
+					{float(x + width) - CORE_DOOR_X_INSET, float(y)
+						+ (height == Door::Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT)});
+		}
+		catch (Exception const& error) { if (diagnostic) *diagnostic = error.getMessage(); return false; }
 		found->e = static_cast<uint32_t>(height);
 
 		auto const& cell = mLayers[layerIndex]->getCellDefinition(x, y);
@@ -6069,6 +6083,16 @@ namespace core
 			for (auto requiredLayer : requiredLayers)
 			{
 				auto layer = getLayer(requiredLayer);
+				// A back-side Window may span several Backgrounds/Locations.
+				for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
+					for (uint32_t ix = x; ix < x + cellsWide; ++ix)
+					{
+						auto owner = layer->getCellDefinition(ix, iy).sectorIndex;
+						if (owner != ~0u) validatePanelWallRectangle(owner,
+							{float(x) + CORE_WINDOW_X_INSET, float(y) + CORE_WINDOW_Y_OFFSET},
+							{float(x + cellsWide) - CORE_WINDOW_X_INSET,
+								float(y + levelsHigh - 1) + CORE_WINDOW_Y_OFFSET + CORE_WINDOW_HEIGHT});
+					}
 				for (uint32_t iy = y; iy < y + levelsHigh; ++iy)
 					for (uint32_t ix = x; ix < x + cellsWide; ++ix)
 					{
@@ -6331,13 +6355,17 @@ namespace core
 				SectorObjectType::BulkheadDoor, left.sectorIndex);
 			validateObjectAllowedInSector("World::canAddSectorBulkheadDoor",
 				SectorObjectType::BulkheadDoor, right.sectorIndex);
+			for (auto owner : {left.sectorIndex, right.sectorIndex})
+				validatePanelWallRectangle(owner,
+					{float(thresholdX) - CORE_BULKHEAD_DOOR_WIDTH * 0.5f, float(y)},
+					{float(thresholdX) + CORE_BULKHEAD_DOOR_WIDTH * 0.5f, float(y) + CORE_DOOR_HEIGHT});
 			vector<physicalControl::Demand> demands;
 			for (int controlSide = 0; controlSide < CORE_NUM_SIDES; ++controlSide)
 				if (options.controls[controlSide])
 					demands.push_back(insetControlDemand(mSectors[controlSide == CORE_SIDE_LEFT ? left.sectorIndex : right.sectorIndex],
 						physicalControl::OwnerType::BulkheadDoor, { layerIndex, thresholdX, y, 2, 1 }, y, controlSide));
-			validatePhysicalControlBoundary(layerIndex, y, thresholdX);
-			validatePhysicalControlAdditions(demands, thresholdX);
+			if (demands.empty()) validatePhysicalControlBoundary(layerIndex, y, thresholdX);
+			else validatePhysicalControlAdditions(demands, thresholdX);
 		}
 		catch (Exception const& error) { return reject(error.getMessage()); }
 		catch (exception const& error) { return reject(error.what()); }
@@ -8034,6 +8062,7 @@ namespace core
 	{
 		invalidateSimulationSnapshot();
 		reflowAllPhysicalControls(true);
+		validateRetainedAccessPanels();
 		if (mBuildFinished)
 		{
 			if (!mSimulationPaused)

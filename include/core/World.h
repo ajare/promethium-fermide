@@ -973,6 +973,9 @@ namespace core
 
 		bool validateAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
 			AccessPanelGeometry geometry, uint32_t ignoredObject, std::string* diagnostic) const;
+		static void retireRemovedAccessPanelRecords(std::vector<ConstructionRecord>& records);
+		void validateRetainedAccessPanels() const;
+		void validatePanelWallRectangle(uint32_t sectorIndex, Vector2 min, Vector2 max) const;
 		void restoreFurniture(ConstructionRecord const& record);
 		bool markerHasNoBehaviourReferences(MarkerId id, std::string* diagnostic) const;
 		std::string furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const;
@@ -1378,9 +1381,10 @@ namespace core
 			std::vector<uint32_t> row, assignment;
 			std::vector<physicalControl::Demand> demands;
 		};
+		void validatePanelControlPlan(PhysicalControlPlan const& plan) const;
 		PhysicalControlPlan planPhysicalControls(uint32_t layer, uint32_t sector, uint32_t y,
 			physicalControl::Demand const* extra = nullptr, uint32_t blockedX = ~0u,
-			uint32_t openedX = ~0u, uint32_t unsupportedX = ~0u) const;
+			uint32_t openedX = ~0u, uint32_t unsupportedX = ~0u, bool validatePanels = true) const;
 		void validatePhysicalControlBoundary(uint32_t layer, uint32_t y, uint32_t blockedX) const;
 		void validatePhysicalControlSectorCreation(uint32_t layer, uint32_t x, uint32_t y,
 			uint32_t width, uint32_t height, bool walls) const;

@@ -43,9 +43,13 @@ namespace core
 			rows[{demand.owner.hostingLocation.layer, demand.owner.role.level}].push_back(demand);
 		for (auto const& [row, additions] : rows)
 		{
-			auto plan = planPhysicalControls(row.first, ~0u, row.second, nullptr, blockedX);
+			auto plan = planPhysicalControls(row.first, ~0u, row.second, nullptr, blockedX, ~0u, ~0u, false);
 			plan.demands.insert(plan.demands.end(), additions.begin(), additions.end());
-			try { (void)physicalControl::allocateCanonical(plan.demands); }
+			try
+			{
+				plan.assignment = physicalControl::allocateCanonical(plan.demands);
+				validatePanelControlPlan(plan);
+			}
 			catch (runtime_error const& error) { throw WorldException(this, error.what()); }
 		}
 	}
@@ -160,8 +164,38 @@ namespace core
 		return demand;
 	}
 
+	void World::validatePanelControlPlan(PhysicalControlPlan const& plan) const
+	{
+		// Validate the chosen canonical layout, not the old Button bounds or all
+		// possible hosts. Panels must not change the allocator's placement policy.
+		map<pair<uint32_t, int64_t>, vector<size_t>> stacks;
+		for (size_t i = 0; i < plan.demands.size(); ++i)
+		{
+			auto const& demand = plan.demands[i];
+			auto const& candidate = demand.candidates[plan.assignment[i]];
+			stacks[{demand.owner.hostingLocation.layer, candidate.centreKey()}].push_back(i);
+		}
+		for (auto const& [key, indices] : stacks)
+		{
+			auto ordered = indices;
+			sort(ordered.begin(), ordered.end(), [&](auto a, auto b)
+				{ return physicalControl::canonicalLess(plan.demands[a].owner, plan.demands[b].owner); });
+			for (size_t rank = 0; rank < ordered.size(); ++rank)
+			{
+				auto i = ordered[rank];
+				auto const& demand = plan.demands[i];
+				auto const& candidate = demand.candidates[plan.assignment[i]];
+				auto y = demand.owner.role.level;
+				auto sector = mLayers[key.first]->getCellDefinition(candidate.cellX, y).sectorIndex;
+				Vector2 min{candidate.centreX() - CORE_BUTTON_SIZE * 0.5f,
+					float(y) + CORE_BUTTON_Y_OFFSET + float(rank) * CORE_BUTTON_SIZE * 1.25f};
+				validatePanelWallRectangle(sector, min, min + Vector2{CORE_BUTTON_SIZE, CORE_BUTTON_SIZE});
+			}
+		}
+	}
+
 	World::PhysicalControlPlan World::planPhysicalControls(uint32_t layer, uint32_t sector,
-		uint32_t y, physicalControl::Demand const* extra, uint32_t blockedX, uint32_t openedX, uint32_t unsupportedX) const
+		uint32_t y, physicalControl::Demand const* extra, uint32_t blockedX, uint32_t openedX, uint32_t unsupportedX, bool validatePanels) const
 	{
 		(void)sector; // Physical coincidence is Layer/Level-wide, not Sector-local.
 		PhysicalControlPlan plan;
@@ -180,6 +214,7 @@ namespace core
 		if (extra) plan.demands.push_back(validPhysicalControlDemand(*extra, y, blockedX, openedX, unsupportedX));
 		try { plan.assignment = physicalControl::allocateCanonical(plan.demands); }
 		catch (runtime_error const& error) { throw WorldException(this, error.what()); }
+		if (validatePanels) validatePanelControlPlan(plan);
 		return plan;
 	}
 

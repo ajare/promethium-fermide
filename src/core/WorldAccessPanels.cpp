@@ -3,6 +3,8 @@
 #include "core/MobilityProfile.h"
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <tuple>
 
 namespace core
 {
@@ -76,6 +78,70 @@ namespace core
 				return reject("Access panel overlaps a fixed wall object");
 		}
 		return true;
+	}
+
+	void World::validatePanelWallRectangle(uint32_t sectorIndex, Vector2 min, Vector2 max) const
+	{
+		if (min.x >= max.x || min.y >= max.y) return;
+		auto sector = mSectors[sectorIndex];
+		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+		{
+			auto object = std::dynamic_pointer_cast<const AccessPanelSectorObject>(sector->getObject(i));
+			if (!object) continue;
+			Vector2 panelMin, panelMax; object->getPanel()->getFullShape(panelMin, panelMax);
+			if (panelMin.x < panelMax.x && panelMin.y < panelMax.y
+				&& min.x < panelMax.x && max.x > panelMin.x && min.y < panelMax.y && max.y > panelMin.y)
+				throw WorldException(this, "Fixed wall object overlaps an Access panel");
+		}
+	}
+
+	void World::retireRemovedAccessPanelRecords(std::vector<ConstructionRecord>& records)
+	{
+		// Historical removed panels impose no support/geometry constraint on an
+		// edit. Keep their object slots so subsequent authored indices stay valid.
+		std::map<std::tuple<uint32_t,uint32_t,uint32_t>, std::vector<size_t>> lifetimes;
+		std::vector<bool> discard(records.size());
+		for (size_t i = 0; i < records.size(); ++i)
+		{
+			auto& record = records[i];
+			if (record.type != ConstructionType::AccessPanel && record.type != ConstructionType::ConfigureAccessPanel
+				&& record.type != ConstructionType::RemoveAccessPanel) continue;
+			auto key = std::tuple{record.a,record.b,record.c};
+			if (record.type == ConstructionType::AccessPanel) lifetimes[key] = {i};
+			else if (record.type == ConstructionType::ConfigureAccessPanel) lifetimes[key].push_back(i);
+			else if (auto found = lifetimes.find(key); found != lifetimes.end() && !found->second.empty())
+			{
+				auto& placement = records[found->second.front()];
+				ConstructionRecord tombstone{ConstructionType::ObjectTombstone}; tombstone.a = placement.a;
+				placement = std::move(tombstone);
+				for (size_t j = 1; j < found->second.size(); ++j) discard[found->second[j]] = true;
+				// Removing a tail panel originally trimmed its empty object slots.
+				// Replay that trim as well as the placement slot, so later indices
+				// are identical whether the removed panel was at the tail or not.
+				ConstructionRecord trim{ConstructionType::ObjectTombstone}; trim.a = record.a; trim.p = true;
+				record = std::move(trim); lifetimes.erase(found);
+			}
+		}
+		std::vector<ConstructionRecord> retained;
+		for (size_t i = 0; i < records.size(); ++i) if (!discard[i]) retained.push_back(std::move(records[i]));
+		records = std::move(retained);
+	}
+
+	void World::validateRetainedAccessPanels() const
+	{
+		for (auto const& sector : mSectors)
+		{
+			if (!sector) continue;
+			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+			{
+				auto object = std::dynamic_pointer_cast<const AccessPanelSectorObject>(sector->getObject(i));
+				if (!object) continue;
+				std::string diagnostic;
+				auto panel = object->getPanel();
+				if (!validateAccessPanel(sector->getIndex(), panel->getLevelOffset(), object->getCellX(),
+					panel->getGeometry(), i, &diagnostic)) throw WorldException(this, diagnostic);
+			}
+		}
 	}
 
 	bool World::canAddAccessPanel(uint32_t sector, uint32_t level, uint32_t x,

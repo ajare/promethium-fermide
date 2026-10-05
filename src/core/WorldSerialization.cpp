@@ -590,7 +590,9 @@ namespace core
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("objectIndex", record.b);
 			serializer.writeUint64("id", record.markerId.value); break;
 		case ConstructionType::ObjectTombstone:
-			serializer.writeUint32("sectorIndex", record.a); break;
+			serializer.writeUint32("sectorIndex", record.a);
+			if (record.p) serializer.writeBool("trimTrailing", true);
+			break;
 		case ConstructionType::Background:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -1408,7 +1410,9 @@ namespace core
 			if (version >= 11) record.markerId = MarkerId{ serializer.readUint64("id") };
 			break;
 		case ConstructionType::ObjectTombstone:
-			record.a = serializer.readUint32("sectorIndex"); break;
+			record.a = serializer.readUint32("sectorIndex");
+			record.p = serializer.readBool("trimTrailing", true, false);
+			break;
 		case ConstructionType::Background:
 			record.layer = readLayer("layer");
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -3022,7 +3026,8 @@ namespace core
 			break;
 		}
 		case ConstructionType::ObjectTombstone:
-			_getSector(record.a)->addSectorObject(nullptr);
+			if (record.p) _getSector(record.a)->trimTrailingObjectTombstones();
+			else _getSector(record.a)->addSectorObject(nullptr);
 			break;
 		case ConstructionType::Background:
 			addBackground(record.layer == ~0u ? 0u : record.layer, record.a, record.b,
@@ -3374,6 +3379,7 @@ namespace core
 					activeLadders.push_back({ record.a, record.b, record.c, record.d });
 			}
 		}
+		retireRemovedAccessPanelRecords(records);
 		string ladderDiagnostic;
 		if (!normalizeRoomLadderRecords(records, ladderDiagnostic))
 			throw WorldException(this, ladderDiagnostic);
@@ -5438,6 +5444,7 @@ namespace core
 		}
 		auto const removedDumbwaiters = locationEditDumbwaiters(plan);
 		auto sourceRecords = mConstructionRecords;
+		retireRemovedAccessPanelRecords(sourceRecords);
 		vector<uint32_t> originalToSource(mSectors.size());
 		for (uint32_t i = 0; i < originalToSource.size(); ++i) originalToSource[i] = i;
 		reconcileDumbwaiterReplay(sourceRecords, originalToSource);
@@ -5691,7 +5698,11 @@ namespace core
 				}
 				catch (Exception const& error)
 				{
-					if (producer || source.type == ConstructionType::Furniture)
+					if (producer || source.type == ConstructionType::Furniture
+						|| source.type == ConstructionType::AccessPanel
+						|| source.type == ConstructionType::ConfigureAccessPanel
+						|| source.type == ConstructionType::RemoveAccessPanel
+						|| error.getMessage().find("Access panel") != string::npos)
 					{
 						diagnostic = error.getMessage();
 						if (source.type == ConstructionType::Ladder)
@@ -6500,25 +6511,7 @@ namespace core
 			}
 		}
 
-		auto const agents = captureAgentsForReplay();
-
-		resetForDeserialization(mName, mCellsWide, mLevelsHigh, true);
-		mDeserializingConstruction = true;
-		try
-		{
-			for (auto const& record : records) applyConstructionRecord(record);
-			finishBuild();
-		}
-		catch (...)
-		{
-			mDeserializingConstruction = false;
-			throw;
-		}
-		mDeserializingConstruction = false;
-		mConstructionRecords = std::move(records);
-		mSimulationPaused = true;
-		modify();
-		restoreCarriedAgents(agents, false);
+		rebuildFromConstructionRecords(std::move(records));
 		return true;
 	}
 
@@ -7114,6 +7107,9 @@ namespace core
 			|| !dynamic_pointer_cast<const WalkwaySectorObject>(mSectors[sectorIndex]->getObject(objectIndex)))
 		{ plan.diagnostic = "The selected Walkway no longer exists"; return plan; }
 		auto walkway = mSectors[sectorIndex]->getObject(objectIndex);
+		if (mLayers[walkway->getSector()->getLayerIndex()]->getCellDefinition(
+			walkway->getCellX(), walkway->getCellY()).accessPanel != ~0u)
+		{ plan.diagnostic = "Cannot remove Walkway support for a retained Access panel"; return plan; }
 		try
 		{
 			(void)planPhysicalControls(mSectors[sectorIndex]->getLayerIndex(), sectorIndex,
@@ -7196,6 +7192,9 @@ namespace core
 		auto object = dynamic_pointer_cast<WalkwaySectorObject>(
 			mSectors[sectorIndex]->getObject(objectIndex));
 		if (!object) return false;
+		if (mLayers[object->getSector()->getLayerIndex()]->getCellDefinition(
+			object->getCellX(), object->getCellY()).accessPanel != ~0u)
+			throw WorldException(this, "Cannot remove Walkway support for a retained Access panel");
 		(void)planPhysicalControls(mSectors[sectorIndex]->getLayerIndex(), sectorIndex,
 			object->getCellY(), nullptr, ~0u, ~0u, object->getCellX());
 		auto supportDiagnostic = furnitureSupportDiagnostic(sectorIndex,
@@ -7692,6 +7691,19 @@ namespace core
 		{
 			auto object = sector->getObject(i);
 			if (!object || !seen.insert(object.get()).second) continue;
+			if (object->getObjectType() == SectorObjectType::AccessPanel)
+			{
+				if (object->getCellX() - sector->getCellX() >= cellsWide
+					|| object->getCellY() - sector->getCellY() >= levelsHigh
+					|| (!plan.move && (object->getCellX() < x || object->getCellX() >= x + cellsWide
+						|| object->getCellY() < y || object->getCellY() >= y + levelsHigh
+						|| (y != sector->getCellY() && object->getCellY() == sector->getCellY()))))
+				{
+					plan.diagnostic = "Cannot shrink a Location around a retained Access panel";
+					return plan;
+				}
+				continue; // Panels retain cell-relative ownership; never cascade-delete.
+			}
 			if (plan.move)
 			{
 				auto type = object->getObjectType();

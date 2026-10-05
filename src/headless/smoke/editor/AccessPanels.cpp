@@ -59,9 +59,62 @@ namespace
 			&& captureDocumentSnapshot(world)->yaml==before && world->getGraph()==graph && !world->isModified()
 			&& gWorldDocumentHistory.undoCount()==3, "Invalid/stale move changed document history");
 	}
+	void structuralHistory()
+	{
+		editor_smoke::State state; using smoke::require;
+		auto world=std::make_shared<core::World>("Panel structural history",12,4);
+		auto room=world->addRoom("Room",0,0,0,6,2); world->addRoom("Back",1,0,0,12,3);
+		auto walkway=world->addSectorWalkway(room,1,3);
+		world->addAccessPanel(room,1,3,{1,1,0}); world->addAccessPanel(room,0,4,{0.5f,0.25f,0.5f});
+		world->finishBuild(); world->pauseSimulation(); world->markSaved(); gWorldDocumentHistory.clear();
+		auto before=captureDocumentSnapshot(world); auto graph=world->getGraph();
+		require(!world->planRemoveSectorWalkway(room,walkway.index).valid
+			&& !world->planResizeLocation(room,0,0,3,2).valid, "Editor support/shrink preview accepted");
+		bool refused=false; try { world->addSectorLightSwitch(room,4); } catch (std::exception const&) { refused=true; }
+		// The switch is below the edge-touching panel; this surrounding edit is valid.
+		require(!refused, "Permitted surrounding Button edit refused"); commitDocumentEdit(before);
+		world->finishBuild(); world->markSaved(); before=captureDocumentSnapshot(world); graph=world->getGraph();
+		refused=false; try { world->addBoothWindow(0,0,4); } catch (std::exception const&) { refused=true; }
+		require(!refused,"Permitted BoothWindow edge contact refused"); commitDocumentEdit(before); world->finishBuild();
+		world->markSaved(); before=captureDocumentSnapshot(world); graph=world->getGraph();
+		refused=false; try { world->addSectorDoor(0,1,3); } catch (std::exception const&) { refused=true; }
+		require(refused && captureDocumentSnapshot(world)->yaml==before->yaml && world->getGraph()==graph
+			&& !world->isModified() && gWorldDocumentHistory.undoCount()==2, "Rejected surrounding editor edit changed history/state");
+		auto restore=[&](DocumentSnapshot const& snapshot) { auto loaded=deserializeDocumentSnapshot(snapshot,world,{});
+			if (!loaded) return false;
+			world=loaded; world->pauseSimulation(); return true; };
+		auto assertPanels=[&](uint32_t x,uint32_t y) {
+			unsigned count=0;
+			for (uint32_t i=0;i<world->getSector(room)->getNumObjects();++i)
+				if (auto p=std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(world->getSector(room)->getObject(i)))
+				{
+					++count; auto vertex=world->getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(p));
+					require(p->getCellX()==x+(p->getPanel()->getLevelOffset()==1 ? 3u : 4u)
+						&& p->getCellY()==y+p->getPanel()->getLevelOffset() && vertex
+						&& p->getPanel()->getState()==core::AccessPanel::State::Closed
+						&& world->lookupInteractionPoint(p->getPanel()->getControl(core::AccessPanel::Action::Open)), "History reconstruction lost panel geometry/controls");
+				}
+			require(count==2,"History lost retained panels");
+		};
+		auto undo=[&] { require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world),restore),"Structural undo failed"); };
+		auto redo=[&] { require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world),restore),"Structural redo failed"); };
+		undo(); assertPanels(0,0); redo(); assertPanels(0,0);
+		before=captureDocumentSnapshot(world); auto move=world->planResizeLocation(room,6,1,6,2);
+		require(move.valid,"Editor Location carry refused: "+move.diagnostic); room=world->applyLocationEdit(move); commitDocumentEdit(before);
+		assertPanels(6,1); undo(); assertPanels(0,0); redo(); assertPanels(6,1);
+		before=captureDocumentSnapshot(world); auto shrink=world->planResizeLocation(room,6,1,5,2);
+		require(shrink.valid,"Valid retained-panel shrink refused"); room=world->applyLocationEdit(shrink); commitDocumentEdit(before);
+		assertPanels(6,1); undo(); assertPanels(6,1); redo(); assertPanels(6,1);
+		before=captureDocumentSnapshot(world); auto removal=world->planRemoveLocation(room);
+		require(removal.valid,"Editor Location deletion refused"); world->applyLocationEdit(removal); commitDocumentEdit(before);
+		undo(); assertPanels(6,1); redo();
+		for (uint32_t s=0;s<world->getNumSectors();++s) for (uint32_t i=0;i<world->getSector(s)->getNumObjects();++i)
+			require(!std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(world->getSector(s)->getObject(i)),"Owner deletion redo restored orphan panel");
+	}
 	void workflow(smoke::Context const&)
 	{
 		clipboardAndMovement();
+		structuralHistory();
 		editor_smoke::State state; using smoke::require;
 		auto world=std::make_shared<core::World>("Panel editor",8,3);
 		auto room=world->addFacade(0,0,1,6,2); world->addSectorWalkway(room,1,2);

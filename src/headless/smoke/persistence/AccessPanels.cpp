@@ -27,6 +27,10 @@ namespace persistence
 			auto placed=moved.addAccessPanel(room,0,2,geometry); moved.finishBuild(); moved.pauseSimulation();
 			auto object=moved.applyObjectMove(moved.planMoveSectorObject(room,placed.index,13,1));
 			moved.addAccessPanel(corridor,0,8,geometry); moved.finishBuild();
+			// Surrounding replay retires the removed source panel while retaining
+			// its original tail-trimming semantics and destination indices.
+			auto resize=moved.planResizeLocation(room,1,0,5,2);
+			require(resize.valid,"Historical removed panel blocked surrounding move"); moved.applyLocationEdit(resize);
 			for (bool binary : {false,true})
 			{
 				auto bytes=write(moved,binary);
@@ -50,6 +54,71 @@ namespace persistence
 					require(count==2 && loaded.canAddAccessPanel(room,0,2,geometry), "Moved source attachment persisted");
 				}
 			}
+		}
+		// Accepted surrounding structural edits must remain canonical in both formats.
+		for (bool binary : {false,true})
+		{
+			core::World structural("Structural round trip",12,4); structural.addLayer(); structural.addLayer();
+			auto owner=structural.addRoom("Room",2,1,0,6,2); structural.addSectorWalkway(owner,1,3);
+			structural.addAccessPanel(owner,1,3,{1,1,0}); auto removed=structural.addCorridor(2,0,0,6,1);
+			structural.addAccessPanel(removed,0,3); structural.finishBuild(); structural.pauseSimulation();
+			structural.applyLocationEdit(structural.planRemoveLocation(removed));
+			owner=structural.applyLocationEdit(structural.planResizeLocation(owner,6,2,6,2));
+			structural.applyDeleteLayer(structural.planDeleteLayer(0)); structural.applyDeleteLevel(structural.planDeleteLevel(0));
+			auto bytes=write(structural,binary);
+			std::unique_ptr<core::Serializer> reader=binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+			reader->deserialize(); core::SerializationWorkData work; core::World loaded("Structural loaded",1,1);
+			require(loaded.deserialize(*reader,work) && write(loaded,binary)==bytes,"Structural results did not round trip");
+			for (bool replay : {false,true})
+			{
+				if (replay) { loaded.resetSimulation(); loaded.pauseSimulation(); }
+				unsigned count=0;
+				for (uint32_t s=0;s<loaded.getNumSectors();++s) for (uint32_t i=0;i<loaded.getSector(s)->getNumObjects();++i)
+					if (auto p=std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(loaded.getSector(s)->getObject(i)))
+					{
+						++count; auto vertex=loaded.getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(p));
+						require(p->getCellX()==9 && p->getCellY()==2 && p->getSector()->getLayerIndex()==1
+							&& p->getPanel()->getGeometry()==core::AccessPanelGeometry{1,1,0} && vertex
+							&& p->getPanel()->getState()==core::AccessPanel::State::Closed
+							&& loaded.lookupInteractionPoint(p->getPanel()->getControl(core::AccessPanel::Action::Open)), "Structural replay lost owned panel");
+					}
+				require(count==1,"Deleted owning Location panels reconstructed");
+			}
+		}
+		// Reverse-order reconstructed wall conflicts cannot replace a live document.
+		for (unsigned kind=0;kind<5;++kind) for (bool binary : {false,true})
+		{
+			core::World conflict("Reverse replay",8,2); auto owner=conflict.addRoom("Room",0,0,0,7,2); conflict.addRoom("Back",1,0,0,7,2);
+			conflict.addAccessPanel(owner,0,3,{0,1,0});
+			if (kind==0) conflict.addSectorDoor(0,0,3);
+			if (kind==1) conflict.addSectorWindow(0,0,3,1,1);
+			if (kind==2) conflict.addBoothWindow(0,0,3);
+			if (kind==3) conflict.addSectorLightSwitch(owner,3);
+			conflict.finishBuild(); conflict.pauseSimulation(); conflict.markSaved();
+			auto baseline=write(conflict,false); auto graph=conflict.getGraph(); auto bytes=write(conflict,binary);
+			if (binary)
+			{
+				auto field=kind==4 ? std::string("levelOffset") : std::string("width");
+				auto offset=bytes.find(field); require(offset!=std::string::npos,"Binary panel field missing"); offset+=field.size()+1;
+				bytes[offset]=kind==4 ? 1 : 0; bytes[offset+1]=0;
+				bytes[offset+2]=kind==4 ? 0 : static_cast<char>(0x80); bytes[offset+3]=kind==4 ? 0 : static_cast<char>(0x3f);
+			}
+			else
+			{
+				auto node=YAML::Load(bytes);
+				for (auto record : node["construction"]) if (record["type"].as<std::string>()=="accessPanel") record[kind==4 ? "levelOffset" : "width"]=1;
+				bytes=YAML::Dump(node);
+			}
+			bool refused=false;
+			try
+			{
+				std::unique_ptr<core::Serializer> reader=binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+				reader->deserialize(); core::SerializationWorkData work; conflict.deserialize(*reader,work);
+			}
+			catch (std::exception const&) { refused=true; }
+			require(refused && write(conflict,false)==baseline && conflict.getGraph()==graph && !conflict.isModified(),"Reverse wall replay mutated live document");
 		}
 		core::World world("Panel persistence",10,4);
 		auto room=world.addRoom("Room",0,1,1,7,2); auto corridor=world.addCorridor(0,0,1,7,1);

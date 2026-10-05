@@ -1,4 +1,4 @@
-# Access panels (#451, #452, #453)
+# Access panels (#451, #452, #453, #454)
 
 Access panels are cell-owned objects on the visible back surface of Rooms,
 Corridors, and Facades. They do not occupy the aperture slot, add walls,
@@ -79,8 +79,29 @@ edits and delete/replacement), rebuild approaches, and reconstruct Closed.
 Schemas 1–50 without panel records remain supported. Malformed input is rejected
 in detached reconstruction before the live World is replaced.
 
-Comprehensive surrounding-edit reconciliation (including reverse wall-object
-conflict checks and control reflow) remains follow-up work under #454.
+Surrounding structural edits also enforce these invariants (#454). Location
+movement carries cell-relative panels and rebuilds their bounds, approaches, and
+owned interactions. Owning-Location deletion removes the panels and all old
+requests, controls, and device references; replacement identities are fresh.
+Location cropping and Floor/Walkway support removal refuse retained panels rather
+than deleting, clamping, or relocating them. Layer/Level deletion follows the
+existing destructive Sector-deletion contract; retained Locations and their panels
+compact together and reconstruct Closed.
+
+Door/Window/BoothWindow placement, movement and resizing validate against panels
+on both sides. Door height changes and Bulkhead Door placement also preflight
+panel bounds. Canonical Button planning checks the complete chosen layout,
+including stack heights, against panel rectangles before any reflow. Panels do
+not influence the allocator's policy: a conflicting final assignment refuses the
+triggering transaction. Edge contact and zero-area rules remain unchanged;
+Furniture and Agents remain excluded. Detached replay validates retained panels
+again after final control reflow, before live state or history is replaced.
+
+Removed historical panels impose no support constraints on surrounding replay.
+Their placement slots become ordinary object tombstones; an optional
+`trimTrailing: true` tombstone replays the original removal's trailing-empty-slot
+trim without deleting live objects. This backward-compatible optional field in
+schema 51 preserves subsequent object indices in YAML, binary, reset and history.
 Runtime Open is never serialized as an authored initial-state option.
 Owned interactions are reconstructed from placement records, not serialized handles.
 
@@ -130,6 +151,25 @@ safety, and movement/copy persistence/replay.
 All use existing production seams; Editor and Render use CPU-only ImGui with no
 display or dialogs. See `linux-smoke-validation.md` and `validation-recovery.md`
 for the required bounded final validation lanes.
+
+## #454 verification
+
+Final Linux GUI-enabled default builds (including `editor`, core and headless
+modules/tools) and unfiltered final CTest passed on the final source state in
+Release and Debug: 110 registered tests, zero failures, one explicit optional GUI
+capability skip per configuration. Displays were unset; Editor and Render used
+CPU-only ImGui. The affected World/Editor/Render/Persistence/Simulation milestone,
+focused panel checks, smoke ownership audit, and `git diff --check` also passed.
+
+- Release final CTest: `d30c8089af6f4ce38293773dc9ba3882`, 132.11 s.
+- Debug final CTest: `eff2571c6c8a4a87bc5ed7073df7a6d8`, 594.67 s.
+
+Coverage includes Location carry/resize/deletion, Ground Floor and Walkway
+support refusal, reverse wall-object placement/movement/resize and Door height,
+final Button stack/support reflow, Layer/Level compaction/deletion, stale pending
+requests/operations, document undo/redo, retired-panel chronology and stable object
+indices, permitted Furniture/Agent overlap, renderer carry/removal, and YAML/binary
+structural round trips and atomic conflicting/unsupported reconstruction refusal.
 
 ## #453 verification
 

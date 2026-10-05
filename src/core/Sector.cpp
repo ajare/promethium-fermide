@@ -268,8 +268,13 @@ namespace core
 	{
 		if (index >= mObjects.size() || !mObjects[index]) return false;
 		mObjects[index].reset();
-		while (!mObjects.empty() && !mObjects.back()) mObjects.pop_back();
+		trimTrailingObjectTombstones();
 		return true;
+	}
+
+	void Sector::trimTrailingObjectTombstones()
+	{
+		while (!mObjects.empty() && !mObjects.back()) mObjects.pop_back();
 	}
 
 	uint32_t Sector::createForceBridge(shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t size, int fromSide, bool extensible, bool startExtended)

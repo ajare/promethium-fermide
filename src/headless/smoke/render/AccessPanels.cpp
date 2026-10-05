@@ -26,6 +26,13 @@ namespace
 				auto object=world->applyObjectMove(world->planMoveSectorObject(owner,created.index,4,0));
 				uint32_t movedIndex=0; while (world->getSector(owner)->getObject(movedIndex)!=object) ++movedIndex;
 				require(!world->getGraph()->getVertexForObject(old) && world->canAddAccessPanel(owner,0,3,geometry), "Moved rendering fixture retained source attachment");
+				auto previous=object;
+				auto move=kind==2 ? world->planResizeFacade(owner,1,1,7,1) : world->planResizeLocation(owner,1,1,7,1);
+				require(move.valid, "Renderer Location move refused: " + move.diagnostic);
+				owner=world->applyLocationEdit(move);
+				object=world->getSector(owner)->getObject(movedIndex);
+				require(object && object->getCellX()==5 && object->getCellY()==1
+					&& !world->getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(previous)), "Carried panel retained source geometry/vertex");
 				auto panel=std::static_pointer_cast<const core::AccessPanelSectorObject>(object)->getPanel();
 				core::Vector2 min,max; panel->getSelectionShape(min,max);
 				bool degenerate=geometry.width==0 || geometry.height==0;
@@ -79,7 +86,11 @@ namespace
 					require(crosses == 2 && openFills == (!degenerate && style == LayerRenderStyle::Solid ? 2u : 0u), "Open indistinguishable on canvas/Facade/wireframe");
 				}
 				require(world->getGraph() == graph && graph->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object)) == vertex && panel->getGeometry() == geometry, "Presentation changed geometry/topology");
-				world->pauseSimulation(); require(world->removeAccessPanel(owner,movedIndex),"Render fixture deletion refused");
+				world->pauseSimulation();
+				auto removal=kind==2 ? world->planRemoveFacade(owner) : world->planRemoveLocation(owner);
+				require(removal.valid,"Render owner deletion refused"); world->applyLocationEdit(removal);
+				require(!world->lookupAccessPanel(panel->getId()),"Renderer owner deletion retained panel");
+				gSelectedSectorObject.reset();
 				WorldDrawList after({{0,0},{1200,800}}); renderWorld(world,&after);
 				require(std::none_of(after.commands().begin(),after.commands().end(),[](auto const& c) {
 					auto t=std::get_if<WorldDrawList::Triangle>(&c); auto l=std::get_if<WorldDrawList::Line>(&c);

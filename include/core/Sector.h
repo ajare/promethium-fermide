@@ -86,6 +86,7 @@ namespace core
 			float xOffset, uint32_t* vertexIdentifier = nullptr);
 
 		bool removeSectorObject(uint32_t index);
+		void trimTrailingObjectTombstones();
 
 		uint32_t createForceBridge(std::shared_ptr<const Sector> sector, uint32_t x, uint32_t y, uint32_t size, int fromSide, bool extensible, bool startExtended);
 

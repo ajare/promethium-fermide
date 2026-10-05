@@ -64,9 +64,115 @@ namespace
 		require(!conflict.planMoveSectorObject(room,created.index,3,0).valid && saved(conflict)==before
 			&& conflict.getGraph()==graph && !conflict.isModified(), "Move wall overlap mutated document");
 	}
+	std::shared_ptr<const core::AccessPanelSectorObject> panelIn(core::World const& world, uint32_t sector)
+	{
+		for (uint32_t i = 0; i < world.getSector(sector)->getNumObjects(); ++i)
+			if (auto p = std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(world.getSector(sector)->getObject(i))) return p;
+		return {};
+	}
+	void structural()
+	{
+		for (unsigned kind = 0; kind < 3; ++kind)
+			for (auto geometry : {core::AccessPanelGeometry{}, {0,0,1}, {1,1,0}})
+			{
+				core::World world("Carried panels", 16, 5);
+				auto owner = kind == 0 ? world.addRoom("Room",0,1,1,5,2)
+					: kind == 1 ? world.addCorridor(0,1,1,5,1) : world.addFacade(0,1,1,5,2);
+				if (kind != 1) world.addSectorWalkway(owner,1,3);
+				auto level = kind == 1 ? 0u : 1u;
+				auto created = world.addAccessPanel(owner,level,4,geometry);
+				world.finishBuild(); world.pauseSimulation();
+				auto actor = world.createAgent("Pending",owner,level,3.5f);
+				auto old = panelIn(world,owner); auto panel = old->getPanel();
+				auto point = panel->getControl(core::AccessPanel::Action::Open);
+				auto pending = world.requestAccessPanel(panel->getId(),core::AccessPanel::Action::Open,actor);
+				require(bool(pending), "Structural pending request refused");
+				auto requestState=world.lookupInteractionRequest(pending).entity;
+				auto operation=requestState->getOperations().front().first;
+				auto operationState=world.lookupDeviceOperation(operation).entity;
+				world.markSaved(); auto before = saved(world); auto graph = world.getGraph();
+				auto resize = [&](uint32_t width,uint32_t height) { return kind == 2
+					? world.planResizeFacade(owner,1,1,width,height) : world.planResizeLocation(owner,1,1,width,height); };
+				for (auto plan : {resize(3,kind == 1 ? 1 : 2), resize(5,level)})
+				{
+					require(!plan.valid, "Location shrink discarded retained panel");
+					bool refused = false; try { world.applyLocationEdit(plan); } catch (std::exception const&) { refused = true; }
+					require(refused && saved(world)==before && world.getGraph()==graph && !world.isModified()
+						&& world.lookupInteractionRequest(pending).entity==requestState
+						&& world.lookupDeviceOperation(operation).entity==operationState && world.lookupInteractionPoint(point), "Resize preflight mutated live state");
+				}
+				if (kind != 1)
+				{
+					auto walkway = std::as_const(world).getLayer(0)->getCellDefinition(4,2).floorIndex;
+					require(!world.planRemoveSectorWalkway(owner,walkway).valid, "Walkway preview removed panel support");
+					bool refused = false; try { world.removeSectorWalkway(owner,walkway); } catch (std::exception const&) { refused = true; }
+					require(refused && saved(world)==before && world.getGraph()==graph && !world.isModified()
+						&& world.lookupInteractionRequest(pending).entity, "Walkway support removal was not atomic");
+				}
+				auto move = kind == 2 ? world.planResizeFacade(owner,7,2,5,2)
+					: world.planResizeLocation(owner,7,2,5,kind == 1 ? 1 : 2);
+				require(move.valid, "Location carrying panel refused: " + move.diagnostic);
+				owner = world.applyLocationEdit(move);
+				auto carried = panelIn(world,owner); auto vertex = world.getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(carried));
+				require(carried && carried->getCellX()==10 && carried->getCellY()==2+level
+					&& carried->getPanel()->getGeometry()==geometry && carried->getPanel()->getLevelOffset()==level
+					&& vertex && vertex->getPosition()==core::Vector2{10.5f,float(2+level)}
+					&& world.lookupInteractionPoint(carried->getPanel()->getControl(core::AccessPanel::Action::Open)).entity->getPosition()==vertex->getPosition()
+					&& !world.lookupInteractionPoint(point) && !world.lookupInteractionRequest(pending).entity
+					&& !world.lookupDeviceOperation(operation) && !world.lookupAccessPanel(panel->getId()) && !world.getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(old)), "Location move retained stale panel geometry/handles");
+				actor = world.createAgent("Removal pending",owner,level,3.5f);
+				panel = carried->getPanel(); point = panel->getControl(core::AccessPanel::Action::Open);
+				pending = world.requestAccessPanel(panel->getId(),core::AccessPanel::Action::Open,actor);
+				require(bool(pending), "Carried panel interactions unusable");
+				operation=world.lookupInteractionRequest(pending).entity->getOperations().front().first;
+				auto remove = kind == 2 ? world.planRemoveFacade(owner) : world.planRemoveLocation(owner);
+				require(remove.valid, "Owning Location deletion refused"); world.applyLocationEdit(remove);
+				require(!world.lookupAccessPanel(panel->getId()) && !world.lookupInteractionPoint(point)
+					&& !world.lookupInteractionRequest(pending).entity && !world.lookupDeviceOperation(operation)
+					&& !world.getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(carried)), "Location deletion orphaned panel state");
+				owner = world.addRoom("Replacement",0,2,7,5,2); world.addSectorWalkway(owner,1,3);
+				created = world.addAccessPanel(owner,level,10,geometry); world.finishBuild();
+				require(panelIn(world,owner)->getPanel()->getId()!=panel->getId()
+					&& !world.requestAccessPanel(panel->getId(),core::AccessPanel::Action::Open,actor), "Replacement reused removed panel identity");
+			}
+		{
+			core::World floor("Ground Floor removal",8,3); auto owner=floor.addRoom("Room",0,0,0,7,2);
+			floor.addAccessPanel(owner,0,3,{0,0,0}); floor.finishBuild(); floor.pauseSimulation(); floor.markSaved();
+			auto before=saved(floor); auto graph=floor.getGraph();
+			require(!floor.planResizeLocation(owner,0,1,7,1).valid && saved(floor)==before
+				&& floor.getGraph()==graph && !floor.isModified(), "Ground Floor removal relocated retained panel");
+		}
+		{
+			core::World history("Retired panels",10,3); auto owner=history.addRoom("Room",0,0,0,8,2);
+			auto walkway=history.addSectorWalkway(owner,1,6); auto removed=history.addAccessPanel(owner,1,6);
+			auto retained=history.addAccessPanel(owner,0,2); history.finishBuild(); history.pauseSimulation();
+			history.configureAccessPanel(owner,removed.index,{1,1,0}); history.removeAccessPanel(owner,removed.index);
+			require(history.removeSectorWalkway(owner,walkway.index), "Removed historical panel blocked support removal");
+			auto resize=history.planResizeLocation(owner,0,0,5,1);
+			require(resize.valid, "Removed historical panel blocked shrink: "+resize.diagnostic); owner=history.applyLocationEdit(resize);
+			require(history.getSector(owner)->getObject(retained.index) && panelIn(history,owner)->getCellX()==2,
+				"Retiring panel chronology shifted surviving object indices");
+		}
+		for (bool layerEdit : {false,true})
+		{
+			core::World world("Layer/Level panels",8,4); world.addLayer(); world.addLayer();
+			auto owner = world.addRoom("Retained",2,2,0,7,1); world.addAccessPanel(owner,0,3,{0,0,0});
+			world.finishBuild(); world.pauseSimulation(); auto old = panelIn(world,owner)->getPanel();
+			if (layerEdit) world.applyDeleteLayer(world.planDeleteLayer(0));
+			else world.applyDeleteLevel(world.planDeleteLevel(0));
+			auto p = panelIn(world,0);
+			require(p && p->getSector()->getLayerIndex()==(layerEdit ? 1u : 2u) && p->getCellY()==(layerEdit ? 2u : 1u)
+				&& p->getPanel()->getState()==core::AccessPanel::State::Closed && !world.lookupAccessPanel(old->getId()), "Layer/Level compaction lost valid panel");
+			old = p->getPanel();
+			if (layerEdit) world.applyDeleteLayer(world.planDeleteLayer(1));
+			else world.applyDeleteLevel(world.planDeleteLevel(1));
+			require(!world.lookupAccessPanel(old->getId()) && !world.lookupInteractionPoint(old->getControl(core::AccessPanel::Action::Open)), "Layer/Level owner deletion orphaned panel");
+		}
+	}
 	void authored(smoke::Context const&)
 	{
 		movement();
+		structural();
 		for (unsigned kind = 0; kind < 3; ++kind)
 		{
 			core::World world("Panels", 10, 4);
@@ -143,8 +249,73 @@ namespace
 		auto ladder=unsupported.addLadder(1,0,3,{4,false,true});
 		require(!unsupported.canAddAccessPanel(ladder.ladder.sector->getIndex(),0,3), "Transit admitted panel");
 	}
+	void reverseOverlap()
+	{
+		for (unsigned kind=0; kind<5; ++kind) for (uint32_t panelLayer : {0u,1u})
+		{
+			core::World world("Reverse wall conflicts",10,2);
+			auto front = world.addRoom("Front",0,0,0,9,1); auto back = world.addRoom("Back",1,0,0,9,1);
+			auto owner = panelLayer == 0 ? front : back;
+			world.addAccessPanel(owner,0,3,{1,1,0});
+			uint32_t object=~0u;
+			if (kind==0) object=world.addSectorDoor(0,0,5).door.index;
+			if (kind==1) object=world.addSectorWindow(0,0,5,1,1);
+			if (kind==2) object=world.addBoothWindow(0,0,5).window.index;
+			world.finishBuild(); world.pauseSimulation(); world.markSaved(); auto before=saved(world); auto graph=world.getGraph();
+			bool refused=false;
+			try
+			{
+				if (kind==0) world.addSectorDoor(0,0,3);
+				if (kind==1) world.addSectorWindow(0,0,3,1,1);
+				if (kind==2) world.addBoothWindow(0,0,3);
+				if (kind==3) world.addSectorLightSwitch(owner,3);
+				if (kind==4) world.addAccessPanel(owner,0,3,{0,0,0});
+			}
+			catch (std::exception const&) { refused=true; }
+			require(refused && saved(world)==before && world.getGraph()==graph && !world.isModified(), "Reverse wall placement was not atomic");
+			if (object!=~0u)
+			{
+				require(!world.planMoveSectorObject(front,object,3,0).valid, "Wall object moved into panel");
+				auto plan = kind==0 ? world.planResizeSectorDoor(front,object,3,0,2,1)
+					: world.planResizeSectorWindow(front,object,3,0,3,1);
+				require(!plan.valid && saved(world)==before && world.getGraph()==graph && !world.isModified(), "Wall object resize overlapped panel");
+			}
+		}
+		// The first Button ends at .35. Adding a second Door stacks it at .375,
+		// intersecting a panel on the preceding cell without aperture overlap.
+		core::World stack("Reflow into panel",6,1); stack.addLayer();
+		stack.addRoom("Front",0,0,0,6,1); auto middle=stack.addRoom("Middle",1,0,1,2,1); stack.addRoom("Back",2,0,0,6,1);
+		stack.addSectorDoor(0,0,2,core::World::RemoteControlledDoor1Options);
+		stack.addAccessPanel(middle,0,1,{1,0.1f,0.375f}); stack.finishBuild(); stack.pauseSimulation(); stack.markSaved();
+		auto before=saved(stack); auto graph=stack.getGraph(); bool refused=false;
+		try { stack.addSectorDoor(1,0,2,core::World::RemoteControlledDoor1Options); } catch (std::exception const&) { refused=true; }
+		require(refused && saved(stack)==before && stack.getGraph()==graph && !stack.isModified(), "Final Button stack reflow partially committed");
+		core::World support("Support reflow",8,3);
+		auto room=support.addRoom("Room",0,0,0,7,2); support.addCorridor(1,1,0,7,1);
+		for (uint32_t x : {2u,3u,4u}) support.addSectorWalkway(room,1,x);
+		support.addSectorDoor(0,1,3,core::World::RemoteControlledDoor1Options);
+		support.addAccessPanel(room,1,2,{1,0.1f,0.25f}); support.finishBuild(); support.pauseSimulation(); support.markSaved();
+		before=saved(support); graph=support.getGraph();
+		auto walkway=std::as_const(support).getLayer(0)->getCellDefinition(4,1).floorIndex;
+		require(!support.planRemoveSectorWalkway(room,walkway).valid, "Support removal preview missed Button reflow overlap");
+		refused=false; try { support.removeSectorWalkway(room,walkway); } catch (std::exception const&) { refused=true; }
+		require(refused && saved(support)==before && support.getGraph()==graph && !support.isModified(), "Support-triggered Button reflow partially committed");
+		// Degenerate bounds and touching edges remain valid in reverse order.
+		for (auto geometry : {core::AccessPanelGeometry{0,1,0}, {1,0,0}, {0.5f,0.25f,0.5f}})
+		{
+			core::World edges("Reverse edges",8,2); auto host=edges.addRoom("Room",0,0,0,7,1); edges.addRoom("Back",1,0,0,7,1);
+			edges.addAccessPanel(host,0,3,geometry); edges.addBoothWindow(0,0,3); edges.finishBuild();
+			require(panelIn(edges,host)->getPanel()->getGeometry()==geometry, "Edge contact/zero area changed authored panel");
+		}
+		core::World height("Door height panel",8,2); auto host=height.addRoom("Room",0,0,0,7,1); height.addRoom("Back",1,0,0,7,1);
+		height.addSectorDoor(0,0,3); height.addAccessPanel(host,0,3,{0.5f,0.1f,0.8f}); height.finishBuild(); height.pauseSimulation(); height.markSaved();
+		before=saved(height); graph=height.getGraph(); std::string reason;
+		require(!height.setSectorDoorHeight(0,0,3,1,core::Door::Height::Tall,&reason)
+			&& saved(height)==before && height.getGraph()==graph && !height.isModified(), "Tall Door expansion was not atomic");
+	}
 	void overlap(smoke::Context const& context)
 	{
+		reverseOverlap();
 		for (unsigned kind=0;kind<4;++kind)
 		{
 			core::World world("Overlap",8,2); auto room=world.addRoom("Front",0,0,0,7,1);
@@ -181,6 +352,14 @@ namespace
 			core::World edges("Wall edge contact",8,2); auto room=edges.addRoom("Room",0,0,0,7,1);
 			edges.addRoom("Back",1,0,0,7,1); edges.addBoothWindow(0,0,3);
 			require(edges.canAddAccessPanel(room,0,3,{0.5f,0.25f,0.5f}), "Fixed wall edge contact refused");
+		}
+		{
+			core::World reverse("Furniture after panels",8,2); auto room=reverse.addRoom("Room",0,0,0,7,1);
+			reverse.addAccessPanel(room,0,3,{1,1,0});
+			reverse.attachFurnitureCatalogue("chair.furniture.yaml",core::FurnitureCatalogue::readFile(context.fixture("resources/test-worlds/chair.furniture.yaml")));
+			reverse.placeFurniture(room,"chair",3,0,"In front"); reverse.finishBuild(); reverse.pauseSimulation();
+			reverse.createAgent("In front",room,0,3.5f);
+			require(panelIn(reverse,room) && reverse.furniture().size()==1, "Furniture/Agent overlap invalidated panel");
 		}
 		core::World world("Edges",6,2); auto room=world.addRoom("Room",0,0,0,5,1);
 		world.addAccessPanel(room,0,1,{1,1,0}); require(world.canAddAccessPanel(room,0,2,{1,1,0}), "Panel edge contact rejected");
