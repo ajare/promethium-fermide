@@ -248,6 +248,8 @@ namespace
 			std::filesystem::copy_file(context.fixture(std::string("src/headless/smoke/fixtures/furniture/") + filename), root / filename);
 		std::filesystem::copy_file(root / "chair.furniture.lua", root / "elsewhere/chair.furniture.lua");
 		std::filesystem::copy_file(root / "chair.furniture.lua", root / "wrong.yaml");
+		std::string const legacySource = "furnitureCatalogue:\n  version: 1\n  definitions: []\n";
+		{ std::ofstream output(root / "external.furniture.yaml"); output << legacySource; }
 		{ std::ofstream output(root / "broken.furniture.lua"); output << "not a catalogue"; }
 		auto path = root / "picker.world.yaml";
 		auto world = std::make_shared<core::World>("Picker", 8, 2);
@@ -295,7 +297,7 @@ namespace
 		picked.reset(); click();
 		require(choices == 2 && captureDocumentSnapshot(world, history)->yaml == unchanged && history.undoCount() == 1,
 			"Cancelled picker mutated the document/history");
-		for (auto file : {"elsewhere/chair.furniture.lua", "wrong.yaml", "broken.furniture.lua"})
+		for (auto file : {"elsewhere/chair.furniture.lua", "wrong.yaml", "external.furniture.yaml", "broken.furniture.lua"})
 		{
 			picked = (root / file).string(); click();
 			require(captureDocumentSnapshot(world, history)->yaml == unchanged && history.undoCount() == 1
@@ -303,6 +305,13 @@ namespace
 				"Rejected picker selection changed the catalogue/history");
 			if (std::string(file).starts_with("elsewhere"))
 				require(text.find("beside the World") != std::string::npos, "Outside-directory selection lost its diagnostic");
+			if (std::string(file).ends_with(".yaml"))
+				require(text.find("requires conversion to Lua") != std::string::npos, "YAML picker rejection lost conversion diagnostic");
+		}
+		{
+			std::ifstream input(root / "external.furniture.yaml"); std::string bytes((std::istreambuf_iterator<char>(input)), {});
+			require(bytes == legacySource && !std::filesystem::exists(root / "external.furniture.lua"),
+				"Catalogue selection silently converted or rewrote external YAML");
 		}
 		pickerError = true; click(); pickerError = false;
 		require(text.find("Native picker failed") != std::string::npos && history.undoCount() == 1,

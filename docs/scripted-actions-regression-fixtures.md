@@ -53,14 +53,12 @@ updated. No duplicate legacy aggregate CTest registration was introduced.
 
 ## Final contract handoff (#467)
 
-A source/resource/script audit finds no old-format regression caller or generated
-YAML Furniture path. Remaining production migration scaffolding is intentionally
-unchanged: `src/core/Furniture.cpp` accepts/parses YAML and its suffix;
-`include/core/Furniture.h` retains `UsablePointAction`/the optional point action;
-`World::furnitureMarkerAction` remains declared/implemented in
-`include/core/World.h` and `src/core/WorldFurniture.cpp`. Remove these and their
-obsolete contracts in #467, not this test-conversion slice. Historical validation
-records in prior slice documentation describe the state at that time.
+#466 left production migration scaffolding for #467. That final slice now removes
+the YAML parser/suffix acceptance, optional closed-enum point action and implicit
+arrival adapter. No old-format regression caller, generated catalogue path or
+checked-in YAML Furniture catalogue remains. Unsupported external YAML is rejected
+without rewriting it. Historical validation below and in prior slice documentation
+describes the state at that time; see [final integration evidence](scripted-actions-integration.md).
 
 ## Validation
 

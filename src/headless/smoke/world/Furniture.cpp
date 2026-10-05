@@ -232,6 +232,33 @@ namespace
 				"Document serialized executable catalogue state");
 		}
 		before = snapshot(world);
+		auto acceptedCatalogue = world.furnitureCatalogue();
+		std::string const legacySource = "furnitureCatalogue:\n  version: 1\n  uuid: " + acceptedCatalogue->uuid() + "\n  definitions: []\n";
+		for (auto suffix : {".furniture.yaml", ".furniture.yml", ".yaml", ".yml"})
+		{
+			auto external = root / (std::string("external") + suffix);
+			{ std::ofstream output(external); output << legacySource; }
+			auto refusesConversion = [&](auto operation) {
+				bool refused = false;
+				try { operation(); }
+				catch (std::exception const& error) { refused = std::string(error.what()).find("requires conversion to Lua") != std::string::npos; }
+				require(refused, "YAML Furniture did not report conversion required: " + external.string());
+			};
+			refusesConversion([&] { (void)core::FurnitureCatalogue::readFile(external); });
+			refusesConversion([&] { (void)core::FurnitureCatalogue::load(external); });
+			refusesConversion([&] { world.attachFurnitureCatalogue(external.filename().string(), acceptedCatalogue); });
+			require(!world.reloadFurnitureCatalogue(external, &diagnostic)
+				&& diagnostic.find("requires conversion to Lua") != std::string::npos, "YAML reload lost conversion diagnostic");
+			auto oldDocument = YAML::Load(before);
+			oldDocument["furnitureCatalogue"]["filename"] = external.filename().string();
+			auto document = root / "external.world.yaml";
+			{ std::ofstream output(document); output << oldDocument; }
+			refusesConversion([&] { (void)core::loadWorldDocument(document); });
+			std::ifstream input(external); std::string bytes((std::istreambuf_iterator<char>(input)), {});
+			require(bytes == legacySource && !std::filesystem::exists(root / "external.furniture.lua")
+				&& snapshot(world) == before && world.furnitureCatalogue() == acceptedCatalogue,
+				"YAML rejection mutated the World/package or silently rewrote the file");
+		}
 		auto rejected = [&](std::string const& sourceText) {
 			write(sourceText);
 			for (auto const& document : documents)
@@ -263,6 +290,7 @@ namespace
 		for (auto text : {"not Lua!", "return 1", "require('missing')", "require('../escape')", "io.open('file')",
 			"while true do end", "pcall(function() while true do end end); return {}",
 			"local t = {}; for i=1,100000 do t[i] = string.rep('x', 10000) end; return t"}) rejected(text);
+		rejected(legacySource); // Renaming YAML to .furniture.lua is not conversion or a parsing fallback.
 		rejected(std::string(256 * 1024 + 1, ' '));
 		std::filesystem::remove(package);
 		for (auto const& document : documents)

@@ -83,13 +83,14 @@ changed UUIDs, incompatible placements and removed referenced destinations fail
 loading. Existing Floor/Walkway support, Location membership, overlap, Local-depth
 and route admission checks are unchanged.
 
-Old-format loading remains **temporary integration-branch migration scaffolding**.
-Lua files never fall back to YAML parsing. Bundled catalogues are converted in
-#465; paused transactional reload and runtime use are implemented. Regression inputs and builders were converted in #466 and now live under
-`src/headless/smoke/fixtures/furniture` (native Lua catalogues and YAML Worlds).
-No regression caller uses the old format; production loader removal remains #467.
-This is not a promised shipped YAML compatibility path. See
-[regression conversion](scripted-actions-regression-fixtures.md).
+Furniture catalogues are **Lua only**. External YAML selection, loading, attachment,
+World dependency resolution and reload reject the old format with a conversion-required
+diagnostic; no file is rewritten. Renaming YAML to `.furniture.lua` does not convert
+it, and Lua loading has no YAML fallback. World YAML/binary documents remain supported.
+Bundled catalogues (#465) and regression inputs/builders (#466) are native Lua;
+#467 removes the old parser and closed-enum arrival adapters. See
+[regression conversion](scripted-actions-regression-fixtures.md) and
+[final integration evidence](scripted-actions-integration.md).
 
 ## Verification
 
@@ -104,7 +105,10 @@ uses the existing draw-command workflow for Lua artwork, clipping, movement and
 Marker visibility, including two-tile desk rendering. No low-level Lua or Vertex
 test API is introduced.
 
-### Final Linux validation
+### Historical #461 Linux validation
+
+The results below describe #461, not the final integrated state. See
+[final integration evidence](scripted-actions-integration.md) for #467.
 
 The final source state built the complete default core/headless/editor inventory
 in both Release and Debug using supervised `--lane final --build-only all`.

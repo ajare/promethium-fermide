@@ -20,5 +20,6 @@ The separate `sit.furniture.lua` fixture has a seated point and a plain point;
 its definition-owned callback deliberately does nothing for the plain point,
 rather than silently assigning the former seat activity to every point.
 
-No YAML Furniture catalogue inputs or builders remain. Production legacy-loader
-and closed-enum removal are separately scoped to #467.
+No YAML Furniture catalogue inputs or builders remain. #467 removes the production
+legacy loader and closed-enum arrival adapter. External YAML rejection is tested
+through public World/document and CPU-only editor workflows.

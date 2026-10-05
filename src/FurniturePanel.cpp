@@ -46,7 +46,7 @@ bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 			throw std::runtime_error("Save the World before loading a Furniture catalogue");
 		std::filesystem::path path(filename);
 		if (path.has_parent_path() || filename.empty() || !core::FurnitureCatalogue::filenameIsValid(filename))
-			throw std::runtime_error("Select a .furniture.lua catalogue beside the World");
+			throw std::runtime_error("Select a .furniture.lua catalogue beside the World; YAML Furniture requires conversion to Lua");
 		auto catalogue = core::FurnitureCatalogue::load(worldPath.parent_path() / path);
 		auto before = captureDocumentSnapshot(world, history);
 		world->attachFurnitureCatalogue(filename, std::move(catalogue));

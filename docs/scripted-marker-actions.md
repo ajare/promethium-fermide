@@ -1,6 +1,12 @@
-# Scripted Marker Actions (#457–#462)
+# Scripted Marker Actions (#457–#467)
 
-This integration-branch slice exposes movement through
+The integrated feature uses only Lua Furniture catalogues and explicit Actions.
+Bundled and regression dependencies are converted; the YAML loader and implicit
+arrival adapters are removed. Validation sections below record individual slices'
+**historical** results and deferred work, not current failures or remaining tasks.
+See [final integration evidence](scripted-actions-integration.md) for #467.
+
+The public movement workflow is
 `World::moveAgentToNamedMarker(agent, name, action)` and
 `World::moveAgentToMarker(agent, marker, action)`. The default is the immutable
 built-in `core::IdleAction` identity (`idle`, displayed as **Idle**).
@@ -24,8 +30,8 @@ transport journeys retain their existing safe-exit rules. Outcomes remain
 available through the public event queue independently of behaviour observation.
 
 Idle claims no usable point, schedules no new activity, and leaves an assigned
-behaviour enabled. Replacing active Furniture use with Idle finishes that use. Legacy catalogue Sit/Lying fields no
-longer cause arrival or intermediate-passage effects. The selected-Agent editor
+behaviour enabled. Replacing active Furniture use with Idle finishes that use.
+Legacy catalogue Sit/Lying fields and their arrival machinery are removed. The selected-Agent editor
 panel visibly offers Idle, derived Use furniture and loaded custom Actions in
 its movement Action selector. The chosen destination must offer the selected Action.
 
@@ -35,7 +41,7 @@ ordered Marker assignments in YAML and binary documents. Schema 53 introduced
 rejected. Reconstruction does not persist or execute Lua state. The existing
 reset/paused/history Path-intent rules remain in force.
 
-## Verification and migration boundary
+## Historical #457 verification and migration boundary
 
 Public World/document checks cover default and explicit Idle, planning and
 physical arrival timing, same-target requests, replacement, rename, deletion,

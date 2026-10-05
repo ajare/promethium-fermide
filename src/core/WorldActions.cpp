@@ -95,6 +95,8 @@ namespace core
 	bool World::reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic)
 	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = "Furniture reload: " + message; return false; };
+		if (!FurnitureCatalogue::filenameIsValid(path.filename().string()))
+			return reject("Furniture catalogue must end with .furniture.lua; YAML Furniture requires conversion to Lua");
 		if (!isSimulationPaused()) return reject("Pause the simulation before reloading");
 		if (!mFurnitureCatalogue || path.filename().string() != mFurnitureCatalogueFilename)
 			return reject("Select this catalogue before reloading it");

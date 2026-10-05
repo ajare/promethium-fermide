@@ -22,7 +22,6 @@ namespace core::script
 		std::map<std::string, FurnitureValue> fields;
 		explicit operator bool() const { return kind != Missing; }
 		bool IsSequence() const { return kind == Array; }
-		bool IsScalar() const { return kind == String || kind == Number || kind == Boolean; }
 		size_t size() const { return elements.size(); }
 		auto begin() const { return elements.begin(); }
 		auto end() const { return elements.end(); }

@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <set>
 #include <utility>
-#include <yaml-cpp/yaml.h>
 #include <fstream>
 #include "FurnitureLua.h"
 
@@ -16,8 +15,7 @@ namespace core
 
 	namespace
 	{
-		template<class Node>
-		void readDefinitions(Node const& root, std::map<std::string, FurnitureDefinition>& definitionsOut)
+		void readDefinitions(script::FurnitureValue const& root, std::map<std::string, FurnitureDefinition>& definitionsOut)
 		{
 			auto definitions = root["definitions"];
 			if (!definitions.IsSequence() || definitions.size() == 0)
@@ -59,13 +57,6 @@ namespace core
 						|| !Marker::nameIsValid(p.label, &diagnostic) || Marker::trimName(p.label) != p.label
 						|| !keys.insert(p.key).second || !labels.insert(p.label).second)
 						throw SerializationException("Invalid Furniture usable point key, label or floor-height offset");
-					if (point["action"])
-					{
-						auto const action = point["action"].IsScalar() ? point["action"].template as<std::string>() : "";
-						if (action == "Sit") p.action = UsablePointAction::Sit;
-						else if (action == "Lying") p.action = UsablePointAction::Lying;
-						else throw SerializationException("Unknown Furniture usable-point action for " + d.key + ":" + p.key);
-					}
 					d.usablePoints.push_back(std::move(p));
 				}
 				d.sideRoutes = entry["sideRoutes"] ? entry["sideRoutes"].template as<bool>() : false;
@@ -128,37 +119,24 @@ namespace core
 			if (!std::filesystem::is_regular_file(path))
 				throw SerializationException("Missing Furniture catalogue: " + path.string());
 			if (!filenameIsValid(path.filename().string()))
-				throw SerializationException("Furniture catalogue must end with .furniture.lua");
-			if (path.filename().string().ends_with(".furniture.lua"))
-			{
-				auto result = std::make_shared<FurnitureCatalogue>();
-				std::ifstream file(path, std::ios::binary);
-				if (!file) throw SerializationException("Cannot read Furniture catalogue");
-				char buffer[4096];
-				while (file.read(buffer, sizeof(buffer)) || file.gcount())
-				{
-					result->mLuaSource.append(buffer, static_cast<size_t>(file.gcount()));
-					if (result->mLuaSource.size() > 256 * 1024) throw SerializationException("Furniture source exceeds budget");
-				}
-				if (file.bad()) throw SerializationException("Cannot read Furniture catalogue");
-				auto root = script::readFurnitureLua(result->mLuaSource);
-				script::validateFurnitureLua(root);
-				result->mUuid = root["uuid"].as<std::string>();
-				if (!AgentTagRegistry::uuidIsValid(result->mUuid)) throw SerializationException("Invalid Furniture catalogue UUID");
-				readDefinitions(root, result->mDefinitions);
-				for (auto const& entry : root["definitions"])
-					result->mDefinitions.at(entry["key"].as<std::string>()).hasUse = static_cast<bool>(entry["use"]);
-				return result;
-			}
-			// Temporary integration-branch scaffolding. Removed by the migration slice.
-			auto root = YAML::LoadFile(path.string())["furnitureCatalogue"];
-			if (!root || root["version"].as<unsigned>() != 1)
-				throw SerializationException("Unsupported Furniture catalogue version");
+				throw SerializationException("Furniture catalogue must end with .furniture.lua; YAML Furniture requires conversion to Lua");
 			auto result = std::make_shared<FurnitureCatalogue>();
+			std::ifstream file(path, std::ios::binary);
+			if (!file) throw SerializationException("Cannot read Furniture catalogue");
+			char buffer[4096];
+			while (file.read(buffer, sizeof(buffer)) || file.gcount())
+			{
+				result->mLuaSource.append(buffer, static_cast<size_t>(file.gcount()));
+				if (result->mLuaSource.size() > 256 * 1024) throw SerializationException("Furniture source exceeds budget");
+			}
+			if (file.bad()) throw SerializationException("Cannot read Furniture catalogue");
+			auto root = script::readFurnitureLua(result->mLuaSource);
+			script::validateFurnitureLua(root);
 			result->mUuid = root["uuid"].as<std::string>();
-			if (!AgentTagRegistry::uuidIsValid(result->mUuid))
-				throw SerializationException("Invalid Furniture catalogue UUID");
+			if (!AgentTagRegistry::uuidIsValid(result->mUuid)) throw SerializationException("Invalid Furniture catalogue UUID");
 			readDefinitions(root, result->mDefinitions);
+			for (auto const& entry : root["definitions"])
+				result->mDefinitions.at(entry["key"].as<std::string>()).hasUse = static_cast<bool>(entry["use"]);
 			return result;
 		}
 		catch (std::exception const& error)
@@ -169,11 +147,13 @@ namespace core
 
 	bool FurnitureCatalogue::filenameIsValid(std::string const& filename)
 	{
-		return !filename.empty() && (filename.ends_with(".furniture.lua") || filename.ends_with(".furniture.yaml"));
+		return !filename.empty() && filename.ends_with(".furniture.lua");
 	}
 
 	std::shared_ptr<const FurnitureCatalogue> FurnitureCatalogue::load(std::filesystem::path const& path)
 	{
+		if (!filenameIsValid(path.filename().string()))
+			throw SerializationException("Furniture catalogue must end with .furniture.lua; YAML Furniture requires conversion to Lua: " + path.string());
 		return resourceLoader ? resourceLoader(path) : readFile(path);
 	}
 	void FurnitureCatalogue::setResourceLoader(Loader loader) { resourceLoader = std::move(loader); }

@@ -20,7 +20,7 @@ Status: agreed interview decisions, synthesised as a Furniture spec. The user ap
 - Each usable Furniture point is a furniture-owned Marker with stable identity, selectable by Agent behaviours through the existing Marker destination model.
 - A two-seat sofa has two selectable destinations. Optional side vertices are routing-only waypoints, not destination Markers.
 - Usable Furniture Markers default to Blocks pathing: they are valid origins and destinations, but not intermediate waypoints.
-- Reaching a Furniture Marker is ordinary Marker arrival. This feature adds no sitting state, exclusive seat occupancy, capacity, or reservations; multiple Agents may target the same usable point.
+- Reaching a Furniture Marker with Idle is ordinary Marker arrival. Explicit Use furniture invokes the definition's Lua use lifecycle; seated/lying use claims that usable point exclusively as a destination, without blocking intermediate passage. See [scripted Marker Actions](scripted-marker-actions.md).
 
 ## Agreed definition and instance semantics
 
@@ -30,11 +30,11 @@ Status: agreed interview decisions, synthesised as a Furniture spec. The user ap
 - Instances do not override the definition's layout initially.
 - Furniture definitions and usable points have stable keys separate from display names. Renaming labels or reordering catalogue entries preserves an instance's existing usable-point Marker identities and behaviour references.
 - Definitions explicitly list internal edges and their Local-depth offsets, and designate external connection points. The engine does not infer internal connectivity merely from vertex positions.
-- Definitions live in a separate reusable Furniture catalogue rather than being embedded in each World.
+- Definitions live in a separate reusable `.furniture.lua` catalogue rather than being embedded in each World. YAML Furniture catalogues require conversion and are rejected without rewriting; World YAML/binary documents remain supported.
 - Catalogue files are manually authored for the first feature; no visual Furniture-definition designer is included. The editor manages instances.
 - Loading fails with a clear diagnostic if a referenced catalogue or Furniture definition is missing; no placeholder or silent omission is used because Furniture affects routing.
 - Worlds use current catalogue definitions on their next load, rather than saved layout snapshots. Stable usable-point keys preserve existing Marker identities. Invalidated placements or removed referenced usable points cause diagnostic load failure, not silent behaviour-reference changes.
-- Live catalogue reload is out of scope initially.
+- Paused catalogue reload is transactional: validate first, then finish affected active uses with their old callbacks before replacement. See [Lua Furniture catalogues](lua-furniture-catalogues.md).
 - World catalogue references use a portable relative filename plus expected stable catalogue UUID, following the external-registry identity protection in ADR 0007. A mismatched catalogue identity is a load failure even if definition keys match.
 - A definition's appearance is a list of World-tile-sized Image-set regions at integer tile offsets. One- and two-tile layouts are ordinary cases of that list; larger layouts use the same representation without scaling tiles.
 

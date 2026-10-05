@@ -13,7 +13,7 @@ namespace core
 		std::filesystem::path path(filename);
 		if (!catalogue || filename.empty() || path.has_parent_path()
 			|| !core::FurnitureCatalogue::filenameIsValid(filename))
-			throw WorldException(this, "Furniture catalogue reference must be a .furniture.lua basename");
+			throw WorldException(this, "Furniture catalogue reference must be a .furniture.lua basename; YAML Furniture requires conversion to Lua");
 		if (!mFurniture.empty() && (filename != mFurnitureCatalogueFilename || catalogue != mFurnitureCatalogue))
 			throw WorldException(this, "Cannot replace a Furniture catalogue while instances use it");
 		mFurnitureCatalogue = std::move(catalogue);
@@ -26,21 +26,6 @@ namespace core
 		return std::any_of(mFurniture.begin(), mFurniture.end(),
 			[id](auto const& instance) { return std::any_of(instance.destinations.begin(), instance.destinations.end(),
 				[id](auto const& point) { return point.marker == id; }); });
-	}
-
-	std::optional<UsablePointAction> World::furnitureMarkerAction(MarkerId id) const
-	{
-		if (!id || !mFurnitureCatalogue) return {};
-		for (auto const& instance : mFurniture)
-			for (auto const& destination : instance.destinations)
-				if (destination.marker == id)
-				{
-					if (auto definition = mFurnitureCatalogue->definition(instance.definitionKey))
-						for (auto const& point : definition->usablePoints)
-							if (point.key == destination.key) return point.action;
-					return {};
-				}
-		return {};
 	}
 
 	AgentId World::usablePointOccupant(MarkerId marker) const

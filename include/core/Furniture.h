@@ -18,14 +18,12 @@ namespace core
 		std::string imageSet, image;
 		bool operator==(FurnitureTile const&) const = default;
 	};
-	enum class UsablePointAction { Sit, Lying };
 
 	struct FurnitureUsablePoint
 	{
 		std::string key, label;
 		float x{ 0.5f };
 		bool blocksPathing{ true }; // default for newly created owned Markers
-		std::optional<UsablePointAction> action{};
 		bool operator==(FurnitureUsablePoint const&) const = default;
 	};
 	struct FurnitureRoutingVertex

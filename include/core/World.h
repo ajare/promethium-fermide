@@ -2929,7 +2929,6 @@ namespace core
 		std::string const& furnitureCatalogueFilename() const { return mFurnitureCatalogueFilename; }
 		auto const& furniture() const { return mFurniture; }
 		bool isFurnitureMarker(MarkerId id) const;
-		std::optional<UsablePointAction> furnitureMarkerAction(MarkerId id) const;
 		AgentId usablePointOccupant(MarkerId id) const;
 		bool claimUsablePoint(AgentId agent, MarkerId marker);
 		bool canEditFurniture(uint64_t id, float x, float y, std::string const& name,
