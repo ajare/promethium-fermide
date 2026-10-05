@@ -7,6 +7,33 @@
 
 namespace core
 {
+	namespace
+	{
+		bool configurationActionsAvailable(AgentBehaviourConfigurationValue const& value,
+			ActionRegistry const* registry, std::string& missing)
+		{
+			if (auto action = agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value))
+			{
+				if (action->reference != IdleAction && (!registry || !registry->find(action->reference)))
+				{
+					missing = action->reference;
+					return false;
+				}
+			}
+			else if (auto list = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationList>(&value))
+			{
+				for (auto const& item : *list)
+					if (!configurationActionsAvailable(item, registry, missing)) return false;
+			}
+			else if (auto record = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationRecord>(&value))
+			{
+				for (auto const& [name, item] : *record)
+					if (!configurationActionsAvailable(item, registry, missing)) return false;
+			}
+			return true;
+		}
+	}
+
 	bool World::selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic)
 	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
@@ -21,6 +48,12 @@ namespace core
 			for (auto const& [marker, actions] : mMarkerActions)
 				if (lookupMarker(marker)) for (auto const& action : actions)
 					if (!registry->find(action)) return reject("Registry selection would invalidate a Marker Action: " + action);
+			std::string missing;
+			for (auto const& [id, agent] : mAgents.entries())
+				if (auto const& assignment = agent->getBehaviourAssignment())
+					for (auto const& [field, value] : assignment->configuration)
+						if (!configurationActionsAvailable(value, registry.get(), missing))
+							return reject("Registry selection would invalidate a behaviour Action: " + missing);
 			mActionRegistry = std::move(registry);
 			mActionRegistryFilename = path.filename().string();
 			markModified();
@@ -37,6 +70,15 @@ namespace core
 			return false;
 		}
 		if (!mActionRegistry) return true;
+		std::string missing;
+		for (auto const& [id, agent] : mAgents.entries())
+			if (auto const& assignment = agent->getBehaviourAssignment())
+				for (auto const& [field, value] : assignment->configuration)
+					if (!configurationActionsAvailable(value, nullptr, missing))
+					{
+						if (diagnostic) *diagnostic = "Action registry is referenced by behaviour configuration: " + missing;
+						return false;
+					}
 		mMarkerActions.clear();
 		for (auto const& [id, agent] : mAgents.entries())
 			if (agent->mResetAction != IdleAction)

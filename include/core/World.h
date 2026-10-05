@@ -658,8 +658,9 @@ namespace core
 			std::string* diagnostic = nullptr) const;
 		uint32_t countAgentBehaviourAssignments() const;
 		MovementCommandResult inspectBehaviourMoveToMarker(AgentId agent,
-			MarkerId marker) const;
-		MovementCommandResult moveBehaviourAgentToMarker(AgentId agent, MarkerId marker);
+			MarkerId marker, std::string_view action = IdleAction) const;
+		MovementCommandResult moveBehaviourAgentToMarker(AgentId agent, MarkerId marker,
+			std::string_view action = IdleAction);
 		MovementCommandResult inspectBehaviourMovementCancellation(AgentId agent) const;
 		MovementCommandResult cancelBehaviourAgentMovement(AgentId agent);
 

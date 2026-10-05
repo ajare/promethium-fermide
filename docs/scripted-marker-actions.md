@@ -1,4 +1,4 @@
-# Scripted Marker Actions (#457–#459)
+# Scripted Marker Actions (#457–#460)
 
 This integration-branch slice exposes movement through
 `World::moveAgentToNamedMarker(agent, name, action)` and
@@ -131,8 +131,7 @@ Availability is checked at acceptance and arrival. Assignment/package removal
 cancels pending requests at the next safe simulation boundary, preserving existing
 safe-exit handling, with `ActionUnavailable` and a diagnostic. It never substitutes
 Idle. Arrival invokes only the selected callback in stable Agent order; intermediate
-passage does not execute it. Agent behaviour Action selection/outcome additions
-remain deferred to #460.
+passage does not execute it. Agent behaviour Action selection/outcome additions are implemented in #460 below.
 
 Focused public checks: Simulation `markerActions/registry`, `/execution`,
 `/failures`, `/documents`, `/logging`; Editor `markerActions/workflow`. They cover
@@ -208,6 +207,43 @@ Existing registry/containment/determinism checks are retained. Furniture catalog
 conversion and use/finish lifecycle, live reload and behaviour API work are not
 part of this slice.
 
+## Behaviour-selected Actions (#460)
+
+The additive `prometheum.v2` movement contract is
+`context.move_to(marker, action)`; `marker` is an opaque configured Marker or a
+named Marker string resolved once at acceptance. Omitted/nil Actions are Idle;
+v1 retains its opaque-Marker/Idle movement contract. Inspection and execution
+both use the same World/coordinator availability validation as editor requests.
+Same Marker plus same Action is NoOp; changing the Action is replacement.
+
+Authored `action` configuration fields use display-name selection of stable
+references. Defaults, nested values, history, clipboard and YAML/binary documents
+retain the typed identity, never Lua state. Invalid references reject assignment;
+registry selection/removal cannot invalidate authored behaviour Action fields.
+The generated picker always offers Idle and offers loaded custom Actions when at
+least one World Marker offers them. Request admission checks the chosen Marker.
+
+Immutable behaviour outcomes include destination identity, Action identity,
+result and event sequence/tick. Success is `destination_reached`, failure is
+`action_failed` with `refused`/`script_error`, a diagnostic and semantic script
+failure classification. Cancellation preserves `explicit`/`superseded` and adds
+`target_deleted`/`action_unavailable`. Route loss retains its callback with an
+additive fourth immutable outcome argument. See [behaviour packages](agent-behaviour-packages.md)
+for the complete API and example. Idle neither schedules replacement activity
+nor disables the assigned behaviour. Timers, stable delivery order and committed
+traversal handling remain unchanged; script exceptions still pause/headless-fail,
+with their queued outcome observed after public resume.
+
+Public checks: Behaviours `scriptedActionOutcomes`, `scriptedActionScriptFailure`,
+`scriptedActionCancellations`, plus extended v1/v2 Route-loss coverage; Editor
+`markerActions/behaviourConfiguration`. They exercise custom completion and next
+requests, ordinary refusal, exceptions/resume, omitted Idle followed by another
+custom request, explicit/same-Marker replacement cancellation, Action removal,
+target deletion, schema package loading, assignment refusal, generated controls,
+Undo/Redo and YAML/binary reopen. State-changing Furniture demonstrations and
+occupancy-conflict integration remain deferred to the Furniture lifecycle and
+fixture-conversion slices, not implemented here.
+
 ### #459 final Linux verification
 
 The final source state built the complete default core/headless/editor inventory
@@ -224,3 +260,19 @@ Final build evidence: Release `289dbdc89b2d4d129c3b16dd101fd79c`, Debug
 `7dd3b38c83cb475380154508f63effe0`. Final unfiltered CTest evidence: Release
 `892a9091442c4f9aa074706a6dc22090`, Debug
 `bcdbea2cf3654aeca6982a10a15bd37c`.
+
+### #460 final Linux verification
+
+The final source state built the default core/headless/editor inventory through
+supervised `--lane final --build-only all` in Release and Debug. Unfiltered final
+CTest ran 110 tests per configuration: **103 passed, one optional GUI capability
+skipped, six failed** exclusively for the seven unchanged legacy implicit-Furniture
+checks listed above. Behaviour and Editor functional/exhaustive/CLI coverage,
+persistence, Action checks, ownership and tools contracts passed; no new failure
+was introduced. Full-suite green remains the #467 contract. `git diff --check`
+passed. No Windows validation is claimed.
+
+Final build evidence: Release `f4b84d4e7dec48fb89b861bd2dd12a15`, Debug
+`9a6c66c3731f448f9dc79a68d5916011`. Final unfiltered CTest evidence: Release
+`786d8f6e8cab461a92b7cd2bc08b8294`, Debug
+`a8a0624e24c648f6bd272b696b3a1ea5`.

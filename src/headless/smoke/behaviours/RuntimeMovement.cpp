@@ -92,6 +92,204 @@ namespace
 			"Bundled v2 workflows did not complete repeated trips");
 	}
 
+	void scriptedActionOutcomes(smoke::Context const& context, bool scriptFailure = false)
+	{
+		TemporaryDirectory temporary{ context };
+		auto package = temporary.path / "actions.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeRuntimeText(package / "actions.lua", R"lua(
+return {api_version=2, factory=function(configuration)
+  local stage = 0
+  local sequence = 0
+  return {
+    on_start=function(context)
+      assert(context.move_to(configuration.first, 'missing').status == 'unavailable_action')
+      context.set_timer('start', 1)
+    end,
+    on_timer=function(name, context)
+      assert(context.move_to(configuration.first, configuration.action).accepted)
+    end,
+    on_event=function(event, context)
+      if event.type ~= 'destination_reached' and event.type ~= 'action_failed' then return end
+      assert(event.sequence > sequence and event.destination ~= nil)
+      sequence = event.sequence
+      assert(not pcall(function() event.action='idle' end))
+      if stage == 0 then
+        assert(event.type == 'destination_reached' and event.result == 'succeeded')
+        assert(event.destination == configuration.first and event.action == configuration.action)
+        assert(context.move_to(configuration.second, configuration.action).status == 'unavailable_action')
+        context.set_timer('next', 1)
+        stage = 1
+      elseif stage == 1 then
+        -- No autonomous Idle scheduling: this request comes only from this callback.
+        assert(event.action == configuration.action)
+        assert(context.move_to(configuration.first, configuration.refusal).accepted)
+        stage = 2
+      elseif stage == 2 then
+        assert(event.type == 'action_failed' and event.result == 'failed')
+        assert(event.action == configuration.refusal and event.reason == configuration.failure_reason)
+        assert(#event.diagnostic > 0)
+        assert(event.script_failure == (event.reason == 'refused' and 'none' or 'lua_error'))
+        assert(context.move_to(configuration.second).accepted)
+        stage = 3
+      elseif stage == 3 then
+        assert(event.destination == configuration.second)
+        assert(event.action == 'idle' and event.result == 'succeeded')
+        assert(context.move_to(configuration.first, configuration.action).accepted)
+        stage = 4
+      else
+        assert(stage == 4 and event.action == configuration.action)
+        context.log('completed action chain')
+        stage = 5
+      end
+    end
+  }
+end}
+)lua");
+		auto behaviour = registry->addAgentBehaviour("Action chain", "actions.lua", {
+			{ "first", core::AgentBehaviourSchemaType::Marker },
+			{ "second", core::AgentBehaviourSchemaType::Marker },
+			{ "action", core::AgentBehaviourSchemaType::Action },
+			{ "refusal", core::AgentBehaviourSchemaType::Action },
+			{ "failure_reason", core::AgentBehaviourSchemaType::String }
+		});
+		auto path = temporary.path / "test.actions.lua";
+		std::string const action = "ad603358-5ebf-45bb-a686-c3f491152c61:greet";
+		std::string const refusal = "ad603358-5ebf-45bb-a686-c3f491152c61:refuse";
+		writeRuntimeText(path, std::string(R"lua(return {api_version=1, uuid='ad603358-5ebf-45bb-a686-c3f491152c61', actions={
+{key='greet', name='Greet', run=function(a,w,m) w.log('greeted') end},
+{key='refuse', name='Refuse', run=function(a,w,m) w.set_pose('sitting'); )lua")
+			+ (scriptFailure ? "error('Action exception')" : "w.claim()") + " end}}}");
+		core::World world("Behaviour Actions", 10, 2);
+		auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+		world.addSectorMarker(room, 0, 3.5f, "First");
+		world.addSectorMarker(room, 0, 6.5f, "Second");
+		world.finishBuild();
+		auto agent = world.createAgent("Author", room, 0, 1.5f);
+		auto markers = world.getMarkerIds();
+		world.pauseSimulation();
+		require(world.selectActionRegistry(path) && world.setMarkerActions(markers[0], {action, refusal}),
+			"Could not author Actions");
+		world.attachAgentBehaviourRegistry("actions.behaviours", registry);
+		require(world.setAgentBehaviourAssignment(agent, behaviour, 1, {
+			{ "first", markers[0] }, { "second", markers[1] },
+			{ "action", core::AgentBehaviourAction{action} },
+			{ "refusal", core::AgentBehaviourAction{refusal} },
+			{ "failure_reason", scriptFailure ? "script_error" : "refused" }
+		}), "Could not assign Action configuration");
+		require(world.resumeSimulation(), "Could not resume Action chain");
+		unsigned successes = 0, failures = 0;
+		for (unsigned tick = 0; tick < 2500; ++tick)
+		{
+			auto const advanced = world.advanceTick();
+			if (!advanced && !scriptFailure)
+			{
+				auto const& diagnostics = world.getAgentBehaviourRuntimeDiagnostics();
+				throw std::runtime_error("Action chain failed: " + (diagnostics.empty()
+					? std::string("no behaviour diagnostic") : diagnostics.back().diagnostic));
+			}
+			for (auto const& event : world.consumeSimulationEvents())
+			{
+				if (event.type == core::SimulationEventType::DestinationReached) ++successes;
+				if (event.type == core::SimulationEventType::ActionFailed) ++failures;
+			}
+			if (!advanced)
+				require(failures == 1 && world.resumeSimulation(), "Script failure could not be observed after public resume");
+		}
+		require(successes == 4 && failures == 1 && world.getAgentBehaviourRuntimeDiagnostics().empty(),
+			"Behaviour did not observe success/refusal/Idle and select its next target");
+	}
+
+	void scriptedActionCancellations(smoke::Context const& context)
+	{
+		TemporaryDirectory temporary{ context };
+		auto package = temporary.path / "cancel.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeRuntimeText(package / "cancel.lua", R"lua(
+return {api_version=2, factory=function(configuration)
+  return {
+    on_start=function(context)
+      assert(context.move_to(configuration.destination, configuration.action).accepted)
+      if configuration.reason == 'explicit' or configuration.reason == 'superseded' then
+        context.set_timer('cancel', 1)
+      end
+    end,
+    on_timer=function(name, context)
+      if configuration.reason == 'explicit' then
+        assert(context.cancel_movement().accepted)
+      else
+        -- Same Marker, different Action is a replacement, not a NoOp.
+        assert(context.move_to(configuration.destination).status == 'superseded')
+      end
+    end,
+    on_event=function(event, context)
+      if event.type ~= 'movement_cancelled' or event.action == 'idle' then return end
+      assert(event.destination ~= nil and event.action == configuration.action)
+      assert(event.result == 'cancelled' and event.reason == configuration.reason)
+      assert(context.move_to(configuration.fallback).accepted)
+    end
+  }
+end}
+)lua");
+		auto behaviour = registry->addAgentBehaviour("Cancellation", "cancel.lua", {
+			{ "destination", core::AgentBehaviourSchemaType::String },
+			{ "fallback", core::AgentBehaviourSchemaType::Marker },
+			{ "action", core::AgentBehaviourSchemaType::Action },
+			{ "reason", core::AgentBehaviourSchemaType::String }
+		});
+		auto path = temporary.path / "cancel.actions.lua";
+		std::string const action = "ad603358-5ebf-45bb-a686-c3f491152c61:greet";
+		writeRuntimeText(path, "return {api_version=1, uuid='ad603358-5ebf-45bb-a686-c3f491152c61', actions={{key='greet',name='Greet',run=function() end}}}");
+		for (std::string const reason : {"explicit", "superseded", "action_unavailable", "target_deleted"})
+		{
+			core::World world("Cancelled Actions", 10, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
+			world.addSectorMarker(room, 0, 8.5f, "Target");
+			world.addSectorMarker(room, 0, 2.5f, "Fallback");
+			world.finishBuild();
+			auto agent = world.createAgent("Author", room, 0, 1.5f);
+			auto markers = world.getMarkerIds();
+			world.pauseSimulation();
+			require(world.selectActionRegistry(path) && world.setMarkerActions(markers[0], {action}), "Cancellation Action refused");
+			world.attachAgentBehaviourRegistry("cancel.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(agent, behaviour, 1, {
+				{ "destination", "Target" }, { "fallback", markers[1] },
+				{ "action", core::AgentBehaviourAction{action} },
+				{ "reason", reason }
+			}), "Cancellation assignment refused");
+			require(world.resumeSimulation() && world.advanceTick(), "Cancellation start failed");
+			world.pauseSimulation();
+			if (reason == "target_deleted")
+			{
+				require(world.removeSectorMarker(room, 0), "Target deletion refused");
+				world.finishBuild();
+			}
+			else if (reason == "action_unavailable")
+				require(world.setMarkerActions(markers[0], {}), "Action removal refused");
+			require(world.resumeSimulation(), "Cancellation resume failed");
+			unsigned cancelled = 0, reached = 0;
+			for (unsigned tick = 0; tick < 1000; ++tick)
+			{
+				require(world.advanceTick(), "Cancellation callback failed");
+				for (auto const& event : world.consumeSimulationEvents())
+				{
+					if (event.type == core::SimulationEventType::MovementCancelled && event.selectedAction == action)
+					{
+						require(event.destinationMarker == markers[0], "Cancellation lost accepted Marker identity");
+						++cancelled;
+					}
+					if (event.type == core::SimulationEventType::DestinationReached) ++reached;
+				}
+			}
+			require(cancelled == 1 && reached == 1 && world.getAgentBehaviourRuntimeDiagnostics().empty(),
+				"Cancellation was not observed with Action identity and fallback");
+		}
+	}
+
 	void planningIntentReplacement(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
@@ -224,7 +422,9 @@ return {
         local result = context.move_to(configuration.destination)
         if not result.accepted or result.status ~= "accepted" then error(result.status) end
       end,
-      on_route_lost = function(destination, reason, context)
+      on_route_lost = function(destination, reason, context, outcome)
+        assert(outcome.destination == destination and outcome.reason == reason)
+        assert(outcome.action == 'idle' and outcome.result == 'failed')
         losses = losses + 1
         if losses ~= 1 or destination ~= configuration.destination
             or reason ~= configuration.expected_reason then
@@ -351,6 +551,9 @@ return {
 
 void behaviour_smoke::registerRuntimeMovement(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "scriptedActionOutcomes", [](auto const& context) { scriptedActionOutcomes(context); } });
+	checks.push_back({ "scriptedActionScriptFailure", [](auto const& context) { scriptedActionOutcomes(context, true); } });
+	checks.push_back({ "scriptedActionCancellations", scriptedActionCancellations });
 	checks.push_back({ "bundledMovementWorkflows", [](smoke::Context const& context)
 	{
 		bundledMovementWorkflows(context);

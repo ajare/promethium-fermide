@@ -270,6 +270,9 @@ namespace
 			else if constexpr (is_same_v<T, string>)
 				output << YAML::Key << "type" << YAML::Value << "string"
 					<< YAML::Key << "value" << YAML::Value << typed;
+			else if constexpr (is_same_v<T, core::AgentBehaviourAction>)
+				output << YAML::Key << "type" << YAML::Value << "action"
+					<< YAML::Key << "value" << YAML::Value << typed.reference;
 			else if constexpr (is_same_v<T, core::AgentBehaviourDuration>)
 				output << YAML::Key << "type" << YAML::Value << "duration"
 					<< YAML::Key << "value" << YAML::Value << typed.ticks;
@@ -328,6 +331,8 @@ namespace
 				result.value = number;
 			}
 			else if (type == "string") result.value = value.as<string>();
+			else if (type == "action")
+				result.value = core::AgentBehaviourAction{ value.as<string>() };
 			else if (type == "duration")
 				result.value = core::AgentBehaviourDuration{ value.as<uint64_t>() };
 			else if (type == "marker")

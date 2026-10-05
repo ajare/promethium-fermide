@@ -176,6 +176,7 @@ set(editor_names
     furniture/cataloguePicker
     furniture/compositionActions
     markerActions/workflow
+    markerActions/behaviourConfiguration
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory
     securityScanners/selectionWorkflow

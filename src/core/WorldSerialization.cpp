@@ -2448,6 +2448,12 @@ namespace core
 							throw SerializationException(format("{}; incompatible reference in Agent '{}' ({}) behaviour configuration field '{}'",
 								removed->second, agent->getName(), id.value, path));
 					}
+					else if (auto action = agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value))
+					{
+						if (action->reference != IdleAction && (!mActionRegistry || !mActionRegistry->find(action->reference)))
+							throw SerializationException("Agent behaviour configuration '" + path
+								+ "' references unavailable Action " + action->reference);
+					}
 					else if (auto list = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationList>(&value))
 						for (size_t index = 0; index < list->size(); ++index)
 							checkReference((*list)[index], path + "[" + to_string(index) + "]");

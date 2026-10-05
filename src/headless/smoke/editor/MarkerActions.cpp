@@ -4,12 +4,97 @@
 #include "MarkerPanel.h"
 #include "AgentBehaviourAssignmentPanel.h"
 #include "core/World.h"
+#include "core/AgentBehaviourRegistry.h"
+#include "core/BinarySerializer.h"
+#include "core/YamlSerializer.h"
 #include "core/Log.h"
 #include "imgui/imgui.h"
 #include <fstream>
 
 namespace
 {
+	void behaviourConfiguration(smoke::Context const& context)
+	{
+		editor_smoke::State state;
+		using smoke::require;
+		auto const root = context.temporaryRoot();
+		auto const package = root / "configured.behaviours";
+		std::filesystem::create_directories(package);
+		std::ofstream(package / "request.lua") << "return {api_version=2,factory=function() return {} end}";
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		auto behaviour = registry->addAgentBehaviour("Configured Action", "request.lua", {
+			{ "destination", core::AgentBehaviourSchemaType::Marker },
+			{ "action", core::AgentBehaviourSchemaType::Action, {}, false, core::AgentBehaviourAction{} }
+		});
+		registry->saveTo((package / "behaviours.yaml").string());
+		registry = core::AgentBehaviourRegistry::loadFrom((package / "behaviours.yaml").string());
+		auto path = root / "configured.actions.lua";
+		std::ofstream(path) << "return {api_version=1,uuid='ad603358-5ebf-45bb-a686-c3f491152c61',actions={{key='greet',name='Greet',run=function() end}}}";
+		std::string const action = "ad603358-5ebf-45bb-a686-c3f491152c61:greet";
+		auto world = std::make_shared<core::World>("Configuration", 10, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 10, 1);
+		world->addSectorMarker(room, 0, 6.5f, "Target");
+		world->finishBuild();
+		auto agent = world->createAgent("Author", room, 0, 1.5f);
+		auto marker = world->getMarkerIds()[0];
+		world->pauseSimulation();
+		std::string diagnostic;
+		require(commitActionRegistrySelection(world, path, diagnostic)
+			&& commitMarkerActionAssignment(world, marker, {action}, diagnostic), "Configuration Action authoring failed: " + diagnostic);
+		world->attachAgentBehaviourRegistry("configured.behaviours", registry);
+		require(commitAgentBehaviourAssignment(world, agent, behaviour, 1, {{"destination", marker}}, diagnostic), diagnostic);
+		auto selected = [&]()
+		{
+			return core::agentBehaviourConfigurationGetIf<core::AgentBehaviourAction>(
+				&world->getAgentBehaviourAssignment(agent)->configuration.at("action"))->reference;
+		};
+		require(selected() == "idle", "Omitted configuration Action did not default to Idle");
+		auto configuration = world->getAgentBehaviourAssignment(agent)->configuration;
+		configuration["action"] = core::AgentBehaviourAction{action};
+		require(commitAgentBehaviourAssignment(world, agent, behaviour, 1, configuration, diagnostic), diagnostic);
+		auto count = gWorldDocumentHistory.undoCount();
+		configuration["action"] = core::AgentBehaviourAction{"missing"};
+		require(!commitAgentBehaviourAssignment(world, agent, behaviour, 1, configuration, diagnostic)
+			&& gWorldDocumentHistory.undoCount() == count && selected() == action,
+			"Invalid configured Action changed assignment/history");
+		require(!world->clearActionRegistry(&diagnostic) && world->actionRegistry() && selected() == action,
+			"Registry removal invalidated an authored behaviour Action");
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto replacement = deserializeDocumentSnapshot(snapshot, world, {});
+			if (!replacement) return false;
+			world = std::move(replacement); world->pauseSimulation(); return true;
+		};
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore) && selected() == "idle",
+			"Undo did not restore configured Idle");
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore) && selected() == action,
+			"Redo did not restore stable Action identity");
+		auto& io = ImGui::GetIO(); io.DisplaySize = {800,600};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImGui::NewFrame(); ImGui::Begin("Behaviour Actions");
+		renderAgentBehaviourConfigurationPanel(world, agent);
+		ImGui::End(); ImGui::Render();
+		for (bool binary : {false, true})
+		{
+			auto document = root / (binary ? "configured.world.bin" : "configured.world.yaml");
+			auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toFile(document.string()))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toFile(document.string()));
+			core::SerializationWorkData work;
+			work.documentDirectory = root;
+			work.markSerializedUnmodified = false;
+			world->serialize(*writer, work); writer->serialize(); writer.reset();
+			auto reader = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromFile(document.string()))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromFile(document.string()));
+			reader->deserialize();
+			core::World reopened("Loading", 1, 1);
+			require(reopened.deserialize(*reader, work), "Configured Action document refused");
+			reopened.resolveAgentBehaviourRegistry(registry);
+			require(reopened.getAgentBehaviourAssignment(agent) == world->getAgentBehaviourAssignment(agent),
+				"Action configuration changed through YAML/binary reopen");
+		}
+	}
+
 	void workflow(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -85,4 +170,5 @@ namespace
 void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"markerActions/workflow",workflow});
+	checks.push_back({"markerActions/behaviourConfiguration",behaviourConfiguration});
 }

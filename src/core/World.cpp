@@ -520,6 +520,10 @@ namespace core
 			if (auto const* marker = agentBehaviourConfigurationGetIf<MarkerId>(&value);
 				marker && (!*marker || !world.lookupMarker(*marker)))
 				return reject(format("references unknown Marker {}", marker->value));
+			if (auto const* action = agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value);
+				action && action->reference != IdleAction
+				&& (!world.actionRegistry() || !world.actionRegistry()->find(action->reference)))
+				return reject("references unknown Action " + action->reference);
 			if (auto* list = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationList>(&value))
 			{
 				if (list->size() > MaxAgentBehaviourListElements)
@@ -8520,15 +8524,16 @@ namespace core
 	}
 
 	MovementCommandResult World::inspectBehaviourMoveToMarker(
-		AgentId agent, MarkerId marker) const
+		AgentId agent, MarkerId marker, std::string_view action) const
 	{
-		return mSimulationCoordinator.inspectMoveAgentToMarker(agent, marker, true);
+		return mSimulationCoordinator.inspectMoveAgentToMarker(agent, marker, true, action);
 	}
 
-	MovementCommandResult World::moveBehaviourAgentToMarker(AgentId agent, MarkerId marker)
+	MovementCommandResult World::moveBehaviourAgentToMarker(AgentId agent, MarkerId marker,
+		std::string_view action)
 	{
 		invalidateSimulationSnapshot();
-		return mSimulationCoordinator.moveAgentToMarker(agent, marker, true);
+		return mSimulationCoordinator.moveAgentToMarker(agent, marker, true, action);
 	}
 
 	MovementCommandResult World::cancelAgentMovement(AgentId agent)

@@ -31,7 +31,15 @@ namespace core
 		// An ordered collection of one element type.
 		List,
 		// An ordered set of named fields.
-		Record
+		Record,
+		// A stable built-in or registry Action reference, selected by display name.
+		Action
+	};
+
+	struct AgentBehaviourAction
+	{
+		std::string reference{ "idle" };
+		bool operator==(AgentBehaviourAction const&) const = default;
 	};
 
 	struct AgentBehaviourDuration
@@ -53,7 +61,7 @@ namespace core
 	{
 		using Storage = std::variant<bool, int64_t, double, std::string,
 			AgentBehaviourDuration, MarkerId, AgentBehaviourConfigurationList,
-			AgentBehaviourConfigurationRecord>;
+			AgentBehaviourConfigurationRecord, AgentBehaviourAction>;
 
 		Storage value{ false };
 
@@ -71,6 +79,7 @@ namespace core
 		AgentBehaviourConfigurationValue(char const* typed) : value(std::string(typed)) {}
 		AgentBehaviourConfigurationValue(AgentBehaviourDuration typed) : value(typed) {}
 		AgentBehaviourConfigurationValue(MarkerId typed) : value(typed) {}
+		AgentBehaviourConfigurationValue(AgentBehaviourAction typed) : value(std::move(typed)) {}
 		AgentBehaviourConfigurationValue(AgentBehaviourConfigurationList typed)
 			: value(std::move(typed)) {}
 		AgentBehaviourConfigurationValue(AgentBehaviourConfigurationRecord typed)

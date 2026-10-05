@@ -63,7 +63,7 @@ using AgentClipboardConfigurationRecord =
 struct AgentClipboardConfigurationValue
 {
 	using Storage = std::variant<bool, int64_t, double, std::string,
-		core::AgentBehaviourDuration, AgentClipboardMarker,
+		core::AgentBehaviourDuration, core::AgentBehaviourAction, AgentClipboardMarker,
 		AgentClipboardConfigurationList, AgentClipboardConfigurationRecord>;
 	Storage value{ false };
 	bool operator==(AgentClipboardConfigurationValue const&) const = default;

@@ -54,6 +54,9 @@ set(core_names
     liveLoadsFactoriesAndCallbacksAreContained
     independentStartupInstancesMoveDeterministically
     manifestHelpersHavePrivatePerAgentGraphs
+    scriptedActionOutcomes
+    scriptedActionScriptFailure
+    scriptedActionCancellations
     bundledMovementWorkflows
     planningIntentReplacement
     routeLossAndTopologyLifecycleV1

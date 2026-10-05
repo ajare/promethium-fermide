@@ -25,6 +25,7 @@
 #include "core/Agent.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/World.h"
+#include "core/Marker.h"
 #include "core/Log.h"
 #include "core/Simulation.h"
 #include "core/Sector.h"
@@ -368,6 +369,7 @@ namespace core
 			PendingMovementCommandType type{ PendingMovementCommandType::MoveTo };
 			AgentId agent;
 			MarkerId marker;
+			std::string action{ IdleAction };
 		};
 
 		enum class PendingAuthorizationCommandType
@@ -393,7 +395,9 @@ namespace core
 			AgentId agent;
 			uint32_t commandCount{ 0 };
 			uint32_t commandLimit{ AgentBehaviourRuntimeAdapter::DefaultCommandsPerCallback };
-			std::function<MovementCommandResult(MarkerId)> inspectMove;
+			uint32_t apiVersion{ 1 };
+			std::function<MarkerId(std::string_view)> resolveMarker;
+			std::function<MovementCommandResult(MarkerId, std::string_view)> inspectMove;
 			std::function<MovementCommandResult()> inspectCancel;
 			std::function<bool(std::string, uint64_t, std::string&)> setTimer;
 			std::function<bool(std::string const&)> cancelTimer;
@@ -459,7 +463,8 @@ namespace core
 		{
 			return reason == MovementCancellationReason::Explicit ? "explicit"
 				: reason == MovementCancellationReason::Superseded ? "superseded"
-				: reason == MovementCancellationReason::TargetDeleted ? "target_deleted" : "unknown";
+				: reason == MovementCancellationReason::TargetDeleted ? "target_deleted"
+				: reason == MovementCancellationReason::ActionUnavailable ? "action_unavailable" : "unknown";
 		}
 
 		std::string_view interactionResultName(InteractionResult result)
@@ -620,20 +625,49 @@ namespace core
 			countCommand(state, *scope);
 
 			MarkerHandle* handle = nullptr;
+			int markerIndex = 0;
 			for (int index = 1; index <= lua_gettop(state) && !handle; ++index)
+			{
 				handle = static_cast<MarkerHandle*>(
 					luaL_testudata(state, index, MarkerMetatable));
-			if (!handle)
+				if (handle) markerIndex = index;
+			}
+			MarkerId marker = handle ? handle->marker : MarkerId{};
+			if (!handle && scope->apiVersion >= 2 && lua_type(state, 1) == LUA_TSTRING)
+			{
+				size_t length = 0;
+				auto const* name = lua_tolstring(state, 1, &length);
+				marker = scope->resolveMarker(std::string_view(name, length));
+				markerIndex = 1;
+			}
+			if (!marker)
 			{
 				pushCommandResult(state, false, "invalid_marker");
 				return 1;
 			}
 
-			auto const result = scope->inspectMove(handle->marker);
+			std::string_view action = IdleAction;
+			if (!lua_isnoneornil(state, markerIndex + 1))
+			{
+				if (scope->apiVersion < 2 || lua_type(state, markerIndex + 1) != LUA_TSTRING)
+				{
+					pushCommandResult(state, false, "unavailable_action");
+					return 1;
+				}
+				size_t length = 0;
+				auto const* text = lua_tolstring(state, markerIndex + 1, &length);
+				if (length > 165 || length == 0)
+				{
+					pushCommandResult(state, false, "unavailable_action");
+					return 1;
+				}
+				action = std::string_view(text, length);
+			}
+			auto const result = scope->inspectMove(marker, action);
 			if (result.status == MovementCommandStatus::Accepted
 				|| result.status == MovementCommandStatus::Superseded)
 				scope->commands.push_back({ PendingMovementCommandType::MoveTo,
-					scope->agent, handle->marker });
+					scope->agent, marker, std::string(action) });
 			pushCommandResult(state, result.accepted(), movementStatusName(result.status));
 			return 1;
 		}
@@ -885,6 +919,8 @@ namespace core
 					lua_pushnumber(state, typed);
 				else if constexpr (std::is_same_v<T, std::string>)
 					lua_pushlstring(state, typed.data(), typed.size());
+				else if constexpr (std::is_same_v<T, AgentBehaviourAction>)
+					lua_pushlstring(state, typed.reference.data(), typed.reference.size());
 				else if constexpr (std::is_same_v<T, AgentBehaviourDuration>)
 					lua_pushinteger(state, static_cast<lua_Integer>(typed.ticks));
 				else if constexpr (std::is_same_v<T, MarkerId>)
@@ -965,6 +1001,7 @@ namespace core
 		enum class OutcomeType
 		{
 			DestinationReached,
+			ActionFailed,
 			MovementCancelled,
 			RouteLost,
 			InteractionCompleted,
@@ -979,6 +1016,9 @@ namespace core
 			uint64_t tick{ 0 };
 			OutcomeType type{ OutcomeType::DestinationReached };
 			MarkerId destination;
+			std::string action{ IdleAction };
+			std::string diagnostic;
+			ScriptExecutionFailure scriptFailure{ ScriptExecutionFailure::None };
 			RouteLossReason routeLossReason{ RouteLossReason::None };
 			MovementCancellationReason cancellationReason{
 				MovementCancellationReason::None };
@@ -1462,6 +1502,10 @@ namespace core
 			lua_pushvalue(lua, -1);
 			lua_setfield(lua, backing, "destination_marker");
 			lua_setfield(lua, backing, "destination");
+			auto const action = goal == world.mMovementGoals.end() ? IdleAction
+				: std::string_view(goal->second.selectedAction);
+			lua_pushlstring(lua, action.data(), action.size());
+			lua_setfield(lua, backing, "selected_action");
 			auto const* sector = agent->getSector();
 			if (sector)
 				pushOpaqueHandle(lua, SectorHandle{ SectorId{
@@ -1581,6 +1625,7 @@ namespace core
 			std::vector<PendingAuthorizationCommand> const& pendingAuthorizationCommands)
 		{
 			instance.scope.active = true;
+			instance.scope.apiVersion = instance.apiVersion;
 			instance.scope.movementCommandIssued = false;
 			instance.scope.commandCount = 0;
 			instance.scope.commandLimit = commandLimit;
@@ -1597,16 +1642,23 @@ namespace core
 			instance.scope.logMessageByteLimit = logMessageByteLimit;
 			instance.scope.stagedTimers = instance.timers;
 			instance.scope.stagedRandomState = instance.randomState;
-			instance.scope.inspectMove = [&world, agentId, &pendingCommands, &instance](MarkerId marker)
+			instance.scope.resolveMarker = [&world](std::string_view name)
+			{
+				for (auto const marker : world.getMarkerIds())
+					if (auto candidate = world.lookupMarker(marker); candidate && candidate->getName() == name)
+						return marker;
+				return MarkerId{};
+			};
+			instance.scope.inspectMove = [&world, agentId, &pendingCommands, &instance](MarkerId marker, std::string_view action)
 			{
 				auto pending = std::find_if(pendingCommands.rbegin(), pendingCommands.rend(),
 					[agentId](PendingMovementCommand const& command)
 					{ return command.agent == agentId; });
 				if (pending != pendingCommands.rend())
 					return MovementCommandResult{ pending->type == PendingMovementCommandType::MoveTo
-						&& pending->marker == marker ? MovementCommandStatus::NoOp
+						&& pending->marker == marker && pending->action == action ? MovementCommandStatus::NoOp
 						: MovementCommandStatus::AgentBusy };
-				auto result = world.inspectBehaviourMoveToMarker(agentId, marker);
+				auto result = world.inspectBehaviourMoveToMarker(agentId, marker, action);
 				if (instance.apiVersion == 1 && result.status == MovementCommandStatus::Superseded)
 					return MovementCommandResult{ MovementCommandStatus::AgentBusy };
 				return result;
@@ -1818,6 +1870,7 @@ namespace core
 			switch (outcome.type)
 			{
 			case OutcomeType::DestinationReached: type = "destination_reached"; break;
+			case OutcomeType::ActionFailed: type = "action_failed"; break;
 			case OutcomeType::MovementCancelled: type = "movement_cancelled"; break;
 			case OutcomeType::InteractionCompleted: type = "interaction_completed"; break;
 			case OutcomeType::InteractionFailed: type = "interaction_failed"; break;
@@ -1832,10 +1885,42 @@ namespace core
 			lua_pushinteger(lua, static_cast<lua_Integer>(outcome.sequence));
 			lua_setfield(lua, backing, "sequence");
 			if (outcome.type == OutcomeType::DestinationReached
+				|| outcome.type == OutcomeType::ActionFailed
+				|| outcome.type == OutcomeType::RouteLost
 				|| outcome.type == OutcomeType::MovementCancelled)
 			{
 				pushMarkerHandle(lua, outcome.destination);
 				lua_setfield(lua, backing, "destination");
+				lua_pushlstring(lua, outcome.action.data(), outcome.action.size());
+				lua_setfield(lua, backing, "action");
+				lua_pushstring(lua, outcome.type == OutcomeType::DestinationReached ? "succeeded"
+					: outcome.type == OutcomeType::MovementCancelled ? "cancelled" : "failed");
+				lua_setfield(lua, backing, "result");
+				if (outcome.type == OutcomeType::ActionFailed)
+				{
+					lua_pushstring(lua, outcome.scriptFailure == ScriptExecutionFailure::None
+						? "refused" : "script_error");
+					lua_setfield(lua, backing, "reason");
+					char const* failure = "none";
+					switch (outcome.scriptFailure)
+					{
+					case ScriptExecutionFailure::None: break;
+					case ScriptExecutionFailure::LuaError: failure = "lua_error"; break;
+					case ScriptExecutionFailure::MemoryBudgetExceeded: failure = "memory_budget_exceeded"; break;
+					case ScriptExecutionFailure::InstructionBudgetExceeded: failure = "instruction_budget_exceeded"; break;
+					case ScriptExecutionFailure::ConversionError: failure = "conversion_error"; break;
+					}
+					lua_pushstring(lua, failure);
+					lua_setfield(lua, backing, "script_failure");
+					lua_pushlstring(lua, outcome.diagnostic.data(), outcome.diagnostic.size());
+					lua_setfield(lua, backing, "diagnostic");
+				}
+				if (outcome.type == OutcomeType::RouteLost)
+				{
+					auto const reason = routeLossReasonName(outcome.routeLossReason);
+					lua_pushlstring(lua, reason.data(), reason.size());
+					lua_setfield(lua, backing, "reason");
+				}
 				if (outcome.type == OutcomeType::MovementCancelled)
 				{
 					auto const reason = cancellationReasonName(outcome.cancellationReason);
@@ -1949,9 +2034,10 @@ namespace core
 					auto const reason = routeLossReasonName(outcome.routeLossReason);
 					lua_pushlstring(lua, reason.data(), reason.size());
 					pushContext(world, instance);
+					pushSemanticEvent(outcome);
 					auto const admission = admitCallback();
 					auto const result = admission.succeeded
-						? protectedCall(lua, budget, 3, 0) : admission;
+						? protectedCall(lua, budget, 4, 0) : admission;
 					finishCallback(instance, "on_route_lost", result, commands,
 						authorizationCommands);
 				}
@@ -2101,7 +2187,7 @@ namespace core
 					!= disabledAgents.end()) continue;
 				if (command.type == PendingMovementCommandType::MoveTo)
 					(void)world.moveBehaviourAgentToMarker(
-						command.agent, command.marker);
+						command.agent, command.marker, command.action);
 				else
 					(void)world.cancelBehaviourAgentMovement(command.agent);
 			}
@@ -2332,7 +2418,8 @@ namespace core
 		outcome.tick = event.tick;
 		if (event.type == SimulationEventType::DestinationReached
 			|| event.type == SimulationEventType::MovementCancelled
-			|| event.type == SimulationEventType::RouteLost)
+			|| event.type == SimulationEventType::RouteLost
+			|| event.type == SimulationEventType::ActionFailed)
 		{
 			agent = event.agent.id;
 			outcome.type = event.type == SimulationEventType::DestinationReached
@@ -2340,7 +2427,12 @@ namespace core
 				: event.type == SimulationEventType::MovementCancelled
 					? Impl::OutcomeType::MovementCancelled
 					: Impl::OutcomeType::RouteLost;
+			if (event.type == SimulationEventType::ActionFailed)
+				outcome.type = Impl::OutcomeType::ActionFailed;
 			outcome.destination = event.destinationMarker;
+			outcome.action = event.selectedAction;
+			outcome.diagnostic = event.diagnostic;
+			outcome.scriptFailure = event.scriptFailure;
 			outcome.routeLossReason = event.routeLossReason;
 			outcome.cancellationReason = event.movementCancellationReason;
 		}

@@ -30,6 +30,8 @@ namespace core
 				return agentBehaviourConfigurationGetIf<string>(&value) != nullptr;
 			case AgentBehaviourSchemaType::Duration:
 				return agentBehaviourConfigurationGetIf<AgentBehaviourDuration>(&value) != nullptr;
+			case AgentBehaviourSchemaType::Action:
+				return agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value) != nullptr;
 			case AgentBehaviourSchemaType::Marker:
 				return agentBehaviourConfigurationGetIf<MarkerId>(&value) != nullptr;
 			case AgentBehaviourSchemaType::List:
@@ -199,6 +201,7 @@ namespace core
 			else if constexpr (is_same_v<T, string>) return "string";
 			else if constexpr (is_same_v<T, AgentBehaviourDuration>) return "duration";
 			else if constexpr (is_same_v<T, MarkerId>) return "marker";
+			else if constexpr (is_same_v<T, AgentBehaviourAction>) return "action";
 			else if constexpr (is_same_v<T, AgentBehaviourConfigurationList>) return "list";
 			else return "record";
 		}, value.value);
@@ -224,6 +227,7 @@ namespace core
 		case AgentBehaviourSchemaType::Number: return "number";
 		case AgentBehaviourSchemaType::String: return "string";
 		case AgentBehaviourSchemaType::Duration: return "duration";
+		case AgentBehaviourSchemaType::Action: return "action";
 		case AgentBehaviourSchemaType::Marker: return "marker";
 		case AgentBehaviourSchemaType::List: return "list";
 		case AgentBehaviourSchemaType::Record: return "record";
@@ -239,6 +243,7 @@ namespace core
 		else if (name == "number") type = AgentBehaviourSchemaType::Number;
 		else if (name == "string") type = AgentBehaviourSchemaType::String;
 		else if (name == "duration") type = AgentBehaviourSchemaType::Duration;
+		else if (name == "action") type = AgentBehaviourSchemaType::Action;
 		else if (name == "marker") type = AgentBehaviourSchemaType::Marker;
 		else if (name == "list") type = AgentBehaviourSchemaType::List;
 		else if (name == "record") type = AgentBehaviourSchemaType::Record;

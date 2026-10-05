@@ -1,5 +1,6 @@
 #include "AgentBehaviourAssignmentPanel.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <string>
@@ -7,6 +8,7 @@
 
 #include "DocumentEdit.h"
 #include "core/Agent.h"
+#include "core/ActionRegistry.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/World.h"
 #include "core/Log.h"
@@ -27,6 +29,7 @@ namespace
 		case core::AgentBehaviourSchemaType::Integer: return int64_t{ 0 };
 		case core::AgentBehaviourSchemaType::Number: return 0.0;
 		case core::AgentBehaviourSchemaType::String: return string{};
+		case core::AgentBehaviourSchemaType::Action: return core::AgentBehaviourAction{};
 		case core::AgentBehaviourSchemaType::Duration:
 			return core::AgentBehaviourDuration{ 1 };
 		case core::AgentBehaviourSchemaType::Marker:
@@ -204,6 +207,39 @@ namespace
 			if (!ImGui::InputScalar("##ticks", ImGuiDataType_U64, &edited)) return false;
 			durationValue->ticks = edited;
 			return true;
+		}
+		if (auto* actionValue =
+			core::agentBehaviourConfigurationGetIf<core::AgentBehaviourAction>(&value))
+		{
+			auto const& registry = world.actionRegistry();
+			auto const* definition = registry ? registry->find(actionValue->reference) : nullptr;
+			auto const preview = actionValue->reference == core::IdleAction ? "Idle"
+				: definition ? definition->name.c_str() : "Unavailable Action";
+			bool changed = false;
+			if (ImGui::BeginCombo("##action", preview))
+			{
+				auto select = [&](string const& reference, char const* name)
+				{
+					if (ImGui::Selectable(name, reference == actionValue->reference))
+					{
+						actionValue->reference = reference;
+						changed = true;
+					}
+				};
+				select(string(core::IdleAction), "Idle");
+				if (registry)
+					for (auto const& action : registry->actions())
+					{
+						auto const reference = registry->identity(action);
+						auto const markers = world.getMarkerIds();
+						if (any_of(markers.begin(), markers.end(), [&](auto marker)
+							{ auto offered = world.availableAgentActions(marker);
+							  return find(offered.begin(), offered.end(), reference) != offered.end(); }))
+							select(reference, action.name.c_str());
+					}
+				ImGui::EndCombo();
+			}
+			return changed;
 		}
 		if (auto* markerValue =
 			core::agentBehaviourConfigurationGetIf<core::MarkerId>(&value))

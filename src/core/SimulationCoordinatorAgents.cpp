@@ -369,6 +369,7 @@ namespace core
 		if (!agent->getSector() || agent->getSector()->getType() == SectorType::Background)
 			return { MovementCommandStatus::NoOccupiableSector };
 		if (!mWorld.lookupMarker(marker)) return { MovementCommandStatus::UnknownMarker };
+		if (!mWorld.actionAvailable(marker, action)) return { MovementCommandStatus::UnavailableAction };
 		if (auto it = mWorld.mMovementGoals.find(id); it != mWorld.mMovementGoals.end()
 			&& !it->second.cancelling && it->second.marker == marker && it->second.selectedAction == action)
 			return { MovementCommandStatus::NoOp };

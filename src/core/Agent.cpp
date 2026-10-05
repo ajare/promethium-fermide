@@ -36,6 +36,8 @@ namespace core
 				else if constexpr (is_same_v<T, int64_t>) serializer.writeInt64("value", typed);
 				else if constexpr (is_same_v<T, double>) serializer.writeDouble("value", typed);
 				else if constexpr (is_same_v<T, string>) serializer.writeString("value", typed);
+				else if constexpr (is_same_v<T, AgentBehaviourAction>)
+					serializer.writeString("value", typed.reference);
 				else if constexpr (is_same_v<T, AgentBehaviourDuration>)
 					serializer.writeUint64("value", typed.ticks);
 				else if constexpr (is_same_v<T, MarkerId>)
@@ -78,6 +80,7 @@ namespace core
 			if (type == "integer") return serializer.readInt64("value");
 			if (type == "number") return serializer.readDouble("value");
 			if (type == "string") return serializer.readString("value");
+			if (type == "action") return AgentBehaviourAction{ serializer.readString("value") };
 			if (type == "duration")
 				return AgentBehaviourDuration{ serializer.readUint64("value") };
 			if (type == "marker") return MarkerId{ serializer.readUint64("value") };

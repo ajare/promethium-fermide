@@ -70,7 +70,7 @@ Helper import names are case-sensitive dotted Lua identifiers such as
 `prometheum.v1` and `prometheum.v2` names are invalid.
 
 Schema types are `boolean`, `integer`, `number`, `string`, `duration` (simulation
-ticks), `marker`, `list`, and `record`. Lists have exactly one child; records
+ticks), `marker`, `action`, `list`, and `record`. Lists have exactly one child; records
 have at least one child with unique field names. Scalars have no children.
 Nesting is limited to 16 levels and each configured List to 4,096 elements.
 Required and optional/default validation applies recursively and diagnostics use
@@ -150,11 +150,17 @@ package/module/line diagnostics and protected-call tracebacks. Configuration
 assignment is authored separately. At the first simulation boundary, every
 assigned Agent executes the complete behaviour/helper graph in a private module
 environment with private closures, upvalues, exports, and import cache;
-`on_start` runs once in Agent-ID order. `context.move_to` accepts only an opaque
-Marker handle from validated configuration; `context.cancel_movement` requests
+`on_start` runs once in Agent-ID order. `context.move_to` accepts an opaque
+Marker handle from validated configuration. V2 also accepts a named Marker string
+and an optional second argument selecting a stable Action reference; omitted/nil
+Actions resolve to Idle. Names resolve once to stable Marker identities before
+commands are staged. Unknown/unoffered Actions return `unavailable_action` through
+the same World request validator as editor requests, never fall back to Idle.
+V1 retains its Marker-handle/omitted-Idle contract. `context.cancel_movement` requests
 cancellation at the next safe boundary. Both return an immutable semantic result
-with `accepted` and `status` fields. Repeating the current destination reports
-`no_op` without restarting Route planning. In v2 an accepted replacement reports
+with `accepted` and `status` fields. Repeating the current Marker and Action reports
+`no_op` without restarting Route planning. Changing the Action at the same Marker
+is a replacement, not a duplicate. In v2 an accepted replacement reports
 `superseded` and stages one `movement_cancelled` event with reason `superseded`
 for the previous destination; explicit cancellation uses reason `explicit`.
 A committed crossing or occupied-resource journey finishes safely before the
@@ -196,7 +202,9 @@ It also receives `interaction_completed` with an opaque `interaction`, display
 `failed`, `rejected`, or `cancelled`. Request snapshots, actors, operations, and
 device internals are not exposed. `on_route_lost` receives the opaque destination
 and one of `unreachable`, `topology_changed`, or `destination_removed` after the
-engine has cleared the old goal. Successful automatic same-destination replanning
+engine has cleared the old goal. An additive fourth argument contains the immutable
+`route_lost` outcome (`destination`, `action`, `result = "failed"`, `reason`,
+`tick`, `sequence`); existing three-argument callbacks remain valid. Successful automatic same-destination replanning
 remains internal and does not call Lua.
 
 Deactivating an assigned Agent freezes each timer at its remaining duration and
@@ -220,6 +228,60 @@ scenarios; the legacy `--agent-behaviour-checks` selection is retired (#289).
 It covers mixed-version commands, events, preflight and reload, v1-to-v2 source
 migration, automatic replanning and Route loss in both versions, and repeated
 trips using the bundled patrol and random-wander sources.
+
+## Selecting Actions and observing activity outcomes (#460)
+
+An `action` schema field stores a stable built-in/registry reference, not its display
+name or Lua code. It is marshalled as an immutable Lua string. Declare an optional
+Idle default with `type: action`, `required: false`, `default: idle`. The generated
+configuration editor offers Idle and loaded Actions offered by World Markers,
+using display names; request validation still checks the actual selected target.
+Unknown references reject assignment without changing the document/history.
+YAML/binary documents, nested configuration and clipboard retain the typed identity.
+Registry removal/replacement refuses to invalidate authored Action configuration;
+clear/change the referencing configuration first. Removing a Marker's offer is
+allowed and cancels pending activity with `action_unavailable`.
+
+```lua
+return {api_version = require('prometheum.v2').api_version,
+  factory = function(configuration)
+    return {
+      on_start = function(context)
+        local request = context.move_to(configuration.destination, configuration.action)
+        if not request.accepted then context.set_timer('retry', 60) end
+      end,
+      on_event = function(event, context)
+        if event.type == 'destination_reached' and event.action == configuration.action then
+          context.move_to(configuration.next_destination) -- Idle; behaviour stays enabled
+        elseif event.type == 'action_failed' then
+          context.log(event.reason .. ': ' .. event.diagnostic)
+          context.move_to(configuration.next_destination)
+        end
+      end,
+      on_timer = function(name, context)
+        context.move_to(configuration.destination, configuration.action)
+      end
+    }
+  end}
+```
+
+Movement outcomes carry `destination` (opaque stable Marker), `action` (stable
+reference), `result` (`succeeded`, `failed`, `cancelled`), `tick` and `sequence`.
+`destination_reached` is successful physical arrival **and** completion of the
+selected synchronous Action, including Idle. `action_failed` reports ordinary
+host refusal as `reason = "refused"`, or script failure as `reason = "script_error"`,
+with a bounded `diagnostic` and `script_failure` (`none`, `lua_error`,
+`memory_budget_exceeded`, `instruction_budget_exceeded`, `conversion_error`).
+Cancellation reasons include `explicit`, `superseded`, `target_deleted` and
+`action_unavailable`. These outcomes are delivered in existing stable event order;
+route loss retains its existing callback. `context.agent.selected_action` describes
+pending intent (Idle when no request remains). No private coordination data is exposed.
+
+Action exceptions/budget failures retain the pause/headless-failure policy. Their
+queued behaviour outcome is delivered after public simulation resume, without
+turning an ordinary host refusal into a behaviour programming error. Idle schedules
+nothing and never disables the assigned behaviour. Existing timer, deactivation,
+replacement and committed safe-exit rules remain unchanged.
 
 ## World persistence
 
