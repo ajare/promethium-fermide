@@ -19,7 +19,8 @@ namespace core
 		Shuttle,
 		Walkway,
 		Window,
-		BoothWindow
+		BoothWindow,
+		AccessPanel
 	};
 
 	inline bool isWindowAperture(SectorObjectType type)

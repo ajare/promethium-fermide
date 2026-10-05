@@ -41,6 +41,7 @@
 #include "FurniturePanel.h"
 #include "AgentClipboard.h"
 #include "BoothWindowEditor.h"
+#include "AccessPanelEditor.h"
 
 #if defined(_WIN32)
 #include <nfd.h>
@@ -170,6 +171,7 @@ namespace
 		None,
 		Agent,
 		Marker,
+		AccessPanel,
 		Door,
 		BulkheadDoor,
 		Window,
@@ -490,6 +492,21 @@ namespace
 		return { sector, levelOffset, localX,
 			(float)sector->getCellY() + levelOffset,
 			(float)sector->getCellY() + levelOffset, std::move(diagnostic) };
+	}
+
+	PegmanTarget getAccessPanelTarget(shared_ptr<const core::World> const& world,
+		ImVec2 position, ImVec2 canvasPos, ImVec2 canvasSize)
+	{
+		PegmanTarget target;
+		if (!pointInRect(position, canvasPos, canvasPos + canvasSize)) { target.diagnostic = "Drop inside the world"; return target; }
+		auto p = screenToWorld(position);
+		if (p.x < 0 || p.y < 0) { target.diagnostic = "Access panel cell is outside the World"; return target; }
+		target.cellX = static_cast<uint32_t>(floor(p.x)); target.cellY = static_cast<uint32_t>(floor(p.y));
+		target.sector = world->getSectorAtPosition(gUISettings.visibleLayer,p.x,p.y);
+		if (!target.sector) { target.diagnostic = "Access panels require a Location"; return target; }
+		target.levelOffset = target.cellY - target.sector->getCellY();
+		world->canAddAccessPanel(target.sector->getIndex(),target.levelOffset,target.cellX,{},&target.diagnostic);
+		return target;
 	}
 
 	PegmanTarget getDoorTarget(shared_ptr<const core::World> const& world,
@@ -1592,6 +1609,8 @@ namespace
 		auto bulkheadDoorMin = paletteSlotMin(trayTopLeft, PaletteSlot::BulkheadDoor);
 		auto dumbMin = paletteSlotMin(trayTopLeft, PaletteSlot::Dumbwaiter);
 		auto dumbMax = paletteSlotMax(trayTopLeft, PaletteSlot::Dumbwaiter);
+		auto panelMin = paletteSlotMin(trayTopLeft, PaletteSlot::AccessPanel);
+		auto panelMax = paletteSlotMax(trayTopLeft, PaletteSlot::AccessPanel);
 		auto boothMin = paletteSlotMin(trayTopLeft, PaletteSlot::BoothWindow);
 		auto boothMax = paletteSlotMax(trayTopLeft, PaletteSlot::BoothWindow);
 		auto windowMin = paletteSlotMin(trayTopLeft, PaletteSlot::Window);
@@ -1905,11 +1924,15 @@ namespace
 			else if (pointInRect(io.MousePos, bulkheadDoorMin, bulkheadDoorMax)) hoveredItem = PaletteItem::BulkheadDoor;
 			else if (pointInRect(io.MousePos, windowMin, windowMax)) hoveredItem = PaletteItem::Window;
 			else if (pointInRect(io.MousePos, boothMin, boothMax)) hoveredItem = PaletteItem::BoothWindow;
+			else if (pointInRect(io.MousePos, panelMin, panelMax)) hoveredItem = PaletteItem::AccessPanel;
 			else if (pointInRect(io.MousePos, walkwayMin, walkwayMax)) hoveredItem = PaletteItem::Walkway;
 			else if (pointInRect(io.MousePos, forceBridgeMin, forceBridgeMax)) hoveredItem = PaletteItem::ForceBridge;
 			else if (pointInRect(io.MousePos, roomLadderMin, roomLadderMax)) hoveredItem = PaletteItem::RoomLadder;
 			else if (pointInRect(io.MousePos, platformLiftMin, platformLiftMax)) hoveredItem = PaletteItem::PlatformLift;
 		}
+		drawList->AddRect(panelMin, panelMax,
+			hoveredItem == PaletteItem::AccessPanel ? yellow : borderColour, 3.0f);
+		drawList->AddText(paletteLabelPosition(panelMin,panelMax,"Access panel"),yellow,"Access panel");
 		drawList->AddRect(bulkheadDoorMin, bulkheadDoorMax,
 			hoveredItem == PaletteItem::BulkheadDoor ? yellow : borderColour, 3.0f);
 		drawList->AddRect(windowMin, windowMax,
@@ -1937,6 +1960,7 @@ namespace
 				: hoveredItem == PaletteItem::BulkheadDoor ? "Drag to add Bulkhead Door"
 				: hoveredItem == PaletteItem::Window ? "Drag to add Window"
 				: hoveredItem == PaletteItem::BoothWindow ? "Drag to add BoothWindow"
+				: hoveredItem == PaletteItem::AccessPanel ? "Drag to add Access panel"
 				: hoveredItem == PaletteItem::Walkway ? "Drag to add Walkway"
 				: hoveredItem == PaletteItem::ForceBridge ? "Drag to add Force Bridge"
 				: hoveredItem == PaletteItem::RoomLadder ? "Drag to add Room Ladder"
@@ -1967,7 +1991,9 @@ namespace
 		{
 			paletteConsumedMouse = true;
 			auto const dragMouse = worldDragMousePosition();
-			if (gPegman.item == PaletteItem::Marker)
+			if (gPegman.item == PaletteItem::AccessPanel)
+				target = getAccessPanelTarget(world, dragMouse, canvasPos, canvasSize);
+			else if (gPegman.item == PaletteItem::Marker)
 				target = getMarkerTarget(world, dragMouse, canvasPos, canvasSize);
 			else if (gPegman.item == PaletteItem::Door)
 				target = getDoorTarget(world, dragMouse, canvasPos, canvasSize);
@@ -1989,7 +2015,19 @@ namespace
 			if (ImGui::IsKeyPressed(ImGuiKey_Escape) || io.MouseClicked[1]) resetPegman();
 			else if (io.MouseReleased[0])
 			{
-				if (target && gPegman.item == PaletteItem::Marker)
+				if (target && gPegman.item == PaletteItem::AccessPanel)
+				{
+					string diagnostic;
+					auto object = placeAccessPanel(world,target.sector->getIndex(),target.levelOffset,target.cellX,{},diagnostic);
+					if (object)
+					{
+						setSelectionMode(UISettings::SelectionMode::Object);
+						gSelectedAgent = nullptr; gSelectedSector.reset(); gSelectedSectorObject = object;
+					}
+					else reportEditorError("Access panel editor", diagnostic);
+					resetPegman();
+				}
+				else if (target && gPegman.item == PaletteItem::Marker)
 				{
 					placeMarker(world, target);
 					resetPegman();
@@ -2053,7 +2091,13 @@ namespace
 		if (gPegman.phase == PalettePhase::Dragging)
 		{
 			auto colour = target ? yellow : red;
-			if (gPegman.item == PaletteItem::Marker)
+			if (gPegman.item == PaletteItem::AccessPanel)
+			{
+				auto topLeft = target.sector ? worldToScreen({float(target.cellX)+0.25f,float(target.cellY)+0.5f}) : io.MousePos-ImVec2(16,20);
+				auto bottomRight = target.sector ? worldToScreen({float(target.cellX)+0.75f,float(target.cellY)+0.25f}) : io.MousePos+ImVec2(16,20);
+				drawList->AddRect(topLeft,bottomRight,colour,0,0,2);
+			}
+			else if (gPegman.item == PaletteItem::Marker)
 			{
 				auto preview = target.sector
 					? worldToScreen({ target.sector->getPosition().x + target.localX,
@@ -4570,7 +4614,8 @@ void handleShortcuts(shared_ptr<core::World>& world)
 				}
 			}
 			else if (gSelectedSectorObject
-				&& (gSelectedSectorObject->getObjectType() == core::SectorObjectType::Marker
+				&& (gSelectedSectorObject->getObjectType() == core::SectorObjectType::AccessPanel
+					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::Marker
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::Door
 					|| gSelectedSectorObject->getObjectType() == core::SectorObjectType::BulkheadDoor
 					|| core::isWindowAperture(gSelectedSectorObject->getObjectType())
@@ -4631,7 +4676,9 @@ void handleShortcuts(shared_ptr<core::World>& world)
 							if (!removed && !diagnostic.empty())
 								reportEditorError("Marker editor", diagnostic);
 						}
-						else removed = type == core::SectorObjectType::Door
+						else removed = type == core::SectorObjectType::AccessPanel
+							? world->removeAccessPanel(sector->getIndex(), i)
+							: type == core::SectorObjectType::Door
 								? world->removeSectorDoor(sector->getIndex(), i)
 								: type == core::SectorObjectType::BulkheadDoor
 									? world->removeSectorBulkheadDoor(sector->getIndex(), i)
@@ -7197,6 +7244,15 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 			renderMarkerPanel(world, gSelectedSectorObject);
 			break;
 
+		case core::SectorObjectType::AccessPanel:
+			if (renderAccessPanelPanel(world,gSelectedSectorObject))
+			{
+				auto sector = gSelectedSectorObject->getSector();
+				bool exists = false;
+				for (uint32_t i=0;i<sector->getNumObjects();++i) if (sector->getObject(i)==gSelectedSectorObject) exists=true;
+				if (!exists) { gSelectedSectorObject.reset(); gHoveredSectorObject.reset(); }
+			}
+			break;
 		case core::SectorObjectType::BoothWindow:
 		case core::SectorObjectType::Window:
 			renderWindowPanel(world, gSelectedSectorObject);

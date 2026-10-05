@@ -32,6 +32,8 @@ namespace core
 		case SectorObjectType::Walkway:
 			return "Walkway";
 
+		case SectorObjectType::AccessPanel:
+			return "Access panel";
 		case SectorObjectType::BoothWindow:
 			return "BoothWindow";
 		case SectorObjectType::Window:

@@ -46,7 +46,7 @@ namespace core
 
 		uint32_t getVertexIdentifier() const;
 
-		bool pointInside(float x, float y) const;
+		virtual bool pointInside(float x, float y) const;
 
 		virtual std::shared_ptr<Vertex> createVertex(std::shared_ptr<SectorObject> object, std::shared_ptr<Sector> sector, void* user = nullptr) const = 0;
 		

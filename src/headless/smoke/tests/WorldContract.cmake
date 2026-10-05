@@ -41,6 +41,8 @@ set(checks
     boothWindows/atomicRefusal
     boothWindows/lifecycle
     boothWindows/simultaneousAdjacentPairs
+    accessPanels/authoredWorld
+    accessPanels/wallOverlap
     markerPlacementEnforcesPaletteCoreRules
     corridorDoorPlacementEnforcesPaletteRules
     objectMoveValidatesAndRebuildsOnceCommitted

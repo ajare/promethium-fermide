@@ -38,6 +38,7 @@ namespace core
 			type == SectorObjectType::Ladder ||
 			type == SectorObjectType::Lift ||
 			type == SectorObjectType::Marker ||
+			type == SectorObjectType::AccessPanel ||
 			type == SectorObjectType::Walkway ||
 			isWindowAperture(type);
 	}

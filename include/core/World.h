@@ -15,6 +15,7 @@
 #include "core/PhysicalControlPlacement.h"
 #include "core/AgentGroup.h"
 #include "core/AccessPermission.h"
+#include "core/AccessPanel.h"
 #include "core/PermissionSet.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/Background.h"
@@ -909,7 +910,10 @@ namespace core
 			Chamber,
 			BoothWindow,
 			Dumbwaiter,
-			MoveDumbwaiter
+			MoveDumbwaiter,
+			AccessPanel,
+			ConfigureAccessPanel,
+			RemoveAccessPanel
 		};
 
 		// Compact tagged command storage. Field meanings are determined by type and
@@ -965,6 +969,8 @@ namespace core
 			DumbwaiterId dumbwaiterId{};
 		};
 
+		bool validateAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
+			AccessPanelGeometry geometry, uint32_t ignoredObject, std::string* diagnostic) const;
 		void restoreFurniture(ConstructionRecord const& record);
 		bool markerHasNoBehaviourReferences(MarkerId id, std::string* diagnostic) const;
 		std::string furnitureSupportDiagnostic(uint32_t sector, uint32_t x, uint32_t y) const;
@@ -2006,6 +2012,14 @@ namespace core
 
 		bool getSectorWindowOptions(uint32_t layerIndex, uint32_t y, uint32_t x,
 			uint32_t cellsWide, uint32_t levelsHigh, CreateWindowOptions& options) const;
+
+		bool canAddAccessPanel(uint32_t sectorIndex, uint32_t levelOffset, uint32_t cellX,
+			AccessPanelGeometry geometry = {}, std::string* diagnostic = nullptr) const;
+		CreateObjectResult addAccessPanel(uint32_t sectorIndex, uint32_t levelOffset,
+			uint32_t cellX, AccessPanelGeometry geometry = {});
+		bool configureAccessPanel(uint32_t sectorIndex, uint32_t objectIndex,
+			AccessPanelGeometry geometry, std::string* diagnostic = nullptr);
+		bool removeAccessPanel(uint32_t sectorIndex, uint32_t objectIndex);
 
 		bool canAddBoothWindow(uint32_t layer, uint32_t y, uint32_t x,
 			uint32_t width = 1, uint32_t height = 1, std::string* diagnostic = nullptr) const;

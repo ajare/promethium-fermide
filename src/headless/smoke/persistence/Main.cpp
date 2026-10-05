@@ -7,6 +7,7 @@ namespace
 {
 	constexpr smoke::Check checks[] = {
 		{ "dumbwaiters/authoredRoundTripAndMalformedRecords", persistence::dumbwaiters },
+		{ "accessPanels/roundTripAndMalformedRecords", persistence::accessPanels },
 		{ "boothWindows/authoredRoundTripAndMalformedRecords", persistence::boothWindows },
 		{ "airlocks/authoredRoundTripAndReplay", persistence::airlocks },
 		{ "furniture/documents", persistence::furniture },

@@ -40,6 +40,7 @@ int main(int argc, char** argv)
 	registerFurniture(checks);
 	registerSecurityScanners(checks);
 	registerBoothWindows(checks);
+	registerAccessPanels(checks);
 	registerObjectEditing(checks);
 	registerFloorsAndWalls(checks);
 	registerTopology(checks);

@@ -351,6 +351,9 @@ _Avoid_: Device controller, traversal controller
 **Button**:
 A physical control representing an Interaction point, owned by the object or Location that requires it. It belongs to one cell even when its visible shape extends slightly into a neighbouring cell.
 
+**Access panel**:
+A cell-owned object on the visible back surface of a Room, Corridor, or Facade, identified by cell X and an integer Level offset relative to its Location. It has cell-centred width, physical height, and a bottom Y offset, requires Floor or Walkway support, and owns a floor-Level approach vertex. It is not an aperture, perimeter wall, traversal resource, or movement obstruction; the initial Empty type is reconstructed Closed.
+
 **Button stack**:
 A vertical group of physical Buttons in one Location that share a horizontal position and one approach vertex. Each Button retains its own Interaction point, Device commands, and Permission requirement.
 

@@ -34,6 +34,7 @@ set(names
     carriageDoors
     carriageImages
     agentPoses
+    furniture/bedRenderOffset
     airlocks/chamberAndControls
     furniture/chairCommands
     furniture/demoCommands
@@ -43,6 +44,7 @@ set(names
     securityScanners/beamSweeps
     dumbwaiters/initialPresentationAndClipping
     boothWindows/staticPresentationAndNestedClipping
+    accessPanels/closedPresentationAndIndicators
     theDepotCarriesEveryClippedTransitBehindALayerOfLocations
     aTransitBehindTheSelectionIsPaintedSolidThroughItsLocations
     aTransitIsNotPaintedWhereTheSelectedLayerDoesNotOpen

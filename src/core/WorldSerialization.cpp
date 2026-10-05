@@ -154,6 +154,9 @@ namespace core
 		case ConstructionType::BoothWindow: return "boothWindow";
 		case ConstructionType::Dumbwaiter: return "dumbwaiter";
 		case ConstructionType::MoveDumbwaiter: return "moveDumbwaiter";
+		case ConstructionType::AccessPanel: return "accessPanel";
+		case ConstructionType::ConfigureAccessPanel: return "configureAccessPanel";
+		case ConstructionType::RemoveAccessPanel: return "removeAccessPanel";
 		case ConstructionType::BulkheadDoor: return "bulkheadDoor";
 		case ConstructionType::LightSwitch: return "lightSwitch";
 		case ConstructionType::ForceBridge: return "forceBridge";
@@ -176,7 +179,7 @@ namespace core
 	World::ConstructionType World::constructionTypeFromName(string const& name)
 	{
 		if (name == "securityScanner") return ConstructionType::Chamber; // Legacy scanner migration.
-		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::MoveDumbwaiter); ++value)
+		for (uint32_t value = 0; value <= static_cast<uint32_t>(ConstructionType::RemoveAccessPanel); ++value)
 		{
 			auto const type = static_cast<ConstructionType>(value);
 			if (constructionTypeName(type) == name) return type;
@@ -559,6 +562,19 @@ namespace core
 			}
 			serializer.endArray();
 			break;
+		case ConstructionType::AccessPanel:
+		case ConstructionType::ConfigureAccessPanel:
+		case ConstructionType::RemoveAccessPanel:
+			serializer.writeUint32("sectorIndex", record.a);
+			serializer.writeUint32("levelOffset", record.b);
+			serializer.writeUint32("xOffset", record.c);
+			if (record.type != ConstructionType::RemoveAccessPanel)
+			{
+				serializer.writeString("panelType", "empty");
+				serializer.writeFloat("width", record.x); serializer.writeFloat("height", record.y);
+				serializer.writeFloat("yOffset", record.z);
+			}
+			break;
 		case ConstructionType::Marker:
 			serializer.writeUint32("sectorIndex", record.a); serializer.writeUint32("levelIndex", record.b);
 			serializer.writeFloat("xOffset", record.x);
@@ -649,7 +665,8 @@ namespace core
 		// 44, instance Local depth in 45, Agent Local depth in 46, and authored
 		// Path destination identity in 47.
 		// Version 50 combines Furniture and Dumbwaiter authored state.
-		serializer.writeUint32("version", 50);
+		// Version 51 adds cell-owned Closed Empty Access panels.
+		serializer.writeUint32("version", 51);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1350,6 +1367,19 @@ namespace core
 				MarkerId{ serializer.readUint64("markerId") }, serializer.readString("markerName"),
 				serializer.readUint32("properties") });
 			break;
+		case ConstructionType::AccessPanel:
+		case ConstructionType::ConfigureAccessPanel:
+		case ConstructionType::RemoveAccessPanel:
+			if (version < 51) throw SerializationException("Access panels require schema 51");
+			record.a = serializer.readUint32("sectorIndex");
+			record.b = serializer.readUint32("levelOffset"); record.c = serializer.readUint32("xOffset");
+			if (record.type != ConstructionType::RemoveAccessPanel)
+			{
+				if (serializer.readString("panelType") != "empty") throw SerializationException("Unknown Access panel type");
+				record.x = serializer.readFloat("width"); record.y = serializer.readFloat("height"); record.z = serializer.readFloat("yOffset");
+				if (!AccessPanel::geometryIsValid({record.x, record.y, record.z})) throw SerializationException("Invalid Access panel geometry");
+			}
+			break;
 		case ConstructionType::Marker:
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.x = serializer.readFloat("xOffset");
@@ -1440,7 +1470,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 50)
+		if (version < 1 || version > 51)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2936,6 +2966,31 @@ namespace core
 			break;
 		case ConstructionType::Furniture:
 			restoreFurniture(record); break;
+		case ConstructionType::AccessPanel:
+		case ConstructionType::ConfigureAccessPanel:
+		case ConstructionType::RemoveAccessPanel:
+		{
+			if (record.a >= mSectors.size()) throw SerializationException("Access panel owner does not exist");
+			auto sector = mSectors[record.a];
+			if (record.c >= sector->getCellsWide() || record.b >= sector->getLevelsHigh())
+				throw SerializationException("Access panel cell is outside its Location");
+			auto x = sector->getCellX() + record.c;
+			if (record.type == ConstructionType::AccessPanel)
+				addAccessPanel(record.a, record.b, x, {record.x, record.y, record.z});
+			else
+			{
+				auto index = mLayers[sector->getLayerIndex()]->getCellDefinition(x, sector->getCellY() + record.b).accessPanel;
+				if (index == ~0u) throw SerializationException("Access panel edit has no owned panel");
+				if (record.type == ConstructionType::RemoveAccessPanel) removeAccessPanel(record.a, index);
+				else
+				{
+					std::string diagnostic;
+					if (!configureAccessPanel(record.a, index, {record.x, record.y, record.z}, &diagnostic))
+						throw SerializationException("Invalid Access panel edit: " + diagnostic);
+				}
+			}
+			break;
+		}
 		case ConstructionType::Marker:
 			addSectorMarkerRestored(record.a, record.b, record.x,
 				record.markerId, record.name, record.c);
@@ -3006,6 +3061,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -3468,6 +3524,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4616,6 +4673,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -4841,6 +4899,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -5120,6 +5179,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -5174,6 +5234,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -5390,6 +5451,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};
@@ -7893,6 +7955,7 @@ namespace core
 			return type == ConstructionType::LightSwitch || type == ConstructionType::ForceBridge
 				|| type == ConstructionType::SectorLadder || type == ConstructionType::PlatformLift
 				|| type == ConstructionType::Walkway || type == ConstructionType::Marker || type == ConstructionType::Furniture
+				|| type == ConstructionType::AccessPanel || type == ConstructionType::ConfigureAccessPanel || type == ConstructionType::RemoveAccessPanel
 				|| type == ConstructionType::RemoveWall || type == ConstructionType::RemoveMarker
 				|| type == ConstructionType::ObjectTombstone;
 		};

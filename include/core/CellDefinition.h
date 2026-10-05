@@ -39,6 +39,9 @@ namespace core
 		uint32_t floorIndex{ ~0u };
 		CellFloorType floorType{ CellFloorType::Ground };
 
+		// Independent cell-owned back-surface panel; does not occupy the aperture slot.
+		uint32_t accessPanel{ ~0u };
+
 		// Markers
 		std::vector<uint32_t> markers;
 

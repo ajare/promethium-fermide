@@ -84,6 +84,7 @@ set(editor_names
     agent/walkSpeedSelectionReportsSampleAndSource
     agent/heightRangeEditsAreSingleExactTransactions
     agent/heightChangesOnlyBoundsAndRendering
+    agent/selectionShowsCurrentPose
     tags/savedWorldCreatesAndReopensAdjacentRegistry
     tags/selectionEnforcesBasenameExtensionAndDirectory
     tags/tagNamesIdentityOrderingAndNoOpEdits
@@ -181,6 +182,7 @@ set(editor_names
     dumbwaiters/wholeUnitMoveAndClipboard
     dumbwaiters/landingPermissionHistoryAndAgentSelection
     boothWindows/historyAndClipboard
+    accessPanels/selectionAndHistory
     background/thePanelReadsTheSelectedBackground
     background/aPanelColourEditRoundTripsThroughSerialisation
     background/theColourEditCarriesNoAlphaChannel

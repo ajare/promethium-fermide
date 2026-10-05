@@ -423,6 +423,65 @@ namespace core
 					sector->getCellX() + instance.x + definition.maxX } });
 		}
 
+		auto connectPort = [&](shared_ptr<Vertex> const& from, shared_ptr<Vertex> const& to, int depth) {
+			auto edge = make_shared<SectorEdge>();
+			edge->mLocalDepth = depth;
+			edge->mFurnitureRoute = true;
+			addEdge(edge, from, to, false);
+		};
+
+		// A wall panel may stand behind Furniture without reviving the replaced
+		// ordinary floor. Attach its approach as a destination branch on one
+		// existing route, never as a connector between front/back depth routes.
+		// Prefer a rear-most route at its X, or the nearest authored endpoint
+		// for a sparse layout, retaining that route's depth.
+		std::erase_if(vertices, [&](auto const& approach) {
+			if (!dynamic_pointer_cast<AccessPanel>(approach->getObject())) return false;
+			auto x = approach->getPosition().x;
+			if (none_of(furnitureSpans.begin(), furnitureSpans.end(), [&](auto const& span) {
+				return span.first == approach->getSector() && span.second.first <= x && x <= span.second.second;
+			})) return false;
+			set<uint64_t> owners;
+			for (auto const& instance : mwWorld->furniture())
+			{
+				if (instance.sector != approach->getSector()->getIndex() || instance.y + approach->getSector()->getCellY() != y) continue;
+				auto const& definition = *mwWorld->furnitureCatalogue()->definition(instance.definitionKey);
+				auto baseX = approach->getSector()->getCellX() + instance.x;
+				if (definition.sideRoutes && baseX + definition.minX <= x && x <= baseX + definition.maxX) owners.insert(instance.id);
+			}
+			FurnitureRoute* selected = nullptr;
+			float nearestX = x, distance = numeric_limits<float>::max();
+			for (auto& route : routes)
+			{
+				if (!owners.contains(route.instance)) continue;
+				auto projected = clamp(x, min(route.from->getPosition().x, route.to->getPosition().x), max(route.from->getPosition().x, route.to->getPosition().x));
+				auto gap = abs(projected - x);
+				if (gap < distance || (gap == distance && (!selected || route.depth > selected->depth)))
+				{ selected = &route; nearestX = projected; distance = gap; }
+			}
+			if (!selected) return false;
+			shared_ptr<Vertex> junction;
+			if (selected->from->getPosition().x == nearestX) junction = selected->from;
+			else if (selected->to->getPosition().x == nearestX) junction = selected->to;
+			else
+			{
+				auto cut = find_if(selected->cuts.begin(), selected->cuts.end(),
+					[&](auto const& v) { return v->getPosition().x == nearestX; });
+				if (cut != selected->cuts.end()) junction = *cut;
+				else
+				{
+					auto sector = approach->getSector();
+					junction = make_shared<SectorMarkerVertex>(sector, nearestX - sector->getCellX(), y - sector->getCellY());
+					junction->mTopologyKey = selected->from->getTopologyKey() + ":panel-cut:" + approach->getTopologyKey();
+					selected->cuts.push_back(junction);
+					mVertices.push_back(junction); mSectorVertexLookup[sector.get()].push_back(junction);
+				}
+			}
+			connectPort(approach, junction, selected->depth);
+			mVertices.push_back(approach); mSectorVertexLookup[approach->getSector().get()].push_back(approach);
+			return true;
+		});
+
 		// Use the same combined coverage for ordinary objects and port attachment.
 		// Run boundaries include walls; processable cells exclude Walkway gaps.
 		auto floorSides = [&](shared_ptr<Vertex> const& vertex) {
@@ -473,12 +532,6 @@ namespace core
 			addEdge(make_shared<SectorEdge>(), anchor, port.vertex, false);
 		}
 
-		auto connectPort = [&](shared_ptr<Vertex> const& from, shared_ptr<Vertex> const& to, int depth) {
-			auto edge = make_shared<SectorEdge>();
-			edge->mLocalDepth = depth;
-			edge->mFurnitureRoute = true;
-			addEdge(edge, from, to, false);
-		};
 		// Endpoint attachment requires two designated ports, not a private vertex
 		// which happens to coincide. Emit each shared-depth connector once.
 		for (size_t i = 0; i < ports.size(); ++i)
@@ -743,6 +796,9 @@ namespace core
 		}
 
 		auto markerObject = std::dynamic_pointer_cast<MarkerSectorObject>(marker);
+		if (marker->getObjectType() == SectorObjectType::AccessPanel)
+			markerVertex->mTopologyKey = "access-panel:" + std::to_string(obj.sector->getIndex())
+				+ ":" + std::to_string(obj.x) + ":" + std::to_string(obj.y);
 		if (markerObject)
 			markerVertex->mTopologyKey = "marker:" + std::to_string(markerObject->getMarker()->getId().value);
 		if (markerObject && mwWorld->isFurnitureMarker(markerObject->getMarker()->getId()))
@@ -1579,6 +1635,11 @@ namespace core
 			//
 			// Process objects
 			//
+			if (cellDef.accessPanel != ~0u)
+			{
+				ObjectData obj = { cellDef.accessPanel, layerIndex, x, y, mwWorld->_getSector(cellDef.sectorIndex), {} };
+				processMarker(obj, row); // Existing non-traversal floor-object approach seam.
+			}
 			for (auto markerIndex : cellDef.markers)
 			{
 				ObjectData obj = { markerIndex, layerIndex, x, y, mwWorld->_getSector(cellDef.sectorIndex), {} };

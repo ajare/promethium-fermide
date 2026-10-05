@@ -48,6 +48,7 @@ int main(int argc, char** argv)
 	editor_smoke::registerFurniture(checks);
 	editor_smoke::registerSecurityScanners(checks);
 	editor_smoke::registerBoothWindows(checks);
+	editor_smoke::registerAccessPanels(checks);
 	editor_smoke::registerBackground(checks);
 	editor_smoke::registerFacade(checks);
 	editor_smoke::registerBrokenExtensibles(checks);

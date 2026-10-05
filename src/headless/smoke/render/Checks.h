@@ -33,6 +33,7 @@ namespace render_smoke
 			"Render check did not restore its ImGui context");
 	}
 
+	void registerAccessPanels(std::vector<smoke::Check>& checks);
 	void registerBoothWindows(std::vector<smoke::Check>& checks);
 	void registerAgentPoses(std::vector<smoke::Check>& checks);
 	void registerAirlocks(std::vector<smoke::Check>& checks);

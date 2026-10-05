@@ -28,6 +28,7 @@
 #include "core/LadderSectorObject.h"
 #include "core/LiftSectorObject.h"
 #include "core/MarkerSectorObject.h"
+#include "core/AccessPanel.h"
 #include "core/WalkwaySectorObject.h"
 #include "core/Button.h"
 #include "core/Marker.h"
@@ -1479,6 +1480,21 @@ void renderSectorObjects(shared_ptr<const core::Sector> sector, uint32_t layer, 
 					? LayerRenderStyle::Solid : LayerRenderStyle::Wireframe;
 				if (style != LayerRenderStyle::Solid) controlStyle = LayerRenderStyle::Wireframe;
 				renderPhysicalControl(button, layer, controlStyle, selected, drawList);
+			}
+			break;
+
+		case core::SectorObjectType::AccessPanel:
+			if (flags & RENDER_SECTOR_OBJECTS_BEHIND)
+			{
+				auto panel = static_pointer_cast<const core::AccessPanelSectorObject>(object)->getPanel();
+				core::Vector2 min, max; panel->getFullShape(min, max);
+				bool degenerate = panel->getSize().x == 0 || panel->getSize().y == 0;
+				if (degenerate) panel->getSelectionShape(min, max);
+				transformPosition(min); transformPosition(max);
+				if (!degenerate && isDrawnSolid(style))
+					drawList->AddRectFilled({min.x, max.y}, {max.x, min.y}, IM_COL32(78, 92, 110, 255));
+				drawList->AddRect({min.x, max.y}, {max.x, min.y},
+					selected ? IM_COL32(251, 188, 4, 255) : IM_COL32(165, 180, 198, 255), 0, 0, 2);
 			}
 			break;
 

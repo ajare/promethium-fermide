@@ -84,6 +84,7 @@ namespace
 		case core::SectorObjectType::Shuttle: return "Shuttle";
 		case core::SectorObjectType::Walkway: return "Walkway";
 		case core::SectorObjectType::BoothWindow: return "BoothWindow";
+		case core::SectorObjectType::AccessPanel: return "Access panel";
 		case core::SectorObjectType::Window: return "Window";
 		}
 		return "Unknown";
@@ -92,7 +93,7 @@ namespace
 	// Every SectorObjectType the model knows about. The parity loop below walks
 	// this list so a type added later is compared against a Room rather than
 	// silently skipped.
-	std::array<core::SectorObjectType, 11> const AllSectorObjectTypes{
+	std::array<core::SectorObjectType, 12> const AllSectorObjectTypes{
 		core::SectorObjectType::None,
 		core::SectorObjectType::BulkheadDoor,
 		core::SectorObjectType::Door,
@@ -103,7 +104,8 @@ namespace
 		core::SectorObjectType::Marker,
 		core::SectorObjectType::Shuttle,
 		core::SectorObjectType::Walkway,
-		core::SectorObjectType::Window
+		core::SectorObjectType::Window,
+		core::SectorObjectType::AccessPanel
 	};
 
 	core::Facade makeFacade(core::BackgroundColour const& colour = core::Facade::defaultColour())
@@ -943,7 +945,7 @@ agents: []
 		world.finishBuild();
 
 		auto const yaml = serializeWorld(world);
-		require(yaml.find("version: 50") != std::string::npos,
+		require(yaml.find("version: 51") != std::string::npos,
 			"The writer did not raise the version above the pre-Door-style ceiling");
 
 		bool refusedVersion = false;

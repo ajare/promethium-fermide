@@ -314,7 +314,7 @@ set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES
-        world/Main.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
+        world/Main.cpp world/AccessPanels.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
         world/MarkerIdentity.cpp
         world/TwoSidedButtons.cpp
         world/BackgroundSector.cpp
@@ -345,7 +345,7 @@ set_tests_properties(smoke-world-contract PROPERTIES LABELS "harness;core" TIMEO
 pf_add_smoke_module(pf-smoke-persistence
     NAME persistence
     SOURCES
-        persistence/Main.cpp persistence/Airlocks.cpp persistence/Furniture.cpp persistence/SecurityScanners.cpp persistence/BoothWindows.cpp
+        persistence/Main.cpp persistence/AccessPanels.cpp persistence/Airlocks.cpp persistence/Furniture.cpp persistence/SecurityScanners.cpp persistence/BoothWindows.cpp
         persistence/Formats.cpp
         persistence/TransactionalWrites.cpp
         persistence/DocumentPaths.cpp
@@ -381,7 +381,7 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 pf_add_smoke_module(pf-smoke-render
     NAME render
     SOURCES
-        render/Main.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
+        render/Main.cpp render/AccessPanels.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp
         render/DrawOrder.cpp
@@ -424,7 +424,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/Main.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/Main.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp

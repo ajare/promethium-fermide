@@ -156,6 +156,8 @@ set(core_names
     dumbwaiters/agentLandingPermissions
     dumbwaiters/agentRacesAndOwnership
     furniture/actions
+    furniture/bedLyingLifecycle
+    furniture/authoredChairArrival
     furniture/seatedEdits
     furniture/occupancyLifecycle
     runScaledWorld

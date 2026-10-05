@@ -8130,6 +8130,16 @@ namespace core
 			if (sectorObject) *sectorObject = object;
 			return object->_getObject();
 		}
+		// Degenerate panel indicators can extend just beyond their owning cell.
+		// Their editor hit region does not change the authored/collision rectangle.
+		for (auto const& sector : getSectors(layerIndex))
+			for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
+				if (auto panel = dynamic_pointer_cast<const AccessPanelSectorObject>(sector->getObject(i));
+					panel && panel->pointInside(x, y))
+				{
+					if (sectorObject) *sectorObject = panel;
+					return panel->_getObject();
+				}
 		// An open platform is deliberately rendered a little below its nominal
 		// floor. Hit-test its current geometry before resolving the pointer through
 		// a grid cell, because that rendered strip may lie in the cell below its Room.

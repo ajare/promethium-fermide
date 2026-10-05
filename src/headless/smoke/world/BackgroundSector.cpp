@@ -32,7 +32,7 @@ namespace
 	// Every SectorObjectType the model knows about. A Background must answer false
 	// for all of them as a host, so a new type added here is caught by this check
 	// rather than silently becoming hostable in a Background.
-	std::array<core::SectorObjectType, 11> const AllSectorObjectTypes{
+	std::array<core::SectorObjectType, 12> const AllSectorObjectTypes{
 		core::SectorObjectType::None,
 		core::SectorObjectType::BulkheadDoor,
 		core::SectorObjectType::Door,
@@ -43,7 +43,8 @@ namespace
 		core::SectorObjectType::Marker,
 		core::SectorObjectType::Shuttle,
 		core::SectorObjectType::Walkway,
-		core::SectorObjectType::Window
+		core::SectorObjectType::Window,
+		core::SectorObjectType::AccessPanel
 	};
 
 	// core::getSectorObjectTypeString() refuses the types it never prints, so the
@@ -63,6 +64,7 @@ namespace
 		case core::SectorObjectType::Shuttle: return "Shuttle";
 		case core::SectorObjectType::Walkway: return "Walkway";
 		case core::SectorObjectType::BoothWindow: return "BoothWindow";
+		case core::SectorObjectType::AccessPanel: return "Access panel";
 		case core::SectorObjectType::Window: return "Window";
 		}
 		return "Unknown";
