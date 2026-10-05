@@ -1573,7 +1573,7 @@ namespace core
 				while (serializer.nextArrayItem())
 				{
 					auto action = serializer.readString("");
-					if (!actionRegistry || !actionRegistry->find(action)) throw SerializationException("Unavailable Marker Action reference: " + action);
+					if (action != UseFurnitureAction && (!actionRegistry || !actionRegistry->find(action))) throw SerializationException("Unavailable Marker Action reference: " + action);
 					if (seen.insert(action).second) actions.push_back(std::move(action));
 				}
 				serializer.endArray();
@@ -2254,7 +2254,12 @@ namespace core
 			std::erase_if(serializedRequirements, [&](auto const& entry)
 			{ return candidate.physicalControlPlacement(entry.first) != nullptr; });
 			for (auto const& [marker, actions] : markerActions)
+			{
 				if (!candidate.lookupMarker(marker)) throw SerializationException("Marker Action assignment references a missing Marker");
+				for (auto const& action : actions)
+					if (action == UseFurnitureAction && !candidate.actionAvailable(marker, action))
+						throw SerializationException("Use furniture assignment requires paired definition functions");
+			}
 			records = std::move(candidate.mConstructionRecords);
 			accessPermissions = std::move(candidate.mAccessPermissions);
 		}
@@ -2450,7 +2455,7 @@ namespace core
 					}
 					else if (auto action = agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value))
 					{
-						if (action->reference != IdleAction && (!mActionRegistry || !mActionRegistry->find(action->reference)))
+						if (action->reference != IdleAction && action->reference != UseFurnitureAction && (!mActionRegistry || !mActionRegistry->find(action->reference)))
 							throw SerializationException("Agent behaviour configuration '" + path
 								+ "' references unavailable Action " + action->reference);
 					}

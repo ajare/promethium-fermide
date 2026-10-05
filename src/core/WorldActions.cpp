@@ -14,7 +14,7 @@ namespace core
 		{
 			if (auto action = agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value))
 			{
-				if (action->reference != IdleAction && (!registry || !registry->find(action->reference)))
+				if (action->reference != IdleAction && action->reference != UseFurnitureAction && (!registry || !registry->find(action->reference)))
 				{
 					missing = action->reference;
 					return false;
@@ -47,7 +47,7 @@ namespace core
 			auto registry = ActionRegistry::load(path);
 			for (auto const& [marker, actions] : mMarkerActions)
 				if (lookupMarker(marker)) for (auto const& action : actions)
-					if (!registry->find(action)) return reject("Registry selection would invalidate a Marker Action: " + action);
+					if (action != UseFurnitureAction && !registry->find(action)) return reject("Registry selection would invalidate a Marker Action: " + action);
 			std::string missing;
 			for (auto const& [id, agent] : mAgents.entries())
 				if (auto const& assignment = agent->getBehaviourAssignment())
@@ -81,14 +81,14 @@ namespace core
 					}
 		mMarkerActions.clear();
 		for (auto const& [id, agent] : mAgents.entries())
-			if (agent->mResetAction != IdleAction)
+			if (agent->mResetAction != IdleAction && agent->mResetAction != UseFurnitureAction)
 			{
 				agent->mResetPath.reset(); agent->mResetDestinationMarker = {}; agent->mResetPathActive = false;
 			}
 		mActionRegistry.reset();
 		mActionRegistryFilename.clear();
 		for (auto& [id, goal] : mMovementGoals)
-			if (goal.selectedAction != IdleAction) { goal.actionInvalidated = true; goal.cancelling = true; }
+			if (goal.selectedAction != IdleAction && goal.selectedAction != UseFurnitureAction) { goal.actionInvalidated = true; goal.cancelling = true; }
 		markModified();
 		invalidateSimulationSnapshot();
 		return true;
@@ -111,7 +111,11 @@ namespace core
 		for (auto& action : actions)
 		{
 			if (action == IdleAction) continue; // universally derived, never redundant
-			if (!mActionRegistry || !mActionRegistry->find(action)) return reject("Unavailable Marker Action identity");
+			if (action == UseFurnitureAction)
+			{
+				if (!actionAvailable(marker, action)) return reject("Furniture definition has no use functions");
+			}
+			else if (!mActionRegistry || !mActionRegistry->find(action)) return reject("Unavailable Marker Action identity");
 			if (seen.insert(action).second) unique.push_back(std::move(action));
 		}
 		if (unique == markerActions(marker)) return true;
@@ -134,6 +138,12 @@ namespace core
 	{
 		if (!lookupMarker(marker)) return false;
 		if (action == IdleAction) return true;
+		if (action == UseFurnitureAction)
+		{
+			auto instance = furnitureForMarker(marker);
+			auto definition = instance && mFurnitureCatalogue ? mFurnitureCatalogue->definition(instance->definitionKey) : nullptr;
+			return definition && definition->hasUse;
+		}
 		if (!mActionRegistry || !mActionRegistry->find(action)) return false;
 		auto found = mMarkerActions.find(marker);
 		return found != mMarkerActions.end()
@@ -173,8 +183,20 @@ namespace core
 
 	void World::executeMarkerAction(AgentId agentId, MarkerId markerId, std::string_view action, SimulationEvent& event)
 	{
-		if (action == IdleAction) return;
 		auto agent = mAgents.find(agentId);
+		if (auto occupant = usablePointOccupant(markerId); occupant && occupant != agentId)
+		{
+			event.type = SimulationEventType::ActionFailed;
+			event.diagnostic = "Usable point is occupied by another Agent";
+			return;
+		}
+		if (agent && agent->mFurnitureUse)
+		{
+			if (action == UseFurnitureAction && agent->mFurnitureUse->marker == markerId) return;
+			finishFurnitureUse(agentId);
+			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
+		}
+		if (action == IdleAction) return;
 		auto marker = lookupMarker(markerId);
 		if (!agent || !marker || !actionAvailable(markerId, action))
 		{
@@ -183,10 +205,77 @@ namespace core
 			event.diagnostic = "Selected Action is no longer available";
 			return;
 		}
+		auto views = actionViews(agentId, markerId);
+		auto instance = furnitureForMarker(markerId);
+		auto result = action == UseFurnitureAction
+			? mFurnitureCatalogue->executeUse(instance->definitionKey, false, views)
+			: mActionRegistry->execute(action, views);
+		applyActionResult(agentId, markerId, std::move(result), event);
+		if (action == UseFurnitureAction && event.type == SimulationEventType::DestinationReached)
+			agent->mFurnitureUse = Agent::FurnitureUse{markerId, instance->id, instance->definitionKey, mFurnitureCatalogue};
+	}
+
+	FurnitureInstance const* World::furnitureForMarker(MarkerId marker) const
+	{
+		for (auto const& instance : mFurniture)
+			for (auto const& point : instance.destinations)
+				if (point.marker == marker) return &instance;
+		return nullptr;
+	}
+
+	ActionViews World::actionViews(AgentId agentId, MarkerId markerId) const
+	{
+		auto agent = mAgents.find(agentId);
+		auto marker = lookupMarker(markerId);
 		auto position = agent->getGlobalPosition();
-		ActionViews views{agent->getName(), getName(), marker->getName(), agentId.value, markerId.value,
-			getSimulationTick(), position.x, position.y};
-		auto result = mActionRegistry->execute(action, views);
+		ActionViews views{agent->getName(), getName(), marker ? marker->getName() : "", agentId.value, markerId.value,
+			getSimulationTick(), position.x, position.y, {}, {}, {},
+			agent->mPose == Pose::Sitting ? "sitting" : agent->mPose == Pose::Lying ? "lying" : "standing", 0};
+		if (auto instance = furnitureForMarker(markerId))
+		{
+			views.furnitureId = instance->id;
+			views.furnitureName = instance->name;
+			views.definitionKey = instance->definitionKey;
+			for (auto const& point : instance->destinations)
+				if (point.marker == markerId) views.usablePointKey = point.key;
+		}
+		return views;
+	}
+
+	void World::finishFurnitureUse(AgentId agentId)
+	{
+		auto agent = mAgents.find(agentId);
+		if (!agent || !agent->mFurnitureUse) return;
+		auto use = std::move(*agent->mFurnitureUse);
+		agent->mFurnitureUse.reset();
+		SimulationEvent event;
+		event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
+		event.destinationMarker = use.marker;
+		event.selectedAction = UseFurnitureAction;
+		event.type = SimulationEventType::DestinationReached;
+		auto result = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker));
+		applyActionResult(agentId, use.marker, std::move(result), event, true);
+		// Safety is host-owned, independent of callback success and staged effects.
+		agent->mPose = Pose::Standing;
+		agent->mOccupiedUsablePoint = {};
+		invalidateSimulationSnapshot();
+		if (event.type == SimulationEventType::ActionFailed)
+		{
+			if (event.scriptFailure == ScriptExecutionFailure::None)
+			{
+				event.scriptFailure = ScriptExecutionFailure::ConversionError;
+				addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
+				mActionExecutionFailed = true;
+			}
+			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
+			mPendingMovementOutcomes.push_back(std::move(event));
+		}
+	}
+
+	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,
+		SimulationEvent& event, bool finishing)
+	{
+		auto agent = mAgents.find(agentId);
 		if (!result.succeeded)
 		{
 			event.type = SimulationEventType::ActionFailed;
@@ -242,6 +331,14 @@ namespace core
 				break;
 			}
 			}
+		}
+		if (finishing && (pose != Pose::Standing || claim))
+		{
+			reject("Furniture finish_use omitted Standing/occupancy cleanup");
+			event.scriptFailure = ScriptExecutionFailure::ConversionError;
+			addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
+			mActionExecutionFailed = true;
+			return; // incomplete finishing must not publish staged devices or logs
 		}
 		// Committed requests retain the ordinary asynchronous device/traversal
 		// authorities; scripts never submit unvalidated raw device commands.

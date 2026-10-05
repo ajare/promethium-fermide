@@ -1,12 +1,13 @@
-# Scripted Marker Actions (#457–#460)
+# Scripted Marker Actions (#457–#462)
 
 This integration-branch slice exposes movement through
 `World::moveAgentToNamedMarker(agent, name, action)` and
 `World::moveAgentToMarker(agent, marker, action)`. The default is the immutable
 built-in `core::IdleAction` identity (`idle`, displayed as **Idle**).
-`World::availableAgentActions(marker)` returns Idle followed by the Marker's
-ordered additional Lua Actions. Unknown or unassigned Actions are refused, never
-silently replaced with Idle. Furniture use/finish callbacks remain deferred.
+`World::availableAgentActions(marker)` returns Idle, derived Use furniture when
+the owning definition provides paired callbacks, then the Marker's ordered
+additional Lua Actions, without duplicates. Unknown or unavailable Actions are
+refused, never silently replaced with Idle.
 
 Names resolve once at acceptance to World-owned Marker identities. Rename and
 supported topology reconstruction retain the target. Deletion cancels it;
@@ -22,11 +23,11 @@ failure; `MovementCancelled` distinguishes explicit cancellation, replacement
 transport journeys retain their existing safe-exit rules. Outcomes remain
 available through the public event queue independently of behaviour observation.
 
-Idle invokes no Furniture effects, claims no usable point, schedules nothing,
-and leaves an assigned behaviour enabled. Legacy catalogue Sit/Lying fields no
+Idle claims no usable point, schedules no new activity, and leaves an assigned
+behaviour enabled. Replacing active Furniture use with Idle finishes that use. Legacy catalogue Sit/Lying fields no
 longer cause arrival or intermediate-passage effects. The selected-Agent editor
-panel visibly offers Idle and loaded custom Actions in its movement Action
-selector. The chosen destination must offer the selected Action.
+panel visibly offers Idle, derived Use furniture and loaded custom Actions in
+its movement Action selector. The chosen destination must offer the selected Action.
 
 World schema 54 records saved Path Action intent, registry basename/UUID and
 ordered Marker assignments in YAML and binary documents. Schema 53 introduced
@@ -55,7 +56,7 @@ following legacy checks still require migration to explicit Furniture use:
 
 They are retained unchanged rather than bypassed, skipped, or satisfied by a
 compatibility exception. Their owning functional and exhaustive-contract CTests
-therefore report failures until the follow-up lifecycle/fixture work lands.
+therefore report failures until the follow-up fixture migration lands.
 
 Final Linux validation built the default core/headless/editor inventory in both
 Release and Debug, then ran the supervised unfiltered final CTest lane. Each
@@ -276,3 +277,68 @@ Final build evidence: Release `f4b84d4e7dec48fb89b861bd2dd12a15`, Debug
 `9a6c66c3731f448f9dc79a68d5916011`. Final unfiltered CTest evidence: Release
 `786d8f6e8cab461a92b7cd2bc08b8294`, Debug
 `a8a0624e24c648f6bd272b696b3a1ea5`.
+
+## Explicit Furniture use and finishing (#462)
+
+The immutable built-in `use-furniture` delegates to the selected owning Lua
+Furniture definition's `use(agent, world, marker)`. Paired `use`/`finish_use`
+functions derive availability; definitions with neither offer only Idle unless
+custom Actions are assigned. Explicit redundant Use furniture assignments are
+accepted only at usable definitions and are deduplicated in the selector. No
+Action registry is required for the built-in.
+
+All callbacks use the same fresh, budgeted sandbox and atomic validated effects
+as custom Actions. Agent views now expose `pose` (`standing`, `sitting`, `lying`).
+Furniture-owned Marker views additionally expose `usable_point` and an immutable
+`furniture` view with `id`, `name`, and `definition`. No mutable domain object,
+occupancy table or shared VM is exposed. Chair scripts stage Sitting then claim
+the selected point; finishing stages Standing and release. Instance occupancy
+remains host-managed and per point, independent of immutable definition functions.
+
+Active Furniture use is separate from callback execution, recording the Agent,
+Marker, instance, definition and accepted catalogue snapshot. Repeated use at the
+same active point does not invoke either callback. Idle or a custom Action at that
+point finishes before replacement execution. New journey acceptance and Route
+planning retain use; finishing occurs immediately before the first physical
+position change. Unreachable journeys, pause and deactivation retain the seat.
+Occupied destinations are unavailable to every other Agent for every Action,
+including Idle, with an arrival recheck. Intermediate routing remains permitted
+(subject to the authored Blocks pathing property). Conflicts produce ordinary
+request failure/Route loss, never a script error or partial pose/claim commit.
+
+The host unconditionally restores Standing and releases occupancy after finishing,
+even if the callback throws, exceeds instruction/heap budgets, fails validation,
+or omits cleanup. Incomplete finishing is rejected before staged device effects
+or logs commit. Structured Action-failure diagnostics are published in the same
+tick and use the existing interactive-pause/headless-failure policy. Authored
+requests/assignments retain built-in identities through YAML/binary documents and
+editor request Undo/Redo without serializing callbacks or transient active use.
+Structural-edit/reconstruction lifecycle and transactional reload remain separate
+slices, as does conversion of legacy demonstration catalogues/implicit-use checks.
+
+Focused public checks: Simulation `markerActions/furnitureUse`,
+`markerActions/furnitureUseCompetition`, `markerActions/furnitureFinishFailures`,
+`markerActions/furnitureUseDocuments`; Editor `markerActions/furnitureUseWorkflow`.
+They cover the real use-to-finish journey, independent sofa points, deterministic
+competition, all-Action exclusivity and circulation, idempotence, replacement,
+unreachable/physical departure timing, safe views, failure cleanup, authored
+request persistence and headless editor selection/history. The fixture is
+`src/headless/smoke/fixtures/use.furniture.lua`, independent of demonstration content.
+
+### #462 final Linux verification
+
+Final Release and Debug default builds passed (core, headless, editor and contract
+inventory). Unfiltered final CTest ran 110 tests per configuration: **103 passed,
+one optional GUI capability skipped, six failed**, exclusively for the seven
+unchanged legacy implicit-Furniture checks listed above. All #462 World/document,
+Simulation and Editor checks and their CLI/exhaustive contracts passed; no new
+failure remains. No tests were bypassed or weakened. `git diff --check` passed.
+Windows validation is not claimed. Debug final CTest was run serially after an
+earlier cross-configuration contention timeout; final evidence has no timeout.
+
+Final build evidence: Release `0f6e68c251694ef7a75fcb3cd44002bc`, Debug
+`e65db6e064f74a4d82f709ad42413af2`. Final unfiltered CTest evidence: Release
+`7f541f1cba074c7bbdbe94bb8c1c899e`, Debug
+`fc98d13c77f44855a2b66fcaf91dab51`. Full-suite green remains the #467 integration
+contract; legacy catalogue/fixture migration and structural/reload lifecycle are
+not part of #462.

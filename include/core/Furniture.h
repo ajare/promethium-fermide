@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include "core/EntityId.h"
+#include "core/ActionRegistry.h"
 
 namespace core
 {
@@ -46,7 +47,7 @@ namespace core
 		std::vector<FurnitureRoutingVertex> vertices;
 		std::vector<FurnitureRoutingEdge> edges;
 		bool sideRoutes{ false }; // replace the ordinary floor span
-		bool hasUse{ false }; // validated paired Lua callbacks; not activated in this slice
+		bool hasUse{ false }; // validated paired Lua callbacks
 		// Full artwork rectangle, including transparent pixels and layout gaps.
 		int minX{ 0 }, minY{ 0 }, maxX{ 0 }, maxY{ 0 };
 	};
@@ -64,6 +65,9 @@ namespace core
 		// Accepted executable source snapshot, never serialized or exposed as VM state.
 		std::string mLuaSource;
 		std::map<std::string, FurnitureDefinition> mDefinitions;
+		friend class World;
+		ActionExecutionResult executeUse(std::string_view key, bool finishing, ActionViews const& views) const
+		{ return ActionRegistry::executeFurniture(mLuaSource, key, finishing, views); }
 	public:
 		std::string const& uuid() const { return mUuid; }
 		auto const& definitions() const { return mDefinitions; }

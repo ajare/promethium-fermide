@@ -178,6 +178,7 @@ set(editor_names
     furniture/compositionActions
     markerActions/workflow
     markerActions/behaviourConfiguration
+    markerActions/furnitureUseWorkflow
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory
     securityScanners/selectionWorkflow

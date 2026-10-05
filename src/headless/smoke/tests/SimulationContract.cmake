@@ -172,6 +172,10 @@ set(core_names
     markerActions/atomicEffects
     markerActions/deviceEffects
     markerActions/claimCompetition
+    markerActions/furnitureUse
+    markerActions/furnitureFinishFailures
+    markerActions/furnitureUseCompetition
+    markerActions/furnitureUseDocuments
     runScaledWorld
 )
 

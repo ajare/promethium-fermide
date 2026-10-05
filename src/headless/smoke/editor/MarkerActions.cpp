@@ -2,6 +2,8 @@
 #include "State.h"
 #include "DocumentEdit.h"
 #include "MarkerPanel.h"
+#include "FurniturePanel.h"
+#include "core/Agent.h"
 #include "AgentBehaviourAssignmentPanel.h"
 #include "core/World.h"
 #include "core/AgentBehaviourRegistry.h"
@@ -95,6 +97,57 @@ namespace
 		}
 	}
 
+	void furnitureUseWorkflow(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto root = context.temporaryRoot() / "use-editor"; std::filesystem::create_directories(root);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"), root / "use.furniture.lua");
+		auto document = root / "use.world.yaml";
+		auto world = std::make_shared<core::World>("Editor use", 10, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 10, 1); world->finishBuild();
+		auto agent = world->createAgent("Visitor", room, 0, 1.5f);
+		world->pauseSimulation(); world->saveTo(document.string());
+		std::string diagnostic;
+		require(selectFurnitureCatalogue(world, document, "use.furniture.lua", diagnostic), diagnostic);
+		require(placeSelectedFurniture(world, room, "chair", 3, 0, false, "Chair", diagnostic), diagnostic);
+		auto seat = world->furniture()[0].marker;
+		require(world->setAgentIndividualMinimumRoutePlanningTime(agent, 0.1f)
+			&& world->setAgentIndividualMaximumRoutePlanningTime(agent, 0.1f), "Editor use planning refused");
+		require(world->availableAgentActions(seat) == std::vector<std::string>{"idle", "use-furniture"}, "Editor chair lacks derived use");
+		auto& io = ImGui::GetIO(); io.DisplaySize = {800, 600}; io.Fonts->AddFontDefault(); io.Fonts->Build();
+		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
+		require(renderAgentMovementActionSelector(world, seat) == core::IdleAction, "Furniture selector no longer defaults to Idle");
+		require(renderAgentMovementActionSelector(world) == core::IdleAction, "Global selector no longer defaults to Idle");
+		ImGui::End(); ImGui::Render();
+		auto count = gWorldDocumentHistory.undoCount();
+		require(commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
+			&& gWorldDocumentHistory.undoCount() == count + 1, "Editor use request missed history: " + diagnostic);
+		auto restore = [&](DocumentSnapshot const& snapshot)
+		{
+			auto loaded = deserializeDocumentSnapshot(snapshot, world, document);
+			if (!loaded) return false;
+			world = std::move(loaded); world->pauseSimulation(); return true;
+		};
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Use request Undo/Redo failed");
+		require(world->resumeSimulation(), "Editor use resume failed");
+		bool arrived = false;
+		for (unsigned tick = 0; tick < 1800 && !arrived; ++tick)
+		{
+			require(world->advanceTick(), "Editor use failed");
+			for (auto const& event : world->consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::DestinationReached)
+				{ arrived = true; require(event.selectedAction == core::UseFurnitureAction, "Editor selected another Action"); }
+		}
+		require(arrived && world->lookupAgent(agent).entity->getPose() == core::Pose::Sitting
+			&& world->usablePointOccupant(seat) == agent, "Editor request did not use chair");
+		world->pauseSimulation();
+		require(commitAgentMarkerActionRequest(world, agent, seat, core::IdleAction, diagnostic), diagnostic);
+		require(world->usablePointOccupant(seat) == agent, "Editor request acceptance vacated chair");
+		require(world->resumeSimulation() && world->advanceTicks(60), "Editor Idle replacement failed");
+		require(world->lookupAgent(agent).entity->getPose() == core::Pose::Standing && !world->usablePointOccupant(seat), "Editor replacement did not finish");
+	}
+
 	void workflow(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -171,4 +224,5 @@ void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"markerActions/workflow",workflow});
 	checks.push_back({"markerActions/behaviourConfiguration",behaviourConfiguration});
+	checks.push_back({"markerActions/furnitureUseWorkflow",furnitureUseWorkflow});
 }

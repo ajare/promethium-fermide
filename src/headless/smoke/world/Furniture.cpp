@@ -49,7 +49,8 @@ namespace
 		world.addSectorMarker(room, 0, 0.5f, "Entrance");
 		world.addSectorMarker(room, 0, 10.5f, "Exit");
 		world.finishBuild(); world.pauseSimulation();
-		require(world.availableAgentActions(chairSeat).size() == 1, "Loading activated deferred Use furniture availability");
+		require(world.availableAgentActions(chairSeat) == std::vector<std::string>{"idle", "use-furniture"},
+			"Paired Lua callbacks did not derive Use furniture availability");
 		std::string diagnostic;
 		require(world.renameMarker(seat, "Authored desk point", &diagnostic), diagnostic);
 		require(world.setMarkerProperties(seat, 0, &diagnostic), diagnostic);

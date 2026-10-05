@@ -615,6 +615,11 @@ namespace core
 		bool mActionExecutionFailed{ false };
 		bool actionAvailable(MarkerId marker, std::string_view action) const;
 		void executeMarkerAction(AgentId agent, MarkerId marker, std::string_view action, SimulationEvent& event);
+		FurnitureInstance const* furnitureForMarker(MarkerId marker) const;
+		ActionViews actionViews(AgentId agent, MarkerId marker) const;
+		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
+			bool finishing = false);
+		void finishFurnitureUse(AgentId agent);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
 		struct AgentTagRegistryReference
@@ -2165,7 +2170,7 @@ namespace core
 		// Runtime-only movement seam: no Path/Vertex access is needed by callers.
 		// Accepted intent reports DestinationReached, RouteLost or MovementCancelled
 		// through simulation events. Names resolve once, never again after edits.
-		// Idle is immutable and the only available Action in this slice.
+		// Immutable built-ins plus assigned registry Actions, resolved at a Marker.
 		// Target deletion cancels; route failure does not select a fallback Action.
 		// Same pending goal and Action is a NoOp; another goal supersedes it,
 		// publishing a distinct cancellation without interrupting committed traversal.

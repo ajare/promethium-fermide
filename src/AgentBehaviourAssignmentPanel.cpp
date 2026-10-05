@@ -214,6 +214,7 @@ namespace
 			auto const& registry = world.actionRegistry();
 			auto const* definition = registry ? registry->find(actionValue->reference) : nullptr;
 			auto const preview = actionValue->reference == core::IdleAction ? "Idle"
+				: actionValue->reference == core::UseFurnitureAction ? "Use furniture"
 				: definition ? definition->name.c_str() : "Unavailable Action";
 			bool changed = false;
 			if (ImGui::BeginCombo("##action", preview))
@@ -227,6 +228,11 @@ namespace
 					}
 				};
 				select(string(core::IdleAction), "Idle");
+				auto const markers = world.getMarkerIds();
+				if (any_of(markers.begin(), markers.end(), [&](auto marker)
+					{ auto offered = world.availableAgentActions(marker);
+					  return find(offered.begin(), offered.end(), core::UseFurnitureAction) != offered.end(); }))
+					select(string(core::UseFurnitureAction), "Use furniture");
 				if (registry)
 					for (auto const& action : registry->actions())
 					{
@@ -386,8 +392,16 @@ std::string_view renderAgentMovementActionSelector(shared_ptr<const core::World>
 	if (world)
 	{
 		if (marker) options = world->availableAgentActions(marker);
-		else if (world->actionRegistry())
-			for (auto const& definition : world->actionRegistry()->actions()) options.push_back(world->actionRegistry()->identity(definition));
+		else
+		{
+			auto const markers = world->getMarkerIds();
+			if (any_of(markers.begin(), markers.end(), [&](auto id)
+				{ auto offered = world->availableAgentActions(id);
+				  return find(offered.begin(), offered.end(), core::UseFurnitureAction) != offered.end(); }))
+				options.emplace_back(core::UseFurnitureAction);
+			if (world->actionRegistry())
+				for (auto const& definition : world->actionRegistry()->actions()) options.push_back(world->actionRegistry()->identity(definition));
+		}
 	}
 	if (std::find(options.begin(), options.end(), selected) == options.end()) selected = core::IdleAction;
 	auto preview = world ? world->agentActionDisplayName(selected) : "Idle";

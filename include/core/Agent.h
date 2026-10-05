@@ -24,6 +24,7 @@ namespace core
 {
 	class World;
 	class Sector;
+	class FurnitureCatalogue;
 	struct LiftRouteAccessObservation;
 
 	struct PathIterator
@@ -247,6 +248,14 @@ namespace core
 		Pose mPose{ Pose::Standing };
 		// Runtime-only claim; deletion releases it with the Agent.
 		MarkerId mOccupiedUsablePoint{};
+		struct FurnitureUse
+		{
+			MarkerId marker;
+			uint64_t instance;
+			std::string definition;
+			std::shared_ptr<const FurnitureCatalogue> catalogue;
+		};
+		std::optional<FurnitureUse> mFurnitureUse;
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };

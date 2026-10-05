@@ -21,6 +21,8 @@ namespace core
 		std::string agentName, worldName, markerName;
 		uint64_t agentId{}, markerId{}, tick{};
 		float x{}, y{};
+		std::string furnitureName, definitionKey, usablePointKey, pose;
+		uint64_t furnitureId{};
 	};
 
 	enum class ActionEffectType { Pose, Claim, Release, Device };
@@ -49,6 +51,9 @@ namespace core
 	{
 		std::string mUuid, mSource;
 		std::vector<ActionDefinition> mActions;
+		friend class FurnitureCatalogue;
+		static ActionExecutionResult executeFurniture(std::string const& source, std::string_view key,
+			bool finishing, ActionViews const& views);
 	public:
 		static std::shared_ptr<const ActionRegistry> load(std::filesystem::path const& path);
 		std::string const& uuid() const { return mUuid; }

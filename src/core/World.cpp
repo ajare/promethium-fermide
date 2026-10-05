@@ -521,7 +521,7 @@ namespace core
 				marker && (!*marker || !world.lookupMarker(*marker)))
 				return reject(format("references unknown Marker {}", marker->value));
 			if (auto const* action = agentBehaviourConfigurationGetIf<AgentBehaviourAction>(&value);
-				action && action->reference != IdleAction
+				action && action->reference != IdleAction && action->reference != UseFurnitureAction
 				&& (!world.actionRegistry() || !world.actionRegistry()->find(action->reference)))
 				return reject("references unknown Action " + action->reference);
 			if (auto* list = agentBehaviourConfigurationGetIf<AgentBehaviourConfigurationList>(&value))
@@ -8519,7 +8519,10 @@ namespace core
 	{
 		if (!lookupMarker(marker)) return {};
 		auto result = std::vector<std::string>{ std::string(IdleAction) };
-		for (auto const& action : markerActions(marker)) if (actionAvailable(marker, action)) result.push_back(action);
+		if (actionAvailable(marker, UseFurnitureAction)) result.emplace_back(UseFurnitureAction);
+		for (auto const& action : markerActions(marker))
+			if (actionAvailable(marker, action) && std::find(result.begin(), result.end(), action) == result.end())
+				result.push_back(action);
 		return result;
 	}
 

@@ -40,6 +40,27 @@ namespace
 		return world;
 	}
 
+	std::shared_ptr<core::World> useFixture(std::filesystem::path const& path, float startX = 1.5f)
+	{
+		auto world = std::make_shared<core::World>("Furniture use", 14, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 11, 1);
+		auto isolated = world->addRoom("Isolated", 0, 0, 12, 2, 1);
+		world->attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
+		require(world->placeFurniture(room, "chair", 3, 0, "Chair")
+			&& world->placeFurniture(room, "sofa", 6, 0, "Sofa")
+			&& world->placeFurniture(room, "desk", 9, 0, "Desk"), "Use fixture placement refused");
+		world->addSectorMarker(room, 0, 1.5f, "Origin");
+		world->addSectorMarker(room, 0, 10.5f, "End");
+		world->addSectorMarker(isolated, 0, 0.5f, "Unreachable");
+		world->finishBuild();
+		for (auto const& name : {"First", "Second", "Third"}) world->createAgent(name, room, 0, startX);
+		world->pauseSimulation();
+		for (uint64_t id : {1u, 2u, 3u})
+			require(world->setAgentIndividualMinimumRoutePlanningTime(core::AgentId{id}, 0.1f)
+				&& world->setAgentIndividualMaximumRoutePlanningTime(core::AgentId{id}, 0.1f), "Use planning refused");
+		return world;
+	}
+
 	void registryContracts(smoke::Context const& context)
 	{
 		auto path = context.temporaryRoot() / "contract.actions.lua";
@@ -300,6 +321,143 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		}
 	}
 
+	void furnitureUse(smoke::Context const& context)
+	{
+		auto world = useFixture(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
+		auto chair = world->furniture()[0].marker;
+		auto left = world->furniture()[1].destinations[0].marker;
+		auto right = world->furniture()[1].destinations[1].marker;
+		auto desk = world->furniture()[2].marker;
+		auto owner = core::AgentId{1}, other = core::AgentId{2}, third = core::AgentId{3};
+		std::string const use(core::UseFurnitureAction);
+		auto path = context.temporaryRoot() / "replacement.actions.lua";
+		write(path, package("{key='hello',name='Replacement',run=function(a,w,m) w.release() end},"
+			"{key='other',name='Observe Standing',run=function(a,w,m) assert(a.pose == 'standing'); w.log('replacement') end}"));
+		require(world->selectActionRegistry(path) && world->setMarkerActions(chair, {second, use, second, "idle"}), "Use assignment refused");
+		require(world->availableAgentActions(chair) == std::vector<std::string>{"idle", use, second}, "Derived use ordering/deduplication changed");
+		require(world->availableAgentActions(desk) == std::vector<std::string>{"idle"}, "Desk invented derived use");
+		require(!world->setMarkerActions(desk, {use}) && world->markerActions(desk).empty(), "Desk accepted an unavailable built-in use assignment");
+		require(runAction(*world, owner, chair, "idle").type == core::SimulationEventType::DestinationReached
+			&& world->lookupAgent(owner).entity->getPose() == core::Pose::Standing && !world->usablePointOccupant(chair), "Idle implicitly used chair");
+		core::consumeLogMessages();
+		require(runAction(*world, owner, chair, use).type == core::SimulationEventType::DestinationReached, "Explicit use failed");
+		require(world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting && world->usablePointOccupant(chair) == owner, "Chair use did not sit/claim");
+		core::consumeLogMessages();
+		require(runAction(*world, owner, chair, use).type == core::SimulationEventType::DestinationReached, "Repeated use failed");
+		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("use:") && !log.msg.starts_with("finish:"), "Repeated use restarted lifecycle");
+		world->pauseSimulation();
+		auto pausedTick = world->getSimulationTick();
+		require(!world->advanceTicks(5) && world->getSimulationTick() == pausedTick, "Pause advanced simulation");
+		world->lookupAgent(owner).entity->setActive(false);
+		require(world->resumeSimulation() && world->advanceTicks(20), "Inactive advancement failed");
+		require(world->usablePointOccupant(chair) == owner && world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting, "Pause/deactivation vacated seat");
+		world->pauseSimulation(); world->lookupAgent(owner).entity->setActive(true);
+		// Occupied destinations reject Idle and assigned custom Actions alike.
+		for (auto const& action : {std::string("idle"), second, use})
+		{
+			auto refused = runAction(*world, other, chair, action);
+			require(refused.type != core::SimulationEventType::DestinationReached
+				&& refused.scriptFailure == core::ScriptExecutionFailure::None && world->usablePointOccupant(chair) == owner, "Occupied destination bypassed exclusivity");
+		}
+		// Circulation through an occupied point remains possible.
+		require(world->moveAgentToNamedMarker(other, "End").accepted() && world->advanceTicks(1800), "Occupied point blocked circulation");
+		require(world->lookupAgent(other).entity->getGlobalPosition().x == 10.5f && world->usablePointOccupant(chair) == owner, "Pass-through vacated or blocked seat");
+		world->consumeSimulationEvents();
+		require(world->moveAgentToNamedMarker(owner, "Unreachable").accepted(), "Unreachable replacement refused at acceptance");
+		require(world->usablePointOccupant(chair) == owner, "Acceptance vacated seat");
+		require(world->advanceTicks(60) && world->usablePointOccupant(chair) == owner
+			&& world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting, "Unreachable planning finished use");
+		bool routeLost = false;
+		for (auto const& event : world->consumeSimulationEvents())
+			routeLost |= event.agent.id == owner && event.type == core::SimulationEventType::RouteLost;
+		require(routeLost, "Unreachable replacement has no Route-loss outcome");
+		core::consumeLogMessages();
+		require(runAction(*world, owner, chair, second).type == core::SimulationEventType::DestinationReached, "Same-seat custom replacement failed");
+		std::vector<std::string> logs;
+		for (auto const& log : core::consumeLogMessages()) if (log.source == "Marker Action") logs.push_back(log.msg);
+		require(logs.size() == 2 && logs[0].starts_with("finish:") && logs[1] == "replacement", "Replacement ran before finish");
+		require(!world->usablePointOccupant(chair) && world->lookupAgent(owner).entity->getPose() == core::Pose::Standing, "Replacement did not finish use");
+		require(runAction(*world, owner, chair, use).type == core::SimulationEventType::DestinationReached, "Second use failed");
+		auto idle = runAction(*world, owner, chair, "idle");
+		require(idle.type == core::SimulationEventType::DestinationReached && idle.agent.pose == core::Pose::Standing
+			&& !world->usablePointOccupant(chair) && world->lookupAgent(owner).entity->getPose() == core::Pose::Standing, "Same-seat Idle did not finish or reported stale Pose");
+		require(runAction(*world, owner, chair, use).type == core::SimulationEventType::DestinationReached, "Departure use failed");
+		core::consumeLogMessages();
+		require(world->moveAgentToNamedMarker(owner, "Origin").accepted(), "Departure request refused");
+		auto start = world->lookupAgent(owner).entity->getGlobalPosition();
+		bool departed = false;
+		for (unsigned tick = 0; tick < 120 && !departed; ++tick)
+		{
+			require(world->advanceTick(), "Departure tick failed");
+			departed = world->lookupAgent(owner).entity->getGlobalPosition() != start;
+			require((world->usablePointOccupant(chair) == owner) == !departed, "Finish not at physical departure boundary");
+		}
+		require(departed && world->lookupAgent(owner).entity->getPose() == core::Pose::Standing, "Departure did not stand");
+		// Distinct sofa seats share immutable functions, never instance occupancy.
+		require(runAction(*world, owner, left, use).type == core::SimulationEventType::DestinationReached
+			&& runAction(*world, third, right, use).type == core::SimulationEventType::DestinationReached, "Independent sofa use failed");
+		require(world->usablePointOccupant(left) == owner && world->usablePointOccupant(right) == third, "Sofa claims are not per-point");
+		require(runAction(*world, owner, left, "idle").type == core::SimulationEventType::DestinationReached
+			&& !world->usablePointOccupant(left) && world->usablePointOccupant(right) == third, "Sofa finish released another seat");
+	}
+
+	void furnitureFinishFailures(smoke::Context const& context)
+	{
+		auto fixture = context.fixture("src/headless/smoke/fixtures/use.furniture.lua");
+		std::ifstream input(fixture); std::string source((std::istreambuf_iterator<char>(input)), {});
+		for (auto const& body : {"world.log('finish rollback'); world.set_pose('standing'); world.release(); error('finish broke')",
+			"while true do end", "local t={} while true do t[#t+1]=string.rep('x',10000) end", "world.log('finish rollback') -- omitted cleanup"})
+		{
+			auto custom = source;
+			auto begin = custom.find("  world.set_pose('standing')");
+			auto end = custom.find("\nend", begin);
+			custom.replace(begin, end-begin, body);
+			auto path = context.temporaryRoot() / "failure.furniture.lua"; write(path, custom);
+			for (bool departure : {false, true})
+			{
+				auto world = useFixture(path); auto seat = world->furniture()[0].marker; auto agent = core::AgentId{1};
+				require(runAction(*world, agent, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached, "Failure fixture use failed");
+				world->consumeSimulationEvents(); core::consumeLogMessages();
+				require((departure ? world->moveAgentToNamedMarker(agent, "Origin") : world->moveAgentToMarker(agent, seat)).accepted(), "Finish request refused");
+				bool failed = false;
+				for (unsigned tick = 0; tick < 120 && !failed; ++tick) failed = !world->advanceTick();
+				require(failed && world->isSimulationPaused() && !world->usablePointOccupant(seat)
+					&& world->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Finish failure stranded pose/occupancy or ignored failure policy");
+				bool diagnostic = false;
+				for (auto const& event : world->consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::ActionFailed)
+					{
+						diagnostic = !event.diagnostic.empty() && event.scriptFailure != core::ScriptExecutionFailure::None;
+						if (std::string_view(body).starts_with("while")) require(event.scriptFailure == core::ScriptExecutionFailure::InstructionBudgetExceeded, "Finish budget lost classification");
+						if (std::string_view(body).starts_with("local")) require(event.scriptFailure == core::ScriptExecutionFailure::MemoryBudgetExceeded, "Finish heap budget lost classification");
+					}
+				require(diagnostic, "Finish failure has no structured diagnostic");
+				for (auto const& log : core::consumeLogMessages()) require(log.msg != "finish rollback", "Failed/incomplete finish published staged logs");
+			}
+		}
+	}
+
+	void furnitureUseCompetition(smoke::Context const& context)
+	{
+		for (unsigned run = 0; run < 2; ++run)
+		for (auto startX : {1.5f, 3.5f})
+		for (auto action : {core::UseFurnitureAction, core::IdleAction})
+		{
+			auto world = useFixture(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"), startX);
+			auto seat = world->furniture()[0].marker;
+			require(world->moveAgentToMarker(core::AgentId{1}, seat, core::UseFurnitureAction).accepted()
+				&& world->moveAgentToMarker(core::AgentId{2}, seat, action).accepted(), "Competing use/Idle refused");
+			require(world->resumeSimulation() && world->advanceTicks(1800), "Use competition crashed");
+			require(world->usablePointOccupant(seat) == core::AgentId{1}
+				&& world->lookupAgent(core::AgentId{2}).entity->getPose() == core::Pose::Standing, "Use competition is not deterministic/atomic");
+			bool failed = false;
+			for (auto const& event : world->consumeSimulationEvents())
+				if (event.agent.id == core::AgentId{2} && (event.type == core::SimulationEventType::ActionFailed || event.type == core::SimulationEventType::RouteLost))
+				{ failed = true; require(event.scriptFailure == core::ScriptExecutionFailure::None, "Use conflict became script error"); }
+			require(failed, "Use conflict has no request outcome");
+		}
+	}
+
 	void deviceEffects(smoke::Context const& context)
 	{
 		for (unsigned scenario = 0; scenario < 8; ++scenario)
@@ -403,6 +561,44 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		return world;
 	}
 
+	void furnitureUseDocuments(smoke::Context const& context)
+	{
+		auto path = context.temporaryRoot() / "use.furniture.lua";
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"), path,
+			std::filesystem::copy_options::overwrite_existing);
+		auto world = useFixture(path);
+		auto seat = world->furniture()[0].marker; auto agent = core::AgentId{1};
+		require(world->setMarkerActions(seat, {"use-furniture", "idle", "use-furniture"})
+			&& world->authorAgentMarkerRequest(agent, seat, core::UseFurnitureAction), "Built-in use authoring refused without registry");
+		for (bool binary : {false, true})
+		{
+			auto document = context.temporaryRoot() / (binary ? "use.world.bin" : "use.world.yaml");
+			auto writer = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toFile(document.string()))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toFile(document.string()));
+			core::SerializationWorkData work; work.documentDirectory = context.temporaryRoot();
+			world->serialize(*writer, work); writer->serialize(); writer.reset();
+			auto loaded = reopen(document, binary);
+			require(loaded->availableAgentActions(seat) == std::vector<std::string>{"idle", "use-furniture"}
+				&& loaded->markerActions(seat) == std::vector<std::string>{"use-furniture"}, "Document lost derived/assigned use identity");
+			if (loaded->isSimulationPaused()) require(loaded->resumeSimulation(), "Reopened use resume failed");
+			bool arrived = false;
+			for (unsigned tick = 0; tick < 1800 && !arrived; ++tick)
+			{
+				require(loaded->advanceTick(), "Reopened use execution failed");
+				for (auto const& event : loaded->consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::DestinationReached)
+					{ arrived = true; require(event.selectedAction == core::UseFurnitureAction, "Persisted use became Idle"); }
+			}
+			require(arrived && loaded->usablePointOccupant(seat) == agent
+				&& loaded->lookupAgent(agent).entity->getPose() == core::Pose::Sitting, "Reopened authored use did not sit/claim");
+			require(runAction(*loaded, agent, seat, "idle").type == core::SimulationEventType::DestinationReached
+				&& !loaded->usablePointOccupant(seat), "Reopened use did not finish");
+		}
+		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
+		world->serialize(*writer, work); writer->serialize(); auto yaml = writer->getSerializedString();
+		require(yaml.find("function") == std::string::npos && yaml.find("finish_use") == std::string::npos, "Furniture callbacks entered document");
+	}
+
 	void boundedLogging(smoke::Context const& context)
 	{
 		auto path = context.temporaryRoot() / "logging.actions.lua";
@@ -499,4 +695,8 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/atomicEffects", atomicEffects});
 	checks.push_back({"markerActions/deviceEffects", deviceEffects});
 	checks.push_back({"markerActions/claimCompetition", claimCompetition});
+	checks.push_back({"markerActions/furnitureUse", furnitureUse});
+	checks.push_back({"markerActions/furnitureFinishFailures", furnitureFinishFailures});
+	checks.push_back({"markerActions/furnitureUseCompetition", furnitureUseCompetition});
+	checks.push_back({"markerActions/furnitureUseDocuments", furnitureUseDocuments});
 }

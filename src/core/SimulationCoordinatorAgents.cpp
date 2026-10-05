@@ -720,15 +720,19 @@ namespace core
 	void SimulationCoordinator::updateMovementGoals()
 	{
 		mWorld.invalidateSimulationSnapshot();
-		for (auto& event : mWorld.mPendingMovementOutcomes)
+		auto publishPendingOutcomes = [&]()
 		{
-			event.sequence = mWorld.mNextEventSequence++;
-			event.tick = mWorld.mSimulationTick;
-			event.phase = mWorld.mCurrentPhase;
-			mWorld.mAgentBehaviourRuntime->observeOutcome(event);
-			mWorld.mEvents.push_back(std::move(event));
-		}
-		mWorld.mPendingMovementOutcomes.clear();
+			for (auto& event : mWorld.mPendingMovementOutcomes)
+			{
+				event.sequence = mWorld.mNextEventSequence++;
+				event.tick = mWorld.mSimulationTick;
+				event.phase = mWorld.mCurrentPhase;
+				mWorld.mAgentBehaviourRuntime->observeOutcome(event);
+				mWorld.mEvents.push_back(std::move(event));
+			}
+			mWorld.mPendingMovementOutcomes.clear();
+		};
+		publishPendingOutcomes();
 		for (auto it = mWorld.mMovementGoals.begin(); it != mWorld.mMovementGoals.end();)
 		{
 			auto id = it->first;
@@ -758,7 +762,6 @@ namespace core
 			}
 			else if (goal.planningDeferred || agent->mState == Agent::State::RoutePlanning || agent->mPath.path) { ++it; continue; }
 			SimulationEvent event;
-			event.sequence = mWorld.mNextEventSequence++;
 			event.tick = mWorld.mSimulationTick;
 			event.phase = mWorld.mCurrentPhase;
 			event.agent = makeAgentSnapshot(agent);
@@ -783,6 +786,10 @@ namespace core
 			if (event.type == SimulationEventType::DestinationReached)
 				mWorld.executeMarkerAction(id, goal.marker, goal.selectedAction, event);
 			it = mWorld.mMovementGoals.erase(it);
+			// Same-Marker finishing may fail inside arrival. Publish its diagnostic
+			// before replacement completion and before headless failure pauses us.
+			publishPendingOutcomes();
+			event.sequence = mWorld.mNextEventSequence++;
 			// Runtime observation is a separate subscription: it never drains or
 			// mutates the public simulation event queue.
 			mWorld.mAgentBehaviourRuntime->observeOutcome(event);

@@ -684,6 +684,7 @@ namespace core
 		mPath = {};
 		mPathStartPosition = {};
 		mResetPosition = {};
+		mFurnitureUse.reset();
 		mLocalDepth = mResetLocalDepth = 0;
 		mResetDestinationMarker = {};
 		mResetAction = "idle";
@@ -1178,6 +1179,13 @@ namespace core
 		if (authored && mWorld && pos.sector())
 			mWorld->validateAgentLocationPlacement(*pos.sector(), *this);
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
+		if (!authored && mWorld
+			&& (pos.sector() != mPosition.sector() || pos.global().distanceTo(mPosition.global()) > 0.f))
+		{
+			mWorld->finishFurnitureUse(mWorld->getAgentId(this));
+			mOccupiedUsablePoint = {};
+			mPose = Pose::Standing;
+		}
 		if (pos.sector() != mPosition.sector()) mLocalDepth = 0;
 		mPosition = pos;
 		if (authored)
@@ -1408,8 +1416,13 @@ namespace core
 			return;
 		}
 
-		mOccupiedUsablePoint = {};
-		mPose = Pose::Standing;
+		// Definition-owned use survives planning. Generic one-shot Action poses
+		// retain the existing Path-start reset; only active use has a lifecycle.
+		if (!mFurnitureUse)
+		{
+			mOccupiedUsablePoint = {};
+			mPose = Pose::Standing;
+		}
 		cancelTraversal();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::MovingToVertex;
@@ -1446,9 +1459,8 @@ namespace core
 
 	void Agent::performDestinationAction()
 	{
-		// Idle is the only available Action in this slice. Arrival must never
-		// infer use from the Furniture catalogue's legacy usable-point action.
-		// Idle schedules nothing and leaves the assigned behaviour enabled.
+		// The coordinator invokes exactly the selected Marker Action after
+		// arrival. Movement and intermediate passage never infer Furniture use.
 	}
 
 	bool Agent::nextPathNode()
