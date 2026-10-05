@@ -15,6 +15,9 @@ namespace core
 
 bool commitActionRegistrySelection(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& path, std::string& diagnostic);
+// Reload changes executable snapshots, not authored references/history.
+bool reloadSelectedActionRegistry(std::shared_ptr<core::World> const& world,
+	std::filesystem::path const& path, std::string& diagnostic);
 bool commitMarkerActionAssignment(std::shared_ptr<core::World> const& world,
 	core::MarkerId marker, std::vector<std::string> actions, std::string& diagnostic);
 

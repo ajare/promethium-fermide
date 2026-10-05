@@ -62,6 +62,134 @@ namespace
 		return world;
 	}
 
+	void transactionalReload(smoke::Context const& context)
+	{
+		auto root = context.temporaryRoot();
+		auto actions = root / "reload.actions.lua";
+		write(actions, package("{key='hello',name='Old',run=function(a,w,m) w.log('old-action') end}"));
+		auto world = worldFixture();
+		auto marker = world->getMarkerIds()[0];
+		require(world->selectActionRegistry(actions) && world->setMarkerActions(marker, {first}), "Reload setup refused");
+		world->saveTo((root / "reload.world.yaml").string());
+		auto old = world->actionRegistry();
+		std::string diagnostic;
+		for (auto const& source : {std::string("return {}"), package(""),
+			std::string("return {api_version=1,uuid='00000000-0000-4000-8000-000000000000',actions={}}")})
+		{
+			write(actions, source);
+			require(!world->reloadActionRegistry(actions, &diagnostic) && !diagnostic.empty()
+				&& world->actionRegistry() == old && world->markerActions(marker) == std::vector<std::string>{first}
+				&& !world->isModified(), "Failed Action preflight changed package/references/modified state");
+		}
+		write(actions, package("{key='hello',name='New',run=function(a,w,m) w.log('new-action') end}"));
+		require(world->moveAgentToMarker(core::AgentId{1}, marker, first).accepted(), "Pending reload request refused");
+		require(world->resumeSimulation(), "Reload running setup refused");
+		require(!world->reloadActionRegistry(actions, &diagnostic) && world->actionRegistry() == old, "Running reload changed package");
+		world->pauseSimulation();
+		require(world->reloadActionRegistry(actions, &diagnostic) && diagnostic.empty()
+			&& world->agentActionDisplayName(first) == "New" && !world->isModified(), diagnostic);
+		core::consumeLogMessages();
+		require(world->resumeSimulation() && world->advanceTicks(1800), "Reloaded request failed");
+		bool logged = false;
+		for (auto const& log : core::consumeLogMessages()) logged |= log.msg == "new-action";
+		require(logged, "Stable pending request did not execute replacement Action");
+
+		auto path = root / "reload.furniture.lua";
+		std::ifstream input(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
+		std::string source{std::istreambuf_iterator<char>(input), {}};
+		write(path, source);
+		auto furnished = useFixture(path);
+		auto seat = furnished->furniture()[0].marker;
+		auto sofa = furnished->furniture()[1].marker;
+		require(furnished->moveAgentToMarker(core::AgentId{1}, seat, core::UseFurnitureAction).accepted()
+			&& furnished->resumeSimulation() && furnished->advanceTicks(1800), "Reload use setup failed");
+		furnished->pauseSimulation();
+		require(furnished->selectActionRegistry(actions), "Furniture Action registry selection refused");
+		core::consumeLogMessages();
+		require(furnished->reloadActionRegistry(actions, &diagnostic)
+			&& furnished->usablePointOccupant(seat) == core::AgentId{1}
+			&& furnished->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Sitting,
+			"Action reload changed an unaffected Furniture use");
+		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("finish:"), "Action reload finished unaffected use");
+		furnished->saveTo((root / "furnished.world.yaml").string());
+		auto catalogue = furnished->furnitureCatalogue();
+		auto position = furnished->lookupAgent(core::AgentId{1}).entity->getGlobalPosition();
+		auto replace = [](std::string text, std::string const& from, std::string const& to) {
+			auto at = text.find(from); require(at != std::string::npos, "Reload fixture substitution missing");
+			text.replace(at, from.size(), to); return text;
+		};
+		for (auto const& invalid : {std::string("return {}"),
+			replace(source, "a1a1a1a1-1111-4111-8111-111111111111", "00000000-0000-4000-8000-000000000000"),
+			replace(source, "key='seat'", "key='missing'"),
+			replace(source, "x=0.5,blocksPathing=false", "x=99,blocksPathing=false"),
+			replace(source, "{x=0,y=0,imageSet='ObjectAtlas',image='chair'}", "{x=-4,y=0,imageSet='ObjectAtlas',image='chair'}")})
+		{
+			write(path, invalid); core::consumeLogMessages();
+			require(!furnished->reloadFurnitureCatalogue(path, &diagnostic) && !diagnostic.empty()
+				&& furnished->furnitureCatalogue() == catalogue && furnished->usablePointOccupant(seat) == core::AgentId{1}
+				&& furnished->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Sitting
+				&& furnished->lookupAgent(core::AgentId{1}).entity->getGlobalPosition() == position
+				&& !furnished->isModified(), "Failed Furniture preflight changed live state");
+			for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("finish:"), "Preflight executed finish");
+		}
+		// Changed callbacks must not be used to finish an old use.
+		auto changed = replace(source, "world.log('finish:'", "world.log('new-finish:'");
+		changed = replace(changed, "world.log('use:'", "world.log('new-use:'");
+		write(path, changed); core::consumeLogMessages();
+		require(furnished->moveAgentToMarker(core::AgentId{2}, sofa, core::UseFurnitureAction).accepted(), "Pending Furniture request refused");
+		require(furnished->reloadFurnitureCatalogue(path, &diagnostic), diagnostic);
+		bool finished = false;
+		for (auto const& log : core::consumeLogMessages())
+		{
+			finished |= log.msg == "finish:Chair Seat";
+			require(!log.msg.starts_with("new-finish:"), "Reload finished with replacement functions");
+		}
+		require(finished && !furnished->usablePointOccupant(seat)
+			&& furnished->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Standing
+			&& furnished->lookupMarker(seat)->getName() == "Chair Seat", "Reload lost cleanup or stable Marker identity");
+		// Reconciliation also accepts valid geometry edits without changing owned identities.
+		write(path, replace(changed, "x=0.5,blocksPathing=false", "x=0.75,blocksPathing=false"));
+		require(furnished->reloadFurnitureCatalogue(path, &diagnostic)
+			&& furnished->furniture()[0].marker == seat, "Valid layout reload lost Marker identity: " + diagnostic);
+		require(furnished->setMarkerActions(seat, {std::string(core::UseFurnitureAction)}), "Explicit use assignment refused");
+		auto accepted = furnished->furnitureCatalogue();
+		write(path, replace(changed, "use = use, finish_use = finish", ""));
+		require(!furnished->reloadFurnitureCatalogue(path, &diagnostic) && !diagnostic.empty()
+			&& furnished->furnitureCatalogue() == accepted, "Reload invalidated authored Use furniture assignment");
+		require(furnished->setMarkerActions(seat, {}), "Explicit use clear refused");
+		require(furnished->resumeSimulation() && furnished->advanceTicks(1800), "Post-reload use failed");
+		require(furnished->usablePointOccupant(sofa) == core::AgentId{2}, "Reload lost unaffected pending request");
+		furnished->pauseSimulation();
+		// Remove use without explicit assignment: pending requests cancel, not Idle.
+		require(furnished->moveAgentToMarker(core::AgentId{3}, seat, core::UseFurnitureAction).accepted(), "Invalidation request refused");
+		write(path, replace(changed, "use = use, finish_use = finish", ""));
+		require(furnished->reloadFurnitureCatalogue(path, &diagnostic), diagnostic);
+		require(furnished->resumeSimulation() && furnished->advanceTicks(60), "Invalidation processing failed");
+		bool cancelled = false;
+		for (auto const& event : furnished->consumeSimulationEvents())
+			cancelled |= event.type == core::SimulationEventType::MovementCancelled
+				&& event.movementCancellationReason == core::MovementCancellationReason::ActionUnavailable
+				&& event.selectedAction == core::UseFurnitureAction;
+		require(cancelled, "Reload did not explicitly cancel invalidated request");
+
+		// Old finishing failure keeps the old package installed, but always cleans claims/Pose.
+		for (auto const& finish : {std::string("error('old finishing failed')"), std::string("world.log('incomplete')")})
+		{
+			auto failing = replace(source, "world.set_pose('standing')\n  world.release()", finish);
+			write(path, failing);
+			auto failureWorld = useFixture(path);
+			auto target = failureWorld->furniture()[0].marker;
+			require(failureWorld->moveAgentToMarker(core::AgentId{1}, target, core::UseFurnitureAction).accepted()
+				&& failureWorld->resumeSimulation() && failureWorld->advanceTicks(1800), "Failure reload setup failed");
+			failureWorld->pauseSimulation(); auto before = failureWorld->furnitureCatalogue(); write(path, source);
+			require(!failureWorld->reloadFurnitureCatalogue(path, &diagnostic) && !diagnostic.empty()
+				&& failureWorld->furnitureCatalogue() == before && !failureWorld->usablePointOccupant(target)
+				&& failureWorld->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Standing,
+				"Finishing failure installed package or stranded user");
+			require(failureWorld->resumeSimulation() && !failureWorld->advanceTick(), "Finishing failure was suppressed");
+		}
+	}
+
 	void registryContracts(smoke::Context const& context)
 	{
 		auto path = context.temporaryRoot() / "contract.actions.lua";
@@ -811,6 +939,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 
 void registerMarkerActions(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"markerActions/reload", transactionalReload});
 	checks.push_back({"markerActions/registry", registryContracts});
 	checks.push_back({"markerActions/execution", execution});
 	checks.push_back({"markerActions/failures", failures});

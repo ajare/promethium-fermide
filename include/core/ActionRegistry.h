@@ -50,6 +50,7 @@ namespace core
 	class ActionRegistry
 	{
 		std::string mUuid, mSource;
+		std::filesystem::path mSourcePath;
 		std::vector<ActionDefinition> mActions;
 		friend class FurnitureCatalogue;
 		static ActionExecutionResult executeFurniture(std::string const& source, std::string_view key,
@@ -57,6 +58,7 @@ namespace core
 	public:
 		static std::shared_ptr<const ActionRegistry> load(std::filesystem::path const& path);
 		std::string const& uuid() const { return mUuid; }
+		std::filesystem::path const& sourcePath() const { return mSourcePath; }
 		std::vector<ActionDefinition> const& actions() const { return mActions; }
 		std::string identity(ActionDefinition const& action) const { return mUuid + ":" + action.key; }
 		ActionDefinition const* find(std::string_view identity) const;

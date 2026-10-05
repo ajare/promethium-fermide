@@ -126,7 +126,8 @@ saved World: documents reference only its basename and expected UUID. Reopen
 validates the registry and every assigned identity; a display-name change does
 not invalidate stable keys. YAML/binary serialization contains no Lua source,
 closures or VM state. History holds immutable package dependencies, not a VM.
-Selecting the same attached reference does not reload it; live reload is #464.
+Selecting the same attached reference does not reload it; use the explicit paused
+Reload Action registry workflow described under #464 below.
 
 Availability is checked at acceptance and arrival. Assignment/package removal
 cancels pending requests at the next safe simulation boundary, preserving existing
@@ -393,3 +394,63 @@ Final build evidence: Release `77dec36df1024a17859051ad477bf477`, Debug
 `1e94bb1c43c0410d9d1f22bcb0ab0880`. Final unfiltered CTest evidence: Release
 `0c607048c86e409a8161106f98c8b553`, Debug
 `ae3b0c886195442bbed93ab0b1d21015`.
+
+## Transactional Action and Furniture reload (#464)
+
+`World::reloadActionRegistry(path, diagnostic)` and
+`World::reloadFurnitureCatalogue(path, diagnostic)` require an already selected
+package and a paused World. Both refuse a different basename or UUID. Reload reads
+fresh immutable source, validates Lua contracts and stable authored references,
+and publishes contextual refusal diagnostics. Furniture additionally preflights
+complete construction replay, including usable-point keys, geometry, routes,
+Floor support, overlap and assigned Action availability. No live lifecycle
+callback runs during preflight. Refusal preserves the loaded package, references,
+topology, claims/Pose, modified state and document history.
+
+After successful Furniture preflight, every active use belonging to that catalogue
+finishes in stable Agent order with its retained old definition and old Marker
+view. Only then may the replacement be installed. Throwing or incomplete old
+finishing applies host Standing/claim cleanup, retains the old installed catalogue,
+and reports the existing structured Action failure; the next simulation tick
+fails/pauses normally. It is not a rollback of successful old teardown callbacks.
+Action-registry reload does not touch active Furniture uses.
+
+Callback-only reload keeps the current topology and requests. Changed definition
+metadata/layout reconciles through normal validated structural replay, preserving
+Furniture/Marker identities and pending selected Actions. Invalidated derived
+Use furniture requests produce explicit ActionUnavailable cancellation, not Idle.
+An explicit authored Use furniture assignment instead refuses incompatible reload.
+
+The Marker panel exposes **Reload Action registry**, using the selected registry's
+source path; the Furniture panel exposes **Reload Furniture catalogue**, using the
+saved World's catalogue reference. Both reuse public World workflows and require
+pause. Reload changes accepted executable snapshots, not authored package
+references, and does not add an undo entry. Selection/assignment edits retain normal
+document history. Action history carries only package identity/path, never source
+or functions; assignment Undo/Redo uses the currently accepted package. Furniture
+history likewise uses the current accepted catalogue for the same UUID. Runtime
+uses, Pose/claims and VM state are never persisted or replayed through history.
+Resource-backed catalogue preflight also reads fresh files and validates artwork,
+rather than silently returning a stale path-only catalogue cache.
+
+Focused public checks are Simulation `markerActions/reload` and Editor
+`markerActions/reloadWorkflow`. They cover Action/Furniture success and failure,
+identity/reference/placement refusal, old-function teardown ordering, valid layout
+reconciliation, stable pending requests, explicit cancellation, cleanup failure,
+running refusal, unchanged history on reload and no old executable replay on
+Undo/Redo. All checks are headless and bounded.
+
+### #464 final Linux verification
+
+Release and Debug default builds passed (core, headless, editor and contracts).
+Final unfiltered CTest ran 110 tests per configuration: **103 passed, one optional
+GUI capability skipped, six failed**. These are the unchanged legacy implicit-use
+Simulation/Routing/Render failures documented for #463 (seven scenario checks,
+six CTest entries); full-suite green and legacy migration remain #467's contract.
+All #464 checks and Editor functional/CLI/exhaustive contracts passed in both
+configurations. `git diff --check` passed. No Windows validation is claimed.
+
+Final build evidence: Release `fde5a62c6cf84b64838f4cee403634d4`, Debug
+`3389068a11f34a7b82ca9d477b512b38`. Final unfiltered CTest evidence: Release
+`347f20ccd3f245d9b0dbd1c3ef714548`, Debug
+`61f4b84b56014925b5623c5455e966a6`.

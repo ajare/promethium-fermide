@@ -175,6 +175,63 @@ namespace
 			require(!log.msg.starts_with("use:") && !log.msg.starts_with("finish:"), "History reconstruction replayed lifecycle effects");
 	}
 
+	void reloadWorkflow(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto root = context.temporaryRoot();
+		auto path = root / "editor-reload.actions.lua";
+		auto write = [&](std::string const& name) {
+			std::ofstream(path) << "return {api_version=1,uuid='ad603358-5ebf-45bb-a686-c3f491152c61',actions={{key='greet',name='"
+				<< name << "',run=function() end}}}";
+		};
+		write("Old");
+		auto world = std::make_shared<core::World>("Editor reload", 10, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 10, 1);
+		world->addSectorMarker(room, 0, 1.5f, "Target"); world->finishBuild(); world->pauseSimulation();
+		auto marker = world->getMarkerIds()[0]; std::string diagnostic;
+		std::string action = "ad603358-5ebf-45bb-a686-c3f491152c61:greet";
+		require(commitActionRegistrySelection(world, path, diagnostic)
+			&& commitMarkerActionAssignment(world, marker, {action}, diagnostic), diagnostic);
+		auto count = gWorldDocumentHistory.undoCount();
+		auto before = world->actionRegistry();
+		std::ofstream(path) << "return {}";
+		require(!reloadSelectedActionRegistry(world, path, diagnostic) && !diagnostic.empty()
+			&& world->actionRegistry() == before && gWorldDocumentHistory.undoCount() == count,
+			"Failed editor reload changed package/history");
+		write("New");
+		require(reloadSelectedActionRegistry(world, path, diagnostic) && gWorldDocumentHistory.undoCount() == count,
+			"Runtime reload authored an undo entry");
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto loaded = deserializeDocumentSnapshot(snapshot, world, {});
+			if (!loaded) return false;
+			world = std::move(loaded); world->pauseSimulation(); return true;
+		};
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+			&& world->markerActions(marker).empty() && world->agentActionDisplayName(action) == "New"
+			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+			&& world->markerActions(marker) == std::vector<std::string>{action}
+			&& world->agentActionDisplayName(action) == "New", "History replayed old executable package");
+		require(world->resumeSimulation() && !reloadSelectedActionRegistry(world, path, diagnostic)
+			&& gWorldDocumentHistory.undoCount() == count, "Running editor reload changed history");
+		world->pauseSimulation();
+		auto furniturePath = root / "use.furniture.lua";
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"), furniturePath);
+		auto document = root / "reload.world.yaml"; world->saveTo(document.string());
+		require(selectFurnitureCatalogue(world, document, furniturePath.filename().string(), diagnostic)
+			&& placeSelectedFurniture(world, room, "chair", 3, 0, false, "Chair", diagnostic), diagnostic);
+		count = gWorldDocumentHistory.undoCount();
+		auto catalogue = world->furnitureCatalogue();
+		std::ofstream(furniturePath) << "return {}";
+		require(!reloadSelectedFurnitureCatalogue(world, document, diagnostic) && !diagnostic.empty()
+			&& world->furnitureCatalogue() == catalogue && gWorldDocumentHistory.undoCount() == count,
+			"Failed editor Furniture reload changed history/package");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"), furniturePath,
+			std::filesystem::copy_options::overwrite_existing);
+		require(reloadSelectedFurnitureCatalogue(world, document, diagnostic)
+			&& gWorldDocumentHistory.undoCount() == count && world->furniture()[0].marker,
+			"Successful editor Furniture reload changed authored history");
+	}
+
 	void workflow(smoke::Context const& context)
 	{
 		editor_smoke::State state;
@@ -249,6 +306,7 @@ namespace
 
 void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"markerActions/reloadWorkflow",reloadWorkflow});
 	checks.push_back({"markerActions/workflow",workflow});
 	checks.push_back({"markerActions/behaviourConfiguration",behaviourConfiguration});
 	checks.push_back({"markerActions/furnitureUseWorkflow",furnitureUseWorkflow});

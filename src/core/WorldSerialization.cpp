@@ -1529,9 +1529,9 @@ namespace core
 			filesystem::path path(furnitureFilename);
 			if (furnitureFilename.empty() || path.has_parent_path() || !FurnitureCatalogue::filenameIsValid(furnitureFilename))
 				throw SerializationException("Furniture catalogue reference must be a .furniture.lua basename");
-			if (!workData.documentDirectory.empty())
+			furnitureCatalogue = workData.furnitureCatalogue ? workData.furnitureCatalogue : mFurnitureCatalogue;
+			if ((!furnitureCatalogue || furnitureCatalogue->uuid() != expectedUuid) && !workData.documentDirectory.empty())
 				furnitureCatalogue = FurnitureCatalogue::load(workData.documentDirectory / path);
-			else furnitureCatalogue = workData.furnitureCatalogue ? workData.furnitureCatalogue : mFurnitureCatalogue;
 			if (!furnitureCatalogue) throw SerializationException("Missing Furniture catalogue dependency: " + furnitureFilename);
 			if (furnitureCatalogue->uuid() != expectedUuid)
 				throw SerializationException("Furniture catalogue UUID mismatch: expected " + expectedUuid + ", found " + furnitureCatalogue->uuid());

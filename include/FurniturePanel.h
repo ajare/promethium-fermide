@@ -13,6 +13,8 @@ core::FurnitureInstance const* selectedFurnitureInstance(std::shared_ptr<core::W
 bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& worldPath, std::string const& filename,
 	std::string& diagnostic, DocumentHistory& history = gWorldDocumentHistory);
+bool reloadSelectedFurnitureCatalogue(std::shared_ptr<core::World> const& world,
+	std::filesystem::path const& worldPath, std::string& diagnostic);
 bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint32_t sector, std::string const& key, float x, float y, bool snapX,
 	std::string const& name, std::string& diagnostic,

@@ -16,6 +16,7 @@ namespace core
 	{
 		int x{ 0 }, y{ 0 };
 		std::string imageSet, image;
+		bool operator==(FurnitureTile const&) const = default;
 	};
 	enum class UsablePointAction { Sit, Lying };
 
@@ -25,6 +26,7 @@ namespace core
 		float x{ 0.5f };
 		bool blocksPathing{ true }; // default for newly created owned Markers
 		std::optional<UsablePointAction> action{};
+		bool operator==(FurnitureUsablePoint const&) const = default;
 	};
 	struct FurnitureRoutingVertex
 	{
@@ -33,11 +35,13 @@ namespace core
 		// A usable-point key binds this vertex to its World-owned Marker.
 		std::string usablePoint;
 		bool external{ false };
+		bool operator==(FurnitureRoutingVertex const&) const = default;
 	};
 	struct FurnitureRoutingEdge
 	{
 		std::string from, to;
 		std::optional<int> depthOffset; // absent means fixed 0
+		bool operator==(FurnitureRoutingEdge const&) const = default;
 	};
 	struct FurnitureDefinition
 	{
@@ -50,6 +54,7 @@ namespace core
 		bool hasUse{ false }; // validated paired Lua callbacks
 		// Full artwork rectangle, including transparent pixels and layout gaps.
 		int minX{ 0 }, minY{ 0 }, maxX{ 0 }, maxY{ 0 };
+		bool operator==(FurnitureDefinition const&) const = default;
 	};
 	struct FurnitureDestination
 	{

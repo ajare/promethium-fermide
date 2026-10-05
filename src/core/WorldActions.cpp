@@ -38,10 +38,10 @@ namespace core
 	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
 		if (!isSimulationPaused()) return reject("Pause the simulation to select an Action registry");
-		// Selection is not reload. Same reference/source remains immutable until
-		// the dedicated transactional reload slice supplies its lifecycle policy.
+		// Selection is not reload. Use the explicit paused reload transaction
+		// to replace an already accepted executable snapshot.
 		if (mActionRegistry && path.filename().string() == mActionRegistryFilename)
-			return reject("Action registry already selected; live reload is not supported");
+			return reject("Action registry already selected; use Reload Action registry");
 		try
 		{
 			auto registry = ActionRegistry::load(path);
@@ -57,6 +57,97 @@ namespace core
 			mActionRegistry = std::move(registry);
 			mActionRegistryFilename = path.filename().string();
 			markModified();
+			return true;
+		}
+		catch (std::exception const& error) { return reject(error.what()); }
+	}
+
+	bool World::reloadActionRegistry(std::filesystem::path const& path, std::string* diagnostic)
+	{
+		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = "Action reload: " + message; return false; };
+		if (!isSimulationPaused()) return reject("Pause the simulation before reloading");
+		if (!mActionRegistry || path.filename().string() != mActionRegistryFilename)
+			return reject("Select this registry before reloading it");
+		try
+		{
+			auto replacement = ActionRegistry::load(path);
+			if (replacement->uuid() != mActionRegistry->uuid()) return reject("Registry UUID does not match the selected package");
+			for (auto const& [marker, actions] : mMarkerActions)
+				for (auto const& action : actions)
+					if (action != UseFurnitureAction && !replacement->find(action))
+						return reject("Marker " + std::to_string(marker.value) + " references missing Action " + action);
+			std::string missing;
+			for (auto const& [id, agent] : mAgents.entries())
+				if (auto const& assignment = agent->getBehaviourAssignment())
+					for (auto const& [field, value] : assignment->configuration)
+						if (!configurationActionsAvailable(value, replacement.get(), missing))
+							return reject("Agent " + agent->getName() + " field " + field + " references missing Action " + missing);
+			mActionRegistry = std::move(replacement);
+			for (auto& [id, goal] : mMovementGoals)
+				if (goal.marker && !actionAvailable(goal.marker, goal.selectedAction))
+				{ goal.actionInvalidated = true; goal.cancelling = true; }
+			if (diagnostic) diagnostic->clear();
+			return true;
+		}
+		catch (std::exception const& error) { return reject(error.what()); }
+	}
+
+	bool World::reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic)
+	{
+		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = "Furniture reload: " + message; return false; };
+		if (!isSimulationPaused()) return reject("Pause the simulation before reloading");
+		if (!mFurnitureCatalogue || path.filename().string() != mFurnitureCatalogueFilename)
+			return reject("Select this catalogue before reloading it");
+		try
+		{
+			auto replacement = FurnitureCatalogue::load(path);
+			if (replacement->uuid() != mFurnitureCatalogue->uuid()) return reject("Catalogue UUID does not match the selected package");
+			auto candidate = makeCandidateWorld();
+			candidate->mFurnitureCatalogue = replacement;
+			candidate->mDeserializingConstruction = true;
+			for (auto const& record : mConstructionRecords) candidate->applyConstructionRecord(record);
+			candidate->finishBuild();
+			for (auto const& [marker, actions] : mMarkerActions)
+				for (auto const& action : actions)
+					if (!candidate->actionAvailable(marker, action))
+						return reject("Marker " + std::to_string(marker.value) + " references unavailable Action " + action);
+			// Every lifecycle in this catalogue is affected, even if geometry is unchanged.
+			// Finish all users in stable Agent order, retaining the old package on error.
+			bool finishingFailed = false;
+			for (auto const& [id, agent] : mAgents.entries())
+				if (agent->mFurnitureUse && agent->mFurnitureUse->catalogue == mFurnitureCatalogue)
+				{
+					auto outcomes = mPendingMovementOutcomes.size();
+					finishFurnitureUse(id);
+					finishingFailed |= mPendingMovementOutcomes.size() != outcomes;
+				}
+			if (finishingFailed) return reject("Old finish_use failed; users were safely cleaned up and the old catalogue remains installed (see Action diagnostics)");
+			bool layoutChanged = false;
+			for (auto const& instance : mFurniture)
+				layoutChanged |= *mFurnitureCatalogue->definition(instance.definitionKey) != *replacement->definition(instance.definitionKey);
+			auto old = mFurnitureCatalogue;
+			auto goals = mMovementGoals;
+			auto outcomes = mPendingMovementOutcomes;
+			mFurnitureCatalogue = std::move(replacement);
+			if (layoutChanged)
+			{
+				try { rebuildFromConstructionRecords(mConstructionRecords); }
+				catch (...) { mFurnitureCatalogue = std::move(old); throw; }
+				// Structural replay carries Agents, not Paths. Retain request identities
+				// and replan against the new graph, never replacing their Action with Idle.
+				mMovementGoals = std::move(goals);
+				mPendingMovementOutcomes = std::move(outcomes);
+				for (auto& [id, goal] : mMovementGoals)
+				{
+					goal.retainedPath.reset();
+					if (auto agent = mAgents.find(id)) mSimulationCoordinator.beginRoutePlanning(*agent);
+				}
+			}
+			invalidateSimulationSnapshot();
+			for (auto& [id, goal] : mMovementGoals)
+				if (goal.marker && !actionAvailable(goal.marker, goal.selectedAction))
+				{ goal.actionInvalidated = true; goal.cancelling = true; }
+			if (diagnostic) diagnostic->clear();
 			return true;
 		}
 		catch (std::exception const& error) { return reject(error.what()); }

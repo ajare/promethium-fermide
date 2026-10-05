@@ -18,7 +18,8 @@ namespace
 {
 	struct ActionSnapshotContext : DocumentSnapshotContext
 	{
-		std::shared_ptr<const core::ActionRegistry> registry;
+		std::filesystem::path path;
+		std::string uuid;
 	};
 }
 
@@ -37,7 +38,8 @@ optional<DocumentSnapshot> captureDocumentSnapshot(
 		if (world->actionRegistry())
 		{
 			auto context = std::make_shared<ActionSnapshotContext>();
-			context->registry = world->actionRegistry();
+			context->path = world->actionRegistry()->sourcePath();
+			context->uuid = world->actionRegistry()->uuid();
 			snapshot.context = std::move(context);
 		}
 		return snapshot;
@@ -61,14 +63,22 @@ shared_ptr<core::World> deserializeDocumentSnapshot(
 	serializer->deserialize();
 	core::SerializationWorkData workData;
 	if (auto context = std::dynamic_pointer_cast<ActionSnapshotContext>(snapshot.context))
-		workData.actionRegistry = context->registry;
+	{
+		// History holds authored package identity/path, never executable source.
+		// Undo an assignment using the currently accepted reload, not old functions.
+		if (currentWorld && currentWorld->actionRegistry()
+			&& currentWorld->actionRegistry()->uuid() == context->uuid
+			&& currentWorld->actionRegistryFilename() == context->path.filename().string())
+			workData.actionRegistry = currentWorld->actionRegistry();
+		else workData.actionRegistry = core::ActionRegistry::load(context->path);
+	}
 	else if (currentWorld) workData.actionRegistry = currentWorld->actionRegistry();
 	if (!documentPath.empty())
 	{
 		workData.documentDirectory = documentPath.parent_path();
 		if (workData.documentDirectory.empty()) workData.documentDirectory = ".";
 	}
-	else if (currentWorld) workData.furnitureCatalogue = currentWorld->furnitureCatalogue();
+	if (currentWorld) workData.furnitureCatalogue = currentWorld->furnitureCatalogue();
 	if (!loaded->deserialize(*serializer, workData)) return {};
 	return loaded;
 }

@@ -164,6 +164,7 @@ set(core_names
     furniture/authoredChairArrival
     furniture/seatedEdits
     furniture/occupancyLifecycle
+    markerActions/reload
     markerActions/registry
     markerActions/execution
     markerActions/failures

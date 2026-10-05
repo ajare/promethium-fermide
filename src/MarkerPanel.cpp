@@ -22,6 +22,13 @@ bool commitActionRegistrySelection(std::shared_ptr<core::World> const& world,
 	return true;
 }
 
+bool reloadSelectedActionRegistry(std::shared_ptr<core::World> const& world,
+	std::filesystem::path const& path, std::string& diagnostic)
+{
+	if (!world) { diagnostic = "No World selected"; return false; }
+	return world->reloadActionRegistry(path, &diagnostic);
+}
+
 bool commitMarkerActionAssignment(std::shared_ptr<core::World> const& world,
 	core::MarkerId marker, std::vector<std::string> actions, std::string& diagnostic)
 {
@@ -121,6 +128,11 @@ void renderMarkerEditorPanel(
 	if (world->actionRegistry())
 	{
 		ImGui::Text("Selected: %s", world->actionRegistryFilename().c_str());
+		if (ImGui::Button("Reload Action registry"))
+		{
+			std::string diagnostic;
+			if (!reloadSelectedActionRegistry(world, world->actionRegistry()->sourcePath(), diagnostic)) report(diagnostic);
+		}
 		if (ImGui::Button("Remove registry and assignments"))
 		{
 			auto undo = captureDocumentSnapshot(world);

@@ -2186,6 +2186,8 @@ namespace core
 		std::shared_ptr<const ActionRegistry> const& actionRegistry() const { return mActionRegistry; }
 		std::string const& actionRegistryFilename() const { return mActionRegistryFilename; }
 		bool selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
+		bool reloadActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
+		bool reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic = nullptr);
 		bool clearActionRegistry(std::string* diagnostic = nullptr);
 		bool setMarkerActions(MarkerId marker, std::vector<std::string> actions, std::string* diagnostic = nullptr);
 		std::vector<std::string> markerActions(MarkerId marker) const;

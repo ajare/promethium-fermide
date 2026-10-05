@@ -56,6 +56,13 @@ bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 	catch (std::exception const& error) { diagnostic = error.what(); return false; }
 }
 
+bool reloadSelectedFurnitureCatalogue(std::shared_ptr<core::World> const& world,
+	std::filesystem::path const& worldPath, std::string& diagnostic)
+{
+	if (!world || worldPath.empty()) { diagnostic = "Save the World before reloading its Furniture catalogue"; return false; }
+	return world->reloadFurnitureCatalogue(worldPath.parent_path() / world->furnitureCatalogueFilename(), &diagnostic);
+}
+
 bool placeSelectedFurniture(std::shared_ptr<core::World> const& world,
 	uint32_t sector, std::string const& key, float x, float y, bool snapX,
 	std::string const& name, std::string& diagnostic, DocumentHistory& history, int localDepth)
@@ -136,6 +143,10 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 			}
 		}
 		catch (std::exception const& failure) { diagnostic = failure.what(); }
+	ImGui::EndDisabled();
+	ImGui::BeginDisabled(!saved || filename.empty() || !world->isSimulationPaused());
+	if (ImGui::Button("Reload Furniture catalogue"))
+		reloadSelectedFurnitureCatalogue(world, worldPath, diagnostic);
 	ImGui::EndDisabled();
 	if (!saved) ImGui::TextUnformatted("Save the World before selecting a Furniture catalogue.");
 	if (!diagnostic.empty()) ImGui::TextWrapped("%s", diagnostic.c_str());

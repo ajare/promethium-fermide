@@ -244,9 +244,10 @@ namespace
 			core::FurnitureCatalogue::setResourceLoader([this](std::filesystem::path const& path)
 			{
 				auto canonicalPath = std::filesystem::weakly_canonical(path);
-				if (auto found = mFurnitureCatalogueResources.find(canonicalPath);
-					found != mFurnitureCatalogueResources.end())
-					return found->second->catalogue();
+				// Loading is an explicit package preflight, including reload. Never
+				// return a path-only cache: external edits must be read and artwork
+				// validated into a fresh immutable snapshot. Existing Worlds retain
+				// their own accepted catalogue until their transaction commits.
 
 				static uint64_t sequence = 0;
 				auto resource = std::make_shared<FurnitureCatalogueResource>(
@@ -256,7 +257,7 @@ namespace
 				mResources->addResource(resource);
 				mResources->createResource(resource);
 				mResources->loadResource(resource);
-				mFurnitureCatalogueResources.emplace(std::move(canonicalPath), resource);
+				mFurnitureCatalogueResources.insert_or_assign(std::move(canonicalPath), resource);
 				return resource->catalogue();
 			});
 		}

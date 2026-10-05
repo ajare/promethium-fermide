@@ -176,6 +176,7 @@ set(editor_names
     furniture/attachmentActions
     furniture/cataloguePicker
     furniture/compositionActions
+    markerActions/reloadWorkflow
     markerActions/workflow
     markerActions/behaviourConfiguration
     markerActions/furnitureUseWorkflow

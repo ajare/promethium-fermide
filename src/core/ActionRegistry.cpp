@@ -277,6 +277,7 @@ namespace core
 		std::ifstream file(path, std::ios::binary);
 		if (!file) throw SerializationException("Missing Action registry: " + path.string());
 		auto registry = std::make_shared<ActionRegistry>();
+		registry->mSourcePath = std::filesystem::weakly_canonical(path);
 		char buffer[4096];
 		while (file.read(buffer, sizeof(buffer)) || file.gcount())
 		{
