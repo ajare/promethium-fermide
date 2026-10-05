@@ -20,6 +20,142 @@ namespace
 		world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
 	}
 
+	void luaObjects(smoke::Context const& context)
+	{
+		using smoke::require;
+		auto root = context.temporaryRoot() / "lua-objects";
+		std::filesystem::create_directories(root);
+		auto source = context.fixture("src/headless/smoke/fixtures/objects.furniture.lua");
+		auto package = root / "objects.furniture.lua";
+		std::filesystem::copy_file(source, package);
+		std::ifstream input(source); std::string original((std::istreambuf_iterator<char>(input)), {});
+		auto write = [&](std::string const& text) { std::ofstream output(package); output << text; };
+		auto variant = [&](std::string const& edit) {
+			auto text = original;
+			text.replace(text.find("return {"), 8, "local catalogue = {");
+			return text + "\n" + edit + "\nreturn catalogue\n";
+		};
+		core::World world("Lua objects", 12, 3);
+		auto room = world.addRoom("Room", 0, 0, 0, 12, 2);
+		world.attachFurnitureCatalogue(package.filename().string(), core::FurnitureCatalogue::load(package));
+		auto desk = world.placeFurniture(room, "desk", 2.125f, 0, "Desk", 2);
+		world.placeFurniture(room, "table", 6, 0, "Table");
+		world.placeFurniture(room, "chair", 8, 0, "Chair");
+		auto seat = world.furniture().front().marker;
+		auto chairSeat = world.furniture().back().marker;
+		require(!world.furnitureCatalogue()->definition("desk")->hasUse
+			&& world.furnitureCatalogue()->definition("chair")->hasUse
+			&& world.furniture()[1].destinations.empty(), "Paired functions/non-usable definitions were lost");
+		world.addSectorMarker(room, 0, 0.5f, "Entrance");
+		world.addSectorMarker(room, 0, 10.5f, "Exit");
+		world.finishBuild(); world.pauseSimulation();
+		require(world.availableAgentActions(chairSeat).size() == 1, "Loading activated deferred Use furniture availability");
+		std::string diagnostic;
+		require(world.renameMarker(seat, "Authored desk point", &diagnostic), diagnostic);
+		require(world.setMarkerProperties(seat, 0, &diagnostic), diagnostic);
+		auto before = snapshot(world);
+		for (auto placement : {std::pair{2.5f, 0.f}, {11.f, 0.f}, {4.f, 1.f}, {4.f, 0.25f}})
+			require(!world.canPlaceFurniture(room, "desk", placement.first, placement.second, "Invalid", &diagnostic, 2)
+				&& snapshot(world) == before, "Lua geometry bypassed overlap/support/containment validation");
+		require(!world.canPlaceFurniture(room, "desk", 4, 0, "Negative", &diagnostic, -1), "Negative depth admitted");
+		auto visitor = world.createAgent("Visitor", room, 0, 0.5f);
+		require(world.moveAgentToNamedMarker(visitor, "Exit").accepted(), "Desk circulation request refused");
+		world.resumeSimulation();
+		bool side = false;
+		for (int tick = 0; tick < 1600; ++tick)
+		{
+			world.advanceTicks(1);
+			auto agent = world.lookupAgent(visitor).entity;
+			if (agent->getGlobalPosition().x > 2.5f && agent->getGlobalPosition().x < 3.5f)
+			{
+				side = true;
+				require(agent->getLocalDepth() == 2 || agent->getLocalDepth() == 3, "Lua desk acquired floor shortcut");
+			}
+		}
+		require(side && world.lookupAgent(visitor).entity->getGlobalPosition().x == 10.5f, "Lua desk normal movement failed");
+		require(world.moveAgentToMarker(visitor, chairSeat).accepted(), "Stored Lua chair point unavailable to Idle");
+		world.advanceTicks(1600);
+		require(world.lookupAgent(visitor).entity->getGlobalPosition().x == 8.5f
+			&& world.lookupAgent(visitor).entity->getPose() == core::Pose::Standing,
+			"Catalogue loading activated deferred use callback");
+		world.pauseSimulation();
+		require(world.editFurniture(desk, 3.125f, 0, "Edited desk", &diagnostic, 3), diagnostic);
+		require(world.furniture().front().marker == seat, "Lua instance edit changed owned identity");
+		require(world.authorAgentMarkerRequest(visitor, chairSeat, core::IdleAction, &diagnostic), diagnostic);
+		std::vector<std::filesystem::path> documents;
+		for (auto suffix : {"world.yaml", "world"})
+		{
+			auto document = root / (std::string("objects.") + suffix); documents.push_back(document);
+			world.saveTo(document.string());
+			auto loaded = core::loadWorldDocument(document);
+			require(loaded->furnitureCatalogueFilename() == "objects.furniture.lua"
+				&& loaded->furnitureCatalogue()->uuid() == world.furnitureCatalogue()->uuid()
+				&& loaded->furniture().front().id == desk && loaded->furniture().front().marker == seat
+				&& loaded->lookupMarker(seat)->getName() == "Authored desk point"
+				&& !loaded->lookupMarker(seat)->hasProperty(core::MarkerProperty::BlocksPathing),
+				"Lua document round trip lost stable/authored identities");
+			auto yaml = snapshot(*loaded);
+			require(yaml.find("finish_use") == std::string::npos && yaml.find("world.set_pose") == std::string::npos,
+				"Document serialized executable catalogue state");
+		}
+		before = snapshot(world);
+		auto rejected = [&](std::string const& sourceText) {
+			write(sourceText);
+			for (auto const& document : documents)
+			{
+				bool refused = false;
+				try { (void)core::loadWorldDocument(document); } catch (std::exception const&) { refused = true; }
+				require(refused, "Invalid Lua dependency accepted by World document loader: " + sourceText.substr(sourceText.size() > 200 ? sourceText.size() - 200 : 0));
+			}
+			require(snapshot(world) == before && world.furnitureCatalogue()->definition("chair")->hasUse,
+				"Rejected dependency modified the live immutable catalogue/World");
+		};
+		for (auto edit : {
+			"catalogue.api_version = 2", "catalogue.uuid = 'bad'", "catalogue.uuid = '00000000-0000-4000-8000-000000000001'",
+			"catalogue.definitions[2].use = nil", "catalogue.definitions[2].finish_use = false",
+			"catalogue.definitions[2].usablePoints = {}; catalogue.definitions[2].use = nil; catalogue.definitions[2].finish_use = nil",
+			"catalogue.definitions = {}", "catalogue.definitions[1].tiles[1].imageSet = 'Missing'",
+			"catalogue.definitions[1].self = catalogue", "catalogue.definitions[1].usablePoints[1].key = 'bad key'",
+			"catalogue.definitions[2].use = print", "local n = 0; catalogue.definitions[2].use = function() n = n + 1 end",
+			"catalogue.definitions[1].tiles[1].x = 0.5", "catalogue.definitions[1].tiles[2].x = 0",
+			"catalogue.definitions[1].usablePoints[1].x = 0/0", "catalogue.definitions[1].usablePoints[1].y = 1",
+			"catalogue.definitions[1].vertices[1].x = 100", "catalogue.definitions[1].edges[1].to = 'missing'",
+			"catalogue.definitions[1].edges[2] = catalogue.definitions[1].edges[1]",
+			"catalogue.definitions[1].tiles[2].x = 12", "catalogue.definitions[1].usablePoints[1].action = 'Sit'",
+			"catalogue.definitions[2].key = 'desk'", "catalogue.definitions[1].vertices[7].usablePoint = 'missing'",
+			"catalogue.definitions[1].vertices[1].external = 1", "catalogue.definitions[4] = catalogue.definitions[3]; catalogue.definitions[3] = nil",
+			"catalogue.definitions.extra = {}", "catalogue.unexpected = function() end",
+			"setmetatable(catalogue, {})", "catalogue.definitions[1].edges[1].depthOffset = '2'"})
+			rejected(variant(edit));
+		for (auto text : {"not Lua!", "return 1", "require('missing')", "require('../escape')", "io.open('file')",
+			"while true do end", "pcall(function() while true do end end); return {}",
+			"local t = {}; for i=1,100000 do t[i] = string.rep('x', 10000) end; return t"}) rejected(text);
+		rejected(std::string(256 * 1024 + 1, ' '));
+		std::filesystem::remove(package);
+		for (auto const& document : documents)
+		{
+			bool refused = false;
+			try { (void)core::loadWorldDocument(document); } catch (std::exception const&) { refused = true; }
+			require(refused, "Missing Lua catalogue dependency accepted");
+		}
+		write(variant("catalogue.definitions[1].usablePoints[2] = {key='extra', label='Extra', x=1.25, blocksPathing=false}; "
+			"catalogue.definitions[1].vertices[9] = {key='extra', x=1.25, usablePoint='extra'}; "
+			"catalogue.definitions[1].edges[8] = {from='frontRight', to='extra', depthOffset=0}"));
+		for (auto const& document : documents)
+		{
+			auto loaded = core::loadWorldDocument(document);
+			require(loaded->furniture().front().destinations.size() == 2
+				&& loaded->furniture().front().marker == seat && loaded->lookupMarker(seat)->getName() == "Authored desk point"
+				&& loaded->furniture().front().destinations[1].marker != seat,
+				"Lua reconciliation lost stable keys/Marker identity");
+		}
+		write(variant("catalogue.definitions[2].use = function(agent, world, marker) sit(agent, world, marker) end"));
+		for (auto const& document : documents)
+			require(core::loadWorldDocument(document)->furnitureCatalogue()->definition("chair")->hasUse,
+				"Stateless shared Lua helpers were refused");
+		write(original);
+	}
+
 	void actions(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -915,6 +1051,7 @@ namespace
 }
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/luaObjects", luaObjects });
 	checks.push_back({ "furniture/actions", actions });
 	checks.push_back({ "furniture/demo", demonstration });
 	checks.push_back({ "furniture/chair", chair });

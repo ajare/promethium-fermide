@@ -85,7 +85,11 @@ namespace
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 
-	void chairCommands(smoke::Context const& context)
+	void chairCommandsImpl(smoke::Context const&, bool);
+	void chairCommands(smoke::Context const& context) { chairCommandsImpl(context, false); }
+	void luaCommands(smoke::Context const& context) { chairCommandsImpl(context, true); }
+
+	void chairCommandsImpl(smoke::Context const& context, bool lua)
 	{
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = {800, 600}; ImGui::GetIO().Fonts->AddFontDefault(); ImGui::GetIO().Fonts->Build(); ImGui::NewFrame();
@@ -103,7 +107,8 @@ namespace
 		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
-		world->attachFurnitureCatalogue("chair.furniture.yaml", core::FurnitureCatalogue::load(context.fixture("resources/test-worlds/chair.furniture.yaml")));
+		world->attachFurnitureCatalogue(lua ? "objects.furniture.lua" : "chair.furniture.yaml",
+			core::FurnitureCatalogue::load(context.fixture(lua ? "src/headless/smoke/fixtures/objects.furniture.lua" : "resources/test-worlds/chair.furniture.yaml")));
 		auto id = world->placeFurniture(room, "chair", 2.25f, 0, "Chair");
 		world->addSectorMarker(room, 0, 6.5f, "Standalone"); world->finishBuild();
 		float artworkX = 2.25f;
@@ -421,6 +426,29 @@ namespace
 		require(visitor->getGlobalPosition() == position && visitor->getLocalDepth() == 2,
 			"Detached rendering rebuild changed Agent physical/depth history");
 		checkAttached();
+		if (lua)
+		{
+			auto deskWorld = std::make_shared<core::World>("Lua desk artwork", 8, 2);
+			auto deskRoom = deskWorld->addRoom("Room", 0, 0, 0, 8, 1);
+			deskWorld->attachFurnitureCatalogue("objects.furniture.lua", core::FurnitureCatalogue::load(
+				context.fixture("src/headless/smoke/fixtures/objects.furniture.lua")));
+			deskWorld->placeFurniture(deskRoom, "desk", 2.125f, 0, "Desk", 2);
+			deskWorld->finishBuild();
+			RenderWorldScope deskScope(deskWorld);
+			WorldDrawList drawing({{150,450},{300,590}});
+			renderSector(deskWorld->getSector(deskRoom), 0, LayerRenderStyle::Aperture, false, ImColor(192,192,255), &drawing);
+			unsigned triangles = 0;
+			for (auto const& command : drawing.commands())
+				if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas
+					&& triangle->texcoords[0].x >= 256.f / 320 && triangle->texcoords[0].y <= 320.f / 480)
+				{
+					++triangles;
+					require(triangle->clip.minimum.x == 150 && triangle->clip.maximum.x == 300,
+						"Lua desk artwork escaped aperture clipping");
+				}
+			require(triangles == 4, "Lua desk did not render both artwork tiles");
+		}
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 }
@@ -890,6 +918,7 @@ namespace
 }
 void render_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/luaCommands", isolated<luaCommands> });
 	checks.push_back({ "furniture/chairCommands", isolated<chairCommands> });
 	checks.push_back({ "furniture/demoCommands", isolated<demoCommands> });
 	checks.push_back({ "locationPlan/grid", isolated<locationPlanGrid> });

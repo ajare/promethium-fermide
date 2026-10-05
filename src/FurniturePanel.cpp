@@ -45,8 +45,8 @@ bool selectFurnitureCatalogue(std::shared_ptr<core::World> const& world,
 		if (!world || worldPath.empty() || !std::filesystem::is_regular_file(worldPath))
 			throw std::runtime_error("Save the World before loading a Furniture catalogue");
 		std::filesystem::path path(filename);
-		if (path.has_parent_path() || filename.empty() || !filename.ends_with(".furniture.yaml"))
-			throw std::runtime_error("Select a .furniture.yaml catalogue beside the World");
+		if (path.has_parent_path() || filename.empty() || !core::FurnitureCatalogue::filenameIsValid(filename))
+			throw std::runtime_error("Select a .furniture.lua catalogue beside the World");
 		auto catalogue = core::FurnitureCatalogue::load(worldPath.parent_path() / path);
 		auto before = captureDocumentSnapshot(world, history);
 		world->attachFurnitureCatalogue(filename, std::move(catalogue));
@@ -131,7 +131,7 @@ void renderFurniturePanel(std::shared_ptr<core::World> const& world,
 				auto chosen = std::filesystem::absolute(std::filesystem::path(*path));
 				auto directory = std::filesystem::absolute(worldPath).parent_path();
 				if (!std::filesystem::equivalent(chosen.parent_path(), directory))
-					throw std::runtime_error("Select a .furniture.yaml catalogue beside the World");
+					throw std::runtime_error("Select a .furniture.lua catalogue beside the World");
 				selectFurnitureCatalogue(world, worldPath, chosen.filename().string(), diagnostic, history);
 			}
 		}

@@ -164,6 +164,7 @@ set(editor_names
     routing/historyAndClipboard
     airlocks/structuralHistory
     airlocks/editorCommands
+    furniture/luaWorkflow
     furniture/demoActions
     locationPlan/workflow
     locationPlan/placement

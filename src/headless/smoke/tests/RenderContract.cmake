@@ -36,6 +36,7 @@ set(names
     agentPoses
     furniture/bedRenderOffset
     airlocks/chamberAndControls
+    furniture/luaCommands
     furniture/chairCommands
     furniture/demoCommands
     locationPlan/grid

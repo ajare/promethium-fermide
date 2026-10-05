@@ -12,8 +12,8 @@ namespace core
 	{
 		std::filesystem::path path(filename);
 		if (!catalogue || filename.empty() || path.has_parent_path()
-			|| !filename.ends_with(".furniture.yaml"))
-			throw WorldException(this, "Furniture catalogue reference must be a .furniture.yaml basename");
+			|| !core::FurnitureCatalogue::filenameIsValid(filename))
+			throw WorldException(this, "Furniture catalogue reference must be a .furniture.lua basename");
 		if (!mFurniture.empty() && (filename != mFurnitureCatalogueFilename || catalogue != mFurnitureCatalogue))
 			throw WorldException(this, "Cannot replace a Furniture catalogue while instances use it");
 		mFurnitureCatalogue = std::move(catalogue);

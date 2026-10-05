@@ -16,6 +16,55 @@
 
 namespace
 {
+	void luaWorkflow(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto root = context.temporaryRoot() / "lua-editor"; std::filesystem::create_directories(root);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/objects.furniture.lua"), root / "objects.furniture.lua");
+		auto path = root / "editor.world.yaml";
+		auto world = std::make_shared<core::World>("Lua authoring", 12, 2);
+		world->addRoom("Room", 0, 0, 0, 12, 1); world->finishBuild(); world->pauseSimulation(); world->saveTo(path.string());
+		DocumentHistory history; std::string diagnostic;
+		require(selectFurnitureCatalogue(world, path, "objects.furniture.lua", diagnostic, history), diagnostic);
+		require(history.undoCount() == 1, "Lua catalogue selection missed history");
+		require(placeSelectedFurniture(world, 0, "desk", 2.125f, 0, false, "Desk", diagnostic, history, 2), diagnostic);
+		auto desk = world->furniture().front();
+		require(selectFurnitureInstance(world, desk.id), "Cannot select Lua instance");
+		require(editSelectedFurniture(world, desk.id, 4.125f, 0, false, "Edited", diagnostic, history, 3), diagnostic);
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			auto loaded = deserializeDocumentSnapshot(snapshot, world, path);
+			if (!loaded) return false;
+			world = std::move(loaded); world->pauseSimulation(); return true;
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore)
+			&& world->furniture().front().x == 2.125f && world->furniture().front().marker == desk.marker,
+			"Lua edit undo lost identity");
+		require(history.undo(captureDocumentSnapshot(world, history), restore) && world->furniture().empty(), "Lua placement undo failed");
+		require(history.undo(captureDocumentSnapshot(world, history), restore) && !world->furnitureCatalogue(), "Lua selection undo failed");
+		for (int i = 0; i < 3; ++i) require(history.redo(captureDocumentSnapshot(world, history), restore), "Lua redo failed");
+		require(world->furniture().front().marker == desk.marker && world->furniture().front().x == 4.125f,
+			"Lua history reconstructed different authored data");
+		auto before = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
+		{ std::ofstream output(root / "broken.furniture.lua"); output << "while true do end"; }
+		for (auto filename : {"broken.furniture.lua", "missing.furniture.lua", "../objects.furniture.lua"})
+			require(!selectFurnitureCatalogue(world, path, filename, diagnostic, history) && !diagnostic.empty()
+				&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == before,
+				"Rejected Lua selection modified editor history");
+		require(!placeSelectedFurniture(world, 0, "desk", 5, 0, false, "Overlap", diagnostic, history, 3)
+			&& history.undoCount() == count && captureDocumentSnapshot(world, history)->yaml == before,
+			"Rejected Lua placement modified history");
+		for (auto suffix : {"world.yaml", "world"})
+		{
+			auto output = root / (std::string("edited.") + suffix); world->saveTo(output.string());
+			auto loaded = core::loadWorldDocument(output);
+			require(loaded->furnitureCatalogueFilename() == "objects.furniture.lua" && loaded->furniture().front().marker == desk.marker,
+				"Editor Lua save/reopen lost package or Marker identity");
+		}
+		require(deleteSelectedFurniture(world, desk.id, diagnostic, history), diagnostic);
+		require(history.undo(captureDocumentSnapshot(world, history), restore) && world->furniture().front().marker == desk.marker,
+			"Lua deletion undo lost identity");
+	}
+
 	void demoActions(smoke::Context const& context)
 	{
 		editor_smoke::State state; using smoke::require;
@@ -1251,6 +1300,7 @@ namespace
 }
 void editor_smoke::registerFurniture(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "furniture/luaWorkflow", luaWorkflow });
 	checks.push_back({ "furniture/demoActions", demoActions });
 	checks.push_back({ "locationPlan/workflow", locationPlanWorkflow });
 	checks.push_back({ "locationPlan/placement", locationPlanPlacement });

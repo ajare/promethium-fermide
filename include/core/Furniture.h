@@ -46,6 +46,7 @@ namespace core
 		std::vector<FurnitureRoutingVertex> vertices;
 		std::vector<FurnitureRoutingEdge> edges;
 		bool sideRoutes{ false }; // replace the ordinary floor span
+		bool hasUse{ false }; // validated paired Lua callbacks; not activated in this slice
 		// Full artwork rectangle, including transparent pixels and layout gaps.
 		int minX{ 0 }, minY{ 0 }, maxX{ 0 }, maxY{ 0 };
 	};
@@ -60,11 +61,14 @@ namespace core
 	class FurnitureCatalogue
 	{
 		std::string mUuid;
+		// Accepted executable source snapshot, never serialized or exposed as VM state.
+		std::string mLuaSource;
 		std::map<std::string, FurnitureDefinition> mDefinitions;
 	public:
 		std::string const& uuid() const { return mUuid; }
 		auto const& definitions() const { return mDefinitions; }
 		FurnitureDefinition const* definition(std::string const& key) const;
+		static bool filenameIsValid(std::string const& filename);
 		static std::shared_ptr<const FurnitureCatalogue> readFile(std::filesystem::path const& path);
 		static std::shared_ptr<const FurnitureCatalogue> load(std::filesystem::path const& path);
 		// The rendering service installs its resource-managed loader. Core-only

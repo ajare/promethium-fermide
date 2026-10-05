@@ -7,38 +7,26 @@
 #include <set>
 #include <utility>
 #include <yaml-cpp/yaml.h>
+#include <fstream>
+#include "FurnitureLua.h"
 
 namespace core
 {
 	namespace { FurnitureCatalogue::Loader resourceLoader; }
 
-	FurnitureDefinition const* FurnitureCatalogue::definition(std::string const& key) const
+	namespace
 	{
-		auto found = mDefinitions.find(key);
-		return found == mDefinitions.end() ? nullptr : &found->second;
-	}
-
-	std::shared_ptr<const FurnitureCatalogue> FurnitureCatalogue::readFile(std::filesystem::path const& path)
-	{
-		try
+		template<class Node>
+		void readDefinitions(Node const& root, std::map<std::string, FurnitureDefinition>& definitionsOut)
 		{
-			if (!std::filesystem::is_regular_file(path))
-				throw SerializationException("Missing Furniture catalogue: " + path.string());
-			auto root = YAML::LoadFile(path.string())["furnitureCatalogue"];
-			if (!root || root["version"].as<unsigned>() != 1)
-				throw SerializationException("Unsupported Furniture catalogue version");
-			auto result = std::make_shared<FurnitureCatalogue>();
-			result->mUuid = root["uuid"].as<std::string>();
-			if (!AgentTagRegistry::uuidIsValid(result->mUuid))
-				throw SerializationException("Invalid Furniture catalogue UUID");
 			auto definitions = root["definitions"];
 			if (!definitions.IsSequence() || definitions.size() == 0)
 				throw SerializationException("Furniture catalogue needs definitions");
 			for (auto entry : definitions)
 			{
 				FurnitureDefinition d;
-				d.key = entry["key"].as<std::string>();
-				d.label = entry["label"].as<std::string>();
+				d.key = entry["key"].template as<std::string>();
+				d.label = entry["label"].template as<std::string>();
 				auto tiles = entry["tiles"];
 				auto points = entry["usablePoints"];
 				if (!tiles.IsSequence() || tiles.size() == 0 || !points.IsSequence())
@@ -47,8 +35,8 @@ namespace core
 				bool first = true;
 				for (auto tile : tiles)
 				{
-					FurnitureTile t{ tile["x"].as<int>(), tile["y"].as<int>(),
-						tile["imageSet"].as<std::string>(), tile["image"].as<std::string>() };
+					FurnitureTile t{ tile["x"].template as<int>(), tile["y"].template as<int>(),
+						tile["imageSet"].template as<std::string>(), tile["image"].template as<std::string>() };
 					// Bound arithmetic and prohibit artwork below its supporting Floor.
 					if (t.x < -65536 || t.x > 65536 || t.y < 0 || t.y > 65536
 						|| !offsets.emplace(t.x, t.y).second)
@@ -64,23 +52,23 @@ namespace core
 				std::set<std::string> keys, labels;
 				for (auto point : points)
 				{
-					FurnitureUsablePoint p{ point["key"].as<std::string>(), point["label"].as<std::string>(), point["x"].as<float>(),
-						point["blocksPathing"] ? point["blocksPathing"].as<bool>() : true };
-					if ((point["y"] && point["y"].as<float>() != 0) || !std::isfinite(p.x)
+					FurnitureUsablePoint p{ point["key"].template as<std::string>(), point["label"].template as<std::string>(), point["x"].template as<float>(),
+						point["blocksPathing"] ? point["blocksPathing"].template as<bool>() : true };
+					if ((point["y"] && point["y"].template as<float>() != 0) || !std::isfinite(p.x)
 						|| p.x < d.minX || p.x >= d.maxX || p.key.empty()
 						|| !Marker::nameIsValid(p.label, &diagnostic) || Marker::trimName(p.label) != p.label
 						|| !keys.insert(p.key).second || !labels.insert(p.label).second)
 						throw SerializationException("Invalid Furniture usable point key, label or floor-height offset");
 					if (point["action"])
 					{
-						auto const action = point["action"].IsScalar() ? point["action"].as<std::string>() : "";
+						auto const action = point["action"].IsScalar() ? point["action"].template as<std::string>() : "";
 						if (action == "Sit") p.action = UsablePointAction::Sit;
 						else if (action == "Lying") p.action = UsablePointAction::Lying;
 						else throw SerializationException("Unknown Furniture usable-point action for " + d.key + ":" + p.key);
 					}
 					d.usablePoints.push_back(std::move(p));
 				}
-				d.sideRoutes = entry["sideRoutes"] ? entry["sideRoutes"].as<bool>() : false;
+				d.sideRoutes = entry["sideRoutes"] ? entry["sideRoutes"].template as<bool>() : false;
 				if (d.sideRoutes && !entry["vertices"])
 					throw SerializationException("Furniture side routes require explicit vertices and edges");
 				if (entry["vertices"] || entry["edges"])
@@ -91,11 +79,11 @@ namespace core
 					std::set<std::string> vertexKeys, boundPoints;
 					for (auto vertex : vertices)
 					{
-						FurnitureRoutingVertex v{ vertex["key"].as<std::string>(), vertex["x"].as<float>(),
-							vertex["usablePoint"] ? vertex["usablePoint"].as<std::string>() : "",
-							vertex["external"] ? vertex["external"].as<bool>() : false };
+						FurnitureRoutingVertex v{ vertex["key"].template as<std::string>(), vertex["x"].template as<float>(),
+							vertex["usablePoint"] ? vertex["usablePoint"].template as<std::string>() : "",
+							vertex["external"] ? vertex["external"].template as<bool>() : false };
 						if (v.key.empty() || !vertexKeys.insert(v.key).second || !std::isfinite(v.x)
-							|| v.x < d.minX || v.x > d.maxX || (vertex["y"] && vertex["y"].as<float>() != 0))
+							|| v.x < d.minX || v.x > d.maxX || (vertex["y"] && vertex["y"].template as<float>() != 0))
 							throw SerializationException("Invalid Furniture routing vertex");
 						if (!v.usablePoint.empty())
 						{
@@ -111,8 +99,8 @@ namespace core
 					std::set<std::pair<std::string, std::string>> connections;
 					for (auto edge : edges)
 					{
-						FurnitureRoutingEdge e{ edge["from"].as<std::string>(), edge["to"].as<std::string>(), {} };
-						if (edge["depthOffset"]) e.depthOffset = edge["depthOffset"].as<int>();
+						FurnitureRoutingEdge e{ edge["from"].template as<std::string>(), edge["to"].template as<std::string>(), {} };
+						if (edge["depthOffset"]) e.depthOffset = edge["depthOffset"].template as<int>();
 						if (!vertexKeys.contains(e.from) || !vertexKeys.contains(e.to) || e.from == e.to
 							|| !connections.emplace(std::min(e.from, e.to), std::max(e.from, e.to)).second)
 							throw SerializationException("Invalid or duplicate Furniture routing edge");
@@ -121,15 +109,67 @@ namespace core
 				}
 				if (d.key.empty() || !Marker::nameIsValid(d.label, &diagnostic))
 					throw SerializationException("Invalid Furniture definition key or label");
-				if (!result->mDefinitions.emplace(d.key, d).second)
+				if (!definitionsOut.emplace(d.key, d).second)
 					throw SerializationException("Duplicate Furniture definition key: " + d.key);
 			}
+		}
+	}
+
+	FurnitureDefinition const* FurnitureCatalogue::definition(std::string const& key) const
+	{
+		auto found = mDefinitions.find(key);
+		return found == mDefinitions.end() ? nullptr : &found->second;
+	}
+
+	std::shared_ptr<const FurnitureCatalogue> FurnitureCatalogue::readFile(std::filesystem::path const& path)
+	{
+		try
+		{
+			if (!std::filesystem::is_regular_file(path))
+				throw SerializationException("Missing Furniture catalogue: " + path.string());
+			if (!filenameIsValid(path.filename().string()))
+				throw SerializationException("Furniture catalogue must end with .furniture.lua");
+			if (path.filename().string().ends_with(".furniture.lua"))
+			{
+				auto result = std::make_shared<FurnitureCatalogue>();
+				std::ifstream file(path, std::ios::binary);
+				if (!file) throw SerializationException("Cannot read Furniture catalogue");
+				char buffer[4096];
+				while (file.read(buffer, sizeof(buffer)) || file.gcount())
+				{
+					result->mLuaSource.append(buffer, static_cast<size_t>(file.gcount()));
+					if (result->mLuaSource.size() > 256 * 1024) throw SerializationException("Furniture source exceeds budget");
+				}
+				if (file.bad()) throw SerializationException("Cannot read Furniture catalogue");
+				auto root = script::readFurnitureLua(result->mLuaSource);
+				script::validateFurnitureLua(root);
+				result->mUuid = root["uuid"].as<std::string>();
+				if (!AgentTagRegistry::uuidIsValid(result->mUuid)) throw SerializationException("Invalid Furniture catalogue UUID");
+				readDefinitions(root, result->mDefinitions);
+				for (auto const& entry : root["definitions"])
+					result->mDefinitions.at(entry["key"].as<std::string>()).hasUse = static_cast<bool>(entry["use"]);
+				return result;
+			}
+			// Temporary integration-branch scaffolding. Removed by the migration slice.
+			auto root = YAML::LoadFile(path.string())["furnitureCatalogue"];
+			if (!root || root["version"].as<unsigned>() != 1)
+				throw SerializationException("Unsupported Furniture catalogue version");
+			auto result = std::make_shared<FurnitureCatalogue>();
+			result->mUuid = root["uuid"].as<std::string>();
+			if (!AgentTagRegistry::uuidIsValid(result->mUuid))
+				throw SerializationException("Invalid Furniture catalogue UUID");
+			readDefinitions(root, result->mDefinitions);
 			return result;
 		}
 		catch (std::exception const& error)
 		{
 			throw SerializationException("Could not load Furniture catalogue " + path.string() + ": " + error.what());
 		}
+	}
+
+	bool FurnitureCatalogue::filenameIsValid(std::string const& filename)
+	{
+		return !filename.empty() && (filename.ends_with(".furniture.lua") || filename.ends_with(".furniture.yaml"));
 	}
 
 	std::shared_ptr<const FurnitureCatalogue> FurnitureCatalogue::load(std::filesystem::path const& path)

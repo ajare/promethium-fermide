@@ -1527,8 +1527,8 @@ namespace core
 			auto expectedUuid = serializer.readString("expectedUuid");
 			serializer.endMap();
 			filesystem::path path(furnitureFilename);
-			if (furnitureFilename.empty() || path.has_parent_path() || !furnitureFilename.ends_with(".furniture.yaml"))
-				throw SerializationException("Furniture catalogue reference must be a .furniture.yaml basename");
+			if (furnitureFilename.empty() || path.has_parent_path() || !FurnitureCatalogue::filenameIsValid(furnitureFilename))
+				throw SerializationException("Furniture catalogue reference must be a .furniture.lua basename");
 			if (!workData.documentDirectory.empty())
 				furnitureCatalogue = FurnitureCatalogue::load(workData.documentDirectory / path);
 			else furnitureCatalogue = workData.furnitureCatalogue ? workData.furnitureCatalogue : mFurnitureCatalogue;

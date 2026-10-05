@@ -2709,7 +2709,7 @@ namespace
 	optional<string> chooseFurnitureCataloguePath()
 	{
 		nfdu8char_t* selectedPathRaw{ nullptr };
-		nfdu8filteritem_t const filters[] = { { "Furniture catalogue", "furniture.yaml" } };
+		nfdu8filteritem_t const filters[] = { { "Furniture catalogue", "furniture.lua" } };
 		auto const directory = filesystem::path(gWorldFilepath).parent_path().string();
 		auto const result = NFD_OpenDialogU8(&selectedPathRaw, filters, 1,
 			directory.empty() ? nullptr : directory.c_str());
