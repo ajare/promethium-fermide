@@ -354,8 +354,8 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		{
 			core::World world("Atomic effects", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
-			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
-				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			world.attachFurnitureCatalogue("sit.furniture.lua", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.lua")));
 			require(world.placeFurniture(room, "chair", 3, 0, "Chair") != 0, "Effects Furniture refused");
 			world.finishBuild();
 			auto marker = world.furniture()[0].destinations[0].marker;
@@ -402,8 +402,8 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		{
 			core::World world("Competition", 10, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 10, 1);
-			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
-				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			world.attachFurnitureCatalogue("sit.furniture.lua", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.lua")));
 			require(world.placeFurniture(room, "chair", 3, 0, "First chair")
 				&& world.placeFurniture(room, "chair", 6, 0, "Second chair"), "Competition placement refused");
 			world.finishBuild();
@@ -692,6 +692,60 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		}
 	}
 
+	void furnitureUseAtomicity(smoke::Context const& context)
+	{
+		// Independent usable points must also work when both claims happen together.
+		auto fixture = context.fixture("src/headless/smoke/fixtures/use.furniture.lua");
+		for (unsigned repeat = 0; repeat < 2; ++repeat)
+		{
+			auto world = useFixture(fixture);
+			auto left = world->furniture()[1].destinations[0].marker;
+			auto right = world->furniture()[1].destinations[1].marker;
+			auto firstAgent = core::AgentId{1}, secondAgent = core::AgentId{2};
+			require(world->moveAgentToMarker(firstAgent, left, core::UseFurnitureAction).accepted()
+				&& world->moveAgentToMarker(secondAgent, right, core::UseFurnitureAction).accepted()
+				&& world->resumeSimulation() && world->advanceTicks(1800), "Concurrent independent use failed");
+			require(world->usablePointOccupant(left) == firstAgent && world->usablePointOccupant(right) == secondAgent
+				&& world->lookupAgent(firstAgent).entity->getPose() == core::Pose::Sitting
+				&& world->lookupAgent(secondAgent).entity->getPose() == core::Pose::Sitting,
+				"Concurrent use merged independent seats");
+			require(runAction(*world, firstAgent, left, std::string(core::IdleAction)).type == core::SimulationEventType::DestinationReached
+				&& !world->usablePointOccupant(left) && world->usablePointOccupant(right) == secondAgent,
+				"Concurrent-seat replacement released another Agent's claim");
+		}
+		// A failed Furniture use must roll back Pose, claim, logs and active lifecycle,
+		// not only the effects of an ordinary custom Action.
+		std::ifstream input(fixture);
+		std::string original((std::istreambuf_iterator<char>(input)), {});
+		for (auto body : {"world.set_pose('sitting'); world.claim(); world.log('use rollback'); error('use broke')",
+			"world.set_pose('sitting'); world.claim(); while true do end"})
+		{
+			auto source = original;
+			auto begin = source.find("  world.set_pose('sitting')");
+			auto end = source.find("\nend", begin);
+			source.replace(begin, end - begin, body);
+			auto path = context.temporaryRoot() / "use-atomicity.furniture.lua";
+			write(path, source);
+			auto world = useFixture(path);
+			auto seat = world->furniture()[0].marker;
+			auto owner = core::AgentId{1};
+			core::consumeLogMessages();
+			auto failed = runAction(*world, owner, seat, std::string(core::UseFurnitureAction));
+			require(failed.type == core::SimulationEventType::ActionFailed
+				&& failed.scriptFailure != core::ScriptExecutionFailure::None
+				&& world->isSimulationPaused() && !world->usablePointOccupant(seat)
+				&& world->lookupAgent(owner).entity->getPose() == core::Pose::Standing,
+				"Failed Furniture use committed partial state or ignored error policy");
+			for (auto const& log : core::consumeLogMessages()) require(log.msg != "use rollback", "Failed use published log");
+			require(runAction(*world, owner, seat, std::string(core::IdleAction)).type == core::SimulationEventType::DestinationReached,
+				"Failed use left an active lifecycle or stranded the seat");
+			for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("finish:"), "Failed use installed a finish callback");
+			// A different Agent can now arrive Standing: there was no leaked claim.
+			require(runAction(*world, core::AgentId{2}, seat, std::string(core::IdleAction)).type == core::SimulationEventType::DestinationReached,
+				"Failed use leaked occupancy to another request");
+		}
+	}
+
 	void deviceEffects(smoke::Context const& context)
 	{
 		for (unsigned scenario = 0; scenario < 8; ++scenario)
@@ -952,5 +1006,6 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/furnitureStructuralEdits", furnitureStructuralEdits});
 	checks.push_back({"markerActions/furnitureFinishFailures", furnitureFinishFailures});
 	checks.push_back({"markerActions/furnitureUseCompetition", furnitureUseCompetition});
+	checks.push_back({"markerActions/furnitureUseAtomicity", furnitureUseAtomicity});
 	checks.push_back({"markerActions/furnitureUseDocuments", furnitureUseDocuments});
 }

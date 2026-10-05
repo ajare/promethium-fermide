@@ -1,3 +1,4 @@
+#include "../support/CatalogueSource.h"
 #include "Checks.h"
 #include "core/World.h"
 #include "core/Agent.h"
@@ -60,20 +61,13 @@ namespace
 			std::filesystem::copy_file(context.fixture("resources/test-worlds/" + filename), package);
 			auto catalogue = core::FurnitureCatalogue::load(package);
 			auto legacy = core::FurnitureCatalogue::readFile(context.fixture(
-				"src/headless/smoke/fixtures/legacy-furniture/" + std::string(name) + ".furniture.yaml"));
+				"src/headless/smoke/fixtures/furniture/" + std::string(name) + ".furniture.lua"));
 			require(catalogue->uuid() == legacy->uuid() && catalogue->definitions().size() == legacy->definitions().size(),
 				"Bundled conversion changed UUID/definition keys");
 			for (auto const& [key, definition] : catalogue->definitions())
 			{
 				auto original = *legacy->definition(key);
-				auto previous = original.usablePoints.empty() ? std::optional<core::UsablePointAction>{} : original.usablePoints.front().action;
-				for (auto& point : original.usablePoints)
-				{
-					// Audit legacy per-point intent before deliberately replacing it. No conflicting bundled uses exist.
-					if (point.action != previous)
-						throw smoke::Failure("Conflicting legacy uses: " + filename + "/" + key + "/" + point.key);
-					point.action.reset();
-				}
+				// Teaching catalogues add use to geometry-only regression seating.
 				original.hasUse = key == "chair" || key == "sofa" || key == "bed";
 				require(original == definition, "Conversion changed artwork, geometry, keys, explicit routes or defaults: " + filename + "/" + key);
 				core::World world("Bundled " + key, 24, 3);
@@ -135,7 +129,7 @@ namespace
 		for (auto name : {"chair", "desk", "furniture", "furniture-test-1", "furniture-integration"})
 		{
 			auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/" + std::string(name) + ".world.yaml"));
-			auto legacy = core::loadWorldDocument(context.fixture("src/headless/smoke/fixtures/legacy-furniture/" + std::string(name) + ".world.yaml"));
+			auto legacy = core::loadWorldDocument(context.fixture("src/headless/smoke/fixtures/furniture/" + std::string(name) + ".world.yaml"));
 			sameInstances(*legacy, *world);
 			for (auto suffix : {"world.yaml", "world"})
 			{
@@ -147,6 +141,14 @@ namespace
 						(std::string(name) == "furniture-test-1" ? core::Pose::Lying : core::Pose::Sitting),
 						"Teaching journey lost explicit Use furniture intent");
 			}
+			legacy->advanceTicks(4000);
+			if (std::string(name) == "furniture" || std::string(name) == "furniture-test-1")
+				require(legacy->lookupAgent(core::AgentId{1}).entity->getPose() ==
+					(std::string(name) == "furniture-test-1" ? core::Pose::Lying : core::Pose::Sitting),
+					"Converted regression World lost explicit use intent");
+			else
+				for (auto const& agent : legacy->getSimulationSnapshot().agents)
+					require(agent.pose == core::Pose::Standing, "Omitted regression Action implicitly used Furniture");
 		}
 	}
 
@@ -290,32 +292,27 @@ namespace
 	void actions(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto source = context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml");
+		auto source = context.fixture("src/headless/smoke/fixtures/sit.furniture.lua");
 		auto catalogue = core::FurnitureCatalogue::readFile(source);
-		auto const& points = catalogue->definition("chair")->usablePoints;
-		require(points[0].action == core::UsablePointAction::Sit && !points[1].action,
-			"Sit or omitted usable-point action parsed incorrectly");
-		auto bundled = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml"));
+		require(catalogue->definition("chair")->hasUse
+			&& catalogue->definition("chair")->usablePoints.size() == 2,
+			"Paired chair callbacks or independent points lost");
+		auto bundled = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/furniture/furniture.furniture.lua"));
 		auto bed = bundled->definition("bed");
 		require(bed && bed->maxX - bed->minX == 2 && bed->maxY - bed->minY == 1
-			&& bed->usablePoints.size() == 1 && bed->usablePoints[0].x == 1.f
-			&& bed->usablePoints[0].action == core::UsablePointAction::Lying,
-			"Bed must span two cells with one central Lying usable point");
-		auto legacy = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
-		require(!legacy->definition("chair")->usablePoints[0].action, "Legacy chair gained an action");
-		for (auto value : {"Stand", "sit", "lying", "Lie", "''", "null", "[]", "{}"})
+			&& bed->usablePoints.size() == 1 && bed->usablePoints[0].x == 1.f && bed->hasUse,
+			"Bed must span two cells with one central usable point and paired callbacks");
+		auto plain = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"));
+		require(!plain->definition("chair")->hasUse, "Geometry-only chair gained use callbacks");
+		for (auto mutation : {"catalogue.definitions[1].use = true", "catalogue.definitions[1].finish_use = nil",
+			"catalogue.definitions[1].usablePoints[1].action = 'Sit'"})
 		{
-			auto yaml = YAML::LoadFile(source.string());
-			yaml["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["action"] = YAML::Load(value);
-			auto file = context.temporaryRoot() / "invalid-action.furniture.yaml";
-			{ std::ofstream out(file); out << yaml; }
+			auto file = context.temporaryRoot() / "invalid-action.furniture.lua";
+			smoke::writeCatalogue(file, smoke::catalogueSource(source) + mutation);
 			bool rejected = false;
 			try { core::FurnitureCatalogue::readFile(file); }
-			catch (core::SerializationException const& error)
-			{
-				rejected = std::string(error.what()).find("usable-point action") != std::string::npos;
-			}
-			require(rejected, "Unknown or malformed action was not explicitly rejected");
+			catch (core::SerializationException const&) { rejected = true; }
+			require(rejected, "Malformed callback pair or retired point action accepted");
 		}
 	}
 
@@ -360,11 +357,11 @@ namespace
 	void chair(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto catalogue = core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"));
 		core::World transitWorld("Unsupported Furniture host", 4, 2);
 		transitWorld.addCorridor(0, 0, 0, 4, 1); transitWorld.addCorridor(0, 1, 0, 4, 1);
 		auto ladder = transitWorld.addLadder(1, 0, 2, {2, false, true});
-		transitWorld.attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
+		transitWorld.attachFurnitureCatalogue("chair.furniture.lua", catalogue);
 		std::string refusal;
 		require(!transitWorld.canPlaceFurniture(ladder.ladder.sector->getIndex(), "chair", 0, 0, "Transit chair", &refusal)
 			&& refusal.find("Room, Corridor or Facade") != std::string::npos, "Transit admitted Furniture");
@@ -373,7 +370,7 @@ namespace
 		auto corridor = world.addCorridor(0, 3, 0, 8, 1);
 		auto facade = world.addFacade("Facade", 0, 0, 8, 8, 1);
 		auto background = world.addBackground(1, 0, 0, 8, 1);
-		world.attachFurnitureCatalogue("chair.furniture.yaml", catalogue);
+		world.attachFurnitureCatalogue("chair.furniture.lua", catalogue);
 		world.addSectorWalkway(room, 1, 2); world.addSectorWalkway(room, 1, 3);
 		world.placeFurniture(room, "chair", 2.25f, 0, "Reading chair");
 		world.placeFurniture(room, "chair", 3.25f, 0, "Adjacent chair");
@@ -504,9 +501,9 @@ namespace
 	void usablePointDefaults(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto cataloguePath = context.temporaryRoot() / "pass-through.furniture.yaml";
+		auto cataloguePath = context.temporaryRoot() / "pass-through.furniture.lua";
 		// Pin the routes/defaults under test; the user-facing demo catalogue is editable.
-		auto source = context.fixture("src/headless/smoke/fixtures/usable-points.furniture.yaml");
+		auto source = context.fixture("src/headless/smoke/fixtures/usable-points.furniture.lua");
 		auto catalogue = core::FurnitureCatalogue::load(source);
 		require(!catalogue->definition("chair")->usablePoints.front().blocksPathing,
 			"Test chair seat must default to non-blocking");
@@ -545,9 +542,9 @@ namespace
 		require(behind, "Blocking the chair seat did not leave the back route available");
 
 		// Omit the new chair default in this private copy to retain compatibility coverage.
-		auto defaultYaml = YAML::LoadFile(source.string());
-		defaultYaml["furnitureCatalogue"]["definitions"][0]["usablePoints"][0].remove("blocksPathing");
-		{ std::ofstream file(cataloguePath); file << defaultYaml; }
+		auto defaultSource = smoke::catalogueSource(source)
+			+ "catalogue.definitions[1].usablePoints[1].blocksPathing = nil\n";
+		smoke::writeCatalogue(cataloguePath, defaultSource);
 		core::World world("Pass-through sofa seats", 8, 2);
 		auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
 		world.attachFurnitureCatalogue(cataloguePath.filename().string(), core::FurnitureCatalogue::load(cataloguePath));
@@ -580,12 +577,12 @@ namespace
 		std::string diagnostic;
 		require(world.setMarkerProperties(seats[0].marker, core::markerPropertyBit(core::MarkerProperty::BlocksPathing), &diagnostic), diagnostic);
 		// A newly added catalogue point must also use its default during reconciliation.
-		auto yaml = YAML::LoadFile(cataloguePath.string());
-		auto sofa = yaml["furnitureCatalogue"]["definitions"][1];
-		sofa["usablePoints"].push_back(YAML::Load("{key: extra, label: Extra, x: 1.625, blocksPathing: false}"));
-		sofa["vertices"].push_back(YAML::Load("{key: extra, x: 1.625, usablePoint: extra}"));
-		sofa["edges"].push_back(YAML::Load("{from: rightSeat, to: extra, depthOffset: -1}"));
-		{ std::ofstream file(cataloguePath); file << yaml; }
+		smoke::writeCatalogue(cataloguePath, defaultSource + R"(
+local sofa = catalogue.definitions[2]
+table.insert(sofa.usablePoints, {key='extra', label='Extra', x=1.625, blocksPathing=false})
+table.insert(sofa.vertices, {key='extra', x=1.625, usablePoint='extra'})
+table.insert(sofa.edges, {from='rightSeat', to='extra', depthOffset=-1})
+)");
 		for (auto extension : {"world.yaml", "world"})
 		{
 			auto filename = context.temporaryRoot() / (std::string("pass-through.") + extension);
@@ -606,8 +603,8 @@ namespace
 		using smoke::require;
 		core::World world("Multi-point layouts", 20, 5);
 		auto room = world.addRoom("Room", 0, 0, 0, 20, 5);
-		world.attachFurnitureCatalogue("layouts.furniture.yaml",
-			core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml")));
+		world.attachFurnitureCatalogue("layouts.furniture.lua",
+			core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/furniture/layouts.furniture.lua")));
 		for (uint32_t x = 7; x < 12; ++x) world.addSectorWalkway(room, 1, x);
 		for (uint32_t x = 4; x < 7; ++x) world.addSectorWalkway(room, 2, x);
 		world.addSectorWalkway(room, 2, 7); world.addSectorWalkway(room, 2, 9);
@@ -639,18 +636,12 @@ namespace
 		refuse("larger", 13.25f, 2.25f, "floor-aligned");
 		world.addSectorMarker(room, 0, 19.5f, "Invalid Right seat");
 		refuse("sofa", 12.5f, 0, "already exists"); // Validate the second point before issuing either identity.
-		auto malformedPath = context.temporaryRoot() / "invalid.furniture.yaml";
-		auto catalogueYaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml").string());
-		for (int variant = 0; variant < 5; ++variant)
+		auto malformedPath = context.temporaryRoot() / "invalid.furniture.lua";
+		auto original = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/layouts.furniture.lua"));
+		for (auto mutation : {"d.usablePoints[2].key = 'left'", "d.usablePoints[2].y = 0.25",
+			"d.tiles[2].x = 1.25", "d.usablePoints[2].label = 'Left seat'", "d.usablePoints[2].x = 0/0"})
 		{
-			auto invalid = YAML::Clone(catalogueYaml);
-			auto definition = invalid["furnitureCatalogue"]["definitions"][0];
-			if (variant == 0) definition["usablePoints"][1]["key"] = "left";
-			if (variant == 1) definition["usablePoints"][1]["y"] = 0.25;
-			if (variant == 2) definition["tiles"][1]["x"] = 1.25;
-			if (variant == 3) definition["usablePoints"][1]["label"] = "Left seat";
-			if (variant == 4) definition["usablePoints"][1]["x"] = ".nan";
-			{ std::ofstream file(malformedPath); file << invalid; }
+			smoke::writeCatalogue(malformedPath, original + "local d = catalogue.definitions[1]\n" + mutation);
 			bool refused = false;
 			try { (void)core::FurnitureCatalogue::load(malformedPath); }
 			catch (std::exception const&) { refused = true; }
@@ -729,27 +720,26 @@ namespace
 		int baselineArrival = 0;
 		for (int variant = 0; variant < 11; ++variant)
 		{
-			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml").string());
-			auto desk = yaml["furnitureCatalogue"]["definitions"][0];
-			auto chair = yaml["furnitureCatalogue"]["definitions"][1];
-			// Isolate the back route: a chair must not acquire it through the front.
-			desk["edges"].remove(5); desk["edges"].remove(3);
-			if (variant == 2) chair["vertices"][0]["external"] = false;
-			if (variant == 4) desk["vertices"][2]["external"] = true;
-			if (variant == 5) chair["vertices"][1]["external"] = true;
-			if (variant == 7) chair["edges"][0]["depthOffset"] = 2;
-			if (variant == 9)
-			{
-				auto other = YAML::Clone(chair); other["key"] = "other";
-				other["edges"][0]["depthOffset"] = -2;
-				yaml["furnitureCatalogue"]["definitions"].push_back(other);
-				auto coincident = YAML::Clone(other); coincident["key"] = "coincident";
-				coincident["edges"][0]["depthOffset"] = -3;
-				yaml["furnitureCatalogue"]["definitions"].push_back(coincident);
-			}
-			if (variant == 10) chair["edges"][0].remove("depthOffset");
-			auto filename = context.temporaryRoot() / ("attachment" + std::to_string(variant) + ".furniture.yaml");
-			{ std::ofstream file(filename); file << yaml; }
+			auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/attachments.furniture.lua"));
+			source += "local desk, chair = catalogue.definitions[1], catalogue.definitions[2]\n"
+				"table.remove(desk.edges, 6); table.remove(desk.edges, 4)\n";
+			if (variant == 2) source += "chair.vertices[1].external = false\n";
+			if (variant == 4) source += "desk.vertices[3].external = true\n";
+			if (variant == 5) source += "chair.vertices[2].external = true\n";
+			if (variant == 7) source += "chair.edges[1].depthOffset = 2\n";
+			if (variant == 9) source += R"(
+local function copy(value)
+  if type(value) ~= 'table' then return value end
+  local result = {}; for k,v in pairs(value) do result[k] = copy(v) end; return result
+end
+local other = copy(chair); other.key = 'other'; other.edges[1].depthOffset = -2
+table.insert(catalogue.definitions, other)
+local coincident = copy(other); coincident.key = 'coincident'; coincident.edges[1].depthOffset = -3
+table.insert(catalogue.definitions, coincident)
+)";
+			if (variant == 10) source += "chair.edges[1].depthOffset = nil\n";
+			auto filename = context.temporaryRoot() / ("attachment" + std::to_string(variant) + ".furniture.lua");
+			smoke::writeCatalogue(filename, source);
 			core::World world("Attached arrangement", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
@@ -841,28 +831,14 @@ namespace
 			for (int variant = 0; variant < 4; ++variant)
 				for (bool reverse : { false, true })
 		{
-			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/composition.furniture.yaml").string());
-			auto definitions = yaml["furnitureCatalogue"]["definitions"];
-			if (variant == 1)
-				for (auto edge : definitions[1]["edges"])
-					if (edge["depthOffset"]) edge["depthOffset"] = 1;
-			if (variant == 2)
-			{
-				definitions[1]["vertices"][0]["external"] = false;
-				definitions[1]["vertices"][3]["external"] = false;
-			}
-			if (variant == 3)
-			{
-				definitions[0]["vertices"].push_back(YAML::Load("{key: gap, x: 2.5}"));
-				definitions[0]["edges"][2]["from"] = "gap";
-			}
-			if (reverse)
-			{
-				auto first = YAML::Clone(definitions[0]);
-				definitions[0] = YAML::Clone(definitions[1]); definitions[1] = first;
-			}
-			auto filename = context.temporaryRoot() / "composition.furniture.yaml";
-			{ std::ofstream file(filename); file << yaml; }
+			auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/composition.furniture.lua"));
+			source += "local definitions = catalogue.definitions\n";
+			if (variant == 1) source += "for _,edge in ipairs(definitions[2].edges) do if edge.depthOffset then edge.depthOffset = 1 end end\n";
+			if (variant == 2) source += "definitions[2].vertices[1].external = false; definitions[2].vertices[4].external = false\n";
+			if (variant == 3) source += "table.insert(definitions[1].vertices, {key='gap', x=2.5}); definitions[1].edges[3].from = 'gap'\n";
+			if (reverse) source += "definitions[1], definitions[2] = definitions[2], definitions[1]\n";
+			auto filename = context.temporaryRoot() / "composition.furniture.lua";
+			smoke::writeCatalogue(filename, source);
 			core::World world("Composed replacements", 16, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 16, 1);
 			world.attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
@@ -979,14 +955,14 @@ namespace
 	void deskRoutes(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto fixture = context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml");
+		auto fixture = context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua");
 		auto catalogue = core::FurnitureCatalogue::load(fixture);
 		int baselineArrival = 0;
 		for (int depth : { 0, 2, 5 })
 		{
 			core::World world("Isolated desk", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
-			world.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+			world.attachFurnitureCatalogue("desk.furniture.lua", catalogue);
 			auto id = world.placeFurniture(room, "desk", 2.125f, 0, "Desk", depth);
 			uint32_t leftId = 0, rightId = 0;
 			world.addSectorMarker(room, 0, 0.5f, "Entrance", &leftId);
@@ -1065,18 +1041,16 @@ namespace
 		// Force each side independently, and also exercise signed relative offsets.
 		for (int variant = 0; variant < 4; ++variant)
 		{
-			auto yaml = YAML::LoadFile(fixture.string());
-			auto definition = yaml["furnitureCatalogue"]["definitions"][0];
-			definition["edges"].remove(variant == 0 ? 1 : 4);
-			if (variant == 2) definition["edges"][1]["depthOffset"] = -3;
-			if (variant == 3)
-			{
-				definition["sideRoutes"] = false;
-				definition["vertices"] = YAML::Load("[{key: left, x: 0, external: true}, {key: seat, x: 0.75, usablePoint: seat}]");
-				definition["edges"] = YAML::Load("[{from: left, to: seat, depthOffset: 0}]");
-			}
-			auto filename = context.temporaryRoot() / ("side" + std::to_string(variant) + ".furniture.yaml");
-			{ std::ofstream file(filename); file << yaml; }
+			auto source = smoke::catalogueSource(fixture) + "local d = catalogue.definitions[1]\n";
+			source += "table.remove(d.edges, " + std::to_string(variant == 0 ? 2 : 5) + ")\n";
+			if (variant == 2) source += "d.edges[2].depthOffset = -3\n";
+			if (variant == 3) source += R"(
+d.sideRoutes = false
+d.vertices = {{key='left', x=0, external=true}, {key='seat', x=0.75, usablePoint='seat'}}
+d.edges = {{from='left', to='seat', depthOffset=0}}
+)";
+			auto filename = context.temporaryRoot() / ("side" + std::to_string(variant) + ".furniture.lua");
+			smoke::writeCatalogue(filename, source);
 			core::World world("One side", 8, 2); auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
 			std::string diagnostic;
@@ -1111,7 +1085,7 @@ namespace
 			core::World world("Stranded row object", 8, 2);
 			auto room = world.addRoom("Front", 0, 0, 0, 8, 1);
 			world.addRoom("Back", 1, 0, 0, 8, 1);
-			world.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+			world.attachFurnitureCatalogue("desk.furniture.lua", catalogue);
 			auto object = [&] {
 				if (variant < 2) world.addSectorMarker(room, 0, 3, "Stranded Marker");
 				else if (variant < 4) world.addSectorDoor(0, 0, 3);
@@ -1131,7 +1105,7 @@ namespace
 		{
 			core::World world("Wall attachment", width, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, width, 1);
-			world.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+			world.attachFurnitureCatalogue("desk.furniture.lua", catalogue);
 			auto id = world.placeFurniture(room, "desk", 0, 0, "Wall desk", 2);
 			uint32_t marker = 0;
 			world.addSectorMarker(room, 0, width == 2 ? 1.0f : 2.0f, "Room Marker", &marker);
@@ -1163,7 +1137,7 @@ namespace
 		auto frontRoom = protectedWorld.addRoom("Approach", 0, 0, 0, 8, 1);
 		auto backRoom = protectedWorld.addRoom("Protected", 1, 0, 0, 8, 1);
 		protectedWorld.addSectorDoor(0, 0, 0);
-		protectedWorld.attachFurnitureCatalogue("desk.furniture.yaml", catalogue);
+		protectedWorld.attachFurnitureCatalogue("desk.furniture.lua", catalogue);
 		protectedWorld.placeFurniture(backRoom, "desk", 2, 0, "Desk", 2);
 		uint32_t destinationId = 0; protectedWorld.addSectorMarker(backRoom, 0, 6.5f, "Destination", &destinationId);
 		protectedWorld.finishBuild(); protectedWorld.pauseSimulation();

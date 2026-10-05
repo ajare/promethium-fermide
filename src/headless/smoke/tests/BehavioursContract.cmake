@@ -57,6 +57,7 @@ set(core_names
     scriptedActionOutcomes
     scriptedActionScriptFailure
     scriptedActionCancellations
+    furnitureUseOutcomes
     bundledMovementWorkflows
     planningIntentReplacement
     routeLossAndTopologyLifecycleV1

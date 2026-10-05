@@ -1,3 +1,4 @@
+#include "../support/CatalogueSource.h"
 #include "WorldChecks.h"
 #include "core/World.h"
 #include "core/Agent.h"
@@ -16,12 +17,12 @@ namespace persistence
 		using smoke::require;
 		auto root = context.temporaryRoot() / "demonstration";
 		std::filesystem::create_directory(root);
-		auto cataloguePath = root / "furniture-integration.furniture.yaml";
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture-integration.furniture.yaml"), cataloguePath);
+		auto cataloguePath = root / "furniture-integration.furniture.lua";
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/furniture-integration.furniture.lua"), cataloguePath);
 		// Fresh authoring must not allocate any Marker for a circulation-only desk.
 		core::World circulation("Desk without destinations", 8, 2);
 		auto room = circulation.addRoom("Room", 0, 0, 0, 8, 1);
-		circulation.attachFurnitureCatalogue("furniture-integration.furniture.yaml", core::FurnitureCatalogue::load(cataloguePath));
+		circulation.attachFurnitureCatalogue("furniture-integration.furniture.lua", core::FurnitureCatalogue::load(cataloguePath));
 		auto deskId = circulation.placeFurniture(room, "desk", 2, 0, "Desk", 2);
 		circulation.finishBuild(); circulation.pauseSimulation();
 		require(circulation.getMarkerIds().empty() && circulation.furniture().front().destinations.empty()
@@ -36,7 +37,7 @@ namespace persistence
 				"Desk save/reopen invented destinations");
 		}
 		auto source = root / "demo.world.yaml";
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture-integration.world.yaml"), source);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/furniture-integration.world.yaml"), source);
 		auto world = core::loadWorldDocument(source);
 		require(world->furniture().size() == 6, "Required complete Furniture demonstration is missing instances");
 		auto desk = world->furniture()[1];
@@ -72,15 +73,15 @@ namespace persistence
 		// formats must resolve current geometry and preserve independent names/IDs.
 		auto portable = context.temporaryRoot() / "portable-demonstration";
 		std::filesystem::rename(root, portable);
-		auto catalogue = YAML::LoadFile((portable / "furniture-integration.furniture.yaml").string());
-		auto definitions = catalogue["furnitureCatalogue"]["definitions"];
-		definitions[1]["label"] = "Revised sofa";
-		definitions[1]["usablePoints"][1]["label"] = "Revised right seat";
-		definitions[1]["usablePoints"][1]["x"] = 1.625f;
-		for (auto vertex : definitions[1]["vertices"])
-			if (vertex["key"].as<std::string>() == "rightSeat") vertex["x"] = 1.625f;
-		definitions[0]["usablePoints"].push_back(YAML::Load("{key: extra, label: Extra, x: 0.75}"));
-		{ std::ofstream file(portable / "furniture-integration.furniture.yaml"); file << catalogue; }
+		auto catalogue = smoke::catalogueSource(portable / "furniture-integration.furniture.lua");
+		smoke::writeCatalogue(portable / "furniture-integration.furniture.lua", catalogue + R"(
+local definitions = catalogue.definitions
+definitions[2].label = 'Revised sofa'
+definitions[2].usablePoints[2].label = 'Revised right seat'
+definitions[2].usablePoints[2].x = 1.625
+for _,vertex in ipairs(definitions[2].vertices) do if vertex.key == 'rightSeat' then vertex.x = 1.625 end end
+table.insert(definitions[1].usablePoints, {key='extra', label='Extra', x=0.75})
+)");
 		for (auto extension : {"world.yaml", "world"})
 		{
 			auto loaded = core::loadWorldDocument(portable / (std::string("authored.") + extension));
@@ -131,11 +132,11 @@ namespace persistence
 		// coordinates. Replay preserves authored origin/depth independently of
 		// the underway physical position and of the moved destination.
 		{
-			auto path = root / "movement.furniture.yaml";
-			std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml"), path);
+			auto path = root / "movement.furniture.lua";
+			std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"), path);
 			core::World movement("Movement documents", 14, 2);
 			auto sector = movement.addRoom("Room", 0, 0, 0, 14, 1);
-			movement.attachFurnitureCatalogue("movement.furniture.yaml", core::FurnitureCatalogue::load(path));
+			movement.attachFurnitureCatalogue("movement.furniture.lua", core::FurnitureCatalogue::load(path));
 			auto first = movement.placeFurniture(sector, "desk", 2, 0, "First", 2);
 			auto second = movement.placeFurniture(sector, "desk", 2, 0, "Second", 6);
 			auto target = movement.furniture().back().marker;
@@ -197,12 +198,11 @@ namespace persistence
 				for (auto extension : { "world.yaml", "world" })
 					movement.saveTo((root / (std::string(active ? "active." : "inactive.") + extension)).string());
 			}
-			auto changed = YAML::LoadFile(path.string());
-			auto definition = changed["furnitureCatalogue"]["definitions"][0];
-			definition["usablePoints"][0]["key"] = "stool";
-			for (auto vertex : definition["vertices"])
-				if (vertex["usablePoint"]) vertex["usablePoint"] = "stool";
-			{ std::ofstream file(path); file << changed; }
+			smoke::writeCatalogue(path, smoke::catalogueSource(path) + R"(
+local definition = catalogue.definitions[1]
+definition.usablePoints[1].key = 'stool'
+for _,vertex in ipairs(definition.vertices) do if vertex.usablePoint then vertex.usablePoint = 'stool' end end
+)");
 			for (auto prefix : { "active.", "inactive." })
 				for (auto extension : { "world.yaml", "world" })
 				{
@@ -219,11 +219,11 @@ namespace persistence
 					require(false, "Removed saved Path destination did not fail loading");
 				}
 		}
-		auto cataloguePath = root / "chair.furniture.yaml";
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), cataloguePath);
+		auto cataloguePath = root / "chair.furniture.lua";
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"), cataloguePath);
 		auto world = std::make_shared<core::World>("Chair document", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
-		world->attachFurnitureCatalogue("chair.furniture.yaml", core::FurnitureCatalogue::load(cataloguePath));
+		world->attachFurnitureCatalogue("chair.furniture.lua", core::FurnitureCatalogue::load(cataloguePath));
 		auto id = world->placeFurniture(room, "chair", 1.25f, 0, "Desk chair");
 		auto marker = world->furniture().front().marker;
 		world->renameMarker(marker, "Workstation"); world->finishBuild(); world->pauseSimulation();
@@ -240,7 +240,7 @@ namespace persistence
 				&& loaded->furniture().front().x == 2.25f && loaded->furniture().front().name == "Renamed desk chair"
 				&& loaded->furniture().front().marker == marker
 				&& loaded->lookupMarker(marker)->getName() == "Workstation"
-				&& loaded->furnitureCatalogueFilename() == "chair.furniture.yaml", "World format lost Furniture reference or identities");
+				&& loaded->furnitureCatalogueFilename() == "chair.furniture.lua", "World format lost Furniture reference or identities");
 			loaded->resetSimulation();
 			require(loaded->furniture().front().marker == marker, "Reset lost chair Marker identity");
 			loaded->pauseSimulation();
@@ -266,31 +266,34 @@ namespace persistence
 			catch (std::exception const& error) { require(std::string(error.what()).find(fragment) != std::string::npos, error.what()); return; }
 			require(false, "Incompatible Furniture dependency was silently accepted");
 		};
-		auto catalogue = YAML::LoadFile(cataloguePath.string());
-		auto saveCatalogue = [&] { std::ofstream file(cataloguePath); file << catalogue; };
-		catalogue["furnitureCatalogue"]["definitions"][0]["label"] = "Renamed chair";
-		catalogue["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["label"] = "Renamed seat";
+		auto catalogue = smoke::catalogueSource(cataloguePath);
+		auto saveCatalogue = [&] { smoke::writeCatalogue(cataloguePath, catalogue); };
+		catalogue += "catalogue.definitions[1].label = 'Renamed chair'\n"
+			"catalogue.definitions[1].usablePoints[1].label = 'Renamed seat'\n";
 		saveCatalogue();
 		auto revised = core::loadWorldDocument(root / "chair.world.yaml");
 		require(revised->furnitureCatalogue()->definition("chair")->label == "Renamed chair"
 			&& revised->lookupMarker(marker)->getName() == "Workstation", "Reload used an embedded snapshot or renamed an owned Marker");
-		catalogue["furnitureCatalogue"]["uuid"] = "e78a6c36-7902-4abc-9c90-1876058b32f4"; saveCatalogue(); expectFailure("UUID mismatch");
-		catalogue["furnitureCatalogue"]["uuid"] = world->furnitureCatalogue()->uuid();
-		catalogue["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["key"] = "removed-seat"; saveCatalogue();
+		catalogue += "catalogue.uuid = 'e78a6c36-7902-4abc-9c90-1876058b32f4'\n";
+		saveCatalogue(); expectFailure("UUID mismatch");
+		catalogue += "catalogue.uuid = '" + world->furnitureCatalogue()->uuid() + "'\n"
+			"catalogue.definitions[1].usablePoints[1].key = 'removed-seat'\n";
+		saveCatalogue();
 		auto replacedPoint = core::loadWorldDocument(root / "chair.world.yaml");
 		require(!replacedPoint->lookupMarker(marker) && replacedPoint->furniture().front().marker.value > marker.value,
 			"Removed point silently retargeted its identity to a new key");
-		catalogue["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["key"] = "seat";
-		catalogue["furnitureCatalogue"]["definitions"][0]["key"] = "removed-chair"; saveCatalogue(); expectFailure("Missing Furniture definition");
+		catalogue += "catalogue.definitions[1].usablePoints[1].key = 'seat'\n"
+			"catalogue.definitions[1].key = 'removed-chair'\n";
+		saveCatalogue(); expectFailure("Missing Furniture definition");
 		std::filesystem::remove(cataloguePath); expectFailure("Missing Furniture catalogue");
 		core::World legacy("No Furniture", 2, 1); legacy.addCorridor(0, 0, 2); legacy.finishBuild();
 		legacy.saveTo((root / "legacy.world").string());
 		require(!core::loadWorldDocument(root / "legacy.world")->furnitureCatalogue(), "Unfurnished World acquired a catalogue dependency");
 		// Multi-tile layouts use the same document contract, preserving every point.
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml"), root / "layouts.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/layouts.furniture.lua"), root / "layouts.furniture.lua");
 		auto layouts = std::make_shared<core::World>("Layout documents", 16, 4);
 		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 16, 4);
-		layouts->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(root / "layouts.furniture.yaml"));
+		layouts->attachFurnitureCatalogue("layouts.furniture.lua", core::FurnitureCatalogue::load(root / "layouts.furniture.lua"));
 		auto sofa = layouts->placeFurniture(layoutRoom, "sofa", 1.125f, 0, "Sofa");
 		auto larger = layouts->placeFurniture(layoutRoom, "larger", 8.25f, 0, "Sparse");
 		auto sofaPoints = layouts->furniture()[0].destinations;
@@ -338,29 +341,24 @@ namespace persistence
 			require(loaded->furniture().size() == 1 && loaded->furniture()[0].destinations.size() == 3, "Deletion/replay damaged unrelated layout slots");
 		}
 		// Definition/point order is not identity; current fractional offsets are resolved by key.
-		auto layoutCataloguePath = root / "layouts.furniture.yaml";
-		auto layoutCatalogue = YAML::LoadFile(layoutCataloguePath.string());
-		auto definitions = layoutCatalogue["furnitureCatalogue"]["definitions"];
-		auto firstPoint = YAML::Clone(definitions[0]["usablePoints"][0]);
-		definitions[0]["usablePoints"][0] = YAML::Clone(definitions[0]["usablePoints"][1]);
-		definitions[0]["usablePoints"][1] = firstPoint;
-		definitions[0]["usablePoints"][1]["label"] = "Revised left seat";
-		{ std::ofstream file(layoutCataloguePath); file << layoutCatalogue; }
+		auto layoutCataloguePath = root / "layouts.furniture.lua";
+		auto originalLayouts = smoke::catalogueSource(layoutCataloguePath);
+		auto writeLayouts = [&](std::string const& value) { smoke::writeCatalogue(layoutCataloguePath, value); };
+		writeLayouts(originalLayouts + R"(
+local points = catalogue.definitions[1].usablePoints
+points[1], points[2] = points[2], points[1]
+points[2].label = 'Revised left seat'
+)");
 		auto reordered = core::loadWorldDocument(root / "layouts.world.yaml");
 		require(reordered->furniture()[0].destinations[0].marker == sofaPoints[0].marker
 			&& reordered->lookupMarker(sofaPoints[1].marker)->getName() == "Right destination", "Catalogue ordering retargeted point identities");
-		// Compatible edits reconcile by key in both formats. New points allocate
-		// beyond even deleted standalone identities and use valid unique names.
-		auto originalLayouts = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml").string());
-		auto writeLayouts = [&](YAML::Node const& value) { std::ofstream file(layoutCataloguePath); file << value; };
-		auto changed = YAML::Clone(originalLayouts);
-		auto added = YAML::Load("{key: new, label: Right destination, x: 1, y: 0}");
-		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"].push_back(added);
-		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["x"] = 0.5f;
-		// Also reorder definitions, independently of usable-point order.
-		auto sofaDefinition = YAML::Clone(changed["furnitureCatalogue"]["definitions"][0]);
-		changed["furnitureCatalogue"]["definitions"][0] = YAML::Clone(changed["furnitureCatalogue"]["definitions"][1]);
-		changed["furnitureCatalogue"]["definitions"][1] = sofaDefinition;
+		// Reconcile new points and reordered definitions by stable keys, not ordinal.
+		auto changed = originalLayouts + R"(
+local definitions = catalogue.definitions
+table.insert(definitions[1].usablePoints, {key='new', label='Right destination', x=1, y=0})
+definitions[1].usablePoints[1].x = 0.5
+definitions[1], definitions[2] = definitions[2], definitions[1]
+)";
 		writeLayouts(changed);
 		core::MarkerId newPoint;
 		for (auto filename : { "layouts.world.yaml", "layouts.world" })
@@ -402,7 +400,7 @@ namespace persistence
 			require(std::string(error.what()).find("identity space is exhausted") != std::string::npos, error.what());
 		}
 		// Remove a point and add another in the same edit: never reuse by ordinal.
-		changed["furnitureCatalogue"]["definitions"][1]["usablePoints"].remove(0);
+		changed += "table.remove(catalogue.definitions[2].usablePoints, 1)\n";
 		writeLayouts(changed);
 		for (auto filename : { "layouts.world.yaml", "layouts.world" })
 		{
@@ -411,7 +409,7 @@ namespace persistence
 				&& loaded->furniture()[0].destinations[0].marker == sofaPoints[1].marker,
 				"Unreferenced removal silently retargeted a destination");
 		}
-		auto failLayouts = [&](YAML::Node const& value, std::string const& fragment) {
+		auto failLayouts = [&](std::string const& value, std::string const& fragment) {
 			writeLayouts(value);
 			for (auto filename : { "layouts.world.yaml", "layouts.world" })
 			{
@@ -420,16 +418,11 @@ namespace persistence
 				require(false, "Incompatible current layout was accepted");
 			}
 		};
-		auto invalidLayout = YAML::Clone(originalLayouts);
-		invalidLayout["furnitureCatalogue"]["definitions"][0]["tiles"].push_back(
-			YAML::Load("{x: 12, y: 0, imageSet: ObjectAtlas, image: chair}"));
+		auto invalidLayout = originalLayouts + "table.insert(catalogue.definitions[1].tiles, {x=12, y=0, imageSet='ObjectAtlas', image='chair'})\n";
 		failLayouts(invalidLayout, "inside one Location");
-		invalidLayout = YAML::Clone(originalLayouts);
-		invalidLayout["furnitureCatalogue"]["definitions"][0]["tiles"].push_back(
-			YAML::Load("{x: 7, y: 0, imageSet: ObjectAtlas, image: chair}"));
+		invalidLayout = originalLayouts + "table.insert(catalogue.definitions[1].tiles, {x=7, y=0, imageSet='ObjectAtlas', image='chair'})\n";
 		failLayouts(invalidLayout, "overlaps");
-		invalidLayout = YAML::Clone(originalLayouts);
-		invalidLayout["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["x"] = 99;
+		invalidLayout = originalLayouts + "catalogue.definitions[1].usablePoints[1].x = 99\n";
 		failLayouts(invalidLayout, "usable");
 		writeLayouts(originalLayouts);
 		// A width expansion across a Walkway gap is rejected, not omitted or moved.
@@ -437,13 +430,11 @@ namespace persistence
 		auto elevatedRoom = elevated->addRoom("Room", 0, 0, 0, 8, 3);
 		elevated->addSectorWalkway(elevatedRoom, 1, 1);
 		elevated->addSectorWalkway(elevatedRoom, 1, 2);
-		elevated->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(layoutCataloguePath));
+		elevated->attachFurnitureCatalogue("layouts.furniture.lua", core::FurnitureCatalogue::load(layoutCataloguePath));
 		elevated->placeFurniture(elevatedRoom, "sofa", 1, 1, "Elevated sofa");
 		elevated->finishBuild();
 		for (auto filename : { "elevated.world.yaml", "elevated.world" }) elevated->saveTo((root / filename).string());
-		invalidLayout = YAML::Clone(originalLayouts);
-		invalidLayout["furnitureCatalogue"]["definitions"][0]["tiles"].push_back(
-			YAML::Load("{x: 2, y: 0, imageSet: ObjectAtlas, image: chair}"));
+		invalidLayout = originalLayouts + "table.insert(catalogue.definitions[1].tiles, {x=2, y=0, imageSet='ObjectAtlas', image='chair'})\n";
 		writeLayouts(invalidLayout);
 		for (auto filename : { "elevated.world.yaml", "elevated.world" })
 		{
@@ -465,8 +456,7 @@ namespace persistence
 		require(layouts->setAgentBehaviourAssignment(behaviourVisitor, core::AgentBehaviourId{1}, 1,
 			{{"first_marker", sofaPoints[0].marker}, {"second_marker", sofaPoints[1].marker}}, &diagnostic), diagnostic);
 		for (auto filename : { "referenced.world.yaml", "referenced.world" }) layouts->saveTo((root / filename).string());
-		changed = YAML::Clone(originalLayouts);
-		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"][0]["label"] = "New label";
+		changed = originalLayouts + "catalogue.definitions[1].usablePoints[1].label = 'New label'\n";
 		writeLayouts(changed);
 		for (auto filename : { "referenced.world.yaml", "referenced.world" })
 		{
@@ -475,7 +465,7 @@ namespace persistence
 			require(assignment && *core::agentBehaviourConfigurationGetIf<core::MarkerId>(&assignment->configuration.at("first_marker")) == sofaPoints[0].marker,
 				"Label change lost a behaviour reference");
 		}
-		changed["furnitureCatalogue"]["definitions"][0]["usablePoints"].remove(0);
+		changed += "table.remove(catalogue.definitions[1].usablePoints, 1)\n";
 		writeLayouts(changed);
 		for (auto filename : { "referenced.world.yaml", "referenced.world" })
 		{
@@ -499,10 +489,10 @@ namespace persistence
 		require(std::abs(deskDemo->getSimulationSnapshot().agents.front().globalPosition.x - 6.5f) < 0.01f,
 			"Demonstration Agent did not traverse the desk");
 		// Both document representations resolve desk edge offsets from the saved instance depth.
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml"), root / "desk.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"), root / "desk.furniture.lua");
 		auto desk = std::make_shared<core::World>("Desk documents", 8, 2);
 		auto deskRoom = desk->addRoom("Room", 0, 0, 0, 8, 1);
-		desk->attachFurnitureCatalogue("desk.furniture.yaml", core::FurnitureCatalogue::load(root / "desk.furniture.yaml"));
+		desk->attachFurnitureCatalogue("desk.furniture.lua", core::FurnitureCatalogue::load(root / "desk.furniture.lua"));
 		auto deskId = desk->placeFurniture(deskRoom, "desk", 2.125f, 0, "Desk", 2);
 		auto deskSeat = desk->furniture().front().marker;
 		desk->finishBuild(); desk->pauseSimulation();
@@ -539,15 +529,14 @@ namespace persistence
 		for (auto record : invalidDesk["construction"])
 			if (record["type"].as<std::string>() == "furniture") record["localDepth"] = 4;
 		refuseDesk(invalidDesk, "overlaps");
-		auto revisedDesk = YAML::LoadFile((root / "desk.furniture.yaml").string());
-		revisedDesk["furnitureCatalogue"]["definitions"][0]["edges"][1]["depthOffset"] = -5;
-		{ std::ofstream file(root / "desk.furniture.yaml"); file << revisedDesk; }
+		smoke::writeCatalogue(root / "desk.furniture.lua", smoke::catalogueSource(root / "desk.furniture.lua")
+			+ "catalogue.definitions[1].edges[2].depthOffset = -5\n");
 		refuseDesk(deskYaml, "resolved edge depth");
 		// Attachments are derived from current definitions in both supported formats.
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml"), root / "attachments.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/attachments.furniture.lua"), root / "attachments.furniture.lua");
 		auto arrangement = std::make_shared<core::World>("Attached documents", 8, 2);
 		auto arrangementRoom = arrangement->addRoom("Room", 0, 0, 0, 8, 1);
-		arrangement->attachFurnitureCatalogue("attachments.furniture.yaml", core::FurnitureCatalogue::load(root / "attachments.furniture.yaml"));
+		arrangement->attachFurnitureCatalogue("attachments.furniture.lua", core::FurnitureCatalogue::load(root / "attachments.furniture.lua"));
 		arrangement->placeFurniture(arrangementRoom, "desk", 2.125f, 0, "Desk", 2);
 		arrangement->placeFurniture(arrangementRoom, "chair", 3.125f, 0, "Chair", 1);
 		auto attachedMarker = arrangement->furniture().back().marker;
@@ -584,12 +573,12 @@ namespace persistence
 			}
 		}
 		// Composed replacement coverage is derived, never serialized as graph state.
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/composition.furniture.yaml"), root / "composition.furniture.yaml");
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/composition.furniture.lua"), root / "composition.furniture.lua");
 		for (float x : {3.f, 5.f, 6.f})
 		{
 			auto composed = std::make_shared<core::World>("Composed documents", 12, 2);
 			auto host = composed->addRoom("Room", 0, 0, 0, 12, 1);
-			composed->attachFurnitureCatalogue("composition.furniture.yaml", core::FurnitureCatalogue::load(root / "composition.furniture.yaml"));
+			composed->attachFurnitureCatalogue("composition.furniture.lua", core::FurnitureCatalogue::load(root / "composition.furniture.lua"));
 			composed->placeFurniture(host, "inner", x, 0, "Inner", 3);
 			composed->placeFurniture(host, "outer", 2, 0, "Outer", 2);
 			composed->addSectorMarker(host, 0, 0.5f, "Entrance");
@@ -624,7 +613,7 @@ namespace persistence
 			}
 		}
 		// Portable references survive moving the complete project directory.
-		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"), cataloguePath);
+		std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"), cataloguePath);
 		auto moved = root / "moved"; std::filesystem::create_directory(moved);
 		std::filesystem::rename(cataloguePath, moved / cataloguePath.filename());
 		for (auto filename : { "chair.world.yaml", "chair.world" })

@@ -2,7 +2,7 @@ version: 50
 nextDumbwaiterId: 1
 nextFurnitureId: 3
 furnitureCatalogue:
-  filename: furniture.furniture.yaml
+  filename: furniture.furniture.lua
   expectedUuid: 7ad3b31e-c85b-43ac-90ba-359359359359
 name: Untitled
 randomSeed: 0
@@ -80,6 +80,7 @@ agents:
     localY: 0
     path:
       destinationMarker: 1
+      action: use-furniture
       destinationSector: 0
       destinationLocalX: 2.5
       destinationLocalY: 0

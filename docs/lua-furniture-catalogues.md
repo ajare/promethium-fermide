@@ -85,10 +85,11 @@ and route admission checks are unchanged.
 
 Old-format loading remains **temporary integration-branch migration scaffolding**.
 Lua files never fall back to YAML parsing. Bundled catalogues are converted in
-#465; paused transactional reload and runtime use are implemented. Frozen legacy
-regression inputs remain under `src/headless/smoke/fixtures/legacy-furniture` until
-the separately scoped fixture-builder and loader-removal slices. This is not a
-promised shipped YAML compatibility path.
+#465; paused transactional reload and runtime use are implemented. Regression inputs and builders were converted in #466 and now live under
+`src/headless/smoke/fixtures/furniture` (native Lua catalogues and YAML Worlds).
+No regression caller uses the old format; production loader removal remains #467.
+This is not a promised shipped YAML compatibility path. See
+[regression conversion](scripted-actions-regression-fixtures.md).
 
 ## Verification
 

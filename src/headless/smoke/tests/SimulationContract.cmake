@@ -177,6 +177,7 @@ set(core_names
     markerActions/furnitureStructuralEdits
     markerActions/furnitureFinishFailures
     markerActions/furnitureUseCompetition
+    markerActions/furnitureUseAtomicity
     markerActions/furnitureUseDocuments
     runScaledWorld
 )

@@ -1,3 +1,4 @@
+#include "../support/CatalogueSource.h"
 #include "Checks.h"
 #include "PausePosition.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -14,15 +15,14 @@ namespace
 	{
 		using smoke::require;
 		auto root = context.temporaryRoot();
-		auto catalogue = root / "desk.furniture.yaml";
-		auto attached = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml").string());
-		attached["furnitureCatalogue"]["definitions"][1]["edges"][0]["depthOffset"] = 2;
-		{ std::ofstream file(catalogue); file << attached; }
+		auto catalogue = root / "desk.furniture.lua";
+		smoke::writeCatalogue(catalogue, smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/attachments.furniture.lua"))
+			+ "catalogue.definitions[2].edges[1].depthOffset = 2\n");
 		for (int repetition = 0; repetition < 2; ++repetition)
 		{
 			core::World world("Topology movement", 14, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 14, 1);
-			world.attachFurnitureCatalogue("desk.furniture.yaml", core::FurnitureCatalogue::load(catalogue));
+			world.attachFurnitureCatalogue("desk.furniture.lua", core::FurnitureCatalogue::load(catalogue));
 			auto desk = world.placeFurniture(room, "desk", 2, 0, "Desk", 2);
 			auto markerId = world.furniture().front().marker;
 			// Coincident front/back cut vertices must not be confused on rebuild.
@@ -156,21 +156,20 @@ namespace
 	{
 		using smoke::require;
 		auto root = context.temporaryRoot();
-		auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
+		auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"));
 		// Include coincident topology-only depth transitions without interaction.
-		auto vertices = yaml["furnitureCatalogue"]["definitions"][0]["vertices"];
-		vertices[2]["x"] = 0;
-		vertices[3]["x"] = 2;
-		auto edges = yaml["furnitureCatalogue"]["definitions"][0]["edges"];
-		edges[0]["depthOffset"] = 1;
-		edges[2]["depthOffset"] = 2;
-		auto cataloguePath = root / "depth.furniture.yaml";
-		{ std::ofstream file(cataloguePath); file << yaml; }
+		source += R"(
+local d = catalogue.definitions[1]
+d.vertices[3].x = 0; d.vertices[4].x = 2
+d.edges[1].depthOffset = 1; d.edges[3].depthOffset = 2
+)";
+		auto cataloguePath = root / "depth.furniture.lua";
+		smoke::writeCatalogue(cataloguePath, source);
 		for (int depth : { 0, 3 })
 		{
 			core::World world("Retained depth", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
-			world.attachFurnitureCatalogue("depth.furniture.yaml", core::FurnitureCatalogue::load(cataloguePath));
+			world.attachFurnitureCatalogue("depth.furniture.lua", core::FurnitureCatalogue::load(cataloguePath));
 			auto furniture = world.placeFurniture(room, "desk", 2, 0, "Desk", depth);
 			uint32_t exitId = 0;
 			world.addSectorMarker(room, 0, 6.5f, "Exit", &exitId);

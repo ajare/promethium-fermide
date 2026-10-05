@@ -8,12 +8,12 @@ namespace
 	void actions(smoke::Context const& context)
 	{
 		using smoke::require;
-		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/sit.furniture.lua"));
 		for (int scenario = 0; scenario < 4; ++scenario)
 		{
 			core::World world("Sit arrival", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
-			world.attachFurnitureCatalogue("sit.furniture.yaml", catalogue);
+			world.attachFurnitureCatalogue("sit.furniture.lua", catalogue);
 			require(world.placeFurniture(room, "chair", 3, 0, "Chair") != 0, "Could not place test chair");
 			world.addSectorMarker(room, 0, 6.5f, "Exit");
 			world.finishBuild();
@@ -23,7 +23,7 @@ namespace
 			auto destination = scenario < 2 ? seat : scenario == 2 ? plain : exit;
 			auto id = world.createAgent("Walker", room, 0, scenario == 1 ? 7.5f : 0.5f);
 			auto* agent = world.lookupAgent(id).entity;
-			require(world.moveAgentToMarker(id, destination).accepted(), "Arrival move refused");
+			require(world.moveAgentToMarker(id, destination, scenario < 2 ? core::UseFurnitureAction : core::IdleAction).accepted(), "Arrival move refused");
 			require(agent->getPose() == core::Pose::Standing, "Action fired before physical arrival");
 			if (scenario == 3)
 			{
@@ -71,16 +71,16 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 			{
 				core::World world("Idle arrival", 12, 2);
 				auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
-				world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(
-					context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml")));
+				world.attachFurnitureCatalogue("furniture.furniture.lua", core::FurnitureCatalogue::readFile(
+					context.fixture("src/headless/smoke/fixtures/furniture/furniture.furniture.lua")));
 				require(world.placeFurniture(room, definition, 3, 0, "Target") != 0, "Idle fixture placement refused");
 				world.addSectorMarker(room, 0, 8.5f, "Exit");
 				world.finishBuild();
 				auto target = world.furniture().front().destinations.front().marker;
 				auto id = world.createAgent("Walker", room, 0, 0.5f);
 				world.consumeSimulationEvents();
-				require(world.availableAgentActions(target) == std::vector<std::string>{ "idle" },
-					"Legacy Furniture use appeared in available Actions");
+				require(world.availableAgentActions(target) == std::vector<std::string>{ "idle", "use-furniture" },
+					"Scripted Furniture did not offer explicit use alongside Idle");
 				require((explicitIdle ? world.moveAgentToMarker(id, target, core::IdleAction)
 					: world.moveAgentToMarker(id, target)).accepted(), "Idle request refused");
 				unsigned reached = 0;
@@ -110,12 +110,12 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 	checks.push_back({ "furniture/bedLyingLifecycle", [](smoke::Context const& context)
 	{
 		using smoke::require;
-		auto source = context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml");
+		auto source = context.fixture("src/headless/smoke/fixtures/furniture/furniture.furniture.lua");
 		for (int scenario = 0; scenario < 3; ++scenario)
 		{
 			core::World world("Bed arrival", 16, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 16, 1);
-			world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(source));
+			world.attachFurnitureCatalogue("furniture.furniture.lua", core::FurnitureCatalogue::readFile(source));
 			auto bed = world.placeFurniture(room, "bed", 3, 0, "Bed");
 			auto otherBed = world.placeFurniture(room, "bed", 10, 0, "Other bed");
 			require(bed && otherBed, "Bed placement failed");
@@ -125,7 +125,7 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 			auto exit = world.getMarkerIds().back();
 			auto id = world.createAgent("Sleeper", room, 0, scenario == 1 ? 8.5f : 0.5f);
 			auto* agent = world.lookupAgent(id).entity;
-			require(world.moveAgentToMarker(id, scenario == 2 ? exit : middle).accepted(), "Bed move refused");
+			require(world.moveAgentToMarker(id, scenario == 2 ? exit : middle, scenario == 2 ? core::IdleAction : core::UseFurnitureAction).accepted(), "Bed move refused");
 			require(agent->getPose() == core::Pose::Standing, "Lying fired before arrival");
 			for (int tick = 0; tick < 1800; ++tick)
 			{
@@ -153,7 +153,7 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 			agent = world.lookupAgent(id).entity;
 			require(agent->getPose() == core::Pose::Lying && world.usablePointOccupant(middle) == id,
 				"Structural replay lost unaffected Lying pose or claim");
-			std::filesystem::copy_file(source, context.temporaryRoot() / "furniture.furniture.yaml",
+			std::filesystem::copy_file(source, context.temporaryRoot() / "furniture.furniture.lua",
 				std::filesystem::copy_options::overwrite_existing);
 			for (auto suffix : {".world.yaml", ".world"})
 			{
@@ -188,7 +188,7 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 		auto* agent = world->lookupAgent(core::AgentId{1}).entity;
 		require(agent != nullptr, "Chair arrival Agent missing");
 		require(world->resumeSimulation(), "Chair arrival simulation resume refused");
-		require(world->moveAgentToMarker(core::AgentId{1}, world->furniture()[0].destinations[0].marker).accepted(),
+		require(world->moveAgentToMarker(core::AgentId{1}, world->furniture()[0].destinations[0].marker, core::UseFurnitureAction).accepted(),
 			"Chair destination move refused");
 		world->advanceTicks(1800);
 		require(agent->getState() == core::Agent::State::Idle, "Agent did not arrive at chair");
@@ -204,8 +204,8 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 		{
 			core::World world("Seated edits", 12, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
-			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
-				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			world.attachFurnitureCatalogue("sit.furniture.lua", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.lua")));
 			auto chair = world.placeFurniture(room, "chair", 3, 0, "Chair");
 			world.placeFurniture(room, "chair", 8, 0, "Other");
 			world.addSectorMarker(room, 0, 10.5f, "Exit");
@@ -215,8 +215,8 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 			auto otherSeat = world.furniture()[1].destinations[0].marker;
 			auto sitter = world.createAgent("Sitter", room, 0, 2.5f);
 			auto other = world.createAgent("Unaffected", room, 0, 9.5f);
-			require(world.moveAgentToMarker(sitter, seat).accepted()
-				&& world.moveAgentToMarker(other, otherSeat).accepted(), "Seat moves refused");
+			require(world.moveAgentToMarker(sitter, seat, core::UseFurnitureAction).accepted()
+				&& world.moveAgentToMarker(other, otherSeat, core::UseFurnitureAction).accepted(), "Seat moves refused");
 			world.advanceTicks(1800);
 			require(world.usablePointOccupant(seat) == sitter && world.usablePointOccupant(otherSeat) == other,
 				"Fixture sitters did not claim seats");
@@ -253,7 +253,7 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 			require(world.resumeSimulation(), "Resume after seated edit refused");
 			require(world.moveAgentToMarker(sitter, exit).accepted(), "Released sitter could not depart");
 			world.advanceTicks(1800);
-			require(world.moveAgentToMarker(sitter, seat).accepted(), "Replacement/moved seat not routable");
+			require(world.moveAgentToMarker(sitter, seat, core::UseFurnitureAction).accepted(), "Replacement/moved seat not routable");
 			world.advanceTicks(1800);
 			require(world.usablePointOccupant(seat) == sitter
 				&& world.lookupAgent(sitter).entity->getPose() == core::Pose::Sitting,
@@ -268,22 +268,22 @@ void registerFurniture(std::vector<smoke::Check>& checks)
 		{
 			core::World world("Seat lifecycle", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
-			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
-				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			world.attachFurnitureCatalogue("sit.furniture.lua", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.lua")));
 			world.placeFurniture(room, "chair", 3, 0, "Chair");
 			world.addSectorMarker(room, 0, 6.5f, "Exit");
 			world.finishBuild();
 			auto seat = world.furniture()[0].destinations[0].marker;
 			auto exit = world.getMarkerIds().back();
 			auto id = world.createAgent("Sitter", room, 0, 0.5f);
-			require(world.moveAgentToMarker(id, seat).accepted(), "Seat move refused");
+			require(world.moveAgentToMarker(id, seat, core::UseFurnitureAction).accepted(), "Seat move refused");
 			world.advanceTicks(1800);
 			require(world.usablePointOccupant(seat) == id && world.lookupAgent(id).entity->getPose() == core::Pose::Sitting,
 				"Sitting did not claim usable point");
 			if (release == 0)
 			{
-				std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml"),
-					context.temporaryRoot() / "sit.furniture.yaml", std::filesystem::copy_options::overwrite_existing);
+				std::filesystem::copy_file(context.fixture("src/headless/smoke/fixtures/sit.furniture.lua"),
+					context.temporaryRoot() / "sit.furniture.lua", std::filesystem::copy_options::overwrite_existing);
 				for (auto suffix : { ".world.yaml", ".world" })
 				{
 					auto file = context.temporaryRoot() / (std::string("occupied") + suffix);

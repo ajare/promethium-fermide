@@ -1,0 +1,67 @@
+-- Independent regression geometry; stable catalogue and point identities.
+local catalogue = {
+  api_version = 1,
+  uuid = "8b709c26-9a12-4dd7-aabb-548579102f34",
+  definitions = {{
+      key = "sofa",
+      label = "Two-seat sofa",
+      tiles = {{
+          x = 0,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "chair",
+        }, {
+          x = 1,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "chair",
+        }},
+      usablePoints = {{
+          key = "left",
+          label = "Left seat",
+          x = 0.25,
+          y = 0,
+        }, {
+          key = "right",
+          label = "Right seat",
+          x = 1.625,
+          y = 0,
+        }},
+    }, {
+      key = "larger",
+      label = "Larger layout",
+      tiles = {{
+          x = -1,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "chair",
+        }, {
+          x = 1,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "chair",
+        }, {
+          x = 0,
+          y = 1,
+          imageSet = "ObjectAtlas",
+          image = "chair",
+        }},
+      usablePoints = {{
+          key = "left",
+          label = "Left point",
+          x = -0.75,
+          y = 0,
+        }, {
+          key = "middle",
+          label = "Middle point",
+          x = 0.375,
+          y = 0,
+        }, {
+          key = "right",
+          label = "Right point",
+          x = 1.75,
+          y = 0,
+        }},
+    }},
+}
+return catalogue

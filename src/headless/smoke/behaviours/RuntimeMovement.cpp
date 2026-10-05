@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/Agent.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRegistryDocument.h"
 #include "core/World.h"
@@ -200,6 +201,105 @@ end}
 		}
 		require(successes == 4 && failures == 1 && world.getAgentBehaviourRuntimeDiagnostics().empty(),
 			"Behaviour did not observe success/refusal/Idle and select its next target");
+	}
+
+	void furnitureUseOutcomes(smoke::Context const& context)
+	{
+		TemporaryDirectory temporary{ context };
+		auto package = temporary.path / "furniture.behaviours";
+		std::filesystem::create_directories(package);
+		auto registry = core::AgentBehaviourRegistry::create();
+		registry->saveTo((package / "behaviours.yaml").string());
+		writeRuntimeText(package / "choose.lua", R"lua(
+return {api_version=2, factory=function(configuration)
+  local failed, completed = false, false
+  local function choose(context)
+    assert(not failed)
+    failed = true
+    assert(context.move_to(configuration.alternative, 'use-furniture').accepted)
+  end
+  return {
+    on_start=function(context)
+      assert(context.move_to(configuration.occupied, 'use-furniture').accepted)
+    end,
+    on_route_lost=function(destination, reason, context, outcome)
+      assert(destination == configuration.occupied and outcome.result == 'failed')
+      assert(outcome.action == 'use-furniture')
+      choose(context)
+    end,
+    on_event=function(event, context)
+      if event.type == 'action_failed' then
+        assert(event.destination == configuration.occupied and event.action == 'use-furniture')
+        assert(event.result == 'failed' and event.script_failure == 'none')
+        choose(context)
+      elseif event.type == 'destination_reached' then
+        assert(failed and not completed and event.destination == configuration.alternative)
+        assert(event.result == 'succeeded' and event.action == 'use-furniture')
+        completed = true
+      end
+    end
+  }
+end}
+)lua");
+		auto behaviour = registry->addAgentBehaviour("Choose another seat", "choose.lua", {
+			{ "occupied", core::AgentBehaviourSchemaType::Marker },
+			{ "alternative", core::AgentBehaviourSchemaType::Marker }
+		});
+		// Both route-time exclusion and coincident arrival refusal are ordinary failures.
+		for (float start : {0.5f, 3.5f})
+		{
+			core::World world("Behaviour Furniture outcomes", 12, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
+			world.attachFurnitureCatalogue("use.furniture.lua", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/use.furniture.lua")));
+			world.placeFurniture(room, "sofa", 3, 0, "Independent seats");
+			world.finishBuild();
+			auto left = world.furniture().front().destinations[0].marker;
+			auto right = world.furniture().front().destinations[1].marker;
+			auto owner = world.createAgent("Owner", room, 0, 3.5f);
+			require(world.moveAgentToMarker(owner, left, core::UseFurnitureAction).accepted()
+				&& world.advanceTicks(600) && world.usablePointOccupant(left) == owner,
+				"Could not establish occupied seat");
+			auto chooser = world.createAgent("Chooser", room, 0, start);
+			world.pauseSimulation();
+			world.attachAgentBehaviourRegistry("furniture.behaviours", registry);
+			require(world.setAgentBehaviourAssignment(chooser, behaviour, 1,
+				{{"occupied", left}, {"alternative", right}}), "Could not assign Furniture choice behaviour");
+			world.consumeSimulationEvents();
+			require(world.resumeSimulation(), "Could not resume Furniture choice");
+			unsigned failures = 0, successes = 0;
+			for (unsigned tick = 0; tick < 1800; ++tick)
+			{
+				if (!world.advanceTick())
+				{
+					auto const& diagnostics = world.getAgentBehaviourRuntimeDiagnostics();
+					throw smoke::Failure("Furniture choice failed: " + (diagnostics.empty()
+						? std::string("no behaviour diagnostic") : diagnostics.back().diagnostic));
+				}
+				for (auto const& event : world.consumeSimulationEvents())
+				{
+					if (event.agent.id != chooser) continue;
+					if (event.type == core::SimulationEventType::ActionFailed || event.type == core::SimulationEventType::RouteLost)
+					{
+						++failures;
+						require(event.destinationMarker == left && event.selectedAction == core::UseFurnitureAction
+							&& event.scriptFailure == core::ScriptExecutionFailure::None
+							&& event.agent.pose == core::Pose::Standing, "Seat conflict lost ordinary atomic request outcome");
+					}
+					if (event.type == core::SimulationEventType::DestinationReached)
+					{
+						++successes;
+						require(event.destinationMarker == right && event.selectedAction == core::UseFurnitureAction,
+							"Behaviour did not select alternative Furniture use");
+					}
+				}
+			}
+			require(failures == 1 && successes == 1 && world.getAgentBehaviourRuntimeDiagnostics().empty()
+				&& world.usablePointOccupant(left) == owner && world.usablePointOccupant(right) == chooser
+				&& world.lookupAgent(owner).entity->getPose() == core::Pose::Sitting
+				&& world.lookupAgent(chooser).entity->getPose() == core::Pose::Sitting,
+				"Behaviour choice lost independent claims or produced duplicate outcomes");
+		}
 	}
 
 	void scriptedActionCancellations(smoke::Context const& context)
@@ -554,6 +654,7 @@ void behaviour_smoke::registerRuntimeMovement(std::vector<smoke::Check>& checks)
 	checks.push_back({ "scriptedActionOutcomes", [](auto const& context) { scriptedActionOutcomes(context); } });
 	checks.push_back({ "scriptedActionScriptFailure", [](auto const& context) { scriptedActionOutcomes(context, true); } });
 	checks.push_back({ "scriptedActionCancellations", scriptedActionCancellations });
+	checks.push_back({ "furnitureUseOutcomes", furnitureUseOutcomes });
 	checks.push_back({ "bundledMovementWorkflows", [](smoke::Context const& context)
 	{
 		bundledMovementWorkflows(context);

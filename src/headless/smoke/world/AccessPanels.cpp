@@ -335,8 +335,8 @@ namespace
 		{
 			core::World furnished("Furniture overlap",8,2);
 			auto room=kind==0 ? furnished.addRoom("Room",0,0,0,7,1) : kind==1 ? furnished.addCorridor(0,0,0,7,1) : furnished.addFacade(0,0,0,7,1);
-			auto filename=routed ? "furniture.furniture.yaml" : "chair.furniture.yaml";
-			furnished.attachFurnitureCatalogue(filename,core::FurnitureCatalogue::readFile(context.fixture(std::string("src/headless/smoke/fixtures/legacy-furniture/")+filename)));
+			auto filename=routed ? "furniture.furniture.lua" : "chair.furniture.lua";
+			furnished.attachFurnitureCatalogue(filename,core::FurnitureCatalogue::readFile(context.fixture(std::string("src/headless/smoke/fixtures/furniture/")+filename)));
 			furnished.placeFurniture(room,routed ? "desk" : "chair",3,0,"Furniture");
 			furnished.addSectorMarker(room,0,1.5f); furnished.addSectorMarker(room,0,6.5f);
 			auto panel=furnished.addAccessPanel(room,0,1,{1,1,0}); furnished.finishBuild(); furnished.pauseSimulation();
@@ -356,7 +356,7 @@ namespace
 		{
 			core::World reverse("Furniture after panels",8,2); auto room=reverse.addRoom("Room",0,0,0,7,1);
 			reverse.addAccessPanel(room,0,3,{1,1,0});
-			reverse.attachFurnitureCatalogue("chair.furniture.yaml",core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml")));
+			reverse.attachFurnitureCatalogue("chair.furniture.lua",core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua")));
 			reverse.placeFurniture(room,"chair",3,0,"In front"); reverse.finishBuild(); reverse.pauseSimulation();
 			reverse.createAgent("In front",room,0,3.5f);
 			require(panelIn(reverse,room) && reverse.furniture().size()==1, "Furniture/Agent overlap invalidated panel");

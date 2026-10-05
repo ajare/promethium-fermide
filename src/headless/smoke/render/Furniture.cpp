@@ -1,3 +1,4 @@
+#include "../support/CatalogueSource.h"
 #include "Checks.h"
 #include "LocationPlan.h"
 #include "Render.h"
@@ -107,8 +108,8 @@ namespace
 		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
-		world->attachFurnitureCatalogue(lua ? "objects.furniture.lua" : "chair.furniture.yaml",
-			core::FurnitureCatalogue::load(context.fixture(lua ? "src/headless/smoke/fixtures/objects.furniture.lua" : "src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml")));
+		world->attachFurnitureCatalogue(lua ? "objects.furniture.lua" : "chair.furniture.lua",
+			core::FurnitureCatalogue::load(context.fixture(lua ? "src/headless/smoke/fixtures/objects.furniture.lua" : "src/headless/smoke/fixtures/furniture/chair.furniture.lua")));
 		auto id = world->placeFurniture(room, "chair", 2.25f, 0, "Chair");
 		world->addSectorMarker(room, 0, 6.5f, "Standalone"); world->finishBuild();
 		float artworkX = 2.25f;
@@ -183,7 +184,7 @@ namespace
 		check(LayerRenderStyle::Solid, {{0,0},{800,600}}, 0);
 		auto layouts = std::make_shared<core::World>("Layout rendering", 20, 4);
 		auto layoutRoom = layouts->addRoom("Room", 0, 0, 0, 20, 4);
-		layouts->attachFurnitureCatalogue("layouts.furniture.yaml", core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml")));
+		layouts->attachFurnitureCatalogue("layouts.furniture.lua", core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/furniture/layouts.furniture.lua")));
 		auto sofa = layouts->placeFurniture(layoutRoom, "sofa", 1.125f, 0, "Sofa");
 		auto larger = layouts->placeFurniture(layoutRoom, "larger", 8.375f, 0, "Larger");
 		layouts->finishBuild(); layouts->pauseSimulation();
@@ -234,10 +235,10 @@ namespace
 		// renders first even when placement order is the reverse.
 		for (bool backRoute : { false, true })
 		{
-			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
-			yaml["furnitureCatalogue"]["definitions"][0]["edges"].remove(backRoute ? 1 : 4);
-			auto filename = context.temporaryRoot() / (backRoute ? "back.furniture.yaml" : "front.furniture.yaml");
-			{ std::ofstream file(filename); file << yaml; }
+			auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"));
+			source += "table.remove(catalogue.definitions[1].edges, " + std::to_string(backRoute ? 2 : 5) + ")\n";
+			auto filename = context.temporaryRoot() / (backRoute ? "back.furniture.lua" : "front.furniture.lua");
+			smoke::writeCatalogue(filename, source);
 			auto deskWorld = std::make_shared<core::World>("Desk draw ordering", 8, 2);
 			auto deskRoom = deskWorld->addRoom("Room", 0, 0, 0, 8, 1);
 			deskWorld->attachFurnitureCatalogue(filename.filename().string(), core::FurnitureCatalogue::load(filename));
@@ -354,8 +355,8 @@ namespace
 		// the actual traversal depth, without relying on equal-cost route choice.
 		auto attached = std::make_shared<core::World>("Attached rendering", 8, 2);
 		auto attachedRoom = attached->addRoom("Room", 0, 0, 0, 8, 1);
-		attached->attachFurnitureCatalogue("attachments.furniture.yaml",
-			core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/legacy-furniture/attachments.furniture.yaml")));
+		attached->attachFurnitureCatalogue("attachments.furniture.lua",
+			core::FurnitureCatalogue::load(context.fixture("src/headless/smoke/fixtures/furniture/attachments.furniture.lua")));
 		attached->placeFurniture(attachedRoom, "desk", 2.125f, 0, "Desk", 2);
 		auto attachedChair = attached->placeFurniture(attachedRoom, "chair", 3.25f, 0, "Chair", 1);
 		auto attachedMarker = attached->furniture().back().marker;
@@ -465,17 +466,14 @@ namespace
 		world->addSectorMarker(host, 1, 7.5f, "Upper marker");
 		world->addSectorDoor(0, 2, 10);
 		world->finishBuild(); world->pauseSimulation();
-		auto catalogueData = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
-		// The usable vertex participates at two route depths, but its authored
-		// usable point remains one circle on the instance's depth row.
-		catalogueData["furnitureCatalogue"]["definitions"][0]["edges"].push_back(
-			YAML::Load("{from: seat, to: backLeft, depthOffset: 1}"));
-		// Three projections of backLeft must form a chain with a gap for the
-		// intermediate depth's glyph, not an extra direct 0-to-3 guide.
-		catalogueData["furnitureCatalogue"]["definitions"][0]["edges"].push_back(
-			YAML::Load("{from: backLeft, to: frontRight, depthOffset: 0}"));
-		auto cataloguePath = context.temporaryRoot() / "plan-graph-links.furniture.yaml";
-		{ std::ofstream output(cataloguePath); output << catalogueData; }
+		auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"));
+		// One usable point remains one circle despite participating at multiple depths.
+		source += R"(
+table.insert(catalogue.definitions[1].edges, {from='seat', to='backLeft', depthOffset=1})
+table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', depthOffset=0})
+)";
+		auto cataloguePath = context.temporaryRoot() / "plan-graph-links.furniture.lua";
+		smoke::writeCatalogue(cataloguePath, source);
 		world->attachFurnitureCatalogue(cataloguePath.filename().string(), core::FurnitureCatalogue::readFile(cataloguePath));
 		auto id = world->placeFurniture(host, "desk", 1.25f, 0, "Ground desk", 2);
 		world->placeFurniture(host, "desk", 1.25f, 1, "Upper desk", 6);
@@ -696,12 +694,14 @@ namespace
 		require(lines > 0 && points >= 8, "Catalogue-free Location plan omitted ordinary graph");
 		// A port can also be a usable destination: usable colour wins, including
 		// after changing the current catalogue instead of retaining cached classes.
-		auto authored = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml").string());
-		auto definition = authored["furnitureCatalogue"]["definitions"][0];
-		definition["vertices"] = YAML::Load("[{key: left, x: 0, external: true}, {key: seat, x: 0.5, usablePoint: seat, external: true}]");
-		definition["edges"] = YAML::Load("[{from: left, to: seat, depthOffset: 0}]");
-		auto path = context.temporaryRoot() / "usable-external.furniture.yaml";
-		{ std::ofstream output(path); output << authored; }
+		auto chairSource = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"));
+		chairSource += R"(
+local d = catalogue.definitions[1]
+d.vertices = {{key='left', x=0, external=true}, {key='seat', x=0.5, usablePoint='seat', external=true}}
+d.edges = {{from='left', to='seat', depthOffset=0}}
+)";
+		auto path = context.temporaryRoot() / "usable-external.furniture.lua";
+		smoke::writeCatalogue(path, chairSource);
 		plain->attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
 		plain->pauseSimulation();
 		plain->placeFurniture(room, "chair", 1.25f, 0, "External seat", 0); plain->finishBuild();
@@ -764,7 +764,7 @@ namespace
 		}
 		require(near(commands.GetClipRectMin().x, 100) && near(commands.GetClipRectMax().y, 220),
 			"Plan changed the caller's clip stack");
-		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/chair.furniture.yaml"));
+		auto catalogue = core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"));
 		for (bool valid : {true, false})
 		{
 			WorldDrawList preview({{100, 60}, {360, 220}});
@@ -805,8 +805,8 @@ namespace
 		furnished->addSectorWalkway(host, 1, 1);
 		furnished->addSectorWalkway(host, 1, 4);
 		furnished->finishBuild(); furnished->pauseSimulation();
-		furnished->attachFurnitureCatalogue("layouts.furniture.yaml",
-			core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/layouts.furniture.yaml")));
+		furnished->attachFurnitureCatalogue("layouts.furniture.lua",
+			core::FurnitureCatalogue::readFile(context.fixture("src/headless/smoke/fixtures/furniture/layouts.furniture.lua")));
 		furnished->placeFurniture(host, "larger", 1.25f, 0, "Sparse footprint", 3);
 		furnished->placeFurniture(host, "sofa", 0, 1, "Upper sofa", 6);
 		furnished->placeFurniture(hall, "sofa", 1.25f, 0, "Hall sofa", 0);

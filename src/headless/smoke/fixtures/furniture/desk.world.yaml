@@ -7,7 +7,7 @@ levelsHigh: 2
 layers: 2
 layerNames: [Desk room, Background]
 furnitureCatalogue:
-  filename: desk.furniture.yaml
+  filename: desk.furniture.lua
   expectedUuid: 1c639f04-1183-4e51-9385-86cce6b0f031
 nextFurnitureId: 2
 nextMarkerId: 4

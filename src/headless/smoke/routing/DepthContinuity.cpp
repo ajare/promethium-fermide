@@ -1,3 +1,4 @@
+#include "../support/CatalogueSource.h"
 #include "Checks.h"
 #include "core/Agent.h"
 #include "core/Defines.h"
@@ -10,7 +11,6 @@
 #include <functional>
 #include <limits>
 #include <set>
-#include <yaml-cpp/yaml.h>
 
 namespace
 {
@@ -50,24 +50,21 @@ namespace
 		int incoming, int expectedFirstDepth)
 	{
 		using smoke::require;
-		auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
-		auto definition = yaml["furnitureCatalogue"]["definitions"][0];
-		definition["usablePoints"] = YAML::Load("[{key: history, label: History, x: 0}, {key: start, label: Start, x: 0.25}, {key: goal, label: Goal, x: 1.75}]");
-		definition["vertices"] = YAML::Load("[{key: history, x: 0, external: true, usablePoint: history}, {key: start, x: 0.25, usablePoint: start}, {key: goal, x: 1.75, usablePoint: goal}]");
+		auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"));
+		source += R"(
+local d = catalogue.definitions[1]
+d.usablePoints = {{key='history', label='History', x=0}, {key='start', label='Start', x=0.25}, {key='goal', label='Goal', x=1.75}}
+d.vertices = {{key='history', x=0, external=true, usablePoint='history'}, {key='start', x=0.25, usablePoint='start'}, {key='goal', x=1.75, usablePoint='goal'}}
+d.edges = {}
+)";
 		for (auto const& vertex : vertices)
-		{
-			YAML::Node node; node["key"] = vertex.key; node["x"] = vertex.x;
-			definition["vertices"].push_back(node);
-		}
-		definition["edges"] = YAML::Node(YAML::NodeType::Sequence);
+			source += "table.insert(d.vertices, {key='" + std::string(vertex.key) + "', x=" + std::to_string(vertex.x) + "})\n";
 		edges.insert(edges.begin(), { "history", "start", incoming });
 		for (auto const& edge : edges)
-		{
-			YAML::Node node; node["from"] = edge.from; node["to"] = edge.to; node["depthOffset"] = edge.depth;
-			definition["edges"].push_back(node);
-		}
-		auto path = context.temporaryRoot() / (std::string(name) + ".furniture.yaml");
-		{ std::ofstream file(path); file << yaml; }
+			source += "table.insert(d.edges, {from='" + std::string(edge.from) + "', to='" + edge.to
+				+ "', depthOffset=" + std::to_string(edge.depth) + "})\n";
+		auto path = context.temporaryRoot() / (std::string(name) + ".furniture.lua");
+		smoke::writeCatalogue(path, source);
 		core::World world(name, 8, 2);
 		auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
 		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::load(path));
@@ -190,14 +187,16 @@ namespace
 		for (bool layers : { false, true })
 		for (bool cheaper : { false, true })
 		{
-			auto yaml = YAML::LoadFile(context.fixture("src/headless/smoke/fixtures/legacy-furniture/desk.furniture.yaml").string());
-			auto definition = yaml["furnitureCatalogue"]["definitions"][0];
-			definition["usablePoints"] = YAML::Load("[{key: seat, label: Seat, x: 1.75}]");
-			definition["vertices"] = YAML::Load("[{key: left, x: 0, external: true}, {key: a, x: 1}, {key: b, x: 1}, {key: seat, x: 1.75, usablePoint: seat}, {key: right, x: 2, external: true}]");
-			definition["edges"] = YAML::Load("[{from: left, to: a, depthOffset: 0}, {from: a, to: seat, depthOffset: 0}, {from: left, to: b, depthOffset: 9}, {from: b, to: seat, depthOffset: 9}, {from: left, to: right, depthOffset: 0}]");
-			if (cheaper) definition["vertices"][1]["x"] = 1.7501f;
-			auto cataloguePath = context.temporaryRoot() / (std::string("sector-") + (layers ? "layers" : "locations") + (cheaper ? "-cheaper" : "") + ".furniture.yaml");
-			{ std::ofstream file(cataloguePath); file << yaml; }
+			auto source = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua"));
+			source += R"(
+local d = catalogue.definitions[1]
+d.usablePoints = {{key='seat', label='Seat', x=1.75}}
+d.vertices = {{key='left', x=0, external=true}, {key='a', x=1}, {key='b', x=1}, {key='seat', x=1.75, usablePoint='seat'}, {key='right', x=2, external=true}}
+d.edges = {{from='left', to='a', depthOffset=0}, {from='a', to='seat', depthOffset=0}, {from='left', to='b', depthOffset=9}, {from='b', to='seat', depthOffset=9}, {from='left', to='right', depthOffset=0}}
+)";
+			if (cheaper) source += "d.vertices[2].x = 1.7501\n";
+			auto cataloguePath = context.temporaryRoot() / (std::string("sector-") + (layers ? "layers" : "locations") + (cheaper ? "-cheaper" : "") + ".furniture.lua");
+			smoke::writeCatalogue(cataloguePath, source);
 			core::World world("Sector reset", 18, 1);
 			world.addLayer();
 			auto origin = world.addRoom("Origin", 0, 0, 0, 6, 1);

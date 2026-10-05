@@ -21,12 +21,12 @@ namespace
 		gUISettings.renderAgentDebug = false;
 		core::World world("Bed offset", 8, 2);
 		auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
-		world.attachFurnitureCatalogue("furniture.furniture.yaml", core::FurnitureCatalogue::readFile(
-			context.fixture("src/headless/smoke/fixtures/legacy-furniture/furniture.furniture.yaml")));
+		world.attachFurnitureCatalogue("furniture.furniture.lua", core::FurnitureCatalogue::readFile(
+			context.fixture("src/headless/smoke/fixtures/furniture/furniture.furniture.lua")));
 		world.placeFurniture(room, "bed", 3, 0, "Bed");
 		world.addSectorMarker(room, 0, 6.5f, "Exit"); world.finishBuild();
 		auto id = world.createAgent("Sleeper", room, 0, 0.5f);
-		require(world.moveAgentToMarker(id, world.furniture()[0].destinations[0].marker).accepted(), "Bed move refused");
+		require(world.moveAgentToMarker(id, world.furniture()[0].destinations[0].marker, core::UseFurnitureAction).accepted(), "Bed move refused");
 		world.advanceTicks(1800);
 		auto* sleeper = world.lookupAgent(id).entity;
 		require(sleeper->getPose() == core::Pose::Lying && sleeper->getPoseRenderYOffset() == 0.25f

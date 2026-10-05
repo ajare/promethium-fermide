@@ -1,0 +1,149 @@
+-- Independent regression geometry; stable catalogue and point identities.
+local catalogue = {
+  api_version = 1,
+  uuid = "f834cb53-36cd-4d0a-920d-4a2acfbe6592",
+  definitions = {{
+      key = "chair",
+      label = "Chair",
+      tiles = {{
+          x = 0,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "chair",
+        }},
+      usablePoints = {{
+          key = "seat",
+          label = "Seat",
+          x = 0.5,
+        }},
+    }, {
+      key = "sofa",
+      label = "Two-seat sofa",
+      sideRoutes = true,
+      tiles = {{
+          x = 0,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "sofa-left",
+        }, {
+          x = 1,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "sofa-right",
+        }},
+      usablePoints = {{
+          key = "left",
+          label = "Left seat",
+          x = 0.5,
+        }, {
+          key = "right",
+          label = "Right seat",
+          x = 1.5,
+        }},
+      vertices = {{
+          key = "left",
+          x = 0,
+          external = true,
+        }, {
+          key = "frontLeft",
+          x = 0.25,
+        }, {
+          key = "frontRight",
+          x = 1.75,
+        }, {
+          key = "right",
+          x = 2,
+          external = true,
+        }, {
+          key = "leftSeat",
+          x = 0.5,
+          usablePoint = "left",
+        }, {
+          key = "rightSeat",
+          x = 1.5,
+          usablePoint = "right",
+        }},
+      edges = {{
+          from = "left",
+          to = "frontLeft",
+        }, {
+          from = "frontLeft",
+          to = "frontRight",
+          depthOffset = -1,
+        }, {
+          from = "frontRight",
+          to = "right",
+        }, {
+          from = "left",
+          to = "right",
+          depthOffset = -1,
+        }, {
+          from = "left",
+          to = "leftSeat",
+          depthOffset = -1,
+        }, {
+          from = "left",
+          to = "rightSeat",
+          depthOffset = -1,
+        }},
+    }, {
+      key = "desk",
+      label = "Desk with front and back routes",
+      sideRoutes = true,
+      tiles = {{
+          x = 0,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "desk-left",
+        }, {
+          x = 1,
+          y = 0,
+          imageSet = "ObjectAtlas",
+          image = "desk-right",
+        }},
+      usablePoints = {},
+      vertices = {{
+          key = "left",
+          x = 0,
+          external = true,
+        }, {
+          key = "right",
+          x = 2,
+          external = true,
+        }, {
+          key = "frontLeft",
+          x = 0.25,
+        }, {
+          key = "frontRight",
+          x = 1.75,
+        }, {
+          key = "backLeft",
+          x = 0.25,
+        }, {
+          key = "backRight",
+          x = 1.75,
+        }},
+      edges = {{
+          from = "left",
+          to = "frontLeft",
+        }, {
+          from = "frontLeft",
+          to = "frontRight",
+          depthOffset = 0,
+        }, {
+          from = "frontRight",
+          to = "right",
+        }, {
+          from = "left",
+          to = "backLeft",
+        }, {
+          from = "backLeft",
+          to = "backRight",
+          depthOffset = 1,
+        }, {
+          from = "backRight",
+          to = "right",
+        }},
+    }},
+}
+return catalogue

@@ -11,8 +11,8 @@ namespace routing_smoke
 			using smoke::require;
 			core::World world("Seat routing", 12, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 12, 1);
-			world.attachFurnitureCatalogue("sit.furniture.yaml", core::FurnitureCatalogue::readFile(
-				context.fixture("src/headless/smoke/fixtures/sit.furniture.yaml")));
+			world.attachFurnitureCatalogue("sit.furniture.lua", core::FurnitureCatalogue::readFile(
+				context.fixture("src/headless/smoke/fixtures/sit.furniture.lua")));
 			world.placeFurniture(room, "chair", 6, 0, "Chair");
 			world.addSectorMarker(room, 0, 10.5f, "Exit");
 			world.finishBuild();
@@ -33,9 +33,8 @@ namespace routing_smoke
 				}
 			auto path = world.getGraph()->calculatePath(other, seatVertex);
 			require(path != nullptr, "Free seat was excluded");
-			other->setPath(path, true);
-			world.lookupAgent(winner).entity->setPath(world.getGraph()->calculatePath(
-				world.lookupAgent(winner).entity, seatVertex), true);
+			require(world.moveAgentToMarker(loser, seat, core::UseFurnitureAction).accepted()
+				&& world.moveAgentToMarker(winner, seat, core::UseFurnitureAction).accepted(), "Seat requests refused");
 			for (int tick = 0; tick < 600 && !world.usablePointOccupant(seat); ++tick) world.advanceTicks(1);
 			require(world.usablePointOccupant(seat) == winner, "First arrival did not claim seat");
 			require(other->getState() == core::Agent::State::RoutePlanning, "Competing Path not hard-invalidated");

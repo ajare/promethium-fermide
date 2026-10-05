@@ -110,8 +110,10 @@ explicit routes and placement were not repaired or changed.
 
 Editable teaching data stays in `resources/test-worlds`; the separate
 `furniture-integration` World/catalogue remains stable integration content.
-Unconverted regression inputs are frozen under `src/headless/smoke/fixtures/legacy-furniture`;
-fixture builders and final loader removal are outside #465.
+Regression inputs and builders, outside #465, were subsequently converted by
+#466 under `src/headless/smoke/fixtures/furniture`. They retain independent
+regression geometry and stable identities. Final loader removal remains #467;
+see [regression conversion](scripted-actions-regression-fixtures.md).
 
 Required examples fail if absent; no check skips them. Existing module ownership
 and unique temporary roots are retained:
