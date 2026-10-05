@@ -1,6 +1,6 @@
 version: 50
 nextDumbwaiterId: 1
-nextFurnitureId: 4
+nextFurnitureId: 5
 furnitureCatalogue:
   filename: furniture.furniture.yaml
   expectedUuid: 7ad3b31e-c85b-43ac-90ba-359359359359
@@ -21,8 +21,8 @@ construction:
     name: Room 1
     layer: 0
     y: 1
-    x: 4
-    cellsWide: 8
+    x: 1
+    cellsWide: 11
     levelsHigh: 1
     topLevelHeight: 0.9
   - type: furniture
@@ -144,6 +144,19 @@ construction:
     initialStop: 0
     destinationPermissionRequirements:
       []
+  - type: furniture
+    sectorIndex: 0
+    id: 4
+    definition: bed
+    name: Bed
+    x: 8
+    y: 0
+    localDepth: 1
+    destinations:
+      - usablePoint: middle
+        markerId: 5
+        markerName: Bed Middle
+        properties: 0
 agentGroups:
   []
 accessPermissions:
@@ -157,7 +170,7 @@ accessPermissionGrants:
   []
 interactionPermissionRequirements:
   []
-nextMarkerId: 5
+nextMarkerId: 6
 nextAgentGroupId: 1
 agents:
   - id: 1
@@ -165,5 +178,11 @@ agents:
       name: Agent 1
       flags: 0
     sector: 0
-    localX: 0.671875
+    localX: 3.671875
     localY: 0
+    path:
+      destinationMarker: 5
+      destinationSector: 0
+      destinationLocalX: 9
+      destinationLocalY: 0
+      active: true

@@ -348,6 +348,10 @@ The visual manner in which a Door's leaf or leaves reveal its threshold: OpenUp,
 A place where an agent can request one or more typed device commands, usually represented by a physical button or switch.
 _Avoid_: Device controller, traversal controller
 
+**Access panel**:
+An openable object set into a Location's visible back surface and owned by one of its cells. Opening it exposes functionality determined by its type; an Empty access panel exposes no controls and can only be closed.
+_Avoid_: Window, aperture, Button
+
 **Button**:
 A physical control representing an Interaction point, owned by the object or Location that requires it. It belongs to one cell even when its visible shape extends slightly into a neighbouring cell.
 
