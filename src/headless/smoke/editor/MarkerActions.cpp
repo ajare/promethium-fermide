@@ -7,6 +7,7 @@
 #include "AgentBehaviourAssignmentPanel.h"
 #include "core/World.h"
 #include "core/AgentBehaviourRegistry.h"
+#include "core/AgentTagRegistryDocument.h"
 #include "core/BinarySerializer.h"
 #include "core/YamlSerializer.h"
 #include "core/Log.h"
@@ -41,6 +42,7 @@ namespace
 		auto agent = world->createAgent("Author", room, 0, 1.5f);
 		auto marker = world->getMarkerIds()[0];
 		world->pauseSimulation();
+		world->saveTo((root / "configured-setup.world.yaml").string());
 		std::string diagnostic;
 		require(commitActionRegistrySelection(world, path, diagnostic)
 			&& commitMarkerActionAssignment(world, marker, {action}, diagnostic), "Configuration Action authoring failed: " + diagnostic);
@@ -188,6 +190,7 @@ namespace
 		auto world = std::make_shared<core::World>("Editor reload", 10, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 10, 1);
 		world->addSectorMarker(room, 0, 1.5f, "Target"); world->finishBuild(); world->pauseSimulation();
+		world->saveTo((root / "editor-reload.world.yaml").string());
 		auto marker = world->getMarkerIds()[0]; std::string diagnostic;
 		std::string action = "ad603358-5ebf-45bb-a686-c3f491152c61:greet";
 		require(commitActionRegistrySelection(world, path, diagnostic)
@@ -245,6 +248,7 @@ namespace
 		world->addSectorMarker(room,0,6.5f,"Target");
 		world->finishBuild(); auto agent = world->createAgent("Visitor",room,0,1.5f);
 		world->pauseSimulation();
+		world->saveTo((context.temporaryRoot() / "editor.world.yaml").string());
 		auto marker = world->getMarkerIds()[0];
 		std::string const first = "ad603358-5ebf-45bb-a686-c3f491152c61:hello";
 		std::string const second = "ad603358-5ebf-45bb-a686-c3f491152c61:other";
@@ -359,6 +363,69 @@ namespace
 			"Paused destination edit did not author document history: " + diagnostic);
 		require(world->isModified(), "Paused destination edit did not dirty the document");
 	}
+
+	void registryDirectory(smoke::Context const& context)
+	{
+		editor_smoke::State state; using smoke::require;
+		auto const root = context.temporaryRoot();
+		auto const worldDirectory = root / "registry-world";
+		auto const otherDirectory = root / "registry-elsewhere";
+		std::filesystem::create_directories(worldDirectory);
+		std::filesystem::create_directories(otherDirectory);
+		auto const document = worldDirectory / "directory.world.yaml";
+		auto const adjacent = worldDirectory / "adjacent.actions.lua";
+		auto const elsewhere = otherDirectory / "elsewhere.actions.lua";
+		auto const uuid = std::string("ad603358-5ebf-45bb-a686-c3f491152c61");
+		auto write = [&](std::filesystem::path const& path, std::string const& name)
+		{
+			std::ofstream(path) << "return {api_version=1,uuid='" << uuid
+				<< "',actions={{key='greet',name='" << name << "',run=function() end}}}";
+		};
+		write(adjacent, "Adjacent");
+		write(elsewhere, "Elsewhere");
+		auto world = std::make_shared<core::World>("Registry directory", 10, 2);
+		auto room = world->addRoom("Room", 0, 0, 0, 10, 1);
+		world->addSectorMarker(room, 0, 6.5f, "Target");
+		world->finishBuild(); world->pauseSimulation();
+		auto marker = world->getMarkerIds()[0];
+		std::string const action = uuid + ":greet";
+		std::string diagnostic;
+
+		// An unsaved World has no document directory to bind a registry to, so the
+		// panel refuses rather than attaching a file its document cannot locate.
+		require(!commitActionRegistrySelection(world, adjacent, diagnostic) && !diagnostic.empty()
+			&& !world->actionRegistry(), "Unsaved World accepted an Action registry");
+
+		world->saveTo(document.string());
+		require(!world->documentDirectory().empty(), "Saving did not record the document directory");
+
+		// The World seam rejects a registry from another directory even though it
+		// parses, because reopen resolves the basename beside the document.
+		diagnostic.clear();
+		require(!world->selectActionRegistry(elsewhere, &diagnostic) && !diagnostic.empty()
+			&& !world->actionRegistry(), "World accepted a registry outside its document directory");
+
+		// The panel seam mirrors the Furniture adjacency rule and adds no history.
+		auto history = gWorldDocumentHistory.undoCount();
+		diagnostic.clear();
+		require(!commitActionRegistrySelection(world, elsewhere, diagnostic) && !diagnostic.empty()
+			&& !world->actionRegistry() && gWorldDocumentHistory.undoCount() == history,
+			"Panel accepted a registry outside the World directory");
+
+		// A bare relative reference resolves beside the saved World and is accepted.
+		diagnostic.clear();
+		require(commitActionRegistrySelection(world, adjacent.filename(), diagnostic)
+			&& world->actionRegistryFilename() == adjacent.filename().string()
+			&& gWorldDocumentHistory.undoCount() == history + 1, diagnostic);
+		require(commitMarkerActionAssignment(world, marker, {action}, diagnostic), diagnostic);
+
+		// The reference round-trips: the saved document resolves the registry beside it.
+		world->saveTo(document.string());
+		auto reopened = core::loadWorldDocument(document);
+		require(reopened->actionRegistryFilename() == adjacent.filename().string()
+			&& reopened->markerActions(marker) == std::vector<std::string>{action},
+			"Saved document did not resolve its adjacent registry");
+	}
 }
 
 void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
@@ -368,4 +435,5 @@ void editor_smoke::registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/behaviourConfiguration",behaviourConfiguration});
 	checks.push_back({"markerActions/furnitureUseWorkflow",furnitureUseWorkflow});
 	checks.push_back({"markerActions/liveDestinationEdit",liveDestinationEdit});
+	checks.push_back({"markerActions/registryDirectory",registryDirectory});
 }

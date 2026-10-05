@@ -1479,6 +1479,9 @@ namespace core
 	bool World::deserializeImpl(Serializer& serializer, SerializationWorkData& workData)
 	{
 		invalidateSimulationSnapshot();
+		// Anchor external basename references to the loaded document's directory.
+		// History snapshots without a path leave the current location intact.
+		if (!workData.documentDirectory.empty()) mDocumentDirectory = workData.documentDirectory;
 		serializer.beginMap("world");
 		auto const version = serializer.readUint32("version");
 		// Versions 1 through 6 predate Door opening styles; their records replay
@@ -1548,7 +1551,7 @@ namespace core
 			auto uuid = serializer.readString("expectedUuid");
 			serializer.endMap();
 			filesystem::path path(actionFilename);
-			if (path.has_parent_path() || actionFilename.size() <= 12 || !actionFilename.ends_with(".actions.lua"))
+			if (path.has_parent_path() || !ActionRegistry::filenameIsValid(actionFilename))
 				throw SerializationException("Action registry reference must be a .actions.lua basename");
 			actionRegistry = workData.actionRegistry ? workData.actionRegistry : mActionRegistry;
 			if (!actionRegistry || actionRegistry->uuid() != uuid)
@@ -2726,6 +2729,8 @@ namespace core
 		// replacing the destination - happens above.  Only now may the document
 		// become clean (#63).
 		serializer->serialize();
+		auto const directory = std::filesystem::path(filepath).parent_path();
+		mDocumentDirectory = directory.empty() ? std::filesystem::path(".") : directory;
 		markSaved();
 	}
 

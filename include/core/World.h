@@ -611,6 +611,10 @@ namespace core
 		std::map<AgentId, MovementGoal> mMovementGoals;
 		std::shared_ptr<const ActionRegistry> mActionRegistry;
 		std::string mActionRegistryFilename;
+		// Transient save/load location; never serialized. It anchors external
+		// basename references, so a registry can only be selected beside the
+		// document whose reopen will look for it there.
+		std::filesystem::path mDocumentDirectory;
 		std::map<MarkerId, std::vector<std::string>> mMarkerActions;
 		bool mActionExecutionFailed{ false };
 		// Set only while finishFurnitureUse executes a lifecycle callback. Departure
@@ -2190,6 +2194,9 @@ namespace core
 		std::vector<std::string> availableAgentActions(MarkerId marker) const;
 		std::shared_ptr<const ActionRegistry> const& actionRegistry() const { return mActionRegistry; }
 		std::string const& actionRegistryFilename() const { return mActionRegistryFilename; }
+		// Directory of the last successful save or load; empty for an unsaved World.
+		// External packages are referenced by basename and stay beside the document.
+		std::filesystem::path const& documentDirectory() const { return mDocumentDirectory; }
 		bool selectActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
 		bool reloadActionRegistry(std::filesystem::path const& path, std::string* diagnostic = nullptr);
 		bool reloadFurnitureCatalogue(std::filesystem::path const& path, std::string* diagnostic = nullptr);

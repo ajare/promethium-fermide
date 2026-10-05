@@ -57,6 +57,9 @@ namespace core
 			bool finishing, ActionViews const& views);
 	public:
 		static std::shared_ptr<const ActionRegistry> load(std::filesystem::path const& path);
+		// The persisted reference is always a .actions.lua basename; the World
+		// document resolves it beside itself on reopen.
+		static bool filenameIsValid(std::string const& filename);
 		std::string const& uuid() const { return mUuid; }
 		std::filesystem::path const& sourcePath() const { return mSourcePath; }
 		std::vector<ActionDefinition> const& actions() const { return mActions; }

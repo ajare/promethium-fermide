@@ -15,9 +15,28 @@ bool commitActionRegistrySelection(std::shared_ptr<core::World> const& world,
 	std::filesystem::path const& path, std::string& diagnostic)
 {
 	if (!world) { diagnostic = "No World selected"; return false; }
+	// Mirror the Furniture catalogue workflow: a registry must sit beside the
+	// saved World, because the document persists only its basename and resolves
+	// it there on reopen. Relative references are read beside the World.
+	auto const& directory = world->documentDirectory();
+	if (directory.empty())
+	{
+		diagnostic = "Save the World before loading an Action registry";
+		return false;
+	}
+	std::filesystem::path source = path;
+	if (!source.is_absolute()) source = directory / source;
+	std::error_code error;
+	auto const canonicalDirectory = std::filesystem::weakly_canonical(directory, error);
+	auto const canonicalSource = std::filesystem::weakly_canonical(source, error);
+	if (error || canonicalSource.parent_path() != canonicalDirectory)
+	{
+		diagnostic = "Select a .actions.lua registry beside the World; the World references it by basename";
+		return false;
+	}
 	auto undo = captureDocumentSnapshot(world);
 	if (!undo) { diagnostic = "Cannot capture World history"; return false; }
-	if (!world->selectActionRegistry(path, &diagnostic)) return false;
+	if (!world->selectActionRegistry(source, &diagnostic)) return false;
 	commitDocumentEdit(std::move(undo));
 	return true;
 }

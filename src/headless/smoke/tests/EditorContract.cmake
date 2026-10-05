@@ -182,6 +182,7 @@ set(editor_names
     markerActions/behaviourConfiguration
     markerActions/furnitureUseWorkflow
     markerActions/liveDestinationEdit
+    markerActions/registryDirectory
     securityScanners/editorCommandsAndHistory
     securityScanners/structuralHistory
     securityScanners/selectionWorkflow

@@ -38,13 +38,30 @@ namespace core
 	{
 		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
 		if (!isSimulationPaused()) return reject("Pause the simulation to select an Action registry");
+		if (!ActionRegistry::filenameIsValid(path.filename().string()))
+			return reject("Select a .actions.lua registry");
+		// A saved World reopens its registry beside itself by basename, so a
+		// registry from anywhere else would produce a document that cannot load.
+		// The document location is authoritative once known; an unsaved World has
+		// no reopen contract to violate. Relative references stay beside the World.
+		std::filesystem::path source = path;
+		if (!mDocumentDirectory.empty())
+		{
+			if (!source.is_absolute()) source = mDocumentDirectory / source;
+			std::error_code error;
+			auto const directory = std::filesystem::weakly_canonical(mDocumentDirectory, error);
+			auto const canonical = std::filesystem::weakly_canonical(source, error);
+			if (error || canonical.parent_path() != directory)
+				return reject("Select a .actions.lua registry beside the World; the World references it by basename");
+			source = canonical;
+		}
 		// Selection is not reload. Use the explicit paused reload transaction
 		// to replace an already accepted executable snapshot.
-		if (mActionRegistry && path.filename().string() == mActionRegistryFilename)
+		if (mActionRegistry && source.filename().string() == mActionRegistryFilename)
 			return reject("Action registry already selected; use Reload Action registry");
 		try
 		{
-			auto registry = ActionRegistry::load(path);
+			auto registry = ActionRegistry::load(source);
 			for (auto const& [marker, actions] : mMarkerActions)
 				if (lookupMarker(marker)) for (auto const& action : actions)
 					if (action != UseFurnitureAction && !registry->find(action)) return reject("Registry selection would invalidate a Marker Action: " + action);
@@ -55,7 +72,7 @@ namespace core
 						if (!configurationActionsAvailable(value, registry.get(), missing))
 							return reject("Registry selection would invalidate a behaviour Action: " + missing);
 			mActionRegistry = std::move(registry);
-			mActionRegistryFilename = path.filename().string();
+			mActionRegistryFilename = source.filename().string();
 			markModified();
 			return true;
 		}

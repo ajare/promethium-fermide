@@ -270,9 +270,14 @@ namespace core
 		}
 	}
 
+	bool ActionRegistry::filenameIsValid(std::string const& filename)
+	{
+		return filename.size() > 12 && filename.ends_with(".actions.lua");
+	}
+
 	std::shared_ptr<const ActionRegistry> ActionRegistry::load(std::filesystem::path const& path)
 	{
-		if (path.filename().string().size() <= 12 || !path.filename().string().ends_with(".actions.lua"))
+		if (!filenameIsValid(path.filename().string()))
 			throw SerializationException("Action registry must end with .actions.lua");
 		std::ifstream file(path, std::ios::binary);
 		if (!file) throw SerializationException("Missing Action registry: " + path.string());

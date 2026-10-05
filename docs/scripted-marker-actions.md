@@ -532,3 +532,34 @@ non-script refusal without pausing.
 Verification: the full Simulation smoke module reported **156 passed, 0 failed**
 in the Release tree, and the new check also passed in Debug. `git diff --check`
 is clean.
+
+## Action registry beside the saved World (#471)
+
+A World document stores only an Action registry's basename and expected UUID and
+resolves it beside itself on reopen. The Marker **Agent Actions** panel passed its
+raw text-field path straight to `World::selectActionRegistry`, which accepted any
+readable `.actions.lua` from any directory and recorded only `path.filename()`. A
+World saved with such a reference then failed to reopen with `Missing Action
+registry dependency: <basename>` until the file was copied beside it.
+
+Selection now mirrors the Furniture catalogue workflow. The World records the
+directory of its last successful save or load (transient and never serialized).
+`World::selectActionRegistry` rejects a registry whose canonical parent is not that
+directory with a clear diagnostic, and treats a relative reference as sitting
+beside the World; an unsaved World has no document location to violate and is
+unchanged. The panel seam `commitActionRegistrySelection` applies the same
+adjacency rule before capturing history, so a user-entered absolute or relative
+path from another directory is refused without attaching anything or adding an
+undo entry. `ActionRegistry::filenameIsValid` centralizes the `.actions.lua`
+basename contract used by selection, load and deserialization.
+
+Focused public check: Editor `markerActions/registryDirectory`. It covers the
+unsaved-World refusal, the World and panel refusals of a parseable registry in
+another directory (with unchanged history), acceptance of a bare relative
+reference beside the saved World, and a save/reopen round trip that resolves the
+adjacent registry and its assignments.
+
+Verification: the full Editor smoke module reported **208 passed, 0 failed** and
+the full Simulation smoke module reported **156 passed, 0 failed** in the Release
+tree; Persistence reported **95 passed, 0 failed** and World **48 passed, 0
+failed**. `git diff --check` is clean.
