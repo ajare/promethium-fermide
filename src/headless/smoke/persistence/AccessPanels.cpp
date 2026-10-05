@@ -16,6 +16,41 @@ namespace persistence
 			};
 			return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
 		};
+		// Movement and independent authored copies survive both persistence formats
+		// and replay, including floor-Level approaches for degenerate geometry.
+		for (auto geometry : {core::AccessPanelGeometry{}, {0,1,0}, {1,0,1}, {0,0,0}})
+		{
+			core::World moved("Moved panels",16,3);
+			auto room=moved.addRoom("Room",0,0,0,5,2); auto corridor=moved.addCorridor(0,0,6,4,1);
+			auto facade=moved.addFacade(0,0,11,4,2); moved.addSectorWalkway(facade,1,2);
+			moved.addSectorMarker(facade,1,2.25f); moved.addSectorMarker(corridor,0,0.5f);
+			auto placed=moved.addAccessPanel(room,0,2,geometry); moved.finishBuild(); moved.pauseSimulation();
+			auto object=moved.applyObjectMove(moved.planMoveSectorObject(room,placed.index,13,1));
+			moved.addAccessPanel(corridor,0,8,geometry); moved.finishBuild();
+			for (bool binary : {false,true})
+			{
+				auto bytes=write(moved,binary);
+				std::unique_ptr<core::Serializer> reader=binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes)) : std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+				reader->deserialize(); core::SerializationWorkData work; core::World loaded("Loaded moves",1,1);
+				require(loaded.deserialize(*reader,work) && write(loaded,binary)==bytes, "Moved panel persistence changed records");
+				for (bool replay : {false,true})
+				{
+					if (replay) { loaded.resetSimulation(); loaded.pauseSimulation(); }
+					unsigned count=0; core::AccessPanelId previous{};
+					for (auto s : {room,corridor,facade}) for (uint32_t i=0;i<loaded.getSector(s)->getNumObjects();++i)
+						if (auto p=std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(loaded.getSector(s)->getObject(i)))
+						{
+							++count; auto panel=p->getPanel(); auto vertex=loaded.getGraph()->getVertexForObject(std::const_pointer_cast<core::AccessPanelSectorObject>(p));
+							require(s!=room && panel->getId()!=previous && panel->getGeometry()==geometry && panel->getState()==core::AccessPanel::State::Closed
+								&& panel->getLevelOffset()==(s==facade ? 1u : 0u) && vertex && !vertex->getEdges().empty()
+								&& vertex->getPosition()==core::Vector2{float(p->getCellX())+0.5f,float(p->getCellY())}
+								&& loaded.lookupInteractionPoint(panel->getControl(core::AccessPanel::Action::Open)), "Moved/copied panel reconstruction broken: sector="+std::to_string(s)+" vertex="+std::to_string(bool(vertex))+" edges="+std::to_string(vertex ? vertex->getEdges().size() : 0)+" geometry="+std::to_string(geometry.width)+","+std::to_string(geometry.height)+" replay="+std::to_string(replay));
+							previous=panel->getId();
+						}
+					require(count==2 && loaded.canAddAccessPanel(room,0,2,geometry), "Moved source attachment persisted");
+				}
+			}
+		}
 		core::World world("Panel persistence",10,4);
 		auto room=world.addRoom("Room",0,1,1,7,2); auto corridor=world.addCorridor(0,0,1,7,1);
 		auto facade=world.addFacade(1,1,1,7,2); world.addSectorWalkway(room,1,3);

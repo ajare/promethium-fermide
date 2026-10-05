@@ -5887,6 +5887,46 @@ namespace core
 			return false;
 		}
 
+		// Panels retain their authored chronology: remove the current cell attachment,
+		// then append a fresh placement. Detached replay validates the complete graph
+		// and rebuilds optional device ownership without transferring live handles.
+		if (auto panelObject = dynamic_pointer_cast<const AccessPanelSectorObject>(object))
+		{
+			auto owner = object->getSector();
+			auto target = getSectorAtPosition(owner->getLayerIndex(), float(plan.x) + 0.5f, float(plan.y) + 0.5f);
+			if (!target || !isLocationLike(target->getType()) || plan.y < target->getCellY())
+			{ diagnostic = "Access panels require a Room, Corridor, or Facade"; return false; }
+			auto geometry = panelObject->getPanel()->getGeometry();
+			if (!validateAccessPanel(target->getIndex(), plan.y - target->getCellY(), plan.x, geometry,
+				target == owner ? plan.objectIndex : ~0u, &diagnostic)) return false;
+			ConstructionRecord removed{ConstructionType::RemoveAccessPanel};
+			removed.a = owner->getIndex(); removed.b = panelObject->getPanel()->getLevelOffset();
+			removed.c = object->getCellX() - owner->getCellX();
+			records.push_back(removed);
+			ConstructionRecord moved{ConstructionType::AccessPanel};
+			moved.a = target->getIndex(); moved.b = plan.y - target->getCellY(); moved.c = plan.x - target->getCellX();
+			moved.x = geometry.width; moved.y = geometry.height; moved.z = geometry.yOffset;
+			records.push_back(moved);
+			auto candidate = makeCandidateWorld();
+			candidate->mDeserializingConstruction = true;
+			try
+			{
+				for (auto const& record : records)
+				{
+					if (&record == &records.back())
+					{
+						newSectorIndex = target->getIndex();
+						newObjectIndex = candidate->mSectors[newSectorIndex]->getNumObjects();
+					}
+					candidate->applyConstructionRecord(record);
+				}
+				candidate->finishBuild();
+			}
+			catch (Exception const& error) { diagnostic = error.getMessage(); return false; }
+			catch (exception const& error) { diagnostic = error.what(); return false; }
+			return true;
+		}
+
 		if (auto window = dynamic_pointer_cast<const WindowSectorObject>(object))
 			if (auto booth = dynamic_pointer_cast<const BoothWindow>(window->getWindow()); booth && booth->getDumbwaiterOwner())
 			{ diagnostic = "Dumbwaiter-owned apertures cannot be moved independently"; return false; }

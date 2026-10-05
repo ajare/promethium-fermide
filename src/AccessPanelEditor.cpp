@@ -13,6 +13,52 @@ namespace
 	}
 }
 
+YAML::Node makeAccessPanelClipboardObject(core::World const& world,
+	std::shared_ptr<const core::SectorObject> const& object)
+{
+	auto wrapper = std::dynamic_pointer_cast<const core::AccessPanelSectorObject>(object);
+	if (!wrapper || indexOf(world, object) == ~0u) throw std::runtime_error("Access panel no longer exists");
+	auto geometry = wrapper->getPanel()->getGeometry();
+	YAML::Node result;
+	result["panelType"] = "Empty";
+	result["width"] = geometry.width; result["height"] = geometry.height; result["yOffset"] = geometry.yOffset;
+	return result;
+}
+
+core::AccessPanelGeometry readAccessPanelClipboardObject(YAML::Node const& object)
+{
+	if (!object.IsMap() || object.size() != 4 || object["panelType"].as<std::string>() != "Empty")
+		throw std::runtime_error("Access panel clipboard requires Empty type and authored geometry only");
+	core::AccessPanelGeometry geometry{object["width"].as<float>(), object["height"].as<float>(), object["yOffset"].as<float>()};
+	if (!core::AccessPanel::geometryIsValid(geometry)) throw std::runtime_error("Invalid Access panel clipboard geometry");
+	return geometry;
+}
+
+std::shared_ptr<const core::SectorObject> pasteAccessPanel(std::shared_ptr<core::World> const& world,
+	uint32_t sector, uint32_t level, uint32_t x, YAML::Node const& object, std::string& diagnostic)
+{
+	core::AccessPanelGeometry geometry;
+	try { geometry = readAccessPanelClipboardObject(object); }
+	catch (std::exception const& error) { diagnostic = error.what(); return {}; }
+	return placeAccessPanel(world, sector, level, x, geometry, diagnostic);
+}
+
+std::shared_ptr<const core::SectorObject> moveAccessPanel(std::shared_ptr<core::World> const& world,
+	std::shared_ptr<const core::SectorObject> const& object, uint32_t x, uint32_t y, std::string& diagnostic)
+{
+	diagnostic.clear();
+	auto index = indexOf(*world, object);
+	if (index == ~0u || object->getObjectType() != core::SectorObjectType::AccessPanel) return {};
+	if (!world->isSimulationPaused()) { diagnostic = "Pause simulation to move Access panels"; return {}; }
+	if (object->getCellX() == x && object->getCellY() == y) return {};
+	auto plan = world->planMoveSectorObject(object->getSector()->getIndex(), index, x, y);
+	if (!plan.valid) { diagnostic = plan.diagnostic; return {}; }
+	auto before = captureDocumentSnapshot(world);
+	auto moved = world->applyObjectMove(plan);
+	commitDocumentEdit(std::move(before));
+	return moved;
+}
+
 std::shared_ptr<const core::SectorObject> placeAccessPanel(std::shared_ptr<core::World> const& world,
 	uint32_t sector, uint32_t level, uint32_t x, core::AccessPanelGeometry geometry, std::string& diagnostic)
 {

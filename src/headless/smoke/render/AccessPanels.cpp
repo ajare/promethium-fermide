@@ -21,7 +21,11 @@ namespace
 				auto world=std::make_shared<core::World>("Panel rendering",8,3);
 				auto owner=kind==0 ? world->addRoom("Room",layer,0,0,7,1) : kind==1 ? world->addCorridor(layer,0,0,7,1) : world->addFacade(layer,0,0,7,1);
 				auto created=world->addAccessPanel(owner,0,3,geometry); world->finishBuild();
-				auto object=created.sector->getObject(created.index);
+				auto old=created.sector->getObject(created.index);
+				world->pauseSimulation();
+				auto object=world->applyObjectMove(world->planMoveSectorObject(owner,created.index,4,0));
+				uint32_t movedIndex=0; while (world->getSector(owner)->getObject(movedIndex)!=object) ++movedIndex;
+				require(!world->getGraph()->getVertexForObject(old) && world->canAddAccessPanel(owner,0,3,geometry), "Moved rendering fixture retained source attachment");
 				auto panel=std::static_pointer_cast<const core::AccessPanelSectorObject>(object)->getPanel();
 				core::Vector2 min,max; panel->getSelectionShape(min,max);
 				bool degenerate=geometry.width==0 || geometry.height==0;
@@ -52,10 +56,10 @@ namespace
 					renderSector(world->getSector(owner),layer,LayerRenderStyle::Wireframe,false,ImColor(IM_COL32_WHITE),&wire);
 					require(std::none_of(wire.commands().begin(),wire.commands().end(),[](auto const& c) {return std::holds_alternative<WorldDrawList::Triangle>(c);}),"Wireframe fills panel");
 				}
-				auto actor = world->createAgent("Operator", owner, 0, 3.5f);
-				auto graph = world->getGraph(); auto vertex = graph->getVertexForObject(object);
+				auto actor = world->createAgent("Operator", owner, 0, 4.5f);
+				auto graph = world->getGraph(); auto vertex = graph->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
 				require(bool(world->requestAccessPanel(panel->getId(), core::AccessPanel::Action::Open, actor)), "Render Open request refused");
-				world->advanceTick();
+				world->resumeSimulation(); world->advanceTick();
 				require(panel->getState() == core::AccessPanel::State::Open, "Render fixture did not open");
 				for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Wireframe})
 				{
@@ -74,8 +78,8 @@ namespace
 					}
 					require(crosses == 2 && openFills == (!degenerate && style == LayerRenderStyle::Solid ? 2u : 0u), "Open indistinguishable on canvas/Facade/wireframe");
 				}
-				require(world->getGraph() == graph && graph->getVertexForObject(object) == vertex && panel->getGeometry() == geometry, "Presentation changed geometry/topology");
-				world->pauseSimulation(); require(world->removeAccessPanel(owner,created.index),"Render fixture deletion refused");
+				require(world->getGraph() == graph && graph->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object)) == vertex && panel->getGeometry() == geometry, "Presentation changed geometry/topology");
+				world->pauseSimulation(); require(world->removeAccessPanel(owner,movedIndex),"Render fixture deletion refused");
 				WorldDrawList after({{0,0},{1200,800}}); renderWorld(world,&after);
 				require(std::none_of(after.commands().begin(),after.commands().end(),[](auto const& c) {
 					auto t=std::get_if<WorldDrawList::Triangle>(&c); auto l=std::get_if<WorldDrawList::Line>(&c);

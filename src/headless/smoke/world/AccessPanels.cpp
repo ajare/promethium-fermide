@@ -12,8 +12,61 @@ namespace
 		auto out = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		work.markSerializedUnmodified = false; world.serialize(*out, work); out->serialize(); return out->getSerializedString();
 	}
+	void movement()
+	{
+		for (auto geometry : {core::AccessPanelGeometry{}, {0,0.25f,0.25f}, {0.5f,0,1}, {0,0,0}})
+		{
+			core::World world("Panel moves",16,4);
+			auto room = world.addRoom("Room",0,0,0,5,3);
+			auto corridor = world.addCorridor(0,0,6,4,1);
+			auto facade = world.addFacade(0,0,11,4,3);
+			auto background = world.addBackground(0,3,6,4,1);
+			(void)background;
+			world.addSectorWalkway(room,1,2); world.addSectorWalkway(facade,1,2);
+			auto created = world.addAccessPanel(room,0,1,geometry);
+			world.addAccessPanel(corridor,0,7,{0,0,0});
+			world.finishBuild(); world.pauseSimulation(); world.markSaved();
+			auto before = saved(world); auto graph = world.getGraph();
+			for (auto target : {core::Vector2{7,0}, {6,3}, {3,1}, {16,0}, {0,4}})
+			{
+				auto plan = world.planMoveSectorObject(room,created.index,uint32_t(target.x),uint32_t(target.y));
+				require(!plan.valid, "Invalid panel move preview accepted");
+				bool rejected = false; try { world.applyObjectMove(plan); } catch (std::exception const&) { rejected = true; }
+				require(rejected && saved(world)==before && world.getGraph()==graph && !world.isModified(), "Invalid move partially changed ownership/graph");
+			}
+			std::shared_ptr<const core::SectorObject> object = created.sector->getObject(created.index);
+			for (auto target : {core::Vector2{8,0}, {13,1}, {2,1}, {12,0}})
+			{
+				auto old = object; auto oldPanel = std::static_pointer_cast<const core::AccessPanelSectorObject>(old)->getPanel();
+				auto source = old->getSector()->getIndex(); uint32_t index=0;
+				while (world.getSector(source)->getObject(index)!=old) ++index;
+				auto control = oldPanel->getControl(core::AccessPanel::Action::Open);
+				auto plan = world.planMoveSectorObject(source,index,uint32_t(target.x),uint32_t(target.y));
+				require(plan.valid, "Valid Location panel move refused: " + plan.diagnostic);
+				object = world.applyObjectMove(plan);
+				auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(object)->getPanel();
+				auto vertex = world.getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(object));
+				require(panel->getGeometry()==geometry && panel->getType()==core::AccessPanel::Type::Empty
+					&& panel->getState()==core::AccessPanel::State::Closed && vertex
+					&& vertex->getPosition()==core::Vector2{target.x+0.5f,target.y}
+					&& !world.getGraph()->getVertexForObject(std::const_pointer_cast<core::SectorObject>(old))
+					&& !world.lookupInteractionPoint(control) && !world.lookupAccessPanel(oldPanel->getId()), "Move retained stale owned references");
+				require(world.canAddAccessPanel(source,oldPanel->getLevelOffset(),old->getCellX(),geometry), "Move left source attachment");
+				core::Vector2 min,max; panel->getSelectionShape(min,max); auto centre=(min+max)*0.5f;
+				std::shared_ptr<const core::SectorObject> selected;
+				require(world.getObjectAtPosition(0,centre.x,centre.y,&selected)==panel && selected==object, "Moved degenerate panel selection stale");
+			}
+		}
+		core::World conflict("Move wall conflict",8,2); auto room=conflict.addRoom("Room",0,0,0,7,1);
+		conflict.addRoom("Back",1,0,0,7,1); conflict.addBoothWindow(0,0,3);
+		auto created=conflict.addAccessPanel(room,0,1,{1,1,0}); conflict.finishBuild(); conflict.pauseSimulation(); conflict.markSaved();
+		auto before=saved(conflict); auto graph=conflict.getGraph();
+		require(!conflict.planMoveSectorObject(room,created.index,3,0).valid && saved(conflict)==before
+			&& conflict.getGraph()==graph && !conflict.isModified(), "Move wall overlap mutated document");
+	}
 	void authored(smoke::Context const&)
 	{
+		movement();
 		for (unsigned kind = 0; kind < 3; ++kind)
 		{
 			core::World world("Panels", 10, 4);
@@ -114,12 +167,14 @@ namespace
 			auto filename=routed ? "furniture.furniture.yaml" : "chair.furniture.yaml";
 			furnished.attachFurnitureCatalogue(filename,core::FurnitureCatalogue::readFile(context.fixture(std::string("resources/test-worlds/")+filename)));
 			furnished.placeFurniture(room,routed ? "desk" : "chair",3,0,"Furniture");
-			uint32_t from,to; furnished.addSectorMarker(room,0,1.5f,&from); furnished.addSectorMarker(room,0,6.5f,&to);
-			auto panel=furnished.addAccessPanel(room,0,3,{1,1,0}); furnished.finishBuild();
-			auto graph=furnished.getGraph(); auto vertex=graph->getVertexForObject(panel.sector->getObject(panel.index));
+			furnished.addSectorMarker(room,0,1.5f); furnished.addSectorMarker(room,0,6.5f);
+			auto panel=furnished.addAccessPanel(room,0,1,{1,1,0}); furnished.finishBuild(); furnished.pauseSimulation();
+			furnished.createAgent("In front",room,0,3.5f);
+			auto moved=furnished.applyObjectMove(furnished.planMoveSectorObject(room,panel.index,3,0));
+			auto graph=furnished.getGraph(); auto vertex=graph->getVertexForObject(std::const_pointer_cast<core::SectorObject>(moved));
 			require(furnished.furniture().size()==1 && vertex
-				&& core::pathing::findPath(nullptr,graph.get(),graph->getVertexByIdentifier(from),vertex)
-				&& core::pathing::findPath(nullptr,graph.get(),graph->getVertexByIdentifier(to),vertex), "Furniture overlap stranded panel approach");
+				&& core::pathing::findPath(nullptr,graph.get(),graph->getClosestVertexInSector(furnished.getSector(room).get(),{1.5f,0}),vertex)
+				&& core::pathing::findPath(nullptr,graph.get(),graph->getClosestVertexInSector(furnished.getSector(room).get(),{6.5f,0}),vertex), "Furniture overlap stranded panel approach");
 			if (routed) require(vertex->getEdges().size()==1, "Panel created a shortcut through Furniture routes");
 		}
 		{

@@ -3509,7 +3509,7 @@ namespace
 		}
 	}
 
-	enum class ClipboardObjectType { Dumbwaiter, Agent, Door, BulkheadDoor, Window, BoothWindow, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
+	enum class ClipboardObjectType { Dumbwaiter, Agent, Door, BulkheadDoor, Window, BoothWindow, AccessPanel, Marker, Walkway, ForceBridge, RoomLadder, PlatformLift };
 	struct ClipboardDefinition
 	{
 		ClipboardObjectType type{};
@@ -3519,6 +3519,7 @@ namespace
 		core::World::CreateBulkheadDoorOptions bulkheadDoor;
 		core::World::CreateWindowOptions window;
 		BoothWindowClipboard boothWindow;
+		core::AccessPanelGeometry accessPanel;
 		DumbwaiterClipboard dumbwaiter;
 		core::World::CreateForceBridgeOptions forceBridge{ 1, CORE_SIDE_LEFT, true, true, 1 };
 		core::World::CreateLadderOptions ladder{ 0, false, true };
@@ -3697,6 +3698,11 @@ namespace
 				<< options.automaticSensorDistance
 				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken
 				<< YAML::EndMap;
+		}
+		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::AccessPanel)
+		{
+			output << YAML::Key << "type" << YAML::Value << "AccessPanel"
+				<< YAML::Key << "object" << YAML::Value << makeAccessPanelClipboardObject(*world, gSelectedSectorObject);
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::BoothWindow)
 		{
@@ -3896,6 +3902,11 @@ namespace
 			if (definition.bulkheadDoor.activationMode != core::DoorActivationMode::RemoteControlled
 				&& (definition.bulkheadDoor.controls[0] || definition.bulkheadDoor.controls[1]))
 				throw runtime_error("Bulkhead Door controls require RemoteControlled activation");
+		}
+		else if (type == "AccessPanel")
+		{
+			definition.type = ClipboardObjectType::AccessPanel;
+			definition.accessPanel = readAccessPanelClipboardObject(object);
 		}
 		else if (type == "BoothWindow")
 		{
@@ -4228,6 +4239,13 @@ namespace
 					CORE_SIDE_LEFT, definition.bulkheadDoor, &diagnostic))
 					throw runtime_error(diagnostic);
 			}
+			else if (definition.type == ClipboardObjectType::AccessPanel)
+			{
+				markerSector = world->getSectorAtPosition(gUISettings.visibleLayer, float(x) + 0.5f, float(y) + 0.5f);
+				if (!markerSector || !world->canAddAccessPanel(markerSector->getIndex(),
+					y - markerSector->getCellY(), x, definition.accessPanel, &diagnostic))
+					throw runtime_error(diagnostic.empty() ? "Access panels require a supported Location cell" : diagnostic);
+			}
 			else if (definition.type == ClipboardObjectType::BoothWindow)
 			{
 				resolveBoothWindowClipboardPermissions(*world, definition.boothWindow);
@@ -4320,6 +4338,11 @@ namespace
 					auto result = world->addSectorBulkheadDoor(gUISettings.visibleLayer,
 						y, x, CORE_SIDE_LEFT, definition.bulkheadDoor);
 					created = result.door.sector->getObject(result.door.index);
+				}
+				else if (definition.type == ClipboardObjectType::AccessPanel)
+				{
+					auto result = world->addAccessPanel(markerSector->getIndex(), y - markerSector->getCellY(), x, definition.accessPanel);
+					created = result.sector->getObject(result.index);
 				}
 				else if (definition.type == ClipboardObjectType::BoothWindow)
 				{
@@ -9484,6 +9507,13 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 		auto topLeft = worldToScreen({ (float)plan.x, (float)plan.y + height });
 		auto bottomRight = worldToScreen({ (float)plan.x + width, (float)plan.y });
 		auto colour = plan.valid ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 64, 64, 255);
+		if (auto panel = dynamic_pointer_cast<const core::AccessPanelSectorObject>(gSelectedSectorObject))
+		{
+			core::Vector2 min, max; panel->getPanel()->getSelectionShape(min, max);
+			auto delta = core::Vector2{float(plan.x) - float(panel->getCellX()), float(plan.y) - float(panel->getCellY())};
+			topLeft = worldToScreen({min.x + delta.x, max.y + delta.y});
+			bottomRight = worldToScreen({max.x + delta.x, min.y + delta.y});
+		}
 		if (gSelectedSectorObject
 			&& gSelectedSectorObject->getObjectType() == core::SectorObjectType::BulkheadDoor)
 			drawList->AddLine(

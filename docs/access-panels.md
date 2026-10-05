@@ -1,4 +1,4 @@
-# Access panels (#451, #452)
+# Access panels (#451, #452, #453)
 
 Access panels are cell-owned objects on the visible back surface of Rooms,
 Corridors, and Facades. They do not occupy the aperture slot, add walls,
@@ -79,10 +79,34 @@ edits and delete/replacement), rebuild approaches, and reconstruct Closed.
 Schemas 1–50 without panel records remain supported. Malformed input is rejected
 in detached reconstruction before the live World is replaced.
 
-Panel movement/clipboard and comprehensive surrounding-edit reconciliation
-(including reverse wall-object conflict checks and control reflow) remain follow-up
-work under #450. Runtime Open is never serialized as an authored initial-state option.
+Comprehensive surrounding-edit reconciliation (including reverse wall-object
+conflict checks and control reflow) remains follow-up work under #454.
+Runtime Open is never serialized as an authored initial-state option.
 Owned interactions are reconstructed from placement records, not serialized handles.
+
+## Movement and clipboard (#453)
+
+Drag a selected panel with the existing object-movement workflow. The preview
+uses the panel's selection geometry (including zero-area indicators), and
+`planMoveSectorObject` / `applyObjectMove` share destination validation. Panels
+may move between supported cells in Rooms, Corridors, and Facades on the same
+Layer, preserving Empty type, width, height, and Y offset. Source attachments
+are removed and the destination floor-Level approach is rebuilt.
+
+Copy/paste uses an authored-only `AccessPanel` payload: `panelType: Empty`,
+`width`, `height`, and `yOffset`. Invalid/missing/non-finite fields and extra
+runtime/ownership fields are rejected before any edit. Pasted panels have
+independent identities, approaches, and owned interactions, and start Closed.
+
+Movement uses existing detached construction replay preflight, then ownership
+reconstruction, rather than copying live vertices, controls or pending requests.
+It appends removal/placement records to retain geometry-edit chronology and
+object tombstones, without a new persistence schema. These records rebuild
+optional device ownership through ordinary panel creation. As with other object
+moves, selection is replaced with the returned destination object and stale
+selection references cannot edit/delete the reconstructed object. Move and paste
+use document snapshot undo/redo; rejected operations add no history or modified
+state. YAML/binary loading and reset reconstruct Closed destination panels.
 
 ## Headless coverage
 
@@ -97,9 +121,26 @@ Editor coverage includes the actual Agent action buttons, runtime history isolat
 and operable reconstructed controls. Persistence checks YAML/binary saving while Open,
 Closed reconstruction, and subsequent Agent operation.
 
+The same checks also cover movement across supported Location types, Floor and
+Walkway ownership, occupied/unsupported/conflicting cells, Furniture/Agent
+exclusion, degenerate hit-testing and destination rendering, malformed clipboard
+payloads, fresh identities/controls, pending-request cleanup, undo/redo selection
+safety, and movement/copy persistence/replay.
+
 All use existing production seams; Editor and Render use CPU-only ImGui with no
 display or dialogs. See `linux-smoke-validation.md` and `validation-recovery.md`
 for the required bounded final validation lanes.
+
+## #453 verification
+
+Final GUI-enabled Linux default builds (core, headless modules/tools, and `editor`)
+and unfiltered CTest passed on the final source state in Release and Debug:
+110 registered tests, zero failures, one explicit optional GUI skip each. All
+checks were headless; no display or dialog was used. `git diff --check` and the
+smoke ownership audit passed.
+
+- Release final CTest: `c5e7f9f597bb462eadb3d17ed2a8067f`, 129.76 s.
+- Debug final CTest: `0101767323a3439b97629411488ac8bf`, 607.14 s.
 
 ## #452 verification
 
