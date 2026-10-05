@@ -633,7 +633,6 @@ namespace core
 	bool SimulationCoordinator::advanceTick()
 	{
 		if (mWorld.mSimulationPaused) return false;
-		mWorld.mActionExecutionFailed = false;
 		auto const stepStartedAt = SimulationStepTiming::Clock::now();
 		auto const eventStart = mWorld.mEvents.size();
 		mWorld.invalidateSimulationSnapshot();
@@ -680,7 +679,12 @@ namespace core
 		mWorld.mCurrentPhase = SimulationPhase::None;
 		auto const stepCompletedAt = SimulationStepTiming::Clock::now();
 		mWorld.mSimulationStepTiming.record(stepCompletedAt - stepStartedAt, stepCompletedAt);
-		if (mWorld.mActionExecutionFailed) { mWorld.pauseSimulation(); return false; }
+		if (mWorld.mActionExecutionFailed)
+		{
+			mWorld.mActionExecutionFailed = false;
+			mWorld.pauseSimulation();
+			return false;
+		}
 		return true;
 	}
 

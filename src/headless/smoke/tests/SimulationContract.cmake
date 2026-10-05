@@ -173,6 +173,7 @@ set(core_names
     markerActions/deviceEffects
     markerActions/claimCompetition
     markerActions/furnitureUse
+    markerActions/furnitureStructuralEdits
     markerActions/furnitureFinishFailures
     markerActions/furnitureUseCompetition
     markerActions/furnitureUseDocuments

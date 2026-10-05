@@ -1,6 +1,7 @@
 #include "Checks.h"
 #include "core/World.h"
 #include "core/Agent.h"
+#include "core/AgentBehaviourRegistry.h"
 #include "core/Log.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
@@ -413,12 +414,23 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			auto end = custom.find("\nend", begin);
 			custom.replace(begin, end-begin, body);
 			auto path = context.temporaryRoot() / "failure.furniture.lua"; write(path, custom);
-			for (bool departure : {false, true})
+			for (unsigned ending : {0u, 1u, 2u, 3u})
 			{
 				auto world = useFixture(path); auto seat = world->furniture()[0].marker; auto agent = core::AgentId{1};
 				require(runAction(*world, agent, seat, std::string(core::UseFurnitureAction)).type == core::SimulationEventType::DestinationReached, "Failure fixture use failed");
 				world->consumeSimulationEvents(); core::consumeLogMessages();
-				require((departure ? world->moveAgentToNamedMarker(agent, "Origin") : world->moveAgentToMarker(agent, seat)).accepted(), "Finish request refused");
+				if (ending < 2)
+					require((ending ? world->moveAgentToNamedMarker(agent, "Origin") : world->moveAgentToMarker(agent, seat)).accepted(), "Finish request refused");
+				else
+				{
+					world->pauseSimulation();
+					auto position = world->lookupAgent(agent).entity->getGlobalPosition();
+					auto id = world->furniture()[0].id;
+					require(ending == 2 ? world->editFurniture(id, 4, 0, "Moved") : world->removeFurniture(id), "Failure cleanup edit refused");
+					require(!world->usablePointOccupant(seat) && world->lookupAgent(agent).entity->getPose() == core::Pose::Standing
+						&& world->lookupAgent(agent).entity->getGlobalPosition() == position, "Edit finish failure stranded/teleported Agent");
+					require(world->resumeSimulation(), "Edit failure resume refused");
+				}
 				bool failed = false;
 				for (unsigned tick = 0; tick < 120 && !failed; ++tick) failed = !world->advanceTick();
 				require(failed && world->isSimulationPaused() && !world->usablePointOccupant(seat)
@@ -434,6 +446,100 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				require(diagnostic, "Finish failure has no structured diagnostic");
 				for (auto const& log : core::consumeLogMessages()) require(log.msg != "finish rollback", "Failed/incomplete finish published staged logs");
 			}
+		}
+	}
+
+	void furnitureStructuralEdits(smoke::Context const& context)
+	{
+		std::ifstream input(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
+		std::string unclaimed((std::istreambuf_iterator<char>(input)), {});
+		for (auto call : {"  world.claim()\n", "  world.release()\n"}) unclaimed.erase(unclaimed.find(call), std::string_view(call).size());
+		auto unclaimedPath = context.temporaryRoot() / "unclaimed.furniture.lua";
+		write(unclaimedPath, unclaimed);
+		for (bool claim : {false, true})
+		for (bool remove : {false, true})
+		{
+			auto world = useFixture(claim ? context.fixture("src/headless/smoke/fixtures/use.furniture.lua") : unclaimedPath);
+			auto chair = world->furniture()[0].id;
+			auto seat = world->furniture()[0].marker;
+			auto sofaSeat = world->furniture()[1].destinations[0].marker;
+			auto owner = core::AgentId{1}, independent = core::AgentId{2}, traveller = core::AgentId{3};
+			require(runAction(*world, owner, seat, "use-furniture").type == core::SimulationEventType::DestinationReached
+				&& runAction(*world, independent, sofaSeat, "use-furniture").type == core::SimulationEventType::DestinationReached, "Edit use setup failed");
+			world->pauseSimulation(); core::consumeLogMessages();
+			auto position = world->lookupAgent(owner).entity->getGlobalPosition();
+			auto graph = world->getGraph();
+			std::string diagnostic;
+			require(!world->editFurniture(chair, 6, 0, "Refused", &diagnostic) && !diagnostic.empty()
+				&& world->getGraph() == graph && world->usablePointOccupant(seat) == (claim ? owner : core::AgentId{})
+				&& world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting, "Refused edit changed graph/use");
+			auto registry = core::AgentBehaviourRegistry::create();
+			world->attachAgentBehaviourRegistry("references.behaviours", registry);
+			auto behaviour = registry->addAgentBehaviour("Visit", "visit.lua", {
+				{"destination", core::AgentBehaviourSchemaType::Marker, {}, true, std::nullopt}});
+			require(world->setAgentBehaviourAssignment(traveller, behaviour, 1, {{"destination", seat}}, &diagnostic), diagnostic);
+			require(!world->removeFurniture(chair, &diagnostic) && diagnostic.find("destination") != std::string::npos
+				&& world->getGraph() == graph && world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting,
+				"Referenced Furniture deletion changed active use");
+			require(world->clearAgentBehaviourAssignment(traveller, &diagnostic), diagnostic);
+			require(!world->removeFurniture(99999, &diagnostic), "Unknown Furniture deletion accepted");
+			for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("finish:"), "Refused deletion invoked lifecycle");
+			// Rename-only replay must preserve the lifecycle as well as the claim.
+			require(world->editFurniture(chair, 3, 0, "Renamed", &diagnostic)
+				&& world->usablePointOccupant(seat) == (claim ? owner : core::AgentId{}), "Rename lost active use");
+			for (auto const& log : core::consumeLogMessages())
+				require(!log.msg.starts_with("finish:") && !log.msg.starts_with("use:"), "Rename replay invoked lifecycle");
+			if (remove)
+			{
+				// A request accepted before the claim is freed cannot bypass occupancy;
+				// instead test a pending request to the independently movable desk.
+				auto desk = world->furniture()[2].id;
+				auto target = world->furniture()[2].marker;
+				auto actions = context.temporaryRoot() / "deleted.actions.lua";
+				write(actions, package("{key='hello',name='Deleted callback',run=function(a,w,m) w.log('stale callback') end}"));
+				require(world->selectActionRegistry(actions) && world->setMarkerActions(target, {first}), "Pending Action setup refused");
+				require(world->moveAgentToMarker(traveller, target, first).accepted() && world->removeFurniture(desk, &diagnostic), diagnostic);
+				require(world->resumeSimulation() && world->advanceTicks(30), "Deletion cancellation failed");
+				bool cancelled = false;
+				for (auto const& event : world->consumeSimulationEvents())
+					cancelled |= event.agent.id == traveller && event.type == core::SimulationEventType::MovementCancelled
+						&& event.movementCancellationReason == core::MovementCancellationReason::TargetDeleted;
+				require(cancelled, "Removed target did not cancel pending request");
+				world->pauseSimulation();
+				for (auto const& log : core::consumeLogMessages()) require(log.msg != "stale callback", "Deleted target executed stale Action");
+			}
+			require(remove ? world->removeFurniture(chair, &diagnostic)
+				: world->editFurniture(chair, 4, 0, "Moved", &diagnostic), diagnostic);
+			require(world->lookupAgent(owner).entity->getGlobalPosition() == position
+				&& world->lookupAgent(owner).entity->getPose() == core::Pose::Standing
+				&& !world->usablePointOccupant(seat), "Structural edit teleported Agent or stranded use");
+			unsigned finishes = 0;
+			for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
+			require(finishes == 1, "Affected use did not finish exactly once with old view");
+			require(world->usablePointOccupant(sofaSeat) == (claim ? independent : core::AgentId{})
+				&& world->lookupAgent(independent).entity->getPose() == core::Pose::Sitting, "Local edit reset unrelated use");
+			require(runAction(*world, independent, sofaSeat, "idle").type == core::SimulationEventType::DestinationReached, "Preserved use replacement failed");
+			finishes = 0;
+			for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
+			require(finishes == 1 && !world->usablePointOccupant(sofaSeat), "Replay lost unrelated active lifecycle");
+		}
+		for (unsigned surrounding : {0u, 1u, 2u})
+		{
+			auto world = useFixture(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
+			if (surrounding == 1) world->addLayer();
+			auto seat = world->furniture()[0].marker;
+			require(runAction(*world, core::AgentId{1}, seat, "use-furniture").type == core::SimulationEventType::DestinationReached, "Surrounding edit setup failed");
+			world->pauseSimulation(); core::consumeLogMessages();
+			if (surrounding == 2)
+			{
+				require(!world->planRemoveLocation(0).valid && world->usablePointOccupant(seat) == core::AgentId{1}, "Refused Location removal changed use");
+				world->applyLocationEdit(world->planResizeLocation(0, 1, 0, 11, 1));
+			}
+			else require(surrounding == 1 ? world->applyDeleteLayer(world->planDeleteLayer(0))
+				: world->applyDeleteLevel(world->planDeleteLevel(0)), "Surrounding target invalidation refused");
+			unsigned finishes = 0;
+			for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
+			require(finishes == 1 && !world->usablePointOccupant(seat), "Surrounding edit invalidated target before finishing");
 		}
 	}
 
@@ -594,6 +700,24 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			require(runAction(*loaded, agent, seat, "idle").type == core::SimulationEventType::DestinationReached
 				&& !loaded->usablePointOccupant(seat), "Reopened use did not finish");
 		}
+		// Save an actually active use. Reconstruction itself must not execute
+		// either lifecycle callback; an authored request may run only on later ticks.
+		require(runAction(*world, agent, seat, "use-furniture").type == core::SimulationEventType::DestinationReached, "Active document setup failed");
+		world->pauseSimulation();
+		for (bool binary : {false, true})
+		{
+			auto document = context.temporaryRoot() / (binary ? "active.world.bin" : "active.world.yaml");
+			auto output = binary ? std::unique_ptr<core::Serializer>(core::BinarySerializer::toFile(document.string()))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::toFile(document.string()));
+			core::SerializationWorkData data; data.documentDirectory = context.temporaryRoot();
+			world->serialize(*output, data); output->serialize(); output.reset();
+			core::consumeLogMessages(); auto loaded = reopen(document, binary);
+			require(!loaded->usablePointOccupant(seat) && loaded->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Load restored transient use");
+			for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("use:") && !log.msg.starts_with("finish:"), "Load invoked lifecycle");
+		}
+		core::consumeLogMessages(); world->resetSimulation();
+		require(!world->usablePointOccupant(seat) && world->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Reset restored transient use");
+		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("use:") && !log.msg.starts_with("finish:"), "Reset invoked lifecycle");
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		world->serialize(*writer, work); writer->serialize(); auto yaml = writer->getSerializedString();
 		require(yaml.find("function") == std::string::npos && yaml.find("finish_use") == std::string::npos, "Furniture callbacks entered document");
@@ -696,6 +820,7 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/deviceEffects", deviceEffects});
 	checks.push_back({"markerActions/claimCompetition", claimCompetition});
 	checks.push_back({"markerActions/furnitureUse", furnitureUse});
+	checks.push_back({"markerActions/furnitureStructuralEdits", furnitureStructuralEdits});
 	checks.push_back({"markerActions/furnitureFinishFailures", furnitureFinishFailures});
 	checks.push_back({"markerActions/furnitureUseCompetition", furnitureUseCompetition});
 	checks.push_back({"markerActions/furnitureUseDocuments", furnitureUseDocuments});

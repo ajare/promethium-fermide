@@ -342,3 +342,54 @@ Final build evidence: Release `0f6e68c251694ef7a75fcb3cd44002bc`, Debug
 `fc98d13c77f44855a2b66fcaf91dab51`. Full-suite green remains the #467 integration
 contract; legacy catalogue/fixture migration and structural/reload lifecycle are
 not part of #462.
+
+## Furniture lifecycle and structural-edit safety (#463)
+
+Accepted Furniture movement/deletion finishes affected uses after complete replay
+preflight, while the old Marker, owning Furniture and immutable definition remain
+accessible. This also handles active uses that never claimed occupancy. Agents
+remain at their physical positions for Furniture edits. Rename-only edits and
+unrelated uses retain both lifecycle identity and claims through local replay,
+without executing callbacks. Lua usable-point claims no longer depend on the
+legacy arrival-action enum when being restored. Surrounding Location movement
+and Level/Layer target removal finish affected uses after their edit validation.
+Existing support/reference protections remain authoritative; refused edits do
+not finish use or add document history.
+
+Pending requests to deleted targets retain their stable identity and publish
+TargetDeleted cancellation rather than invoking stale Actions. Reset, load and
+history reconstruction discard runtime use/claims/Pose without calling either
+lifecycle function. Only later simulation of an authored request can execute use.
+Local replay retains the accepted catalogue snapshot for surviving active uses;
+none of this transient lifecycle data is serialized.
+
+Throwing, budget-exhausted, invalid or incomplete finish callbacks still restore
+Standing and release occupancy. Structural-edit failures retain their structured
+pending outcome and failure flag across replay, so the next simulation tick
+publishes the diagnostic and reports headless failure/pauses rather than silently
+clearing the error at tick entry.
+
+Public coverage: new Simulation `markerActions/furnitureStructuralEdits` exercises
+accepted/refused movement/deletion, behaviour-reference protection, rename-only
+replay, claimed/unclaimed use, unrelated-use preservation, stale Action
+cancellation and surrounding edits. Extended `furnitureFinishFailures` covers
+move/delete failure cleanup, `furnitureUseDocuments` covers active-use save/load
+and Reset without callback replay, and Editor `furnitureUseWorkflow` covers edit
+refusal/history, safe movement and move/delete Undo/Redo. Existing
+`furnitureUse` covers pause/deactivation, unreachable replanning and exact
+physical-departure finishing. All are bounded, headless public-seam checks.
+
+### #463 final Linux verification
+
+Release and Debug default builds passed (core, headless, editor and contracts).
+Final unfiltered CTest ran 110 tests per configuration: **103 passed, one optional
+GUI capability skipped, six failed**. The failures are exactly the seven unchanged
+legacy implicit-Furniture checks already recorded for #462; no #463 check or new
+failure remains. Full-suite green and legacy migration remain #467's contract.
+Focused lifecycle/document/editor checks passed in both configurations, and
+`git diff --check` passed. No Windows validation is claimed.
+
+Final build evidence: Release `77dec36df1024a17859051ad477bf477`, Debug
+`1e94bb1c43c0410d9d1f22bcb0ab0880`. Final unfiltered CTest evidence: Release
+`0c607048c86e409a8161106f98c8b553`, Debug
+`ae3b0c886195442bbed93ab0b1d21015`.

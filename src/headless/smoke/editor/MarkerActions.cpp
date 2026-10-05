@@ -146,6 +146,33 @@ namespace
 		require(world->usablePointOccupant(seat) == agent, "Editor request acceptance vacated chair");
 		require(world->resumeSimulation() && world->advanceTicks(60), "Editor Idle replacement failed");
 		require(world->lookupAgent(agent).entity->getPose() == core::Pose::Standing && !world->usablePointOccupant(seat), "Editor replacement did not finish");
+		world->pauseSimulation();
+		require(commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic), diagnostic);
+		require(world->resumeSimulation() && world->advanceTicks(60) && world->usablePointOccupant(seat) == agent, "Editor edit-use setup failed");
+		world->pauseSimulation(); core::consumeLogMessages();
+		auto id = world->furniture()[0].id;
+		count = gWorldDocumentHistory.undoCount();
+		auto position = world->lookupAgent(agent).entity->getGlobalPosition();
+		require(!editSelectedFurniture(world, id, -1, 0, false, "Refused", diagnostic)
+			&& gWorldDocumentHistory.undoCount() == count && world->usablePointOccupant(seat) == agent,
+			"Refused editor move changed use/history");
+		require(!deleteSelectedFurniture(world, 99999, diagnostic) && gWorldDocumentHistory.undoCount() == count,
+			"Refused editor deletion changed history");
+		require(editSelectedFurniture(world, id, 4, 0, false, "Moved", diagnostic)
+			&& gWorldDocumentHistory.undoCount() == count + 1, diagnostic);
+		require(world->lookupAgent(agent).entity->getGlobalPosition() == position && !world->usablePointOccupant(seat)
+			&& world->lookupAgent(agent).entity->getPose() == core::Pose::Standing, "Editor move stranded/teleported user");
+		unsigned finishes = 0;
+		for (auto const& log : core::consumeLogMessages()) if (log.msg.starts_with("finish:")) ++finishes;
+		require(finishes == 1, "Editor move did not finish old use");
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+			&& !world->usablePointOccupant(seat) && world->lookupAgent(agent).entity->getPose() == core::Pose::Standing
+			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Furniture move history restored transient use");
+		require(deleteSelectedFurniture(world, id, diagnostic)
+			&& gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+			&& gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Furniture deletion history failed");
+		for (auto const& log : core::consumeLogMessages())
+			require(!log.msg.starts_with("use:") && !log.msg.starts_with("finish:"), "History reconstruction replayed lifecycle effects");
 	}
 
 	void workflow(smoke::Context const& context)

@@ -2826,6 +2826,7 @@ namespace core
 		{
 			mMovementGoals.clear();
 			mPendingMovementOutcomes.clear();
+			mActionExecutionFailed = false;
 			mSimulationTick = 0;
 			mNextEventSequence = 1;
 		}
@@ -3345,7 +3346,11 @@ namespace core
 				agent->mResetPosition.sector() ? agent->mResetPosition.sector()->getLayerIndex() : sector->getLayerIndex(),
 				agent->mResetPosition.sector() ? agent->mResetLocalDepth : agent->getLocalDepth(),
 				agent->mResetDestinationMarker, agent->mResetPathActive, agent->mResetAction,
-				agent->mPose, agent->mOccupiedUsablePoint });
+				agent->mPose, agent->mOccupiedUsablePoint,
+				agent->mFurnitureUse ? agent->mFurnitureUse->marker : MarkerId{},
+				agent->mFurnitureUse ? agent->mFurnitureUse->instance : 0,
+				agent->mFurnitureUse ? agent->mFurnitureUse->definition : std::string{},
+				agent->mFurnitureUse ? agent->mFurnitureUse->catalogue : nullptr });
 		}
 		return carried;
 	}
@@ -3451,10 +3456,13 @@ namespace core
 			raw->mPose = saved.pose;
 			if (saved.occupiedUsablePoint)
 			{
-				if (furnitureMarkerAction(saved.occupiedUsablePoint))
+				if (isFurnitureMarker(saved.occupiedUsablePoint))
 					raw->mOccupiedUsablePoint = saved.occupiedUsablePoint;
 				else raw->mPose = Pose::Standing;
 			}
+			if (saved.useMarker && actionAvailable(saved.useMarker, UseFurnitureAction))
+				raw->mFurnitureUse = Agent::FurnitureUse{saved.useMarker, saved.useFurniture,
+					saved.useDefinition, saved.useCatalogue};
 			raw->mEscalatorTraversalSequence = saved.escalatorTraversalSequence;
 			raw->mRouteJourneySequence = saved.routeJourneySequence;
 			if (saved.behaviourAssignment)
@@ -3510,6 +3518,25 @@ namespace core
 		catch (Exception const&) { throw; }
 		catch (exception const& error) { throw WorldException(this, error.what()); }
 
+		// Preflight has succeeded. Finish while the old Marker and immutable
+		// definition are still available, including uses that did not claim a seat.
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			if (!agent->mFurnitureUse) continue;
+			auto const& use = *agent->mFurnitureUse;
+			auto ownsUse = [&](ConstructionRecord const& record) {
+				return record.type == ConstructionType::Furniture && record.furnitureId == use.instance
+					&& std::any_of(record.furnitureDestinations.begin(), record.furnitureDestinations.end(),
+						[&](auto const& point) { return point.marker == use.marker; });
+			};
+			auto before = std::find_if(mConstructionRecords.begin(), mConstructionRecords.end(), ownsUse);
+			auto after = std::find_if(records.begin(), records.end(), ownsUse);
+			if (before == mConstructionRecords.end() || after == records.end()
+				|| before->a != after->a || before->x != after->x || before->y != after->y
+				|| before->furnitureDepth != after->furnitureDepth || before->definitionKey != after->definitionKey
+				|| (before->a == movedSectorIndex && (deltaX || deltaY)))
+				finishFurnitureUse(id);
+		}
 		auto agents = captureAgentsForReplay();
 		for (auto& carried : agents)
 		{
@@ -3944,6 +3971,11 @@ namespace core
 		vector<bool> removed;
 		vector<string> consequences;
 		auto records = recordsWithoutLevel(plan.levelIndex, removed, consequences);
+		// Level preflight succeeded: affected targets disappear or move vertically.
+		for (auto const& [id, agent] : mAgents.entries())
+			if (agent->mFurnitureUse)
+				if (auto marker = lookupMarker(agent->mFurnitureUse->marker);
+					marker && marker->getCellY() >= plan.levelIndex) finishFurnitureUse(id);
 		vector<CarriedAgent> agents;
 		for (auto agent : captureAgentsForReplay())
 		{
@@ -4085,6 +4117,12 @@ namespace core
 
 		LayerDeleteImpact impact;
 		auto records = recordsWithoutLayer(plan.layerIndex, impact);
+		// Finish removed targets before their owning Layer/definition view vanishes.
+		// Layer-number compaction alone does not end surviving uses.
+		for (auto const& [id, agent] : mAgents.entries())
+			if (agent->mFurnitureUse)
+				if (auto instance = furnitureForMarker(agent->mFurnitureUse->marker);
+					instance && impact.sectorRemoved[instance->sector]) finishFurnitureUse(id);
 
 		// Agents standing on the deleted Layer go with it; the rest carry forward
 		// one Layer shallower, assignments included (#122).
@@ -8052,6 +8090,14 @@ namespace core
 		string diagnostic;
 		if (!prepareLocationEdit(plan, records, newSectorIndex, diagnostic))
 			throw WorldException(this, diagnostic);
+
+		// Complete validation precedes lifecycle teardown. Removal or translation
+		// invalidates uses in this Location, but leaves other Locations untouched.
+		if (plan.remove || plan.move)
+			for (auto const& [id, agent] : mAgents.entries())
+				if (agent->mFurnitureUse)
+					if (auto instance = furnitureForMarker(agent->mFurnitureUse->marker);
+						instance && instance->sector == plan.sectorIndex) finishFurnitureUse(id);
 
 		// Agents standing in the Room being moved follow it. Every Agent carries
 		// its Agent group across the replay (#122).

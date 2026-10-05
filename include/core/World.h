@@ -1191,6 +1191,10 @@ namespace core
 			std::string resetAction;
 			Pose pose{ Pose::Standing };
 			MarkerId occupiedUsablePoint{};
+			MarkerId useMarker{};
+			uint64_t useFurniture{ 0 };
+			std::string useDefinition;
+			std::shared_ptr<const FurnitureCatalogue> useCatalogue;
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried
