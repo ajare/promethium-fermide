@@ -1,0 +1,9 @@
+# Script Marker actions and Lua Furniture definitions
+
+Status: accepted design; implementation pending
+
+Every Agent movement request selects an Agent action at a Marker, defaulting to the universally available Idle action; additional available actions are authored on Markers and are empty by default. Names resolve to stable Marker identities when requests are accepted, rather than retaining transient routing Vertex references. Actions execute budgeted, synchronous Lua functions through safe Agent, World and Marker views with validated, atomically staged effects, extending ADR 0008's scripting boundary without exposing mutable domain objects or graph vertices.
+
+Furniture catalogues become Lua modules returning immutable definition objects containing authored geometry, routing and paired `use(agent, world, marker)` and `finish_use(agent, world, marker)` functions. Use furniture delegates to the selected Marker's definition; occupancy remains host-managed per usable point rather than shared mutable Lua state. Scripts normally implement pose and occupancy transitions, while the host guarantees cleanup if finishing fails. This replaces closed-enum implicit destination-arrival effects with explicitly requested, extensible use and paired teardown, while retaining typed Device commands and Traversal resources as the authorities for device operation and movement admission.
+
+Lua catalogues retain catalogue UUID, definition and usable-point identities; World documents remain YAML or binary and reference external catalogues, never persisted Lua functions or VM state. Existing YAML catalogues and repository World references will be converted and the YAML catalogues deleted; legacy YAML catalogue loading is deliberately unsupported rather than maintained through a compatibility adapter. Action registries remain separate from Furniture definitions, and paused-only transactional reload validates dependencies before replacing loaded packages.
