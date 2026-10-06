@@ -3671,8 +3671,9 @@ namespace
 				<< YAML::Key << "activationMode" << YAML::Value << activationModeName(options.activationMode)
 				<< YAML::Key << "holdOpenSeconds" << YAML::Value << options.holdOpenSeconds
 				<< YAML::Key << "crossingLanes" << YAML::Value << options.crossingLanes
-				<< YAML::Key << "openStyle" << YAML::Value << doorOpenStyleName(options.openStyle)
-				<< YAML::EndMap;
+				<< YAML::Key << "openStyle" << YAML::Value << doorOpenStyleName(options.openStyle);
+			if (options.speedOverride) output << YAML::Key << "speed" << YAML::Value << *options.speedOverride;
+			output << YAML::EndMap;
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::BulkheadDoor)
 		{
@@ -3692,8 +3693,9 @@ namespace
 				<< YAML::Key << "crossingLanes" << YAML::Value << options.crossingLanes
 				<< YAML::Key << "automaticSensorDistance" << YAML::Value
 				<< options.automaticSensorDistance
-				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken
-				<< YAML::EndMap;
+				<< YAML::Key << "initiallyBroken" << YAML::Value << options.initiallyBroken;
+			if (options.speedOverride) output << YAML::Key << "speed" << YAML::Value << *options.speedOverride;
+			output << YAML::EndMap;
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::AccessPanel)
 		{
@@ -3835,6 +3837,9 @@ namespace
 		{
 			definition.type = ClipboardObjectType::Door;
 			definition.door.width = requiredYaml<uint32_t>(object, "width");
+			if (object["speed"]) definition.door.speedOverride = object["speed"].as<float>();
+			if (!core::Door::speedIsValid(definition.door.speedOverride))
+				throw runtime_error("Door speed must be finite and positive");
 			if (object["height"])
 			{
 				auto const height = object["height"].as<string>();
@@ -3870,6 +3875,9 @@ namespace
 		else if (type == "BulkheadDoor")
 		{
 			definition.type = ClipboardObjectType::BulkheadDoor;
+			if (object["speed"]) definition.bulkheadDoor.speedOverride = object["speed"].as<float>();
+			if (!core::Door::speedIsValid(definition.bulkheadDoor.speedOverride))
+				throw runtime_error("Bulkhead Door speed must be finite and positive");
 			auto controls = object["controls"];
 			if (!controls || !controls.IsSequence() || controls.size() != 2)
 				throw runtime_error("Bulkhead Door controls must contain two values");
@@ -5227,9 +5235,8 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 
 void renderToolbar(shared_ptr<core::World> world)
 {
-	auto const averageStepMilliseconds =
-		std::round(world->getAverageSimulationStepMicroseconds() / 100.0) / 10.0;
-	ImGui::Text("Simulation: %.1f ms / step", averageStepMilliseconds);
+	auto const averageStepMicroseconds = world->getAverageSimulationStepMicroseconds();
+	ImGui::Text("Simulation: %.1f us / step", averageStepMicroseconds);
 	if (ImGui::IsItemHovered())
 		ImGui::SetTooltip("Average completed core tick time over the last second; excludes rendering.");
 
@@ -5820,7 +5827,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 			core::World::CreateBulkheadDoorOptions options{
 				{ leftControl, rightControl },
 				static_cast<core::DoorActivationMode>(activationMode),
-				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance, {}, door->isInitiallyBroken() };
+				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance, {}, door->isInitiallyBroken(), door->getSpeedOverride() };
 			gSelectedSectorObject = world->applySectorBulkheadDoorOptions(
 				owner->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset(); editedObject = nullptr;

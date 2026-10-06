@@ -143,6 +143,36 @@ void renderDoorConditionPanel(shared_ptr<core::World> const& world,
 	if (door->isBroken())
 		ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f),
 			"Broken (position frozen): %.2f%% open", door->getOpenPercentage() * 100.0f);
+	if (!door->isChamberOwned())
+	{
+		static core::Door const* editedDoor = nullptr;
+		static float speed = 0.0f;
+		if (editedDoor != door.get()) { editedDoor = door.get(); speed = door->getSpeed(); }
+		ImGui::BeginDisabled(!world->isSimulationPaused());
+		bool overrideSpeed = door->getSpeedOverride().has_value();
+		if (ImGui::Checkbox("Override opening/closing speed", &overrideSpeed))
+		{
+			auto undo = captureDocumentSnapshot(world);
+			if (world->setDoorSpeedOverride(door->getTraversalResourceId(),
+				overrideSpeed ? optional<float>{door->getSpeed()} : nullopt))
+				commitDocumentEdit(std::move(undo));
+			speed = door->getSpeed();
+		}
+		ImGui::Text("Default speed: %.3f units/s", door->getDefaultSpeed());
+		if (overrideSpeed)
+		{
+			ImGui::InputFloat("Opening/closing speed (units/s)", &speed, 0.05f, 0.25f, "%.3f");
+			ImGui::BeginDisabled(!core::Door::speedIsValid(speed));
+			if (ImGui::Button("Apply Door speed"))
+			{
+				auto undo = captureDocumentSnapshot(world);
+				if (world->setDoorSpeedOverride(door->getTraversalResourceId(), speed))
+					commitDocumentEdit(std::move(undo));
+			}
+			ImGui::EndDisabled();
+		}
+		ImGui::EndDisabled();
+	}
 	if (door->isBreakable())
 	{
 		bool initiallyBroken = door->isInitiallyBroken();

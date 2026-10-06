@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 
 #include "core/Door.h"
 #include "core/Sector.h"
@@ -21,6 +22,18 @@ namespace core
 			cellsWide, sectors)
 	{
 		mHeight = height;
+	}
+
+	bool Door::speedIsValid(std::optional<float> speed)
+	{
+		return !speed || (std::isfinite(*speed) && *speed > 0.0f);
+	}
+
+	bool Door::setSpeedOverride(std::optional<float> speed)
+	{
+		if (isChamberOwned() || !speedIsValid(speed)) return false;
+		mSpeedOverride = speed;
+		return true;
 	}
 
 	uint32_t Door::getCellsWide() const { return mCellsWide; }
@@ -138,13 +151,20 @@ namespace core
 	}
 
 	std::string Door::getDescription() const { return "Door"; }
+	float Door::getDefaultSpeed() const
+	{
+		// Retain legacy default durations for horizontal styles; vertical leaves
+		// share the regular Door's physical speed regardless of height.
+		float travel = mOpenStyle == OpenStyle::OpenUp ? CORE_DOOR_HEIGHT : getSize().x;
+		if (mOpenStyle == OpenStyle::OpenApart) travel *= 0.5f;
+		return travel / CORE_DOOR_OPEN_CLOSE_TIME;
+	}
+
 	float Door::getOpenCloseTime() const
 	{
-		// OpenUp is a vertical slide, so a taller leaf takes proportionally longer
-		// and therefore travels at the same world-space speed as a regular leaf.
-		return mOpenStyle == OpenStyle::OpenUp
-			? CORE_DOOR_OPEN_CLOSE_TIME * getSize().y / CORE_DOOR_HEIGHT
-			: CORE_DOOR_OPEN_CLOSE_TIME;
+		float travel = mOpenStyle == OpenStyle::OpenUp ? getSize().y : getSize().x;
+		if (mOpenStyle == OpenStyle::OpenApart) travel *= 0.5f;
+		return travel / getSpeed();
 	}
 	float Door::getTimeBeforeClosing() const { return mHoldOpenTime; }
 	void Door::getCurrentShape(Vector2& minExtent, Vector2& maxExtent) const

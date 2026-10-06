@@ -287,6 +287,12 @@ namespace core
 		};
 
 		serializer.writeString("type", constructionTypeName(record.type));
+		if (!record.transportDoorSpeeds.empty())
+		{
+			serializer.beginArray("doorSpeeds", false);
+			for (float speed : record.transportDoorSpeeds) serializer.writeFloat("", speed);
+			serializer.endArray();
+		}
 		if ((record.type == ConstructionType::Ladder || record.type == ConstructionType::SectorLadder
 			|| record.type == ConstructionType::ForceBridge) && record.initiallyBroken)
 			serializer.writeBool("initiallyBroken", true);
@@ -405,6 +411,8 @@ namespace core
 			serializer.writeBool("backControl", record.q); serializer.writeString("activationMode", activationName(record.i));
 			serializer.writeFloat("holdOpenSeconds", record.x); serializer.writeUint32("crossingLanes", record.d);
 			serializer.writeString("openStyle", openStyleName(record.j));
+			serializer.writeBool("hasSpeedOverride", record.doorSpeed.has_value());
+			if (record.doorSpeed) serializer.writeFloat("speed", *record.doorSpeed);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			// Only a Door whose Buttons were added in the editor carries the mode
 			// removal restores. Authored control layouts need no extra field; their
@@ -481,6 +489,8 @@ namespace core
 			serializer.writeString("activationMode", activationName(record.j));
 			serializer.writeFloat("holdOpenSeconds", record.x); serializer.writeUint32("crossingLanes", record.d);
 			serializer.writeFloat("automaticSensorDistance", record.y);
+			serializer.writeBool("hasSpeedOverride", record.doorSpeed.has_value());
+			if (record.doorSpeed) serializer.writeFloat("speed", *record.doorSpeed);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			for (size_t side = 0; side < 2; ++side)
 				if (!record.controlPermissionRequirements[side].empty())
@@ -674,7 +684,8 @@ namespace core
 		// registry references as application Resource names (ADR 0010) rather
 		// than adjacent file basenames. Pre-55 documents that still carry a
 		// filename/package are read as legacy names for compatibility.
-		serializer.writeUint32("version", 55);
+		// Version 56 adds authored Door and Bulkhead Door speed overrides.
+		serializer.writeUint32("version", 56);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1054,6 +1065,17 @@ namespace core
 
 		auto const typeName = serializer.readString("type");
 		record.type = constructionTypeFromName(typeName);
+		if (version >= 56 && serializer.hasField("doorSpeeds"))
+		{
+			serializer.beginArray("doorSpeeds");
+			while (serializer.nextArrayItem())
+			{
+				float speed = serializer.readFloat("");
+				if (!std::isfinite(speed) || speed < 0.0f) throw SerializationException("Invalid landing Door speed");
+				record.transportDoorSpeeds.push_back(speed);
+			}
+			serializer.endArray();
+		}
 		if (serializer.hasField("locationPermissionRequirement"))
 		{
 			if (version < 32)
@@ -1203,6 +1225,9 @@ namespace core
 				? readActivation("preButtonActivation") : -1;
 			record.x = serializer.readFloat("holdOpenSeconds"); record.d = serializer.readUint32("crossingLanes");
 			record.j = readOpenStyle("openStyle");
+			if (version >= 56 && serializer.hasField("hasSpeedOverride") && serializer.readBool("hasSpeedOverride"))
+				record.doorSpeed = serializer.readFloat("speed");
+			if (!Door::speedIsValid(record.doorSpeed)) throw SerializationException("Invalid Door speed");
 			if (serializer.hasField("initiallyBroken"))
 			{
 				if (version < 33) throw SerializationException(
@@ -1308,6 +1333,9 @@ namespace core
 			record.d = serializer.readUint32("crossingLanes");
 			record.y = serializer.readFloat("automaticSensorDistance", true,
 				CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE);
+			if (version >= 56 && serializer.hasField("hasSpeedOverride") && serializer.readBool("hasSpeedOverride"))
+				record.doorSpeed = serializer.readFloat("speed");
+			if (!Door::speedIsValid(record.doorSpeed)) throw SerializationException("Invalid Bulkhead Door speed");
 			if (serializer.hasField("initiallyBroken"))
 			{
 				if (version < 34) throw SerializationException(
@@ -1509,7 +1537,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 55)
+		if (version < 1 || version > 56)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2939,7 +2967,7 @@ namespace core
 		case ConstructionType::Lift:
 		{
 			CreateLiftOptions options{ record.c, record.values, record.d, record.x, record.y,
-				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides, {}, record.initiallyBroken };
+				record.g, record.e, CORE_PLATFORM_LIFT_STOP_DURATION, record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();
@@ -2980,7 +3008,7 @@ namespace core
 		case ConstructionType::Shuttle:
 		{
 			CreateShuttleOptions options{ record.d, record.e, record.values, record.f,
-				record.g, record.x, record.y, record.p, record.h ? record.h : (1u << 1), record.overrides, {}, record.initiallyBroken };
+				record.g, record.x, record.y, record.p, record.h ? record.h : (1u << 1), record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
 			for (auto const& requirement : record.landingControlPermissionRequirements)
 			{
 				options.landingControlPermissionRequirements.emplace_back();
@@ -2995,7 +3023,7 @@ namespace core
 			auto created = addSectorDoor(doorLayer(record), record.a, record.b,
 				{ record.c, static_cast<Door::Height>(record.e), { record.p, record.q },
 					static_cast<DoorActivationMode>(record.i), record.x, record.d,
-					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken });
+					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken, record.doorSpeed });
 			if (!record.values.empty())
 			{
 				auto resource = mTraversalResources.find(created.traversalResource);
@@ -3043,7 +3071,7 @@ namespace core
 		case ConstructionType::BulkheadDoor:
 		{
 			CreateBulkheadDoorOptions options{ { record.p, record.q },
-				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y, {}, record.initiallyBroken };
+				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y, {}, record.initiallyBroken, record.doorSpeed };
 			for (size_t side = 0; side < 2; ++side)
 				for (auto permission : record.controlPermissionRequirements[side])
 					options.controlPermissionRequirements[side].push_back(
@@ -3280,6 +3308,7 @@ namespace core
 			// takes its override with it.
 			auto const oldOffsets = found->values;
 			auto const oldStyles = found->overrides;
+			auto const oldSpeeds = found->transportDoorSpeeds;
 			auto const oldRequirements = found->destinationPermissionRequirements;
 			found->destinationPermissionRequirements.assign(plan.stopOffsets.size(), {});
 			for (size_t i = 0; i < plan.stopOffsets.size(); ++i)
@@ -3288,14 +3317,16 @@ namespace core
 						found->destinationPermissionRequirements[i] = oldRequirements[j];
 			found->values = plan.stopOffsets;
 			found->overrides.assign(plan.stopOffsets.size(), ~0u);
+			if (!oldSpeeds.empty()) found->transportDoorSpeeds.assign(plan.stopOffsets.size(), 0.0f);
 			for (size_t i = 0; i < plan.stopOffsets.size(); ++i)
 			{
 				auto const level = plan.y + plan.stopOffsets[i];
 				for (size_t j = 0; j < oldOffsets.size(); ++j)
 				{
-					if (oldY + oldOffsets[j] == level && j < oldStyles.size())
+					if (oldY + oldOffsets[j] == level)
 					{
-						found->overrides[i] = oldStyles[j];
+						if (j < oldStyles.size()) found->overrides[i] = oldStyles[j];
+						if (j < oldSpeeds.size()) found->transportDoorSpeeds[i] = oldSpeeds[j];
 						break;
 					}
 				}
@@ -4432,6 +4463,7 @@ namespace core
 			auto const oldRequirements = found->destinationPermissionRequirements;
 			found->destinationPermissionRequirements.assign(plan.stopOffsets.size(), {});
 			auto const oldStyles = found->overrides;
+			auto const oldSpeeds = found->transportDoorSpeeds;
 			auto const oldBaseX = found->b;
 			auto const oldCars = found->d;
 			auto const oldCarWidth = found->e;
@@ -4450,6 +4482,7 @@ namespace core
 			auto const doorsPerStop = cars * static_cast<uint32_t>(doorOffsets.size());
 			found->values = plan.stopOffsets;
 			found->overrides.assign(plan.stopOffsets.size() * doorsPerStop, ~0u);
+			if (!oldSpeeds.empty()) found->transportDoorSpeeds.assign(plan.stopOffsets.size() * doorsPerStop, 0.0f);
 			auto const landingLayer = layerInFront(transitLayer);
 			for (size_t i = 0; i < plan.stopOffsets.size(); ++i)
 			{
@@ -4479,7 +4512,7 @@ namespace core
 						if (sourceDoor >= oldDoorOffsets.size()) continue;
 						auto const oldSlot = source * oldDoorsPerStop
 							+ car * static_cast<uint32_t>(oldDoorOffsets.size()) + sourceDoor;
-						if (oldSlot >= oldStyles.size() || oldStyles[oldSlot] == ~0u) continue;
+						if (oldSlot >= oldStyles.size() && oldSlot >= oldSpeeds.size()) continue;
 						// A Door whose partial landing is unsupported is never built,
 						// so its override is dropped rather than left live to leak a
 						// style back if the landing later returns; a newly supported
@@ -4492,9 +4525,9 @@ namespace core
 							|| cell.sectorIndex >= mSectors.size()
 							|| !isLocationLike(mSectors[cell.sectorIndex]->getType()))
 							continue;
-						found->overrides[i * doorsPerStop
-							+ car * static_cast<uint32_t>(doorOffsets.size()) + door]
-							= oldStyles[oldSlot];
+						auto const newSlot = i * doorsPerStop + car * static_cast<uint32_t>(doorOffsets.size()) + door;
+						if (oldSlot < oldStyles.size()) found->overrides[newSlot] = oldStyles[oldSlot];
+						if (oldSlot < oldSpeeds.size()) found->transportDoorSpeeds[newSlot] = oldSpeeds[oldSlot];
 					}
 				}
 			}
@@ -6697,7 +6730,7 @@ namespace core
 			});
 		if (found == mConstructionRecords.rend()) return false;
 		options = { { found->p, found->q }, static_cast<DoorActivationMode>(found->j),
-			found->x, found->d, found->y, {}, found->initiallyBroken };
+			found->x, found->d, found->y, {}, found->initiallyBroken, found->doorSpeed };
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : found->controlPermissionRequirements[side])
 				options.controlPermissionRequirements[side].push_back(
@@ -6721,6 +6754,8 @@ namespace core
 			? "Airlock-owned Doors cannot be edited independently" : "Security scanner-owned Doors cannot be edited independently");
 		if (!isFiniteTiming(options.holdOpenSeconds))
 			throw WorldException(this, "Bulkhead Door hold-open time must be finite and non-negative");
+		if (!Door::speedIsValid(options.speedOverride))
+			throw WorldException(this, "Bulkhead Door speed must be finite and positive");
 		if (!isfinite(options.automaticSensorDistance)
 			|| options.automaticSensorDistance < 0.0f)
 			throw WorldException(this,
@@ -6745,6 +6780,7 @@ namespace core
 		found->j = static_cast<int32_t>(options.activationMode);
 		found->x = options.holdOpenSeconds; found->d = options.crossingLanes;
 		found->y = options.automaticSensorDistance;
+		found->doorSpeed = options.speedOverride;
 		found->initiallyBroken = options.initiallyBroken;
 		for (size_t side = 0; side < 2; ++side)
 		{

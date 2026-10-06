@@ -504,7 +504,7 @@ namespace
 			"The round-trip fixture is not what the check expects: " + before);
 
 		auto const yaml = serializeWorld(world);
-		require(yaml.find("version: 55") != std::string::npos,
+		require(yaml.find("version: 56") != std::string::npos,
 			"The count document was not written under the current World schema");
 
 		// Neither half of the document writes the number down. The groups say

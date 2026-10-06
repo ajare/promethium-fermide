@@ -2,6 +2,9 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include <limits>
+#include <yaml-cpp/yaml.h>
+#include "core/BinarySerializer.h"
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -30,6 +33,125 @@
 namespace persistence
 {
 	using smoke::require;
+
+	void doorMotionSpeeds(smoke::Context const&)
+	{
+		auto write = [](core::World const& world, bool binary) {
+			auto serialize = [&](auto out) {
+				core::SerializationWorkData work; work.markSerializedUnmodified = false;
+				world.serialize(*out, work); out->serialize(); return out->getSerializedString();
+			};
+			return binary ? serialize(core::BinarySerializer::toString()) : serialize(core::YamlSerializer::toString());
+		};
+		core::World world("Door speeds", 8, 2);
+		world.addRoom("Left", 0, 0, 0, 4, 1);
+		world.addRoom("Right", 0, 0, 4, 4, 1);
+		world.addRoom("Back", 1, 0, 0, 8, 1);
+		auto ordinary = world.addSectorDoor(0, 0, 2);
+		auto bulkhead = world.addSectorBulkheadDoor(0, 0, 4, CORE_SIDE_LEFT);
+		world.finishBuild(); world.pauseSimulation();
+		auto door = std::static_pointer_cast<const core::DoorSectorObject>(ordinary.door.sector->getObject(ordinary.door.index))->getDoor();
+		auto bulk = std::static_pointer_cast<const core::BulkheadDoorSectorObject>(bulkhead.door.sector->getObject(bulkhead.door.index))->getDoor();
+		require(!door->getSpeedOverride() && !bulk->getSpeedOverride()
+			&& std::abs(door->getOpenCloseTime() - CORE_DOOR_OPEN_CLOSE_TIME) < 0.0001f
+			&& std::abs(bulk->getOpenCloseTime() - CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME) < 0.0001f, "Default Door speeds changed existing timing");
+		require(world.setDoorSpeedOverride(ordinary.traversalResource, 0.25f)
+			&& world.setDoorSpeedOverride(bulkhead.traversalResource, 0.125f), "Authored Door speed edit failed");
+		for (auto device : {std::static_pointer_cast<core::Door>(door), std::static_pointer_cast<core::Door>(bulk)})
+		{
+			require(device->requestOpen(), "Door speed motion request failed");
+			device->update(device->getOpenCloseTime() * 0.25f);
+			require(std::abs(device->getOpenPercentage() - 0.25f) < 0.0001f, "Door opening did not use authored speed");
+			require(device->requestClose(), "Door closing request failed");
+			device->update(device->getOpenCloseTime() * 0.125f);
+			require(std::abs(device->getOpenPercentage() - 0.125f) < 0.0001f, "Door closing did not use authored speed");
+		}
+		auto baseline = write(world, false);
+		for (float speed : {0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+			require(!world.setDoorSpeedOverride(ordinary.traversalResource, speed)
+				&& !world.setDoorSpeedOverride(bulkhead.traversalResource, speed)
+				&& write(world, false) == baseline, "Invalid Door speed mutated authored state");
+		for (bool binary : {false, true})
+		{
+			auto bytes = write(world, binary);
+			std::unique_ptr<core::Serializer> reader = binary
+				? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+				: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+			reader->deserialize(); core::SerializationWorkData work;
+			core::World loaded("Loaded", 1, 1);
+			require(loaded.deserialize(*reader, work), "Door speeds failed round trip");
+			for (bool replay : {false, true})
+			{
+				if (replay) { loaded.resetSimulation(); loaded.pauseSimulation(); }
+				core::World::CreateDoorOptions options;
+				require(loaded.getSectorDoorOptions(0, 0, 2, 1, options) && options.speedOverride == 0.25f, "Ordinary Door speed lost in persistence/replay");
+				unsigned count = 0;
+				for (uint32_t s = 0; s < loaded.getNumSectors(); ++s)
+					for (uint32_t i = 0; i < loaded.getSector(s)->getNumObjects(); ++i)
+						if (auto object = std::dynamic_pointer_cast<const core::BulkheadDoorSectorObject>(loaded.getSector(s)->getObject(i)))
+						{ ++count; require(object->getDoor()->getSpeedOverride() == 0.125f, "Bulkhead speed lost in persistence/replay"); }
+				require(count == 2, "Shared Bulkhead Door lost during replay");
+			}
+		}
+		for (auto type : {"door", "bulkheadDoor"})
+			for (float speed : {0.0f, -1.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+			{
+				auto malformed = YAML::Load(baseline);
+				for (auto record : malformed["construction"])
+					if (record["type"].as<std::string>() == type) record["speed"] = speed;
+				auto reader = core::YamlSerializer::fromString(YAML::Dump(malformed)); reader->deserialize();
+				core::SerializationWorkData work; bool refused = false;
+				try { world.deserialize(*reader, work); } catch (std::exception const&) { refused = true; }
+				require(refused && write(world, false) == baseline, "Malformed persisted Door speed mutated World");
+			}
+		auto legacy = YAML::Load(baseline); legacy["version"] = 55;
+		for (auto record : legacy["construction"])
+		{ record.remove("hasSpeedOverride"); record.remove("speed"); }
+		auto reader = core::YamlSerializer::fromString(YAML::Dump(legacy)); reader->deserialize();
+		core::World loaded("Legacy", 1, 1); core::SerializationWorkData work;
+		require(loaded.deserialize(*reader, work), "Legacy Door speeds failed loading");
+		core::World::CreateDoorOptions options;
+		require(loaded.getSectorDoorOptions(0, 0, 2, 1, options) && !options.speedOverride, "Legacy Door did not inherit default speed");
+		require(world.setDoorSpeedOverride(ordinary.traversalResource, std::nullopt)
+			&& !door->getSpeedOverride(), "Clearing Door speed did not restore default");
+		for (bool shuttle : {false, true})
+		{
+			core::World transport("Landing speeds", 32, 3);
+			transport.addCorridor(0, 0, 31);
+			transport.addCorridor(0, 1, 0, 31, 1);
+			std::vector<core::World::CreateDoorResult> doors;
+			if (shuttle)
+			{
+				core::World::CreateShuttleOptions options{2, 3, {0, 18}, 0};
+				options.doorMask = 0b101;
+				doors = transport.addShuttle(1, 0, 0, 27, options).doors;
+			}
+			else doors = transport.addLift(1, 0, 2, 1, 2).doors;
+			transport.finishBuild(); transport.pauseSimulation();
+			require(doors.size() > 1 && transport.setDoorSpeedOverride(doors[1].traversalResource, 0.2f), "Landing speed edit failed");
+			for (bool binary : {false, true})
+			{
+				auto bytes = write(transport, binary);
+				std::unique_ptr<core::Serializer> reader = binary
+					? std::unique_ptr<core::Serializer>(core::BinarySerializer::fromString(bytes))
+					: std::unique_ptr<core::Serializer>(core::YamlSerializer::fromString(bytes));
+				reader->deserialize(); core::SerializationWorkData work;
+				core::World loaded("Landing loaded", 1, 1);
+				require(loaded.deserialize(*reader, work), "Landing speeds failed loading");
+				for (bool replay : {false, true})
+				{
+					if (replay) { loaded.resetSimulation(); loaded.pauseSimulation(); }
+					std::set<core::Door const*> overriddenDoors;
+					for (uint32_t s = 0; s < loaded.getNumSectors(); ++s)
+						for (uint32_t i = 0; i < loaded.getSector(s)->getNumObjects(); ++i)
+							if (auto object = std::dynamic_pointer_cast<const core::DoorSectorObject>(loaded.getSector(s)->getObject(i)))
+								if (object->getDoor()->getSpeedOverride())
+								{ overriddenDoors.insert(object->getDoor().get()); require(object->getDoor()->getSpeedOverride() == 0.2f, "Wrong landing speed persisted"); }
+					require(overriddenDoors.size() == 1, "Landing speed affected siblings or was lost in replay");
+				}
+			}
+		}
+	}
 
 	void bulkheadDoorsSupportIndependentObjectEditing(smoke::Context const&)
 	{
@@ -71,6 +193,7 @@ namespace persistence
 		options.holdOpenSeconds = 3.0f;
 		options.crossingLanes = 1;
 		options.automaticSensorDistance = 0.75f;
+		options.speedOverride = 0.175f;
 		object = world.applySectorBulkheadDoorOptions(left, created.door.index, options);
 		require(object && object->getCellX() + 1 == 2,
 			"Bulkhead Door settings edit lost the selected object");
@@ -92,7 +215,8 @@ namespace persistence
 			&& !options.controls[0] && !options.controls[1]
 			&& std::abs(options.holdOpenSeconds - 3.0f) < 0.0001f
 			&& options.crossingLanes == 1
-			&& std::abs(options.automaticSensorDistance - 0.75f) < 0.0001f,
+			&& std::abs(options.automaticSensorDistance - 0.75f) < 0.0001f
+			&& options.speedOverride == 0.175f,
 			"Bulkhead Door move did not preserve authored settings");
 
 		core::SerializationWorkData workData;
@@ -112,7 +236,8 @@ namespace persistence
 		}
 		require(loadedLeft && objectIndex != ~0u
 			&& loaded.getSectorBulkheadDoorOptions(loadedLeft->getIndex(), objectIndex, options)
-			&& std::abs(options.automaticSensorDistance - 0.75f) < 0.0001f,
+			&& std::abs(options.automaticSensorDistance - 0.75f) < 0.0001f
+			&& options.speedOverride == 0.175f,
 			"Bulkhead Door authored settings did not round-trip");
 		loaded.pauseSimulation();
 		require(loaded.removeSectorBulkheadDoor(loadedLeft->getIndex(), objectIndex),
@@ -957,7 +1082,7 @@ namespace persistence
 			("A Lift stop style override was refused: " + diagnostic).c_str());
 
 		auto const yaml = serialize(authored);
-		require(yaml.find("version: 55") != std::string::npos,
+		require(yaml.find("version: 56") != std::string::npos,
 			"A map with authored Door styles was not written at the current schema version");
 		require(yaml.find("version: 6") == std::string::npos,
 			"A map with authored Door styles still carries version 6");
@@ -1042,7 +1167,7 @@ namespace persistence
 			"A legacy Shuttle-owned Door");
 
 		// The current reader still refuses anything above its own ceiling.
-		auto const futureYaml = std::string("version: 56")
+		auto const futureYaml = std::string("version: 57")
 			+ defaultsYaml.substr(defaultsYaml.find("\n"));
 		bool refusedFuture{ false };
 		try

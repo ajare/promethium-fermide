@@ -234,6 +234,14 @@ namespace
 			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); frame();
 			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); frame();
 		};
+		click("Override opening/closing speed"); frame();
+		require(door->getSpeedOverride() == door->getDefaultSpeed()
+			&& gWorldDocumentHistory.undoCount() == 1 && save() != initial,
+			"Door speed override did not commit authored history");
+		click("Override opening/closing speed"); frame();
+		require(!door->getSpeedOverride() && save() == initial
+			&& gWorldDocumentHistory.undoCount() == 2, "Clearing Door speed did not restore inherited default");
+		gWorldDocumentHistory.clear(); gWorldDocumentHistory.markSaved(); world->markSaved();
 		click("Initially Broken"); frame();
 		require(door->isInitiallyBroken() && door->isBroken() && gWorldDocumentHistory.undoCount() == 1,
 			"Authored Door control did not commit one history entry");

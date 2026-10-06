@@ -99,7 +99,7 @@ namespace core
 	*/
 	float BulkheadDoor::getOpenCloseTime() const
 	{
-		return CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
+		return getSize().y / getSpeed();
 	}
 
 	/***

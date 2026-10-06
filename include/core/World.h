@@ -82,6 +82,7 @@ namespace core
 			Door::OpenStyle openStyle{ Door::OpenStyle::OpenUp };
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 			bool initiallyBroken{ false };
+			std::optional<float> speedOverride{};
 		};
 
 		struct CreateDoorResult
@@ -100,6 +101,7 @@ namespace core
 			float automaticSensorDistance{ CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE };
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 			bool initiallyBroken{ false };
+			std::optional<float> speedOverride{};
 		};
 
 		struct CreateBulkheadDoorResult
@@ -234,6 +236,8 @@ namespace core
 			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
 			// Whole-transport authored condition, shared by Lifts and Platform lifts.
 			bool initiallyBroken{ false };
+			// Per-stop speed, zero inherits the default.
+			std::vector<float> doorSpeeds{};
 		};
 
 		struct CreateLiftResult
@@ -276,6 +280,8 @@ namespace core
 			std::vector<std::vector<AccessPermissionId>> landingControlPermissionRequirements{};
 			// One authored condition for the complete coupled vehicle.
 			bool initiallyBroken{ false };
+			// Same grid as doorOpenStyles; zero inherits the default.
+			std::vector<float> doorSpeeds{};
 		};
 
 		struct CreateShuttleResult
@@ -963,6 +969,8 @@ namespace core
 			ChamberSubtype chamberSubtype{ ChamberSubtype::SecurityScanner };
 			float scannerSensorDistance{ 0.5f };
 			std::optional<float> accessPanelSpeed{};
+			std::optional<float> doorSpeed{};
+			std::vector<float> transportDoorSpeeds{};
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
 			// Door: the activation mode the Door had before the editor's Buttons
@@ -1977,6 +1985,7 @@ namespace core
 		// together: save/load, clipboard readback, moves, and undo/redo all carry
 		// the new style. Opening style affects rendering and, for a tall OpenUp Door,
 		// scales timing to preserve vertical speed; state and traversal are untouched.
+		bool setDoorSpeedOverride(TraversalResourceId resource, std::optional<float> speed);
 		bool setSectorDoorOpenStyle(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 			Door::OpenStyle style, std::string* diagnostic = nullptr);
 

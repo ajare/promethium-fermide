@@ -64,6 +64,7 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     stairwellEditsReplayWalkwaysBeforeTransits
     ladderEditsReplayLocationsBeforeTransits
     staircaseEditsReplayLocationsBeforeTransits
+    doorMotionSpeeds
     bulkheadDoorsSupportIndependentObjectEditing
     ordinaryDoorBrokenLifecycle
     bulkheadDoorBrokenLifecycle

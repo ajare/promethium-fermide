@@ -47,6 +47,7 @@ namespace core
 
 		// Overridden from OpenableObject
 		[[nodiscard]] float getOpenCloseTime() const override;
+		float getDefaultSpeed() const override { return CORE_CORRIDOR_HEIGHT / CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME; }
 
 		// Overridden from OpenableObject
 		float getTimeBeforeClosing() const override;

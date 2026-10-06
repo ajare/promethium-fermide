@@ -42,6 +42,7 @@ namespace persistence
 	void stairwellEditsReplayWalkwaysBeforeTransits(smoke::Context const&);
 	void ladderEditsReplayLocationsBeforeTransits(smoke::Context const&);
 	void staircaseEditsReplayLocationsBeforeTransits(smoke::Context const&);
+	void doorMotionSpeeds(smoke::Context const&);
 	void bulkheadDoorsSupportIndependentObjectEditing(smoke::Context const&);
 	void ordinaryDoorBrokenLifecycle(smoke::Context const&);
 	void bulkheadDoorBrokenLifecycle(smoke::Context const&);

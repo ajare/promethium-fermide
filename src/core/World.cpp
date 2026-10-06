@@ -2453,6 +2453,8 @@ namespace core
 
 	void World::validateSectorDoorOptions(string const& caller, CreateDoorOptions const& options) const
 	{
+		if (!Door::speedIsValid(options.speedOverride))
+			throw WorldException(this, caller + ": Door speed must be finite and positive");
 		// A zero-width Door would cover no cell: its placement loop runs zero times,
 		// leaving the Door's two Sectors unset for the queue configuration to
 		// dereference. A crossing-lane count above the usable threshold width is not
@@ -2612,6 +2614,8 @@ namespace core
 
 	void World::validateLiftOptions(string const& caller, CreateLiftOptions const& options) const
 	{
+		for (float speed : options.doorSpeeds)
+			if (!std::isfinite(speed) || speed < 0.0f) throw WorldException(this, caller + ": Invalid landing Door speed");
 		if (options.cellsWide == 0)
 		{
 			throw WorldException(this, format("{} - Lift width must be positive.", caller));
@@ -2665,6 +2669,8 @@ namespace core
 
 	void World::validateShuttleOptions(string const& caller, CreateShuttleOptions const& options) const
 	{
+		for (float speed : options.doorSpeeds)
+			if (!std::isfinite(speed) || speed < 0.0f) throw WorldException(this, caller + ": Invalid landing Door speed");
 		if (options.numCars == 0)
 			throw WorldException(this, format("{} - Shuttle must have at least one carriage.", caller));
 		if (options.carWidth < 3 || options.carWidth > 5)
@@ -4132,6 +4138,8 @@ namespace core
 				&& options.stopDoorOpenStyles[stopIndex] != ~0u)
 				stopDoorOptions.openStyle =
 					static_cast<Door::OpenStyle>(options.stopDoorOpenStyles[stopIndex]);
+			if (stopIndex < options.doorSpeeds.size() && options.doorSpeeds[stopIndex] > 0.0f)
+				stopDoorOptions.speedOverride = options.doorSpeeds[stopIndex];
 			auto doorRes = _addSectorDoor(layerInFront(layerIndex), y + options.stopOffsets[stopIndex],
 				x, stopDoorOptions, true);
 			liftRes.doors.push_back(doorRes);
@@ -4227,6 +4235,7 @@ namespace core
 		// state: record them so save/load and later rebuilds replay them, the
 		// way the Shuttle path records its doorOpenStyles.
 		record.overrides = options.stopDoorOpenStyles;
+		record.transportDoorSpeeds = options.doorSpeeds;
 		for (auto const& requirement : options.landingControlPermissionRequirements)
 		{
 			record.landingControlPermissionRequirements.emplace_back();
@@ -4392,6 +4401,8 @@ namespace core
 							&& options.doorOpenStyles[slot] != ~0u)
 							stopDoorOptions.openStyle =
 								static_cast<Door::OpenStyle>(options.doorOpenStyles[slot]);
+						if (slot < options.doorSpeeds.size() && options.doorSpeeds[slot] > 0.0f)
+							stopDoorOptions.speedOverride = options.doorSpeeds[slot];
 						shuttleRes.doors[slot] = _addSectorDoor(layerInFront(layerIndex),
 							y, globalX, stopDoorOptions, true);
 					}
@@ -4512,6 +4523,7 @@ namespace core
 		record.x = options.minimumDwellSeconds; record.y = options.maximumBoardingSeconds;
 		record.values = options.stopOffsets;
 		record.overrides = options.doorOpenStyles;
+		record.transportDoorSpeeds = options.doorSpeeds;
 		for (auto const& requirement : options.landingControlPermissionRequirements)
 		{
 			record.landingControlPermissionRequirements.emplace_back();
@@ -4931,7 +4943,7 @@ namespace core
 				{
 					options = { record.d, record.e, record.values, record.f, record.g,
 						record.x, record.y, record.p, record.h ? record.h : (1u << 1),
-						record.overrides, {}, record.initiallyBroken };
+						record.overrides, {}, record.initiallyBroken, record.transportDoorSpeeds };
 					return true;
 				}
 			}
@@ -5104,6 +5116,7 @@ namespace core
 		options.crossingLanes = found->d;
 		options.openStyle = static_cast<Door::OpenStyle>(found->j);
 		options.initiallyBroken = found->initiallyBroken;
+		options.speedOverride = found->doorSpeed;
 		return true;
 	}
 
@@ -5289,6 +5302,72 @@ namespace core
 		if (found == mConstructionRecords.rend()) return false;
 		found->initiallyBroken = door->mInitiallyBroken = broken;
 		setDoorBroken(id, broken);
+		modify();
+		return true;
+	}
+
+	bool World::setDoorSpeedOverride(TraversalResourceId id, std::optional<float> speed)
+	{
+		if (!mSimulationPaused || !Door::speedIsValid(speed)) return false;
+		auto resource = mTraversalResources.find(id);
+		if (!resource || !resource->mDoor || resource->mDoor->isChamberOwned()) return false;
+		auto door = resource->mDoor;
+		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
+			[&](ConstructionRecord const& record)
+			{
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(door))
+					return record.type == ConstructionType::BulkheadDoor
+						&& record.a == bulkhead->getFrontLayer()
+						&& record.b == static_cast<uint32_t>(bulkhead->getPosition().y)
+						&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
+							== static_cast<uint32_t>(bulkhead->getPosition().x + CORE_BULKHEAD_DOOR_WIDTH * 0.5f);
+				return record.type == ConstructionType::Door && record.layer == door->getFrontLayer()
+					&& record.a == static_cast<uint32_t>(door->getPosition().y)
+					&& record.b == static_cast<uint32_t>(door->getPosition().x)
+					&& record.c == door->getCellsWide();
+			});
+		if (found == mConstructionRecords.rend())
+		{
+			// Landing Doors store their per-instance speed in the transport record.
+			uint32_t owner = ~0u, stop = 0, carriage = 0, index = 0;
+			bool liftOwned = false, located = false;
+			for (auto const& sector : mSectors)
+			{
+				if (!sector) continue;
+				for (uint32_t i = 0; i < sector->getNumObjects() && !located; ++i)
+				{
+					auto object = dynamic_pointer_cast<const DoorSectorObject>(sector->getObject(i));
+					if (!object || object->getDoor() != door) continue;
+					liftOwned = isLiftOwnedDoor(object, &owner, &stop);
+					located = liftOwned || isShuttleOwnedDoor(object, &owner, &stop, &carriage, &index);
+				}
+				if (located) break;
+			}
+			if (!located) return false;
+			uint32_t producer = 0;
+			for (auto& record : mConstructionRecords)
+			{
+				if (!constructionTypeCreatesSector(record.type)) continue;
+				if (producer++ != owner) continue;
+				if (record.type != (liftOwned ? ConstructionType::Lift : ConstructionType::Shuttle)) return false;
+				auto count = liftOwned ? 1u : static_cast<uint32_t>(SimulationCoordinator::shuttleDoorOffsets(record.e,
+					record.h ? record.h : (1u << 1)).size());
+				auto slot = liftOwned ? stop : (stop * record.d + carriage) * count + index;
+				record.transportDoorSpeeds.resize(std::max(record.transportDoorSpeeds.size(), size_t(slot + 1)), 0.0f);
+				record.transportDoorSpeeds[slot] = speed.value_or(0.0f);
+				while (!record.transportDoorSpeeds.empty() && record.transportDoorSpeeds.back() == 0.0f)
+					record.transportDoorSpeeds.pop_back();
+				invalidateSimulationSnapshot();
+				door->setSpeedOverride(speed);
+				modify();
+				return true;
+			}
+			return false;
+		}
+		if (found->doorSpeed == speed) return true;
+		invalidateSimulationSnapshot();
+		found->doorSpeed = speed;
+		door->setSpeedOverride(speed);
 		modify();
 		return true;
 	}
@@ -5587,6 +5666,7 @@ namespace core
 		record.i = static_cast<int32_t>(options.activationMode); record.x = options.holdOpenSeconds;
 		record.j = static_cast<int32_t>(options.openStyle);
 		record.initiallyBroken = options.initiallyBroken;
+		record.doorSpeed = options.speedOverride;
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : options.controlPermissionRequirements[side])
 				record.controlPermissionRequirements[side].push_back(
@@ -5913,6 +5993,7 @@ namespace core
 		auto doorSectorObject = dynamic_pointer_cast<DoorSectorObject>(doorObject.sector->_getObject(doorObject.index));
 		auto door = doorSectorObject->getDoor();
 		door->setOpenStyle(options.openStyle);
+		door->setSpeedOverride(options.speedOverride);
 		// Generated transport Doors use the same construction helper but are not
 		// independently breakable in the ordinary Door slice.
 		door->mBreakable = isLocationLike(sectors[0]->getType())
@@ -6292,6 +6373,8 @@ namespace core
 		}
 		if (!isFiniteTiming(options.holdOpenSeconds))
 			return reject("Bulkhead Door hold-open time must be finite and non-negative");
+		if (!Door::speedIsValid(options.speedOverride))
+			return reject("Bulkhead Door speed must be finite and positive");
 		if (!isfinite(options.automaticSensorDistance)
 			|| options.automaticSensorDistance < 0.0f)
 			return reject("Bulkhead Door automatic sensor distance must be finite and non-negative");
@@ -6428,6 +6511,7 @@ namespace core
 			door, options.activationMode, options.holdOpenSeconds);
 		door->configureTraversal(options.activationMode, traversalResource, options.holdOpenSeconds);
 		door->setAutomaticSensorDistance(options.automaticSensorDistance);
+		door->setSpeedOverride(options.speedOverride);
 		door->mBreakable = true;
 		door->mInitiallyBroken = door->mBroken = options.initiallyBroken;
 		configureDoorCrossingLanes(traversalResource, options.crossingLanes);
@@ -6475,6 +6559,7 @@ namespace core
 		record.x = options.holdOpenSeconds; record.d = options.crossingLanes;
 		record.y = options.automaticSensorDistance;
 		record.initiallyBroken = options.initiallyBroken;
+		record.doorSpeed = options.speedOverride;
 		for (size_t controlSide = 0; controlSide < 2; ++controlSide)
 			for (auto permission : options.controlPermissionRequirements[controlSide])
 				record.controlPermissionRequirements[controlSide].push_back(

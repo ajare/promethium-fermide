@@ -34,6 +34,7 @@ namespace core
 		DoorActivationMode mActivationMode{ DoorActivationMode::Manual };
 		TraversalResourceId mTraversalResource;
 		float mHoldOpenTime{ CORE_DOOR_STAY_OPEN_TIME };
+		std::optional<float> mSpeedOverride;
 		uint32_t mOpenLeaseCount{ 0 };
 		bool mObstructed{ false };
 		bool mAirlockOwned{ false };
@@ -59,6 +60,11 @@ namespace core
 		void setHeight(Height height);
 		OpenStyle getOpenStyle() const;
 		void setOpenStyle(OpenStyle style);
+		static bool speedIsValid(std::optional<float> speed);
+		std::optional<float> getSpeedOverride() const { return mSpeedOverride; }
+		virtual float getDefaultSpeed() const;
+		float getSpeed() const { return mSpeedOverride.value_or(getDefaultSpeed()); }
+		bool setSpeedOverride(std::optional<float> speed);
 
 		// A Door joins exactly one adjacent Layer pair.  The index is the side of that
 		// pair, not an absolute Layer index: 0 is the front Layer the Door is authored

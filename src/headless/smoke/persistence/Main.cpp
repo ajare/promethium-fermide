@@ -62,6 +62,7 @@ namespace
 		{ "stairwellEditsReplayWalkwaysBeforeTransits", persistence::stairwellEditsReplayWalkwaysBeforeTransits },
 		{ "ladderEditsReplayLocationsBeforeTransits", persistence::ladderEditsReplayLocationsBeforeTransits },
 		{ "staircaseEditsReplayLocationsBeforeTransits", persistence::staircaseEditsReplayLocationsBeforeTransits },
+		{ "doorMotionSpeeds", persistence::doorMotionSpeeds },
 		{ "bulkheadDoorsSupportIndependentObjectEditing", persistence::bulkheadDoorsSupportIndependentObjectEditing },
 		{ "ordinaryDoorBrokenLifecycle", persistence::ordinaryDoorBrokenLifecycle },
 		{ "bulkheadDoorBrokenLifecycle", persistence::bulkheadDoorBrokenLifecycle },
