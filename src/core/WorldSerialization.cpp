@@ -413,6 +413,8 @@ namespace core
 			serializer.writeString("openStyle", openStyleName(record.j));
 			serializer.writeBool("hasSpeedOverride", record.doorSpeed.has_value());
 			if (record.doorSpeed) serializer.writeFloat("speed", *record.doorSpeed);
+			serializer.writeBool("hasHeightScale", record.doorHeightScale.has_value());
+			if (record.doorHeightScale) serializer.writeFloat("heightScale", *record.doorHeightScale);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
 			// Only a Door whose Buttons were added in the editor carries the mode
 			// removal restores. Authored control layouts need no extra field; their
@@ -684,8 +686,8 @@ namespace core
 		// registry references as application Resource names (ADR 0010) rather
 		// than adjacent file basenames. Pre-55 documents that still carry a
 		// filename/package are read as legacy names for compatibility.
-		// Version 56 adds authored Door and Bulkhead Door speed overrides.
-		serializer.writeUint32("version", 56);
+		// Version 57 adds optional ordinary Regular Door Height scale.
+		serializer.writeUint32("version", 57);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1086,6 +1088,8 @@ namespace core
 			while (serializer.nextArrayItem()) record.locationPermissionRequirement.push_back(serializer.readUint32(""));
 			serializer.endArray();
 		}
+		if (record.type != ConstructionType::Door && (serializer.hasField("heightScale") || serializer.hasField("hasHeightScale")))
+			throw SerializationException("Height scale is only available for ordinary Doors");
 		switch (record.type)
 		{
 		case ConstructionType::Corridor:
@@ -1228,6 +1232,12 @@ namespace core
 			if (version >= 56 && serializer.hasField("hasSpeedOverride") && serializer.readBool("hasSpeedOverride"))
 				record.doorSpeed = serializer.readFloat("speed");
 			if (!Door::speedIsValid(record.doorSpeed)) throw SerializationException("Invalid Door speed");
+			if (version >= 57 && serializer.hasField("hasHeightScale") && serializer.readBool("hasHeightScale"))
+				record.doorHeightScale = serializer.readFloat("heightScale");
+			else if (serializer.hasField("heightScale")) record.doorHeightScale = serializer.readFloat("heightScale");
+			if (!Door::heightScaleIsValid(record.doorHeightScale)
+				|| (record.doorHeightScale && record.e != static_cast<uint32_t>(Door::Height::Regular)))
+				throw SerializationException("Invalid Door Height scale");
 			if (serializer.hasField("initiallyBroken"))
 			{
 				if (version < 33) throw SerializationException(
@@ -1537,7 +1547,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 56)
+		if (version < 1 || version > 57)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3023,7 +3033,7 @@ namespace core
 			auto created = addSectorDoor(doorLayer(record), record.a, record.b,
 				{ record.c, static_cast<Door::Height>(record.e), { record.p, record.q },
 					static_cast<DoorActivationMode>(record.i), record.x, record.d,
-					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken, record.doorSpeed });
+					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken, record.doorSpeed, record.doorHeightScale });
 			if (!record.values.empty())
 			{
 				auto resource = mTraversalResources.find(created.traversalResource);

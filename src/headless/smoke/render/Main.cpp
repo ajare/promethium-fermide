@@ -36,5 +36,6 @@ int main(int argc, char** argv)
 	render_smoke::registerLifetime(checks);
 	render_smoke::registerDoorButtons(checks);
 	render_smoke::registerSerializationRendering(checks);
+	render_smoke::registerScaledDoors(checks);
 	return smoke::main("render", checks, argc, argv);
 }

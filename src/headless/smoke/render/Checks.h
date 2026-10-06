@@ -58,3 +58,5 @@ namespace render_smoke
 }
 
 namespace render_smoke { void registerFurniture(std::vector<smoke::Check>& checks); }
+
+namespace render_smoke { void registerScaledDoors(std::vector<smoke::Check>& checks); }

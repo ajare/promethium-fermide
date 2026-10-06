@@ -57,6 +57,7 @@ set(checks
     pausedTopologyRebuildIsAtomicAndCleansOwnership
     graphBuildWarnsForLocationWithoutVertices
     traversalGeometryPolicyIsWorldOwned
+    scaled-doors
     runMiddleLayerDeletion
 )
 string(JOIN "\n" listed ${checks})

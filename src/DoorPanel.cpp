@@ -261,6 +261,35 @@ void renderDoorPanel(shared_ptr<core::World> const& world,
 		&& frontLocation->getType() == core::SectorType::Location && !frontLocation->isCorridor();
 
 	ImGui::BeginDisabled(!world->isSimulationPaused());
+	if (!liftOwned && !shuttleOwned && door->getHeight() == core::Door::Height::Regular)
+	{
+		static core::Door const* scaleDoor = nullptr;
+		static float scale = 1.0f;
+		if (scaleDoor != door.get()) { scaleDoor = door.get(); scale = door->getHeightScale().value_or(1.0f); }
+		auto applyScale = [&](optional<float> value)
+		{
+			if (value == door->getHeightScale()) return;
+			auto undo = captureDocumentSnapshot(world);
+			string diagnostic;
+			if (world->setSectorDoorHeightScale(door->getFrontLayer(), object->getCellY(),
+				object->getCellX(), door->getCellsWide(), value, &diagnostic))
+				commitDocumentEdit(std::move(undo));
+			else core::addLogMessage("Door editor", 0, core::LogLevel::Error, diagnostic);
+		};
+		bool overrideScale = door->getHeightScale().has_value();
+		if (ImGui::Checkbox("Override Height scale", &overrideScale))
+		{
+			applyScale(overrideScale ? optional<float>{1.0f} : nullopt);
+			scale = door->getHeightScale().value_or(1.0f);
+		}
+		if (overrideScale)
+		{
+			ImGui::InputFloat("Height scale", &scale, 0.1f, 0.1f, "%.3f");
+			ImGui::BeginDisabled(!core::Door::heightScaleIsValid(scale));
+			if (ImGui::Button("Apply Height scale")) applyScale(scale);
+			ImGui::EndDisabled();
+		}
+	}
 	if (roomDoor)
 	{
 		char const* const heightItems[] = { "Regular", "Tall" };

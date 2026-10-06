@@ -2453,6 +2453,9 @@ namespace core
 
 	void World::validateSectorDoorOptions(string const& caller, CreateDoorOptions const& options) const
 	{
+		if (!Door::heightScaleIsValid(options.heightScale)
+			|| (options.heightScale && options.height != Door::Height::Regular))
+			throw WorldException(this, caller + ": Height scale requires a Regular Door and a finite value from 0.1 to 1.0");
 		if (!Door::speedIsValid(options.speedOverride))
 			throw WorldException(this, caller + ": Door speed must be finite and positive");
 		// A zero-width Door would cover no cell: its placement loop runs zero times,
@@ -2553,11 +2556,14 @@ namespace core
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef0.sectorIndex);
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, cellDef1.sectorIndex);
 			}
+		if (options.heightScale && (!isLocationLike(getSector(frontLayer->getCellDefinition(x, y).sectorIndex)->getType())
+			|| !isLocationLike(getSector(behindLayer->getCellDefinition(x, y).sectorIndex)->getType())))
+			throw WorldException(this, caller + ": Height scale is only available for ordinary Doors between Locations");
 		for (auto layer : {layerIndex, backLayer})
 			validatePanelWallRectangle(mLayers[layer]->getCellDefinition(x, y).sectorIndex,
 				{float(x) + CORE_DOOR_X_INSET, float(y)},
 				{float(x + cellsWide) - CORE_DOOR_X_INSET, float(y)
-					+ (options.height == Door::Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT)});
+					+ Door::effectiveHeight(options.height, options.heightScale)});
 		if (!controlsAreExternallyBound)
 			for (uint32_t side = 0; side < 2; ++side)
 			{
@@ -5020,6 +5026,7 @@ namespace core
 			validateSectorDoorOptions(caller, options);
 			uint32_t liftX, liftWidth;
 			bool const liftLanding = getLiftLandingGeometry(backLayer, y, x, liftX, liftWidth);
+			if (liftLanding && options.heightScale) return reject("Transport-owned Doors refuse Height scale");
 			if (liftLanding && (x != liftX || options.width != liftWidth))
 				return reject(format("Lift landing doors must start at {} and be {} cells wide", liftX, liftWidth));
 			if (options.activationMode != DoorActivationMode::RemoteControlled
@@ -5069,6 +5076,10 @@ namespace core
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, foreCell.sectorIndex);
 				validateObjectAllowedInSector(caller, SectorObjectType::Door, backCell.sectorIndex);
 			}
+			if (!liftLanding)
+				for (auto sector : sectors)
+					validatePanelWallRectangle(sector->getIndex(), {float(x) + CORE_DOOR_X_INSET, float(y)},
+						{float(x + options.width) - CORE_DOOR_X_INSET, float(y) + Door::effectiveHeight(options.height, options.heightScale)});
 			if (liftLanding)
 			{
 				auto const lift = dynamic_pointer_cast<const LiftTransit>(sectors[1]);
@@ -5117,13 +5128,48 @@ namespace core
 		options.openStyle = static_cast<Door::OpenStyle>(found->j);
 		options.initiallyBroken = found->initiallyBroken;
 		options.speedOverride = found->doorSpeed;
+		options.heightScale = found->doorHeightScale;
+		return true;
+	}
+
+	bool World::setSectorDoorHeightScale(uint32_t layerIndex, uint32_t y, uint32_t x,
+		uint32_t width, std::optional<float> scale, std::string* diagnostic)
+	{
+		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (!mSimulationPaused) return reject("Pause simulation to change Height scale");
+		CreateDoorOptions options;
+		if (!getSectorDoorOptions(layerIndex, y, x, width, options)) return reject("No authored ordinary Door");
+		if (options.height != Door::Height::Regular || !Door::heightScaleIsValid(scale))
+			return reject("Height scale requires a Regular Door and a finite value from 0.1 to 1.0");
+		auto const& cell = mLayers[layerIndex]->getCellDefinition(x, y);
+		auto object = dynamic_pointer_cast<DoorSectorObject>(mSectors[cell.sectorIndex]->_getObject(cell.sectorObjectIndex));
+		if (!object || isLiftOwnedDoor(object) || isShuttleOwnedDoor(object)) return reject("Transport-owned Door");
+		auto door = object->getDoor();
+		if (typeid(*door) != typeid(Door) || door->isChamberOwned()
+			|| !isLocationLike(door->getFrontSector()->getType()) || !isLocationLike(door->getBackSector()->getType()))
+			return reject("Height scale is only available for ordinary Doors between Locations");
+		if (options.heightScale == scale) { if (diagnostic) diagnostic->clear(); return true; }
+		try
+		{
+			for (auto layer : {layerIndex, layerIndex + 1})
+				validatePanelWallRectangle(mLayers[layer]->getCellDefinition(x, y).sectorIndex,
+					{float(x) + CORE_DOOR_X_INSET, float(y)},
+					{float(x + width) - CORE_DOOR_X_INSET, float(y) + Door::effectiveHeight(options.height, scale)});
+		}
+		catch (Exception const& error) { return reject(error.getMessage()); }
+		invalidateSimulationSnapshot();
+		door->setHeightScale(scale);
+		for (auto it = mConstructionRecords.rbegin(); it != mConstructionRecords.rend(); ++it)
+			if (it->type == ConstructionType::Door && it->layer == layerIndex && it->a == y && it->b == x && it->c == width)
+			{ it->doorHeightScale = scale; break; }
+		modify();
+		if (diagnostic) diagnostic->clear();
 		return true;
 	}
 
 	bool World::setSectorDoorHeight(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 		Door::Height height, std::string* diagnostic)
 	{
-		invalidateSimulationSnapshot();
 		CreateDoorOptions options;
 		if (!getSectorDoorOptions(layerIndex, y, x, width, options))
 		{
@@ -5133,6 +5179,11 @@ namespace core
 		if (height != Door::Height::Regular && height != Door::Height::Tall)
 		{
 			if (diagnostic) *diagnostic = "Unknown Door height";
+			return false;
+		}
+		if (height == Door::Height::Tall && options.heightScale)
+		{
+			if (diagnostic) *diagnostic = "Reset Height scale before choosing Tall";
 			return false;
 		}
 		auto const front = getSectorAtPosition(layerIndex, (float)x + 0.5f, (float)y + 0.5f);
@@ -5156,9 +5207,11 @@ namespace core
 				validatePanelWallRectangle(mLayers[layer]->getCellDefinition(x, y).sectorIndex,
 					{float(x) + CORE_DOOR_X_INSET, float(y)},
 					{float(x + width) - CORE_DOOR_X_INSET, float(y)
-						+ (height == Door::Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT)});
+						+ Door::effectiveHeight(height, options.heightScale)});
 		}
 		catch (Exception const& error) { if (diagnostic) *diagnostic = error.getMessage(); return false; }
+		if (options.height == height) return true;
+		invalidateSimulationSnapshot();
 		found->e = static_cast<uint32_t>(height);
 
 		auto const& cell = mLayers[layerIndex]->getCellDefinition(x, y);
@@ -5613,7 +5666,6 @@ namespace core
 
 	World::CreateDoorResult World::addSectorDoor(uint32_t layerIndex, uint32_t y, uint32_t x, CreateDoorOptions const& options)
 	{
-		invalidateSimulationSnapshot();
 		string const caller = format("World::addSectorDoor({}, {}, {}, {})", layerIndex, y, x, options.width);
 		// Every rejecting check runs before beginStructuralEdit() so a refused call
 		// stays a true no-op: no SectorObjects, traversal resources, events, or
@@ -5623,6 +5675,7 @@ namespace core
 		uint32_t liftX, liftWidth;
 		if (getLiftLandingGeometry(layerBehind(layerIndex), y, x, liftX, liftWidth))
 		{
+			if (options.heightScale) throw WorldException(this, "Transport-owned Doors refuse Height scale");
 			string diagnostic;
 			CreateDoorOptions normalized;
 			normalized.width = liftWidth;
@@ -5667,6 +5720,7 @@ namespace core
 		record.j = static_cast<int32_t>(options.openStyle);
 		record.initiallyBroken = options.initiallyBroken;
 		record.doorSpeed = options.speedOverride;
+		record.doorHeightScale = options.heightScale;
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : options.controlPermissionRequirements[side])
 				record.controlPermissionRequirements[side].push_back(
@@ -5994,6 +6048,7 @@ namespace core
 		auto door = doorSectorObject->getDoor();
 		door->setOpenStyle(options.openStyle);
 		door->setSpeedOverride(options.speedOverride);
+		door->setHeightScale(options.heightScale);
 		// Generated transport Doors use the same construction helper but are not
 		// independently breakable in the ordinary Door slice.
 		door->mBreakable = isLocationLike(sectors[0]->getType())

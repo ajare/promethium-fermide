@@ -937,6 +937,9 @@ void renderSectors(std::shared_ptr<const core::World> world, uint32_t layer,
 // them. Declared here so the headless draw-order check (#49) can exercise
 // the real renderSector() draw-call order rather than a model of it.
 //
+void renderDoor(std::shared_ptr<const core::Door> door, uint32_t layer,
+	LayerRenderStyle style, bool selected, WorldDrawList* drawList);
+
 void renderSector(std::shared_ptr<const core::Sector> sector, uint32_t layer,
 	LayerRenderStyle style, bool renderEdges, ImColor colour, WorldDrawList* drawList);
 

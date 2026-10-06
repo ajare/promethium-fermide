@@ -35,6 +35,7 @@ namespace core
 		TraversalResourceId mTraversalResource;
 		float mHoldOpenTime{ CORE_DOOR_STAY_OPEN_TIME };
 		std::optional<float> mSpeedOverride;
+		std::optional<float> mHeightScale;
 		uint32_t mOpenLeaseCount{ 0 };
 		bool mObstructed{ false };
 		bool mAirlockOwned{ false };
@@ -58,6 +59,10 @@ namespace core
 		uint32_t getCellsWide() const;
 		Height getHeight() const { return mHeight; }
 		void setHeight(Height height);
+		static bool heightScaleIsValid(std::optional<float> scale);
+		static float effectiveHeight(Height height, std::optional<float> scale = {});
+		std::optional<float> getHeightScale() const { return mHeightScale; }
+		bool setHeightScale(std::optional<float> scale);
 		OpenStyle getOpenStyle() const;
 		void setOpenStyle(OpenStyle style);
 		static bool speedIsValid(std::optional<float> speed);

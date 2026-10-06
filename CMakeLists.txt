@@ -421,6 +421,7 @@ endforeach()
 add_library(pf-agent-editing STATIC
     src/DocumentEdit.cpp
     src/DoorPanel.cpp
+    src/DoorClipboard.cpp
     src/ChamberPanel.cpp
     src/AgentGroupsPanel.cpp
     src/AgentGroupAssignmentPanel.cpp

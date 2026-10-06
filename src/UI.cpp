@@ -1,3 +1,4 @@
+#include "DoorClipboard.h"
 #include <algorithm>
 #include <array>
 #include <cfloat>
@@ -209,6 +210,7 @@ namespace
 	};
 
 	PaletteDropState gPegman;
+	core::World::CreateDoorOptions gDoorDraft;
 
 	// Palette tray placement (ticket #41). The tray is dragged by any part of
 	// itself that is not a button. Its position is remembered as an offset from
@@ -570,15 +572,23 @@ namespace
 		target.cellX = (uint32_t)floor(worldPosition.x);
 		target.cellY = (uint32_t)floor(worldPosition.y);
 		uint32_t landingX, landingWidth;
+		auto options = gDoorDraft;
 		if (world->getLiftLandingGeometry(gUISettings.visibleLayer + 1, target.cellY, target.cellX, landingX, landingWidth))
+		{
 			target.cellX = landingX;
+			options.width = landingWidth;
+		}
 		target.sector = world->getSectorAtPosition(gUISettings.visibleLayer,
 			(float)target.cellX, worldPosition.y);
 		// A Shuttle serves the Door pair from the Layer directly behind the Layer the
 		// Door is authored on, so query the Layer behind the visible one.
 		auto shuttleStops = world->getShuttleStopCandidatesForDoor(gUISettings.visibleLayer + 1, target.cellY, target.cellX);
-		if (!shuttleStops.empty()) target.diagnostic.clear();
-		else world->canAddCorridorDoor(gUISettings.visibleLayer, target.cellY, target.cellX, &target.diagnostic);
+		if (!shuttleStops.empty())
+		{
+			if (gDoorDraft.heightScale) target.diagnostic = "Transport-owned Doors refuse Height scale";
+			else target.diagnostic.clear();
+		}
+		else world->canAddCorridorDoor(gUISettings.visibleLayer, target.cellY, target.cellX, options, &target.diagnostic);
 		return target;
 	}
 
@@ -1386,7 +1396,7 @@ namespace
 		auto undo = captureDocumentSnapshot(world);
 		try
 		{
-			auto created = world->addSectorDoor(gUISettings.visibleLayer, target.cellY, target.cellX);
+			auto created = world->addSectorDoor(gUISettings.visibleLayer, target.cellY, target.cellX, gDoorDraft);
 			world->finishBuild();
 			setSelectionMode(UISettings::SelectionMode::Object);
 			gSelectedAgent = nullptr;
@@ -1599,6 +1609,21 @@ namespace
 		constexpr ImU32 disabledColour = IM_COL32(90, 90, 98, 150);
 		auto const& io = ImGui::GetIO();
 		bool paletteConsumedMouse = false;
+		ImGui::SetNextWindowPos(ImVec2(canvasPos.x + 8.0f, canvasPos.y + 8.0f), ImGuiCond_FirstUseEver);
+		if (ImGui::Begin("Door creation settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		{
+			bool enabled = gDoorDraft.heightScale.has_value();
+			if (ImGui::Checkbox("Override Height scale for new Doors", &enabled))
+				gDoorDraft.heightScale = enabled ? optional<float>{1.0f} : nullopt;
+			if (enabled)
+			{
+				float scale = gDoorDraft.heightScale.value_or(1.0f);
+				if (ImGui::InputFloat("Height scale (0.1-1.0)", &scale, 0.1f, 0.1f, "%.3f"))
+					gDoorDraft.heightScale = scale;
+				ImGui::TextDisabled("Only ordinary Regular Doors between Locations.");
+			}
+		}
+		ImGui::End();
 
 		if (gPaint.dragging && gPaint.layer != (uint32_t)gUISettings.visibleLayer)
 			resetPaint(false);
@@ -2203,7 +2228,7 @@ namespace
 			{
 				if (target.sector)
 				{
-					auto previewHeight = gPegman.item == PaletteItem::Door ? CORE_DOOR_HEIGHT : 1.0f;
+					auto previewHeight = gPegman.item == PaletteItem::Door ? core::Door::effectiveHeight(gDoorDraft.height, core::Door::heightScaleIsValid(gDoorDraft.heightScale) ? gDoorDraft.heightScale : nullopt) : 1.0f;
 					auto topLeft = worldToScreen({ (float)target.cellX,
 						(float)target.cellY + previewHeight });
 					auto bottomRight = worldToScreen({ (float)target.cellX + 1.0f,
@@ -2214,7 +2239,7 @@ namespace
 				}
 				else
 				{
-					auto previewHeight = gPegman.item == PaletteItem::Door ? CORE_DOOR_HEIGHT : 1.0f;
+					auto previewHeight = gPegman.item == PaletteItem::Door ? core::Door::effectiveHeight(gDoorDraft.height, core::Door::heightScaleIsValid(gDoorDraft.heightScale) ? gDoorDraft.heightScale : nullopt) : 1.0f;
 					auto halfSize = ImVec2(CORE_CELL_WIDTH_PIXELS * 0.5f,
 						previewHeight * CORE_LEVEL_HEIGHT_PIXELS * 0.5f);
 					drawList->AddRect(io.MousePos - halfSize, io.MousePos + halfSize,
@@ -3578,18 +3603,6 @@ namespace
 		return "Manual";
 	}
 
-	char const* doorOpenStyleName(core::Door::OpenStyle style)
-	{
-		switch (style)
-		{
-		case core::Door::OpenStyle::OpenUp: return "OpenUp";
-		case core::Door::OpenStyle::OpenLeft: return "OpenLeft";
-		case core::Door::OpenStyle::OpenRight: return "OpenRight";
-		case core::Door::OpenStyle::OpenApart: return "OpenApart";
-		}
-		return "OpenUp";
-	}
-
 	char const* windowStateName(core::Window::State state)
 	{
 		switch (state)
@@ -3662,18 +3675,8 @@ namespace
 				door->getCellsWide(), options))
 				throw runtime_error("The selected Door has no authored definition");
 			output << YAML::Key << "type" << YAML::Value << "Door"
-				<< YAML::Key << "object" << YAML::Value << YAML::BeginMap
-				<< YAML::Key << "width" << YAML::Value << options.width
-				<< YAML::Key << "height" << YAML::Value
-				<< (options.height == core::Door::Height::Tall ? "Tall" : "Regular")
-				<< YAML::Key << "controls" << YAML::Value << YAML::Flow << YAML::BeginSeq
-				<< options.controls[0] << options.controls[1] << YAML::EndSeq
-				<< YAML::Key << "activationMode" << YAML::Value << activationModeName(options.activationMode)
-				<< YAML::Key << "holdOpenSeconds" << YAML::Value << options.holdOpenSeconds
-				<< YAML::Key << "crossingLanes" << YAML::Value << options.crossingLanes
-				<< YAML::Key << "openStyle" << YAML::Value << doorOpenStyleName(options.openStyle);
-			if (options.speedOverride) output << YAML::Key << "speed" << YAML::Value << *options.speedOverride;
-			output << YAML::EndMap;
+				<< YAML::Key << "object" << YAML::Value;
+			writeDoorClipboardObject(output, options);
 		}
 		else if (gSelectedSectorObject->getObjectType() == core::SectorObjectType::BulkheadDoor)
 		{
@@ -3821,6 +3824,8 @@ namespace
 		auto type = requiredYaml<string>(root, "type");
 		auto object = root["object"];
 		if (!object || !object.IsMap()) throw runtime_error("Clipboard object definition is required");
+		if (type != "Door" && object["heightScale"].IsDefined())
+			throw runtime_error("Height scale is only available for ordinary Doors");
 		if (type == "Dumbwaiter")
 		{
 			definition.type = ClipboardObjectType::Dumbwaiter;
@@ -3836,41 +3841,7 @@ namespace
 		else if (type == "Door")
 		{
 			definition.type = ClipboardObjectType::Door;
-			definition.door.width = requiredYaml<uint32_t>(object, "width");
-			if (object["speed"]) definition.door.speedOverride = object["speed"].as<float>();
-			if (!core::Door::speedIsValid(definition.door.speedOverride))
-				throw runtime_error("Door speed must be finite and positive");
-			if (object["height"])
-			{
-				auto const height = object["height"].as<string>();
-				if (height == "Regular") definition.door.height = core::Door::Height::Regular;
-				else if (height == "Tall") definition.door.height = core::Door::Height::Tall;
-				else throw runtime_error("Door height is invalid");
-			}
-			auto controls = object["controls"];
-			if (!controls || !controls.IsSequence() || controls.size() != 2)
-				throw runtime_error("Door controls must contain two values");
-			definition.door.controls[0] = controls[0].as<bool>();
-			definition.door.controls[1] = controls[1].as<bool>();
-			auto mode = requiredYaml<string>(object, "activationMode");
-			if (mode == "Automatic") definition.door.activationMode = core::DoorActivationMode::Automatic;
-			else if (mode == "Manual") definition.door.activationMode = core::DoorActivationMode::Manual;
-			else if (mode == "RemoteControlled") definition.door.activationMode = core::DoorActivationMode::RemoteControlled;
-			else if (mode == "Unavailable") definition.door.activationMode = core::DoorActivationMode::Unavailable;
-			else throw runtime_error("Door activationMode is invalid");
-			definition.door.holdOpenSeconds = requiredYaml<float>(object, "holdOpenSeconds");
-			definition.door.crossingLanes = requiredYaml<uint32_t>(object, "crossingLanes");
-			// A clipboard entry written before opening styles existed carries no style;
-			// it pastes as OpenUp, the only style those builds could ever show.
-			if (object["openStyle"]) {
-				auto style = object["openStyle"].as<std::string>();
-				if (style == "OpenUp") definition.door.openStyle = core::Door::OpenStyle::OpenUp;
-				else if (style == "OpenLeft") definition.door.openStyle = core::Door::OpenStyle::OpenLeft;
-				else if (style == "OpenRight") definition.door.openStyle = core::Door::OpenStyle::OpenRight;
-				else if (style == "OpenApart") definition.door.openStyle = core::Door::OpenStyle::OpenApart;
-				else throw runtime_error("Door openStyle is invalid");
-			}
-			else definition.door.openStyle = core::Door::OpenStyle::OpenUp;
+			definition.door = readDoorClipboardObject(object);
 		}
 		else if (type == "BulkheadDoor")
 		{
@@ -4228,14 +4199,8 @@ namespace
 			}
 			else if (definition.type == ClipboardObjectType::Door)
 			{
-				uint32_t landingX, landingWidth;
-				if (world->getLiftLandingGeometry(gUISettings.visibleLayer + 1, y, x, landingX, landingWidth))
-				{
-					x = landingX;
-					definition.door = {};
-					definition.door.width = landingWidth;
-				}
-				if (!world->canAddCorridorDoor(gUISettings.visibleLayer, y, x, definition.door, &diagnostic))
+				if (!prepareDoorClipboardPaste(*world, gUISettings.visibleLayer, y, x,
+					definition.door, diagnostic))
 					throw runtime_error(diagnostic);
 			}
 			else if (definition.type == ClipboardObjectType::BulkheadDoor)

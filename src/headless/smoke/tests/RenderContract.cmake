@@ -132,6 +132,7 @@ set(names
     stairwellSectorsAreCanvasSelectableRendering
     staircasesConnectAdjacentCorridorsAndRoundTripRendering
     laddersCanBeValidatedEditedAndDeletedRendering
+    scaled-doors/commands
 )
 if(DEFINED LANE)
     set(lane_binary "${RENDER}")

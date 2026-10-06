@@ -36,12 +36,34 @@ namespace core
 		return true;
 	}
 
+	bool Door::heightScaleIsValid(std::optional<float> scale)
+	{
+		return !scale || (std::isfinite(*scale) && *scale >= 0.1f && *scale <= 1.0f);
+	}
+
+	float Door::effectiveHeight(Height height, std::optional<float> scale)
+	{
+		return height == Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT * scale.value_or(1.0f);
+	}
+
+	bool Door::setHeightScale(std::optional<float> scale)
+	{
+		auto front = getFrontSector();
+		auto back = getBackSector();
+		if (typeid(*this) != typeid(Door) || isChamberOwned() || mHeight != Height::Regular
+			|| !front || !back || !isLocationLike(front->getType()) || !isLocationLike(back->getType())
+			|| !heightScaleIsValid(scale)) return false;
+		mHeightScale = scale;
+		setSize({ getSize().x, effectiveHeight(mHeight, scale) });
+		return true;
+	}
+
 	uint32_t Door::getCellsWide() const { return mCellsWide; }
 	void Door::setHeight(Height height)
 	{
-		if (isChamberOwned()) return;
+		if (isChamberOwned() || (height == Height::Tall && mHeightScale)) return;
 		mHeight = height;
-		setSize({ getSize().x, height == Height::Tall ? CORE_DOOR_TALL_HEIGHT : CORE_DOOR_HEIGHT });
+		setSize({ getSize().x, effectiveHeight(height, mHeightScale) });
 	}
 	Door::OpenStyle Door::getOpenStyle() const { return mOpenStyle; }
 	void Door::setOpenStyle(OpenStyle style) { if (!isChamberOwned()) mOpenStyle = style; }

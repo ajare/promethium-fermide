@@ -317,7 +317,7 @@ set_tests_properties(smoke-routing-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-world
     NAME world
     SOURCES
-        world/Main.cpp world/AccessPanels.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
+        world/ScaledDoors.cpp world/Main.cpp world/AccessPanels.cpp world/Airlocks.cpp world/Furniture.cpp world/SecurityScanners.cpp world/BoothWindows.cpp
         world/MarkerIdentity.cpp
         world/TwoSidedButtons.cpp
         world/BackgroundSector.cpp
@@ -384,7 +384,7 @@ set_tests_properties(smoke-persistence-contract PROPERTIES LABELS "harness;core"
 pf_add_smoke_module(pf-smoke-render
     NAME render
     SOURCES
-        render/Main.cpp render/AccessPanels.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
+        render/ScaledDoors.cpp render/Main.cpp render/AccessPanels.cpp render/Airlocks.cpp render/Furniture.cpp render/State.cpp render/Walls.cpp render/AgentPaths.cpp render/Transports.cpp render/SecurityScanners.cpp render/BoothWindows.cpp
         render/SerializationRendering.cpp
         render/AgentPoses.cpp
         render/DrawOrder.cpp
@@ -427,7 +427,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/ScaledDoors.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp

@@ -83,6 +83,7 @@ namespace core
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 			bool initiallyBroken{ false };
 			std::optional<float> speedOverride{};
+			std::optional<float> heightScale{};
 		};
 
 		struct CreateDoorResult
@@ -970,6 +971,7 @@ namespace core
 			float scannerSensorDistance{ 0.5f };
 			std::optional<float> accessPanelSpeed{};
 			std::optional<float> doorSpeed{};
+			std::optional<float> doorHeightScale{};
 			std::vector<float> transportDoorSpeeds{};
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
@@ -1977,6 +1979,8 @@ namespace core
 
 		// Re-authors an ordinary Door's physical height. Tall is available only to
 		// Doors authored in Rooms; transport, Corridor and Facade Doors stay regular.
+		bool setSectorDoorHeightScale(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
+			std::optional<float> scale, std::string* diagnostic = nullptr);
 		bool setSectorDoorHeight(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 			Door::Height height, std::string* diagnostic = nullptr);
 

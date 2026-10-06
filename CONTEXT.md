@@ -195,7 +195,7 @@ The controlled boundary between two sectors, such as a doorway or the entrance t
 _Avoid_: Vertex, when discussing physical movement rules
 
 **Door**:
-A threshold that connects two adjacent layers. It is authored on the front layer of the pair and opens into the layer immediately behind it. A regular Door has a one-level footprint. An ordinary Door authored in a Room may be regular height or 0.9-unit tall; Corridor, Facade, Lift, and Shuttle Doors always use regular height. Lift and Shuttle landing doors belong to their transport.
+A threshold that connects two adjacent layers. It is authored on the front layer of the pair and opens into the layer immediately behind it. A regular Door has a one-level footprint. An ordinary Door authored in a Room may be regular height or 0.9-unit tall; Corridor, Facade, Lift, and Shuttle Doors always use regular height. Lift and Shuttle landing doors belong to their transport. Ordinary Regular Doors between Rooms, Corridors, or Facades may have an authored Height scale from 0.1 through 1.0 relative to the hardcoded Regular height; omission or reset uses 1. Scaling is bottom-anchored and changes only visual height and vertical travel duration, not tile footprint, width, crossing lanes, or Agent clearance. Tall and specialized or transport-owned thresholds refuse an override, including explicit 1.
 _Avoid_: Portal
 
 **Bulkhead Door**:

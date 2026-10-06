@@ -7,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <vector>
+#include "core/DoorSectorObject.h"
 #include "core/DoorVertex.h"
 
 namespace
@@ -89,6 +90,13 @@ namespace
 		options.activationMode = core::DoorActivationMode::Manual;
 		auto created = world.addSectorDoor(0, 0, 3, options);
 		world.finishBuild();
+		// Pin the narrow-band scenario to a fully open threshold so request
+		// creation is not instead triggered by the occupied waiting queue.
+		if (cellsWide == 1) {
+			world.acquireDoorOpenLease(created.traversalResource);
+			auto door = std::static_pointer_cast<const core::DoorSectorObject>(created.door.sector->getObject(created.door.index))->getDoor();
+			door->requestOpen(); world.advanceTicks(150);
+		}
 
 		auto edge = *std::find_if(world.getGraph()->getEdges().begin(),
 			world.getGraph()->getEdges().end(), [&](auto const& candidate)
@@ -203,6 +211,9 @@ namespace
 		world.finishBuild();
 		// Hold the door open so the grant lands as soon as the request exists.
 		if (!world.acquireDoorOpenLease(created.traversalResource)) return trace;
+		// This scenario measures arrival at an already open Door, not leaf motion.
+		auto door = std::static_pointer_cast<const core::DoorSectorObject>(created.door.sector->getObject(created.door.index))->getDoor();
+		door->requestOpen(); world.advanceTicks(150);
 
 		auto edge = *std::find_if(world.getGraph()->getEdges().begin(),
 			world.getGraph()->getEdges().end(), [&](auto const& candidate)

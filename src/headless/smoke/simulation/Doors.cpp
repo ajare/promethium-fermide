@@ -77,7 +77,7 @@ namespace
 			return false;
 		}
 
-		for (uint32_t i = 0; i < 120
+		for (uint32_t i = 0; i < 240
 			&& world.getSimulationSnapshot().traversalResources.front().doorState != core::DoorSnapshotState::Closed; ++i)
 		{
 			world.advanceTick();
@@ -454,7 +454,7 @@ namespace
 		auto sensor = core::DoorSensorId{ 1 };
 		if (!world.setDoorSensorObservation(created.traversalResource, sensor,
 			core::DoorSensorObservation::Presence)) return false;
-		world.advanceTicks(90);
+		world.advanceTicks(150);
 		auto lease = world.acquireDoorOpenLease(created.traversalResource);
 		world.setDoorSensorObservation(created.traversalResource, sensor, core::DoorSensorObservation::Clear);
 		world.advanceTicks(30);

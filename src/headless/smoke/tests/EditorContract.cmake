@@ -235,6 +235,7 @@ set(editor_names
     palette/paddingAndGapsAreTheGrip
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
+    scaled-doors/clipboard-history
 )
 
 if(DEFINED LANE)

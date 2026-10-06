@@ -448,6 +448,14 @@ namespace core
 	{
 		for (auto const& object : mObjects)
 		{
+			// Ordinary adjacent-Layer Doors share the same wrapper in both Sectors.
+			// Only the wrapper's owning Sector advances their motion. Specialized
+			// thresholds retain their existing coordinator/transport update paths.
+			if (auto door = dynamic_pointer_cast<DoorSectorObject>(object);
+				door && typeid(*door->getDoor()) == typeid(Door)
+				&& isLocationLike(door->getDoor()->getFrontSector()->getType())
+				&& isLocationLike(door->getDoor()->getBackSector()->getType())
+				&& object->getSector().get() != this) continue;
 			if (object) object->update(frameTime);
 		}
 
