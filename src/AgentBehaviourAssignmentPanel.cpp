@@ -476,34 +476,31 @@ bool applyAgentPathEdit(shared_ptr<core::World> const& world, core::Agent* agent
 	return true;
 }
 
-std::string_view renderAgentMovementActionSelector(shared_ptr<const core::World> const& world, core::MarkerId marker)
+std::optional<string> renderAgentMovementActionPopup(shared_ptr<const core::World> const& world,
+	core::MarkerId marker, bool openRequested, bool& active)
 {
-	static string selected{core::IdleAction};
-	static std::weak_ptr<const core::World> selectedWorld;
-	if (!world || selectedWorld.lock() != world) { selected = core::IdleAction; selectedWorld = world; }
-	std::vector<string> options{string(core::IdleAction)};
-	if (world)
+	constexpr auto popup = "Choose destination Action";
+	if (openRequested && active) ImGui::OpenPopup(popup);
+	std::optional<string> selected;
+	if (ImGui::BeginPopup(popup))
 	{
-		if (marker) options = world->availableAgentActions(marker);
+		auto const options = world ? world->availableAgentActions(marker) : std::vector<string>{};
+		if (!active || options.empty()) ImGui::CloseCurrentPopup();
 		else
 		{
-			auto const markers = world->getMarkerIds();
-			if (any_of(markers.begin(), markers.end(), [&](auto id)
-				{ auto offered = world->availableAgentActions(id);
-				  return find(offered.begin(), offered.end(), core::UseFurnitureAction) != offered.end(); }))
-				options.emplace_back(core::UseFurnitureAction);
-			if (world->actionRegistry())
-				for (auto const& definition : world->actionRegistry()->actions()) options.push_back(world->actionRegistry()->identity(definition));
+			ImGui::SeparatorText("Destination Action");
+			for (auto const& action : options)
+			{
+				ImGui::PushID(action.c_str());
+				if (ImGui::Selectable(world->agentActionDisplayName(action).c_str())) selected = action;
+				ImGui::PopID();
+			}
+			ImGui::Separator();
+			if (ImGui::Selectable("Cancel")) ImGui::CloseCurrentPopup();
 		}
+		ImGui::EndPopup();
 	}
-	if (std::find(options.begin(), options.end(), selected) == options.end()) selected = core::IdleAction;
-	auto preview = world ? world->agentActionDisplayName(selected) : "Idle";
-	if (ImGui::BeginCombo("Action", preview.c_str()))
-	{
-		for (auto const& action : options)
-			if (ImGui::Selectable(world ? world->agentActionDisplayName(action).c_str() : "Idle", action == selected)) selected = action;
-		ImGui::EndCombo();
-	}
+	active = ImGui::IsPopupOpen(popup);
 	return selected;
 }
 

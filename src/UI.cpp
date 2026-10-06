@@ -136,18 +136,27 @@ void setSelectionMode(UISettings::SelectionMode mode);
 
 namespace
 {
-	std::string gSelectedMovementAction{core::IdleAction};
+	struct PendingMovementAction
+	{
+		std::weak_ptr<core::World> world;
+		core::AgentId agent;
+		core::MarkerId marker;
+		bool active{false};
+		bool openRequested{false};
+	};
+	PendingMovementAction gPendingMovementAction;
 
 	void reportEditorError(string const& source, string message);
 
 	// Reports the shared editor seam's diagnostic so a refused request leaves a
 	// visible message rather than only a log line (#469).
 	bool applyAgentPathEdit(shared_ptr<const core::World> const& world, core::Agent* agent,
-		shared_ptr<core::Path> path, bool startPathing, bool replaceCurrentPath)
+		shared_ptr<core::Path> path, bool startPathing, bool replaceCurrentPath,
+		std::string_view action = core::IdleAction)
 	{
 		std::string diagnostic;
 		if (::applyAgentPathEdit(std::const_pointer_cast<core::World>(world), agent, std::move(path),
-			startPathing, replaceCurrentPath, gSelectedMovementAction, diagnostic)) return true;
+			startPathing, replaceCurrentPath, action, diagnostic)) return true;
 		if (!diagnostic.empty()) reportEditorError("Agent Action", diagnostic);
 		return false;
 	}
@@ -225,6 +234,7 @@ namespace
 		if (!gSelectedAgent || gSelectingAgentPathDestination) return;
 		auto const id = world ? world->getAgentId(gSelectedAgent) : core::AgentId{};
 		if (world && id && world->agentBehaviourOwnsMovement(id)) return;
+		gPendingMovementAction.active = false;
 		gSelectingAgentPathDestination = true;
 		gPathSelectionPreviousMode = gUISettings.selectionMode;
 		gPathSelectionPreviouslyRenderedGraph = gUISettings.renderGraph;
@@ -241,6 +251,40 @@ namespace
 		gUISettings.renderGraph = gPathSelectionPreviouslyRenderedGraph;
 		gHoveredVertex.reset();
 		gSelectedVertex.reset();
+	}
+
+	void chooseAgentDestinationAction(shared_ptr<core::World> const& world,
+		shared_ptr<const core::Vertex> const& vertex)
+	{
+		if (!gSelectedAgent || !vertex || !isMarkerPathTarget(*world, *vertex)) return;
+		auto path = world->getGraph()->calculatePath(gSelectedAgent, nullptr, vertex);
+		if (!path)
+		{
+			reportEditorError("Agent path", "No path is available to the selected vertex");
+			return;
+		}
+		auto marker = dynamic_pointer_cast<core::Marker>(vertex->getObject());
+		gPendingMovementAction = {world, world->getAgentId(gSelectedAgent), marker->getId(), true, true};
+		endAgentPathSelection();
+	}
+
+	void renderDestinationActionPopup(shared_ptr<core::World> const& world)
+	{
+		auto& pending = gPendingMovementAction;
+		// Stable identities avoid retaining a Path or a raw Agent across edits,
+		// topology rebuilds, selection changes, and World replacement.
+		if (pending.world.lock() != world || !world || !gSelectedAgent
+			|| world->getAgentId(gSelectedAgent) != pending.agent
+			|| world->agentBehaviourOwnsMovement(pending.agent)) pending.active = false;
+		auto action = renderAgentMovementActionPopup(world, pending.marker,
+			pending.openRequested, pending.active);
+		pending.openRequested = false;
+		if (action)
+		{
+			string diagnostic;
+			if (!requestAgentMarkerAction(world, pending.agent, pending.marker, *action, diagnostic))
+				reportEditorError("Agent Action", diagnostic);
+		}
 	}
 
 	enum class PaintTool
@@ -4742,20 +4786,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			if (gSelectingAgentPathDestination && gSelectedAgent)
 			{
-				if (!isMarkerPathTarget(*world, *gHoveredVertex)) return;
-				auto path = graph->calculatePath(gSelectedAgent, nullptr, gHoveredVertex);
-				if (path)
-				{
-					// Whether the request succeeded or was refused, the user is done
-					// choosing: a refusal has already surfaced a visible diagnostic.
-					applyAgentPathEdit(world, gSelectedAgent, std::move(path), true, true);
-					endAgentPathSelection();
-				}
-				else
-				{
-					reportEditorError("Agent path",
-						"No path is available to the selected vertex");
-				}
+				chooseAgentDestinationAction(world, gHoveredVertex);
 			}
 			else if (ImGui::GetIO().KeyCtrl)
 			{
@@ -7514,7 +7545,6 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	renderAgentAccessPermissions(world, id);
 	renderAgentRuntimeProperties(world, id);
 	renderAgentBehaviourConfigurationPanel(world, id);
-	gSelectedMovementAction = renderAgentMovementActionSelector(world);
 
 	if (gSelectingAgentPathDestination)
 	{
@@ -7563,7 +7593,12 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 				auto const wasPathing = livePath
 					? gSelectedAgent->getState() != core::Agent::State::Idle
 					: intent.wasPathing;
-				applyAgentPathEdit(world, gSelectedAgent, std::move(newPath), wasPathing, true);
+				// Recalculation keeps the Action chosen for this request, rather
+				// than reverting it to Idle now that there is no global picker.
+				string action{core::IdleAction};
+				for (auto const& snapshot : world->getSimulationSnapshot().agents)
+					if (snapshot.id == id) { action = snapshot.selectedAction; break; }
+				applyAgentPathEdit(world, gSelectedAgent, std::move(newPath), wasPathing, true, action);
 			}
 		}
 		ImGui::EndDisabled();
@@ -7612,13 +7647,24 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 
 	renderAgentPose(*gSelectedAgent);
 
+	auto renderTargetAction = [&]
+	{
+		string action{core::IdleAction};
+		for (auto const& snapshot : world->getSimulationSnapshot().agents)
+			if (snapshot.id == id) { action = snapshot.selectedAction; break; }
+		ImGui::Text("Action: %s", world->agentActionDisplayName(action).c_str());
+	};
+
 	auto const& path = gSelectedAgent->getPath();
 	if (path)
 	{
 		ImGui::Text("Path: vertex %u of %u", gSelectedAgent->getPathTargetNodeIndex(),
 			(uint32_t)path->nodes.size());
 		if (!path->nodes.empty() && path->nodes.back().targetVertex)
+		{
 			ImGui::Text("Destination: %s", path->nodes.back().targetVertex->getDescription().c_str());
+			renderTargetAction();
+		}
 	}
 	else
 	{
@@ -7634,6 +7680,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 			ImGui::Text("Destination: %s (%.2f, %.2f)",
 				destination ? destination->getDescription().c_str() : "<unknown>",
 				intent.destinationPosition.x, intent.destinationPosition.y);
+			renderTargetAction();
 		}
 		else
 		{
@@ -7654,13 +7701,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 		ImGui::BeginDisabled(behaviourOwnsMovement || !isMarkerPathTarget(*world, *gSelectedVertex));
 		if (ImGui::Button("Path to selected Marker"))
 		{
-			auto newPath = world->getGraph()->calculatePath(gSelectedAgent, gSelectedVertex);
-			if (newPath)
-			{
-				// Explicitly cancel the old route first. Agent::setPath may retain an
-				// active traversal permit, but this command promises replacement.
-				applyAgentPathEdit(world, gSelectedAgent, std::move(newPath), true, true);
-			}
+			chooseAgentDestinationAction(world, gSelectedVertex);
 		}
 		ImGui::EndDisabled();
 	}
@@ -9511,6 +9552,7 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 
 	renderMenu(world);
 	renderDocumentToolbar(world);
+	renderDestinationActionPopup(world);
 	renderFilePopups(world);
 	renderDockSpace();
 

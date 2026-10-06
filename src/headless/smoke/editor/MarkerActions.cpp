@@ -13,6 +13,7 @@
 #include "core/Log.h"
 #include "imgui/imgui.h"
 #include <fstream>
+#include <iterator>
 
 namespace
 {
@@ -118,8 +119,26 @@ namespace
 		require(world->availableAgentActions(seat) == std::vector<std::string>{"idle", "use-furniture"}, "Editor chair lacks derived use");
 		auto& io = ImGui::GetIO(); io.DisplaySize = {800, 600}; io.Fonts->AddFontDefault(); io.Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
-		require(renderAgentMovementActionSelector(world, seat) == core::IdleAction, "Furniture selector no longer defaults to Idle");
-		require(renderAgentMovementActionSelector(world) == core::IdleAction, "Global selector no longer defaults to Idle");
+		bool choosingAction = true;
+		auto const popupHistory = gWorldDocumentHistory.undoCount();
+		renderAgentMovementActionPopup(world, seat, true, choosingAction);
+		ImGui::End(); ImGui::Render();
+		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
+		auto const popupLog = root / "popup.txt";
+		ImGui::LogToFile(-1, popupLog.string().c_str());
+		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction),
+			"Opening the destination popup implicitly chose an Action");
+		ImGui::LogFinish();
+		std::ifstream popupInput(popupLog);
+		std::string popupText((std::istreambuf_iterator<char>(popupInput)), {});
+		require(choosingAction && popupText.find("Idle") != std::string::npos
+			&& popupText.find(world->agentActionDisplayName(core::UseFurnitureAction)) != std::string::npos,
+			"Furniture destination popup omitted its Actions");
+		require(gWorldDocumentHistory.undoCount() == popupHistory,
+			"Opening the popup changed document history");
+		choosingAction = false;
+		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction) && !choosingAction,
+			"Cancelling the popup chose an Action");
 		ImGui::End(); ImGui::Render();
 		auto count = gWorldDocumentHistory.undoCount();
 		require(commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
@@ -242,7 +261,8 @@ namespace
 		auto path = context.temporaryRoot() / "editor.actions.lua";
 		std::ofstream(path) << R"lua(return {api_version=1, uuid='ad603358-5ebf-45bb-a686-c3f491152c61', actions={
 {key='hello',name='Hello',run=function(a,w,m) w.log('editor:' .. m.name) end},
-{key='other',name='Other',run=function() end}}})lua";
+{key='other',name='Other',run=function() end},
+{key='unassigned',name='Unassigned',run=function() end}}})lua";
 		auto world = std::make_shared<core::World>("Editor",10,2);
 		auto room = world->addRoom("Room",0,0,0,10,1);
 		world->addSectorMarker(room,0,6.5f,"Target");
@@ -273,7 +293,26 @@ namespace
 		auto& io = ImGui::GetIO(); io.DisplaySize = {800,600};
 		io.Fonts->AddFontDefault(); io.Fonts->Build();
 		ImGui::NewFrame(); ImGui::Begin("Marker actions");
-		require(renderAgentMovementActionSelector(world,marker) == core::IdleAction, "Editor no longer defaults to visible Idle");
+		bool choosingAction = true;
+		renderAgentMovementActionPopup(world, marker, true, choosingAction);
+		ImGui::End(); ImGui::Render();
+		ImGui::NewFrame(); ImGui::Begin("Marker actions");
+		auto const popupLog = context.temporaryRoot() / "marker-popup.txt";
+		ImGui::LogToFile(-1, popupLog.string().c_str());
+		require(!renderAgentMovementActionPopup(world, marker, false, choosingAction),
+			"Destination popup selected an Action before user input");
+		ImGui::LogFinish();
+		std::ifstream popupInput(popupLog);
+		std::string popupText((std::istreambuf_iterator<char>(popupInput)), {});
+		auto const firstLabel = world->agentActionDisplayName(first);
+		auto const secondLabel = world->agentActionDisplayName(second);
+		require(popupText.find("Idle") != std::string::npos
+			&& popupText.find(secondLabel) < popupText.find(firstLabel)
+			&& popupText.find("Unassigned") == std::string::npos
+			&& popupText.find(world->agentActionDisplayName(core::UseFurnitureAction)) == std::string::npos,
+			"Destination popup omitted Idle or changed authored Action order");
+		choosingAction = false;
+		renderAgentMovementActionPopup(world, marker, false, choosingAction);
 		auto sector = world->getSector(room);
 		for (uint32_t i = 0; i < sector->getNumObjects(); ++i)
 			if (auto object = sector->getObject(i); object && object->getObjectType() == core::SectorObjectType::Marker)

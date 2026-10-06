@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -20,9 +21,11 @@ bool commitAgentBehaviourAssignment(
 bool commitAgentBehaviourClear(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, std::string& diagnostic);
 
-// Movement Actions are explicit even when Idle is the sole available choice.
-std::string_view renderAgentMovementActionSelector(
-	std::shared_ptr<const core::World> const& world = {}, core::MarkerId marker = {});
+// Destination-specific picker. No request is issued until an Action is chosen;
+// active becomes false on selection or dismissal. Idle remains an explicit choice.
+std::optional<std::string> renderAgentMovementActionPopup(
+	std::shared_ptr<const core::World> const& world, core::MarkerId marker,
+	bool openRequested, bool& active);
 bool commitAgentMarkerActionRequest(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, core::MarkerId marker, std::string_view action, std::string& diagnostic);
 // Issues one editor movement request to a Marker through the seam that matches
