@@ -34,6 +34,7 @@
 #include <willpower/common/Logger.h>
 
 #include "ApplicationResources.h"
+#include "ManifestCatalogResolver.h"
 #include "core/Furniture.h"
 #include "core/WorldDocument.h"
 #include "ObjectTileset.h"
@@ -191,38 +192,6 @@ namespace
 		std::vector<WorldDrawList::Text> texts;
 	};
 
-	// Maps a World's catalogue Resource name to the manifest source declared in
-	// Resources.yaml, so core's World loader can resolve Resource references
-	// without depending on the resource system.
-	class CatalogResolver final : public core::CatalogResourceResolver
-	{
-	public:
-		explicit CatalogResolver(resources::ResourceManager& manager)
-			: mManager(manager) {}
-
-		std::filesystem::path catalogSource(std::string const& type,
-			std::string const& resourceName) const override
-		{
-			for (auto const& resource : mManager.getResourcesByType(type))
-			{
-				if (!resource || resource->getName() != resourceName) continue;
-				auto source = std::filesystem::path(resource->getSource());
-				if (!source.is_absolute())
-					source = std::filesystem::path(resource->getDefinitionFile()).parent_path() / source;
-				// The manifest names a behaviour package by its inner manifest file;
-				// the file-based loader expects the package directory.
-				if (type == "AgentBehaviourRegistry"
-					&& std::filesystem::is_regular_file(source))
-					source = source.parent_path();
-				return source;
-			}
-			return {};
-		}
-
-	private:
-		resources::ResourceManager& mManager;
-	};
-
 	class WorldRenderSystem
 	{
 		struct Slot
@@ -265,7 +234,8 @@ namespace
 			mResources->addResourceLocation("Directory", resourceDirectory.string(),
 				"Resources.yaml");
 			mResources->scanLocations();
-			mCatalogResolver = std::make_shared<CatalogResolver>(*mResources);
+			mCatalogResolver = std::make_shared<ManifestCatalogResolver>(
+				resourceDirectory / "Resources.yaml");
 			core::setCatalogResourceResolver(mCatalogResolver);
 
 			mSectorSet = requireImageSet("SectorAtlas");
@@ -438,18 +408,7 @@ namespace
 		std::filesystem::path resourceSource(std::string const& type,
 			std::string const& name)
 		{
-			for (auto const& resource : mResources->getResourcesByType(type))
-			{
-				if (!resource || resource->getName() != name) continue;
-				auto source = std::filesystem::path(resource->getSource());
-				if (!source.is_absolute())
-					source = std::filesystem::path(resource->getDefinitionFile()).parent_path() / source;
-				if (type == "AgentBehaviourRegistry"
-					&& std::filesystem::is_regular_file(source))
-					source = source.parent_path();
-				return source;
-			}
-			return {};
+			return mCatalogResolver->catalogSource(type, name);
 		}
 
 	private:
@@ -658,7 +617,7 @@ namespace
 		std::unique_ptr<mpp::RenderSystem> mRenderSystem;
 		std::unique_ptr<mpp::ResourceManager> mRenderResources;
 		std::unique_ptr<resources::ResourceManager> mResources;
-		std::shared_ptr<CatalogResolver> mCatalogResolver;
+		std::shared_ptr<ManifestCatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mSectorSet;
 		resources::ResourcePtr mObjectSet;
 		// The ResourceManager owns registered resources; this index prevents

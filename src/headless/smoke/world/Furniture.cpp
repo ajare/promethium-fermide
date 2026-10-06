@@ -9,6 +9,7 @@
 #include <limits>
 #include "core/Exceptions.h"
 #include "core/SerializationException.h"
+#include "core/WorldDocument.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
 
@@ -19,6 +20,36 @@ namespace
 		auto writer = core::YamlSerializer::toString(); core::SerializationWorkData work;
 		work.markSerializedUnmodified = false;
 		world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+	}
+
+	void catalogResourceResolution(smoke::Context const&)
+	{
+		using smoke::require;
+		// Composite catalogue Resources (those that also declare dependent
+		// resources, such as a Furniture catalogue's Artwork dependency) must
+		// resolve to their manifest `location` file, never the manifest directory.
+		struct { std::string name; std::string filename; } const furniture[] = {
+			{ "ChairCatalogue", "chair.furniture.lua" },
+			{ "DeskCatalogue", "desk.furniture.lua" },
+			{ "FurnitureCatalogue", "furniture.furniture.lua" },
+			{ "FurnitureIntegrationCatalogue", "furniture-integration.furniture.lua" },
+		};
+		for (auto const& entry : furniture)
+		{
+			auto source = core::resolveCatalogSource("FurnitureCatalogue", entry.name);
+			require(!source.empty(), "Manifest Furniture catalogue did not resolve: " + entry.name);
+			require(source.filename().string() == entry.filename
+				&& std::filesystem::is_regular_file(source),
+				"Composite Furniture catalogue resolved to the wrong source: " + source.string());
+		}
+		auto tags = core::resolveCatalogSource("AgentTagRegistry", "TestAgentTags");
+		require(!tags.empty() && tags.filename().string() == "test.tags.yaml"
+			&& std::filesystem::is_regular_file(tags),
+			"Tag registry Resource resolved to the wrong source: " + tags.string());
+		auto behaviours = core::resolveCatalogSource("AgentBehaviourRegistry", "DoorTestBehaviours");
+		require(!behaviours.empty() && behaviours.filename().string() == "door-test-1.behaviours"
+			&& std::filesystem::is_directory(behaviours),
+			"Behaviour package Resource resolved to the wrong source: " + behaviours.string());
 	}
 
 	void bundledLua(smoke::Context const& context)
@@ -1249,6 +1280,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 void registerFurniture(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "furniture/bundledLua", bundledLua });
+	checks.push_back({ "furniture/catalogResourceResolution", catalogResourceResolution });
 	checks.push_back({ "furniture/luaObjects", luaObjects });
 	checks.push_back({ "furniture/actions", actions });
 	checks.push_back({ "furniture/demo", demonstration });

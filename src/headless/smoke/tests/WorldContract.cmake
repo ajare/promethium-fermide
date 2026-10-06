@@ -26,6 +26,7 @@ set(checks
     airlocks/placement
     airlocks/atomicRefusalAndOwnership
     furniture/bundledLua
+    furniture/catalogResourceResolution
     furniture/luaObjects
     furniture/actions
     furniture/demo
