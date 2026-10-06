@@ -629,6 +629,64 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 			require(edge.from.y >= screen(0, 3).y, "Graph included another Level/Location's deep routes");
 		require(locationPlanDepthRows(*world, *world->getSector(host), 2) == 5,
 			"Graph depth expansion ignored Location/Level filtering");
+		// A selected Agent's route follows resolved edge depths, not the
+		// Furniture footprint row or every incident projection of a vertex.
+		auto visitorId = world->createAgent("Plan visitor", host, 0, 7.5f);
+		auto visitor = world->lookupAgent(visitorId).entity;
+		std::shared_ptr<const core::Vertex> seat;
+		for (auto const& vertex : world->getGraph()->getVertices())
+			if (vertex->getTopologyKey() == "furniture:" + std::to_string(id) + ":seat") seat = vertex;
+		auto route = world->getGraph()->calculatePath(visitor, seat);
+		require(route && !route->nodes.empty(), "Plan visitor could not reach the desk");
+		visitor->setPath(route, false);
+		WorldDrawList highlighted({{100, 60}, {360, 220}});
+		renderLocationPlanGrid(highlighted, *world->getSector(host), {80, 40}, {320, 240}, 5, world.get(), 2, 0, visitor);
+		bool depthRoute = false, depthChange = false, seatDot = false;
+		for (auto const& command : highlighted.commands())
+		{
+			if (auto line = std::get_if<WorldDrawList::Line>(&command);
+				line && line->colour == IM_COL32(255, 196, 0, 240))
+			{
+				depthRoute = depthRoute || (near(line->from.y, screen(0, 2).y) && near(line->to.y, screen(0, 2).y));
+				depthChange = depthChange || !near(line->from.y, line->to.y);
+				require(near(line->clip.minimum.x, 120) && near(line->clip.maximum.y, 220), "Selected route escaped plan clip");
+			}
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(255, 196, 0, 240))
+				seatDot = seatDot || (near(triangle->positions[0].x, screen(2, 2).x)
+					&& near(triangle->positions[0].y, screen(2, 2).y));
+		}
+		require(depthRoute && depthChange && seatDot, "Selected Furniture route lost depth edges, transitions or target glyph");
+		WorldDrawList wrongLevel({{0, 0}, {400, 300}});
+		renderLocationPlanGrid(wrongLevel, *world->getSector(host), {0, 0}, {400, 300}, 9, world.get(), 3, 0, visitor);
+		for (auto const& command : wrongLevel.commands())
+			std::visit([&](auto const& primitive) {
+				if constexpr (requires { primitive.colour; })
+					require(primitive.colour != IM_COL32(255, 196, 0, 240), "Selected route leaked to another Level");
+			}, command);
+		WorldDrawList wrongLocation({{0, 0}, {400, 300}});
+		renderLocationPlanGrid(wrongLocation, *world->getSector(other), {0, 0}, {400, 300}, 12, world.get(), 2, 0, visitor);
+		for (auto const& command : wrongLocation.commands())
+			std::visit([&](auto const& primitive) {
+				if constexpr (requires { primitive.colour; })
+					require(primitive.colour != IM_COL32(255, 196, 0, 240), "Selected route leaked to another Location/Layer");
+			}, command);
+		// Match editor inspection after pausing: the live Path is torn down,
+		// but both views must still show the retained route to Furniture.
+		require(world->resumeSimulation(), "Could not resume plan route fixture");
+		world->pauseSimulation();
+		require(!visitor->getPath(), "Pause did not tear down Furniture route");
+		WorldDrawList pausedFurniture({{100, 60}, {360, 220}});
+		renderLocationPlanGrid(pausedFurniture, *world->getSector(host), {80, 40}, {320, 240}, 5,
+			world.get(), 2, 0, visitor);
+		bool pausedSeat = false;
+		for (auto const& command : pausedFurniture.commands())
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(255, 196, 0, 240))
+				pausedSeat = pausedSeat || (near(triangle->positions[0].x, screen(2, 2).x)
+					&& near(triangle->positions[0].y, screen(2, 2).y));
+		require(pausedSeat && !visitor->getPath(), "Paused Furniture route missing or rendering mutated live Path");
+		visitor->setPath(nullptr, false);
 		// Rebuilt topology must be rendered afresh, with no retained graph pointers.
 		std::string diagnostic;
 		require(world->editFurniture(id, 2.25f, 0, "Ground desk", &diagnostic, 4), diagnostic);
@@ -692,6 +750,37 @@ table.insert(catalogue.definitions[1].edges, {from='backLeft', to='frontRight', 
 			}
 		}
 		require(lines > 0 && points >= 8, "Catalogue-free Location plan omitted ordinary graph");
+		// Depth-0 pass-through routes include standalone Markers without a catalogue.
+		plain->pauseSimulation();
+		for (auto markerId : plain->getMarkerIds())
+			require(plain->setMarkerProperties(markerId, core::MarkerProperties{}), "Could not permit intermediate Markers");
+		auto walkerId = plain->createAgent("Walker", room, 0, 0);
+		auto walker = plain->lookupAgent(walkerId).entity;
+		auto target = plain->getGraph()->getClosestVertexInSector(plain->getSector(room).get(), {6.5f, 0});
+		auto walk = plain->getGraph()->calculatePath(walker, target);
+		require(walk && !walk->nodes.empty(), "Plain plan route unavailable");
+		walker->setPath(walk, false);
+		WorldDrawList walking({{0, 0}, {400, 300}});
+		renderLocationPlanGrid(walking, *plain->getSector(room), {0, 0}, {400, 300}, 4, plain.get(), 0, 0, walker);
+		bool standalone = false; unsigned routeLines = 0;
+		for (auto const& command : walking.commands())
+		{
+			if (auto line = std::get_if<WorldDrawList::Line>(&command);
+				line && line->colour == IM_COL32(255, 196, 0, 240))
+			{
+				++routeLines;
+				require(near(line->from.y, 272) && near(line->to.y, 272), "Plain route left depth 0");
+			}
+			if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+				triangle && triangle->colour == IM_COL32(255, 196, 0, 240))
+				standalone = standalone || (near(triangle->positions[0].x, 48 + 3.5f * 340 / 8)
+					&& near(triangle->positions[0].y, 272));
+		}
+		require(routeLines > 0 && standalone, "Pass-through route omitted ordinary Marker vertices");
+		walker->setPath(nullptr, false);
+		WorldDrawList cleared({{0, 0}, {400, 300}});
+		renderLocationPlanGrid(cleared, *plain->getSector(room), {0, 0}, {400, 300}, 4, plain.get(), 0, 0, walker);
+		require(cleared.commands().size() == ordinary.commands().size(), "Cleared Path retained a route overlay");
 		// A port can also be a usable destination: usable colour wins, including
 		// after changing the current catalogue instead of retaining cached classes.
 		auto chairSource = smoke::catalogueSource(context.fixture("src/headless/smoke/fixtures/furniture/chair.furniture.lua"));

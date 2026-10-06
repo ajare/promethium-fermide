@@ -35,6 +35,7 @@
 
 #include "Main.h"
 #include "Render.h"
+#include "AgentPathForRendering.h"
 #include "SectorTileset.h"
 #include "ObjectTileset.h"
 #include "WorldDrawList.h"
@@ -1693,15 +1694,15 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 }
 
 
-void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
+std::shared_ptr<core::Path> agentPathForRendering(core::World const* world, core::Agent const* agent)
 {
-	if (!drawList || !gUISettings.renderAgentDebug || !gSelectedAgent) return;
-	auto path = gSelectedAgent->getPath();
+	if (!agent) return nullptr;
+	auto path = agent->getPath();
 	if ((!path || path->nodes.empty()) && world && world->isSimulationPaused()
 		&& world->isTraversalTopologyValid())
 	{
 		core::World::TopologyPathIntent intent;
-		if (world->getPausedPathIntent(*gSelectedAgent, intent)
+		if (world->getPausedPathIntent(*agent, intent)
 			&& intent.destinationSector
 			&& intent.destinationSector.value <= world->getNumSectors())
 		{
@@ -1712,9 +1713,16 @@ void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
 				? graph->getClosestVertexInSector(
 					destinationSector.get(), intent.destinationPosition)
 				: nullptr;
-			if (destination) path = graph->calculatePath(gSelectedAgent, destination);
+			if (destination) path = graph->calculatePath(agent, destination);
 		}
 	}
+	return path;
+}
+
+void renderSelectedAgentPath(core::World const* world, WorldDrawList* drawList)
+{
+	if (!drawList || !gUISettings.renderAgentDebug || !gSelectedAgent) return;
+	auto path = agentPathForRendering(world, gSelectedAgent);
 	if (!path || path->nodes.empty()) return;
 
 	auto const visibleLayer = static_cast<uint32_t>(max(gUISettings.visibleLayer, 0));

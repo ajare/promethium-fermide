@@ -2,6 +2,7 @@
 #include "ImGuiContext.h"
 
 #include "Render.h"
+#include "LocationPlan.h"
 #include "UISettings.h"
 
 #include <memory>
@@ -277,6 +278,15 @@ void agentPaths(smoke::Context const&)
 	renderSelectedAgentPath(&world, &paused);
 	require(lineCount(paused) >= 2,
 		"Agent debug did not render the selected Agent's calculated Path while paused");
+	WorldDrawList pausedPlan({{0, 0}, {800, 400}});
+	renderLocationPlanGrid(pausedPlan, *world.getSector(corridor), {0, 0}, {800, 400}, 4,
+		&world, 0, 0, agent);
+	bool planRoute = false;
+	for (auto const& command : pausedPlan.commands())
+		if (auto line = std::get_if<WorldDrawList::Line>(&command);
+			line && line->colour == IM_COL32(255, 196, 0, 240)) planRoute = true;
+	require(planRoute, "Main view shows paused selected-Agent route but Location plan omits it");
+	require(!agent->getPath(), "Rendering paused route mutated the Agent's live Path");
 
 	gUISettings.renderAgentDebug = false;
 	WorldDrawList disabled({ { 0.0f, 0.0f }, { 1280.0f, 720.0f } });

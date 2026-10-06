@@ -9534,5 +9534,5 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 		ImGui::GetWindowDrawList()->AddImage(
 			reinterpret_cast<ImTextureID>(static_cast<intptr_t>(texture)),
 			position, {position.x + size.x, position.y + size.y}, {0, 1}, {1, 0});
-	});
+	}, gWorldDocumentHistory, gSelectedAgent);
 }

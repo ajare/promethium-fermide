@@ -168,7 +168,7 @@ void LocationPlan::renderSelectionAction(std::shared_ptr<core::World> const& wor
 }
 
 void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter const& present,
-	DocumentHistory& history)
+	DocumentHistory& history, core::Agent const* selectedAgent)
 {
 	auto location = target(world);
 	if (!location) return;
@@ -210,7 +210,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 		}
 		ImGui::EndDisabled();
 		if (!mDeleteDiagnostic.empty()) ImGui::TextWrapped("%s", mDeleteDiagnostic.c_str());
-		ImGui::TextUnformatted("World X / Local depth (ordering) - edges in cyan");
+		ImGui::TextUnformatted("World X / Local depth (ordering) - edges cyan / selected route yellow");
 		ImGui::TextUnformatted("Vertices: usable gold / external green / other cyan");
 		auto position = ImGui::GetCursorScreenPos();
 		auto size = ImGui::GetContentRegionAvail();
@@ -220,7 +220,7 @@ void LocationPlan::render(std::shared_ptr<core::World> const& world, Presenter c
 			WorldDrawList commands({position, {position.x + size.x, position.y + size.y}});
 			auto selected = selectedFurnitureInstance(world);
 			renderLocationPlanGrid(commands, *location, position, size, mDepthRows, world.get(), mWorldLevel,
-				selected ? selected->id : 0);
+				selected ? selected->id : 0, selectedAgent);
 			auto catalogue = world->furnitureCatalogue();
 			auto const& io = ImGui::GetIO();
 			float left = position.x + 48, right = position.x + size.x - 12;

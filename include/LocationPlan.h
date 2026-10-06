@@ -18,7 +18,7 @@ public:
 	void renderSelectionAction(std::shared_ptr<core::World> const& world,
 		std::shared_ptr<const core::Sector> const& selection, uint32_t worldLevel);
 	void render(std::shared_ptr<core::World> const& world, Presenter const& present,
-		DocumentHistory& history = gWorldDocumentHistory);
+		DocumentHistory& history = gWorldDocumentHistory, core::Agent const* selectedAgent = nullptr);
 	bool isOpen(std::shared_ptr<core::World> const& world);
 	// Called by the existing canvas palette. Returns mouse consumption.
 	bool renderPaletteRow(std::shared_ptr<core::World> const& world,
@@ -47,7 +47,8 @@ private:
 // The viewport is also intersected with the caller's clip by the recorder.
 void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& location,
 	ImVec2 viewportPosition, ImVec2 viewportSize, uint32_t depthRows = 4,
-	core::World const* world = nullptr, uint32_t worldLevel = 0, uint64_t selectedId = 0);
+	core::World const* world = nullptr, uint32_t worldLevel = 0, uint64_t selectedId = 0,
+	core::Agent const* selectedAgent = nullptr);
 
 void renderLocationPlanPreview(WorldDrawList& commands, core::Sector const& location,
 	core::FurnitureDefinition const& definition, float x, int depth, bool valid,

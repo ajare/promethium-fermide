@@ -1,4 +1,5 @@
 #include "LocationPlan.h"
+#include "AgentPathForRendering.h"
 #include <string>
 #include <algorithm>
 #include <set>
@@ -8,6 +9,7 @@
 #include <vector>
 #include "core/Edge.h"
 #include "core/Marker.h"
+#include "core/Agent.h"
 
 namespace
 {
@@ -144,7 +146,8 @@ uint32_t locationPlanDepthRows(core::World const& world, core::Sector const& loc
 }
 
 void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& location,
-	ImVec2 position, ImVec2 size, uint32_t depthRows, core::World const* world, uint32_t worldLevel, uint64_t selectedId)
+	ImVec2 position, ImVec2 size, uint32_t depthRows, core::World const* world, uint32_t worldLevel,
+	uint64_t selectedId, core::Agent const* selectedAgent)
 {
 	depthRows = std::max(depthRows, 4u);
 	if (size.x <= 64 || size.y <= 40 || !location.getCellsWide()) return;
@@ -293,6 +296,69 @@ void renderLocationPlanGrid(WorldDrawList& commands, core::Sector const& locatio
 		for (auto const& entry : vertices)
 			for (auto depth : vertexDepths(*entry.vertex))
 				commands.AddCircleFilled(screen(*entry.vertex, depth), VertexRadius, VertexColours[entry.category], 8);
+
+		// Highlight only the selected Path, not all incident projections of its
+		// vertices. Ordinary Markers and floor anchors participate just like ports.
+		if (auto path = agentPathForRendering(world, selectedAgent); path && !path->nodes.empty())
+		{
+			constexpr auto outline = IM_COL32(32, 32, 32, 220);
+			constexpr auto colour = IM_COL32(255, 196, 0, 240);
+			auto segment = [&](ImVec2 from, ImVec2 to)
+			{
+				commands.AddLine(from, to, outline, 5);
+				commands.AddLine(from, to, colour, 2.5f);
+			};
+			auto depthAt = [&](size_t index)
+			{
+				auto const& node = path->nodes[index];
+				return node.edge ? node.edge->getLocalDepth() : 0;
+			};
+			auto const& first = path->nodes.front().targetVertex;
+			auto agentSector = selectedAgent->getSector();
+			auto agentPosition = selectedAgent->getGlobalPosition();
+			if (first && onPlan(*first, location, worldLevel) && agentSector
+				&& agentSector == &location && agentPosition.y == worldLevel)
+			{
+				ImVec2 from{left + (agentPosition.x - location.getCellX()) * cellWidth,
+					bottom - selectedAgent->getLocalDepth() * rowHeight};
+				segment(from, screen(*first, depthAt(0)));
+			}
+			for (size_t i = 0; i < path->nodes.size(); ++i)
+			{
+				auto const& vertex = path->nodes[i].targetVertex;
+				if (!vertex || !onPlan(*vertex, location, worldLevel)) continue;
+				auto p = screen(*vertex, depthAt(i));
+				if (i + 1 < path->nodes.size())
+				{
+					auto const& next = path->nodes[i + 1];
+					if (next.edge && next.targetVertex && onPlan(*next.targetVertex, location, worldLevel))
+					{
+						auto outgoing = screen(*vertex, next.edge->getLocalDepth());
+						if (p.y != outgoing.y) segment(p, outgoing);
+						segment(outgoing, screen(*next.targetVertex, next.edge->getLocalDepth()));
+					}
+				}
+			}
+			// Paint glyphs last so coincident graph vertices cannot hide the route.
+			for (size_t i = 0; i < path->nodes.size(); ++i)
+			{
+				auto const& vertex = path->nodes[i].targetVertex;
+				if (!vertex || !onPlan(*vertex, location, worldLevel)) continue;
+				std::set<int> depths{depthAt(i)};
+				if (i + 1 < path->nodes.size())
+				{
+					auto const& next = path->nodes[i + 1];
+					if (next.edge && next.targetVertex && onPlan(*next.targetVertex, location, worldLevel))
+						depths.insert(next.edge->getLocalDepth());
+				}
+				for (auto depth : depths)
+				{
+					auto p = screen(*vertex, depth);
+					commands.AddCircleFilled(p, 5, outline, 8);
+					commands.AddCircleFilled(p, VertexRadius, colour, 8);
+				}
+			}
+		}
 	}
 	commands.PopClipRect();
 	commands.PopClipRect();
