@@ -118,7 +118,7 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo(manifest.string());
 		writeRuntimeText(package / "startup.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 local factories_in_this_environment = 0
 return {
   api_version = host.api_version,
@@ -204,7 +204,7 @@ return {
 )lua";
 		writeRuntimeText(package / "counter.lua", helperSource);
 		writeRuntimeText(package / "private.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 local counter = require("helpers.counter")
 local cached = require("helpers.counter")
 if counter ~= cached then error("helper cache was not instance-local") end

@@ -14,7 +14,7 @@ import validation_run as validation
 
 TOOLS = {
     "pf-restoration-benchmark", "pf-generate-routing-world", "pf-metrics-server",
-    "pf-lift-repro", "pf-pause-position-repro", "prometheum-fermide-headless",
+    "pf-lift-repro", "pf-pause-position-repro", "promethium-fermide-headless",
     "pf-compile-contracts", "pf-simulation-step-timing-checks",
     "pf-occupant-packing-checks", "pf-world-render-slot-checks",
     "pf-sector-tileset-checks", "pf-generate-world", "pf-compatibility-probe",
@@ -119,8 +119,8 @@ def main():
             (logs / f"{config}-boundaries.json").write_text(json.dumps(boundaries, indent=2) + "\n")
             # First builds prove representative modules do not need the other modules.
             order = ["pf-smoke-agent", "pf-smoke-render", "pf-smoke-editor"]
-            order += sorted(targets.keys() - set(order) - {"prometheum-fermide-headless"})
-            order += ["prometheum-fermide-headless"]
+            order += sorted(targets.keys() - set(order) - {"promethium-fermide-headless"})
+            order += ["promethium-fermide-headless"]
             products[config] = {}
             for name in order:
                 run(["cmake", "--build", str(build), "--config", config,

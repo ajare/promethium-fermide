@@ -3639,7 +3639,7 @@ namespace
 		if (gUISettings.selectionMode == UISettings::SelectionMode::Sector)
 			return makeDumbwaiterClipboardText(*world, *static_pointer_cast<const core::Dumbwaiter>(gSelectedSector), cut);
 		YAML::Emitter output;
-		output << YAML::BeginMap << YAML::Key << "prometheumClipboard" << YAML::Value
+		output << YAML::BeginMap << YAML::Key << "promethiumClipboard" << YAML::Value
 			<< YAML::BeginMap << YAML::Key << "version" << YAML::Value << 1
 			<< YAML::Key << "operation" << YAML::Value << (cut ? "cut" : "copy");
 		if (gSelectedAgent)
@@ -3808,7 +3808,7 @@ namespace
 	ClipboardDefinition parseClipboard(string const& text)
 	{
 		auto document = YAML::Load(text);
-		auto root = document["prometheumClipboard"];
+		auto root = document["promethiumClipboard"];
 		if (!root || !root.IsMap()) throw runtime_error("Clipboard does not contain a supported object");
 		if (requiredYaml<uint32_t>(root, "version") != 1)
 			throw runtime_error("Clipboard object version is not supported");

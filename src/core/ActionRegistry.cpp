@@ -250,7 +250,7 @@ namespace core
 			auto* state = owner.get();
 			lua_atpanic(state, script::luaPanic);
 			script::ModuleLoader loader;
-			loader.hostModuleVersions.emplace("prometheum.actions.v1", 1);
+			loader.hostModuleVersions.emplace("promethium.actions.v1", 1);
 			std::string diagnostic;
 			try
 			{

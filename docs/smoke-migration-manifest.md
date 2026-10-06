@@ -560,7 +560,7 @@ source lists and dependency tiers are unchanged.
 | `WorldRenderSlotChecks.cpp` | module-owned (retained standalone) | `pf-world-render-slot-checks` |
 | `smoke/simulation/Teardown.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/world/ZeroSizeLocations.cpp` | module-owned | `pf-smoke-world` |
-| `SmokeScenario.cpp` | dispatch/platform helpers only; no product scenarios | `prometheum-fermide-headless` |
+| `SmokeScenario.cpp` | dispatch/platform helpers only; no product scenarios | `promethium-fermide-headless` |
 | `smoke/world/ObjectEditing.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/FloorsAndWalls.cpp` | module-owned | `pf-smoke-world` |
 | `smoke/world/Topology.cpp` | module-owned | `pf-smoke-world` |

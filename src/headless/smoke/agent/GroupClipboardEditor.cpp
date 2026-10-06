@@ -151,7 +151,7 @@ namespace
 	{
 		ReadClipboard read;
 		auto const document = YAML::Load(text);
-		auto const root = document["prometheumClipboard"];
+		auto const root = document["promethiumClipboard"];
 		require(root && root.IsMap(),
 			"The clipboard text carries no clipboard envelope");
 		require(root["version"].as<std::uint32_t>() == 1,
@@ -174,7 +174,7 @@ namespace
 	// hold at the time.
 	std::string legacyClipboardText(std::string const& objectLines)
 	{
-		return "prometheumClipboard:\n"
+		return "promethiumClipboard:\n"
 			"  version: 1\n"
 			"  operation: copy\n"
 			"  type: Agent\n"
@@ -187,7 +187,7 @@ namespace
 	std::vector<std::string> clipboardObjectKeys(std::string const& text)
 	{
 		std::vector<std::string> keys;
-		for (auto const& entry : YAML::Load(text)["prometheumClipboard"]["object"])
+		for (auto const& entry : YAML::Load(text)["promethiumClipboard"]["object"])
 			keys.push_back(entry.first.as<std::string>());
 		std::sort(keys.begin(), keys.end());
 		return keys;
@@ -198,7 +198,7 @@ namespace
 	std::vector<std::string> clipboardObjectValues(std::string const& text)
 	{
 		std::vector<std::string> values;
-		for (auto const& entry : YAML::Load(text)["prometheumClipboard"]["object"])
+		for (auto const& entry : YAML::Load(text)["promethiumClipboard"]["object"])
 			values.push_back(entry.second.as<std::string>());
 		return values;
 	}
@@ -335,7 +335,7 @@ namespace
 		{
 			AgentClipboardPayload payload;
 			std::string diagnostic;
-			require(!readAgentClipboardObject(YAML::Load(text)["prometheumClipboard"]["object"],
+			require(!readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"],
 				payload, diagnostic),
 				"A non-name Agent group was accepted: " + text);
 			require(!diagnostic.empty(),
@@ -796,7 +796,7 @@ namespace
 		// it can be partially interpreted or applied.
 		auto malformedDocument = YAML::Load(legacyClipboardText(
 			"    name: Malformed\n    flags: 0\n"));
-		auto malformedObject = malformedDocument["prometheumClipboard"]["object"];
+		auto malformedObject = malformedDocument["promethiumClipboard"]["object"];
 		malformedObject["authorization"]["worldIdentity"]
 			= source.world->getClipboardIdentity();
 		malformedObject["authorization"]["directGrants"].push_back(direct.value);

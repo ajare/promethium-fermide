@@ -140,7 +140,7 @@ namespace core
 			sol::state_view lua(state);
 			ModuleLoader loader;
 			loader.hostModuleVersions = {
-				{ "prometheum.v1", 1 }, { "prometheum.v2", 2 } };
+				{ "promethium.v1", 1 }, { "promethium.v2", 2 } };
 			loader.packageName = normalizedPackage;
 			for (auto const& helper : helpers)
 				loader.modules.emplace(helper.name, helper);
@@ -170,7 +170,7 @@ namespace core
 			loader.environmentReference = luaL_ref(state, LUA_REGISTRYINDEX);
 			lua_pop(state, 1);
 			loader.dependencyChain.push_back(normalizedModule);
-			auto errorHandler = lua["__prometheum_traceback"];
+			auto errorHandler = lua["__promethium_traceback"];
 
 			auto loaded = lua.load_buffer(source.data(), source.size(), "@" + chunkName,
 				sol::load_mode::text);
@@ -337,10 +337,10 @@ namespace core
 
 	namespace
 	{
-		constexpr char MarkerMetatable[] = "prometheum.v1.marker";
-		constexpr char AgentMetatable[] = "prometheum.v1.agent";
-		constexpr char SectorMetatable[] = "prometheum.v1.sector";
-		constexpr char InteractionMetatable[] = "prometheum.v1.interaction";
+		constexpr char MarkerMetatable[] = "promethium.v1.marker";
+		constexpr char AgentMetatable[] = "promethium.v1.agent";
+		constexpr char SectorMetatable[] = "promethium.v1.sector";
+		constexpr char InteractionMetatable[] = "promethium.v1.interaction";
 
 		struct MarkerHandle
 		{
@@ -1146,7 +1146,7 @@ namespace core
 			lua_atpanic(state.get(), luaPanic);
 			hostLoader.packageName = "World Agent behaviours";
 			hostLoader.hostModuleVersions = {
-				{ "prometheum.v1", 1 }, { "prometheum.v2", 2 } };
+				{ "promethium.v1", 1 }, { "promethium.v2", 2 } };
 			std::string setupMessage;
 			auto const setupStatus = runScratchSetup(state.get(), &hostLoader,
 				ensureOpaqueMetatables, setupMessage);

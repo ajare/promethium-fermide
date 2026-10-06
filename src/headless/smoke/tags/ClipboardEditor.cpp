@@ -130,7 +130,7 @@ namespace
 
 	AgentClipboardPayload readPayload(std::string const& text)
 	{
-		auto const object = YAML::Load(text)["prometheumClipboard"]["object"];
+		auto const object = YAML::Load(text)["promethiumClipboard"]["object"];
 		AgentClipboardPayload payload;
 		std::string diagnostic;
 		require(readAgentClipboardObject(object, payload, diagnostic),

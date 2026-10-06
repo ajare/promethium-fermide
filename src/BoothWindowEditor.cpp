@@ -140,7 +140,7 @@ YAML::Node makeDumbwaiterClipboardObject(core::World const& world, core::Dumbwai
 std::string makeDumbwaiterClipboardText(core::World const& world, core::Dumbwaiter const& unit, bool cut)
 {
 	YAML::Node document;
-	auto root = document["prometheumClipboard"];
+	auto root = document["promethiumClipboard"];
 	root["version"] = 1; root["type"] = "Dumbwaiter";
 	root["operation"] = cut ? "cut" : "copy";
 	root["object"] = makeDumbwaiterClipboardObject(world, unit);

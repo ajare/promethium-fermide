@@ -84,7 +84,7 @@ namespace
 	}
 
 	std::string const ScheduleSource = R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)

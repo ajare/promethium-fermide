@@ -62,9 +62,9 @@ phases, first-frame tricks, or wall-clock render-cache lifetimes.
   random position are runtime-only: none enters World documents or clipboard
   payloads. Save/load and Reset reconstruct from authored data, not the current
   episode. Runtime topology rebuilds, unlike document reloads, preserve an episode.
-- `prometheum.v1` remains supported: planning maps to `idle`, a different destination
+- `promethium.v1` remains supported: planning maps to `idle`, a different destination
   is refused as `agent_busy`, and superseded cancellation events are hidden.
-  `prometheum.v2` exposes `route_planning`, accepts destination replacement with
+  `promethium.v2` exposes `route_planning`, accepts destination replacement with
   `superseded`, and reports the replaced intent's `movement_cancelled` event with
   reason `superseded`. Neither API exposes exact planning timers or random state.
   Both versions may coexist in a registry and reload independently of live Lua

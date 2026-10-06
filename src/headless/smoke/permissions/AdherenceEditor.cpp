@@ -65,7 +65,7 @@ namespace
 		require(f.world->setAgentIndividualPermissionAdherence(f.id, false, &f.diagnostic), f.diagnostic);
 		auto text = makeAgentClipboardText(makeAgentClipboardPayload(*f.world, f.id, "Copy"), false);
 		AgentClipboardPayload payload;
-		require(readAgentClipboardObject(YAML::Load(text)["prometheumClipboard"]["object"],
+		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"],
 			payload, f.diagnostic), f.diagnostic);
 		require(payload.individualPermissionAdherence == false,
 			"Clipboard lost an explicit false Permission adherence value");
@@ -76,7 +76,7 @@ namespace
 		require(f.world->lookupAgent(pastedId).entity->getIndividualPermissionAdherence() == false,
 			"Paste did not preserve explicit false Permission adherence");
 
-		auto legacy = YAML::Load(text)["prometheumClipboard"]["object"];
+		auto legacy = YAML::Load(text)["promethiumClipboard"]["object"];
 		legacy.remove("permissionAdherence");
 		legacy.remove("agentTagRegistryUuid");
 		legacy.remove("tags");

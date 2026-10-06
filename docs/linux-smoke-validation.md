@@ -75,7 +75,7 @@ build-linux/bin/x64/Release/pf-smoke-routing --check populationRouting
 ctest --test-dir build-linux -R '^smoke-routing($|-)' -L '^validation-fast$' --output-on-failure
 ```
 
-The old `prometheum-fermide-headless --...` forms are compatibility examples only.
+The old `promethium-fermide-headless --...` forms are compatibility examples only.
 They emit deprecation guidance and dispatch sibling module/tool executables; they
 are not CTest owners. See [headless compatibility](headless-compatibility.md).
 

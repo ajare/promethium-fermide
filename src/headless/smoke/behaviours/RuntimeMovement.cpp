@@ -398,8 +398,8 @@ end}
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		std::string const source = R"lua(
-assert(require("prometheum.v1").api_version == 1)
-assert(require("prometheum.v2").api_version == 2)
+assert(require("promethium.v1").api_version == 1)
+assert(require("promethium.v2").api_version == 2)
 return {
   api_version = version,
   factory = function(configuration)
@@ -512,7 +512,7 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "lifecycle.lua", "local version = " + std::to_string(version) + R"lua(
-local host = require("prometheum.v" .. version)
+local host = require("promethium.v" .. version)
 return {
   api_version = host.api_version,
   factory = function(configuration)

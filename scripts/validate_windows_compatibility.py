@@ -7,7 +7,7 @@ import sys
 
 from validate_windows_smoke import run
 
-AGGREGATE = "prometheum-fermide-headless"
+AGGREGATE = "promethium-fermide-headless"
 TOOLS = {"pf-restoration-benchmark", "pf-generate-routing-world", "pf-metrics-server",
          "pf-lift-repro", "pf-pause-position-repro", "pf-compatibility-probe"}
 SYSTEM_LIBRARIES = {name + ".lib" for name in (

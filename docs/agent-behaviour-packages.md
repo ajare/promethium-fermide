@@ -67,7 +67,7 @@ traversal, missing files, and symlinks escaping the package are refused. The
 manifest itself must also resolve inside the package. Sources must end in `.lua`.
 Helper import names are case-sensitive dotted Lua identifiers such as
 `schedule.clock`; path separators, `..`, extensions, and the reserved
-`prometheum.v1` and `prometheum.v2` names are invalid.
+`promethium.v1` and `promethium.v2` names are invalid.
 
 Schema types are `boolean`, `integer`, `number`, `string`, `duration` (simulation
 ticks), `marker`, `action`, `list`, and `record`. Lists have exactly one child; records
@@ -83,7 +83,7 @@ YAML are not exposed.
 
 Only text Lua source is accepted; precompiled bytecode is refused. The standard
 `package` library is not enabled. The custom `require` resolves exactly the
-immutable built-in `prometheum.v1` and `prometheum.v2` modules and logical helper
+immutable built-in `promethium.v1` and `promethium.v2` modules and logical helper
 names declared in this manifest; it never derives a filesystem path and cannot load native modules.
 Undeclared, absolute, traversal, and path-like imports are refused. I/O, OS,
 environment, filesystem, debug, coroutine, dynamic loading, entropy, and wall
@@ -119,14 +119,14 @@ suppression for the window. Logs staged by a callback that later fails are not
 published.
 
 Behaviour modules obtain the immutable versioned host boundary through
-`require("prometheum.v2")` (API version 2) or the retained `prometheum.v1`
+`require("promethium.v2")` (API version 2) or the retained `promethium.v1`
 (API version 1), and must return this shape:
 
 ```lua
-local prometheum = require("prometheum.v2")
+local promethium = require("promethium.v2")
 
 return {
-  api_version = prometheum.api_version,
+  api_version = promethium.api_version,
   factory = function(configuration)
     return {
       -- All callbacks are optional. Preflight validates but does not call them.
@@ -243,7 +243,7 @@ clear/change the referencing configuration first. Removing a Marker's offer is
 allowed and cancels pending activity with `action_unavailable`.
 
 ```lua
-return {api_version = require('prometheum.v2').api_version,
+return {api_version = require('promethium.v2').api_version,
   factory = function(configuration)
     return {
       on_start = function(context)

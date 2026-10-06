@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(prometheum-fermide LANGUAGES C CXX)
+project(promethium-fermide LANGUAGES C CXX)
 
 # Visual Studio solution folders (ignored by non-IDE generators).
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -18,14 +18,14 @@ function(pf_group_third_party_targets directory)
 endfunction()
 
 if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "prometheum-fermide supports Windows and Linux only")
+    message(FATAL_ERROR "promethium-fermide supports Windows and Linux only")
 endif()
 if(WIN32 AND NOT MSVC)
     message(FATAL_ERROR "Windows builds require MSVC")
 endif()
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "prometheum-fermide only supports 64-bit builds")
+    message(FATAL_ERROR "promethium-fermide only supports 64-bit builds")
 endif()
 
 # Supported builds provide these two configurations only. Single-configuration
@@ -311,7 +311,7 @@ set_source_files_properties(src/core/SimulationMetricsCollector.cpp PROPERTIES
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
-add_library(prometheum-fermide-core STATIC
+add_library(promethium-fermide-core STATIC
     ${PF_CORE_SOURCES}
     ${PF_CORE_HEADERS}
     src/RecentFiles.cpp
@@ -319,23 +319,23 @@ add_library(prometheum-fermide-core STATIC
     src/DocumentHistory.cpp
     include/DocumentHistory.h
 )
-target_compile_features(prometheum-fermide-core PUBLIC cxx_std_20)
-target_compile_definitions(prometheum-fermide-core PUBLIC YAML_CPP_STATIC_DEFINE)
-target_include_directories(prometheum-fermide-core PUBLIC "${PF_INCLUDE_DIR}")
+target_compile_features(promethium-fermide-core PUBLIC cxx_std_20)
+target_compile_definitions(promethium-fermide-core PUBLIC YAML_CPP_STATIC_DEFINE)
+target_include_directories(promethium-fermide-core PUBLIC "${PF_INCLUDE_DIR}")
 if(MSVC)
-    target_compile_options(prometheum-fermide-core PRIVATE
+    target_compile_options(promethium-fermide-core PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
 else()
-    target_compile_options(prometheum-fermide-core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(promethium-fermide-core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-target_link_libraries(prometheum-fermide-core
+target_link_libraries(promethium-fermide-core
     PUBLIC ${PF_YAML_TARGET}
     PRIVATE pf-lua sol2::sol2
 )
-pf_apply_high_analysis(prometheum-fermide-core)
-set_target_properties(prometheum-fermide-core PROPERTIES
+pf_apply_high_analysis(promethium-fermide-core)
+set_target_properties(promethium-fermide-core PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}"
-    OUTPUT_NAME "prometheum-fermide-core"
+    OUTPUT_NAME "promethium-fermide-core"
 )
 
 # Compile-only public API contracts have a dedicated object target instead of
@@ -352,7 +352,7 @@ add_custom_target(pf-compile-contracts ALL
 
 # Standalone authored-World generator (no GUI dependency).
 add_executable(pf-generate-world scripts/generate_new_world.cpp)
-target_link_libraries(pf-generate-world PRIVATE prometheum-fermide-core)
+target_link_libraries(pf-generate-world PRIVATE promethium-fermide-core)
 target_compile_definitions(pf-generate-world PRIVATE PF_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(pf-generate-world PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PF_OUTPUT_DIR}")
 pf_apply_high_analysis(pf-generate-world)
@@ -367,7 +367,7 @@ set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(cpp_httplib)
 add_library(pf-metrics STATIC src/metrics/PrometheusTextFormatter.cpp src/metrics/MetricsHttpServer.cpp)
-target_link_libraries(pf-metrics PUBLIC prometheum-fermide-core PRIVATE httplib::httplib)
+target_link_libraries(pf-metrics PUBLIC promethium-fermide-core PRIVATE httplib::httplib)
 if(MSVC)
     target_compile_options(pf-metrics PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
@@ -394,7 +394,7 @@ add_library(pf-render STATIC
     src/SectorTileset.cpp
     src/ObjectTileset.cpp
 )
-target_link_libraries(pf-render PUBLIC prometheum-fermide-core pf-imgui-cpu)
+target_link_libraries(pf-render PUBLIC promethium-fermide-core pf-imgui-cpu)
 
 # Application globals are deliberately separate from production rendering:
 # the GUI supplies real ones; CPU-only consumers opt into these stubs. Object
@@ -436,7 +436,7 @@ add_library(pf-agent-editing STATIC
     src/LocationPlan.cpp
     src/PermissionsPanel.cpp
 )
-target_link_libraries(pf-agent-editing PUBLIC prometheum-fermide-core pf-imgui-cpu pf-render)
+target_link_libraries(pf-agent-editing PUBLIC promethium-fermide-core pf-imgui-cpu pf-render)
 target_compile_features(pf-agent-editing PUBLIC cxx_std_20)
 target_compile_definitions(pf-agent-editing PRIVATE
     $<$<CONFIG:Debug>:_DEBUG>
@@ -454,7 +454,7 @@ pf_apply_high_analysis(pf-agent-editing)
 # reproduction tool.
 add_library(pf-pause-position-support STATIC src/headless/support/PausePosition.cpp)
 target_include_directories(pf-pause-position-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
-target_link_libraries(pf-pause-position-support PUBLIC prometheum-fermide-core)
+target_link_libraries(pf-pause-position-support PUBLIC promethium-fermide-core)
 if(MSVC)
     target_compile_options(pf-pause-position-support PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
@@ -466,7 +466,7 @@ pf_apply_high_analysis(pf-pause-position-support)
 # Shared assertions for module-owned boarding checks and the standalone Lift tool.
 add_library(pf-lift-boarding-support STATIC src/headless/support/LiftBoarding.cpp)
 target_include_directories(pf-lift-boarding-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
-target_link_libraries(pf-lift-boarding-support PUBLIC prometheum-fermide-core)
+target_link_libraries(pf-lift-boarding-support PUBLIC promethium-fermide-core)
 if(MSVC)
     target_compile_options(pf-lift-boarding-support PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
@@ -478,7 +478,7 @@ pf_apply_high_analysis(pf-lift-boarding-support)
 # Shared population workload for routing checks and the standalone World generator.
 add_library(pf-routing-population-support STATIC src/headless/support/RoutingPopulation.cpp)
 target_include_directories(pf-routing-population-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
-target_link_libraries(pf-routing-population-support PUBLIC prometheum-fermide-core)
+target_link_libraries(pf-routing-population-support PUBLIC promethium-fermide-core)
 if(MSVC)
     target_compile_options(pf-routing-population-support PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
@@ -489,7 +489,7 @@ pf_apply_high_analysis(pf-routing-population-support)
 
 add_library(pf-restoration-support STATIC src/headless/support/Restoration.cpp)
 target_include_directories(pf-restoration-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/headless/support")
-target_link_libraries(pf-restoration-support PUBLIC prometheum-fermide-core)
+target_link_libraries(pf-restoration-support PUBLIC promethium-fermide-core)
 if(MSVC)
     target_compile_options(pf-restoration-support PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
@@ -522,8 +522,8 @@ pf_add_headless_tool(pf-pause-position-repro src/headless/tools/PausePositionRep
 target_link_libraries(pf-pause-position-repro PRIVATE pf-pause-position-support)
 
 # Deliberately no linked libraries: all compatibility work happens in children.
-pf_add_headless_tool(prometheum-fermide-headless src/headless/SmokeScenario.cpp)
-target_include_directories(prometheum-fermide-headless PRIVATE
+pf_add_headless_tool(promethium-fermide-headless src/headless/SmokeScenario.cpp)
+target_include_directories(promethium-fermide-headless PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/generated" "${PF_INCLUDE_DIR}")
 
 if(PF_BUILD_GUI)
@@ -543,6 +543,7 @@ if(PF_BUILD_GUI)
     )
     target_compile_features(editor PRIVATE cxx_std_20)
     target_compile_definitions(editor PRIVATE
+        PF_RENDER_LOG_DIR="${CMAKE_BINARY_DIR}/logs/$<CONFIG>"
         _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
         $<$<CONFIG:Debug>:_DEBUG>
     )
@@ -579,8 +580,8 @@ if(PF_BUILD_GUI)
 
     add_custom_command(TARGET editor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/resources/prometheum-fermide.ini"
-            "$<TARGET_FILE_DIR:editor>/prometheum-fermide.ini"
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/promethium-fermide.ini"
+            "$<TARGET_FILE_DIR:editor>/promethium-fermide.ini"
         COMMENT "Copying ImGui configuration"
     )
 endif()
@@ -602,7 +603,7 @@ endforeach()
 string(APPEND PF_COMPATIBILITY_HEADER "};\n")
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/CompatibilityModules.h"
     CONTENT "${PF_COMPATIBILITY_HEADER}")
-add_dependencies(prometheum-fermide-headless ${PF_COMPATIBILITY_MODULES}
+add_dependencies(promethium-fermide-headless ${PF_COMPATIBILITY_MODULES}
     pf-restoration-benchmark pf-generate-routing-world pf-metrics-server
     pf-lift-repro pf-pause-position-repro pf-compile-contracts)
 if(BUILD_TESTING)
@@ -617,7 +618,7 @@ if(BUILD_TESTING)
     set_target_properties(pf-compatibility-probe PROPERTIES FOLDER "Tests/Harness")
     add_test(NAME headless-compatibility-contract COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/tests/headless_compatibility.py"
-        "$<TARGET_FILE:prometheum-fermide-headless>"
+        "$<TARGET_FILE:promethium-fermide-headless>"
         "$<TARGET_FILE:pf-compatibility-probe>" ${PF_COMPATIBILITY_MODULES})
     set_tests_properties(headless-compatibility-contract PROPERTIES TIMEOUT 60 LABELS "harness;headless")
     set(PF_TOOLS_CONTRACT_COMMAND ${Python3_EXECUTABLE}
@@ -706,7 +707,7 @@ endif()
 
 set_target_properties(pf-interaction-api-compile-contract pf-compile-contracts
     PROPERTIES FOLDER "Tests/Compile Contracts")
-set_target_properties(prometheum-fermide-headless PROPERTIES FOLDER "Tests/Harness")
+set_target_properties(promethium-fermide-headless PROPERTIES FOLDER "Tests/Harness")
 set_target_properties(
     pf-headless-render-support pf-pause-position-support pf-lift-boarding-support
     pf-routing-population-support pf-restoration-support

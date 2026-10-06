@@ -31,7 +31,7 @@
 namespace
 {
 	constexpr int StartupTimeoutMs = 30'000;
-	constexpr char UnusableVideoDriver[] = "prometheum-fermide-no-such-video-driver";
+	constexpr char UnusableVideoDriver[] = "promethium-fermide-no-such-video-driver";
 
 	std::string environmentValue(char const* name)
 	{
@@ -88,7 +88,7 @@ namespace
 					|| _wcsnicmp(entry, L"WAYLAND_DISPLAY=", 16) == 0) continue;
 				entries.emplace_back(entry);
 			}
-			entries.emplace_back(L"SDL_VIDEODRIVER=prometheum-fermide-no-such-video-driver");
+			entries.emplace_back(L"SDL_VIDEODRIVER=promethium-fermide-no-such-video-driver");
 			std::sort(entries.begin(), entries.end(), [](auto const& left, auto const& right)
 			{
 				return _wcsicmp(left.c_str(), right.c_str()) < 0;

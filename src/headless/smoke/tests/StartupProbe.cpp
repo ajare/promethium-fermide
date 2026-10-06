@@ -56,7 +56,7 @@ int main(int argc, char** argv)
 	if ((GetErrorMode() & flags) != flags) return 93;
 #endif
 	pf::setupNonInteractiveProcess();
-	if (environment("SDL_VIDEODRIVER") != "prometheum-fermide-no-such-video-driver"
+	if (environment("SDL_VIDEODRIVER") != "promethium-fermide-no-such-video-driver"
 		|| !environment("DISPLAY").empty() || !environment("WAYLAND_DISPLAY").empty()) return 94;
 	if (environment("PF_STARTUP_INHERITED") != "value with spaces") return 95;
 	auto mode = environment("PF_STARTUP_PROBE");

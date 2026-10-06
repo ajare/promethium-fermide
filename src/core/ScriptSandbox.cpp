@@ -386,7 +386,7 @@ namespace core::script
 		lua_pushcclosure(state, requireDeclaredModule, 1);
 		lua_setglobal(state, "require");
 		lua_pushcfunction(state, tracebackHandler);
-		lua_setglobal(state, "__prometheum_traceback");
+		lua_setglobal(state, "__promethium_traceback");
 	}
 
 	// Sandbox setup is the one phase that must run before any protected call
@@ -498,7 +498,7 @@ namespace core::script
 		int argumentCount, int resultCount)
 	{
 		auto const functionIndex = lua_gettop(state) - argumentCount;
-		lua_getglobal(state, "__prometheum_traceback");
+		lua_getglobal(state, "__promethium_traceback");
 		lua_insert(state, functionIndex);
 		beginInstructionBudget(state, budget);
 		auto const status = lua_pcall(state, argumentCount, resultCount,

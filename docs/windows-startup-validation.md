@@ -19,7 +19,7 @@ build directory for fresh multi-configuration evidence:
 
 ```bat
 cmake -S . -B "out\startup validation\gui" -G "Visual Studio 18 2026" -A x64 -DPF_BUILD_GUI=ON -DBUILD_TESTING=ON
-cmake --build "out\startup validation\gui" --config Debug --target pf-smoke-startup pf-startup-probe prometheum-fermide-headless pf-compatibility-probe pf-smoke-harness-probe --parallel 4
+cmake --build "out\startup validation\gui" --config Debug --target pf-smoke-startup pf-startup-probe promethium-fermide-headless pf-compatibility-probe pf-smoke-harness-probe --parallel 4
 ctest --test-dir "out\startup validation\gui" -C Debug -R "^(smoke-startup.*|smoke-harness-contract|smoke-ownership-audit|headless-compatibility-contract)$" --no-tests=error --output-on-failure -j 4
 ```
 
@@ -41,7 +41,7 @@ editor's shared startup log. The synthetic failure contract is parallel-safe;
 there is no global parallelism restriction.
 
 For actual compatibility dispatch, run the configuration-specific absolute path
-of `prometheum-fermide-headless.exe --graphics-startup-smoke` from an unrelated
+of `promethium-fermide-headless.exe --graphics-startup-smoke` from an unrelated
 directory containing spaces. GUI-enabled builds must report Startup PASS and
 return 0. Configure a second tree with `PF_BUILD_GUI=OFF`, build the dispatcher
 in both configurations, and repeat: it must report missing `pf-smoke-startup.exe`

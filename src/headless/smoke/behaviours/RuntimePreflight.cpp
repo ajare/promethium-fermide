@@ -26,7 +26,7 @@ namespace
 		for (auto version : { 1, 2 })
 		{
 			auto result = preflight("local version = " + std::to_string(version) + R"lua(
-local host = require("prometheum.v" .. version)
+local host = require("promethium.v" .. version)
 if host.api_version ~= version then error("wrong host API") end
 assert(not pcall(function() host.api_version = 3 end))
 return {
@@ -126,7 +126,7 @@ return { api_version = 1, factory = function() return {} end }
 	void customLoaderIsReservedAndImmutable()
 	{
 		auto immutable = preflight(R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 local changed = pcall(function() host.api_version = 2 end)
 if changed or host.api_version ~= 1 then error("mutable host module") end
 if pcall(function() math.pi = 0 end)
@@ -144,7 +144,7 @@ return { api_version = 1, factory = function() return {} end }
 		require(core::AgentBehaviourHelperModule::nameIsValid(
 			"helpers.values", &nameDiagnostic),
 			"A dotted helper import name was refused");
-		for (auto const& invalidName : { "", "prometheum.v1", "prometheum.v2", "/absolute",
+		for (auto const& invalidName : { "", "promethium.v1", "promethium.v2", "/absolute",
 			"../traversal", "helpers/file", "native.dll", "helpers..value" })
 			require(!core::AgentBehaviourHelperModule::nameIsValid(
 				invalidName, &nameDiagnostic),
@@ -242,7 +242,7 @@ return { api_version = 1, factory = function() return {} end }
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo(manifest.string());
 		writeRuntimeText(package / "valid.lua",
-			"local p=require('prometheum.v1'); return {api_version=p.api_version, factory=function() return {} end}\n");
+			"local p=require('promethium.v1'); return {api_version=p.api_version, factory=function() return {} end}\n");
 		writeRuntimeText(package / "broken.lua", "return { api_version = 1, factory = function( }\n");
 		auto const valid = registry->addAgentBehaviour("Valid", "valid.lua", {});
 		auto const broken = registry->addAgentBehaviour("Broken", "broken.lua", {});

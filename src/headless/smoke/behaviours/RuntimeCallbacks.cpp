@@ -27,7 +27,7 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "duplicate.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -41,7 +41,7 @@ return {
 		auto const behaviour = registry->addAgentBehaviour("Duplicate", "duplicate.lua",
 			{ { "destination", core::AgentBehaviourSchemaType::Marker } });
 		writeRuntimeText(package / "moving.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -139,7 +139,7 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "activation.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -264,7 +264,7 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "interactions.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -357,7 +357,7 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "failure.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function()
@@ -381,7 +381,7 @@ return {
 		auto const failureBehaviour = registry->addAgentBehaviour("Failure teardown",
 			"failure.lua", {});
 		writeRuntimeText(package / "unassignment.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function()
@@ -398,7 +398,7 @@ return {
 		auto const unassignmentBehaviour = registry->addAgentBehaviour("Unassignment",
 			"unassignment.lua", {});
 		writeRuntimeText(package / "close.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function()

@@ -203,7 +203,7 @@ int main(int argc, char** argv)
 	{
 		if (argc == 2 && std::string(argv[1]) == "--help")
 		{
-			std::cout << "Usage: prometheum-fermide-headless [legacy-option [tool arguments]]\n"
+			std::cout << "Usage: promethium-fermide-headless [legacy-option [tool arguments]]\n"
 				"Deprecated compatibility dispatcher. Prefer pf-smoke-* modules, dedicated tools, or CTest.\n"
 				"No arguments runs all configured smoke modules sequentially.\n";
 			return 0;

@@ -132,7 +132,7 @@ namespace core::script
 		if (!state) throw SerializationException("Cannot allocate Furniture sandbox");
 		lua_atpanic(state.get(), luaPanic);
 		ModuleLoader loader;
-		loader.hostModuleVersions.emplace("prometheum.actions.v1", 1);
+		loader.hostModuleVersions.emplace("promethium.actions.v1", 1);
 		std::string diagnostic;
 		if (runScratchSetup(state.get(), &loader, nullptr, diagnostic) != LUA_OK)
 			throw SerializationException(diagnostic);

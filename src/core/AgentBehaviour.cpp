@@ -275,8 +275,8 @@ namespace core
 			return false;
 		};
 		if (name.empty()) return reject("An Agent behaviour helper module name cannot be blank");
-		if (name == "prometheum.v1" || name == "prometheum.v2")
-			return reject("Built-in prometheum module names are reserved");
+		if (name == "promethium.v1" || name == "promethium.v2")
+			return reject("Built-in promethium module names are reserved");
 		if (name.size() > 255)
 			return reject("An Agent behaviour helper module name cannot exceed 255 bytes");
 

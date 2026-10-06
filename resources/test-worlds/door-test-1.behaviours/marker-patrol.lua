@@ -1,9 +1,9 @@
-local prometheum = require("prometheum.v2")
+local promethium = require("promethium.v2")
 
 local WAIT_TICKS = 5 * 60
 
 return {
-  api_version = prometheum.api_version,
+  api_version = promethium.api_version,
   factory = function(configuration)
     local heading_to_first_marker = true
 

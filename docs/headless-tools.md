@@ -105,7 +105,7 @@ routes, exposition, security, and GUI behavior.
 
 ## Migration and validation
 
-The old `prometheum-fermide-headless --restoration-benchmark`,
+The old `promethium-fermide-headless --restoration-benchmark`,
 `--write-routing-scale-world`, `--metrics*`, `--lift-crossing-repro`,
 `--lift-stall-repro`, and `--pause-position-repro` selections now launch the
 corresponding tool as a subprocess with deprecation guidance. See the

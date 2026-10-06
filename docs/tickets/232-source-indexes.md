@@ -36,9 +36,9 @@ work; they are not deduplicated into interchangeable topology Vertices.
 Run:
 
 ```text
-cmake --build build-windows --config Release --target prometheum-fermide-headless --parallel
-build-windows/bin/x64/Release/prometheum-fermide-headless.exe --routing-scale-checks
-build-windows/bin/x64/Release/prometheum-fermide-headless.exe
+cmake --build build-windows --config Release --target promethium-fermide-headless --parallel
+build-windows/bin/x64/Release/promethium-fermide-headless.exe --routing-scale-checks
+build-windows/bin/x64/Release/promethium-fermide-headless.exe
 ```
 
 Checks include:

@@ -51,7 +51,7 @@ namespace
 	// so the field needs no new version of its own. The optional `active` key
 	// added with Agent activation (#118) behaves the same way: absent reads
 	// back as activated, and an older reader ignores it.
-	char const* const ClipboardKey{ "prometheumClipboard" };
+	char const* const ClipboardKey{ "promethiumClipboard" };
 	uint32_t const ClipboardVersion{ 1 };
 
 	// The Agent group name a payload will use: the domain's own trim, judged

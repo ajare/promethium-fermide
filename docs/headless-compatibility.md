@@ -1,6 +1,6 @@
 # Legacy headless compatibility (#305)
 
-`prometheum-fermide-headless` links only its dispatcher, not production libraries,
+`promethium-fermide-headless` links only its dispatcher, not production libraries,
 smoke implementations, or the smoke harness. Prefer direct `pf-smoke-*` commands,
 [dedicated tools](headless-tools.md), or CTest.
 

@@ -10,7 +10,7 @@ endfunction()
 add_library(pf-smoke-support STATIC support/Smoke.cpp)
 target_include_directories(pf-smoke-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/support"
     PRIVATE "${PF_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../support")
-target_link_libraries(pf-smoke-support PUBLIC prometheum-fermide-core)
+target_link_libraries(pf-smoke-support PUBLIC promethium-fermide-core)
 target_compile_definitions(pf-smoke-support PRIVATE PF_SMOKE_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 target_compile_features(pf-smoke-support PUBLIC cxx_std_20)
 pf_smoke_target_policy(pf-smoke-support)
@@ -33,8 +33,8 @@ function(pf_add_smoke_module target)
         if(absolute IN_LIST owned)
             message(FATAL_ERROR "Smoke source already owned by another module: ${absolute}")
         endif()
-        if(TARGET prometheum-fermide-headless)
-            get_target_property(legacy_sources prometheum-fermide-headless SOURCES)
+        if(TARGET promethium-fermide-headless)
+            get_target_property(legacy_sources promethium-fermide-headless SOURCES)
             foreach(legacy_source IN LISTS legacy_sources)
                 get_filename_component(legacy_absolute "${legacy_source}" REALPATH
                     BASE_DIR "${PROJECT_SOURCE_DIR}")
@@ -90,7 +90,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/Dumbwaiters.cpp
         simulation/Furniture.cpp
         simulation/MarkerActions.cpp
-    LIBRARIES prometheum-fermide-core pf-pause-position-support
+    LIBRARIES promethium-fermide-core pf-pause-position-support
     LABELS core
     TIMEOUT 60
 )
@@ -170,7 +170,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/WalkSpeed.cpp
         agent/Height.cpp
         agent/IndividualProperties.cpp
-    LIBRARIES prometheum-fermide-core
+    LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
 )
@@ -188,7 +188,7 @@ pf_add_smoke_module(pf-smoke-agent-tags
         tags/Assignment.cpp
         tags/Reconciliation.cpp
         tags/MobilityProfile.cpp
-    LIBRARIES prometheum-fermide-core
+    LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
 )
@@ -215,7 +215,7 @@ pf_add_smoke_module(pf-smoke-behaviours
         behaviours/RuntimeDeterminism.cpp
         behaviours/RuntimeScale.cpp
         behaviours/RuntimeAuthorization.cpp
-    LIBRARIES prometheum-fermide-core
+    LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,60,30>"
 )
@@ -244,7 +244,7 @@ pf_add_smoke_module(pf-smoke-permissions
         permissions/InteractionGeometry.cpp
         permissions/Preflight.cpp
         permissions/Refusal.cpp
-    LIBRARIES prometheum-fermide-core
+    LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT "$<IF:$<AND:$<PLATFORM_ID:Windows>,$<CONFIG:Debug>>,600,240>"
 )
@@ -304,7 +304,7 @@ pf_add_smoke_module(pf-smoke-routing
         routing/LiftRouteCost.cpp
         routing/ShuttleRouteCost.cpp
         routing/LadderForceBridgeRouteCost.cpp
-    LIBRARIES prometheum-fermide-core pf-routing-population-support
+    LIBRARIES promethium-fermide-core pf-routing-population-support
     LABELS core
     TIMEOUT 120
 )
@@ -335,7 +335,7 @@ pf_add_smoke_module(pf-smoke-world
         world/FloorsAndWalls.cpp
         world/Topology.cpp
         world/LayerDeletion.cpp
-    LIBRARIES prometheum-fermide-core
+    LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
 )
@@ -371,7 +371,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/ShuttleDocuments.cpp
         persistence/DeepLayerReplay.cpp
         persistence/Restoration.cpp
-    LIBRARIES prometheum-fermide-core pf-restoration-support
+    LIBRARIES promethium-fermide-core pf-restoration-support
     LABELS core
     TIMEOUT 30
 )

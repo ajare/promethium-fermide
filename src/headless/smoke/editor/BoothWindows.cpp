@@ -278,7 +278,7 @@ namespace
 		};
 		world->pressDumbwaiterLanding(id, 0); world->resumeSimulation(); require(world->advanceTicks(60), "Copy cycle setup failed");
 		world->pauseSimulation(); gWorldDocumentHistory.clear();
-		auto envelope = YAML::Load(makeDumbwaiterClipboardText(*world, *unit))["prometheumClipboard"];
+		auto envelope = YAML::Load(makeDumbwaiterClipboardText(*world, *unit))["promethiumClipboard"];
 		require(envelope["version"].as<unsigned>() == 1 && envelope["type"].as<std::string>() == "Dumbwaiter"
 			&& envelope["operation"].as<std::string>() == "copy", "Editor clipboard envelope is not parseable by the production workflow");
 		auto node = envelope["object"];

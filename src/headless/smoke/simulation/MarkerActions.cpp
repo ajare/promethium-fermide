@@ -233,7 +233,7 @@ namespace
 	{
 		auto path = context.temporaryRoot() / "execute.actions.lua";
 		write(path, package(R"lua({key='hello',name='Hello',run=function(agent, world, marker)
-assert(world.api_version == 1 and require('prometheum.actions.v1').api_version == 1)
+assert(world.api_version == 1 and require('promethium.actions.v1').api_version == 1)
 assert(agent.graph == nil and world.graph == nil and marker.vertex == nil)
 assert(agent.set_pose == nil and type(world.claim) == 'function')
 assert(io == nil and os == nil and debug == nil and coroutine == nil and load == nil)

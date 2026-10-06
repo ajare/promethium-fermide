@@ -101,7 +101,7 @@ namespace
 		AgentClipboardPayload payload;
 		std::string diagnostic;
 		require(readAgentClipboardObject(
-			YAML::Load(text)["prometheumClipboard"]["object"], payload, diagnostic),
+			YAML::Load(text)["promethiumClipboard"]["object"], payload, diagnostic),
 			"Clipboard parse failed: " + diagnostic);
 		return payload;
 	}

@@ -130,7 +130,7 @@ namespace
 		require(f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 1, &f.diagnostic), f.diagnostic);
 		auto const text = makeAgentClipboardText(makeAgentClipboardPayload(*f.world, f.id, "Copy"), false);
 		AgentClipboardPayload payload;
-		require(readAgentClipboardObject(YAML::Load(text)["prometheumClipboard"]["object"], payload, f.diagnostic), f.diagnostic);
+		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"], payload, f.diagnostic), f.diagnostic);
 		require(payload.minimumRoutePlanningTimeSample == minimum && payload.maximumRoutePlanningTimeSample == maximum
 			&& payload.individualMinimumRoutePlanningTime == 9 && payload.individualMaximumRoutePlanningTime == 1,
 			"Clipboard lost raw individual values or sample provenance");
@@ -159,7 +159,7 @@ namespace
 			&& pasted->getEffectiveMaximumRoutePlanningTime().value == 9,
 			"Paste did not preserve crossed authored values and inherited samples");
 		// An old, untagged clipboard object receives defaults rather than authored overrides.
-		auto legacy = YAML::Load(text)["prometheumClipboard"]["object"];
+		auto legacy = YAML::Load(text)["promethiumClipboard"]["object"];
 		legacy.remove("agentTagRegistryUuid");
 		legacy.remove("tags");
 		legacy.remove("propertySamples");

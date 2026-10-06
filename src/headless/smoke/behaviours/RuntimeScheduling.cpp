@@ -28,7 +28,7 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "timers.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -118,7 +118,7 @@ return {
 			{ "overflow", core::AgentBehaviourSchemaType::Boolean }
 		});
 		writeRuntimeText(package / "timer-order.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function()
@@ -279,7 +279,7 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "schedule.lua", R"lua(
-local host = require("prometheum.v1")
+local host = require("promethium.v1")
 return {
   api_version = host.api_version,
   factory = function(configuration)

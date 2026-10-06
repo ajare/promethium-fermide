@@ -21,5 +21,7 @@ Thumbs.db
 # Runtime logs
 logs/*.log
 
+imgui.ini
+
 # High analysis build output (tools/high_analysis_build.sh)
 build-high-analysis*/

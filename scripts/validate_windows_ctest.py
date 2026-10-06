@@ -58,7 +58,7 @@ def audit_inventory(inventory, gui, config):
         if not command or not Path(command[0]).is_file():
             raise RuntimeError(f"missing required CTest product: {test['name']}: {command}")
         product = Path(command[0]).stem
-        if product == 'prometheum-fermide-headless':
+        if product == 'promethium-fermide-headless':
             raise RuntimeError('compatibility aggregate duplicates direct coverage')
         if product.startswith('pf-smoke-') and product != 'pf-smoke-harness-probe':
             module = product.removeprefix('pf-smoke-')
@@ -112,7 +112,7 @@ def audit_dependencies(targets):
                 sources[path] = target['name']
         dependencies = {t['name'] for t in closure if t['type'] != 'UTILITY'} - {name}
         if name == 'pf-smoke-agent':
-            allowed = {'pf-smoke-support', 'prometheum-fermide-core', 'pf-lua', 'yaml-cpp'}
+            allowed = {'pf-smoke-support', 'promethium-fermide-core', 'pf-lua', 'yaml-cpp'}
             if not dependencies <= allowed:
                 raise RuntimeError(f'core dependency boundary violated: {dependencies - allowed}')
         else:

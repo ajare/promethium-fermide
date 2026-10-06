@@ -132,7 +132,7 @@ namespace
 
 	filesystem::path loadResourceDirectory()
 	{
-		auto const configurationPath = executableDirectory() / "prometheum-fermide.ini";
+		auto const configurationPath = executableDirectory() / "promethium-fermide.ini";
 		ifstream configuration(configurationPath);
 		if (!configuration)
 		{

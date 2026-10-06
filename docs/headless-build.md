@@ -17,11 +17,11 @@ dispatch them as children. Use CTest for direct, nonduplicated coverage; see the
 [Linux validation procedure](linux-smoke-validation.md).
 
 This document retains historical scenario descriptions. Any command below that
-uses `prometheum-fermide-headless --...` is explicitly a compatibility example,
+uses `promethium-fermide-headless --...` is explicitly a compatibility example,
 not the active invocation; the current direct module/tool replacements are in the
 linked documents.
 
-The `prometheum-fermide-core` target builds the shared simulation library. Domain modules and the editor share production libraries; the compatibility executable itself links none of them. Core smoke modules need no SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
+The `promethium-fermide-core` target builds the shared simulation library. Domain modules and the editor share production libraries; the compatibility executable itself links none of them. Core smoke modules need no SDL, ImGui, OpenGL, rendering, or audio dependencies. The scenarios route agents between marker vertices, verify ordinary request/permit/commit behavior, denial and cancellation, exercise manual, automatic, remote-controlled, unavailable, fair two-sided queued, and wide concurrent doors, verify scoped open leases, sensor-driven reopening, graceful deactivation, queue cancellation, physical waiting separation, logical queue overflow, compatible replan priority, deterministic permit expiry/reassignment, same-layer bulkhead coordination, conditional open-window traversal, and atomic paused topology rebuilds with ownership cleanup and failure diagnostics, advance worlds in fixed ticks, and exit unsuccessfully if an invariant fails or two identical runs produce different snapshots or events.
 
 ## Walking and threshold route costs (#206)
 
@@ -69,7 +69,7 @@ remote vehicle position, passenger manifests, or scheduled requests. Alighting
 does not pay another service wait. Null-Agent previews retain authored facts.
 
 The historical compatibility example is
-`prometheum-fermide-headless.exe --shuttle-route-checks`; the active command is
+`promethium-fermide-headless.exe --shuttle-route-checks`; the active command is
 `pf-smoke-routing --check shuttleRouteCosts`.
 
 The distance crossover fixture uses an Agent with a 0.8 Walk speed modifier:
@@ -288,7 +288,7 @@ active.
 ## Population routing (#224)
 
 Run `pf-smoke-routing --check populationRouting` for the active modular check.
-The old `prometheum-fermide-headless.exe --routing-scale-checks` form is a
+The old `promethium-fermide-headless.exe --routing-scale-checks` form is a
 compatibility example. The check covers independent reference-Dijkstra checks,
 source-inference boundary checks, and a generated
 mixed population: 1,000 Agents, 2,040 Vertices, four Levels, stationary
@@ -767,9 +767,9 @@ cmake --build out\build --config Debug
 ctest --test-dir out\build -C Debug --output-on-failure
 ```
 
-Use `Release` instead of `Debug` for an optimized build. CMake places final executables and libraries in `bin\x64\<Configuration>` within its build directory (for example, `out\build\bin\x64\Debug`). CMake fetches and statically links the graphical dependencies, then copies only `prometheum-fermide.ini` beside `editor.exe`.
+Use `Release` instead of `Debug` for an optimized build. CMake places final executables and libraries in `bin\x64\<Configuration>` within its build directory (for example, `out\build\bin\x64\Debug`). CMake fetches and statically links the graphical dependencies, then copies only `promethium-fermide.ini` beside `editor.exe`.
 
-The `prometheum-fermide-headless` executable is retained only as the
+The `promethium-fermide-headless` executable is retained only as the
 [compatibility orchestrator](headless-compatibility.md). Its no-argument form
 dispatches all configured modules; selected legacy forms dispatch their current
 module or tool and print deprecation guidance. CTest and direct `pf-smoke-*`

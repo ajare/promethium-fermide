@@ -1,4 +1,4 @@
-local prometheum = require("prometheum.v2")
+local promethium = require("promethium.v2")
 
 -- Simulation time runs at 60 ticks per second.
 local ARRIVAL_WAIT = 3 * 60
@@ -6,7 +6,7 @@ local RETRY_TIMER = "try_next_marker"
 local WAIT_TIMER = "arrival_wait"
 
 return {
-  api_version = prometheum.api_version,
+  api_version = promethium.api_version,
   factory = function(configuration)
     local remaining = {}
     local last_arrival = nil

@@ -209,12 +209,16 @@ namespace
 		WorldRenderSystem(std::filesystem::path const& resourceDirectory,
 			std::size_t width, std::size_t height)
 		{
+			// Keep diagnostics in the build tree regardless of the launch directory.
+			std::filesystem::path const logDirectory(PF_RENDER_LOG_DIR);
+			std::filesystem::create_directories(logDirectory);
 			mMppLogger = std::make_unique<mpp::Logger>();
-			if (!mMppLogger->initialise("prometheum-fermide-mpp.log",
+			if (!mMppLogger->initialise(
+				(logDirectory / "promethium-fermide-mpp.log").string(),
 				mpp::Logger::Level::Debug))
 				throw std::runtime_error("Could not initialise the MPP logger");
 			mWpLogger = std::make_unique<wp::Logger>();
-			mWpLogger->open("prometheum-fermide-resources.html");
+			mWpLogger->open((logDirectory / "promethium-fermide-resources.html").string());
 
 			mRenderSystem = std::make_unique<mpp::RenderSystem>(width, height,
 				mMppLogger.get());

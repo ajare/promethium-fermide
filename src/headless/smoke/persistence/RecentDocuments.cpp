@@ -11,7 +11,7 @@ namespace persistence
 
 	void recentFilesPersistAcrossStartup(smoke::Context const& context)
 	{
-		auto directory = context.temporaryRoot() / "prometheum-fermide-recent-files-smoke";
+		auto directory = context.temporaryRoot() / "promethium-fermide-recent-files-smoke";
 		std::filesystem::create_directories(directory);
 		auto file = directory / "recent-files.txt";
 		RecentFiles first(3);
@@ -33,7 +33,7 @@ namespace persistence
 	void missingRecentFilesCanBeRemovedPersistently(smoke::Context const& context)
 	{
 		auto directory = context.temporaryRoot()
-			/ "prometheum-fermide-missing-recent-file-smoke";
+			/ "promethium-fermide-missing-recent-file-smoke";
 		std::filesystem::create_directories(directory);
 		auto const storage = directory / "recent-files.txt";
 		auto const missing = (directory / "moved.world").string();

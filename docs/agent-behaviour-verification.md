@@ -70,8 +70,8 @@ and individual selectors:
 
 ## Portable build contract
 
-Both `editor` and `prometheum-fermide-headless` link the same
-`prometheum-fermide-core`; Lua and sol2 are private dependencies of that core.
+Both `editor` and `promethium-fermide-headless` link the same
+`promethium-fermide-core`; Lua and sol2 are private dependencies of that core.
 CMake builds Lua 5.4.9 from the archive with SHA-256
 `2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6` and
 sol2 v3.5.0 from commit `e24392e9718f0616cfbba86005622a419d2f0c5d` on both

@@ -105,7 +105,7 @@ reserved; Use furniture is not yet available.
 Read-only userdata views expose `agent.id/name/x/y`, `world.name/tick/api_version`
 and `marker.id/name`. `world.log(message)` stages Info logging. No mutable domain
 objects, graph, filesystem/process, debug, coroutine, wall-time or random APIs
-are exposed. The immutable `prometheum.actions.v1` import identifies the host
+are exposed. The immutable `promethium.actions.v1` import identifies the host
 contract; all other imports are refused. Source is capped at 256 KiB, registry size at
 256 Actions, invocation memory at 2 MiB and execution at 100,000 instructions.
 Caught budget exhaustion remains terminal. Logs are limited to 32 messages,
@@ -217,7 +217,7 @@ part of this slice.
 
 ## Behaviour-selected Actions (#460)
 
-The additive `prometheum.v2` movement contract is
+The additive `promethium.v2` movement contract is
 `context.move_to(marker, action)`; `marker` is an opaque configured Marker or a
 named Marker string resolved once at acceptance. Omitted/nil Actions are Idle;
 v1 retains its opaque-Marker/Idle movement contract. Inspection and execution

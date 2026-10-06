@@ -62,7 +62,7 @@ an immutable accepted source snapshot, not a live VM or shared closure state.
 Module evaluation uses the reusable deterministic sandbox: 256 KiB source,
 2 MiB Lua heap, 100,000 instructions and bounded returned-data conversion
 (16,384 values, depth 16, array indices up to 4096, strings up to 1024 bytes).
-Only the versioned `prometheum.actions.v1` host import is admitted; unrestricted
+Only the versioned `promethium.actions.v1` host import is admitted; unrestricted
 imports, filesystem/process access and nondeterministic facilities are unavailable.
 Caught budget exhaustion still rejects the catalogue.
 

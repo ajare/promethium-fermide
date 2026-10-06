@@ -62,7 +62,7 @@ namespace
 	// same envelope makeAgentClipboardText writes.
 	std::string clipboardTextWithObjectBody(std::string const& body)
 	{
-		return "prometheumClipboard:\n  version: 1\n  operation: copy\n  type: Agent\n"
+		return "promethiumClipboard:\n  version: 1\n  operation: copy\n  type: Agent\n"
 			"  object:\n" + body;
 	}
 
@@ -83,7 +83,7 @@ namespace
 
 		auto const parsed = YAML::Load(text);
 		AgentClipboardPayload read;
-		require(readAgentClipboardObject(parsed["prometheumClipboard"]["object"], read, diagnostic),
+		require(readAgentClipboardObject(parsed["promethiumClipboard"]["object"], read, diagnostic),
 			"The clipboard text did not parse: " + diagnostic);
 		require(!read.active, "A parsed payload lost the deactivation");
 
@@ -95,7 +95,7 @@ namespace
 			"An activated Agent's clipboard text mentions activation");
 		AgentClipboardPayload legacyRead;
 		require(readAgentClipboardObject(
-			YAML::Load(legacyText)["prometheumClipboard"]["object"], legacyRead, diagnostic),
+			YAML::Load(legacyText)["promethiumClipboard"]["object"], legacyRead, diagnostic),
 			"The legacy clipboard text did not parse: " + diagnostic);
 		require(legacyRead.active, "A payload without the activation key did not read as activated");
 
@@ -106,7 +106,7 @@ namespace
 			"    name: Broken\n    flags: 0\n    active: [not, a, bool]\n");
 		AgentClipboardPayload malformedRead;
 		require(!readAgentClipboardObject(
-			YAML::Load(malformedText)["prometheumClipboard"]["object"], malformedRead, diagnostic),
+			YAML::Load(malformedText)["promethiumClipboard"]["object"], malformedRead, diagnostic),
 			"A non-boolean activation was read instead of refused");
 		require(!diagnostic.empty(), "A refused clipboard payload gave no reason");
 	}
