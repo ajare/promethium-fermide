@@ -150,15 +150,25 @@ The condition in which an Agent's selected destination has no valid Path, either
 _Avoid_: Replan, which recalculates a Path to the same destination
 
 **Agent action**:
-The activity explicitly selected with an Agent's movement request to a Marker, performed only after physical arrival.
-_Avoid_: Usable-point action, which implied automatic Furniture use; Agent behaviour, which directs requests
+An explicitly selected activity an Agent performs at a target Marker after physical arrival. Every movement request selects an Agent action, defaulting to Idle when none is specified; arriving at a Marker does not implicitly select another action.
+_Avoid_: Usable-point action, which implied automatic Furniture use; Agent behaviour, which directs destination choice; Device command, which requests device operation
 
 **Idle action**:
-The immutable built-in Agent action that schedules no activity on arrival. It is always available and is selected when a movement request omits its Action.
+The immutable built-in Agent action that schedules no activity on arrival. It is universally available, even when the Marker offers no additional Agent actions, and is selected when a movement request omits its Action.
 _Avoid_: Deactivation, which stops an Agent's participation; disabling Agent behaviour
 
 **Available Agent actions**:
-The Actions offered at a Marker, including Idle and an ordered list of additional Actions. Ordinary Markers offer no additional Actions by default.
+The ordered additional Agent actions offered at a Marker, beyond the universally available Idle action. A Marker offers no additional Agent actions by default.
+_Avoid_: Vertex actions, because authored targets are Markers
+
+**Use furniture action**:
+An Agent action at a Furniture-owned Marker that invokes the use associated with that Furniture definition. The selected Marker identifies the usable point being used.
+
+**Furniture use**:
+The activity associated with a Furniture definition and shared by its placed instances, performed through the Use furniture action. A Furniture definition may offer no use; sitting and lying are uses rather than implicit destination-arrival effects.
+
+**Finish using furniture**:
+The activity paired with a Furniture use that ends an Agent's use of its selected usable point. For sitting and lying uses, finishing restores Standing and releases the usable point's occupancy.
 
 **Occupied**:
 The runtime state of a usable point claimed by a seated or lying Agent. An Occupied usable point is an invalid Path destination for every other Agent until the claim is released, but remains usable as an intermediate waypoint.
