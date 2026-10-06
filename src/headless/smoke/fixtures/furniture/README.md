@@ -10,7 +10,10 @@ Actions still arrive Standing, without occupancy.
 `furniture/bundledLua` compares teaching definitions and placements with these
 regression baselines (teaching content adds use to geometry-only seating), loads
 all dependent Worlds, checks their intended explicit use or default Idle, and
-round-trips both World formats. Other domain-owned checks preserve routing, Local
+round-trips both World formats. The editable `furniture-test-1` teaching World
+now demonstrates chair use (Sitting), while its frozen regression World retains
+the bed journey (Lying). Their identities are checked against their own round
+trips, not against each other. Other domain-owned checks preserve routing, Local
 depth, composition, support/overlap, reconciliation, history and ownership contracts.
 
 Generated variants use `support/CatalogueSource.h` to compose native Lua source

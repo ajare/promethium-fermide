@@ -161,7 +161,9 @@ namespace
 		{
 			auto world = core::loadWorldDocument(context.fixture("resources/test-worlds/" + std::string(name) + ".world.yaml"));
 			auto legacy = core::loadWorldDocument(context.fixture("src/headless/smoke/fixtures/furniture/" + std::string(name) + ".world.yaml"));
-			sameInstances(*legacy, *world);
+			// furniture-test-1 is an editable chair sample, not the frozen bed regression.
+			// Validate each World's identities against its own round trip below.
+			if (std::string(name) != "furniture-test-1") sameInstances(*legacy, *world);
 			for (auto suffix : {"world.yaml", "world"})
 			{
 				auto document = root / (std::string(name) + "-bundled." + suffix);
@@ -169,8 +171,15 @@ namespace
 				loaded->advanceTicks(4000);
 				if (std::string(name) == "furniture" || std::string(name) == "furniture-test-1")
 					require(loaded->lookupAgent(core::AgentId{1}).entity->getPose() ==
-						(std::string(name) == "furniture-test-1" ? core::Pose::Lying : core::Pose::Sitting),
+						core::Pose::Sitting,
 						"Teaching journey lost explicit Use furniture intent");
+			}
+			for (auto suffix : {"world.yaml", "world"})
+			{
+				auto document = root / (std::string(name) + "-regression." + suffix);
+				legacy->saveTo(document.string());
+				auto loaded = core::loadWorldDocument(document);
+				sameInstances(*legacy, *loaded);
 			}
 			legacy->advanceTicks(4000);
 			if (std::string(name) == "furniture" || std::string(name) == "furniture-test-1")
