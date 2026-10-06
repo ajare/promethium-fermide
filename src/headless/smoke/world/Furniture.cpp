@@ -995,6 +995,60 @@ table.insert(catalogue.definitions, coincident)
 		using smoke::require;
 		auto fixture = context.fixture("src/headless/smoke/fixtures/furniture/desk.furniture.lua");
 		auto catalogue = core::FurnitureCatalogue::load(fixture);
+		// furniture-test-1: the chair overlaps the desk at matching back-route depth.
+		for (int variant = 0; variant < 4; ++variant)
+		{
+			auto sourcePath = context.fixture("resources/test-worlds/furniture.furniture.lua");
+			std::ifstream input(sourcePath);
+			std::string source{std::istreambuf_iterator<char>(input), {}};
+			source.replace(source.find("return {"), 8, "local catalogue = {");
+			bool blocked = variant >= 2;
+			if (blocked) source += "\ntable.remove(catalogue.definitions[4].edges, 5)\n";
+			auto package = context.temporaryRoot() / ("chair-behind-desk-" + std::to_string(variant) + ".furniture.lua");
+			smoke::writeCatalogue(package, source);
+			core::World world("Chair behind desk", 12, 3);
+			auto room = world.addRoom("Room", 0, 2, 2, 9, 1);
+			world.attachFurnitureCatalogue(package.filename().string(), core::FurnitureCatalogue::load(package));
+			if (variant % 2 == 0) world.placeFurniture(room, "chair", 3, 0, "Chair", 1);
+			world.placeFurniture(room, "desk", 2, 0, "Desk", 0);
+			if (variant % 2 != 0) world.placeFurniture(room, "chair", 3, 0, "Chair", 1);
+			world.finishBuild();
+			auto id = world.createAgent("Walker", room, 0, 0.734375f);
+			auto chair = std::find_if(world.furniture().begin(), world.furniture().end(),
+				[](auto const& instance) { return instance.definitionKey == "chair"; });
+			world.pauseSimulation();
+			std::string diagnostic;
+			require(world.authorAgentMarkerRequest(id, chair->marker, core::UseFurnitureAction, &diagnostic), diagnostic);
+			require(world.resumeSimulation(), "Chair movement resume refused");
+			auto document = context.temporaryRoot() / ("chair-behind-desk-" + std::to_string(variant) + ".world.yaml");
+			world.saveTo(document.string());
+			auto restored = core::loadWorldDocument(document);
+			auto& movingWorld = variant % 2 ? *restored : world;
+			auto agent = movingWorld.lookupAgent(id).entity;
+			bool passedDesk = false;
+			float maximumX = 0, previousX = agent->getGlobalPosition().x;
+			int previousDepth = agent->getLocalDepth();
+			for (int tick = 0; tick < 1200; ++tick)
+			{
+				movingWorld.advanceTicks(1);
+				auto x = agent->getGlobalPosition().x;
+				maximumX = std::max(maximumX, x);
+				if (x > 4 && x < 6)
+				{
+					passedDesk = true;
+					require(agent->getLocalDepth() == (blocked && maximumX < 6 ? 0 : 1),
+						"Chair approach crossed through desk: x=" + std::to_string(x)
+						+ " depth=" + std::to_string(agent->getLocalDepth()));
+					if (previousX > 4 && previousX < 6)
+						require(agent->getLocalDepth() == previousDepth, "Depth changed inside desk footprint");
+				}
+				previousX = x; previousDepth = agent->getLocalDepth();
+			}
+			require(passedDesk && agent->getPose() == core::Pose::Sitting, "Chair approach did not arrive and sit: variant="
+				+ std::to_string(variant) + " x=" + std::to_string(agent->getGlobalPosition().x)
+				+ " state=" + std::to_string(static_cast<int>(agent->getState())));
+			require(blocked ? maximumX >= 6 : maximumX == 5.5f, "Chair did not choose the expected direct/detour route");
+		}
 		int baselineArrival = 0;
 		for (int depth : { 0, 2, 5 })
 		{

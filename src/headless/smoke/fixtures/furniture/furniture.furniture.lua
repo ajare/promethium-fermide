@@ -283,6 +283,18 @@ local catalogue = {
         }},
     }},
 }
+-- Chair and desk side depths extend to the outside boundaries.
+local chair = catalogue.definitions[1]
+chair.edges[1].depthOffset = 0
+chair.edges[4].depthOffset = 0
+chair.edges[5].depthOffset = 1
+chair.edges[7].depthOffset = 1
+table.insert(chair.vertices, {key='floorLeft', x=0})
+table.insert(chair.vertices, {key='floorRight', x=1})
+table.insert(chair.edges, {from='floorLeft', to='approachLeft'})
+table.insert(chair.edges, {from='floorRight', to='approachRight'})
+catalogue.definitions[4].edges[4].depthOffset = 1
+catalogue.definitions[4].edges[6].depthOffset = 1
 catalogue.definitions[1].use = function(agent, world, marker)
   world.set_pose('sitting')
   world.claim()

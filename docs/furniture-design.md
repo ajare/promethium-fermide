@@ -66,6 +66,8 @@ Status: agreed interview decisions, synthesised as a Furniture spec. The user ap
 - The footprint is the tile layout's full bounding rectangle, including transparent pixels and gaps between tiles. Boundary contact is allowed and is not overlap.
 - Overlapping routes join only at designated external connection points with matching resolved Local depth. A connection may split an existing route at that point.
 - Visual crossings or overlaps alone do not create connections. Depth changes require a definition's authored connectivity.
+- An external port whose depth 0 comes only from unassigned approach edges provides ordinary Floor access, but does not attach to another side-routed instance's depth-0 route strictly inside that instance's footprint when the port's Furniture is behind it. This prevents a Floor approach from creating a front-to-back shortcut through a desk. Explicitly assigned depth-0 ports (including signed offsets) retain authored composition semantics; outside-boundary connections remain possible.
+- The demonstration chair's front/back routes extend to its outside ports, with separate unassigned Floor-access edges at those boundaries. The demonstration desk's back approaches also retain back-route depth through its full width, allowing direct rear access or a detour around its right boundary when rear circulation is broken.
 
 ## Agreed deletion semantics
 

@@ -359,6 +359,8 @@ namespace core
 			uint64_t instance;
 			shared_ptr<Vertex> vertex;
 			std::vector<int> depths;
+			int instanceDepth;
+			bool floorOnlyZero = true;
 		};
 		struct FurnitureRoute
 		{
@@ -369,6 +371,8 @@ namespace core
 		};
 		std::vector<FurniturePort> ports;
 		std::vector<FurnitureRoute> routes;
+		struct RoutedFootprint { int depth; float left, right; };
+		map<uint64_t, RoutedFootprint> routedFootprints;
 		std::vector<std::pair<shared_ptr<const Sector>, std::pair<float, float>>> furnitureSpans;
 		for (auto const& instance : mwWorld->furniture())
 		{
@@ -401,11 +405,12 @@ namespace core
 				authored.emplace(point.key, vertex);
 				if (point.external)
 				{
-					FurniturePort port{ instance.id, vertex, {} };
+					FurniturePort port{ instance.id, vertex, {}, instance.localDepth };
 					for (auto const& connection : definition.edges)
 						if (connection.from == point.key || connection.to == point.key)
 						{
 							auto depth = connection.depthOffset ? instance.localDepth + *connection.depthOffset : 0;
+							if (depth == 0 && connection.depthOffset) port.floorOnlyZero = false;
 							if (find(port.depths.begin(), port.depths.end(), depth) == port.depths.end())
 								port.depths.push_back(depth);
 						}
@@ -419,8 +424,12 @@ namespace core
 					authored.at(connection.from), authored.at(connection.to), {} });
 			}
 			if (definition.sideRoutes)
-				furnitureSpans.push_back({ sector, { sector->getCellX() + instance.x + definition.minX,
-					sector->getCellX() + instance.x + definition.maxX } });
+			{
+				auto left = sector->getCellX() + instance.x + definition.minX;
+				auto right = sector->getCellX() + instance.x + definition.maxX;
+				furnitureSpans.push_back({ sector, { left, right } });
+				routedFootprints.emplace(instance.id, RoutedFootprint{ instance.localDepth, left, right });
+			}
 		}
 
 		auto connectPort = [&](shared_ptr<Vertex> const& from, shared_ptr<Vertex> const& to, int depth) {
@@ -532,6 +541,19 @@ namespace core
 			addEdge(make_shared<SectorEdge>(), anchor, port.vertex, false);
 		}
 
+		// An unassigned depth-zero approach gives access from ordinary Floor,
+		// not a shortcut through shallower Furniture to a route behind it.
+		// Explicitly authored depth-zero ports remain composable. At an outside
+		// boundary an approach can turn around the other piece as usual.
+		auto canJoin = [&](FurniturePort const& port, uint64_t other, int depth) {
+			if (depth != 0 || !port.floorOnlyZero) return true;
+			auto footprint = routedFootprints.find(other);
+			if (footprint == routedFootprints.end()) return true;
+			auto const& span = footprint->second;
+			auto x = port.vertex->getPosition().x;
+			return port.instanceDepth <= span.depth || x <= span.left || x >= span.right;
+		};
+
 		// Endpoint attachment requires two designated ports, not a private vertex
 		// which happens to coincide. Emit each shared-depth connector once.
 		for (size_t i = 0; i < ports.size(); ++i)
@@ -542,7 +564,8 @@ namespace core
 					|| a.vertex->getSector() != b.vertex->getSector()
 					|| a.vertex->getPosition() != b.vertex->getPosition()) continue;
 				for (auto depth : a.depths)
-					if (find(b.depths.begin(), b.depths.end(), depth) != b.depths.end())
+					if (find(b.depths.begin(), b.depths.end(), depth) != b.depths.end()
+						&& canJoin(a, b.instance, depth) && canJoin(b, a.instance, depth))
 						connectPort(a.vertex, b.vertex, depth);
 			}
 		for (auto& route : routes)
@@ -553,7 +576,8 @@ namespace core
 			{
 				if (port.instance == route.instance
 					|| port.vertex->getSector() != left->getSector()
-					|| find(port.depths.begin(), port.depths.end(), route.depth) == port.depths.end()) continue;
+					|| find(port.depths.begin(), port.depths.end(), route.depth) == port.depths.end()
+					|| !canJoin(port, route.instance, route.depth)) continue;
 				auto x = port.vertex->getPosition().x;
 				if (x > left->getPosition().x && x < right->getPosition().x)
 				{
