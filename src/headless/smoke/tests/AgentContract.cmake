@@ -76,6 +76,8 @@ set(agent_checks
     standingDoorClearance
     standingDoorWorldJourneys
     automaticCrawlingJourneys
+    controlledCrawlingLifecycle
+    controlledCrawlingGates
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist

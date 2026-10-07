@@ -1,4 +1,4 @@
-# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483)
+# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#484)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
@@ -9,9 +9,10 @@ support elevation is added to that extent. Exact fits are accepted with a
 `0.00001` world-unit tolerance. Specialized and transport-owned thresholds keep
 their existing rules; admitted crossings may finish safely.
 
-## Automatic low-Door Crawling (#483)
+## Automatic low-Door Crawling (#483–#484)
 
-An Agent completing a Marker journey through a manual ordinary Regular or Tall
+An Agent completing a Marker journey through a manual, automatic or
+remote-controlled ordinary Regular or Tall
 Door crosses **Standing** when Standing fits, otherwise **Crawling** when that
 fits, and is refused when neither envelope fits. The classification is one
 shared seam — `Door::classifyAgentCrossing` — used by route feasibility,
@@ -37,6 +38,36 @@ and permit adoption; `admitsAgentTraversal` is its `!= None` wrapper.
   already admitted crossing completes safely after live Height/envelope changes.
   Reset restores Standing, and repeated low Doors each perform their own
   crossing-scoped Crawling-to-Standing cycle.
+
+### Automatic and remote-controlled opening (#484)
+
+All three activation modes use the existing shared clearance, cost and permit
+adoption path; no separate low-Door activation protocol is needed. Automatic
+sensing and remote physical control operation still open the Door normally.
+Opening, control-approach and queue waits remain Standing, even when activation
+is delayed or fails. Crawling begins only on adopted crossing admission.
+Remote Interaction points retain their Access permission requirements and
+Buttons Mobility restrictions. Unavailable or Broken closed Doors remain
+unusable; no partial-opening passage is introduced. Opening styles, physical
+width, crossing lanes and fair queue order are unchanged. Tall Doors cannot
+author a Height scale and fit all supported unsupported Standing Heights.
+
+Public-World regressions cover every opening style and activation mode in both
+directions, Standing/low/exact/tolerance/impossible fits, alternatives and Tall
+Standing journeys. Controlled low-Door journeys additionally cover protected
+controls with and without grants, forbidden Buttons/Door Mobility, Broken and
+Unavailable operation, queued followers, pause/deactivation, cancellation and
+replacement before/after admission, live Height enlargement and Reset. Direct
+and captured cost regressions verify six-tick Standing versus twelve-tick
+Crawling motion without revealing unobserved opening state. A slightly shorter
+open low-Door route loses to an open Standing alternative because of that
+extra motion cost; restoring Standing clearance restores the shorter choice.
+
+#484 validation: incremental Release build including `editor` passed; all
+**70/70 repository CTests** passed (unmodified Willpower submodule tests
+excluded). The shared implementation from #483 already supported these modes;
+#484 delivers the mode-specific regression coverage and documentation without
+adding duplicate runtime policy.
 
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:

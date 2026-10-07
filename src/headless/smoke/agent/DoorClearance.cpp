@@ -411,27 +411,37 @@ void runPoseDoorMovementReset(smoke::Context const& context)
 
 void runAutomaticCrawlingJourneys(smoke::Context const&)
 {
-	// The first complete automatic-Crawling tracer bullet: an Agent completes a
-	// Marker journey through a manual ordinary Regular Door Standing if Standing
-	// fits, otherwise Crawling if that fits (30% height, doubled crossing), and
-	// is refused when neither envelope fits. Both directions and the optional
-	// alternative Door are covered.
+	// Complete Marker journeys exercise the shared classification across all
+	// ordinary Door activation modes and opening styles, without supplied Paths.
 	struct Scenario { char const* label; float scale; core::Pose crossing; bool admits; };
 	for (auto const& test : {
 		Scenario{"standing-fit", .90f, core::Pose::Standing, true},
 		Scenario{"crawling-fit", .40f, core::Pose::Crawling, true},
-		Scenario{"crawling-exact-fit", .2701f, core::Pose::Crawling, true},
+		Scenario{"crawling-exact-fit", .27f, core::Pose::Crawling, true},
+		Scenario{"crawling-tolerance-fit", .26999f, core::Pose::Crawling, true},
+		Scenario{"crawling-over-tolerance", .26995f, core::Pose::Standing, false},
 		Scenario{"refusal", .10f, core::Pose::Standing, false}})
+	for (auto mode : {core::DoorActivationMode::Manual, core::DoorActivationMode::Automatic,
+		core::DoorActivationMode::RemoteControlled})
+	for (auto style : {core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenLeft,
+		core::Door::OpenStyle::OpenRight, core::Door::OpenStyle::OpenApart})
 	for (bool reverse : {false, true})
 	for (bool alternate : {false, true})
+	for (bool tall : {false, true})
 	{
+		// Tall Doors cannot author a scale and already fit every supported
+		// Standing Height. Verify that they do not lower Pose in either mode.
+		if (tall && test.scale != .90f) continue;
 		core::World world("Automatic crawling", 12, 2);
 		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
 		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
 		auto origin = reverse ? back : front, destination = reverse ? front : back;
 		core::World::CreateDoorOptions options;
-		options.heightScale = test.scale;
-		options.activationMode = core::DoorActivationMode::Manual;
+		if (tall) options.height = core::Door::Height::Tall;
+		else options.heightScale = test.scale;
+		options.activationMode = mode;
+		options.openStyle = style;
+		options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
 		auto low = world.addSectorDoor(0, 0, 2, options);
 		if (alternate) world.addSectorDoor(0, 0, 9, {});
 		world.addSectorMarker(destination, 0, 3.5f, "Goal");
@@ -444,6 +454,9 @@ void runAutomaticCrawlingJourneys(smoke::Context const&)
 		for (unsigned tick = 0; tick < 3000; ++tick)
 		{
 			world.advanceTick();
+			require(agent->getPose() != core::Pose::Crouching, "Door automatically selected Crouching");
+			if (agent->getState() != core::Agent::State::TraversingEdge)
+				require(agent->getPose() == core::Pose::Standing, "Opening/queue/exit lowered Pose");
 			if (agent->getPose() == core::Pose::Crawling) ++crawlingTicks;
 			if (agent->getState() == core::Agent::State::TraversingEdge
 				&& agent->getPose() == core::Pose::Crawling) crawled = true;
@@ -453,6 +466,14 @@ void runAutomaticCrawlingJourneys(smoke::Context const&)
 				for (auto const& request : world.getSimulationSnapshot().traversalRequests)
 					if (permit.request == request.id && request.resource == low.traversalResource) crossed = true;
 			if (agent->getState() == core::Agent::State::Idle) break;
+		}
+		auto snapshot = world.getSimulationSnapshot();
+		require(snapshot.traversalPermits.empty() && snapshot.traversalRequests.empty(), "Crawl journey leaked traversal");
+		for (auto const& resource : snapshot.traversalResources)
+		{
+			require(resource.openLeaseCount == 0, "Crawl journey leaked Door lease");
+			for (auto const& lane : resource.queueLanes) require(lane.queue.empty(), "Crawl journey leaked queue");
+			for (auto const& lane : resource.crossingLanes) require(!lane.owner, "Crawl journey leaked lane");
 		}
 		bool const reachedDestination = agent->getSector() == world.getSector(destination).get();
 		if (test.admits)
@@ -473,5 +494,198 @@ void runAutomaticCrawlingJourneys(smoke::Context const&)
 			<< " reverse=" << reverse << " alternate=" << alternate
 			<< " outcome=" << (test.admits ? (test.crossing == core::Pose::Crawling ? "crawled" : "stood") : (alternate ? "alternate" : "route-loss"))
 			<< " crawlingTicks=" << crawlingTicks << '\n';
+	}
+}
+
+void runControlledCrawlingGates(smoke::Context const&)
+{
+	for (bool reverse : {false, true})
+	for (int restriction = 0; restriction != 6; ++restriction)
+	{
+		core::World world("Protected low Door", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		auto origin = reverse ? back : front, destination = reverse ? front : back;
+		core::World::CreateDoorOptions options;
+		options.heightScale = .4f;
+		options.activationMode = restriction == 5 ? core::DoorActivationMode::Unavailable
+			: core::DoorActivationMode::RemoteControlled;
+		options.controls[0] = options.controls[1] = restriction != 5;
+		auto door = world.addSectorDoor(0, 0, 3, options);
+		world.addSectorMarker(destination, 0, 5.5f, "Goal");
+		world.finishBuild();
+		auto id = world.createAgent("Traveller", origin, 0, 2.5f);
+		auto agent = world.lookupAgent(id).entity;
+		world.pauseSimulation();
+		if (restriction <= 1)
+		{
+			auto key = world.addAccessPermission("Control key");
+			for (auto const& control : door.controls)
+				require(world.setInteractionPointPermissionRequirement(control.interactionPoint, {key}), "Control protection refused");
+			if (restriction == 0) require(world.setAgentAccessPermissionGrant(id, key, true), "Control grant refused");
+		}
+		if (restriction == 2 || restriction == 3)
+		{
+			core::MobilityProfile profile;
+			profile.set(restriction == 2 ? core::TraversalKind::Buttons : core::TraversalKind::Door,
+				core::MobilityUse::CannotUse);
+			require(world.setAgentIndividualMobilityProfile(id, profile), "Protected Mobility refused");
+		}
+		if (restriction == 4) require(world.setDoorBroken(door.traversalResource, true), "Broken Door refused");
+		require(world.resumeSimulation() && world.moveAgentToNamedMarker(id, "Goal").accepted(), "Protected intent refused");
+		unsigned crawlingTicks = 0, losses = 0, arrivals = 0;
+		for (unsigned tick = 0; tick != 3000; ++tick)
+		{
+			world.advanceTick();
+			crawlingTicks += agent->getPose() == core::Pose::Crawling;
+			if (agent->getState() != core::Agent::State::TraversingEdge)
+				require(agent->getPose() == core::Pose::Standing, "Protected opening lowered Pose");
+			for (auto const& event : world.consumeSimulationEvents())
+			{
+				losses += event.type == core::SimulationEventType::RouteLost;
+				arrivals += event.type == core::SimulationEventType::DestinationReached;
+			}
+			if (agent->getState() == core::Agent::State::Idle) break;
+		}
+		bool const allowed = restriction == 0;
+		require(agent->getState() == core::Agent::State::Idle
+			&& (agent->getSector() == world.getSector(destination).get()) == allowed
+			&& crawlingTicks == (allowed ? 12u : 0u) && arrivals == (allowed ? 1u : 0u)
+			&& losses == (allowed ? 0u : 1u), "Low Door bypassed protected/unavailable operation");
+		auto snapshot = world.getSimulationSnapshot();
+		require(snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(), "Protected traversal leaked");
+		for (auto const& resource : snapshot.traversalResources)
+			require(resource.openLeaseCount == 0, "Protected Door lease leaked");
+	}
+}
+
+void runControlledCrawlingLifecycle(smoke::Context const&)
+{
+	// All commands and observations use public World seams. The slower opening
+	// leaves a visible Standing wait before a single-lane, twelve-tick crossing.
+	for (auto mode : {core::DoorActivationMode::Automatic, core::DoorActivationMode::RemoteControlled})
+	for (bool reverse : {false, true})
+	for (int change = 0; change != 9; ++change)
+	{
+		core::World world("Controlled crawling lifecycle", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		auto origin = reverse ? back : front, destination = reverse ? front : back;
+		core::World::CreateDoorOptions options;
+		options.heightScale = .23f; // .8 Height crawls; enlarging to 1 no longer fits.
+		options.activationMode = mode;
+		options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+		options.speedOverride = .5f;
+		auto created = world.addSectorDoor(0, 0, 3, options);
+		world.addSectorMarker(destination, 0, 5.5f, "Goal");
+		world.addSectorMarker(destination, 0, 6.5f, "Replacement");
+		world.finishBuild();
+		auto id = world.createAgent("Head", origin, 0, 3.5f);
+		auto followerId = world.createAgent("Follower", origin, 0, 1.5f);
+		auto agent = world.lookupAgent(id).entity;
+		auto follower = world.lookupAgent(followerId).entity;
+		world.pauseSimulation();
+		require(world.setAgentIndividualHeightModifier(id, .8f)
+			&& world.setAgentIndividualHeightModifier(followerId, .7f), "Lifecycle Heights refused");
+		require(world.resumeSimulation(), "Initial lifecycle resume refused");
+		require(world.moveAgentToNamedMarker(id, "Goal").accepted()
+			&& world.moveAgentToNamedMarker(followerId, "Goal").accepted(), "Lifecycle intents refused");
+		bool changed = false, waited = false, followerWaited = false, headCrossed = false;
+		unsigned cancellations = 0, arrivals = 0, losses = 0;
+		for (unsigned tick = 0; tick < 3000; ++tick)
+		{
+			world.advanceTick();
+			bool crossing = false;
+			for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+				crossing |= request.owner == id && request.resource == created.traversalResource
+					&& request.state == core::TraversalRequestState::Granted
+					&& agent->getState() == core::Agent::State::TraversingEdge;
+			if (!crossing) require(agent->getPose() == core::Pose::Standing, "Head lowered before admission/after exit");
+			if (follower->getState() != core::Agent::State::TraversingEdge)
+				require(follower->getPose() == core::Pose::Standing, "Follower lowered while queued");
+			waited |= agent->getState() == core::Agent::State::WaitingForTraversal;
+			followerWaited |= follower->getState() == core::Agent::State::WaitingForTraversal;
+			if (follower->getPose() == core::Pose::Crawling)
+				require(headCrossed || change == 5 || change == 6 || change == 8, "Follower overtook queue head");
+			if (crossing)
+			{
+				require(agent->getPose() == core::Pose::Crawling, "Low admitted crossing did not crawl: change=" + std::to_string(change)
+					+ " mode=" + std::to_string(static_cast<int>(mode)) + " tick=" + std::to_string(tick));
+				headCrossed = true;
+			}
+			// Before admission: enlarge the head beyond even Crawling, cancel,
+			// or replace its intent. After admission: freeze, cancel, replace,
+			// enlarge, or Reset. A follower proves ownership remains serviceable.
+			if (!changed && ((change >= 5 && waited && !crossing) || (change < 5 && crossing)))
+			{
+				changed = true;
+				if (change == 0)
+				{
+					world.pauseSimulation();
+					auto frozenTick = world.getSimulationTick();
+					for (unsigned i = 0; i != 20; ++i) world.advanceTick();
+					require(world.getSimulationTick() == frozenTick && agent->getPose() == core::Pose::Crawling,
+						"Pause changed admitted crossing");
+					require(world.setAgentActive(id, false), "Deactivation refused");
+					require(world.resumeSimulation(), "Lifecycle resume refused");
+					for (unsigned i = 0; i != 20; ++i) world.advanceTick();
+					require(agent->getPose() == core::Pose::Crawling && agent->getSector() == world.getSector(origin).get(),
+						"Deactivation did not freeze crossing");
+					world.pauseSimulation();
+					require(world.setAgentActive(id, true), "Reactivation refused");
+					require(world.resumeSimulation(), "Reactivation resume refused");
+				}
+				else if (change == 1 || change == 6)
+					require(world.cancelAgentMovement(id).accepted(), "Cancellation refused");
+				else if (change == 2 || change == 7)
+					require(world.moveAgentToNamedMarker(id, "Replacement").accepted(), "Replacement refused");
+				else if (change == 3 || change == 5)
+				{
+					world.pauseSimulation();
+					require(world.setAgentIndividualHeightModifier(id, 1.0f), "Live enlargement refused");
+					require(world.resumeSimulation(), "Height resume refused");
+				}
+				else if (change == 4)
+				{
+					world.resetSimulation();
+					require(world.lookupAgent(id).entity->getPose() == core::Pose::Standing,
+						"Reset retained Crawling");
+					break;
+				}
+				else if (change == 8)
+					require(world.setDoorBroken(created.traversalResource, true), "Live Broken edit refused");
+			}
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.agent.id == id)
+				{
+					cancellations += event.type == core::SimulationEventType::MovementCancelled;
+					arrivals += event.type == core::SimulationEventType::DestinationReached;
+					losses += event.type == core::SimulationEventType::RouteLost;
+				}
+			if (changed && agent->getState() == core::Agent::State::Idle
+				&& follower->getState() == core::Agent::State::Idle) break;
+		}
+		require(changed && waited, "Lifecycle transition/wait not exercised");
+		if (change != 4)
+		{
+			require(agent->getState() == core::Agent::State::Idle && follower->getState() == core::Agent::State::Idle,
+				"Lifecycle journey stranded");
+			bool const finishes = change < 4 || change == 7;
+			require((agent->getSector() == world.getSector(destination).get()) == finishes,
+				"Cancellation/live change violated admission commitment");
+			require(change == 8 || follower->getSector() == world.getSector(destination).get(), "Follower could not finish");
+			require(cancellations <= 1 && arrivals <= 1 && losses <= 1, "Duplicate lifecycle outcome");
+			require((change == 1 || change == 6) ? cancellations == 1 : (change == 5 || change == 8) ? losses == 1 : arrivals == 1,
+				"Missing lifecycle outcome");
+			require(change >= 5 || followerWaited, "Queued follower was not exercised: change=" + std::to_string(change));
+		}
+		auto snapshot = world.getSimulationSnapshot();
+		require(snapshot.traversalPermits.empty() && snapshot.traversalRequests.empty(), "Lifecycle traversal leaked");
+		for (auto const& resource : snapshot.traversalResources)
+		{
+			require(resource.openLeaseCount == 0, "Lifecycle lease leaked");
+			for (auto const& lane : resource.queueLanes) require(lane.queue.empty(), "Lifecycle queue leaked");
+			for (auto const& lane : resource.crossingLanes) require(!lane.owner, "Lifecycle lane leaked");
+		}
 	}
 }

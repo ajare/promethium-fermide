@@ -10,6 +10,7 @@
 #include "core/Vertex.h"
 #include "core/DoorSectorObject.h"
 #include "core/Edge.h"
+#include "core/RouteTraversalInputs.h"
 
 namespace
 {
@@ -142,10 +143,10 @@ namespace
 		options.activationMode = core::DoorActivationMode::Automatic;
 		auto automatic = world.addSectorDoor(0, 0, 5, options);
 		uint32_t a, b;
-		world.addSectorMarker(fore, 0, 4.6f, &a);
-		world.addSectorMarker(back, 0, 4.6f, &b);
+		world.addSectorMarker(fore, 0, 4.99f, &a);
+		world.addSectorMarker(back, 0, 4.99f, &b);
 		world.finishBuild();
-		auto agent = world.lookupAgent(world.createAgent("Observer", fore, 0, 4.5f)).entity;
+		auto agent = world.lookupAgent(world.createAgent("Observer", fore, 0, 4.99f)).entity;
 		auto graph = world.getGraph();
 		auto getDoor = [&](auto const& result)
 		{
@@ -167,6 +168,12 @@ namespace
 		require(choose() == automatic.traversalResource, "Open automatic alternative did not beat closed remote Door");
 		remoteDoor->requestOpen(); remoteDoor->update(10);
 		require(choose() == remote.traversalResource, "New journey did not prefer shorter open route");
+		// The remote Door is slightly nearer, but its doubled low crossing
+		// motion makes the Standing alternative preferable with both open.
+		require(remoteDoor->setHeightScale(.4f), "Competing low aperture refused");
+		require(choose() == automatic.traversalResource, "Slower Crawling did not change competing route choice");
+		require(remoteDoor->setHeightScale({}), "Competing aperture reset refused");
+		require(choose() == remote.traversalResource, "Standing restoration did not restore shorter route choice");
 
 		for (auto const& edge : graph->getEdges())
 		{
@@ -184,6 +191,30 @@ namespace
 				"Unobserved Door state leaked into route costs");
 			require(closed.components.motionSeconds == 0.1f && closed.components.knownWaitSeconds == 2,
 				"Door crossing or opening duration missing");
+			// Low crossing duration is the same fact in direct and captured
+			// evaluation. Static clearance must not reveal unseen live opening.
+			for (auto mode : {core::DoorActivationMode::Automatic, core::DoorActivationMode::RemoteControlled})
+			{
+				remoteDoor->configureTraversal(mode, remote.traversalResource, 5);
+				require(remoteDoor->setHeightScale(.4f), "Low cost aperture refused");
+				auto lowClosed = edge->getDirectedTraversalFacts(target, unseen);
+				auto capturedClosed = core::RouteTraversalInputs::capture(*edge, target, unseen).evaluate(unseen);
+				remoteDoor->requestOpen(); remoteDoor->update(10);
+				auto lowOpen = edge->getDirectedTraversalFacts(target, unseen);
+				auto capturedOpen = core::RouteTraversalInputs::capture(*edge, target, unseen).evaluate(unseen);
+				require(lowClosed.feasible && lowClosed.components.motionSeconds == .2f
+					&& capturedClosed.components.motionSeconds == lowClosed.components.motionSeconds
+					&& capturedOpen.components.motionSeconds == lowOpen.components.motionSeconds
+					&& lowClosed.components.expectedWaitSeconds == lowOpen.components.expectedWaitSeconds
+					&& capturedClosed.components.expectedWaitSeconds == capturedOpen.components.expectedWaitSeconds
+					&& lowClosed.components.interactionUnits == lowOpen.components.interactionUnits,
+					"Low Door cost disagreed with timing/capture or exposed unseen state");
+				require(remoteDoor->setHeightScale({}), "Cost aperture reset refused");
+				require(edge->getDirectedTraversalFacts(target, unseen).components.motionSeconds == .1f,
+					"Standing crossing inherited Crawling cost");
+				remoteDoor->requestClose(); remoteDoor->update(10);
+			}
+			remoteDoor->configureTraversal(core::DoorActivationMode::RemoteControlled, remote.traversalResource, 5);
 			remoteDoor->setHeight(core::Door::Height::Tall);
 			for (auto style : { core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenLeft,
 				core::Door::OpenStyle::OpenRight, core::Door::OpenStyle::OpenApart })
