@@ -1670,8 +1670,14 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
 		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
 	if (agent->getPose() != core::Pose::Standing)
+	{
+		bool const horizontal = agent->isHorizontalPose();
+		ImVec2 const scale = horizontal
+			? ImVec2{agent->getPoseHeightScale(), 1.0f}
+			: ImVec2{1.0f, agent->getPoseHeightScale()};
 		drawList->transformGeometrySince(bodyStart, {(pos0.x + pos1.x) * 0.5f, pos0.y},
-			{1.0f, agent->getPoseHeightScale()}, agent->getPose() == core::Pose::Lying);
+			scale, horizontal);
+	}
 
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;

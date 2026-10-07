@@ -35,7 +35,8 @@ namespace
 		{
 			world->pauseSimulation();
 			if (!world->setAgentActive(id, active)) throw std::runtime_error("Activation refused");
-			for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying, core::Pose::Standing})
+			for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying,
+				core::Pose::Crouching, core::Pose::Crawling, core::Pose::Standing})
 			{
 				core::AgentPoseTestAccess::set(*agent, pose);
 				visible.clear();
@@ -47,8 +48,15 @@ namespace
 				ImGui::LogFinish();
 				ImGui::End();
 				ImGui::Render();
-				auto label = pose == core::Pose::Standing ? "Pose: Standing"
-					: pose == core::Pose::Sitting ? "Pose: Sitting" : "Pose: Lying";
+				char const* label = nullptr;
+				switch (pose)
+				{
+				case core::Pose::Standing: label = "Pose: Standing"; break;
+				case core::Pose::Sitting: label = "Pose: Sitting"; break;
+				case core::Pose::Lying: label = "Pose: Lying"; break;
+				case core::Pose::Crouching: label = "Pose: Crouching"; break;
+				case core::Pose::Crawling: label = "Pose: Crawling"; break;
+				}
 				if (visible.find(label) == std::string::npos)
 					throw std::runtime_error("Selection omitted current Pose");
 				if (agent->getPose() != pose)

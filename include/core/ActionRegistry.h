@@ -29,7 +29,7 @@ namespace core
 	struct ActionEffect
 	{
 		ActionEffectType type;
-		// Pose: 0 Standing, 1 Sitting, 2 Lying. Device: typed command kind.
+		// Pose: 0 Standing, 1 Sitting, 2 Lying, 3 Crouching, 4 Crawling. Device: typed command kind.
 		int value{};
 		uint64_t point{};
 	};

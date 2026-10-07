@@ -52,6 +52,8 @@ namespace core
 				if (pose == "standing") command.value = 0;
 				else if (pose == "sitting") command.value = 1;
 				else if (pose == "lying") command.value = 2;
+				else if (pose == "crouching") command.value = 3;
+				else if (pose == "crawling") command.value = 4;
 				else return luaL_error(state, "Unknown Agent pose");
 			}
 			if (type == ActionEffectType::Device)

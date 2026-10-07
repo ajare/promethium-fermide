@@ -357,7 +357,7 @@ namespace core
 		auto position = agent->getGlobalPosition();
 		ActionViews views{agent->getName(), getName(), marker ? marker->getName() : "", agentId.value, markerId.value,
 			getSimulationTick(), position.x, position.y, {}, {}, {},
-			agent->mPose == Pose::Sitting ? "sitting" : agent->mPose == Pose::Lying ? "lying" : "standing", 0};
+			poseName(agent->mPose), 0};
 		if (auto instance = furnitureForMarker(markerId))
 		{
 			views.furnitureId = instance->id;

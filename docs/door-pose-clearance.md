@@ -1,8 +1,10 @@
 # Door clearance: Pose, support and live changes (#476–#477)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
-above the approach Floor includes effective Height modifiers, Sitting's 0.6
-body-height scale, or Lying's rotated vertical extent (body width). Physical
+above the approach Floor includes effective Height modifiers, Sitting's and
+Crouching's 0.6 body-height scale, Crawling's 0.3 body-height scale, or
+Lying's rotated vertical extent (body width). Crawling uses its reduced height
+rather than Lying's body width. Physical
 support elevation is added to that extent. Exact fits are accepted with a
 `0.00001` world-unit tolerance. Specialized and transport-owned thresholds keep
 their existing rules; admitted crossings may finish safely.
@@ -103,11 +105,15 @@ that future envelope without introducing such mechanics, the fixture:
 
 The labelled cases cover:
 
-- Sitting: floor-supported fit (.27 body under .28 opening), raised refusal,
-  exact fit, within-tolerance fit and over-tolerance refusal.
+- Sitting and Crouching: floor-supported fit (.27 body under .28 opening),
+  raised refusal, exact fit, within-tolerance fit and over-tolerance refusal.
+- Crawling: .135 body, proving the 30% height is used rather than Lying's .40
+  width (a .20 opening admits Crawling, a .13 opening refuses), plus raised
+  refusal and tolerance boundary.
 - Lying: .40 rotated extent, fit/refusal with support and tolerance boundary.
-- Effective Height modifier .7, including Sitting exact fit/refusal and Lying
-  width remaining unchanged by a modifier of the upright long dimension.
+- Effective Height modifier .7, including Sitting/Crouching exact fit/refusal,
+  Crawling scaling with the modifier, and Lying width remaining unchanged by a
+  modifier of the upright long dimension.
 - Both directions, nonzero approach Level, and ordinary Tall fit/refusal.
 - Paired Lying cases differing only in the decorative offsets (unclaimed
   versus zero-elevation claimed point), both fitting and refusing.

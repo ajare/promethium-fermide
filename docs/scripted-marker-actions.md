@@ -172,7 +172,7 @@ not a claim of this slice.
 The version-1 World view adds these dot-call capabilities:
 
 ```lua
-world.set_pose("sitting") -- standing, sitting or lying
+world.set_pose("sitting") -- standing, sitting, lying, crouching or crawling
 world.claim()             -- selected Furniture-owned usable-point Marker only
 world.release()           -- selected point, owned by this Agent only
 world.request_device(12, "set-sector-lights") -- World Interaction point ID and type
@@ -295,7 +295,8 @@ accepted only at usable definitions and are deduplicated in the selector. No
 Action registry is required for the built-in.
 
 All callbacks use the same fresh, budgeted sandbox and atomic validated effects
-as custom Actions. Agent views now expose `pose` (`standing`, `sitting`, `lying`).
+as custom Actions. Agent views now expose `pose` (`standing`, `sitting`, `lying`,
+`crouching`, `crawling`).
 Furniture-owned Marker views additionally expose `usable_point` and an immutable
 `furniture` view with `id`, `name`, and `definition`. No mutable domain object,
 occupancy table or shared VM is exposed. Chair scripts stage Sitting then claim

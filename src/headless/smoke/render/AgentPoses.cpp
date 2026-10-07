@@ -101,11 +101,14 @@ namespace
 				setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 			}
 			ImVec2 originalMin{}, originalMax{};
-			for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying})
+			for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying,
+				core::Pose::Crouching, core::Pose::Crawling})
 			{
 				core::AgentPoseTestAccess::set(*agent, pose);
+				auto const heightScale = agent->getPoseHeightScale();
+				auto const horizontal = agent->isHorizontalPose();
 				require(world.getSimulationSnapshot().agents.front().pose == pose, "Snapshot did not expose Pose");
-				require(near(agent->getHeight(), standingHeight * (pose == core::Pose::Sitting ? 0.6f : 1.f))
+				require(near(agent->getHeight(), standingHeight * heightScale)
 					&& near(agent->getWidth(), standingWidth), "Pose changed the wrong physical dimensions");
 				core::Vector2 b0, b1; agent->getBounds().getCurrentShape(b0, b1);
 				require(near(b1.y - b0.y, agent->getHeight()) && near(b1.x - b0.x, standingWidth), "Pose bounds disagree with physics");
@@ -129,10 +132,10 @@ namespace
 						require(triangle.texture == WorldDrawList::Texture::ObjectAtlas, "Pose lost sprite texture");
 						for (auto p : triangle.positions) { lo.x = std::min(lo.x,p.x); lo.y = std::min(lo.y,p.y); hi.x = std::max(hi.x,p.x); hi.y = std::max(hi.y,p.y); }
 					}
-					if (pose == core::Pose::Lying)
+					if (horizontal)
 					{
 						auto const& triangle = std::get<WorldDrawList::Triangle>(list.commands().front());
-						require(triangle.positions[0].x > triangle.positions[2].x, "Lying head does not point right");
+						require(triangle.positions[0].x > triangle.positions[2].x, "Horizontal head does not point right");
 					}
 				}
 				else
@@ -157,12 +160,15 @@ namespace
 				}
 				require(hi.x > lo.x && hi.y > lo.y, "Pose produced no visible body");
 				if (pose == core::Pose::Standing) { originalMin = lo; originalMax = hi; }
-				else if (pose == core::Pose::Sitting)
-					require(near(hi.x-lo.x, originalMax.x-originalMin.x) && near(hi.y-lo.y, (originalMax.y-originalMin.y)*0.6f)
-						&& near(hi.y, sprite ? originalMax.y : 600.f + (originalMax.y - 600.f) * 0.6f),
-						"Sitting must squash only height around the floor anchor (including glyph padding)");
-				else require(near(hi.x-lo.x, originalMax.y-originalMin.y) && near(hi.y-lo.y, originalMax.x-originalMin.x)
-					&& hi.x-lo.x > standingWidth * CORE_CELL_WIDTH_PIXELS, "Lying must rotate and overflow without squeezing");
+				else if (horizontal)
+					require(near(hi.x-lo.x, originalMax.y-originalMin.y)
+						&& near(hi.y-lo.y, (originalMax.x-originalMin.x) * heightScale)
+						&& hi.x-lo.x > standingWidth * CORE_CELL_WIDTH_PIXELS,
+						"Horizontal pose must rotate, thin to its height scale, and overflow without squeezing");
+				else require(near(hi.x-lo.x, originalMax.x-originalMin.x)
+					&& near(hi.y-lo.y, (originalMax.y-originalMin.y) * heightScale)
+					&& near(hi.y, sprite ? originalMax.y : 600.f + (originalMax.y - 600.f) * heightScale),
+					"Upright pose must squash only height around the floor anchor (including glyph padding)");
 			}
 		}
 		clearObjectTileset(); ImGui::EndFrame();

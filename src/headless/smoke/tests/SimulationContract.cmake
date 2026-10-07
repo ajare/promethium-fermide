@@ -172,6 +172,7 @@ set(core_names
     markerActions/documents
     markerActions/logging
     markerActions/atomicEffects
+    markerActions/poseVocabulary
     markerActions/deviceEffects
     markerActions/claimCompetition
     markerActions/furnitureUse

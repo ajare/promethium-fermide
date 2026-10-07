@@ -6,6 +6,7 @@
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
 #include "core/MobilityProfile.h"
+#include <cmath>
 #include <fstream>
 
 namespace
@@ -390,6 +391,77 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				require(world.lookupAgent(agent).entity->getPose() == core::Pose::Standing && !world.usablePointOccupant(marker), "Batch leaked Pose/claim");
 				for (auto const& log : core::consumeLogMessages()) require(log.msg != "rollback", "Rejected batch logged");
 			}
+		}
+	}
+
+	void poseVocabulary(smoke::Context const& context)
+	{
+		auto near = [](float a, float b) { return std::abs(a - b) < 0.0001f; };
+		struct PoseCase { char const* name; core::Pose pose; float scale; };
+		for (auto const& test : {
+			PoseCase{"crouching", core::Pose::Crouching, 0.6f},
+			PoseCase{"crawling", core::Pose::Crawling, 0.3f}})
+		{
+			// A Furniture use commits the new pose through the validated set_pose
+			// vocabulary; its finish_use observes a.pose before restoring Standing.
+			auto catalogue = context.temporaryRoot() / (std::string("pose-") + test.name + ".furniture.lua");
+			write(catalogue, "return {api_version=1,uuid='" + uuid + "',definitions={{"
+				"key='pose',label='Pose',tiles={{x=0,y=0,imageSet='ObjectAtlas',image='chair'}},"
+				"usablePoints={{key='body',label='Body',x=0.5,blocksPathing=false}},"
+				"use=function(a,w,m) w.set_pose('" + std::string(test.name) + "'); w.claim(); w.log('use') end,"
+				"finish_use=function(a,w,m) assert(a.pose == '" + std::string(test.name) + "'); w.set_pose('standing'); w.release(); w.log('finish') end}}}");
+			core::World world("Pose vocabulary", 8, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.attachFurnitureCatalogue(catalogue.filename().string(), core::FurnitureCatalogue::readFile(catalogue));
+			require(world.placeFurniture(room, "pose", 2, 0, "Pose") != 0, "Vocabulary Furniture refused");
+			world.addSectorMarker(room, 0, 6.5f, "Away");
+			world.finishBuild();
+			auto marker = world.furniture().front().destinations.front().marker;
+			auto id = world.createAgent("Operator", room, 0, 1.5f);
+			auto agent = world.lookupAgent(id).entity;
+			world.pauseSimulation();
+			require(world.setAgentIndividualHeightModifier(id, 0.8f), "Vocabulary Height refused");
+			world.resumeSimulation();
+			auto const standingHeight = agent->getStandingHeight();
+			require(world.moveAgentToMarker(id, marker, core::UseFurnitureAction).accepted(), "Vocabulary use refused");
+			for (unsigned tick = 0; tick < 1800 && agent->getPose() != test.pose; ++tick)
+				require(world.advanceTick(), "Vocabulary use simulation failed");
+			require(agent->getPose() == test.pose && world.usablePointOccupant(marker) == id,
+				"Use did not pose/claim: " + std::string(test.name));
+			require(near(agent->getHeight(), standingHeight * test.scale)
+				&& near(agent->getWidth(), CORE_AGENT_MAX_WIDTH), "Wrong effective posed height for " + std::string(test.name));
+			world.consumeSimulationEvents();
+			require(world.moveAgentToNamedMarker(id, "Away").accepted(), "Vocabulary departure refused");
+			bool finished = false;
+			for (unsigned tick = 0; tick < 1800; ++tick)
+			{
+				require(world.advanceTick(), "Vocabulary departure simulation failed");
+				for (auto const& log : core::consumeLogMessages()) finished |= log.msg == "finish";
+				if (finished && agent->getPose() == core::Pose::Standing && !world.usablePointOccupant(marker)) break;
+			}
+			require(finished && agent->getPose() == core::Pose::Standing && !world.usablePointOccupant(marker),
+				"Departure did not observe/restore pose or release occupancy: " + std::string(test.name));
+		}
+		// Unknown pose names fail validation and roll back without publishing effects.
+		for (auto const& bad : {"crouch", "crawl", "sitting-on-floor", ""})
+		{
+			auto path = context.temporaryRoot() / "bad-pose.actions.lua";
+			write(path, package("{key='hello',name='BadPose',run=function(a,w,m) w.set_pose('" + std::string(bad) + "'); w.log('rollback') end}"));
+			core::World world("Bad pose", 8, 2);
+			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
+			world.addSectorMarker(room, 0, 6.5f, "Target");
+			world.finishBuild();
+			auto marker = world.getMarkerIds().back();
+			auto id = world.createAgent("Operator", room, 0, 1.5f);
+			world.pauseSimulation();
+			require(world.selectActionRegistry(path) && world.setMarkerActions(marker, {first}), "Bad pose registry refused");
+			core::consumeLogMessages();
+			auto event = runAction(world, id, marker, first);
+			require(event.type == core::SimulationEventType::ActionFailed
+				&& event.scriptFailure != core::ScriptExecutionFailure::None
+				&& world.lookupAgent(id).entity->getPose() == core::Pose::Standing,
+				"Invalid pose was not rejected atomically: '" + std::string(bad) + "'");
+			for (auto const& log : core::consumeLogMessages()) require(log.msg != "rollback", "Rejected pose published logs");
 		}
 	}
 
@@ -1154,6 +1226,7 @@ void registerMarkerActions(std::vector<smoke::Check>& checks)
 	checks.push_back({"markerActions/documents", documents});
 	checks.push_back({"markerActions/logging", boundedLogging});
 	checks.push_back({"markerActions/atomicEffects", atomicEffects});
+	checks.push_back({"markerActions/poseVocabulary", poseVocabulary});
 	checks.push_back({"markerActions/deviceEffects", deviceEffects});
 	checks.push_back({"markerActions/claimCompetition", claimCompetition});
 	checks.push_back({"markerActions/furnitureUse", furnitureUse});

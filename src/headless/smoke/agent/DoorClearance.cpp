@@ -39,7 +39,7 @@ namespace
 		require(static_cast<bool>(file), "Cannot write Door clearance diagnostic fixture");
 	}
 
-	std::filesystem::path catalogue(smoke::Context const& context, float support, bool lying,
+	std::filesystem::path catalogue(smoke::Context const& context, float support, core::Pose pose,
 		std::string const& supportLiteral = {})
 	{
 		auto path = context.temporaryRoot() / "clearance.furniture.lua";
@@ -47,7 +47,7 @@ namespace
 			"key='support',label='Support',tiles={{x=0,y=0,imageSet='ObjectAtlas',image='chair'}},"
 			"usablePoints={{key='body',label='Body',x=0.5,blocksPathing=false,supportElevation="
 			+ (supportLiteral.empty() ? std::to_string(support) : supportLiteral) + "}},use=function(a,w,m) w.set_pose('"
-			+ (lying ? "lying" : "sitting") + "'); w.claim() end,"
+			+ std::string(core::poseName(pose)) + "'); w.claim() end,"
 			"finish_use=function(a,w,m) w.set_pose('standing'); w.release() end}}}");
 		return path;
 	}
@@ -74,27 +74,43 @@ namespace
 
 void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 {
-	struct Case { char const* label; bool lying; float support, opening; bool fits; float modifier = 1.f; };
-	// .45 Standing, .27 Sitting, .40 rotated Lying. Support is physical;
-	// getPoseRenderYOffset() (.25 for claimed Lying) is decorative.
+	struct Case { char const* label; core::Pose pose; float support, opening; bool fits; float modifier = 1.f; };
+	// .45 Standing, .27 Sitting/Crouching, .135 Crawling, .40 rotated Lying.
+	// Support is physical; getPoseRenderYOffset() (.25 for claimed Lying) is
+	// decorative. Crawling clearance is its 30% height, not Lying's body width.
 	for (auto const& test : {
-		Case{"sitting-fit", false, 0.f, .28f, true},
-		Case{"sitting-raised-refusal", false, .03f, .28f, false},
-		Case{"sitting-exact-fit", false, .01f, .28f, true},
-		Case{"sitting-within-tolerance", false, .010005f, .28f, true},
-		Case{"sitting-over-tolerance", false, .01002f, .28f, false},
-		Case{"lying-rotated-fit", true, 0.f, .41f, true},
-		Case{"lying-raised-refusal", true, .03f, .41f, false},
-		Case{"lying-exact-fit", true, .01f, .41f, true},
-		Case{"lying-over-tolerance", true, .01002f, .41f, false},
-		Case{"lying-decorative-refusal", true, 0.f, .39f, false},
-		Case{"sitting-modifier-exact-fit", false, .01f, .199f, true, .7f},
-		Case{"sitting-modifier-refusal", false, .01002f, .199f, false, .7f},
-		Case{"lying-modifier-width-unchanged", true, 0.f, .39f, false, .7f},
-		Case{"tall-sitting-fit", false, .62f, .9f, true},
-		Case{"tall-sitting-refusal", false, .64f, .9f, false},
-		Case{"tall-lying-fit", true, .49f, .9f, true},
-		Case{"tall-lying-refusal", true, .51f, .9f, false}})
+		Case{"sitting-fit", core::Pose::Sitting, 0.f, .28f, true},
+		Case{"sitting-raised-refusal", core::Pose::Sitting, .03f, .28f, false},
+		Case{"sitting-exact-fit", core::Pose::Sitting, .01f, .28f, true},
+		Case{"sitting-within-tolerance", core::Pose::Sitting, .010005f, .28f, true},
+		Case{"sitting-over-tolerance", core::Pose::Sitting, .01002f, .28f, false},
+		Case{"crouching-fit", core::Pose::Crouching, 0.f, .28f, true},
+		Case{"crouching-raised-refusal", core::Pose::Crouching, .03f, .28f, false},
+		Case{"crouching-exact-fit", core::Pose::Crouching, .01f, .28f, true},
+		Case{"crouching-over-tolerance", core::Pose::Crouching, .01002f, .28f, false},
+		Case{"crawling-width-not-used", core::Pose::Crawling, 0.f, .20f, true},
+		Case{"crawling-too-low-refusal", core::Pose::Crawling, 0.f, .13f, false},
+		Case{"crawling-raised-refusal", core::Pose::Crawling, .03f, .16f, false},
+		Case{"crawling-exact-fit", core::Pose::Crawling, .01f, .145f, true},
+		Case{"crawling-over-tolerance", core::Pose::Crawling, .01002f, .145f, false},
+		Case{"lying-rotated-fit", core::Pose::Lying, 0.f, .41f, true},
+		Case{"lying-raised-refusal", core::Pose::Lying, .03f, .41f, false},
+		Case{"lying-exact-fit", core::Pose::Lying, .01f, .41f, true},
+		Case{"lying-over-tolerance", core::Pose::Lying, .01002f, .41f, false},
+		Case{"lying-decorative-refusal", core::Pose::Lying, 0.f, .39f, false},
+		Case{"sitting-modifier-exact-fit", core::Pose::Sitting, .01f, .199f, true, .7f},
+		Case{"sitting-modifier-refusal", core::Pose::Sitting, .01002f, .199f, false, .7f},
+		Case{"crouching-modifier-exact-fit", core::Pose::Crouching, .01f, .199f, true, .7f},
+		Case{"crawling-modifier-height-scaled", core::Pose::Crawling, 0.f, .10f, true, .7f},
+		Case{"lying-modifier-width-unchanged", core::Pose::Lying, 0.f, .39f, false, .7f},
+		Case{"tall-sitting-fit", core::Pose::Sitting, .62f, .9f, true},
+		Case{"tall-sitting-refusal", core::Pose::Sitting, .64f, .9f, false},
+		Case{"tall-crouching-fit", core::Pose::Crouching, .62f, .9f, true},
+		Case{"tall-crouching-refusal", core::Pose::Crouching, .64f, .9f, false},
+		Case{"tall-crawling-fit", core::Pose::Crawling, .75f, .9f, true},
+		Case{"tall-crawling-refusal", core::Pose::Crawling, .78f, .9f, false},
+		Case{"tall-lying-fit", core::Pose::Lying, .49f, .9f, true},
+		Case{"tall-lying-refusal", core::Pose::Lying, .51f, .9f, false}})
 	for (bool reverse : {false, true})
 	for (bool decorated : {false, true})
 	{
@@ -110,7 +126,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		if (test.opening == .9f) options.height = core::Door::Height::Tall;
 		else options.heightScale = test.opening / CORE_DOOR_HEIGHT;
 		world.addSectorDoor(0, 1, 2, options);
-		auto path = catalogue(context, test.support, test.lying);
+		auto path = catalogue(context, test.support, test.pose);
 		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
 		require(world.placeFurniture(sector, "support", 2, 0, "Support") != 0, "Support placement refused");
 		world.finishBuild();
@@ -124,7 +140,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		auto actions = context.temporaryRoot() / "clearance.actions.lua";
 		write(actions, "return {api_version=1,uuid='" + std::string(uuid) + "',actions={{"
 			"key='pose',name='Pose',run=function(a,w,m) w.set_pose('"
-			+ (test.lying ? "lying" : "sitting") + "'); "
+			+ std::string(core::poseName(test.pose)) + "'); "
 			+ (decorated ? "w.claim(); " : "") + "end}}}");
 		auto action = std::string(uuid) + ":pose";
 		require(world.selectActionRegistry(actions) && world.setMarkerActions(marker, {action}), "Pose fixture registry refused");
@@ -156,7 +172,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 			if (agent->getState() == core::Agent::State::TraversingEdge)
 			{
 				observedCrossing = true;
-				require(agent->getPose() == (test.lying ? core::Pose::Lying : core::Pose::Sitting),
+				require(agent->getPose() == test.pose,
 					"Diagnostic Pose was cleared before actual crossing");
 			}
 			if (agent->getState() == core::Agent::State::RoutePlanning)
@@ -188,7 +204,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 	for (auto literal : {"-0.01", "0/0", "1/0", "'not-a-height'"})
 	{
 		bool refused = false;
-		try { (void)core::FurnitureCatalogue::readFile(catalogue(context, 0.f, false, literal)); }
+		try { (void)core::FurnitureCatalogue::readFile(catalogue(context, 0.f, core::Pose::Standing, literal)); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, std::string("Invalid support elevation accepted: ") + literal);
 		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] invalid-support=" << literal << " outcome=refused\n";
@@ -291,7 +307,7 @@ void runCommittedDoorEnvelope(smoke::Context const& context)
 		if (change == 2) options.height = core::Door::Height::Tall;
 		else options.heightScale = .28f / CORE_DOOR_HEIGHT;
 		world.addSectorDoor(0, 0, 2, options);
-		auto path = catalogue(context, change == 2 ? .64f : .03f, false);
+		auto path = catalogue(context, change == 2 ? .64f : .03f, core::Pose::Sitting);
 		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
 		require(world.placeFurniture(origin, "support", 2, 0, "Support") != 0
 			&& world.placeFurniture(reverse ? front : back, "support", 2, 0, "Other support") != 0, "Committed support fixture failed");
@@ -354,7 +370,7 @@ void runPoseDoorMovementReset(smoke::Context const& context)
 		options.heightScale = .84f; // .42 fits Sitting and Lying, not Standing.
 		auto low = world.addSectorDoor(0, 0, 4, options);
 		if (alternate) world.addSectorDoor(0, 0, 9, {});
-		auto path = catalogue(context, .01f, lying);
+		auto path = catalogue(context, .01f, lying ? core::Pose::Lying : core::Pose::Sitting);
 		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
 		require(world.placeFurniture(front, "support", 2, 0, "Chair or bed") != 0, "Reset support refused");
 		world.addSectorMarker(back, 0, 6.5f, "Destination");

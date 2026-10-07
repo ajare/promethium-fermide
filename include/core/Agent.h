@@ -739,11 +739,22 @@ namespace core
 		float getWidth() const;
 
 		Pose getPose() const { return mPose; }
-		float getPoseHeightScale() const { return mPose == Pose::Sitting ? 0.6f : 1.0f; }
+		float getPoseHeightScale() const
+		{
+			switch (mPose)
+			{
+			case Pose::Sitting:
+			case Pose::Crouching: return 0.6f;
+			case Pose::Crawling: return 0.3f;
+			default: return 1.0f;
+			}
+		}
 		// Keep routing/physics at the central point; align the body at Bed x + 0.75.
 		float getPoseRenderXOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? -0.25f : 0.f; }
 		// Lift the body onto the mattress without changing the supporting Floor.
 		float getPoseRenderYOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? 0.25f : 0.f; }
+		// Whether the pose renders as a horizontal body (head to the right).
+		bool isHorizontalPose() const { return mPose == Pose::Lying || mPose == Pose::Crawling; }
 
 		float getStandingHeight() const;
 		float getHeight() const;
