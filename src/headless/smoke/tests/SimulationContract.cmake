@@ -142,6 +142,10 @@ set(core_names
     securityScanners/admissionAuthorizationChanges
     securityScanners/localRouteObservations
     securityScanners/automaticJourneys
+    decontamination/crawlingJourneys
+    decontamination/crawlingLifecycle
+    decontamination/crawlingGates
+    decontamination/crawlingBatches
     securityScanners/configuration
     securityScanners/contentionAndReuse
     securityScanners/abandonedAdmission

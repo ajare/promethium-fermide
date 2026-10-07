@@ -1002,6 +1002,8 @@ namespace
 	}
 }
 
+void registerDecontaminationCrawling(std::vector<smoke::Check>& checks);
+
 void registerSecurityScanners(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "securityScanners/editSafety", editSafety });
@@ -1009,6 +1011,7 @@ void registerSecurityScanners(std::vector<smoke::Check>& checks)
 	checks.push_back({ "securityScanners/admissionAuthorizationChanges", admissionAuthorization });
 	checks.push_back({ "securityScanners/localRouteObservations", routeObservations });
 	checks.push_back({ "securityScanners/automaticJourneys", journeys });
+	registerDecontaminationCrawling(checks);
 	checks.push_back({ "securityScanners/configuration", configuration });
 	checks.push_back({ "securityScanners/contentionAndReuse", contention });
 	checks.push_back({ "securityScanners/abandonedAdmission", abandonment });

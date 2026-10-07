@@ -152,6 +152,20 @@ all **70/70 repository CTests** passed with unmodified Willpower submodule tests
 excluded. The Simulation inventory/CLI contracts and ownership audit include
 the new fixture.
 
+### Decontamination Chamber entry and exit (#488)
+
+Decontamination uses the same clearance, crossing-scoped half-speed Crawling and
+committed-exit rules as Security Scanner, independently at entry and exit. It
+adds no Height overrides, automatic Crouching or transition timers. Width-capacity
+batches, the boarding deadline, standing slots and closed-door shared processing
+remain authoritative; accepted low crossings complete before processing begins.
+Only threshold motion costs increase, not positioning or decontamination timing.
+
+The Simulation `decontamination/crawlingJourneys`, `crawlingLifecycle`,
+`crawlingGates` and `crawlingBatches` checks cover single and batch journeys,
+independent clearance, costs, lifecycle and gates. See
+[Decontamination Chambers](decontamination-chambers.md) for details.
+
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:
 
