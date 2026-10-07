@@ -1,4 +1,4 @@
-# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#486)
+# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#489)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
@@ -6,9 +6,10 @@ Crouching's 0.6 body-height scale, Crawling's 0.3 body-height scale, or
 Lying's rotated vertical extent (body width). Crawling uses its reduced height
 rather than Lying's body width. Physical
 support elevation is added to that extent. Exact fits are accepted with a
-`0.00001` world-unit tolerance. Standalone Bulkhead Doors use the same rule
-against their physical opening. Chamber and transport-owned thresholds keep
-their existing rules; admitted crossings may finish safely.
+`0.00001` world-unit tolerance. Standalone Bulkhead, Airlock, Security Scanner
+and Lift landing Doors use the same rule against their physical opening.
+Other transport-owned thresholds keep their existing rules; admitted crossings
+may finish safely.
 
 ## Automatic low-Door Crawling (#483–#484)
 
@@ -152,6 +153,40 @@ all **70/70 repository CTests** passed with unmodified Willpower submodule tests
 excluded. The Simulation inventory/CLI contracts and ownership audit include
 the new fixture.
 
+### Security Scanner entry and exit (#487)
+
+Security Scanner Doors now classify their real physical openings independently,
+without adding Height overrides or changing Broken support. Planning and new
+entry admission require both the entrance and the committed opposite exit to
+fit Standing or Crawling. Remaining-Path validation and reservation selection
+reject newly impossible openings before admission.
+
+Agents wait Standing and crawl only during each admitted low threshold crossing,
+at half normal speed with no preparation/recovery delay. Each far-side threshold
+vertex must be physically reached before Standing resumes. Scan timing/sensing,
+interior walking and the automatic exit do not slow; route motion estimates
+double only the low threshold's motion component.
+
+The shared Traversal resource still owns the sole slot, ticket order, crossing
+permits and the interlocked cycle. A live exit shrink before admission loses the
+route; an already admitted occupant keeps its committed exit, crawling if the
+opening no longer fits Standing, rather than stranding inside the chamber.
+Occupant deactivation freezes a crawling exit; Reset releases transient state
+and restores Standing. Directionality, destination Location requirements and
+Door Mobility remain authoritative.
+
+`securityScanners/crawlingJourneys`, `crawlingLifecycle` and `crawlingGates` in
+the Simulation module cover both directions, independent low entry/exit and
+Standing fits, exact Crawling fit and impossible passage, direct/captured route
+estimates, half-speed motion, pause/deactivation, live exit shrink before and
+after admission, Reset, destination Location permission and forbidden/last-resort
+Mobility. Fixtures use public World movement and inspection seams plus existing
+public Shape assignment.
+
+#487 validation: the incremental Release build, including `editor`, passed;
+all **70/70 repository CTests** passed with unmodified Willpower submodule tests
+excluded.
+
 ### Decontamination Chamber entry and exit (#488)
 
 Decontamination uses the same clearance, crossing-scoped half-speed Crawling and
@@ -165,6 +200,33 @@ The Simulation `decontamination/crawlingJourneys`, `crawlingLifecycle`,
 `crawlingGates` and `crawlingBatches` checks cover single and batch journeys,
 independent clearance, costs, lifecycle and gates. See
 [Decontamination Chambers](decontamination-chambers.md) for details.
+
+### Lift landing Doors (#489)
+
+Lift landing Doors now classify their real physical openings in planning and
+admission, using the shared Standing-first/Crawling-fallback/refusal rule and
+adding **no Door height overrides**. Waiting and landing-call operation stay
+Standing; an admitted low boarding or disembarking switches directly to Crawling
+at half normal threshold speed and restores Standing fully inside or outside the
+car. Lift travel speed, car capacity, accepted manifests and Stop requests,
+landing queue order, destination permissions and Mobility remain unchanged.
+
+Route motion estimates double only the low landing threshold's component: the
+in-place Door crossing doubles from six to twelve 1/60-second ticks, while the
+boarding/alighting walk and the vehicle ride keep their ordinary durations. The
+shared Traversal resource still owns the car manifest, schedule, capacity and
+landing queue. Pause/deactivation freeze an admitted landing crossing with its
+Crawling Pose; an onboard passenger's committed exit completes Crawling even
+when a live Height or opening change no longer fits Standing, and Reset clears
+transient Crawling without leaking occupancy or permits.
+
+The Simulation `lifts/crawlingJourneys`, `crawlingCapacity`, `crawlingLifecycle`
+and `crawlingGates` checks cover low origin/destination Doors, Standing fits and
+impossible openings, multiple passengers and capacity, direct/captured route
+estimates, pause/deactivation, cancellation/replacement, live Height and
+opening changes, Reset, destination Location permissions and forbidden/last-resort
+Mobility. Fixtures use public World movement and inspection seams plus existing
+public Shape assignment.
 
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:
@@ -189,8 +251,9 @@ Routing and every admission gate route their fit/refusal question through one
 seam: `Door::admitsAgentTraversal(agent, approachFloorY, beginningMovement)`.
 It combines the Agent's effective traversal envelope with the Door's top
 clearance above the given approach floor and preserves the Door's scope
-(ordinary Regular/Tall Doors between Locations restrict clearance; specialized,
-transport-owned and Chamber thresholds keep their existing rules). Callers
+(ordinary Regular/Tall Doors, standalone Bulkhead Doors, Airlocks, both
+Chamber subtypes and Lift landing Doors restrict clearance; other specialized
+and transport-owned thresholds keep their existing rules). Callers
 retain their own approach-floor source and `beginningMovement` value; future
 crossing modes build on this single boundary instead of duplicating the fit
 question at each gate.

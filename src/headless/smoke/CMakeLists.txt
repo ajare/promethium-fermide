@@ -84,7 +84,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/DoorQueues.cpp
         simulation/CrossingBands.cpp
         simulation/Scale.cpp
-        simulation/Airlocks.cpp simulation/AirlockCrawling.cpp simulation/SecurityScanners.cpp simulation/DecontaminationCrawling.cpp
+        simulation/Airlocks.cpp simulation/AirlockCrawling.cpp simulation/SecurityScanners.cpp simulation/SecurityScannerCrawling.cpp simulation/DecontaminationCrawling.cpp simulation/LiftCrawling.cpp
         simulation/AccessPanels.cpp
         simulation/BoothWindows.cpp
         simulation/Dumbwaiters.cpp

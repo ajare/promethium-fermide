@@ -869,12 +869,14 @@ namespace core
 		for (auto const& [id, agent] : mWorld.mAgents.entries())
 		{
 			// Airlock admission/occupancy is a fixed journey, not a new route
-			// choice on resume. Keep its physical position and tasks intact.
+			// choice on resume. An onboard Lift or Shuttle passenger is likewise
+			// committed: keep its physical position and tasks intact.
 			bool airlockJourney = false;
 			for (auto const& [resourceId, resource] : mWorld.mTraversalResources.entries())
 			{
 				(void)resourceId;
-				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
+				if (!resource->mAirlock && !resource->mSecurityScanner
+					&& !resource->mLift && !resource->mShuttle) continue;
 				// Scanner waiting tickets also survive a plain global pause. Recreating
 				// them in Agent order on resume would silently undo fair admission.
 				if (resource->mSecurityScanner)
@@ -885,9 +887,10 @@ namespace core
 								airlockJourney = true;
 				if (find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end())
 					airlockJourney = true;
-				for (auto reservation : resource->mAdmissionReservations)
-					if (auto request = mWorld.mTraversalRequests.find(reservation); request && request->mOwner == id)
-						airlockJourney = true;
+				if (resource->mAirlock || resource->mSecurityScanner)
+					for (auto reservation : resource->mAdmissionReservations)
+						if (auto request = mWorld.mTraversalRequests.find(reservation); request && request->mOwner == id)
+							airlockJourney = true;
 			}
 			if (airlockJourney) continue;
 			// Admitted standalone thresholds retain their physical safety commitment.
@@ -896,12 +899,14 @@ namespace core
 					bulkhead && bulkhead->isStandalone()) continue;
 			// An admitted ordinary Door crossing is a safety commitment. A plain
 			// pause freezes it, rather than returning it to the source boundary.
+			// Lift landing Doors share that commitment for boarding/disembarking.
 			if (agent->mTraversalTask && hasCommittedMovement(*agent))
 				if (auto edge = dynamic_pointer_cast<DoorEdge const>(agent->mTraversalTask->edge);
 					edge && typeid(*edge->getDoor()) == typeid(Door)
 					&& !edge->getDoor()->isChamberOwned()
-					&& isLocationLike(edge->getDoor()->getFrontSector()->getType())
-					&& isLocationLike(edge->getDoor()->getBackSector()->getType())) continue;
+					&& ((isLocationLike(edge->getDoor()->getFrontSector()->getType())
+						&& isLocationLike(edge->getDoor()->getBackSector()->getType()))
+						|| edge->getDoor()->isLiftOwned())) continue;
 			auto path = agent->mPath.path;
 			auto from = agent->mPath.targetNode;
 			if (agent->mState == Agent::State::RoutePlanning)

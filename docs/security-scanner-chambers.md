@@ -1,4 +1,4 @@
-# Security scanner chambers (#339, #340, #341, #342, #343, #344, #345)
+# Security scanner chambers (#339, #340, #341, #342, #343, #344, #345, #487)
 
 The palette's **Chamber** tool creates a same-Layer Chamber with the Security Scanner subtype through World-owned Chamber commands. Selection identifies the Sector as Chamber and offers a required **Subtype** dropdown containing **Security Scanner** and **Decontamination Chamber**. Choosing the active subtype is a no-op: configuration, dirty state, and document history remain unchanged. Airlock remains separate and unchanged.
 Drag horizontally across empty whole cells between adjoining walkable Room or
@@ -48,6 +48,25 @@ authored positions and Paths through the existing World restoration pipeline.
 Generated Doors cannot be independently operated, configured, moved, or deleted.
 Direct Agent creation/placement/relocation inside is refused. Structural edits
 require a globally paused World and an empty chamber with no threshold crossing.
+
+## Low physical Door openings (#487)
+
+Entry and exit independently use the shared Standing-first/Crawling-fallback
+clearance rule on their real physical openings, without adding Height overrides
+or changing Broken support. Planning and new entry admission require both the
+entrance and the committed opposite exit to fit Standing or Crawling; remaining-Path
+validation and reservation selection reject newly impossible openings before
+admission. An Agent waits Standing, switches directly to Crawling for each
+admitted low crossing at half normal threshold speed, and stands immediately
+beyond the far-side boundary. There is no Crouching stage or transition timer.
+
+Capacity, ticket order, scan timing/sensing, interlocks and the automatic exit
+remain authoritative. Route estimates double only the low threshold's motion
+component; scan duration and interior walking are unchanged. Pause and occupant
+deactivation freeze a crawling crossing; cancellation/replacement and Reset
+release transient Crawling without stranding an admitted occupant. A live exit
+shrink before admission loses the route; after admission the committed exit
+finishes rather than stranding the occupant.
 
 ## Scan beams
 
@@ -171,6 +190,9 @@ their behavior names; shared journey dispatch supports both Chamber subtypes. Se
 - `pf-smoke-simulation --check securityScanners/admissionAuthorizationChanges`
 - `pf-smoke-simulation --check securityScanners/localRouteObservations`
 - `pf-smoke-simulation --check securityScanners/automaticJourneys`
+- `pf-smoke-simulation --check securityScanners/crawlingJourneys`
+- `pf-smoke-simulation --check securityScanners/crawlingLifecycle`
+- `pf-smoke-simulation --check securityScanners/crawlingGates`
 - `pf-smoke-simulation --check securityScanners/configuration`
 - `pf-smoke-simulation --check securityScanners/contentionAndReuse`
 - `pf-smoke-simulation --check securityScanners/abandonedAdmission`

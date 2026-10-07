@@ -77,6 +77,10 @@ set(core_names
     lifts/brokenStopDoorsAndSelectorSafety
     lifts/brokenLocalMemory
     lifts/brokenRoutePlanning
+    lifts/crawlingJourneys
+    lifts/crawlingCapacity
+    lifts/crawlingLifecycle
+    lifts/crawlingGates
     platformLifts/brokenFreezeAndRecoverPassengers
     platformLifts/brokenStopAndSelectorSafety
     platformLifts/brokenPermissionsAndCommittedBoarding
@@ -142,6 +146,9 @@ set(core_names
     securityScanners/admissionAuthorizationChanges
     securityScanners/localRouteObservations
     securityScanners/automaticJourneys
+    securityScanners/crawlingJourneys
+    securityScanners/crawlingLifecycle
+    securityScanners/crawlingGates
     decontamination/crawlingJourneys
     decontamination/crawlingLifecycle
     decontamination/crawlingGates

@@ -63,18 +63,21 @@ namespace core
 	{
 		auto front = getFrontSector();
 		auto back = getBackSector();
-		// Standalone and Airlock Bulkhead Doors use their physical opening,
-		// never an ordinary Door height override. Other specialized thresholds
-		// retain their existing rules.
-		bool const bulkhead = typeid(*this) == typeid(BulkheadDoor) && !isSecurityScannerOwned();
+		// Standalone, Airlock and both Chamber subtypes (Security Scanner and
+		// Decontamination) use their physical Bulkhead Door opening, never an
+		// ordinary Door height override. Transport landing Doors likewise use
+		// their physical opening. Other specialized thresholds retain their rules.
+		bool const bulkhead = typeid(*this) == typeid(BulkheadDoor);
 		auto supportedSector = [&](Sector const& sector) {
 			return isLocationLike(sector.getType())
-				|| (isAirlockOwned() && sector.getType() == SectorType::Airlock);
+				|| (isAirlockOwned() && sector.getType() == SectorType::Airlock)
+				|| (isSecurityScannerOwned() && sector.getType() == SectorType::Chamber)
+				|| (mLiftOwned && sector.getType() == SectorType::Lift);
 		};
-		if ((!bulkhead && typeid(*this) != typeid(Door)) || isSecurityScannerOwned() || !front || !back
+		if ((!bulkhead && typeid(*this) != typeid(Door)) || !front || !back
 			|| !supportedSector(*front) || !supportedSector(*back)) return true;
 		auto const availableHeight = getPosition().y
-			+ (bulkhead ? getSize().y : effectiveHeight(mHeight, mHeightScale)) - approachFloorY;
+			+ ((bulkhead || mLiftOwned) ? getSize().y : effectiveHeight(mHeight, mHeightScale)) - approachFloorY;
 		return topAboveFloor <= availableHeight + ClearanceTolerance;
 	}
 

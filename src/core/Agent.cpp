@@ -1717,7 +1717,10 @@ namespace core
 		}
 
 		// Recheck before adopting even an already granted permit, never during crossing.
+		// An onboard Lift passenger's committed exit is exempt: it must finish its
+		// journey even if a live change made the opening or envelope impossible.
 		if (mTraversalTask->edge->getType() == EdgeType::Door
+			&& getSector()->getType() != SectorType::Lift
 			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsAgentTraversal(
 				*this, getGlobalPosition().y))
 		{
@@ -1726,7 +1729,9 @@ namespace core
 		}
 		if (auto bulkhead = dynamic_cast<BulkheadDoorEdge const*>(mTraversalTask->edge.get());
 			bulkhead && (bulkhead->isStandalone() || (bulkhead->getDoor()->isAirlockOwned()
-				&& getSector()->getType() != SectorType::Airlock))
+				&& getSector()->getType() != SectorType::Airlock)
+				|| (bulkhead->getDoor()->isSecurityScannerOwned()
+					&& getSector()->getType() != SectorType::Chamber))
 			&& !bulkhead->getDoor()->admitsAgentTraversal(*this, getGlobalPosition().y))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
@@ -1795,7 +1800,8 @@ namespace core
 			}
 			auto const bulkhead = dynamic_cast<BulkheadDoorEdge const*>(mTraversalTask->edge.get());
 			// The far-side boundary must be reached physically before standing up.
-			auto const directTarget = bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned())
+			auto const directTarget = bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()
+				|| bulkhead->getDoor()->isSecurityScannerOwned())
 				? vertexA : getSkippablePathTarget(vertexA);
 			if (directTarget != vertexA)
 			{
@@ -1812,17 +1818,22 @@ namespace core
 			if (doorCrossing)
 			{
 				auto const& doorEdge = static_cast<DoorEdge const&>(*mTraversalTask->edge);
-				mTraversalTask->crawling = doorEdge.getDoor()->classifyAgentCrossing(
-					*this, getGlobalPosition().y) == Door::DoorCrossingMode::Crawling;
+				auto const mode = doorEdge.getDoor()->classifyAgentCrossing(
+					*this, getGlobalPosition().y);
+				// An onboard Lift passenger must finish its committed exit even if
+				// its envelope or the opening changed during the ride.
+				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
+					|| (mode == Door::DoorCrossingMode::None && getSector()->getType() == SectorType::Lift);
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
-			if (bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()))
+			if (bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()
+				|| bulkhead->getDoor()->isSecurityScannerOwned()))
 			{
 				auto const mode = bulkhead->getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
-				// An admitted Airlock occupant must finish its exit even if its
+				// An admitted Chamber occupant must finish its exit even if its
 				// envelope or the opening changed during the interlocked journey.
 				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
-					|| (mode == Door::DoorCrossingMode::None && getSector()->getType() == SectorType::Airlock);
+					|| (mode == Door::DoorCrossingMode::None && getSector()->getType() == SectorType::Chamber);
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
 			mTraversalTask->traversalTicksRemaining =

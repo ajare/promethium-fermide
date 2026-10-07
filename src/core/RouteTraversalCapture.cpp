@@ -263,6 +263,15 @@ namespace core
 					auto expectedTarget = result.boarding ? chamber.get() : chamber->getStop(chamber->getExitSide()).sector.get();
 					if (sector.get() != expectedSource || target->getSector().get() != expectedTarget)
 						result.exclusion = RouteExclusionReason::Control;
+					// Entry commits the complete interlocked journey. Reject an
+					// impossible exit before reserving/adopting capacity.
+					if (result.boarding && context.agent
+						&& !chamber->getDoor(chamber->getExitSide())->admitsAgentTraversal(
+							*context.agent, chamber->getPosition().y, true))
+					{
+						result.exclusion = RouteExclusionReason::Clearance;
+						return result;
+					}
 					if (result.boarding && context.world && context.agent
 						&& !context.world->canAgentAccessLocation(*chamber->getStop(chamber->getExitSide()).sector, *context.agent))
 						result.exclusion = RouteExclusionReason::Permission;

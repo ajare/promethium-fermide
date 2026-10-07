@@ -44,6 +44,7 @@ namespace core
 		bool mObstructed{ false };
 		bool mAirlockOwned{ false };
 		bool mSecurityScannerOwned{ false };
+		bool mLiftOwned{ false };
 		void advanceCoordinatedMotion(float frameTime);
 		bool mBreakable{ false };
 		bool mInitiallyBroken{ false };
@@ -116,6 +117,7 @@ namespace core
 		// Typed device operations call these commands; no callback/action queue exists.
 		bool isAirlockOwned() const { return mAirlockOwned; }
 		bool isSecurityScannerOwned() const { return mSecurityScannerOwned; }
+		bool isLiftOwned() const { return mLiftOwned; }
 		bool isChamberOwned() const { return mAirlockOwned || mSecurityScannerOwned; }
 		bool isBreakable() const { return mBreakable; }
 		bool isInitiallyBroken() const { return mInitiallyBroken; }

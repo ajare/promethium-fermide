@@ -232,7 +232,9 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/simulation/Airlocks.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/AirlockCrawling.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/SecurityScanners.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/SecurityScannerCrawling.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/DecontaminationCrawling.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/LiftCrawling.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/AccessPanels.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/BoothWindows.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Dumbwaiters.cpp` | module-owned | `pf-smoke-simulation` |

@@ -221,9 +221,10 @@ namespace core
 			shared_ptr<Door> door;
 			if (auto ordinary = dynamic_pointer_cast<DoorEdge const>(edge)) door = ordinary->getDoor();
 			else if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(edge);
-				bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned())) door = bulkhead->getDoor();
+				bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()
+					|| bulkhead->getDoor()->isSecurityScannerOwned())) door = bulkhead->getDoor();
 			if (!door) continue;
-			if (door->isAirlockOwned())
+			if (door->isAirlockOwned() || door->isSecurityScannerOwned())
 			{
 				auto resource = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
 				// Protect both thresholds of this already admitted journey, but
@@ -232,6 +233,17 @@ namespace core
 					!= resource->mOccupants.end()
 					|| (agent.mTraversalTask && agent.mTraversalTask->edge->getTraversalResourceId()
 						== edge->getTraversalResourceId() && hasCommittedMovement(agent)))) continue;
+			}
+			if (door->isLiftOwned())
+			{
+				auto landing = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
+				if (landing)
+					if (auto lift = mWorld.mTraversalResources.find(landing->mLiftCoordinator))
+						// An onboard passenger's committed exit must finish even after
+						// a live change; continue validating unrelated thresholds.
+						if (std::find(lift->mOccupants.begin(), lift->mOccupants.end(), id)
+							!= lift->mOccupants.end())
+							continue;
 			}
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
 				&& hasCommittedMovement(agent)) continue;

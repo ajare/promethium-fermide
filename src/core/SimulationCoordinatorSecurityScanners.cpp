@@ -116,6 +116,12 @@ namespace core
 						|| agentForbidsTraversal(actor, TraversalKind::Door)
 						|| request->mCapacityPosition < resource->mCapacity
 						|| !nearEntry(*actor) || !mWorld.canAgentAccessLocation(*chamber.getStop(chamber.getExitSide()).sector, *actor)) continue;
+					// Entry commits the complete interlocked journey for both Chamber
+					// subtypes: reserve each batch slot only when both thresholds fit
+					// Standing or Crawling. Low crossings do not extend the deadline;
+					// accepted reservations finish before shared processing starts.
+					if (!chamber.mDoors[chamber.getEntrySide()]->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
+						|| !chamber.mDoors[chamber.getExitSide()]->admitsAgentTraversal(*actor, chamber.getPosition().y, true)) continue;
 					for (uint32_t rank = 0; rank < resource->mCapacity; ++rank)
 					{
 						auto slot = chamber.isLeftToRight() ? resource->mCapacity - 1 - rank : rank;
@@ -243,6 +249,16 @@ namespace core
 		{
 			denyTraversalRequest(id, TraversalFailureReason::ControlRejected);
 			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+			return;
+		}
+		// Entry commits the complete interlocked journey. Reject an impossible
+		// exit before adopting capacity, never after boarding.
+		if (entry && (!chamber.mDoors[side]->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
+			|| !chamber.mDoors[1 - side]->admitsAgentTraversal(*actor, chamber.getPosition().y, true)))
+		{
+			auto owner = request->mOwner;
+			denyTraversalRequest(id, TraversalFailureReason::PreparationFailed);
+			replanAgentAfterAuthorizationRefusal(owner, false);
 			return;
 		}
 		if (entry && (request->mCapacityPosition >= resource.mCapacity

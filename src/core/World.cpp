@@ -4185,6 +4185,9 @@ namespace core
 			auto landing = mTraversalResources.find(liftRes.doors[i].traversalResource);
 			landing->mLiftCoordinator = coordinator;
 			landing->mLiftStopIndex = i;
+			// Lift landing Doors use their physical opening for clearance, like
+			// Bulkhead and Chamber thresholds, without a height-authoring override.
+			landing->mDoor->mLiftOwned = true;
 			// The car-side lane represents standing capacity, not corridor waiting
 			// space. Give it exactly one spot per passenger position.
 			for (auto& lane : landing->mQueueLanes)
