@@ -236,6 +236,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/simulation/DecontaminationCrawling.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/LiftCrawling.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/ShuttleCrawling.cpp` | module-owned | `pf-smoke-simulation` |
+| `smoke/simulation/MixedCrawling.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/AccessPanels.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/BoothWindows.cpp` | module-owned | `pf-smoke-simulation` |
 | `smoke/simulation/Dumbwaiters.cpp` | module-owned | `pf-smoke-simulation` |

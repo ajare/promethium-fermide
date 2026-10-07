@@ -178,6 +178,13 @@ world.release()           -- selected point, owned by this Agent only
 world.request_device(12, "set-sector-lights") -- World Interaction point ID and type
 ```
 
+`set_pose` accepts the runtime pose vocabulary `standing`, `sitting`, `lying`,
+`crouching` and `crawling`. Crouching's bodily height is 60% and Crawling's is
+30% of effective Standing height; both are runtime-only and never authored.
+Crouching is available to Lua but Door traversal never selects it automatically,
+and an admitted low Door crossing selects Crawling itself at 50% of the ordinary
+threshold speed before restoring Standing.
+
 Device requests invoke the existing point's authored typed bindings, not arbitrary
 raw device commands. Supported types are `set-sector-lights`, `open-door`,
 `set-extended-state`, `call-lift`, `select-lift-destination`, `call-shuttle`,

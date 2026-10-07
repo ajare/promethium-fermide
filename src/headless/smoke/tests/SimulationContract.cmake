@@ -202,6 +202,11 @@ set(core_names
     markerActions/furnitureUseCompetition
     markerActions/furnitureUseAtomicity
     markerActions/furnitureUseDocuments
+    mixedCrawling/journeys
+    mixedCrawling/costs
+    mixedCrawling/gates
+    mixedCrawling/lifecycle
+    mixedCrawling/persistence
     runScaledWorld
 )
 

@@ -1,4 +1,4 @@
-# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#490)
+# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#491)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
@@ -9,7 +9,9 @@ support elevation is added to that extent. Exact fits are accepted with a
 `0.00001` world-unit tolerance. Standalone Bulkhead, Airlock, Security Scanner,
 Lift landing and Shuttle landing Doors use the same rule against their physical
 opening. Other transport-owned thresholds keep their existing rules; admitted
-crossings may finish safely.
+crossings may finish safely. Windows and BoothWindows are non-passenger
+apertures that gain no clearance or traversal fallback, and the existing
+Height-scale authoring limits are unchanged.
 
 ## Automatic low-Door Crawling (#483–#484)
 
@@ -261,6 +263,43 @@ Shape assignment.
 #490 validation: the incremental Release build, including `editor`, passed; the
 full Release CTest suite and Simulation contract passed with the new Shuttle
 crawling checks.
+
+### Mixed-resource journeys (#491)
+
+The independently delivered slices compose into one mandatory route: an ordinary
+Regular Door (Layer transfer), a standalone same-Layer Bulkhead Door, an
+interlocked Airlock and a Lift. Every low threshold performs its own
+crossing-scoped Crawling-to-Standing cycle, the Agent returns Standing between
+crossings, and the shared Traversal resources stay authoritative across the
+resource boundaries. The route never enters Crouching and never crawls outside
+an admitted threshold crossing.
+
+Six low thresholds (ordinary, standalone Bulkhead, Airlock entry, Airlock exit,
+Lift boarding and Lift alighting) each add their own slower crossing to the
+perceived route cost. In-place Door and landing thresholds double their
+six-tick motion to twelve, the horizontal Bulkhead crossing halves its speed,
+and the Lift ride and ordinary walking keep their ordinary durations, so the
+route-duration difference is exactly the summed threshold additions. A forbidden
+Door Mobility, or an Airlock Access requirement without a grant, still loses the
+whole route even though every low threshold admits Crawling; a grant restores
+it. Pause freezes an admitted Lift-threshold Crawling crossing, cancellation and
+replacement inside the crossing finish the accepted journey before resolving
+the new intent, and Reset restores Standing with no leaked permit, queue, lane or
+Airlock reservation. Saving and reopening the mixed World preserves the authored
+movement intent while restoring the transient stance Standing, and adds no
+authored Pose or crossing-progress field.
+
+The Simulation `mixedCrawling/journeys`, `mixedCrawling/costs`,
+`mixedCrawling/gates`, `mixedCrawling/lifecycle` and `mixedCrawling/persistence`
+checks cover the combined route, composed costs, restricted and granted
+permission/Mobility, the pause/cancel/replace/Reset lifecycle across resource
+boundaries, and the save/reopen plus Reset stance restoration. They reuse the
+same public World movement, inspection and document seams as the per-resource
+checks and do not depend on the user's edited World. The runtime Lua pose
+vocabulary, real Furniture departure with released use/occupancy and the editor's
+Pose inspection are re-validated by the existing `markerActions/poseVocabulary`,
+`poseDoorMovementReset`, `poseEditor` and `agentPoses` checks; ordinary movement
+still restores Standing and no mixed journey adds general posed locomotion.
 
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:
