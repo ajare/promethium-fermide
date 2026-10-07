@@ -329,14 +329,22 @@ namespace
 
 		for (auto mode : { core::DoorActivationMode::Automatic, core::DoorActivationMode::Manual,
 			core::DoorActivationMode::RemoteControlled })
+		for (int frontKind = 0; frontKind != 3; ++frontKind)
+		for (int backKind = 0; backKind != 3; ++backKind)
 		for (bool reverse : { false, true })
 		for (bool alternate : { false, true })
 		for (float modifier : { 0.7f, 0.8f, 0.8001f, 1.0f })
 		for (bool external : { false, true })
 		{
 			core::World world("Clearance journeys", 12, 2);
-			auto front = world.addRoom("Front", 0, 1, 0, 12, 1);
-			auto back = world.addRoom("Back", 1, 1, 0, 12, 1);
+			auto location = [&](int kind, uint32_t layer)
+			{
+				if (kind == 1) return world.addCorridor(layer, 1, 0, 12, 1);
+				if (kind == 2) return world.addFacade(layer, 1, 0, 12, 1);
+				return world.addRoom(layer ? "Back" : "Front", layer, 1, 0, 12, 1);
+			};
+			auto front = location(frontKind, 0);
+			auto back = location(backKind, 1);
 			core::World::CreateDoorOptions options;
 			options.heightScale = 0.72f; // .36: exact fit for a valid .8 modifier.
 			options.activationMode = mode;
@@ -349,7 +357,16 @@ namespace
 			auto id = world.createAgent("Traveller", sourceSector, 0, 1.5f);
 			auto agent = world.lookupAgent(id).entity;
 			world.pauseSimulation();
-			require(world.setAgentIndividualHeightModifier(id, modifier), "Journey Height failed");
+			// Route requests exercise inherited samples; supplied Paths exercise
+			// individual-over-tag precedence at the live admission gate.
+			auto registry = core::AgentTagRegistry::create();
+			auto tag = registry->addAgentTag("height");
+			require(registry->addAgentTagHeightModifier(tag), "Journey Height tag failed");
+			if (!external && modifier != 1.0f)
+				require(registry->setAgentTagHeightModifier(tag, { modifier, modifier }), "Journey Height range failed");
+			world.attachAgentTagRegistry("journey.tags.yaml", registry);
+			require(world.assignAgentTag(id, tag), "Journey Height assignment failed");
+			if (external) require(world.setAgentIndividualHeightModifier(id, modifier), "Journey Height failed");
 			require(world.setAgentIndividualPermissionAdherence(id, false), "Adherence edit failed");
 			core::MobilityProfile mobility;
 			mobility.set(core::TraversalKind::Door, core::MobilityUse::OnlyIfNoOtherOption);
@@ -386,7 +403,8 @@ namespace
 			require(agent->getState() == core::Agent::State::Idle
 				&& (agent->getSector() == world.getSector(targetSector).get()) == (fits || alternate)
 				&& lost == (!fits && !alternate) && crossedLow == fits,
-				"World journey failed: reverse=" + std::to_string(reverse) + " alternate=" + std::to_string(alternate)
+				"World journey failed: front=" + std::to_string(frontKind) + " back=" + std::to_string(backKind)
+				+ " reverse=" + std::to_string(reverse) + " alternate=" + std::to_string(alternate)
 				+ " modifier=" + std::to_string(modifier) + " external=" + std::to_string(external) + " mode=" + std::to_string(static_cast<int>(mode))
 				+ " state=" + std::to_string(static_cast<int>(agent->getState())) + " lost=" + std::to_string(lost)
 				+ " crossedLow=" + std::to_string(crossedLow) + " x=" + std::to_string(agent->getGlobalPosition().x) + " y=" + std::to_string(agent->getGlobalPosition().y));

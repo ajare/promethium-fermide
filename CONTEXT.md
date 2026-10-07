@@ -255,6 +255,10 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 **Agent**:
 A simulated person with a position, destination path, and current movement state.
 
+**Height modifier**:
+An Agent property that multiplies its base standing height. An individual value overrides the persisted sample inherited from an Agent tag; the effective value affects appearance and ordinary Door clearance, without redefining unrelated traversal physics.
+_Avoid_: Pose height scale, which describes the runtime stance rather than an authored property
+
 **Pose**:
 An Agent's runtime bodily stance: Standing (the default), Sitting, or Lying. A Pose is simulation state, never authored; movement alone does not select a Furniture activity. Sitting reduces the Agent's effective height; Lying currently changes appearance only.
 _Avoid_: Movement state, which describes pathing progress rather than bodily stance
