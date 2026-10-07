@@ -1051,6 +1051,7 @@ namespace core
 	private:
 
 		bool childrenModified() const override;
+		bool hasActiveDoorCrossing(Door const* door) const;
 
 		void serializeImpl(Serializer& serializer, SerializationWorkData& workData) const override;
 

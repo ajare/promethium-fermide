@@ -236,6 +236,7 @@ set(editor_names
     history/independentHistoriesDoNotLeakCommandsOrState
     isolation/normalAndExceptionalExit
     scaled-doors/clipboard-history
+    scaled-doors/crossing-history
 )
 
 if(DEFINED LANE)

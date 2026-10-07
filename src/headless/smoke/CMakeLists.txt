@@ -178,6 +178,11 @@ pf_add_smoke_module(pf-smoke-agent
 
 # Explicit diagnostic invocations retain the smoke runner's ordinary CLI output
 # contract while providing the labelled traces required by ticket #476.
+add_test(NAME door-live-clearance-diagnostic COMMAND pf-smoke-agent --check liveDoorClearance)
+add_test(NAME door-live-clearance-committed COMMAND pf-smoke-agent --check committedDoorEnvelope)
+add_test(NAME door-live-clearance-editor COMMAND pf-smoke-editor --check scaled-doors/crossing-history)
+set_tests_properties(door-live-clearance-diagnostic door-live-clearance-committed door-live-clearance-editor
+    PROPERTIES ENVIRONMENT "PF_DOOR_CLEARANCE_TRACE=1" LABELS "door-clearance;functional;smoke;validation-fast" TIMEOUT 120)
 add_test(NAME door-pose-clearance-diagnostic COMMAND pf-smoke-agent --check poseDoorClearanceDiagnostics)
 add_test(NAME door-pose-clearance-movement-reset COMMAND pf-smoke-agent --check poseDoorMovementReset)
 set_tests_properties(door-pose-clearance-diagnostic door-pose-clearance-movement-reset

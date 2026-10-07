@@ -71,6 +71,8 @@ set(agent_checks
     movementRouteTimeAndExplicitSpeedsUseTheRightObservations
     poseDoorClearanceDiagnostics
     poseDoorMovementReset
+    liveDoorClearance
+    committedDoorEnvelope
     standingDoorClearance
     standingDoorWorldJourneys
     heightRangesAreBoundedRevisionedAndPersisted

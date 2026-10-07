@@ -1,4 +1,4 @@
-# Door clearance: Pose and support (#476)
+# Door clearance: Pose, support and live changes (#476–#477)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's 0.6
@@ -75,9 +75,9 @@ that future envelope without introducing such mechanics, the fixture:
 1. Creates real adjacent Rooms at Level 1, an ordinary Door, an Agent and
    catalogue-backed Furniture with a usable point at the Door approach.
 2. Uses an explicit Lua Action to pose/claim through the existing World workflow.
-3. Starts an actual two-node Agent Path and waits for its threshold boundary.
-   A narrowly scoped diagnostic driver then dispatches the same validated
-   authored Action there. It calls the production World Action execution seam;
+3. Selects an actual two-node Agent Path while already positioned at the
+   threshold. Before the next intent-collection phase, a narrowly scoped
+   diagnostic driver dispatches the same validated authored Action there. It calls the production World Action execution seam;
    it does not write private Agent state or replace clearance/queue logic.
 4. Evaluates direct and captured retained-Pose traversal facts, then advances
    actual fixed-timestep Agent/coordinator simulation. Fitting cases must be
@@ -108,7 +108,65 @@ Standing, arrival, released occupancy, and no permit through the low Door.
 These cases exercise the ordinary retry/Route-loss lifecycle separately from
 the retained-envelope diagnostic.
 
+## Live-change safety (#477)
+
+Remaining ordinary Door edges are checked against the effective traversal
+envelope before each active Agent collects traversal intent. This catches
+geometry, individual/tag Height, Pose and physical support changes even when
+neither topology nor remembered device condition changes. Infeasible suffixes
+use existing Route planning/Route loss; a sampled planning interval is not
+restarted. Queued/stale Paths still face the independent request, queue and
+permit-adoption clearance gates. Fitting queues, permissions and Mobility rules
+remain unchanged.
+
+An already admitted edge is excluded from invalidation. A plain pause freezes
+an ordinary Door crossing in place with its commitment intact; resume completes
+it even if its Agent's envelope has grown. World Height scale and Regular/Tall
+edits refuse active crossings (including paused crossings) before authored state,
+geometry, dirty state or history can change. Running World height edits also
+refuse before mutation. Idle accepted edits remain undoable.
+
+### Release live-change diagnostics
+
+```sh
+cmake --build build-linux --target pf-smoke-agent pf-smoke-editor -j 4
+ctest --test-dir build-linux -R '^door-(live|pose)-clearance-' -V
+```
+
+The new labelled `[live-clearance]` observations are:
+
+- `door-live-clearance-diagnostic`: 288 World journeys, changing Door scale
+  (`change=0`), individual Height (`1`) or tag-supplied Height (`2`) after route
+  selection, near/queued and far from admission. Both directions, all four
+  opening styles, all three activation modes and alternative/no-alternative
+  outcomes are covered. Authored changes use the supported paused editor World
+  seams; a plain pause already replans waiting movement.
+- `door-live-clearance-committed`: six Regular/Tall journeys in both directions.
+  The existing validated Action diagnostic changes retained Pose (`admitted-change=0`)
+  or physical support (`1` Regular, `2` Tall) after admission. All complete;
+  a subsequent stale oversized Path is refused with Route planning and no permit.
+  This uses the #476 Action dispatch seam, not private-field manipulation or
+  new seated locomotion.
+- `door-live-clearance-editor`: real document snapshots and history check running
+  and paused edit refusal, unchanged YAML/topology/dirty state/history, preserved
+  crossing position, individual Height enlargement during crossing, safe arrival,
+  and undo/redo of the preceding accepted scale edit with restored clearance.
+
+The existing Pose diagnostics change the envelope on selected external Paths
+before intent collection, observing fitting crossings or Route planning without
+oversized permits. `standingDoorWorldJourneys` also covers a stale oversized queue
+head with a fitting follower. The combined Agent, World and Editor smoke modules
+retain the Location-pairing, Tall/excluded-ownership and legacy-geometry matrix.
+
 ## Verification record
+
+#477: the complete incremental Release build (including the editor) succeeded;
+all **115/115 CTests** passed. The five combined dedicated diagnostics also
+passed. `git diff --check` is clean. Interactive editor checks were not run;
+the document/history fixture and labelled World diagnostics are the automated
+counterparts for the ticket's manual workflow.
+
+### Earlier #476 verification
 
 Release `smoke-agent`: all 67 checks passed, including both new checks and the
 existing Standing clearance and journey regressions. The complete incremental

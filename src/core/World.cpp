@@ -34,6 +34,7 @@
 #include "core/WalkwaySectorObject.h"
 #include "core/PlatformLift.h"
 #include "core/BulkheadDoor.h"
+#include "core/DoorEdge.h"
 #include "core/Exceptions.h"
 
 
@@ -5132,6 +5133,20 @@ namespace core
 		return true;
 	}
 
+	bool World::hasActiveDoorCrossing(Door const* door) const
+	{
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			(void)id;
+			if (agent->mState != Agent::State::TraversingEdge
+				&& agent->mState != Agent::State::AwaitingTraversalCommit) continue;
+			if (!agent->mTraversalTask) continue;
+			auto edge = dynamic_pointer_cast<DoorEdge const>(agent->mTraversalTask->edge);
+			if (edge && edge->getDoor().get() == door) return true;
+		}
+		return false;
+	}
+
 	bool World::setSectorDoorHeightScale(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t width, std::optional<float> scale, std::string* diagnostic)
 	{
@@ -5148,6 +5163,7 @@ namespace core
 		if (typeid(*door) != typeid(Door) || door->isChamberOwned()
 			|| !isLocationLike(door->getFrontSector()->getType()) || !isLocationLike(door->getBackSector()->getType()))
 			return reject("Height scale is only available for ordinary Doors between Locations");
+		if (hasActiveDoorCrossing(door.get())) return reject("Cannot change Door height during an active crossing");
 		if (options.heightScale == scale) { if (diagnostic) diagnostic->clear(); return true; }
 		try
 		{
@@ -5170,6 +5186,11 @@ namespace core
 	bool World::setSectorDoorHeight(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 		Door::Height height, std::string* diagnostic)
 	{
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause simulation to change Door height";
+			return false;
+		}
 		CreateDoorOptions options;
 		if (!getSectorDoorOptions(layerIndex, y, x, width, options))
 		{
@@ -5201,6 +5222,14 @@ namespace core
 					&& record.a == y && record.b == x && record.c == width;
 			});
 		if (found == mConstructionRecords.rend()) return false;
+		auto const& doorCell = mLayers[layerIndex]->getCellDefinition(x, y);
+		auto doorObject = dynamic_pointer_cast<DoorSectorObject>(
+			mSectors[doorCell.sectorIndex]->_getObject(doorCell.sectorObjectIndex));
+		if (doorObject && hasActiveDoorCrossing(doorObject->getDoor().get()))
+		{
+			if (diagnostic) *diagnostic = "Cannot change Door height during an active crossing";
+			return false;
+		}
 		try
 		{
 			for (auto layer : {layerIndex, layerIndex + 1})

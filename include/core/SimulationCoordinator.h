@@ -238,6 +238,7 @@ namespace core
 		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool setExtensibleBroken(TraversalResourceId resource, bool broken);
 		void observeLocalDeviceConditions(Agent& agent);
+		void validateDoorClearancePath(Agent& agent);
 		bool setTransportBroken(TraversalResourceId transport, bool broken);
 		void allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource);
 

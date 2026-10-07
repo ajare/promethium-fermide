@@ -28,6 +28,8 @@
 
 void runPoseDoorClearanceDiagnostics(smoke::Context const& context);
 void runPoseDoorMovementReset(smoke::Context const& context);
+void runLiveDoorClearance(smoke::Context const& context);
+void runCommittedDoorEnvelope(smoke::Context const& context);
 
 namespace
 {
@@ -428,6 +430,8 @@ void agent_smoke::registerHeight(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "poseDoorClearanceDiagnostics", runPoseDoorClearanceDiagnostics });
 	checks.push_back({ "poseDoorMovementReset", runPoseDoorMovementReset });
+	checks.push_back({ "liveDoorClearance", runLiveDoorClearance });
+	checks.push_back({ "committedDoorEnvelope", runCommittedDoorEnvelope });
 	checks.push_back({ "standingDoorClearance", [](smoke::Context const&) { standingDoorClearance(); } });
 	checks.push_back({ "standingDoorWorldJourneys", [](smoke::Context const&) { standingDoorWorldJourneys(); } });
 	checks.push_back({ "heightRangesAreBoundedRevisionedAndPersisted", [](smoke::Context const&) { rangesAreBoundedRevisionedAndPersisted(); } });

@@ -12,6 +12,7 @@
 #include "core/Coordination.h"
 #include "core/Defines.h"
 #include "core/Edge.h"
+#include "core/DoorEdge.h"
 #include "core/Exceptions.h"
 #include "core/Graph.h"
 #include "core/Lift.h"
@@ -493,6 +494,7 @@ namespace core
 				(void)id;
 				if (!agent->isActive()) continue;
 				observeLocalDeviceConditions(*agent);
+				validateDoorClearancePath(*agent);
 				agent->collectTraversalIntent();
 			}
 			break;
@@ -887,6 +889,14 @@ namespace core
 						airlockJourney = true;
 			}
 			if (airlockJourney) continue;
+			// An admitted ordinary Door crossing is a safety commitment. A plain
+			// pause freezes it, rather than returning it to the source boundary.
+			if (agent->mTraversalTask && hasCommittedMovement(*agent))
+				if (auto edge = dynamic_pointer_cast<DoorEdge const>(agent->mTraversalTask->edge);
+					edge && typeid(*edge->getDoor()) == typeid(Door)
+					&& !edge->getDoor()->isChamberOwned()
+					&& isLocationLike(edge->getDoor()->getFrontSector()->getType())
+					&& isLocationLike(edge->getDoor()->getBackSector()->getType())) continue;
 			auto path = agent->mPath.path;
 			auto from = agent->mPath.targetNode;
 			if (agent->mState == Agent::State::RoutePlanning)

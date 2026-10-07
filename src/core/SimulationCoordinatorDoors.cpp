@@ -6,6 +6,7 @@
 #include "core/World.h"
 #include "core/Coordination.h"
 #include "core/Door.h"
+#include "core/DoorEdge.h"
 #include "core/ExtensibleObject.h"
 #include "core/DoorSectorObject.h"
 #include "core/BulkheadDoorSectorObject.h"
@@ -196,6 +197,35 @@ namespace core
 			return; // Never restart or extend an already sampled planning interval.
 		}
 		replanAgentAfterAuthorizationRefusal(agentId, !invalid);
+	}
+
+	void SimulationCoordinator::validateDoorClearancePath(Agent& agent)
+	{
+		auto const id = mWorld.getAgentId(&agent);
+		auto goal = mWorld.mMovementGoals.find(id);
+		auto path = agent.mPath.path;
+		auto from = agent.mPath.targetNode;
+		if (!path && goal != mWorld.mMovementGoals.end())
+		{
+			path = goal->second.retainedPath;
+			from = goal->second.retainedFromNode;
+		}
+		if (!path) return;
+		// Geometry and the effective envelope can change without a topology or
+		// device-condition revision. Check the remaining suffix before intent
+		// collection, including externally supplied Paths and queued Agents.
+		for (size_t node = from; node < path->nodes.size(); ++node)
+		{
+			auto edge = dynamic_pointer_cast<DoorEdge const>(path->nodes[node].edge);
+			if (!edge) continue;
+			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
+				&& hasCommittedMovement(agent)) continue;
+			auto source = edge->getOtherVertex(path->nodes[node].targetVertex);
+			if (edge->getDoor()->admitsVerticalExtent(agent.getTraversalDoorClearanceExtent(),
+				source->getPosition().y)) continue;
+			replanAgentAfterAuthorizationRefusal(id, false);
+			return; // An existing sampled planning interval is never restarted.
+		}
 	}
 
 	void SimulationCoordinator::allocateRemoteDoorPreparation(TraversalRequestId requestId, TraversalResource& resource)

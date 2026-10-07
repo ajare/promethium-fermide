@@ -3,6 +3,7 @@
 #include "core/Agent.h"
 #include "core/DoorEdge.h"
 #include "core/RouteTraversalInputs.h"
+#include "core/AgentTagRegistry.h"
 #include "PathFixture.h"
 #include <cstdlib>
 #include <fstream>
@@ -136,8 +137,6 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		// Path start clears generic poses, so the diagnostic dispatches the
 		// authored Action at the waiting boundary rather than editing fields.
 		agent->setPath(smoke::twoNodePath(source, target, edge), true);
-		world.advanceTick();
-		require(agent->getState() == core::Agent::State::WaitingForTraversal, "Diagnostic actor did not reach threshold");
 		core::DoorClearanceDiagnostic::poseAtThreshold(world, id, marker, action);
 		auto policy = world.getRouteChoicePolicy();
 		core::RouteDecisionContext retained{agent, policy.baselineProfile, policy, agent->getSector(),
@@ -193,6 +192,153 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		catch (std::exception const&) { refused = true; }
 		require(refused, std::string("Invalid support elevation accepted: ") + literal);
 		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] invalid-support=" << literal << " outcome=refused\n";
+	}
+}
+
+void runLiveDoorClearance(smoke::Context const&)
+{
+	for (int change = 0; change != 3; ++change)
+	for (bool queued : {false, true})
+	for (bool alternate : {false, true})
+	for (bool reverse : {false, true})
+	for (auto mode : {core::DoorActivationMode::Automatic, core::DoorActivationMode::Manual,
+		core::DoorActivationMode::RemoteControlled})
+	for (auto style : {core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenLeft,
+		core::Door::OpenStyle::OpenRight, core::Door::OpenStyle::OpenApart})
+	{
+		core::World world("Live clearance", 12, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto origin = reverse ? back : front, destination = reverse ? front : back;
+		core::World::CreateDoorOptions options;
+		options.heightScale = .72f;
+		options.speedOverride = .1f;
+		options.activationMode = mode;
+		options.openStyle = style;
+		options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+		auto low = world.addSectorDoor(0, 0, 2, options);
+		if (alternate) world.addSectorDoor(0, 0, 9, {});
+		world.addSectorMarker(destination, 0, 3.5f, "Goal");
+		world.finishBuild();
+		auto id = world.createAgent("Traveller", origin, 0, queued ? 2.5f : .5f);
+		auto agent = world.lookupAgent(id).entity;
+		world.pauseSimulation();
+		auto registry = core::AgentTagRegistry::create();
+		auto tag = registry->addAgentTag("height");
+		require(registry->addAgentTagHeightModifier(tag)
+			&& registry->setAgentTagHeightModifier(tag, {.7f, .7f}), "Live tag fixture failed");
+		world.attachAgentTagRegistry("live.tags.yaml", registry);
+		require(world.assignAgentTag(id, tag), "Live tag assignment failed");
+		require(world.resumeSimulation(), "Live resume failed");
+		require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Live goal refused");
+		bool selected = false;
+		for (unsigned tick = 0; tick < 600; ++tick)
+		{
+			world.advanceTick();
+			if (agent->getPath() && (!queued || agent->getState() == core::Agent::State::WaitingForTraversal))
+			{ selected = true; break; }
+		}
+		require(selected, "Live route was not selected before edit");
+		if (change == 0)
+		{
+			world.pauseSimulation();
+			require(world.setSectorDoorHeightScale(0, 0, 2, 1, .6f), "Idle height edit refused");
+			require(world.resumeSimulation(), "Height edit resume failed");
+		}
+		else
+		{
+			world.pauseSimulation();
+			if (change == 1) require(world.setAgentIndividualHeightModifier(id, 1.f), "Live individual edit failed");
+			else require(registry->setAgentTagHeightModifier(tag, {1.f, 1.f}), "Live tag edit failed");
+			require(world.resumeSimulation(), "Envelope edit resume failed");
+		}
+		bool lost = false, crossedLow = false, planning = false;
+		for (unsigned tick = 0; tick < 6000; ++tick)
+		{
+			world.advanceTick();
+			planning |= agent->getState() == core::Agent::State::RoutePlanning;
+			for (auto const& event : world.consumeSimulationEvents())
+				if (event.type == core::SimulationEventType::RouteLost)
+				{
+					lost = true;
+					require(event.routeLossReason == core::RouteLossReason::Unreachable
+						|| event.routeLossReason == core::RouteLossReason::TopologyChanged, "Wrong live Route loss");
+				}
+			for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+				if (request.resource == low.traversalResource && request.state == core::TraversalRequestState::Granted)
+					crossedLow = true;
+			if (agent->getState() == core::Agent::State::Idle) break;
+		}
+		require(planning && !crossedLow && lost == !alternate
+			&& (agent->getSector() == world.getSector(destination).get()) == alternate,
+			"Live clearance did not replan safely: change=" + std::to_string(change));
+		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] change=" << change
+			<< " queued=" << queued << " reverse=" << reverse << " mode=" << int(mode) << " style=" << int(style)
+			<< " outcome=" << (alternate ? "alternate/arrived" : "route-loss") << '\n';
+	}
+}
+
+void runCommittedDoorEnvelope(smoke::Context const& context)
+{
+	for (int change = 0; change != 3; ++change)
+	for (bool reverse : {false, true})
+	{
+		core::World world("Committed envelope", 6, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 6, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 6, 1);
+		auto origin = reverse ? back : front;
+		core::World::CreateDoorOptions options;
+		if (change == 2) options.height = core::Door::Height::Tall;
+		else options.heightScale = .28f / CORE_DOOR_HEIGHT;
+		world.addSectorDoor(0, 0, 2, options);
+		auto path = catalogue(context, change == 2 ? .64f : .03f, false);
+		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
+		require(world.placeFurniture(origin, "support", 2, 0, "Support") != 0
+			&& world.placeFurniture(reverse ? front : back, "support", 2, 0, "Other support") != 0, "Committed support fixture failed");
+		world.finishBuild();
+		auto marker = world.furniture().front().destinations.front().marker;
+		auto otherMarker = world.furniture().back().destinations.front().marker;
+		auto id = world.createAgent("Body", origin, 0, 2.5f);
+		auto agent = world.lookupAgent(id).entity;
+		world.pauseSimulation();
+		auto actions = context.temporaryRoot() / "committed.actions.lua";
+		write(actions, "return {api_version=1,uuid='" + std::string(uuid) + "',actions={{"
+			"key='sit',name='Sit',run=function(a,w,m) w.set_pose('sitting') end},{"
+			"key='change',name='Change',run=function(a,w,m) w.set_pose('"
+			+ (change == 0 ? "lying" : "sitting") + "'); " + (change == 0 ? "" : "w.claim(); ") + "end}}}");
+		auto sit = std::string(uuid) + ":sit", changed = std::string(uuid) + ":change";
+		require(world.selectActionRegistry(actions) && world.setMarkerActions(marker, {sit, changed})
+			&& world.setMarkerActions(otherMarker, {sit, changed}), "Committed Action fixture failed");
+		require(world.resumeSimulation(), "Committed resume failed");
+		auto edge = doorEdge(world);
+		auto source = edge->getVertex(0)->getSector()->getIndex() == origin ? edge->getVertex(0) : edge->getVertex(1);
+		auto target = edge->getOtherVertex(source);
+		agent->setPath(smoke::twoNodePath(source, target, edge), true);
+		core::DoorClearanceDiagnostic::poseAtThreshold(world, id, marker, sit);
+		bool admitted = false;
+		for (unsigned tick = 0; tick < 600; ++tick)
+		{
+			world.advanceTick();
+			if (agent->getState() == core::Agent::State::TraversingEdge) { admitted = true; break; }
+		}
+		require(admitted, "Fitting retained envelope was not admitted");
+		core::DoorClearanceDiagnostic::poseAtThreshold(world, id, marker, changed);
+		auto door = std::static_pointer_cast<core::DoorEdge const>(edge)->getDoor();
+		require(!door->admitsVerticalExtent(agent->getTraversalDoorClearanceExtent(), source->getPosition().y),
+			"Changed envelope still fits diagnostic aperture");
+		for (unsigned tick = 0; tick < 600 && agent->getState() != core::Agent::State::Idle; ++tick) world.advanceTick();
+		require(agent->getState() == core::Agent::State::Idle && agent->getSector() == target->getSector().get(),
+			"Admitted Pose/support enlargement interrupted crossing");
+		// The commitment is over: the same oversized envelope must not be
+		// granted a subsequent crossing, even on an externally supplied Path.
+		agent->setPath(smoke::twoNodePath(target, source, edge), true);
+		core::DoorClearanceDiagnostic::poseAtThreshold(world, id, otherMarker, changed);
+		world.advanceTick();
+		require(agent->getState() == core::Agent::State::RoutePlanning
+			&& world.getSimulationSnapshot().traversalPermits.empty(), "Subsequent oversized crossing was admitted");
+		agent->clearPath();
+		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] admitted-change=" << change
+			<< " reverse=" << reverse << " outcome=completed/subsequent-refused\n";
 	}
 }
 
