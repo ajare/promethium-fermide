@@ -155,7 +155,11 @@ child uses its shared startup log. The contract checks exact CLI behavior from a
 empty directory containing spaces and verifies explicitly that a missing required
 child fails rather than skips. `smoke-startup-failures` uses synthetic headless
 children to test wrong statuses, abort, exception termination, timeout, and
-in-process environment isolation; it is not serialized. The compatibility switch
+in-process environment isolation; it is not serialized. Its synthetic timeout
+probe injects a one-second budget into the same platform-specific child wait,
+termination, and reaping path; real GUI checks retain their 30-second default.
+The failure contract also rejects a premature timeout or a synthetic probe that
+takes longer than ten seconds to finish. The compatibility switch
 `--graphics-startup-smoke` dispatches Startup, or reports missing product status
 127 in GUI-disabled builds. See [Windows Startup validation](windows-startup-validation.md)
 for the Debug/Release matrix and no-dialog process setup.

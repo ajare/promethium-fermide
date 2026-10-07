@@ -30,6 +30,15 @@ namespace
 
 int main(int argc, char** argv)
 {
+	if (argc == 2 && std::string(argv[1]) == "--verify-timeout")
+	{
+		// Exercise the real platform-specific timeout/kill/reap path without
+		// spending the real GUI's 30-second allowance on a synthetic sleeper.
+		std::vector<smoke::Check> checks;
+		startup_smoke::registerSyntheticTimeoutCheck(checks);
+		return smoke::main("startup", checks, 1, argv);
+	}
+
 	if (argc == 2 && std::string(argv[1]) == "--verify-environment")
 	{
 		auto driver = environment("SDL_VIDEODRIVER");

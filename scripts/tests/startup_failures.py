@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 startup, probe = map(lambda value: Path(value).resolve(), sys.argv[1:])
 with tempfile.TemporaryDirectory(prefix="pf startup failures ") as temporary:
@@ -15,9 +16,9 @@ with tempfile.TemporaryDirectory(prefix="pf startup failures ") as temporary:
                PF_STARTUP_INHERITED="value with spaces", SDL_VIDEODRIVER="parent-driver",
                DISPLAY="parent-display", WAYLAND_DISPLAY="parent-wayland")
 
-    def run(command, mode, status, diagnostic):
+    def run(command, mode, status, diagnostic, timeout=40):
         result = subprocess.run(command, cwd=work, env=dict(env, PF_STARTUP_PROBE=mode),
-                                capture_output=True, text=True, timeout=40)
+                                capture_output=True, text=True, timeout=timeout)
         assert result.returncode == status, (mode, result.returncode, result.stdout, result.stderr)
         assert diagnostic in result.stdout, (mode, result.stdout, result.stderr)
         assert f"SUMMARY startup pass={1 if status == 0 else 0} fail={status} skip=0" in result.stdout
@@ -28,9 +29,14 @@ with tempfile.TemporaryDirectory(prefix="pf startup failures ") as temporary:
             ("wrong", 1, "GUI exited with unexpected status 23"),
             ("abort", 1, "GUI aborted" if os.name == "nt" else "GUI terminated by signal"),
             ("exception", 1, "GUI crashed with exit code 3221225477" if os.name == "nt"
-             else "GUI terminated by signal"),
-            ("timeout", 1, "GUI executable did not fail fast")):
+             else "GUI terminated by signal")):
         run([str(startup)], mode, status, diagnostic)
+    # Only the synthetic sleeper uses a short injected timeout. Other negatives
+    # still exercise the normal Startup product and its default GUI budget.
+    started = time.monotonic()
+    run([str(probe), "--verify-timeout"], "timeout", 1,
+        "GUI executable did not fail fast", timeout=10)
+    assert time.monotonic() - started >= 0.8, "Synthetic timeout fired prematurely"
     # Exercise the actual check in one process, then inspect the environment:
     # a subprocess-only parent assertion would miss the old _putenv_s leak.
     run([str(probe), "--verify-environment"], "controlled", 0,

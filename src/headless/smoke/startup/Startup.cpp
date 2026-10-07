@@ -30,7 +30,6 @@
 
 namespace
 {
-	constexpr int StartupTimeoutMs = 30'000;
 	constexpr char UnusableVideoDriver[] = "promethium-fermide-no-such-video-driver";
 
 	std::string environmentValue(char const* name)
@@ -109,7 +108,7 @@ namespace
 		return environment;
 	}
 
-	void runGuiWithUnusableDriver(std::filesystem::path const& guiExecutable)
+	void runGuiWithUnusableDriver(std::filesystem::path const& guiExecutable, int timeoutMs)
 	{
 		auto environment = childEnvironment();
 		STARTUPINFOW startupInfo{};
@@ -126,7 +125,7 @@ namespace
 		}
 
 		DWORD const waitResult = WaitForSingleObject(processInfo.hProcess,
-			static_cast<DWORD>(StartupTimeoutMs));
+			static_cast<DWORD>(timeoutMs));
 		if (waitResult == WAIT_TIMEOUT)
 		{
 			TerminateProcess(processInfo.hProcess, 1);
@@ -177,7 +176,7 @@ namespace
 		}
 	}
 #else
-	void runGuiWithUnusableDriver(std::filesystem::path const& guiExecutable)
+	void runGuiWithUnusableDriver(std::filesystem::path const& guiExecutable, int timeoutMs)
 	{
 		pid_t const child = fork();
 		if (child == -1)
@@ -209,7 +208,7 @@ namespace
 				waitpid(child, &status, 0);
 				throw smoke::Failure("Could not wait for the GUI smoke child process");
 			}
-			if (waitedMs >= StartupTimeoutMs)
+			if (waitedMs >= timeoutMs)
 			{
 				kill(child, SIGKILL);
 				waitpid(child, &status, 0);
@@ -243,13 +242,19 @@ namespace
 	}
 #endif
 
+	template<int TimeoutMs>
 	void graphicsInitializationFailure(smoke::Context const&)
 	{
-		runGuiWithUnusableDriver(requiredGuiExecutable());
+		runGuiWithUnusableDriver(requiredGuiExecutable(), TimeoutMs);
 	}
 }
 
 void startup_smoke::registerChecks(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "graphicsInitializationFailure", graphicsInitializationFailure });
+	checks.push_back({ "graphicsInitializationFailure", graphicsInitializationFailure<30'000> });
+}
+
+void startup_smoke::registerSyntheticTimeoutCheck(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({ "graphicsInitializationFailure", graphicsInitializationFailure<1000> });
 }
