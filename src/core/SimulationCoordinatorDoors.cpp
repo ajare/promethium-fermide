@@ -234,15 +234,15 @@ namespace core
 					|| (agent.mTraversalTask && agent.mTraversalTask->edge->getTraversalResourceId()
 						== edge->getTraversalResourceId() && hasCommittedMovement(agent)))) continue;
 			}
-			if (door->isLiftOwned())
+			if (door->isLiftOwned() || door->isShuttleOwned())
 			{
 				auto landing = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
 				if (landing)
-					if (auto lift = mWorld.mTraversalResources.find(landing->mLiftCoordinator))
+					if (auto transport = mWorld.mTraversalResources.find(landing->mLiftCoordinator))
 						// An onboard passenger's committed exit must finish even after
 						// a live change; continue validating unrelated thresholds.
-						if (std::find(lift->mOccupants.begin(), lift->mOccupants.end(), id)
-							!= lift->mOccupants.end())
+						if (std::find(transport->mOccupants.begin(), transport->mOccupants.end(), id)
+							!= transport->mOccupants.end())
 							continue;
 			}
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge

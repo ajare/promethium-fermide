@@ -899,14 +899,16 @@ namespace core
 					bulkhead && bulkhead->isStandalone()) continue;
 			// An admitted ordinary Door crossing is a safety commitment. A plain
 			// pause freezes it, rather than returning it to the source boundary.
-			// Lift landing Doors share that commitment for boarding/disembarking.
+			// Lift and Shuttle landing Doors share that commitment for
+			// boarding/disembarking.
 			if (agent->mTraversalTask && hasCommittedMovement(*agent))
 				if (auto edge = dynamic_pointer_cast<DoorEdge const>(agent->mTraversalTask->edge);
 					edge && typeid(*edge->getDoor()) == typeid(Door)
 					&& !edge->getDoor()->isChamberOwned()
 					&& ((isLocationLike(edge->getDoor()->getFrontSector()->getType())
 						&& isLocationLike(edge->getDoor()->getBackSector()->getType()))
-						|| edge->getDoor()->isLiftOwned())) continue;
+						|| edge->getDoor()->isLiftOwned()
+						|| edge->getDoor()->isShuttleOwned())) continue;
 			auto path = agent->mPath.path;
 			auto from = agent->mPath.targetNode;
 			if (agent->mState == Agent::State::RoutePlanning)

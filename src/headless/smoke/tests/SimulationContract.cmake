@@ -90,6 +90,11 @@ set(core_names
     shuttles/brokenStopDoorsAndSelectorSafety
     shuttles/brokenLocalMemory
     shuttles/brokenRoutePlanning
+    shuttles/crawlingJourneys
+    shuttles/crawlingCapacity
+    shuttles/crawlingCarriages
+    shuttles/crawlingLifecycle
+    shuttles/crawlingGates
     brokenDoors/frozenPositionAndCommands
     brokenDoors/operationsAndAdmittedCrossings
     brokenDoors/individualLocalMemory

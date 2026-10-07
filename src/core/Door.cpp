@@ -65,19 +65,20 @@ namespace core
 		auto back = getBackSector();
 		// Standalone, Airlock and both Chamber subtypes (Security Scanner and
 		// Decontamination) use their physical Bulkhead Door opening, never an
-		// ordinary Door height override. Transport landing Doors likewise use
-		// their physical opening. Other specialized thresholds retain their rules.
+		// ordinary Door height override. Lift and Shuttle landing Doors likewise
+		// use their physical opening. Other specialized thresholds retain their rules.
 		bool const bulkhead = typeid(*this) == typeid(BulkheadDoor);
 		auto supportedSector = [&](Sector const& sector) {
 			return isLocationLike(sector.getType())
 				|| (isAirlockOwned() && sector.getType() == SectorType::Airlock)
 				|| (isSecurityScannerOwned() && sector.getType() == SectorType::Chamber)
-				|| (mLiftOwned && sector.getType() == SectorType::Lift);
+				|| (mLiftOwned && sector.getType() == SectorType::Lift)
+				|| (mShuttleOwned && sector.getType() == SectorType::Shuttle);
 		};
 		if ((!bulkhead && typeid(*this) != typeid(Door)) || !front || !back
 			|| !supportedSector(*front) || !supportedSector(*back)) return true;
 		auto const availableHeight = getPosition().y
-			+ ((bulkhead || mLiftOwned) ? getSize().y : effectiveHeight(mHeight, mHeightScale)) - approachFloorY;
+			+ ((bulkhead || mLiftOwned || mShuttleOwned) ? getSize().y : effectiveHeight(mHeight, mHeightScale)) - approachFloorY;
 		return topAboveFloor <= availableHeight + ClearanceTolerance;
 	}
 

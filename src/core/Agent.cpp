@@ -1717,10 +1717,12 @@ namespace core
 		}
 
 		// Recheck before adopting even an already granted permit, never during crossing.
-		// An onboard Lift passenger's committed exit is exempt: it must finish its
-		// journey even if a live change made the opening or envelope impossible.
+		// An onboard Lift or Shuttle passenger's committed exit is exempt: it must
+		// finish its journey even if a live change made the opening or envelope
+		// impossible.
 		if (mTraversalTask->edge->getType() == EdgeType::Door
 			&& getSector()->getType() != SectorType::Lift
+			&& getSector()->getType() != SectorType::Shuttle
 			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsAgentTraversal(
 				*this, getGlobalPosition().y))
 		{
@@ -1820,10 +1822,12 @@ namespace core
 				auto const& doorEdge = static_cast<DoorEdge const&>(*mTraversalTask->edge);
 				auto const mode = doorEdge.getDoor()->classifyAgentCrossing(
 					*this, getGlobalPosition().y);
-				// An onboard Lift passenger must finish its committed exit even if
-				// its envelope or the opening changed during the ride.
+				// An onboard Lift or Shuttle passenger must finish its committed exit
+				// even if its envelope or the opening changed during the ride.
 				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
-					|| (mode == Door::DoorCrossingMode::None && getSector()->getType() == SectorType::Lift);
+					|| (mode == Door::DoorCrossingMode::None
+						&& (getSector()->getType() == SectorType::Lift
+							|| getSector()->getType() == SectorType::Shuttle));
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
 			if (bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()

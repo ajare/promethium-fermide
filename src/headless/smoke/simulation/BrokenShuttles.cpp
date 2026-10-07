@@ -225,10 +225,13 @@ namespace
 	}
 }
 
+void registerShuttleCrawling(std::vector<smoke::Check>& checks);
+
 void registerBrokenShuttles(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "shuttles/brokenFreezeAndRecoverPassengers", [](smoke::Context const&) { freezeAndRecover(); } });
 	checks.push_back({ "shuttles/brokenStopDoorsAndSelectorSafety", [](smoke::Context const&) { doorSafety(); } });
 	checks.push_back({ "shuttles/brokenLocalMemory", [](smoke::Context const&) { localMemory(); } });
 	checks.push_back({ "shuttles/brokenRoutePlanning", [](smoke::Context const&) { routePlanning(); } });
+	registerShuttleCrawling(checks);
 }

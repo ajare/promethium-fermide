@@ -4459,6 +4459,9 @@ namespace core
 				(void)inserted;
 				landing->mLiftCoordinator = coordinator;
 				landing->mLiftStopIndex = stop;
+				// Shuttle landing Doors use their physical opening for clearance, like
+				// Lift landing Doors, without a height-authoring override.
+				landing->mDoor->mShuttleOwned = true;
 				shuttleResource->mShuttleDoors.push_back({ stop, carriage, zone->second,
 					locationId, doorResult.traversalResource,
 					carriage * (options.carWidth + 1.0f) + doorOffsets[door] + 0.5f });

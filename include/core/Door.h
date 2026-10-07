@@ -45,6 +45,7 @@ namespace core
 		bool mAirlockOwned{ false };
 		bool mSecurityScannerOwned{ false };
 		bool mLiftOwned{ false };
+		bool mShuttleOwned{ false };
 		void advanceCoordinatedMotion(float frameTime);
 		bool mBreakable{ false };
 		bool mInitiallyBroken{ false };
@@ -118,6 +119,7 @@ namespace core
 		bool isAirlockOwned() const { return mAirlockOwned; }
 		bool isSecurityScannerOwned() const { return mSecurityScannerOwned; }
 		bool isLiftOwned() const { return mLiftOwned; }
+		bool isShuttleOwned() const { return mShuttleOwned; }
 		bool isChamberOwned() const { return mAirlockOwned || mSecurityScannerOwned; }
 		bool isBreakable() const { return mBreakable; }
 		bool isInitiallyBroken() const { return mInitiallyBroken; }

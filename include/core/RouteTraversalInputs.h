@@ -37,9 +37,9 @@ namespace core
 		bool needsActivation = false;
 		bool boarding = false;
 		bool open = false;
-		// Ordinary, Bulkhead (including Airlock and Chamber) and Lift landing Door
-		// crossing uses the low-Door Crawling fallback (30% height) with a doubled
-		// motion duration.
+		// Ordinary, Bulkhead (including Airlock and Chamber), Lift landing and
+		// Shuttle landing Door crossing uses the low-Door Crawling fallback (30%
+		// height) with a doubled motion duration.
 		bool crawling = false;
 		// 0 automatic, 1 manual, 2 remote; unavailable is captured as exclusion.
 		uint8_t activation = 0;
