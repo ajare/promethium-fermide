@@ -2,6 +2,7 @@
 #include <cmath>
 
 #include "core/Door.h"
+#include "core/BulkheadDoor.h"
 #include "core/Sector.h"
 #include "core/Agent.h"
 
@@ -62,10 +63,13 @@ namespace core
 	{
 		auto front = getFrontSector();
 		auto back = getBackSector();
-		// Specialized, transport and chamber thresholds keep their existing rules.
-		if (typeid(*this) != typeid(Door) || isChamberOwned() || !front || !back
+		// Standalone Bulkhead Doors use their physical opening, not an ordinary
+		// Door height scale. Chamber and transport thresholds retain their rules.
+		bool const bulkhead = typeid(*this) == typeid(BulkheadDoor) && !isChamberOwned();
+		if ((!bulkhead && typeid(*this) != typeid(Door)) || isChamberOwned() || !front || !back
 			|| !isLocationLike(front->getType()) || !isLocationLike(back->getType())) return true;
-		auto const availableHeight = getPosition().y + effectiveHeight(mHeight, mHeightScale) - approachFloorY;
+		auto const availableHeight = getPosition().y
+			+ (bulkhead ? getSize().y : effectiveHeight(mHeight, mHeightScale)) - approachFloorY;
 		return topAboveFloor <= availableHeight + ClearanceTolerance;
 	}
 

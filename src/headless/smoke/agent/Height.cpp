@@ -33,6 +33,9 @@ void runCommittedDoorEnvelope(smoke::Context const& context);
 void runAutomaticCrawlingJourneys(smoke::Context const& context);
 void runControlledCrawlingLifecycle(smoke::Context const& context);
 void runControlledCrawlingGates(smoke::Context const& context);
+void runBulkheadCrawlingJourneys(smoke::Context const& context);
+void runBulkheadCrawlingLifecycle(smoke::Context const& context);
+void runBulkheadCrawlingGates(smoke::Context const& context);
 
 namespace
 {
@@ -464,6 +467,9 @@ void agent_smoke::registerHeight(std::vector<smoke::Check>& checks)
 	checks.push_back({ "automaticCrawlingJourneys", runAutomaticCrawlingJourneys });
 	checks.push_back({ "controlledCrawlingLifecycle", runControlledCrawlingLifecycle });
 	checks.push_back({ "controlledCrawlingGates", runControlledCrawlingGates });
+	checks.push_back({ "bulkheadCrawlingJourneys", runBulkheadCrawlingJourneys });
+	checks.push_back({ "bulkheadCrawlingLifecycle", runBulkheadCrawlingLifecycle });
+	checks.push_back({ "bulkheadCrawlingGates", runBulkheadCrawlingGates });
 	checks.push_back({ "heightRangesAreBoundedRevisionedAndPersisted", [](smoke::Context const&) { rangesAreBoundedRevisionedAndPersisted(); } });
 	checks.push_back({ "heightAssignmentPersistenceAndConflictsMatchOtherProperties", [](smoke::Context const&) { assignmentPersistenceAndConflictsMatchOtherProperties(); } });
 }

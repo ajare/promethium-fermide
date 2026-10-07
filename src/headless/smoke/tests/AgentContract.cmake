@@ -78,6 +78,9 @@ set(agent_checks
     automaticCrawlingJourneys
     controlledCrawlingLifecycle
     controlledCrawlingGates
+    bulkheadCrawlingJourneys
+    bulkheadCrawlingLifecycle
+    bulkheadCrawlingGates
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist

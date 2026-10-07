@@ -1,5 +1,6 @@
 #include "core/Agent.h"
 #include "core/DoorEdge.h"
+#include "core/BulkheadDoorEdge.h"
 
 #include "core/World.h"
 #include "core/Edge.h"
@@ -1227,7 +1228,9 @@ namespace core
 		{
 			mWorld->finishFurnitureUse(mWorld->getAgentId(this));
 			mOccupiedUsablePoint = {};
-			mPose = Pose::Standing;
+			// Ordinary locomotion stands, but admitted threshold motion owns its
+			// required Pose until physical completion (including same-Layer moves).
+			mPose = mTraversalTask && mTraversalTask->crawling ? Pose::Crawling : Pose::Standing;
 		}
 		if (pos.sector() != mPosition.sector()) mLocalDepth = 0;
 		mPosition = pos;
@@ -1721,6 +1724,13 @@ namespace core
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 			return;
 		}
+		if (auto bulkhead = dynamic_cast<BulkheadDoorEdge const*>(mTraversalTask->edge.get());
+			bulkhead && bulkhead->isStandalone()
+			&& !bulkhead->getDoor()->admitsAgentTraversal(*this, getGlobalPosition().y))
+		{
+			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+			return;
+		}
 		auto requestLookup = mWorld->lookupTraversalRequest(mTraversalTask->request);
 		if (!requestLookup) return;
 		// A selected (or reinstalled stale) Path is intent, not authorization.
@@ -1782,7 +1792,10 @@ namespace core
 				mTraversalTask->destinationVertex = mPath.path->nodes[vertexA].targetVertex;
 				mTraversalTask->pathNodesConsumed = vertexA - mPath.targetNode;
 			}
-			auto const directTarget = getSkippablePathTarget(vertexA);
+			auto const bulkhead = dynamic_cast<BulkheadDoorEdge const*>(mTraversalTask->edge.get());
+			// The far-side boundary must be reached physically before standing up.
+			auto const directTarget = bulkhead && bulkhead->isStandalone()
+				? vertexA : getSkippablePathTarget(vertexA);
 			if (directTarget != vertexA)
 			{
 				mTraversalTask->destinationVertex = mPath.path->nodes[directTarget].targetVertex;
@@ -1799,6 +1812,12 @@ namespace core
 			{
 				auto const& doorEdge = static_cast<DoorEdge const&>(*mTraversalTask->edge);
 				mTraversalTask->crawling = doorEdge.getDoor()->classifyAgentCrossing(
+					*this, getGlobalPosition().y) == Door::DoorCrossingMode::Crawling;
+				if (mTraversalTask->crawling) mPose = Pose::Crawling;
+			}
+			if (bulkhead && bulkhead->isStandalone())
+			{
+				mTraversalTask->crawling = bulkhead->getDoor()->classifyAgentCrossing(
 					*this, getGlobalPosition().y) == Door::DoorCrossingMode::Crawling;
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
@@ -2027,6 +2046,7 @@ namespace core
 				if (traversalSpeed <= 0.0f)
 					traversalSpeed = mTraversalTask->edge->getType() == EdgeType::Ladder
 						? getClimbSpeed() : getWalkSpeed();
+				if (mTraversalTask->crawling) traversalSpeed *= 0.5f;
 				if (moveToPosition(mTraversalTask->destinationVertex->getPosition(), frameTime,
 					traversalSpeed))
 					mState = State::AwaitingTraversalCommit;

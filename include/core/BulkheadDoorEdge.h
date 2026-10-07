@@ -40,6 +40,9 @@ namespace core
 		[[nodiscard]] bool requiresButton() const override;
 
 		TraversalResourceId getTraversalResourceId() const override;
+
+		std::shared_ptr<BulkheadDoor> getDoor() const { return mDoor; }
+		bool isStandalone() const { return !mAirlock && !mSecurityScanner && !mDoor->isChamberOwned(); }
 	};
 
 } // core

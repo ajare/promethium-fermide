@@ -134,7 +134,7 @@ namespace core
 		case EdgeType::Door: case EdgeType::BulkheadDoor:
 		{
 			c.motionSeconds = type == EdgeType::Door
-				? (crawling ? 12.0f / 60.0f : 6.0f / 60.0f) : walking();
+				? (crawling ? 12.0f / 60.0f : 6.0f / 60.0f) : walking() * (crawling ? 2.0f : 1.0f);
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
 			if (securityScanner)
 			{

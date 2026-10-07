@@ -57,14 +57,17 @@ namespace core
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
 		// Scanner thresholds require a coordinator permit, never opportunistic use.
 		if (mDoor->isSecurityScannerOwned()) return false;
-		(void)targetVertex;
+		if (agent && !mDoor->admitsAgentTraversal(*agent,
+			getOtherVertex(targetVertex)->getPosition().y)) return false;
 		return mDoor->isOpen();
 	}
 
-	EdgeTraversalRequestResult BulkheadDoorEdge::requestTraversal(shared_ptr<const Vertex>,
+	EdgeTraversalRequestResult BulkheadDoorEdge::requestTraversal(shared_ptr<const Vertex> target,
 		shared_ptr<const Agent> agent) const
 	{
 		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
+			return EdgeTraversalRequestResult::Failed;
+		if (agent && !mDoor->admitsAgentTraversal(*agent, getOtherVertex(target)->getPosition().y))
 			return EdgeTraversalRequestResult::Failed;
 		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
@@ -80,8 +83,21 @@ namespace core
 			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
 		}
+		auto mode = Door::DoorCrossingMode::Standing;
+		if (context.agent)
+		{
+			mode = mDoor->classifyAgentCrossing(*context.agent,
+				getOtherVertex(target)->getPosition().y, context.beginningMovement);
+			if (mode == Door::DoorCrossingMode::None)
+			{
+				DirectedTraversalFacts facts;
+				facts.exclusionReason = RouteExclusionReason::Clearance;
+				return facts;
+			}
+		}
 		return thresholdRouteFacts(*this, *mDoor, target, context,
-			distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed,
+			(distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed)
+				* (mode == Door::DoorCrossingMode::Crawling ? 2.0f : 1.0f),
 			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
 	}
 

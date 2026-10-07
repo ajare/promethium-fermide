@@ -10,6 +10,7 @@
 #include "core/ExtensibleObject.h"
 #include "core/DoorSectorObject.h"
 #include "core/BulkheadDoorSectorObject.h"
+#include "core/BulkheadDoorEdge.h"
 #include "core/Sector.h"
 #include "core/Agent.h"
 #include "core/Path.h"
@@ -216,12 +217,16 @@ namespace core
 		// collection, including externally supplied Paths and queued Agents.
 		for (size_t node = from; node < path->nodes.size(); ++node)
 		{
-			auto edge = dynamic_pointer_cast<DoorEdge const>(path->nodes[node].edge);
-			if (!edge) continue;
+			auto const& edge = path->nodes[node].edge;
+			shared_ptr<Door> door;
+			if (auto ordinary = dynamic_pointer_cast<DoorEdge const>(edge)) door = ordinary->getDoor();
+			else if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(edge);
+				bulkhead && bulkhead->isStandalone()) door = bulkhead->getDoor();
+			if (!door) continue;
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
 				&& hasCommittedMovement(agent)) continue;
 			auto source = edge->getOtherVertex(path->nodes[node].targetVertex);
-			if (edge->getDoor()->admitsAgentTraversal(agent, source->getPosition().y)) continue;
+			if (door->admitsAgentTraversal(agent, source->getPosition().y)) continue;
 			replanAgentAfterAuthorizationRefusal(id, false);
 			return; // An existing sampled planning interval is never restarted.
 		}

@@ -8,6 +8,7 @@
 #include "core/Agent.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/BulkheadDoor.h"
+#include "core/BulkheadDoorEdge.h"
 #include "core/World.h"
 #include "core/Coordination.h"
 #include "core/Defines.h"
@@ -889,6 +890,10 @@ namespace core
 						airlockJourney = true;
 			}
 			if (airlockJourney) continue;
+			// Admitted standalone thresholds retain their physical safety commitment.
+			if (agent->mTraversalTask && hasCommittedMovement(*agent))
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(agent->mTraversalTask->edge);
+					bulkhead && bulkhead->isStandalone()) continue;
 			// An admitted ordinary Door crossing is a safety commitment. A plain
 			// pause freezes it, rather than returning it to the source boundary.
 			if (agent->mTraversalTask && hasCommittedMovement(*agent))

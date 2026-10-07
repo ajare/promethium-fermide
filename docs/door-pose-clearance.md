@@ -1,4 +1,4 @@
-# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#484)
+# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#485)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
@@ -6,7 +6,8 @@ Crouching's 0.6 body-height scale, Crawling's 0.3 body-height scale, or
 Lying's rotated vertical extent (body width). Crawling uses its reduced height
 rather than Lying's body width. Physical
 support elevation is added to that extent. Exact fits are accepted with a
-`0.00001` world-unit tolerance. Specialized and transport-owned thresholds keep
+`0.00001` world-unit tolerance. Standalone Bulkhead Doors use the same rule
+against their physical opening. Chamber and transport-owned thresholds keep
 their existing rules; admitted crossings may finish safely.
 
 ## Automatic low-Door Crawling (#483–#484)
@@ -68,6 +69,49 @@ extra motion cost; restoring Standing clearance restores the shorter choice.
 excluded). The shared implementation from #483 already supported these modes;
 #484 delivers the mode-specific regression coverage and documentation without
 adding duplicate runtime policy.
+
+### Standalone same-Layer Bulkhead Doors (#485)
+
+Standalone Bulkhead Doors now use the same Standing/Crawling/impossible
+classification in direct and captured route facts, remaining-Path validation,
+request/queue gates and permit adoption. Clearance uses the physical doorway
+top relative to the approach Floor; this adds **no Height scale authoring**.
+The standard 0.7-unit opening fits all currently validated unsupported Agent
+Heights. Reduced physical test fixtures use existing public Shape value
+assignment, not private state injection or a new authoring/test-only command.
+
+The crossing is horizontal, not the six/twelve-tick in-place ordinary Door
+crossing. Its far-side vertex is a mandatory physical exit boundary, 0.3 units
+beyond the wall centre: Door half-thickness plus Agent half-width. The Agent
+waits Standing, crawls only after admission, moves at half normal speed until
+fully across, then immediately stands. Horizontal position updates retain the
+admitted Pose rather than applying ordinary walking's Standing reset. Route
+motion costs double the corresponding threshold walking duration.
+
+A fully open Bulkhead remains an unconstrained bidirectional passage, with no
+new crossing-lane restriction. Manual, automatic and remote activation retain
+their existing operation rules; protected controls and Mobility remain binding.
+Broken-open passage remains usable; Broken-closed or unavailable operation
+does not gain partial-opening passage. Admitted crossings retain their permit,
+position and Pose through pause/deactivation and complete safely after
+cancellation, replacement or a live envelope change. Reset clears the task and
+restores Standing. Chamber/Airlock journeys are not changed by this slice.
+
+`bulkheadCrawlingJourneys`, `bulkheadCrawlingLifecycle` and
+`bulkheadCrawlingGates` exercise real World Marker journeys in both directions,
+repeated thresholds, exact/tolerance/impossible fits, physical exit and
+half-speed motion, direct/captured cost agreement, and alternative routes.
+A direct Standing route wins over an adjacent-Layer bypass; doubling only the
+Bulkhead motion cost makes that bypass win. Identical Broken-open journeys
+verify doubled physical crossing duration. Lifecycle checks cover frozen
+pause/deactivation, before/after-admission cancellation and replacement, live
+Height and geometry changes, Broken changes, Reset and terminal cleanup.
+Protected control, unavailable, forbidden Mobility and Broken-open/closed
+checks ensure Crawling does not bypass operation or feasibility rules.
+
+#485 validation: the incremental Release build (including `editor`) passed;
+all **70/70 repository CTests** passed, with unmodified Willpower submodule
+tests excluded. The smoke ownership manifest includes the new Agent fixture.
 
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:
