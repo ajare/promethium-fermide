@@ -27,6 +27,7 @@ contract/probe invocations are not new scenario owners. See
 <!-- current-ownership-begin -->
 | Current check source | Ownership | Target |
 | --- | --- | --- |
+| `smoke/agent/DoorClearance.cpp` | module-owned | `pf-smoke-agent` |
 | `OccupantPackingChecks.cpp` | retained standalone | `pf-occupant-packing-checks` |
 | `SectorTilesetChecks.cpp` | retained standalone | `pf-sector-tileset-checks` |
 | `SimulationStepTimingChecks.cpp` | retained standalone | `pf-simulation-step-timing-checks` |

@@ -154,7 +154,7 @@ namespace core::script
 		{
 			key(definition["key"]);
 			records(definition["tiles"], {"x", "y", "imageSet", "image"});
-			records(definition["usablePoints"], {"key", "label", "x", "y", "blocksPathing"});
+			records(definition["usablePoints"], {"key", "label", "x", "y", "blocksPathing", "supportElevation"});
 			for (auto const& point : definition["usablePoints"]) key(point["key"]);
 			if (definition["vertices"])
 			{

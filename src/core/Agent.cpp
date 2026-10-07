@@ -1061,6 +1061,31 @@ namespace core
 		return CORE_AGENT_MAX_HEIGHT * getEffectiveHeightModifier().value;
 	}
 
+	float Agent::getTraversalDoorClearanceExtent(bool beginningMovement) const
+	{
+		return beginningMovement || mFurnitureUse ? getStandingHeight() : getDoorClearanceExtent();
+	}
+
+	float Agent::getDoorClearanceExtent() const
+	{
+		float support = 0.f;
+		if (mWorld && mOccupiedUsablePoint)
+		{
+			if (auto instance = mWorld->furnitureForMarker(mOccupiedUsablePoint))
+			{
+				auto catalogue = mWorld->furnitureCatalogue();
+				auto definition = catalogue ? catalogue->definition(instance->definitionKey) : nullptr;
+				if (definition)
+					for (auto const& destination : instance->destinations)
+						if (destination.marker == mOccupiedUsablePoint)
+							for (auto const& point : definition->usablePoints)
+								if (point.key == destination.key) support = point.supportElevation;
+			}
+		}
+		// Lying rotates the upright body by 90 degrees: width becomes height.
+		return support + (mPose == Pose::Lying ? getWidth() : getHeight());
+	}
+
 	float Agent::getHeight() const
 	{
 		return getStandingHeight() * getPoseHeightScale();
@@ -1678,8 +1703,8 @@ namespace core
 
 		// Recheck before adopting even an already granted permit, never during crossing.
 		if (mTraversalTask->edge->getType() == EdgeType::Door
-			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsStandingHeight(
-				getStandingHeight(), getGlobalPosition().y))
+			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsVerticalExtent(
+				getTraversalDoorClearanceExtent(), getGlobalPosition().y))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 			return;

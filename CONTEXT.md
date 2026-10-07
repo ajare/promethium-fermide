@@ -195,7 +195,7 @@ The controlled boundary between two sectors, such as a doorway or the entrance t
 _Avoid_: Vertex, when discussing physical movement rules
 
 **Door**:
-A threshold that connects two adjacent layers. It is authored on the front layer of the pair and opens into the layer immediately behind it. A regular Door has a one-level footprint. An ordinary Door authored in a Room may be regular height or 0.9-unit tall; Corridor, Facade, Lift, and Shuttle Doors always use regular height. Lift and Shuttle landing doors belong to their transport. Ordinary Regular Doors between Rooms, Corridors, or Facades may have an authored Height scale from 0.1 through 1.0 relative to the hardcoded Regular height; omission or reset uses 1. Scaling is bottom-anchored and changes visual height, vertical travel duration, and Standing Agent clearance, not tile footprint, width, or crossing lanes. Ordinary Regular and Tall Doors between Locations admit a Standing Agent only when its effective standing height fits below the doorway top relative to the approach Floor (including exact fits within a small geometry tolerance). Clearance is a hard planning and new-admission constraint, independent of activation mode, permissions, and Mobility fallback; admitted crossings finish safely. Tall and specialized or transport-owned thresholds refuse an override, including explicit 1.
+A threshold that connects two adjacent layers. It is authored on the front layer of the pair and opens into the layer immediately behind it. A regular Door has a one-level footprint. An ordinary Door authored in a Room may be regular height or 0.9-unit tall; Corridor, Facade, Lift, and Shuttle Doors always use regular height. Lift and Shuttle landing doors belong to their transport. Ordinary Regular Doors between Rooms, Corridors, or Facades may have an authored Height scale from 0.1 through 1.0 relative to the hardcoded Regular height; omission or reset uses 1. Scaling is bottom-anchored and changes visual height, vertical travel duration, and Standing Agent clearance, not tile footprint, width, or crossing lanes. Ordinary Regular and Tall Doors between Locations admit an Agent only when its traversal vertical envelope, including its Pose and applicable Support elevation, fits below the doorway top relative to the approach Floor (including exact fits within a small geometry tolerance). Clearance is a hard planning and new-admission constraint, independent of activation mode, permissions, and Mobility fallback; admitted crossings finish safely. Tall and specialized or transport-owned thresholds refuse an override, including explicit 1.
 _Avoid_: Portal
 
 **Bulkhead Door**:
@@ -260,8 +260,12 @@ An Agent property that multiplies its base standing height. An individual value 
 _Avoid_: Pose height scale, which describes the runtime stance rather than an authored property
 
 **Pose**:
-An Agent's runtime bodily stance: Standing (the default), Sitting, or Lying. A Pose is simulation state, never authored; movement alone does not select a Furniture activity. Sitting reduces the Agent's effective height; Lying currently changes appearance only.
+An Agent's runtime bodily stance: Standing (the default), Sitting, or Lying. A Pose is simulation state, never authored; movement alone does not select a Furniture activity. Sitting reduces bodily height and Lying rotates the bodily vertical extent; ordinary movement restores Standing rather than choosing a Pose to fit a Door.
 _Avoid_: Movement state, which describes pathing progress rather than bodily stance
+
+**Support elevation**:
+The physical height of an Agent's support above its supporting Floor or Walkway, distinct from decorative artwork offsets. It contributes to the Agent's top while the Agent remains supported, but does not imply movable Furniture.
+_Avoid_: Render offset, Marker height
 
 **Agent behaviour**:
 A reusable state-machine definition that may direct many Agents. Each assigned Agent runs an independent instance of the behaviour.

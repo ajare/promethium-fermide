@@ -69,6 +69,8 @@ set(agent_checks
     walkSpeedIndependentAndFixedSamplesPersistAcrossLoadAndReset
     walkSpeedInheritedConflictsAreRefusedAtomically
     movementRouteTimeAndExplicitSpeedsUseTheRightObservations
+    poseDoorClearanceDiagnostics
+    poseDoorMovementReset
     standingDoorClearance
     standingDoorWorldJourneys
     heightRangesAreBoundedRevisionedAndPersisted

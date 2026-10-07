@@ -747,8 +747,8 @@ namespace core
 				auto request = mWorld.mTraversalRequests.find(requestId);
 				if (!request || request->mState != TraversalRequestState::Pending) continue;
 				auto actor = mWorld.mAgents.find(request->mOwner);
-				if (!actor || resource.mDoor->admitsStandingHeight(
-					actor->getStandingHeight(), actor->getGlobalPosition().y)) continue;
+				if (!actor || resource.mDoor->admitsVerticalExtent(
+					actor->getTraversalDoorClearanceExtent(), actor->getGlobalPosition().y)) continue;
 				auto owner = request->mOwner;
 				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
 				replanAgentAfterAuthorizationRefusal(owner, false);

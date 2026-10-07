@@ -51,8 +51,10 @@ namespace core
 				for (auto point : points)
 				{
 					FurnitureUsablePoint p{ point["key"].template as<std::string>(), point["label"].template as<std::string>(), point["x"].template as<float>(),
-						point["blocksPathing"] ? point["blocksPathing"].template as<bool>() : true };
+						point["blocksPathing"] ? point["blocksPathing"].template as<bool>() : true,
+						point["supportElevation"] ? point["supportElevation"].template as<float>() : 0.f };
 					if ((point["y"] && point["y"].template as<float>() != 0) || !std::isfinite(p.x)
+						|| !std::isfinite(p.supportElevation) || p.supportElevation < 0.f
 						|| p.x < d.minX || p.x >= d.maxX || p.key.empty()
 						|| !Marker::nameIsValid(p.label, &diagnostic) || Marker::trimName(p.label) != p.label
 						|| !keys.insert(p.key).second || !labels.insert(p.label).second)

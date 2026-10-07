@@ -254,5 +254,8 @@ namespace core
 		// Snapshot the departure depth, including stationary incoming-edge history.
 		// This is context only: it adds no route cost or continuity preference.
 		int const localDepth = routeAgentLocalDepth(agent);
+		// Ordinary movement clears temporary poses. A retained-Pose traversal
+		// driver can explicitly evaluate an already positioned Agent instead.
+		bool const beginningMovement = true;
 	};
 }

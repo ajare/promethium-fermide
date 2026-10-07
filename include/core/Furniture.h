@@ -24,6 +24,8 @@ namespace core
 		std::string key, label;
 		float x{ 0.5f };
 		bool blocksPathing{ true }; // default for newly created owned Markers
+		// Physical support above the Marker Floor; independent of artwork offsets.
+		float supportElevation{ 0.f };
 		bool operator==(FurnitureUsablePoint const&) const = default;
 	};
 	struct FurnitureRoutingVertex

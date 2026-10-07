@@ -58,15 +58,15 @@ namespace core
 		return true;
 	}
 
-	bool Door::admitsStandingHeight(float standingHeight, float approachFeetY) const
+	bool Door::admitsVerticalExtent(float topAboveFloor, float approachFloorY) const
 	{
 		auto front = getFrontSector();
 		auto back = getBackSector();
 		// Specialized, transport and chamber thresholds keep their existing rules.
 		if (typeid(*this) != typeid(Door) || isChamberOwned() || !front || !back
 			|| !isLocationLike(front->getType()) || !isLocationLike(back->getType())) return true;
-		auto const availableHeight = getPosition().y + effectiveHeight(mHeight, mHeightScale) - approachFeetY;
-		return standingHeight <= availableHeight + StandingClearanceTolerance;
+		auto const availableHeight = getPosition().y + effectiveHeight(mHeight, mHeightScale) - approachFloorY;
+		return topAboveFloor <= availableHeight + ClearanceTolerance;
 	}
 
 	uint32_t Door::getCellsWide() const { return mCellsWide; }

@@ -747,6 +747,11 @@ namespace core
 
 		float getStandingHeight() const;
 		float getHeight() const;
+		// Current top above the supporting Floor, excluding decorative offsets.
+		float getDoorClearanceExtent() const;
+		// New movement clears Action poses; active Furniture use finishes on
+		// physical departure even though it survives planning.
+		float getTraversalDoorClearanceExtent(bool beginningMovement = false) const;
 
 		Shape getBounds() const;
 

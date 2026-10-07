@@ -169,11 +169,20 @@ pf_add_smoke_module(pf-smoke-agent
         agent/Colour.cpp
         agent/WalkSpeed.cpp
         agent/Height.cpp
+        agent/DoorClearance.cpp
         agent/IndividualProperties.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
 )
+
+# Explicit diagnostic invocations retain the smoke runner's ordinary CLI output
+# contract while providing the labelled traces required by ticket #476.
+add_test(NAME door-pose-clearance-diagnostic COMMAND pf-smoke-agent --check poseDoorClearanceDiagnostics)
+add_test(NAME door-pose-clearance-movement-reset COMMAND pf-smoke-agent --check poseDoorMovementReset)
+set_tests_properties(door-pose-clearance-diagnostic door-pose-clearance-movement-reset
+    PROPERTIES LABELS "smoke;functional;validation-fast;core" TIMEOUT 30
+    ENVIRONMENT "PF_DOOR_CLEARANCE_TRACE=1")
 
 pf_add_smoke_contract(NAME smoke-agent-contract COMMAND ${CMAKE_COMMAND}
     "-DAGENT=$<TARGET_FILE:pf-smoke-agent>"

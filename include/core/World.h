@@ -59,6 +59,9 @@ namespace core
 		// the private machinery beside them on the World's behalf (ADR 0004).
 		friend class SimulationCoordinator;
 		friend struct WorldAgentRestorationTestAccess;
+		// Headless diagnostic driver dispatches validated Actions at a traversal
+		// boundary, never edits fields or introduces retained-Pose locomotion.
+		friend struct DoorClearanceDiagnostic;
 
 	public:
 
