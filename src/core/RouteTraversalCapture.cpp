@@ -283,6 +283,13 @@ namespace core
 					result.airlock = true;
 					result.boarding = target->getSector().get() == chamber.get();
 					int side = sector.get() == chamber->getStop(0).sector.get() ? 0 : 1;
+					if (result.boarding && context.agent
+						&& !chamber->getDoor(1 - side)->admitsAgentTraversal(
+							*context.agent, chamber->getPosition().y, true))
+					{
+						result.exclusion = RouteExclusionReason::Clearance;
+						return result;
+					}
 					result.open = result.boarding && result.observed && door.isOpen();
 					result.needsActivation = result.boarding && !result.open;
 					result.preparationSeconds = result.open ? 0 : CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME;
@@ -305,7 +312,7 @@ namespace core
 								buttonX = point.entity->getPosition().x;
 								result.interactionSeconds = point.entity->getDurationTicks() * World::getFixedTimestep();
 							}
-						result.length += 2 * std::abs(source->getPosition().x - buttonX);
+						result.controlApproachLength = 2 * std::abs(source->getPosition().x - buttonX);
 					}
 					if (result.boarding && result.observed && context.agent)
 					{

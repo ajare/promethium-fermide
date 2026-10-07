@@ -221,8 +221,18 @@ namespace core
 			shared_ptr<Door> door;
 			if (auto ordinary = dynamic_pointer_cast<DoorEdge const>(edge)) door = ordinary->getDoor();
 			else if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(edge);
-				bulkhead && bulkhead->isStandalone()) door = bulkhead->getDoor();
+				bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned())) door = bulkhead->getDoor();
 			if (!door) continue;
+			if (door->isAirlockOwned())
+			{
+				auto resource = mWorld.mTraversalResources.find(edge->getTraversalResourceId());
+				// Protect both thresholds of this already admitted journey, but
+				// continue validating unrelated thresholds in the remaining suffix.
+				if (resource && (std::find(resource->mOccupants.begin(), resource->mOccupants.end(), id)
+					!= resource->mOccupants.end()
+					|| (agent.mTraversalTask && agent.mTraversalTask->edge->getTraversalResourceId()
+						== edge->getTraversalResourceId() && hasCommittedMovement(agent)))) continue;
+			}
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
 				&& hasCommittedMovement(agent)) continue;
 			auto source = edge->getOtherVertex(path->nodes[node].targetVertex);

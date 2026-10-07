@@ -63,11 +63,16 @@ namespace core
 	{
 		auto front = getFrontSector();
 		auto back = getBackSector();
-		// Standalone Bulkhead Doors use their physical opening, not an ordinary
-		// Door height scale. Chamber and transport thresholds retain their rules.
-		bool const bulkhead = typeid(*this) == typeid(BulkheadDoor) && !isChamberOwned();
-		if ((!bulkhead && typeid(*this) != typeid(Door)) || isChamberOwned() || !front || !back
-			|| !isLocationLike(front->getType()) || !isLocationLike(back->getType())) return true;
+		// Standalone and Airlock Bulkhead Doors use their physical opening,
+		// never an ordinary Door height override. Other specialized thresholds
+		// retain their existing rules.
+		bool const bulkhead = typeid(*this) == typeid(BulkheadDoor) && !isSecurityScannerOwned();
+		auto supportedSector = [&](Sector const& sector) {
+			return isLocationLike(sector.getType())
+				|| (isAirlockOwned() && sector.getType() == SectorType::Airlock);
+		};
+		if ((!bulkhead && typeid(*this) != typeid(Door)) || isSecurityScannerOwned() || !front || !back
+			|| !supportedSector(*front) || !supportedSector(*back)) return true;
 		auto const availableHeight = getPosition().y
 			+ (bulkhead ? getSize().y : effectiveHeight(mHeight, mHeightScale)) - approachFloorY;
 		return topAboveFloor <= availableHeight + ClearanceTolerance;

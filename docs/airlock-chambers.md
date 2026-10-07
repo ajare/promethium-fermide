@@ -1,4 +1,4 @@
-# Airlock chambers and journeys (#322–#327)
+# Airlock chambers and journeys (#322–#327, #486)
 
 The Airlock palette tool paints a one-Level, positive whole-cell chamber on the
 visible Layer. It requires empty chamber cells and a walkable Room or Corridor
@@ -60,6 +60,25 @@ nor grants bypass coordinated admission, direction, capacity, or interlocks. The
 Room or Corridor's Location requirement is checked before admission independently
 of control requirements and adherence. Once admitted, later grant loss or tighter
 control/Location requirements cannot revoke the committed opposite exit.
+
+## Low physical Door openings (#486)
+
+Entry and exit independently use Standing-first/Crawling-fallback clearance.
+New admission requires both real physical openings to fit; Height overrides
+remain unsupported on owned Doors. An Agent waits Standing, switches directly
+to Crawling for an admitted low crossing, crosses at half normal threshold
+speed, and stands immediately beyond the far-side boundary. There is no
+Crouching stage or transition timer. Chamber walking and outside-control
+walking/interaction retain their normal timing. Route estimates include the
+slower threshold motion without slowing those other components.
+
+Capacity, ticket order, batch selection, the closed-door cycle and interlocks
+remain authoritative. Pause/deactivation freeze admitted crossing motion/Pose
+and preserve its reservation even before occupancy commits. Clearance changes
+before admission trigger normal Route planning/Route loss; later changes do
+not revoke an admitted journey's opposite exit. Cancellation and replacement
+preserve safe completion, and Reset clears transient crossing state and restores
+Standing. See [Door Pose clearance](door-pose-clearance.md) for fixture coverage.
 
 Directed objective estimates include chamber walking, outside button approaches
 and required entry interaction duration, Door closure/opening, and one cycle.

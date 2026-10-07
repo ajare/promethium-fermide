@@ -1,4 +1,4 @@
-# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#485)
+# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#486)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
@@ -112,6 +112,45 @@ checks ensure Crawling does not bypass operation or feasibility rules.
 #485 validation: the incremental Release build (including `editor`) passed;
 all **70/70 repository CTests** passed, with unmodified Willpower submodule
 tests excluded. The smoke ownership manifest includes the new Agent fixture.
+
+### Airlock entry and exit (#486)
+
+Airlock Doors now classify their real physical openings independently, without
+adding Height overrides or changing Broken support. Planning and new entry
+admission require both the entrance and the committed opposite exit to fit
+Standing or Crawling. Remaining-Path validation and batch reservation selection
+reject newly impossible openings before admission.
+
+Agents wait Standing and crawl only during each admitted low threshold crossing,
+at half normal speed with no preparation/recovery delay. Each far-side threshold
+vertex must be physically reached before Standing resumes, including inside the
+chamber. Outside-control approach walking, interaction duration, ordinary chamber
+walking and cycle timing do not slow; route motion estimates double only the
+low threshold's motion component.
+
+The shared Traversal resource still owns batch capacity, opposing queues, entry
+order, crossing permits and the interlocked cycle. An admitted entry crossing
+retains its capacity reservation through pause/deactivation, even before it
+becomes an occupant. Occupants retain their committed opposite exit if Height
+or physical opening changes later; an exit that no longer fits Standing uses
+Crawling and completes rather than stranding the admitted occupant. Cancellation
+and replacement finish the accepted journey before resolving the new intent.
+Reset releases transient state and restores Standing. Other Chamber and
+transport thresholds remain outside this ticket's delivered scope.
+
+`airlocks/crawlingJourneys`, `crawlingBatches`, `crawlingLifecycle` and
+`crawlingGates` in the Simulation module cover both directions, independent low
+entry/exit and Standing fits, exact Crawling fit and impossible passage,
+direct/captured route estimates, half-speed motion, mandatory physical exit,
+full and opposing batches, pause/deactivation, cancellation/replacement,
+before/after-admission Height and geometry changes, Reset, protected controls,
+forbidden/last-resort Mobility and terminal traversal cleanup. Fixtures use
+public World movement and inspection seams plus existing public Shape assignment.
+
+#486 validation: the incremental Release build, including `editor`, passed;
+all **70/70 repository CTests** passed with unmodified Willpower submodule tests
+excluded. The Simulation inventory/CLI contracts and ownership audit include
+the new fixture.
 
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:

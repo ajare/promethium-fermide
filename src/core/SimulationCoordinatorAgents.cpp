@@ -161,10 +161,11 @@ namespace core
 				(void)resourceId;
 				if (!resource->mAirlock && !resource->mSecurityScanner) continue;
 				bool occupant = find(resource->mOccupants.begin(), resource->mOccupants.end(), id) != resource->mOccupants.end();
-				if (!occupant)
+				if (!occupant && !(resource->mAirlock && hasCommittedMovement(*agent)))
 				{
-					// Pausing retained selected boarders. Deactivation now abandons
-					// admission, but never takes an occupied slot away.
+					// Pausing retained selected boarders. Deactivation abandons
+					// unadopted admission, but never an occupied slot or an
+					// already underway Airlock entry crossing.
 					if ((agent->mTraversalTask && agent->mTraversalTask->edge->getTraversalResourceId() == resourceId)
 						|| (agent->mQueuedTraversalTask && agent->mQueuedTraversalTask->edge->getTraversalResourceId() == resourceId))
 					{

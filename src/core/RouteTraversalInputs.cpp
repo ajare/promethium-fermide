@@ -148,7 +148,9 @@ namespace core
 			}
 			if (airlock)
 			{
-				c.motionSeconds += interactionSeconds;
+				// Only the threshold slows for Crawling, not the Standing walk
+				// to the outside control or its interaction duration.
+				c.motionSeconds += controlApproachLength / context.walkSpeed + interactionSeconds;
 				c.expectedWaitSeconds = airlockCycleSeconds;
 				if (observed && boarding)
 				{

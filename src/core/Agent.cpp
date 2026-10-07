@@ -1725,7 +1725,8 @@ namespace core
 			return;
 		}
 		if (auto bulkhead = dynamic_cast<BulkheadDoorEdge const*>(mTraversalTask->edge.get());
-			bulkhead && bulkhead->isStandalone()
+			bulkhead && (bulkhead->isStandalone() || (bulkhead->getDoor()->isAirlockOwned()
+				&& getSector()->getType() != SectorType::Airlock))
 			&& !bulkhead->getDoor()->admitsAgentTraversal(*this, getGlobalPosition().y))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
@@ -1794,7 +1795,7 @@ namespace core
 			}
 			auto const bulkhead = dynamic_cast<BulkheadDoorEdge const*>(mTraversalTask->edge.get());
 			// The far-side boundary must be reached physically before standing up.
-			auto const directTarget = bulkhead && bulkhead->isStandalone()
+			auto const directTarget = bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned())
 				? vertexA : getSkippablePathTarget(vertexA);
 			if (directTarget != vertexA)
 			{
@@ -1815,10 +1816,13 @@ namespace core
 					*this, getGlobalPosition().y) == Door::DoorCrossingMode::Crawling;
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
-			if (bulkhead && bulkhead->isStandalone())
+			if (bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()))
 			{
-				mTraversalTask->crawling = bulkhead->getDoor()->classifyAgentCrossing(
-					*this, getGlobalPosition().y) == Door::DoorCrossingMode::Crawling;
+				auto const mode = bulkhead->getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
+				// An admitted Airlock occupant must finish its exit even if its
+				// envelope or the opening changed during the interlocked journey.
+				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
+					|| (mode == Door::DoorCrossingMode::None && getSector()->getType() == SectorType::Airlock);
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
 			mTraversalTask->traversalTicksRemaining =

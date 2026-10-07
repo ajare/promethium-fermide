@@ -115,6 +115,10 @@ set(core_names
     bandArrivalLeavesNonCrossingAgentsUnaffected
     airlocks/structuralEditSafety
     airlocks/singleAgentJourneys
+    airlocks/crawlingJourneys
+    airlocks/crawlingBatches
+    airlocks/crawlingLifecycle
+    airlocks/crawlingGates
     airlocks/batchesAndOpposingQueues
     airlocks/approachingBatch
     airlocks/boardingDeadline

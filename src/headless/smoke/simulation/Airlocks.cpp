@@ -1190,10 +1190,13 @@ namespace
 		}
 	}
 }
+void registerAirlockCrawling(std::vector<smoke::Check>& checks);
+
 void registerAirlocks(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "airlocks/structuralEditSafety", editSafety });
 	checks.push_back({ "airlocks/singleAgentJourneys", journeys });
+	registerAirlockCrawling(checks);
 	checks.push_back({ "airlocks/batchesAndOpposingQueues", batches });
 	checks.push_back({ "airlocks/approachingBatch", approachingBatch });
 	checks.push_back({ "airlocks/boardingDeadline", boardingDeadline });

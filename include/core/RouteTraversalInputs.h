@@ -21,6 +21,7 @@ namespace core
 		bool securityScanner = false;
 		float airlockCycleSeconds = 0;
 		float interactionSeconds = 0;
+		float controlApproachLength = 0;
 		RouteExclusionReason exclusion = RouteExclusionReason::None;
 		float length = 0;
 		float rise = 0;
@@ -36,7 +37,7 @@ namespace core
 		bool needsActivation = false;
 		bool boarding = false;
 		bool open = false;
-		// Ordinary Door crossing uses the automatic low-Door Crawling fallback
+		// Ordinary and Bulkhead (including Airlock) Door crossing uses the low-Door Crawling fallback
 		// (30% height) with a doubled motion duration.
 		bool crawling = false;
 		// 0 automatic, 1 manual, 2 remote; unavailable is captured as exclusion.

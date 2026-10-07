@@ -43,7 +43,8 @@ namespace core
 				}
 			for (auto reservation : resource->mAdmissionReservations)
 				if (auto request = mWorld.mTraversalRequests.find(reservation); request)
-					if (auto actor = mWorld.mAgents.find(request->mOwner); !actor || !actor->isActive())
+					if (auto actor = mWorld.mAgents.find(request->mOwner);
+						!actor || (!actor->isActive() && !hasCommittedMovement(*actor)))
 						cancelTraversal(reservation, request->mPermit, false);
 			for (auto const& door : chamber.mDoors) door->advanceCoordinatedMotion(World::getFixedTimestep());
 			auto occupied = std::any_of(resource->mOccupants.begin(), resource->mOccupants.end(), [](auto id) { return (bool)id; });
@@ -55,6 +56,9 @@ namespace core
 					auto request = mWorld.mTraversalRequests.find(waiting);
 					if (!request || request->mState != TraversalRequestState::Pending
 						|| request->mCapacityPosition < resource->mCapacity) continue;
+					auto actor = mWorld.mAgents.find(request->mOwner);
+					if (!actor || !chamber.mDoors[side]->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
+						|| !chamber.mDoors[1 - side]->admitsAgentTraversal(*actor, chamber.getPosition().y, true)) continue;
 					auto slot = side == 0 ? resource->mCapacity - 1 - chamber.mBoardingMembers : chamber.mBoardingMembers;
 					resource->mAdmissionReservations[slot] = waiting;
 					request->mCapacityPosition = slot;
@@ -149,6 +153,16 @@ namespace core
 		bool const occupied = std::any_of(resource.mOccupants.begin(), resource.mOccupants.end(), [](auto owner) { return (bool)owner; });
 		if (entry)
 		{
+			// Entry commits the complete interlocked journey. Reject an impossible
+			// exit before reserving/adopting capacity, never after boarding.
+			if (!chamber.mDoors[side]->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
+				|| !chamber.mDoors[1 - side]->admitsAgentTraversal(*actor, chamber.getPosition().y, true))
+			{
+				auto owner = request->mOwner;
+				denyTraversalRequest(id, TraversalFailureReason::PreparationFailed);
+				replanAgentAfterAuthorizationRefusal(owner, false);
+				return;
+			}
 			// Sharing a button press does not grant another entrant the operator's
 			// capability or authorization. Keep the former individual entry gate.
 			if (agentForbidsButtons(actor)
