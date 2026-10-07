@@ -241,6 +241,12 @@ namespace core
 		{
 			Door const& door = result.type == EdgeType::Door
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
+			if (context.agent && !door.admitsStandingHeight(
+				context.agent->getStandingHeight(), source->getPosition().y))
+			{
+				result.exclusion = RouteExclusionReason::Clearance;
+				return result;
+			}
 			result.mobilityKind = TraversalKind::Door;
 			if (result.type == EdgeType::BulkheadDoor)
 				if (auto chamber = static_cast<BulkheadDoorEdge const&>(edge).mSecurityScanner;

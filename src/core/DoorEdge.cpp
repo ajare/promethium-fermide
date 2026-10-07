@@ -47,14 +47,16 @@ namespace core
 
 	bool DoorEdge::isTraversable(shared_ptr<const Vertex> /* targetVertex */, shared_ptr<const Agent> agent) const
 	{
-		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
+		if ((agent && !mDoor->admitsStandingHeight(agent->getStandingHeight(), agent->getGlobalPosition().y))
+			|| agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
 		return mDoor->admitsNewCrossings();
 	}
 
 	EdgeTraversalRequestResult DoorEdge::requestTraversal(shared_ptr<const Vertex>,
 		shared_ptr<const Agent> agent) const
 	{
-		if (agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
+		if ((agent && !mDoor->admitsStandingHeight(agent->getStandingHeight(), agent->getGlobalPosition().y))
+			|| agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
 			return EdgeTraversalRequestResult::Failed;
 		return (mDoor->admitsNewCrossings() || mDoor->requestOpen())
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
@@ -67,6 +69,13 @@ namespace core
 		auto facts = thresholdRouteFacts(*this, *mDoor, target, context, 6.0f / 60.0f,
 			CORE_DOOR_OPEN_CLOSE_TIME);
 		auto source = getOtherVertex(target);
+		if (context.agent && source && !mDoor->admitsStandingHeight(
+			context.agent->getStandingHeight(), source->getPosition().y))
+		{
+			facts.feasible = false;
+			facts.exclusionReason = RouteExclusionReason::Clearance;
+			return facts;
+		}
 		auto known = mDoor->knownCondition(context.agent, context.observationSector);
 		auto const locallyOpen = (source && source->getSector().get() == context.observationSector
 			&& mDoor->isOpen()) || (known && known->broken && known->position >= 1.0f);

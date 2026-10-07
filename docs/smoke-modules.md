@@ -388,7 +388,7 @@ build-linux/bin/x64/Release/pf-smoke-agent-editor --check clipboardCarriesActiva
 ctest --test-dir build-linux -R '^smoke-agent' -j 3 --output-on-failure
 ```
 
-- `pf-smoke-agent` / `smoke-agent` (`smoke;core`) owns 63 registrations:
+- `pf-smoke-agent` / `smoke-agent` (`smoke;core`) owns 65 registrations:
   typed Agent identity and handle invalidation, activation, Agent group identity,
   naming, persistence, assignment, counts, deletion, ID allocation, topology,
   Colour, Walk speed, Height, and individual-property precedence/persistence.
@@ -1184,3 +1184,7 @@ Validated with GCC 15:
 Validation also required spelling the default `MobilityProfile` value explicitly
 inside its `optional` initializer in `AgentTagAssignmentPanel.cpp`: GCC rejected
 the old ambiguous empty-brace initializer. This does not change panel behavior.
+
+#475 adds `standingDoorClearance` and `standingDoorWorldJourneys` to the existing
+core Agent Height owner: ordinary Door geometry, immutable directed feasibility,
+Height precedence, fallback exclusion, World journeys and stale/external Path cleanup.

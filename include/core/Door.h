@@ -63,6 +63,9 @@ namespace core
 		static float effectiveHeight(Height height, std::optional<float> scale = {});
 		std::optional<float> getHeightScale() const { return mHeightScale; }
 		bool setHeightScale(std::optional<float> scale);
+		// Top clearance above the approach Floor; unrelated to arrival/lane tolerances.
+		static constexpr float StandingClearanceTolerance = 0.00001f;
+		bool admitsStandingHeight(float standingHeight, float approachFeetY) const;
 		OpenStyle getOpenStyle() const;
 		void setOpenStyle(OpenStyle style);
 		static bool speedIsValid(std::optional<float> speed);

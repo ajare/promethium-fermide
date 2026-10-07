@@ -922,6 +922,7 @@ namespace core
 			switch (reason)
 			{
 			case RouteExclusionReason::Mobility: return "excluded by the Agent's Mobility profile";
+			case RouteExclusionReason::Clearance: return "excluded by Standing Agent doorway clearance";
 			case RouteExclusionReason::Direction: return "excluded by traversal direction";
 			case RouteExclusionReason::Control: return "excluded because no usable control can open or prepare it";
 			case RouteExclusionReason::PreparationSide: return "excluded because the resource cannot be prepared from this side";

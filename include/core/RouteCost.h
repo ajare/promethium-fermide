@@ -62,6 +62,7 @@ namespace core
 	{
 		None,
 		Mobility,
+		Clearance,
 		Direction,
 		Control,
 		PreparationSide,

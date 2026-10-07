@@ -210,6 +210,15 @@ namespace core
 				denyTraversalRequest(requestId);
 				return;
 			}
+			auto actor = mWorld.mAgents.find(request->mOwner);
+			if (actor && !resource->mDoor->admitsStandingHeight(
+				actor->getStandingHeight(), actor->getGlobalPosition().y))
+			{
+				auto owner = request->mOwner;
+				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+				replanAgentAfterAuthorizationRefusal(owner, false);
+				return;
+			}
 			if (!resource->mEnabled)
 			{
 				return; // deactivation cleanup denies waiters after active lanes drain

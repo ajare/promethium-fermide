@@ -14,6 +14,7 @@ namespace core
 		std::shared_ptr<Door> mDoor;
 
 	public:
+		std::shared_ptr<Door> getDoor() const { return mDoor; }
 
 		// This is meant to be called internally to make a copy.  Why must it be public?
 		DoorEdge(uint32_t id, std::shared_ptr<Door> door);

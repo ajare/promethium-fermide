@@ -745,6 +745,7 @@ namespace core
 		// Lift the body onto the mattress without changing the supporting Floor.
 		float getPoseRenderYOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? 0.25f : 0.f; }
 
+		float getStandingHeight() const;
 		float getHeight() const;
 
 		Shape getBounds() const;

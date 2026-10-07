@@ -739,6 +739,21 @@ namespace core
 			}
 		}
 
+		// Snapshot IDs before cleanup mutates queues and releases preparation leases.
+		// Reject invalid heads first so fitting followers can be granted this tick.
+		if (resource.mDoor)
+			for (auto requestId : waiting)
+			{
+				auto request = mWorld.mTraversalRequests.find(requestId);
+				if (!request || request->mState != TraversalRequestState::Pending) continue;
+				auto actor = mWorld.mAgents.find(request->mOwner);
+				if (!actor || resource.mDoor->admitsStandingHeight(
+					actor->getStandingHeight(), actor->getGlobalPosition().y)) continue;
+				auto owner = request->mOwner;
+				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
+				replanAgentAfterAuthorizationRefusal(owner, false);
+			}
+
 		// A fully extended Force Bridge is floor, and a fully open Bulkhead Door
 		// is an ordinary opening. Queueing coordinates preparation while either is
 		// unavailable, but afterwards every waiter may cross concurrently from

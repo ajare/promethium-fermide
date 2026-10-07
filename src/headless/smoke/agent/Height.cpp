@@ -21,6 +21,10 @@
 #include "core/YamlSerializer.h"
 
 #include "Checks.h"
+#include "PathFixture.h"
+#include "core/DoorEdge.h"
+#include "core/RouteTraversalInputs.h"
+#include "core/Vertex.h"
 
 namespace
 {
@@ -176,11 +180,233 @@ namespace
 			"Simulation reset changed the persisted Height sample");
 	}
 
+	void standingDoorClearance()
+	{
+		// Every ordered Location pairing, both directions, and every usable mode.
+		for (int frontKind = 0; frontKind != 3; ++frontKind)
+		for (int backKind = 0; backKind != 3; ++backKind)
+		for (auto mode : { core::DoorActivationMode::Automatic, core::DoorActivationMode::Manual,
+			core::DoorActivationMode::RemoteControlled })
+		{
+			core::World world("Standing clearance", 12, 3);
+			auto location = [&](int kind, uint32_t layer)
+			{
+				if (kind == 1) return world.addCorridor(layer, 1, 0, 12, 1);
+				if (kind == 2) return world.addFacade(layer, 1, 0, 12, 1);
+				return world.addRoom(layer ? "Back" : "Front", layer, 1, 0, 12, 1);
+			};
+			location(frontKind, 0);
+			location(backKind, 1);
+			// The observer's feet are deliberately on a different Floor from the Door.
+			auto observer = world.addRoom("Observer", 0, 0, 0, 12, 1);
+			core::World::CreateDoorOptions options;
+			options.activationMode = mode;
+			options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+			options.heightScale = 0.7f;
+			world.addSectorDoor(0, 1, 2, options);
+			world.finishBuild();
+			auto id = world.createAgent("Standing", observer, 0, 1.5f);
+			auto agent = world.lookupAgent(id).entity;
+			world.pauseSimulation();
+			auto registry = core::AgentTagRegistry::create();
+			auto tag = registry->addAgentTag("short");
+			require(registry->addAgentTagHeightModifier(tag), "Height tag failed");
+			require(registry->setAgentTagHeightModifier(tag, { 0.7f, 0.7f }), "Height range failed");
+			world.attachAgentTagRegistry("clearance.tags.yaml", registry);
+			require(world.assignAgentTag(id, tag), "Height assignment failed");
+			auto sample = agent->getHeightModifierSample();
+			auto edgeIt = std::find_if(world.getGraph()->getEdges().begin(), world.getGraph()->getEdges().end(),
+				[](auto const& edge) { return edge->getType() == core::EdgeType::Door; });
+			require(edgeIt != world.getGraph()->getEdges().end(), "Missing Door");
+			auto edge = *edgeIt;
+			auto door = static_cast<core::DoorEdge const&>(*edge).getDoor();
+			auto const policy = world.getRouteChoicePolicy();
+			core::MobilityProfile mobility;
+			mobility.set(core::TraversalKind::Door, core::MobilityUse::OnlyIfNoOtherOption);
+			core::RouteDecisionContext context{ agent, policy.baselineProfile, policy,
+				agent->getSector(), agent->getWalkSpeed(), &world, agent->getClimbSpeed(), true, 0, 0, mobility };
+			for (uint32_t side = 0; side != 2; ++side)
+			{
+				auto target = edge->getVertex(side);
+				require(edge->getDirectedTraversalFacts(target, context).feasible
+					&& core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context).feasible,
+					"Tag short Agent or nonzero remote Floor rejected");
+				require(world.setAgentIndividualHeightModifier(id, 1.0f), "Individual Height failed");
+				auto frozen = core::RouteTraversalInputs::capture(*edge, target, context);
+				require(!frozen.evaluate(context).feasible
+					&& frozen.evaluate(context).exclusionReason == core::RouteExclusionReason::Clearance
+					&& !edge->getDirectedTraversalFacts(target, context).feasible,
+					"Too tall bypassed hard fallback exclusion");
+				require(world.setAgentIndividualHeightModifier(id, {}), "Height reset failed");
+				require(!frozen.evaluate(context).feasible && agent->getHeightModifierSample() == sample,
+					"Captured inputs mutated or persisted Height resampled");
+			}
+			// Runtime uses the actual feet, not a remote route endpoint or Door bottom.
+			auto runtimeId = world.createAgent("Runtime", edge->getVertex(0)->getSector()->getIndex(), 0, 2.5f);
+			require(world.setAgentIndividualHeightModifier(runtimeId, 0.7f), "Runtime Height refused");
+			auto agentHandle = std::shared_ptr<const core::Agent>(world.lookupAgent(runtimeId).entity, [](core::Agent const*) {});
+			require(door->setHeightScale(0.6f), "Runtime low scale refused");
+			require(!edge->isTraversable(edge->getVertex(1), agentHandle)
+				&& edge->requestTraversal(edge->getVertex(1), agentHandle) == core::EdgeTraversalRequestResult::Failed
+				&& !door->isOpening(), "Runtime clearance allowed passage or started opening");
+			require(door->setHeightScale(0.63f), "Runtime exact scale refused");
+			if (mode != core::DoorActivationMode::RemoteControlled)
+				require(edge->requestTraversal(edge->getVertex(1), agentHandle) == core::EdgeTraversalRequestResult::OK,
+					"Runtime exact fit refused");
+			for (auto scale : { 0.1f, 1.0f })
+			{
+				require(door->setHeightScale(scale), "Scale endpoint refused");
+				require(door->admitsStandingHeight(agent->getStandingHeight(), 1.0f) == (scale == 1.0f),
+					"Scale endpoint clearance incorrect");
+			}
+			require(door->setHeightScale({}), "Default scale refused");
+			for (auto height : { core::Door::Height::Regular, core::Door::Height::Tall })
+			{
+				door->setHeight(height);
+				require(door->admitsStandingHeight(CORE_AGENT_MAX_HEIGHT, 1.0f), "Default standing Agent rejected");
+				auto const feet = door->getPosition().y + core::Door::effectiveHeight(height) - agent->getStandingHeight();
+				require(door->admitsStandingHeight(agent->getStandingHeight(), feet)
+					&& door->admitsStandingHeight(agent->getStandingHeight(), feet + core::Door::StandingClearanceTolerance * 0.5f)
+					&& !door->admitsStandingHeight(agent->getStandingHeight(), feet + core::Door::StandingClearanceTolerance * 2.0f),
+					"Default/Tall top-relative exact-fit tolerance incorrect");
+			}
+		}
+	}
+
+	void standingDoorWorldJourneys()
+	{
+		// Minimal stale-admission defense: edit the live aperture while queued,
+		// or after crossing starts. This is not a comprehensive live-edit contract.
+		for (bool underway : { false, true })
+		{
+			core::World world("Stale clearance", 6, 2);
+			auto front = world.addRoom("Front", 0, 0, 0, 6, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 6, 1);
+			core::World::CreateDoorOptions options;
+			options.heightScale = 0.72f;
+			auto created = world.addSectorDoor(0, 0, 2, options);
+			world.finishBuild();
+			auto id = world.createAgent("Head", front, 0, 2.5f);
+			auto followerId = world.createAgent("Follower", front, 0, 1.5f);
+			auto head = world.lookupAgent(id).entity, follower = world.lookupAgent(followerId).entity;
+			world.pauseSimulation();
+			require(world.setAgentIndividualHeightModifier(id, 0.8f)
+				&& world.setAgentIndividualHeightModifier(followerId, 0.7f), "Queue Heights refused");
+			require(world.resumeSimulation(), "Queue resume refused");
+			std::shared_ptr<core::Door> door;
+			for (auto const& edge : world.getGraph()->getEdges())
+				if (edge->getTraversalResourceId() == created.traversalResource)
+				{
+					door = static_cast<core::DoorEdge const&>(*edge).getDoor();
+					auto source = edge->getVertex(0)->getSector()->getIndex() == front
+						? edge->getVertex(0) : edge->getVertex(1);
+					head->setPath(smoke::twoNodePath(source, edge->getOtherVertex(source), edge), true);
+					follower->setPath(smoke::twoNodePath(source, edge->getOtherVertex(source), edge), true);
+					break;
+				}
+			bool edited = false;
+			for (uint32_t tick = 0; tick != 1200; ++tick)
+			{
+				world.advanceTick();
+				if (!edited && ((underway && head->getState() == core::Agent::State::TraversingEdge)
+					|| (!underway && head->getState() == core::Agent::State::WaitingForTraversal
+						&& door->getOpenLeaseCount() > 0)))
+				{
+					require(door->setHeightScale(0.65f), "Stale aperture edit refused");
+					edited = true;
+				}
+				if (edited && head->getState() == core::Agent::State::Idle
+					&& follower->getState() == core::Agent::State::Idle) break;
+			}
+			require(edited && head->getState() == core::Agent::State::Idle
+				&& (head->getSector() == world.getSector(back).get()) == underway
+				&& follower->getSector() == world.getSector(back).get(),
+				"Stale head blocked fitting follower or admitted crossing could not finish");
+			auto snapshot = world.getSimulationSnapshot();
+			require(snapshot.traversalPermits.empty() && snapshot.traversalRequests.empty()
+				&& door->getOpenLeaseCount() == 0, "Stale clearance ownership leaked");
+		}
+
+		for (auto mode : { core::DoorActivationMode::Automatic, core::DoorActivationMode::Manual,
+			core::DoorActivationMode::RemoteControlled })
+		for (bool reverse : { false, true })
+		for (bool alternate : { false, true })
+		for (float modifier : { 0.7f, 0.8f, 0.8001f, 1.0f })
+		for (bool external : { false, true })
+		{
+			core::World world("Clearance journeys", 12, 2);
+			auto front = world.addRoom("Front", 0, 1, 0, 12, 1);
+			auto back = world.addRoom("Back", 1, 1, 0, 12, 1);
+			core::World::CreateDoorOptions options;
+			options.heightScale = 0.72f; // .36: exact fit for a valid .8 modifier.
+			options.activationMode = mode;
+			options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+			auto low = world.addSectorDoor(0, 1, 2, options);
+			if (alternate) world.addSectorDoor(0, 1, 9, {});
+			auto sourceSector = reverse ? back : front, targetSector = reverse ? front : back;
+			world.addSectorMarker(targetSector, 0, 3.5f, "Destination");
+			world.finishBuild();
+			auto id = world.createAgent("Traveller", sourceSector, 0, 1.5f);
+			auto agent = world.lookupAgent(id).entity;
+			world.pauseSimulation();
+			require(world.setAgentIndividualHeightModifier(id, modifier), "Journey Height failed");
+			require(world.setAgentIndividualPermissionAdherence(id, false), "Adherence edit failed");
+			core::MobilityProfile mobility;
+			mobility.set(core::TraversalKind::Door, core::MobilityUse::OnlyIfNoOtherOption);
+			require(world.setAgentIndividualMobilityProfile(id, mobility), "Fallback edit failed");
+			require(world.resumeSimulation(), "Journey resume failed");
+			if (external)
+			{
+				for (auto const& edge : world.getGraph()->getEdges())
+					if (edge->getTraversalResourceId() == low.traversalResource)
+					{
+						auto source = edge->getVertex(0)->getSector()->getIndex() == sourceSector
+							? edge->getVertex(0) : edge->getVertex(1);
+						agent->setPath(smoke::twoNodePath(source, edge->getOtherVertex(source), edge), true);
+						break;
+					}
+			}
+			else require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Journey intent refused");
+			bool lost = false, crossedLow = false;
+			for (uint32_t tick = 0; tick != 6000; ++tick)
+			{
+				world.advanceTick();
+				for (auto const& event : world.consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::RouteLost)
+					{
+						require(event.routeLossReason == core::RouteLossReason::Unreachable, "Wrong clearance Route loss");
+						lost = true;
+					}
+				for (auto const& permit : world.getSimulationSnapshot().traversalPermits)
+					for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+						if (permit.request == request.id && request.resource == low.traversalResource) crossedLow = true;
+				if (agent->getState() == core::Agent::State::Idle) break;
+			}
+			bool const fits = modifier <= 0.8f;
+			require(agent->getState() == core::Agent::State::Idle
+				&& (agent->getSector() == world.getSector(targetSector).get()) == (fits || alternate)
+				&& lost == (!fits && !alternate) && crossedLow == fits,
+				"World journey failed: reverse=" + std::to_string(reverse) + " alternate=" + std::to_string(alternate)
+				+ " modifier=" + std::to_string(modifier) + " external=" + std::to_string(external) + " mode=" + std::to_string(static_cast<int>(mode))
+				+ " state=" + std::to_string(static_cast<int>(agent->getState())) + " lost=" + std::to_string(lost)
+				+ " crossedLow=" + std::to_string(crossedLow) + " x=" + std::to_string(agent->getGlobalPosition().x) + " y=" + std::to_string(agent->getGlobalPosition().y));
+			auto snapshot = world.getSimulationSnapshot();
+			require(snapshot.traversalPermits.empty() && snapshot.traversalRequests.empty(), "Traversal ownership leaked");
+			for (auto const& resource : snapshot.traversalResources)
+			{
+				require(resource.openLeaseCount == 0, "Door lease leaked");
+				for (auto const& lane : resource.queueLanes) require(lane.queue.empty(), "Door queue leaked");
+				for (auto const& lane : resource.crossingLanes) require(!lane.owner, "Crossing lane leaked");
+			}
+		}
+	}
 
 }
 
 void agent_smoke::registerHeight(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "standingDoorClearance", [](smoke::Context const&) { standingDoorClearance(); } });
+	checks.push_back({ "standingDoorWorldJourneys", [](smoke::Context const&) { standingDoorWorldJourneys(); } });
 	checks.push_back({ "heightRangesAreBoundedRevisionedAndPersisted", [](smoke::Context const&) { rangesAreBoundedRevisionedAndPersisted(); } });
 	checks.push_back({ "heightAssignmentPersistenceAndConflictsMatchOtherProperties", [](smoke::Context const&) { assignmentPersistenceAndConflictsMatchOtherProperties(); } });
 }

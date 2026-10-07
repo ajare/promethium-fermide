@@ -1,4 +1,5 @@
 #include "core/Agent.h"
+#include "core/DoorEdge.h"
 
 #include "core/World.h"
 #include "core/Edge.h"
@@ -1055,9 +1056,14 @@ namespace core
 		return CORE_AGENT_MAX_WIDTH;
 	}
 
+	float Agent::getStandingHeight() const
+	{
+		return CORE_AGENT_MAX_HEIGHT * getEffectiveHeightModifier().value;
+	}
+
 	float Agent::getHeight() const
 	{
-		return CORE_AGENT_MAX_HEIGHT * getEffectiveHeightModifier().value * getPoseHeightScale();
+		return getStandingHeight() * getPoseHeightScale();
 	}
 
 	Shape Agent::getBounds() const
@@ -1670,6 +1676,14 @@ namespace core
 			return;
 		}
 
+		// Recheck before adopting even an already granted permit, never during crossing.
+		if (mTraversalTask->edge->getType() == EdgeType::Door
+			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsStandingHeight(
+				getStandingHeight(), getGlobalPosition().y))
+		{
+			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+			return;
+		}
 		auto requestLookup = mWorld->lookupTraversalRequest(mTraversalTask->request);
 		if (!requestLookup) return;
 		// A selected (or reinstalled stale) Path is intent, not authorization.

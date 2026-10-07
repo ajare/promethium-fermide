@@ -1001,3 +1001,6 @@ with migration guidance.
 
 This is source-level ownership, not a promised future taxonomy: mixed dependency
 sources still need splitting before their follow-up domain migrations.
+
+#475 adds `standingDoorClearance` and `standingDoorWorldJourneys`, both owned by
+`smoke/agent/Height.cpp` in `pf-smoke-agent`; no source ownership migration.
