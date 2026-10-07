@@ -2,7 +2,7 @@
 
 ### Building code
 
-Try to use incremental builds always to same time.
+Try to use incremental builds always to same time.  When implementing and reviewing, only use the Release configuration to build and test.
 
 ### Testing
 

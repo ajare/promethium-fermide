@@ -1,4 +1,4 @@
-version: 55
+version: 57
 nextDumbwaiterId: 1
 nextFurnitureId: 4
 furnitureCatalogue:
@@ -81,6 +81,83 @@ construction:
         markerId: 4
         markerName: Sofa Right seat
         properties: 0
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 2
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 9
+    cellsWide: 5
+    levelsHigh: 1
+  - type: room
+    name: Room 2
+    layer: 1
+    y: 1
+    x: 2
+    cellsWide: 8
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: door
+    layer: 0
+    y: 1
+    x: 4
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: true
+    heightScale: 0.5
+  - type: door
+    layer: 0
+    y: 1
+    x: 9
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: marker
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 3.625
+    id: 5
+    name: Marker 2
+    properties: 0
+  - type: door
+    layer: 0
+    y: 1
+    x: 5
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: marker
+    sectorIndex: 3
+    levelIndex: 0
+    xOffset: 0.5625
+    id: 6
+    name: Marker 3
+    properties: 0
 agentGroups:
   []
 accessPermissions:
@@ -94,7 +171,7 @@ accessPermissionGrants:
   []
 interactionPermissionRequirements:
   []
-nextMarkerId: 5
+nextMarkerId: 7
 nextAgentGroupId: 1
 agents:
   - id: 1
@@ -118,3 +195,17 @@ agents:
       destinationLocalY: 0
       active: true
       action: use-furniture
+  - id: 2
+    agent:
+      name: Agent 2
+      flags: 0
+    sector: 1
+    localX: 0.671875
+    localY: 0
+    path:
+      destinationMarker: 6
+      destinationSector: 3
+      destinationLocalX: 0.5625
+      destinationLocalY: 0
+      active: true
+      action: idle
