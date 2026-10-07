@@ -69,6 +69,13 @@ namespace core
 		return topAboveFloor <= availableHeight + ClearanceTolerance;
 	}
 
+	bool Door::admitsAgentTraversal(Agent const& agent, float approachFloorY,
+		bool beginningMovement) const
+	{
+		return admitsVerticalExtent(agent.getTraversalDoorClearanceExtent(beginningMovement),
+			approachFloorY);
+	}
+
 	uint32_t Door::getCellsWide() const { return mCellsWide; }
 	void Door::setHeight(Height height)
 	{

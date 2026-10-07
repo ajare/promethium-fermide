@@ -67,6 +67,12 @@ namespace core
 		static constexpr float ClearanceTolerance = 0.00001f;
 		static constexpr float StandingClearanceTolerance = ClearanceTolerance;
 		bool admitsVerticalExtent(float topAboveFloor, float approachFloorY) const;
+		// Shared clearance decision boundary for routing and every admission gate:
+		// combines the Agent's effective traversal envelope with this Door's top
+		// clearance above the given approach floor. Preserves current scope and
+		// pose/support semantics; later crossing modes build on this seam.
+		bool admitsAgentTraversal(Agent const& agent, float approachFloorY,
+			bool beginningMovement = false) const;
 		bool admitsStandingHeight(float standingHeight, float approachFeetY) const
 		{ return admitsVerticalExtent(standingHeight, approachFeetY); }
 		OpenStyle getOpenStyle() const;

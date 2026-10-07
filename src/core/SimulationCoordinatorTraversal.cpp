@@ -211,8 +211,7 @@ namespace core
 				return;
 			}
 			auto actor = mWorld.mAgents.find(request->mOwner);
-			if (actor && !resource->mDoor->admitsVerticalExtent(
-				actor->getTraversalDoorClearanceExtent(), actor->getGlobalPosition().y))
+			if (actor && !resource->mDoor->admitsAgentTraversal(*actor, actor->getGlobalPosition().y))
 			{
 				auto owner = request->mOwner;
 				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);

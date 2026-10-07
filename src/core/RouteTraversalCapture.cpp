@@ -241,8 +241,8 @@ namespace core
 		{
 			Door const& door = result.type == EdgeType::Door
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
-			if (context.agent && !door.admitsVerticalExtent(
-				context.agent->getTraversalDoorClearanceExtent(context.beginningMovement), source->getPosition().y))
+			if (context.agent && !door.admitsAgentTraversal(
+				*context.agent, source->getPosition().y, context.beginningMovement))
 			{
 				result.exclusion = RouteExclusionReason::Clearance;
 				return result;

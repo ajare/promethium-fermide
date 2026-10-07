@@ -1703,8 +1703,8 @@ namespace core
 
 		// Recheck before adopting even an already granted permit, never during crossing.
 		if (mTraversalTask->edge->getType() == EdgeType::Door
-			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsVerticalExtent(
-				getTraversalDoorClearanceExtent(), getGlobalPosition().y))
+			&& !static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor()->admitsAgentTraversal(
+				*this, getGlobalPosition().y))
 		{
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 			return;

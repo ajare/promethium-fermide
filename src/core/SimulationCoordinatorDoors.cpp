@@ -221,8 +221,7 @@ namespace core
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
 				&& hasCommittedMovement(agent)) continue;
 			auto source = edge->getOtherVertex(path->nodes[node].targetVertex);
-			if (edge->getDoor()->admitsVerticalExtent(agent.getTraversalDoorClearanceExtent(),
-				source->getPosition().y)) continue;
+			if (edge->getDoor()->admitsAgentTraversal(agent, source->getPosition().y)) continue;
 			replanAgentAfterAuthorizationRefusal(id, false);
 			return; // An existing sampled planning interval is never restarted.
 		}

@@ -24,6 +24,18 @@ of an already-positioned retained-Pose crossing explicitly uses `false`.
 Runtime checks repeat the predicted envelope at request, queue and permit
 adoption boundaries, never interrupting an admitted crossing.
 
+## Shared clearance decision boundary
+
+Routing and every admission gate route their fit/refusal question through one
+seam: `Door::admitsAgentTraversal(agent, approachFloorY, beginningMovement)`.
+It combines the Agent's effective traversal envelope with the Door's top
+clearance above the given approach floor and preserves the Door's scope
+(ordinary Regular/Tall Doors between Locations restrict clearance; specialized,
+transport-owned and Chamber thresholds keep their existing rules). Callers
+retain their own approach-floor source and `beginningMovement` value; future
+crossing modes build on this single boundary instead of duplicating the fit
+question at each gate.
+
 ## Physical support versus decoration
 
 A Lua Furniture usable point may declare `supportElevation`, a finite,
