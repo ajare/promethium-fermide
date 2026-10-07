@@ -237,6 +237,9 @@ namespace core
 			uint32_t pathNodesConsumed{ 1 };
 			uint64_t traversalTicksRemaining{ 0 };
 			std::optional<bool> escalatorWalking;
+			// Set when a Door crossing is admitted as the automatic low-Door
+			// Crawling fallback (30% height, doubled crossing duration).
+			bool crawling{ false };
 
 		};
 
@@ -406,6 +409,10 @@ namespace core
 		void serializeImpl(Serializer& serializer, SerializationWorkData& workData) const override;
 
 		bool deserializeImpl(Serializer& serializer, SerializationWorkData& workData) override;
+
+		// Physical support elevation of the currently occupied Furniture usable
+		// point, or zero. Decorative render offsets are excluded.
+		float getSupportElevation() const;
 
 		// Assignment belongs to World::setAgentGroup, which has already
 		// judged both the Agent and the Agent group against this World.
@@ -763,6 +770,17 @@ namespace core
 		// New movement clears Action poses; active Furniture use finishes on
 		// physical departure even though it survives planning.
 		float getTraversalDoorClearanceExtent(bool beginningMovement = false) const;
+		// Whether the automatic low-Door Crawling fallback applies to this Agent:
+		// it is effectively Standing (or predicts a Standing departure) rather
+		// than retaining a lowered Action pose at the threshold.
+		bool admitsAutomaticDoorCrawling(bool beginningMovement) const
+		{
+			return beginningMovement || mFurnitureUse || mPose == Pose::Standing;
+		}
+		// Top of the Crawling envelope above the supporting Floor, mirroring the
+		// departure prediction of getTraversalDoorClearanceExtent for the 0.3
+		// body-height Crawling pose. Excludes decorative offsets.
+		float getTraversalCrawlingDoorClearanceExtent(bool beginningMovement = false) const;
 
 		Shape getBounds() const;
 

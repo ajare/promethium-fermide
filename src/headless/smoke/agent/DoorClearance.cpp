@@ -227,7 +227,7 @@ void runLiveDoorClearance(smoke::Context const&)
 		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
 		auto origin = reverse ? back : front, destination = reverse ? front : back;
 		core::World::CreateDoorOptions options;
-		options.heightScale = .72f;
+		options.heightScale = .20f;
 		options.speedOverride = .1f;
 		options.activationMode = mode;
 		options.openStyle = style;
@@ -258,7 +258,7 @@ void runLiveDoorClearance(smoke::Context const&)
 		if (change == 0)
 		{
 			world.pauseSimulation();
-			require(world.setSectorDoorHeightScale(0, 0, 2, 1, .6f), "Idle height edit refused");
+			require(world.setSectorDoorHeightScale(0, 0, 2, 1, .15f), "Idle height edit refused");
 			require(world.resumeSimulation(), "Height edit resume failed");
 		}
 		else
@@ -360,8 +360,11 @@ void runCommittedDoorEnvelope(smoke::Context const& context)
 
 void runPoseDoorMovementReset(smoke::Context const& context)
 {
+	// Departure from Furniture predicts an unsupported Standing envelope rather
+	// than the retained Sitting/Lying pose. A Door too low for Standing is now
+	// crossed by the automatic Crawling fallback: departure still releases the
+	// Furniture use/occupancy and restores Standing on arrival.
 	for (bool lying : {false, true})
-	for (bool alternate : {false, true})
 	{
 		core::World world("Furniture departure prediction", 12, 2);
 		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
@@ -369,7 +372,6 @@ void runPoseDoorMovementReset(smoke::Context const& context)
 		core::World::CreateDoorOptions options;
 		options.heightScale = .84f; // .42 fits Sitting and Lying, not Standing.
 		auto low = world.addSectorDoor(0, 0, 4, options);
-		if (alternate) world.addSectorDoor(0, 0, 9, {});
 		auto path = catalogue(context, .01f, lying ? core::Pose::Lying : core::Pose::Sitting);
 		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
 		require(world.placeFurniture(front, "support", 2, 0, "Chair or bed") != 0, "Reset support refused");
@@ -384,26 +386,92 @@ void runPoseDoorMovementReset(smoke::Context const& context)
 		require(agent->getDoorClearanceExtent() < .42f && agent->getTraversalDoorClearanceExtent(true) > .42f,
 			"Departure prediction exploited temporary pose/support");
 		require(world.moveAgentToNamedMarker(id, "Destination").accepted(), "Departure intent refused");
-		bool lost = false, crossedLow = false;
+		bool crawled = false, arrived = false;
 		for (unsigned tick = 0; tick < 3000; ++tick)
 		{
 			world.advanceTick();
+			if (agent->getState() == core::Agent::State::TraversingEdge
+				&& agent->getPose() == core::Pose::Crawling) crawled = true;
+			for (auto const& permit : world.getSimulationSnapshot().traversalPermits)
+				for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+					if (permit.request == request.id && request.resource == low.traversalResource) crawled = true;
+			if (agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+		}
+		require(crawled && arrived && agent->getSector() == world.getSector(back).get(),
+			"Departure did not crawl through the low Door: lying=" + std::to_string(lying)
+			+ " crawled=" + std::to_string(crawled) + " arrived=" + std::to_string(arrived)
+			+ " state=" + std::to_string(static_cast<int>(agent->getState()))
+			+ " x=" + std::to_string(agent->getGlobalPosition().x));
+		require(agent->getPose() == core::Pose::Standing && world.usablePointOccupant(seat) != id,
+			"Departure lifecycle released too early or failed to release on departure");
+		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] movement-reset pose=" << (lying ? "lying" : "sitting")
+			<< " outcome=crawled/arrived/released" << '\n';
+	}
+}
+
+void runAutomaticCrawlingJourneys(smoke::Context const&)
+{
+	// The first complete automatic-Crawling tracer bullet: an Agent completes a
+	// Marker journey through a manual ordinary Regular Door Standing if Standing
+	// fits, otherwise Crawling if that fits (30% height, doubled crossing), and
+	// is refused when neither envelope fits. Both directions and the optional
+	// alternative Door are covered.
+	struct Scenario { char const* label; float scale; core::Pose crossing; bool admits; };
+	for (auto const& test : {
+		Scenario{"standing-fit", .90f, core::Pose::Standing, true},
+		Scenario{"crawling-fit", .40f, core::Pose::Crawling, true},
+		Scenario{"crawling-exact-fit", .2701f, core::Pose::Crawling, true},
+		Scenario{"refusal", .10f, core::Pose::Standing, false}})
+	for (bool reverse : {false, true})
+	for (bool alternate : {false, true})
+	{
+		core::World world("Automatic crawling", 12, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+		auto origin = reverse ? back : front, destination = reverse ? front : back;
+		core::World::CreateDoorOptions options;
+		options.heightScale = test.scale;
+		options.activationMode = core::DoorActivationMode::Manual;
+		auto low = world.addSectorDoor(0, 0, 2, options);
+		if (alternate) world.addSectorDoor(0, 0, 9, {});
+		world.addSectorMarker(destination, 0, 3.5f, "Goal");
+		world.finishBuild();
+		auto id = world.createAgent("Traveller", origin, 0, 1.5f);
+		auto agent = world.lookupAgent(id).entity;
+		require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Crawl intent refused");
+		bool crossed = false, crawled = false, lost = false;
+		unsigned crawlingTicks = 0;
+		for (unsigned tick = 0; tick < 3000; ++tick)
+		{
+			world.advanceTick();
+			if (agent->getPose() == core::Pose::Crawling) ++crawlingTicks;
+			if (agent->getState() == core::Agent::State::TraversingEdge
+				&& agent->getPose() == core::Pose::Crawling) crawled = true;
 			for (auto const& event : world.consumeSimulationEvents())
 				lost |= event.type == core::SimulationEventType::RouteLost;
 			for (auto const& permit : world.getSimulationSnapshot().traversalPermits)
 				for (auto const& request : world.getSimulationSnapshot().traversalRequests)
-					if (permit.request == request.id && request.resource == low.traversalResource) crossedLow = true;
+					if (permit.request == request.id && request.resource == low.traversalResource) crossed = true;
 			if (agent->getState() == core::Agent::State::Idle) break;
 		}
-		require(!crossedLow && lost == !alternate && (agent->getSector() == world.getSector(back).get()) == alternate,
-			"Movement used temporary pose through low Door: alternate=" + std::to_string(alternate)
-			+ " lying=" + std::to_string(lying) + " lost=" + std::to_string(lost)
-			+ " low=" + std::to_string(crossedLow) + " state=" + std::to_string(static_cast<int>(agent->getState()))
-			+ " x=" + std::to_string(agent->getGlobalPosition().x));
-		require(agent->getPose() == (alternate ? core::Pose::Standing : lying ? core::Pose::Lying : core::Pose::Sitting)
-			&& (world.usablePointOccupant(seat) == id) == !alternate,
-			"Departure lifecycle released too early or failed to release on departure");
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] movement-reset pose=" << (lying ? "lying" : "sitting")
-			<< " outcome=" << (alternate ? "stood/alternate/arrived/released" : "route-loss/use-retained") << '\n';
+		bool const reachedDestination = agent->getSector() == world.getSector(destination).get();
+		if (test.admits)
+		{
+			require(reachedDestination && crossed && !lost, std::string(test.label) + ": fitting journey did not arrive");
+			if (test.crossing == core::Pose::Crawling)
+				require(crawled && crawlingTicks == 12, std::string(test.label) + ": Crawling crossing wrong Pose or duration: crawled=" + std::to_string(crawled) + " crawlingTicks=" + std::to_string(crawlingTicks));
+			else
+				require(!crawled, std::string(test.label) + ": Standing crossing lowered Pose");
+		}
+		else
+		{
+			require(!crossed && lost == !alternate && reachedDestination == alternate,
+				std::string(test.label) + ": refusal did not Route-loss or alternate: lost=" + std::to_string(lost)
+				+ " alternate=" + std::to_string(alternate) + " reached=" + std::to_string(reachedDestination));
+		}
+		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[crawling] " << test.label
+			<< " reverse=" << reverse << " alternate=" << alternate
+			<< " outcome=" << (test.admits ? (test.crossing == core::Pose::Crawling ? "crawled" : "stood") : (alternate ? "alternate" : "route-loss"))
+			<< " crawlingTicks=" << crawlingTicks << '\n';
 	}
 }

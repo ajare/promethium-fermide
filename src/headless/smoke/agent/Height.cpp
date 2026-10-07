@@ -30,6 +30,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context);
 void runPoseDoorMovementReset(smoke::Context const& context);
 void runLiveDoorClearance(smoke::Context const& context);
 void runCommittedDoorEnvelope(smoke::Context const& context);
+void runAutomaticCrawlingJourneys(smoke::Context const& context);
 
 namespace
 {
@@ -233,25 +234,45 @@ namespace
 			for (uint32_t side = 0; side != 2; ++side)
 			{
 				auto target = edge->getVertex(side);
-				require(edge->getDirectedTraversalFacts(target, context).feasible
+				auto standingFacts = edge->getDirectedTraversalFacts(target, context);
+				require(standingFacts.feasible
 					&& core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context).feasible,
 					"Tag short Agent or nonzero remote Floor rejected");
+				// A Standing refusal now falls back to automatic Crawling rather than
+				// being excluded; captured inputs record the doubled motion duration.
 				require(world.setAgentIndividualHeightModifier(id, 1.0f), "Individual Height failed");
-				auto frozen = core::RouteTraversalInputs::capture(*edge, target, context);
-				require(!frozen.evaluate(context).feasible
-					&& frozen.evaluate(context).exclusionReason == core::RouteExclusionReason::Clearance
+				auto crawl = core::RouteTraversalInputs::capture(*edge, target, context);
+				auto crawlFacts = crawl.evaluate(context);
+				require(crawlFacts.feasible && crawl.crawling
+					&& crawlFacts.components.motionSeconds > standingFacts.components.motionSeconds
+					&& edge->getDirectedTraversalFacts(target, context).feasible,
+					"Standing refusal did not fall back to Crawling");
+				// Too low even for Crawling remains a hard Clearance exclusion.
+				require(door->setHeightScale(0.2f), "Low scale refused");
+				auto impossible = core::RouteTraversalInputs::capture(*edge, target, context);
+				require(!impossible.evaluate(context).feasible
+					&& impossible.evaluate(context).exclusionReason == core::RouteExclusionReason::Clearance
 					&& !edge->getDirectedTraversalFacts(target, context).feasible,
-					"Too tall bypassed hard fallback exclusion");
+					"Too-low-for-Crawling bypassed hard Clearance exclusion");
+				require(door->setHeightScale(0.7f), "Scale restore refused");
 				require(world.setAgentIndividualHeightModifier(id, {}), "Height reset failed");
-				require(!frozen.evaluate(context).feasible && agent->getHeightModifierSample() == sample,
+				require(impossible.evaluate(context).exclusionReason == core::RouteExclusionReason::Clearance
+					&& agent->getHeightModifierSample() == sample,
 					"Captured inputs mutated or persisted Height resampled");
 			}
 			// Runtime uses the actual feet, not a remote route endpoint or Door bottom.
 			auto runtimeId = world.createAgent("Runtime", edge->getVertex(0)->getSector()->getIndex(), 0, 2.5f);
 			require(world.setAgentIndividualHeightModifier(runtimeId, 0.7f), "Runtime Height refused");
 			auto agentHandle = std::shared_ptr<const core::Agent>(world.lookupAgent(runtimeId).entity, [](core::Agent const*) {});
+			auto const runtimeFeet = world.lookupAgent(runtimeId).entity->getGlobalPosition().y;
 			require(door->setHeightScale(0.6f), "Runtime low scale refused");
-			require(!edge->isTraversable(edge->getVertex(1), agentHandle)
+			require(door->classifyAgentCrossing(*world.lookupAgent(runtimeId).entity, runtimeFeet)
+					== core::Door::DoorCrossingMode::Crawling,
+				"Runtime Standing refusal did not fall back to Crawling");
+			require(door->setHeightScale(0.15f), "Runtime crawl refusal scale refused");
+			require(door->classifyAgentCrossing(*world.lookupAgent(runtimeId).entity, runtimeFeet)
+					== core::Door::DoorCrossingMode::None
+				&& !edge->isTraversable(edge->getVertex(1), agentHandle)
 				&& edge->requestTraversal(edge->getVertex(1), agentHandle) == core::EdgeTraversalRequestResult::Failed
 				&& !door->isOpening(), "Runtime clearance allowed passage or started opening");
 			require(door->setHeightScale(0.63f), "Runtime exact scale refused");
@@ -317,7 +338,7 @@ namespace
 					|| (!underway && head->getState() == core::Agent::State::WaitingForTraversal
 						&& door->getOpenLeaseCount() > 0)))
 				{
-					require(door->setHeightScale(0.65f), "Stale aperture edit refused");
+					require(door->setHeightScale(0.20f), "Stale aperture edit refused");
 					edited = true;
 				}
 				if (edited && head->getState() == core::Agent::State::Idle
@@ -389,7 +410,7 @@ namespace
 					}
 			}
 			else require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Journey intent refused");
-			bool lost = false, crossedLow = false;
+			bool lost = false, crossedLow = false, crawled = false;
 			for (uint32_t tick = 0; tick != 6000; ++tick)
 			{
 				world.advanceTick();
@@ -402,17 +423,21 @@ namespace
 				for (auto const& permit : world.getSimulationSnapshot().traversalPermits)
 					for (auto const& request : world.getSimulationSnapshot().traversalRequests)
 						if (permit.request == request.id && request.resource == low.traversalResource) crossedLow = true;
+				if (agent->getState() == core::Agent::State::TraversingEdge
+					&& agent->getPose() == core::Pose::Crawling) crawled = true;
 				if (agent->getState() == core::Agent::State::Idle) break;
 			}
-			bool const fits = modifier <= 0.8f;
+			// Taller Agents no longer refuse the low Door: they cross it Crawling.
+			bool const stands = modifier <= 0.8f;
 			require(agent->getState() == core::Agent::State::Idle
-				&& (agent->getSector() == world.getSector(targetSector).get()) == (fits || alternate)
-				&& lost == (!fits && !alternate) && crossedLow == fits,
+				&& agent->getSector() == world.getSector(targetSector).get()
+				&& !lost && crossedLow && crawled == !stands,
 				"World journey failed: front=" + std::to_string(frontKind) + " back=" + std::to_string(backKind)
 				+ " reverse=" + std::to_string(reverse) + " alternate=" + std::to_string(alternate)
 				+ " modifier=" + std::to_string(modifier) + " external=" + std::to_string(external) + " mode=" + std::to_string(static_cast<int>(mode))
 				+ " state=" + std::to_string(static_cast<int>(agent->getState())) + " lost=" + std::to_string(lost)
-				+ " crossedLow=" + std::to_string(crossedLow) + " x=" + std::to_string(agent->getGlobalPosition().x) + " y=" + std::to_string(agent->getGlobalPosition().y));
+				+ " crossedLow=" + std::to_string(crossedLow) + " crawled=" + std::to_string(crawled)
+				+ " x=" + std::to_string(agent->getGlobalPosition().x) + " y=" + std::to_string(agent->getGlobalPosition().y));
 			auto snapshot = world.getSimulationSnapshot();
 			require(snapshot.traversalPermits.empty() && snapshot.traversalRequests.empty(), "Traversal ownership leaked");
 			for (auto const& resource : snapshot.traversalResources)
@@ -434,6 +459,7 @@ void agent_smoke::registerHeight(std::vector<smoke::Check>& checks)
 	checks.push_back({ "committedDoorEnvelope", runCommittedDoorEnvelope });
 	checks.push_back({ "standingDoorClearance", [](smoke::Context const&) { standingDoorClearance(); } });
 	checks.push_back({ "standingDoorWorldJourneys", [](smoke::Context const&) { standingDoorWorldJourneys(); } });
+	checks.push_back({ "automaticCrawlingJourneys", runAutomaticCrawlingJourneys });
 	checks.push_back({ "heightRangesAreBoundedRevisionedAndPersisted", [](smoke::Context const&) { rangesAreBoundedRevisionedAndPersisted(); } });
 	checks.push_back({ "heightAssignmentPersistenceAndConflictsMatchOtherProperties", [](smoke::Context const&) { assignmentPersistenceAndConflictsMatchOtherProperties(); } });
 }

@@ -65,12 +65,17 @@ namespace core
 	DirectedTraversalFacts DoorEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		// Runtime keeps an ordinary Door crossing in place for six 1/60-second ticks.
-		auto facts = thresholdRouteFacts(*this, *mDoor, target, context, 6.0f / 60.0f,
-			CORE_DOOR_OPEN_CLOSE_TIME);
 		auto source = getOtherVertex(target);
-		if (context.agent && source && !mDoor->admitsAgentTraversal(
-			*context.agent, source->getPosition().y, context.beginningMovement))
+		auto const mode = context.agent && source
+			? mDoor->classifyAgentCrossing(*context.agent, source->getPosition().y,
+				context.beginningMovement)
+			: Door::DoorCrossingMode::Standing;
+		// Runtime keeps an ordinary Door crossing in place for six 1/60-second
+		// ticks; an automatic Crawling crossing doubles that motion duration.
+		auto facts = thresholdRouteFacts(*this, *mDoor, target, context,
+			mode == Door::DoorCrossingMode::Crawling ? 12.0f / 60.0f : 6.0f / 60.0f,
+			CORE_DOOR_OPEN_CLOSE_TIME);
+		if (mode == Door::DoorCrossingMode::None)
 		{
 			facts.feasible = false;
 			facts.exclusionReason = RouteExclusionReason::Clearance;

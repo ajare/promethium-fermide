@@ -25,6 +25,10 @@ namespace core
 		// Door takes longer so its leaf keeps the regular Door's vertical speed.
 		enum struct OpenStyle { OpenUp, OpenLeft, OpenRight, OpenApart };
 		enum struct Height { Regular, Tall };
+		// The crossing mode an Agent uses at this threshold. Standing crosses in
+		// its current/standing envelope; Crawling is the automatic low-Door
+		// fallback (30% height, 50% crossing speed); None means infeasible.
+		enum struct DoorCrossingMode { None, Standing, Crawling };
 
 	private:
 		uint32_t mCellsWide;
@@ -68,10 +72,17 @@ namespace core
 		static constexpr float StandingClearanceTolerance = ClearanceTolerance;
 		bool admitsVerticalExtent(float topAboveFloor, float approachFloorY) const;
 		// Shared clearance decision boundary for routing and every admission gate:
-		// combines the Agent's effective traversal envelope with this Door's top
-		// clearance above the given approach floor. Preserves current scope and
-		// pose/support semantics; later crossing modes build on this seam.
+		// `classifyAgentCrossing(...) != None`. Combines the Agent's effective
+		// traversal envelope with this Door's top clearance above the given
+		// approach floor, preserving the Door's scope and pose/support semantics.
 		bool admitsAgentTraversal(Agent const& agent, float approachFloorY,
+			bool beginningMovement = false) const;
+		// Shared clearance decision boundary for routing and every admission gate.
+		// Standing when the Agent's current/standing envelope fits; otherwise
+		// Crawling when the automatic fallback applies and its 30% envelope fits;
+		// otherwise None. Retained lowered Action poses cross in their own
+		// envelope and never trigger the automatic Crawling fallback.
+		DoorCrossingMode classifyAgentCrossing(Agent const& agent, float approachFloorY,
 			bool beginningMovement = false) const;
 		bool admitsStandingHeight(float standingHeight, float approachFeetY) const
 		{ return admitsVerticalExtent(standingHeight, approachFeetY); }

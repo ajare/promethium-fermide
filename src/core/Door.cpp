@@ -69,11 +69,26 @@ namespace core
 		return topAboveFloor <= availableHeight + ClearanceTolerance;
 	}
 
+	Door::DoorCrossingMode Door::classifyAgentCrossing(Agent const& agent, float approachFloorY,
+		bool beginningMovement) const
+	{
+		// The current envelope governs first. A retained lowered Action pose
+		// crosses in that pose and never triggers the automatic Crawling fallback.
+		if (admitsVerticalExtent(agent.getTraversalDoorClearanceExtent(beginningMovement),
+			approachFloorY))
+			return DoorCrossingMode::Standing;
+		if (agent.admitsAutomaticDoorCrawling(beginningMovement)
+			&& admitsVerticalExtent(agent.getTraversalCrawlingDoorClearanceExtent(beginningMovement),
+				approachFloorY))
+			return DoorCrossingMode::Crawling;
+		return DoorCrossingMode::None;
+	}
+
 	bool Door::admitsAgentTraversal(Agent const& agent, float approachFloorY,
 		bool beginningMovement) const
 	{
-		return admitsVerticalExtent(agent.getTraversalDoorClearanceExtent(beginningMovement),
-			approachFloorY);
+		return classifyAgentCrossing(agent, approachFloorY, beginningMovement)
+			!= DoorCrossingMode::None;
 	}
 
 	uint32_t Door::getCellsWide() const { return mCellsWide; }

@@ -1,4 +1,4 @@
-# Door clearance: Pose, support and live changes (#476–#477)
+# Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483)
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
@@ -8,6 +8,35 @@ rather than Lying's body width. Physical
 support elevation is added to that extent. Exact fits are accepted with a
 `0.00001` world-unit tolerance. Specialized and transport-owned thresholds keep
 their existing rules; admitted crossings may finish safely.
+
+## Automatic low-Door Crawling (#483)
+
+An Agent completing a Marker journey through a manual ordinary Regular or Tall
+Door crosses **Standing** when Standing fits, otherwise **Crawling** when that
+fits, and is refused when neither envelope fits. The classification is one
+shared seam — `Door::classifyAgentCrossing` — used by route feasibility,
+route-cost facts and captured inputs, live Path validation, request/queue gates
+and permit adoption; `admitsAgentTraversal` is its `!= None` wrapper.
+
+- The Agent waits Standing while the Door opens and in any queue. On an admitted
+  low crossing it switches directly to Crawling (30% of effective Standing
+  height), crosses at **50%** of its ordinary threshold-crossing speed (the
+  in-place Door crossing doubles from six to twelve 1/60-second ticks), then
+  stands again immediately after full completion. There is no Crouching stage
+  and no preparation/recovery delay.
+- A retained lowered Action Pose (Sitting/Crouching/Crawling/Lying set by Lua at
+  the threshold) keeps its own envelope and never triggers the automatic
+  Crawling fallback; an Agent that is effectively Standing (or predicts a
+  Standing departure, including Furniture use) may crawl.
+- Objective crossing facts and captured route inputs record the doubled motion
+  duration, so real competing routes reflect the slower threshold crossing in
+  perceived cost. Doors too low even for Crawling keep normal alternative
+  routing or Route loss; permissions, Mobility, queues, lanes, permits, Broken
+  behaviour and interlocks remain authoritative.
+- Pause/deactivation freeze the admitted crossing and its Crawling Pose; an
+  already admitted crossing completes safely after live Height/envelope changes.
+  Reset restores Standing, and repeated low Doors each perform their own
+  crossing-scoped Crawling-to-Standing cycle.
 
 `Agent::getDoorClearanceExtent()` describes the **current** envelope.
 `getTraversalDoorClearanceExtent(beginningMovement)` predicts departure:
@@ -177,6 +206,16 @@ head with a fitting follower. The combined Agent, World and Editor smoke modules
 retain the Location-pairing, Tall/excluded-ownership and legacy-geometry matrix.
 
 ## Verification record
+
+#483: the complete incremental Release build (including the editor) succeeded;
+all **115/115 CTests** passed, including the new `automaticCrawlingJourneys`
+check (Standing fit, Crawling fit with the doubled twelve-tick crossing, exact
+Crawling fit, refusal of both, both directions and the optional alternative
+Door). Standing-only assertions in `standingDoorClearance`,
+`standingDoorWorldJourneys`, `liveDoorClearance` and `poseDoorMovementReset`
+were updated for the automatic Crawling fallback. `git diff --check` is clean.
+Interactive editor checks were not run; the labelled World diagnostics are the
+automated counterpart for the manual workflow.
 
 #477: the complete incremental Release build (including the editor) succeeded;
 all **115/115 CTests** passed. The five combined dedicated diagnostics also

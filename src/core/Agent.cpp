@@ -1066,7 +1066,7 @@ namespace core
 		return beginningMovement || mFurnitureUse ? getStandingHeight() : getDoorClearanceExtent();
 	}
 
-	float Agent::getDoorClearanceExtent() const
+	float Agent::getSupportElevation() const
 	{
 		float support = 0.f;
 		if (mWorld && mOccupiedUsablePoint)
@@ -1082,8 +1082,20 @@ namespace core
 								if (point.key == destination.key) support = point.supportElevation;
 			}
 		}
+		return support;
+	}
+
+	float Agent::getDoorClearanceExtent() const
+	{
 		// Lying rotates the upright body by 90 degrees: width becomes height.
-		return support + (mPose == Pose::Lying ? getWidth() : getHeight());
+		return getSupportElevation() + (mPose == Pose::Lying ? getWidth() : getHeight());
+	}
+
+	float Agent::getTraversalCrawlingDoorClearanceExtent(bool beginningMovement) const
+	{
+		return (beginningMovement || mFurnitureUse)
+			? getStandingHeight() * 0.3f
+			: getSupportElevation() + getStandingHeight() * 0.3f;
 	}
 
 	float Agent::getHeight() const
@@ -1780,9 +1792,18 @@ namespace core
 			// locomotion task visible for a short deterministic crossing instead
 			// of committing in the permit-allocation tick. The crossing runs in
 			// place at the Agent's current position; the far-side Door vertex is
-			// never a movement target.
+			// never a movement target. An admitted automatic-Crawling crossing
+			// doubles that duration and lowers the Pose for the crossing only.
+			bool const doorCrossing = mTraversalTask->edge->getType() == EdgeType::Door;
+			if (doorCrossing)
+			{
+				auto const& doorEdge = static_cast<DoorEdge const&>(*mTraversalTask->edge);
+				mTraversalTask->crawling = doorEdge.getDoor()->classifyAgentCrossing(
+					*this, getGlobalPosition().y) == Door::DoorCrossingMode::Crawling;
+				if (mTraversalTask->crawling) mPose = Pose::Crawling;
+			}
 			mTraversalTask->traversalTicksRemaining =
-				requestLookup.entity->getEdgeType() == EdgeType::Door ? 6 : 0;
+				doorCrossing ? (mTraversalTask->crawling ? 12 : 6) : 0;
 			if (mTraversalTask->edge->getType() == EdgeType::Staircase
 				&& mTraversalTask->edge->getTraversalSpeed(nullptr) > 0.0f)
 			{
@@ -1820,6 +1841,9 @@ namespace core
 
 		auto const consumed = mTraversalTask->pathNodesConsumed;
 		for (uint32_t i = 0; i < consumed && mPath.path; ++i) nextPathNode();
+		// Automatic Crawling is crossing-scoped: stand immediately after full
+		// completion so the Agent continues its ordinary route Standing.
+		if (mTraversalTask && mTraversalTask->crawling) mPose = Pose::Standing;
 	}
 
 	void Agent::considerTraversalReplan()
@@ -1854,6 +1878,7 @@ namespace core
 		if (request && (request.entity->getState() == TraversalRequestState::Committed
 			|| request.entity->getState() == TraversalRequestState::Cancelled))
 		{
+			if (mTraversalTask->crawling) mPose = Pose::Standing;
 			mWorld->releaseTraversal(mTraversalTask->request, mTraversalTask->permit);
 			mTraversalTask.reset();
 			syncStandingRouteObservation();
@@ -1886,6 +1911,7 @@ namespace core
 				mWorld->releaseTraversal(mQueuedTraversalTask->request, mQueuedTraversalTask->permit);
 			}
 		}
+		if (mTraversalTask && mTraversalTask->crawling) mPose = Pose::Standing;
 		mTraversalTask.reset();
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();

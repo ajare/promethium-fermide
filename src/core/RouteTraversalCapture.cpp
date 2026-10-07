@@ -241,11 +241,16 @@ namespace core
 		{
 			Door const& door = result.type == EdgeType::Door
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
-			if (context.agent && !door.admitsAgentTraversal(
-				*context.agent, source->getPosition().y, context.beginningMovement))
+			if (context.agent)
 			{
-				result.exclusion = RouteExclusionReason::Clearance;
-				return result;
+				auto const mode = door.classifyAgentCrossing(
+					*context.agent, source->getPosition().y, context.beginningMovement);
+				if (mode == Door::DoorCrossingMode::None)
+				{
+					result.exclusion = RouteExclusionReason::Clearance;
+					return result;
+				}
+				result.crawling = mode == Door::DoorCrossingMode::Crawling;
 			}
 			result.mobilityKind = TraversalKind::Door;
 			if (result.type == EdgeType::BulkheadDoor)

@@ -75,6 +75,7 @@ set(agent_checks
     committedDoorEnvelope
     standingDoorClearance
     standingDoorWorldJourneys
+    automaticCrawlingJourneys
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist
