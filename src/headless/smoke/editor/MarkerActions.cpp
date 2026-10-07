@@ -5,6 +5,7 @@
 #include "FurniturePanel.h"
 #include "core/Agent.h"
 #include "AgentBehaviourAssignmentPanel.h"
+#include "AgentPathForRendering.h"
 #include "core/World.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -401,6 +402,47 @@ namespace
 			&& gWorldDocumentHistory.undoCount() == authoredHistory + 1,
 			"Paused destination edit did not author document history: " + diagnostic);
 		require(world->isModified(), "Paused destination edit did not dirty the document");
+		core::World::TopologyPathIntent intent;
+		require(world->getPausedPathIntent(*entity, intent) && intent.destinationMarker == marker,
+			"Paused Idle request has no inspectable destination");
+
+		// Minimized Agent 2 / Marker 3 repro: a paused request must remain
+		// visible before planning completes, even with no previous Path.
+		auto furnitureWorld = std::make_shared<core::World>("Paused destination", 10, 2);
+		auto const visitorRoom = furnitureWorld->addRoom("Room", 0, 0, 0, 10, 1);
+		furnitureWorld->addSectorMarker(visitorRoom, 0, 8.5f, "Marker 3");
+		furnitureWorld->finishBuild();
+		auto const visitor = furnitureWorld->createAgent("Agent 2", visitorRoom, 0, 1.5f);
+		auto const destination = furnitureWorld->getMarkerIds().front();
+		furnitureWorld->pauseSimulation();
+		require(requestAgentMarkerAction(furnitureWorld, visitor, destination, core::IdleAction, diagnostic),
+			"Agent 2 Idle request refused: " + diagnostic);
+		auto* visitorEntity = furnitureWorld->lookupAgent(visitor).entity;
+		core::World::TopologyPathIntent previewIntent;
+		require(furnitureWorld->getPausedPathIntent(*visitorEntity, previewIntent)
+			&& previewIntent.destinationMarker == destination,
+			"Selecting Idle for Marker 3 displays no destination for Agent 2");
+		auto const planningTicks = visitorEntity->getRoutePlanningRemainingTicks();
+		auto preview = agentPathForRendering(furnitureWorld.get(), visitorEntity);
+		require(preview && !preview->nodes.empty(),
+			"Selecting Idle for Marker 3 displays no route for Agent 2");
+		require(visitorEntity->getState() == core::Agent::State::RoutePlanning
+			&& visitorEntity->getRoutePlanningRemainingTicks() == planningTicks && planningTicks > 0,
+			"Paused route preview advanced or bypassed Route planning");
+		require(furnitureWorld->resumeSimulation(), "Furniture World resume failed");
+		bool visitorArrived = false;
+		for (unsigned tick = 0; tick < 1800 && !visitorArrived; ++tick)
+		{
+			require(furnitureWorld->advanceTick(), "Agent 2 Idle journey failed");
+			for (auto const& event : furnitureWorld->consumeSimulationEvents())
+				if (event.agent.id == visitor && event.type == core::SimulationEventType::DestinationReached)
+				{
+					visitorArrived = true;
+					require(event.destinationMarker == destination && event.selectedAction == core::IdleAction,
+						"Agent 2 arrived with a different destination or Action");
+				}
+		}
+		require(visitorArrived, "Agent 2 never arrived at Marker 3 after resuming");
 	}
 
 	void registryDirectory(smoke::Context const& context)

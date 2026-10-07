@@ -7881,6 +7881,26 @@ namespace core
 				return true;
 			}
 		}
+		// A request made while paused starts Route planning and clears the old
+		// runtime Path/paused intent. Expose its current destination for editor
+		// inspection and previews without advancing the planning timer.
+		if (isSimulationPaused())
+		{
+			auto const id = getAgentId(&agent);
+			if (auto goal = mMovementGoals.find(id); goal != mMovementGoals.end()
+				&& !goal->second.cancelling && !goal->second.actionInvalidated)
+			{
+				intent = {};
+				intent.destinationMarker = goal->second.marker;
+				intent.destinationSector = goal->second.sector;
+				intent.destinationPosition = goal->second.position;
+				if (intent.destinationSector && intent.destinationSector.value <= mSectors.size())
+					intent.destinationLocalPosition = intent.destinationPosition
+						- mSectors[intent.destinationSector.value - 1]->getPosition();
+				intent.wasPathing = goal->second.startPathing;
+				return true;
+			}
+		}
 		return false;
 	}
 
