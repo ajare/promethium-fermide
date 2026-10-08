@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include "Checks.h"
 // Saved-Path restoration under the effective Mobility profile, for ticket #194.
 //
@@ -59,8 +60,8 @@ namespace
 		auto profile = core::RouteChoicePolicy{}.baselineProfile;
 		core::RouteDecisionContext const context{ agent, profile, {},
 			agent ? agent->getSector() : nullptr,
-			agent ? agent->getWalkSpeed() : core::Agent::physicalBaselineForType("Human").walkSpeed,
-			nullptr, agent ? agent->getClimbSpeed() : core::Agent::physicalBaselineForType("Human").climbSpeed,
+			agent ? agent->getWalkSpeed() : core::bundledHumanBaseline().walkSpeed,
+			nullptr, agent ? agent->getClimbSpeed() : core::bundledHumanBaseline().climbSpeed,
 			true, 0, 0, agent ? std::optional{ agent->getEffectiveMobilityProfile().value }
 				: std::optional<core::MobilityProfile>{} };
 		unsigned count = 0;

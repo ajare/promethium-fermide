@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -625,7 +626,7 @@ namespace persistence
 			? edge->getVertex(0) : edge->getVertex(1);
 		auto high = low == edge->getVertex(0) ? edge->getVertex(1) : edge->getVertex(0);
 		auto const& routePolicy = world.getRouteChoicePolicy();
-		auto const& humanPhysical = core::Agent::physicalBaselineForType("Human");
+		auto const& humanPhysical = core::bundledHumanBaseline();
 		core::RouteDecisionContext const routeContext{ nullptr, routePolicy.baselineProfile,
 			routePolicy, nullptr, humanPhysical.walkSpeed, &world,
 			humanPhysical.climbSpeed };

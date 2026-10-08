@@ -1,4 +1,4 @@
-#include "core/Human.h"
+#include "core/AgentType.h"
 #include "../support/CatalogueSource.h"
 #include "WorldChecks.h"
 #include "core/World.h"
@@ -571,8 +571,8 @@ definitions[1], definitions[2] = definitions[2], definitions[1]
 						if (object->getMarker()->getId() == attachedMarker) seat = loaded->getGraph()->getVertexForObject(object);
 						if (object->getMarker()->getName() == "Entrance") approach = loaded->getGraph()->getVertexForObject(object);
 					}
-				core::Human query("Query");
-				require(seat && loaded->getGraph()->calculatePath(&query,
+				auto query = core::Agent::create(core::bundledHumanAgentType(), "Query");
+				require(seat && loaded->getGraph()->calculatePath(query.get(),
 					approach, seat), "Document replay lost route attachment");
 				auto visitor = loaded->lookupAgent(loaded->createAgent("Visitor", arrangementRoom, 0, 0.5f)).entity;
 				visitor->setPath(loaded->getGraph()->calculatePath(visitor, seat), true);
@@ -614,9 +614,9 @@ definitions[1], definitions[2] = definitions[2], definitions[1]
 							if (name == "Internal boundary") boundary = vertex;
 							if (object->getMarker()->getId() == owned) seat = vertex;
 						}
-					core::Human query("Query"); auto graph = loaded->getGraph();
-					require(graph->calculatePath(&query, entrance, exit) && graph->calculatePath(&query, entrance, seat)
-						&& !graph->calculatePath(&query, entrance, boundary), "Round trip/reset changed composed coverage or attachment");
+					auto query = core::Agent::create(core::bundledHumanAgentType(), "Query"); auto graph = loaded->getGraph();
+					require(graph->calculatePath(query.get(), entrance, exit) && graph->calculatePath(query.get(), entrance, seat)
+						&& !graph->calculatePath(query.get(), entrance, boundary), "Round trip/reset changed composed coverage or attachment");
 					require(loaded->lookupMarker(owned)->getName() == "Composed destination", "Composed destination identity/name changed");
 				}
 			}

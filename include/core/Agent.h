@@ -27,6 +27,7 @@ namespace core
 	class Sector;
 	class FurnitureCatalogue;
 	struct LiftRouteAccessObservation;
+	struct AgentTypeDefinition;
 
 	struct PathIterator
 	{
@@ -625,7 +626,7 @@ namespace core
 		bool atEndOfPath() const;
 
 
-	protected:
+	private:
 		explicit Agent(std::string const& name);
 		// Applies an immutable type identity and a frozen physical baseline once,
 		// from a factory or a document-load path. Later mutation is not exposed.
@@ -644,16 +645,17 @@ namespace core
 		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
 		// Stable type ID, independent of the presentation display name.
 		std::string const& getTypeId() const { return mTypeId; }
-		// Application Resource name the type resolved from; empty for the
-		// embedded bundled Human definition used by legacy documents.
+		// Application Resource name the type resolved from (including legacy Human).
 		std::string const& getTypeResourceName() const { return mTypeResourceName; }
-		static std::unique_ptr<Agent> create(std::string const& type, std::string const& name);
-		// Resolves a built-in type's physical baseline where no individual Agent
-		// exists, such as an editor preview or agent-less route calculation.
-		static AgentPhysicalBaseline const& physicalBaselineForType(std::string_view type);
-		// Standing dimensions for editor previews before World ownership. Height
+		// Resource-backed scratch Agent for agent-aware queries without World
+		// ownership. Its isolated live instance retains its runtime until teardown.
+		// Placed Agents must use World::createAgent and its World-local budget.
+		static std::unique_ptr<Agent> create(AgentTypeDefinition const& definition,
+			std::string const& name);
+		// Standing dimensions from a validated preview or instance baseline. Height
 		// is the already-resolved property modifier, not a Pose or resource size.
-		static Vector2 placementDimensions(std::string const& type, float heightModifier = 1.0f);
+		static Vector2 placementDimensions(AgentPhysicalBaseline const& physical,
+			float heightModifier = 1.0f);
 
 		virtual ~Agent();
 		Agent(Agent const&) = delete;

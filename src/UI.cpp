@@ -526,7 +526,8 @@ namespace
 		ImVec2 feet, ImVec2 canvasPos, ImVec2 canvasSize)
 	{
 		if (!pointInRect(feet, canvasPos, canvasPos + canvasSize)) return {};
-		return pegmanAgentTargetAtWorld(world, screenToWorld(feet));
+		return pegmanAgentTargetAtWorld(world, screenToWorld(feet),
+			agentTypeDraftPlacementDimensions().x);
 	}
 
 	PegmanTarget getMarkerTarget(shared_ptr<const core::World> const& world,

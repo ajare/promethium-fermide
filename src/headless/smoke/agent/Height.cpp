@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 // Migrated from AgentHeightSmokeChecks.cpp (#286); core dependency tier.
 
 #include <algorithm>
@@ -295,7 +296,7 @@ namespace
 			{
 				door->setHeight(height);
 				require(door->admitsStandingHeight(
-					core::Agent::physicalBaselineForType("Human").standingHeight, 1.0f),
+					core::bundledHumanBaseline().standingHeight, 1.0f),
 					"Default standing Agent rejected");
 				auto const feet = door->getPosition().y + core::Door::effectiveHeight(height) - agent->getStandingHeight();
 				require(door->admitsStandingHeight(agent->getStandingHeight(), feet)

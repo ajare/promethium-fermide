@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -52,7 +53,7 @@ namespace core
 				// The remaining walking costs use the maximum valid physical speed.
 				auto const lowerBound = edge->getType() != EdgeType::Location ? 0.0f
 					: length == 0 ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-					: length / (Agent::physicalBaselineForType("Human").walkSpeed
+					: length / (bundledHumanBaseline().walkSpeed
 						* AgentWalkSpeedModifierMaximum);
 				auto const inputIndex = edge->getType() == EdgeType::Location
 					? std::numeric_limits<size_t>::max() : mInputArcs.size();
@@ -661,9 +662,9 @@ namespace core
 				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
 			RouteDecisionContext const context{ agent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				agent ? agent->getWalkSpeed() : Agent::physicalBaselineForType("Human").walkSpeed,
+				agent ? agent->getWalkSpeed() : bundledHumanBaseline().walkSpeed,
 				graph->getWorld(),
-				agent ? agent->getClimbSpeed() : Agent::physicalBaselineForType("Human").climbSpeed,
+				agent ? agent->getClimbSpeed() : bundledHumanBaseline().climbSpeed,
 				false, perceptionKey, 0,
 				mobility.value };
 			auto const inferredSource = !source;

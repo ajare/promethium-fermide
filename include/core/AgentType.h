@@ -28,13 +28,13 @@ namespace core
 
 	// The bundled Human definition. Its source is embedded so headless World
 	// creation and legacy document loading can resolve Human without an editor
-	// startup or a filesystem dependency. It is the single authority for the
-	// Human baseline in this slice.
+	// startup or a filesystem dependency. The embed is generated at build time
+	// directly from the bundled resource, never maintained as a second source.
 	AgentTypeDefinition bundledHumanAgentType();
 
 	// The frozen, validated Human baseline produced by running the bundled
-	// definition's new() once. Computed lazily and shared by the compatibility
-	// Human class and any caller that needs Human dimensions without a World.
+	// resource's new() once. Used only for the existing Human-default UI and
+	// Agent-less route-query policy; placed Agents use their own frozen baseline.
 	AgentPhysicalBaseline const& bundledHumanBaseline();
 
 	// Constructs a frozen, validated baseline for one resolved definition in an

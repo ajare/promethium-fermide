@@ -1,0 +1,4 @@
+#pragma once
+
+// Generated from the authored .agent.lua resource, never a second definition.
+inline constexpr char kHumanAgentLua[] = R"PF_AGENT(@PF_HUMAN_AGENT_LUA@)PF_AGENT";

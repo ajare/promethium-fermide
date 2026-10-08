@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include <cassert>
 #include <cmath>
 
@@ -72,8 +73,8 @@ namespace core
 			? (ascending ? context.agent->getPhysicalBaseline().stairAscentSpeed
 				: context.agent->getPhysicalBaseline().stairDescentSpeed)
 			// Agent-less editor previews retain the Human-compatible baseline.
-			: (ascending ? Agent::physicalBaselineForType("Human").stairAscentSpeed
-				: Agent::physicalBaselineForType("Human").stairDescentSpeed);
+			: (ascending ? bundledHumanBaseline().stairAscentSpeed
+				: bundledHumanBaseline().stairDescentSpeed);
 		auto const speed = typeSpeed * context.profile.stairSpeedModifier;
 		facts.feasible = true;
 		facts.components.motionSeconds = getLength() / speed;

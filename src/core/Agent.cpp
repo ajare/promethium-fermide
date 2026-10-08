@@ -1,5 +1,5 @@
 #include "core/Agent.h"
-#include "core/Human.h"
+#include "core/AgentTypeRuntime.h"
 #include "core/AgentType.h"
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
@@ -134,21 +134,22 @@ namespace core
 		}
 	}
 
-	std::unique_ptr<Agent> Agent::create(string const& type, string const& name)
+	std::unique_ptr<Agent> Agent::create(AgentTypeDefinition const& definition, string const& name)
 	{
-		if (type == "Human") return std::make_unique<Human>(name);
-		throw SerializationException("Unsupported Agent type '" + type + "'");
+		AgentTypeRuntimeAdapter runtime;
+		auto result = runtime.construct(definition.typeId, definition.source, name);
+		if (!result.succeeded)
+			throw SerializationException("Agent type '" + definition.typeId
+				+ "' resource '" + definition.resourceName + "': " + result.diagnostic);
+		auto agent = std::unique_ptr<Agent>(new Agent(name));
+		agent->setTypeIdentity(definition.typeId, definition.displayName,
+			definition.resourceName, result.baseline);
+		agent->mLuaInstance = std::move(result.instance);
+		return agent;
 	}
 
-	AgentPhysicalBaseline const& Agent::physicalBaselineForType(string_view type)
+	Vector2 Agent::placementDimensions(AgentPhysicalBaseline const& physical, float heightModifier)
 	{
-		if (type == "Human") return bundledHumanBaseline();
-		throw SerializationException("Unsupported Agent type '" + string(type) + "'");
-	}
-
-	Vector2 Agent::placementDimensions(string const& type, float heightModifier)
-	{
-		auto const& physical = physicalBaselineForType(type);
 		return { physical.width, physical.standingHeight * heightModifier };
 	}
 
@@ -183,10 +184,10 @@ namespace core
 	void Agent::serializeImpl(Serializer& serializer, SerializationWorkData&) const
 	{
 		serializer.beginMap("agent");
-		serializer.writeString("type", std::string(getTypeName()));
-		// Stable type ID and application Resource reference (ADR 0010). The type
-		// field remains the presentation name for legacy readers; typeId is the
-		// authoritative identity the resource must declare on load.
+		serializer.writeString("type", mTypeId);
+		// Stable type ID and application Resource reference (ADR 0010). Keep the
+		// historical type wire slot, but do not persist revision-dependent display
+		// names as authored identity. typeId remains authoritative on load.
 		serializer.writeString("typeId", mTypeId);
 		if (!mTypeResourceName.empty())
 			serializer.writeString("resource", mTypeResourceName);
@@ -353,8 +354,8 @@ namespace core
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		serializer.beginMap("agent");
 		auto const type = serializer.readString("type", true, "Human");
-		if (type != getTypeName())
-			throw SerializationException("Unsupported Agent type '" + type + "'");
+		// Presentation may change in the resolved revision; only the stable ID
+		// is identity. World already validated the authoritative resource reference.
 		auto const typeId = serializer.readString("typeId", true, type);
 		if (typeId != getTypeId())
 			throw SerializationException("Serialized Agent type ID '" + typeId

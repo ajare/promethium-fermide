@@ -1,4 +1,4 @@
-#include "core/Human.h"
+#include "core/AgentType.h"
 #include "Checks.h"
 #include "RoutingPopulation.h"
 #include <bit>
@@ -133,9 +133,9 @@ namespace
 		{
 			auto world = core::loadWorldDocument(smokeContext.fixture(std::filesystem::path("resources/test-worlds") / filename));
 			auto graph = world->getGraph();
-			core::Human agent("Reference walker");
-			core::RouteDecisionContext const context{ &agent, {}, {}, nullptr,
-				agent.getWalkSpeed(), world.get() };
+			auto agent = core::Agent::create(core::bundledHumanAgentType(), "Reference walker");
+			core::RouteDecisionContext const context{ agent.get(), {}, {}, nullptr,
+				agent->getWalkSpeed(), world.get() };
 			auto const& vertices = graph->getVertices();
 			for (auto const& source : vertices)
 			{
@@ -160,7 +160,7 @@ namespace
 				}
 				for (auto const& target : vertices)
 				{
-					auto path = graph->calculatePath(&agent, source, target);
+					auto path = graph->calculatePath(agent.get(), source, target);
 					auto expected = distances[target->getSearchIndex()];
 					require(bool(path) == std::isfinite(expected), "Reference reachability mismatch");
 					if (path) require(std::abs(path->nodes.back().cumulativePerceivedCost - expected) < 0.001f,
@@ -436,7 +436,7 @@ namespace
 				profile.waitingAversion = extreme ? 3 : 0.5f;
 				core::MobilityProfile mobility;
 				mobility.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
-				auto const& physical = core::Agent::physicalBaselineForType("Human");
+				auto const& physical = core::bundledHumanBaseline();
 				core::RouteDecisionContext context{ agent, profile, {},
 					observedSector < world->getNumSectors() ? world->getSector(observedSector).get() : nullptr,
 					physical.walkSpeed * profile.walkSpeedModifier, world.get(),

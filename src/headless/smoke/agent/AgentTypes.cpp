@@ -140,6 +140,22 @@ namespace
 		require(physical.width == 0.5f && physical.standingHeight == 0.6f
 			&& physical.reach == 0.3f && physical.walkSpeed == 0.4f,
 			"The generic type's frozen baseline was not applied");
+		// The former Human-only query factory now accepts any resolved resource,
+		// retains an isolated instance, and does not publish to the World.
+		core::AgentTypeDefinition definition{ "Tall", "Tall Person", "tall.agent.lua",
+			typeSource("Tall", "Tall Person", validBaseline()) };
+		auto query = core::Agent::create(definition, "Query");
+		require(query->getTypeId() == "Tall" && query->getWidth() == agent->getWidth()
+			&& query->getWalkSpeed() == agent->getWalkSpeed()
+			&& world.getSimulationSnapshot().agents.size() == 1,
+			"Resource-backed query factory refused an arbitrary type or published an Agent");
+		require(world.attachAgentType("unit.agent.lua", typeSource("Unit", "Unit",
+			validBaseline("sitting_height_ratio=1, crouching_height_ratio=1,\n"
+				"crawling_height_ratio=1, crawling_speed_ratio=1,\n")), &diagnostic), diagnostic);
+		auto unit = world.lookupAgent(world.createAgent("Unit", "Unit", corridor, 0, 4.f)).entity;
+		require(unit->getPhysicalBaseline().crawlingSpeedRatio == 1.f
+			&& unit->getTraversalCrawlingDoorClearanceExtent(true) == unit->getStandingHeight(),
+			"The inclusive ratio upper boundary was refused or changed");
 	}
 
 	void invalidBaselinesAreRejected(smoke::Context const&)
@@ -151,54 +167,72 @@ namespace
 		attachCases.push_back({ "malformed Lua", "this is not valid lua" });
 		attachCases.push_back({ "missing constructor",
 			"return { api_version = 1, type_id = \"NoCtor\", display_name = \"No Ctor\" }\n" });
+		attachCases.push_back({ "invalid constructor",
+			"return { api_version = 1, type_id = 'NoCtor', display_name = 'No Ctor', new = 42 }" });
+		attachCases.push_back({ "module exception", "error('module refused')" });
 		attachCases.push_back({ "invalid type id",
 			"return { api_version = 1, type_id = \"bad id!\", display_name = \"Bad\", new = function() return {} end }\n" });
 		for (auto const& test : attachCases)
 		{
 			core::World world("Reject", 4, 2);
 			std::string diagnostic;
-			require(!world.attachAgentType(test.name + ".agent.lua", test.source, &diagnostic),
-				("Invalid Agent type was accepted at attach: " + test.name).c_str());
+			require(!world.attachAgentType(test.name + ".agent.lua", test.source, &diagnostic)
+				&& !diagnostic.empty(),
+				("Invalid Agent type was accepted or undiagnosed at attach: " + test.name).c_str());
 		}
 
 		// Sources with a valid type object whose new() returns an invalid
 		// baseline: attachment succeeds, but creation must refuse atomically.
-		struct ConstructCase { std::string name; std::string source; };
+		struct ConstructCase { std::string name; std::string body; std::string expected; };
 		std::vector<ConstructCase> constructCases;
-		constructCases.push_back({ "omitted field", typeSource("Missing", "Missing",
-			"        return { width = 0.5, standing_height = 0.6, reach = 0.3,\n"
-			"            walk_speed = 0.4, climb_speed = 0.2, stair_ascent_speed = 0.3,\n"
-			"            stair_descent_speed = 0.35, sitting_height_ratio = 0.5,\n"
-			"            crouching_height_ratio = 0.6, crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5 }\n") });
-		constructCases.push_back({ "zero width", typeSource("Zero", "Zero",
-			validBaseline("            width = 0.0,\n")) });
-		constructCases.push_back({ "NaN reach", typeSource("NaN", "NaN",
-			validBaseline("            reach = (0.0 / 0.0),\n")) });
-		constructCases.push_back({ "ratio above one", typeSource("Ratio", "Ratio",
-			validBaseline("            sitting_height_ratio = 1.5,\n")) });
-		constructCases.push_back({ "non-table constructor", typeSource("NotTable", "Not Table",
-			"        return 42\n") });
-		constructCases.push_back({ "forbidden capability", typeSource("Forbidden", "Forbidden",
-			"        local x = setmetatable({}, {})\n" + validBaseline()) });
+		// Every field is tested, and every failure names the offending field.
+		for (auto const* field : { "width", "standing_height", "reach", "walk_speed",
+			"climb_speed", "stair_ascent_speed", "stair_descent_speed",
+			"sitting_height_ratio", "crouching_height_ratio", "crawling_height_ratio",
+			"crawling_speed_ratio" })
+		{
+			for (auto const* value : { "nil", "0", "-1", "0/0", "math.huge",
+				"-math.huge", "false", "'0.5'", "{}", "1e-300" })
+				constructCases.push_back({ std::string(field) + " = " + value,
+					validBaseline(std::string(field) + " = " + value + ",\n"), field });
+			constructCases.push_back({ std::string(field) + " overflow",
+				validBaseline(std::string(field) + " = 1e300,\n"), field });
+			if (std::string_view(field).ends_with("ratio"))
+				constructCases.push_back({ std::string(field) + " above one",
+					validBaseline(std::string(field) + " = 1.01,\n"), field });
+		}
+		for (auto const* value : { "42", "nil", "false", "function() end", "'instance'" })
+			constructCases.push_back({ std::string("non-table ") + value,
+				std::string("return ") + value, "instance table" });
+		constructCases.push_back({ "constructor exception", "error('constructor refused')",
+			"constructor refused" });
+		for (auto const* capability : { "io.open('unsafe')", "os.execute('unsafe')",
+			"debug.getregistry()", "package.loadlib('unsafe', 'unsafe')",
+			"require('unsafe')", "dofile('unsafe')", "loadfile('unsafe')",
+			"load('unsafe')", "setmetatable({}, {})", "collectgarbage()" })
+			constructCases.push_back({ capability,
+				std::string("local forbidden = ") + capability + "\n" + validBaseline(), "" });
 		for (auto const& test : constructCases)
 		{
 			core::World world("Reject", 6, 2);
 			auto const corridor = world.addCorridor(0, 0, 6);
 			world.finishBuild();
 			std::string diagnostic;
-			require(world.attachAgentType(test.name + ".agent.lua", test.source, &diagnostic),
+			require(world.attachAgentType("invalid.agent.lua",
+				typeSource("Invalid", "Invalid", test.body), &diagnostic),
 				("Valid type object was refused at attach: " + test.name + " (" + diagnostic + ")").c_str());
 			bool threw = false;
 			try
 			{
-				(void)world.createAgent(test.name, "Broken", corridor, 0, 1.0f);
+				(void)world.createAgent("Invalid", "Broken", corridor, 0, 1.0f);
 			}
-			catch (std::exception const&)
+			catch (std::exception const& error)
 			{
-				threw = true;
+				diagnostic = error.what();
+				threw = diagnostic.find("invalid.agent.lua") != std::string::npos
+					&& diagnostic.find(test.expected) != std::string::npos;
 			}
-			require(threw, ("Invalid baseline was accepted at creation: " + test.name).c_str());
+			require(threw, ("Invalid construction was not diagnosed: " + test.name + ": " + diagnostic).c_str());
 			require(world.getSimulationSnapshot().agents.empty()
 				&& world.getSector(corridor)->getAgents().empty(),
 				("Invalid baseline left a partial Agent: " + test.name).c_str());
@@ -251,6 +285,21 @@ namespace
 		require(threw, "An unbounded constructor was not stopped by the instruction budget");
 		require(world.getSimulationSnapshot().agents.empty(),
 			"A budgeted failure left a partial Agent");
+		for (auto const* guard : { "pcall", "xpcall" })
+		{
+			auto const body = std::string(guard) + "(function() while true do end end"
+				+ (std::string_view(guard) == "xpcall" ? ", function(e) return e end" : "")
+				+ ")\n" + validBaseline();
+			require(world.attachAgentType(std::string(guard) + ".agent.lua",
+				typeSource(guard, guard, body), &diagnostic), diagnostic);
+			bool refused = false;
+			try { world.createAgent(guard, "Caught budget", corridor, 0, 1.f); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && world.getSimulationSnapshot().agents.empty(),
+				"A protected call swallowed terminal instruction-budget exhaustion");
+		}
+		require(!!world.createAgent("Recovery", corridor, 0, 1.f),
+			"Instruction-budget failure poisoned subsequent creation");
 	}
 
 	void allocationBudgetIsEnforced(smoke::Context const&)
@@ -276,6 +325,22 @@ namespace
 		require(threw, "A huge allocation was not stopped by the memory budget");
 		require(world.getSimulationSnapshot().agents.empty(),
 			"A memory-budget failure left a partial Agent");
+		for (auto const* guard : { "pcall", "xpcall" })
+		{
+			auto const body = std::string(guard)
+				+ "(function() local blob = string.rep('x', 16 * 1024 * 1024) end"
+				+ (std::string_view(guard) == "xpcall" ? ", function(e) return e end" : "")
+				+ ")\n" + validBaseline();
+			require(world.attachAgentType(std::string(guard) + ".agent.lua",
+				typeSource(guard, guard, body), &diagnostic), diagnostic);
+			bool refused = false;
+			try { world.createAgent(guard, "Caught budget", corridor, 0, 1.f); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && world.getSimulationSnapshot().agents.empty(),
+				"A protected call swallowed terminal allocation-budget exhaustion");
+		}
+		require(!!world.createAgent("Recovery", corridor, 0, 1.f),
+			"Allocation-budget failure poisoned subsequent creation");
 	}
 
 	void instancesAreIsolated(smoke::Context const&)
@@ -286,8 +351,7 @@ namespace
 		// A module-level counter proves isolation: each new() must start from a
 		// fresh environment, so every instance observes width == 1.0 rather than
 		// a shared, incrementing counter.
-		std::string const counter = "        local count = 0\n"
-			"        count = count + 1\n"
+		std::string const counter = "        count = count + 1\n"
 			"        return {\n"
 			"            width = count,\n"
 			"            standing_height = 0.6, reach = 0.3, walk_speed = 0.4,\n"
@@ -297,7 +361,7 @@ namespace
 			"            crawling_speed_ratio = 0.5 }\n";
 		std::string diagnostic;
 		require(world.attachAgentType("counter.agent.lua",
-			typeSource("Counter", "Counter", counter), &diagnostic), diagnostic.c_str());
+			"local count = 0\n" + typeSource("Counter", "Counter", counter), &diagnostic), diagnostic.c_str());
 		auto const first = world.createAgent("Counter", "First", corridor, 0, 1.0f);
 		auto const second = world.createAgent("Counter", "Second", corridor, 0, 2.0f);
 		require(world.lookupAgent(first).entity->getPhysicalBaseline().width == 1.0f
@@ -378,7 +442,8 @@ namespace
 		auto write = [&](float width) {
 			std::ofstream out(path);
 			// Both module upvalues and instance-private data are fresh each time.
-			out << "local count = 0\n" << typeSource("Revision", "Revision",
+			out << "local count = 0\n" << typeSource("Revision",
+				width > 0.5f ? "Revised display" : "Original display",
 				"count = count + 1\n" + validBaseline(
 					"width = " + std::to_string(width) + " * count,\n"
 					"private_state = { count = count },\n"));
@@ -417,8 +482,9 @@ namespace
 		{
 			auto loaded = core::loadWorldDocument(root / filename);
 			require(loaded->lookupAgent(first).entity->getPhysicalBaseline().width == 0.75f
-				&& loaded->lookupAgent(second).entity->getPhysicalBaseline().width == 0.75f,
-				"Load reused a baseline snapshot or shared mutable module state");
+				&& loaded->lookupAgent(second).entity->getPhysicalBaseline().width == 0.75f
+				&& std::string(loaded->lookupAgent(first).entity->getTypeName()) == "Revised display",
+				"Load reused a baseline snapshot, refused revised display, or shared mutable module state");
 		}
 		world.resetSimulation();
 		for (auto id : { first, second })
@@ -555,10 +621,10 @@ namespace
 		auto const* agent = world.lookupAgent(id).entity;
 		require(agent != nullptr, "The placed Human was not found");
 		auto const& baseline = agent->getPhysicalBaseline();
-		auto const preview = core::Agent::placementDimensions("Human");
+		auto const preview = core::Agent::placementDimensions(core::bundledHumanBaseline());
 		require(preview.x == baseline.width && preview.y == baseline.standingHeight,
 			"The preview dimensions did not match the scripted placement baseline");
-		auto const modified = core::Agent::placementDimensions("Human", 1.5f);
+		auto const modified = core::Agent::placementDimensions(core::bundledHumanBaseline(), 1.5f);
 		require(modified.x == baseline.width
 			&& modified.y == baseline.standingHeight * 1.5f,
 			"The preview did not apply the height modifier to the scripted baseline");
@@ -823,8 +889,10 @@ namespace
 		require(original.setAgentIndividualWalkSpeedModifier(id, 1.2f),
 			"Could not author an individual Walk speed modifier");
 
-		auto const yaml = removeLineContaining(serializeWorld(original, false),
+		auto yaml = removeLineContaining(serializeWorld(original, false),
 			"resource: human.agent.lua");
+		yaml = removeLineContaining(yaml, "typeId: Human");
+		yaml = removeLineContaining(yaml, "type: Human");
 		require(yaml.find("resource: human.agent.lua") == std::string::npos,
 			"The resource reference was not stripped");
 
@@ -909,8 +977,7 @@ namespace
 		// a document or across load: loading reconstructs from source, so the
 		// reloaded World's instance observes width == 1 rather than a persisted
 		// count.
-		std::string const counter = "        local count = 0\n"
-			"        count = count + 1\n"
+		std::string const counter = "        count = count + 1\n"
 			"        return {\n"
 			"            width = count,\n"
 			"            standing_height = 0.6, reach = 0.3, walk_speed = 0.4,\n"
@@ -922,7 +989,7 @@ namespace
 		counterType.typeId = "Counter";
 		counterType.displayName = "Counter";
 		counterType.resourceName = "counter.agent.lua";
-		counterType.source = typeSource("Counter", "Counter", counter);
+		counterType.source = "local count = 0\n" + typeSource("Counter", "Counter", counter);
 		core::setAgentTypeResourceLoader(
 			[counterType](std::string const& name) -> std::optional<core::AgentTypeDefinition>
 			{

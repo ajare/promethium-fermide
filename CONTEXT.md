@@ -195,7 +195,7 @@ The controlled boundary between two sectors, such as a doorway or the entrance t
 _Avoid_: Vertex, when discussing physical movement rules
 
 **Door**:
-A threshold that connects two adjacent layers. It is authored on the front layer of the pair and opens into the layer immediately behind it. A regular Door has a one-level footprint. An ordinary Door authored in a Room may be regular height or 0.9-unit tall; Corridor, Facade, Lift, and Shuttle Doors always use regular height. Lift and Shuttle landing doors belong to their transport. Ordinary Regular Doors between Rooms, Corridors, or Facades may have an authored Height scale from 0.1 through 1.0 relative to the hardcoded Regular height; omission or reset uses 1. Scaling is bottom-anchored and changes visual height, vertical travel duration, and Standing Agent clearance, not tile footprint, width, or crossing lanes. Door clearance is the fit of an Agent's traversal vertical envelope, including its Pose and applicable Support elevation, below the doorway top relative to the approach Floor. An Agent that fits Standing crosses Standing; otherwise it crosses Crawling when Crawling's 30% of effective Standing height fits, and is refused when neither fits. That Standing-first, Crawling-fallback, refusal rule applies to ordinary Regular Doors, standalone Bulkhead Doors, Lift and Shuttle landing Doors, Airlocks and both Chamber subtypes; Windows and BoothWindows are excluded and gain no traversal behaviour. A Crawling crossing moves at 50% of the ordinary threshold speed, and there is no automatic Crouching stage or preparation/recovery delay. Clearance is a hard planning and new-admission constraint, independent of activation mode, permissions, and Mobility fallback; admitted crossings finish safely. Tall and specialized or transport-owned thresholds refuse an override, including explicit 1.
+A threshold that connects two adjacent layers. It is authored on the front layer of the pair and opens into the layer immediately behind it. A regular Door has a one-level footprint. An ordinary Door authored in a Room may be regular height or 0.9-unit tall; Corridor, Facade, Lift, and Shuttle Doors always use regular height. Lift and Shuttle landing doors belong to their transport. Ordinary Regular Doors between Rooms, Corridors, or Facades may have an authored Height scale from 0.1 through 1.0 relative to the hardcoded Regular height; omission or reset uses 1. Scaling is bottom-anchored and changes visual height, vertical travel duration, and Standing Agent clearance, not tile footprint, width, or crossing lanes. Door clearance is the fit of an Agent's traversal vertical envelope, including its Pose and applicable Support elevation, below the doorway top relative to the approach Floor. An Agent that fits Standing crosses Standing; otherwise it crosses Crawling when the Agent type's Crawling envelope fits, and is refused when neither fits. That Standing-first, Crawling-fallback, refusal rule applies to ordinary Regular Doors, standalone Bulkhead Doors, Lift and Shuttle landing Doors, Airlocks and both Chamber subtypes; Windows and BoothWindows are excluded and gain no traversal behaviour. A Crawling crossing moves at the Agent type's Crawling speed ratio of the ordinary threshold speed, and there is no automatic Crouching stage or preparation/recovery delay. Clearance is a hard planning and new-admission constraint, independent of activation mode, permissions, and Mobility fallback; admitted crossings finish safely. Tall and specialized or transport-owned thresholds refuse an override, including explicit 1.
 _Avoid_: Portal
 
 **Bulkhead Door**:
@@ -256,12 +256,16 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 A simulated intelligent entity with a position, destination Path, and current movement state.
 
 **Agent type**:
-An Agent's immutable physical identity, defined by one `.agent.lua` resource: a stable type ID, a display name, and a `new()` constructor returning a fresh instance with a complete physical baseline. The host validates and freezes that baseline before publishing an Agent.
+An Agent's immutable physical identity, with a stable type ID, a presentation display name, and a complete physical baseline shared in meaning by Agents of that type. An instance's physical baseline is fixed for its lifetime; individual Agent properties and Agent tags modify its effective observations without changing its type.
 _Avoid_: Agent tag, which supplies shared Agent properties
 
 **Agent type ID**:
 The stable identifier of an Agent type, independent of its presentation display name. A saved Agent records both its type ID and the Agent type resource it resolved from; legacy Human records lacking them resolve to the bundled Human definition.
 _Avoid_: Agent type, display name
+
+**Agent instance**:
+One living Agent of an Agent type, with its own private state and fixed physical baseline. A surviving Agent retains its instance across ordinary structural edits; load, Reset, and restoration after deletion start a fresh lifetime.
+_Avoid_: Agent type, which defines identity rather than one living entity
 
 **Human**:
 An Agent representing a person, with human physical baselines. Human is a bundled script-backed Agent type whose `.agent.lua` definition preserves the historical baselines; legacy Human documents resolve to that bundled definition.
@@ -276,10 +280,10 @@ An Agent's runtime bodily stance: Standing (the default), Sitting, Lying, Crouch
 _Avoid_: Movement state, which describes pathing progress rather than bodily stance
 
 **Crouching**:
-A lowered Agent Pose with reduced bodily height relative to Standing, distinct from Sitting and Crawling. Its bodily height is 60% of effective Standing height; Lua Actions may select it, but Door traversal never selects it automatically.
+A lowered Agent Pose with reduced bodily height relative to Standing, distinct from Sitting and Crawling. Its bodily height uses its Agent type's Crouching height ratio (60% for Human); Agent actions may select it, but Door traversal never selects it automatically.
 
 **Crawling**:
-A low Agent Pose with reduced bodily height relative to Standing, used for passage through Doors that cannot admit the Agent Standing. Its bodily height is 30% of effective Standing height, and an admitted Crawling crossing moves at 50% of the ordinary threshold speed.
+A low Agent Pose with reduced bodily height relative to Standing, used for passage through Doors that cannot admit the Agent Standing. Its bodily height and crossing speed use its Agent type's Crawling ratios (30% of effective Standing height and 50% of ordinary threshold speed for Human).
 
 **Support elevation**:
 The physical height of an Agent's support above its supporting Floor or Walkway, distinct from decorative artwork offsets. It contributes to the Agent's top while the Agent remains supported, but does not imply movable Furniture.

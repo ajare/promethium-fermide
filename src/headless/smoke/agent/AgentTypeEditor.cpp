@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "AgentClipboard.h"
+#include "AgentDropTargets.h"
 #include "DocumentEdit.h"
 #include "DocumentHistory.h"
 #include "core/Agent.h"
@@ -441,6 +442,13 @@ namespace
 			payload.type = selected.typeId;
 			payload.resource = selected.resourceName;
 			auto const preview = agentClipboardPlacementDimensions(payload);
+			auto const previousLayer = gUISettings.visibleLayer;
+			gUISettings.visibleLayer = 0;
+			auto const target = pegmanAgentTargetAtWorld(fixture.world, { 0.01f, 0.1f }, preview.x);
+			auto const invalidTarget = pegmanAgentTargetAtWorld(fixture.world, { 0.01f, 0.1f }, 0.f);
+			gUISettings.visibleLayer = previousLayer;
+			require(target && target.localX == preview.x * 0.5f && !invalidTarget,
+				"Creation drop clamping used Human width or admitted an invalid preview");
 			require(agentCount(*fixture.world) == 0 && preview.x == 0.7f,
 				"Import preview created an Agent or used Human dimensions");
 			require(commitAgentPlacement(fixture.world, payload,
@@ -511,6 +519,22 @@ namespace
 	void externalImportRefusesWithoutRegistration(smoke::Context const& context)
 	{
 		auto const root = context.temporaryRoot();
+		{
+			ResourceFixture startup(root);
+			startup.types.reset();
+			auto const invalid = root / "invalid-startup.agent.lua";
+			writeSource(invalid, "not lua");
+			startup.manager.addResource(std::make_shared<AgentTypeResource>("invalid-startup.agent.lua", "",
+				invalid.string(), std::map<std::string, std::string>{}, nullptr));
+			startup.types = std::make_unique<ApplicationAgentTypes>(startup.manager);
+			auto const inventory = startup.types->types();
+			require(inventory.size() == 1 && inventory.front().typeId == "Human"
+				&& !startup.types->resolve("invalid-startup.agent.lua"),
+				"Startup published an invalid resource in the Agent-type selector");
+			std::ifstream input(invalid);
+			require(std::string(std::istreambuf_iterator<char>(input), {}) == "not lua",
+				"Startup rewrote an invalid authored script");
+		}
 		ResourceFixture resources(root);
 		ApplicationAgentType selected;
 		std::string diagnostic;
@@ -524,6 +548,8 @@ namespace
 			{ invalidBaseline, "width" },
 			{ missingBaseline, "reach" },
 			{ "not lua", "" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=7 }", "constructor" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() local blob=string.rep('x',128*1024*1024) end }", "" },
 			{ "return { api_version=1, type_id='Bad', display_name='Bad' }", "constructor" },
 			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() return 7 end }", "instance table" },
 			{ "return { type_id='Bad', display_name='Bad', new=function() return {} end }", "" },

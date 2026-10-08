@@ -1,4 +1,5 @@
 #include "core/AgentType.h"
+#include "BundledHumanSource.h"
 #include "core/AgentTypeRuntime.h"
 #include "core/SerializationException.h"
 #include "core/WorldDocument.h"
@@ -12,34 +13,6 @@ namespace core
 	{
 		AgentTypeResourceLoader gAgentTypeResourceLoader;
 
-		// The bundled Human Agent type. This source is the single authority for
-		// Human physical outcomes in this slice; resources/test-worlds/human.agent.lua
-		// must remain byte-for-byte identical (a smoke check asserts this).
-		constexpr std::string_view kHumanAgentLua = R"(-- Bundled Human Agent type definition.
--- One .agent.lua source defines exactly one type object with a stable type ID,
--- a display name, and a new() constructor returning a fresh instance carrying
--- the complete physical baseline.
-return {
-    api_version = 1,
-    type_id = "Human",
-    display_name = "Human",
-    new = function()
-        return {
-            width = 0.4,
-            standing_height = (0.7 - 0.2) - 0.05,
-            reach = 0.25,
-            walk_speed = 0.5,
-            climb_speed = 0.25,
-            stair_ascent_speed = 0.35,
-            stair_descent_speed = 0.45,
-            sitting_height_ratio = 0.6,
-            crouching_height_ratio = 0.6,
-            crawling_height_ratio = 0.3,
-            crawling_speed_ratio = 0.5,
-        }
-    end,
-}
-)";
 	}
 
 	AgentTypeDefinition bundledHumanAgentType()

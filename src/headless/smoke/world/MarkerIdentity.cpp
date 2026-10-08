@@ -1,4 +1,4 @@
-#include "core/Human.h"
+#include "core/AgentType.h"
 #include "Checks.h"
 #include <memory>
 #include <stdexcept>
@@ -116,11 +116,11 @@ namespace
 		world.pauseSimulation();
 
 		auto graph = world.getGraph();
-		core::Human routingAgent("Marker pathing check");
+		auto routingAgent = core::Agent::create(core::bundledHumanAgentType(), "Marker pathing check");
 		auto source = graph->getVertexByIdentifier(sourceVertex);
 		auto blocker = graph->getVertexByIdentifier(blockingVertex);
 		auto destination = graph->getVertexByIdentifier(destinationVertex);
-		require(graph->calculatePath(&routingAgent, source, destination) != nullptr,
+		require(graph->calculatePath(routingAgent.get(), source, destination) != nullptr,
 			"The linear Marker route was not initially traversable");
 
 		auto blockerId = world.getMarkerIds()[1];
@@ -129,16 +129,16 @@ namespace
 		std::string diagnostic;
 		require(world.setMarkerProperties(blockerId, blocksPathing, &diagnostic),
 			"Could not set Blocks pathing: " + diagnostic);
-		require(graph->calculatePath(&routingAgent, source, destination) == nullptr,
+		require(graph->calculatePath(routingAgent.get(), source, destination) == nullptr,
 			"A Path ran through a Marker which blocks pathing");
-		require(graph->calculatePath(&routingAgent, source, blocker) != nullptr,
+		require(graph->calculatePath(routingAgent.get(), source, blocker) != nullptr,
 			"A blocking Marker could not remain a Path destination");
-		require(graph->calculatePath(&routingAgent, blocker, destination) != nullptr,
+		require(graph->calculatePath(routingAgent.get(), blocker, destination) != nullptr,
 			"A Path could not start at a blocking Marker");
 
 		require(world.setMarkerProperties(blockerId, 0, &diagnostic),
 			"Could not clear Blocks pathing: " + diagnostic);
-		require(graph->calculatePath(&routingAgent, source, destination) != nullptr,
+		require(graph->calculatePath(routingAgent.get(), source, destination) != nullptr,
 			"Clearing Blocks pathing did not restore the route");
 	}
 

@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include "Checks.h"
 #include "PathFixture.h"
 #include "core/Agent.h"
@@ -292,7 +293,7 @@ namespace
 				return world.lookupAgent(id).entity->getSector() == world.getSector(1).get();
 			})
 			&& world.lookupInteractionPoint(created.controls[0].interactionPoint).entity->getReach()
-				== core::Agent::physicalBaselineForType("Human").standingHeight * 0.4f;
+				== core::bundledHumanBaseline().standingHeight * 0.4f;
 	}
 
 	bool remoteDoorUsesOnePhysicalOperatorAndSharedOperation()

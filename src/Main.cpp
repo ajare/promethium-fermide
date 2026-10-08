@@ -1,5 +1,7 @@
 #define NOMINMAX
 
+#include "core/AgentType.h"
+
 #if defined(_WIN32)
 #include <Windows.h>
 #include <GL/glew.h>
@@ -473,7 +475,7 @@ void setup()
 		0
 	};
 	gAgentIconFont = io.Fonts->AddFontFromFileTTF(iconFontPath.c_str(),
-		core::Agent::placementDimensions("Human").y * CORE_LEVEL_HEIGHT_PIXELS, nullptr, agentIconRanges);
+		core::Agent::placementDimensions(core::bundledHumanBaseline()).y * CORE_LEVEL_HEIGHT_PIXELS, nullptr, agentIconRanges);
 	if (!gAgentIconFont)
 	{
 		throw ExitApplicationException(1, "Could not load the Agent icon font.");
@@ -831,7 +833,7 @@ void run()
 		shared_ptr<core::World>& observedWorld;
 		~ObserverCleanup() { if (observedWorld) observedWorld->setSimulationObserver(nullptr); }
 	} observerCleanup{metricsWorld};
-	std::shared_ptr<core::Agent> pathingAgent = core::Agent::create("Human", "Pather");
+	std::shared_ptr<core::Agent> pathingAgent = core::Agent::create(core::bundledHumanAgentType(), "Pather");
 
 	// Render settings
 	ImVec4 clearColour = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);

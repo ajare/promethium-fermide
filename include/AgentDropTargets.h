@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "core/Agent.h"
+#include "core/AgentType.h"
 #include "core/World.h"
 #include "core/Defines.h"
 #include "core/Sector.h"
@@ -55,7 +56,7 @@ inline bool locationHasCapacity(std::shared_ptr<const core::Sector> const& secto
 // canvas does after the canvas-rectangle test and the screen-to-world
 // translation in UI.cpp's getPegmanTarget().
 inline PegmanTarget pegmanAgentTargetAtWorld(std::shared_ptr<const core::World> const& world,
-	core::Vector2 const& worldPosition)
+	core::Vector2 const& worldPosition, float agentWidth = core::bundledHumanBaseline().width)
 {
 	auto sector = world->getSectorAtPosition(gUISettings.visibleLayer, worldPosition.x, worldPosition.y);
 	if (!locationHasCapacity(sector) || !sector->pointInBounds(worldPosition.x, worldPosition.y)) return {};
@@ -65,7 +66,9 @@ inline PegmanTarget pegmanAgentTargetAtWorld(std::shared_ptr<const core::World> 
 	auto levelOffset = cellY - sector->getCellY();
 	if (levelOffset >= sector->getLevelsHigh()) return {};
 
-	float halfAgentWidth = core::Agent::placementDimensions("Human").x * 0.5f;
+	if (!std::isfinite(agentWidth) || agentWidth <= 0)
+		return { nullptr, 0, 0.0f, worldPosition.y, worldPosition.y, "Agent type preview is unavailable" };
+	float halfAgentWidth = agentWidth * 0.5f;
 	float minimumX = halfAgentWidth;
 	float maximumX = sector->getSize().x - halfAgentWidth;
 	float localX = worldPosition.x - sector->getPosition().x;
@@ -108,7 +111,7 @@ inline PegmanTarget getAgentMoveTarget(std::shared_ptr<const core::World> const&
 	if (cellY < sector->getCellY() || cellY >= sector->getCellY() + sector->getLevelsHigh())
 		return { nullptr, 0, 0.0f, worldPosition.y, worldPosition.y, "Agent level is outside the sector" };
 	float halfWidth = (agent ? agent->getWidth()
-		: core::Agent::placementDimensions("Human").x) * 0.5f;
+		: core::bundledHumanBaseline().width) * 0.5f;
 	float localX = std::clamp(worldPosition.x - sector->getPosition().x, halfWidth,
 		std::max(halfWidth, sector->getSize().x - halfWidth));
 	return { sector, cellY - sector->getCellY(), localX, worldPosition.y,

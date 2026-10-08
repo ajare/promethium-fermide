@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace core
@@ -151,26 +152,25 @@ namespace core
 				lua_rawget(state, instance);
 				auto const missing = lua_isnil(state, -1);
 				auto const value = lua_tonumber(state, -1);
-				auto const isNumber = !missing && lua_isnumber(state, -1);
-				auto const valid = isNumber && std::isfinite(value)
-					&& value > 0.0f
-					&& (!field.ratio || value <= 1.0f);
+				auto const isNumber = lua_type(state, -1) == LUA_TNUMBER;
+				// Simulation consumes floats, not Lua doubles. Reject finite Lua
+				// values that overflow or underflow the frozen physical baseline.
+				auto const representable = std::isfinite(value) && value > 0
+					&& value <= std::numeric_limits<float>::max();
+				auto const frozen = representable ? static_cast<float>(value) : 0.f;
 				lua_pop(state, 1);
-				if (!valid)
-				{
-					auto const reason = missing
-						? "is missing"
-						: (!isNumber
-							? "must be a finite number"
-							: (!std::isfinite(value)
-								? "must be finite"
-								: (value <= 0.0f
-									? "must be positive"
-									: "must be within (0, 1]")));
+				char const* reason = nullptr;
+				if (missing) reason = "is missing";
+				else if (!isNumber) reason = "must be a finite number";
+				else if (!std::isfinite(value)) reason = "must be finite";
+				else if (value <= 0) reason = "must be positive";
+				else if (field.ratio && value > 1) reason = "must be within (0, 1]";
+				else if (!std::isfinite(frozen) || frozen <= 0)
+					reason = "must be representable as a finite positive float";
+				if (reason)
 					throw SerializationException(std::string("Agent type baseline field '")
 						+ field.key + "' " + reason);
-				}
-				baseline.*field.destination = static_cast<float>(value);
+				baseline.*field.destination = frozen;
 			}
 			return baseline;
 		}

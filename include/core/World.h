@@ -1543,7 +1543,7 @@ namespace core
 
 		void buildGraph();
 
-		std::unique_ptr<Agent> makeAgentForPlacement(std::string const& name,
+		std::unique_ptr<Agent> makePlacementQuery(std::string const& typeId, std::string const& name,
 			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets) const;
 
 		// Forwards to SimulationCoordinator, which owns Agent placement (ADR 0004).

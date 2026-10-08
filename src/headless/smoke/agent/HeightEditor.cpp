@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 // Migrated from AgentHeightSmokeChecks.cpp (#286); editor dependency tier.
 
 #include "AgentTagAssignmentPanel.h"
@@ -228,7 +229,7 @@ namespace
 
 		// Creation previews have no World-owned Agent yet. They must agree with
 		// actual Human bounds; modifiers change height, never the placement width.
-		auto const baseline = core::Agent::placementDimensions("Human");
+		auto const baseline = core::Agent::placementDimensions(core::bundledHumanBaseline());
 		require(baseline.x == tallAgent->getWidth()
 			&& baseline.y == tallAgent->getStandingHeight(), "Human preview dimensions changed");
 		gUISettings.visibleLayer = 0;

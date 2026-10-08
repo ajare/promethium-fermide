@@ -308,6 +308,14 @@ endif()
 set_source_files_properties(src/core/SimulationMetricsCollector.cpp PROPERTIES
     COMPILE_DEFINITIONS "PF_BUILD_VERSION=\"${PF_BUILD_VERSION}\"")
 
+# Human has one authored source of truth. Embed that resource for headless
+# creation/legacy migration; editing it triggers an incremental reconfigure.
+set(PF_HUMAN_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/test-worlds/human.agent.lua")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_HUMAN_SOURCE}")
+file(READ "${PF_HUMAN_SOURCE}" PF_HUMAN_AGENT_LUA)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledHumanSource.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledHumanSource.h" @ONLY)
+
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
@@ -321,7 +329,8 @@ add_library(promethium-fermide-core STATIC
 )
 target_compile_features(promethium-fermide-core PUBLIC cxx_std_20)
 target_compile_definitions(promethium-fermide-core PUBLIC YAML_CPP_STATIC_DEFINE)
-target_include_directories(promethium-fermide-core PUBLIC "${PF_INCLUDE_DIR}")
+target_include_directories(promethium-fermide-core PUBLIC "${PF_INCLUDE_DIR}"
+    PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(MSVC)
     target_compile_options(promethium-fermide-core PRIVATE
         "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)

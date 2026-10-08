@@ -21,7 +21,7 @@ namespace
 		smoke::require(human && std::string(human->getTypeName()) == "Human",
 			"Ordinary World creation did not create a Human");
 		auto const& physical = human->getPhysicalBaseline();
-		auto const preview = core::Agent::placementDimensions(human->getTypeName());
+		auto const preview = core::Agent::placementDimensions(human->getPhysicalBaseline());
 		smoke::require(preview.x == human->getWidth() && preview.y == human->getStandingHeight()
 			&& std::abs(human->getBounds().getSize().x - preview.x) < 0.000001f
 			&& std::abs(human->getBounds().getSize().y - preview.y) < 0.000001f,
@@ -43,7 +43,7 @@ namespace
 		smoke::require(human->getStandingHeight() == physical.standingHeight * 0.8f
 			&& human->getWalkSpeed() == physical.walkSpeed * 1.2f,
 			"Human modifiers did not apply to physical baselines");
-		auto const modifiedPreview = core::Agent::placementDimensions(human->getTypeName(), 0.8f);
+		auto const modifiedPreview = core::Agent::placementDimensions(human->getPhysicalBaseline(), 0.8f);
 		smoke::require(std::abs(human->getBounds().getSize().x - modifiedPreview.x) < 0.000001f
 			&& std::abs(human->getBounds().getSize().y - modifiedPreview.y) < 0.000001f,
 			"Modified Human bounds disagreed with placement dimensions");

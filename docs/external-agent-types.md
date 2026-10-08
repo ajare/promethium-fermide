@@ -1,5 +1,8 @@
 # Import external Agent types (#506)
 
+See [Lua Agent-type authoring](lua-agent-types.md) for all eleven baseline fields,
+sandbox limits, immutable identity, preview isolation and reconstruction semantics.
+
 In **Agent creation settings**, enter the path to a `.agent.lua` file and choose
 **Import Agent type**. Successful import selects that definition in the existing
 **Agent type** combobox. Its display name and stable type ID remain distinct;

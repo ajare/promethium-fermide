@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include <algorithm>
 #include <cassert>
 
@@ -109,7 +110,7 @@ namespace core
 		auto const rise = getDirectedRise(*targetVertex);
 		auto const distance = getLength();
 		auto const speed = context.climbSpeed > 0.0f
-			? context.climbSpeed : Agent::physicalBaselineForType("Human").climbSpeed;
+			? context.climbSpeed : bundledHumanBaseline().climbSpeed;
 		facts.feasible = true;
 		auto& c = facts.components;
 		c.motionSeconds = distance == 0.0f

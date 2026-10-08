@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include "Checks.h"
 #include "AgentPoseTestAccess.h"
 #include "Render.h"
@@ -194,7 +195,7 @@ namespace
 			for (float modifier : {0.7f, 0.9f})
 			{
 				require(world.setAgentIndividualHeightModifier(id, modifier), "Human Height authoring refused");
-				auto const dimensions = core::Agent::placementDimensions("Human", modifier);
+				auto const dimensions = core::Agent::placementDimensions(core::bundledHumanBaseline(), modifier);
 				require(near(agent->getBounds().getSize().x, dimensions.x)
 					&& near(agent->getBounds().getSize().y, dimensions.y),
 					"Human render bounds disagreed with modified preview dimensions");

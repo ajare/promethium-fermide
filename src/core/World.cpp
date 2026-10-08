@@ -8682,10 +8682,10 @@ namespace core
 		return found == mAgentTypes.end() ? std::string{} : found->second->displayName;
 	}
 
-	unique_ptr<Agent> World::makeAgentForPlacement(string const& name,
+	unique_ptr<Agent> World::makePlacementQuery(string const& typeId, string const& name,
 		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets) const
 	{
-		auto agent = Agent::create("Human", name);
+		auto agent = Agent::create(*mAgentTypes.at(typeId), name);
 		for (auto permission : grants)
 		{
 			auto found = lookupAccessPermission(permission);
@@ -8723,7 +8723,7 @@ namespace core
 	{
 		try
 		{
-			auto agent = makeAgentForPlacement("New Agent", grants, sets);
+			auto agent = makePlacementQuery("Human", "New Agent", grants, sets);
 			validateAgentLocationPlacement(*getSector(sectorId), *agent);
 		}
 		catch (exception const& error)
@@ -8738,13 +8738,13 @@ namespace core
 	AgentId World::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
 		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets)
 	{
-		return addOwnedAgentToSector(makeAgentForPlacement(name, grants, sets), sectorId, levelOffset, xOffset);
+		return createAgent("Human", name, sectorId, levelOffset, xOffset, grants, sets);
 	}
 
 	AgentId World::createAgent(string const& name, uint32_t sectorId,
 		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets)
 	{
-		return addOwnedAgentToSector(makeAgentForPlacement(name, grants, sets), sectorId);
+		return createAgent("Human", name, sectorId, grants, sets);
 	}
 
 	AgentId World::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)

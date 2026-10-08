@@ -1,3 +1,4 @@
+#include "core/AgentType.h"
 #include "Checks.h"
 #include "State.h"
 // The editor surface for Facades, for ticket #47.
@@ -438,7 +439,7 @@ void theCanvasDropTargetsAcceptAFacade()
 		&& facadeTarget.sector->getIndex() == facadeIndex,
 		"The pegman drop resolved to something other than the Facade");
 	require(facadeTarget.levelOffset == 0, "The pegman drop landed on the wrong level");
-	auto const humanWidth = core::Agent::physicalBaselineForType("Human").width;
+	auto const humanWidth = core::bundledHumanBaseline().width;
 	require(facadeTarget.localX >= humanWidth * 0.5f
 		&& facadeTarget.localX <= facadeTarget.sector->getSize().x - humanWidth * 0.5f,
 		"The pegman drop landed outside the Facade's Agent band");
