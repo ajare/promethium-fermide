@@ -337,6 +337,10 @@ _Avoid_: Behaviour configuration, behaviour state
 A collection of reusable Agent behaviours that forms one shared behaviour namespace for the Worlds that reference it.
 _Avoid_: Agent tag registry, script directory
 
+**Installed behaviour**:
+The runtime-owned association between one Agent and the behaviour closure its behaviour runtime invokes at each boundary. By default the association holds a no-op; assigning an Agent behaviour installs that behaviour's independent per-Agent closure, and the behaviour finishing or being unassigned re-installs the default. It is runtime state, never authored, and an Agent type script must not define a `behaviour` member.
+_Avoid_: Agent behaviour, which names the reusable definition rather than its per-Agent installation
+
 **Agent tag**:
 A named reusable set of Agent properties that may be assigned to many Agents.
 _Avoid_: Agent group, label
