@@ -1,8 +1,6 @@
 # Declare Agent pose capabilities and Furniture pose requirements
 
-Status: accepted design; API v2 declarations and frozen capabilities (#521) and
-shared fit/selection/routing/movement (#522) and Furniture declarations/eligibility
-(#523) implemented; full lifecycle/edit integration pending (#524)
+Status: implemented (#521–#524)
 
 Agent types declare their supported canonical Poses, physical envelope parameters, and ordered automatic pose choices for Room movement and Door crossing. The host validates and freezes these declarations for each Agent lifetime, selects the first physically fitting eligible pose, and uses the same result for route prediction, admission, movement, and duration estimates. This extends ADR 0019's frozen physical baseline rather than introducing live Lua selection callbacks; a standing-only Agent must never acquire Crawling through a host fallback.
 
@@ -26,4 +24,4 @@ Physical fit is a hard constraint for placement, new admission, ordinary Action 
 
 The existing commitment exception is explicit, not a new capability: admitted crossings keep their selected supported pose; a committed transport or chamber exit uses a supported fitting pose, or its previously accepted supported exit pose if later conditions make every choice impossible. Such grandfathered completion does not authorize new admission or claim physical fit. Edit guards continue to protect commitments.
 
-The approved contract, authoring examples, ownership table, testing seams, and implementation issue links are in [Agent pose capabilities](../agent-pose-capabilities.md). This ADR records the agreed direction. The declaration/frozen-data, shared fit/selection/routing/movement, and Furniture declarations/eligibility slices are implemented and tested; full lifecycle/edit integration remains pending in #524. See [shared selection validation](../agent-pose-selection-validation.md).
+The approved contract, authoring examples, ownership table, testing seams, and implementation issue links are in [Agent pose capabilities](../agent-pose-capabilities.md). The declaration, selection, Furniture and lifecycle slices are implemented. See [shared selection validation](../agent-pose-selection-validation.md) and [lifecycle validation](../agent-pose-lifecycle-validation.md).

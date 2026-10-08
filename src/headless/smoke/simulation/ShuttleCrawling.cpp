@@ -528,6 +528,40 @@ namespace
 			scene.clean();
 		}
 	}
+	void robotCommittedExit(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		{
+			Scene scene(.35f, .35f);
+			pose_journeys::attachRobot(scene.world);
+			auto id = scene.world.createAgent("StandingRobot", "Committed Robot", reverse ? scene.destination : scene.origin, 0, 8.5f);
+			auto* agent = scene.world.lookupAgent(id).entity;
+			scene.world.pauseSimulation();
+			require(scene.world.setAgentIndividualHeightModifier(id, .8f) && scene.world.resumeSimulation(), "Robot initial Height refused");
+			require(scene.world.moveAgentToNamedMarker(id, reverse ? "Origin goal" : "Destination goal").accepted(), "Robot journey refused");
+			bool enlarged = false, exception = false, arrived = false;
+			for (unsigned tick = 0; tick < 8000 && !arrived; ++tick)
+			{
+				scene.step();
+				require(agent->getPose() == core::Pose::Standing, "Committed recovery manufactured robot pose");
+				if (!enlarged && agent->getSector()->getType() == core::SectorType::Shuttle
+					&& agent->getState() != core::Agent::State::TraversingEdge)
+				{
+					scene.world.pauseSimulation();
+					require(scene.world.setAgentIndividualHeightModifier(id, 1.0f), "Future exit Height edit refused");
+					require(scene.world.resumeSimulation(), "Robot journey resume refused");
+					enlarged = true;
+				}
+				for (auto const& snapshot : scene.world.getSimulationSnapshot().agents)
+					if (snapshot.id == id) exception |= snapshot.grandfatheredCrossing;
+				for (auto const& event : scene.world.consumeSimulationEvents())
+					if (event.agent.id == id && event.type == core::SimulationEventType::DestinationReached) arrived = true;
+			}
+			require(enlarged && exception && arrived, "Robot exit did not distinguish prior acceptance from current fit");
+			pose_journeys::refused(scene.world, id, reverse ? "Destination goal" : "Origin goal");
+		}
+	}
+
 	void robotRefusal(smoke::Context const&)
 	{
 		for (bool reverse : {false, true})
@@ -544,6 +578,7 @@ namespace
 void registerShuttleCrawling(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"shuttles/supportedPoseRefusal", robotRefusal});
+	checks.push_back({"shuttles/robotCommittedExit", robotCommittedExit});
 	checks.push_back({"shuttles/crawlingJourneys", journeys});
 	checks.push_back({"shuttles/crawlingCapacity", capacity});
 	checks.push_back({"shuttles/crawlingCarriages", carriages});

@@ -1,10 +1,9 @@
 # Script-defined Agent poses and Furniture pose requirements
 
-Status: approved design; API v2 declarations/frozen capabilities (#521) and
-shared fit/selection/routing/movement (#522), and declarative Furniture requirements
-and shared eligibility (#523) implemented. Full lifecycle/edit integration remains
-pending in #524. See [shared selection validation](agent-pose-selection-validation.md). This document specifies the complete agreed refactor, not completed
-integration semantics.
+Status: implemented (#521–#524). API v2 declarations, shared fit/selection,
+Furniture eligibility, ownership, edit preflight and supported committed completion
+are integrated. See [shared selection validation](agent-pose-selection-validation.md)
+and [lifecycle validation](agent-pose-lifecycle-validation.md).
 See [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
 The current authoring contracts are documented in [Lua Agent types](lua-agent-types.md)
 and [Lua Furniture catalogues](lua-furniture-catalogues.md).
@@ -242,7 +241,7 @@ properties, not runtime poses, pose-definition snapshots, or live Lua state.
 Fresh validation failure is transactional. No pose-related World schema change
 is required merely to store frozen definitions.
 
-## Verification plan — not execution evidence
+## Verification scope
 
 Primary seam: production World workflows with real Lua resources, Marker requests,
 fixed-timestep simulation, snapshots, and semantic outcomes. Use existing Agent-type,
@@ -292,10 +291,12 @@ and envelope observations. Its Agent/Editor coverage includes Human and Standing
 resources, malformed contracts, preview/import refusal, persistence, revised fresh
 lifetimes and surviving topology/history carry. #522 integrates shared fit/selection, placement, routing/admission and context
 motion, with focused production World journeys and captured/direct facts.
-The remaining #523/#524 links track planned integration, not completed validation.
+#523 implements declared Furniture requirements and target-space eligibility.
+#524 integrates ownership release, replacement-effect transactions, occupied-space
+preflight and exact accepted-exit recording. Its validation is recorded separately.
 
 Out of scope: custom pose identities/shapes, independent per-pose widths, new
 fatigue/damage/task systems, live Lua selectors, tag-granted capabilities,
 anticipatory thresholds, hysteresis/delays, intermediate Furniture pose sequences,
 general Action capability metadata, new seated/lying locomotion, movable Furniture,
-new device/permission/Mobility semantics, and implementation in this design session.
+and new device/permission/Mobility semantics.

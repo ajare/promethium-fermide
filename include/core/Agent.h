@@ -28,6 +28,7 @@ namespace core
 	class World;
 	class Sector;
 	class FurnitureCatalogue;
+	class Door;
 	struct LiftRouteAccessObservation;
 	struct AgentTypeDefinition;
 
@@ -285,6 +286,7 @@ namespace core
 			// Frozen supported pose and context speed selected on admitted
 			// threshold adoption; retained until physical crossing completion.
 			std::optional<PoseSelection> crossingPose;
+			bool grandfatheredCrossing{ false };
 
 		};
 
@@ -295,7 +297,7 @@ namespace core
 		// Runtime bodily stance, deliberately absent from serialization.
 		Pose mPose{ Pose::Standing };
 		// True while mPose was authored by a Marker Action's set_pose effect and
-		// should be retained across ordinary locomotion until a new Path starts.
+		// is retained until successful replacement or actual physical departure.
 		// Distinguishes a retained Action pose from the Sector-derived pose that
 		// syncPoseToSector() applies. Runtime-only, like the pose itself.
 		bool mRetainedActionPose{ false };
@@ -309,6 +311,9 @@ namespace core
 			std::shared_ptr<const FurnitureCatalogue> catalogue;
 		};
 		std::optional<FurnitureUse> mFurnitureUse;
+		// Runtime acceptance, not a fit result or serialized capability. Only a
+		// committed journey may use this after later aperture changes.
+		std::map<std::shared_ptr<Door>, PoseSelection> mAcceptedExitPoses;
 		// Counter-based simulation stream, separate from authored samples and Lua.
 		// Only entry into a moving Escalator consumes a draw; never serialized.
 		uint64_t mEscalatorTraversalSequence{ 0 };
@@ -500,8 +505,9 @@ namespace core
 		void setHeightModifierSample(AgentPropertySample sample)
 		{
 			mHeightModifierSample = sample;
+			syncPoseToSector();
 		}
-		void clearHeightModifierSample() { mHeightModifierSample.reset(); }
+		void clearHeightModifierSample() { mHeightModifierSample.reset(); syncPoseToSector(); }
 		void setStairSpeedModifierSample(AgentPropertySample sample)
 		{
 			mStairSpeedModifierSample = sample;
@@ -564,7 +570,7 @@ namespace core
 		void setIndividualWalkSpeedModifier(std::optional<float> value)
 		{ mIndividualWalkSpeedModifier = value; modify(); }
 		void setIndividualHeightModifier(std::optional<float> value)
-		{ mIndividualHeightModifier = value; modify(); }
+		{ mIndividualHeightModifier = value; syncPoseToSector(); modify(); }
 		void setIndividualStairSpeedModifier(std::optional<float> value)
 		{ mIndividualStairSpeedModifier = value; modify(); }
 		void setIndividualLadderSpeedModifier(std::optional<float> value)
@@ -876,8 +882,8 @@ namespace core
 		float getHeight() const;
 		// Current top above the supporting Floor, excluding decorative offsets.
 		float getDoorClearanceExtent() const;
-		// New movement clears Action poses; active Furniture use finishes on
-		// physical departure even though it survives planning.
+		// Departure prediction excludes temporary ownership; Action/Furniture
+		// posture and support themselves survive until actual departure.
 		float getTraversalDoorClearanceExtent(bool beginningMovement = false) const;
 		// Top of the Crawling envelope above the supporting Floor, mirroring the
 		// departure prediction of getTraversalDoorClearanceExtent for the

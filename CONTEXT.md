@@ -289,7 +289,7 @@ A low Agent Pose with reduced bodily height relative to Standing, used for passa
 The physical height of an Agent's support above its supporting Floor or Walkway, distinct from decorative artwork offsets. It contributes to the Agent's top while the Agent remains supported, but does not imply movable Furniture.
 _Avoid_: Render offset, Marker height
 
-### Pose capabilities (approved domain model)
+### Pose capabilities
 
 **Supported pose**:
 A bodily stance an Agent type is physically capable of performing. Capability is distinct from whether that stance fits the Agent's current surroundings or is selected automatically.
@@ -304,7 +304,7 @@ The choice of the first supported, physically fitting Pose in the ordered choice
 _Avoid_: Pose capability, which describes possibility rather than selection
 
 **Pose ownership**:
-The activity or movement condition that determines an Agent's current bodily stance: its environment, an explicit Agent action, Furniture use, or an admitted crossing. Ownership is distinct from whether the Agent supports or physically fits that stance.
+The activity or movement condition that determines an Agent's current bodily stance: its environment, an explicit Agent action, Furniture use, or an admitted crossing. Ownership is distinct from whether the Agent supports or physically fits that stance. Planning and failed requests retain ownership; successful pose replacement or actual departure transfers it.
 _Avoid_: Movement state, occupancy
 
 **Furniture use pose**:
@@ -314,6 +314,10 @@ _Avoid_: Arrival pose, which suggests implicit use on arrival
 **Furniture finish pose**:
 The bodily stance required when finishing a Furniture use after releasing its physical support. Together with the Furniture use pose, it determines whether an Agent can fulfil the use's posture requirements.
 _Avoid_: Default pose, which need not be the Furniture's required finishing stance
+
+**Grandfathered completion**:
+Completion of an admitted crossing or committed journey using its previously accepted supported Pose when later conditions no longer admit a fitting Pose. It is an exception for that commitment, not a successful current-space fit or permission for new admission.
+_Avoid_: Physical fit, pose capability
 
 ### Agent behaviours and shared resources
 

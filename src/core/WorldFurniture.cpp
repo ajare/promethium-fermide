@@ -144,6 +144,7 @@ namespace core
 			candidate->mDeserializingConstruction = true;
 			for (auto const& record : records) candidate->applyConstructionRecord(record);
 			candidate->finishBuild();
+			validateReplayPoseState(*candidate, std::numeric_limits<uint32_t>::max(), 0, 0);
 		}
 		catch (std::exception const& error) { return reject(error.what()); }
 		if (diagnostic) diagnostic->clear();

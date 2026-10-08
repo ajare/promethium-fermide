@@ -649,7 +649,7 @@ namespace core
 		FurnitureInstance const* furnitureForMarker(MarkerId marker) const;
 		ActionViews actionViews(AgentId agent, MarkerId marker) const;
 		void applyActionResult(AgentId agent, MarkerId marker, ActionExecutionResult result, SimulationEvent& event,
-			bool finishing = false);
+			bool finishing = false, bool validateOnly = false, bool replacingUse = false);
 		void finishFurnitureUse(AgentId agent);
 		std::vector<SimulationEvent> mPendingMovementOutcomes;
 
@@ -810,6 +810,8 @@ namespace core
 		void addAgentTagWalkSpeedModifierSamples(AgentTagId id,
 			AgentWalkSpeedModifierProperty const& property);
 		void clearAgentTagWalkSpeedModifierSamples(AgentTagId id);
+		bool canApplyAgentTagHeightModifier(AgentTagId id, std::optional<AgentModifierRange> range,
+			std::string* diagnostic = nullptr) const;
 		void addAgentTagHeightModifierSamples(AgentTagId id,
 			AgentHeightModifierProperty const& property);
 		void clearAgentTagHeightModifierSamples(AgentTagId id);
@@ -1269,6 +1271,7 @@ namespace core
 			bool resetPathActive;
 			std::string resetAction;
 			Pose pose{ Pose::Standing };
+			bool retainedActionPose{ false };
 			MarkerId occupiedUsablePoint{};
 			MarkerId useMarker{};
 			uint64_t useFurniture{ 0 };
@@ -2292,6 +2295,11 @@ namespace core
 		// Metadata-only target-space preflight, shared by editor, requests and arrival.
 		bool furnitureUseEligible(AgentId agent, MarkerId marker, std::string* diagnostic = nullptr) const;
 		// Phase-fit boundary also available to live finishing/edit preflight.
+		// Preflight immediate occupied-space changes without running callbacks.
+		bool agentPoseStateFits(Agent const& agent, float clearance, float heightFactor = 1.0f) const;
+		bool agentHeightStateFits(Agent const& agent, float next, std::string* diagnostic) const;
+		void validateReplayPoseState(World const& candidate, uint32_t movedSectorIndex,
+			int deltaX, int deltaY) const;
 		bool furniturePoseFits(AgentId agent, MarkerId marker, Pose pose, bool usingSupport,
 			std::string* diagnostic = nullptr) const;
 		std::shared_ptr<const ActionRegistry> const& actionRegistry() const { return mActionRegistry; }

@@ -1538,6 +1538,10 @@ namespace core
 				repair.maximumRoutePlanningTimeSource = maximumRoutePlanningTimeSource;
 				repair.maximumRoutePlanningTimeProperty = *maximumRoutePlanningTimeProperty;
 			}
+			if (repair.heightAction != AgentTagSampleRepairAction::None
+				&& !agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(
+					repair.heightAction == AgentTagSampleRepairAction::Resample ? repair.heightProperty.range.maximum : 1.f),
+					diagnostic)) return false;
 			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
@@ -1592,6 +1596,7 @@ namespace core
 					repair.heightProperty.revision,
 					sampleAgentModifier(repair.heightProperty.range) });
 			}
+			agent->syncPoseToSector();
 			if (repair.stairSpeedAction == AgentTagSampleRepairAction::Clear)
 				agent->clearStairSpeedModifierSample();
 			else if (repair.stairSpeedAction == AgentTagSampleRepairAction::Resample)
@@ -1714,6 +1719,8 @@ namespace core
 
 	void World::clearAgentTagAssignments(AgentTagId id)
 	{
+		std::string diagnostic;
+		if (!canApplyAgentTagHeightModifier(id, std::nullopt, &diagnostic)) throw invalid_argument(diagnostic);
 		invalidateSimulationSnapshot();
 		bool changed{ false };
 		for (auto& [agentId, agent] : mAgents.entries())
@@ -1773,6 +1780,13 @@ namespace core
 
 	void World::clearAllAgentTagAssignmentsAndSamples()
 	{
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			(void)id;
+			std::string diagnostic;
+			if (agent && !agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(1.f), &diagnostic))
+				throw invalid_argument(diagnostic);
+		}
 		invalidateSimulationSnapshot();
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
@@ -1828,6 +1842,20 @@ namespace core
 		if (changed) modify();
 	}
 
+	bool World::canApplyAgentTagHeightModifier(AgentTagId id, std::optional<AgentModifierRange> range,
+		std::string* diagnostic) const
+	{
+		for (auto const& [agentId, agent] : mAgents.entries())
+		{
+			(void)agentId;
+			if (!agent || agent->getIndividualHeightModifier()) continue;
+			if (range ? !agent->hasAgentTag(id) : (!agent->getHeightModifierSample()
+				|| agent->getHeightModifierSample()->sourceTag != id)) continue;
+			if (!agentHeightStateFits(*agent, range ? range->maximum : 1.0f, diagnostic)) return false;
+		}
+		return true;
+	}
+
 	void World::addAgentTagHeightModifierSamples(AgentTagId id,
 		AgentHeightModifierProperty const& property)
 	{
@@ -1840,6 +1868,7 @@ namespace core
 			agent->setHeightModifierSample({
 				SampledAgentPropertyType::HeightModifier, id, property.revision,
 				sampleAgentModifier(property.range) });
+			agent->syncPoseToSector();
 			changed = true;
 		}
 		if (changed) modify();
@@ -1855,6 +1884,7 @@ namespace core
 			if (!agent || !agent->getHeightModifierSample()
 				|| agent->getHeightModifierSample()->sourceTag != id) continue;
 			agent->clearHeightModifierSample();
+			agent->syncPoseToSector();
 			changed = true;
 		}
 		if (changed) modify();
@@ -5242,6 +5272,14 @@ namespace core
 		if (location->getLevelsHigh() != 1) return reject("Height scale only applies to one-level-high Rooms");
 		if (!Location::roomHeightScaleIsValid(scale)) return reject("Height scale must be a finite value from 0.2 to 1.0");
 		if (location->getHeightScale() == scale) { if (diagnostic) diagnostic->clear(); return true; }
+		auto const ceiling = location->getPosition().y + scale.value_or(1.0f);
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			(void)id;
+			if (agent->physicalMovementSector() == location.get()
+				&& !agentPoseStateFits(*agent, ceiling - agent->getGlobalPosition().y))
+				return reject("Room height would invalidate an occupied pose or Furniture finishing posture");
+		}
 		invalidateSimulationSnapshot();
 		if (!location->setHeightScale(scale)) return reject("Height scale could not be applied");
 		for (auto it = mConstructionRecords.rbegin(); it != mConstructionRecords.rend(); ++it)
@@ -5249,7 +5287,11 @@ namespace core
 				&& it->b == location->getCellY() && it->c == location->getCellX()
 				&& it->d == location->getCellsWide() && it->e == location->getLevelsHigh())
 			{ it->roomHeightScale = scale; break; }
-		for (auto* agent : location->getAgents()) agent->syncPoseToSector();
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			(void)id;
+			if (agent->physicalMovementSector() == location.get()) agent->syncPoseToSector();
+		}
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -9205,8 +9247,13 @@ namespace core
 			if (diagnostic) *diagnostic = "The individual Height modifier is unchanged";
 			return false;
 		}
+		auto* agent = lookup.entity;
+		auto const next = value.value_or(agent->getHeightModifierSample()
+			? agent->getHeightModifierSample()->value : 1.0f);
+		if (!agentHeightStateFits(*agent, next, diagnostic)) return false;
 		invalidateSimulationSnapshot();
-		lookup.entity->setIndividualHeightModifier(value);
+		agent->setIndividualHeightModifier(value);
+		agent->syncPoseToSector();
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -9787,6 +9834,9 @@ namespace core
 				agentLookup.entity->getName(), mAgentTagRegistry->getAgentTagName(tag)));
 
 		auto const* assignedDefinition = mAgentTagRegistry->lookupAgentTag(tag);
+		if (auto height = assignedDefinition->getHeightModifier(); height
+			&& !agentHeightStateFits(*agentLookup.entity, agentLookup.entity->getIndividualHeightModifier()
+				.value_or(height->range.maximum), diagnostic)) return false;
 		for (auto const existing : agentLookup.entity->getAgentTagIds())
 		{
 			auto const* source = mAgentTagRegistry->lookupAgentTag(existing);
@@ -10001,6 +10051,8 @@ namespace core
 				SampledAgentPropertyType::MaximumRoutePlanningTime, tag, property->revision,
 				sampleAgentModifier(property->range) };
 		}
+		if (heightSample && !agentHeightStateFits(*target,
+			target->getIndividualHeightModifier().value_or(heightSample->value), diagnostic)) return false;
 		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
 		target->assignAgentTag(tag);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
@@ -10047,6 +10099,9 @@ namespace core
 		if (!agentLookup.entity->hasAgentTag(tag))
 			return reject(format("Agent '{}' is not assigned to Agent tag #{}",
 				agentLookup.entity->getName(), mAgentTagRegistry->getAgentTagName(tag)));
+		auto const* target = agentLookup.entity;
+		if (target->getHeightModifierSample() && target->getHeightModifierSample()->sourceTag == tag
+			&& !agentHeightStateFits(*target, target->getIndividualHeightModifier().value_or(1.0f), diagnostic)) return false;
 		return true;
 	}
 
@@ -10453,6 +10508,8 @@ namespace core
 			&& target->getMinimumRoutePlanningTimeSample() == minimumRoutePlanningTimeSample
 			&& target->getMaximumRoutePlanningTimeSample() == maximumRoutePlanningTimeSample) return true;
 
+		if (!agentHeightStateFits(*target, target->getIndividualHeightModifier().value_or(
+			heightSample ? heightSample->value : 1.0f), diagnostic)) return false;
 		target->setAgentTags(tags);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		else target->clearWalkSpeedModifierSample();

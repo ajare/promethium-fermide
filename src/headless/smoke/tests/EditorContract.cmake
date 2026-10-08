@@ -255,6 +255,7 @@ set(editor_names
     scaled-doors/clipboard-history
     scaled-doors/crossing-history
     roomHeightScale/history
+    roomHeightScale/occupiedPoseHistory
 )
 
 if(DEFINED LANE)

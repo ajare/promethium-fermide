@@ -1199,6 +1199,9 @@ namespace core
 		// World with no assignment depends on this shared definition document.
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
 
+		for (auto* world : mLoadedWorlds)
+			if (world && !world->canApplyAgentTagHeightModifier(id, std::nullopt, diagnostic)) return false;
+
 		// Every loaded assignment goes before the definition. From the first
 		// write onward no loaded World can be left with a stale reference, and
 		// no later step can refuse after the complete preflight above.
@@ -1482,6 +1485,8 @@ namespace core
 				"Agent tag #{} already has Height modifier", tag->getName()));
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
 		if (!heightModifierAdditionIsValid(id, diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world && !world->canApplyAgentTagHeightModifier(id, DefaultAgentHeightModifierRange, diagnostic)) return false;
 
 		uint64_t revision{ 0 };
 		try { revision = allocatePropertyRevision(); }
@@ -1515,6 +1520,8 @@ namespace core
 		if (current->range == range)
 			return reject("The Agent Height modifier range is unchanged");
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world && !world->canApplyAgentTagHeightModifier(id, range, diagnostic)) return false;
 
 		uint64_t revision{ 0 };
 		try { revision = allocatePropertyRevision(); }
@@ -1544,6 +1551,8 @@ namespace core
 			return reject(std::format(
 				"Agent tag #{} has no Height modifier", tag->getName()));
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		for (auto* world : mLoadedWorlds)
+			if (world && !world->canApplyAgentTagHeightModifier(id, std::nullopt, diagnostic)) return false;
 		for (auto* world : mLoadedWorlds)
 			if (world) world->clearAgentTagHeightModifierSamples(id);
 		tag->removeHeightModifier();

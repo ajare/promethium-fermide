@@ -34,6 +34,8 @@ namespace core
 		Vector2 globalPosition;
 		AgentPathState state{ AgentPathState::Idle };
 		Pose pose{ Pose::Standing };
+		// Exceptional completion under prior acceptance, not current-space fit.
+		bool grandfatheredCrossing{ false };
 		// Whether the Agent is simulated. Deactivated Agents keep their last
 		// sector and positions; every movement-state field below stays frozen
 		// at whatever it held when the Agent was deactivated (#118).

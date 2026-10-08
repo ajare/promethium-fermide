@@ -194,6 +194,14 @@ add_test(NAME agent-type-history-lifetime COMMAND pf-smoke-editor
 set_tests_properties(agent-type-topology-lifetime agent-type-history-lifetime
     PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 
+add_test(NAME pose-lifecycle-ownership COMMAND pf-smoke-simulation --check markerActions/poseOwnershipAndEditSafety)
+add_test(NAME pose-lifecycle-robot-exit COMMAND pf-smoke-simulation --check shuttles/robotCommittedExit)
+set_tests_properties(pose-lifecycle-ownership pose-lifecycle-robot-exit PROPERTIES
+    LABELS "core;functional;smoke;validation-fast;pose-selection" TIMEOUT 60)
+add_test(NAME pose-lifecycle-editor-history COMMAND pf-smoke-editor --check roomHeightScale/occupiedPoseHistory)
+set_tests_properties(pose-lifecycle-editor-history PROPERTIES
+    LABELS "editor;functional;smoke;validation-fast;pose-selection" TIMEOUT 60)
+
 foreach(check IN ITEMS agentPosesSupportedRooms agentPosesSupportedBridge agentPosesSupportedDoors agentPosesCrouchingDoor agentPosesApertureBoundaries)
     add_test(NAME pose-selection-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(pose-selection-${check} PROPERTIES

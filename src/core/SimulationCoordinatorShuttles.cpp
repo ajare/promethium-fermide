@@ -374,6 +374,10 @@ namespace core
 			if (door.stopIndex != intent->second.destinationStop
 				|| door.carriageIndex != request->mShuttleCarriage
 				|| (destinationSector && door.locationSector != destinationSector)) continue;
+			auto landing = mWorld.mTraversalResources.find(door.landingResource);
+			if (!landing || !landing->mDoor || !landing->mDoor->selectAgentCrossing(*agent,
+				agent->getGlobalPosition().y, true, landing->mDoor->isIndependentlyBroken()
+					? std::optional<float>{landing->mDoor->getOpenPercentage()} : std::nullopt)) continue;
 			auto const distance = abs(slotX - door.carriagePosition);
 			if (!selected || distance < selectedDistance - 0.001f
 				|| (abs(distance - selectedDistance) <= 0.001f
@@ -385,6 +389,10 @@ namespace core
 			{ selected = &door; selectedDistance = distance; }
 		}
 		if (!selected) return false;
+		auto landing = mWorld.mTraversalResources.find(selected->landingResource);
+		agent->mAcceptedExitPoses[landing->mDoor] = *landing->mDoor->selectAgentCrossing(*agent,
+			agent->getGlobalPosition().y, true, landing->mDoor->isIndependentlyBroken()
+				? std::optional<float>{landing->mDoor->getOpenPercentage()} : std::nullopt);
 		request->mShuttleAlightingDoor = selected->landingResource;
 		return true;
 	}

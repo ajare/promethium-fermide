@@ -3515,7 +3515,7 @@ namespace core
 				agent->mResetPosition.sector() ? agent->mResetPosition.sector()->getLayerIndex() : sector->getLayerIndex(),
 				agent->mResetPosition.sector() ? agent->mResetLocalDepth : agent->getLocalDepth(),
 				agent->mResetDestinationMarker, agent->mResetPathActive, agent->mResetAction,
-				agent->mPose, agent->mOccupiedUsablePoint,
+				agent->mPose, agent->mRetainedActionPose, agent->mOccupiedUsablePoint,
 				agent->mFurnitureUse ? agent->mFurnitureUse->marker : MarkerId{},
 				agent->mFurnitureUse ? agent->mFurnitureUse->instance : 0,
 				agent->mFurnitureUse ? agent->mFurnitureUse->definition : std::string{},
@@ -3628,11 +3628,12 @@ namespace core
 			raw->mResetPathActive = saved.resetPathActive;
 			raw->mResetAction = saved.resetAction;
 			raw->mPose = saved.pose;
+			raw->mRetainedActionPose = saved.retainedActionPose;
 			if (saved.occupiedUsablePoint)
 			{
 				if (isFurnitureMarker(saved.occupiedUsablePoint))
 					raw->mOccupiedUsablePoint = saved.occupiedUsablePoint;
-				else raw->mPose = Pose::Standing;
+				else raw->mRetainedActionPose = false;
 			}
 			if (saved.useMarker && actionAvailable(saved.useMarker, UseFurnitureAction))
 				raw->mFurnitureUse = Agent::FurnitureUse{saved.useMarker, saved.useFurniture,
@@ -3641,9 +3642,38 @@ namespace core
 			raw->mRouteJourneySequence = saved.routeJourneySequence;
 			if (saved.behaviourAssignment)
 				raw->mBehaviourAssignment = *saved.behaviourAssignment;
+			raw->syncPoseToSector();
 			_getSector(sector->getIndex())->mAgents.insert(raw);
 			mAgents.restore(saved.id, std::move(agent));
 			mAgentIds.emplace(raw, saved.id);
+		}
+	}
+
+	void World::validateReplayPoseState(World const& candidate, uint32_t movedSectorIndex,
+		int deltaX, int deltaY) const
+	{
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			auto position = agent->getGlobalPosition();
+			if (agent->getSector()->getIndex() == movedSectorIndex)
+				position += Vector2{float(deltaX), float(deltaY)};
+			auto sector = candidate.getSectorAtPosition(agent->getSector()->getLayerIndex(), position.x, position.y);
+			if (!sector || !isLocationLike(sector->getType())) continue;
+			auto clearance = sector->isRoom() ? sector->getPosition().y + sector->getLevelsHigh() - 1
+				+ sector->getEffectiveTopLevelHeight() - position.y : std::numeric_limits<float>::infinity();
+			bool fits = candidate.agentPoseStateFits(*agent, clearance);
+			if (agent->mFurnitureUse)
+			{
+				auto const& use = *agent->mFurnitureUse;
+				auto before = furnitureForMarker(use.marker), after = candidate.furnitureForMarker(use.marker);
+				bool const unchanged = before && after && before->sector == after->sector
+					&& before->x == after->x && before->y == after->y && before->localDepth == after->localDepth
+					&& before->definitionKey == after->definitionKey && agent->getSector()->getIndex() != movedSectorIndex;
+				auto finish = use.catalogue->definition(use.definition)->finishUsePose;
+				if (!furniturePoseFits(id, use.marker, finish, false, nullptr)) fits = false;
+				else if (!unchanged) fits = agent->poseFits(finish, clearance);
+			}
+			if (!fits) throw WorldException(this, "Structural edit would invalidate an occupied pose or Furniture finishing posture");
 		}
 	}
 
@@ -3688,6 +3718,7 @@ namespace core
 			candidate->mDeserializingConstruction = true;
 			for (auto const& record : records) candidate->applyConstructionRecord(record);
 			candidate->finishBuild();
+			validateReplayPoseState(*candidate, movedSectorIndex, deltaX, deltaY);
 		}
 		catch (Exception const&) { throw; }
 		catch (exception const& error) { throw WorldException(this, error.what()); }
@@ -3730,7 +3761,7 @@ namespace core
 					|| before->a != after->a || before->x != after->x || before->y != after->y
 					|| before->furnitureDepth != after->furnitureDepth || before->definitionKey != after->definitionKey)
 				{
-					carried.pose = Pose::Standing;
+					carried.retainedActionPose = false;
 					carried.occupiedUsablePoint = {};
 				}
 			}
@@ -6050,6 +6081,18 @@ namespace core
 				records.push_back(std::move(source));
 			}
 			candidate->finishBuild();
+			if (!plan.remove)
+				validateReplayPoseState(*candidate, plan.move ? plan.sectorIndex : std::numeric_limits<uint32_t>::max(),
+					plan.move ? int(plan.x) - int(mSectors[plan.sectorIndex]->getCellX()) : 0,
+					plan.move ? int(plan.y) - int(mSectors[plan.sectorIndex]->getCellY()) : 0);
+			else
+				for (auto const& [id, agent] : mAgents.entries())
+					if (agent->mFurnitureUse && agent->getSector()->getIndex() == plan.sectorIndex)
+					{
+						auto const& use = *agent->mFurnitureUse;
+						if (!furniturePoseFits(id, use.marker, use.catalogue->definition(use.definition)->finishUsePose,
+							false, &diagnostic)) return false;
+					}
 		}
 		catch (Exception const& error)
 		{

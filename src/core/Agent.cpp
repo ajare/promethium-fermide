@@ -1201,7 +1201,7 @@ namespace core
 
 	void Agent::syncPoseToSector()
 	{
-		if (mFurnitureUse || mRetainedActionPose) return;
+		if (mFurnitureUse || mRetainedActionPose || (mTraversalTask && mTraversalTask->crossingPose)) return;
 		auto const* sector = physicalMovementSector();
 		if (auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
 			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}})
@@ -1354,11 +1354,16 @@ namespace core
 			mWorld->validateAgentLocationPlacement(*pos.sector(), *this, pos.global().y);
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		bool const changedSector = pos.sector() != mPosition.sector();
-		if (!authored && mWorld
+		if (mWorld && mPosition.sector()
 			&& (changedSector || pos.global().distanceTo(mPosition.global()) > 0.f))
 		{
+			// Ownership changes only at physical departure, never at Path start.
+			auto const* destination = pos.sector();
+			if (!destination || (!(mTraversalTask && mTraversalTask->crossingPose)
+				&& !requiredPoseFor(*destination, pos.global().y))) return;
 			mWorld->finishFurnitureUse(mWorld->getAgentId(this));
 			mOccupiedUsablePoint = {};
+			mRetainedActionPose = false;
 		}
 		if (changedSector) mLocalDepth = 0;
 		mPosition = pos;
@@ -1599,14 +1604,8 @@ namespace core
 			return;
 		}
 
-		// Definition-owned use survives planning. Generic one-shot Action poses
-		// retain the existing Path-start reset; only active use has a lifecycle.
-		if (!mFurnitureUse)
-		{
-			mOccupiedUsablePoint = {};
-			mPose = Pose::Standing;
-			mRetainedActionPose = false;
-		}
+		// Planning and same-position requests do not relinquish posture or
+		// support. The first physical departure transfers ownership.
 		cancelTraversal();
 		syncPoseToSector();
 		mEarlyQueueApproachDirectionX = 0;
@@ -1914,6 +1913,33 @@ namespace core
 			mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 			return;
 		}
+		std::shared_ptr<Door> acceptedExitDoor;
+		std::optional<PoseSelection> acceptedExitPose;
+		if (isLocationLike(getSector()->getType()) && !isLocationLike(destinationSector->getType()))
+		{
+			// Admission commits a complete journey, including its required exit.
+			// Record the exact supported choice rather than choosing a generic
+			// lowered fallback when the passenger eventually disembarks.
+			for (size_t node = mPath.targetNode + 1; node < mPath.path->nodes.size(); ++node)
+			{
+				auto const& next = mPath.path->nodes[node];
+				if (!next.edge || !next.targetVertex || !isLocationLike(next.targetVertex->getSector()->getType())) continue;
+				auto source = next.edge->getOtherVertex(next.targetVertex);
+				if (isLocationLike(source->getSector()->getType())) continue;
+				if (auto door = dynamic_cast<DoorEdge const*>(next.edge.get())) acceptedExitDoor = door->getDoor();
+				else if (auto door = dynamic_cast<BulkheadDoorEdge const*>(next.edge.get())) acceptedExitDoor = door->getDoor();
+				if (!acceptedExitDoor) continue;
+				acceptedExitPose = acceptedExitDoor->selectAgentCrossing(*this, source->getPosition().y, true,
+					acceptedExitDoor->isIndependentlyBroken()
+						? std::optional<float>{acceptedExitDoor->getOpenPercentage()} : std::nullopt);
+				if (!acceptedExitPose || !requiredPoseFor(*next.targetVertex->getSector(), next.targetVertex->getPosition().y))
+				{
+					mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+					return;
+				}
+				break;
+			}
+		}
 		if (requestLookup.entity->getState() == TraversalRequestState::Pending)
 		{
 			mWorld->allocateTraversalRequest(mTraversalTask->request,
@@ -1927,6 +1953,10 @@ namespace core
 		// on its next allocation turn rather than remaining a ghost lane owner.
 		if (requestLookup && requestLookup.entity->getState() == TraversalRequestState::Granted)
 		{
+			if (acceptedExitPose)
+			{
+				mAcceptedExitPoses[acceptedExitDoor] = *acceptedExitPose;
+			}
 			mTraversalTask->permit = requestLookup.entity->getPermit();
 			auto vertexA = mPath.targetNode + 1;
 			auto resource = mWorld->lookupTraversalResource(requestLookup.entity->getResource());
@@ -1980,8 +2010,8 @@ namespace core
 			}
 			if (doorCrossing || bulkhead)
 			{
-				// Existing committed completion must not manufacture capabilities.
-				// Full accepted-exit lifecycle recording belongs to #524.
+				// A commitment exception uses prior acceptance, never a fabricated
+				// current fit or an arbitrary supported fallback.
 				if (!mTraversalTask->crossingPose)
 				{
 					if (isLocationLike(getSector()->getType()))
@@ -1990,10 +2020,16 @@ namespace core
 						mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
 						return;
 					}
-					auto const& choices = getPhysicalBaseline().doorCrossing;
-					auto const& accepted = choices.back();
-					mTraversalTask->crossingPose = PoseSelection{accepted.pose, accepted.speedRatio};
+					auto door = doorCrossing ? static_cast<DoorEdge const&>(*mTraversalTask->edge).getDoor() : bulkhead->getDoor();
+					auto accepted = mAcceptedExitPoses.find(door);
+					if (accepted == mAcceptedExitPoses.end())
+						throw Exception("Committed exit has no accepted supported pose");
+					mTraversalTask->crossingPose = accepted->second;
+					mTraversalTask->grandfatheredCrossing = true;
 				}
+				mWorld->finishFurnitureUse(mWorld->getAgentId(this));
+				mOccupiedUsablePoint = {};
+				mRetainedActionPose = false;
 				mPose = mTraversalTask->crossingPose->pose;
 			}
 			mTraversalTask->traversalTicksRemaining = doorCrossing
@@ -2035,6 +2071,11 @@ namespace core
 
 		auto const consumed = mTraversalTask->pathNodesConsumed;
 		for (uint32_t i = 0; i < consumed && mPath.path; ++i) nextPathNode();
+		if (mTraversalTask)
+		{
+			mTraversalTask->crossingPose.reset();
+			mTraversalTask->grandfatheredCrossing = false;
+		}
 		// Automatic Crawling is crossing-scoped, but the destination Sector now
 		// owns the Pose: a normal Sector stands the Agent back up, while a
 		// one-cell-high low Room ducks or crawls it.
@@ -2073,9 +2114,9 @@ namespace core
 		if (request && (request.entity->getState() == TraversalRequestState::Committed
 			|| request.entity->getState() == TraversalRequestState::Cancelled))
 		{
-			syncPoseToSector();
 			mWorld->releaseTraversal(mTraversalTask->request, mTraversalTask->permit);
 			mTraversalTask.reset();
+			syncPoseToSector();
 			syncStandingRouteObservation();
 			mTraversalLocalGoal.reset();
 			if (mQueuedTraversalTask)
@@ -2106,8 +2147,8 @@ namespace core
 				mWorld->releaseTraversal(mQueuedTraversalTask->request, mQueuedTraversalTask->permit);
 			}
 		}
-		syncPoseToSector();
 		mTraversalTask.reset();
+		syncPoseToSector();
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();

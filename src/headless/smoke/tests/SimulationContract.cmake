@@ -92,6 +92,7 @@ set(core_names
     shuttles/brokenLocalMemory
     shuttles/brokenRoutePlanning
     shuttles/supportedPoseRefusal
+    shuttles/robotCommittedExit
     shuttles/crawlingJourneys
     shuttles/crawlingCapacity
     shuttles/crawlingCarriages
@@ -189,6 +190,7 @@ set(core_names
     furniture/authoredChairArrival
     furniture/seatedEdits
     furniture/occupancyLifecycle
+    markerActions/poseOwnershipAndEditSafety
     markerActions/furniturePoseRequirements
     markerActions/reload
     markerActions/authoredRequests

@@ -287,6 +287,45 @@ namespace core
 			&& std::find(found->second.begin(), found->second.end(), action) != found->second.end();
 	}
 
+	bool World::agentHeightStateFits(Agent const& agent, float next, std::string* diagnostic) const
+	{
+		auto const* sector = agent.physicalMovementSector();
+		if (!sector) return true; // A fresh instance has not been placed yet.
+		auto const clearance = sector->isRoom()
+			? sector->getPosition().y + sector->getLevelsHigh() - 1
+				+ sector->getEffectiveTopLevelHeight() - agent.getGlobalPosition().y
+			: std::numeric_limits<float>::infinity();
+		if (agentPoseStateFits(agent, clearance, next / agent.getEffectiveHeightModifier().value)) return true;
+		if (diagnostic) *diagnostic = "Height modifier would invalidate an occupied pose or Furniture finishing posture";
+		return false;
+	}
+
+	bool World::agentPoseStateFits(Agent const& agent, float clearance, float heightFactor) const
+	{
+		auto fits = [&](Pose pose, float support) {
+			auto envelope = agent.getPoseEnvelope(pose);
+			return envelope && support + envelope->y * (pose == Pose::Lying ? 1.0f : heightFactor)
+				<= clearance + 0.00001f;
+		};
+		if (agent.mFurnitureUse)
+		{
+			auto const& use = *agent.mFurnitureUse;
+			auto definition = use.catalogue->definition(use.definition);
+			float support = 0;
+			if (auto instance = furnitureForMarker(use.marker))
+				for (auto const& destination : instance->destinations)
+					if (destination.marker == use.marker)
+						for (auto const& point : definition->usablePoints)
+							if (point.key == destination.key) support = point.supportElevation;
+			return fits(definition->usePose, support) && fits(definition->finishUsePose, 0);
+		}
+		if (agent.mRetainedActionPose || (agent.mTraversalTask && agent.mTraversalTask->crossingPose))
+			return fits(agent.getPose(), agent.getSupportElevation());
+		for (auto const& choice : agent.getPhysicalBaseline().roomMovement)
+			if (fits(choice.pose, 0)) return true;
+		return false;
+	}
+
 	bool World::furniturePoseFits(AgentId id, MarkerId marker, Pose pose, bool usingSupport,
 		std::string* diagnostic) const
 	{
@@ -363,13 +402,20 @@ namespace core
 			event.diagnostic = "Usable point is occupied by another Agent";
 			return;
 		}
-		if (agent && agent->mFurnitureUse)
+		bool const replacingUse = agent && agent->mFurnitureUse.has_value();
+		if (replacingUse)
 		{
 			if (action == UseFurnitureAction && agent->mFurnitureUse->marker == markerId) return;
-			finishFurnitureUse(agentId);
-			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
+			auto const& use = *agent->mFurnitureUse;
+			if (!furniturePoseFits(agentId, use.marker, use.catalogue->definition(use.definition)->finishUsePose,
+				false, &event.diagnostic)) { event.type = SimulationEventType::ActionFailed; return; }
 		}
-		if (action == IdleAction) return;
+		if (action == IdleAction)
+		{
+			if (replacingUse) finishFurnitureUse(agentId);
+			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
+			return;
+		}
 		auto marker = lookupMarker(markerId);
 		if (!agent || !marker || !actionAvailable(markerId, action))
 		{
@@ -384,6 +430,8 @@ namespace core
 			return;
 		}
 		auto views = actionViews(agentId, markerId);
+		if (replacingUse) views.pose = poseName(agent->mFurnitureUse->catalogue
+			->definition(agent->mFurnitureUse->definition)->finishUsePose);
 		auto instance = furnitureForMarker(markerId);
 		auto result = action == UseFurnitureAction
 			? mFurnitureCatalogue->executeUse(instance->definitionKey, false, views)
@@ -391,7 +439,44 @@ namespace core
 		if (action == UseFurnitureAction && result.succeeded)
 			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose,
 				static_cast<int>(mFurnitureCatalogue->definition(instance->definitionKey)->usePose)});
-		applyActionResult(agentId, markerId, std::move(result), event);
+		if (replacingUse)
+		{
+			// Validate replacement before invoking finish, then stage both batches
+			// together. In particular, competing device requests cannot tear down
+			// a seat before the complete replacement is judged.
+			applyActionResult(agentId, markerId, result, event, false, true, true);
+			if (event.type != SimulationEventType::DestinationReached) return;
+			auto const use = *agent->mFurnitureUse;
+			auto finishPose = use.catalogue->definition(use.definition)->finishUsePose;
+			auto finished = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker));
+			if (!finished.succeeded)
+			{
+				applyActionResult(agentId, use.marker, std::move(finished), event, true);
+				agent->mFurnitureUse.reset();
+				agent->mOccupiedUsablePoint = {};
+				agent->mPose = finishPose;
+				agent->mRetainedActionPose = true;
+				event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
+				invalidateSimulationSnapshot();
+				return;
+			}
+			finished.effects.insert(finished.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
+			finished.effects.push_back({ActionEffectType::Release});
+			finished.effects.insert(finished.effects.end(), result.effects.begin(), result.effects.end());
+			finished.logs.insert(finished.logs.end(), result.logs.begin(), result.logs.end());
+			finished.logsSuppressed |= result.logsSuppressed;
+			struct FinishingScope
+			{
+				AgentId& slot;
+				AgentId restore;
+				~FinishingScope() { slot = restore; }
+			} scope{mFinishingFurnitureUseAgent, mFinishingFurnitureUseAgent};
+			mFinishingFurnitureUseAgent = agentId;
+			applyActionResult(agentId, markerId, std::move(finished), event, true);
+			if (event.type != SimulationEventType::DestinationReached) return;
+			agent->mFurnitureUse.reset();
+		}
+		else applyActionResult(agentId, markerId, std::move(result), event);
 		if (action == UseFurnitureAction && event.type == SimulationEventType::DestinationReached)
 			agent->mFurnitureUse = Agent::FurnitureUse{markerId, instance->id, instance->definitionKey, mFurnitureCatalogue};
 	}
@@ -452,9 +537,10 @@ namespace core
 			result.effects.push_back({ActionEffectType::Release});
 		}
 		applyActionResult(agentId, use.marker, std::move(result), event, true);
-		// Lifecycle transaction/failure recovery is completed in #524.
+		// Admission and mutation guards guarantee this literal finishing pose.
+		// Callback failure cannot leak occupancy or invent another stance.
 		agent->mPose = finishPose;
-		agent->mRetainedActionPose = finishPose != Pose::Standing;
+		agent->mRetainedActionPose = true;
 		agent->mOccupiedUsablePoint = {};
 		invalidateSimulationSnapshot();
 		if (event.type == SimulationEventType::ActionFailed)
@@ -468,7 +554,7 @@ namespace core
 	}
 
 	void World::applyActionResult(AgentId agentId, MarkerId markerId, ActionExecutionResult result,
-		SimulationEvent& event, bool finishing)
+		SimulationEvent& event, bool finishing, bool validateOnly, bool replacingUse)
 	{
 		auto agent = mAgents.find(agentId);
 		if (!result.succeeded)
@@ -483,8 +569,11 @@ namespace core
 		// Shadow only host-owned values. No effects (including logging and
 		// operation events) are published until the entire batch is accepted.
 		auto pose = agent->mPose;
-		auto claim = agent->mOccupiedUsablePoint;
+		auto claim = replacingUse ? MarkerId{} : agent->mOccupiedUsablePoint;
+		if (replacingUse && agent->mFurnitureUse)
+			pose = agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose;
 		bool poseAuthored = false;
+		bool released = false;
 		InteractionPointId device;
 		auto reject = [&](char const* diagnostic)
 		{
@@ -504,9 +593,11 @@ namespace core
 				claim = markerId;
 				break;
 			case ActionEffectType::Release:
-				if (!isFurnitureMarker(markerId) || (claim != markerId && !(finishing && !claim)))
+				if (!isFurnitureMarker(markerId) || (released && !finishing)
+					|| (claim != markerId && !((finishing || replacingUse) && !claim)))
 				{ reject("Only the owning Agent may release this usable point"); return; }
 				claim = {};
+				released = true;
 				break;
 			case ActionEffectType::Device:
 			{
@@ -538,6 +629,7 @@ namespace core
 					: std::numeric_limits<float>::infinity());
 			if (!fits) { event.type = SimulationEventType::ActionFailed; if (event.diagnostic.empty()) event.diagnostic = "Action pose is unsupported or does not fit"; return; }
 		}
+		if (validateOnly) return;
 		// Committed requests retain the ordinary asynchronous device/traversal
 		// authorities; scripts never submit unvalidated raw device commands.
 		if (device) requestInteraction(device, agentId);
@@ -547,7 +639,7 @@ namespace core
 			else agent->mOccupiedUsablePoint = {};
 		}
 		agent->mPose = pose;
-		if (poseAuthored) agent->mRetainedActionPose = pose != Pose::Standing;
+		if (poseAuthored) agent->mRetainedActionPose = true;
 		event.agent.pose = pose;
 		invalidateSimulationSnapshot();
 		for (auto const& log : result.logs) addLogMessage("Marker Action", 0, LogLevel::Info, log.message);

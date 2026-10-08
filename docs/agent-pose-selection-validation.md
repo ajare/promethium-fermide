@@ -66,8 +66,7 @@ Agent, Simulation, Routing, Persistence, Render, Editor, World, Transports,
 Permissions, Behaviours and Agent-tag suites and their contracts. No submodule
 tests were run. `git diff --check` passed.
 
-Furniture pose requirements/eligibility remain #523. Full Action/Furniture
-ownership release, edit protection, fresh-lifetime placement integration and
-accepted grandfathered-exit recording remain #524. This slice preserves existing
-committed completion using supported frozen choices; it does not claim the final
-accepted-exit lifecycle contract or add runtime persistence.
+This records the #522 validation boundary. Furniture requirements/eligibility
+subsequently shipped in #523; ownership, edit protection and exact accepted-exit
+recording are integrated in #524. See [lifecycle validation](agent-pose-lifecycle-validation.md).
+Neither slice adds runtime pose persistence.

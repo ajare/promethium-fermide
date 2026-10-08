@@ -444,7 +444,9 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 	core::SimulationEvent runAction(core::World& world, core::AgentId agent, core::MarkerId marker, std::string const& action = first)
 	{
 		world.pauseSimulation();
-		require(world.moveAgentToMarker(agent, marker, action).accepted(), "Effect request refused");
+		auto request = world.moveAgentToMarker(agent, marker, action);
+		require(request.accepted(), "Effect request refused: " + action + " marker=" + std::to_string(marker.value)
+			+ " status=" + std::to_string(static_cast<int>(request.status)));
 		world.consumeSimulationEvents();
 		require(world.resumeSimulation(), "Effects resume refused");
 		for (unsigned tick = 0; tick < 1800; ++tick)
@@ -639,6 +641,96 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				&& world.lookupAgent(owner).entity->getPose() == core::Pose::Standing, "Owner could not release claim");
 			require(world.usablePointOccupant(otherSeat) == independent, "Release affected another Furniture instance");
 		}
+	}
+
+	void poseOwnershipAndEditSafety(smoke::Context const& context)
+	{
+		auto fixture = context.fixture("src/headless/smoke/fixtures/use.furniture.lua");
+		auto world = useFixture(fixture);
+		auto id = core::AgentId{1};
+		auto seat = world->furniture()[0].marker;
+		auto actions = context.temporaryRoot() / "pose-ownership.actions.lua";
+		write(actions, package("{key='hello',name='Invalid replacement',run=function(a,w,m) w.set_pose('standing'); w.release(); w.log('leaked'); w.release() end},"
+			"{key='other',name='Sit',run=function(a,w,m) w.set_pose('sitting') end}"));
+		require(world->selectActionRegistry(actions) && world->setMarkerActions(seat, {first, second}), "Ownership Actions refused");
+		require(world->setAgentIndividualHeightModifier(id, .8f)
+			&& world->setRoomHeightScale(0, .42f), "Ownership Room height refused");
+		std::string eligibility;
+		require(world->furnitureUseEligible(id, seat, &eligibility), "Ownership eligibility: " + eligibility);
+		require(runAction(*world, id, seat, "use-furniture").type == core::SimulationEventType::DestinationReached, "Ownership use failed");
+		core::consumeLogMessages();
+		auto failed = runAction(*world, id, seat);
+		require(failed.type == core::SimulationEventType::ActionFailed && failed.scriptFailure == core::ScriptExecutionFailure::None
+			&& world->usablePointOccupant(seat) == id && world->lookupAgent(id).entity->getPose() == core::Pose::Sitting,
+			"Refused same-position replacement finished use");
+		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("finish:") && log.msg != "leaked", "Refused replacement published effects");
+		world->pauseSimulation();
+		world->saveTo((context.temporaryRoot() / "pose-guard.world.yaml").string());
+		std::string reason;
+		require(!world->setRoomHeightScale(0, .35f, &reason) && !reason.empty() && !world->isModified()
+			&& world->usablePointOccupant(seat) == id, "Ceiling edit invalidated declared finish or dirty state");
+		require(!world->setAgentIndividualHeightModifier(id, 1.0f, &reason) && !world->isModified()
+			&& world->lookupAgent(id).entity->getEffectiveHeightModifier().value == .8f, "Height edit invalidated declared finish");
+		require(runAction(*world, id, seat, "idle").type == core::SimulationEventType::DestinationReached, "Guarded finish failed");
+		require(runAction(*world, id, seat, second).type == core::SimulationEventType::DestinationReached, "Explicit pose failed");
+		require(runAction(*world, id, seat, "idle").agent.pose == core::Pose::Sitting, "Same-position Idle reset Action ownership");
+		require(world->moveAgentToNamedMarker(id, "Unreachable").accepted() && world->advanceTicks(80)
+			&& world->lookupAgent(id).entity->getPose() == core::Pose::Sitting, "Failed planning reset Action ownership");
+		world->pauseSimulation();
+		require(world->setRoomHeightScale(0, .3f), "Fitting retained pose edit refused");
+		require(world->editFurniture(world->furniture()[2].id, 9, 0, "Renamed desk")
+			&& world->lookupAgent(id).entity->getPose() == core::Pose::Sitting, "Replay lost retained Action ownership");
+		world->saveTo((context.temporaryRoot() / "retained-pose.world.yaml").string());
+		require(!world->setRoomHeightScale(0, .2f) && !world->isModified()
+			&& world->lookupAgent(id).entity->getPose() == core::Pose::Sitting, "Environment substituted retained Action pose");
+
+		// A declared lowered finish is literal, while actual departure transfers
+		// to the low Room's movement choice without transient Standing.
+		std::ifstream input(fixture);
+		std::string source{std::istreambuf_iterator<char>(input), {}};
+		for (auto const& replacement : {std::pair{std::string("standing"), std::string("crawling")}})
+			for (size_t at = 0; (at = source.find(replacement.first, at)) != std::string::npos; at += replacement.second.size())
+				source.replace(at, replacement.first.size(), replacement.second);
+		auto lowered = context.temporaryRoot() / "lowered-use.furniture.lua";
+		write(lowered, source);
+		auto low = useFixture(lowered);
+		seat = low->furniture()[0].marker;
+		require(low->setRoomHeightScale(0, .3f), "Low Room refused");
+		auto eligible = low->furnitureUseEligible(id, seat, &eligibility);
+		require(eligible, "Low eligibility: " + eligibility);
+		require(runAction(*low, id, seat, "use-furniture").type == core::SimulationEventType::DestinationReached
+			&& low->lookupAgent(id).entity->getPose() == core::Pose::Sitting, "Low use failed");
+		require(runAction(*low, id, seat, "idle").agent.pose == core::Pose::Crawling
+			&& !low->usablePointOccupant(seat), "Host substituted environmental pose for declared finish");
+		require(runAction(*low, id, seat, "use-furniture").type == core::SimulationEventType::DestinationReached, "Low reuse failed");
+		require(low->moveAgentToNamedMarker(id, "End").accepted(), "Low departure request refused");
+		bool departed = false;
+		for (unsigned tick = 0; tick < 1800; ++tick)
+		{
+			require(low->advanceTick(), "Low departure failed");
+			auto* agent = low->lookupAgent(id).entity;
+			require(agent->getPose() != core::Pose::Standing, "Low departure produced impossible posture");
+			if (low->usablePointOccupant(seat) == id) require(agent->getPose() == core::Pose::Sitting, "Planning relinquished low use");
+			else departed = true;
+			if (departed && agent->getState() == core::Agent::State::Idle) break;
+		}
+		require(departed && low->lookupAgent(id).entity->getGlobalPosition().x == 10.5f
+			&& low->lookupAgent(id).entity->getPose() == core::Pose::Crouching, "Low departure did not arrive/release");
+
+		auto robots = useFixture(fixture);
+		std::ifstream robotFile(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
+		std::string robotSource{std::istreambuf_iterator<char>(robotFile), {}};
+		require(robots->attachAgentType("standing-robot.agent.lua", robotSource, &reason), "Robot attachment refused");
+		auto robot = robots->createAgent("StandingRobot", "Robot", 0, 0, 3.5f);
+		seat = robots->furniture()[0].marker;
+		write(actions, package("{key='hello',name='Unsupported pose',run=function(a,w,m) w.claim(); w.set_pose('sitting'); w.log('robot leak') end}"));
+		require(robots->selectActionRegistry(actions) && robots->setMarkerActions(seat, {first}), "Robot Action setup refused");
+		core::consumeLogMessages();
+		auto refused = runAction(*robots, robot, seat);
+		require(refused.type == core::SimulationEventType::ActionFailed && refused.scriptFailure == core::ScriptExecutionFailure::None
+			&& !robots->usablePointOccupant(seat) && robots->lookupAgent(robot).entity->getPose() == core::Pose::Standing,
+			"Unsupported literal pose leaked claim or became a Lua failure");
+		for (auto const& log : core::consumeLogMessages()) require(log.msg != "robot leak", "Unsupported batch published logs");
 	}
 
 	void furnitureUse(smoke::Context const& context)
@@ -1338,6 +1430,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 
 void registerMarkerActions(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"markerActions/poseOwnershipAndEditSafety", poseOwnershipAndEditSafety});
 	checks.push_back({"markerActions/furniturePoseRequirements", furniturePoseRequirements});
 	checks.push_back({"markerActions/reload", transactionalReload});
 	checks.push_back({"markerActions/authoredRequests", authoredRequests});

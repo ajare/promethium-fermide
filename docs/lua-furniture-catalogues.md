@@ -85,7 +85,10 @@ movement, and arrival rechecks. Idle and unrelated Actions remain available.
 The host commits the declared Pose with callback effects atomically and restores
 the declared finishing Pose and releases occupancy on finish. General Marker
 Actions retain validated `set_pose`; Furniture callbacks must remove it rather
-than rely on implicit migration. Full lifecycle/edit sequencing is tracked in #524.
+than rely on implicit migration. Planning, failed replacement and pause retain
+use and occupancy. Departure and replacement preflight cleanup; occupied-space
+edits must preserve both declared poses. Callback failure still guarantees the
+literal finish pose and release. See [lifecycle validation](agent-pose-lifecycle-validation.md).
 See the
 [Action workflow](scripted-marker-actions.md).
 
@@ -123,7 +126,8 @@ Linux incremental Release default build passed. All 84 repository CTests were
 validated, excluding unchanged `willpower_` submodule tests; four initial
 migration/inventory failures passed focused recovery. Final affected Simulation,
 World, Editor, Persistence and Behaviour functional/contract checks passed (6/6).
-`git diff --check` passed. Full lifecycle/edit transactions remain #524.
+`git diff --check` passed. These are historical #523 results; subsequent lifecycle
+integration and its evidence are documented under #524.
 
 
 Public World/document check `furniture/luaObjects` exercises real Lua loading,
