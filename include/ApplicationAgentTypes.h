@@ -25,7 +25,11 @@ public:
 	ApplicationAgentTypes& operator=(ApplicationAgentTypes const&) = delete;
 	bool importFile(std::filesystem::path const& path, ApplicationAgentType& imported,
 		std::string& diagnostic);
+	// Fresh dependency resolution for placement/load/Reset, not rendering.
 	std::optional<core::AgentTypeDefinition> resolve(std::string const& name);
+	// Pure read of the validated startup/import snapshot. Does not import,
+	// reread, or execute a resource, including on missing/invalid names.
+	std::optional<core::AgentTypePreview> preview(std::string const& name) const;
 	std::vector<ApplicationAgentType> types() const;
 private:
 	wp::application::resourcesystem::ResourceManager& mManager;

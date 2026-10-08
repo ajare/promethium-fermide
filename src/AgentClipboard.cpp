@@ -576,21 +576,27 @@ core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& pay
 {
 	auto const heightModifier = payload.individualHeightModifier.value_or(
 		payload.heightModifierSample ? payload.heightModifierSample->value : 1.0f);
-	// Preview executes only in an isolated bounded context. An invalid explicit
-	// identity must never acquire a misleading Human envelope.
+	// Rendering reads cached validation only. Fresh resource resolution belongs
+	// to placement/load/Reset, never the per-frame dimensions query.
 	string failure;
 	if (!clipboardTagStateIsWellFormed(payload, failure))
 	{
 		if (diagnostic) *diagnostic = failure;
 		return {};
 	}
-	auto const definition = clipboardAgentType(payload, nullptr, failure);
-	auto const baseline = definition ? core::agentTypeDefinitionBaseline(*definition) : std::nullopt;
-	if (definition && !baseline)
-		failure = "The Agent type resource '" + definition->resourceName + "' constructor failed during preview";
+	if (payload.resource.empty() && payload.type != "Human")
+	{
+		if (diagnostic) *diagnostic = "Agent type '" + payload.type + "' requires an explicit resource reference";
+		return {};
+	}
+	auto const resource = payload.resource.empty() ? "human.agent.lua" : payload.resource;
+	auto const preview = core::agentTypeResourcePreview(resource, failure);
+	if (preview && preview->typeId != payload.type)
+		failure = "The Agent type resource '" + resource + "' declares type ID '"
+			+ preview->typeId + "' but the placement requested '" + payload.type + "'";
 	if (diagnostic) *diagnostic = failure;
-	if (!baseline) return {};
-	return { baseline->width, baseline->standingHeight * heightModifier };
+	if (!preview || !failure.empty()) return {};
+	return { preview->baseline.width, preview->baseline.standingHeight * heightModifier };
 }
 
 AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,

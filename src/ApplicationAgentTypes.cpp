@@ -49,6 +49,7 @@ void AgentTypeResource::create(resources::DataStreamPtr data, resources::Resourc
 	mSource = std::move(source);
 	mTypeId = std::move(preflight.typeId);
 	mDisplayName = std::move(preflight.displayName);
+	mPreview = core::AgentTypePreview{ mTypeId, result.baseline };
 }
 
 void AgentTypeResource::destroy()
@@ -56,6 +57,7 @@ void AgentTypeResource::destroy()
 	mSource.clear();
 	mTypeId.clear();
 	mDisplayName.clear();
+	mPreview.reset();
 }
 
 ApplicationAgentTypes::ApplicationAgentTypes(resources::ResourceManager& manager)
@@ -181,6 +183,14 @@ std::optional<core::AgentTypeDefinition> ApplicationAgentTypes::resolve(std::str
 	mManager.createResource(candidate);
 	return core::AgentTypeDefinition{ candidate->typeId(), candidate->displayName(),
 		name, candidate->source() };
+}
+
+std::optional<core::AgentTypePreview> ApplicationAgentTypes::preview(std::string const& name) const
+{
+	auto const found = mResources.find(name);
+	if (found == mResources.end()) return std::nullopt;
+	auto typed = std::dynamic_pointer_cast<AgentTypeResource>(found->second);
+	return typed ? typed->mPreview : std::nullopt;
 }
 
 std::vector<ApplicationAgentType> ApplicationAgentTypes::types() const

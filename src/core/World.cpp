@@ -8682,26 +8682,13 @@ namespace core
 		return found == mAgentTypes.end() ? std::string{} : found->second->displayName;
 	}
 
-	unique_ptr<Agent> World::makePlacementQuery(string const& typeId, string const& name,
-		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets) const
+	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
 	{
-		auto agent = Agent::create(*mAgentTypes.at(typeId), name);
-		for (auto permission : grants)
-		{
-			auto found = lookupAccessPermission(permission);
-			if (!found) throw invalid_argument(found.diagnostic);
-			agent->mDirectAccessGrants.set(permission.value - 1);
-		}
-		for (auto permissionSet : sets)
-		{
-			auto found = lookupPermissionSet(permissionSet);
-			if (!found) throw invalid_argument(found.diagnostic);
-		}
-		agent->mPermissionSets = sets;
-		return agent;
+		validateAgentLocationPermissions(sector, effectiveAccessGrants(agent), agent.getName());
 	}
 
-	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
+	void World::validateAgentLocationPermissions(Sector const& sector,
+		bitset<256> const& grants, string const& name) const
 	{
 		if (sector.getType() == SectorType::Dumbwaiter)
 			throw invalid_argument("Agents cannot enter a Dumbwaiter shaft or car");
@@ -8709,9 +8696,10 @@ namespace core
 			throw invalid_argument(sector.getType() == SectorType::Chamber
 				? "Agents cannot be placed inside authored Security scanners"
 				: "Agents must enter Airlock chambers through coordinated traversal");
-		if (canAgentAccessLocation(sector, agent)) return;
-		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~effectiveAccessGrants(agent);
-		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", agent.getName(), sector.getName());
+		if (sector.getType() != SectorType::Location) return;
+		auto missing = static_cast<Location const&>(sector).getPermissionRequirement() & ~grants;
+		if (missing.none()) return;
+		auto diagnostic = format("Agent '{}' cannot be placed in Location '{}': missing Access permissions", name, sector.getName());
 		for (size_t bit = 0; bit < AccessPermission::Capacity; ++bit)
 			if (missing.test(bit))
 				diagnostic += format(" {} ('{}')", bit + 1, mAccessPermissions[bit]->getName());
@@ -8723,8 +8711,22 @@ namespace core
 	{
 		try
 		{
-			auto agent = makePlacementQuery("Human", "New Agent", grants, sets);
-			validateAgentLocationPlacement(*getSector(sectorId), *agent);
+			// This is an authorization query, not a physical Agent construction.
+			// Keep it independent of Lua and resource resolution on drag frames.
+			bitset<256> effective;
+			for (auto permission : grants)
+			{
+				auto found = lookupAccessPermission(permission);
+				if (!found) throw invalid_argument(found.diagnostic);
+				effective.set(permission.value - 1);
+			}
+			for (auto permissionSet : sets)
+			{
+				auto found = lookupPermissionSet(permissionSet);
+				if (!found) throw invalid_argument(found.diagnostic);
+				effective |= found.entity->mPermissions;
+			}
+			validateAgentLocationPermissions(*getSector(sectorId), effective, "New Agent");
 		}
 		catch (exception const& error)
 		{

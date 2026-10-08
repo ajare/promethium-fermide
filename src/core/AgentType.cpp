@@ -6,12 +6,20 @@
 
 #include <fstream>
 #include <iterator>
+#include <map>
 
 namespace core
 {
 	namespace
 	{
 		AgentTypeResourceLoader gAgentTypeResourceLoader;
+		AgentTypePreviewLoader gAgentTypePreviewLoader;
+		struct PreviewResult
+		{
+			std::optional<AgentTypePreview> preview;
+			std::string diagnostic;
+		};
+		std::map<std::string, PreviewResult> gAgentTypePreviews;
 
 	}
 
@@ -151,8 +159,46 @@ namespace core
 		return definition;
 	}
 
-	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader)
+	std::optional<AgentTypePreview> agentTypeResourcePreview(
+		std::string const& resourceName, std::string& diagnostic)
 	{
+		// Managed resources own the preview lifetime. Their lookup is a pure
+		// read once imported, and a later explicit import can repair a miss.
+		if (gAgentTypePreviewLoader)
+		{
+			try
+			{
+				auto preview = gAgentTypePreviewLoader(resourceName);
+				diagnostic = preview ? "" : "The Agent type resource '" + resourceName + "' is unavailable";
+				return preview;
+			}
+			catch (std::exception const& error) { diagnostic = error.what(); return std::nullopt; }
+		}
+		auto [found, inserted] = gAgentTypePreviews.try_emplace(resourceName);
+		auto& result = found->second;
+		if (inserted)
+		{
+			try
+			{
+				auto definition = resolveAgentTypeResource(resourceName);
+				if (!definition)
+					result.diagnostic = "The Agent type resource '" + resourceName + "' is unavailable";
+				else if (auto baseline = agentTypeDefinitionBaseline(*definition))
+					result.preview = AgentTypePreview{ definition->typeId, *baseline };
+				else
+					result.diagnostic = "The Agent type resource '" + resourceName + "' constructor failed during preview";
+			}
+			catch (std::exception const& error) { result.diagnostic = error.what(); }
+		}
+		diagnostic = result.diagnostic;
+		return result.preview;
+	}
+
+	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader,
+		AgentTypePreviewLoader previewLoader)
+	{
+		gAgentTypePreviews.clear();
 		gAgentTypeResourceLoader = std::move(loader);
+		gAgentTypePreviewLoader = std::move(previewLoader);
 	}
 }

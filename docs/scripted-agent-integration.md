@@ -14,6 +14,38 @@ are unchanged. No callbacks, cross-script methods, hot reload, Lua-state
 persistence, scanning, generated scripts or additional production types were
 introduced.
 
+## Placement preview performance (#516)
+
+Managed Agent-type resources retain the baseline already validated at startup or
+explicit import. Dragging and falling previews read that snapshot without file
+I/O or Lua construction, checking the requested type ID and applying current
+individual/tag Height modifiers on each query. Missing or mismatched previews
+return zero dimensions rather than a Human fallback. Preview lookups do not
+implicitly import unknown resources; paste arming resolves dependencies before
+starting the fall.
+
+Without an application preview loader, the headless preview seam validates each
+resource once and caches both success and failure until the resource loader is
+replaced or cleared. Managed preview data belongs to the acquired resource and
+is discarded when that resource is destroyed. Reimport remains idempotent.
+
+Location placement eligibility is a permission-only query: it validates direct
+grants and Permission sets and shares the actual placement permission checks,
+without constructing a temporary Agent or Lua runtime. Physical drop bounds
+continue to use the selected type's cached dimensions.
+
+Arming/committing placement, document load and Reset still use fresh dependency
+resolution. A cached visual preview cannot authorize placement of an unavailable
+resource, nor suppress revision validation at reconstruction boundaries.
+
+`agentTypesPreviewQueriesReuseValidatedResource` checks repeated queries and
+cached failures with loader-lifetime invalidation.
+`agentTypesManagedPreviewIsReadOnly` removes an imported source before its first
+preview, exercises repeated dimensions/drop-target queries without fresh
+resolution, and verifies that actual placement still rejects the missing file.
+Both run in `smoke-editor`, with focused CTest entries `agent-type-preview-cache`
+and `agent-type-managed-preview-cache`.
+
 ## Public-seam coverage
 
 The Agent and Editor modules cover these contracts on the final source state:

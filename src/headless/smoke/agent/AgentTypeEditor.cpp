@@ -40,9 +40,10 @@ namespace
 	// resolution on scope exit so later checks are unaffected.
 	struct AgentTypeLoaderScope
 	{
-		explicit AgentTypeLoaderScope(core::AgentTypeResourceLoader loader)
+		explicit AgentTypeLoaderScope(core::AgentTypeResourceLoader loader,
+			core::AgentTypePreviewLoader preview = {})
 		{
-			core::setAgentTypeResourceLoader(std::move(loader));
+			core::setAgentTypeResourceLoader(std::move(loader), std::move(preview));
 		}
 		~AgentTypeLoaderScope() { core::setAgentTypeResourceLoader({}); }
 	};
@@ -183,6 +184,52 @@ namespace
 		auto const& physical = agent->getPhysicalBaseline();
 		require(preview.x == physical.width && preview.y == physical.standingHeight,
 			"Scout preview dimensions did not agree with placement");
+	}
+
+	void previewQueriesReuseValidatedResource(smoke::Context const&)
+	{
+		auto fixture = buildWorld("Repeated Agent preview");
+		auto definition = core::bundledHumanAgentType();
+		unsigned resolutions = 0;
+		AgentTypeLoaderScope scope{ [&](std::string const&) {
+			++resolutions;
+			return std::optional{ definition };
+		} };
+		auto payload = humanPayload("Preview");
+		auto initial = agentClipboardPlacementDimensions(payload);
+		require(initial.x > 0.f, "Initial preview did not resolve");
+		for (unsigned frame = 0; frame < 64; ++frame)
+		{
+			payload.individualHeightModifier = frame % 2 ? 0.9f : 1.f;
+			auto const dimensions = agentClipboardPlacementDimensions(payload);
+			require(dimensions.x == initial.x
+				&& dimensions.y == initial.y * *payload.individualHeightModifier,
+				"Cached preview ignored current individual properties");
+			require(fixture.world->canPlaceAgentInLocation(fixture.corridor, {}, {}),
+				"Repeated placement permission query failed");
+		}
+		require(resolutions == 1, "Per-frame previews re-resolved the Agent resource "
+			+ std::to_string(resolutions) + " times instead of once");
+		require(agentCount(*fixture.world) == 0, "Preview published an Agent");
+
+		// Loader replacement is an explicit cache-lifetime boundary. Failed
+		// snapshots must also be cached so a bad selection cannot spin up Lua
+		// (or retry I/O) on every frame.
+		unsigned failures = 0;
+		core::setAgentTypeResourceLoader([&](std::string const&)
+			-> std::optional<core::AgentTypeDefinition> {
+			++failures;
+			throw std::runtime_error("Unavailable preview dependency");
+		});
+		std::string diagnostic;
+		for (unsigned frame = 0; frame < 64; ++frame)
+			require(agentClipboardPlacementDimensions(payload, &diagnostic).x == 0.f
+				&& diagnostic == "Unavailable preview dependency",
+				"Loader replacement retained a stale successful preview");
+		require(failures == 1, "Failed preview retried dependency resolution per frame");
+		core::setAgentTypeResourceLoader([&](std::string const&) { return std::optional{ definition }; });
+		require(agentClipboardPlacementDimensions(payload, &diagnostic).x == initial.x
+			&& diagnostic.empty(), "Failed preview survived resource-loader replacement");
 	}
 
 	void editorSelectionDependencyRefusedAtomically(smoke::Context const&)
@@ -351,6 +398,76 @@ namespace
 			types = std::make_unique<ApplicationAgentTypes>(manager);
 		}
 	};
+
+	void managedPreviewIsReadOnly(smoke::Context const& context)
+	{
+		auto const root = context.temporaryRoot();
+		auto const path = root / "preview.agent.lua";
+		writeSource(path, externalSource("Preview"));
+		ResourceFixture resources(root);
+		unsigned freshResolutions = 0;
+		AgentTypeLoaderScope scope{
+			[&](auto const& name) { ++freshResolutions; return resources.types->resolve(name); },
+			[&](auto const& name) { return resources.types->preview(name); } };
+		ApplicationAgentType selected;
+		std::string diagnostic;
+		require(resources.types->importFile(path, selected, diagnostic), diagnostic);
+		auto payload = humanPayload("Preview");
+		payload.type = selected.typeId;
+		payload.resource = selected.resourceName;
+		auto fixture = buildWorld("Managed preview");
+		// Even the FIRST preview after import must use the validated resource,
+		// not reread source or invoke the fresh reconstruction loader.
+		std::filesystem::remove(path);
+		auto const previousLayer = gUISettings.visibleLayer;
+		struct RestoreLayer { int value; ~RestoreLayer() { gUISettings.visibleLayer = value; } }
+			restoreLayer{ previousLayer };
+		gUISettings.visibleLayer = 0;
+		for (unsigned frame = 0; frame < 64; ++frame)
+		{
+			auto dimensions = agentClipboardPlacementDimensions(payload, &diagnostic);
+			require(dimensions.x == 0.4f && diagnostic.empty(),
+				"Imported preview reread an unavailable file: " + diagnostic);
+			require(!!pegmanAgentTargetAtWorld(fixture.world, { 0.01f, 0.1f }, dimensions.x),
+				"Cached Agent dimensions did not produce a drop target");
+			auto mismatched = payload;
+			mismatched.type = "Other";
+			require(agentClipboardPlacementDimensions(mismatched, &diagnostic).x == 0.f
+				&& !diagnostic.empty(), "Cached preview accepted a mismatched identity");
+			auto missing = payload;
+			missing.resource = "missing.agent.lua";
+			require(agentClipboardPlacementDimensions(missing, &diagnostic).x == 0.f,
+				"Missing preview acquired a Human envelope");
+		}
+		require(freshResolutions == 0 && agentCount(*fixture.world) == 0,
+			"Per-frame preview performed fresh resolution or published an Agent");
+		core::AgentId placed;
+		require(!commitAgentPlacement(fixture.world, payload,
+			fixture.world->getSector(fixture.corridor), 0, 1.f, placed, diagnostic)
+			&& !placed && !diagnostic.empty(),
+			"Cached preview incorrectly masked a missing placement dependency");
+		require(freshResolutions == 1, "Placement did not revalidate its dependency");
+
+		// A clipboard resource not yet imported is resolved at paste arming,
+		// before the UI asks for dimensions. A prior preview miss must not poison
+		// the newly imported resource, and subsequent fall frames remain reads.
+		auto const pastedPath = root / "pasted.agent.lua";
+		writeSource(pastedPath, externalSource("PastedPreview"));
+		payload.type = "PastedPreview";
+		payload.resource = core::externalAgentTypeResourceName(pastedPath);
+		require(agentClipboardPlacementDimensions(payload, &diagnostic).x == 0.f,
+			"Preview implicitly imported an unknown resource");
+		PendingAgentPlacement pending;
+		require(armAgentPlacement(pending, *fixture.world, payload,
+			fixture.world->getSector(fixture.corridor), 0, 1.f, diagnostic), diagnostic);
+		auto const afterArming = freshResolutions;
+		std::filesystem::remove(pastedPath);
+		require(agentClipboardPlacementDimensions(pending.payload, &diagnostic).x == 0.4f
+			&& diagnostic.empty() && freshResolutions == afterArming,
+			"Armed paste did not acquire its imported preview snapshot");
+		pending.cancel();
+		require(agentCount(*fixture.world) == 0, "Arming/cancelling a preview published an Agent");
+	}
 
 	void managedResourceRevisionOnResetAndLoad(smoke::Context const& context)
 	{
@@ -754,12 +871,13 @@ namespace
 		auto fixture = buildWorld("Clipboard refusals");
 		auto const validDefinition = *core::resolveAgentTypeResource("scout.agent.lua");
 		auto definition = validDefinition;
-		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
+		auto loader = [&definition](std::string const& name)
 			-> std::optional<core::AgentTypeDefinition> {
 			if (name == "scout.agent.lua") return definition;
 			if (name == "human.agent.lua") return core::bundledHumanAgentType();
 			return std::nullopt;
-		} };
+		};
+		AgentTypeLoaderScope scope{ loader };
 		std::string diagnostic;
 		auto const before = captureDocumentSnapshot(fixture.world);
 		for (int failure = 0; failure != 5; ++failure)
@@ -770,6 +888,9 @@ namespace
 			if (failure == 2) payload.resource.clear();
 			if (failure == 3) definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('preview constructor') end }";
 			if (failure == 4) payload.individualHeightModifier = -1.f;
+			// Each case is a newly selected/validated resource session, not an
+			// implicit hot reload of an already accepted preview snapshot.
+			core::setAgentTypeResourceLoader(loader);
 			if (failure < 4)
 			{
 				auto dimensions = agentClipboardPlacementDimensions(payload, &diagnostic);
@@ -842,6 +963,8 @@ namespace
 
 void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "agentTypesPreviewQueriesReuseValidatedResource", previewQueriesReuseValidatedResource });
+	checks.push_back({ "agentTypesManagedPreviewIsReadOnly", managedPreviewIsReadOnly });
 	checks.push_back({ "agentTypesScriptedClipboardAndDeletionHistory", scriptedClipboardAndDeletionHistory });
 	checks.push_back({ "agentTypesScriptedClipboardRefusalAndLegacy", scriptedClipboardRefusalAndLegacy });
 	checks.push_back({ "agentTypesExternalImportPlacesAndReopens", externalImportPlacesAndReopens });

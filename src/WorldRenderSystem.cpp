@@ -253,6 +253,9 @@ namespace
 			core::setAgentTypeResourceLoader([this](std::string const& name)
 			{
 				return mAgentTypes->resolve(name);
+			}, [this](std::string const& name)
+			{
+				return mAgentTypes->preview(name);
 			});
 
 			mScene = mRenderSystem->createScene("Default");

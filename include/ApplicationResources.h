@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include "core/AgentType.h"
 
 #include <willpower/application/resourcesystem/Resource.h>
 #include <willpower/application/resourcesystem/ResourceFactory.h>
@@ -37,8 +38,9 @@ private:
 
 // A managed `.agent.lua` Agent type definition (ADR 0019). create() validates
 // the source in an isolated scratch sandbox and retains the immutable text and
-// stable type identity; no World or live runtime is touched, and destroy()
-// releases only that text, never a live Lua object.
+// stable type identity and validated preview baseline. Rendering reads that
+// snapshot without I/O or Lua construction. No World or live runtime is touched;
+// destroy() releases the snapshot, never a live Lua object.
 class AgentTypeResource final : public wp::application::resourcesystem::Resource
 {
 	friend class ApplicationAgentTypes;
@@ -57,6 +59,7 @@ private:
 	std::string mSource;
 	std::string mTypeId;
 	std::string mDisplayName;
+	std::optional<core::AgentTypePreview> mPreview;
 };
 
 class AgentTagRegistryResource final : public wp::application::resourcesystem::Resource

@@ -4244,21 +4244,26 @@ namespace
 				}
 				else payload.name = uniqueAgentName(world,
 					consumedCut ? payload.name + " copy" : payload.name);
-				string previewDiagnostic;
-				auto const dimensions = agentClipboardPlacementDimensions(payload, &previewDiagnostic);
-				if (!previewDiagnostic.empty()) throw runtime_error(previewDiagnostic);
-				float halfWidth = dimensions.x * 0.5f;
-				float localX = clamp(worldPosition.x - sector->getPosition().x, halfWidth,
-					max(halfWidth, sector->getSize().x - halfWidth));
+				// Resolve a possibly new external clipboard dependency once at this
+				// explicit paste boundary, BEFORE reading its cached dimensions.
+				PendingAgentPlacement pending;
 				// Arming judges the Agent group and Agent tag registry identity before
 				// anything is deferred, so an unusable payload is refused while the
 				// cursor is still where the user put it and the simulation is still as
 				// they left it. Nothing is written by arming: the Agent, group and tag
 				// assignments only exist if the fall is allowed to land.
 				string diagnostic;
-				if (!armAgentPlacement(gPegman.pastedAgent, *world, payload, sector,
-					y - sector->getCellY(), localX, diagnostic))
+				if (!armAgentPlacement(pending, *world, payload, sector,
+					y - sector->getCellY(), worldPosition.x - sector->getPosition().x, diagnostic))
 					throw runtime_error(diagnostic);
+				string previewDiagnostic;
+				auto const dimensions = agentClipboardPlacementDimensions(pending.payload, &previewDiagnostic);
+				if (!previewDiagnostic.empty()) throw runtime_error(previewDiagnostic);
+				float halfWidth = dimensions.x * 0.5f;
+				float localX = clamp(worldPosition.x - sector->getPosition().x, halfWidth,
+					max(halfWidth, sector->getSize().x - halfWidth));
+				pending.localX = localX;
+				gPegman.pastedAgent = std::move(pending);
 				if (!diagnostic.empty()) reportClipboardWarning(diagnostic);
 				if (!world->isSimulationPaused()) world->pauseSimulation();
 				gUISettings.worldPaused = true;

@@ -11,7 +11,9 @@ Legacy Human payloads may omit the Resource reference and/or type ID under the
 existing legacy rules. These resolve to bundled `human.agent.lua`. An explicit
 missing resource, mismatched ID, competing definition in the destination World,
 or failing constructor is refused, never substituted with Human. Invalid
-previews return zero dimensions and a dependency diagnostic. Arming a paste
+previews return zero dimensions and a dependency diagnostic. Per-frame previews
+use validated startup/import snapshots, not current on-disk edits; invalidating
+an on-disk dependency does not hot-reload an accepted preview. Arming a paste
 validates identity and its isolated constructor without publishing a World Agent
 or history entry; committing revalidates dependencies and rolls back a newly
 registered type if creation fails.

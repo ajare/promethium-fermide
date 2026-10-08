@@ -39,8 +39,8 @@ namespace core
 
 	// Constructs a frozen, validated baseline for one resolved definition in an
 	// isolated scratch runtime, without a World and without retaining a live
-	// instance. Returns nullopt when construction fails. Editor previews use
-	// this so they neither create nor mutate a World Agent (ADR 0019).
+	// instance. Returns nullopt when construction fails. This is a validation
+	// boundary, not a per-frame query; rendering uses agentTypeResourcePreview.
 	std::optional<AgentPhysicalBaseline> agentTypeDefinitionBaseline(
 		AgentTypeDefinition const& definition);
 
@@ -72,5 +72,19 @@ namespace core
 	// resolution.
 	using AgentTypeResourceLoader =
 		std::function<std::optional<AgentTypeDefinition>(std::string const&)>;
-	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader);
+	// Preview metadata is independent of fresh dependency resolution: rendering
+	// must not read files or construct Lua instances each frame. Managed loaders
+	// return their already-validated import/startup snapshot. Headless callers
+	// cache one validation (including failures) per resource until loader reset.
+	struct AgentTypePreview
+	{
+		std::string typeId;
+		AgentPhysicalBaseline baseline;
+	};
+	using AgentTypePreviewLoader =
+		std::function<std::optional<AgentTypePreview>(std::string const&)>;
+	std::optional<AgentTypePreview> agentTypeResourcePreview(
+		std::string const& resourceName, std::string& diagnostic);
+	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader,
+		AgentTypePreviewLoader previewLoader = {});
 }
