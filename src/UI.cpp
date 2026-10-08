@@ -4243,7 +4243,10 @@ namespace
 				}
 				else payload.name = uniqueAgentName(world,
 					consumedCut ? payload.name + " copy" : payload.name);
-				float halfWidth = agentClipboardPlacementDimensions(payload).x * 0.5f;
+				string previewDiagnostic;
+				auto const dimensions = agentClipboardPlacementDimensions(payload, &previewDiagnostic);
+				if (!previewDiagnostic.empty()) throw runtime_error(previewDiagnostic);
+				float halfWidth = dimensions.x * 0.5f;
 				float localX = clamp(worldPosition.x - sector->getPosition().x, halfWidth,
 					max(halfWidth, sector->getSize().x - halfWidth));
 				// Arming judges the Agent group and Agent tag registry identity before

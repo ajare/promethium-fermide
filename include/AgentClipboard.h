@@ -121,6 +121,11 @@ struct AgentClipboardPayload
 	std::optional<core::AgentPropertySample> stairSpeedModifierSample;
 	std::optional<core::AgentPropertySample> ladderSpeedModifierSample;
 	std::optional<core::AgentPropertySample> interactionAversionSample;
+	std::optional<core::AgentColour> individualColour;
+	std::optional<float> individualEscalatorWalkingChance;
+	std::optional<float> individualWalkSpeedModifier;
+	std::optional<float> individualHeightModifier;
+	std::optional<core::MobilityProfile> individualMobilityProfile;
 	std::optional<float> individualStairSpeedModifier;
 	std::optional<float> individualLadderSpeedModifier;
 	std::optional<float> individualInteractionAversion;
@@ -155,8 +160,11 @@ struct AgentClipboardPayload
 };
 
 // Standing preview dimensions from the payload's type and retained Height
-// sample. This does not commit an Agent or change the World.
-core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload);
+// sample. This does not commit an Agent or change the World. Invalid resources,
+// identity mismatches or constructor failures return zero dimensions, never a
+// Human fallback; callers may request the dependency diagnostic.
+core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload,
+	std::string* diagnostic = nullptr);
 
 // The payload a copy of `agent` carries. `name` is the name the copy will
 // use - the caller owns name uniqueness, the payload owns the

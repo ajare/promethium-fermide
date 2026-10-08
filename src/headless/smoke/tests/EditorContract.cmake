@@ -76,6 +76,8 @@ set(editor_names
     agent/cuttingAGroupedAgentLeavesItsSourceGroupDefined
     agent/authorizationIsPreservedOnlyInTheOriginatingWorld
     agent/anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
+    agentTypesScriptedClipboardAndDeletionHistory
+    agentTypesScriptedClipboardRefusalAndLegacy
     agentTypesExternalImportPlacesAndReopens
     agentTypesExternalImportRefusesWithoutRegistration
     agentTypesExternalPlacementRollsBackRegistration

@@ -11,6 +11,7 @@
 #include "ApplicationAgentTypes.h"
 #include "ApplicationResources.h"
 #include "core/AgentTagRegistryDocument.h"
+#include "core/AgentTagRegistry.h"
 #include "core/SerializationException.h"
 #include <optional>
 #include <stdexcept>
@@ -530,6 +531,210 @@ namespace
 			"Duplicate refusal changed the original definition");
 	}
 
+	void scriptedClipboardAndDeletionHistory(smoke::Context const& context)
+	{
+		gWorldDocumentHistory.clear();
+		auto definition = *core::resolveAgentTypeResource("scout.agent.lua");
+		auto const initialSource = definition.source;
+		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
+			-> std::optional<core::AgentTypeDefinition> {
+			if (name == definition.resourceName) return definition;
+			if (name == "human.agent.lua") return core::bundledHumanAgentType();
+			return std::nullopt;
+		} };
+		auto fixture = buildWorld("Scripted clipboard history");
+		auto& world = fixture.world;
+		world->pauseSimulation();
+		auto registry = core::AgentTagRegistry::create();
+		auto const tag = registry->addAgentTag("physical");
+		std::string diagnostic;
+		require(registry->addAgentTagHeightModifier(tag, &diagnostic), diagnostic);
+		require(registry->setAgentTagHeightModifier(tag, { 0.7f, 0.9f }, &diagnostic), diagnostic);
+		require(registry->addAgentTagWalkSpeedModifier(tag, &diagnostic), diagnostic);
+		auto const registryPath = context.temporaryRoot() / "clipboard.tags.yaml";
+		registry->saveTo(registryPath.string());
+		world->attachAgentTagRegistry(registryPath.filename().string(), registry);
+		world->saveTo((context.temporaryRoot() / "clipboard.world.yaml").string());
+		core::AgentId original;
+		require(commitAgentPlacement(world, scoutPayload("Original"), world->getSector(fixture.corridor),
+			0, 1.f, original, diagnostic), diagnostic);
+		require(world->assignAgentTag(original, tag, &diagnostic), diagnostic);
+		auto authored = makeAgentClipboardPayload(*world, original, "Copy");
+		authored.active = false;
+		authored.group = "Researchers";
+		authored.individualColour = core::AgentColour{ 12, 34, 56 };
+		authored.individualEscalatorWalkingChance = 0.4f;
+		authored.individualWalkSpeedModifier = 1.2f;
+		authored.individualHeightModifier = 0.95f;
+		authored.individualStairSpeedModifier = 1.3f;
+		authored.individualLadderSpeedModifier = 0.9f;
+		authored.individualInteractionAversion = 0.8f;
+		authored.individualEffortAversion = 1.2f;
+		authored.individualWaitingAversion = 1.3f;
+		authored.individualCrowdAversion = 1.4f;
+		authored.individualRiskAversion = 1.5f;
+		authored.individualRouteFamiliarity = 0.6f;
+		authored.individualRoutePersistence = 0.2f;
+		authored.individualMinimumRoutePlanningTime = 2.f;
+		authored.individualMaximumRoutePlanningTime = 4.f;
+		authored.individualPermissionAdherence = false;
+		core::MobilityProfile mobility;
+		mobility.set(core::TraversalKind::Ladder, core::MobilityUse::CannotUse);
+		authored.individualMobilityProfile = mobility;
+		auto const text = makeAgentClipboardText(authored, false);
+		AgentClipboardPayload read;
+		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"], read, diagnostic), diagnostic);
+		require(makeAgentClipboardText(read, false) == text, "Wire round trip lost authored Agent data");
+		PendingAgentPlacement pending;
+		auto const before = captureDocumentSnapshot(world);
+		auto const preview = agentClipboardPlacementDimensions(read, &diagnostic);
+		require(diagnostic.empty() && preview.x == 0.3f && preview.y == 0.35f * 0.95f,
+			"Preview lost Scout identity or individual-over-tag Height precedence");
+		require(armAgentPlacement(pending, *world, read, world->getSector(fixture.corridor), 0, 4.f, diagnostic), diagnostic);
+		require(captureDocumentSnapshot(world)->yaml == before->yaml, "Arming mutated the World");
+		core::AgentId pasted;
+		require(commitPendingAgentPlacement(pending, world, pasted, diagnostic), diagnostic);
+		auto verify = [&] {
+			require(makeAgentClipboardText(makeAgentClipboardPayload(*world, pasted, "Copy"), false) == text,
+				"Paste/history lost identity, individual properties, tags, samples or group");
+		};
+		verify();
+		require(world->lookupAgent(pasted).entity->getStandingHeight() == preview.y,
+			"Pasted bounds disagree with preview");
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			try {
+				auto loaded = deserializeDocumentSnapshot(snapshot, world, context.temporaryRoot() / "clipboard.world.yaml");
+				if (!loaded) return false;
+				core::loadAndAttachAgentTagRegistry(*loaded, context.temporaryRoot() / "clipboard.world.yaml");
+				world = std::move(loaded);
+				return true;
+			} catch (std::exception const& error) { diagnostic = error.what(); return false; }
+		};
+		auto const pasteUndone = gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore);
+		require(pasteUndone, "Paste undo failed: " + diagnostic);
+		require(!world->lookupAgent(pasted).entity && agentCount(*world) == 1,
+			"Paste undo kept the pasted Agent or removed its source");
+		definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('redo constructor') end }";
+		auto const undone = captureDocumentSnapshot(world);
+		auto const redoCount = gWorldDocumentHistory.redoCount();
+		require(!gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+			&& gWorldDocumentHistory.redoCount() == redoCount
+			&& captureDocumentSnapshot(world)->yaml == undone->yaml,
+			"Paste redo reused a removed instance or changed state after failure");
+		definition.source = initialSource;
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Paste redo failed to recover");
+		verify();
+		// Public copy of the placed Agent must produce the same portable data.
+		gWorldDocumentHistory.clear();
+		auto const beforeCut = captureDocumentSnapshot(world);
+		require(cutAgent(world, pasted, diagnostic), diagnostic);
+		commitDocumentEdit(beforeCut);
+		require(!world->lookupAgent(pasted).entity, "Cut kept the deleted Agent alive in the World");
+		auto const deleted = captureDocumentSnapshot(world);
+		auto const count = gWorldDocumentHistory.undoCount();
+		require(count == 1, "Cut was not captured as one history edit");
+		auto const undo = [&] { return gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore); };
+		for (int failure = 0; failure != 3; ++failure)
+		{
+			if (failure == 0) definition.resourceName = "missing.agent.lua";
+			if (failure == 1) definition.typeId = "Mismatched";
+			if (failure == 2) definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('fresh lifetime') end }";
+			require(!undo(), "Deletion undo accepted an invalid dependency or reused the deleted instance");
+			require(captureDocumentSnapshot(world)->yaml == deleted->yaml
+				&& gWorldDocumentHistory.undoCount() == count && !gWorldDocumentHistory.canRedo(),
+				"Failed deletion restoration changed the World/history");
+			definition = { "Scout", "Scout", "scout.agent.lua", initialSource };
+		}
+		auto const at = definition.source.find("width = 0.3");
+		require(at != std::string::npos, "Scout fixture width not found");
+		definition.source.replace(at, std::string("width = 0.3").size(), "width = 0.5");
+		auto const deletionUndone = undo();
+		require(deletionUndone, "Deleted-Agent undo did not recover: " + diagnostic);
+		verify();
+		require(world->lookupAgent(pasted).entity->getWidth() == 0.5f
+			&& world->lookupAgent(original).entity->getWidth() == 0.3f,
+			"Deletion restoration was not fresh or discarded the surviving instance");
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Deletion redo failed");
+		require(!world->lookupAgent(pasted).entity, "Deletion redo retained its Agent");
+		require(undo(), "Repeated deletion undo failed");
+		verify();
+		gWorldDocumentHistory.clear();
+	}
+
+	void scriptedClipboardRefusalAndLegacy(smoke::Context const&)
+	{
+		gWorldDocumentHistory.clear();
+		auto fixture = buildWorld("Clipboard refusals");
+		auto const validDefinition = *core::resolveAgentTypeResource("scout.agent.lua");
+		auto definition = validDefinition;
+		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
+			-> std::optional<core::AgentTypeDefinition> {
+			if (name == "scout.agent.lua") return definition;
+			if (name == "human.agent.lua") return core::bundledHumanAgentType();
+			return std::nullopt;
+		} };
+		std::string diagnostic;
+		auto const before = captureDocumentSnapshot(fixture.world);
+		for (int failure = 0; failure != 5; ++failure)
+		{
+			auto payload = scoutPayload("Refused");
+			if (failure == 0) payload.resource = "absent.agent.lua";
+			if (failure == 1) payload.type = "NotScout";
+			if (failure == 2) payload.resource.clear();
+			if (failure == 3) definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('preview constructor') end }";
+			if (failure == 4) payload.individualHeightModifier = -1.f;
+			if (failure < 4)
+			{
+				auto dimensions = agentClipboardPlacementDimensions(payload, &diagnostic);
+				require(dimensions.x == 0.f && dimensions.y == 0.f && !diagnostic.empty(),
+					"Invalid clipboard preview silently became Human");
+			}
+			PendingAgentPlacement pending;
+			require(!armAgentPlacement(pending, *fixture.world, payload,
+				fixture.world->getSector(fixture.corridor), 0, 1.f, diagnostic)
+				&& !pending.armed() && !diagnostic.empty(), "Invalid paste was armed");
+			core::AgentId placed;
+			require(!commitAgentPlacement(fixture.world, payload, fixture.world->getSector(fixture.corridor),
+				0, 1.f, placed, diagnostic) && !placed && !diagnostic.empty(), "Invalid paste was published");
+			require(captureDocumentSnapshot(fixture.world)->yaml == before->yaml
+				&& !gWorldDocumentHistory.canUndo(), "Refused paste changed World/history");
+			definition = validDefinition;
+		}
+		require(fixture.world->attachAgentType("competing.agent.lua", validDefinition.source, &diagnostic), diagnostic);
+		auto const conflictBefore = captureDocumentSnapshot(fixture.world);
+		PendingAgentPlacement conflict;
+		require(!armAgentPlacement(conflict, *fixture.world, scoutPayload("Conflict"),
+			fixture.world->getSector(fixture.corridor), 0, 1.f, diagnostic)
+			&& diagnostic.find("competing resources") != std::string::npos,
+			"Competing clipboard identity was armed");
+		core::AgentId refused;
+		require(!commitAgentPlacement(fixture.world, scoutPayload("Conflict"), fixture.world->getSector(fixture.corridor),
+			0, 1.f, refused, diagnostic) && !refused
+			&& captureDocumentSnapshot(fixture.world)->yaml == conflictBefore->yaml,
+			"Conflicting paste changed the World");
+		for (auto const* field : { "colour", "escalatorWalkingChance", "walkSpeedModifier", "heightModifier", "mobilityProfile" })
+		{
+			auto object = YAML::Load("name: Invalid property\nflags: 0\n");
+			object[field] = YAML::Load("[-1, 999]");
+			AgentClipboardPayload invalid;
+			require(!readAgentClipboardObject(object, invalid, diagnostic) && !diagnostic.empty(),
+				"Malformed individual clipboard property was accepted");
+		}
+		for (bool omitType : { false, true })
+		{
+			auto object = YAML::Load("name: Legacy\nflags: 0\n");
+			if (!omitType) object["type"] = "Human";
+			AgentClipboardPayload legacy;
+			require(readAgentClipboardObject(object, legacy, diagnostic), diagnostic);
+			core::AgentId placed;
+			require(commitAgentPlacement(fixture.world, legacy, fixture.world->getSector(fixture.corridor),
+				0, 1.f, placed, diagnostic), diagnostic);
+			require(fixture.world->lookupAgent(placed).entity->getTypeResourceName() == "human.agent.lua",
+				"Legacy clipboard did not resolve bundled Human");
+		}
+		gWorldDocumentHistory.clear();
+	}
+
 	void editorCopiedFixturePreservesTypeIdentity(smoke::Context const&)
 	{
 		auto fixture = buildWorld("Editor Scout copy");
@@ -550,6 +755,8 @@ namespace
 
 void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "agentTypesScriptedClipboardAndDeletionHistory", scriptedClipboardAndDeletionHistory });
+	checks.push_back({ "agentTypesScriptedClipboardRefusalAndLegacy", scriptedClipboardRefusalAndLegacy });
 	checks.push_back({ "agentTypesExternalImportPlacesAndReopens", externalImportPlacesAndReopens });
 	checks.push_back({ "agentTypesExternalImportRefusesWithoutRegistration", externalImportRefusesWithoutRegistration });
 	checks.push_back({ "agentTypesExternalPlacementRollsBackRegistration", externalPlacementRollsBackRegistration });

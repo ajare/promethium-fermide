@@ -74,6 +74,18 @@ namespace
 		};
 		if (payload.type.empty() || !core::agentTypeIdIsValid(payload.type))
 			return reject("Unsupported Agent type '" + payload.type + "'");
+		if (payload.individualEscalatorWalkingChance
+			&& !core::agentEscalatorWalkingChanceIsValid(*payload.individualEscalatorWalkingChance))
+			return reject("Clipboard Escalator walking chance is invalid");
+		if (payload.individualWalkSpeedModifier
+			&& !core::agentWalkSpeedModifierRangeIsValid(
+				{ *payload.individualWalkSpeedModifier, *payload.individualWalkSpeedModifier }, &diagnostic)) return false;
+		if (payload.individualHeightModifier
+			&& !core::agentHeightModifierRangeIsValid(
+				{ *payload.individualHeightModifier, *payload.individualHeightModifier }, &diagnostic)) return false;
+		if (payload.individualMobilityProfile
+			&& !core::mobilityProfileIsValid(*payload.individualMobilityProfile))
+			return reject("Clipboard Mobility profile is invalid");
 		if (payload.individualStairSpeedModifier
 			&& !core::agentStairSpeedModifierRangeIsValid(
 				{ *payload.individualStairSpeedModifier, *payload.individualStairSpeedModifier },
@@ -531,30 +543,53 @@ namespace
 	}
 }
 
-core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload)
+namespace
 {
-	auto const heightModifier = payload.heightModifierSample
-		? payload.heightModifierSample->value : 1.0f;
-	// Resolve the type's frozen baseline so the preview agrees with placement.
-	// A legacy payload without a resource reference is the bundled Human; an
-	// unresolvable reference degrades to Human dimensions because the preview
-	// is non-committal and the actual placement will refuse with a diagnostic.
-	std::optional<core::AgentPhysicalBaseline> baseline;
-	if (payload.resource.empty())
+	std::optional<core::AgentTypeDefinition> clipboardAgentType(
+		AgentClipboardPayload const& payload, core::World const* world, string& diagnostic)
 	{
-		if (payload.type == "Human") baseline = core::bundledHumanBaseline();
-	}
-	else
-	{
-		try
+		if (payload.resource.empty() && payload.type != "Human")
 		{
-			auto const definition = core::resolveAgentTypeResource(payload.resource);
-			if (definition) baseline = core::agentTypeDefinitionBaseline(*definition);
+			diagnostic = "Agent type '" + payload.type + "' requires an explicit resource reference";
+			return std::nullopt;
 		}
-		catch (std::exception const&) { /* Placement reports the dependency diagnostic. */ }
+		auto const resource = payload.resource.empty() ? "human.agent.lua" : payload.resource;
+		std::optional<core::AgentTypeDefinition> resolved;
+		try { resolved = core::resolveAgentTypeResource(resource); }
+		catch (std::exception const& error) { diagnostic = error.what(); return std::nullopt; }
+		if (!resolved)
+			diagnostic = "The Agent type resource '" + resource + "' is unavailable";
+		else if (resolved->typeId != payload.type)
+			diagnostic = "The Agent type resource '" + resource + "' declares type ID '"
+				+ resolved->typeId + "' but the placement requested '" + payload.type + "'";
+		else if (world && world->hasAgentType(resolved->typeId)
+			&& world->agentTypeResourceName(resolved->typeId) != resolved->resourceName)
+			diagnostic = "Agent type ID '" + resolved->typeId
+				+ "' is declared by competing resources in this World";
+		else return resolved;
+		return std::nullopt;
 	}
-	if (!baseline)
-		return core::Agent::placementDimensions("Human", heightModifier);
+}
+
+core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload,
+	string* diagnostic)
+{
+	auto const heightModifier = payload.individualHeightModifier.value_or(
+		payload.heightModifierSample ? payload.heightModifierSample->value : 1.0f);
+	// Preview executes only in an isolated bounded context. An invalid explicit
+	// identity must never acquire a misleading Human envelope.
+	string failure;
+	if (!clipboardTagStateIsWellFormed(payload, failure))
+	{
+		if (diagnostic) *diagnostic = failure;
+		return {};
+	}
+	auto const definition = clipboardAgentType(payload, nullptr, failure);
+	auto const baseline = definition ? core::agentTypeDefinitionBaseline(*definition) : std::nullopt;
+	if (definition && !baseline)
+		failure = "The Agent type resource '" + definition->resourceName + "' constructor failed during preview";
+	if (diagnostic) *diagnostic = failure;
+	if (!baseline) return {};
 	return { baseline->width, baseline->standingHeight * heightModifier };
 }
 
@@ -569,6 +604,11 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 
 	payload.type = lookup.entity->getTypeId();
 	payload.resource = lookup.entity->getTypeResourceName();
+	payload.individualColour = lookup.entity->getIndividualColour();
+	payload.individualEscalatorWalkingChance = lookup.entity->getIndividualEscalatorWalkingChance();
+	payload.individualWalkSpeedModifier = lookup.entity->getIndividualWalkSpeedModifier();
+	payload.individualHeightModifier = lookup.entity->getIndividualHeightModifier();
+	payload.individualMobilityProfile = lookup.entity->getIndividualMobilityProfile();
 	payload.flags = lookup.entity->getFlags();
 	payload.active = lookup.entity->isActive();
 	payload.agentTags = lookup.entity->getAgentTagIds();
@@ -679,6 +719,23 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	// so a payload written before activation existed reads back activated
 	// (#118).
 	if (!payload.active) output << YAML::Key << "active" << YAML::Value << false;
+	if (payload.individualColour)
+		output << YAML::Key << "colour" << YAML::Value << YAML::BeginMap
+			<< YAML::Key << "r" << YAML::Value << unsigned(payload.individualColour->r)
+			<< YAML::Key << "g" << YAML::Value << unsigned(payload.individualColour->g)
+			<< YAML::Key << "b" << YAML::Value << unsigned(payload.individualColour->b) << YAML::EndMap;
+	if (payload.individualEscalatorWalkingChance)
+		output << YAML::Key << "escalatorWalkingChance" << YAML::Value << *payload.individualEscalatorWalkingChance;
+	if (payload.individualWalkSpeedModifier)
+		output << YAML::Key << "walkSpeedModifier" << YAML::Value << *payload.individualWalkSpeedModifier;
+	if (payload.individualHeightModifier)
+		output << YAML::Key << "heightModifier" << YAML::Value << *payload.individualHeightModifier;
+	if (payload.individualMobilityProfile)
+	{
+		output << YAML::Key << "mobilityProfile" << YAML::Value << YAML::BeginSeq;
+		for (auto use : payload.individualMobilityProfile->uses) output << unsigned(use);
+		output << YAML::EndSeq;
+	}
 	if (payload.individualStairSpeedModifier)
 		output << YAML::Key << "stairSpeedModifier" << YAML::Value
 			<< *payload.individualStairSpeedModifier;
@@ -885,6 +942,43 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		}
 	}
 
+	try
+	{
+		if (auto colour = object["colour"])
+		{
+			auto channel = [&](char const* name) {
+				auto value = colour[name].as<unsigned>();
+				if (value > 255) throw invalid_argument("Colour channel exceeds 255");
+				return static_cast<uint8_t>(value);
+			};
+			payload.individualColour = core::AgentColour{ channel("r"), channel("g"), channel("b") };
+		}
+		if (object["escalatorWalkingChance"])
+			payload.individualEscalatorWalkingChance = object["escalatorWalkingChance"].as<float>();
+		if (object["walkSpeedModifier"])
+			payload.individualWalkSpeedModifier = object["walkSpeedModifier"].as<float>();
+		if (object["heightModifier"])
+			payload.individualHeightModifier = object["heightModifier"].as<float>();
+		if (auto profile = object["mobilityProfile"])
+		{
+			core::MobilityProfile value;
+			if (!profile.IsSequence() || profile.size() != value.uses.size())
+				throw invalid_argument("Mobility profile requires one use per traversal kind");
+			for (size_t i = 0; i < value.uses.size(); ++i)
+			{
+				auto use = profile[i].as<unsigned>();
+				if (use > unsigned(core::MobilityUse::OnlyIfNoOtherOption))
+					throw invalid_argument("Invalid Mobility use");
+				value.uses[i] = static_cast<core::MobilityUse>(use);
+			}
+			payload.individualMobilityProfile = value;
+		}
+	}
+	catch (std::exception const& error)
+	{
+		diagnostic = "Clipboard individual Agent property is invalid: " + string(error.what());
+		return false;
+	}
 	if (object["stairSpeedModifier"])
 	{
 		float value;
@@ -1411,6 +1505,13 @@ bool armAgentPlacement(PendingAgentPlacement& pending,
 
 	if (!world.canPlaceAgentInLocation(sector->getIndex(), payload.directAccessGrants,
 		payload.permissionSets, &diagnostic)) return false;
+	auto const definition = clipboardAgentType(payload, &world, diagnostic);
+	if (!definition) return false;
+	if (!core::agentTypeDefinitionBaseline(*definition))
+	{
+		diagnostic = "The Agent type resource '" + definition->resourceName + "' constructor failed during preview";
+		return false;
+	}
 
 	pending.payload = payload;
 	pending.sector = sector;
@@ -1464,14 +1565,23 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	if (!clipboardBehaviourFitsWorld(*world, payload,
 		&behaviourConfiguration, diagnostic)) return false;
 	if ((!payload.agentTags.empty() || payload.behaviour
-		|| payload.authorizationWorldIdentity)
+		|| payload.authorizationWorldIdentity || payload.individualColour
+		|| payload.individualEscalatorWalkingChance || payload.individualWalkSpeedModifier
+		|| payload.individualHeightModifier || payload.individualMobilityProfile
+		|| payload.individualStairSpeedModifier || payload.individualLadderSpeedModifier
+		|| payload.individualInteractionAversion || payload.individualEffortAversion
+		|| payload.individualWaitingAversion || payload.individualCrowdAversion
+		|| payload.individualRiskAversion || payload.individualRouteFamiliarity
+		|| payload.individualRoutePersistence || payload.individualMinimumRoutePlanningTime
+		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence)
 		&& !world->isSimulationPaused())
 	{
 		diagnostic = payload.authorizationWorldIdentity
 			? "Pause the simulation before pasting an Agent with authorization"
 			: payload.behaviour
 				? "Pause the simulation before pasting an Agent with a behaviour"
-				: "Pause the simulation before pasting a tagged Agent";
+				: !payload.agentTags.empty() ? "Pause the simulation before pasting a tagged Agent"
+				: "Pause the simulation before pasting individual Agent properties";
 		return false;
 	}
 
@@ -1483,43 +1593,9 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	// payload without a resource reference resolves to the bundled Human; an
 	// explicit missing, unreadable, invalid, or mismatched resource refuses
 	// placement before any write.
-	std::string resourceName = payload.resource;
-	if (resourceName.empty())
-	{
-		if (payload.type != "Human")
-		{
-			diagnostic = "Agent type '" + payload.type
-				+ "' requires an explicit resource reference";
-			return false;
-		}
-		resourceName = "human.agent.lua";
-	}
-	std::optional<core::AgentTypeDefinition> resolved;
-	try { resolved = core::resolveAgentTypeResource(resourceName); }
-	catch (std::exception const& error)
-	{
-		diagnostic = error.what();
-		return false;
-	}
-	if (!resolved)
-	{
-		diagnostic = "The Agent type resource '" + resourceName + "' is unavailable";
-		return false;
-	}
-	if (resolved->typeId != payload.type)
-	{
-		diagnostic = "The Agent type resource '" + resourceName
-			+ "' declares type ID '" + resolved->typeId
-			+ "' but the placement requested '" + payload.type + "'";
-		return false;
-	}
-	if (world->hasAgentType(resolved->typeId)
-		&& world->agentTypeResourceName(resolved->typeId) != resolved->resourceName)
-	{
-		diagnostic = "Agent type ID '" + resolved->typeId
-			+ "' is declared by competing resources in this World";
-		return false;
-	}
+	auto const resolved = clipboardAgentType(payload, world.get(), diagnostic);
+	if (!resolved) return false;
+	auto const& resourceName = resolved->resourceName;
 
 	// Snapshot precedes registration too. Guard the new definition through
 	// every placement refusal, including a constructor exhausting the World budget.
@@ -1584,6 +1660,22 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		if (!created)
 		{
 			diagnostic = "The placed Agent could not be found in the World" + rollBack();
+			return false;
+		}
+		string propertyDiagnostic;
+		if ((payload.individualColour && !world->setAgentIndividualColour(agentId,
+			payload.individualColour, &propertyDiagnostic))
+			|| (payload.individualEscalatorWalkingChance && !world->setAgentIndividualEscalatorWalkingChance(agentId,
+				payload.individualEscalatorWalkingChance, &propertyDiagnostic))
+			|| (payload.individualWalkSpeedModifier && !world->setAgentIndividualWalkSpeedModifier(agentId,
+				payload.individualWalkSpeedModifier, &propertyDiagnostic))
+			|| (payload.individualHeightModifier && !world->setAgentIndividualHeightModifier(agentId,
+				payload.individualHeightModifier, &propertyDiagnostic))
+			|| (payload.individualMobilityProfile && !world->setAgentIndividualMobilityProfile(agentId,
+				payload.individualMobilityProfile, &propertyDiagnostic)))
+		{
+			diagnostic = "The pasted Agent's individual properties could not be restored: "
+				+ propertyDiagnostic + rollBack();
 			return false;
 		}
 		created->setFlags(payload.flags);
