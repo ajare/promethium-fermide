@@ -2476,7 +2476,20 @@ namespace core
 				? serializer.readString("resource", true, "") : std::string{};
 			serializer.endMap();
 			auto definition = resolveAgentType(typeId, typeResource);
-			auto agent = makeScriptAgent(definition->typeId, "");
+			auto const* survivor = workData.survivingAgentSource
+				? workData.survivingAgentSource->lookupAgent(id).entity : nullptr;
+			std::unique_ptr<Agent> agent;
+			if (survivor && survivor->getTypeId() == definition->typeId
+				&& survivor->getTypeResourceName() == definition->resourceName)
+			{
+				// History rebuilds topology and authored state, not a surviving
+				// Agent's private Lua object. Never keep handles in history entries.
+				agent.reset(new Agent(""));
+				agent->setTypeIdentity(survivor->mTypeId, survivor->mDisplayName,
+					survivor->mTypeResourceName, survivor->mPhysicalBaseline);
+				agent->mLuaInstance = survivor->mLuaInstance;
+			}
+			else agent = makeScriptAgent(definition->typeId, "");
 			agent->deserialize(serializer, workData);
 			auto const sectorIndex = serializer.readUint32("sector");
 			auto const localX = serializer.readFloat("localX");
@@ -2667,6 +2680,17 @@ namespace core
 				mAgents.remove(entry.id);
 				throw;
 			}
+		}
+
+		// History must not reissue a deleted Agent's identity on a later branch:
+		// otherwise ID/type/resource matching could mistake a new lifetime for a
+		// survivor. The snapshot never retains the deleted live object.
+		if (workData.survivingAgentSource)
+		{
+			auto const previousNext = workData.survivingAgentSource->mAgents.nextId();
+			auto const restoredNext = mAgents.nextId();
+			mAgents.restoreNextId(previousNext == 0 || restoredNext == 0
+				? 0 : std::max(previousNext, restoredNext));
 		}
 
 		// With no external tag namespace, all effective properties were available
@@ -2862,7 +2886,9 @@ namespace core
 					cancelledDumbwaiters.insert(cancelledDumbwaiters.end(),
 						mEvents.begin() + previousEventCount, mEvents.end());
 			}
+		auto const nextAgent = mAgents.nextId();
 		mAgents = {};
+		if (preserveBehaviourRuntime) mAgents.restoreNextId(nextAgent);
 		mAgentIds.clear();
 		// Agent groups are deliberately not cleared here. Every reset-and-replay
 		// path below reuses this reset to rebuild the world from its own
@@ -3426,7 +3452,7 @@ namespace core
 		{
 			auto const* sector = agent->getSector();
 			if (!sector) continue;
-			carried.push_back(CarriedAgent{ id, agent->getName(), agent->getTypeName(), agent->getFlags(),
+			carried.push_back(CarriedAgent{ id, agent->getName(), agent->getTypeId(), agent->getFlags(),
 				sector->getIndex(), sector->getLayerIndex(), agent->getGlobalPosition(),
 				agent->getAgentGroupId(), agent->mDirectAccessGrants, agent->mPermissionSets,
 				agent->getAgentTagIds(),
@@ -3459,7 +3485,9 @@ namespace core
 				agent->mFurnitureUse ? agent->mFurnitureUse->marker : MarkerId{},
 				agent->mFurnitureUse ? agent->mFurnitureUse->instance : 0,
 				agent->mFurnitureUse ? agent->mFurnitureUse->definition : std::string{},
-				agent->mFurnitureUse ? agent->mFurnitureUse->catalogue : nullptr });
+				agent->mFurnitureUse ? agent->mFurnitureUse->catalogue : nullptr,
+				agent->mDisplayName, agent->mTypeResourceName, agent->mPhysicalBaseline,
+				agent->mLuaInstance });
 		}
 		return carried;
 	}
@@ -3479,7 +3507,9 @@ namespace core
 				if (isLocationLike(sector->getType())
 					&& !mLayers[saved.layer]->getCellDefinition(cellX, cellY).isTraversableOnFoot()) continue;
 			}
-			auto agent = makeScriptAgent(saved.type, saved.name);
+			auto agent = std::unique_ptr<Agent>(new Agent(saved.name));
+			agent->setTypeIdentity(saved.type, saved.displayName, saved.typeResource, saved.baseline);
+			agent->mLuaInstance = saved.luaInstance;
 			agent->setFlags(saved.flags);
 			agent->setActive(saved.active);
 			auto* raw = agent.get();

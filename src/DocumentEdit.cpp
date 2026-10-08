@@ -78,7 +78,11 @@ shared_ptr<core::World> deserializeDocumentSnapshot(
 		workData.documentDirectory = documentPath.parent_path();
 		if (workData.documentDirectory.empty()) workData.documentDirectory = ".";
 	}
-	if (currentWorld) workData.furnitureCatalogue = currentWorld->furnitureCatalogue();
+	if (currentWorld)
+	{
+		workData.furnitureCatalogue = currentWorld->furnitureCatalogue();
+		workData.survivingAgentSource = currentWorld.get();
+	}
 	if (!loaded->deserialize(*serializer, workData)) return {};
 	return loaded;
 }

@@ -83,6 +83,7 @@ set(editor_names
     agentTypesEditorSelectionPreviewAgreesWithPlacement
     agentTypesEditorSelectionDependencyRefusedAtomically
     agentTypesEditorCopiedFixturePreservesTypeIdentity
+    agentTypesHistoryPreservesSurvivorsAndReconstructsDeletedAgents
     agent/assignmentAndPropertyAdditionConflictsAreAtomic
     agent/editorCommitsRevisionedColourAndUndoRedoExactly
     agent/conflictingColourRedoIsRefusedAtomically

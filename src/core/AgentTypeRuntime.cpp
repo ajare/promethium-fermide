@@ -176,7 +176,7 @@ namespace core
 		}
 	}
 
-	struct AgentTypeRuntimeAdapter::Impl
+	struct AgentTypeRuntimeAdapter::Impl : std::enable_shared_from_this<Impl>
 	{
 		ScratchBudget budget;
 		// Package loader retained as a member because the sandbox's require
@@ -328,11 +328,13 @@ namespace core
 					result.diagnostic = "Agent type instance could not be retained";
 					return result;
 				}
-				auto* rawState = state.get();
+				// Document history may replace the World while a surviving instance
+				// still belongs to this state. Keep its allocator and loader alive
+				// until the last handle releases its registry reference.
 				result.instance = std::shared_ptr<void>(nullptr,
-					[rawState, instanceReference](void*)
+					[owner = shared_from_this(), instanceReference](void*)
 				{
-					luaL_unref(rawState, LUA_REGISTRYINDEX, instanceReference);
+					luaL_unref(owner->state.get(), LUA_REGISTRYINDEX, instanceReference);
 				});
 				result.succeeded = true;
 				(void)name;
@@ -358,7 +360,7 @@ namespace core
 	};
 
 	AgentTypeRuntimeAdapter::AgentTypeRuntimeAdapter(AgentTypeRuntimeLimits limits)
-		: mImpl(std::make_unique<Impl>(limits))
+		: mImpl(std::make_shared<Impl>(limits))
 	{
 	}
 

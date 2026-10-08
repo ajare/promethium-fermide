@@ -181,6 +181,13 @@ pf_add_smoke_module(pf-smoke-agent
 
 # Explicit diagnostic invocations retain the smoke runner's ordinary CLI output
 # contract while providing the labelled traces required by ticket #476.
+add_test(NAME agent-type-topology-lifetime COMMAND pf-smoke-agent
+    --check agentTypesTopologyReplayPreservesLiveInstances)
+add_test(NAME agent-type-history-lifetime COMMAND pf-smoke-editor
+    --check agentTypesHistoryPreservesSurvivorsAndReconstructsDeletedAgents)
+set_tests_properties(agent-type-topology-lifetime agent-type-history-lifetime
+    PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
+
 add_test(NAME door-live-clearance-diagnostic COMMAND pf-smoke-agent --check liveDoorClearance)
 add_test(NAME door-live-clearance-committed COMMAND pf-smoke-agent --check committedDoorEnvelope)
 add_test(NAME door-live-clearance-editor COMMAND pf-smoke-editor --check scaled-doors/crossing-history)

@@ -1194,6 +1194,8 @@ namespace core
 		{
 			AgentId id;
 			std::string name;
+			// Stable type ID: the authored identity a survivor is matched by,
+			// independent of its presentation display name (#509).
 			std::string type;
 			uint32_t flags{ 0 };
 			uint32_t sectorIndex{ 0 };
@@ -1266,6 +1268,16 @@ namespace core
 			uint64_t useFurniture{ 0 };
 			std::string useDefinition;
 			std::shared_ptr<const FurnitureCatalogue> useCatalogue;
+			// A structural replay is not a Reset: the surviving Agent keeps its
+			// immutable type identity, its frozen physical baseline, and its
+			// opaque live Lua instance handle. The handle's shared ownership keeps
+			// the instance alive through the rebuild; when the Agent is dropped as
+			// the edit's casualty its last reference is released and the instance
+			// lifetime ends (#509).
+			std::string displayName;
+			std::string typeResource;
+			AgentPhysicalBaseline baseline{};
+			std::shared_ptr<void> luaInstance;
 		};
 
 		// Captures every Agent that stands in a Sector. A path adjusts the carried

@@ -682,6 +682,67 @@ namespace
 			"The legacy Human lost an authored individual property");
 	}
 
+	void topologyReplayPreservesLiveInstances(smoke::Context const&)
+	{
+		// The public allocation budget makes a second live construction fail.
+		// Replay must carry the existing private object, not duplicate it (nor
+		// drop it before construction). No VM inspection or method API is needed.
+		core::World world("Retained instance", 12, 3, {},
+			core::AgentTypeRuntimeLimits{ 2u * 1024u * 1024u, 100'000u });
+		auto corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		world.pauseSimulation();
+		std::string diagnostic;
+		require(world.attachAgentType("retained.agent.lua",
+			typeSource("Retained", "Distinct display name", validBaseline(
+				"            private_blob = string.rep('x', 800 * 1024),\n")),
+			&diagnostic), diagnostic.c_str());
+		core::AgentId id;
+		try { id = world.createAgent("Retained", "Survivor", corridor, 0, 2.0f); }
+		catch (std::exception const& error) { throw std::runtime_error(std::string("Initial construction: ") + error.what()); }
+		require(world.setAgentIndividualWalkSpeedModifier(id, 1.2f),
+			"Could not author a survivor property");
+		require(world.setAgentActive(id, false), "Could not deactivate survivor");
+		auto refuseDuplicate = [&] {
+			bool refused = false;
+			try { (void)world.createAgent("Retained", "Duplicate", corridor, 0, 4.0f); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "The retained private object no longer consumes its instance budget");
+		};
+		refuseDuplicate();
+		auto verify = [&] {
+			auto const* agent = world.lookupAgent(id).entity;
+			require(agent && agent->getTypeId() == "Retained"
+				&& std::string(agent->getTypeName()) == "Distinct display name"
+				&& agent->getTypeResourceName() == "retained.agent.lua"
+				&& agent->getPhysicalBaseline().width == 0.5f
+				&& agent->getIndividualWalkSpeedModifier() == 1.2f && !agent->isActive(),
+				"Replay lost survivor identity, baseline, or authored/runtime state");
+		};
+		world.addLevel();
+		verify();
+		auto resize = world.planResizeLocation(corridor, 0, 0, 9, 1);
+		require(resize.valid, "Survivor Location resize did not validate");
+		corridor = world.applyLocationEdit(resize);
+		verify();
+		// Refused topology changes are true no-ops, including private lifetime.
+		auto invalid = world.planResizeLocation(corridor, 11, 0, 9, 1);
+		require(!invalid.valid, "An out-of-bounds Location resize was accepted");
+		verify();
+		refuseDuplicate(); // carrying only a baseline would have discarded the blob
+		auto remove = world.planRemoveLocation(corridor);
+		require(remove.valid, "Location removal did not validate");
+		world.applyLocationEdit(remove);
+		require(!world.lookupAgent(id).entity, "A deleted Agent survived Location removal");
+		auto replacementSector = world.addCorridor(0, 0, 9);
+		world.finishBuild();
+		// A new lightweight construction and teardown remain safe after releasing
+		// the large instance (its unreferenced Lua storage is collected lazily).
+		auto const replacement = world.createAgent("Fresh", replacementSector, 0, 2.0f);
+		require(!!replacement && replacement != id,
+			"Deletion did not permit fresh construction with a new Agent identity");
+	}
+
 	void loadingConstructsFreshInstances(smoke::Context const&)
 	{
 		// A module-level counter is mutable state that must never survive into
@@ -754,4 +815,5 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesCompetingTypeIdsRejectedOnLoad", competingTypeIdsRejectedOnLoad });
 	checks.push_back({ "agentTypesLegacyHumanWithoutResource", legacyHumanWithoutResourceResolves });
 	checks.push_back({ "agentTypesLoadingConstructsFreshInstances", loadingConstructsFreshInstances });
+	checks.push_back({ "agentTypesTopologyReplayPreservesLiveInstances", topologyReplayPreservesLiveInstances });
 }

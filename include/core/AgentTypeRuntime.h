@@ -52,7 +52,8 @@ namespace core
 		friend class World;
 
 		struct Impl;
-		std::unique_ptr<Impl> mImpl;
+		// Live handles retain the state across replacement of a World by history.
+		std::shared_ptr<Impl> mImpl;
 
 	public:
 		static constexpr size_t DefaultMemoryBudgetBytes{ 64u * 1024u * 1024u };

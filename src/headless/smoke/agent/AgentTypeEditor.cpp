@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "AgentClipboard.h"
+#include "DocumentEdit.h"
+#include "DocumentHistory.h"
 #include "core/Agent.h"
 #include "core/AgentType.h"
 #include "core/Sector.h"
@@ -203,6 +205,112 @@ namespace
 			"Failed Scout placement left an Agent behind");
 	}
 
+	void historyPreservesSurvivorsAndReconstructsDeletedAgents(smoke::Context const&)
+	{
+		// The managed resource can change between reconstructions. A throwing
+		// new() distinguishes preservation from fresh construction at the public
+		// history seam without inspecting VM pointers or arbitrary private state.
+		auto definition = core::bundledHumanAgentType();
+		definition.typeId = "HistoryFixture";
+		definition.displayName = "History fixture display";
+		definition.resourceName = "history-fixture.agent.lua";
+		auto replace = [](std::string& source, std::string const& from, std::string const& to) {
+			auto const at = source.find(from);
+			require(at != std::string::npos, "Fixture source replacement was not found");
+			source.replace(at, from.size(), to);
+		};
+		replace(definition.source, "type_id = \"Human\"", "type_id = \"HistoryFixture\"");
+		replace(definition.source, "display_name = \"Human\"",
+			"display_name = \"History fixture display\"");
+		auto const initialSource = definition.source;
+		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
+			-> std::optional<core::AgentTypeDefinition> {
+			if (name == definition.resourceName) return definition;
+			return std::nullopt;
+		} };
+		auto world = std::make_shared<core::World>("History survival", 12, 2);
+		auto const first = world->addRoom("Survivor room", 0, 0, 0, 5, 1);
+		auto const second = world->addRoom("Removed room", 0, 0, 6, 4, 1);
+		world->finishBuild();
+		world->pauseSimulation();
+		std::string diagnostic;
+		require(world->attachAgentType(definition.resourceName, definition.source, &diagnostic), diagnostic);
+		auto const survivor = world->createAgent(definition.typeId, "Survivor", first, 0, 2.0f);
+		auto const casualty = world->createAgent(definition.typeId, "Deleted", second, 0, 2.0f);
+		require(world->setAgentIndividualWalkSpeedModifier(survivor, 1.2f),
+			"Could not author the survivor's property");
+		DocumentHistory history;
+		auto before = captureDocumentSnapshot(world, history);
+		require(before.has_value(), "Could not capture a structural history entry");
+		auto resize = world->planResizeLocation(first, 0, 0, 6, 1);
+		require(resize.valid, "History fixture resize was not valid");
+		world->applyLocationEdit(resize);
+		commitDocumentEdit(std::move(before), history);
+		definition.source = "return { api_version = 1, type_id = 'HistoryFixture', "
+			"display_name = 'Changed display', new = function() error('fresh constructor') end }";
+		auto restore = [&](DocumentSnapshot const& target) {
+			try
+			{
+				auto loaded = deserializeDocumentSnapshot(target, world, {});
+				if (!loaded) return false;
+				world = std::move(loaded); // destroys old World, but not survivor Lua state
+				return true;
+			}
+			catch (std::exception const&) { return false; }
+		};
+		auto verifySurvivor = [&] {
+			auto const* agent = world->lookupAgent(survivor).entity;
+			require(agent && agent->getTypeId() == definition.typeId
+				&& std::string(agent->getTypeName()) == "History fixture display"
+				&& agent->getPhysicalBaseline().width == 0.4f
+				&& agent->getIndividualWalkSpeedModifier() == 1.2f,
+				"History reconstructed or changed a surviving Agent");
+		};
+		require(history.undo(captureDocumentSnapshot(world, history), restore),
+			"Structural undo ran a surviving Agent's throwing constructor");
+		verifySurvivor();
+		require(history.redo(captureDocumentSnapshot(world, history), restore),
+			"Structural redo ran a surviving Agent's throwing constructor");
+		verifySurvivor();
+
+		before = captureDocumentSnapshot(world, history);
+		auto remove = world->planRemoveLocation(second);
+		require(remove.valid, "History fixture Location deletion was not valid");
+		world->applyLocationEdit(remove);
+		commitDocumentEdit(std::move(before), history);
+		require(!world->lookupAgent(casualty).entity, "Topology deletion kept a casualty");
+		auto const undoCount = history.undoCount();
+		require(!history.undo(captureDocumentSnapshot(world, history), restore),
+			"Undo of deletion reused a deleted Agent instead of constructing fresh");
+		require(history.undoCount() == undoCount && !history.canRedo()
+			&& !world->lookupAgent(casualty).entity,
+			"Failed reconstruction changed the live World or document history");
+		verifySurvivor(); // failed candidate released borrowed references safely
+
+		definition.source = initialSource;
+		replace(definition.source, "width = 0.4", "width = 0.7");
+		require(history.undo(captureDocumentSnapshot(world, history), restore),
+			"Deletion undo did not recover after constructor failure");
+		verifySurvivor();
+		require(world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f,
+			"Deletion undo did not use a fresh constructor from the resolved resource");
+		require(history.redo(captureDocumentSnapshot(world, history), restore),
+			"Deletion redo failed");
+		verifySurvivor();
+		require(!world->lookupAgent(casualty).entity, "Deletion redo kept the casualty");
+		auto const newId = world->createAgent("New lifetime", first, 0, 4.0f);
+		require(newId.value > casualty.value,
+			"History replacement reissued a deleted Agent's authored identity");
+		// Loading without a current World remains a fresh lifetime boundary.
+		auto const snapshot = captureDocumentSnapshot(world, history);
+		auto loaded = deserializeDocumentSnapshot(*snapshot, {}, {});
+		require(loaded && loaded->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
+			"An ordinary document load incorrectly preserved the old baseline");
+		world->resetSimulation();
+		require(world->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
+			"Reset incorrectly preserved a surviving instance from structural history");
+	}
+
 	void editorCopiedFixturePreservesTypeIdentity(smoke::Context const&)
 	{
 		auto fixture = buildWorld("Editor Scout copy");
@@ -237,4 +345,6 @@ void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 		editorSelectionDependencyRefusedAtomically });
 	checks.push_back({ "agentTypesEditorCopiedFixturePreservesTypeIdentity",
 		editorCopiedFixturePreservesTypeIdentity });
+	checks.push_back({ "agentTypesHistoryPreservesSurvivorsAndReconstructsDeletedAgents",
+		historyPreservesSurvivorsAndReconstructsDeletedAgents });
 }

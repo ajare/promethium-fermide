@@ -105,6 +105,7 @@ set(agent_checks
     agentTypesCompetingTypeIdsRejectedOnLoad
     agentTypesLegacyHumanWithoutResource
     agentTypesLoadingConstructsFreshInstances
+    agentTypesTopologyReplayPreservesLiveInstances
 )
 
 function(invoke status expected)
