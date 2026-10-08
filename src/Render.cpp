@@ -1045,10 +1045,15 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	transformPosition(bounds0);
 	transformPosition(bounds1);
 
-	auto colour = button->isEnabled() ? ImColor(0, 255, 128) : ImColor(192, 128, 128);
+	// A Button whose controlled object is Broken renders red, never the enabled
+	// green, so a failed threshold is visible from its control.
+	auto const broken = gRenderWorld
+		&& gRenderWorld->isControlTargetBroken(button->getInteractionPointId());
+	auto colour = broken ? ImColor(255, 0, 0)
+		: button->isEnabled() ? ImColor(0, 255, 128) : ImColor(192, 128, 128);
 	auto point = gRenderWorld ? gRenderWorld->lookupInteractionPoint(button->getInteractionPointId()).entity : nullptr;
 	auto unit = point ? gRenderWorld->lookupDumbwaiter(point->getDumbwaiterOwner()) : nullptr;
-	if (unit)
+	if (unit && !broken)
 	{
 		auto stop = unit->getLandingButton(0) == button->getInteractionPointId() ? 0u : 1u;
 		colour = unit->isBusy() ? ImColor(220, 80, 80)
@@ -1061,7 +1066,7 @@ void renderPhysicalControl(shared_ptr<const core::Button> button, uint32_t /* la
 	// exactly like the Door it stands beside.
 	if (style == LayerRenderStyle::Solid)
 	{
-		if (unit || !drawObjectSprite(button->isEnabled() ? "button-enabled" : "button-disabled",
+		if (unit || broken || !drawObjectSprite(button->isEnabled() ? "button-enabled" : "button-disabled",
 			drawList, {bounds0.x, bounds0.y}, {bounds1.x, bounds1.y}))
 			drawList->AddRectFilled({ bounds0.x, bounds0.y }, { bounds1.x, bounds1.y }, colour);
 	}

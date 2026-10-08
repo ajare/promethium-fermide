@@ -1969,6 +1969,11 @@ namespace core
 		bool isShuttleOwnedControl(std::shared_ptr<const SectorObject> const& object,
 			uint32_t* shuttleSectorIndex = nullptr, uint32_t* stopIndex = nullptr) const;
 
+		// Whether any object an interaction point's commands target (a Door,
+		// extensible Ladder/Force Bridge, Lift, or Shuttle) is Broken. The Button
+		// rendering uses this to tint a controlling Button red instead of green.
+		bool isControlTargetBroken(InteractionPointId point) const;
+
 		std::vector<uint32_t> getValidShuttleStopOffsets(uint32_t layerIndex, uint32_t y, uint32_t x,
 			uint32_t cellsWide, uint32_t numCars, uint32_t carWidth,
 			bool allowPartialLandings, uint32_t doorMask) const;

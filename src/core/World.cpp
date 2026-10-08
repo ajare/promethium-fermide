@@ -4903,6 +4903,37 @@ namespace core
 		return false;
 	}
 
+	bool World::isControlTargetBroken(InteractionPointId pointId) const
+	{
+		auto point = mInteractionPoints.find(pointId);
+		if (!point) return false;
+		for (auto const& binding : point->mBindings)
+		{
+			auto resource = mTraversalResources.find(binding.command.traversalResource);
+			if (!resource) continue;
+			switch (binding.command.type)
+			{
+			case DeviceCommandType::OpenDoor:
+				if (resource->mDoor && resource->mDoor->isBroken()) return true;
+				break;
+			case DeviceCommandType::SetExtendedState:
+				if (resource->mExtensible && resource->mExtensible->isBroken()) return true;
+				break;
+			case DeviceCommandType::CallLift:
+			case DeviceCommandType::SelectLiftDestination:
+				if (resource->mLift && resource->mLift->isBroken()) return true;
+				break;
+			case DeviceCommandType::CallShuttle:
+			case DeviceCommandType::SelectShuttleDestination:
+				if (resource->mShuttle && resource->mShuttle->isBroken()) return true;
+				break;
+			default:
+				break;
+			}
+		}
+		return false;
+	}
+
 	vector<uint32_t> World::getValidShuttleStopOffsets(uint32_t layerIndex, uint32_t y, uint32_t x,
 		uint32_t cellsWide, uint32_t numCars, uint32_t carWidth,
 		bool allowPartialLandings, uint32_t doorMask) const

@@ -98,6 +98,7 @@ namespace
 	}
 
 	ImU32 const kEnabledButtonColour = ImU32(ImColor(0, 255, 128));
+	ImU32 const kBrokenButtonColour = ImU32(ImColor(255, 0, 0));
 	// BackLocationColour: the tint the renderer gives the Sector revealed through
 	// a Door's aperture.
 	ImU32 const kBackLayerFillColour = ImU32(ImColor(224, 224, 255));
@@ -562,7 +563,46 @@ namespace
 	}
 }
 
+void brokenDoorButtonRendersRed()
+{
+	gUISettings.worldViewportX = 0.0f;
+	gUISettings.worldViewportY = 0.0f;
+	gUISettings.worldViewportWidth = 1280.0f;
+	gUISettings.worldViewportHeight = 720.0f;
+	gUISettings.worldZoom = 1.0f;
+	gUISettings.xOffset = 0.0f;
+	gUISettings.yOffset = 0.0f;
+	clearObjectTileset();
+	auto options = core::World::RemoteControlledDoor1Options;
+	Scene scene = buildTwoRoomScene("Broken Door Button rendering", 8, 0, &options, 2);
+	scene->pauseSimulation();
+	auto const door = scene.door.object->getDoor();
+	require(scene->setDoorBroken(door->getTraversalResourceId(), true), "Door break refused");
+
+	ImColor const roomColour(192, 192, 255);
+	// The Sector-level passes resolve the controlled object through the published
+	// World, so install it exactly as the viewport does.
+	std::shared_ptr<core::World const> published(scene.world.get(), [](core::World const*) {});
+	RenderWorldScope scope(published);
+	WorldDrawList drawList(kViewportClip);
+	renderSector(scene.world->getSector(scene.frontSector), 0, LayerRenderStyle::Solid, false, roomColour, &drawList);
+
+	int redTriangles = 0, greenTriangles = 0;
+	for (auto const& command : drawList.commands())
+		if (auto triangle = std::get_if<WorldDrawList::Triangle>(&command);
+			triangle && triangle->texture == WorldDrawList::Texture::None
+			&& survivesClip(boundsOf(triangle->positions, 3, 0.0f), triangle->clip))
+		{
+			redTriangles += triangle->colour == kBrokenButtonColour;
+			greenTriangles += triangle->colour == kEnabledButtonColour;
+		}
+	require(redTriangles == 2 && greenTriangles == 0,
+		"A Broken Door's Button must render one red filled quad, never green: red="
+		+ std::to_string(redTriangles) + " green=" + std::to_string(greenTriangles));
+}
+
 void render_smoke::registerDoorButtons(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "backButtonRendersAsOutlineOnly", isolated<[](smoke::Context const&) { backButtonRendersAsOutlineOnly(); }> });
+	checks.push_back({ "brokenDoorButtonRendersRed", isolated<[](smoke::Context const&) { brokenDoorButtonRendersRed(); }> });
 }

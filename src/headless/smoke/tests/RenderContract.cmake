@@ -127,6 +127,7 @@ set(names
     nestedApertureSeesTheRenderedWorld
     nestedScopesRestoreThePreviousWorld
     backButtonRendersAsOutlineOnly
+    brokenDoorButtonRendersRed
     onlyTheSelectedLayerIsDrawn
     transitsOnTheLayerBehindAreOnlyDrawnThroughApertures
     stairwellSectorsAreCanvasSelectableRendering
