@@ -18,6 +18,7 @@
 #include "core/AgentBehaviourRuntime.h"
 #include "core/AgentType.h"
 #include "core/AgentTypeRuntime.h"
+#include "core/WorldDocument.h"
 #include "core/AgentTagRegistry.h"
 #include "core/Background.h"
 #include "core/Location.h"
@@ -8513,8 +8514,33 @@ namespace core
 	}
 
 	std::shared_ptr<const AgentTypeDefinition> World::resolveAgentType(
-		std::string const& typeId, std::string const& resourceName)
+		std::string const& typeId, std::string const& resourceName, bool reconstruct)
 	{
+		if (reconstruct && !resourceName.empty())
+		{
+			// Reconstruction, unlike ordinary creation, resolves the current revision.
+			// Directly attached in-memory definitions have no file dependency; retain
+			// their registered source when no managed resource supplies a revision.
+			auto resolved = core::resolveAgentTypeResource(resourceName);
+			if (resolved)
+			{
+				if (resolved->typeId != typeId)
+					throw SerializationException("Agent type resource '" + resourceName
+						+ "' declares type ID '" + resolved->typeId
+						+ "' but reconstruction expects '" + typeId + "'");
+				auto found = mAgentTypes.find(typeId);
+				if (found != mAgentTypes.end()
+					&& found->second->resourceName != resourceName)
+					throw SerializationException("Agent type ID '" + typeId
+						+ "' is declared by competing resources in this World");
+				auto definition = std::make_shared<AgentTypeDefinition>(std::move(*resolved));
+				mAgentTypes[typeId] = definition;
+				return definition;
+			}
+			if (!resolveCatalogSource("AgentType", resourceName).empty())
+				throw SerializationException("Missing or invalid Agent type '" + typeId
+					+ "' resource '" + resourceName + "'");
+		}
 		if (!resourceName.empty())
 		{
 			// An explicit resource reference is authoritative: if the named
@@ -8568,7 +8594,8 @@ namespace core
 		auto result = mAgentTypeRuntime->construct(definition.typeId,
 			definition.source, name);
 		if (!result.succeeded)
-			throw WorldException(this, result.diagnostic);
+			throw WorldException(this, "Agent type '" + definition.typeId
+				+ "' resource '" + definition.resourceName + "': " + result.diagnostic);
 		auto agent = std::unique_ptr<Agent>(new Agent(name));
 		agent->setTypeIdentity(definition.typeId, definition.displayName,
 			definition.resourceName, result.baseline);

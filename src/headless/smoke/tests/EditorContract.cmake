@@ -79,6 +79,7 @@ set(editor_names
     agentTypesScriptedClipboardAndDeletionHistory
     agentTypesScriptedClipboardRefusalAndLegacy
     agentTypesExternalImportPlacesAndReopens
+    agentTypesManagedResourceRevisionOnResetAndLoad
     agentTypesExternalImportRefusesWithoutRegistration
     agentTypesExternalPlacementRollsBackRegistration
     agentTypesEditorPlacementCreatesScriptedHuman

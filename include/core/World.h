@@ -701,9 +701,11 @@ namespace core
 		// (or manifest catalog) and registered on first use; explicit
 		// missing/mismatched references never silently fall back to Human.
 		// Competing resources that declare an already-registered type ID are
-		// rejected. Mutates mAgentTypes only to register a newly resolved type.
+		// rejected. Reconstruction additionally resolves the current managed source
+		// revision; ordinary creation keeps the registered immutable definition.
 		std::shared_ptr<const AgentTypeDefinition> resolveAgentType(
-			std::string const& typeId, std::string const& resourceName);
+			std::string const& typeId, std::string const& resourceName,
+			bool reconstruct = false);
 		// Constructs an Agent with a fresh live Lua instance and frozen baseline
 		// for the named type. Throws (leaving no partial Agent) on any failure.
 		std::unique_ptr<Agent> makeScriptAgent(std::string const& typeId,

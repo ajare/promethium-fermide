@@ -2458,6 +2458,7 @@ namespace core
 
 		std::vector<PendingAgent> pending;
 		set<AgentId> seenIds;
+		set<std::string> resolvedAgentResources;
 
 		serializer.beginArray("agents");
 		while (serializer.nextArrayItem())
@@ -2475,15 +2476,18 @@ namespace core
 			auto const typeResource = version >= 61
 				? serializer.readString("resource", true, "") : std::string{};
 			serializer.endMap();
-			auto definition = resolveAgentType(typeId, typeResource);
+			auto const resource = typeResource.empty() && typeId == "Human"
+				? std::string("human.agent.lua") : typeResource;
+			auto definition = resolveAgentType(typeId, resource,
+				!workData.survivingAgentSource && resolvedAgentResources.insert(resource).second);
 			auto const* survivor = workData.survivingAgentSource
 				? workData.survivingAgentSource->lookupAgent(id).entity : nullptr;
 			std::unique_ptr<Agent> agent;
 			if (survivor && survivor->getTypeId() == definition->typeId
 				&& survivor->getTypeResourceName() == definition->resourceName)
 			{
-				// History rebuilds topology and authored state, not a surviving
-				// Agent's private Lua object. Never keep handles in history entries.
+				// History preserves a survivor; Reset supplies an already validated
+				// fresh instance. Neither stores handles in serialized data.
 				agent.reset(new Agent(""));
 				agent->setTypeIdentity(survivor->mTypeId, survivor->mDisplayName,
 					survivor->mTypeResourceName, survivor->mPhysicalBaseline);
@@ -2778,6 +2782,32 @@ namespace core
 	void World::resetSimulation()
 	{
 		RestorationTiming timing("reset-total");
+		// Run every constructor before touching simulation, topology, authored
+		// state or the old runtime. A fresh runtime avoids double-counting live
+		// instances against the World's allocation budget. Keep these exact
+		// validated objects through replay; never run constructors a second time.
+		World replacements("Reset Agent instances", 2, 2, {},
+			mAgentTypeRuntime->getLimits());
+		replacements.mAgentTypes = mAgentTypes;
+		set<std::string> resolvedResources;
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			auto const& resource = agent->getTypeResourceName();
+			try
+			{
+				replacements.resolveAgentType(agent->getTypeId(), resource,
+					resolvedResources.insert(resource).second);
+				replacements.mAgents.restore(id,
+					replacements.makeScriptAgent(agent->getTypeId(), agent->getName()));
+			}
+			catch (std::exception const& error)
+			{
+				throw SerializationException("Cannot reset Agent '" + agent->getName()
+					+ "' type '" + agent->getTypeId() + "' resource '" + resource
+					+ "': " + error.what());
+			}
+		}
+		replacements.mAgents.restoreNextId(mAgents.nextId());
 		invalidateSimulationSnapshot();
 		auto const wasModified = isModified();
 		auto const wasPaused = mSimulationPaused;
@@ -2804,6 +2834,9 @@ namespace core
 		SerializationWorkData readData;
 		{
 			RestorationTiming phase("reset-reconstruction");
+			readData.survivingAgentSource = &replacements;
+			mAgentTypes = std::move(replacements.mAgentTypes);
+			mAgentTypeRuntime = std::move(replacements.mAgentTypeRuntime);
 			deserialize(*input, readData);
 		}
 		input.reset();

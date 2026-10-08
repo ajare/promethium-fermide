@@ -95,6 +95,9 @@ set(agent_checks
     agentTypesLegacyAndScriptedLoading
     agentTypesDuplicateTypeIdRejected
     agentTypesResetReconstructsScriptedInstances
+    agentTypesResetRevisionAndAuthoredData
+    agentTypesResetFailureIsAtomic
+    agentTypesResetReleasesReplacedInstances
     agentTypesResolvedResourceIdentity
     agentTypesResolvedResourceUnavailable
     agentTypesPreviewMatchesPlacement

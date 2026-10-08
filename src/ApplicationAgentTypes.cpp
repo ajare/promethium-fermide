@@ -166,7 +166,21 @@ std::optional<core::AgentTypeDefinition> ApplicationAgentTypes::resolve(std::str
 	}
 	auto typed = std::dynamic_pointer_cast<AgentTypeResource>(found->second);
 	if (!typed) return std::nullopt;
-	return core::AgentTypeDefinition{ typed->typeId(), typed->displayName(), name, typed->source() };
+	// Dependency resolution is an intentional reconstruction boundary. Read
+	// the selected Resource's current source into a private candidate, without
+	// replacing the startup/import resource or any surviving World instance.
+	// Ordinary import remains idempotent; this is not hot reload.
+	auto candidate = std::make_shared<AgentTypeResource>(name, typed->getNamespace(),
+		typed->getSource(), typed->getTags(), typed->mwLocation);
+	struct Cleanup
+	{
+		resources::ResourceManager& manager;
+		resources::ResourcePtr resource;
+		~Cleanup() { manager.destroyResources({ resource }); }
+	} cleanup{ mManager, candidate };
+	mManager.createResource(candidate);
+	return core::AgentTypeDefinition{ candidate->typeId(), candidate->displayName(),
+		name, candidate->source() };
 }
 
 std::vector<ApplicationAgentType> ApplicationAgentTypes::types() const

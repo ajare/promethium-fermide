@@ -234,6 +234,7 @@ namespace
 		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
 			-> std::optional<core::AgentTypeDefinition> {
 			if (name == definition.resourceName) return definition;
+			if (name == "human.agent.lua") return core::bundledHumanAgentType();
 			return std::nullopt;
 		} };
 		auto world = std::make_shared<core::World>("History survival", 12, 2);
@@ -349,6 +350,66 @@ namespace
 			types = std::make_unique<ApplicationAgentTypes>(manager);
 		}
 	};
+
+	void managedResourceRevisionOnResetAndLoad(smoke::Context const& context)
+	{
+		auto const root = context.temporaryRoot();
+		auto const path = root / "revision.agent.lua";
+		auto source = externalSource("Revision");
+		writeSource(path, source);
+		auto fixture = buildWorld("Managed revision");
+		auto world = fixture.world;
+		core::AgentId id;
+		std::string resourceName;
+		{
+			ResourceFixture resources(root);
+			AgentTypeLoaderScope scope{ [&resources](auto const& name) { return resources.types->resolve(name); } };
+			ApplicationAgentType selected;
+			std::string diagnostic;
+			require(resources.types->importFile(path, selected, diagnostic), diagnostic);
+			resourceName = selected.resourceName;
+			auto payload = humanPayload("Revision instance");
+			payload.type = selected.typeId;
+			payload.resource = selected.resourceName;
+			require(commitAgentPlacement(world, payload, world->getSector(fixture.corridor),
+				0, 1.f, id, diagnostic), diagnostic);
+			world->saveTo((root / "revision.world.yaml").string());
+			world->saveTo((root / "revision.world").string());
+			auto const at = source.find("width = 0.4");
+			source.replace(at, std::string("width = 0.4").size(), "width = 0.7");
+			writeSource(path, source);
+			require(world->lookupAgent(id).entity->getPhysicalBaseline().width == 0.4f,
+				"A managed resource edit hot-reloaded an existing Agent");
+			for (auto const* filename : { "revision.world.yaml", "revision.world" })
+			{
+				auto loaded = core::loadWorldDocument(root / filename);
+				require(loaded->lookupAgent(id).entity->getPhysicalBaseline().width == 0.7f,
+					"Same-session load used the cached startup/import revision");
+			}
+			world->resetSimulation();
+			require(world->lookupAgent(id).entity->getPhysicalBaseline().width == 0.7f,
+				"Managed Reset used the cached startup/import revision");
+			auto const* previous = world->lookupAgent(id).entity;
+			writeSource(path, "invalid revised resource");
+			bool refused = false;
+			try { world->resetSimulation(); }
+			catch (std::exception const& error) {
+				refused = std::string(error.what()).find(resourceName) != std::string::npos;
+			}
+			require(refused && world->lookupAgent(id).entity == previous,
+				"Invalid managed Reset replaced a live instance or lacked a dependency diagnostic");
+			require(resources.types->types().size() == 2,
+				"Revision resolution changed the managed selector inventory");
+			writeSource(path, source);
+		}
+		// Destroying Willpower resources cannot invalidate World-owned source or
+		// Lua handles. A later intentional reconstruction can resolve the file.
+		require(world->lookupAgent(id).entity->getPhysicalBaseline().width == 0.7f,
+			"Resource destruction invalidated the retained World instance");
+		world->resetSimulation();
+		require(world->lookupAgent(id).entity->getTypeResourceName() == resourceName,
+			"Resource teardown left Reset with dangling definition references");
+	}
 
 	void externalImportPlacesAndReopens(smoke::Context const& context)
 	{
@@ -758,6 +819,7 @@ void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesScriptedClipboardAndDeletionHistory", scriptedClipboardAndDeletionHistory });
 	checks.push_back({ "agentTypesScriptedClipboardRefusalAndLegacy", scriptedClipboardRefusalAndLegacy });
 	checks.push_back({ "agentTypesExternalImportPlacesAndReopens", externalImportPlacesAndReopens });
+	checks.push_back({ "agentTypesManagedResourceRevisionOnResetAndLoad", managedResourceRevisionOnResetAndLoad });
 	checks.push_back({ "agentTypesExternalImportRefusesWithoutRegistration", externalImportRefusesWithoutRegistration });
 	checks.push_back({ "agentTypesExternalPlacementRollsBackRegistration", externalPlacementRollsBackRegistration });
 	checks.push_back({ "agentTypesEditorPlacementCreatesScriptedHuman",

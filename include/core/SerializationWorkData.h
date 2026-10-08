@@ -13,8 +13,9 @@ namespace core
 		std::filesystem::path documentDirectory;
 		std::shared_ptr<const FurnitureCatalogue> furnitureCatalogue;
 		std::shared_ptr<const ActionRegistry> actionRegistry;
-		// Only document history opts in. Borrowed for this restoration call, never
-		// saved in a snapshot: absent Agents must construct fresh on deletion undo.
+		// Document history borrows surviving instances; Reset borrows its fully
+		// preconstructed replacement set. Never saved in a snapshot: absent
+		// Agents must construct fresh on deletion undo.
 		World const* survivingAgentSource{ nullptr };
 	};
 }

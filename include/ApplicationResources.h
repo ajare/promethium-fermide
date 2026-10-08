@@ -41,6 +41,7 @@ private:
 // releases only that text, never a live Lua object.
 class AgentTypeResource final : public wp::application::resourcesystem::Resource
 {
+	friend class ApplicationAgentTypes;
 public:
 	AgentTypeResource(std::string const& name, std::string const& namesp,
 		std::string const& source, std::map<std::string, std::string> const& tags,

@@ -6,6 +6,9 @@
 #include "core/SerializationException.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
+#include "core/WorldDocument.h"
+#include "core/AgentTagRegistry.h"
+#include "core/AgentTagRegistryDocument.h"
 
 #include <cmath>
 #include <fstream>
@@ -366,6 +369,163 @@ namespace
 		require(agent && agent->getTypeId() == "Tall"
 			&& agent->getPhysicalBaseline().width == before,
 			"Reset lost or changed the scripted Agent's frozen baseline");
+	}
+
+	void resetRevisionAndAuthoredData(smoke::Context const& context)
+	{
+		auto const root = context.temporaryRoot();
+		auto const path = root / "revision.agent.lua";
+		auto write = [&](float width) {
+			std::ofstream out(path);
+			// Both module upvalues and instance-private data are fresh each time.
+			out << "local count = 0\n" << typeSource("Revision", "Revision",
+				"count = count + 1\n" + validBaseline(
+					"width = " + std::to_string(width) + " * count,\n"
+					"private_state = { count = count },\n"));
+			require(bool(out), "Could not write revision fixture");
+		};
+		write(0.5f);
+		auto const resource = core::externalAgentTypeResourceName(path);
+		core::World world("Revision", 8, 2);
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		world.pauseSimulation();
+		auto definition = core::resolveAgentTypeResource(resource);
+		std::string diagnostic;
+		require(definition && world.attachAgentType(resource, definition->source, &diagnostic), diagnostic);
+		auto first = world.createAgent("Revision", "First", corridor, 0, 1.f);
+		auto second = world.createAgent("Revision", "Second", corridor, 0, 3.f);
+		auto registry = core::AgentTagRegistry::create();
+		auto tag = registry->addAgentTag("physical");
+		require(registry->addAgentTagHeightModifier(tag, &diagnostic), diagnostic);
+		require(registry->setAgentTagHeightModifier(tag, { 0.7f, 0.9f }, &diagnostic), diagnostic);
+		auto const registryPath = root / "revision.tags.yaml";
+		registry->saveTo(registryPath.string());
+		world.attachAgentTagRegistry(registryPath.filename().string(), registry);
+		require(world.assignAgentTag(first, tag, &diagnostic), diagnostic);
+		require(world.setAgentIndividualWalkSpeedModifier(first, 1.2f), "Could not author speed");
+		require(world.setAgentIndividualHeightModifier(first, 0.95f), "Could not author height");
+		auto const sample = world.lookupAgent(first).entity->getHeightModifierSample();
+		world.saveTo((root / "revision.world.yaml").string());
+		world.saveTo((root / "revision.world").string());
+		auto const authored = serializeWorld(world, false);
+		write(0.75f);
+		require(world.lookupAgent(first).entity->getPhysicalBaseline().width == 0.5f
+			&& world.lookupAgent(second).entity->getPhysicalBaseline().width == 0.5f,
+			"On-disk edits changed a live frozen baseline");
+		for (auto const* filename : { "revision.world.yaml", "revision.world" })
+		{
+			auto loaded = core::loadWorldDocument(root / filename);
+			require(loaded->lookupAgent(first).entity->getPhysicalBaseline().width == 0.75f
+				&& loaded->lookupAgent(second).entity->getPhysicalBaseline().width == 0.75f,
+				"Load reused a baseline snapshot or shared mutable module state");
+		}
+		world.resetSimulation();
+		for (auto id : { first, second })
+		{
+			auto const* agent = world.lookupAgent(id).entity;
+			require(agent && agent->getTypeId() == "Revision"
+				&& agent->getTypeResourceName() == resource
+				&& agent->getPhysicalBaseline().width == 0.75f,
+				"Reset did not reconstruct isolated instances from the current revision");
+		}
+		auto const* agent = world.lookupAgent(first).entity;
+		require(agent->getHeightModifierSample() == sample
+			&& agent->getIndividualHeightModifier() == 0.95f
+			&& agent->getIndividualWalkSpeedModifier() == 1.2f
+			&& agent->getAgentTagIds().contains(tag), "Reset changed authored properties or tag samples");
+		require(world.isSimulationPaused() && !world.isModified()
+			&& serializeWorld(world, false) == authored,
+			"Reset changed authored document data, pause or dirty state");
+		require(authored.find("private_state") == std::string::npos
+			&& authored.find("standing_height") == std::string::npos,
+			"Document serialized private state or a baseline snapshot");
+	}
+
+	void resetFailureIsAtomic(smoke::Context const& context)
+	{
+		auto const path = context.temporaryRoot() / "failure.agent.lua";
+		auto const valid = typeSource("Failure", "Failure", validBaseline());
+		auto write = [&](std::string const& source) {
+			std::ofstream out(path); out << source;
+			require(bool(out), "Could not write failure fixture");
+		};
+		write(valid);
+		auto const resource = core::externalAgentTypeResourceName(path);
+		core::World world("Atomic reset", 8, 2, {},
+			core::AgentTypeRuntimeLimits{ 2u * 1024u * 1024u, 100'000u });
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		// Human preconstruction succeeds before the second type is refused.
+		auto const first = world.createAgent("First", corridor, 0, 1.f);
+		std::string diagnostic;
+		require(world.attachAgentType(resource, valid, &diagnostic), diagnostic);
+		auto const second = world.createAgent("Failure", "Second", corridor, 0, 3.f);
+		auto const third = world.createAgent("Failure", "Third", corridor, 0, 5.f);
+		world.update(0.1);
+		auto const* originalFirst = world.lookupAgent(first).entity;
+		auto const* originalSecond = world.lookupAgent(second).entity;
+		auto const* originalThird = world.lookupAgent(third).entity;
+		auto const authored = serializeWorld(world, false);
+		auto const tick = world.getSimulationSnapshot().tick;
+		auto const paused = world.isSimulationPaused();
+		auto const modified = world.isModified();
+		for (auto const& source : {
+			std::string("invalid Lua"),
+			typeSource("Failure", "Failure", "error('Reset constructor refused')"),
+			typeSource("Failure", "Failure", validBaseline("width = 0,\n")),
+			typeSource("WrongIdentity", "Wrong", validBaseline()),
+			typeSource("Failure", "Failure", "while true do end"),
+			typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 128 * 1024 * 1024),\n")),
+			// One revised constructor fits; the next instance exceeds the total
+			// runtime budget. Failure must discard the whole candidate set.
+			typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 800 * 1024),\n")),
+			std::string{} })
+		{
+			write(source);
+			if (source.empty()) std::filesystem::remove(path);
+			bool refused = false;
+			try { world.resetSimulation(); }
+			catch (std::exception const& error) {
+				auto const message = std::string(error.what());
+				refused = message.find(resource) != std::string::npos;
+			}
+			require(refused, "Reset failure did not diagnose its resource");
+			require(world.lookupAgent(first).entity == originalFirst
+				&& world.lookupAgent(second).entity == originalSecond
+				&& world.lookupAgent(third).entity == originalThird
+				&& world.getSimulationSnapshot().tick == tick
+				&& world.isSimulationPaused() == paused && world.isModified() == modified
+				&& serializeWorld(world, false) == authored,
+				"A refused Reset partially reconstructed or rewound the World");
+		}
+		write(valid);
+		world.resetSimulation();
+		require(world.lookupAgent(second).entity->getPhysicalBaseline().width == 0.5f,
+			"A failed Reset poisoned subsequent reconstruction");
+	}
+
+	void resetReleasesReplacedInstances(smoke::Context const&)
+	{
+		core::World world("Reset lifetime", 8, 2, {},
+			core::AgentTypeRuntimeLimits{ 2u * 1024u * 1024u, 100'000u });
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		std::string diagnostic;
+		require(world.attachAgentType("private.agent.lua", typeSource("Private", "Private",
+			validBaseline("private_blob = string.rep('x', 800 * 1024),\n")), &diagnostic), diagnostic);
+		auto const id = world.createAgent("Private", "Instance", corridor, 0, 1.f);
+		for (int cycle = 0; cycle < 4; ++cycle)
+		{
+			world.resetSimulation(); // Must not charge both old and fresh instances to one runtime.
+			require(world.lookupAgent(id).entity->getPhysicalBaseline().width == 0.5f,
+				"Reset lost its private instance's baseline");
+			bool refused = false;
+			try { world.createAgent("Private", "Duplicate", corridor, 0, 3.f); }
+			catch (std::exception const&) { refused = true; }
+			require(refused && world.getSimulationSnapshot().agents.size() == 1,
+				"Reset discarded the private instance or failed to preserve its runtime budget");
+		}
 	}
 
 	void resolvedResourceIdentity(smoke::Context const&)
@@ -805,6 +965,9 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesLegacyAndScriptedLoading", legacyAndScriptedHumanLoading });
 	checks.push_back({ "agentTypesDuplicateTypeIdRejected", duplicateTypeIdIsRejected });
 	checks.push_back({ "agentTypesResetReconstructsScriptedInstances", resetReconstructsScriptedInstances });
+	checks.push_back({ "agentTypesResetRevisionAndAuthoredData", resetRevisionAndAuthoredData });
+	checks.push_back({ "agentTypesResetFailureIsAtomic", resetFailureIsAtomic });
+	checks.push_back({ "agentTypesResetReleasesReplacedInstances", resetReleasesReplacedInstances });
 	checks.push_back({ "agentTypesResolvedResourceIdentity", resolvedResourceIdentity });
 	checks.push_back({ "agentTypesResolvedResourceUnavailable", resolvedResourceUnavailable });
 	checks.push_back({ "agentTypesPreviewMatchesPlacement", previewMatchesPlacement });
