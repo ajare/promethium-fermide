@@ -1055,7 +1055,8 @@ namespace core
 	{
 		auto agent = mAgents.find(id);
 		if (!agent || !agent->getBehaviourAssignment()) return false;
-		if (!mAgentBehaviourRuntime->isInstanceDisabled(id)) return true;
+		if (!mAgentBehaviourRuntime->isInstanceDisabled(id)
+			&& !mAgentBehaviourRuntime->isInstanceCompleted(id)) return true;
 		// A failed instance stops issuing commands immediately, but an already
 		// committed crossing still drains through the ordinary safe-cancellation
 		// protocol before manual controls return.

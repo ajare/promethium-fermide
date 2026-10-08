@@ -9,6 +9,7 @@ int main(int argc, char** argv)
 	behaviour_smoke::registerRuntimePreflight(checks);
 	behaviour_smoke::registerRuntimeContainment(checks);
 	behaviour_smoke::registerRuntimeInstances(checks);
+	behaviour_smoke::registerRuntimeCoroutines(checks);
 	behaviour_smoke::registerRuntimeMovement(checks);
 	behaviour_smoke::registerRuntimeCallbacks(checks);
 	behaviour_smoke::registerRuntimeScheduling(checks);

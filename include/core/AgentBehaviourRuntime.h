@@ -35,6 +35,7 @@ namespace core
 		// bytes staged and published for the window, independently of the count.
 		size_t logBytesPerMessage{ 4u * 1024u };
 		size_t logBytesPerWindow{ 256u * 1024u };
+		uint32_t pendingEventsPerInstance{ 64u };
 	};
 
 	using AgentBehaviourRuntimeFailure = ScriptExecutionFailure;
@@ -114,6 +115,7 @@ namespace core
 			std::vector<AgentBehaviourRuntimeDiagnostic>& diagnostics,
 			std::map<AgentId, AgentBehaviourAssignment> const* assignments = nullptr,
 			AgentBehaviourId excludedBehaviour = {});
+		bool isInstanceCompleted(AgentId agent) const;
 		void appendDiagnostics(
 			std::vector<AgentBehaviourRuntimeDiagnostic> diagnostics);
 		static AgentBehaviourModulePreflight preflightModule(

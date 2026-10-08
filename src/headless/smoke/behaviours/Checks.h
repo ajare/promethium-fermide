@@ -11,6 +11,7 @@ namespace behaviour_smoke
 	void registerRuntimePreflight(std::vector<smoke::Check>& checks);
 	void registerRuntimeContainment(std::vector<smoke::Check>& checks);
 	void registerRuntimeInstances(std::vector<smoke::Check>& checks);
+	void registerRuntimeCoroutines(std::vector<smoke::Check>& checks);
 	void registerRuntimeMovement(std::vector<smoke::Check>& checks);
 	void registerRuntimeCallbacks(std::vector<smoke::Check>& checks);
 	void registerRuntimeScheduling(std::vector<smoke::Check>& checks);

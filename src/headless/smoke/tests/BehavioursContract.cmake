@@ -54,6 +54,9 @@ set(core_names
     liveLoadsFactoriesAndCallbacksAreContained
     independentStartupInstancesMoveDeterministically
     manifestHelpersHavePrivatePerAgentGraphs
+    coroutineMovementAndCompletion
+    coroutineFailuresAreContained
+    coroutineQueuesAndActivation
     scriptedActionOutcomes
     scriptedActionScriptFailure
     scriptedActionCancellations

@@ -257,6 +257,7 @@ pf_add_smoke_module(pf-smoke-behaviours
         behaviours/RuntimePreflight.cpp
         behaviours/RuntimeContainment.cpp
         behaviours/RuntimeInstances.cpp
+        behaviours/RuntimeCoroutines.cpp
         behaviours/RuntimeMovement.cpp
         behaviours/RuntimeCallbacks.cpp
         behaviours/RuntimeScheduling.cpp
