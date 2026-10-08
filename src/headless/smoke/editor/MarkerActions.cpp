@@ -143,10 +143,10 @@ namespace
 		ImGui::End(); ImGui::Render();
 		auto count = gWorldDocumentHistory.undoCount();
 		require(world->setRoomHeightScale(room, .4f), "Editor incompatible height refused");
-		require(!world->furnitureUseEligible(agent, seat, &diagnostic) && diagnostic.find("finish") != std::string::npos,
-			"Editor preflight missed impossible finish");
+		require(!world->furnitureUseEligible(agent, seat, &diagnostic) && diagnostic.find("stand") != std::string::npos,
+			"Editor preflight missed a non-standing Sector");
 		require(!commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
-			&& diagnostic.find("finish") != std::string::npos && gWorldDocumentHistory.undoCount() == count,
+			&& diagnostic.find("stand") != std::string::npos && gWorldDocumentHistory.undoCount() == count,
 			"Ineligible editor use started movement or added history");
 		require(world->setRoomHeightScale(room, 1.f), "Editor height restoration failed");
 		require(commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)

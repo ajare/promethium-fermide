@@ -357,6 +357,18 @@ namespace core
 		if (auto owner = usablePointOccupant(marker); owner && owner != id) return reject("Usable point is occupied by another Agent");
 		auto instance = furnitureForMarker(marker);
 		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
+		// Use begins from the Sector floor: an Agent that cannot stand in the
+		// Furniture's Sector (capability and clearance at the Furniture) cannot
+		// begin use, however well the declared poses themselves would fit.
+		if (auto agent = mAgents.find(id))
+		{
+			auto sector = mSectors.at(instance->sector);
+			auto const clearance = sector->isRoom()
+				? sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - instance->y
+				: std::numeric_limits<float>::infinity();
+			if (!agent->poseFits(Pose::Standing, clearance))
+				return reject("Agent cannot stand in the Furniture's Sector");
+		}
 		return furniturePoseFits(id, marker, definition->usePose, true, diagnostic)
 			&& furniturePoseFits(id, marker, definition->finishUsePose, false, diagnostic);
 	}

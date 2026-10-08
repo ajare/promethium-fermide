@@ -197,9 +197,12 @@ Expose one production World eligibility query with a useful refusal reason. It
 checks both declared poses against the Agent's frozen capabilities and against
 the target usable point's geometry:
 
-1. The use envelope must fit with the point's declared support elevation.
-2. The finish envelope must fit after release of Furniture support/occupancy.
-3. Apply existing usable-point, availability, occupancy, permission, and movement
+1. The Agent must be able to stand in the Furniture's Sector: its Standing pose
+   must be supported and fit the Sector clearance at the Furniture, however well
+   the declared poses themselves would fit.
+2. The use envelope must fit with the point's declared support elevation.
+3. The finish envelope must fit after release of Furniture support/occupancy.
+4. Apply existing usable-point, availability, occupancy, permission, and movement
    rules as appropriate; pose eligibility does not supersede those authorities.
 
 Do not use the Agent's current Room to predict a distant use, and do not execute

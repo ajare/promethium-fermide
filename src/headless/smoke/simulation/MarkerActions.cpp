@@ -236,8 +236,8 @@ namespace
 		require(!world.moveAgentToMarker(robot, seat, core::UseFurnitureAction).accepted(), "Incompatible request began travel");
 		require(world.moveAgentToMarker(robot, seat).accepted(), "Incompatible use blocked Idle request");
 		require(world.setRoomHeightScale(target, .4f), "Target height refused");
-		require(!world.furnitureUseEligible(human, seat, &diagnostic) && diagnostic.find("finish") != std::string::npos,
-			"Remote eligibility used origin geometry or ignored finish fit");
+		require(!world.furnitureUseEligible(human, seat, &diagnostic) && diagnostic.find("stand") != std::string::npos,
+			"Remote eligibility used origin geometry or ignored Sector Standing fit");
 		require(!world.moveAgentToMarker(human, seat, core::UseFurnitureAction).accepted()
 			&& world.moveAgentToMarker(human, seat).accepted(), "Finish fit became an Idle routing obstacle");
 		require(world.setRoomHeightScale(target, .5f), "Target height restore failed");
@@ -264,7 +264,7 @@ namespace
 		require(stale->resumeSimulation() && stale->advanceTicks(1800), "Stale eligibility became a script failure");
 		bool staleRefusal = false;
 		for (auto const& event : stale->consumeSimulationEvents())
-			staleRefusal |= event.type == core::SimulationEventType::ActionFailed && event.diagnostic.find("finish") != std::string::npos;
+			staleRefusal |= event.type == core::SimulationEventType::ActionFailed && event.diagnostic.find("stand") != std::string::npos;
 		require(staleRefusal && !stale->usablePointOccupant(staleSeat), "Stale arrival published Furniture use");
 		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("use:"), "Stale arrival ran callback");
 		// Both phases are capability requirements, even when use itself is supported.
@@ -684,38 +684,50 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		require(!world->setRoomHeightScale(0, .2f) && !world->isModified()
 			&& world->lookupAgent(id).entity->getPose() == core::Pose::Sitting, "Environment substituted retained Action pose");
 
-		// A declared lowered finish is literal, while actual departure transfers
-		// to the low Room's movement choice without transient Standing.
-		std::ifstream input(fixture);
-		std::string source{std::istreambuf_iterator<char>(input), {}};
-		for (auto const& replacement : {std::pair{std::string("standing"), std::string("crawling")}})
-			for (size_t at = 0; (at = source.find(replacement.first, at)) != std::string::npos; at += replacement.second.size())
-				source.replace(at, replacement.first.size(), replacement.second);
-		auto lowered = context.temporaryRoot() / "lowered-use.furniture.lua";
-		write(lowered, source);
-		auto low = useFixture(lowered);
+		// An Agent that cannot stand in the Furniture's Sector cannot begin use,
+		// even when the declared use and finish poses would themselves fit.
+		auto low = useFixture(fixture);
 		seat = low->furniture()[0].marker;
 		require(low->setRoomHeightScale(0, .3f), "Low Room refused");
-		auto eligible = low->furnitureUseEligible(id, seat, &eligibility);
-		require(eligible, "Low eligibility: " + eligibility);
-		require(runAction(*low, id, seat, "use-furniture").type == core::SimulationEventType::DestinationReached
-			&& low->lookupAgent(id).entity->getPose() == core::Pose::Sitting, "Low use failed");
-		require(runAction(*low, id, seat, "idle").agent.pose == core::Pose::Crawling
-			&& !low->usablePointOccupant(seat), "Host substituted environmental pose for declared finish");
-		require(runAction(*low, id, seat, "use-furniture").type == core::SimulationEventType::DestinationReached, "Low reuse failed");
+		require(!low->furnitureUseEligible(id, seat, &eligibility) && eligibility.find("stand") != std::string::npos,
+			"Low eligibility allowed a non-standing Sector: " + eligibility);
+		require(low->moveAgentToMarker(id, seat, std::string(core::UseFurnitureAction)).status
+			== core::MovementCommandStatus::UnavailableAction, "Low use began travel");
+		// A use requested before the ceiling dropped is refused again at arrival.
+		require(low->setRoomHeightScale(0, std::nullopt), "Low Room reset refused");
+		require(low->moveAgentToMarker(id, seat, std::string(core::UseFurnitureAction)).accepted(), "Dropping use request refused");
+		require(low->setRoomHeightScale(0, .3f), "Low Room drop refused");
+		core::consumeLogMessages();
+		require(low->resumeSimulation(), "Low resume refused");
+		bool refusedUse = false;
+		for (unsigned tick = 0; tick < 1800 && !refusedUse; ++tick)
+		{
+			require(low->advanceTick(), "Low arrival failed");
+			for (auto const& event : low->consumeSimulationEvents())
+				if (event.agent.id == id && (event.type == core::SimulationEventType::ActionFailed
+					|| event.type == core::SimulationEventType::DestinationReached))
+				{
+					refusedUse = event.type == core::SimulationEventType::ActionFailed;
+					require(refusedUse && event.scriptFailure == core::ScriptExecutionFailure::None, "Low arrival was not a clean refusal");
+				}
+		}
+		require(refusedUse && !low->usablePointOccupant(seat)
+			&& low->lookupAgent(id).entity->getPose() == core::Pose::Crouching, "Low arrival leaked occupancy or impossible posture");
+		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("use:"), "Refused low use published effects");
+		// Idle travel through the low Room remains available.
+		low->pauseSimulation();
 		require(low->moveAgentToNamedMarker(id, "End").accepted(), "Low departure request refused");
+		require(low->resumeSimulation(), "Low departure resume refused");
 		bool departed = false;
 		for (unsigned tick = 0; tick < 1800; ++tick)
 		{
 			require(low->advanceTick(), "Low departure failed");
 			auto* agent = low->lookupAgent(id).entity;
 			require(agent->getPose() != core::Pose::Standing, "Low departure produced impossible posture");
-			if (low->usablePointOccupant(seat) == id) require(agent->getPose() == core::Pose::Sitting, "Planning relinquished low use");
-			else departed = true;
-			if (departed && agent->getState() == core::Agent::State::Idle) break;
+			if (agent->getState() == core::Agent::State::Idle) { departed = true; break; }
 		}
 		require(departed && low->lookupAgent(id).entity->getGlobalPosition().x == 10.5f
-			&& low->lookupAgent(id).entity->getPose() == core::Pose::Crouching, "Low departure did not arrive/release");
+			&& low->lookupAgent(id).entity->getPose() == core::Pose::Crouching, "Low departure did not arrive");
 
 		auto robots = useFixture(fixture);
 		std::ifstream robotFile(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
