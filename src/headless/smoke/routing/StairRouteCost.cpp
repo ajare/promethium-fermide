@@ -27,10 +27,6 @@ namespace
 		auto world = core::loadWorldDocument(smokeContext.fixture("resources/test-worlds/staircase-test-1.world.yaml"));
 		auto graph = world->getGraph();
 		auto agent = world->lookupAgent(core::AgentId{ 1 }).entity;
-		auto configured = world->getRouteChoicePolicy();
-		configured.stairAscentSpeed = 0.25f;
-		configured.stairDescentSpeed = 0.5f;
-		world->setRouteChoicePolicy(configured);
 		auto const policy = world->getRouteChoicePolicy();
 		core::RouteDecisionContext context{ agent, policy.baselineProfile, policy,
 			agent->getSector(), agent->getWalkSpeed() };
@@ -55,16 +51,20 @@ namespace
 			auto down = edge->getDirectedTraversalFacts(lower, context);
 			auto const length = edge->getLength();
 			require(up.feasible && down.feasible
-				&& std::abs(up.components.motionSeconds - length / policy.stairAscentSpeed) < 0.0001f
-				&& std::abs(down.components.motionSeconds - length / policy.stairDescentSpeed) < 0.0001f,
+				&& std::abs(up.components.motionSeconds
+					- length / agent->getPhysicalBaseline().stairAscentSpeed) < 0.0001f
+				&& std::abs(down.components.motionSeconds
+					- length / agent->getPhysicalBaseline().stairDescentSpeed) < 0.0001f,
 				"Stationary Staircase duration ignored physical length or direction");
 			require(up.components.physicalEffortUnits > down.components.physicalEffortUnits,
 				"Staircase ascent did not carry greater baseline effort");
 			require(std::abs(up.components.interactionUnits - policy.stairInteractionPerFlight) < 0.0001f
 				&& std::abs(down.components.interactionUnits - policy.stairInteractionPerFlight) < 0.0001f,
 				"Staircase interaction was not charged once per flight");
-			require(std::abs(edge->getTraversalSpeed(agent, upper) - policy.stairAscentSpeed) < 0.0001f
-				&& std::abs(edge->getTraversalSpeed(agent, lower) - policy.stairDescentSpeed) < 0.0001f,
+			require(std::abs(edge->getTraversalSpeed(agent, upper)
+				- agent->getPhysicalBaseline().stairAscentSpeed) < 0.0001f
+				&& std::abs(edge->getTraversalSpeed(agent, lower)
+					- agent->getPhysicalBaseline().stairDescentSpeed) < 0.0001f,
 				"Estimated and runtime stationary Staircase speeds disagree");
 			world->pauseSimulation();
 			std::string diagnostic;
@@ -78,7 +78,7 @@ namespace
 			require(std::abs(slowUp.components.motionSeconds
 				- up.components.motionSeconds / 0.5f) < 0.0001f
 				&& std::abs(edge->getTraversalSpeed(agent, upper)
-					- policy.stairAscentSpeed * 0.5f) < 0.0001f,
+					- agent->getPhysicalBaseline().stairAscentSpeed * 0.5f) < 0.0001f,
 				"Stair speed modifier changed estimated and runtime speed differently");
 			checked = true;
 			break;
@@ -237,8 +237,10 @@ namespace
 		auto const [down, downLength] = totals(downPath);
 		require(upLength > 0.0f && std::abs(upLength - downLength) < 0.0001f,
 			"Stairwell route did not traverse the same physical run in reverse");
-		require(std::abs(up.motionSeconds - upLength / policy.stairAscentSpeed) < 0.0001f
-			&& std::abs(down.motionSeconds - downLength / policy.stairDescentSpeed) < 0.0001f,
+		require(std::abs(up.motionSeconds
+			- upLength / agent->getPhysicalBaseline().stairAscentSpeed) < 0.0001f
+			&& std::abs(down.motionSeconds
+				- downLength / agent->getPhysicalBaseline().stairDescentSpeed) < 0.0001f,
 			"Multi-flight Stairwell collapsed to one graph minimum cost");
 		require(std::abs(up.interactionUnits - 2.0f * policy.stairInteractionPerFlight) < 0.0001f
 			&& std::abs(down.interactionUnits - 2.0f * policy.stairInteractionPerFlight) < 0.0001f,

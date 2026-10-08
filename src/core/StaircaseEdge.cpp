@@ -111,8 +111,14 @@ namespace core
 			facts.exclusionReason = RouteExclusionReason::Mobility;
 			return facts;
 		}
-		auto const speed = (ascending ? context.policy.stairAscentSpeed : context.policy.stairDescentSpeed)
-			* context.profile.stairSpeedModifier;
+		// A route decision snapshots its modifier profile; the unmodified
+		// directional baseline belongs to the concrete Agent type.
+		auto const typeSpeed = context.agent
+			? (ascending ? context.agent->getPhysicalBaseline().stairAscentSpeed
+				: context.agent->getPhysicalBaseline().stairDescentSpeed)
+			// Agent-less editor previews retain the Human-compatible baseline.
+			: (ascending ? 0.35f : 0.45f);
+		auto const speed = typeSpeed * context.profile.stairSpeedModifier;
 		facts.feasible = true;
 		facts.components.motionSeconds = getLength() / speed;
 		facts.components.physicalEffortUnits = abs(rise) * (ascending

@@ -119,11 +119,10 @@ namespace core
 		float remoteDoorInteraction = 2.0f;
 		float unobservedDoorClosedProbability = 0.5f;
 		float unobservedDoorQueueSeconds = 0.0f;
-		// Stationary stair motion is directional. Effort and interaction are
-		// seconds-equivalent values per unit of positive/negative rise, so the
-		// three topology edges in one Stairwell flight still incur one charge.
-		float stairAscentSpeed = 0.35f;
-		float stairDescentSpeed = 0.45f;
+		// Stationary-stair speed is an Agent-type physical baseline. Effort and
+		// interaction are seconds-equivalent values per unit of positive/negative
+		// rise, so the three topology edges in one Stairwell flight still incur
+		// one charge.
 		float stairAscentEffortPerRise = 1.5f;
 		float stairDescentEffortPerRise = 0.25f;
 		float stairInteractionPerFlight = 0.15f;

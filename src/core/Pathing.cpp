@@ -624,8 +624,7 @@ namespace core
 				auto const agentId = world ? world->getAgentId(&agent).value : uint64_t{ 0 };
 				auto const journeyIdentity = agent.getRouteJourneyIdentity(target);
 				return { &agent, profile, graph.getRouteChoicePolicy(), agent.getSector(),
-					CORE_AGENT_BASE_WALK_SPEED * profile.walkSpeedModifier, world,
-					CORE_AGENT_BASE_CLIMB_SPEED * profile.ladderSpeedModifier, allowFallback,
+					agent.getWalkSpeed(), world, agent.getClimbSpeed(), allowFallback,
 					worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
 						^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL), 0 };
 			}
@@ -661,9 +660,9 @@ namespace core
 				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
 			RouteDecisionContext const context{ agent, profile,
 				graph->getRouteChoicePolicy(), agent ? agent->getSector() : nullptr,
-				CORE_AGENT_BASE_WALK_SPEED * (agent ? profile.walkSpeedModifier : 1.0f),
+				agent ? agent->getWalkSpeed() : static_cast<float>(CORE_AGENT_BASE_WALK_SPEED),
 				graph->getWorld(),
-				CORE_AGENT_BASE_CLIMB_SPEED * (agent ? profile.ladderSpeedModifier : 1.0f),
+				agent ? agent->getClimbSpeed() : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED),
 				false, perceptionKey, 0,
 				mobility.value };
 			auto const inferredSource = !source;
@@ -826,8 +825,7 @@ namespace core
 			auto const perceptionKey = worldSeed ^ (agentId * 0x9e3779b97f4a7c15ULL)
 				^ (journeyIdentity * 0xbf58476d1ce4e5b9ULL);
 			RouteDecisionContext const context{ &agent, profile, graph.getRouteChoicePolicy(),
-				agent.getSector(), CORE_AGENT_BASE_WALK_SPEED * profile.walkSpeedModifier,
-				world, CORE_AGENT_BASE_CLIMB_SPEED * profile.ladderSpeedModifier,
+				agent.getSector(), agent.getWalkSpeed(), world, agent.getClimbSpeed(),
 				true, perceptionKey, 0 };
 
 			auto& workspace = graph.getPathfindingWorkspace();

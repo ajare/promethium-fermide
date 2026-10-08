@@ -75,7 +75,12 @@ namespace core
 			}
 			else
 			{
-				c.motionSeconds = length / ((rise > 0 ? p.stairAscentSpeed : p.stairDescentSpeed) * profile.stairSpeedModifier);
+				auto const typeSpeed = context.agent
+					? (rise > 0 ? context.agent->getPhysicalBaseline().stairAscentSpeed
+						: context.agent->getPhysicalBaseline().stairDescentSpeed)
+					// Agent-less editor previews retain the Human-compatible baseline.
+					: (rise > 0 ? 0.35f : 0.45f);
+				c.motionSeconds = length / (typeSpeed * profile.stairSpeedModifier);
 				c.physicalEffortUnits = std::abs(rise) * (rise > 0 ? p.stairAscentEffortPerRise : p.stairDescentEffortPerRise);
 				c.interactionUnits = std::abs(rise) * p.stairInteractionPerFlight;
 				facts.optimisticLowerBoundSeconds = c.motionSeconds;

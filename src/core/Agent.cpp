@@ -1188,8 +1188,8 @@ namespace core
 
 	float Agent::getStationaryStairSpeed(bool ascending) const
 	{
-		auto const policy = mWorld ? mWorld->getRouteChoicePolicy() : RouteChoicePolicy{};
-		return (ascending ? policy.stairAscentSpeed : policy.stairDescentSpeed)
+		auto const& physical = getPhysicalBaseline();
+		return (ascending ? physical.stairAscentSpeed : physical.stairDescentSpeed)
 			* getEffectiveStairSpeedModifier().value;
 	}
 
