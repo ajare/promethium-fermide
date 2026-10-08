@@ -65,6 +65,10 @@ sprites:
     cell: [3, 5]
     content: [0, 152, 72, 8]
     tintable: true
+  robot-standing:
+    cell: [4, 5]
+    content: [32, 88, 26, 72]
+    tintable: true
   marker:
     cell: [2, 1]
     content: [24, 122, 16, 22]

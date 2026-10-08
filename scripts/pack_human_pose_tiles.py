@@ -9,7 +9,7 @@ def pack_human_poses(path: Path) -> None:
     if source.width != 320 or source.height not in (800, 960):
         raise ValueError("Expected the bundled 320x800 or 320x960 ObjectAtlas")
     atlas = Image.new("RGBA", (320, 960))
-    atlas.paste(source.crop((0, 0, 320, 800)), (0, 0))
+    atlas.paste(source, (0, 0))
     standing = source.crop((83, 248, 109, 320))
     horizontal = standing.transpose(Image.Transpose.ROTATE_270)
     sprites = [
@@ -21,6 +21,12 @@ def pack_human_poses(path: Path) -> None:
     ]
     for x, sprite in sprites:
         atlas.paste(sprite, (x, 960 - sprite.height))
+    robot_path = path.with_name("robot-standing.png")
+    if robot_path.is_file():
+        robot = Image.open(robot_path).convert("RGBA")
+        if robot.size != (26, 72):
+            raise ValueError("Expected a 26x72 Robot Standing tile")
+        atlas.paste(robot, (288, 888))
     atlas.save(path)
 
 

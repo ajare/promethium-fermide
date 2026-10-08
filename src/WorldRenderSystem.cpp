@@ -405,7 +405,8 @@ namespace
 				SectorTileRegion region{ static_cast<int>(definition.x),
 					static_cast<int>(definition.y), static_cast<int>(definition.width),
 					static_cast<int>(definition.height) };
-				auto const tintable = name == "agent" || name == "marker" || name.starts_with("human-");
+				auto const tintable = name == "agent" || name == "marker"
+					|| name.starts_with("human-") || name == "robot-standing";
 				objectTiles.sprites.emplace(name, ObjectSprite{ region, tintable });
 			}
 			setObjectTileset(std::move(objectTiles), reinterpret_cast<ImTextureID>(1));

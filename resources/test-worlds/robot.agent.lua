@@ -13,7 +13,7 @@ return {
             climb_speed = 0.25,
             stair_ascent_speed = 0.35,
             stair_descent_speed = 0.45,
-            poses = { standing = { image_tile = "agent" } },
+            poses = { standing = { image_tile = "robot-standing" } },
             automatic_poses = {
                 room_movement = {{ pose = "standing", speed_ratio = 1 }},
                 door_crossing = {{ pose = "standing", speed_ratio = 1 }},

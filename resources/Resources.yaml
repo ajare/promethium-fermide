@@ -62,6 +62,7 @@ Resources:
               - { name: "human-lying", x: "64", y: "934", width: "72", height: "26" }
               - { name: "human-crouching", x: "144", y: "917", width: "26", height: "43" }
               - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
+              - { name: "robot-standing", x: "288", y: "888", width: "26", height: "72" }
               - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
               - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
               - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
