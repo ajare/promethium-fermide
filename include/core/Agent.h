@@ -202,11 +202,12 @@ namespace core
 
 	// Type-owned physical defaults, before shared authored modifiers. Resource
 	// slot spacing and environmental dimensions are not Agent baselines.
+	// crawlingSpeedRatio divides threshold motion durations (Crawling runs at
+	// ratio x ordinary speed, so its duration is the ordinary duration / ratio).
 	struct AgentPhysicalBaseline
 	{
 		float width;
 		float standingHeight;
-		float reachDistance;
 		float walkSpeed;
 		float climbSpeed;
 		float stairAscentSpeed;

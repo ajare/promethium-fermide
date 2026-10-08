@@ -30,7 +30,6 @@ namespace
 			&& physical.standingHeight == 0.45f
 			&& physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f
-			&& physical.reachDistance == 0.25f
 			&& physical.stairAscentSpeed == 0.35f && physical.stairDescentSpeed == 0.45f
 			&& physical.sittingHeightRatio == 0.6f && physical.crouchingHeightRatio == 0.6f
 			&& physical.crawlingHeightRatio == 0.3f && physical.crawlingSpeedRatio == 0.5f,

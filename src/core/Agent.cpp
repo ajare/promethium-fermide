@@ -1915,7 +1915,9 @@ namespace core
 				if (mTraversalTask->crawling) mPose = Pose::Crawling;
 			}
 			mTraversalTask->traversalTicksRemaining =
-				doorCrossing ? (mTraversalTask->crawling ? 12 : 6) : 0;
+				doorCrossing ? (mTraversalTask->crawling
+					? static_cast<uint64_t>(6.0f / getPhysicalBaseline().crawlingSpeedRatio)
+					: 6) : 0;
 			if (mTraversalTask->edge->getType() == EdgeType::Staircase
 				&& mTraversalTask->edge->getTraversalSpeed(nullptr) > 0.0f)
 			{

@@ -101,9 +101,12 @@ namespace core
 				return facts;
 			}
 		}
+		// A Crawling crossing runs at the Agent type's crawling speed ratio, so
+		// its duration divides the ordinary walking duration by that ratio.
 		return thresholdRouteFacts(*this, *mDoor, target, context,
 			(distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed)
-				* (mode == Door::DoorCrossingMode::Crawling ? 2.0f : 1.0f),
+				/ (context.agent && mode == Door::DoorCrossingMode::Crawling
+					? context.agent->getPhysicalBaseline().crawlingSpeedRatio : 1.0f),
 			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
 	}
 

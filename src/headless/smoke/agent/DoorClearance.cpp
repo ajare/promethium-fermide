@@ -468,6 +468,25 @@ void runAutomaticCrawlingJourneys(smoke::Context const&)
 		world.finishBuild();
 		auto id = world.createAgent("Traveller", origin, 0, 1.5f);
 		auto agent = world.lookupAgent(id).entity;
+		if (!tall && test.crossing == core::Pose::Crawling)
+		{
+			// Both route seams resolve the Crawling slowdown from the Agent type:
+			// the ordinary six-tick crossing divided by the crawling speed ratio.
+			auto edge = doorEdge(world);
+			auto source = edge->getVertex(0)->getSector()->getIndex() == origin
+				? edge->getVertex(0) : edge->getVertex(1);
+			auto target = edge->getOtherVertex(source);
+			auto policy = world.getRouteChoicePolicy();
+			core::RouteDecisionContext context{agent, policy.baselineProfile, policy,
+				agent->getSector(), agent->getWalkSpeed(), &world, agent->getClimbSpeed(),
+				false, 0, 0, {}, 0, false};
+			auto direct = edge->getDirectedTraversalFacts(target, context);
+			auto captured = core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context);
+			auto const expected = (6.0f / 60.0f) / agent->getPhysicalBaseline().crawlingSpeedRatio;
+			require(std::abs(direct.components.motionSeconds - expected) < .00001f
+				&& std::abs(captured.components.motionSeconds - expected) < .00001f,
+				std::string(test.label) + ": Crawling estimate ignored the type speed ratio");
+		}
 		require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Crawl intent refused");
 		bool crossed = false, crawled = false, lost = false;
 		unsigned crawlingTicks = 0;

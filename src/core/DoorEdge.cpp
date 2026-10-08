@@ -77,10 +77,14 @@ namespace core
 				context.beginningMovement)
 			: Door::DoorCrossingMode::Standing;
 		// Runtime keeps an ordinary Door crossing in place for six 1/60-second
-		// ticks; an automatic Crawling crossing doubles that motion duration.
+		// ticks; an automatic Crawling crossing divides that duration by the
+		// Agent type's crawling speed ratio (0.5 for a Human doubles it).
+		auto const crossingSeconds = context.agent
+			&& mode == Door::DoorCrossingMode::Crawling
+			? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().crawlingSpeedRatio
+			: 6.0f / 60.0f;
 		auto facts = thresholdRouteFacts(*this, *mDoor, target, context,
-			mode == Door::DoorCrossingMode::Crawling ? 12.0f / 60.0f : 6.0f / 60.0f,
-			CORE_DOOR_OPEN_CLOSE_TIME);
+			crossingSeconds, CORE_DOOR_OPEN_CLOSE_TIME);
 		if (mode == Door::DoorCrossingMode::None)
 		{
 			facts.feasible = false;

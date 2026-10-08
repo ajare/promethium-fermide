@@ -82,10 +82,11 @@ void runBulkheadCrawlingJourneys(smoke::Context const&)
 			require(direct.feasible == fits && captured.feasible == fits, "Bulkhead clearance disagrees across route seams");
 			if (fits)
 			{
-				auto motion = edge->getLength() / agent->getWalkSpeed() * (crawls ? 2.f : 1.f);
+				auto motion = edge->getLength() / agent->getWalkSpeed()
+					/ (crawls ? agent->getPhysicalBaseline().crawlingSpeedRatio : 1.0f);
 				require(std::abs(direct.components.motionSeconds - motion) < .00001f
 					&& std::abs(captured.components.motionSeconds - motion) < .00001f,
-					"Bulkhead crawling cost is not half-speed motion");
+					"Bulkhead crawling cost is not type-ratio-slowed motion");
 			}
 			else require(direct.exclusionReason == core::RouteExclusionReason::Clearance
 				&& captured.exclusionReason == core::RouteExclusionReason::Clearance, "Bulkhead impossible fit lost Clearance exclusion");
