@@ -91,14 +91,10 @@ namespace
 					&& !scene.door->open() && !scene.door->close() && !scene.door->toggle(), "Broken command succeeded");
 				require(scene.door->getActivationMode() == mode,
 					"Breakage changed authored activation/style");
-				// A Broken Bulkhead Door admits an Agent whose standing (or automatic
-				// Crawling) extent fits the frozen vertical aperture.
+				// A Broken Bulkhead Door blocks only when too low to crawl through.
 				auto const aperture = position * scene.door->getSize().y;
-				bool const admitted = scene.agent->getTraversalDoorClearanceExtent()
-						<= aperture + core::Door::ClearanceTolerance
-					|| (scene.agent->admitsAutomaticDoorCrawling(false)
-						&& scene.agent->getTraversalCrawlingDoorClearanceExtent()
-							<= aperture + core::Door::ClearanceTolerance);
+				bool const admitted = scene.agent->getTraversalCrawlingDoorClearanceExtent()
+					<= aperture + core::Door::ClearanceTolerance;
 				require(bool(scene.path()) == admitted, "Frozen Door routing disagrees with passage");
 				if (admitted)
 				{

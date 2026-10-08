@@ -95,18 +95,14 @@ namespace
 						&& !scene.door->open() && !scene.door->close() && !scene.door->toggle(), "Broken command succeeded");
 					require(scene.door->getOpenStyle() == style && scene.door->getActivationMode() == mode,
 						"Breakage changed authored activation/style");
-					// A Broken Door admits an Agent whose envelope fits the frozen
-					// aperture: standing (or automatic Crawling) height for vertical
-					// openings, width for horizontal openings.
+					// A Broken vertical opening blocks only when too low to crawl
+					// through; horizontal openings fit the Agent width.
 					bool admitted;
 					if (style == core::Door::OpenStyle::OpenUp)
 					{
 						auto const aperture = position * scene.door->getSize().y;
-						admitted = scene.agent->getTraversalDoorClearanceExtent()
-								<= aperture + core::Door::ClearanceTolerance
-							|| (scene.agent->admitsAutomaticDoorCrawling(false)
-								&& scene.agent->getTraversalCrawlingDoorClearanceExtent()
-									<= aperture + core::Door::ClearanceTolerance);
+						admitted = scene.agent->getTraversalCrawlingDoorClearanceExtent()
+							<= aperture + core::Door::ClearanceTolerance;
 					}
 					else admitted = scene.agent->getWidth()
 						<= position * scene.door->getSize().x + core::Door::ClearanceTolerance;

@@ -116,20 +116,23 @@ namespace core
 			|| mOpenStyle == OpenStyle::OpenUp;
 		if (vertical)
 		{
-			// Mirror classifyAgentCrossing's Standing/Crawling fallback against the
-			// scaled aperture height instead of the full height.
+			// A Broken vertical opening is passable unless it is too low for the
+			// Crawling envelope. The Agent ducks under whenever Standing no longer
+			// fits, so the automatic-Crawling fallback is unconditional here.
 			auto const fullHeight = (typeid(*this) == typeid(BulkheadDoor) || mLiftOwned || mShuttleOwned)
 				? getSize().y : effectiveHeight(mHeight, mHeightScale);
 			auto const available = getPosition().y + openFraction * fullHeight - approachFloorY;
 			if (agent.getTraversalDoorClearanceExtent(beginningMovement)
 				<= available + ClearanceTolerance) return DoorCrossingMode::Standing;
-			if (agent.admitsAutomaticDoorCrawling(beginningMovement)
-				&& agent.getTraversalCrawlingDoorClearanceExtent(beginningMovement)
-					<= available + ClearanceTolerance) return DoorCrossingMode::Crawling;
+			if (agent.getTraversalCrawlingDoorClearanceExtent(beginningMovement)
+				<= available + ClearanceTolerance) return DoorCrossingMode::Crawling;
 			return DoorCrossingMode::None;
 		}
-		return agent.getWidth() <= openFraction * getSize().x + ClearanceTolerance
-			? DoorCrossingMode::Standing : DoorCrossingMode::None;
+		// Horizontal openings keep their full height; the frozen fraction narrows
+		// the width. Height clearance follows the ordinary standing/crawling rule.
+		if (agent.getWidth() > openFraction * getSize().x + ClearanceTolerance)
+			return DoorCrossingMode::None;
+		return classifyAgentCrossing(agent, approachFloorY, beginningMovement);
 	}
 
 	bool Door::admitsBrokenPassage(Agent const& agent, float openFraction, float approachFloorY,

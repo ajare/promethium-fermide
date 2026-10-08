@@ -97,12 +97,13 @@ namespace core
 		DoorCrossingMode classifyBrokenAgentCrossing(Agent const& agent, float approachFloorY,
 			bool beginningMovement = false) const
 		{ return classifyBrokenAgentCrossing(agent, getOpenPercentage(), approachFloorY, beginningMovement); }
-		// A Broken Door is frozen at some open fraction. A vertical opening
-		// (OpenUp and Bulkhead Doors) admits passage when the Agent's standing
-		// clearance extent fits under the scaled aperture height; a horizontal
-		// opening (OpenApart, OpenLeft, OpenRight) admits it when the Agent's
-		// width fits within the scaled aperture width. `openFraction` may come
-		// from a remembered condition, not only the live percentage.
+		// A Broken Door admits passage unless its frozen aperture is too low to
+		// crawl through: vertical openings (OpenUp and Bulkhead Doors) fit the
+		// Agent's Crawling envelope under the scaled height and assume it ducks
+		// under whenever Standing no longer fits; horizontal openings
+		// (OpenApart, OpenLeft, OpenRight) fit the Agent's width within the
+		// scaled width. `openFraction` may come from a remembered condition, not
+		// only the live percentage.
 		bool admitsBrokenPassage(Agent const& agent, float openFraction, float approachFloorY,
 			bool beginningMovement = false) const;
 		bool admitsBrokenPassage(Agent const& agent, float approachFloorY,
