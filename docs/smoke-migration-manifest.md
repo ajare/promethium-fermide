@@ -40,6 +40,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/editor/MarkerActions.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/agent/Activation.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ActivationEditor.cpp` | module-owned | `pf-smoke-editor` |
+| `smoke/agent/AgentTypes.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/Colour.cpp` | module-owned | `pf-smoke-agent` |
 | `smoke/agent/ColourEditor.cpp` | module-owned | `pf-smoke-editor` |
 | `smoke/agent/Group.cpp` | module-owned | `pf-smoke-agent` |

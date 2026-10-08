@@ -28,6 +28,7 @@ namespace
 			"Uncommitted Human dimensions disagreed with World bounds");
 		smoke::require(physical.width == 0.4f
 			&& physical.standingHeight == 0.45f
+			&& physical.reach == 0.25f
 			&& physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f
 			&& physical.stairAscentSpeed == 0.35f && physical.stairDescentSpeed == 0.45f

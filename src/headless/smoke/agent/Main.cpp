@@ -15,5 +15,6 @@ int main(int argc, char** argv)
 	agent_smoke::registerWalkSpeed(checks);
 	agent_smoke::registerHeight(checks);
 	agent_smoke::registerIndividualProperties(checks);
+	agent_smoke::registerAgentTypes(checks);
 	return smoke::main("agent", checks, argc, argv);
 }

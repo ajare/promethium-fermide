@@ -4,24 +4,17 @@
 
 namespace core
 {
-	// Built-in physical identity. Shared properties and simulation participation
-	// remain in Agent; there is deliberately no conversion operation.
+	class AgentTypeDefinition;
+
+	// Compatibility adapter for callers that still name a concrete Human type.
+	// It routes to the bundled Human Agent-type definition (the single physical
+	// authority) rather than carrying its own compiled baseline, so ordinary
+	// placement and route queries observe the same values as script-backed
+	// Humans. Owned World Agents are constructed through the World's Agent type
+	// runtime instead; this class only serves temporary, non-owned callers.
 	class Human final : public Agent
 	{
 	public:
-		explicit Human(std::string const& name) : Agent(name) {}
-		char const* getTypeName() const override { return "Human"; }
-		static AgentPhysicalBaseline const& physicalBaseline()
-		{
-			// Match the historical expressions exactly (including float rounding).
-			static constexpr AgentPhysicalBaseline baseline{
-				0.4f, (0.7f - 0.2f) - 0.05f,
-				0.5f, 0.25f, 0.35f, 0.45f, 0.6f, 0.6f, 0.3f, 0.5f };
-			return baseline;
-		}
-		AgentPhysicalBaseline const& getPhysicalBaseline() const override
-		{
-			return physicalBaseline();
-		}
+		explicit Human(std::string const& name);
 	};
 }

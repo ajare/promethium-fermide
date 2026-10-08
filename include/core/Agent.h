@@ -204,10 +204,13 @@ namespace core
 	// slot spacing and environmental dimensions are not Agent baselines.
 	// crawlingSpeedRatio divides threshold motion durations (Crawling runs at
 	// ratio x ordinary speed, so its duration is the ordinary duration / ratio).
+	// reach is the interaction distance for which the type's geometry is
+	// authoritative; it is validated and frozen like every other baseline field.
 	struct AgentPhysicalBaseline
 	{
 		float width;
 		float standingHeight;
+		float reach;
 		float walkSpeed;
 		float climbSpeed;
 		float stairAscentSpeed;
@@ -375,6 +378,20 @@ namespace core
 		// Authored configuration only. Runtime Lua instance state never enters the
 		// Agent or a World document.
 		std::optional<AgentBehaviourAssignment> mBehaviourAssignment;
+
+		// Immutable type identity and frozen physical baseline (ADR for #503).
+		// The live Lua instance and its private state live in the World-owned
+		// Agent type runtime; only the validated baseline is copied here, so a
+		// later Lua mutation cannot change ongoing simulation.
+		AgentPhysicalBaseline mPhysicalBaseline{};
+		std::string mTypeId;
+		std::string mDisplayName;
+		std::string mTypeResourceName;
+		// Opaque handle to the retained live Lua instance. Owned here so the
+		// instance's private state lives exactly as long as this Agent; its
+		// destructor releases the instance from the World's Lua state. Never
+		// serialized, and never exposed as Lua/sol2.
+		std::shared_ptr<void> mLuaInstance;
 
 		World* mWorld{ nullptr };
 		std::map<TraversalResourceId, DeviceCondition> mRememberedDeviceConditions;
@@ -610,11 +627,26 @@ namespace core
 
 	protected:
 		explicit Agent(std::string const& name);
+		// Applies an immutable type identity and a frozen physical baseline once,
+		// from a factory or a document-load path. Later mutation is not exposed.
+		void setTypeIdentity(std::string typeId, std::string displayName,
+			std::string resourceName, AgentPhysicalBaseline baseline)
+		{
+			mTypeId = std::move(typeId);
+			mDisplayName = std::move(displayName);
+			mTypeResourceName = std::move(resourceName);
+			mPhysicalBaseline = baseline;
+		}
 
 	public:
 		// Stable wire identity and physical observations are immutable type data.
-		virtual char const* getTypeName() const = 0;
-		virtual AgentPhysicalBaseline const& getPhysicalBaseline() const = 0;
+		char const* getTypeName() const { return mDisplayName.c_str(); }
+		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
+		// Stable type ID, independent of the presentation display name.
+		std::string const& getTypeId() const { return mTypeId; }
+		// Application Resource name the type resolved from; empty for the
+		// embedded bundled Human definition used by legacy documents.
+		std::string const& getTypeResourceName() const { return mTypeResourceName; }
 		static std::unique_ptr<Agent> create(std::string const& type, std::string const& name);
 		// Resolves a built-in type's physical baseline where no individual Agent
 		// exists, such as an editor preview or agent-less route calculation.

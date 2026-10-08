@@ -19,6 +19,8 @@
 #include "core/AccessPanel.h"
 #include "core/PermissionSet.h"
 #include "core/AgentBehaviourRuntime.h"
+#include "core/AgentType.h"
+#include "core/AgentTypeRuntime.h"
 #include "core/Background.h"
 #include "core/Facade.h"
 #include "core/Layer.h"
@@ -570,6 +572,12 @@ namespace core
 		// and reaches the registries below through this World.
 		SimulationCoordinator mSimulationCoordinator;
 
+		// Every World owns one sandboxed Lua runtime for its Agent types. It is
+		// declared before mAgents so Agent destruction (which releases live Lua
+		// instances through their opaque handles) happens while the runtime's Lua
+		// state is still alive.
+		std::unique_ptr<AgentTypeRuntimeAdapter> mAgentTypeRuntime;
+
 		EntityRegistry<AgentId, Agent> mAgents;
 
 		// Legacy pointer-facing APIs use this reverse index only to recover an ID;
@@ -676,6 +684,26 @@ namespace core
 		// Lua/sol2 types out of this domain header and its per-Agent environments
 		// prevent mutable module or instance state crossing assignments.
 		std::unique_ptr<AgentBehaviourRuntimeAdapter> mAgentBehaviourRuntime;
+
+		// Registered Agent-type definitions, keyed by stable type ID. The bundled
+		// Human is registered at construction; additional types are attached
+		// through the public attachAgentType workflow. The source is shared and
+		// immutable; executed instance state lives in mAgentTypeRuntime.
+		std::map<std::string, std::shared_ptr<const AgentTypeDefinition>> mAgentTypes;
+
+		// Registers the bundled Human type so ordinary World creation, legacy
+		// document loading, and candidate Worlds can resolve Human without an
+		// editor startup. Runs once during construction.
+		void registerBundledAgentTypes();
+		// Resolves a type ID (and optional explicit resource reference) to its
+		// registered definition, or throws with a precise diagnostic. Explicit
+		// missing/mismatched references never silently fall back to Human.
+		std::shared_ptr<const AgentTypeDefinition> resolveAgentType(
+			std::string const& typeId, std::string const& resourceName) const;
+		// Constructs an Agent with a fresh live Lua instance and frozen baseline
+		// for the named type. Throws (leaving no partial Agent) on any failure.
+		std::unique_ptr<Agent> makeScriptAgent(std::string const& typeId,
+			std::string const& name);
 
 		bool validateAgentBehaviourAssignmentAgainst(
 			AgentBehaviourRegistry const& registry, AgentBehaviourId behaviour,
@@ -1640,7 +1668,8 @@ namespace core
 	public:
 
 		World(std::string const& name, uint32_t cellsWide, uint32_t levelsHigh,
-			AgentBehaviourRuntimeLimits behaviourRuntimeLimits = {});
+			AgentBehaviourRuntimeLimits behaviourRuntimeLimits = {},
+			AgentTypeRuntimeLimits agentTypeRuntimeLimits = {});
 
 		// A World allocates one CellDefinition per (x, level) on each Layer, so
 		// dimensions are accepted only when the total across `layerCount` Layers
@@ -2440,6 +2469,25 @@ namespace core
 		AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
 
 		AgentId createAgent(std::string const& name, uint32_t sectorId);
+
+		// Script-backed Agent creation. `typeId` names a registered Agent type
+		// (the bundled Human or an attached `.agent.lua` definition). The World
+		// constructs a fresh live Lua instance, validates and freezes its
+		// baseline, and publishes the Agent only after the constructor succeeds.
+		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
+		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId);
+
+		// Registers a `.agent.lua` type definition under `resourceName`. The
+		// source is validated (type ID, display name, new()) before it is
+		// accepted; a duplicate type ID or an invalid definition is refused
+		// without mutating the World. Returns false with a diagnostic on refusal.
+		bool attachAgentType(std::string resourceName, std::string source, std::string* diagnostic = nullptr);
+
+		// True when `typeId` names a registered Agent type in this World.
+		bool hasAgentType(std::string_view typeId) const;
+
+		// The display name of a registered type, or empty when unknown.
+		std::string agentTypeDisplayName(std::string_view typeId) const;
 
 		// Initial authorization is validated before ownership, placement or ID allocation.
 		AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,

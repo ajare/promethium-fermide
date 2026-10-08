@@ -49,9 +49,9 @@ namespace
 	{
 		core::World source("Legacy", 4, 2);
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 60");
+		auto const version = yaml.find("version: 61");
 		require(version != std::string::npos, "The current World schema version was missing");
-		yaml.replace(version, std::string("version: 60").size(), "version: 9");
+		yaml.replace(version, std::string("version: 61").size(), "version: 9");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		auto reader = core::YamlSerializer::fromString(yaml);

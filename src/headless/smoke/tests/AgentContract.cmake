@@ -84,6 +84,17 @@ set(agent_checks
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist
+    agentTypesScriptedHumanIdentity
+    agentTypesBundledDefinitionMatchesResource
+    agentTypesGenericScriptBackedType
+    agentTypesInvalidBaselinesRejected
+    agentTypesConstructorFailureLeavesNoPartialAgent
+    agentTypesExecutionBudgetEnforced
+    agentTypesAllocationBudgetEnforced
+    agentTypesInstancesAreIsolated
+    agentTypesLegacyAndScriptedLoading
+    agentTypesDuplicateTypeIdRejected
+    agentTypesResetReconstructsScriptedInstances
 )
 
 function(invoke status expected)

@@ -697,7 +697,10 @@ namespace core
 		// Version 58 adds the authored Broken open percentage for ordinary Doors.
 		// Version 59 adds optional one-cell-high Room height scale.
 		// Version 60 persists immutable Agent type identity.
-		serializer.writeUint32("version", 60);
+		// Version 61 persists the stable Agent type ID and its application
+		// Resource reference; pre-61 records resolve the type by the legacy
+		// presentation name only.
+		serializer.writeUint32("version", 61);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1580,7 +1583,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 60)
+		if (version < 1 || version > 61)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2467,8 +2470,13 @@ namespace core
 			}
 			serializer.beginMap("agent");
 			auto const type = serializer.readString("type", true, "Human");
+			auto const typeId = version >= 61
+				? serializer.readString("typeId", true, type) : type;
+			auto const typeResource = version >= 61
+				? serializer.readString("resource", true, "") : std::string{};
 			serializer.endMap();
-			auto agent = Agent::create(type, "");
+			auto definition = resolveAgentType(typeId, typeResource);
+			auto agent = makeScriptAgent(definition->typeId, "");
 			agent->deserialize(serializer, workData);
 			auto const sectorIndex = serializer.readUint32("sector");
 			auto const localX = serializer.readFloat("localX");
@@ -2965,6 +2973,9 @@ namespace core
 		candidate->mActionRegistry = mActionRegistry;
 		candidate->mActionRegistryFilename = mActionRegistryFilename;
 		candidate->mMarkerActions = mMarkerActions;
+		// The candidate shares every registered Agent type so replay/validation
+		// can construct script-backed Agents. Sources are immutable and shared.
+		candidate->mAgentTypes = mAgentTypes;
 		return candidate;
 	}
 
@@ -3468,7 +3479,7 @@ namespace core
 				if (isLocationLike(sector->getType())
 					&& !mLayers[saved.layer]->getCellDefinition(cellX, cellY).isTraversableOnFoot()) continue;
 			}
-			auto agent = Agent::create(saved.type, saved.name);
+			auto agent = makeScriptAgent(saved.type, saved.name);
 			agent->setFlags(saved.flags);
 			agent->setActive(saved.active);
 			auto* raw = agent.get();

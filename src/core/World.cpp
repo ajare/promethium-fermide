@@ -16,6 +16,8 @@
 #include "core/OccupantPacking.h"
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRuntime.h"
+#include "core/AgentType.h"
+#include "core/AgentTypeRuntime.h"
 #include "core/AgentTagRegistry.h"
 #include "core/Background.h"
 #include "core/Location.h"
@@ -36,6 +38,7 @@
 #include "core/BulkheadDoor.h"
 #include "core/DoorEdge.h"
 #include "core/Exceptions.h"
+#include "core/SerializationException.h"
 
 
 namespace core
@@ -117,7 +120,8 @@ namespace core
 	*/
 
 	World::World(string const& name, uint32_t cellsWide, uint32_t levelsHigh,
-		AgentBehaviourRuntimeLimits behaviourRuntimeLimits)
+		AgentBehaviourRuntimeLimits behaviourRuntimeLimits,
+		AgentTypeRuntimeLimits agentTypeRuntimeLimits)
 		: mName(name)
 		, mClipboardIdentity(AgentTagRegistry::create()->getUuid())
 		, mCellsWide(cellsWide)
@@ -125,6 +129,8 @@ namespace core
 		, mLayers(2)
 		, mLayerNames{ defaultLayerName(0), defaultLayerName(1) }
 		, mSimulationCoordinator(*this)
+		, mAgentTypeRuntime(std::make_unique<AgentTypeRuntimeAdapter>(
+			agentTypeRuntimeLimits))
 		, mAgentBehaviourRuntime(std::make_unique<AgentBehaviourRuntimeAdapter>(
 			behaviourRuntimeLimits))
 	{
@@ -146,6 +152,7 @@ namespace core
 		for (uint32_t level = 0; level < levelsHigh; ++level)
 			mLevelNames.push_back(format("Level {}", level));
 		mGraph = make_shared<Graph>(this);
+		registerBundledAgentTypes();
 	}
 
 	std::string const& World::getLevelName(uint32_t level) const
@@ -8497,6 +8504,101 @@ namespace core
 		return mSimulationCoordinator.addOwnedAgentToSector(std::move(agent), sectorId);
 	}
 
+	void World::registerBundledAgentTypes()
+	{
+		if (mAgentTypes.contains("Human")) return;
+		auto definition = std::make_shared<AgentTypeDefinition>(
+			bundledHumanAgentType());
+		mAgentTypes.emplace(definition->typeId, std::move(definition));
+	}
+
+	std::shared_ptr<const AgentTypeDefinition> World::resolveAgentType(
+		std::string const& typeId, std::string const& resourceName) const
+	{
+		if (!resourceName.empty())
+		{
+			// An explicit resource reference is authoritative: resolve the named
+			// resource and verify its declared type ID matches the saved record.
+			for (auto const& [id, definition] : mAgentTypes)
+			{
+				(void)id;
+				if (definition->resourceName != resourceName) continue;
+				if (definition->typeId != typeId)
+					throw SerializationException(
+						"Agent type resource '" + resourceName + "' declares type ID '"
+						+ definition->typeId + "' but the document expects '" + typeId + "'");
+				return definition;
+			}
+			throw SerializationException(
+				"Missing Agent type resource '" + resourceName + "'");
+		}
+		// Legacy record: the stable type ID names a bundled or attached type.
+		auto found = mAgentTypes.find(typeId);
+		if (found == mAgentTypes.end())
+			throw SerializationException("Unsupported Agent type '" + typeId + "'");
+		return found->second;
+	}
+
+	std::unique_ptr<Agent> World::makeScriptAgent(std::string const& typeId,
+		std::string const& name)
+	{
+		auto found = mAgentTypes.find(typeId);
+		if (found == mAgentTypes.end())
+			throw SerializationException("Unsupported Agent type '" + typeId + "'");
+		auto const& definition = *found->second;
+		auto result = mAgentTypeRuntime->construct(definition.typeId,
+			definition.source, name);
+		if (!result.succeeded)
+			throw WorldException(this, result.diagnostic);
+		auto agent = std::unique_ptr<Agent>(new Agent(name));
+		agent->setTypeIdentity(definition.typeId, definition.displayName,
+			definition.resourceName, result.baseline);
+		agent->mLuaInstance = std::move(result.instance);
+		return agent;
+	}
+
+	bool World::attachAgentType(std::string resourceName, std::string source,
+		std::string* diagnostic)
+	{
+		invalidateSimulationSnapshot();
+		auto reject = [&](std::string reason)
+		{
+			if (diagnostic) *diagnostic = std::move(reason);
+			return false;
+		};
+		if (resourceName.empty())
+			return reject("Agent type resource name cannot be empty");
+		auto preflight = AgentTypeRuntimeAdapter::preflightType(resourceName, source);
+		if (!preflight.loaded)
+			return reject(preflight.diagnostic);
+		if (!agentTypeIdIsValid(preflight.typeId))
+			return reject("Agent type has an invalid type_id: " + preflight.typeId);
+		if (!agentTypeDisplayNameIsValid(preflight.displayName))
+			return reject("Agent type has an invalid display_name");
+		if (mAgentTypes.contains(preflight.typeId))
+			return reject("Agent type ID '" + preflight.typeId
+				+ "' is already registered in this World");
+		auto definition = std::make_shared<AgentTypeDefinition>();
+		definition->typeId = std::move(preflight.typeId);
+		definition->displayName = std::move(preflight.displayName);
+		definition->resourceName = std::move(resourceName);
+		definition->source = std::move(source);
+		mAgentTypes.emplace(definition->typeId, std::move(definition));
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::hasAgentType(std::string_view typeId) const
+	{
+		return mAgentTypes.contains(std::string(typeId));
+	}
+
+	std::string World::agentTypeDisplayName(std::string_view typeId) const
+	{
+		auto found = mAgentTypes.find(std::string(typeId));
+		return found == mAgentTypes.end() ? std::string{} : found->second->displayName;
+	}
+
 	unique_ptr<Agent> World::makeAgentForPlacement(string const& name,
 		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets) const
 	{
@@ -8572,6 +8674,18 @@ namespace core
 	{
 		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createAgent(name, sectorId);
+	}
+
+	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
+	{
+		invalidateSimulationSnapshot();
+		return mSimulationCoordinator.createAgent(std::move(typeId), name, sectorId, levelOffset, xOffset);
+	}
+
+	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId)
+	{
+		invalidateSimulationSnapshot();
+		return mSimulationCoordinator.createAgent(std::move(typeId), name, sectorId);
 	}
 
 	void World::wakeAllAgents()

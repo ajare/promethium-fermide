@@ -173,6 +173,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/DoorClearance.cpp
         agent/BulkheadCrawling.cpp
         agent/IndividualProperties.cpp
+        agent/AgentTypes.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30

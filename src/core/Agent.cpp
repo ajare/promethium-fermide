@@ -1,5 +1,6 @@
 #include "core/Agent.h"
 #include "core/Human.h"
+#include "core/AgentType.h"
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
 
@@ -141,7 +142,7 @@ namespace core
 
 	AgentPhysicalBaseline const& Agent::physicalBaselineForType(string_view type)
 	{
-		if (type == "Human") return Human::physicalBaseline();
+		if (type == "Human") return bundledHumanBaseline();
 		throw SerializationException("Unsupported Agent type '" + string(type) + "'");
 	}
 
@@ -183,6 +184,12 @@ namespace core
 	{
 		serializer.beginMap("agent");
 		serializer.writeString("type", std::string(getTypeName()));
+		// Stable type ID and application Resource reference (ADR 0010). The type
+		// field remains the presentation name for legacy readers; typeId is the
+		// authoritative identity the resource must declare on load.
+		serializer.writeString("typeId", mTypeId);
+		if (!mTypeResourceName.empty())
+			serializer.writeString("resource", mTypeResourceName);
 		serializer.writeString("name", mName);
 		serializer.writeUint32("flags", mFlags);
 		// The Agent group is written by its stable ID and never by name, so a
@@ -348,6 +355,10 @@ namespace core
 		auto const type = serializer.readString("type", true, "Human");
 		if (type != getTypeName())
 			throw SerializationException("Unsupported Agent type '" + type + "'");
+		auto const typeId = serializer.readString("typeId", true, type);
+		if (typeId != getTypeId())
+			throw SerializationException("Serialized Agent type ID '" + typeId
+				+ "' does not match the resolved type '" + getTypeId() + "'");
 		mName = serializer.readString("name");
 		mFlags = serializer.readUint32("flags");
 		// Absent means no Agent group. Whether an ID that is present actually

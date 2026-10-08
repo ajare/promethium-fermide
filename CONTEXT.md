@@ -256,11 +256,15 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 A simulated intelligent entity with a position, destination Path, and current movement state.
 
 **Agent type**:
-An Agent's immutable physical identity, defining its baseline dimensions, movement speeds, and Pose proportions.
+An Agent's immutable physical identity, defined by one `.agent.lua` resource: a stable type ID, a display name, and a `new()` constructor returning a fresh instance with a complete physical baseline. The host validates and freezes that baseline before publishing an Agent.
 _Avoid_: Agent tag, which supplies shared Agent properties
 
+**Agent type ID**:
+The stable identifier of an Agent type, independent of its presentation display name. A saved Agent records both its type ID and the Agent type resource it resolved from; legacy Human records lacking them resolve to the bundled Human definition.
+_Avoid_: Agent type, display name
+
 **Human**:
-An Agent representing a person, with human physical baselines.
+An Agent representing a person, with human physical baselines. Human is a bundled script-backed Agent type whose `.agent.lua` definition preserves the historical baselines; legacy Human documents resolve to that bundled definition.
 _Avoid_: Agent, when specifically distinguishing a person from other intelligent entities
 
 **Height modifier**:

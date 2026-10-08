@@ -69,6 +69,12 @@ namespace core
 
 		AgentId createAgent(std::string const& name, uint32_t sectorId);
 
+		// Script-backed creation: `typeId` names a registered Agent type. The
+		// World constructs the live instance and frozen baseline before ownership
+		// transfers here.
+		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
+		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId);
+
 		// Takes an already-constructed Agent into the World's ownership and
 		// places it in the Sector `sectorId`. The Agent is attached to the
 		// World, never to the coordinator: the World remains the owner the
