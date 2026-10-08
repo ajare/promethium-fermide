@@ -237,6 +237,7 @@ set(editor_names
     isolation/normalAndExceptionalExit
     scaled-doors/clipboard-history
     scaled-doors/crossing-history
+    roomHeightScale/history
 )
 
 if(DEFINED LANE)

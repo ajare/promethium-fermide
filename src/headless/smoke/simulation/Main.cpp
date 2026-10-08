@@ -36,6 +36,7 @@ int main(int argc, char** argv)
 	registerFurniture(checks);
 	registerMarkerActions(checks);
 	registerMixedCrawling(checks);
+	registerRoomHeights(checks);
 	registerScale(checks);
 	return smoke::main("simulation", checks, argc, argv);
 }

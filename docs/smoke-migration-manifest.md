@@ -265,6 +265,10 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/world/ScaledDoors.cpp` | Scaled Regular Door world checks | `pf-smoke-world` |
 | `smoke/render/ScaledDoors.cpp` | Scaled Regular Door render checks | `pf-smoke-render` |
 | `smoke/editor/ScaledDoors.cpp` | Scaled Regular Door editor checks | `pf-smoke-editor` |
+| `smoke/world/RoomHeightScale.cpp` | Room height scale world checks | `pf-smoke-world` |
+| `smoke/persistence/RoomHeightScaleDocuments.cpp` | Room height scale persistence checks | `pf-smoke-persistence` |
+| `smoke/simulation/RoomHeights.cpp` | Room height pose checks | `pf-smoke-simulation` |
+| `smoke/editor/RoomHeightScale.cpp` | Room height scale editor checks | `pf-smoke-editor` |
 <!-- current-ownership-end -->
 Simulation Observation was migrated in #280. Its stable registered check
 is `simulation/observation`; its old path was

@@ -977,6 +977,9 @@ namespace core
 			std::optional<float> accessPanelSpeed{};
 			std::optional<float> doorSpeed{};
 			std::optional<float> doorHeightScale{};
+			// Room: optional one-cell-high Room height scale (percentage of the
+			// standard Room height). Only valid when the Room has one level.
+			std::optional<float> roomHeightScale{};
 			std::vector<float> transportDoorSpeeds{};
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
@@ -1996,6 +1999,13 @@ namespace core
 			std::optional<float> scale, std::string* diagnostic = nullptr);
 		bool setSectorDoorHeight(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 			Door::Height height, std::string* diagnostic = nullptr);
+
+		// Re-authors a one-cell-high Room's height override. The scale is a
+		// percentage of the standard Room height in [0.2, 1.0], absent to clear.
+		// Only Rooms with exactly one level accept it; other Sector types and
+		// multi-level Rooms are refused. Requires a paused simulation.
+		bool setRoomHeightScale(uint32_t sectorIndex, std::optional<float> scale,
+			std::string* diagnostic = nullptr);
 
 		// Re-authors an ordinary Door's opening style.  The authored construction
 		// record is the persistence boundary, so the record and the live Door move

@@ -62,5 +62,6 @@ int main(int argc, char** argv)
 	editor_smoke::registerHistory(checks);
 	editor_smoke::registerIsolation(checks);
 	editor_smoke::registerScaledDoors(checks);
+	editor_smoke::registerRoomHeightScale(checks);
 	return smoke::main("editor", checks, argc, argv);
 }

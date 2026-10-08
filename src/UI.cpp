@@ -6767,6 +6767,58 @@ void renderObjectView(shared_ptr<const core::World> world)
 }
 
 
+// A one-cell-high Room may override the standard height with a scale in
+// [0.2, 1.0]. The override is a separate authored percentage: it replaces the
+// Room's top-level height, and is removed automatically when the Room grows to
+// more than one cell high.
+void renderRoomHeightScaleEditor(shared_ptr<core::World> const& world,
+	shared_ptr<const core::Sector> const& location)
+{
+	auto const room = dynamic_pointer_cast<const core::Location>(location);
+	if (!room || !room->isRoom()) return;
+
+	bool const eligible = room->getLevelsHigh() == 1;
+	bool overridden = room->getHeightScale().has_value();
+	float scale = room->getHeightScale().value_or(1.0f);
+
+	ImGui::Separator();
+	ImGui::TextUnformatted("Room height");
+	ImGui::BeginDisabled(!world->isSimulationPaused() || !eligible);
+	bool const changed = ImGui::Checkbox("Override height scale", &overridden)
+		|| (overridden && ImGui::SliderFloat("Height scale", &scale,
+			CORE_ROOM_HEIGHT_SCALE_MIN, CORE_ROOM_HEIGHT_SCALE_MAX, "%.3f"));
+	ImGui::EndDisabled();
+	if (!eligible)
+		ImGui::TextDisabled("Only one-cell-high Rooms accept a height scale.");
+
+	if (!changed) return;
+
+	auto undo = captureDocumentSnapshot(world);
+	try
+	{
+		if (!world->isSimulationPaused()) world->pauseSimulation();
+		gUISettings.worldPaused = true;
+		std::string diagnostic;
+		if (!world->setRoomHeightScale(location->getIndex(),
+			overridden ? std::optional<float>{scale} : std::nullopt, &diagnostic))
+		{
+			reportEditorError("Room height scale", diagnostic);
+			return;
+		}
+		world->finishBuild();
+		commitDocumentEdit(std::move(undo));
+	}
+	catch (core::Exception const& error)
+	{
+		reportEditorError("Room height scale", error.getMessage());
+	}
+	catch (std::exception const& error)
+	{
+		reportEditorError("Room height scale", error.what());
+	}
+}
+
+
 void renderLocationWallEditor(shared_ptr<core::World> const& world,
 	shared_ptr<const core::Sector> const& location)
 {
@@ -6944,6 +6996,7 @@ void renderSelectedObjectPanel(shared_ptr<core::World> const& world)
 		}
 		case core::SectorType::Location:
 			renderLocationPermissionRequirements(world, gSelectedSector->getIndex());
+			renderRoomHeightScaleEditor(world, gSelectedSector);
 			renderLocationWallEditor(world, gSelectedSector);
 			break;
 

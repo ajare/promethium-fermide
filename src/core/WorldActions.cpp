@@ -394,6 +394,7 @@ namespace core
 		applyActionResult(agentId, use.marker, std::move(result), event, true);
 		// Safety is host-owned, independent of callback success and staged effects.
 		agent->mPose = Pose::Standing;
+		agent->mRetainedActionPose = false;
 		agent->mOccupiedUsablePoint = {};
 		invalidateSimulationSnapshot();
 		if (event.type == SimulationEventType::ActionFailed)
@@ -424,6 +425,7 @@ namespace core
 		// operation events) are published until the entire batch is accepted.
 		auto pose = agent->mPose;
 		auto claim = agent->mOccupiedUsablePoint;
+		bool poseAuthored = false;
 		InteractionPointId device;
 		auto reject = [&](char const* diagnostic)
 		{
@@ -434,7 +436,7 @@ namespace core
 		{
 			switch (effect.type)
 			{
-			case ActionEffectType::Pose: pose = static_cast<Pose>(effect.value); break;
+			case ActionEffectType::Pose: pose = static_cast<Pose>(effect.value); poseAuthored = true; break;
 			case ActionEffectType::Claim:
 				if (!isFurnitureMarker(markerId) || (claim && claim != markerId))
 				{ reject("Selected Marker is not an eligible usable point"); return; }
@@ -484,6 +486,7 @@ namespace core
 			else agent->mOccupiedUsablePoint = {};
 		}
 		agent->mPose = pose;
+		if (poseAuthored) agent->mRetainedActionPose = pose != Pose::Standing;
 		event.agent.pose = pose;
 		invalidateSimulationSnapshot();
 		for (auto const& log : result.logs) addLogMessage("Marker Action", 0, LogLevel::Info, log.message);

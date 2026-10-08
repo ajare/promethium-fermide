@@ -22,6 +22,11 @@ namespace core
 	protected:
 		void setCellPosition(uint32_t cellX, uint32_t cellY);
 
+		// Recompute the bounding size in place. A Sector uses this when a derived
+		// effective height (for example a one-cell Room's height override) changes
+		// its vertical extent without reconstructing the Area.
+		void setSize(Vector2 const& size) { mSize = size; }
+
 	public:
 
 		Area(uint32_t cellX, uint32_t cellY, float xCellOffset, float yCellOffset, float width, float height);

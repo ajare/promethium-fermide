@@ -75,6 +75,7 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     shuttleBrokenLifecycle
     doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted
     doorHeightPersistsAndIsLimitedToRooms
+    roomHeightScaleRoundTrips
     doorOpenLeftPersistsThroughEveryEditorPath
     doorOpenRightPersistsThroughEveryEditorPath
     doorOpenApartPersistsThroughEveryEditorPath

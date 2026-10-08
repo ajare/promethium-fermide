@@ -208,6 +208,13 @@ namespace core
 #define CORE_CORRIDOR_HEIGHT						0.7f
 #define CORE_ROOM_MIN_HEIGHT						(CORE_DOOR_HEIGHT + 0.05)
 #define CORE_ROOM_MAX_HEIGHT						0.9f
+// The standard height a Room's single level stands at by default. A one-cell-
+// high Room may override it with a scale in [CORE_ROOM_HEIGHT_SCALE_MIN,
+// CORE_ROOM_HEIGHT_SCALE_MAX], making its effective height a percentage of
+// this standard height.
+#define CORE_ROOM_STANDARD_HEIGHT					CORE_ROOM_MAX_HEIGHT
+#define CORE_ROOM_HEIGHT_SCALE_MIN					0.2f
+#define CORE_ROOM_HEIGHT_SCALE_MAX					1.0f
 
 //
 // Graph

@@ -1,5 +1,6 @@
 #include <format>
 #include <cassert>
+#include <cmath>
 
 #include "core/Defines.h"
 #include "core/Location.h"
@@ -41,6 +42,25 @@ namespace core
 			type == SectorObjectType::AccessPanel ||
 			type == SectorObjectType::Walkway ||
 			isWindowAperture(type);
+	}
+
+	float Location::getEffectiveTopLevelHeight() const
+	{
+		return mHeightScale ? CORE_ROOM_STANDARD_HEIGHT * *mHeightScale : Sector::getEffectiveTopLevelHeight();
+	}
+
+	bool Location::roomHeightScaleIsValid(std::optional<float> scale)
+	{
+		return !scale || (std::isfinite(*scale)
+			&& *scale >= CORE_ROOM_HEIGHT_SCALE_MIN && *scale <= CORE_ROOM_HEIGHT_SCALE_MAX);
+	}
+
+	bool Location::setHeightScale(std::optional<float> scale)
+	{
+		if (!isRoom() || getLevelsHigh() != 1 || !roomHeightScaleIsValid(scale)) return false;
+		mHeightScale = scale;
+		setSize({ getSize().x, (float)(getLevelsHigh() - 1) + getEffectiveTopLevelHeight() });
+		return true;
 	}
 
 } // core

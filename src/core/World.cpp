@@ -5223,6 +5223,30 @@ namespace core
 		return true;
 	}
 
+	bool World::setRoomHeightScale(uint32_t sectorIndex, std::optional<float> scale,
+		std::string* diagnostic)
+	{
+		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (!mSimulationPaused) return reject("Pause simulation to change Room height scale");
+		if (sectorIndex >= mSectors.size() || !mSectors[sectorIndex]) return reject("No such Room");
+		auto location = dynamic_pointer_cast<Location>(mSectors[sectorIndex]);
+		if (!location || !location->isRoom()) return reject("Height scale is only available for Rooms");
+		if (location->getLevelsHigh() != 1) return reject("Height scale only applies to one-level-high Rooms");
+		if (!Location::roomHeightScaleIsValid(scale)) return reject("Height scale must be a finite value from 0.2 to 1.0");
+		if (location->getHeightScale() == scale) { if (diagnostic) diagnostic->clear(); return true; }
+		invalidateSimulationSnapshot();
+		if (!location->setHeightScale(scale)) return reject("Height scale could not be applied");
+		for (auto it = mConstructionRecords.rbegin(); it != mConstructionRecords.rend(); ++it)
+			if (it->type == ConstructionType::Room && it->a == location->getLayerIndex()
+				&& it->b == location->getCellY() && it->c == location->getCellX()
+				&& it->d == location->getCellsWide() && it->e == location->getLevelsHigh())
+			{ it->roomHeightScale = scale; break; }
+		for (auto* agent : location->getAgents()) agent->syncPoseToSector();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool World::setSectorDoorHeight(uint32_t layerIndex, uint32_t y, uint32_t x, uint32_t width,
 		Door::Height height, std::string* diagnostic)
 	{

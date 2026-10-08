@@ -28,3 +28,4 @@ void runThresholdLayerOverlapSmokeChecks();
 void registerFurniture(std::vector<smoke::Check>& checks);
 
 void registerScaledDoors(std::vector<smoke::Check>& checks);
+void registerRoomHeightScale(std::vector<smoke::Check>& checks);

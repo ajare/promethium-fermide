@@ -58,6 +58,8 @@ set(checks
     graphBuildWarnsForLocationWithoutVertices
     traversalGeometryPolicyIsWorldOwned
     scaled-doors
+    room-height-scale
+    room-height-scale-requires-pause
     runMiddleLayerDeletion
 )
 string(JOIN "\n" listed ${checks})

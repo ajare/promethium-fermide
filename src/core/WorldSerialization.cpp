@@ -313,7 +313,10 @@ namespace core
 			serializer.writeString("name", record.name); serializer.writeUint32("layer", record.a);
 			serializer.writeUint32("y", record.b); serializer.writeUint32("x", record.c);
 			serializer.writeUint32("cellsWide", record.d); serializer.writeUint32("levelsHigh", record.e);
-			serializer.writeFloat("topLevelHeight", record.x); break;
+			serializer.writeFloat("topLevelHeight", record.x);
+			serializer.writeBool("hasHeightScale", record.roomHeightScale.has_value());
+			if (record.roomHeightScale) serializer.writeFloat("heightScale", *record.roomHeightScale);
+			break;
 		case ConstructionType::Ladder:
 			serializer.writeUint32("layer", record.layer);
 			serializer.writeUint32("y", record.a); serializer.writeUint32("x", record.b);
@@ -692,7 +695,8 @@ namespace core
 		// filename/package are read as legacy names for compatibility.
 		// Version 57 adds optional ordinary Regular Door Height scale.
 		// Version 58 adds the authored Broken open percentage for ordinary Doors.
-		serializer.writeUint32("version", 58);
+		// Version 59 adds optional one-cell-high Room height scale.
+		serializer.writeUint32("version", 59);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1093,8 +1097,9 @@ namespace core
 			while (serializer.nextArrayItem()) record.locationPermissionRequirement.push_back(serializer.readUint32(""));
 			serializer.endArray();
 		}
-		if (record.type != ConstructionType::Door && (serializer.hasField("heightScale") || serializer.hasField("hasHeightScale")))
-			throw SerializationException("Height scale is only available for ordinary Doors");
+		if (record.type != ConstructionType::Door && record.type != ConstructionType::Room
+			&& (serializer.hasField("heightScale") || serializer.hasField("hasHeightScale")))
+			throw SerializationException("Height scale is only available for ordinary Doors and Rooms");
 		switch (record.type)
 		{
 		case ConstructionType::Corridor:
@@ -1105,7 +1110,13 @@ namespace core
 			record.name = serializer.readString("name"); record.a = readLayer("layer");
 			record.b = serializer.readUint32("y"); record.c = serializer.readUint32("x");
 			record.d = serializer.readUint32("cellsWide"); record.e = readRenamedUint32("levelsHigh", "decksHigh");
-			record.x = readRenamedFloat("topLevelHeight", "topDeckHeight"); break;
+			record.x = readRenamedFloat("topLevelHeight", "topDeckHeight");
+			if (version >= 59 && serializer.hasField("hasHeightScale") && serializer.readBool("hasHeightScale"))
+				record.roomHeightScale = serializer.readFloat("heightScale");
+			if (!Location::roomHeightScaleIsValid(record.roomHeightScale)
+				|| (record.roomHeightScale && record.e != 1))
+				throw SerializationException("Invalid Room height scale");
+			break;
 		case ConstructionType::Ladder:
 			record.layer = readLayerOr("layer", layerBehind(0));
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
@@ -1568,7 +1579,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 58)
+		if (version < 1 || version > 59)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2977,6 +2988,7 @@ namespace core
 				: addRoom(record.name, record.a, record.b, record.c, record.d, record.e, record.x);
 			auto& location = static_cast<Location&>(*mSectors[index]);
 			for (auto id : record.locationPermissionRequirement) location.mPermissionRequirement.set(id - 1);
+			if (record.roomHeightScale) location.setHeightScale(record.roomHeightScale);
 			break;
 		}
 		case ConstructionType::Ladder:
@@ -5742,6 +5754,8 @@ namespace core
 					{
 						source.b = plan.y; source.c = plan.x;
 						source.d = plan.cellsWide; source.e = plan.levelsHigh;
+						// The height override only applies to one-cell-high Rooms.
+						if (plan.levelsHigh > 1) source.roomHeightScale.reset();
 					}
 					else if (source.type == ConstructionType::Facade)
 					{

@@ -207,6 +207,11 @@ set(core_names
     mixedCrawling/gates
     mixedCrawling/lifecycle
     mixedCrawling/persistence
+    roomHeights/crouchAndStand
+    roomHeights/crawlAndStand
+    roomHeights/placementDucks
+    roomHeights/doorExitStands
+    roomHeights/loadedWorld
     runScaledWorld
 )
 

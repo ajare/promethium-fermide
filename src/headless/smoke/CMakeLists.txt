@@ -86,6 +86,7 @@ pf_add_smoke_module(pf-smoke-simulation
         simulation/Scale.cpp
         simulation/Airlocks.cpp simulation/AirlockCrawling.cpp simulation/SecurityScanners.cpp simulation/SecurityScannerCrawling.cpp simulation/DecontaminationCrawling.cpp simulation/LiftCrawling.cpp simulation/ShuttleCrawling.cpp simulation/MixedCrawling.cpp
         simulation/AccessPanels.cpp
+        simulation/RoomHeights.cpp
         simulation/BoothWindows.cpp
         simulation/Dumbwaiters.cpp
         simulation/Furniture.cpp
@@ -349,6 +350,7 @@ pf_add_smoke_module(pf-smoke-world
         world/ObjectEditing.cpp
         world/FloorsAndWalls.cpp
         world/Topology.cpp
+        world/RoomHeightScale.cpp
         world/LayerDeletion.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
@@ -376,6 +378,7 @@ pf_add_smoke_module(pf-smoke-persistence
         persistence/Layers.cpp
         persistence/DomainReplay.cpp
         persistence/DoorDocuments.cpp
+        persistence/RoomHeightScaleDocuments.cpp
         persistence/BrokenDoors.cpp
         persistence/BrokenExtensibles.cpp
         persistence/BrokenEscalators.cpp
@@ -442,7 +445,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/ScaledDoors.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp

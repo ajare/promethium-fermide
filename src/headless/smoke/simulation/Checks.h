@@ -27,3 +27,4 @@ void registerScale(std::vector<smoke::Check>& checks);
 void registerFurniture(std::vector<smoke::Check>& checks);
 void registerMarkerActions(std::vector<smoke::Check>& checks);
 void registerMixedCrawling(std::vector<smoke::Check>& checks);
+void registerRoomHeights(std::vector<smoke::Check>& checks);

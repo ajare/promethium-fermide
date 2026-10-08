@@ -425,6 +425,39 @@ namespace
 			"frontLayerOpening applied the overlay cut to the selection itself");
 	}
 
+	// A one-cell-high Room whose height is overridden to below a neighbour's
+	// ceiling still opens into that neighbour using the effective height: the
+	// low Room's wall vanishes entirely while the taller neighbour keeps the
+	// wall above the low ceiling.
+	void checkLowRoomOpenWallUsesEffectiveHeight()
+	{
+		auto world = std::make_shared<core::World>("Low Room open wall", 12, 4);
+		auto room = world->addRoom("Low room", 0, 0, 0, 3, 1);
+		auto corridor = world->addCorridor(0u, 0u, 3u, 2u, 1u);
+		world->finishBuild();
+
+		world->pauseSimulation();
+		require(world->setRoomHeightScale(room, 0.4f), "Low Room height scale was refused");
+		world->removeLocationWall(room, 0, CORE_SIDE_RIGHT);
+		world->finishBuild();
+
+		auto const roomSector = world->getSector(room);
+		auto const corridorSector = world->getSector(corridor);
+		float const effectiveTop = 0.9f * 0.4f;
+		float const corridorTop = levelFloorY(*corridorSector, 1);
+		require(near(levelFloorY(*roomSector, 1), effectiveTop),
+			"The low Room's level height did not use its effective ceiling");
+
+		auto const roomSpans = wallSpansToDraw(world, *roomSector, 0, CORE_SIDE_RIGHT);
+		require(roomSpans.empty(),
+			"the low Room still drew wall beside its taller neighbour");
+
+		auto const corridorSpans = wallSpansToDraw(world, *corridorSector, 0, CORE_SIDE_LEFT);
+		require(corridorSpans.size() == 1 && near(corridorSpans[0].y0, effectiveTop)
+			&& near(corridorSpans[0].y1, corridorTop),
+			"the taller Corridor did not keep the wall above the low Room's ceiling");
+	}
+
 	// A BulkheadDoor end draws no plain wall line, and opening a wall then
 	// restoring it puts the whole level back.
 	void checkBulkheadAndRestore()
@@ -489,6 +522,7 @@ void runWallRenderSmokeChecks()
 		checkRoomIntoShorterCorridorKeepsItsWallAboveTheOpening();
 		checkUpperLevelKeepsItsWallAboveTheOpening();
 		checkBehindLayerDoesNotDrawAcrossAFrontLayerOpening();
+		checkLowRoomOpenWallUsesEffectiveHeight();
 		checkBulkheadAndRestore();
 	}
 	catch (std::exception const& error)

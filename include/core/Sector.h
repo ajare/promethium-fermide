@@ -145,6 +145,16 @@ namespace core
 
 		[[nodiscard]] float getTopLevelHeight() const;
 
+		// The top-level height actually used for geometry, rendering, and Agent
+		// clearance. A one-cell-high Room may override the standard height with a
+		// scale; every other Sector returns the authored top-level height unchanged.
+		[[nodiscard]] virtual float getEffectiveTopLevelHeight() const { return mTopLevelHeight; }
+
+		// Whether this Sector is a Room in the height-authoring sense: an
+		// occupiable Location that is neither a Corridor nor a Facade. Only Rooms
+		// may carry a height override.
+		[[nodiscard]] virtual bool isRoom() const { return false; }
+
 		[[nodiscard]] std::string const& getName() const;
 
 		[[nodiscard]] uint32_t getCapacity() const;

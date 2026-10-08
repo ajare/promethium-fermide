@@ -90,7 +90,7 @@ namespace core
 	{
 		if (levelIndex == getLevelsHigh() - 1)
 		{
-			return getTopLevelHeight();
+			return getEffectiveTopLevelHeight();
 		}
 		else
 		{

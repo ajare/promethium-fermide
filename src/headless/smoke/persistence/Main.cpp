@@ -73,6 +73,7 @@ namespace
 		{ "shuttleBrokenLifecycle", persistence::shuttleBrokenLifecycle },
 		{ "doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted", persistence::doorOpeningStyleIsAuthoredPersistedAndLegacyDefaulted },
 		{ "doorHeightPersistsAndIsLimitedToRooms", persistence::doorHeightPersistsAndIsLimitedToRooms },
+		{ "roomHeightScaleRoundTrips", persistence::roomHeightScaleRoundTrips },
 		{ "doorOpenLeftPersistsThroughEveryEditorPath", persistence::doorOpenLeftPersistsThroughEveryEditorPath },
 		{ "doorOpenRightPersistsThroughEveryEditorPath", persistence::doorOpenRightPersistsThroughEveryEditorPath },
 		{ "doorOpenApartPersistsThroughEveryEditorPath", persistence::doorOpenApartPersistsThroughEveryEditorPath },

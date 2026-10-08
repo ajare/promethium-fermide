@@ -27,3 +27,5 @@ namespace editor_smoke { void registerFurniture(std::vector<smoke::Check>& check
 	void registerMarkerActions(std::vector<smoke::Check>& checks); }
 
 namespace editor_smoke { void registerScaledDoors(std::vector<smoke::Check>& checks); }
+
+namespace editor_smoke { void registerRoomHeightScale(std::vector<smoke::Check>& checks); }

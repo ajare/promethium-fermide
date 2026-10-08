@@ -697,6 +697,7 @@ namespace core
 		mRememberedDeviceConditions.clear();
 		mOccupiedUsablePoint = {};
 		mPose = Pose::Standing;
+		mRetainedActionPose = false;
 		mRoutePlanningSequence = 0;
 		mRoutePlanningTotalTicks = 0;
 		mRoutePlanningRemainingTicks = 0;
@@ -1104,6 +1105,37 @@ namespace core
 		return getStandingHeight() * getPoseHeightScale();
 	}
 
+	Pose Agent::requiredPoseFor(Sector const& sector) const
+	{
+		if (!sector.isRoom()) return Pose::Standing;
+		auto const standing = getStandingHeight();
+		auto const ceiling = sector.getEffectiveTopLevelHeight();
+		if (standing <= ceiling + Door::ClearanceTolerance) return Pose::Standing;
+		if (standing * 0.6f <= ceiling + Door::ClearanceTolerance) return Pose::Crouching;
+		// The authored floor of the height scale (0.2 x the standard height) still
+		// clears the Crawling envelope of the tallest possible Agent, so Crawling
+		// is the effective floor rather than an unreachable "no fit" state.
+		return Pose::Crawling;
+	}
+
+	void Agent::syncPoseToSector()
+	{
+		if (mFurnitureUse || mRetainedActionPose) return; // Active use or a retained Action pose owns the pose.
+		auto const* sector = getSector();
+		// A same-layer Location walk commits its sector transfer at the far vertex,
+		// so the logical sector can lag the Agent's body while it crosses an open
+		// wall. Derive the pose from the sector under the body instead, so a low
+		// Room stops ducking/crawling as soon as the Agent physically stands in a
+		// taller one.
+		if (mWorld && sector)
+		{
+			auto const global = getGlobalPosition();
+			auto const physical = mWorld->getSectorAtPosition(sector->getLayerIndex(), global.x, global.y);
+			if (physical && isLocationLike(physical->getType())) sector = physical.get();
+		}
+		mPose = sector ? requiredPoseFor(*sector) : Pose::Standing;
+	}
+
 	Shape Agent::getBounds() const
 	{
 		auto pos = getGlobalPosition();
@@ -1223,17 +1255,24 @@ namespace core
 		if (authored && mWorld && pos.sector())
 			mWorld->validateAgentLocationPlacement(*pos.sector(), *this);
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
+		bool const changedSector = pos.sector() != mPosition.sector();
 		if (!authored && mWorld
-			&& (pos.sector() != mPosition.sector() || pos.global().distanceTo(mPosition.global()) > 0.f))
+			&& (changedSector || pos.global().distanceTo(mPosition.global()) > 0.f))
 		{
 			mWorld->finishFurnitureUse(mWorld->getAgentId(this));
 			mOccupiedUsablePoint = {};
-			// Ordinary locomotion stands, but admitted threshold motion owns its
-			// required Pose until physical completion (including same-Layer moves).
-			mPose = mTraversalTask && mTraversalTask->crawling ? Pose::Crawling : Pose::Standing;
 		}
-		if (pos.sector() != mPosition.sector()) mLocalDepth = 0;
+		if (changedSector) mLocalDepth = 0;
 		mPosition = pos;
+		// An admitted threshold crossing keeps its crawling Pose until the commit
+		// transfers sector membership; every other movement derives the Pose from
+		// the Sector's effective ceiling. This keeps a one-cell-high low Room's
+		// occupant ducked/crawled while it walks within the Room, and stands it
+		// back up the moment it enters a normal Sector.
+		if (mTraversalTask && mTraversalTask->crawling)
+			mPose = Pose::Crawling;
+		else
+			syncPoseToSector();
 		if (authored)
 		{
 			mResetPosition = pos;
@@ -1468,6 +1507,7 @@ namespace core
 		{
 			mOccupiedUsablePoint = {};
 			mPose = Pose::Standing;
+			mRetainedActionPose = false;
 		}
 		cancelTraversal();
 		mEarlyQueueApproachDirectionX = 0;
@@ -1886,9 +1926,10 @@ namespace core
 
 		auto const consumed = mTraversalTask->pathNodesConsumed;
 		for (uint32_t i = 0; i < consumed && mPath.path; ++i) nextPathNode();
-		// Automatic Crawling is crossing-scoped: stand immediately after full
-		// completion so the Agent continues its ordinary route Standing.
-		if (mTraversalTask && mTraversalTask->crawling) mPose = Pose::Standing;
+		// Automatic Crawling is crossing-scoped, but the destination Sector now
+		// owns the Pose: a normal Sector stands the Agent back up, while a
+		// one-cell-high low Room ducks or crawls it.
+		syncPoseToSector();
 	}
 
 	void Agent::considerTraversalReplan()
@@ -1923,7 +1964,7 @@ namespace core
 		if (request && (request.entity->getState() == TraversalRequestState::Committed
 			|| request.entity->getState() == TraversalRequestState::Cancelled))
 		{
-			if (mTraversalTask->crawling) mPose = Pose::Standing;
+			syncPoseToSector();
 			mWorld->releaseTraversal(mTraversalTask->request, mTraversalTask->permit);
 			mTraversalTask.reset();
 			syncStandingRouteObservation();
@@ -1956,7 +1997,7 @@ namespace core
 				mWorld->releaseTraversal(mQueuedTraversalTask->request, mQueuedTraversalTask->permit);
 			}
 		}
-		if (mTraversalTask && mTraversalTask->crawling) mPose = Pose::Standing;
+		syncPoseToSector();
 		mTraversalTask.reset();
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();

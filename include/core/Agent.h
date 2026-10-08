@@ -249,6 +249,11 @@ namespace core
 		int mLocalDepth{ 0 };
 		// Runtime bodily stance, deliberately absent from serialization.
 		Pose mPose{ Pose::Standing };
+		// True while mPose was authored by a Marker Action's set_pose effect and
+		// should be retained across ordinary locomotion until a new Path starts.
+		// Distinguishes a retained Action pose from the Sector-derived pose that
+		// syncPoseToSector() applies. Runtime-only, like the pose itself.
+		bool mRetainedActionPose{ false };
 		// Runtime-only claim; deletion releases it with the Agent.
 		MarkerId mOccupiedUsablePoint{};
 		struct FurnitureUse
@@ -781,6 +786,16 @@ namespace core
 		// departure prediction of getTraversalDoorClearanceExtent for the 0.3
 		// body-height Crawling pose. Excludes decorative offsets.
 		float getTraversalCrawlingDoorClearanceExtent(bool beginningMovement = false) const;
+
+		// The locomotion Pose this Agent must adopt while occupying `sector`:
+		// Standing when the sector's effective ceiling clears the standing height,
+		// otherwise Crouching when the 60% crouch fits, otherwise Crawling when
+		// the 30% crawl fits. Non-Room sectors always admit Standing.
+		Pose requiredPoseFor(Sector const& sector) const;
+
+		// Re-derives the locomotion Pose from the Agent's current Sector. Retains
+		// Sitting/Lying from an active Furniture use.
+		void syncPoseToSector();
 
 		Shape getBounds() const;
 
