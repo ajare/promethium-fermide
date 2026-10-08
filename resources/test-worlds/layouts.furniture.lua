@@ -1,10 +1,10 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
 local function sit(agent, world, marker)
-  world.set_pose("sitting")
+
   world.claim()
 end
 local function finish(agent, world, marker)
-  world.set_pose("standing")
+
   world.release()
 end
 return {
@@ -22,7 +22,7 @@ return {
         {key = "left", label = "Left seat", x = 0.25, y = 0},
         {key = "right", label = "Right seat", x = 1.625, y = 0},
       },
-      use = sit, finish_use = finish,
+      use_pose = "sitting", finish_use_pose = "standing", use = sit, finish_use = finish,
     },
     {
       key = "larger",

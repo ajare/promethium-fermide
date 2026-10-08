@@ -295,28 +295,31 @@ table.insert(chair.edges, {from='floorLeft', to='approachLeft'})
 table.insert(chair.edges, {from='floorRight', to='approachRight'})
 catalogue.definitions[4].edges[4].depthOffset = 1
 catalogue.definitions[4].edges[6].depthOffset = 1
+catalogue.definitions[1].use_pose = "sitting"
+catalogue.definitions[1].finish_use_pose = "standing"
 catalogue.definitions[1].use = function(agent, world, marker)
-  world.set_pose('sitting')
   world.claim()
 end
 catalogue.definitions[1].finish_use = function(agent, world, marker)
-  world.set_pose('standing')
+
   world.release()
 end
+catalogue.definitions[2].use_pose = "sitting"
+catalogue.definitions[2].finish_use_pose = "standing"
 catalogue.definitions[2].use = function(agent, world, marker)
-  world.set_pose('sitting')
   world.claim()
 end
 catalogue.definitions[2].finish_use = function(agent, world, marker)
-  world.set_pose('standing')
+
   world.release()
 end
+catalogue.definitions[3].use_pose = "lying"
+catalogue.definitions[3].finish_use_pose = "standing"
 catalogue.definitions[3].use = function(agent, world, marker)
-  world.set_pose('lying')
   world.claim()
 end
 catalogue.definitions[3].finish_use = function(agent, world, marker)
-  world.set_pose('standing')
+
   world.release()
 end
 return catalogue

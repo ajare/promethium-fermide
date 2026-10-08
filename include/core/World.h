@@ -2289,6 +2289,11 @@ namespace core
 		MovementCommandResult moveAgentToNamedMarker(AgentId agent, std::string const& markerName,
 			std::string_view action = IdleAction);
 		std::vector<std::string> availableAgentActions(MarkerId marker) const;
+		// Metadata-only target-space preflight, shared by editor, requests and arrival.
+		bool furnitureUseEligible(AgentId agent, MarkerId marker, std::string* diagnostic = nullptr) const;
+		// Phase-fit boundary also available to live finishing/edit preflight.
+		bool furniturePoseFits(AgentId agent, MarkerId marker, Pose pose, bool usingSupport,
+			std::string* diagnostic = nullptr) const;
 		std::shared_ptr<const ActionRegistry> const& actionRegistry() const { return mActionRegistry; }
 		std::string const& actionRegistryFilename() const { return mActionRegistryFilename; }
 		// Directory of the last successful save or load; empty for an unsaved World.

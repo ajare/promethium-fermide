@@ -1,14 +1,14 @@
 -- Native Lua catalogue; UUID, keys, artwork and routes are stable.
 local function sit(agent, world, marker)
-  world.set_pose("sitting")
+
   world.claim()
 end
 local function finish(agent, world, marker)
-  world.set_pose("standing")
+
   world.release()
 end
 local function lie(agent, world, marker)
-  world.set_pose("lying")
+
   world.claim()
 end
 return {
@@ -48,7 +48,7 @@ return {
         {from = "floorLeft", to = "approachLeft"},
         {from = "floorRight", to = "approachRight"},
       },
-      use = sit, finish_use = finish,
+      use_pose = "sitting", finish_use_pose = "standing", use = sit, finish_use = finish,
     },
     {
       key = "sofa",
@@ -82,7 +82,7 @@ return {
         {from = "backLeft", to = "backRight", depthOffset = 1},
         {from = "backRight", to = "right"},
       },
-      use = sit, finish_use = finish,
+      use_pose = "sitting", finish_use_pose = "standing", use = sit, finish_use = finish,
     },
     {
       key = "bed",
@@ -113,7 +113,7 @@ return {
         {from = "backLeft", to = "backRight", depthOffset = 1},
         {from = "backRight", to = "right"},
       },
-      use = lie, finish_use = finish,
+      use_pose = "lying", finish_use_pose = "standing", use = lie, finish_use = finish,
     },
     {
       key = "desk",

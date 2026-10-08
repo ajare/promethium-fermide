@@ -1,5 +1,6 @@
 #include "core/World.h"
 #include "core/Exceptions.h"
+#include "core/Agent.h"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -129,6 +130,13 @@ namespace core
 			return record.type == ConstructionType::Furniture && record.furnitureId == id;
 		});
 		if (found == records.end()) return reject("The Furniture instance no longer exists");
+		// Moving a used instance finishes at the Agent's current usable point,
+		// not at the candidate destination. Preflight must never run callbacks.
+		for (auto const& [agentId, agent] : mAgents.entries())
+			if (agent->mFurnitureUse && agent->mFurnitureUse->instance == id)
+				if (!furniturePoseFits(agentId, agent->mFurnitureUse->marker,
+					agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose,
+					false, diagnostic)) return false;
 		found->x = x; found->y = y; found->name = Marker::trimName(name); found->furnitureDepth = localDepth.value_or(found->furnitureDepth);
 		try
 		{
@@ -168,6 +176,11 @@ namespace core
 		if (!mSimulationPaused) return reject("Pause the simulation before deleting Furniture");
 		auto found = std::find_if(mFurniture.begin(), mFurniture.end(), [id](auto const& instance) { return instance.id == id; });
 		if (found == mFurniture.end()) return reject("The Furniture instance no longer exists");
+		for (auto const& [agentId, agent] : mAgents.entries())
+			if (agent->mFurnitureUse && agent->mFurnitureUse->instance == id)
+				if (!furniturePoseFits(agentId, agent->mFurnitureUse->marker,
+					agent->mFurnitureUse->catalogue->definition(agent->mFurnitureUse->definition)->finishUsePose,
+					false, diagnostic)) return false;
 		std::string references;
 		for (auto const& point : found->destinations)
 		{

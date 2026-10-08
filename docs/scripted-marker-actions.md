@@ -294,6 +294,16 @@ Final build evidence: Release `f4b84d4e7dec48fb89b861bd2dd12a15`, Debug
 
 ## Explicit Furniture use and finishing (#462)
 
+**#523 contract update:** use-enabled definitions require `use_pose` and
+`finish_use_pose`. The host, not the callbacks, stages these Poses and releases
+occupancy on finish. Furniture `set_pose` calls are errors (including caught or
+same-pose calls); general Marker Actions retain it. One production
+`World::furnitureUseEligible` query checks capability and target-space fit for both
+phases, supplies editor refusal reasons, rejects requests before movement and
+rechecks on arrival. Idle arrival is unaffected. Historical Standing-only cleanup
+and omitted-cleanup errors below are superseded; full lifecycle/edit protection
+is #524. See [current Furniture authoring](lua-furniture-catalogues.md).
+
 The immutable built-in `use-furniture` delegates to the selected owning Lua
 Furniture definition's `use(agent, world, marker)`. Paired `use`/`finish_use`
 functions derive availability; definitions with neither offer only Idle unless

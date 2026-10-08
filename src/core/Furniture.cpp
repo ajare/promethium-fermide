@@ -138,7 +138,16 @@ namespace core
 			if (!AgentTagRegistry::uuidIsValid(result->mUuid)) throw SerializationException("Invalid Furniture catalogue UUID");
 			readDefinitions(root, result->mDefinitions);
 			for (auto const& entry : root["definitions"])
-				result->mDefinitions.at(entry["key"].as<std::string>()).hasUse = static_cast<bool>(entry["use"]);
+			{
+				auto& definition = result->mDefinitions.at(entry["key"].as<std::string>());
+				definition.hasUse = static_cast<bool>(entry["use"]);
+				if (definition.hasUse)
+					for (auto pose : {Pose::Standing, Pose::Sitting, Pose::Lying, Pose::Crouching, Pose::Crawling})
+					{
+						if (entry["use_pose"].as<std::string>() == poseName(pose)) definition.usePose = pose;
+						if (entry["finish_use_pose"].as<std::string>() == poseName(pose)) definition.finishUsePose = pose;
+					}
+			}
 			return result;
 		}
 		catch (std::exception const& error)

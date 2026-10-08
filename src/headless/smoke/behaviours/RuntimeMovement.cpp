@@ -220,7 +220,12 @@ return {api_version=2, factory=function(configuration)
   end
   return {
     on_start=function(context)
-      assert(context.move_to(configuration.occupied, 'use-furniture').accepted)
+      assert(not context.move_to(configuration.occupied, 'use-furniture').accepted)
+      context.set_timer('alternative', 1)
+    end,
+    on_timer=function(name, context)
+      assert(name == 'alternative')
+      choose(context)
     end,
     on_route_lost=function(destination, reason, context, outcome)
       assert(destination == configuration.occupied and outcome.result == 'failed')
@@ -245,7 +250,8 @@ end}
 			{ "occupied", core::AgentBehaviourSchemaType::Marker },
 			{ "alternative", core::AgentBehaviourSchemaType::Marker }
 		});
-		// Both route-time exclusion and coincident arrival refusal are ordinary failures.
+		// Occupancy eligibility refuses before movement, including coincident targets;
+		// the behaviour can immediately choose another usable point.
 		for (float start : {0.5f, 3.5f})
 		{
 			core::World world("Behaviour Furniture outcomes", 12, 2);
@@ -294,7 +300,7 @@ end}
 					}
 				}
 			}
-			require(failures == 1 && successes == 1 && world.getAgentBehaviourRuntimeDiagnostics().empty()
+			require(failures == 0 && successes == 1 && world.getAgentBehaviourRuntimeDiagnostics().empty()
 				&& world.usablePointOccupant(left) == owner && world.usablePointOccupant(right) == chooser
 				&& world.lookupAgent(owner).entity->getPose() == core::Pose::Sitting
 				&& world.lookupAgent(chooser).entity->getPose() == core::Pose::Sitting,

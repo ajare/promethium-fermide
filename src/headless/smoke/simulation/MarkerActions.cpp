@@ -154,7 +154,7 @@ namespace
 			&& furnished->furniture()[0].marker == seat, "Valid layout reload lost Marker identity: " + diagnostic);
 		require(furnished->setMarkerActions(seat, {std::string(core::UseFurnitureAction)}), "Explicit use assignment refused");
 		auto accepted = furnished->furnitureCatalogue();
-		write(path, replace(changed, "use = use, finish_use = finish", ""));
+		write(path, replace(changed, "use_pose = \"sitting\", finish_use_pose = \"standing\", use = use, finish_use = finish", ""));
 		require(!furnished->reloadFurnitureCatalogue(path, &diagnostic) && !diagnostic.empty()
 			&& furnished->furnitureCatalogue() == accepted, "Reload invalidated authored Use furniture assignment");
 		require(furnished->setMarkerActions(seat, {}), "Explicit use clear refused");
@@ -163,7 +163,7 @@ namespace
 		furnished->pauseSimulation();
 		// Remove use without explicit assignment: pending requests cancel, not Idle.
 		require(furnished->moveAgentToMarker(core::AgentId{3}, seat, core::UseFurnitureAction).accepted(), "Invalidation request refused");
-		write(path, replace(changed, "use = use, finish_use = finish", ""));
+		write(path, replace(changed, "use_pose = \"sitting\", finish_use_pose = \"standing\", use = use, finish_use = finish", ""));
 		require(furnished->reloadFurnitureCatalogue(path, &diagnostic), diagnostic);
 		require(furnished->resumeSimulation() && furnished->advanceTicks(60), "Invalidation processing failed");
 		bool cancelled = false;
@@ -174,9 +174,9 @@ namespace
 		require(cancelled, "Reload did not explicitly cancel invalidated request");
 
 		// Old finishing failure keeps the old package installed, but always cleans claims/Pose.
-		for (auto const& finish : {std::string("error('old finishing failed')"), std::string("world.log('incomplete')")})
+		for (auto const& finish : {std::string("error('old finishing failed')"), std::string("error('incomplete')")})
 		{
-			auto failing = replace(source, "world.set_pose('standing')\n  world.release()", finish);
+			auto failing = replace(source, "world.release()", finish);
 			write(path, failing);
 			auto failureWorld = useFixture(path);
 			auto target = failureWorld->furniture()[0].marker;
@@ -188,6 +188,124 @@ namespace
 				&& failureWorld->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Standing,
 				"Finishing failure installed package or stranded user");
 			require(failureWorld->resumeSimulation() && !failureWorld->advanceTick(), "Finishing failure was suppressed");
+		}
+	}
+
+	core::SimulationEvent runAction(core::World&, core::AgentId, core::MarkerId, std::string const&);
+
+	void furniturePoseRequirements(smoke::Context const& context)
+	{
+		std::ifstream input(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
+		std::string source{std::istreambuf_iterator<char>(input), {}};
+		auto replace = [](std::string text, std::string const& from, std::string const& to)
+		{
+			auto at = text.find(from); require(at != std::string::npos, "Pose fixture substitution missing");
+			text.replace(at, from.size(), to); return text;
+		};
+		auto path = context.temporaryRoot() / "requirements.furniture.lua";
+		for (auto const& mutation : {std::pair{"use_pose = \"sitting\", ", ""},
+			std::pair{"finish_use_pose = \"standing\", ", ""},
+			std::pair{"use_pose = \"sitting\"", "use_pose = 'unknown'"},
+			std::pair{"use_pose = \"sitting\"", "use_pose = {}"},
+			std::pair{"finish_use = finish", "finish_use = false"}})
+		{
+			write(path, replace(source, mutation.first, mutation.second));
+			bool refused = false;
+			try { (void)core::FurnitureCatalogue::readFile(path); }
+			catch (std::exception const& error) { refused = std::string(error.what()).find("Furniture") != std::string::npos; }
+			require(refused, "Malformed Furniture posture contract accepted");
+		}
+		write(path, source);
+		core::World world("Target pose requirements", 16, 2);
+		auto origin = world.addRoom("Origin", 0, 0, 0, 8, 1);
+		auto target = world.addRoom("Target", 0, 0, 8, 8, 1);
+		world.attachFurnitureCatalogue(path.filename().string(), core::FurnitureCatalogue::readFile(path));
+		require(world.placeFurniture(target, "chair", 2, 0, "Chair"), "Requirement chair placement failed");
+		world.finishBuild();
+		auto human = world.createAgent("Human", origin, 0, 1.5f);
+		std::ifstream robotInput(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
+		std::string robotSource{std::istreambuf_iterator<char>(robotInput), {}};
+		std::string diagnostic;
+		require(world.attachAgentType("standing-robot.agent.lua", robotSource, &diagnostic), diagnostic);
+		auto robot = world.createAgent("StandingRobot", "Robot", origin, 0, 2.5f);
+		world.pauseSimulation();
+		auto seat = world.furniture()[0].marker;
+		require(world.furnitureUseEligible(human, seat, &diagnostic), diagnostic);
+		require(!world.furnitureUseEligible(robot, seat, &diagnostic) && diagnostic.find("sitting") != std::string::npos,
+			"Standing-only Robot offered chair use");
+		require(!world.moveAgentToMarker(robot, seat, core::UseFurnitureAction).accepted(), "Incompatible request began travel");
+		require(world.moveAgentToMarker(robot, seat).accepted(), "Incompatible use blocked Idle request");
+		require(world.setRoomHeightScale(target, .4f), "Target height refused");
+		require(!world.furnitureUseEligible(human, seat, &diagnostic) && diagnostic.find("finish") != std::string::npos,
+			"Remote eligibility used origin geometry or ignored finish fit");
+		require(!world.moveAgentToMarker(human, seat, core::UseFurnitureAction).accepted()
+			&& world.moveAgentToMarker(human, seat).accepted(), "Finish fit became an Idle routing obstacle");
+		require(world.setRoomHeightScale(target, .5f), "Target height restore failed");
+		require(world.furnitureUseEligible(human, seat), "Exact Standing finish fit refused");
+		require(world.setRoomHeightScale(target, .499995f)
+			&& world.furnitureUseEligible(human, seat), "Within-tolerance finish fit refused");
+		require(world.setRoomHeightScale(target, .49998f)
+			&& !world.furnitureUseEligible(human, seat), "Over-tolerance finish fit admitted");
+		// Physical support participates in use fit but is released for finish fit.
+		for (auto const& boundary : {std::pair{.63f, true}, std::pair{.630005f, true}, std::pair{.63002f, false}})
+		{
+			write(path, replace(source, "x=0.5,blocksPathing=false", "x=0.5,blocksPathing=false,supportElevation=" + std::to_string(boundary.first)));
+			auto supportedWorld = useFixture(path);
+			require(supportedWorld->furnitureUseEligible(core::AgentId{1}, supportedWorld->furniture()[0].marker) == boundary.second,
+				"Supported use fit did not apply shared tolerance");
+		}
+		// Arrival rechecks geometry/effective dimensions; stale acceptance publishes nothing.
+		write(path, source);
+		auto stale = useFixture(path);
+		auto staleSeat = stale->furniture()[0].marker;
+		require(stale->moveAgentToMarker(core::AgentId{1}, staleSeat, core::UseFurnitureAction).accepted(), "Stale setup refused");
+		require(stale->setRoomHeightScale(0, .4f), "Stale target height modification refused");
+		core::consumeLogMessages();
+		require(stale->resumeSimulation() && stale->advanceTicks(1800), "Stale eligibility became a script failure");
+		bool staleRefusal = false;
+		for (auto const& event : stale->consumeSimulationEvents())
+			staleRefusal |= event.type == core::SimulationEventType::ActionFailed && event.diagnostic.find("finish") != std::string::npos;
+		require(staleRefusal && !stale->usablePointOccupant(staleSeat), "Stale arrival published Furniture use");
+		for (auto const& log : core::consumeLogMessages()) require(!log.msg.starts_with("use:"), "Stale arrival ran callback");
+		// Both phases are capability requirements, even when use itself is supported.
+		write(path, replace(replace(source, "use_pose = \"sitting\"", "use_pose = 'standing'"),
+			"finish_use_pose = \"standing\"", "finish_use_pose = 'sitting'"));
+		auto finishWorld = useFixture(path);
+		require(finishWorld->attachAgentType("standing-robot.agent.lua", robotSource, &diagnostic), diagnostic);
+		auto finishRobot = finishWorld->createAgent("StandingRobot", "Finish Robot", 0, 0, 1.5f);
+		require(!finishWorld->furnitureUseEligible(finishRobot, finishWorld->furniture()[0].marker, &diagnostic)
+			&& diagnostic.find("sitting") != std::string::npos, "Unsupported finish capability ignored");
+		// Finish posture and release are host-owned, not inferred from callback effects.
+		write(path, replace(replace(source, "finish_use_pose = \"standing\"", "finish_use_pose = 'crouching'"),
+			"world.release()", "world.log('host release')"));
+		auto declaredFinish = useFixture(path);
+		auto declaredSeat = declaredFinish->furniture()[0].marker;
+		require(runAction(*declaredFinish, core::AgentId{1}, declaredSeat, std::string(core::UseFurnitureAction)).type
+			== core::SimulationEventType::DestinationReached, "Declared finish setup failed");
+		declaredFinish->pauseSimulation(); core::consumeLogMessages();
+		require(declaredFinish->canEditFurniture(declaredFinish->furniture()[0].id, 4, 0, "Moved", &diagnostic)
+			&& declaredFinish->canRemoveFurniture(declaredFinish->furniture()[0].id, &diagnostic), diagnostic);
+		require(declaredFinish->usablePointOccupant(declaredSeat) == core::AgentId{1}
+			&& declaredFinish->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Sitting,
+			"Edit preflight published declared finish effects");
+		for (auto const& log : core::consumeLogMessages()) require(log.msg != "host release", "Edit preflight executed callback");
+		require(runAction(*declaredFinish, core::AgentId{1}, declaredSeat, std::string(core::IdleAction)).type
+			== core::SimulationEventType::DestinationReached && !declaredFinish->usablePointOccupant(declaredSeat)
+			&& declaredFinish->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Crouching,
+			"Host substituted Standing or required callback release");
+		// Even caught same-pose calls violate the declarative contract and roll back.
+		for (auto body : {"world.set_pose('sitting')", "pcall(function() world.set_pose('sitting') end)"})
+		{
+			write(path, replace(source, "world.claim()", std::string("world.claim(); world.log('pose rollback'); ") + body));
+			auto failedWorld = useFixture(path);
+			auto marker = failedWorld->furniture()[0].marker;
+			core::consumeLogMessages();
+			auto event = runAction(*failedWorld, core::AgentId{1}, marker, std::string(core::UseFurnitureAction));
+			require(event.type == core::SimulationEventType::ActionFailed && event.diagnostic.find("set_pose") != std::string::npos
+				&& !failedWorld->usablePointOccupant(marker)
+				&& failedWorld->lookupAgent(core::AgentId{1}).entity->getPose() == core::Pose::Standing,
+				"Forbidden same-pose call leaked posture/occupancy");
+			for (auto const& log : core::consumeLogMessages()) require(log.msg != "pose rollback", "Forbidden pose call published logs");
 		}
 	}
 
@@ -402,14 +520,14 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			PoseCase{"crouching", core::Pose::Crouching, 0.6f},
 			PoseCase{"crawling", core::Pose::Crawling, 0.3f}})
 		{
-			// A Furniture use commits the new pose through the validated set_pose
+			// A Furniture use commits its declared pose through host staging
 			// vocabulary; its finish_use observes a.pose before restoring Standing.
 			auto catalogue = context.temporaryRoot() / (std::string("pose-") + test.name + ".furniture.lua");
 			write(catalogue, "return {api_version=1,uuid='" + uuid + "',definitions={{"
 				"key='pose',label='Pose',tiles={{x=0,y=0,imageSet='ObjectAtlas',image='chair'}},"
 				"usablePoints={{key='body',label='Body',x=0.5,blocksPathing=false}},"
-				"use=function(a,w,m) w.set_pose('" + std::string(test.name) + "'); w.claim(); w.log('use') end,"
-				"finish_use=function(a,w,m) assert(a.pose == '" + std::string(test.name) + "'); w.set_pose('standing'); w.release(); w.log('finish') end}}}");
+				"use_pose='" + std::string(test.name) + "',finish_use_pose='standing',use=function(a,w,m) w.claim(); w.log('use') end,"
+				"finish_use=function(a,w,m) assert(a.pose == '" + std::string(test.name) + "'); w.release(); w.log('finish') end}}}");
 			core::World world("Pose vocabulary", 8, 2);
 			auto room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.attachFurnitureCatalogue(catalogue.filename().string(), core::FurnitureCatalogue::readFile(catalogue));
@@ -555,7 +673,8 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		require(world->usablePointOccupant(chair) == owner && world->lookupAgent(owner).entity->getPose() == core::Pose::Sitting, "Pause/deactivation vacated seat");
 		world->pauseSimulation(); world->lookupAgent(owner).entity->setActive(true);
 		// Occupied destinations reject Idle and assigned custom Actions alike.
-		for (auto const& action : {std::string("idle"), second, use})
+		require(!world->moveAgentToMarker(other, chair, use).accepted(), "Occupied use was not refused before travel");
+		for (auto const& action : {std::string("idle"), second})
 		{
 			auto refused = runAction(*world, other, chair, action);
 			require(refused.type != core::SimulationEventType::DestinationReached
@@ -607,11 +726,11 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 	{
 		auto fixture = context.fixture("src/headless/smoke/fixtures/use.furniture.lua");
 		std::ifstream input(fixture); std::string source((std::istreambuf_iterator<char>(input)), {});
-		for (auto const& body : {"world.log('finish rollback'); world.set_pose('standing'); world.release(); error('finish broke')",
-			"while true do end", "local t={} while true do t[#t+1]=string.rep('x',10000) end", "world.log('finish rollback') -- omitted cleanup"})
+		for (auto const& body : {"world.log('finish rollback'); world.release(); error('finish broke')",
+			"while true do end", "local t={} while true do t[#t+1]=string.rep('x',10000) end", "world.log('finish rollback'); error('broken')"})
 		{
 			auto custom = source;
-			auto begin = custom.find("  world.set_pose('standing')");
+			auto begin = custom.find("  world.release()");
 			auto end = custom.find("\nend", begin);
 			custom.replace(begin, end-begin, body);
 			auto path = context.temporaryRoot() / "failure.furniture.lua"; write(path, custom);
@@ -667,7 +786,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 				{pointX, 0.f}, 0.25f, 0.05f, {binding});
 			std::ifstream input(context.fixture("src/headless/smoke/fixtures/use.furniture.lua"));
 			std::string source{std::istreambuf_iterator<char>(input), {}};
-			auto begin = source.find("  world.set_pose('standing')");
+			auto begin = source.find("  world.release()");
 			auto end = source.find("\nend", begin);
 			require(begin != std::string::npos && end != std::string::npos, "Finish device fixture substitution missing");
 			auto body = finishBody;
@@ -709,7 +828,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		// though departure already set the movement state, and completes without an
 		// ordinary refusal or a script-failure pause.
 		{
-			auto world = build("  world.set_pose('standing')\n  world.release()\n"
+			auto world = build("  world.release()\n"
 				"  world.request_device(__POINT__, 'set-sector-lights')\n  world.log('finish:' .. marker.name)", 3.5f);
 			depart(*world, core::AgentId{1}, world->furniture()[0].marker);
 			require(world->advanceTicks(100), "Finish device operation did not complete");
@@ -726,7 +845,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		// An out-of-reach device request is an ordinary refusal: it must stay a
 		// non-script failure so host cleanup stands and headless advancement continues.
 		{
-			auto world = build("  world.set_pose('standing')\n  world.release()\n"
+			auto world = build("  world.release()\n"
 				"  world.request_device(__POINT__, 'set-sector-lights')\n  world.log('finish:' .. marker.name)", 6.5f);
 			depart(*world, core::AgentId{1}, world->furniture()[0].marker);
 			bool refused = false;
@@ -878,11 +997,11 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 		// not only the effects of an ordinary custom Action.
 		std::ifstream input(fixture);
 		std::string original((std::istreambuf_iterator<char>(input)), {});
-		for (auto body : {"world.set_pose('sitting'); world.claim(); world.log('use rollback'); error('use broke')",
-			"world.set_pose('sitting'); world.claim(); while true do end"})
+		for (auto body : {"world.claim(); world.log('use rollback'); error('use broke')",
+			"world.claim(); while true do end"})
 		{
 			auto source = original;
-			auto begin = source.find("  world.set_pose('sitting')");
+			auto begin = source.find("  world.claim()");
 			auto end = source.find("\nend", begin);
 			source.replace(begin, end - begin, body);
 			auto path = context.temporaryRoot() / "use-atomicity.furniture.lua";
@@ -1199,7 +1318,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			auto at = text.find(from); require(at != std::string::npos, "Furniture substitution missing");
 			text.replace(at, from.size(), to); return text;
 		};
-		std::ofstream(furniture) << replace(source, "use = use, finish_use = finish", "");
+		std::ofstream(furniture) << replace(source, "use_pose = \"sitting\", finish_use_pose = \"standing\", use = use, finish_use = finish", "");
 		require(furnished->reloadFurnitureCatalogue(furniture, &diagnostic), "Furniture reload refused: " + diagnostic);
 		require(furnished->isModified(), "Clearing an authored request did not dirty the document");
 		auto useDocument = root / "authored-use.world.yaml";
@@ -1219,6 +1338,7 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 
 void registerMarkerActions(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"markerActions/furniturePoseRequirements", furniturePoseRequirements});
 	checks.push_back({"markerActions/reload", transactionalReload});
 	checks.push_back({"markerActions/authoredRequests", authoredRequests});
 	checks.push_back({"markerActions/registry", registryContracts});

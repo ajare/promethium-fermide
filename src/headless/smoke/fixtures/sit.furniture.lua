@@ -52,13 +52,15 @@ local catalogue = {
         }},
     }},
 }
+catalogue.definitions[1].use_pose = "sitting"
+catalogue.definitions[1].finish_use_pose = "standing"
 catalogue.definitions[1].use = function(agent, world, marker)
   if marker.usable_point == 'plain' then return end
-  world.set_pose('sitting')
+
   world.claim()
 end
 catalogue.definitions[1].finish_use = function(agent, world, marker)
-  world.set_pose('standing')
+
   world.release()
 end
 return catalogue

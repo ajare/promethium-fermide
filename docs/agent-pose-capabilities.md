@@ -1,8 +1,9 @@
 # Script-defined Agent poses and Furniture pose requirements
 
 Status: approved design; API v2 declarations/frozen capabilities (#521) and
-shared fit/selection/routing/movement (#522) implemented. Furniture and lifecycle
-integration remain pending in #523–#524. See [shared selection validation](agent-pose-selection-validation.md). This document specifies the complete agreed refactor, not completed
+shared fit/selection/routing/movement (#522), and declarative Furniture requirements
+and shared eligibility (#523) implemented. Full lifecycle/edit integration remains
+pending in #524. See [shared selection validation](agent-pose-selection-validation.md). This document specifies the complete agreed refactor, not completed
 integration semantics.
 See [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
 The current authoring contracts are documented in [Lua Agent types](lua-agent-types.md)

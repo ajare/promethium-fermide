@@ -101,6 +101,7 @@ namespace
 				auto original = *legacy->definition(key);
 				// Teaching catalogues add use to geometry-only regression seating.
 				original.hasUse = key == "chair" || key == "sofa" || key == "bed";
+				if (original.hasUse) original.usePose = key == "bed" ? core::Pose::Lying : core::Pose::Sitting;
 				require(original == definition, "Conversion changed artwork, geometry, keys, explicit routes or defaults: " + filename + "/" + key);
 				core::World world("Bundled " + key, 24, 3);
 				auto room = world.addRoom("Room", 0, 0, 0, 24, 2);

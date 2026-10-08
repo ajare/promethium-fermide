@@ -2,8 +2,10 @@
 #include "core/Agent.h"
 #include "core/Marker.h"
 #include "core/Log.h"
+#include "core/Sector.h"
 #include <algorithm>
 #include <set>
+#include <limits>
 
 namespace core
 {
@@ -136,6 +138,14 @@ namespace core
 						return reject("Marker " + std::to_string(marker.value) + " references unavailable Action " + action);
 			// Every lifecycle in this catalogue is affected, even if geometry is unchanged.
 			// Finish all users in stable Agent order, retaining the old package on error.
+			for (auto const& [id, agent] : mAgents.entries())
+				if (agent->mFurnitureUse && agent->mFurnitureUse->catalogue == mFurnitureCatalogue)
+				{
+					std::string reason;
+					if (!furniturePoseFits(id, agent->mFurnitureUse->marker,
+						mFurnitureCatalogue->definition(agent->mFurnitureUse->definition)->finishUsePose, false, &reason))
+						return reject(reason);
+				}
 			bool finishingFailed = false;
 			for (auto const& [id, agent] : mAgents.entries())
 				if (agent->mFurnitureUse && agent->mFurnitureUse->catalogue == mFurnitureCatalogue)
@@ -277,6 +287,41 @@ namespace core
 			&& std::find(found->second.begin(), found->second.end(), action) != found->second.end();
 	}
 
+	bool World::furniturePoseFits(AgentId id, MarkerId marker, Pose pose, bool usingSupport,
+		std::string* diagnostic) const
+	{
+		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		auto agent = mAgents.find(id);
+		auto instance = furnitureForMarker(marker);
+		if (!agent || !instance || !mFurnitureCatalogue) return reject("Unknown Agent or Furniture usable point");
+		if (!agent->supportsPose(pose)) return reject(std::string("Agent does not support Furniture pose ") + poseName(pose));
+		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
+		auto sector = mSectors.at(instance->sector);
+		float support = 0;
+		for (auto const& destination : instance->destinations)
+			if (destination.marker == marker)
+				for (auto const& point : definition->usablePoints)
+					if (point.key == destination.key && usingSupport) support = point.supportElevation;
+		auto clearance = sector->isRoom()
+			? sector->getLevelsHigh() - 1 + sector->getEffectiveTopLevelHeight() - instance->y
+			: std::numeric_limits<float>::infinity();
+		if (!agent->poseFits(pose, clearance, support))
+			return reject(std::string("Furniture ") + (usingSupport ? "use" : "finish") + " pose " + poseName(pose) + " does not fit target space");
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::furnitureUseEligible(AgentId id, MarkerId marker, std::string* diagnostic) const
+	{
+		auto reject = [&](std::string message) { if (diagnostic) *diagnostic = std::move(message); return false; };
+		if (!actionAvailable(marker, UseFurnitureAction)) return reject("Furniture definition has no use");
+		if (auto owner = usablePointOccupant(marker); owner && owner != id) return reject("Usable point is occupied by another Agent");
+		auto instance = furnitureForMarker(marker);
+		auto definition = mFurnitureCatalogue->definition(instance->definitionKey);
+		return furniturePoseFits(id, marker, definition->usePose, true, diagnostic)
+			&& furniturePoseFits(id, marker, definition->finishUsePose, false, diagnostic);
+	}
+
 	std::string World::agentActionDisplayName(std::string_view action) const
 	{
 		if (action == IdleAction) return "Idle";
@@ -295,7 +340,8 @@ namespace core
 		auto result = moveAgentToMarker(id, marker, action);
 		if (!result.accepted())
 		{
-			if (diagnostic) *diagnostic = "Marker movement request refused (Action unavailable or Agent not ready)";
+			if (diagnostic && (action != UseFurnitureAction || furnitureUseEligible(id, marker, diagnostic)))
+				*diagnostic = "Marker movement request refused (Action unavailable or Agent not ready)";
 			return false;
 		}
 		auto agent = mAgents.find(id);
@@ -332,11 +378,19 @@ namespace core
 			event.diagnostic = "Selected Action is no longer available";
 			return;
 		}
+		if (action == UseFurnitureAction && !furnitureUseEligible(agentId, markerId, &event.diagnostic))
+		{
+			event.type = SimulationEventType::ActionFailed;
+			return;
+		}
 		auto views = actionViews(agentId, markerId);
 		auto instance = furnitureForMarker(markerId);
 		auto result = action == UseFurnitureAction
 			? mFurnitureCatalogue->executeUse(instance->definitionKey, false, views)
 			: mActionRegistry->execute(action, views);
+		if (action == UseFurnitureAction && result.succeeded)
+			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose,
+				static_cast<int>(mFurnitureCatalogue->definition(instance->definitionKey)->usePose)});
 		applyActionResult(agentId, markerId, std::move(result), event);
 		if (action == UseFurnitureAction && event.type == SimulationEventType::DestinationReached)
 			agent->mFurnitureUse = Agent::FurnitureUse{markerId, instance->id, instance->definitionKey, mFurnitureCatalogue};
@@ -391,18 +445,23 @@ namespace core
 		event.selectedAction = UseFurnitureAction;
 		event.type = SimulationEventType::DestinationReached;
 		auto result = use.catalogue->executeUse(use.definition, true, actionViews(agentId, use.marker));
+		auto finishPose = use.catalogue->definition(use.definition)->finishUsePose;
+		if (result.succeeded)
+		{
+			result.effects.insert(result.effects.begin(), {ActionEffectType::Pose, static_cast<int>(finishPose)});
+			result.effects.push_back({ActionEffectType::Release});
+		}
 		applyActionResult(agentId, use.marker, std::move(result), event, true);
-		// Safety is host-owned, independent of callback success and staged effects.
-		agent->mPose = Pose::Standing;
-		agent->mRetainedActionPose = false;
+		// Lifecycle transaction/failure recovery is completed in #524.
+		agent->mPose = finishPose;
+		agent->mRetainedActionPose = finishPose != Pose::Standing;
 		agent->mOccupiedUsablePoint = {};
 		invalidateSimulationSnapshot();
 		if (event.type == SimulationEventType::ActionFailed)
 		{
-			// An ordinary refusal stays ordinary. The host has already restored
-			// Standing and released occupancy, and the incomplete-cleanup and Lua
-			// failure paths own the pause/headless-failure policy themselves; only
-			// those may escalate a failing finish_use into a script error.
+			// An ordinary refusal stays ordinary. The host has restored the declared
+			// finish Pose and released occupancy; Lua failures alone own the
+			// pause/headless-failure policy.
 			event.agent = mSimulationCoordinator.makeAgentSnapshot(agent);
 			mPendingMovementOutcomes.push_back(std::move(event));
 		}
@@ -445,7 +504,7 @@ namespace core
 				claim = markerId;
 				break;
 			case ActionEffectType::Release:
-				if (!isFurnitureMarker(markerId) || claim != markerId)
+				if (!isFurnitureMarker(markerId) || (claim != markerId && !(finishing && !claim)))
 				{ reject("Only the owning Agent may release this usable point"); return; }
 				claim = {};
 				break;
@@ -469,13 +528,15 @@ namespace core
 			}
 			}
 		}
-		if (finishing && (pose != Pose::Standing || claim))
+		if (poseAuthored || claim != agent->mOccupiedUsablePoint)
 		{
-			reject("Furniture finish_use omitted Standing/occupancy cleanup");
-			event.scriptFailure = ScriptExecutionFailure::ConversionError;
-			addLogMessage("Marker Action", 0, LogLevel::Error, event.diagnostic);
-			mActionExecutionFailed = true;
-			return; // incomplete finishing must not publish staged devices or logs
+			bool fits = isFurnitureMarker(markerId)
+				? furniturePoseFits(agentId, markerId, pose, static_cast<bool>(claim), &event.diagnostic)
+				: agent->poseFits(pose, agent->getSector()->isRoom()
+					? agent->getSector()->getPosition().y + agent->getSector()->getLevelsHigh() - 1
+						+ agent->getSector()->getEffectiveTopLevelHeight() - agent->getGlobalPosition().y
+					: std::numeric_limits<float>::infinity());
+			if (!fits) { event.type = SimulationEventType::ActionFailed; if (event.diagnostic.empty()) event.diagnostic = "Action pose is unsupported or does not fit"; return; }
 		}
 		// Committed requests retain the ordinary asynchronous device/traversal
 		// authorities; scripts never submit unvalidated raw device commands.

@@ -47,9 +47,8 @@ namespace
 		write(path, "return {api_version=1,uuid='" + std::string(uuid) + "',definitions={{"
 			"key='support',label='Support',tiles={{x=0,y=0,imageSet='ObjectAtlas',image='chair'}},"
 			"usablePoints={{key='body',label='Body',x=0.5,blocksPathing=false,supportElevation="
-			+ (supportLiteral.empty() ? std::to_string(support) : supportLiteral) + "}},use=function(a,w,m) w.set_pose('"
-			+ std::string(core::poseName(pose)) + "'); w.claim() end,"
-			"finish_use=function(a,w,m) w.set_pose('standing'); w.release() end}}}");
+			+ (supportLiteral.empty() ? std::to_string(support) : supportLiteral) + "}},use_pose='" + std::string(core::poseName(pose)) + "',finish_use_pose='standing',"
+			"use=function(a,w,m) w.claim() end,finish_use=function(a,w,m) w.release() end}}}");
 		return path;
 	}
 
@@ -120,8 +119,10 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		// not physical elevation, so both must have identical crossing outcomes.
 		if (!decorated && test.support != 0.f) continue;
 		core::World world(test.label, 6, 3);
-		auto front = world.addRoom("Front", 0, 1, 0, 6, 1);
-		auto back = world.addRoom("Back", 1, 1, 0, 6, 1);
+		// Keep the target Room taller than the diagnostic doorway so Furniture
+		// eligibility does not mask the Door-specific refusal being measured.
+		auto front = world.addRoom("Front", 0, 1, 0, 6, 2);
+		auto back = world.addRoom("Back", 1, 1, 0, 6, 2);
 		auto sector = reverse ? back : front;
 		core::World::CreateDoorOptions options;
 		if (test.opening == .9f) options.height = core::Door::Height::Tall;
@@ -320,8 +321,8 @@ void runCommittedDoorEnvelope(smoke::Context const& context)
 	for (bool reverse : {false, true})
 	{
 		core::World world("Committed envelope", 6, 2);
-		auto front = world.addRoom("Front", 0, 0, 0, 6, 1);
-		auto back = world.addRoom("Back", 1, 0, 0, 6, 1);
+		auto front = world.addRoom("Front", 0, 0, 0, 6, 2);
+		auto back = world.addRoom("Back", 1, 0, 0, 6, 2);
 		auto origin = reverse ? back : front;
 		core::World::CreateDoorOptions options;
 		if (change == 2) options.height = core::Door::Height::Tall;

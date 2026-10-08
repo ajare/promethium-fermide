@@ -25,7 +25,7 @@ bool commitAgentBehaviourClear(std::shared_ptr<core::World> const& world,
 // active becomes false on selection or dismissal. Idle remains an explicit choice.
 std::optional<std::string> renderAgentMovementActionPopup(
 	std::shared_ptr<const core::World> const& world, core::MarkerId marker,
-	bool openRequested, bool& active);
+	bool openRequested, bool& active, core::AgentId agent = {});
 bool commitAgentMarkerActionRequest(std::shared_ptr<core::World> const& world,
 	core::AgentId agent, core::MarkerId marker, std::string_view action, std::string& diagnostic);
 // Issues one editor movement request to a Marker through the seam that matches

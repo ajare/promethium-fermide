@@ -9,6 +9,7 @@
 #include <vector>
 #include "core/EntityId.h"
 #include "core/ActionRegistry.h"
+#include "core/Pose.h"
 
 namespace core
 {
@@ -51,7 +52,8 @@ namespace core
 		std::vector<FurnitureRoutingVertex> vertices;
 		std::vector<FurnitureRoutingEdge> edges;
 		bool sideRoutes{ false }; // replace the ordinary floor span
-		bool hasUse{ false }; // validated paired Lua callbacks
+		bool hasUse{ false }; // validated paired Lua callbacks and pose requirements
+		Pose usePose{ Pose::Standing }, finishUsePose{ Pose::Standing };
 		// Full artwork rectangle, including transparent pixels and layout gaps.
 		int minX{ 0 }, minY{ 0 }, maxX{ 0 }, maxY{ 0 };
 		bool operator==(FurnitureDefinition const&) const = default;

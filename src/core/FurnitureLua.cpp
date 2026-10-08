@@ -148,7 +148,7 @@ namespace core::script
 	{
 		fields(root, {"api_version", "uuid", "definitions"});
 		if (root["api_version"].as<int>() != 1) throw SerializationException("Furniture requires api_version = 1");
-		records(root["definitions"], {"key", "label", "tiles", "usablePoints", "sideRoutes", "vertices", "edges", "use", "finish_use"});
+		records(root["definitions"], {"key", "label", "tiles", "usablePoints", "sideRoutes", "vertices", "edges", "use", "finish_use", "use_pose", "finish_use_pose"});
 		if (root["definitions"].size() > 256) throw SerializationException("Too many Furniture definitions");
 		for (auto const& definition : root["definitions"])
 		{
@@ -163,6 +163,14 @@ namespace core::script
 			}
 			if (definition["edges"]) records(definition["edges"], {"from", "to", "depthOffset"});
 			bool use = static_cast<bool>(definition["use"]), finish = static_cast<bool>(definition["finish_use"]);
+			for (auto field : {"use_pose", "finish_use_pose"})
+			{
+				auto const& value = definition[field];
+				if (!use && value) throw SerializationException("No-use Furniture must omit pose declarations");
+				if (use && (value.kind != FurnitureValue::String || (value.text != "standing"
+					&& value.text != "sitting" && value.text != "lying" && value.text != "crouching" && value.text != "crawling")))
+					throw SerializationException(std::string("Furniture requires canonical ") + field + "; migrate callback set_pose to declarations");
+			}
 			if (use != finish || (use && (definition["use"].kind != FurnitureValue::Function
 				|| definition["finish_use"].kind != FurnitureValue::Function || definition["usablePoints"].size() == 0)))
 				throw SerializationException("Furniture use and finish_use must both be Lua functions, or both absent; use requires a usable point");

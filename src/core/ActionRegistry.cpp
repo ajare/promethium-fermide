@@ -24,6 +24,7 @@ namespace core
 			std::set<std::string> keys, names;
 			std::string key, name;
 			bool furniture{false}, finishing{false};
+			bool forbiddenPoseCall{false};
 		};
 
 		int log(lua_State* state)
@@ -46,6 +47,11 @@ namespace core
 			ActionEffect command{type};
 			if (type == ActionEffectType::Pose)
 			{
+				if (call->furniture)
+				{
+					call->forbiddenPoseCall = true;
+					return luaL_error(state, "Furniture callback set_pose is forbidden; declare use_pose and finish_use_pose");
+				}
 				size_t length{};
 				auto text = luaL_checklstring(state, 1, &length);
 				auto pose = std::string_view(text, length);
@@ -262,6 +268,8 @@ namespace core
 				lua_pushcfunction(state, invoke);
 				lua_pushlightuserdata(state, &invocation);
 				auto result = script::protectedCall(state, budget, 1, 0);
+				if (invocation.forbiddenPoseCall)
+					return { false, ScriptExecutionFailure::ConversionError, "Furniture callback set_pose is forbidden; declare use_pose and finish_use_pose", {}, {} };
 				if (result.diagnostic.size() > 2048) result.diagnostic.resize(2048);
 				return { result.succeeded, result.failure, std::move(result.diagnostic), {}, {} };
 			}

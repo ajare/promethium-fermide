@@ -477,7 +477,7 @@ bool applyAgentPathEdit(shared_ptr<core::World> const& world, core::Agent* agent
 }
 
 std::optional<string> renderAgentMovementActionPopup(shared_ptr<const core::World> const& world,
-	core::MarkerId marker, bool openRequested, bool& active)
+	core::MarkerId marker, bool openRequested, bool& active, core::AgentId agent)
 {
 	constexpr auto popup = "Choose destination Action";
 	if (openRequested && active) ImGui::OpenPopup(popup);
@@ -492,7 +492,14 @@ std::optional<string> renderAgentMovementActionPopup(shared_ptr<const core::Worl
 			for (auto const& action : options)
 			{
 				ImGui::PushID(action.c_str());
+				std::string reason;
+				bool eligible = action != core::UseFurnitureAction || !agent
+					|| world->furnitureUseEligible(agent, marker, &reason);
+				ImGui::BeginDisabled(!eligible);
 				if (ImGui::Selectable(world->agentActionDisplayName(action).c_str())) selected = action;
+				ImGui::EndDisabled();
+				if (!eligible && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("%s", reason.c_str());
 				ImGui::PopID();
 			}
 			ImGui::Separator();

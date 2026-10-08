@@ -122,12 +122,12 @@ namespace
 		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
 		bool choosingAction = true;
 		auto const popupHistory = gWorldDocumentHistory.undoCount();
-		renderAgentMovementActionPopup(world, seat, true, choosingAction);
+		renderAgentMovementActionPopup(world, seat, true, choosingAction, agent);
 		ImGui::End(); ImGui::Render();
 		ImGui::NewFrame(); ImGui::Begin("Furniture Action selection");
 		auto const popupLog = root / "popup.txt";
 		ImGui::LogToFile(-1, popupLog.string().c_str());
-		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction),
+		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction, agent),
 			"Opening the destination popup implicitly chose an Action");
 		ImGui::LogFinish();
 		std::ifstream popupInput(popupLog);
@@ -138,10 +138,17 @@ namespace
 		require(gWorldDocumentHistory.undoCount() == popupHistory,
 			"Opening the popup changed document history");
 		choosingAction = false;
-		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction) && !choosingAction,
+		require(!renderAgentMovementActionPopup(world, seat, false, choosingAction, agent) && !choosingAction,
 			"Cancelling the popup chose an Action");
 		ImGui::End(); ImGui::Render();
 		auto count = gWorldDocumentHistory.undoCount();
+		require(world->setRoomHeightScale(room, .4f), "Editor incompatible height refused");
+		require(!world->furnitureUseEligible(agent, seat, &diagnostic) && diagnostic.find("finish") != std::string::npos,
+			"Editor preflight missed impossible finish");
+		require(!commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
+			&& diagnostic.find("finish") != std::string::npos && gWorldDocumentHistory.undoCount() == count,
+			"Ineligible editor use started movement or added history");
+		require(world->setRoomHeightScale(room, 1.f), "Editor height restoration failed");
 		require(commitAgentMarkerActionRequest(world, agent, seat, core::UseFurnitureAction, diagnostic)
 			&& gWorldDocumentHistory.undoCount() == count + 1, "Editor use request missed history: " + diagnostic);
 		auto restore = [&](DocumentSnapshot const& snapshot)

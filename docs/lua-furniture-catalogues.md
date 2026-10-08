@@ -1,12 +1,10 @@
 # Lua Furniture catalogue authoring (#461)
 
-> **Approved follow-on design, not implemented:** Furniture will declare authoritative
-> `use_pose` and `finish_use_pose` requirements; the host will apply them, and
-> Furniture callbacks will no longer call `set_pose`. Agent eligibility will check
-> support and physical fit for both poses before use. See
+> Furniture declares authoritative `use_pose` and `finish_use_pose` requirements.
+> The host stages posture with callback effects; callback `set_pose` is a contract
+> error, even if caught or requesting the same pose. See
 > [Agent pose capabilities](agent-pose-capabilities.md) and
 > [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
-> The callback contract below describes the current implementation, not that refactor.
 
 This scripted-actions integration slice adds native `.furniture.lua` catalogues.
 Select one beside a saved World using **Select Furniture catalogue...**, then
@@ -58,9 +56,11 @@ owned Marker and does not imply Furniture use.
   have `key`, `x`, optional `y = 0`, `usablePoint` and `external`. Edges have
   `from/to` and optional integer `depthOffset`. `sideRoutes` requires explicit
   routes. Coincidence never creates private routing connections.
-- A definition may provide paired `use(agent, world, marker)` and
-  `finish_use(agent, world, marker)` Lua functions, or neither. Use requires at
-  least one usable point. Non-Lua functions and mutable captured values are
+- A use-enabled definition must provide paired `use(agent, world, marker)` and
+  `finish_use(agent, world, marker)` Lua functions and exactly one `use_pose` and
+  `finish_use_pose`, each a canonical lower-case `standing`, `sitting`, `lying`,
+  `crouching` or `crawling`. No-use definitions omit all four fields. Use requires
+  at least one usable point. There are no instance pose overrides. Non-Lua functions and mutable captured values are
   refused. Stateless captured Lua helper functions may be shared. The argument
   contract is the safe [Marker Action contract](scripted-marker-actions.md), not
   mutable domain bindings. No function overrides exist on instances.
@@ -77,8 +77,16 @@ Caught budget exhaustion still rejects the catalogue.
 **Use furniture** is derived automatically for each usable point whose definition
 provides the pair. Explicit requests invoke `use` after physical arrival; finish
 runs before departure or same-seat Action replacement. Default/explicit Idle does
-not use Furniture. The host commits staged Pose/claim effects atomically and
-ensures Standing/release cleanup even if finishing fails. See the
+not use Furniture. `World::furnitureUseEligible` checks both supported poses and
+physical fit at the selected target's Floor/Walkway in its Room, including declared
+support elevation during use and no support after finish. It never executes Lua.
+The editor disables incompatible use with a diagnostic; requests refuse before
+movement, and arrival rechecks. Idle and unrelated Actions remain available.
+The host commits the declared Pose with callback effects atomically and restores
+the declared finishing Pose and releases occupancy on finish. General Marker
+Actions retain validated `set_pose`; Furniture callbacks must remove it rather
+than rely on implicit migration. Full lifecycle/edit sequencing is tracked in #524.
+See the
 [Action workflow](scripted-marker-actions.md).
 
 ## Documents and reconciliation
@@ -101,6 +109,22 @@ Bundled catalogues (#465) and regression inputs/builders (#466) are native Lua;
 [final integration evidence](scripted-actions-integration.md).
 
 ## Verification
+
+### Declared poses and eligibility (#523)
+
+`markerActions/furniturePoseRequirements` covers malformed declarations, Human
+versus Standing-only Robot support, unsupported finish, remote target geometry,
+use support and finish-release fit at exact/tolerance boundaries, stale arrival,
+host-declared non-Standing finish, metadata-only edit preflight, and atomic
+forbidden `set_pose` (including caught calls). Existing Furniture, Door-clearance,
+editor history and real Lua behaviour checks exercise the migrated contract.
+
+Linux incremental Release default build passed. All 84 repository CTests were
+validated, excluding unchanged `willpower_` submodule tests; four initial
+migration/inventory failures passed focused recovery. Final affected Simulation,
+World, Editor, Persistence and Behaviour functional/contract checks passed (6/6).
+`git diff --check` passed. Full lifecycle/edit transactions remain #524.
+
 
 Public World/document check `furniture/luaObjects` exercises real Lua loading,
 placement refusal, desk movement on explicit side routes, deferred callback

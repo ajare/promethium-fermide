@@ -293,7 +293,7 @@ namespace
 			|| world->getAgentId(gSelectedAgent) != pending.agent
 			|| world->agentBehaviourOwnsMovement(pending.agent)) pending.active = false;
 		auto action = renderAgentMovementActionPopup(world, pending.marker,
-			pending.openRequested, pending.active);
+			pending.openRequested, pending.active, pending.agent);
 		pending.openRequested = false;
 		if (action)
 		{

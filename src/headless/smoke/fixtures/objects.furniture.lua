@@ -1,10 +1,10 @@
 -- Stable integration fixture, independent of editable teaching catalogues.
 local function sit(agent, world, marker)
-  world.set_pose("sitting")
+
   world.claim()
 end
 local function stand(agent, world, marker)
-  world.set_pose("standing")
+
   world.release()
 end
 return {
@@ -40,7 +40,7 @@ return {
       key = "chair", label = "Chair",
       tiles = {{x = 0, y = 0, imageSet = "ObjectAtlas", image = "chair"}},
       usablePoints = {{key = "seat", label = "Seat", x = 0.5}},
-      use = sit, finish_use = stand
+      use_pose = "sitting", finish_use_pose = "standing", use = sit, finish_use = stand
     },
     {
       key = "table", label = "Table without destinations",
