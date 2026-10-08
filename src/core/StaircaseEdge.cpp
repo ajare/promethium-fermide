@@ -117,7 +117,8 @@ namespace core
 			? (ascending ? context.agent->getPhysicalBaseline().stairAscentSpeed
 				: context.agent->getPhysicalBaseline().stairDescentSpeed)
 			// Agent-less editor previews retain the Human-compatible baseline.
-			: (ascending ? 0.35f : 0.45f);
+			: (ascending ? Agent::physicalBaselineForType("Human").stairAscentSpeed
+				: Agent::physicalBaselineForType("Human").stairDescentSpeed);
 		auto const speed = typeSpeed * context.profile.stairSpeedModifier;
 		facts.feasible = true;
 		facts.components.motionSeconds = getLength() / speed;

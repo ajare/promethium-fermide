@@ -436,10 +436,11 @@ namespace
 				profile.waitingAversion = extreme ? 3 : 0.5f;
 				core::MobilityProfile mobility;
 				mobility.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+				auto const& physical = core::Agent::physicalBaselineForType("Human");
 				core::RouteDecisionContext context{ agent, profile, {},
 					observedSector < world->getNumSectors() ? world->getSector(observedSector).get() : nullptr,
-					CORE_AGENT_BASE_WALK_SPEED * profile.walkSpeedModifier, world.get(),
-					CORE_AGENT_BASE_CLIMB_SPEED * profile.ladderSpeedModifier, fallback, 12345, 7, mobility };
+					physical.walkSpeed * profile.walkSpeedModifier, world.get(),
+					physical.climbSpeed * profile.ladderSpeedModifier, fallback, 12345, 7, mobility };
 				workspace.beginRouteDecision(*graph, context);
 				checkDemandCosts(workspace, eagerCosts(*graph, context));
 				if (!fallback)
@@ -615,8 +616,9 @@ namespace
 			profile.waitingAversion = 0.5f;
 			profile.routeFamiliarity = 1;
 			require(world.setAgentIndividualWalkSpeedModifier(id, speed), "Could not set reference Walk speed");
+			auto const& physical = agent->getPhysicalBaseline();
 			core::RouteDecisionContext context{ agent, profile, {}, agent->getSector(),
-				CORE_AGENT_BASE_WALK_SPEED * speed, &world, CORE_AGENT_BASE_CLIMB_SPEED * 1.5f };
+				physical.walkSpeed * speed, &world, physical.climbSpeed * 1.5f };
 			workspace.captureRouteCosts(*graph, context);
 			for (uint32_t source = 0; source < count; ++source)
 			{

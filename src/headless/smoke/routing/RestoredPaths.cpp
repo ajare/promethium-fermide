@@ -59,8 +59,8 @@ namespace
 		auto profile = core::RouteChoicePolicy{}.baselineProfile;
 		core::RouteDecisionContext const context{ agent, profile, {},
 			agent ? agent->getSector() : nullptr,
-			agent ? agent->getWalkSpeed() : CORE_AGENT_BASE_WALK_SPEED,
-			nullptr, agent ? agent->getClimbSpeed() : CORE_AGENT_BASE_CLIMB_SPEED,
+			agent ? agent->getWalkSpeed() : core::Agent::physicalBaselineForType("Human").walkSpeed,
+			nullptr, agent ? agent->getClimbSpeed() : core::Agent::physicalBaselineForType("Human").climbSpeed,
 			true, 0, 0, agent ? std::optional{ agent->getEffectiveMobilityProfile().value }
 				: std::optional<core::MobilityProfile>{} };
 		unsigned count = 0;

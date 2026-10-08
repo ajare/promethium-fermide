@@ -625,9 +625,10 @@ namespace persistence
 			? edge->getVertex(0) : edge->getVertex(1);
 		auto high = low == edge->getVertex(0) ? edge->getVertex(1) : edge->getVertex(0);
 		auto const& routePolicy = world.getRouteChoicePolicy();
+		auto const& humanPhysical = core::Agent::physicalBaselineForType("Human");
 		core::RouteDecisionContext const routeContext{ nullptr, routePolicy.baselineProfile,
-			routePolicy, nullptr, CORE_AGENT_BASE_WALK_SPEED, &world,
-			CORE_AGENT_BASE_CLIMB_SPEED };
+			routePolicy, nullptr, humanPhysical.walkSpeed, &world,
+			humanPhysical.climbSpeed };
 		auto const upwardFacts = edge->getDirectedTraversalFacts(high, routeContext);
 		auto const downwardFacts = edge->getDirectedTraversalFacts(low, routeContext);
 		require(edge->isTraversable(high, nullptr) && !edge->isTraversable(low, nullptr)

@@ -438,8 +438,9 @@ void theCanvasDropTargetsAcceptAFacade()
 		&& facadeTarget.sector->getIndex() == facadeIndex,
 		"The pegman drop resolved to something other than the Facade");
 	require(facadeTarget.levelOffset == 0, "The pegman drop landed on the wrong level");
-	require(facadeTarget.localX >= CORE_AGENT_MAX_WIDTH * 0.5f
-		&& facadeTarget.localX <= facadeTarget.sector->getSize().x - CORE_AGENT_MAX_WIDTH * 0.5f,
+	auto const humanWidth = core::Agent::physicalBaselineForType("Human").width;
+	require(facadeTarget.localX >= humanWidth * 0.5f
+		&& facadeTarget.localX <= facadeTarget.sector->getSize().x - humanWidth * 0.5f,
 		"The pegman drop landed outside the Facade's Agent band");
 
 	// A selected Agent drag-moves into the Facade.

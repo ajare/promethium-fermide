@@ -429,7 +429,8 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			require(agent->getPose() == test.pose && world.usablePointOccupant(marker) == id,
 				"Use did not pose/claim: " + std::string(test.name));
 			require(near(agent->getHeight(), standingHeight * test.scale)
-				&& near(agent->getWidth(), CORE_AGENT_MAX_WIDTH), "Wrong effective posed height for " + std::string(test.name));
+				&& near(agent->getWidth(), agent->getPhysicalBaseline().width),
+				"Wrong effective posed height for " + std::string(test.name));
 			world.consumeSimulationEvents();
 			require(world.moveAgentToNamedMarker(id, "Away").accepted(), "Vocabulary departure refused");
 			bool finished = false;

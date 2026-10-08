@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scale bundled Furniture artwork to human proportions (requires Pillow).
 
-The default Agent is 0.45 World units tall (CORE_AGENT_MAX_HEIGHT), or 72
+A Human is 0.45 World units tall, or 72
 pixels at 160 pixels/World unit. Chair/sofa backs are about 61%/47% of
 that height; the desk surface is about 44%. Seats are roughly 25%.
 Keep full 64x160 Image-set cells and catalogue topology unchanged.

@@ -26,11 +26,11 @@ namespace
 			&& std::abs(human->getBounds().getSize().x - preview.x) < 0.000001f
 			&& std::abs(human->getBounds().getSize().y - preview.y) < 0.000001f,
 			"Uncommitted Human dimensions disagreed with World bounds");
-		smoke::require(physical.width == CORE_AGENT_MAX_WIDTH
-			&& physical.standingHeight == CORE_AGENT_MAX_HEIGHT
-			&& physical.walkSpeed == CORE_AGENT_BASE_WALK_SPEED
-			&& physical.climbSpeed == CORE_AGENT_BASE_CLIMB_SPEED
-			&& physical.reachDistance == CORE_AGENT_REACH_DIST
+		smoke::require(physical.width == 0.4f
+			&& physical.standingHeight == 0.45f
+			&& physical.walkSpeed == 0.5f
+			&& physical.climbSpeed == 0.25f
+			&& physical.reachDistance == 0.25f
 			&& physical.stairAscentSpeed == 0.35f && physical.stairDescentSpeed == 0.45f
 			&& physical.sittingHeightRatio == 0.6f && physical.crouchingHeightRatio == 0.6f
 			&& physical.crawlingHeightRatio == 0.3f && physical.crawlingSpeedRatio == 0.5f,

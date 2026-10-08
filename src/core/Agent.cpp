@@ -139,10 +139,16 @@ namespace core
 		throw SerializationException("Unsupported Agent type '" + type + "'");
 	}
 
+	AgentPhysicalBaseline const& Agent::physicalBaselineForType(string_view type)
+	{
+		if (type == "Human") return Human::physicalBaseline();
+		throw SerializationException("Unsupported Agent type '" + string(type) + "'");
+	}
+
 	Vector2 Agent::placementDimensions(string const& type, float heightModifier)
 	{
-		auto const preview = create(type, "");
-		return { preview->getWidth(), preview->getPhysicalBaseline().standingHeight * heightModifier };
+		auto const& physical = physicalBaselineForType(type);
+		return { physical.width, physical.standingHeight * heightModifier };
 	}
 
 	Agent::Agent(string const& name)

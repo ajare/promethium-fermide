@@ -109,7 +109,7 @@ namespace core
 		auto const rise = getDirectedRise(*targetVertex);
 		auto const distance = getLength();
 		auto const speed = context.climbSpeed > 0.0f
-			? context.climbSpeed : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED);
+			? context.climbSpeed : Agent::physicalBaselineForType("Human").climbSpeed;
 		facts.feasible = true;
 		auto& c = facts.components;
 		c.motionSeconds = distance == 0.0f

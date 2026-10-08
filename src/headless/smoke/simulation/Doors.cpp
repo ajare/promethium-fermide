@@ -292,7 +292,7 @@ namespace
 				return world.lookupAgent(id).entity->getSector() == world.getSector(1).get();
 			})
 			&& world.lookupInteractionPoint(created.controls[0].interactionPoint).entity->getReach()
-				== CORE_AGENT_MAX_HEIGHT * 0.4f;
+				== core::Agent::physicalBaselineForType("Human").standingHeight * 0.4f;
 	}
 
 	bool remoteDoorUsesOnePhysicalOperatorAndSharedOperation()

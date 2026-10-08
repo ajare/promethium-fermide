@@ -263,14 +263,12 @@ namespace
 		require(world->assignAgentTag(fastId, fastTag, &diagnostic), diagnostic);
 		auto* slow = world->lookupAgent(slowId).entity;
 		auto* fast = world->lookupAgent(fastId).entity;
-		require(std::abs(slow->getWalkSpeed()
-			- static_cast<float>(CORE_AGENT_BASE_WALK_SPEED) * 0.8f) < 0.00001f
-			&& std::abs(fast->getWalkSpeed()
-				- static_cast<float>(CORE_AGENT_BASE_WALK_SPEED) * 1.2f) < 0.00001f,
+		auto const& physical = slow->getPhysicalBaseline();
+		require(std::abs(slow->getWalkSpeed() - physical.walkSpeed * 0.8f) < 0.00001f
+			&& std::abs(fast->getWalkSpeed() - physical.walkSpeed * 1.2f) < 0.00001f,
 			"Base walk speed did not use the sampled modifier");
 		require(std::abs(slow->getClimbSpeed() - fast->getClimbSpeed()) < 0.000001f
-			&& std::abs(slow->getClimbSpeed()
-				- static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED)) < 0.000001f,
+			&& std::abs(slow->getClimbSpeed() - physical.climbSpeed) < 0.000001f,
 			"Walk speed modifiers changed climb speed");
 
 		auto const target = world->getGraph()->getVertexByIdentifier(targetIdentifier);

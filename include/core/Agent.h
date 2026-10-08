@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <bitset>
 #include <cstdint>
 #include <memory>
@@ -614,6 +615,9 @@ namespace core
 		virtual char const* getTypeName() const = 0;
 		virtual AgentPhysicalBaseline const& getPhysicalBaseline() const = 0;
 		static std::unique_ptr<Agent> create(std::string const& type, std::string const& name);
+		// Resolves a built-in type's physical baseline where no individual Agent
+		// exists, such as an editor preview or agent-less route calculation.
+		static AgentPhysicalBaseline const& physicalBaselineForType(std::string_view type);
 		// Standing dimensions for editor previews before World ownership. Height
 		// is the already-resolved property modifier, not a Pose or resource size.
 		static Vector2 placementDimensions(std::string const& type, float heightModifier = 1.0f);

@@ -62,17 +62,6 @@ namespace core
 	}
 }
 
-//
-// Agents
-//
-// Temporary compatibility constants for consumers migrated after #494. Agent
-// types own physical baselines; these remain only for compatibility callers.
-#define CORE_AGENT_BASE_WALK_SPEED					0.5f
-#define CORE_AGENT_BASE_CLIMB_SPEED					0.25f
-#define CORE_AGENT_MAX_HEIGHT						(CORE_DOOR_HEIGHT - 0.05f)
-#define CORE_AGENT_MAX_WIDTH						0.4f
-#define CORE_AGENT_REACH_DIST						0.25f
-
 // Fixed shared-resource compatibility geometry. These retain the historical
 // Human-sized slots, but are resource layout constraints, not observations of
 // an individual Agent. Mixed-size queue and transport packing is deferred.

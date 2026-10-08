@@ -1,5 +1,6 @@
 #include "core/RouteTraversalInputs.h"
 #include "core/Defines.h"
+#include "core/Agent.h"
 #include "core/MobilityProfile.h"
 #include "core/World.h"
 
@@ -79,7 +80,8 @@ namespace core
 					? (rise > 0 ? context.agent->getPhysicalBaseline().stairAscentSpeed
 						: context.agent->getPhysicalBaseline().stairDescentSpeed)
 					// Agent-less editor previews retain the Human-compatible baseline.
-					: (rise > 0 ? 0.35f : 0.45f);
+					: (rise > 0 ? Agent::physicalBaselineForType("Human").stairAscentSpeed
+						: Agent::physicalBaselineForType("Human").stairDescentSpeed);
 				c.motionSeconds = length / (typeSpeed * profile.stairSpeedModifier);
 				c.physicalEffortUnits = std::abs(rise) * (rise > 0 ? p.stairAscentEffortPerRise : p.stairDescentEffortPerRise);
 				c.interactionUnits = std::abs(rise) * p.stairInteractionPerFlight;
@@ -88,7 +90,8 @@ namespace core
 			break;
 		case EdgeType::Ladder:
 			c.motionSeconds = length == 0 ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-				: length / (context.climbSpeed > 0 ? context.climbSpeed : static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED));
+				: length / (context.climbSpeed > 0 ? context.climbSpeed
+					: Agent::physicalBaselineForType("Human").climbSpeed);
 			c.physicalEffortUnits = length * (rise > 0 ? p.ladderAscentEffortPerUnit : p.ladderDescentEffortPerUnit);
 			c.interactionUnits = p.ladderMountDismountInteraction;
 			c.riskUnits = length * p.ladderRiskPerUnit;

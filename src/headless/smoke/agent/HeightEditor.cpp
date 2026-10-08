@@ -209,16 +209,17 @@ namespace
 		auto* shortAgent = world->lookupAgent(shortId).entity;
 		auto* tallAgent = world->lookupAgent(tallId).entity;
 
-		require(std::abs(shortAgent->getHeight() - CORE_AGENT_MAX_HEIGHT * 0.7f)
-			< 0.000001f && std::abs(tallAgent->getHeight() - CORE_AGENT_MAX_HEIGHT)
+		auto const& physical = shortAgent->getPhysicalBaseline();
+		require(std::abs(shortAgent->getHeight() - physical.standingHeight * 0.7f)
+			< 0.000001f && std::abs(tallAgent->getHeight() - physical.standingHeight)
 			< 0.000001f,
 			"Agent height did not use the sampled Height modifier");
 		auto const shortBounds = shortAgent->getBounds();
 		auto const tallBounds = tallAgent->getBounds();
 		require(std::abs(shortBounds.getSize().y - shortAgent->getHeight()) < 0.000001f
 			&& std::abs(tallBounds.getSize().y - tallAgent->getHeight()) < 0.000001f
-			&& std::abs(shortBounds.getSize().x - CORE_AGENT_MAX_WIDTH) < 0.000001f
-			&& std::abs(tallBounds.getSize().x - CORE_AGENT_MAX_WIDTH) < 0.000001f,
+			&& std::abs(shortBounds.getSize().x - physical.width) < 0.000001f
+			&& std::abs(tallBounds.getSize().x - physical.width) < 0.000001f,
 			"Height changed Agent width or failed to change visual bounds");
 		require(std::abs(shortAgent->getWidth() - tallAgent->getWidth()) < 0.000001f
 			&& std::abs(shortAgent->getWalkSpeed() - tallAgent->getWalkSpeed()) < 0.000001f

@@ -294,7 +294,9 @@ namespace
 			for (auto height : { core::Door::Height::Regular, core::Door::Height::Tall })
 			{
 				door->setHeight(height);
-				require(door->admitsStandingHeight(CORE_AGENT_MAX_HEIGHT, 1.0f), "Default standing Agent rejected");
+				require(door->admitsStandingHeight(
+					core::Agent::physicalBaselineForType("Human").standingHeight, 1.0f),
+					"Default standing Agent rejected");
 				auto const feet = door->getPosition().y + core::Door::effectiveHeight(height) - agent->getStandingHeight();
 				require(door->admitsStandingHeight(agent->getStandingHeight(), feet)
 					&& door->admitsStandingHeight(agent->getStandingHeight(), feet + core::Door::StandingClearanceTolerance * 0.5f)
