@@ -72,7 +72,7 @@ namespace
 			diagnostic = std::move(reason);
 			return false;
 		};
-		if (payload.type != "Human")
+		if (payload.type.empty() || !core::agentTypeIdIsValid(payload.type))
 			return reject("Unsupported Agent type '" + payload.type + "'");
 		if (payload.individualStairSpeedModifier
 			&& !core::agentStairSpeedModifierRangeIsValid(
@@ -533,8 +533,25 @@ namespace
 
 core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload)
 {
-	return core::Agent::placementDimensions(payload.type,
-		payload.heightModifierSample ? payload.heightModifierSample->value : 1.0f);
+	auto const heightModifier = payload.heightModifierSample
+		? payload.heightModifierSample->value : 1.0f;
+	// Resolve the type's frozen baseline so the preview agrees with placement.
+	// A legacy payload without a resource reference is the bundled Human; an
+	// unresolvable reference degrades to Human dimensions because the preview
+	// is non-committal and the actual placement will refuse with a diagnostic.
+	std::optional<core::AgentPhysicalBaseline> baseline;
+	if (payload.resource.empty())
+	{
+		if (payload.type == "Human") baseline = core::bundledHumanBaseline();
+	}
+	else
+	{
+		auto const definition = core::resolveAgentTypeResource(payload.resource);
+		if (definition) baseline = core::agentTypeDefinitionBaseline(*definition);
+	}
+	if (!baseline)
+		return core::Agent::placementDimensions("Human", heightModifier);
+	return { baseline->width, baseline->standingHeight * heightModifier };
 }
 
 AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
@@ -546,7 +563,8 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	auto const lookup = world.lookupAgent(agent);
 	if (!lookup) return payload;
 
-	payload.type = lookup.entity->getTypeName();
+	payload.type = lookup.entity->getTypeId();
+	payload.resource = lookup.entity->getTypeResourceName();
 	payload.flags = lookup.entity->getFlags();
 	payload.active = lookup.entity->isActive();
 	payload.agentTags = lookup.entity->getAgentTagIds();
@@ -646,8 +664,10 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 		<< YAML::Key << "type" << YAML::Value << "Agent"
 		<< YAML::Key << "object" << YAML::Value << YAML::BeginMap
 		<< YAML::Key << "name" << YAML::Value << payload.name
-		<< YAML::Key << "type" << YAML::Value << payload.type
-		<< YAML::Key << "flags" << YAML::Value << payload.flags;
+		<< YAML::Key << "type" << YAML::Value << payload.type;
+	if (!payload.resource.empty())
+		output << YAML::Key << "resource" << YAML::Value << payload.resource;
+	output << YAML::Key << "flags" << YAML::Value << payload.flags;
 	// No group, no key: the payload says nothing about a classification
 	// rather than saying "the empty one".
 	if (payload.group) output << YAML::Key << "group" << YAML::Value << *payload.group;
@@ -801,9 +821,19 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		diagnostic = "Clipboard Agent type has an invalid value";
 		return false;
 	}
-	if (payload.type != "Human")
+	if (payload.type.empty() || !core::agentTypeIdIsValid(payload.type))
 	{
 		diagnostic = "Unsupported Agent type '" + payload.type + "'";
+		return false;
+	}
+	try
+	{
+		payload.resource = object["resource"]
+			? object["resource"].as<string>() : std::string{};
+	}
+	catch (exception const&)
+	{
+		diagnostic = "Clipboard Agent type resource has an invalid value";
 		return false;
 	}
 
@@ -1444,18 +1474,33 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	if (!world->canPlaceAgentInLocation(sector->getIndex(), payload.directAccessGrants,
 		payload.permissionSets, &diagnostic)) return false;
 
-	// Resolve the managed Agent type resource (ADR 0010/0019) and use its
-	// stable type ID for the script-backed World construction path. A missing,
-	// unreadable, or mismatched resource refuses placement before any write.
-	auto const resolved = core::resolveAgentTypeResource("human.agent.lua");
+	// Resolve the selected Agent type resource (ADR 0010/0019) and use its
+	// stable type ID for the script-backed World construction path. A legacy
+	// payload without a resource reference resolves to the bundled Human; an
+	// explicit missing, unreadable, invalid, or mismatched resource refuses
+	// placement before any write.
+	std::string resourceName = payload.resource;
+	if (resourceName.empty())
+	{
+		if (payload.type != "Human")
+		{
+			diagnostic = "Agent type '" + payload.type
+				+ "' requires an explicit resource reference";
+			return false;
+		}
+		resourceName = "human.agent.lua";
+	}
+	auto const resolved = core::resolveAgentTypeResource(resourceName);
 	if (!resolved)
 	{
-		diagnostic = "The bundled Human Agent type resource is unavailable";
+		diagnostic = "The Agent type resource '" + resourceName + "' is unavailable";
 		return false;
 	}
 	if (resolved->typeId != payload.type)
 	{
-		diagnostic = "The bundled Human Agent type resource declares an unexpected type ID";
+		diagnostic = "The Agent type resource '" + resourceName
+			+ "' declares type ID '" + resolved->typeId
+			+ "' but the placement requested '" + payload.type + "'";
 		return false;
 	}
 	if (!world->hasAgentType(resolved->typeId))
@@ -1464,8 +1509,8 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		if (!world->attachAgentType(resolved->resourceName, resolved->source,
 			&attachDiagnostic))
 		{
-			diagnostic = "The bundled Human Agent type resource could not be loaded: "
-				+ attachDiagnostic;
+			diagnostic = "The Agent type resource '" + resourceName
+				+ "' could not be loaded: " + attachDiagnostic;
 			return false;
 		}
 	}

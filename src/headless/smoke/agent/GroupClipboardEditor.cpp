@@ -217,7 +217,7 @@ namespace
 		require(commitAgentPlacement(world, payload, sector, levelOffset, localX,
 			placed, diagnostic), "Placing the pasted Agent failed: " + diagnostic);
 		require(!!placed, "The placement reported success without naming an Agent");
-		require(std::string(world->lookupAgent(placed).entity->getTypeName()) == payload.type,
+		require(std::string(world->lookupAgent(placed).entity->getTypeId()) == payload.type,
 			"Clipboard placement changed the Agent type");
 		return placed;
 	}
@@ -240,12 +240,12 @@ namespace
 		require(read.payload.type == "Human" && text.find("type: Human") != std::string::npos,
 			"The clipboard omitted Human identity");
 		auto unsupported = YAML::Load(text)["promethiumClipboard"]["object"];
-		unsupported["type"] = "Robot";
+		unsupported["type"] = "Rob ot";
 		AgentClipboardPayload rejected;
 		std::string diagnostic;
 		require(!readAgentClipboardObject(unsupported, rejected, diagnostic)
-			&& diagnostic.find("Robot") != std::string::npos,
-			"An unsupported clipboard type was not rejected precisely");
+			&& diagnostic.find("Rob ot") != std::string::npos,
+			"An invalid clipboard type was not rejected precisely");
 		auto invalid = read.payload;
 		invalid.type = "Robot";
 		core::AgentId refused;
@@ -263,13 +263,13 @@ namespace
 			"The clipboard text does not name the Agent group: " + text);
 
 		// No ID of any kind crosses. The clipboard object map holds a name,
-		// flags, type and the Agent group name - and none of those
-		// values is the group's World-local AgentGroupId, which would be
-		// meaningless to whatever pastes this.
+		// flags, type, the type's Resource reference, and the Agent group name
+		// - and none of those values is the group's World-local AgentGroupId,
+		// which would be meaningless to whatever pastes this.
 		auto const keys = clipboardObjectKeys(text);
-		require(keys == std::vector<std::string>{ "flags", "group", "name", "type" },
-			"The clipboard payload carries more than a name, flags, type and an Agent"
-			" group name: " + text);
+		require(keys == std::vector<std::string>{ "flags", "group", "name", "resource", "type" },
+			"The clipboard payload carries more than a name, flags, type, Resource"
+			" reference and an Agent group name: " + text);
 		auto const values = clipboardObjectValues(text);
 		require(std::find(values.begin(), values.end(), std::to_string(crew.value))
 			== values.end(),

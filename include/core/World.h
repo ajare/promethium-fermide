@@ -696,10 +696,14 @@ namespace core
 		// editor startup. Runs once during construction.
 		void registerBundledAgentTypes();
 		// Resolves a type ID (and optional explicit resource reference) to its
-		// registered definition, or throws with a precise diagnostic. Explicit
+		// registered definition, or throws with a precise diagnostic. An
+		// explicit resource reference is resolved through the installed loader
+		// (or manifest catalog) and registered on first use; explicit
 		// missing/mismatched references never silently fall back to Human.
+		// Competing resources that declare an already-registered type ID are
+		// rejected. Mutates mAgentTypes only to register a newly resolved type.
 		std::shared_ptr<const AgentTypeDefinition> resolveAgentType(
-			std::string const& typeId, std::string const& resourceName) const;
+			std::string const& typeId, std::string const& resourceName);
 		// Constructs an Agent with a fresh live Lua instance and frozen baseline
 		// for the named type. Throws (leaving no partial Agent) on any failure.
 		std::unique_ptr<Agent> makeScriptAgent(std::string const& typeId,

@@ -79,6 +79,10 @@ set(editor_names
     agentTypesEditorPlacementCreatesScriptedHuman
     agentTypesEditorPlacementFailureIsAtomic
     agentTypesEditorPlacementMismatchIsRefused
+    agentTypesEditorSelectionPlacesFixtureType
+    agentTypesEditorSelectionPreviewAgreesWithPlacement
+    agentTypesEditorSelectionDependencyRefusedAtomically
+    agentTypesEditorCopiedFixturePreservesTypeIdentity
     agent/assignmentAndPropertyAdditionConflictsAreAtomic
     agent/editorCommitsRevisionedColourAndUndoRedoExactly
     agent/conflictingColourRedoIsRefusedAtomically

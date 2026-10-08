@@ -8513,12 +8513,13 @@ namespace core
 	}
 
 	std::shared_ptr<const AgentTypeDefinition> World::resolveAgentType(
-		std::string const& typeId, std::string const& resourceName) const
+		std::string const& typeId, std::string const& resourceName)
 	{
 		if (!resourceName.empty())
 		{
-			// An explicit resource reference is authoritative: resolve the named
-			// resource and verify its declared type ID matches the saved record.
+			// An explicit resource reference is authoritative: if the named
+			// resource is already registered, its declared type ID must match
+			// the saved record.
 			for (auto const& [id, definition] : mAgentTypes)
 			{
 				(void)id;
@@ -8529,8 +8530,26 @@ namespace core
 						+ definition->typeId + "' but the document expects '" + typeId + "'");
 				return definition;
 			}
-			throw SerializationException(
-				"Missing Agent type resource '" + resourceName + "'");
+			// Not registered yet: resolve the managed resource (ADR 0010/0019)
+			// and verify its declared type ID before registering it. A missing,
+			// unreadable, or invalid resource fails clearly; it never falls back
+			// to Human.
+			auto resolved = core::resolveAgentTypeResource(resourceName);
+			if (!resolved)
+				throw SerializationException(
+					"Missing Agent type resource '" + resourceName + "'");
+			if (resolved->typeId != typeId)
+				throw SerializationException(
+					"Agent type resource '" + resourceName + "' declares type ID '"
+					+ resolved->typeId + "' but the document expects '" + typeId + "'");
+			if (mAgentTypes.contains(resolved->typeId))
+				throw SerializationException(
+					"Agent type ID '" + resolved->typeId
+					+ "' is declared by competing resources in this World");
+			auto definition = std::make_shared<AgentTypeDefinition>(*resolved);
+			auto const stored = definition->typeId;
+			mAgentTypes.emplace(stored, std::move(definition));
+			return mAgentTypes.at(stored);
 		}
 		// Legacy record: the stable type ID names a bundled or attached type.
 		auto found = mAgentTypes.find(typeId);

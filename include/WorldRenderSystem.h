@@ -30,6 +30,19 @@ std::uint32_t renderWorldCommands(WorldDrawList const& commands,
 // "AgentBehaviourRegistry".
 std::vector<std::string> applicationResourceNames(std::string const& type);
 
+// One valid, loaded Agent type offered by the editor's creation selector.
+struct ApplicationAgentType
+{
+	std::string resourceName;
+	std::string typeId;
+	std::string displayName;
+};
+
+// Every valid manifest-registered Agent type loaded at startup, ordered by
+// display name (then resource name). Invalid resources are excluded; the
+// bundled Human is always present.
+std::vector<ApplicationAgentType> applicationAgentTypes();
+
 // Returns the manifest source (file or package directory) for a named Resource
 // of one type, or nullopt when the Resource is unknown.
 std::optional<std::filesystem::path> applicationResourceSource(

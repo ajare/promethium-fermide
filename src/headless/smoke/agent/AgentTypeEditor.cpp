@@ -56,6 +56,14 @@ namespace
 		return AgentClipboardPayload{ name, 0, true, std::nullopt };
 	}
 
+	AgentClipboardPayload scoutPayload(std::string const& name)
+	{
+		AgentClipboardPayload payload{ name, 0, true, std::nullopt };
+		payload.type = "Scout";
+		payload.resource = "scout.agent.lua";
+		return payload;
+	}
+
 	std::size_t agentCount(core::World const& world)
 	{
 		return world.getSimulationSnapshot().agents.size();
@@ -130,6 +138,87 @@ namespace
 		require(agentCount(*fixture.world) == before,
 			"Mismatched placement left an Agent behind");
 	}
+
+	void editorSelectionPlacesFixtureType(smoke::Context const&)
+	{
+		auto fixture = buildWorld("Editor Scout");
+		core::AgentId placed{};
+		std::string diagnostic;
+		require(commitAgentPlacement(fixture.world, scoutPayload("Runner"),
+			fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
+			"Scout placement failed: " + diagnostic);
+		require(!!placed, "Scout placement reported success without naming an Agent");
+		auto const* agent = fixture.world->lookupAgent(placed).entity;
+		require(agent != nullptr, "The placed Scout could not be found");
+		require(agent->getTypeId() == "Scout"
+			&& std::string(agent->getTypeName()) == "Scout"
+			&& agent->getTypeResourceName() == "scout.agent.lua",
+			"Editor Scout placement did not produce Scout identity");
+		require(agent->getPhysicalBaseline().walkSpeed == 0.9f
+			&& agent->getPhysicalBaseline().width == 0.3f,
+			"Editor Scout placement did not use the Scout baseline");
+	}
+
+	void editorSelectionPreviewAgreesWithPlacement(smoke::Context const&)
+	{
+		auto fixture = buildWorld("Editor Scout preview");
+		auto const preview = agentClipboardPlacementDimensions(scoutPayload("Runner"));
+		core::AgentId placed{};
+		std::string diagnostic;
+		require(commitAgentPlacement(fixture.world, scoutPayload("Runner"),
+			fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
+			"Scout placement failed: " + diagnostic);
+		auto const* agent = fixture.world->lookupAgent(placed).entity;
+		auto const& physical = agent->getPhysicalBaseline();
+		require(preview.x == physical.width && preview.y == physical.standingHeight,
+			"Scout preview dimensions did not agree with placement");
+	}
+
+	void editorSelectionDependencyRefusedAtomically(smoke::Context const&)
+	{
+		auto fixture = buildWorld("Editor Scout refusal");
+		auto const before = agentCount(*fixture.world);
+		{
+			AgentClipboardPayload missing = scoutPayload("Broken");
+			missing.resource = "missing.agent.lua";
+			core::AgentId placed{};
+			std::string diagnostic;
+			require(!commitAgentPlacement(fixture.world, missing,
+				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
+				"Placement with a missing Scout resource was accepted");
+			require(!placed && !diagnostic.empty(),
+				"Failed Scout placement did not report or named an Agent");
+		}
+		{
+			AgentClipboardPayload mismatched = scoutPayload("Broken");
+			mismatched.type = "NotScout";
+			core::AgentId placed{};
+			std::string diagnostic;
+			require(!commitAgentPlacement(fixture.world, mismatched,
+				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
+				"Placement with a mismatched Scout type ID was accepted");
+			require(!placed, "Mismatched Scout placement named an Agent");
+		}
+		require(agentCount(*fixture.world) == before,
+			"Failed Scout placement left an Agent behind");
+	}
+
+	void editorCopiedFixturePreservesTypeIdentity(smoke::Context const&)
+	{
+		auto fixture = buildWorld("Editor Scout copy");
+		core::AgentId placed{};
+		std::string diagnostic;
+		require(commitAgentPlacement(fixture.world, scoutPayload("Original"),
+			fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
+			"Scout placement failed: " + diagnostic);
+		// A copy carries the immutable type identity, never a changed type: the
+		// editor has no type-change control, so copying preserves what was placed.
+		auto const payload = makeAgentClipboardPayload(*fixture.world, placed, "Copy");
+		require(payload.type == "Scout" && payload.resource == "scout.agent.lua",
+			"A copied Scout did not carry its type ID and resource reference");
+		require(std::string(fixture.world->lookupAgent(placed).entity->getTypeId()) == "Scout",
+			"The placed Scout's type identity changed");
+	}
 }
 
 void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
@@ -140,4 +229,12 @@ void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 		editorPlacementFailureIsAtomic });
 	checks.push_back({ "agentTypesEditorPlacementMismatchIsRefused",
 		editorPlacementMismatchIsRefused });
+	checks.push_back({ "agentTypesEditorSelectionPlacesFixtureType",
+		editorSelectionPlacesFixtureType });
+	checks.push_back({ "agentTypesEditorSelectionPreviewAgreesWithPlacement",
+		editorSelectionPreviewAgreesWithPlacement });
+	checks.push_back({ "agentTypesEditorSelectionDependencyRefusedAtomically",
+		editorSelectionDependencyRefusedAtomically });
+	checks.push_back({ "agentTypesEditorCopiedFixturePreservesTypeIdentity",
+		editorCopiedFixturePreservesTypeIdentity });
 }

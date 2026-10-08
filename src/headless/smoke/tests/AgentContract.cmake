@@ -99,6 +99,12 @@ set(agent_checks
     agentTypesResolvedResourceUnavailable
     agentTypesPreviewMatchesPlacement
     agentTypesScriptedAuthorizationPlacement
+    agentTypesFixturePhysicalOutcomes
+    agentTypesFixturePersistenceRoundTrip
+    agentTypesLoadingRefusesMismatchedOrMissingResource
+    agentTypesCompetingTypeIdsRejectedOnLoad
+    agentTypesLegacyHumanWithoutResource
+    agentTypesLoadingConstructsFreshInstances
 )
 
 function(invoke status expected)

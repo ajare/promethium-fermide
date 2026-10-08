@@ -212,6 +212,20 @@ namespace
 	PaletteDropState gPegman;
 	core::World::CreateDoorOptions gDoorDraft;
 
+	// The Agent type the creation tool will place (#505). The draft defaults to
+	// the bundled Human and tracks the manifest-registered type the user chose
+	// in the Agent creation settings window; placement and preview both read it
+	// so the preview agrees with what lands.
+	ApplicationAgentType gAgentTypeDraft{ "human.agent.lua", "Human", "Human" };
+
+	core::Vector2 agentTypeDraftPlacementDimensions()
+	{
+		AgentClipboardPayload payload;
+		payload.type = gAgentTypeDraft.typeId;
+		payload.resource = gAgentTypeDraft.resourceName;
+		return agentClipboardPlacementDimensions(payload);
+	}
+
 	// Palette tray placement (ticket #41). The tray is dragged by any part of
 	// itself that is not a button. Its position is remembered as an offset from
 	// the tray's home in the view's bottom-right corner, so the palette follows
@@ -1581,7 +1595,13 @@ namespace
 			auto const landed = gPegman.pastedAgent.armed()
 				? commitPendingAgentPlacement(gPegman.pastedAgent, world, placed, diagnostic)
 				: commitAgentPlacement(world,
-					AgentClipboardPayload{ nextAgentName(world), 0, true, nullopt },
+					[&]
+					{
+						AgentClipboardPayload payload{ nextAgentName(world), 0, true, nullopt };
+						payload.type = gAgentTypeDraft.typeId;
+						payload.resource = gAgentTypeDraft.resourceName;
+						return payload;
+					}(),
 					gPegman.sector, gPegman.levelOffset, gPegman.localX, placed, diagnostic);
 			if (!landed)
 			{
@@ -1621,6 +1641,51 @@ namespace
 				if (ImGui::InputFloat("Height scale (0.1-1.0)", &scale, 0.1f, 0.1f, "%.3f"))
 					gDoorDraft.heightScale = scale;
 				ImGui::TextDisabled("Only ordinary Regular Doors between Locations.");
+			}
+		}
+		ImGui::End();
+
+		ImGui::SetNextWindowPos(ImVec2(canvasPos.x + 8.0f, canvasPos.y + 96.0f), ImGuiCond_FirstUseEver);
+		if (ImGui::Begin("Agent creation settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+		{
+			auto types = applicationAgentTypes();
+			if (types.empty())
+			{
+				ImGui::TextDisabled("No Agent types available");
+			}
+			else
+			{
+				// Keep the draft valid: fall back to Human (the default) when the
+				// selected resource is no longer available.
+				auto selected = std::find_if(types.begin(), types.end(),
+					[](ApplicationAgentType const& type)
+					{
+						return type.resourceName == gAgentTypeDraft.resourceName;
+					});
+				if (selected == types.end())
+				{
+					auto human = std::find_if(types.begin(), types.end(),
+						[](ApplicationAgentType const& type)
+						{
+							return type.typeId == "Human";
+						});
+					gAgentTypeDraft = human != types.end() ? *human : types.front();
+				}
+				std::string previewLabel = gAgentTypeDraft.displayName
+					+ " (" + gAgentTypeDraft.typeId + ")";
+				if (ImGui::BeginCombo("Agent type", previewLabel.c_str()))
+				{
+					for (auto const& type : types)
+					{
+						bool const isSelected =
+							type.resourceName == gAgentTypeDraft.resourceName;
+						std::string label = type.displayName + " (" + type.typeId + ")";
+						if (ImGui::Selectable(label.c_str(), isSelected))
+							gAgentTypeDraft = type;
+						if (isSelected) ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
 			}
 		}
 		ImGui::End();
@@ -2022,16 +2087,18 @@ namespace
 		{
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-			ImGui::SetTooltip(hoveredItem == PaletteItem::Agent ? "Drag to add Human"
-				: hoveredItem == PaletteItem::Marker ? "Drag to add Marker"
-				: hoveredItem == PaletteItem::BulkheadDoor ? "Drag to add Bulkhead Door"
-				: hoveredItem == PaletteItem::Window ? "Drag to add Window"
-				: hoveredItem == PaletteItem::BoothWindow ? "Drag to add BoothWindow"
-				: hoveredItem == PaletteItem::AccessPanel ? "Drag to add Access panel"
-				: hoveredItem == PaletteItem::Walkway ? "Drag to add Walkway"
-				: hoveredItem == PaletteItem::ForceBridge ? "Drag to add Force Bridge"
-				: hoveredItem == PaletteItem::RoomLadder ? "Drag to add Room Ladder"
-				: hoveredItem == PaletteItem::PlatformLift ? "Drag to add Platform Lift" : "Drag to add Door");
+			if (hoveredItem == PaletteItem::Agent)
+				ImGui::SetTooltip("%s", ("Drag to add " + gAgentTypeDraft.displayName).c_str());
+			else
+				ImGui::SetTooltip(hoveredItem == PaletteItem::Marker ? "Drag to add Marker"
+					: hoveredItem == PaletteItem::BulkheadDoor ? "Drag to add Bulkhead Door"
+					: hoveredItem == PaletteItem::Window ? "Drag to add Window"
+					: hoveredItem == PaletteItem::BoothWindow ? "Drag to add BoothWindow"
+					: hoveredItem == PaletteItem::AccessPanel ? "Drag to add Access panel"
+					: hoveredItem == PaletteItem::Walkway ? "Drag to add Walkway"
+					: hoveredItem == PaletteItem::ForceBridge ? "Drag to add Force Bridge"
+					: hoveredItem == PaletteItem::RoomLadder ? "Drag to add Room Ladder"
+					: hoveredItem == PaletteItem::PlatformLift ? "Drag to add Platform Lift" : "Drag to add Door");
 			if (io.MouseClicked[0] && !gViewPan.dragging)
 			{
 				gPegman.phase = PalettePhase::Armed;
@@ -2249,7 +2316,7 @@ namespace
 			else
 			{
 				auto const previewScale = target ? gUISettings.worldZoom : 1.0f;
-				auto const dimensions = core::Agent::placementDimensions("Human");
+				auto const dimensions = agentTypeDraftPlacementDimensions();
 				drawPegman(drawList, io.MousePos,
 					dimensions.x * CORE_CELL_WIDTH_PIXELS * previewScale,
 					dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
@@ -2263,7 +2330,7 @@ namespace
 			auto globalX = gPegman.sector->getPosition().x + gPegman.localX;
 			auto const dimensions = gPegman.pastedAgent.armed()
 				? agentClipboardPlacementDimensions(gPegman.pastedAgent.payload)
-				: core::Agent::placementDimensions("Human");
+				: agentTypeDraftPlacementDimensions();
 			drawPegman(drawList, worldToScreen({ globalX, gPegman.feetY }),
 				dimensions.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
 				dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,

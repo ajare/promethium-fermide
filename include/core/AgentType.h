@@ -36,6 +36,13 @@ namespace core
 	// Human class and any caller that needs Human dimensions without a World.
 	AgentPhysicalBaseline const& bundledHumanBaseline();
 
+	// Constructs a frozen, validated baseline for one resolved definition in an
+	// isolated scratch runtime, without a World and without retaining a live
+	// instance. Returns nullopt when construction fails. Editor previews use
+	// this so they neither create nor mutate a World Agent (ADR 0019).
+	std::optional<AgentPhysicalBaseline> agentTypeDefinitionBaseline(
+		AgentTypeDefinition const& definition);
+
 	// True when `typeId` is an acceptable stable type ID: a non-empty, bounded
 	// identifier using only letters, digits, underscore and hyphen.
 	bool agentTypeIdIsValid(std::string_view typeId);

@@ -7,6 +7,7 @@
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
 
+#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <set>
@@ -418,6 +419,316 @@ namespace
 				== core::bundledHumanBaseline().walkSpeed,
 			"The scripted authorization placement did not use the scripted baseline");
 	}
+
+	std::string removeLineContaining(std::string text, std::string const& needle)
+	{
+		auto const pos = text.find(needle);
+		if (pos == std::string::npos) return text;
+		auto lineStart = text.rfind('\n', pos);
+		lineStart = lineStart == std::string::npos ? 0 : lineStart + 1;
+		auto lineEnd = text.find('\n', pos);
+		lineEnd = lineEnd == std::string::npos ? text.size() : lineEnd + 1;
+		text.erase(lineStart, lineEnd - lineStart);
+		return text;
+	}
+
+	// Loads every valid manifest-registered Agent type resource and returns the
+	// Scout fixture definition the same way the editor does at startup.
+	std::optional<core::AgentTypeDefinition> scoutDefinition(
+		smoke::Context const& context)
+	{
+		auto const source = readFile(context.fixture("resources/test-worlds/scout.agent.lua"));
+		auto const resolved = core::resolveAgentTypeResource("scout.agent.lua");
+		if (!resolved || resolved->typeId != "Scout" || resolved->displayName != "Scout"
+			|| resolved->resourceName != "scout.agent.lua" || resolved->source != source)
+			return std::nullopt;
+		return resolved;
+	}
+
+	void fixtureTypePhysicalOutcomes(smoke::Context const& context)
+	{
+		auto const resolved = scoutDefinition(context);
+		require(resolved.has_value(), "The Scout Agent type resource did not resolve");
+
+		core::World world("Scout physical", 8, 2);
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		std::string diagnostic;
+		require(world.attachAgentType("scout.agent.lua", resolved->source, &diagnostic),
+			diagnostic.c_str());
+		require(world.hasAgentType("Scout")
+			&& world.agentTypeDisplayName("Scout") == "Scout",
+			"The Scout type identity did not resolve");
+		auto const id = world.createAgent("Scout", "Runner", corridor, 0, 1.0f);
+		auto const* agent = world.lookupAgent(id).entity;
+		require(agent && agent->getTypeId() == "Scout"
+			&& std::string(agent->getTypeName()) == "Scout"
+			&& agent->getTypeResourceName() == "scout.agent.lua",
+			"The placed Scout identity did not resolve");
+
+		auto const& physical = agent->getPhysicalBaseline();
+		auto const& human = core::bundledHumanBaseline();
+		require(physical.width == 0.3f && physical.standingHeight == 0.35f
+			&& physical.reach == 0.4f && physical.walkSpeed == 0.9f
+			&& physical.climbSpeed == 0.5f && physical.stairAscentSpeed == 0.6f
+			&& physical.stairDescentSpeed == 0.7f && physical.sittingHeightRatio == 0.5f
+			&& physical.crouchingHeightRatio == 0.5f && physical.crawlingHeightRatio == 0.25f
+			&& physical.crawlingSpeedRatio == 0.75f,
+			"Scout's frozen baseline did not match the fixture");
+		require(physical.width != human.width && physical.standingHeight != human.standingHeight
+			&& physical.reach != human.reach && physical.walkSpeed != human.walkSpeed,
+			"Scout is not distinctly shaped and speeded from Human");
+
+		// The highest available public consumers read the frozen baseline.
+		require(agent->getWalkSpeed() == physical.walkSpeed
+			&& agent->getClimbSpeed() == physical.climbSpeed,
+			"Scout movement did not use its frozen baseline");
+		auto const bounds = agent->getBounds().getSize();
+		auto near = [](float left, float right)
+		{
+			return std::fabs(left - right) < 1e-5f;
+		};
+		require(near(bounds.x, physical.width) && near(bounds.y, physical.standingHeight),
+			"Scout bounds did not use its frozen baseline");
+		require(agent->getTraversalCrawlingDoorClearanceExtent(true)
+				== physical.standingHeight * physical.crawlingHeightRatio,
+			"Scout Crawling clearance did not use its frozen baseline");
+	}
+
+	void fixturePersistenceRoundTrip(smoke::Context const& context)
+	{
+		auto const resolved = scoutDefinition(context);
+		require(resolved.has_value(), "The Scout Agent type resource did not resolve");
+
+		core::World original("Scout document", 6, 2);
+		auto const sector = original.addCorridor(0, 0, 6);
+		original.finishBuild();
+		original.pauseSimulation();
+		std::string diagnostic;
+		require(original.attachAgentType("scout.agent.lua", resolved->source, &diagnostic),
+			diagnostic.c_str());
+		auto const id = original.createAgent("Scout", "Saved scout", sector, 0, 1.0f);
+		(void)id;
+
+		for (bool binary : { false, true })
+		{
+			auto const text = serializeWorld(original, binary);
+			core::World restored("restored", 2, 2);
+			require(loadWorld(text, binary, restored), "Scout World did not load");
+			auto const* agent = restored.lookupAgent(core::AgentId{ 1 }).entity;
+			require(agent && agent->getTypeId() == "Scout"
+				&& agent->getTypeResourceName() == "scout.agent.lua"
+				&& std::string(agent->getTypeName()) == "Scout",
+				"Scout type/resource identity was not preserved");
+			auto const& physical = agent->getPhysicalBaseline();
+			require(physical.width == 0.3f && physical.walkSpeed == 0.9f
+				&& physical.reach == 0.4f,
+				"Scout's frozen baseline was not reconstructed on load");
+		}
+
+		auto const yaml = serializeWorld(original, false);
+		require(yaml.find("typeId: Scout") != std::string::npos
+			&& yaml.find("resource: scout.agent.lua") != std::string::npos,
+			"The saved document omitted the Scout type ID or resource reference");
+		require(yaml.find("walk_speed") == std::string::npos
+			&& yaml.find("standing_height") == std::string::npos
+			&& yaml.find("crawling_height_ratio") == std::string::npos,
+			"The saved document embedded a physical-baseline snapshot");
+	}
+
+	void loadingRefusesMismatchedOrMissingResource(smoke::Context const& context)
+	{
+		auto const resolved = scoutDefinition(context);
+		require(resolved.has_value(), "The Scout Agent type resource did not resolve");
+
+		core::World original("Refusal document", 6, 2);
+		auto const sector = original.addCorridor(0, 0, 6);
+		original.finishBuild();
+		original.pauseSimulation();
+		std::string diagnostic;
+		require(original.attachAgentType("scout.agent.lua", resolved->source, &diagnostic),
+			diagnostic.c_str());
+		(void)original.createAgent("Scout", "Scout", sector, 0, 1.0f);
+
+		auto const yaml = serializeWorld(original, false);
+
+		// A mismatched type ID is refused and publishes no partial Agent.
+		auto mismatched = yaml;
+		auto const typeIdAt = mismatched.find("typeId: Scout");
+		require(typeIdAt != std::string::npos, "Saved Scout omitted its type ID");
+		mismatched.replace(typeIdAt, std::string("typeId: Scout").size(), "typeId: NotScout");
+		core::World refusedType("refused type", 2, 2);
+		bool typeRejected = false;
+		try
+		{
+			(void)loadWorld(mismatched, false, refusedType);
+		}
+		catch (core::SerializationException const& error)
+		{
+			typeRejected = std::string(error.what()).find("NotScout") != std::string::npos;
+		}
+		require(typeRejected, "A mismatched Agent type ID was not refused clearly");
+		require(refusedType.getSimulationSnapshot().agents.empty(),
+			"A mismatched type ID left a partial Agent");
+
+		// A missing resource reference is refused and publishes no partial Agent.
+		auto missing = yaml;
+		auto const resourceAt = missing.find("resource: scout.agent.lua");
+		require(resourceAt != std::string::npos, "Saved Scout omitted its resource reference");
+		missing.replace(resourceAt, std::string("resource: scout.agent.lua").size(),
+			"resource: missing.agent.lua");
+		core::World refusedResource("refused resource", 2, 2);
+		bool resourceRejected = false;
+		try
+		{
+			(void)loadWorld(missing, false, refusedResource);
+		}
+		catch (core::SerializationException const& error)
+		{
+			resourceRejected = std::string(error.what()).find("missing.agent.lua") != std::string::npos;
+		}
+		require(resourceRejected, "A missing Agent type resource was not refused clearly");
+		require(refusedResource.getSimulationSnapshot().agents.empty(),
+			"A missing resource left a partial Agent");
+	}
+
+	void competingTypeIdsRejectedOnLoad(smoke::Context const& context)
+	{
+		auto const scout = scoutDefinition(context);
+		require(scout.has_value(), "The Scout Agent type resource did not resolve");
+
+		core::World original("Competing", 6, 2);
+		auto const sector = original.addCorridor(0, 0, 6);
+		original.finishBuild();
+		original.pauseSimulation();
+		std::string diagnostic;
+		require(original.attachAgentType("scout.agent.lua", scout->source, &diagnostic),
+			diagnostic.c_str());
+		(void)original.createAgent("Scout", "First", sector, 0, 1.0f);
+		(void)original.createAgent("Scout", "Second", sector, 0, 2.0f);
+
+		auto yaml = serializeWorld(original, false);
+		auto const needle = std::string("resource: scout.agent.lua");
+		auto const pos = yaml.rfind(needle);
+		require(pos != std::string::npos, "The second Scout omitted its resource reference");
+		yaml.replace(pos, needle.size(), "resource: rival.agent.lua");
+
+		// A rival resource declaring the same type ID must be rejected when it
+		// would compete with the already-resolved resource inside one World.
+		core::AgentTypeDefinition rival = *scout;
+		rival.resourceName = "rival.agent.lua";
+		rival.displayName = "Scout";
+		rival.source = scout->source;
+		struct LoaderScope
+		{
+			explicit LoaderScope(core::AgentTypeDefinition scoutDef,
+				core::AgentTypeDefinition rivalDef)
+			{
+				core::setAgentTypeResourceLoader(
+					[scoutDef = std::move(scoutDef), rivalDef = std::move(rivalDef)](
+						std::string const& name) -> std::optional<core::AgentTypeDefinition>
+					{
+						if (name == "scout.agent.lua") return scoutDef;
+						if (name == "rival.agent.lua") return rivalDef;
+						return std::nullopt;
+					});
+			}
+			~LoaderScope() { core::setAgentTypeResourceLoader({}); }
+		};
+
+		core::World restored("restored", 2, 2);
+		bool rejected = false;
+		{
+			LoaderScope scope{ *scout, rival };
+			try
+			{
+				(void)loadWorld(yaml, false, restored);
+			}
+			catch (core::SerializationException const& error)
+			{
+				rejected = std::string(error.what()).find("competing") != std::string::npos;
+			}
+		}
+		require(rejected,
+			"Competing resources with the same type ID were not rejected on load");
+	}
+
+	void legacyHumanWithoutResourceResolves(smoke::Context const&)
+	{
+		core::World original("Legacy identity", 6, 2);
+		auto const sector = original.addCorridor(0, 0, 6);
+		original.finishBuild();
+		original.pauseSimulation();
+		auto const id = original.createAgent("Saved human", sector, 0, 1.0f);
+		require(original.setAgentIndividualWalkSpeedModifier(id, 1.2f),
+			"Could not author an individual Walk speed modifier");
+
+		auto const yaml = removeLineContaining(serializeWorld(original, false),
+			"resource: human.agent.lua");
+		require(yaml.find("resource: human.agent.lua") == std::string::npos,
+			"The resource reference was not stripped");
+
+		core::World restored("restored", 2, 2);
+		require(loadWorld(yaml, false, restored), "The legacy Human World did not load");
+		auto const* agent = restored.lookupAgent(core::AgentId{ 1 }).entity;
+		require(agent && agent->getTypeId() == "Human"
+			&& std::string(agent->getTypeName()) == "Human"
+			&& agent->getTypeResourceName() == "human.agent.lua",
+			"The legacy Human did not resolve to the bundled Human");
+		require(agent->getPhysicalBaseline().walkSpeed == core::bundledHumanBaseline().walkSpeed,
+			"The legacy Human did not resolve to the bundled baseline");
+		require(agent->getIndividualWalkSpeedModifier()
+			&& *agent->getIndividualWalkSpeedModifier() == 1.2f,
+			"The legacy Human lost an authored individual property");
+	}
+
+	void loadingConstructsFreshInstances(smoke::Context const&)
+	{
+		// A module-level counter is mutable state that must never survive into
+		// a document or across load: loading reconstructs from source, so the
+		// reloaded World's instance observes width == 1 rather than a persisted
+		// count.
+		std::string const counter = "        local count = 0\n"
+			"        count = count + 1\n"
+			"        return {\n"
+			"            width = count,\n"
+			"            standing_height = 0.6, reach = 0.3, walk_speed = 0.4,\n"
+			"            climb_speed = 0.2, stair_ascent_speed = 0.3,\n"
+			"            stair_descent_speed = 0.35, sitting_height_ratio = 0.5,\n"
+			"            crouching_height_ratio = 0.6, crawling_height_ratio = 0.4,\n"
+			"            crawling_speed_ratio = 0.5 }\n";
+		core::AgentTypeDefinition counterType;
+		counterType.typeId = "Counter";
+		counterType.displayName = "Counter";
+		counterType.resourceName = "counter.agent.lua";
+		counterType.source = typeSource("Counter", "Counter", counter);
+		core::setAgentTypeResourceLoader(
+			[counterType](std::string const& name) -> std::optional<core::AgentTypeDefinition>
+			{
+				if (name == counterType.resourceName) return counterType;
+				return std::nullopt;
+			});
+
+		core::World original("Counter document", 6, 2);
+		auto const sector = original.addCorridor(0, 0, 6);
+		original.finishBuild();
+		original.pauseSimulation();
+		std::string diagnostic;
+		require(original.attachAgentType("counter.agent.lua", counterType.source, &diagnostic),
+			diagnostic.c_str());
+		(void)original.createAgent("Counter", "Counter", sector, 0, 1.0f);
+
+		for (bool binary : { false, true })
+		{
+			auto const text = serializeWorld(original, binary);
+			core::World restored("restored", 2, 2);
+			require(loadWorld(text, binary, restored), "Counter World did not load");
+			auto const* agent = restored.lookupAgent(core::AgentId{ 1 }).entity;
+			require(agent && agent->getPhysicalBaseline().width == 1.0f,
+				"Loading preserved mutable Lua state instead of constructing fresh instances");
+		}
+		core::setAgentTypeResourceLoader({});
+	}
 }
 
 void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
@@ -437,4 +748,10 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesResolvedResourceUnavailable", resolvedResourceUnavailable });
 	checks.push_back({ "agentTypesPreviewMatchesPlacement", previewMatchesPlacement });
 	checks.push_back({ "agentTypesScriptedAuthorizationPlacement", scriptedAuthorizationPlacement });
+	checks.push_back({ "agentTypesFixturePhysicalOutcomes", fixtureTypePhysicalOutcomes });
+	checks.push_back({ "agentTypesFixturePersistenceRoundTrip", fixturePersistenceRoundTrip });
+	checks.push_back({ "agentTypesLoadingRefusesMismatchedOrMissingResource", loadingRefusesMismatchedOrMissingResource });
+	checks.push_back({ "agentTypesCompetingTypeIdsRejectedOnLoad", competingTypeIdsRejectedOnLoad });
+	checks.push_back({ "agentTypesLegacyHumanWithoutResource", legacyHumanWithoutResourceResolves });
+	checks.push_back({ "agentTypesLoadingConstructsFreshInstances", loadingConstructsFreshInstances });
 }

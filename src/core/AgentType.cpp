@@ -56,15 +56,30 @@ return {
 	{
 		static AgentPhysicalBaseline const baseline = []
 		{
-			AgentTypeRuntimeAdapter runtime;
-			auto result = runtime.construct("Human",
-				bundledHumanAgentType().source, "Human");
-			if (!result.succeeded)
+			auto computed = agentTypeDefinitionBaseline(bundledHumanAgentType());
+			if (!computed)
 				throw SerializationException(
-					"Bundled Human type failed: " + result.diagnostic);
-			return result.baseline;
+					"Bundled Human type failed to construct a baseline");
+			return *computed;
 		}();
 		return baseline;
+	}
+
+	std::optional<AgentPhysicalBaseline> agentTypeDefinitionBaseline(
+		AgentTypeDefinition const& definition)
+	{
+		try
+		{
+			AgentTypeRuntimeAdapter runtime;
+			auto result = runtime.construct(definition.typeId,
+				definition.source, definition.displayName);
+			if (!result.succeeded) return std::nullopt;
+			return result.baseline;
+		}
+		catch (std::exception const&)
+		{
+			return std::nullopt;
+		}
 	}
 
 	bool agentTypeIdIsValid(std::string_view typeId)

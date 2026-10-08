@@ -91,6 +91,10 @@ struct AgentClipboardPayload
 	std::string name;
 	// Missing legacy identity means Human; explicit unknown types are refused.
 	std::string type{ "Human" };
+	// The application Resource the type resolved from (ADR 0010/0019). Empty
+	// for a legacy payload with no resource reference; such a payload resolves
+	// to the bundled Human only when its type is Human.
+	std::string resource;
 	std::uint32_t flags{ 0 };
 
 	// Whether the Agent is simulated. Every Agent starts activated, and so
