@@ -472,6 +472,7 @@ pf_add_smoke_module(pf-smoke-editor
         agent/ColourEditor.cpp
         agent/WalkSpeedEditor.cpp
         agent/HeightEditor.cpp
+        agent/MobilityProfileEditor.cpp
         agent/PoseEditor.cpp
         tags/RegistryEditor.cpp
         tags/AssignmentEditor.cpp

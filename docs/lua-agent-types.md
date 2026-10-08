@@ -80,7 +80,8 @@ default is complete replacement, not per-entry merging. The script default is
 not persisted as an individual property or queried from Lua after construction.
 Removing an override exposes the next source. New tag profiles continue to begin
 with every entry `can_use`; adding an individual profile in the editor snapshots
-the Agent's current effective profile.
+the Agent's current effective profile. As with every individual Agent property,
+adding, editing, or removing that snapshot requires a paused simulation.
 
 ## Live object versus frozen baseline
 

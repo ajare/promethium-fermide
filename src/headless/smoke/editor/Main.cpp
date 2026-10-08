@@ -20,6 +20,7 @@ int main(int argc, char** argv)
 	agent_smoke::registerColourEditor(checks);
 	agent_smoke::registerWalkSpeedEditor(checks);
 	agent_smoke::registerHeightEditor(checks);
+	agent_smoke::registerMobilityProfileEditor(checks);
 	agent_smoke::registerPoseEditor(checks);
 	tag_smoke::registerRegistryEditor(checks);
 	tag_smoke::registerAssignmentEditor(checks);

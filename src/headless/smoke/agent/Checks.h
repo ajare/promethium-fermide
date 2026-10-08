@@ -31,4 +31,5 @@ namespace agent_smoke
 	void registerPoseEditor(std::vector<smoke::Check>& checks);
 	void registerWalkSpeedEditor(std::vector<smoke::Check>& checks);
 	void registerHeightEditor(std::vector<smoke::Check>& checks);
+	void registerMobilityProfileEditor(std::vector<smoke::Check>& checks);
 }
