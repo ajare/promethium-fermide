@@ -255,7 +255,7 @@ namespace core
 			uint64_t traversalTicksRemaining{ 0 };
 			std::optional<bool> escalatorWalking;
 			// Set when a Door crossing is admitted as the automatic low-Door
-			// Crawling fallback (30% height, doubled crossing duration).
+			// Crawling fallback (type-defined height, doubled crossing duration).
 			bool crawling{ false };
 
 		};
@@ -778,11 +778,12 @@ namespace core
 		Pose getPose() const { return mPose; }
 		float getPoseHeightScale() const
 		{
+			auto const& physical = getPhysicalBaseline();
 			switch (mPose)
 			{
-			case Pose::Sitting:
-			case Pose::Crouching: return 0.6f;
-			case Pose::Crawling: return 0.3f;
+			case Pose::Sitting: return physical.sittingHeightRatio;
+			case Pose::Crouching: return physical.crouchingHeightRatio;
+			case Pose::Crawling: return physical.crawlingHeightRatio;
 			default: return 1.0f;
 			}
 		}
@@ -808,14 +809,14 @@ namespace core
 			return beginningMovement || mFurnitureUse || mPose == Pose::Standing;
 		}
 		// Top of the Crawling envelope above the supporting Floor, mirroring the
-		// departure prediction of getTraversalDoorClearanceExtent for the 0.3
-		// body-height Crawling pose. Excludes decorative offsets.
+		// departure prediction of getTraversalDoorClearanceExtent for the
+		// type-defined Crawling pose. Excludes decorative offsets.
 		float getTraversalCrawlingDoorClearanceExtent(bool beginningMovement = false) const;
 
 		// The locomotion Pose this Agent must adopt while occupying `sector`:
 		// Standing when the sector's effective ceiling clears the standing height,
-		// otherwise Crouching when the 60% crouch fits, otherwise Crawling when
-		// the 30% crawl fits. Non-Room sectors always admit Standing.
+		// otherwise Crouching or Crawling when its type-defined envelope fits.
+		// Non-Room sectors always admit Standing.
 		Pose requiredPoseFor(Sector const& sector) const;
 
 		// Re-derives the locomotion Pose from the Agent's current Sector. Retains

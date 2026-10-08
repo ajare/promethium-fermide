@@ -1112,9 +1112,11 @@ namespace core
 
 	float Agent::getTraversalCrawlingDoorClearanceExtent(bool beginningMovement) const
 	{
+		auto const crawlingHeight = getStandingHeight()
+			* getPhysicalBaseline().crawlingHeightRatio;
 		return (beginningMovement || mFurnitureUse)
-			? getStandingHeight() * 0.3f
-			: getSupportElevation() + getStandingHeight() * 0.3f;
+			? crawlingHeight
+			: getSupportElevation() + crawlingHeight;
 	}
 
 	float Agent::getHeight() const
@@ -1128,7 +1130,9 @@ namespace core
 		auto const standing = getStandingHeight();
 		auto const ceiling = sector.getEffectiveTopLevelHeight();
 		if (standing <= ceiling + Door::ClearanceTolerance) return Pose::Standing;
-		if (standing * 0.6f <= ceiling + Door::ClearanceTolerance) return Pose::Crouching;
+		auto const& physical = getPhysicalBaseline();
+		if (standing * physical.crouchingHeightRatio <= ceiling + Door::ClearanceTolerance)
+			return Pose::Crouching;
 		// The authored floor of the height scale (0.2 x the standard height) still
 		// clears the Crawling envelope of the tallest possible Agent, so Crawling
 		// is the effective floor rather than an unreachable "no fit" state.

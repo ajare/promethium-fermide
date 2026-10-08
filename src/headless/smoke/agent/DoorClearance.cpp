@@ -5,6 +5,7 @@
 #include "core/RouteTraversalInputs.h"
 #include "core/AgentTagRegistry.h"
 #include "PathFixture.h"
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -135,6 +136,19 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		auto agent = world.lookupAgent(id).entity;
 		world.pauseSimulation();
 		require(world.setAgentIndividualHeightModifier(id, test.modifier), "Diagnostic Height refused");
+		auto const& physical = agent->getPhysicalBaseline();
+		auto const poseRatio = [&]
+		{
+			switch (test.pose)
+			{
+			case core::Pose::Sitting: return physical.sittingHeightRatio;
+			case core::Pose::Crouching: return physical.crouchingHeightRatio;
+			case core::Pose::Crawling: return physical.crawlingHeightRatio;
+			default: return 1.0f;
+			}
+		}();
+		require(agent->getPoseHeightScale() == 1.0f,
+			"Standing Human Pose scale changed before clearance journey");
 		// A one-shot Action supplies a pose/claim without a Furniture-use
 		// departure callback. The transaction driver retains it at the threshold.
 		auto actions = context.temporaryRoot() / "clearance.actions.lua";
@@ -163,6 +177,12 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		if (!test.fits) require(direct.exclusionReason == core::RouteExclusionReason::Clearance, "Wrong retained exclusion");
 		auto envelope = agent->getDoorClearanceExtent();
 		auto decorativeOffset = agent->getPoseRenderYOffset();
+		auto const expectedEnvelope = (test.pose == core::Pose::Lying
+			? agent->getWidth() : agent->getStandingHeight() * poseRatio)
+			+ (decorated ? test.support : 0.f);
+		require(std::abs(envelope - expectedEnvelope) < 0.000001f
+			&& std::abs(agent->getPoseHeightScale() - poseRatio) < 0.000001f,
+			std::string(test.label) + ": type-derived pose envelope disagreed with clearance");
 		bool lost = false, replanned = false, observedCrossing = false;
 		for (unsigned tick = 0; tick < 600; ++tick)
 		{
