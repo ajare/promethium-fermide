@@ -1,3 +1,4 @@
+#include "core/Human.h"
 #include "../support/CatalogueSource.h"
 #include "Checks.h"
 #include "core/World.h"
@@ -482,7 +483,7 @@ namespace
 			if (auto object = std::dynamic_pointer_cast<core::MarkerSectorObject>(sector->getObject(i));
 				object && object->getMarker()->getId() == seat) seatVertex = graph->getVertexForObject(object);
 		require(seatVertex != nullptr, "Owned seat has no routing vertex");
-		core::Agent query("Query");
+		core::Human query("Query");
 		auto left = graph->getVertexByIdentifier(leftId), right = graph->getVertexByIdentifier(rightId);
 		auto through = graph->calculatePath(&query, left, right);
 		require(through != nullptr, "Blocking seat severed ordinary floor circulation");
@@ -594,7 +595,7 @@ namespace
 		chairWorld.addSectorMarker(chairRoom, 0, 0.5f, "Entrance", &chairEntrance);
 		chairWorld.addSectorMarker(chairRoom, 0, 6.5f, "Exit", &chairExit);
 		chairWorld.finishBuild(); chairWorld.pauseSimulation();
-		core::Agent chairQuery("Query");
+		core::Human chairQuery("Query");
 		for (bool reverse : {false, true})
 		{
 			auto graph = chairWorld.getGraph();
@@ -638,7 +639,7 @@ namespace
 		world.addSectorMarker(room, 0, 0.5f, "Entrance", &entrance);
 		world.addSectorMarker(room, 0, 6.5f, "Exit", &exit);
 		world.finishBuild(); world.pauseSimulation();
-		auto graph = world.getGraph(); core::Agent query("Query");
+		auto graph = world.getGraph(); core::Human query("Query");
 		auto from = graph->getVertexByIdentifier(entrance), to = graph->getVertexByIdentifier(exit);
 		auto path = graph->calculatePath(&query, from, to);
 		require(path != nullptr, "Sofa seat chain severed front circulation");
@@ -737,7 +738,7 @@ table.insert(sofa.edges, {from='rightSeat', to='extra', depthOffset=-1})
 					object && object->getMarker()->getId() == id) result = graph->getVertexForObject(object);
 			return result;
 		};
-		core::Agent query("Query");
+		core::Human query("Query");
 		auto entrance = graph->getVertexByIdentifier(entranceId), exit = graph->getVertexByIdentifier(exitId);
 		auto through = graph->calculatePath(&query, entrance, exit);
 		require(through != nullptr, "Multi-point layouts severed circulation");
@@ -836,7 +837,7 @@ table.insert(catalogue.definitions, coincident)
 			world.addSectorMarker(room, 0, 0.5f, "Entrance", &a);
 			world.addSectorMarker(room, 0, 6.5f, "Exit", &b);
 			world.finishBuild();
-			auto graph = world.getGraph(); core::Agent query("Query");
+			auto graph = world.getGraph(); core::Human query("Query");
 			auto left = graph->getVertexByIdentifier(a), right = graph->getVertexByIdentifier(b);
 			auto through = graph->calculatePath(&query, left, right);
 			require(through != nullptr, "Attachment severed authored front circulation");
@@ -939,7 +940,7 @@ table.insert(catalogue.definitions, coincident)
 				return vertex;
 			};
 			auto check = [&](bool throughExpected, bool seatExpected, bool internalExpected) {
-				auto graph = world.getGraph(); core::Agent query("Query");
+				auto graph = world.getGraph(); core::Human query("Query");
 				auto left = point("Entrance"), right = point("Exit");
 				auto through = graph->calculatePath(&query, left, right);
 				require(bool(through) == throughExpected, "Replacement union acquired a bypass or lost authored circulation: shape=" + std::to_string(shape)
@@ -1000,11 +1001,11 @@ table.insert(catalogue.definitions, coincident)
 			if (reverse)
 			{
 				require(world.editFurniture(outerId, 8, 0, "Moved outer", &diagnostic), diagnostic);
-				core::Agent movedQuery("Moved query");
+				core::Human movedQuery("Moved query");
 				require(bool(world.getGraph()->calculatePath(&movedQuery, point("Entrance"), point("Exit"))) == (variant != 2 && variant != 3),
 					"Outer movement restored a bypass or lost remaining contributions");
 				require(world.removeFurniture(outerId, &diagnostic), diagnostic);
-				core::Agent query("Query");
+				core::Human query("Query");
 				require(bool(world.getGraph()->calculatePath(&query, point("Entrance"), point("Exit"))) == (variant != 2),
 					"Removing outer damaged remaining inner routes or restored a bypass");
 				require(world.removeFurniture(innerId, &diagnostic), diagnostic);
@@ -1014,11 +1015,11 @@ table.insert(catalogue.definitions, coincident)
 			}
 			// Moving/removing either piece rebuilds only the surviving authored network.
 			require(world.editFurniture(innerId, 8, 0, "Moved", &diagnostic), diagnostic);
-			core::Agent movedQuery("Moved query");
+			core::Human movedQuery("Moved query");
 			require(bool(world.getGraph()->calculatePath(&movedQuery, point("Entrance"), point("Exit"))) == (variant != 2 && variant != 3),
 				"Inner movement restored a bypass or lost remaining contributions");
 			require(world.removeFurniture(innerId, &diagnostic), diagnostic);
-			auto graph = world.getGraph(); core::Agent query("Query");
+			auto graph = world.getGraph(); core::Human query("Query");
 			require(bool(graph->calculatePath(&query, point("Entrance"), point("Exit")))
 				== (variant != 3), "Removing inner restored a bypass through remaining outer");
 			require(world.removeFurniture(outerId, &diagnostic), diagnostic);
@@ -1100,7 +1101,7 @@ table.insert(catalogue.definitions, coincident)
 			world.addSectorMarker(room, 0, 0.5f, "Entrance", &leftId);
 			world.addSectorMarker(room, 0, 6.5f, "Exit", &rightId);
 			world.finishBuild();
-			auto graph = world.getGraph(); core::Agent query("Query");
+			auto graph = world.getGraph(); core::Human query("Query");
 			auto left = graph->getVertexByIdentifier(leftId), right = graph->getVertexByIdentifier(rightId);
 			auto path = graph->calculatePath(&query, left, right);
 			require(path != nullptr, "Desk severed circulation");
@@ -1196,7 +1197,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 			}
 			world.placeFurniture(room, "desk", 2, 0, "Desk", 2);
 			uint32_t a = 0, b = 0; world.addSectorMarker(room, 0, 0.5f, "Left", &a); world.addSectorMarker(room, 0, 6.5f, "Right", &b);
-			world.finishBuild(); core::Agent query("Query");
+			world.finishBuild(); core::Human query("Query");
 			auto path = world.getGraph()->calculatePath(&query, world.getGraph()->getVertexByIdentifier(a), world.getGraph()->getVertexByIdentifier(b));
 			require(path != nullptr, "Remaining explicit side was unusable");
 			if (variant == 3)
@@ -1252,7 +1253,7 @@ d.edges = {{from='left', to='seat', depthOffset=0}}
 				std::shared_ptr<const core::Vertex> seat;
 				for (auto const& vertex : world.getGraph()->getVertices())
 					if (vertex->getTopologyKey() == "furniture:" + std::to_string(id) + ":seat") seat = vertex;
-				core::Agent query("Query");
+				core::Human query("Query");
 				require(seat && world.getGraph()->calculatePath(&query,
 					world.getGraph()->getVertexByIdentifier(marker), seat), "One-sided floor attachment lost its seat or boundary Marker");
 				require(std::none_of(log.begin(), log.end(), [](auto const& entry) {

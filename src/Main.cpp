@@ -831,7 +831,7 @@ void run()
 		shared_ptr<core::World>& observedWorld;
 		~ObserverCleanup() { if (observedWorld) observedWorld->setSimulationObserver(nullptr); }
 	} observerCleanup{metricsWorld};
-	std::shared_ptr<core::Agent> pathingAgent = make_shared<core::Agent>("Pather");
+	std::shared_ptr<core::Agent> pathingAgent = core::Agent::create("Human", "Pather");
 
 	// Render settings
 	ImVec4 clearColour = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);

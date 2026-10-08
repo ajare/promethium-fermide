@@ -9,6 +9,7 @@
 #include "core/MobilityProfile.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
+#include <yaml-cpp/yaml.h>
 
 
 #include "Checks.h"
@@ -309,7 +310,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		&& diagnostic.find("invalid Mobility use") != std::string::npos,
 		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 59") != std::string::npos
+	require(yaml.find("version: 60") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("ladderSpeedModifier") != std::string::npos
@@ -362,6 +363,19 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		&& loadedAgent->getEffectiveRouteFamiliarity().value == 0.5f
 		&& loadedAgent->getEffectiveMobilityProfile().value == directMobility,
 		"Individual Agent properties did not round-trip");
+
+	// Legacy migration changes only identity, not properties, assignments, or
+	// the persisted per-tag sample values and revisions.
+	auto legacy = YAML::Load(yaml);
+	legacy["version"] = 59;
+	for (auto record : legacy["agents"]) record["agent"].remove("type");
+	auto legacyReader = core::YamlSerializer::fromString(YAML::Dump(legacy));
+	legacyReader->deserialize();
+	require(loaded->deserialize(*legacyReader, work), "Legacy tagged Agents failed to load");
+	require(std::string(loaded->lookupAgent(id).entity->getTypeName()) == "Human"
+		&& YAML::Dump(YAML::Load(serialize(*loaded))["agents"])
+			== YAML::Dump(YAML::Load(yaml)["agents"]),
+		"Human migration changed authored properties, tag assignments, or samples");
 
 	require(world->setAgentIndividualColour(id, std::nullopt, &diagnostic), diagnostic);
 	require(!agent->getEffectiveColour().individual

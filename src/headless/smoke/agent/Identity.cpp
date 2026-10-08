@@ -1,5 +1,7 @@
 #include "Checks.h"
 #include "core/World.h"
+#include "core/Agent.h"
+#include "core/Defines.h"
 #include "core/Simulation.h"
 #include <type_traits>
 
@@ -14,6 +16,31 @@ namespace
 		world.finishBuild();
 
 		auto agentId = world.createAgent("Owned idle agent", corridor, 0, 0.5f);
+		auto const* human = world.lookupAgent(agentId).entity;
+		smoke::require(human && std::string(human->getTypeName()) == "Human",
+			"Ordinary World creation did not create a Human");
+		auto const& physical = human->getPhysicalBaseline();
+		smoke::require(physical.width == CORE_AGENT_MAX_WIDTH
+			&& physical.standingHeight == CORE_AGENT_MAX_HEIGHT
+			&& physical.walkSpeed == CORE_AGENT_BASE_WALK_SPEED
+			&& physical.climbSpeed == CORE_AGENT_BASE_CLIMB_SPEED
+			&& physical.reachDistance == CORE_AGENT_REACH_DIST
+			&& physical.stairAscentSpeed == 0.35f && physical.stairDescentSpeed == 0.45f
+			&& physical.sittingHeightRatio == 0.6f && physical.crouchingHeightRatio == 0.6f
+			&& physical.crawlingHeightRatio == 0.3f && physical.crawlingSpeedRatio == 0.5f,
+			"Human physical baselines changed");
+		world.pauseSimulation();
+		std::string diagnostic;
+		smoke::require(world.setAgentIndividualHeightModifier(agentId, 0.8f, &diagnostic)
+			&& world.setAgentIndividualWalkSpeedModifier(agentId, 1.2f, &diagnostic),
+			"Human physical modifier authoring failed");
+		smoke::require(human->getStandingHeight() == physical.standingHeight * 0.8f
+			&& human->getWalkSpeed() == physical.walkSpeed * 1.2f,
+			"Human modifiers did not apply to physical baselines");
+		world.resetSimulation();
+		smoke::require(std::string(world.lookupAgent(agentId).entity->getTypeName()) == "Human",
+			"Reset lost Human identity");
+
 		auto pointId = world.createInteractionPoint("Light switch");
 		auto operationId = world.createDeviceOperation("Turn lights on", agentId);
 		auto resourceId = world.createTraversalResource("Ordinary passage");

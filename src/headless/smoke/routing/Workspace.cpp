@@ -1,3 +1,4 @@
+#include "core/Human.h"
 #include "Checks.h"
 #include "RoutingPopulation.h"
 #include <bit>
@@ -132,7 +133,7 @@ namespace
 		{
 			auto world = core::loadWorldDocument(smokeContext.fixture(std::filesystem::path("resources/test-worlds") / filename));
 			auto graph = world->getGraph();
-			core::Agent agent("Reference walker");
+			core::Human agent("Reference walker");
 			core::RouteDecisionContext const context{ &agent, {}, {}, nullptr,
 				agent.getWalkSpeed(), world.get() };
 			auto const& vertices = graph->getVertices();

@@ -89,6 +89,8 @@ struct AgentClipboardPayload
 	}
 
 	std::string name;
+	// Missing legacy identity means Human; explicit unknown types are refused.
+	std::string type{ "Human" };
 	std::uint32_t flags{ 0 };
 
 	// Whether the Agent is simulated. Every Agent starts activated, and so

@@ -71,6 +71,8 @@ namespace
 			diagnostic = std::move(reason);
 			return false;
 		};
+		if (payload.type != "Human")
+			return reject("Unsupported Agent type '" + payload.type + "'");
 		if (payload.individualStairSpeedModifier
 			&& !core::agentStairSpeedModifierRangeIsValid(
 				{ *payload.individualStairSpeedModifier, *payload.individualStairSpeedModifier },
@@ -537,6 +539,7 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	auto const lookup = world.lookupAgent(agent);
 	if (!lookup) return payload;
 
+	payload.type = lookup.entity->getTypeName();
 	payload.flags = lookup.entity->getFlags();
 	payload.active = lookup.entity->isActive();
 	payload.agentTags = lookup.entity->getAgentTagIds();
@@ -636,6 +639,7 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 		<< YAML::Key << "type" << YAML::Value << "Agent"
 		<< YAML::Key << "object" << YAML::Value << YAML::BeginMap
 		<< YAML::Key << "name" << YAML::Value << payload.name
+		<< YAML::Key << "type" << YAML::Value << payload.type
 		<< YAML::Key << "flags" << YAML::Value << payload.flags;
 	// No group, no key: the payload says nothing about a classification
 	// rather than saying "the empty one".
@@ -781,6 +785,18 @@ bool readAgentClipboardObject(YAML::Node const& object,
 	if (!object || !object.IsMap())
 	{
 		diagnostic = "Clipboard object definition is required";
+		return false;
+	}
+
+	try { payload.type = object["type"] ? object["type"].as<string>() : "Human"; }
+	catch (exception const&)
+	{
+		diagnostic = "Clipboard Agent type has an invalid value";
+		return false;
+	}
+	if (payload.type != "Human")
+	{
+		diagnostic = "Unsupported Agent type '" + payload.type + "'";
 		return false;
 	}
 

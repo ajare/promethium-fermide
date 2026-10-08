@@ -1,3 +1,4 @@
+#include "core/Human.h"
 #include "../support/CatalogueSource.h"
 #include "Checks.h"
 #include "State.h"
@@ -339,7 +340,7 @@ namespace
 					if (object->getMarker()->getId() == chair.marker) seat = world->getGraph()->getVertexForObject(object);
 					if (object->getMarker()->getName() == "Entrance") entrance = world->getGraph()->getVertexForObject(object);
 				}
-			core::Agent query("Query");
+			core::Human query("Query");
 			require(seat && bool(world->getGraph()->calculatePath(&query,
 				entrance, seat)) == expected,
 				"Editor history retained stale attachment connectivity");
@@ -395,7 +396,7 @@ namespace
 					if (object->getMarker()->getName() == "Internal boundary") boundary = vertex;
 					if (object->getMarker()->getId() == inner.marker) seat = vertex;
 				}
-			core::Agent query("Query");
+			core::Human query("Query");
 			require(seat && world->getGraph()->calculatePath(&query, entrance, seat)
 				&& !world->getGraph()->calculatePath(&query, entrance, boundary), "History lost composition or restored internal floor attachment");
 		};

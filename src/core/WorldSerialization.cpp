@@ -696,7 +696,8 @@ namespace core
 		// Version 57 adds optional ordinary Regular Door Height scale.
 		// Version 58 adds the authored Broken open percentage for ordinary Doors.
 		// Version 59 adds optional one-cell-high Room height scale.
-		serializer.writeUint32("version", 59);
+		// Version 60 persists immutable Agent type identity.
+		serializer.writeUint32("version", 60);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1579,7 +1580,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 59)
+		if (version < 1 || version > 60)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -2464,7 +2465,10 @@ namespace core
 			{
 				throw SerializationException("Serialized Agent ID cannot be zero");
 			}
-			auto agent = std::make_unique<Agent>("");
+			serializer.beginMap("agent");
+			auto const type = serializer.readString("type", true, "Human");
+			serializer.endMap();
+			auto agent = Agent::create(type, "");
 			agent->deserialize(serializer, workData);
 			auto const sectorIndex = serializer.readUint32("sector");
 			auto const localX = serializer.readFloat("localX");
@@ -3411,7 +3415,7 @@ namespace core
 		{
 			auto const* sector = agent->getSector();
 			if (!sector) continue;
-			carried.push_back(CarriedAgent{ id, agent->getName(), agent->getFlags(),
+			carried.push_back(CarriedAgent{ id, agent->getName(), agent->getTypeName(), agent->getFlags(),
 				sector->getIndex(), sector->getLayerIndex(), agent->getGlobalPosition(),
 				agent->getAgentGroupId(), agent->mDirectAccessGrants, agent->mPermissionSets,
 				agent->getAgentTagIds(),
@@ -3464,7 +3468,7 @@ namespace core
 				if (isLocationLike(sector->getType())
 					&& !mLayers[saved.layer]->getCellDefinition(cellX, cellY).isTraversableOnFoot()) continue;
 			}
-			auto agent = make_unique<Agent>(saved.name);
+			auto agent = Agent::create(saved.type, saved.name);
 			agent->setFlags(saved.flags);
 			agent->setActive(saved.active);
 			auto* raw = agent.get();

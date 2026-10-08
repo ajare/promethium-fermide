@@ -1,3 +1,4 @@
+#include "core/Human.h"
 #include "../support/CatalogueSource.h"
 #include "WorldChecks.h"
 #include "core/World.h"
@@ -570,7 +571,7 @@ definitions[1], definitions[2] = definitions[2], definitions[1]
 						if (object->getMarker()->getId() == attachedMarker) seat = loaded->getGraph()->getVertexForObject(object);
 						if (object->getMarker()->getName() == "Entrance") approach = loaded->getGraph()->getVertexForObject(object);
 					}
-				core::Agent query("Query");
+				core::Human query("Query");
 				require(seat && loaded->getGraph()->calculatePath(&query,
 					approach, seat), "Document replay lost route attachment");
 				auto visitor = loaded->lookupAgent(loaded->createAgent("Visitor", arrangementRoom, 0, 0.5f)).entity;
@@ -613,7 +614,7 @@ definitions[1], definitions[2] = definitions[2], definitions[1]
 							if (name == "Internal boundary") boundary = vertex;
 							if (object->getMarker()->getId() == owned) seat = vertex;
 						}
-					core::Agent query("Query"); auto graph = loaded->getGraph();
+					core::Human query("Query"); auto graph = loaded->getGraph();
 					require(graph->calculatePath(&query, entrance, exit) && graph->calculatePath(&query, entrance, seat)
 						&& !graph->calculatePath(&query, entrance, boundary), "Round trip/reset changed composed coverage or attachment");
 					require(loaded->lookupMarker(owned)->getName() == "Composed destination", "Composed destination identity/name changed");

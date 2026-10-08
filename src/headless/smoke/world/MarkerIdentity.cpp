@@ -1,3 +1,4 @@
+#include "core/Human.h"
 #include "Checks.h"
 #include <memory>
 #include <stdexcept>
@@ -115,7 +116,7 @@ namespace
 		world.pauseSimulation();
 
 		auto graph = world.getGraph();
-		core::Agent routingAgent("Marker pathing check");
+		core::Human routingAgent("Marker pathing check");
 		auto source = graph->getVertexByIdentifier(sourceVertex);
 		auto blocker = graph->getVertexByIdentifier(blockingVertex);
 		auto destination = graph->getVertexByIdentifier(destinationVertex);

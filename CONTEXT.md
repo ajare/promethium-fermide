@@ -253,7 +253,15 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 ## Actors and shared resources
 
 **Agent**:
-A simulated person with a position, destination path, and current movement state.
+A simulated intelligent entity with a position, destination Path, and current movement state.
+
+**Agent type**:
+An Agent's immutable physical identity, defining its baseline dimensions, movement speeds, and Pose proportions.
+_Avoid_: Agent tag, which supplies shared Agent properties
+
+**Human**:
+An Agent representing a person, with human physical baselines.
+_Avoid_: Agent, when specifically distinguishing a person from other intelligent entities
 
 **Height modifier**:
 An Agent property that multiplies its base standing height. An individual value overrides the persisted sample inherited from an Agent tag; the effective value affects appearance and ordinary Door clearance, without redefining unrelated traversal physics.

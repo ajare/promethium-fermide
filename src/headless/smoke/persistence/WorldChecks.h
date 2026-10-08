@@ -16,6 +16,7 @@ namespace persistence
 	void legacyVersion3WorldYamlStillLoadsWithDefaultLayers(smoke::Context const&);
 	void version4WorldYamlStillLoads(smoke::Context const&);
 	void layerFieldsAcceptLegacyNamesAndIndices(smoke::Context const&);
+	void humanIdentityRoundTripsAndRejectsUnsupportedTypes(smoke::Context const&);
 	void agentRestoreRejectsMalformedPositions(smoke::Context const&);
 	void agentRestoreRejectsBackgroundAndUnreachableDestination(smoke::Context const&);
 	void worldLayerNamesRoundTrip(smoke::Context const&);

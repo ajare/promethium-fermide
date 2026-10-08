@@ -1,4 +1,5 @@
 #include "core/Agent.h"
+#include "core/Human.h"
 #include "core/DoorEdge.h"
 #include "core/BulkheadDoorEdge.h"
 
@@ -132,6 +133,12 @@ namespace core
 		}
 	}
 
+	std::unique_ptr<Agent> Agent::create(string const& type, string const& name)
+	{
+		if (type == "Human") return std::make_unique<Human>(name);
+		throw SerializationException("Unsupported Agent type '" + type + "'");
+	}
+
 	Agent::Agent(string const& name)
 		: mName(name)
 		, mFlags(0)
@@ -163,6 +170,7 @@ namespace core
 	void Agent::serializeImpl(Serializer& serializer, SerializationWorkData&) const
 	{
 		serializer.beginMap("agent");
+		serializer.writeString("type", std::string(getTypeName()));
 		serializer.writeString("name", mName);
 		serializer.writeUint32("flags", mFlags);
 		// The Agent group is written by its stable ID and never by name, so a
@@ -325,6 +333,9 @@ namespace core
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		serializer.beginMap("agent");
+		auto const type = serializer.readString("type", true, "Human");
+		if (type != getTypeName())
+			throw SerializationException("Unsupported Agent type '" + type + "'");
 		mName = serializer.readString("name");
 		mFlags = serializer.readUint32("flags");
 		// Absent means no Agent group. Whether an ID that is present actually
@@ -1055,12 +1066,12 @@ namespace core
 
 	float Agent::getWidth() const
 	{
-		return CORE_AGENT_MAX_WIDTH;
+		return getPhysicalBaseline().width;
 	}
 
 	float Agent::getStandingHeight() const
 	{
-		return CORE_AGENT_MAX_HEIGHT * getEffectiveHeightModifier().value;
+		return getPhysicalBaseline().standingHeight * getEffectiveHeightModifier().value;
 	}
 
 	float Agent::getTraversalDoorClearanceExtent(bool beginningMovement) const
@@ -1155,13 +1166,13 @@ namespace core
 
 	float Agent::getWalkSpeed() const
 	{
-		return static_cast<float>(CORE_AGENT_BASE_WALK_SPEED)
+		return getPhysicalBaseline().walkSpeed
 			* getEffectiveWalkSpeedModifier().value;
 	}
 
 	float Agent::getClimbSpeed() const
 	{
-		return static_cast<float>(CORE_AGENT_BASE_CLIMB_SPEED)
+		return getPhysicalBaseline().climbSpeed
 			* getEffectiveLadderSpeedModifier().value;
 	}
 

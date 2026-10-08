@@ -2022,7 +2022,7 @@ namespace
 		{
 			paletteConsumedMouse = true;
 			ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-			ImGui::SetTooltip(hoveredItem == PaletteItem::Agent ? "Drag to add Agent"
+			ImGui::SetTooltip(hoveredItem == PaletteItem::Agent ? "Drag to add Human"
 				: hoveredItem == PaletteItem::Marker ? "Drag to add Marker"
 				: hoveredItem == PaletteItem::BulkheadDoor ? "Drag to add Bulkhead Door"
 				: hoveredItem == PaletteItem::Window ? "Drag to add Window"
@@ -7539,6 +7539,7 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	auto globalPosition = gSelectedAgent->getGlobalPosition();
 
 	ImGui::Text("Agent: %s", gSelectedAgent->getName().c_str());
+	ImGui::Text("Type: %s", gSelectedAgent->getTypeName());
 	ImGui::Text("ID: %llu", (unsigned long long)id.value);
 	ImGui::Text("Sector: %s", sector ? sector->getDescription().c_str() : "<none>");
 	if (sector) ImGui::Text("Layer: %u", sector->getLayerIndex());

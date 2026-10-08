@@ -199,6 +199,23 @@ namespace core
 		bool individual{ false };
 	};
 
+	// Type-owned physical defaults, before shared authored modifiers. Resource
+	// slot spacing and environmental dimensions are not Agent baselines.
+	struct AgentPhysicalBaseline
+	{
+		float width;
+		float standingHeight;
+		float reachDistance;
+		float walkSpeed;
+		float climbSpeed;
+		float stairAscentSpeed;
+		float stairDescentSpeed;
+		float sittingHeightRatio;
+		float crouchingHeightRatio;
+		float crawlingHeightRatio;
+		float crawlingSpeedRatio;
+	};
+
 	class Agent : public Serializable
 	{
 		friend struct AgentPoseTestAccess;
@@ -589,9 +606,14 @@ namespace core
 		bool atEndOfPath() const;
 
 
-	public:
+	protected:
+		explicit Agent(std::string const& name);
 
-		Agent(std::string const& name);
+	public:
+		// Stable wire identity and physical observations are immutable type data.
+		virtual char const* getTypeName() const = 0;
+		virtual AgentPhysicalBaseline const& getPhysicalBaseline() const = 0;
+		static std::unique_ptr<Agent> create(std::string const& type, std::string const& name);
 
 		virtual ~Agent();
 		Agent(Agent const&) = delete;

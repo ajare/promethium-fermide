@@ -65,6 +65,8 @@ namespace core
 //
 // Agents
 //
+// Temporary compatibility constants for consumers migrated after #494.
+// Human owns the physical baseline; fixed resource sizing remains unchanged.
 #define CORE_AGENT_BASE_WALK_SPEED					0.5f
 #define CORE_AGENT_BASE_CLIMB_SPEED					0.25f
 #define CORE_AGENT_MAX_HEIGHT						(CORE_DOOR_HEIGHT - 0.05f)

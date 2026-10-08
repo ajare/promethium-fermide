@@ -1156,6 +1156,7 @@ namespace core
 		{
 			AgentId id;
 			std::string name;
+			std::string type;
 			uint32_t flags{ 0 };
 			uint32_t sectorIndex{ 0 };
 			uint32_t layer{ 0 };

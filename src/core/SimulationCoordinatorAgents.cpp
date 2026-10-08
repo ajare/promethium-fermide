@@ -108,13 +108,13 @@ namespace core
 	AgentId SimulationCoordinator::createAgent(string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset)
 	{
 		mWorld.invalidateSimulationSnapshot();
-		return addOwnedAgentToSector(make_unique<Agent>(name), sectorId, levelOffset, xOffset);
+		return addOwnedAgentToSector(Agent::create("Human", name), sectorId, levelOffset, xOffset);
 	}
 
 	AgentId SimulationCoordinator::createAgent(string const& name, uint32_t sectorId)
 	{
 		mWorld.invalidateSimulationSnapshot();
-		return addOwnedAgentToSector(make_unique<Agent>(name), sectorId);
+		return addOwnedAgentToSector(Agent::create("Human", name), sectorId);
 	}
 
 	void SimulationCoordinator::wakeAllAgents()

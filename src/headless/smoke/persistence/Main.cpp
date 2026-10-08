@@ -36,6 +36,7 @@ namespace
 		{ "version4WorldYamlStillLoads", persistence::version4WorldYamlStillLoads },
 		{ "layerFieldsAcceptLegacyNamesAndIndices", persistence::layerFieldsAcceptLegacyNamesAndIndices },
 		{ "agentPoses", persistence::agentPoses },
+		{ "humanIdentityRoundTripsAndRejectsUnsupportedTypes", persistence::humanIdentityRoundTripsAndRejectsUnsupportedTypes },
 		{ "agentRestoreRejectsMalformedPositions", persistence::agentRestoreRejectsMalformedPositions },
 		{ "agentRestoreRejectsBackgroundAndUnreachableDestination", persistence::agentRestoreRejectsBackgroundAndUnreachableDestination },
 		{ "worldLayerNamesRoundTrip", persistence::worldLayerNamesRoundTrip },

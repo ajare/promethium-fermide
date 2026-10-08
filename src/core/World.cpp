@@ -8500,7 +8500,7 @@ namespace core
 	unique_ptr<Agent> World::makeAgentForPlacement(string const& name,
 		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets) const
 	{
-		auto agent = make_unique<Agent>(name);
+		auto agent = Agent::create("Human", name);
 		for (auto permission : grants)
 		{
 			auto found = lookupAccessPermission(permission);

@@ -136,6 +136,8 @@ namespace
 	{
 		for (auto const* agent : allAgents(world))
 		{
+			require(std::string(agent->getTypeName()) == "Human",
+				"Topology reconstruction lost Human identity " + when);
 			auto const group = agent->getAgentGroupId();
 			if (!group) continue;
 			auto const lookup = world.lookupAgentGroup(group);

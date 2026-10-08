@@ -62,6 +62,9 @@ namespace
 		require(restored, redo ? "There is no redo entry to restore"
 			: "There is no undo entry to restore");
 		world = std::move(loaded);
+		for (auto const& snapshot : world->getSimulationSnapshot().agents)
+			require(std::string(world->lookupAgent(snapshot.id).entity->getTypeName()) == "Human",
+				"Clipboard history restoration lost Human identity");
 	}
 
 	// ---------------------------------------------------------------- world
@@ -214,6 +217,8 @@ namespace
 		require(commitAgentPlacement(world, payload, sector, levelOffset, localX,
 			placed, diagnostic), "Placing the pasted Agent failed: " + diagnostic);
 		require(!!placed, "The placement reported success without naming an Agent");
+		require(std::string(world->lookupAgent(placed).entity->getTypeName()) == payload.type,
+			"Clipboard placement changed the Agent type");
 		return placed;
 	}
 
@@ -232,6 +237,24 @@ namespace
 		auto const text = copyText(*world.world, alice, "Alice copy");
 		auto const read = readClipboard(text);
 
+		require(read.payload.type == "Human" && text.find("type: Human") != std::string::npos,
+			"The clipboard omitted Human identity");
+		auto unsupported = YAML::Load(text)["promethiumClipboard"]["object"];
+		unsupported["type"] = "Robot";
+		AgentClipboardPayload rejected;
+		std::string diagnostic;
+		require(!readAgentClipboardObject(unsupported, rejected, diagnostic)
+			&& diagnostic.find("Robot") != std::string::npos,
+			"An unsupported clipboard type was not rejected precisely");
+		auto invalid = read.payload;
+		invalid.type = "Robot";
+		core::AgentId refused;
+		auto const count = agentCount(*world.world);
+		auto const undoCount = gWorldDocumentHistory.undoCount();
+		require(!commitAgentPlacement(world.world, invalid, world.world->getSector(world.room),
+			0, 2.f, refused, diagnostic) && diagnostic.find("Robot") != std::string::npos
+			&& agentCount(*world.world) == count && gWorldDocumentHistory.undoCount() == undoCount,
+			"Direct unsupported-type placement left an Agent or history entry");
 		require(read.payload.name == "Alice copy",
 			"The copied payload lost the copy's name");
 		require(read.payload.group.has_value() && *read.payload.group == "Crew",
@@ -240,12 +263,12 @@ namespace
 			"The clipboard text does not name the Agent group: " + text);
 
 		// No ID of any kind crosses. The clipboard object map holds a name,
-		// flags and the Agent group name - nothing else - and none of those
+		// flags, type and the Agent group name - and none of those
 		// values is the group's World-local AgentGroupId, which would be
 		// meaningless to whatever pastes this.
 		auto const keys = clipboardObjectKeys(text);
-		require(keys == std::vector<std::string>{ "flags", "group", "name" },
-			"The clipboard payload carries more than a name, flags and an Agent"
+		require(keys == std::vector<std::string>{ "flags", "group", "name", "type" },
+			"The clipboard payload carries more than a name, flags, type and an Agent"
 			" group name: " + text);
 		auto const values = clipboardObjectValues(text);
 		require(std::find(values.begin(), values.end(), std::to_string(crew.value))
@@ -300,8 +323,8 @@ namespace
 		auto const read = readClipboard(legacyClipboardText(
 			"    name: Legacy hand\n"
 			"    flags: 0\n"));
-		require(!read.payload.group.has_value(),
-			"A legacy payload without a group read back with one");
+		require(!read.payload.group.has_value() && read.payload.type == "Human",
+			"A legacy payload did not default to an ungrouped Human");
 		require(read.payload.name == "Legacy hand",
 			"A legacy payload lost its name");
 

@@ -38,6 +38,7 @@ set(names dumbwaiters/authoredRoundTripAndMalformedRecords accessPanels/roundTri
     version4WorldYamlStillLoads
     layerFieldsAcceptLegacyNamesAndIndices
     agentPoses
+    humanIdentityRoundTripsAndRejectsUnsupportedTypes
     agentRestoreRejectsMalformedPositions
     agentRestoreRejectsBackgroundAndUnreachableDestination
     worldLayerNamesRoundTrip
