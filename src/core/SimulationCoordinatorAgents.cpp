@@ -55,7 +55,7 @@ namespace core
 			throw WorldException(&mWorld,
 				"An Agent cannot occupy a Background: it owns no walkable floor and takes no part in traversal");
 		}
-		mWorld.validateAgentLocationPlacement(*sector, *agent);
+		mWorld.validateAgentLocationPlacement(*sector, *agent, sector->getPosition().y + levelOffset);
 		auto rawAgent = agent.get();
 		rawAgent->attachToWorld(&mWorld);
 		sector->enterAgent(rawAgent, levelOffset, xOffset);

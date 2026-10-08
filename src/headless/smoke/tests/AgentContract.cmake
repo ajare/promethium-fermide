@@ -84,6 +84,11 @@ set(agent_checks
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist
+    agentPosesSupportedRooms
+    agentPosesSupportedBridge
+    agentPosesSupportedDoors
+    agentPosesCrouchingDoor
+    agentPosesApertureBoundaries
     agentTypesPoseDeclarations
     agentTypesInvalidPoseDeclarations
     agentTypesScriptedHumanIdentity

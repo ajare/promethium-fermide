@@ -5,6 +5,14 @@ namespace core
 	// Runtime bodily stance, independent of locomotion and authored properties.
 	enum class Pose { Standing, Sitting, Lying, Crouching, Crawling };
 
+	inline constexpr float PoseFitTolerance = 0.00001f;
+	// Absence of this result is physical refusal, not a universal pose fallback.
+	struct PoseSelection
+	{
+		Pose pose;
+		float speedRatio;
+	};
+
 	// Lower-case Lua/scripting vocabulary for the runtime pose. Shared by the
 	// validated Action effect and the read-only Agent inspection view.
 	inline constexpr char const* poseName(Pose pose)

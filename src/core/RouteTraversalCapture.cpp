@@ -39,6 +39,11 @@ namespace core
 					&& adjacent->getOtherVertex(source)->getSector().get() == context.observationSector) return true;
 			return false;
 		};
+		if (context.agent && !context.agent->requiredPoseFor(*target->getSector(), target->getPosition().y))
+		{
+			result.exclusion = RouteExclusionReason::Clearance;
+			return result;
+		}
 		bool frozenExtended = false;
 		auto extension = [&](auto const& device)
 		{
@@ -62,7 +67,13 @@ namespace core
 		};
 		switch (result.type)
 		{
-		case EdgeType::Location: break;
+		case EdgeType::Location:
+			if (context.agent)
+			{
+				result.roomMotionSeconds = context.agent->roomMovementSeconds(*source, *target, context.walkSpeed);
+				if (!result.roomMotionSeconds) result.exclusion = RouteExclusionReason::Clearance;
+			}
+			break;
 		case EdgeType::Gap:
 			result.exclusion = RouteExclusionReason::NoContinuation;
 			break;
@@ -141,6 +152,15 @@ namespace core
 		}
 		case EdgeType::ForceBridge:
 		{
+			if (context.agent)
+			{
+				result.roomMotionSeconds = context.agent->roomMovementSeconds(*source, *target, context.walkSpeed);
+				if (!result.roomMotionSeconds)
+				{
+					result.exclusion = RouteExclusionReason::Clearance;
+					break;
+				}
+			}
 			auto const& bridge = static_cast<ForceBridgeEdge const&>(edge).mForceBridge;
 			extension(*bridge);
 			if (result.exclusion == RouteExclusionReason::Control) break;
@@ -243,14 +263,16 @@ namespace core
 				? *static_cast<DoorEdge const&>(edge).mDoor : *static_cast<BulkheadDoorEdge const&>(edge).mDoor;
 			if (context.agent)
 			{
-				auto const mode = door.classifyAgentCrossing(
-					*context.agent, source->getPosition().y, context.beginningMovement);
-				if (mode == Door::DoorCrossingMode::None)
+				auto const known = door.knownCondition(context.agent, context.observationSector);
+				auto const choice = door.selectAgentCrossing(*context.agent, source->getPosition().y,
+					context.beginningMovement, known && known->broken
+						? std::optional<float>{known->position} : std::nullopt);
+				if (!choice)
 				{
 					result.exclusion = RouteExclusionReason::Clearance;
 					return result;
 				}
-				result.crawling = mode == Door::DoorCrossingMode::Crawling;
+				result.motionSpeedRatio = choice->speedRatio;
 			}
 			result.mobilityKind = TraversalKind::Door;
 			if (result.type == EdgeType::BulkheadDoor)

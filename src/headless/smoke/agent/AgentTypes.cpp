@@ -1,5 +1,10 @@
 #include "Checks.h"
 #include "MobilityLifecycle.h"
+#include "PoseJourneys.h"
+#include "core/DoorEdge.h"
+#include "core/DoorSectorObject.h"
+#include "core/BulkheadDoorEdge.h"
+#include "core/RouteTraversalInputs.h"
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/AgentType.h"
@@ -79,6 +84,289 @@ namespace
 			"            automatic_poses = { room_movement = {{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=1},{pose='crawling',speed_ratio=1}}, door_crossing = {{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=0.5}} },\n"
 			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' },\n" + overrides
 			+ "        }\n";
+	}
+
+	void supportedPoseRooms(smoke::Context const&)
+	{
+		for (bool crawlFirst : {false, true})
+		{
+			core::World world("Context Room journeys", 8, 2);
+			auto high = world.addCorridor(0, 0, 0, 2, 1);
+			auto low = world.addRoom("Low", 0, 0, 2, 4, 1);
+			world.addSectorMarker(high, 0, .5f, "High goal");
+			world.addSectorMarker(low, 0, 3.f, "Low goal");
+			world.addSectorMarker(low, 0, 1.f, "Low waypoint");
+			world.finishBuild(); world.pauseSimulation();
+			require(world.setRoomHeightScale(low, .4f), "Room scale refused");
+			world.removeLocationWall(low, 0, CORE_SIDE_LEFT); world.finishBuild();
+			pose_journeys::attachRobot(world);
+			bool rejected = false;
+			try { (void)world.createAgent("StandingRobot", "Impossible", low, 0, .5f); }
+			catch (std::invalid_argument const&) { rejected = true; }
+			require(rejected && world.getSimulationSnapshot().agents.empty(), "Impossible placement published an Agent");
+			auto robot = world.createAgent("StandingRobot", "Robot", high, 0, .5f);
+			auto* robotAgent = world.lookupAgent(robot).entity;
+			auto before = robotAgent->getGlobalPosition();
+			rejected = false;
+			try { const_cast<core::Sector*>(world.getSector(low).get())->enterAgent(robotAgent, 0, .5f); }
+			catch (std::invalid_argument const&) { rejected = true; }
+			require(rejected && robotAgent->getGlobalPosition() == before, "Impossible relocation mutated position");
+			std::string diagnostic;
+			auto roomChoices = crawlFirst
+				? "{{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=0.25},{pose='crouching',speed_ratio=0.5}}"
+				: "{{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=0.5},{pose='crawling',speed_ratio=0.25}}";
+			require(world.attachAgentType("ordered.agent.lua", typeSource("Ordered", "Ordered", validBaseline(
+				"standing_height=.45, automatic_poses={room_movement=" + std::string(roomChoices)
+				+ ",door_crossing={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=.5}}},")), &diagnostic), diagnostic);
+			auto id = world.createAgent("Ordered", "Ordered", low, 0, .5f);
+			auto* agent = world.lookupAgent(id).entity;
+			auto expected = crawlFirst ? core::Pose::Crawling : core::Pose::Crouching;
+			require(agent->getPose() == expected, "Room did not honour frozen supported order");
+			bool estimated = false;
+			for (auto const& edge : world.getGraph()->getEdges())
+				if (edge->getType() == core::EdgeType::Location
+					&& edge->getVertex(0)->getSector()->getIndex() == low
+					&& edge->getVertex(1)->getSector()->getIndex() == low && edge->getLength() > 0)
+				{
+					core::RouteDecisionContext context{agent, {}, world.getGraph()->getRouteChoicePolicy(), agent->getSector(), agent->getWalkSpeed(), &world};
+					auto direct = edge->getDirectedTraversalFacts(edge->getVertex(1), context);
+					auto captured = core::RouteTraversalInputs::capture(*edge, edge->getVertex(1), context).evaluate(context);
+					auto seconds = edge->getLength() / (agent->getWalkSpeed() * (crawlFirst ? .25f : .5f));
+					require(direct.feasible && captured.feasible && std::abs(direct.components.motionSeconds - seconds) < .00001f
+						&& direct.components.motionSeconds == captured.components.motionSeconds, "Room direct/captured motion ignored context ratio");
+					estimated = true;
+				}
+			require(estimated, "Room estimate fixture lacked motion components");
+			world.resumeSimulation();
+			pose_journeys::refused(world, robot, "Low goal");
+			require(world.moveAgentToNamedMarker(id, "Low goal").accepted(), "Room journey refused");
+			bool moving = false; float moved = 0; unsigned motionTicks = 0;
+			for (unsigned tick = 0; tick < 3000; ++tick)
+			{
+				auto x = agent->getGlobalPosition().x; world.advanceTick();
+				auto delta = std::abs(agent->getGlobalPosition().x - x);
+				if (delta > 0) { moving = true; moved += delta; ++motionTicks; }
+				require(agent->getPose() == expected, "Room movement changed supported order");
+				if (moving && agent->getState() == core::Agent::State::Idle) break;
+			}
+			auto ratio = crawlFirst ? .25f : .5f;
+			require(moving && agent->getState() == core::Agent::State::Idle
+				&& std::abs(motionTicks * world.getFixedTimestep() - moved / (agent->getWalkSpeed() * ratio)) < .04f,
+				"Room context ratio disagreed with actual duration");
+			require(world.moveAgentToNamedMarker(id, "High goal").accepted(), "Return journey refused");
+			bool stoodAtBoundary = false;
+			for (unsigned tick = 0; tick < 4000; ++tick)
+			{
+				world.advanceTick();
+				if (agent->getGlobalPosition().x < 2.f)
+				{
+					require(agent->getPose() == core::Pose::Standing, "Physical Room boundary lagged logical membership");
+					stoodAtBoundary = true;
+				}
+				if (stoodAtBoundary && agent->getState() == core::Agent::State::Idle) break;
+			}
+			require(stoodAtBoundary, "Return never crossed physical Room boundary");
+		}
+	}
+
+	void supportedPoseBridge(smoke::Context const&)
+	{
+		core::World world("Room pose on Force Bridge", 8, 3);
+		auto room = world.addRoom("Bridge room", 0, 0, 0, 6, 2);
+		world.addSectorWalkway(room, 1, 0);
+		world.addSectorWalkway(room, 1, 3);
+		core::World::CreateForceBridgeOptions options{2, CORE_SIDE_LEFT, false, true, 0};
+		world.addSectorForceBridge(room, 1, 1, options);
+		world.addSectorMarker(room, 1, 3.5f, "Goal");
+		world.finishBuild();
+		std::string diagnostic;
+		require(world.attachAgentType("bridge-croucher.agent.lua", typeSource("BridgeCroucher", "Bridge Croucher", validBaseline(
+			"standing_height=1.4, automatic_poses={room_movement={{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=.5}},door_crossing={{pose='standing',speed_ratio=1}}},")), &diagnostic), diagnostic);
+		auto id = world.createAgent("BridgeCroucher", "Croucher", room, 1, .5f);
+		auto* agent = world.lookupAgent(id).entity;
+		require(agent->getPose() == core::Pose::Crouching, "Walkway clearance ignored Room pose");
+		bool estimated = false;
+		for (auto const& edge : world.getGraph()->getEdges())
+			if (edge->getType() == core::EdgeType::ForceBridge)
+			{
+				core::RouteDecisionContext context{agent, {}, world.getRouteChoicePolicy(), agent->getSector(), agent->getWalkSpeed(), &world};
+				for (auto target : {edge->getVertex(0), edge->getVertex(1)})
+				{
+					auto direct = edge->getDirectedTraversalFacts(target, context);
+					auto captured = core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context);
+					require(direct.feasible && captured.feasible
+						&& std::abs(direct.components.motionSeconds - edge->getLength() / (agent->getWalkSpeed() * .5f)) < .00001f
+						&& direct.components.motionSeconds == captured.components.motionSeconds,
+						"Force Bridge estimate ignored Room context speed ratio");
+				}
+				estimated = true;
+			}
+		require(estimated, "Force Bridge fixture lacks traversal");
+		require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Bridge Marker intent refused");
+		float moved = 0; unsigned motionTicks = 0;
+		for (unsigned tick = 0; tick < 3000; ++tick)
+		{
+			auto x = agent->getGlobalPosition().x; world.advanceTick();
+			auto delta = std::abs(agent->getGlobalPosition().x - x);
+			if (delta > 0) { moved += delta; ++motionTicks; }
+			require(agent->getPose() == core::Pose::Crouching, "Bridge lost Room posture");
+			if (moved > 0 && agent->getState() == core::Agent::State::Idle) break;
+		}
+		// Each physical waypoint rounds its final movement step to a tick.
+		require(moved > 0 && agent->getState() == core::Agent::State::Idle
+			&& std::abs(motionTicks * world.getFixedTimestep() - moved / (agent->getWalkSpeed() * .5f)) < 4 * world.getFixedTimestep(),
+			"Bridge Room pose speed disagreed with actual journey duration: moved=" + std::to_string(moved)
+				+ " ticks=" + std::to_string(motionTicks) + " state=" + std::to_string(static_cast<int>(agent->getState())));
+	}
+
+	void supportedPoseDoors(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		for (auto mode : {core::DoorActivationMode::Manual, core::DoorActivationMode::Automatic,
+			core::DoorActivationMode::RemoteControlled})
+		for (bool alternate : {false, true})
+		{
+			core::World world("Robot Door journeys", 12, 2);
+			auto a = world.addRoom("A", 0, 0, 0, 12, 1);
+			auto b = world.addRoom("B", 1, 0, 0, 12, 1);
+			core::World::CreateDoorOptions options;
+			options.heightScale = .6f; options.activationMode = mode;
+			options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+			auto low = world.addSectorDoor(0, 0, 2, options);
+			if (alternate) world.addSectorDoor(0, 0, 9, {});
+			world.addSectorMarker(reverse ? a : b, 0, 3.5f, "Goal");
+			world.finishBuild(); pose_journeys::attachRobot(world);
+			auto id = world.createAgent("StandingRobot", "Robot", reverse ? b : a, 0, 1.5f);
+			if (!alternate) { pose_journeys::refused(world, id, "Goal"); continue; }
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Alternative intent refused");
+			bool arrived = false;
+			for (unsigned tick = 0; tick < 5000; ++tick)
+			{
+				world.advanceTick(); auto* agent = world.lookupAgent(id).entity;
+				require(agent->getPose() == core::Pose::Standing, "Alternative invented lowered robot pose");
+				for (auto const& request : world.getSimulationSnapshot().traversalRequests)
+					require(request.resource != low.traversalResource, "Alternative admitted impossible Door");
+				if (agent->getSector() == world.getSector(reverse ? a : b).get()
+					&& agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+			}
+			require(arrived, "Feasible alternative did not arrive");
+		}
+	}
+
+	void supportedPoseApertures(smoke::Context const&)
+	{
+		for (bool bulkhead : {false, true})
+		for (bool reverse : {false, true})
+		for (bool broken : {false, true})
+		for (float gap : {0.f, -.000005f, -.00002f})
+		for (auto style : {core::Door::OpenStyle::OpenUp, core::Door::OpenStyle::OpenApart,
+			core::Door::OpenStyle::OpenLeft, core::Door::OpenStyle::OpenRight})
+		for (auto mode : {core::DoorActivationMode::Manual, core::DoorActivationMode::Automatic,
+			core::DoorActivationMode::RemoteControlled})
+		{
+			bool const widthConstrained = style != core::Door::OpenStyle::OpenUp;
+			core::World world("Supported aperture boundary", 8, 2);
+			auto a = world.addRoom("A", 0, 0, 0, bulkhead ? 4 : 8, 1);
+			auto b = world.addRoom("B", bulkhead ? 0 : 1, 0, bulkhead ? 4 : 0, bulkhead ? 4 : 8, 1);
+			core::TraversalResourceId resource;
+			if (bulkhead)
+			{
+				core::World::CreateBulkheadDoorOptions options;
+				options.activationMode = mode;
+				options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+				resource = world.addSectorBulkheadDoor(0, 0, 3, CORE_SIDE_RIGHT, options).traversalResource;
+			}
+			else
+			{
+				core::World::CreateDoorOptions options;
+				options.activationMode = mode;
+				options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+				options.openStyle = style;
+				options.heightScale = widthConstrained ? 1.f : (.36f + gap) / CORE_DOOR_HEIGHT;
+				resource = world.addSectorDoor(0, 0, 2, options).traversalResource;
+			}
+			world.addSectorMarker(reverse ? a : b, 0, 2.5f, "Goal"); world.finishBuild();
+			std::shared_ptr<core::Door> door;
+			for (auto const& edge : world.getGraph()->getEdges())
+				if (edge->getTraversalResourceId() == resource)
+				{
+					if (auto ordinary = std::dynamic_pointer_cast<const core::DoorEdge>(edge)) door = ordinary->getDoor();
+					if (auto sameLayer = std::dynamic_pointer_cast<const core::BulkheadDoorEdge>(edge)) door = sameLayer->getDoor();
+				}
+			require(bool(door), "Boundary threshold missing");
+			world.pauseSimulation();
+			if (bulkhead) static_cast<core::Shape&>(*door) = core::Shape(door->getPosition(), {door->getSize().x, .36f + gap});
+			if (broken)
+			{
+				require(world.setDoorBroken(resource, true), "Boundary Broken mode refused");
+				auto fraction = widthConstrained && !bulkhead ? (.3f + gap) / door->getSize().x : 1.f;
+				require(world.setDoorBrokenOpenPercentage(resource, fraction), "Boundary aperture refused");
+			}
+			pose_journeys::attachRobot(world);
+			auto id = world.createAgent("StandingRobot", "Robot", reverse ? b : a, 0, bulkhead ? (reverse ? .5f : 3.5f) : 2.5f);
+			require(world.setAgentIndividualHeightModifier(id, .9f), "Effective Height modifier refused");
+			world.resumeSimulation();
+			bool fits = gap >= -.00001f || (!bulkhead && widthConstrained && !broken);
+			if (!fits) { pose_journeys::refused(world, id, "Goal"); continue; }
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Exact-fit intent refused");
+			bool arrived = false;
+			for (unsigned tick = 0; tick < 2500; ++tick)
+			{
+				world.advanceTick(); auto* agent = world.lookupAgent(id).entity;
+				require(agent->getPose() == core::Pose::Standing, "Exact-fit robot lowered posture");
+				if (agent->getSector() == world.getSector(reverse ? a : b).get() && agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+			}
+			require(arrived, "Exact/tolerance fit was planned but not admissible");
+		}
+	}
+
+	void supportedCrouchingDoor(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		for (bool broken : {false, true})
+		for (bool lowered : {false, true})
+		{
+			core::World world("Crouching Door context", 8, 2);
+			auto a = world.addRoom("A", 0, 0, 0, 8, 1), b = world.addRoom("B", 1, 0, 0, 8, 1);
+			core::World::CreateDoorOptions options;
+			options.heightScale = broken || !lowered ? 1.f : .6f;
+			auto made = world.addSectorDoor(0, 0, 2, options);
+			world.addSectorMarker(reverse ? a : b, 0, 2.5f, "Goal"); world.finishBuild();
+			auto door = std::static_pointer_cast<const core::DoorSectorObject>(made.door.sector->getObject(made.door.index))->getDoor();
+			world.pauseSimulation();
+			if (broken) { require(world.setDoorBroken(made.traversalResource, true), "Broken mode refused"); require(world.setDoorBrokenOpenPercentage(made.traversalResource, lowered ? .6f : 1.f), "Broken aperture refused"); }
+			std::string diagnostic;
+			require(world.attachAgentType("crouching.agent.lua", typeSource("Croucher", "Croucher", validBaseline(
+				"standing_height=.45, automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=.8},{pose='crouching',speed_ratio=.25},{pose='crawling',speed_ratio=.5}}},")), &diagnostic), diagnostic);
+			auto id = world.createAgent("Croucher", "Croucher", reverse ? b : a, 0, 2.5f);
+			auto* agent = world.lookupAgent(id).entity;
+			for (auto const& edge : world.getGraph()->getEdges())
+				if (edge->getTraversalResourceId() == made.traversalResource)
+				{
+					auto target = edge->getVertex(0)->getSector()->getIndex() == (reverse ? a : b) ? edge->getVertex(0) : edge->getVertex(1);
+					core::RouteDecisionContext context{agent, {}, world.getGraph()->getRouteChoicePolicy(), agent->getSector(), agent->getWalkSpeed(), &world};
+					auto direct = edge->getDirectedTraversalFacts(target, context);
+					auto captured = core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context);
+					require(direct.feasible && captured.feasible && std::abs(direct.components.motionSeconds - (lowered ? .4f : 8.f / 60.f)) < .00001f
+						&& direct.components.motionSeconds == captured.components.motionSeconds, "Crouching captured/direct duration disagreed: direct=" + std::to_string(direct.components.motionSeconds)
+						+ " captured=" + std::to_string(captured.components.motionSeconds) + " broken=" + std::to_string(broken));
+				}
+			world.resumeSimulation(); require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Crouching intent refused");
+			unsigned crossingTicks = 0; bool arrived = false;
+			for (unsigned tick = 0; tick < 3000; ++tick)
+			{
+				world.advanceTick();
+				if (agent->getState() == core::Agent::State::TraversingEdge
+					&& !world.getSimulationSnapshot().traversalPermits.empty())
+				{
+					require(agent->getPose() == (lowered ? core::Pose::Crouching : core::Pose::Standing), "Door selected wrong supported pose");
+					++crossingTicks;
+				}
+				else require(agent->getPose() == core::Pose::Standing, "Waiting or recovery retained crossing pose");
+				if (agent->getSector() == world.getSector(reverse ? a : b).get() && agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+			}
+			require(arrived && crossingTicks == (lowered ? 24u : 8u), "Crossing did not use context pose/tick-quantized duration");
+		}
 	}
 
 	void scriptedHumanIdentity(smoke::Context const&)
@@ -1297,6 +1585,11 @@ namespace
 
 void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "agentPosesSupportedRooms", supportedPoseRooms });
+	checks.push_back({ "agentPosesSupportedBridge", supportedPoseBridge });
+	checks.push_back({ "agentPosesSupportedDoors", supportedPoseDoors });
+	checks.push_back({ "agentPosesCrouchingDoor", supportedCrouchingDoor });
+	checks.push_back({ "agentPosesApertureBoundaries", supportedPoseApertures });
 	checks.push_back({ "agentTypesPoseDeclarations", poseDeclarations });
 	checks.push_back({ "agentTypesInvalidPoseDeclarations", invalidPoseDeclarations });
 	checks.push_back({ "agentTypesScriptedHumanIdentity", scriptedHumanIdentity });

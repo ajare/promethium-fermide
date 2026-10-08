@@ -1,8 +1,8 @@
 # Script-defined Agent poses and Furniture pose requirements
 
-Status: approved design; API v2 declarations/frozen capabilities implemented in
-#521. Shared selection, Furniture and lifecycle integration remain pending in
-#522–#524. This document specifies the complete agreed refactor, not completed
+Status: approved design; API v2 declarations/frozen capabilities (#521) and
+shared fit/selection/routing/movement (#522) implemented. Furniture and lifecycle
+integration remain pending in #523–#524. See [shared selection validation](agent-pose-selection-validation.md). This document specifies the complete agreed refactor, not completed
 integration semantics.
 See [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
 The current authoring contracts are documented in [Lua Agent types](lua-agent-types.md)
@@ -289,8 +289,9 @@ Each issue ships focused external-behavior coverage; the final issue checks thei
 composition. #521 supplies the validated/frozen declaration contract and capability
 and envelope observations. Its Agent/Editor coverage includes Human and Standing-only
 resources, malformed contracts, preview/import refusal, persistence, revised fresh
-lifetimes and surviving topology/history carry. The remaining links track planned
-integration, not completed validation.
+lifetimes and surviving topology/history carry. #522 integrates shared fit/selection, placement, routing/admission and context
+motion, with focused production World journeys and captured/direct facts.
+The remaining #523/#524 links track planned integration, not completed validation.
 
 Out of scope: custom pose identities/shapes, independent per-pose widths, new
 fatigue/damage/task systems, live Lua selectors, tag-granted capabilities,

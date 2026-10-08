@@ -1,9 +1,10 @@
 # Lua Agent-type authoring and integrated migration (#510)
 
-> **API v2 declarations are implemented (#521).** Supported poses and ordered
-> automatic choices are validated and frozen per lifetime. Full context selection,
-> no-fit movement, Furniture eligibility and lifecycle enforcement remain follow-up
-> work (#522–#524); declarations do not claim those integration semantics.
+> **API v2 declarations (#521) and shared fit/selection/movement (#522) are implemented.**
+> Supported poses and ordered automatic choices are validated and frozen per lifetime.
+> Room/Door motion, placement, routing and admission consume the shared fit result.
+> Furniture eligibility and full lifecycle/edit enforcement remain follow-ups (#523–#524).
+> See [selection validation](agent-pose-selection-validation.md).
 > See [Agent pose capabilities](agent-pose-capabilities.md) and [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
 
 An Agent type is one managed `.agent.lua` resource returning a type table. Human

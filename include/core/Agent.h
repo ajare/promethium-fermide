@@ -5,6 +5,7 @@
 #include <bitset>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <set>
 #include <map>
@@ -281,9 +282,9 @@ namespace core
 			uint32_t pathNodesConsumed{ 1 };
 			uint64_t traversalTicksRemaining{ 0 };
 			std::optional<bool> escalatorWalking;
-			// Set when a Door crossing is admitted as the automatic low-Door
-			// Crawling fallback (type-defined height, doubled crossing duration).
-			bool crawling{ false };
+			// Frozen supported pose and context speed selected on admitted
+			// threshold adoption; retained until physical crossing completion.
+			std::optional<PoseSelection> crossingPose;
 
 		};
 
@@ -878,25 +879,29 @@ namespace core
 		// New movement clears Action poses; active Furniture use finishes on
 		// physical departure even though it survives planning.
 		float getTraversalDoorClearanceExtent(bool beginningMovement = false) const;
-		// Whether the automatic low-Door Crawling fallback applies to this Agent:
-		// it is effectively Standing (or predicts a Standing departure) rather
-		// than retaining a lowered Action pose at the threshold.
-		bool admitsAutomaticDoorCrawling(bool beginningMovement) const
-		{
-			return supportsPose(Pose::Crawling)
-				&& getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling)
-				&& (beginningMovement || mFurnitureUse || mPose == Pose::Standing);
-		}
 		// Top of the Crawling envelope above the supporting Floor, mirroring the
 		// departure prediction of getTraversalDoorClearanceExtent for the
 		// type-defined Crawling pose. Excludes decorative offsets.
 		float getTraversalCrawlingDoorClearanceExtent(bool beginningMovement = false) const;
 
-		// The locomotion Pose this Agent must adopt while occupying `sector`:
-		// Standing when the sector's effective ceiling clears the standing height,
-		// otherwise Crouching or Crawling when its type-defined envelope fits.
-		// Non-Room sectors always admit Standing.
-		Pose requiredPoseFor(Sector const& sector) const;
+		// One physical fit rule and ordered selection for runtime and prediction.
+		// Room clearance is relative to the actual approach Floor/Walkway;
+		// absence refuses movement. Non-Room sectors retain Standing policy.
+		std::optional<PoseSelection> selectAutomaticPose(AutomaticPoseContext context,
+			float clearance, float support = 0.0f,
+			float openingWidth = std::numeric_limits<float>::infinity()) const;
+		bool poseFits(Pose pose, float clearance, float support = 0.0f,
+			float openingWidth = std::numeric_limits<float>::infinity()) const;
+		std::optional<PoseSelection> requiredPoseFor(Sector const& sector,
+			std::optional<float> floorY = std::nullopt) const;
+		std::optional<PoseSelection> selectDoorPose(float clearance,
+			bool beginningMovement = false,
+			float openingWidth = std::numeric_limits<float>::infinity()) const;
+		// Ordinary motion resolves the physical Sector, not lagging membership.
+		Sector const* physicalMovementSector() const;
+		float getRoomMovementSpeed() const;
+		std::optional<float> roomMovementSeconds(Vertex const& source, Vertex const& target,
+			float walkSpeed) const;
 
 		// Re-derives the locomotion Pose from the Agent's current Sector. Retains
 		// Sitting/Lying from an active Furniture use.

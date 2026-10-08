@@ -2544,7 +2544,8 @@ namespace core
 			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
 		bool canPlaceAgentInLocation(uint32_t sectorId, std::set<AccessPermissionId> const& grants,
 			std::set<PermissionSetId> const& sets, std::string* diagnostic = nullptr) const;
-		void validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const;
+		void validateAgentLocationPlacement(Sector const& sector, Agent const& agent,
+			std::optional<float> floorY = std::nullopt) const;
 
 		EntityLookup<Agent> lookupAgent(AgentId id);
 

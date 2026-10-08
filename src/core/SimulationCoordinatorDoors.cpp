@@ -218,6 +218,13 @@ namespace core
 		for (size_t node = from; node < path->nodes.size(); ++node)
 		{
 			auto const& edge = path->nodes[node].edge;
+			auto const& target = path->nodes[node].targetVertex;
+			if (target && !agent.requiredPoseFor(*target->getSector(), target->getPosition().y)
+				&& !(agent.mTraversalTask && agent.mTraversalTask->edge == edge && hasCommittedMovement(agent)))
+			{
+				replanAgentAfterAuthorizationRefusal(id, false);
+				return;
+			}
 			shared_ptr<Door> door;
 			if (auto ordinary = dynamic_pointer_cast<DoorEdge const>(edge)) door = ordinary->getDoor();
 			else if (auto bulkhead = dynamic_pointer_cast<BulkheadDoorEdge const>(edge);
@@ -248,7 +255,11 @@ namespace core
 			if (agent.mTraversalTask && agent.mTraversalTask->edge == edge
 				&& hasCommittedMovement(agent)) continue;
 			auto source = edge->getOtherVertex(path->nodes[node].targetVertex);
-			if (door->admitsAgentTraversal(agent, source->getPosition().y)) continue;
+			// Remote live Broken state is not a Route observation. Use locally
+			// observed or remembered apertures, just as captured route facts do.
+			auto known = door->knownCondition(&agent, agent.getSector());
+			if (door->selectAgentCrossing(agent, source->getPosition().y, false,
+				known && known->broken ? std::optional<float>{known->position} : std::nullopt)) continue;
 			replanAgentAfterAuthorizationRefusal(id, false);
 			return; // An existing sampled planning interval is never restarted.
 		}

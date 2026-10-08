@@ -8,6 +8,7 @@
 #include "core/OpenableObject.h"
 #include "core/Coordination.h"
 #include "core/DeviceCondition.h"
+#include "core/Pose.h"
 #include <optional>
 
 namespace core
@@ -25,10 +26,9 @@ namespace core
 		// Door takes longer so its leaf keeps the regular Door's vertical speed.
 		enum struct OpenStyle { OpenUp, OpenLeft, OpenRight, OpenApart };
 		enum struct Height { Regular, Tall };
-		// The crossing mode an Agent uses at this threshold. Standing crosses in
-		// its current/standing envelope; Crawling is the automatic low-Door
-		// fallback (30% height, 50% crossing speed); None means infeasible.
-		enum struct DoorCrossingMode { None, Standing, Crawling };
+		// Compatibility observation of the shared supported-pose selection.
+		// Consumers needing physical motion use selectAgentCrossing's ratio.
+		enum struct DoorCrossingMode { None, Standing, Crawling, Crouching };
 
 	private:
 		uint32_t mCellsWide;
@@ -72,38 +72,37 @@ namespace core
 		std::optional<float> getHeightScale() const { return mHeightScale; }
 		bool setHeightScale(std::optional<float> scale);
 		// Top clearance above the approach Floor; unrelated to arrival/lane tolerances.
-		static constexpr float ClearanceTolerance = 0.00001f;
+		static constexpr float ClearanceTolerance = PoseFitTolerance;
 		static constexpr float StandingClearanceTolerance = ClearanceTolerance;
+		// In-place inter-Layer crossings quantize context motion to whole ticks.
+		static uint64_t crossingDurationTicks(float speedRatio)
+		{
+			return secondsToTicks((6.0f / 60.0f) / speedRatio, 1.0f / 60.0f);
+		}
 		bool admitsVerticalExtent(float topAboveFloor, float approachFloorY) const;
+		std::optional<PoseSelection> selectAgentCrossing(Agent const& agent, float approachFloorY,
+			bool beginningMovement = false, std::optional<float> openFraction = std::nullopt) const;
 		// Shared clearance decision boundary for routing and every admission gate:
 		// `classifyAgentCrossing(...) != None`. Combines the Agent's effective
 		// traversal envelope with this Door's top clearance above the given
 		// approach floor, preserving the Door's scope and pose/support semantics.
 		bool admitsAgentTraversal(Agent const& agent, float approachFloorY,
 			bool beginningMovement = false) const;
-		// Shared clearance decision boundary for routing and every admission gate.
-		// Standing when the Agent's current/standing envelope fits; otherwise
-		// Crawling when the automatic fallback applies and its 30% envelope fits;
-		// otherwise None. Retained lowered Action poses cross in their own
-		// envelope and never trigger the automatic Crawling fallback.
+		// First fitting frozen Door-context choice, or None. Retained Action
+		// poses keep their envelope until departure; they do not grant capability.
 		DoorCrossingMode classifyAgentCrossing(Agent const& agent, float approachFloorY,
 			bool beginningMovement = false) const;
 		// The crossing mode for a Broken Door's frozen aperture, mirroring
 		// classifyAgentCrossing but against the scaled opening instead of the full
-		// height. Vertical openings scale height (Standing, then automatic
-		// Crawling); horizontal openings scale width and keep their full height.
+		// height. Vertical openings scale height; horizontal openings scale
+		// bodily width and keep their full height. Both use the same pose order.
 		DoorCrossingMode classifyBrokenAgentCrossing(Agent const& agent, float openFraction,
 			float approachFloorY, bool beginningMovement = false) const;
 		DoorCrossingMode classifyBrokenAgentCrossing(Agent const& agent, float approachFloorY,
 			bool beginningMovement = false) const
 		{ return classifyBrokenAgentCrossing(agent, getOpenPercentage(), approachFloorY, beginningMovement); }
-		// A Broken Door admits passage unless its frozen aperture is too low to
-		// crawl through: vertical openings (OpenUp and Bulkhead Doors) fit the
-		// Agent's Crawling envelope under the scaled height and assume it ducks
-		// under whenever Standing no longer fits; horizontal openings
-		// (OpenApart, OpenLeft, OpenRight) fit the Agent's width within the
-		// scaled width. `openFraction` may come from a remembered condition, not
-		// only the live percentage.
+		// Broken apertures require a supported fitting choice, independently of
+		// Mobility and permission. `openFraction` may be remembered, not live.
 		bool admitsBrokenPassage(Agent const& agent, float openFraction, float approachFloorY,
 			bool beginningMovement = false) const;
 		bool admitsBrokenPassage(Agent const& agent, float approachFloorY,

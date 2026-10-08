@@ -110,9 +110,19 @@ namespace
 		require(agent->getPose() == core::Pose::Crawling,
 			"the Agent did not start Crawling in the low Room");
 		require(world.moveAgentToNamedMarker(id, "Normal goal").accepted(), "Door exit movement refused");
+		bool admittedCrawling = false;
 		for (unsigned tick = 0; tick != 20000
 			&& agent->getState() != core::Agent::State::Idle; ++tick)
+		{
 			world.advanceTick();
+			if (agent->getState() == core::Agent::State::TraversingEdge)
+			{
+				require(agent->getPose() == core::Pose::Crawling,
+					"Door crossing invented Standing headroom in its low approach Room");
+				admittedCrawling = true;
+			}
+		}
+		require(admittedCrawling, "Low Room exit never adopted a fitting Door-context pose");
 		require(agent->getState() == core::Agent::State::Idle
 			&& agent->getSector() == world.getSector(normal).get()
 			&& agent->getPose() == core::Pose::Standing,

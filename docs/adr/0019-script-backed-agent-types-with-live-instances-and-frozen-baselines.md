@@ -5,8 +5,8 @@ Status: accepted (amended)
 Approved follow-on [ADR 0020](0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md)
 extends the frozen baseline to supported poses and automatic selection rules under
 Agent-type API v2. The declaration and frozen-data migration is implemented in
-#521; shared context selection and Furniture/lifecycle enforcement remain pending
-in #522–#524.
+#521; shared context fit/selection/routing/movement is implemented in #522.
+Furniture/lifecycle enforcement remains pending in #523–#524.
 
 Each Agent type is defined by one bundled or imported `.agent.lua` resource: a type object carrying a stable type ID, a display name, and a `new()` constructor that returns a fresh instance with a complete physical baseline. The host validates and freezes that baseline before publishing the Agent, while the Agent retains an isolated live Lua instance for its private state and methods. Human uses this script-backed path; there is no compiled Human subtype, physical definition, or Human-only factory/lookup adapter. Headless creation and legacy migration embed the bundled resource at build time directly from its authored source, rather than maintaining a second definition.
 

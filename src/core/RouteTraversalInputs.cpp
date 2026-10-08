@@ -1,6 +1,7 @@
 #include "core/AgentType.h"
 #include "core/RouteTraversalInputs.h"
 #include "core/Defines.h"
+#include "core/Door.h"
 #include "core/Agent.h"
 #include "core/MobilityProfile.h"
 #include "core/World.h"
@@ -53,7 +54,7 @@ namespace core
 		switch (type)
 		{
 		case EdgeType::Location:
-			c.motionSeconds = walking();
+			c.motionSeconds = roomMotionSeconds.value_or(walking());
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
 			break;
 		case EdgeType::Window:
@@ -100,7 +101,7 @@ namespace core
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
 			break;
 		case EdgeType::ForceBridge:
-			c.motionSeconds = walking();
+			c.motionSeconds = roomMotionSeconds.value_or(walking());
 			c.riskUnits = length * p.forceBridgeRiskPerUnit;
 			extension(p.unobservedForceBridgeRetractedProbability);
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
@@ -143,9 +144,8 @@ namespace core
 		case EdgeType::Door: case EdgeType::BulkheadDoor:
 		{
 			c.motionSeconds = type == EdgeType::Door
-				? (crawling ? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value()
-					: 6.0f / 60.0f)
-				: walking() / (crawling ? context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value() : 1.0f);
+				? static_cast<float>(Door::crossingDurationTicks(motionSpeedRatio)) / 60.0f
+				: walking() / motionSpeedRatio;
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
 			if (securityScanner)
 			{

@@ -37,10 +37,10 @@ namespace core
 		bool needsActivation = false;
 		bool boarding = false;
 		bool open = false;
-		// Ordinary, Bulkhead (including Airlock and Chamber), Lift landing and
-		// Shuttle landing Door crossing uses the low-Door Crawling fallback (30%
-		// height) with a doubled motion duration.
-		bool crawling = false;
+		// Captured shared selection result: never reselect from live Agent data
+		// during evaluation. Only threshold motion uses this context ratio.
+		float motionSpeedRatio = 1.0f;
+		std::optional<float> roomMotionSeconds;
 		// 0 automatic, 1 manual, 2 remote; unavailable is captured as exclusion.
 		uint8_t activation = 0;
 		float queueSeconds = 0;

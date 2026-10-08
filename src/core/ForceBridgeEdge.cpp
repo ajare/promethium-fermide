@@ -103,11 +103,19 @@ namespace core
 			return facts;
 		}
 
+		auto const distance = getLength();
+		auto const motion = context.agent
+			? context.agent->roomMovementSeconds(*source, *targetVertex, context.walkSpeed)
+			: std::optional<float>{distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
+				: distance / context.walkSpeed};
+		if (!motion)
+		{
+			facts.exclusionReason = RouteExclusionReason::Clearance;
+			return facts;
+		}
 		facts.feasible = true;
 		auto& c = facts.components;
-		auto const distance = getLength();
-		c.motionSeconds = distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME
-			: distance / context.walkSpeed;
+		c.motionSeconds = *motion;
 		c.riskUnits = distance * context.policy.forceBridgeRiskPerUnit;
 		if (mForceBridge->isExtensible() && !frozenExtended)
 		{

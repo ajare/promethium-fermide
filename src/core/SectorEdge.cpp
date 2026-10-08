@@ -1,3 +1,4 @@
+#include "core/RouteTraversalInputs.h"
 #include <cassert>
 
 #include "core/Defines.h"
@@ -50,16 +51,9 @@ namespace core
 	}
 
 	DirectedTraversalFacts SectorEdge::getDirectedTraversalFacts(
-		shared_ptr<const Vertex>, RouteDecisionContext const& context) const
+		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		DirectedTraversalFacts facts;
-		facts.feasible = true;
-		auto const distance = getLength();
-		facts.components.motionSeconds = distance == 0.0f
-			? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed;
-		facts.objectiveDurationSeconds = facts.components.motionSeconds;
-		facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
-		return facts;
+		return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
 	}
 
 } // core

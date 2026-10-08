@@ -154,6 +154,15 @@ namespace core
 		auto const& arc = directedArcs.at(index);
 		auto const& context = *mDecision;
 		DirectedTraversalFacts facts;
+		if (context.agent)
+		{
+			auto target = mGraph->getVertices()[arc.targetSlot];
+			if (!context.agent->requiredPoseFor(*target->getSector(), target->getPosition().y))
+			{
+				facts.exclusionReason = RouteExclusionReason::Clearance;
+				return facts;
+			}
+		}
 		// Location passage is a hard, destination-owned constraint, including
 		// ordinary floor arcs (which otherwise bypass traversal-input capture).
 		// It never depends on Permission adherence or a device's usable state.
@@ -176,11 +185,7 @@ namespace core
 		}
 		if (arc.inputIndex == std::numeric_limits<size_t>::max())
 		{
-			facts.feasible = true;
-			facts.components.motionSeconds = arc.length == 0.0f
-				? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : arc.length / context.walkSpeed;
-			facts.objectiveDurationSeconds = facts.components.motionSeconds;
-			facts.optimisticLowerBoundSeconds = facts.components.motionSeconds;
+			facts = (*arc.edge)->getDirectedTraversalFacts(mGraph->getVertices()[arc.targetSlot], context);
 		}
 		else facts = mInputs[arc.inputIndex].evaluate(context);
 		if (facts.feasible && facts.components.uncertaintyUnits > 0)
@@ -636,6 +641,8 @@ namespace core
 			node_type source, node_type target)
 		{
 			if (!graph || (!agent && !source)) return nullptr;
+			if (agent && target && !agent->requiredPoseFor(*target->getSector(), target->getPosition().y))
+				return nullptr;
 			if (graph->getWorld() && target)
 				if (auto marker = std::dynamic_pointer_cast<Marker>(target->getObject()))
 					if (auto occupant = graph->getWorld()->usablePointOccupant(marker->getId());

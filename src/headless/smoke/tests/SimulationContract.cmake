@@ -77,6 +77,7 @@ set(core_names
     lifts/brokenStopDoorsAndSelectorSafety
     lifts/brokenLocalMemory
     lifts/brokenRoutePlanning
+    lifts/supportedPoseRefusal
     lifts/crawlingJourneys
     lifts/crawlingCapacity
     lifts/crawlingLifecycle
@@ -90,6 +91,7 @@ set(core_names
     shuttles/brokenStopDoorsAndSelectorSafety
     shuttles/brokenLocalMemory
     shuttles/brokenRoutePlanning
+    shuttles/supportedPoseRefusal
     shuttles/crawlingJourneys
     shuttles/crawlingCapacity
     shuttles/crawlingCarriages
@@ -124,6 +126,7 @@ set(core_names
     bandArrivalLeavesNonCrossingAgentsUnaffected
     airlocks/structuralEditSafety
     airlocks/singleAgentJourneys
+    airlocks/supportedPoseRefusal
     airlocks/crawlingJourneys
     airlocks/crawlingBatches
     airlocks/crawlingLifecycle
@@ -151,9 +154,11 @@ set(core_names
     securityScanners/admissionAuthorizationChanges
     securityScanners/localRouteObservations
     securityScanners/automaticJourneys
+    securityScanners/supportedPoseRefusal
     securityScanners/crawlingJourneys
     securityScanners/crawlingLifecycle
     securityScanners/crawlingGates
+    decontamination/supportedPoseRefusal
     decontamination/crawlingJourneys
     decontamination/crawlingLifecycle
     decontamination/crawlingGates

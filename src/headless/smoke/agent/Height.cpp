@@ -249,7 +249,7 @@ namespace
 				require(world.setAgentIndividualHeightModifier(id, 1.0f), "Individual Height failed");
 				auto crawl = core::RouteTraversalInputs::capture(*edge, target, context);
 				auto crawlFacts = crawl.evaluate(context);
-				require(crawlFacts.feasible && crawl.crawling
+				require(crawlFacts.feasible && crawl.motionSpeedRatio == 0.5f
 					&& crawlFacts.components.motionSeconds > standingFacts.components.motionSeconds
 					&& edge->getDirectedTraversalFacts(target, context).feasible,
 					"Standing refusal did not fall back to Crawling");

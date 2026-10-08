@@ -1,5 +1,4 @@
 #include <cassert>
-#include "ThresholdRouteFacts.h"
 
 #include "core/Defines.h"
 #include "core/MobilityProfile.h"
@@ -81,33 +80,13 @@ namespace core
 	DirectedTraversalFacts BulkheadDoorEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		auto const distance = getLength();
-		if (mAirlock || mSecurityScanner) return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
-		if (mDoor->isSecurityScannerOwned())
+		if (!mSecurityScanner && mDoor->isSecurityScannerOwned())
 		{
 			DirectedTraversalFacts facts;
 			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;
 		}
-		auto mode = Door::DoorCrossingMode::Standing;
-		if (context.agent)
-		{
-			mode = mDoor->classifyAgentCrossing(*context.agent,
-				getOtherVertex(target)->getPosition().y, context.beginningMovement);
-			if (mode == Door::DoorCrossingMode::None)
-			{
-				DirectedTraversalFacts facts;
-				facts.exclusionReason = RouteExclusionReason::Clearance;
-				return facts;
-			}
-		}
-		// A Crawling crossing runs at the Agent type's crawling speed ratio, so
-		// its duration divides the ordinary walking duration by that ratio.
-		return thresholdRouteFacts(*this, *mDoor, target, context,
-			(distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed)
-				/ (context.agent && mode == Door::DoorCrossingMode::Crawling
-					? context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value() : 1.0f),
-			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
+		return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
 	}
 
 	bool BulkheadDoorEdge::requiresButton() const

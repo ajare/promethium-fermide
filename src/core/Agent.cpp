@@ -1144,24 +1144,46 @@ namespace core
 		return getStandingHeight() * getPoseHeightScale();
 	}
 
-	Pose Agent::requiredPoseFor(Sector const& sector) const
+	bool Agent::poseFits(Pose pose, float clearance, float support, float openingWidth) const
 	{
-		if (!sector.isRoom()) return Pose::Standing;
-		auto const standing = getStandingHeight();
-		auto const ceiling = sector.getEffectiveTopLevelHeight();
-		if (standing <= ceiling + Door::ClearanceTolerance) return Pose::Standing;
-		auto const& physical = getPhysicalBaseline();
-		if (supportsPose(Pose::Crouching)
-			&& standing * physical.poses.at(Pose::Crouching) <= ceiling + Door::ClearanceTolerance)
-			return Pose::Crouching;
-		// Preserve existing Human selection in this declaration slice. Full
-		// context selection and no-fit refusal are delivered by #522.
-		return supportsPose(Pose::Crawling) ? Pose::Crawling : Pose::Standing;
+		auto const envelope = getPoseEnvelope(pose);
+		return envelope && support + envelope->y <= clearance + PoseFitTolerance
+			&& getWidth() <= openingWidth + PoseFitTolerance;
 	}
 
-	void Agent::syncPoseToSector()
+	std::optional<PoseSelection> Agent::selectAutomaticPose(AutomaticPoseContext context,
+		float clearance, float support, float openingWidth) const
 	{
-		if (mFurnitureUse || mRetainedActionPose) return; // Active use or a retained Action pose owns the pose.
+		for (auto const& choice : getPhysicalBaseline().automaticPoses(context))
+			if (poseFits(choice.pose, clearance, support, openingWidth))
+				return PoseSelection{choice.pose, choice.speedRatio};
+		return std::nullopt;
+	}
+
+	std::optional<PoseSelection> Agent::selectDoorPose(float clearance,
+		bool beginningMovement, float openingWidth) const
+	{
+		// Retained Action ownership is not an automatic movement choice. Predict
+		// departure without releasing it; Furniture support ends on departure.
+		if (!beginningMovement && !mFurnitureUse && mRetainedActionPose)
+			return poseFits(mPose, clearance, getSupportElevation(), openingWidth)
+				? std::optional<PoseSelection>{{mPose, 1.0f}} : std::nullopt;
+		return selectAutomaticPose(AutomaticPoseContext::DoorCrossing, clearance,
+			(beginningMovement || mFurnitureUse) ? 0.0f : getSupportElevation(), openingWidth);
+	}
+
+	std::optional<PoseSelection> Agent::requiredPoseFor(Sector const& sector,
+		std::optional<float> floorY) const
+	{
+		if (!sector.isRoom()) return PoseSelection{Pose::Standing, 1.0f};
+		auto const ceiling = sector.getPosition().y + sector.getLevelsHigh() - 1
+			+ sector.getEffectiveTopLevelHeight();
+		return selectAutomaticPose(AutomaticPoseContext::RoomMovement,
+			ceiling - floorY.value_or(sector.getPosition().y));
+	}
+
+	Sector const* Agent::physicalMovementSector() const
+	{
 		auto const* sector = getSector();
 		// A same-layer Location walk commits its sector transfer at the far vertex,
 		// so the logical sector can lag the Agent's body while it crosses an open
@@ -1174,7 +1196,42 @@ namespace core
 			auto const physical = mWorld->getSectorAtPosition(sector->getLayerIndex(), global.x, global.y);
 			if (physical && isLocationLike(physical->getType())) sector = physical.get();
 		}
-		mPose = sector ? requiredPoseFor(*sector) : Pose::Standing;
+		return sector;
+	}
+
+	void Agent::syncPoseToSector()
+	{
+		if (mFurnitureUse || mRetainedActionPose) return;
+		auto const* sector = physicalMovementSector();
+		if (auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
+			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}})
+			mPose = choice->pose;
+	}
+
+	float Agent::getRoomMovementSpeed() const
+	{
+		auto const* sector = physicalMovementSector();
+		auto choice = sector ? requiredPoseFor(*sector, getGlobalPosition().y)
+			: std::optional<PoseSelection>{{Pose::Standing, 1.0f}};
+		return choice ? getWalkSpeed() * choice->speedRatio : 0.0f;
+	}
+
+	std::optional<float> Agent::roomMovementSeconds(Vertex const& source, Vertex const& target,
+		float walkSpeed) const
+	{
+		auto a = source.getSector(), b = target.getSector();
+		auto from = source.getPosition(), to = target.getPosition();
+		auto first = requiredPoseFor(*a, from.y), second = requiredPoseFor(*b, to.y);
+		if (!first || !second) return std::nullopt;
+		auto length = from.distanceTo(to);
+		if (length == 0.0f) return CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME;
+		if (a == b) return length / (walkSpeed * first->speedRatio);
+		// Same-Layer open-wall arcs span the physical Room boundary. Split only
+		// motion at that boundary; Local depth has no physical distance.
+		auto boundary = to.x > from.x ? a->getPosition().x + a->getCellsWide() : a->getPosition().x;
+		auto fraction = to.x == from.x ? 0.5f
+			: std::clamp((boundary - from.x) / (to.x - from.x), 0.0f, 1.0f);
+		return length / walkSpeed * (fraction / first->speedRatio + (1.0f - fraction) / second->speedRatio);
 	}
 
 	Shape Agent::getBounds() const
@@ -1294,7 +1351,7 @@ namespace core
 	void Agent::setPosition(SectorPosition pos, bool authored)
 	{
 		if (authored && mWorld && pos.sector())
-			mWorld->validateAgentLocationPlacement(*pos.sector(), *this);
+			mWorld->validateAgentLocationPlacement(*pos.sector(), *this, pos.global().y);
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		bool const changedSector = pos.sector() != mPosition.sector();
 		if (!authored && mWorld
@@ -1310,8 +1367,8 @@ namespace core
 		// the Sector's effective ceiling. This keeps a one-cell-high low Room's
 		// occupant ducked/crawled while it walks within the Room, and stands it
 		// back up the moment it enters a normal Sector.
-		if (mTraversalTask && mTraversalTask->crawling)
-			mPose = Pose::Crawling;
+		if (mTraversalTask && mTraversalTask->crossingPose)
+			mPose = mTraversalTask->crossingPose->pose;
 		else
 			syncPoseToSector();
 		if (authored)
@@ -1551,6 +1608,7 @@ namespace core
 			mRetainedActionPose = false;
 		}
 		cancelTraversal();
+		syncPoseToSector();
 		mEarlyQueueApproachDirectionX = 0;
 		mState = State::MovingToVertex;
 		auto marker = std::dynamic_pointer_cast<Marker>(mPath.path->nodes.back().targetVertex->getObject());
@@ -1632,6 +1690,10 @@ namespace core
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
 		auto agentPos = getGlobalPosition();
 		auto posDist = agentPos.distanceTo(pos);
+		if (speed == getWalkSpeed() && (!mTraversalTask
+			|| (!mTraversalTask->crossingPose && (mTraversalTask->edge->getType() == EdgeType::Location
+				|| mTraversalTask->edge->getType() == EdgeType::ForceBridge))))
+			speed = getRoomMovementSpeed();
 		auto moveDist = speed * frameTime;
 		auto moveDelta = pos - agentPos;
 		auto reachedPos = moveDist >= posDist;
@@ -1903,35 +1965,39 @@ namespace core
 				auto const& doorEdge = static_cast<DoorEdge const&>(*mTraversalTask->edge);
 				// A Broken Door's crossing mode comes from its frozen aperture, not
 				// its full height: a partially-open vertical Door can force Crawling.
-				auto const mode = doorEdge.getDoor()->isIndependentlyBroken()
-					? doorEdge.getDoor()->classifyBrokenAgentCrossing(*this, getGlobalPosition().y)
-					: doorEdge.getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
-				// An onboard Lift or Shuttle passenger must finish its committed exit
-				// even if its envelope or the opening changed during the ride.
-				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
-					|| (mode == Door::DoorCrossingMode::None
-						&& (getSector()->getType() == SectorType::Lift
-							|| getSector()->getType() == SectorType::Shuttle));
-				if (mTraversalTask->crawling) mPose = Pose::Crawling;
+				mTraversalTask->crossingPose = doorEdge.getDoor()->selectAgentCrossing(*this,
+					getGlobalPosition().y, false, doorEdge.getDoor()->isIndependentlyBroken()
+						? std::optional<float>{doorEdge.getDoor()->getOpenPercentage()} : std::nullopt);
 			}
 			if (bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()
 				|| bulkhead->getDoor()->isSecurityScannerOwned()))
 			{
 				// A Broken Bulkhead Door's crossing mode comes from its frozen
 				// aperture, so a partially-open door can force Crawling.
-				auto const mode = bulkhead->getDoor()->isIndependentlyBroken()
-					? bulkhead->getDoor()->classifyBrokenAgentCrossing(*this, getGlobalPosition().y)
-					: bulkhead->getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
-				// An admitted Chamber occupant must finish its exit even if its
-				// envelope or the opening changed during the interlocked journey.
-				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
-					|| (mode == Door::DoorCrossingMode::None && getSector()->getType() == SectorType::Chamber);
-				if (mTraversalTask->crawling) mPose = Pose::Crawling;
+				mTraversalTask->crossingPose = bulkhead->getDoor()->selectAgentCrossing(*this,
+					getGlobalPosition().y, false, bulkhead->getDoor()->isIndependentlyBroken()
+						? std::optional<float>{bulkhead->getDoor()->getOpenPercentage()} : std::nullopt);
 			}
-			mTraversalTask->traversalTicksRemaining =
-				doorCrossing ? (mTraversalTask->crawling
-					? static_cast<uint64_t>(6.0f / getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value())
-					: 6) : 0;
+			if (doorCrossing || bulkhead)
+			{
+				// Existing committed completion must not manufacture capabilities.
+				// Full accepted-exit lifecycle recording belongs to #524.
+				if (!mTraversalTask->crossingPose)
+				{
+					if (isLocationLike(getSector()->getType()))
+					{
+						cancelTraversal();
+						mWorld->replanAgentAfterAuthorizationRefusal(mWorld->getAgentId(this));
+						return;
+					}
+					auto const& choices = getPhysicalBaseline().doorCrossing;
+					auto const& accepted = choices.back();
+					mTraversalTask->crossingPose = PoseSelection{accepted.pose, accepted.speedRatio};
+				}
+				mPose = mTraversalTask->crossingPose->pose;
+			}
+			mTraversalTask->traversalTicksRemaining = doorCrossing
+				? Door::crossingDurationTicks(mTraversalTask->crossingPose->speedRatio) : 0;
 			if (mTraversalTask->edge->getType() == EdgeType::Staircase
 				&& mTraversalTask->edge->getTraversalSpeed(nullptr) > 0.0f)
 			{
@@ -2156,7 +2222,7 @@ namespace core
 				if (traversalSpeed <= 0.0f)
 					traversalSpeed = mTraversalTask->edge->getType() == EdgeType::Ladder
 						? getClimbSpeed() : getWalkSpeed();
-				if (mTraversalTask->crawling) traversalSpeed *= 0.5f;
+				if (mTraversalTask->crossingPose) traversalSpeed *= mTraversalTask->crossingPose->speedRatio;
 				if (moveToPosition(mTraversalTask->destinationVertex->getPosition(), frameTime,
 					traversalSpeed))
 					mState = State::AwaitingTraversalCommit;

@@ -1,3 +1,4 @@
+#include "../agent/PoseJourneys.h"
 #include "Checks.h"
 #include "core/World.h"
 #include "core/Agent.h"
@@ -331,10 +332,22 @@ namespace
 			scene.clean();
 		}
 	}
+	void robotRefusal(smoke::Context const&)
+	{
+		for (bool reverse : {false, true})
+		{
+			Scene scene(.3f, .3f);
+			pose_journeys::attachRobot(scene.world);
+			auto id = scene.world.createAgent("StandingRobot", "Robot", reverse ? scene.right : scene.left, 0, reverse ? .5f : 4.5f);
+			pose_journeys::refused(scene.world, id, reverse ? "Left goal" : "Right goal");
+		}
+	}
+
 }
 
 void registerAirlockCrawling(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"airlocks/supportedPoseRefusal", robotRefusal});
 	checks.push_back({"airlocks/crawlingJourneys", journeys});
 	checks.push_back({"airlocks/crawlingBatches", batches});
 	checks.push_back({"airlocks/crawlingLifecycle", lifecycle});

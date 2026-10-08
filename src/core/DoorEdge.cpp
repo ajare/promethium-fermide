@@ -1,5 +1,5 @@
+#include "core/RouteTraversalInputs.h"
 #include <cassert>
-#include "ThresholdRouteFacts.h"
 
 #include "core/Defines.h"
 #include "core/MobilityProfile.h"
@@ -71,50 +71,7 @@ namespace core
 	DirectedTraversalFacts DoorEdge::getDirectedTraversalFacts(
 		shared_ptr<const Vertex> target, RouteDecisionContext const& context) const
 	{
-		auto source = getOtherVertex(target);
-		auto const mode = context.agent && source
-			? mDoor->classifyAgentCrossing(*context.agent, source->getPosition().y,
-				context.beginningMovement)
-			: Door::DoorCrossingMode::Standing;
-		// Runtime keeps an ordinary Door crossing in place for six 1/60-second
-		// ticks; an automatic Crawling crossing divides that duration by the
-		// Agent type's crawling speed ratio (0.5 for a Human doubles it).
-		auto const crossingSeconds = context.agent
-			&& mode == Door::DoorCrossingMode::Crawling
-			? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value()
-			: 6.0f / 60.0f;
-		auto facts = thresholdRouteFacts(*this, *mDoor, target, context,
-			crossingSeconds, CORE_DOOR_OPEN_CLOSE_TIME);
-		if (mode == Door::DoorCrossingMode::None)
-		{
-			facts.feasible = false;
-			facts.exclusionReason = RouteExclusionReason::Clearance;
-			return facts;
-		}
-		auto known = mDoor->knownCondition(context.agent, context.observationSector);
-		auto const locallyOpen = (source && source->getSector().get() == context.observationSector
-			&& mDoor->isOpen()) || (known && known->broken && known->position >= 1.0f);
-		if (facts.feasible && mDoor->getActivationMode() == DoorActivationMode::Manual
-			&& !locallyOpen && context.world && context.agent
-			&& !context.world->canAgentOpenManualDoor(mDoor->getTraversalResourceId(),
-				context.world->getAgentId(context.agent)))
-		{
-			facts.feasible = false;
-			facts.exclusionReason = RouteExclusionReason::Permission;
-		}
-		// An open Door needs no operation, but an adhering Agent still declines
-		// permission-based passage when every applicable approach-side control is
-		// protected by requirements it does not satisfy.
-		if (facts.feasible && locallyOpen && context.world && context.agent && source
-			&& !context.world->agentAdheresToDoorPermission(
-				mDoor->getTraversalResourceId(),
-				SectorId{ static_cast<uint64_t>(source->getSector()->getIndex()) + 1 },
-				context.world->getAgentId(context.agent)))
-		{
-			facts.feasible = false;
-			facts.exclusionReason = RouteExclusionReason::Permission;
-		}
-		return facts;
+		return RouteTraversalInputs::capture(*this, target, context).evaluate(context);
 	}
 
 	bool DoorEdge::requiresButton() const

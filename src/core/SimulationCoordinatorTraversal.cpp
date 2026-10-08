@@ -90,6 +90,14 @@ namespace core
 			return;
 		}
 
+		if (auto actor = mWorld.mAgents.find(request->mOwner);
+			actor && !actor->requiredPoseFor(*destination->getSector(), destination->getPosition().y))
+		{
+			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+			return;
+		}
+
 		// Interior walking is held at the centre until the automatic scan finishes.
 		if (request->mSourceSector == request->mDestinationSector
 			&& request->mSourceSector.value <= mWorld.mSectors.size())

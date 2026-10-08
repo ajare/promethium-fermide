@@ -194,6 +194,17 @@ add_test(NAME agent-type-history-lifetime COMMAND pf-smoke-editor
 set_tests_properties(agent-type-topology-lifetime agent-type-history-lifetime
     PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 
+foreach(check IN ITEMS agentPosesSupportedRooms agentPosesSupportedBridge agentPosesSupportedDoors agentPosesCrouchingDoor agentPosesApertureBoundaries)
+    add_test(NAME pose-selection-${check} COMMAND pf-smoke-agent --check ${check})
+    set_tests_properties(pose-selection-${check} PROPERTIES
+        LABELS "core;functional;smoke;validation-fast;pose-selection" TIMEOUT 60)
+endforeach()
+foreach(family IN ITEMS airlocks lifts shuttles securityScanners decontamination)
+    add_test(NAME pose-selection-${family} COMMAND pf-smoke-simulation --check ${family}/supportedPoseRefusal)
+    set_tests_properties(pose-selection-${family} PROPERTIES
+        LABELS "core;functional;smoke;validation-fast;pose-selection" TIMEOUT 60)
+endforeach()
+
 add_test(NAME door-live-clearance-diagnostic COMMAND pf-smoke-agent --check liveDoorClearance)
 add_test(NAME door-live-clearance-committed COMMAND pf-smoke-agent --check committedDoorEnvelope)
 add_test(NAME door-live-clearance-editor COMMAND pf-smoke-editor --check scaled-doors/crossing-history)

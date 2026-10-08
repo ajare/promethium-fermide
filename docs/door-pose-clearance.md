@@ -1,5 +1,11 @@
 # Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#491)
 
+> **API-v2 integration (#522):** The Human Standing/Crawling behavior described
+> below is now one type's frozen Door order, not a universal capability. The
+> shared selection returns the first fitting supported pose and context speed,
+> or explicit refusal. Custom Crouching Door choices work; Standing-only robots
+> refuse impossible passages. See [shared selection validation](agent-pose-selection-validation.md).
+
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
 Crouching's 0.6 body-height scale, Crawling's 0.3 body-height scale, or

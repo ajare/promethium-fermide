@@ -8708,9 +8708,13 @@ namespace core
 		return found == mAgentTypes.end() ? std::string{} : found->second->displayName;
 	}
 
-	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent) const
+	void World::validateAgentLocationPlacement(Sector const& sector, Agent const& agent,
+		std::optional<float> floorY) const
 	{
 		validateAgentLocationPermissions(sector, effectiveAccessGrants(agent), agent.getName());
+		if (!agent.requiredPoseFor(sector, floorY))
+			throw invalid_argument(format("Agent '{}' has no fitting supported movement pose in '{}'",
+				agent.getName(), sector.getName()));
 	}
 
 	void World::validateAgentLocationPermissions(Sector const& sector,
