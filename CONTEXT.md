@@ -168,7 +168,7 @@ An Agent action at a Furniture-owned Marker that invokes the use associated with
 The activity associated with a Furniture definition and shared by its placed instances, performed through the Use furniture action. A Furniture definition may offer no use; sitting and lying are uses rather than implicit destination-arrival effects.
 
 **Finish using furniture**:
-The activity paired with a Furniture use that ends an Agent's use of its selected usable point. For sitting and lying uses, finishing restores Standing and releases the usable point's occupancy.
+The activity paired with a Furniture use that ends an Agent's use of its selected usable point and releases its occupancy. Its resulting bodily stance is the Furniture's finishing posture.
 
 **Occupied**:
 The runtime state of a usable point claimed by a seated or lying Agent. An Occupied usable point is an invalid Path destination for every other Agent until the claim is released, but remains usable as an intermediate waypoint.
@@ -288,6 +288,34 @@ A low Agent Pose with reduced bodily height relative to Standing, used for passa
 **Support elevation**:
 The physical height of an Agent's support above its supporting Floor or Walkway, distinct from decorative artwork offsets. It contributes to the Agent's top while the Agent remains supported, but does not imply movable Furniture.
 _Avoid_: Render offset, Marker height
+
+### Pose capabilities (approved domain model)
+
+**Supported pose**:
+A bodily stance an Agent type is physically capable of performing. Capability is distinct from whether that stance fits the Agent's current surroundings or is selected automatically.
+_Avoid_: Mobility use, which describes access to traversal kinds rather than bodily stances
+
+**Pose envelope**:
+The physical bodily extent of an Agent in a particular Pose, used with Support elevation and available space to determine fit. It is distinct from decorative rendering offsets.
+_Avoid_: Sprite bounds, decorative offset
+
+**Automatic pose selection**:
+The choice of the first supported, physically fitting Pose in the ordered choices for a movement context. A lack of any fitting choice is a refusal, not a new physical capability.
+_Avoid_: Pose capability, which describes possibility rather than selection
+
+**Pose ownership**:
+The activity or movement condition that determines an Agent's current bodily stance: its environment, an explicit Agent action, Furniture use, or an admitted crossing. Ownership is distinct from whether the Agent supports or physically fits that stance.
+_Avoid_: Movement state, occupancy
+
+**Furniture use pose**:
+The bodily stance a Furniture use requires while the Agent uses its selected usable point. It is shared by instances of the Furniture definition.
+_Avoid_: Arrival pose, which suggests implicit use on arrival
+
+**Furniture finish pose**:
+The bodily stance required when finishing a Furniture use after releasing its physical support. Together with the Furniture use pose, it determines whether an Agent can fulfil the use's posture requirements.
+_Avoid_: Default pose, which need not be the Furniture's required finishing stance
+
+### Agent behaviours and shared resources
 
 **Agent behaviour**:
 A reusable state-machine definition that may direct many Agents. Each assigned Agent runs an independent instance of the behaviour.

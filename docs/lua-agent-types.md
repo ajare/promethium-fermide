@@ -1,5 +1,11 @@
 # Lua Agent-type authoring and integrated migration (#510)
 
+> **Approved follow-on design, not implemented:** Agent-type API v2 will replace
+> the flat pose ratios below with supported-pose definitions and context-specific
+> automatic selection. See [Agent pose capabilities](agent-pose-capabilities.md)
+> and [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
+> This page describes the current API v1 implementation until that migration ships.
+
 An Agent type is one managed `.agent.lua` resource returning a type table. Human
 is the only bundled production type; Scout is a regression fixture, not an
 additional production type. Human's physical authority is

@@ -1,5 +1,13 @@
 # Lua Furniture catalogue authoring (#461)
 
+> **Approved follow-on design, not implemented:** Furniture will declare authoritative
+> `use_pose` and `finish_use_pose` requirements; the host will apply them, and
+> Furniture callbacks will no longer call `set_pose`. Agent eligibility will check
+> support and physical fit for both poses before use. See
+> [Agent pose capabilities](agent-pose-capabilities.md) and
+> [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
+> The callback contract below describes the current implementation, not that refactor.
+
 This scripted-actions integration slice adds native `.furniture.lua` catalogues.
 Select one beside a saved World using **Select Furniture catalogue...**, then
 place its definitions through the existing Furniture palette and Location plan.
