@@ -21,6 +21,8 @@
 #include <iterator>
 #include <set>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace
@@ -767,22 +769,29 @@ namespace
 		agent_smoke::requireDoorRoute(world, noButtons, 1, false);
 
 		uint32_t invalidIndex = 0;
-		for (auto const& invalid : std::vector<std::pair<std::string, std::string>>{
-			{ "missing", "nil" }, { "malformed", "42" },
-			{ "unknown", "{ staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use', jetpack = 'can_use' }" },
-			{ "invalid-use", "{ staircase = 'bad', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' }" } })
+		for (auto const& invalid : std::vector<std::tuple<std::string, std::string, std::string>>{
+			{ "missing", "nil", "mobility_profile" }, { "malformed", "42", "mobility_profile" },
+			{ "omitted", "{ staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', buttons = 'can_use' }", "door" },
+			{ "unknown", "{ staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use', jetpack = 'can_use' }", "jetpack" },
+			{ "invalid-use", "{ staircase = 'bad', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' }", "staircase" } })
 		{
+			auto const& [name, profile, field] = invalid;
 			auto const typeId = "Bad" + std::to_string(++invalidIndex);
 			core::World rejected("Reject profile", 4, 2);
 			auto const location = rejected.addCorridor(0, 0, 4);
 			rejected.finishBuild();
-			require(rejected.attachAgentType(invalid.first + ".agent.lua", typeSource(typeId,
-				"Bad", validBaseline("mobility_profile = " + invalid.second + ",\n")), &diagnostic), diagnostic);
+			require(rejected.attachAgentType(name + ".agent.lua", typeSource(typeId,
+				"Bad", validBaseline("mobility_profile = " + profile + ",\n")), &diagnostic), diagnostic);
 			bool threw = false;
 			try { (void)rejected.createAgent(typeId, "Bad", location, 0, 1.f); }
-			catch (std::exception const& error) { threw = std::string(error.what()).find(invalid.first + ".agent.lua") != std::string::npos; }
+			catch (std::exception const& error)
+			{
+				auto const message = std::string(error.what());
+				threw = message.find(name + ".agent.lua") != std::string::npos
+					&& message.find(field) != std::string::npos;
+			}
 			require(threw && rejected.getSimulationSnapshot().agents.empty(),
-				"Invalid script Mobility profile was published or lacked resource diagnostics");
+				("Invalid script Mobility profile was published or lacked resource/field diagnostics: " + name).c_str());
 		}
 	}
 
@@ -1135,31 +1144,35 @@ namespace
 		auto const tick = world.getSimulationSnapshot().tick;
 		auto const paused = world.isSimulationPaused();
 		auto const modified = world.isModified();
-		for (auto const& source : {
-			std::string("invalid Lua"),
-			typeSource("Failure", "Failure", "error('Reset constructor refused')"),
-			typeSource("Failure", "Failure", validBaseline("width = 0,\n")),
-			typeSource("Failure", "Failure", validBaseline("poses={standing={image_tile='agent'},crawling={image_tile='agent',height_ratio='0.3'}},\n")),
-			typeSource("Failure", "Failure", validBaseline("automatic_poses={},\n")),
-			typeSource("Failure", "Failure", validBaseline("mobility_profile = nil,\n")),
-			typeSource("Failure", "Failure", validBaseline("mobility_profile = { door = 'bad' },\n")),
-			typeSource("WrongIdentity", "Wrong", validBaseline()),
-			typeSource("Failure", "Failure", "while true do end"),
-			typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 128 * 1024 * 1024),\n")),
+		for (auto const& failure : {
+			std::pair<std::string, std::string>{ std::string("invalid Lua"), {} },
+			{ typeSource("Failure", "Failure", "error('Reset constructor refused')"), {} },
+			{ typeSource("Failure", "Failure", validBaseline("width = 0,\n")), {} },
+			{ typeSource("Failure", "Failure", validBaseline("poses={standing={image_tile='agent'},crawling={image_tile='agent',height_ratio='0.3'}},\n")), {} },
+			{ typeSource("Failure", "Failure", validBaseline("automatic_poses={},\n")), {} },
+			{ typeSource("Failure", "Failure", validBaseline("mobility_profile = nil,\n")), {} },
+			// A complete profile with one invalid use genuinely exercises the
+			// invalid-use path rather than failing early on an omitted entry.
+			{ typeSource("Failure", "Failure", validBaseline("mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'bad', buttons = 'can_use' },\n")), "door" },
+			{ typeSource("WrongIdentity", "Wrong", validBaseline()), {} },
+			{ typeSource("Failure", "Failure", "while true do end"), {} },
+			{ typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 128 * 1024 * 1024),\n")), {} },
 			// One revised constructor fits; the next instance exceeds the total
 			// runtime budget. Failure must discard the whole candidate set.
-			typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 800 * 1024),\n")),
-			std::string{} })
+			{ typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 800 * 1024),\n")), {} },
+			{ std::string{}, {} } })
 		{
+			auto const& [source, field] = failure;
 			write(source);
 			if (source.empty()) std::filesystem::remove(path);
 			bool refused = false;
 			try { world.resetSimulation(); }
 			catch (std::exception const& error) {
 				auto const message = std::string(error.what());
-				refused = message.find(resource) != std::string::npos;
+				refused = message.find(resource) != std::string::npos
+					&& (field.empty() || message.find(field) != std::string::npos);
 			}
-			require(refused, "Reset failure did not diagnose its resource");
+			require(refused, "Reset failure did not diagnose its resource and offending field");
 			require(world.lookupAgent(first).entity == originalFirst
 				&& world.lookupAgent(second).entity == originalSecond
 				&& world.lookupAgent(third).entity == originalThird
