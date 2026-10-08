@@ -152,7 +152,9 @@ namespace
 				root["construction"][record]["locationPermissionRequirement"] = YAML::Load(value);
 				reject(root);
 			}
-		for (auto version : { 31u, 60u })
+		// Version 31 predates Location requirements; the other value must stay
+		// one past the current schema so the document is refused as future.
+		for (auto version : { 31u, 61u })
 		{
 			auto root = YAML::Load(before); root["version"] = version; reject(root);
 		}
