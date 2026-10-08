@@ -229,8 +229,10 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 		if (agent == snapshot.agents.end() || !agent->sectorId) continue;
 		auto sector = world->getSector((uint32_t)agent->sectorId.value - 1);
 		if (!sector || sector->getLayerIndex() != (uint32_t)layer) continue;
+		auto const* entity = world->lookupAgent(agent->id).entity;
+		if (!entity) continue;
 		auto point = agent->globalPosition
-			+ core::Vector2{ CORE_AGENT_MAX_WIDTH * 0.5f, CORE_AGENT_MAX_HEIGHT * 0.5f };
+			+ core::Vector2{ entity->getWidth() * 0.5f, entity->getHeight() * 0.5f };
 		transformPosition(point);
 		drawList->AddCircle({ point.x, point.y }, slotRadius + 3.0f, occupiedColour, 0, 3.0f);
 		auto label = string("Q") + to_string(rank + 1);

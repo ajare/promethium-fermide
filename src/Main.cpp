@@ -473,7 +473,7 @@ void setup()
 		0
 	};
 	gAgentIconFont = io.Fonts->AddFontFromFileTTF(iconFontPath.c_str(),
-		CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS, nullptr, agentIconRanges);
+		core::Agent::placementDimensions("Human").y * CORE_LEVEL_HEIGHT_PIXELS, nullptr, agentIconRanges);
 	if (!gAgentIconFont)
 	{
 		throw ExitApplicationException(1, "Could not load the Agent icon font.");

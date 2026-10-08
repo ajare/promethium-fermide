@@ -150,6 +150,10 @@ struct AgentClipboardPayload
 	std::set<core::PermissionSetId> permissionSets;
 };
 
+// Standing preview dimensions from the payload's type and retained Height
+// sample. This does not commit an Agent or change the World.
+core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload);
+
 // The payload a copy of `agent` carries. `name` is the name the copy will
 // use - the caller owns name uniqueness, the payload owns the
 // classification. An Agent with no Agent group yields no group.

@@ -4,6 +4,7 @@
 #include "core/Defines.h"
 #include "core/Simulation.h"
 #include <type_traits>
+#include <cmath>
 
 static_assert(!std::is_convertible_v<core::AgentId, core::InteractionPointId>);
 
@@ -20,6 +21,11 @@ namespace
 		smoke::require(human && std::string(human->getTypeName()) == "Human",
 			"Ordinary World creation did not create a Human");
 		auto const& physical = human->getPhysicalBaseline();
+		auto const preview = core::Agent::placementDimensions(human->getTypeName());
+		smoke::require(preview.x == human->getWidth() && preview.y == human->getStandingHeight()
+			&& std::abs(human->getBounds().getSize().x - preview.x) < 0.000001f
+			&& std::abs(human->getBounds().getSize().y - preview.y) < 0.000001f,
+			"Uncommitted Human dimensions disagreed with World bounds");
 		smoke::require(physical.width == CORE_AGENT_MAX_WIDTH
 			&& physical.standingHeight == CORE_AGENT_MAX_HEIGHT
 			&& physical.walkSpeed == CORE_AGENT_BASE_WALK_SPEED
@@ -37,6 +43,13 @@ namespace
 		smoke::require(human->getStandingHeight() == physical.standingHeight * 0.8f
 			&& human->getWalkSpeed() == physical.walkSpeed * 1.2f,
 			"Human modifiers did not apply to physical baselines");
+		auto const modifiedPreview = core::Agent::placementDimensions(human->getTypeName(), 0.8f);
+		smoke::require(std::abs(human->getBounds().getSize().x - modifiedPreview.x) < 0.000001f
+			&& std::abs(human->getBounds().getSize().y - modifiedPreview.y) < 0.000001f,
+			"Modified Human bounds disagreed with placement dimensions");
+		smoke::require(world.setAgentIndividualHeightModifier(agentId, {}, &diagnostic)
+			&& human->getStandingHeight() == preview.y,
+			"Clearing Height without a tag did not reveal the default dimensions");
 		world.resetSimulation();
 		smoke::require(std::string(world.lookupAgent(agentId).entity->getTypeName()) == "Human",
 			"Reset lost Human identity");

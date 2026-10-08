@@ -1,6 +1,8 @@
 // Migrated from AgentHeightSmokeChecks.cpp (#286); editor dependency tier.
 
 #include "AgentTagAssignmentPanel.h"
+#include "AgentDropTargets.h"
+#include "AgentClipboard.h"
 #include "Render.h"
 #include "TagsPanel.h"
 #include "UISettings.h"
@@ -222,6 +224,43 @@ namespace
 			&& std::abs(shortAgent->getWalkSpeed() - tallAgent->getWalkSpeed()) < 0.000001f
 			&& std::abs(shortAgent->getClimbSpeed() - tallAgent->getClimbSpeed()) < 0.000001f,
 			"Visual Height changed width or movement observations");
+
+		// Creation previews have no World-owned Agent yet. They must agree with
+		// actual Human bounds; modifiers change height, never the placement width.
+		auto const baseline = core::Agent::placementDimensions("Human");
+		require(baseline.x == tallAgent->getWidth()
+			&& baseline.y == tallAgent->getStandingHeight(), "Human preview dimensions changed");
+		gUISettings.visibleLayer = 0;
+		auto const creation = pegmanAgentTargetAtWorld(world, { 0.01f, 0.1f });
+		auto const moved = getAgentMoveTarget(world, shortAgent, { 10.99f, 0.1f });
+		require(creation && moved && std::abs(creation.localX - baseline.x * 0.5f) < 0.000001f
+			&& std::abs(moved.localX - (11.f - shortAgent->getWidth() * 0.5f)) < 0.000001f,
+			"Human creation/move placement changed at the Location boundaries");
+		require(world->getAgentAtPosition(0, 1.5f, shortAgent->getStandingHeight() * 0.5f) == shortAgent
+			&& !world->getAgentAtPosition(0, 1.5f, baseline.y * 0.9f),
+			"Human hit testing did not use modified bounds");
+		require(world->setAgentIndividualHeightModifier(shortId, 0.9f, &diagnostic), diagnostic);
+		require(shortAgent->getStandingHeight() == baseline.y * 0.9f
+			&& shortAgent->getBounds().getSize().y == shortAgent->getStandingHeight()
+			&& world->getAgentAtPosition(0, 1.5f, baseline.y * 0.8f) == shortAgent,
+			"Individual Height did not override the inherited dimensions and hit bounds");
+		require(world->setAgentIndividualHeightModifier(shortId, {}, &diagnostic), diagnostic);
+		require(shortAgent->getStandingHeight() == baseline.y * 0.7f,
+			"Removing individual Height did not reveal the retained tag sample");
+		auto const payload = makeAgentClipboardPayload(*world, shortId, "Short copy");
+		auto const pasteDimensions = agentClipboardPlacementDimensions(payload);
+		require(pasteDimensions.x == shortAgent->getWidth()
+			&& pasteDimensions.y == shortAgent->getStandingHeight(),
+			"Tagged Human paste preview disagreed with the source dimensions");
+		PendingAgentPlacement pending;
+		require(armAgentPlacement(pending, *world, payload, world->getSector(corridor), 0, 5.5f, diagnostic), diagnostic);
+		require(world->getSimulationSnapshot().agents.size() == 2, "Preview committed an Agent before landing");
+		core::AgentId pasted;
+		require(commitPendingAgentPlacement(pending, world, pasted, diagnostic), diagnostic);
+		auto const* copy = world->lookupAgent(pasted).entity;
+		require(copy && copy->getWidth() == pasteDimensions.x
+			&& copy->getStandingHeight() == pasteDimensions.y,
+			"Human paste landed with dimensions different from its preview");
 
 		auto const target = world->getGraph()->getVertexByIdentifier(targetIdentifier);
 		auto shortPath = world->getGraph()->calculatePath(shortAgent, target);

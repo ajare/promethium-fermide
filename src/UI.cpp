@@ -2249,9 +2249,10 @@ namespace
 			else
 			{
 				auto const previewScale = target ? gUISettings.worldZoom : 1.0f;
+				auto const dimensions = core::Agent::placementDimensions("Human");
 				drawPegman(drawList, io.MousePos,
-					CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * previewScale,
-					CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
+					dimensions.x * CORE_CELL_WIDTH_PIXELS * previewScale,
+					dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
 					colour);
 			}
 			if (!target.diagnostic.empty()) ImGui::SetTooltip("%s", target.diagnostic.c_str());
@@ -2260,9 +2261,12 @@ namespace
 		else if (gPegman.phase == PalettePhase::Falling)
 		{
 			auto globalX = gPegman.sector->getPosition().x + gPegman.localX;
+			auto const dimensions = gPegman.pastedAgent.armed()
+				? agentClipboardPlacementDimensions(gPegman.pastedAgent.payload)
+				: core::Agent::placementDimensions("Human");
 			drawPegman(drawList, worldToScreen({ globalX, gPegman.feetY }),
-				CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
-				CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
+				dimensions.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
+				dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
 				yellow);
 		}
 
@@ -4160,7 +4164,7 @@ namespace
 				}
 				else payload.name = uniqueAgentName(world,
 					consumedCut ? payload.name + " copy" : payload.name);
-				float halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+				float halfWidth = agentClipboardPlacementDimensions(payload).x * 0.5f;
 				float localX = clamp(worldPosition.x - sector->getPosition().x, halfWidth,
 					max(halfWidth, sector->getSize().x - halfWidth));
 				// Arming judges the Agent group and Agent tag registry identity before
@@ -9515,8 +9519,8 @@ void renderWorldWindow(shared_ptr<core::World> world, shared_ptr<const core::Gra
 			auto position = core::Vector2{ preview.sector->getPosition().x + preview.localX,
 				preview.floorY };
 			drawPegman(drawList, worldToScreen(position),
-				CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
-				CORE_AGENT_MAX_HEIGHT * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
+				gSelectedAgent->getWidth() * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
+				gSelectedAgent->getStandingHeight() * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
 				IM_COL32(255, 255, 0, 255));
 		}
 		else if (!preview.diagnostic.empty()) ImGui::SetTooltip("%s", preview.diagnostic.c_str());

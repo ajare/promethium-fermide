@@ -65,7 +65,7 @@ inline PegmanTarget pegmanAgentTargetAtWorld(std::shared_ptr<const core::World> 
 	auto levelOffset = cellY - sector->getCellY();
 	if (levelOffset >= sector->getLevelsHigh()) return {};
 
-	float halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+	float halfAgentWidth = core::Agent::placementDimensions("Human").x * 0.5f;
 	float minimumX = halfAgentWidth;
 	float maximumX = sector->getSize().x - halfAgentWidth;
 	float localX = worldPosition.x - sector->getPosition().x;
@@ -107,7 +107,8 @@ inline PegmanTarget getAgentMoveTarget(std::shared_ptr<const core::World> const&
 	auto cellY = (uint32_t)std::floor(worldPosition.y);
 	if (cellY < sector->getCellY() || cellY >= sector->getCellY() + sector->getLevelsHigh())
 		return { nullptr, 0, 0.0f, worldPosition.y, worldPosition.y, "Agent level is outside the sector" };
-	float halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+	float halfWidth = (agent ? agent->getWidth()
+		: core::Agent::placementDimensions("Human").x) * 0.5f;
 	float localX = std::clamp(worldPosition.x - sector->getPosition().x, halfWidth,
 		std::max(halfWidth, sector->getSize().x - halfWidth));
 	return { sector, cellY - sector->getCellY(), localX, worldPosition.y,

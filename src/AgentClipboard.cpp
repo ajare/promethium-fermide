@@ -530,6 +530,12 @@ namespace
 	}
 }
 
+core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload)
+{
+	return core::Agent::placementDimensions(payload.type,
+		payload.heightModifierSample ? payload.heightModifierSample->value : 1.0f);
+}
+
 AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	core::AgentId agent, string name)
 {

@@ -4,6 +4,7 @@
 #include "ObjectTileset.h"
 #include "UISettings.h"
 #include <cmath>
+#include <cfloat>
 #include <limits>
 
 extern UISettings gUISettings;
@@ -170,6 +171,38 @@ namespace
 					&& near(hi.y, sprite ? originalMax.y : 600.f + (originalMax.y - 600.f) * heightScale),
 					"Upright pose must squash only height around the floor anchor (including glyph padding)");
 			}
+			// Standing Human appearance retains the historical uniform Height
+			// scaling in both sprite and glyph paths, despite unchanged physical width.
+			world.pauseSimulation();
+			core::AgentPoseTestAccess::set(*agent, core::Pose::Standing);
+			auto extent = [&]()
+			{
+				ImDrawList adapter(ImGui::GetDrawListSharedData());
+				adapter._ResetForNewFrame();
+				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
+				adapter.PushClipRect({-1000,-1000},{2000,2000});
+				WorldDrawList list(&adapter); renderAgent(agent, &list);
+				ImVec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+				for (auto const& vertex : adapter.VtxBuffer)
+				{
+					lo.x = std::min(lo.x, vertex.pos.x); lo.y = std::min(lo.y, vertex.pos.y);
+					hi.x = std::max(hi.x, vertex.pos.x); hi.y = std::max(hi.y, vertex.pos.y);
+				}
+				return ImVec2{hi.x-lo.x, hi.y-lo.y};
+			};
+			auto const original = extent();
+			for (float modifier : {0.7f, 0.9f})
+			{
+				require(world.setAgentIndividualHeightModifier(id, modifier), "Human Height authoring refused");
+				auto const dimensions = core::Agent::placementDimensions("Human", modifier);
+				require(near(agent->getBounds().getSize().x, dimensions.x)
+					&& near(agent->getBounds().getSize().y, dimensions.y),
+					"Human render bounds disagreed with modified preview dimensions");
+				auto const modified = extent();
+				require(near(modified.x, original.x * modifier) && near(modified.y, original.y * modifier),
+					"Human Height changed sprite/glyph appearance scaling");
+			}
+			require(world.setAgentIndividualHeightModifier(id, {}), "Human Height reset refused");
 		}
 		clearObjectTileset(); ImGui::EndFrame();
 	}

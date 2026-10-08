@@ -139,6 +139,12 @@ namespace core
 		throw SerializationException("Unsupported Agent type '" + type + "'");
 	}
 
+	Vector2 Agent::placementDimensions(string const& type, float heightModifier)
+	{
+		auto const preview = create(type, "");
+		return { preview->getWidth(), preview->getPhysicalBaseline().standingHeight * heightModifier };
+	}
+
 	Agent::Agent(string const& name)
 		: mName(name)
 		, mFlags(0)
