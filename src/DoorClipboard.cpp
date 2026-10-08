@@ -8,6 +8,7 @@ void validate(core::World::CreateDoorOptions const& o) {
     if (!core::Door::heightScaleIsValid(o.heightScale) || (o.heightScale && o.height != core::Door::Height::Regular))
         throw std::runtime_error("Height scale requires a Regular Door and a finite value from 0.1 to 1.0");
     if (!core::Door::speedIsValid(o.speedOverride)) throw std::runtime_error("Door speed must be finite and positive");
+    if (!core::Door::brokenOpenPercentageIsValid(o.brokenOpenPercentage)) throw std::runtime_error("Broken open percentage must be a finite value from 0 to 1");
 }
 }
 void writeDoorClipboardObject(YAML::Emitter& output, core::World::CreateDoorOptions const& o) {
@@ -23,6 +24,7 @@ void writeDoorClipboardObject(YAML::Emitter& output, core::World::CreateDoorOpti
         << YAML::Key << "crossingLanes" << YAML::Value << o.crossingLanes
         << YAML::Key << "openStyle" << YAML::Value << styles[static_cast<unsigned>(o.openStyle)]
         << YAML::Key << "initiallyBroken" << YAML::Value << o.initiallyBroken;
+    if (o.brokenOpenPercentage != 0.0f) output << YAML::Key << "brokenOpenPercentage" << YAML::Value << o.brokenOpenPercentage;
     if (o.speedOverride) output << YAML::Key << "speed" << YAML::Value << *o.speedOverride;
     if (o.heightScale) output << YAML::Key << "heightScale" << YAML::Value << *o.heightScale;
     output << YAML::EndMap;
@@ -53,6 +55,7 @@ core::World::CreateDoorOptions readDoorClipboardObject(YAML::Node const& object)
         o.openStyle = static_cast<core::Door::OpenStyle>(i);
     }
     if (object["initiallyBroken"]) o.initiallyBroken = object["initiallyBroken"].as<bool>();
+    if (object["brokenOpenPercentage"]) o.brokenOpenPercentage = object["brokenOpenPercentage"].as<float>();
     if (object["speed"]) o.speedOverride = object["speed"].as<float>();
     if (object["heightScale"]) o.heightScale = object["heightScale"].as<float>();
     validate(o);

@@ -85,6 +85,7 @@ namespace core
 			Door::OpenStyle openStyle{ Door::OpenStyle::OpenUp };
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 			bool initiallyBroken{ false };
+			float brokenOpenPercentage{ 0.0f };
 			std::optional<float> speedOverride{};
 			std::optional<float> heightScale{};
 		};
@@ -105,6 +106,7 @@ namespace core
 			float automaticSensorDistance{ CORE_BULKHEAD_DOOR_AUTOMATIC_SENSOR_DISTANCE };
 			std::array<std::vector<AccessPermissionId>, 2> controlPermissionRequirements{};
 			bool initiallyBroken{ false };
+			float brokenOpenPercentage{ 0.0f };
 			std::optional<float> speedOverride{};
 		};
 
@@ -978,6 +980,8 @@ namespace core
 			std::vector<float> transportDoorSpeeds{};
 			bool p{ false }, q{ false };
 			bool initiallyBroken{ false };
+			// Ordinary Door: authored frozen-open fraction (0..1) for the Broken state.
+			float brokenOpenPercentage{ 0.0f };
 			// Door: the activation mode the Door had before the editor's Buttons
 			// option first gave it Buttons, or -1 when the Buttons were loaded as
 			// part of the authored definition. Removal restores a recorded mode and
@@ -2748,6 +2752,7 @@ namespace core
 			Agent const* agent, Sector const* observationSector) const
 		{ return knownTransportCondition(resource, agent, observationSector); }
 		bool setDoorInitiallyBroken(TraversalResourceId door, bool broken);
+		bool setDoorBrokenOpenPercentage(TraversalResourceId door, float openPercentage);
 		bool setDoorBroken(TraversalResourceId door, bool broken);
 		bool setExtensibleInitiallyBroken(TraversalResourceId resource, bool broken);
 		bool setExtensibleBroken(TraversalResourceId resource, bool broken);

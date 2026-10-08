@@ -231,7 +231,12 @@ namespace core
 			}
 			if (resource->mDoor->isBroken())
 			{
-				if (resource->mDoor->admitsNewCrossings()) tryGrantDoorQueue(*resource);
+				// Landing Doors mirror a broken Lift/Shuttle, not an independent
+				// Door breakage: they keep the legacy frozen-aperture rule.
+				bool const pass = resource->mDoor->isIndependentlyBroken()
+					? (actor && resource->mDoor->admitsBrokenPassage(*actor, actor->getGlobalPosition().y))
+					: resource->mDoor->admitsNewCrossings();
+				if (pass) tryGrantDoorQueue(*resource);
 				else denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
 				return;
 			}

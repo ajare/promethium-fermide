@@ -2459,6 +2459,8 @@ namespace core
 			throw WorldException(this, caller + ": Height scale requires a Regular Door and a finite value from 0.1 to 1.0");
 		if (!Door::speedIsValid(options.speedOverride))
 			throw WorldException(this, caller + ": Door speed must be finite and positive");
+		if (!Door::brokenOpenPercentageIsValid(options.brokenOpenPercentage))
+			throw WorldException(this, caller + ": Broken open percentage must be a finite value from 0 to 1");
 		// A zero-width Door would cover no cell: its placement loop runs zero times,
 		// leaving the Door's two Sectors unset for the queue configuration to
 		// dereference. A crossing-lane count above the usable threshold width is not
@@ -5134,6 +5136,7 @@ namespace core
 		options.crossingLanes = found->d;
 		options.openStyle = static_cast<Door::OpenStyle>(found->j);
 		options.initiallyBroken = found->initiallyBroken;
+		options.brokenOpenPercentage = found->brokenOpenPercentage;
 		options.speedOverride = found->doorSpeed;
 		options.heightScale = found->doorHeightScale;
 		return true;
@@ -5389,7 +5392,41 @@ namespace core
 			});
 		if (found == mConstructionRecords.rend()) return false;
 		found->initiallyBroken = door->mInitiallyBroken = broken;
+		// Authoring a broken Door also freezes it at its authored broken-open
+		// position, rather than whatever fraction it happened to hold live.
+		if (broken) door->mOpenPct = door->mBrokenOpenPercentage;
 		setDoorBroken(id, broken);
+		modify();
+		return true;
+	}
+
+	bool World::setDoorBrokenOpenPercentage(TraversalResourceId id, float openPercentage)
+	{
+		if (!mSimulationPaused || !Door::brokenOpenPercentageIsValid(openPercentage)) return false;
+		auto resource = mTraversalResources.find(id);
+		// Transport and Chamber Doors are not independently breakable, so the
+		// breakable guard already confines this to ordinary and standalone
+		// Bulkhead Doors.
+		if (!resource || !resource->mDoor || !resource->mDoor->isBreakable()) return false;
+		auto door = resource->mDoor;
+		auto found = find_if(mConstructionRecords.rbegin(), mConstructionRecords.rend(),
+			[&](ConstructionRecord const& record)
+			{
+				if (auto bulkhead = dynamic_pointer_cast<BulkheadDoor>(door))
+					return record.type == ConstructionType::BulkheadDoor
+						&& record.a == bulkhead->getFrontLayer()
+						&& record.b == static_cast<uint32_t>(bulkhead->getPosition().y)
+						&& record.c + (record.i == CORE_SIDE_RIGHT ? 1u : 0u)
+							== static_cast<uint32_t>(bulkhead->getPosition().x + CORE_BULKHEAD_DOOR_WIDTH * 0.5f);
+				return record.type == ConstructionType::Door && record.layer == door->getFrontLayer()
+					&& record.a == static_cast<uint32_t>(door->getPosition().y)
+					&& record.b == static_cast<uint32_t>(door->getPosition().x)
+					&& record.c == door->getCellsWide();
+			});
+		if (found == mConstructionRecords.rend()) return false;
+		found->brokenOpenPercentage = door->mBrokenOpenPercentage = openPercentage;
+		if (door->isBroken()) door->mOpenPct = openPercentage;
+		invalidateSimulationSnapshot();
 		modify();
 		return true;
 	}
@@ -5754,6 +5791,7 @@ namespace core
 		record.i = static_cast<int32_t>(options.activationMode); record.x = options.holdOpenSeconds;
 		record.j = static_cast<int32_t>(options.openStyle);
 		record.initiallyBroken = options.initiallyBroken;
+		record.brokenOpenPercentage = options.brokenOpenPercentage;
 		record.doorSpeed = options.speedOverride;
 		record.doorHeightScale = options.heightScale;
 		for (size_t side = 0; side < 2; ++side)
@@ -6089,6 +6127,8 @@ namespace core
 		door->mBreakable = isLocationLike(sectors[0]->getType())
 			&& isLocationLike(sectors[1]->getType());
 		door->mInitiallyBroken = door->mBroken = door->mBreakable && options.initiallyBroken;
+		door->mBrokenOpenPercentage = options.brokenOpenPercentage;
+		if (door->mBroken) door->mOpenPct = options.brokenOpenPercentage;
 		auto traversalResource = createDoorTraversalResource(
 			format("Door at {},{}", x, y), door, options.activationMode, options.holdOpenSeconds);
 		door->configureTraversal(options.activationMode, traversalResource, options.holdOpenSeconds);
@@ -6465,6 +6505,8 @@ namespace core
 			return reject("Bulkhead Door hold-open time must be finite and non-negative");
 		if (!Door::speedIsValid(options.speedOverride))
 			return reject("Bulkhead Door speed must be finite and positive");
+		if (!Door::brokenOpenPercentageIsValid(options.brokenOpenPercentage))
+			return reject("Bulkhead Door broken open percentage must be a finite value from 0 to 1");
 		if (!isfinite(options.automaticSensorDistance)
 			|| options.automaticSensorDistance < 0.0f)
 			return reject("Bulkhead Door automatic sensor distance must be finite and non-negative");
@@ -6604,6 +6646,8 @@ namespace core
 		door->setSpeedOverride(options.speedOverride);
 		door->mBreakable = true;
 		door->mInitiallyBroken = door->mBroken = options.initiallyBroken;
+		door->mBrokenOpenPercentage = options.brokenOpenPercentage;
+		if (door->mBroken) door->mOpenPct = options.brokenOpenPercentage;
 		configureDoorCrossingLanes(traversalResource, options.crossingLanes);
 
 		// Same-layer geometry gets explicit approaches on opposite sides of the
@@ -6649,6 +6693,7 @@ namespace core
 		record.x = options.holdOpenSeconds; record.d = options.crossingLanes;
 		record.y = options.automaticSensorDistance;
 		record.initiallyBroken = options.initiallyBroken;
+		record.brokenOpenPercentage = options.brokenOpenPercentage;
 		record.doorSpeed = options.speedOverride;
 		for (size_t controlSide = 0; controlSide < 2; ++controlSide)
 			for (auto permission : options.controlPermissionRequirements[controlSide])
@@ -11437,6 +11482,11 @@ namespace core
 		if (!resource || !resource->mDoor
 			|| resource->mDoorActivationMode != DoorActivationMode::Manual
 			|| resource->mDoor->admitsNewCrossings()) return true;
+		if (resource->mDoor->isIndependentlyBroken())
+		{
+			auto agent = mAgents.find(agentId);
+			return agent && resource->mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y);
+		}
 		return canAgentOpenManualDoor(doorId, agentId);
 	}
 

@@ -30,6 +30,11 @@ namespace core
 		return !speed || (std::isfinite(*speed) && *speed > 0.0f);
 	}
 
+	bool Door::brokenOpenPercentageIsValid(float openPercentage)
+	{
+		return std::isfinite(openPercentage) && openPercentage >= 0.0f && openPercentage <= 1.0f;
+	}
+
 	bool Door::setSpeedOverride(std::optional<float> speed)
 	{
 		if (isChamberOwned() || !speedIsValid(speed)) return false;
@@ -101,6 +106,36 @@ namespace core
 		bool beginningMovement) const
 	{
 		return classifyAgentCrossing(agent, approachFloorY, beginningMovement)
+			!= DoorCrossingMode::None;
+	}
+
+	Door::DoorCrossingMode Door::classifyBrokenAgentCrossing(Agent const& agent, float openFraction,
+		float approachFloorY, bool beginningMovement) const
+	{
+		bool const vertical = typeid(*this) == typeid(BulkheadDoor)
+			|| mOpenStyle == OpenStyle::OpenUp;
+		if (vertical)
+		{
+			// Mirror classifyAgentCrossing's Standing/Crawling fallback against the
+			// scaled aperture height instead of the full height.
+			auto const fullHeight = (typeid(*this) == typeid(BulkheadDoor) || mLiftOwned || mShuttleOwned)
+				? getSize().y : effectiveHeight(mHeight, mHeightScale);
+			auto const available = getPosition().y + openFraction * fullHeight - approachFloorY;
+			if (agent.getTraversalDoorClearanceExtent(beginningMovement)
+				<= available + ClearanceTolerance) return DoorCrossingMode::Standing;
+			if (agent.admitsAutomaticDoorCrawling(beginningMovement)
+				&& agent.getTraversalCrawlingDoorClearanceExtent(beginningMovement)
+					<= available + ClearanceTolerance) return DoorCrossingMode::Crawling;
+			return DoorCrossingMode::None;
+		}
+		return agent.getWidth() <= openFraction * getSize().x + ClearanceTolerance
+			? DoorCrossingMode::Standing : DoorCrossingMode::None;
+	}
+
+	bool Door::admitsBrokenPassage(Agent const& agent, float openFraction, float approachFloorY,
+		bool beginningMovement) const
+	{
+		return classifyBrokenAgentCrossing(agent, openFraction, approachFloorY, beginningMovement)
 			!= DoorCrossingMode::None;
 	}
 

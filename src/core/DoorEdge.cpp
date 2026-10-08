@@ -49,6 +49,9 @@ namespace core
 	{
 		if ((agent && !mDoor->admitsAgentTraversal(*agent, agent->getGlobalPosition().y))
 			|| agentForbidsEdge(agent.get(), *this, TraversalKind::Door)) return false;
+		if (mDoor->isIndependentlyBroken())
+			return agent ? mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y)
+				: mDoor->admitsNewCrossings();
 		return mDoor->admitsNewCrossings();
 	}
 
@@ -58,6 +61,9 @@ namespace core
 		if ((agent && !mDoor->admitsAgentTraversal(*agent, agent->getGlobalPosition().y))
 			|| agentForbidsEdge(agent.get(), *this, TraversalKind::Door))
 			return EdgeTraversalRequestResult::Failed;
+		if (mDoor->isIndependentlyBroken())
+			return (agent && mDoor->admitsBrokenPassage(*agent, agent->getGlobalPosition().y))
+				? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 		return (mDoor->admitsNewCrossings() || mDoor->requestOpen())
 			? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}

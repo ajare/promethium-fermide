@@ -50,6 +50,8 @@ namespace core
 		bool mBreakable{ false };
 		bool mInitiallyBroken{ false };
 		bool mBroken{ false };
+		// Authored frozen-open fraction (0..1) applied when the Door is Broken.
+		float mBrokenOpenPercentage{ 0.0f };
 		// A buttonless manual ordinary Door owns the authorization for its implicit
 		// opening interaction. It is shared by both directed graph edges.
 		std::bitset<256> mPermissionRequirement;
@@ -86,11 +88,32 @@ namespace core
 		// envelope and never trigger the automatic Crawling fallback.
 		DoorCrossingMode classifyAgentCrossing(Agent const& agent, float approachFloorY,
 			bool beginningMovement = false) const;
+		// The crossing mode for a Broken Door's frozen aperture, mirroring
+		// classifyAgentCrossing but against the scaled opening instead of the full
+		// height. Vertical openings scale height (Standing, then automatic
+		// Crawling); horizontal openings scale width and keep their full height.
+		DoorCrossingMode classifyBrokenAgentCrossing(Agent const& agent, float openFraction,
+			float approachFloorY, bool beginningMovement = false) const;
+		DoorCrossingMode classifyBrokenAgentCrossing(Agent const& agent, float approachFloorY,
+			bool beginningMovement = false) const
+		{ return classifyBrokenAgentCrossing(agent, getOpenPercentage(), approachFloorY, beginningMovement); }
+		// A Broken Door is frozen at some open fraction. A vertical opening
+		// (OpenUp and Bulkhead Doors) admits passage when the Agent's standing
+		// clearance extent fits under the scaled aperture height; a horizontal
+		// opening (OpenApart, OpenLeft, OpenRight) admits it when the Agent's
+		// width fits within the scaled aperture width. `openFraction` may come
+		// from a remembered condition, not only the live percentage.
+		bool admitsBrokenPassage(Agent const& agent, float openFraction, float approachFloorY,
+			bool beginningMovement = false) const;
+		bool admitsBrokenPassage(Agent const& agent, float approachFloorY,
+			bool beginningMovement = false) const
+		{ return admitsBrokenPassage(agent, getOpenPercentage(), approachFloorY, beginningMovement); }
 		bool admitsStandingHeight(float standingHeight, float approachFeetY) const
 		{ return admitsVerticalExtent(standingHeight, approachFeetY); }
 		OpenStyle getOpenStyle() const;
 		void setOpenStyle(OpenStyle style);
 		static bool speedIsValid(std::optional<float> speed);
+		static bool brokenOpenPercentageIsValid(float openPercentage);
 		std::optional<float> getSpeedOverride() const { return mSpeedOverride; }
 		virtual float getDefaultSpeed() const;
 		float getSpeed() const { return mSpeedOverride.value_or(getDefaultSpeed()); }
@@ -124,6 +147,11 @@ namespace core
 		bool isBreakable() const { return mBreakable; }
 		bool isInitiallyBroken() const { return mInitiallyBroken; }
 		bool isBroken() const { return mBroken; }
+		// A Breakable Door's own Broken state. Transport landing Doors mirror their
+		// coupled Lift/Shuttle's Broken flag in mBroken, so the authored broken-open
+		// passage rule must never treat them as independently Broken.
+		bool isIndependentlyBroken() const { return mBreakable && mBroken; }
+		float getBrokenOpenPercentage() const { return mBrokenOpenPercentage; }
 		bool admitsNewCrossings() const { return mBroken ? mOpenPct >= 1.0f : isOpen(); }
 		std::optional<DeviceCondition> knownCondition(Agent const* agent,
 			Sector const* observationSector) const;

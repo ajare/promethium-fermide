@@ -1820,8 +1820,11 @@ namespace core
 			if (doorCrossing)
 			{
 				auto const& doorEdge = static_cast<DoorEdge const&>(*mTraversalTask->edge);
-				auto const mode = doorEdge.getDoor()->classifyAgentCrossing(
-					*this, getGlobalPosition().y);
+				// A Broken Door's crossing mode comes from its frozen aperture, not
+				// its full height: a partially-open vertical Door can force Crawling.
+				auto const mode = doorEdge.getDoor()->isIndependentlyBroken()
+					? doorEdge.getDoor()->classifyBrokenAgentCrossing(*this, getGlobalPosition().y)
+					: doorEdge.getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
 				// An onboard Lift or Shuttle passenger must finish its committed exit
 				// even if its envelope or the opening changed during the ride.
 				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling
@@ -1833,7 +1836,11 @@ namespace core
 			if (bulkhead && (bulkhead->isStandalone() || bulkhead->getDoor()->isAirlockOwned()
 				|| bulkhead->getDoor()->isSecurityScannerOwned()))
 			{
-				auto const mode = bulkhead->getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
+				// A Broken Bulkhead Door's crossing mode comes from its frozen
+				// aperture, so a partially-open door can force Crawling.
+				auto const mode = bulkhead->getDoor()->isIndependentlyBroken()
+					? bulkhead->getDoor()->classifyBrokenAgentCrossing(*this, getGlobalPosition().y)
+					: bulkhead->getDoor()->classifyAgentCrossing(*this, getGlobalPosition().y);
 				// An admitted Chamber occupant must finish its exit even if its
 				// envelope or the opening changed during the interlocked journey.
 				mTraversalTask->crawling = mode == Door::DoorCrossingMode::Crawling

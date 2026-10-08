@@ -416,6 +416,8 @@ namespace core
 			serializer.writeBool("hasHeightScale", record.doorHeightScale.has_value());
 			if (record.doorHeightScale) serializer.writeFloat("heightScale", *record.doorHeightScale);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
+			if (record.brokenOpenPercentage != 0.0f)
+				serializer.writeFloat("brokenOpenPercentage", record.brokenOpenPercentage);
 			// Only a Door whose Buttons were added in the editor carries the mode
 			// removal restores. Authored control layouts need no extra field; their
 			// removal falls back to manual activation.
@@ -494,6 +496,8 @@ namespace core
 			serializer.writeBool("hasSpeedOverride", record.doorSpeed.has_value());
 			if (record.doorSpeed) serializer.writeFloat("speed", *record.doorSpeed);
 			if (record.initiallyBroken) serializer.writeBool("initiallyBroken", true);
+			if (record.brokenOpenPercentage != 0.0f)
+				serializer.writeFloat("brokenOpenPercentage", record.brokenOpenPercentage);
 			for (size_t side = 0; side < 2; ++side)
 				if (!record.controlPermissionRequirements[side].empty())
 				{
@@ -687,7 +691,8 @@ namespace core
 		// than adjacent file basenames. Pre-55 documents that still carry a
 		// filename/package are read as legacy names for compatibility.
 		// Version 57 adds optional ordinary Regular Door Height scale.
-		serializer.writeUint32("version", 57);
+		// Version 58 adds the authored Broken open percentage for ordinary Doors.
+		serializer.writeUint32("version", 58);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1244,6 +1249,14 @@ namespace core
 					"Door Broken condition requires World schema version 33 or later");
 				record.initiallyBroken = serializer.readBool("initiallyBroken");
 			}
+			if (serializer.hasField("brokenOpenPercentage"))
+			{
+				if (version < 58) throw SerializationException(
+					"Door broken open percentage requires World schema version 58 or later");
+				record.brokenOpenPercentage = serializer.readFloat("brokenOpenPercentage");
+				if (!Door::brokenOpenPercentageIsValid(record.brokenOpenPercentage))
+					throw SerializationException("Invalid Door broken open percentage");
+			}
 			if (version >= 24 && serializer.hasField("permissionRequirement"))
 			{
 				serializer.beginArray("permissionRequirement");
@@ -1351,6 +1364,14 @@ namespace core
 				if (version < 34) throw SerializationException(
 					"Bulkhead Door Broken condition requires World schema version 34 or later");
 				record.initiallyBroken = serializer.readBool("initiallyBroken");
+			}
+			if (serializer.hasField("brokenOpenPercentage"))
+			{
+				if (version < 58) throw SerializationException(
+					"Bulkhead Door broken open percentage requires World schema version 58 or later");
+				record.brokenOpenPercentage = serializer.readFloat("brokenOpenPercentage");
+				if (!Door::brokenOpenPercentageIsValid(record.brokenOpenPercentage))
+					throw SerializationException("Invalid Bulkhead Door broken open percentage");
 			}
 			if (version >= 25)
 				for (size_t controlSide = 0; controlSide < 2; ++controlSide)
@@ -1547,7 +1568,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 57)
+		if (version < 1 || version > 58)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3033,7 +3054,7 @@ namespace core
 			auto created = addSectorDoor(doorLayer(record), record.a, record.b,
 				{ record.c, static_cast<Door::Height>(record.e), { record.p, record.q },
 					static_cast<DoorActivationMode>(record.i), record.x, record.d,
-					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken, record.doorSpeed, record.doorHeightScale });
+					static_cast<Door::OpenStyle>(record.j), {}, record.initiallyBroken, record.brokenOpenPercentage, record.doorSpeed, record.doorHeightScale });
 			if (!record.values.empty())
 			{
 				auto resource = mTraversalResources.find(created.traversalResource);
@@ -3081,7 +3102,7 @@ namespace core
 		case ConstructionType::BulkheadDoor:
 		{
 			CreateBulkheadDoorOptions options{ { record.p, record.q },
-				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y, {}, record.initiallyBroken, record.doorSpeed };
+				static_cast<DoorActivationMode>(record.j), record.x, record.d, record.y, {}, record.initiallyBroken, record.brokenOpenPercentage, record.doorSpeed };
 			for (size_t side = 0; side < 2; ++side)
 				for (auto permission : record.controlPermissionRequirements[side])
 					options.controlPermissionRequirements[side].push_back(
@@ -6740,7 +6761,7 @@ namespace core
 			});
 		if (found == mConstructionRecords.rend()) return false;
 		options = { { found->p, found->q }, static_cast<DoorActivationMode>(found->j),
-			found->x, found->d, found->y, {}, found->initiallyBroken, found->doorSpeed };
+			found->x, found->d, found->y, {}, found->initiallyBroken, found->brokenOpenPercentage, found->doorSpeed };
 		for (size_t side = 0; side < 2; ++side)
 			for (auto permission : found->controlPermissionRequirements[side])
 				options.controlPermissionRequirements[side].push_back(
@@ -6766,6 +6787,8 @@ namespace core
 			throw WorldException(this, "Bulkhead Door hold-open time must be finite and non-negative");
 		if (!Door::speedIsValid(options.speedOverride))
 			throw WorldException(this, "Bulkhead Door speed must be finite and positive");
+		if (!Door::brokenOpenPercentageIsValid(options.brokenOpenPercentage))
+			throw WorldException(this, "Bulkhead Door broken open percentage must be a finite value from 0 to 1");
 		if (!isfinite(options.automaticSensorDistance)
 			|| options.automaticSensorDistance < 0.0f)
 			throw WorldException(this,
@@ -6792,6 +6815,7 @@ namespace core
 		found->y = options.automaticSensorDistance;
 		found->doorSpeed = options.speedOverride;
 		found->initiallyBroken = options.initiallyBroken;
+		found->brokenOpenPercentage = options.brokenOpenPercentage;
 		for (size_t side = 0; side < 2; ++side)
 		{
 			if (!options.controls[side])

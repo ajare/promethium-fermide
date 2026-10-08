@@ -184,6 +184,21 @@ void renderDoorConditionPanel(shared_ptr<core::World> const& world,
 				commitDocumentEdit(std::move(undo));
 		}
 		ImGui::EndDisabled();
+		if (door->isInitiallyBroken())
+		{
+			// The frozen-open amount is authored alongside the Broken condition.
+			// Transport and Chamber Doors are not independently breakable, so only
+			// ordinary and standalone Bulkhead Doors reach this control.
+			float brokenOpen = door->getBrokenOpenPercentage() * 100.0f;
+			ImGui::BeginDisabled(!world->isSimulationPaused());
+			if (ImGui::SliderFloat("Broken open amount", &brokenOpen, 0.0f, 100.0f, "%.1f%%"))
+			{
+				auto undo = captureDocumentSnapshot(world);
+				if (world->setDoorBrokenOpenPercentage(door->getTraversalResourceId(), brokenOpen / 100.0f))
+					commitDocumentEdit(std::move(undo));
+			}
+			ImGui::EndDisabled();
+		}
 		bool broken = door->isBroken();
 		if (ImGui::Checkbox("Live Broken", &broken))
 			world->setDoorBroken(door->getTraversalResourceId(), broken);

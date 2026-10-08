@@ -43,9 +43,10 @@ namespace core
 			return facts;
 		}
 		auto known = door.knownCondition(context.agent, context.observationSector);
-		bool const brokenOpen = known && known->broken && known->position >= 1.0f;
+		bool const brokenOpen = known && known->broken && context.agent
+			&& door.admitsBrokenPassage(*context.agent, known->position, sourceEndpoint.y, context.beginningMovement);
 		bool const open = brokenOpen || (observed && door.isOpen());
-		if (known && !known->admitsPassage())
+		if (known && known->broken && !brokenOpen)
 		{
 			facts.exclusionReason = RouteExclusionReason::Control;
 			return facts;

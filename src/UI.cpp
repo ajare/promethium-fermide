@@ -5792,7 +5792,7 @@ void renderBulkheadDoorPanel(shared_ptr<core::World> const& world,
 			core::World::CreateBulkheadDoorOptions options{
 				{ leftControl, rightControl },
 				static_cast<core::DoorActivationMode>(activationMode),
-				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance, {}, door->isInitiallyBroken(), door->getSpeedOverride() };
+				holdOpenSeconds, (uint32_t)crossingLanes, automaticSensorDistance, {}, door->isInitiallyBroken(), door->getBrokenOpenPercentage(), door->getSpeedOverride() };
 			gSelectedSectorObject = world->applySectorBulkheadDoorOptions(
 				owner->getIndex(), objectIndex, options);
 			gHoveredSectorObject.reset(); editedObject = nullptr;

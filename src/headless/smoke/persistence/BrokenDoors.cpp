@@ -3,6 +3,7 @@
 #include "core/BinarySerializer.h"
 #include "core/DoorSectorObject.h"
 #include "core/BulkheadDoorSectorObject.h"
+#include "core/AirlockTransit.h"
 #include "core/LiftTransit.h"
 #include "core/World.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -134,6 +135,84 @@ namespace persistence
 				&& std::abs(agent->getLocalPosition().x - 0.5f) < 0.001f,
 				"Demo observer did not replan and complete its journey");
 		}
+
+		{
+		// A Door authored Broken also carries the frozen-open fraction it is stuck
+		// at (ordinary Doors only, including button Doors). It persists, resets to
+		// the authored amount, and the live setter is ordinary-Door-only.
+		core::World world("Broken open percentage", 12, 3);
+		auto front = world.addRoom("Front", 0, 0, 0, 11, 1);
+		world.addRoom("Back", 1, 0, 0, 11, 1);
+		core::World::CreateDoorOptions authored;
+		authored.activationMode = core::DoorActivationMode::RemoteControlled;
+		authored.controls[0] = authored.controls[1] = true;
+		authored.initiallyBroken = true;
+		authored.brokenOpenPercentage = 0.35f;
+		auto made = world.addSectorDoor(0, 0, 2, authored);
+		world.finishBuild();
+		auto door = std::static_pointer_cast<core::DoorSectorObject>(
+			made.door.sector->getObject(made.door.index))->getDoor();
+		require(door->isBroken() && door->isInitiallyBroken()
+			&& door->getOpenPercentage() == 0.35f && door->getBrokenOpenPercentage() == 0.35f,
+			"Authored Broken open percentage did not freeze the Door");
+		core::World::CreateDoorOptions readBack;
+		require(world.getSectorDoorOptions(0, 0, 2, 1, readBack)
+			&& readBack.initiallyBroken && readBack.brokenOpenPercentage == 0.35f,
+			"Authored options lost the Broken open percentage");
+		auto save = [&](bool binary)
+		{
+			auto write = [&](auto writer)
+			{
+				core::SerializationWorkData work; work.markSerializedUnmodified = false;
+				world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+			};
+			return binary ? write(core::BinarySerializer::toString()) : write(core::YamlSerializer::toString());
+		};
+		for (bool binary : { false, true })
+		{
+			auto saved = save(binary);
+			std::unique_ptr<core::Serializer> reader;
+			if (binary) reader = core::BinarySerializer::fromString(saved);
+			else reader = core::YamlSerializer::fromString(saved);
+			reader->deserialize(); core::SerializationWorkData work;
+			core::World restored("Loaded", 1, 1);
+			require(restored.deserialize(*reader, work), "Broken-open-percentage document failed to load");
+			auto loaded = std::static_pointer_cast<core::DoorSectorObject>(
+				restored.getSector(front)->getObject(made.door.index))->getDoor();
+			require(loaded->isBroken() && loaded->isInitiallyBroken()
+				&& loaded->getOpenPercentage() == 0.35f && loaded->getBrokenOpenPercentage() == 0.35f,
+				"Broken open percentage did not persist");
+		}
+		world.resetSimulation();
+		door = std::static_pointer_cast<core::DoorSectorObject>(
+			world.getSector(front)->getObject(made.door.index))->getDoor();
+		require(door->isBroken() && door->getOpenPercentage() == 0.35f,
+			"Reset did not restore the authored Broken open percentage");
+		world.pauseSimulation();
+		require(world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), 0.8f)
+			&& door->getBrokenOpenPercentage() == 0.8f && door->getOpenPercentage() == 0.8f,
+			"Paused Broken-open-percentage edit refused or did not apply");
+		require(!world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), 1.5f)
+			&& !world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), std::nanf(""))
+			&& door->getBrokenOpenPercentage() == 0.8f, "Invalid percentage was accepted");
+		world.markSaved();
+		world.resumeSimulation();
+		require(!world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), 0.5f)
+			&& !world.isModified(), "Running authored edit was accepted/dirtied the document");
+		// The new field requires schema 58; an older reader refuses it.
+		auto legacy = YAML::Load(save(false)); legacy["version"] = 57;
+		core::World old("Old", 1, 1);
+		core::SerializationWorkData work;
+		bool refused = false;
+		try
+		{
+			auto legacyReader = core::YamlSerializer::fromString(YAML::Dump(legacy));
+			legacyReader->deserialize();
+			old.deserialize(*legacyReader, work);
+		}
+		catch (core::SerializationException const&) { refused = true; }
+		require(refused, "Old-schema Broken open percentage was silently accepted");
+		}
 	}
 	void bulkheadDoorBrokenLifecycle(smoke::Context const& context)
 	{
@@ -235,6 +314,88 @@ namespace persistence
 				&& agent->getSector()->getIndex() == 1
 				&& std::abs(agent->getLocalPosition().x - 0.5f) < 0.001f,
 				"Bulkhead demo observer did not complete its detour/approach");
+		}
+
+		// A standalone Bulkhead Door authored Broken also carries the frozen-open
+		// fraction it is stuck at; Chamber Doors stay excluded.
+		{
+			core::World world("Broken Bulkhead open percentage", 12, 3);
+			auto left = world.addRoom("Left", 0, 0, 0, 5, 1);
+			world.addRoom("Right", 0, 0, 5, 6, 1);
+			core::World::CreateBulkheadDoorOptions authored;
+			authored.activationMode = core::DoorActivationMode::RemoteControlled;
+			authored.controls[0] = authored.controls[1] = true;
+			authored.initiallyBroken = true;
+			authored.brokenOpenPercentage = 0.35f;
+			auto made = world.addSectorBulkheadDoor(0, 0, 4, CORE_SIDE_RIGHT, authored);
+			world.finishBuild();
+			auto door = std::static_pointer_cast<core::BulkheadDoorSectorObject>(
+				made.door.sector->getObject(made.door.index))->getDoor();
+			require(door->isBroken() && door->isInitiallyBroken()
+				&& door->getOpenPercentage() == 0.35f && door->getBrokenOpenPercentage() == 0.35f,
+				"Authored Broken open percentage did not freeze the Bulkhead Door");
+			core::World::CreateBulkheadDoorOptions readBack;
+			require(world.getSectorBulkheadDoorOptions(left, made.door.index, readBack)
+				&& readBack.initiallyBroken && readBack.brokenOpenPercentage == 0.35f,
+				"Authored options lost the Bulkhead Broken open percentage");
+			auto save = [&](bool binary)
+			{
+				auto write = [&](auto writer)
+				{
+					core::SerializationWorkData work; work.markSerializedUnmodified = false;
+					world.serialize(*writer, work); writer->serialize(); return writer->getSerializedString();
+				};
+				return binary ? write(core::BinarySerializer::toString()) : write(core::YamlSerializer::toString());
+			};
+			for (bool binary : { false, true })
+			{
+				auto saved = save(binary);
+				std::unique_ptr<core::Serializer> reader;
+				if (binary) reader = core::BinarySerializer::fromString(saved);
+				else reader = core::YamlSerializer::fromString(saved);
+				reader->deserialize(); core::SerializationWorkData work;
+				core::World restored("Loaded", 1, 1);
+				require(restored.deserialize(*reader, work), "Bulkhead broken-open-percentage document failed to load");
+				auto loaded = std::static_pointer_cast<core::BulkheadDoorSectorObject>(
+					restored.getSector(left)->getObject(made.door.index))->getDoor();
+				require(loaded->isBroken() && loaded->isInitiallyBroken()
+					&& loaded->getOpenPercentage() == 0.35f && loaded->getBrokenOpenPercentage() == 0.35f,
+					"Bulkhead Broken open percentage did not persist");
+			}
+			world.resetSimulation();
+			door = std::static_pointer_cast<core::BulkheadDoorSectorObject>(
+				world.getSector(left)->getObject(made.door.index))->getDoor();
+			require(door->isBroken() && door->getOpenPercentage() == 0.35f,
+				"Reset did not restore the authored Bulkhead Broken open percentage");
+			world.pauseSimulation();
+			require(world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), 0.8f)
+				&& door->getBrokenOpenPercentage() == 0.8f && door->getOpenPercentage() == 0.8f,
+				"Paused Bulkhead Broken-open-percentage edit refused or did not apply");
+			require(!world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), 1.5f)
+				&& !world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), std::nanf(""))
+				&& door->getBrokenOpenPercentage() == 0.8f, "Invalid percentage was accepted");
+			world.markSaved();
+			world.resumeSimulation();
+			require(!world.setDoorBrokenOpenPercentage(door->getTraversalResourceId(), 0.5f)
+				&& !world.isModified(), "Running Bulkhead authored edit was accepted/dirtied the document");
+
+			// Chamber Doors are Bulkhead Doors but are not independently breakable,
+			// so they never take a broken open percentage.
+			core::World airlockWorld("Airlock exclusion", 12, 3);
+			airlockWorld.addRoom("Left", 0, 0, 0, 4, 1);
+			airlockWorld.addRoom("Right", 0, 0, 6, 6, 1);
+			auto chamberIndex = airlockWorld.addAirlock(0, 0, 4, 2);
+			airlockWorld.finishBuild();
+			auto chamber = std::dynamic_pointer_cast<const core::AirlockTransit>(
+				airlockWorld.getSector(chamberIndex));
+			require(chamber != nullptr, "Airlock did not build");
+			for (int side = 0; side < 2; ++side)
+			{
+				auto chamberDoor = chamber->getDoor(side);
+				require(chamberDoor && !chamberDoor->isBreakable(), "Airlock Door became independently breakable");
+				require(!airlockWorld.setDoorBrokenOpenPercentage(chamberDoor->getTraversalResourceId(), 0.5f),
+					"Airlock Door accepted a broken open percentage");
+			}
 		}
 	}
 }

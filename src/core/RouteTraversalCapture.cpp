@@ -353,10 +353,11 @@ namespace core
 			// Unavailable doors retain the existing hard permission rule; otherwise
 			// remote openness is deliberately not even read.
 			auto known = door.knownCondition(context.agent, context.observationSector);
-			bool const brokenOpen = known && known->broken && known->position >= 1.0f;
+			bool const brokenOpen = known && known->broken && context.agent
+				&& door.admitsBrokenPassage(*context.agent, known->position, source->getPosition().y, context.beginningMovement);
 			result.open = brokenOpen || ((result.observed
 				|| (!door.isBreakable() && door.getActivationMode() == DoorActivationMode::Unavailable)) && door.isOpen());
-			if (known && !known->admitsPassage())
+			if (known && known->broken && !brokenOpen)
 			{
 				result.exclusion = RouteExclusionReason::Control;
 				return result; // Operation permissions cannot make a frozen aperture usable.

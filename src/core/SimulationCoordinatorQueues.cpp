@@ -717,7 +717,7 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		if (!resource.mEnabled || (!resource.mDoor && !resource.mForceBridge)
-			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings())
+			|| (resource.mDoor && !resource.mDoor->admitsNewCrossings() && !resource.mDoor->isIndependentlyBroken())
 			|| (resource.mForceBridge && !resource.mForceBridge->admitsNewTraversals()))
 		{
 			return;
@@ -747,7 +747,10 @@ namespace core
 				auto request = mWorld.mTraversalRequests.find(requestId);
 				if (!request || request->mState != TraversalRequestState::Pending) continue;
 				auto actor = mWorld.mAgents.find(request->mOwner);
-				if (!actor || resource.mDoor->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)) continue;
+				if (!actor) continue;
+				if (resource.mDoor->admitsAgentTraversal(*actor, actor->getGlobalPosition().y)
+					&& (!resource.mDoor->isIndependentlyBroken()
+						|| resource.mDoor->admitsBrokenPassage(*actor, actor->getGlobalPosition().y))) continue;
 				auto owner = request->mOwner;
 				denyTraversalRequest(requestId, TraversalFailureReason::PreparationFailed);
 				replanAgentAfterAuthorizationRefusal(owner, false);

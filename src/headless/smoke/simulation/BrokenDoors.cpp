@@ -95,8 +95,23 @@ namespace
 						&& !scene.door->open() && !scene.door->close() && !scene.door->toggle(), "Broken command succeeded");
 					require(scene.door->getOpenStyle() == style && scene.door->getActivationMode() == mode,
 						"Breakage changed authored activation/style");
-					require(bool(scene.path()) == (position == 1), "Frozen Door routing disagrees with passage");
-					if (position == 1)
+					// A Broken Door admits an Agent whose envelope fits the frozen
+					// aperture: standing (or automatic Crawling) height for vertical
+					// openings, width for horizontal openings.
+					bool admitted;
+					if (style == core::Door::OpenStyle::OpenUp)
+					{
+						auto const aperture = position * scene.door->getSize().y;
+						admitted = scene.agent->getTraversalDoorClearanceExtent()
+								<= aperture + core::Door::ClearanceTolerance
+							|| (scene.agent->admitsAutomaticDoorCrawling(false)
+								&& scene.agent->getTraversalCrawlingDoorClearanceExtent()
+									<= aperture + core::Door::ClearanceTolerance);
+					}
+					else admitted = scene.agent->getWidth()
+						<= position * scene.door->getSize().x + core::Door::ClearanceTolerance;
+					require(bool(scene.path()) == admitted, "Frozen Door routing disagrees with passage");
+					if (admitted)
 					{
 						scene.agent->setPath(scene.path(), true);
 						scene.world.advanceTicks(600);

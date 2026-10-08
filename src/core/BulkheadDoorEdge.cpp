@@ -59,6 +59,9 @@ namespace core
 		if (mDoor->isSecurityScannerOwned()) return false;
 		if (agent && !mDoor->admitsAgentTraversal(*agent,
 			getOtherVertex(targetVertex)->getPosition().y)) return false;
+		if (mDoor->isIndependentlyBroken())
+			return agent ? mDoor->admitsBrokenPassage(*agent,
+				getOtherVertex(targetVertex)->getPosition().y) : mDoor->admitsNewCrossings();
 		return mDoor->isOpen();
 	}
 
@@ -69,6 +72,9 @@ namespace core
 			return EdgeTraversalRequestResult::Failed;
 		if (agent && !mDoor->admitsAgentTraversal(*agent, getOtherVertex(target)->getPosition().y))
 			return EdgeTraversalRequestResult::Failed;
+		if (mDoor->isIndependentlyBroken())
+			return (agent && mDoor->admitsBrokenPassage(*agent, getOtherVertex(target)->getPosition().y))
+				? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 		return mDoor->open() ? EdgeTraversalRequestResult::OK : EdgeTraversalRequestResult::Failed;
 	}
 
