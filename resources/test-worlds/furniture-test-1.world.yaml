@@ -1,4 +1,4 @@
-version: 57
+version: 58
 nextDumbwaiterId: 1
 nextFurnitureId: 4
 furnitureCatalogue:
@@ -158,6 +158,30 @@ construction:
     id: 6
     name: Marker 3
     properties: 0
+  - type: corridor
+    layer: 0
+    y: 3
+    x: 2
+    cellsWide: 3
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 3
+    x: 5
+    cellsWide: 3
+    levelsHigh: 1
+  - type: bulkheadDoor
+    layer: 0
+    y: 3
+    x: 5
+    side: left
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 1
+    automaticSensorDistance: 0.5
+    hasSpeedOverride: false
 agentGroups:
   []
 accessPermissions:

@@ -1,0 +1,137 @@
+version: 58
+nextDumbwaiterId: 1
+nextFurnitureId: 1
+name: Untitled
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 3
+layers: 2
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 2
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 8
+    cellsWide: 4
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 12
+    cellsWide: 4
+    levelsHigh: 1
+  - type: room
+    name: Room 1
+    layer: 1
+    y: 1
+    x: 4
+    cellsWide: 6
+    levelsHigh: 1
+    topLevelHeight: 0.9
+  - type: door
+    layer: 0
+    y: 1
+    x: 4
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+    initiallyBroken: true
+    brokenOpenPercentage: 0.869
+  - type: door
+    layer: 0
+    y: 1
+    x: 9
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: bulkheadDoor
+    layer: 0
+    y: 1
+    x: 12
+    side: left
+    foreControl: true
+    backControl: true
+    activationMode: remoteControlled
+    holdOpenSeconds: 5
+    crossingLanes: 1
+    automaticSensorDistance: 0.5
+    hasSpeedOverride: false
+    initiallyBroken: true
+    brokenOpenPercentage: 0.36400002
+  - type: marker
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 3.65625
+    id: 1
+    name: Marker 1
+    properties: 0
+  - type: marker
+    sectorIndex: 1
+    levelIndex: 0
+    xOffset: 3.046875
+    id: 2
+    name: Marker 2
+    properties: 0
+  - type: marker
+    sectorIndex: 3
+    levelIndex: 0
+    xOffset: 3.109375
+    id: 3
+    name: Marker 3
+    properties: 0
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 4
+nextAgentGroupId: 1
+agents:
+  - id: 1
+    agent:
+      name: Agent 1
+      flags: 0
+    sector: 0
+    localX: 0.453125
+    localY: 0
+    path:
+      destinationMarker: 1
+      destinationSector: 2
+      destinationLocalX: 3.65625
+      destinationLocalY: 0
+      active: true
+      action: idle
