@@ -1097,6 +1097,19 @@ namespace core
 			std::vector<PendingOutcome> lifecycleOutcomes;
 		};
 
+		// CONTEXT.md "Installed behaviour": the runtime-owned association between
+		// one Agent and the behaviour its behaviour runtime invokes at each
+		// boundary. The default no-op is a first-class, host-recognized state: it
+		// represents "no assignment", is never resumed, and carries no Lua state.
+		// Assigning an Agent behaviour installs that behaviour's independent
+		// per-Agent instance; the behaviour finishing or being unassigned
+		// re-installs the default.
+		struct InstalledBehaviour
+		{
+			bool defaultNoop{ true };
+			Instance instance;
+		};
+
 		ScratchBudget budget;
 		uint32_t timerLimit{ AgentBehaviourRuntimeAdapter::DefaultTimersPerInstance };
 		uint32_t callbackLimit{ AgentBehaviourRuntimeAdapter::DefaultCallbacksPerBoundary };
@@ -1119,7 +1132,13 @@ namespace core
 		bool stateFailed{ false };
 		std::unique_ptr<lua_State, StateCloser> state;
 		ModuleLoader hostLoader;
-		std::map<AgentId, Instance> instances;
+		// The explicit per-Agent Installed behaviour association table. Every
+		// Agent's effective behaviour resolves through it: an Agent with no entry
+		// holds the shared default no-op, and entries are constructed and
+		// discarded only through installAssociation and discardAssociation.
+		std::map<AgentId, InstalledBehaviour> installedBehaviours;
+		// The shared default no-op resolved for Agents with no association entry.
+		InstalledBehaviour const defaultInstalled;
 		// Module-load and factory failures have behaviour scope. Callback failures
 		// remain confined to one Agent instance.
 		std::set<AgentBehaviourId> disabledBehaviours;
@@ -1165,14 +1184,14 @@ namespace core
 		void poison()
 		{
 			stateFailed = true;
-			for (auto& [agent, instance] : instances)
+			for (auto& [agent, installed] : installedBehaviours)
 			{
 				(void)agent;
-				instance.scope.active = false;
-				instance.scope.commands.clear();
-				instance.moduleLoader.reset();
+				installed.instance.scope.active = false;
+				installed.instance.scope.commands.clear();
+				installed.instance.moduleLoader.reset();
 			}
-			instances.clear();
+			installedBehaviours.clear();
 			disabledBehaviours.clear();
 			pendingLifecycleOutcomes.clear();
 			callbackCount = 0;
@@ -1188,6 +1207,59 @@ namespace core
 			instance.configurationReference = LUA_NOREF;
 			instance.environmentReference = LUA_NOREF;
 			instance.moduleLoader.reset();
+		}
+
+		// Resolves one Agent's effective behaviour through the association. An
+		// Agent with no entry holds the default no-op: "no assignment".
+		InstalledBehaviour const& resolveInstalled(AgentId agent) const
+		{
+			auto found = installedBehaviours.find(agent);
+			return found != installedBehaviours.end()
+				? found->second : defaultInstalled;
+		}
+
+		// The single association-construction path. Assignment (installed at the
+		// next boundary), reload, and Reset all build the installed instance
+		// through here. Returns false when the Lua instance could not be
+		// constructed; a behaviour whose module already failed installs disabled
+		// without retrying construction.
+		bool installAssociation(Definition const& definition,
+			InstalledBehaviour& installed)
+		{
+			installed.defaultNoop = false;
+			auto& instance = installed.instance;
+			instance.assignment = *definition.assignment;
+			instance.agentName = definition.agentName;
+			instance.behaviourName = definition.behaviourName;
+			instance.suspended = !definition.active;
+			instance.randomState = definition.randomSeed;
+			instance.registryUuid = definition.registryUuid;
+			instance.packageRevision = definition.packageRevision;
+			instance.packageName = definition.packageName;
+			instance.moduleName = definition.moduleName;
+			instance.scope.agent = definition.agent;
+			if (disabledBehaviours.contains(definition.assignment->behaviour))
+			{
+				instance.disabled = true;
+				return false;
+			}
+			return construct(definition, instance);
+		}
+
+		// The single association-discard path. Teardown for every reason —
+		// unassignment, Reset, reload, World close, instance failure, and
+		// behaviour deletion — runs through here. Unless the association is
+		// retained as disabled, the default no-op is re-installed.
+		// A null World releases without callbacks, preserving the existing
+		// cleanup policy for synchronization, failed construction, and clear().
+		void discardAssociation(World* world, InstalledBehaviour& installed,
+			AgentBehaviourTeardownReason reason, bool keepDisabled)
+		{
+			if (world) teardownInstance(*world, installed.instance, reason, keepDisabled);
+			else release(installed.instance);
+			if (keepDisabled) return;
+			installed.instance = Instance{};
+			installed.defaultNoop = true;
 		}
 
 		void record(Definition const& definition, AgentBehaviourRuntimeStage stage,
@@ -1218,7 +1290,7 @@ namespace core
 				// poison() already abandoned every instance; the dead Lua state
 				// must not be touched again. Registry references are reclaimed by
 				// lua_close on destruction.
-				instances.clear();
+				installedBehaviours.clear();
 				disabledBehaviours.clear();
 				pendingLifecycleOutcomes.clear();
 				diagnostics.clear();
@@ -1232,12 +1304,13 @@ namespace core
 				logSuppressionEmitted = false;
 				return;
 			}
-			for (auto& [agent, instance] : instances)
+			for (auto& [agent, installed] : installedBehaviours)
 			{
 				(void)agent;
-				release(instance);
+				discardAssociation(nullptr, installed,
+					AgentBehaviourTeardownReason::WorldClose, false);
 			}
-			instances.clear();
+			installedBehaviours.clear();
 			disabledBehaviours.clear();
 			pendingLifecycleOutcomes.clear();
 			diagnostics.clear();
@@ -1388,68 +1461,60 @@ namespace core
 			for (auto const& definition : definitions)
 				desired.emplace(definition.agent, &definition);
 
-			for (auto iterator = instances.begin(); iterator != instances.end();)
+			for (auto iterator = installedBehaviours.begin();
+				iterator != installedBehaviours.end();)
 			{
 				auto found = desired.find(iterator->first);
 				if (found != desired.end()
-					&& iterator->second.assignment == *found->second->assignment
-					&& iterator->second.registryUuid == found->second->registryUuid
-					&& iterator->second.packageRevision == found->second->packageRevision)
+					&& iterator->second.instance.assignment == *found->second->assignment
+					&& iterator->second.instance.registryUuid == found->second->registryUuid
+					&& iterator->second.instance.packageRevision == found->second->packageRevision)
 				{
 					++iterator;
 					continue;
 				}
-				release(iterator->second);
-				iterator = instances.erase(iterator);
+				discardAssociation(nullptr, iterator->second,
+					AgentBehaviourTeardownReason::Unassignment, false);
+				iterator = installedBehaviours.erase(iterator);
 			}
 
 			auto& failedBehaviours = disabledBehaviours;
 			for (auto const& definition : definitions)
 			{
-				if (instances.contains(definition.agent)) continue;
-				// An unchanged instance needs no source at all; only a new or
+				if (installedBehaviours.contains(definition.agent)) continue;
+				// An unchanged association needs no source at all; only a new or
 				// changed one materializes the shared registry sources.
 				sources.materialize(*registry);
-				Instance instance;
-				instance.assignment = *definition.assignment;
-				instance.agentName = definition.agentName;
-				instance.behaviourName = definition.behaviourName;
-				instance.suspended = !definition.active;
-				instance.randomState = definition.randomSeed;
-				instance.registryUuid = definition.registryUuid;
-				instance.packageRevision = definition.packageRevision;
-				instance.packageName = definition.packageName;
-				instance.moduleName = definition.moduleName;
-				instance.scope.agent = definition.agent;
-				if (failedBehaviours.contains(definition.assignment->behaviour))
-					instance.disabled = true;
-				else if (!construct(definition, instance))
+				InstalledBehaviour installed;
+				if (!installAssociation(definition, installed))
 				{
-					instance.disabled = true;
-					failedBehaviours.insert(definition.assignment->behaviour);
-					for (auto& [otherAgent, other] : instances)
+					auto& instance = installed.instance;
+					if (!instance.disabled)
 					{
-						(void)otherAgent;
-						if (other.assignment.behaviour != definition.assignment->behaviour
-							|| other.disabled) continue;
-						teardownInstance(world, other,
-							AgentBehaviourTeardownReason::InstanceFailure, true);
-						(void)world.cancelBehaviourAgentMovement(otherAgent);
+						instance.disabled = true;
+						failedBehaviours.insert(definition.assignment->behaviour);
+						for (auto& [otherAgent, other] : installedBehaviours)
+						{
+							(void)otherAgent;
+							if (other.instance.assignment.behaviour != definition.assignment->behaviour
+								|| other.instance.disabled) continue;
+							discardAssociation(&world, other,
+								AgentBehaviourTeardownReason::InstanceFailure, true);
+							(void)world.cancelBehaviourAgentMovement(otherAgent);
+						}
 					}
-				}
-				if (instance.disabled)
-				{
-					release(instance);
+					discardAssociation(nullptr, installed,
+						AgentBehaviourTeardownReason::InstanceFailure, true);
 					(void)world.cancelBehaviourAgentMovement(definition.agent);
 					(void)lua_gc(state.get(), LUA_GCCOLLECT);
 				}
 				if (auto pending = pendingLifecycleOutcomes.find(definition.agent);
 					pending != pendingLifecycleOutcomes.end())
 				{
-					instance.lifecycleOutcomes = std::move(pending->second);
+					installed.instance.lifecycleOutcomes = std::move(pending->second);
 					pendingLifecycleOutcomes.erase(pending);
 				}
-				instances.emplace(definition.agent, std::move(instance));
+				installedBehaviours.emplace(definition.agent, std::move(installed));
 			}
 		}
 
@@ -1466,7 +1531,7 @@ namespace core
 			case Agent::State::TraversingEdge:
 			case Agent::State::AwaitingTraversalCommit: return "traversing";
 			case Agent::State::RoutePlanning:
-				return instances.at(agentId).apiVersion == 1 ? "idle" : "route_planning";
+				return resolveInstalled(agentId).instance.apiVersion == 1 ? "idle" : "route_planning";
 			case Agent::State::Idle:
 			case Agent::State::MovingToVertex: return "moving";
 			}
@@ -1986,13 +2051,15 @@ namespace core
 		void applyActivation(AgentId agent, bool active, uint64_t tick,
 			PendingOutcome outcome)
 		{
-			auto found = instances.find(agent);
-			if (found == instances.end())
+			auto found = installedBehaviours.find(agent);
+			if (found == installedBehaviours.end())
 			{
+				// The Agent holds the default no-op: the transition is retained
+				// for the instance a later assignment installs.
 				pendingLifecycleOutcomes[agent].push_back(std::move(outcome));
 				return;
 			}
-			auto& instance = found->second;
+			auto& instance = found->second.instance;
 			if (active)
 			{
 				if (instance.suspended)
@@ -2064,8 +2131,9 @@ namespace core
 			std::vector<PendingMovementCommand> commands;
 			std::vector<PendingAuthorizationCommand> authorizationCommands;
 			std::vector<AgentId> disabledAgents;
-			for (auto& [agentId, instance] : instances)
+			for (auto& [agentId, installed] : installedBehaviours)
 			{
+				auto& instance = installed.instance;
 				if (instance.disabled) continue;
 				auto agent = world.mAgents.find(agentId);
 				if (!agent) continue;
@@ -2147,7 +2215,7 @@ namespace core
 				}
 				if (instance.disabled)
 				{
-					teardownInstance(world, instance,
+					discardAssociation(&world, installed,
 						AgentBehaviourTeardownReason::InstanceFailure, true);
 					disabledAgents.push_back(agentId);
 				}
@@ -2268,25 +2336,16 @@ namespace core
 				// Reload always constructs every instance, so its shared sources are
 				// materialized once rather than copied into each definition.
 				sources.materialize(registry);
-				Impl::Instance instance;
-				instance.assignment = *definition.assignment;
-				instance.agentName = definition.agentName;
-				instance.behaviourName = definition.behaviourName;
-				instance.suspended = !definition.active;
-				instance.randomState = definition.randomSeed;
-				instance.registryUuid = definition.registryUuid;
-				instance.packageRevision = definition.packageRevision;
-				instance.packageName = definition.packageName;
-				instance.moduleName = definition.moduleName;
-				instance.scope.agent = definition.agent;
-				if (!prepared->mImpl->construct(definition, instance))
+				Impl::InstalledBehaviour installed;
+				if (!prepared->mImpl->installAssociation(definition, installed))
 				{
-					prepared->mImpl->release(instance);
+					prepared->mImpl->discardAssociation(nullptr, installed,
+						AgentBehaviourTeardownReason::InstanceFailure, false);
 					(void)lua_gc(prepared->mImpl->state.get(), LUA_GCCOLLECT);
 					continue;
 				}
-				prepared->mImpl->instances.emplace(definition.agent,
-					std::move(instance));
+				prepared->mImpl->installedBehaviours.emplace(definition.agent,
+					std::move(installed));
 			}
 
 			diagnostics = prepared->mImpl->diagnostics;
@@ -2379,13 +2438,13 @@ namespace core
 				AgentBehaviourRuntimeFailure::ConversionError,
 				AgentBehaviourRuntimeStage::Callback, {}, {}, world.mSimulationTick,
 				{}, {}, {}, {}, {}, error.what(), error.what() });
-			for (auto& [agent, instance] : mImpl->instances)
+			for (auto& [agent, installed] : mImpl->installedBehaviours)
 			{
 				(void)agent;
-				if (!instance.scope.active) continue;
-				instance.scope.active = false;
-				instance.scope.commands.clear();
-				instance.disabled = true;
+				if (!installed.instance.scope.active) continue;
+				installed.instance.scope.active = false;
+				installed.instance.scope.commands.clear();
+				installed.instance.disabled = true;
 			}
 		}
 		catch (...)
@@ -2395,13 +2454,13 @@ namespace core
 				AgentBehaviourRuntimeStage::Callback, {}, {}, world.mSimulationTick,
 				{}, {}, {}, {}, {}, "Unknown Lua adapter conversion failure",
 				"Unknown Lua adapter conversion failure" });
-			for (auto& [agent, instance] : mImpl->instances)
+			for (auto& [agent, installed] : mImpl->installedBehaviours)
 			{
 				(void)agent;
-				if (!instance.scope.active) continue;
-				instance.scope.active = false;
-				instance.scope.commands.clear();
-				instance.disabled = true;
+				if (!installed.instance.scope.active) continue;
+				installed.instance.scope.active = false;
+				installed.instance.scope.commands.clear();
+				installed.instance.disabled = true;
 			}
 		}
 		auto const succeeded = mImpl->diagnostics.size() == diagnosticsBefore;
@@ -2451,12 +2510,14 @@ namespace core
 		}
 		else return;
 
-		auto found = mImpl->instances.find(agent);
-		if (found == mImpl->instances.end() || found->second.disabled) return;
-		if (found->second.apiVersion == 1
+		auto found = mImpl->installedBehaviours.find(agent);
+		// An Agent holding the default no-op has nothing to notify.
+		if (found == mImpl->installedBehaviours.end()
+			|| found->second.instance.disabled) return;
+		if (found->second.instance.apiVersion == 1
 			&& outcome.type == Impl::OutcomeType::MovementCancelled
 			&& outcome.cancellationReason == MovementCancellationReason::Superseded) return;
-		found->second.outcomes.push_back(std::move(outcome));
+		found->second.instance.outcomes.push_back(std::move(outcome));
 		++mImpl->observedOutcomeCount;
 		mImpl->lastObservedSequence = event.sequence;
 	}
@@ -2482,42 +2543,42 @@ namespace core
 	{
 		if (mImpl->stateFailed) return;
 		mImpl->pendingLifecycleOutcomes.erase(agent);
-		auto found = mImpl->instances.find(agent);
-		if (found == mImpl->instances.end()) return;
+		auto found = mImpl->installedBehaviours.find(agent);
+		if (found == mImpl->installedBehaviours.end()) return;
 		try
 		{
-			mImpl->teardownInstance(world, found->second, reason, false);
+			mImpl->discardAssociation(&world, found->second, reason, false);
 		}
 		catch (...)
 		{
 			// Adapter-side conversion/allocation failures are no more entitled to
 			// veto teardown than a protected Lua error.
-			found->second.scope.active = false;
-			found->second.scope.commands.clear();
-			mImpl->release(found->second);
+			found->second.instance.scope.active = false;
+			found->second.instance.scope.commands.clear();
+			mImpl->discardAssociation(nullptr, found->second, reason, false);
 		}
-		mImpl->instances.erase(found);
+		mImpl->installedBehaviours.erase(found);
 	}
 
 	void AgentBehaviourRuntimeAdapter::teardownAll(World& world,
 		AgentBehaviourTeardownReason reason)
 	{
 		if (mImpl->stateFailed) return;
-		for (auto& [agent, instance] : mImpl->instances)
+		for (auto& [agent, installed] : mImpl->installedBehaviours)
 		{
 			(void)agent;
 			try
 			{
-				mImpl->teardownInstance(world, instance, reason, false);
+				mImpl->discardAssociation(&world, installed, reason, false);
 			}
 			catch (...)
 			{
-				instance.scope.active = false;
-				instance.scope.commands.clear();
-				mImpl->release(instance);
+				installed.instance.scope.active = false;
+				installed.instance.scope.commands.clear();
+				mImpl->discardAssociation(nullptr, installed, reason, false);
 			}
 		}
-		mImpl->instances.clear();
+		mImpl->installedBehaviours.clear();
 		mImpl->disabledBehaviours.clear();
 		mImpl->pendingLifecycleOutcomes.clear();
 		mImpl->observedOutcomeCount = 0;
@@ -2526,8 +2587,8 @@ namespace core
 
 	bool AgentBehaviourRuntimeAdapter::isInstanceDisabled(AgentId agent) const
 	{
-		auto found = mImpl->instances.find(agent);
-		return found != mImpl->instances.end() && found->second.disabled;
+		auto const& installed = mImpl->resolveInstalled(agent);
+		return !installed.defaultNoop && installed.instance.disabled;
 	}
 
 	std::vector<AgentBehaviourRuntimeDiagnostic>
