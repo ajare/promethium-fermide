@@ -3,7 +3,8 @@
 The frozen API-v2 declarations from #521 now drive Room movement and passenger
 Door crossing. `Agent::poseFits` uses the declared envelope, effective Standing
 Height, bodily width, real support and `PoseFitTolerance` (0.00001 World units).
-Lying's vertical extent is bodily width; Crawling uses its declared height ratio.
+All non-Standing poses, including Lying, use declared height ratios. Optional
+width ratios adjust the base bodily width; bounds and aperture fit use both.
 Decorative offsets never enter fit.
 
 `selectAutomaticPose` tries Standing, Crouching, then Crawling in both contexts,
@@ -78,6 +79,30 @@ Standing/Crouching/Crawling priority and strict locomotion-ratio validation pass
 one incremental Release build of the Agent and Editor smoke targets and eight
 focused CTests (the seven Agent selection/declaration checks above plus
 `agent-type-history-lifetime`). No full-suite rerun was performed.
+
+The subsequent image-tile extension requires every supported pose to declare
+`image_tile`. Definitions freeze geometry and artwork together; tiles are not
+persisted as runtime World state. `agent-pose-image-tiles` verifies distinct atlas
+UV regions for all five poses and untransformed glyph fallback. Human now has
+five dedicated atlas regions with pose transforms baked by
+`scripts/pack_human_pose_tiles.py`; rendering uses native tile dimensions without
+pose-specific rotation or squashing. Tests also check Human UV orientation,
+artwork dimensions, ordinary Height scaling and Bed offsets. Declaration checks cover missing, malformed, overlong and control/NUL
+containing names; history checks verify that survivors retain old artwork while
+restored deleted Agents use the current resource. Focused Release builds of
+Agent, Editor and Render smoke targets succeeded, and all ten selected CTests
+passed, including `agent-pose-bed-artwork`. Pixel verification confirmed that the
+original 320x800 atlas pixels are unchanged and all five new stance images match
+the deterministic baking transforms. No full-suite rerun was performed.
+
+Lying subsequently gained an explicit height ratio and optional width ratio,
+replacing exchanged Standing dimensions. Human uses `26/72` and `72/26` from
+its atlas tiles. Bounds, clearance, target-pose width fit and Height-edit preflight
+use these frozen dimensions; rendering remains independent of physical ratios.
+Declaration tests cover invalid width values and product overflow/underflow;
+Door diagnostics cover Lying height, support and effective Height modifiers.
+One incremental Release build and all twelve focused CTests passed for this
+extension, without a full-suite rerun.
 
 Furniture requirements/eligibility
 subsequently shipped in #523; ownership, edit protection and exact accepted-exit

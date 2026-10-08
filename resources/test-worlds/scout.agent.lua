@@ -16,8 +16,11 @@ return {
             stair_ascent_speed = 0.6,
             stair_descent_speed = 0.7,
             poses = {
-                standing = {}, sitting = { height_ratio = 0.5 }, lying = {},
-                crouching = { height_ratio = 0.5 }, crawling = { height_ratio = 0.25 },
+                standing = { image_tile = "agent" },
+                sitting = { image_tile = "agent", height_ratio = 0.5 },
+                lying = { image_tile = "agent", height_ratio = 0.5 / 0.75, width_ratio = 0.75 / 0.5 },
+                crouching = { image_tile = "agent", height_ratio = 0.5 },
+                crawling = { image_tile = "agent", height_ratio = 0.25 },
             },
             automatic_poses = {
                 room_movement = {

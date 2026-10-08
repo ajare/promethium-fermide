@@ -75,7 +75,7 @@ namespace
 void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 {
 	struct Case { char const* label; core::Pose pose; float support, opening; bool fits; float modifier = 1.f; };
-	// .45 Standing, .27 Sitting/Crouching, .135 Crawling, .40 rotated Lying.
+	// .45 Standing, .27 Sitting/Crouching, .135 Crawling, .1625 declared Lying.
 	// Support is physical; getPoseRenderYOffset() (.25 for claimed Lying) is
 	// decorative. Crawling clearance is its 30% height, not Lying's body width.
 	for (auto const& test : {
@@ -93,24 +93,24 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		Case{"crawling-raised-refusal", core::Pose::Crawling, .03f, .16f, false},
 		Case{"crawling-exact-fit", core::Pose::Crawling, .01f, .145f, true},
 		Case{"crawling-over-tolerance", core::Pose::Crawling, .01002f, .145f, false},
-		Case{"lying-rotated-fit", core::Pose::Lying, 0.f, .41f, true},
-		Case{"lying-raised-refusal", core::Pose::Lying, .03f, .41f, false},
-		Case{"lying-exact-fit", core::Pose::Lying, .01f, .41f, true},
-		Case{"lying-over-tolerance", core::Pose::Lying, .01002f, .41f, false},
-		Case{"lying-decorative-refusal", core::Pose::Lying, 0.f, .39f, false},
+		Case{"lying-declared-fit", core::Pose::Lying, 0.f, .17f, true},
+		Case{"lying-raised-refusal", core::Pose::Lying, .03f, .17f, false},
+		Case{"lying-exact-fit", core::Pose::Lying, .01f, .1725f, true},
+		Case{"lying-over-tolerance", core::Pose::Lying, .01002f, .1725f, false},
+		Case{"lying-decorative-refusal", core::Pose::Lying, 0.f, .16f, false},
 		Case{"sitting-modifier-exact-fit", core::Pose::Sitting, .01f, .199f, true, .7f},
 		Case{"sitting-modifier-refusal", core::Pose::Sitting, .01002f, .199f, false, .7f},
 		Case{"crouching-modifier-exact-fit", core::Pose::Crouching, .01f, .199f, true, .7f},
 		Case{"crawling-modifier-height-scaled", core::Pose::Crawling, 0.f, .10f, true, .7f},
-		Case{"lying-modifier-width-unchanged", core::Pose::Lying, 0.f, .39f, false, .7f},
+		Case{"lying-modifier-height-scaled", core::Pose::Lying, 0.f, .12f, true, .7f},
 		Case{"tall-sitting-fit", core::Pose::Sitting, .62f, .9f, true},
 		Case{"tall-sitting-refusal", core::Pose::Sitting, .64f, .9f, false},
 		Case{"tall-crouching-fit", core::Pose::Crouching, .62f, .9f, true},
 		Case{"tall-crouching-refusal", core::Pose::Crouching, .64f, .9f, false},
 		Case{"tall-crawling-fit", core::Pose::Crawling, .75f, .9f, true},
 		Case{"tall-crawling-refusal", core::Pose::Crawling, .78f, .9f, false},
-		Case{"tall-lying-fit", core::Pose::Lying, .49f, .9f, true},
-		Case{"tall-lying-refusal", core::Pose::Lying, .51f, .9f, false}})
+		Case{"tall-lying-fit", core::Pose::Lying, .73f, .9f, true},
+		Case{"tall-lying-refusal", core::Pose::Lying, .75f, .9f, false}})
 	for (bool reverse : {false, true})
 	for (bool decorated : {false, true})
 	{
@@ -138,16 +138,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		world.pauseSimulation();
 		require(world.setAgentIndividualHeightModifier(id, test.modifier), "Diagnostic Height refused");
 		auto const& physical = agent->getPhysicalBaseline();
-		auto const poseRatio = [&]
-		{
-			switch (test.pose)
-			{
-			case core::Pose::Sitting: return physical.poses.at(core::Pose::Sitting);
-			case core::Pose::Crouching: return physical.poses.at(core::Pose::Crouching);
-			case core::Pose::Crawling: return physical.poses.at(core::Pose::Crawling);
-			default: return 1.0f;
-			}
-		}();
+		auto const poseRatio = physical.poses.at(test.pose).heightRatio;
 		require(agent->getPoseHeightScale() == 1.0f,
 			"Standing Human Pose scale changed before clearance journey");
 		// A one-shot Action supplies a pose/claim without a Furniture-use
@@ -178,8 +169,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		if (!test.fits) require(direct.exclusionReason == core::RouteExclusionReason::Clearance, "Wrong retained exclusion");
 		auto envelope = agent->getDoorClearanceExtent();
 		auto decorativeOffset = agent->getPoseRenderYOffset();
-		auto const expectedEnvelope = (test.pose == core::Pose::Lying
-			? agent->getWidth() : agent->getStandingHeight() * poseRatio)
+		auto const expectedEnvelope = agent->getStandingHeight() * poseRatio
 			+ (decorated ? test.support : 0.f);
 		require(std::abs(envelope - expectedEnvelope) < 0.000001f
 			&& std::abs(agent->getPoseHeightScale() - poseRatio) < 0.000001f,

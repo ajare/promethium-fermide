@@ -296,7 +296,7 @@ A bodily stance an Agent type is physically capable of performing. Capability is
 _Avoid_: Mobility use, which describes access to traversal kinds rather than bodily stances
 
 **Pose envelope**:
-The physical bodily extent of an Agent in a particular Pose, used with Support elevation and available space to determine fit. It is distinct from decorative rendering offsets.
+The physical bodily extent of an Agent in a particular Pose, derived from its type's base dimensions and that Pose's height and width ratios, used with Support elevation and available space to determine fit. It is distinct from decorative rendering offsets.
 _Avoid_: Sprite bounds, decorative offset
 
 **Automatic pose selection**:

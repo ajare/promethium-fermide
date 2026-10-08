@@ -32,8 +32,8 @@ namespace
 			&& physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f
 			&& physical.stairAscentSpeed == 0.35f && physical.stairDescentSpeed == 0.45f
-			&& physical.poses.at(core::Pose::Sitting) == 0.6f && physical.poses.at(core::Pose::Crouching) == 0.6f
-			&& physical.poses.at(core::Pose::Crawling) == 0.3f && physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.5f,
+			&& physical.poses.at(core::Pose::Sitting).heightRatio == 0.6f && physical.poses.at(core::Pose::Crouching).heightRatio == 0.6f
+			&& physical.poses.at(core::Pose::Crawling).heightRatio == 0.3f && physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.5f,
 			"Human physical baselines changed");
 		world.pauseSimulation();
 		std::string diagnostic;

@@ -80,7 +80,7 @@ namespace
 			"            climb_speed = 0.2,\n"
 			"            stair_ascent_speed = 0.3,\n"
 			"            stair_descent_speed = 0.35,\n"
-			"            poses = { standing = {}, sitting = {height_ratio=0.5}, lying = {}, crouching = {height_ratio=0.6}, crawling = {height_ratio=0.4} },\n"
+			"            poses = { standing = {image_tile='agent'}, sitting = {image_tile='agent',height_ratio=0.5}, lying = {image_tile='agent',height_ratio=5/6,width_ratio=1.2}, crouching = {image_tile='agent',height_ratio=0.6}, crawling = {image_tile='agent',height_ratio=0.4} },\n"
 			"            automatic_poses = { room_movement = {{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=1},{pose='crawling',speed_ratio=1}}, door_crossing = {{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=0.5}} },\n"
 			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' },\n" + overrides
 			+ "        }\n";
@@ -387,8 +387,8 @@ namespace
 		require(physical.width == 0.4f && physical.standingHeight == 0.45f
 			&& physical.reach == 0.25f && physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f && physical.stairAscentSpeed == 0.35f
-			&& physical.stairDescentSpeed == 0.45f && physical.poses.at(core::Pose::Sitting) == 0.6f
-			&& physical.poses.at(core::Pose::Crouching) == 0.6f && physical.poses.at(core::Pose::Crawling) == 0.3f
+			&& physical.stairDescentSpeed == 0.45f && physical.poses.at(core::Pose::Sitting).heightRatio == 0.6f
+			&& physical.poses.at(core::Pose::Crouching).heightRatio == 0.6f && physical.poses.at(core::Pose::Crawling).heightRatio == 0.3f
 			&& physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.5f,
 			"Scripted Human baseline did not match the bundled definition");
 	}
@@ -438,11 +438,11 @@ namespace
 			&& world.getSimulationSnapshot().agents.size() == 1,
 			"Resource-backed query factory refused an arbitrary type or published an Agent");
 		require(world.attachAgentType("unit.agent.lua", typeSource("Unit", "Unit",
-			validBaseline("poses={standing={},sitting={height_ratio=1},crouching={height_ratio=.8},crawling={height_ratio=.4}},\n"
+			validBaseline("poses={standing={image_tile='agent'},sitting={image_tile='agent',height_ratio=1},crouching={image_tile='agent',height_ratio=.8},crawling={image_tile='agent',height_ratio=.4}},\n"
 				"automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=1}}},\n")), &diagnostic), diagnostic);
 		auto unit = world.lookupAgent(world.createAgent("Unit", "Unit", corridor, 0, 4.f)).entity;
 		require(unit->getPhysicalBaseline().automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 1.f
-			&& unit->getPhysicalBaseline().poses.at(core::Pose::Sitting) == 1.f
+			&& unit->getPhysicalBaseline().poses.at(core::Pose::Sitting).heightRatio == 1.f
 			&& unit->getTraversalCrawlingDoorClearanceExtent(true) == unit->getStandingHeight() * .4f,
 			"The inclusive Sitting height/speed ratio upper boundary was refused or changed");
 	}
@@ -553,10 +553,13 @@ namespace
 			auto const* loaded = restored.lookupAgent(id).entity;
 			require(loaded && loaded->getTypeId() == "StandingRobot"
 				&& loaded->getTypeResourceName() == "standing-robot.agent.lua"
+				&& loaded->getPoseImageTile() == "agent"
+				&& loaded->getPhysicalBaseline().poses == agent->getPhysicalBaseline().poses
 				&& !loaded->supportsPose(core::Pose::Crawling), "Robot capability/identity roundtrip changed");
 		}
 		auto const yaml = serializeWorld(world, false);
-		require(yaml.find("automatic_poses") == std::string::npos && yaml.find("poses:") == std::string::npos,
+		require(yaml.find("automatic_poses") == std::string::npos && yaml.find("poses:") == std::string::npos
+			&& yaml.find("image_tile") == std::string::npos,
 			"Document persisted frozen pose definitions");
 
 		// Supporting a pose does not require automatic selection in either list.
@@ -570,6 +573,15 @@ namespace
 			&& explicitAgent->getPoseEnvelope(core::Pose::Lying)->y == 0.5f,
 			"Supported-but-not-automatic poses lost their canonical envelopes");
 		auto const& human = core::bundledHumanBaseline();
+		for (auto const& [pose, definition] : human.poses)
+		{
+			require(definition.imageTile == std::string("human-") + core::poseName(pose),
+				"Bundled Human pose lacks dedicated artwork");
+		}
+		require(human.poses.at(core::Pose::Lying).heightRatio == static_cast<float>(26.0 / 72.0)
+			&& human.poses.at(core::Pose::Lying).widthRatio == static_cast<float>(72.0 / 26.0)
+			&& human.poses.at(core::Pose::Standing).widthRatio == 1.f,
+			"Human Lying ratios disagree with its baked artwork");
 		require(human.roomMovement == std::vector<core::AutomaticPoseChoice>{
 			{core::Pose::Standing, 1.f}, {core::Pose::Crouching, 1.f}, {core::Pose::Crawling, 1.f}}
 			&& human.doorCrossing == std::vector<core::AutomaticPoseChoice>{
@@ -580,6 +592,10 @@ namespace
 		auto query = core::Agent::create(core::AgentTypeDefinition{"Tallest", "Tallest", "tallest.agent.lua",
 			typeSource("Tallest", "Tallest", validBaseline(
 				"automatic_poses={room_movement={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=.75},{pose='crouching',speed_ratio=.25}},door_crossing={{pose='standing',speed_ratio=.9},{pose='crawling',speed_ratio=.5},{pose='crouching',speed_ratio=.3}}},"))}, "Query");
+		require(query->poseFits(core::Pose::Lying, .51f, 0.f, .61f)
+			&& !query->poseFits(core::Pose::Lying, .49f, 0.f, .61f)
+			&& !query->poseFits(core::Pose::Lying, .51f, 0.f, .59f),
+			"Lying fit ignored declared height or width ratios");
 		for (auto context : {core::AutomaticPoseContext::RoomMovement, core::AutomaticPoseContext::DoorCrossing})
 		{
 			for (auto const& [clearance, pose] : std::vector<std::pair<float, core::Pose>>{
@@ -604,27 +620,40 @@ namespace
 		std::vector<std::pair<std::string, std::string>> cases{
 			{"poses=nil,", "poses"}, {"poses=42,", "poses"},
 			{"poses={},", "poses.standing"}, {"poses={standing=false},", "poses.standing"},
-			{"poses={standing={},sitting=42},", "poses.sitting"},
-			{"poses={standing={},flying={}},", "poses.flying"},
-			{"poses={standing={},[1]={}},", "poses"},
-			{"poses={standing={height_ratio=1}},", "poses.standing.height_ratio"},
-			{"poses={standing={},lying={height_ratio=1}},", "poses.lying.height_ratio"},
-			{"poses={standing={},sitting={ratio=0.5}},", "poses.sitting.ratio"},
+			{"poses={standing={image_tile='agent'},sitting=42},", "poses.sitting"},
+			{"poses={standing={image_tile='agent'},flying={}},", "poses.flying"},
+			{"poses={standing={image_tile='agent'},[1]={}},", "poses"},
+			{"poses={standing={image_tile='agent',height_ratio=1}},", "poses.standing.height_ratio"},
+			{"poses={standing={image_tile='agent'},lying={image_tile='agent',height_ratio=1.01}},", "poses.lying.height_ratio"},
+			{"poses={standing={image_tile='agent'},lying={image_tile='agent'}},", "poses.lying.height_ratio"},
+			{"poses={standing={image_tile='agent'},sitting={image_tile='agent',ratio=0.5}},", "poses.sitting.ratio"},
+			{"poses={standing={}},", "poses.standing.image_tile"},
+			{"poses={standing={image_tile='agent'},lying={height_ratio=.5}},", "poses.lying.image_tile"},
+			{"poses={standing={image_tile='agent'},crouching={height_ratio=.6}},", "poses.crouching.image_tile"},
 			{"automatic_poses=nil,", "automatic_poses"},
 			{"automatic_poses={room_movement={},door_crossing={}},", "room_movement"},
 			{"automatic_poses={unknown={}},", "automatic_poses.unknown"},
 			{"sitting_height_ratio=0.5,", "sitting_height_ratio"},
-			{"poses={standing={},crouching={height_ratio=1}},", "poses.crouching.height_ratio"},
-			{"poses={standing={},crawling={height_ratio=1}},", "poses.crawling.height_ratio"},
-			{"poses={standing={},crouching={height_ratio=.6},crawling={height_ratio=.6}},", "poses.crawling.height_ratio"},
-			{"poses={standing={},crouching={height_ratio=.6},crawling={height_ratio=.7}},", "poses.crawling.height_ratio"},
-			{"poses={standing={},crouching={height_ratio=.6},crawling={height_ratio=.600000001}},", "poses.crawling.height_ratio"},
-			{"poses={standing={},crouching={height_ratio=.999999999}},", "poses.crouching.height_ratio"},
-			{"poses={standing={},crawling={height_ratio=.999999999}},", "poses.crawling.height_ratio"},
+			{"poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=1}},", "poses.crouching.height_ratio"},
+			{"poses={standing={image_tile='agent'},crawling={image_tile='agent',height_ratio=1}},", "poses.crawling.height_ratio"},
+			{"poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=.6},crawling={image_tile='agent',height_ratio=.6}},", "poses.crawling.height_ratio"},
+			{"poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=.6},crawling={image_tile='agent',height_ratio=.7}},", "poses.crawling.height_ratio"},
+			{"poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=.6},crawling={image_tile='agent',height_ratio=.600000001}},", "poses.crawling.height_ratio"},
+			{"poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=.999999999}},", "poses.crouching.height_ratio"},
+			{"poses={standing={image_tile='agent'},crawling={image_tile='agent',height_ratio=.999999999}},", "poses.crawling.height_ratio"},
 		};
-		for (auto pose : { "sitting", "crouching", "crawling" })
+		for (auto pose : { "sitting", "lying", "crouching", "crawling" })
 			for (auto value : { "nil", "'0.5'", "0/0", "math.huge", "-math.huge", "0", "-1", "1.01", "1e-300", "1e300", "false", "{}" })
-				cases.emplace_back(std::string("poses={standing={},") + pose + "={height_ratio=" + value + "}},", std::string("poses.") + pose + ".height_ratio");
+				cases.emplace_back(std::string("poses={standing={image_tile='agent'},") + pose + "={image_tile='agent',height_ratio=" + value + "}},", std::string("poses.") + pose + ".height_ratio");
+		for (auto value : {"false", "'1.2'", "{}", "0/0", "math.huge", "-math.huge", "0", "-1", "1e-300", "1e300"})
+			cases.emplace_back(std::string("poses={standing={image_tile='agent'},lying={image_tile='agent',height_ratio=.5,width_ratio=")
+				+ value + "}},", "poses.lying.width_ratio");
+		cases.emplace_back("width=1e30,poses={standing={image_tile='agent'},lying={image_tile='agent',height_ratio=.5,width_ratio=1e30}},",
+			"poses.lying.width_ratio");
+		cases.emplace_back("width=1e-30,poses={standing={image_tile='agent'},lying={image_tile='agent',height_ratio=.5,width_ratio=1e-30}},",
+			"poses.lying.width_ratio");
+		for (auto value : {"nil", "false", "42", "{}", "''", "string.rep('x',129)", "'bad\\0tile'", "'bad\\ntile'"})
+			cases.emplace_back(std::string("poses={standing={image_tile=") + value + "}},", "poses.standing.image_tile");
 		for (auto key : { "room_movement", "door_crossing" })
 		{
 			auto contract = [&](std::string const& list) {
@@ -641,7 +670,7 @@ namespace
 				cases.emplace_back(contract(list), key);
 			for (auto value : { "nil", "'0.5'", "0/0", "math.huge", "-math.huge", "0", "-1", "1.01", "1e-300", "1e300", "false", "{}" })
 				cases.emplace_back(contract(std::string("{{pose='standing',speed_ratio=") + value + "}}"), std::string(key) + "[1].speed_ratio");
-			cases.emplace_back("poses={standing={}}," + contract("{{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=1}}"), key);
+			cases.emplace_back("poses={standing={image_tile='agent'}}," + contract("{{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=1}}"), key);
 		}
 		for (auto const& [overrides, expected] : cases)
 		{
@@ -959,7 +988,7 @@ namespace
 					"width = " + std::to_string(width) + " * count,\n"
 					"private_state = { count = count },\n"
 					+ std::string(width > 0.5f
-						? "poses={standing={},crouching={height_ratio=0.8},crawling={height_ratio=0.4}},automatic_poses={room_movement={{pose='standing',speed_ratio=0.9}},door_crossing={{pose='standing',speed_ratio=0.7},{pose='crawling',speed_ratio=0.6}}},\n"
+						? "poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=0.8},crawling={image_tile='agent',height_ratio=0.4}},automatic_poses={room_movement={{pose='standing',speed_ratio=0.9}},door_crossing={{pose='standing',speed_ratio=0.7},{pose='crawling',speed_ratio=0.6}}},\n"
 						: "") +
 					"mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = '"
 					+ std::string(width > 0.5f ? "can_use" : "cannot_use") + "', buttons = 'only_if_no_other_option' },\n"));
@@ -1110,7 +1139,7 @@ namespace
 			std::string("invalid Lua"),
 			typeSource("Failure", "Failure", "error('Reset constructor refused')"),
 			typeSource("Failure", "Failure", validBaseline("width = 0,\n")),
-			typeSource("Failure", "Failure", validBaseline("poses={standing={},crawling={height_ratio='0.3'}},\n")),
+			typeSource("Failure", "Failure", validBaseline("poses={standing={image_tile='agent'},crawling={image_tile='agent',height_ratio='0.3'}},\n")),
 			typeSource("Failure", "Failure", validBaseline("automatic_poses={},\n")),
 			typeSource("Failure", "Failure", validBaseline("mobility_profile = nil,\n")),
 			typeSource("Failure", "Failure", validBaseline("mobility_profile = { door = 'bad' },\n")),
@@ -1292,8 +1321,8 @@ namespace
 		require(physical.width == 0.3f && physical.standingHeight == 0.35f
 			&& physical.reach == 0.4f && physical.walkSpeed == 0.9f
 			&& physical.climbSpeed == 0.5f && physical.stairAscentSpeed == 0.6f
-			&& physical.stairDescentSpeed == 0.7f && physical.poses.at(core::Pose::Sitting) == 0.5f
-			&& physical.poses.at(core::Pose::Crouching) == 0.5f && physical.poses.at(core::Pose::Crawling) == 0.25f
+			&& physical.stairDescentSpeed == 0.7f && physical.poses.at(core::Pose::Sitting).heightRatio == 0.5f
+			&& physical.poses.at(core::Pose::Crouching).heightRatio == 0.5f && physical.poses.at(core::Pose::Crawling).heightRatio == 0.25f
 			&& physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.75f,
 			"Scout's frozen baseline did not match the fixture");
 		require(physical.width != human.width && physical.standingHeight != human.standingHeight
@@ -1312,7 +1341,7 @@ namespace
 		require(near(bounds.x, physical.width) && near(bounds.y, physical.standingHeight),
 			"Scout bounds did not use its frozen baseline");
 		require(agent->getTraversalCrawlingDoorClearanceExtent(true)
-				== physical.standingHeight * physical.poses.at(core::Pose::Crawling),
+				== physical.standingHeight * physical.poses.at(core::Pose::Crawling).heightRatio,
 			"Scout Crawling clearance did not use its frozen baseline");
 	}
 

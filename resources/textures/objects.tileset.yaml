@@ -1,8 +1,8 @@
 # Pixel coordinates use top-left origin. Each cell is one world unit.
-# Content rectangles exclude alpha padding; renderer maps content to physical bounds.
+# Content rectangles exclude alpha padding and may span adjacent storage cells.
 version: 1
 image: objects.png
-size: [320, 800]
+size: [320, 960]
 tile_size: [64, 160]
 sprites:
   door:
@@ -44,6 +44,26 @@ sprites:
   agent:
     cell: [1, 1]
     content: [19, 88, 26, 72]
+    tintable: true
+  human-standing:
+    cell: [0, 5]
+    content: [0, 88, 26, 72]
+    tintable: true
+  human-sitting:
+    cell: [0, 5]
+    content: [32, 117, 26, 43]
+    tintable: true
+  human-lying:
+    cell: [1, 5]
+    content: [0, 134, 72, 26]
+    tintable: true
+  human-crouching:
+    cell: [2, 5]
+    content: [16, 117, 26, 43]
+    tintable: true
+  human-crawling:
+    cell: [3, 5]
+    content: [0, 152, 72, 8]
     tintable: true
   marker:
     cell: [2, 1]

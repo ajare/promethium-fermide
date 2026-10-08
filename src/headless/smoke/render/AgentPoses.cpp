@@ -46,8 +46,7 @@ namespace
 			clearObjectTileset();
 			if (sprite)
 			{
-				ObjectTileset tiles; tiles.width = 64; tiles.height = 160;
-				tiles.sprites.emplace("agent", ObjectSprite{{0, 0, 64, 160}, true});
+				auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
 				setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 			}
 			for (float zoom : {1.f, 2.f})
@@ -59,12 +58,19 @@ namespace
 				require(!floor.commands().empty() && floor.commands().size() == bed.commands().size(), "Bed offset changed body geometry");
 				for (size_t i = 0; i < floor.commands().size(); ++i)
 				{
-					auto const& a = std::get<WorldDrawList::Triangle>(floor.commands()[i]);
-					auto const& b = std::get<WorldDrawList::Triangle>(bed.commands()[i]);
-					for (int v = 0; v < 3; ++v)
-						require(std::abs(a.positions[v].x - b.positions[v].x - 0.25f * CORE_CELL_WIDTH_PIXELS * zoom) < 0.01f
-							&& std::abs(a.positions[v].y - b.positions[v].y - 0.25f * CORE_LEVEL_HEIGHT_PIXELS * zoom) < 0.01f,
-							"Bed body must render at Bed x + 0.75 and Floor y + 0.25 in sprite and glyph rendering");
+					auto checkOffset = [&](ImVec2 a, ImVec2 b) {
+						require(std::abs(a.x - b.x - 0.25f * CORE_CELL_WIDTH_PIXELS * zoom) < 0.01f
+							&& std::abs(a.y - b.y - 0.25f * CORE_LEVEL_HEIGHT_PIXELS * zoom) < 0.01f,
+							"Bed body must retain artwork offsets in sprite and glyph rendering");
+					};
+					if (auto text = std::get_if<WorldDrawList::Text>(&floor.commands()[i]))
+						checkOffset(text->position, std::get<WorldDrawList::Text>(bed.commands()[i]).position);
+					else
+					{
+						auto const& a = std::get<WorldDrawList::Triangle>(floor.commands()[i]);
+						auto const& b = std::get<WorldDrawList::Triangle>(bed.commands()[i]);
+						for (int v = 0; v < 3; ++v) checkOffset(a.positions[v], b.positions[v]);
+					}
 				}
 			}
 		}
@@ -75,7 +81,7 @@ namespace
 		clearObjectTileset(); ImGui::EndFrame();
 	}
 
-	void agentPoses(smoke::Context const&)
+	void agentPoses(smoke::Context const& context)
 	{
 		using smoke::require;
 		ImGui::GetIO().DisplaySize = {800, 600};
@@ -89,7 +95,18 @@ namespace
 		gUISettings.renderAgentDebug = false;
 		core::World world("Poses", 8, 2);
 		world.addRoom("Room", 0, 0, 0, 8, 1); world.finishBuild();
-		auto id = world.createAgent("Agent", 0, 0, 3.5f);
+		auto definition = core::bundledHumanAgentType();
+		auto replace = [&](std::string const& from, std::string const& to) {
+			auto at = definition.source.find(from);
+			require(at != std::string::npos, "Pose tile fixture source field missing");
+			definition.source.replace(at, from.size(), to);
+		};
+		replace("type_id = \"Human\"", "type_id = \"PoseTiles\"");
+		for (auto name : {"standing", "sitting", "lying", "crouching", "crawling"})
+			replace(std::string("image_tile = \"human-") + name + "\"", std::string("image_tile = \"pose-") + name + "\"");
+		std::string diagnostic;
+		require(world.attachAgentType("pose-tiles.agent.lua", definition.source, &diagnostic), diagnostic);
+		auto id = world.createAgent("PoseTiles", "Agent", 0, 0, 3.5f);
 		auto* agent = world.lookupAgent(id).entity;
 		auto const standingHeight = agent->getHeight(), standingWidth = agent->getWidth();
 		auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
@@ -98,27 +115,32 @@ namespace
 			clearObjectTileset();
 			if (sprite)
 			{
-				ObjectTileset tiles; tiles.width = 64; tiles.height = 160;
-				tiles.sprites.emplace("agent", ObjectSprite{{0, 0, 64, 160}, true});
+				ObjectTileset tiles; tiles.width = 384; tiles.height = 160;
+				int index = 0;
+				for (auto name : {"standing", "sitting", "lying", "crouching", "crawling"})
+					tiles.sprites.emplace(std::string("pose-") + name, ObjectSprite{{64 * index++, 0, 64, 160}, true});
+				// A generic tile must not override a pose's declared artwork.
+				tiles.sprites.emplace("agent", ObjectSprite{{320, 0, 64, 160}, true});
 				setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 			}
+			int tileIndex = 0;
 			ImVec2 originalMin{}, originalMax{};
 			for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying,
 				core::Pose::Crouching, core::Pose::Crawling})
 			{
 				core::AgentPoseTestAccess::set(*agent, pose);
 				auto const heightScale = agent->getPoseHeightScale();
-				auto const horizontal = agent->isHorizontalPose();
 				require(world.getSimulationSnapshot().agents.front().pose == pose, "Snapshot did not expose Pose");
 				require(near(agent->getHeight(), standingHeight * heightScale)
-					&& near(agent->getWidth(), standingWidth), "Pose changed the wrong physical dimensions");
+					&& near(agent->getWidth(), standingWidth * agent->getPhysicalBaseline().poses.at(pose).widthRatio),
+					"Pose did not apply the declared physical dimension ratios");
 				core::Vector2 b0, b1; agent->getBounds().getCurrentShape(b0, b1);
-				require(near(b1.y - b0.y, agent->getHeight()) && near(b1.x - b0.x, standingWidth), "Pose bounds disagree with physics");
+				require(near(b1.y - b0.y, agent->getHeight()) && near(b1.x - b0.x, agent->getWidth()), "Pose bounds disagree with physics");
 				WorldDrawList list(WorldDrawList::ClipRectangle{{0,0},{800,600}});
 				renderAgent(agent, &list);
-				if (!sprite && pose == core::Pose::Standing)
+				if (!sprite)
 					require(list.commands().size() == 1 && std::holds_alternative<WorldDrawList::Text>(list.commands().front()),
-						"Standing glyph must retain the unchanged text path");
+						"Missing artwork must use an untransformed glyph fallback");
 				ImDrawList adapter(ImGui::GetDrawListSharedData());
 				adapter._ResetForNewFrame();
 				adapter.PushTextureID(ImGui::GetIO().Fonts->TexID);
@@ -132,45 +154,26 @@ namespace
 					{
 						auto const& triangle = std::get<WorldDrawList::Triangle>(command);
 						require(triangle.texture == WorldDrawList::Texture::ObjectAtlas, "Pose lost sprite texture");
+						for (auto uv : triangle.texcoords)
+							require(uv.x >= tileIndex / 6.f - .00001f && uv.x <= (tileIndex + 1) / 6.f + .00001f,
+								"Renderer ignored the script-defined pose image tile");
 						for (auto p : triangle.positions) { lo.x = std::min(lo.x,p.x); lo.y = std::min(lo.y,p.y); hi.x = std::max(hi.x,p.x); hi.y = std::max(hi.y,p.y); }
 					}
-					if (horizontal)
-					{
-						auto const& triangle = std::get<WorldDrawList::Triangle>(list.commands().front());
-						require(triangle.positions[0].x > triangle.positions[2].x, "Horizontal head does not point right");
-					}
+					auto const& triangle = std::get<WorldDrawList::Triangle>(list.commands().front());
+					require(triangle.positions[0].x <= triangle.positions[2].x
+						&& triangle.positions[0].y <= triangle.positions[2].y,
+						"Renderer rotated declared artwork");
 				}
 				else
 				{
-					if (pose != core::Pose::Standing)
-					{
-						require(list.commands().size() * 3 == static_cast<size_t>(adapter.IdxBuffer.Size), "Posed glyph was not tessellated");
-						for (size_t i = 0; i < list.commands().size(); ++i)
-						{
-							auto const& triangle = std::get<WorldDrawList::Triangle>(list.commands()[i]);
-							require(triangle.texture == WorldDrawList::Texture::FontAtlas, "Posed glyph lost its font atlas");
-							for (int v = 0; v < 3; ++v)
-							{
-								auto const& vertex = adapter.VtxBuffer[adapter.IdxBuffer[static_cast<int>(i * 3) + v]];
-								require(near(triangle.positions[v].x, vertex.pos.x) && near(triangle.positions[v].y, vertex.pos.y)
-									&& near(triangle.texcoords[v].x, vertex.uv.x) && near(triangle.texcoords[v].y, vertex.uv.y),
-									"Production glyph stance differs from tessellated glyph geometry");
-							}
-						}
-					}
 					for (auto const& vertex : adapter.VtxBuffer) { auto p = vertex.pos; lo.x = std::min(lo.x,p.x); lo.y = std::min(lo.y,p.y); hi.x = std::max(hi.x,p.x); hi.y = std::max(hi.y,p.y); }
 				}
 				require(hi.x > lo.x && hi.y > lo.y, "Pose produced no visible body");
 				if (pose == core::Pose::Standing) { originalMin = lo; originalMax = hi; }
-				else if (horizontal)
-					require(near(hi.x-lo.x, originalMax.y-originalMin.y)
-						&& near(hi.y-lo.y, (originalMax.x-originalMin.x) * heightScale)
-						&& hi.x-lo.x > standingWidth * CORE_CELL_WIDTH_PIXELS,
-						"Horizontal pose must rotate, thin to its height scale, and overflow without squeezing");
 				else require(near(hi.x-lo.x, originalMax.x-originalMin.x)
-					&& near(hi.y-lo.y, (originalMax.y-originalMin.y) * heightScale)
-					&& near(hi.y, sprite ? originalMax.y : 600.f + (originalMax.y - 600.f) * heightScale),
-					"Upright pose must squash only height around the floor anchor (including glyph padding)");
+					&& near(hi.y-lo.y, originalMax.y-originalMin.y) && near(hi.y, originalMax.y),
+					"Equal-size declared tiles must not be rotated or squashed by Pose");
+				++tileIndex;
 			}
 			// Standing Human appearance retains the historical uniform Height
 			// scaling in both sprite and glyph paths, despite unchanged physical width.
@@ -204,6 +207,39 @@ namespace
 					"Human Height changed sprite/glyph appearance scaling");
 			}
 			require(world.setAgentIndividualHeightModifier(id, {}), "Human Height reset refused");
+		}
+		// Real Human tiles carry their shortened/rotated artwork already. The
+		// renderer uses native tile dimensions and unchanged UV orientation.
+		auto tiles = ObjectTileset::load(context.fixture("resources/textures/objects.tileset.yaml"));
+		auto const regions = tiles.sprites;
+		auto const atlasWidth = tiles.width, atlasHeight = tiles.height;
+		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
+		auto humanId = world.createAgent("Human reference", 0, 0, 4.5f);
+		auto* human = world.lookupAgent(humanId).entity;
+		ImVec2 standingSize{};
+		for (auto pose : {core::Pose::Standing, core::Pose::Sitting, core::Pose::Lying,
+			core::Pose::Crouching, core::Pose::Crawling})
+		{
+			core::AgentPoseTestAccess::set(*human, pose);
+			auto const& region = regions.at(human->getPoseImageTile()).region;
+			WorldDrawList list(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
+			renderAgent(human, &list);
+			require(list.commands().size() == 2, "Human did not draw its dedicated pose tile");
+			auto const& first = std::get<WorldDrawList::Triangle>(list.commands().front());
+			require(near(first.texcoords[0].x, (region.x + .5f) / atlasWidth)
+				&& near(first.texcoords[0].y, (region.y + .5f) / atlasHeight),
+				"Human artwork was rotated or mirrored at runtime");
+			ImVec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+			for (auto const& command : list.commands())
+				for (auto point : std::get<WorldDrawList::Triangle>(command).positions)
+				{
+					lo.x = std::min(lo.x, point.x); lo.y = std::min(lo.y, point.y);
+					hi.x = std::max(hi.x, point.x); hi.y = std::max(hi.y, point.y);
+				}
+			if (pose == core::Pose::Standing) standingSize = {hi.x - lo.x, hi.y - lo.y};
+			require(near(hi.x - lo.x, standingSize.x * region.width / 26.f)
+				&& near(hi.y - lo.y, standingSize.y * region.height / 72.f),
+				"Human baked artwork was squashed or rotated again");
 		}
 		clearObjectTileset(); ImGui::EndFrame();
 	}

@@ -1,5 +1,6 @@
 #pragma once
 #include "SectorTileset.h"
+#include <optional>
 struct ObjectSprite { SectorTileRegion region; bool tintable; };
 struct ObjectTileset
 {
@@ -11,6 +12,7 @@ struct ObjectTileset
 void setObjectTileset(ObjectTileset tileset, ImTextureID texture);
 void clearObjectTileset();
 bool hasObjectTileset();
+std::optional<ImVec2> objectSpriteSize(char const* name);
 // Destination is the object's physical screen bounds, not its padded storage cell.
 // Source fractions allow moving door leaves to be cropped without squashing.
 bool drawObjectSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b,

@@ -1,16 +1,18 @@
 # Door clearance: Pose, support, live changes and automatic Crawling (#476–#477, #483–#491)
 
-> **API-v2 integration (#522):** The Human Standing/Crawling behavior described
-> below is now one type's frozen Door order, not a universal capability. The
-> shared selection returns the first fitting supported pose and context speed,
-> or explicit refusal. Custom Crouching Door choices work; Standing-only robots
-> refuse impossible passages. See [shared selection validation](agent-pose-selection-validation.md).
+> **Current API-v2 integration:** Historical Standing/Crawling journeys below
+> predate the unified Standing/Crouching/Crawling preference for both movement
+> contexts. Selection returns the tallest allowed fitting pose and context speed,
+> or explicit refusal. Lying now declares its height and width ratios rather than
+> exchanging Standing dimensions. Standing-only robots still refuse impossible
+> passages. See [shared selection validation](agent-pose-selection-validation.md).
 
 Ordinary Regular and Tall Doors share one top-relative clearance rule. The top
 above the approach Floor includes effective Height modifiers, Sitting's and
-Crouching's 0.6 body-height scale, Crawling's 0.3 body-height scale, or
-Lying's rotated vertical extent (body width). Crawling uses its reduced height
-rather than Lying's body width. Physical
+Crouching's 0.6 body-height scale, Crawling's 0.3 body-height scale, and Human
+Lying's declared `26/72` height ratio (.1625 at neutral Height). Lying's
+`72/26` width ratio affects bounds and applicable opening-width checks, not its
+vertical clearance. Physical
 support elevation is added to that extent. Exact fits are accepted with a
 `0.00001` world-unit tolerance. Standalone Bulkhead, Airlock, Security Scanner,
 Lift landing and Shuttle landing Doors use the same rule against their physical
@@ -407,13 +409,12 @@ The labelled cases cover:
 
 - Sitting and Crouching: floor-supported fit (.27 body under .28 opening),
   raised refusal, exact fit, within-tolerance fit and over-tolerance refusal.
-- Crawling: .135 body, proving the 30% height is used rather than Lying's .40
-  width (a .20 opening admits Crawling, a .13 opening refuses), plus raised
-  refusal and tolerance boundary.
-- Lying: .40 rotated extent, fit/refusal with support and tolerance boundary.
+- Crawling: .135 body, proving the declared height rather than base .40 bodily
+  width is used (a .20 opening admits Crawling, a .13 opening refuses), plus
+  raised refusal and tolerance boundary.
+- Lying: .1625 declared height, fit/refusal with support and tolerance boundary.
 - Effective Height modifier .7, including Sitting/Crouching exact fit/refusal,
-  Crawling scaling with the modifier, and Lying width remaining unchanged by a
-  modifier of the upright long dimension.
+  and Crawling/Lying height scaling with the modifier.
 - Both directions, nonzero approach Level, and ordinary Tall fit/refusal.
 - Paired Lying cases differing only in the decorative offsets (unclaimed
   versus zero-elevation claimed point), both fitting and refusing.

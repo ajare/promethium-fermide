@@ -1657,34 +1657,35 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 	float sourceSize = font->FontSize;
 	auto sourceBounds = font->CalcTextSizeA(sourceSize, FLT_MAX, 0.0f, ICON_FA_MALE);
 	float availableWidth = pos1.x - pos0.x;
-	float availableHeight = pos0.y - pos1.y;
 	// The authored modifier is visual height, not physical width. Establish the
 	// ordinary icon's fit against its unmodified bounds, then scale that icon
 	// uniformly by Height so a narrow glyph still visibly changes size instead
 	// of remaining pinned to the unchanged width constraint.
 	auto const heightModifier = agent->getEffectiveHeightModifier().value;
-	float standardAvailableHeight = availableHeight / (heightModifier * agent->getPoseHeightScale());
-	float scale = min(availableWidth / max(sourceBounds.x, 1.0f),
+	float standardAvailableHeight = agent->getPhysicalBaseline().standingHeight
+		* CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom;
+	float standardAvailableWidth = agent->getPhysicalBaseline().width * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom;
+	float scale = min(standardAvailableWidth / max(sourceBounds.x, 1.0f),
 		standardAvailableHeight / max(sourceBounds.y, 1.0f)) * heightModifier;
 	float fontSize = sourceSize * scale;
 	auto iconSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MALE);
+	// Artwork already contains the stance. Use its native dimensions relative
+	// to the type's Standing tile, never a pose-specific rotation or squash.
+	auto const tileSize = objectSpriteSize(agent->getPoseImageTile().c_str());
+	auto const standingTileSize = objectSpriteSize(
+		agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str());
+	if (tileSize && standingTileSize)
+	{
+		iconSize.x *= tileSize->x / standingTileSize->x;
+		iconSize.y *= tileSize->y / standingTileSize->y;
+	}
 	ImVec2 iconPosition{
 		(pos0.x + pos1.x - iconSize.x) * 0.5f,
 		pos0.y - iconSize.y
 	};
-	auto const bodyStart = drawList->geometryBookmark();
-	if (!drawObjectSprite("agent", drawList, iconPosition,
+	if (!drawObjectSprite(agent->getPoseImageTile().c_str(), drawList, iconPosition,
 		{iconPosition.x + iconSize.x, iconPosition.y + iconSize.y}, colour))
 		drawList->AddText(font, fontSize, iconPosition, colour, ICON_FA_MALE);
-	if (agent->getPose() != core::Pose::Standing)
-	{
-		bool const horizontal = agent->isHorizontalPose();
-		ImVec2 const scale = horizontal
-			? ImVec2{agent->getPoseHeightScale(), 1.0f}
-			: ImVec2{1.0f, agent->getPoseHeightScale()};
-		drawList->transformGeometrySince(bodyStart, {(pos0.x + pos1.x) * 0.5f, pos0.y},
-			scale, horizontal);
-	}
 
 	auto const planning = agent->getState() == core::Agent::State::RoutePlanning;
 	if (!gUISettings.renderAgentDebug) return;

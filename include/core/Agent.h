@@ -217,6 +217,14 @@ namespace core
 
 	enum class AutomaticPoseContext { RoomMovement, DoorCrossing };
 
+	struct AgentPoseDefinition
+	{
+		float heightRatio;
+		std::string imageTile;
+		float widthRatio{1.f};
+		bool operator==(AgentPoseDefinition const&) const = default;
+	};
+
 	struct AgentPhysicalBaseline
 	{
 		float width;
@@ -226,9 +234,10 @@ namespace core
 		float climbSpeed;
 		float stairAscentSpeed;
 		float stairDescentSpeed;
-		// Only declared poses exist. Standing/Lying have canonical geometry;
-		// lowered poses carry their validated height ratio.
-		std::map<Pose, float> poses;
+		// Only declared poses exist. Standing uses the type's base dimensions;
+		// other poses carry validated dimension ratios. Every pose declares
+		// an ObjectAtlas image tile, frozen with the rest of the definition.
+		std::map<Pose, AgentPoseDefinition> poses;
 		std::vector<AutomaticPoseChoice> roomMovement;
 		std::vector<AutomaticPoseChoice> doorCrossing;
 
@@ -856,18 +865,21 @@ namespace core
 		{
 			auto const& physical = getPhysicalBaseline();
 			if (!physical.supportsPose(pose)) return std::nullopt;
-			if (pose == Pose::Lying) return Vector2{ getStandingHeight(), getWidth() };
-			return Vector2{ getWidth(), getStandingHeight() * physical.poses.at(pose) };
+			auto const& definition = physical.poses.at(pose);
+			return Vector2{ physical.width * definition.widthRatio,
+				getStandingHeight() * definition.heightRatio };
 		}
 		Pose getPose() const { return mPose; }
+		std::string const& getPoseImageTile() const { return getPhysicalBaseline().poses.at(mPose).imageTile; }
 		float getPoseHeightScale() const
 		{
 			auto const& physical = getPhysicalBaseline();
 			switch (mPose)
 			{
 			case Pose::Sitting:
+			case Pose::Lying:
 			case Pose::Crouching:
-			case Pose::Crawling: return physical.poses.at(mPose);
+			case Pose::Crawling: return physical.poses.at(mPose).heightRatio;
 			default: return 1.0f;
 			}
 		}
@@ -875,8 +887,6 @@ namespace core
 		float getPoseRenderXOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? -0.25f : 0.f; }
 		// Lift the body onto the mattress without changing the supporting Floor.
 		float getPoseRenderYOffset() const { return mPose == Pose::Lying && mOccupiedUsablePoint ? 0.25f : 0.f; }
-		// Whether the pose renders as a horizontal body (head to the right).
-		bool isHorizontalPose() const { return mPose == Pose::Lying || mPose == Pose::Crawling; }
 
 		float getStandingHeight() const;
 		float getHeight() const;

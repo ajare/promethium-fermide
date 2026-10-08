@@ -459,6 +459,11 @@ pf_add_smoke_module(pf-smoke-render
     TIMEOUT 30
 )
 
+add_test(NAME agent-pose-image-tiles COMMAND pf-smoke-render --check agentPoses)
+add_test(NAME agent-pose-bed-artwork COMMAND pf-smoke-render --check furniture/bedRenderOffset)
+set_tests_properties(agent-pose-image-tiles agent-pose-bed-artwork PROPERTIES
+    LABELS "render;functional;smoke;validation-fast;pose-selection" TIMEOUT 30)
+
 pf_add_smoke_contract(NAME smoke-render-contract COMMAND ${CMAKE_COMMAND}
     "-DRENDER=$<TARGET_FILE:pf-smoke-render>"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/RenderContract.cmake")

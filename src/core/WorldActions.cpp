@@ -304,7 +304,7 @@ namespace core
 	{
 		auto fits = [&](Pose pose, float support) {
 			auto envelope = agent.getPoseEnvelope(pose);
-			return envelope && support + envelope->y * (pose == Pose::Lying ? 1.0f : heightFactor)
+			return envelope && support + envelope->y * heightFactor
 				<= clearance + 0.00001f;
 		};
 		if (agent.mFurnitureUse)

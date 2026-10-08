@@ -1091,7 +1091,8 @@ namespace core
 
 	float Agent::getWidth() const
 	{
-		return getPhysicalBaseline().width;
+		auto const& physical = getPhysicalBaseline();
+		return physical.width * physical.poses.at(mPose).widthRatio;
 	}
 
 	float Agent::getStandingHeight() const
@@ -1125,8 +1126,7 @@ namespace core
 
 	float Agent::getDoorClearanceExtent() const
 	{
-		// Lying rotates the upright body by 90 degrees: width becomes height.
-		return getSupportElevation() + (mPose == Pose::Lying ? getWidth() : getHeight());
+		return getSupportElevation() + getHeight();
 	}
 
 	float Agent::getTraversalCrawlingDoorClearanceExtent(bool beginningMovement) const
@@ -1148,7 +1148,7 @@ namespace core
 	{
 		auto const envelope = getPoseEnvelope(pose);
 		return envelope && support + envelope->y <= clearance + PoseFitTolerance
-			&& getWidth() <= openingWidth + PoseFitTolerance;
+			&& envelope->x <= openingWidth + PoseFitTolerance;
 	}
 
 	std::optional<PoseSelection> Agent::selectAutomaticPose(AutomaticPoseContext context,

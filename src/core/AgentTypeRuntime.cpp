@@ -149,17 +149,18 @@ namespace core
 			}
 		}
 
-		float readRatio(lua_State* state, int index, char const* key, std::string const& field)
+		float readRatio(lua_State* state, int index, char const* key, std::string const& field,
+			bool bounded = true)
 		{
 			lua_pushstring(state, key);
 			lua_rawget(state, index);
 			auto const isNumber = lua_type(state, -1) == LUA_TNUMBER;
 			auto const value = lua_tonumber(state, -1);
 			lua_pop(state, 1);
-			if (!isNumber || !std::isfinite(value) || value <= 0 || value > 1)
-				poseError(field, "must be a finite number within (0, 1]");
+			if (!isNumber || !std::isfinite(value) || value <= 0 || (bounded && value > 1))
+				poseError(field, bounded ? "must be a finite number within (0, 1]" : "must be a finite positive number");
 			auto const frozen = static_cast<float>(value);
-			if (!std::isfinite(frozen) || frozen <= 0 || frozen > 1)
+			if (!std::isfinite(frozen) || frozen <= 0 || (bounded && frozen > 1))
 				poseError(field, "must be representable as a finite positive simulation ratio");
 			return frozen;
 		}
@@ -183,7 +184,7 @@ namespace core
 			struct Entry { char const* name; Pose pose; bool lowered; };
 			static constexpr Entry entries[] = {
 				{ "standing", Pose::Standing, false }, { "sitting", Pose::Sitting, true },
-				{ "lying", Pose::Lying, false }, { "crouching", Pose::Crouching, true },
+				{ "lying", Pose::Lying, true }, { "crouching", Pose::Crouching, true },
 				{ "crawling", Pose::Crawling, true }
 			};
 			for (auto const& entry : entries)
@@ -196,21 +197,39 @@ namespace core
 					requireTable(state, -1, field);
 					auto const definition = lua_gettop(state);
 					checkKeys(state, definition, field, entry.lowered
-						? std::initializer_list<std::string_view>{ "height_ratio" }
-						: std::initializer_list<std::string_view>{});
-					baseline.poses.emplace(entry.pose, entry.lowered
-						? readRatio(state, definition, "height_ratio", field + ".height_ratio") : 1.f);
+						? std::initializer_list<std::string_view>{ "height_ratio", "width_ratio", "image_tile" }
+						: std::initializer_list<std::string_view>{ "image_tile" });
+					AgentPoseDefinition pose{entry.lowered
+						? readRatio(state, definition, "height_ratio", field + ".height_ratio") : 1.f, {}};
+					if (entry.lowered)
+					{
+						lua_pushliteral(state, "width_ratio");
+						lua_rawget(state, definition);
+						bool const hasWidth = !lua_isnil(state, -1);
+						lua_pop(state, 1);
+						if (hasWidth) pose.widthRatio = readRatio(state, definition, "width_ratio", field + ".width_ratio", false);
+						if (!std::isfinite(baseline.width * pose.widthRatio) || baseline.width * pose.widthRatio <= 0.f)
+							poseError(field + ".width_ratio", "must produce a finite positive bodily width");
+					}
+					lua_pushliteral(state, "image_tile");
+					lua_rawget(state, definition);
+					bool const validTile = lua_type(state, -1) == LUA_TSTRING
+						&& readStringField(state, -1, 128, pose.imageTile)
+						&& agentTypeDisplayNameIsValid(pose.imageTile);
+					lua_pop(state, 1);
+					if (!validTile) poseError(field + ".image_tile", "must be a nonempty tile name of at most 128 bytes without control characters");
+					baseline.poses.emplace(entry.pose, std::move(pose));
 				}
 				lua_pop(state, 1);
 			}
 			lua_pop(state, 1);
 			if (!baseline.supportsPose(Pose::Standing)) poseError("poses.standing", "is required");
 			for (auto pose : { Pose::Crouching, Pose::Crawling })
-				if (baseline.supportsPose(pose) && baseline.poses.at(pose) >= 1.f)
+				if (baseline.supportsPose(pose) && baseline.poses.at(pose).heightRatio >= 1.f)
 					poseError(pose == Pose::Crouching ? "poses.crouching.height_ratio" : "poses.crawling.height_ratio",
 						"must be strictly less than standing (1)");
 			if (baseline.supportsPose(Pose::Crouching) && baseline.supportsPose(Pose::Crawling)
-				&& baseline.poses.at(Pose::Crawling) >= baseline.poses.at(Pose::Crouching))
+				&& baseline.poses.at(Pose::Crawling).heightRatio >= baseline.poses.at(Pose::Crouching).heightRatio)
 				poseError("poses.crawling.height_ratio", "must be strictly less than poses.crouching.height_ratio");
 
 			lua_pushliteral(state, "automatic_poses");

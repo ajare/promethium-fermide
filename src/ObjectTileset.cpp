@@ -31,8 +31,8 @@ ObjectTileset ObjectTileset::load(std::filesystem::path const& path)
         int const column = v["cell"][0].as<int>(), row = v["cell"][1].as<int>();
         SectorTileRegion r{c[0].as<int>(), c[1].as<int>(), c[2].as<int>(), c[3].as<int>()};
         if (column < 0 || row < 0 || column >= result.width / tw || row >= result.height / th ||
-            r.x < 0 || r.y < 0 || r.width <= 0 || r.height <= 0 || r.width > tw || r.height > th ||
-            r.x > tw - r.width || r.y > th - r.height)
+            r.x < 0 || r.x >= tw || r.y < 0 || r.width <= 0 || r.height <= 0 || r.height > th ||
+            r.width > result.width || column * tw + r.x > result.width - r.width || r.y > th - r.height)
             throw std::runtime_error("Object sprite is outside its cell");
         r.x += column * tw; r.y += row * th;
         if (!result.sprites.emplace(item.first.as<std::string>(), ObjectSprite{r, v["tintable"].as<bool>()}).second)
@@ -51,14 +51,22 @@ void setObjectTileset(ObjectTileset tileset, ImTextureID texture)
 }
 void clearObjectTileset() { textureId = {}; active = {}; }
 bool hasObjectTileset() { return textureId != ImTextureID{}; }
+std::optional<ImVec2> objectSpriteSize(char const* name)
+{
+    auto const sprite = active.sprites.find(name);
+    if (!textureId || sprite == active.sprites.end()) return std::nullopt;
+    return ImVec2{static_cast<float>(sprite->second.region.width),
+        static_cast<float>(sprite->second.region.height)};
+}
 bool drawObjectSprite(char const* name, WorldDrawList* list, ImVec2 a, ImVec2 b,
     ImU32 tint, ImVec2 sourceMin, ImVec2 sourceMax)
 {
-    if (!textureId) return false;
+    auto const found = active.sprites.find(name);
+    if (!textureId || found == active.sprites.end()) return false;
     ImVec2 minimum{std::min(a.x, b.x), std::min(a.y, b.y)};
     ImVec2 maximum{std::max(a.x, b.x), std::max(a.y, b.y)};
     if (minimum.x == maximum.x || minimum.y == maximum.y) return true;
-    auto const& sprite = active.sprites.at(name);
+    auto const& sprite = found->second;
     auto const& r = sprite.region;
     auto uv = [&](ImVec2 fraction) {
         return ImVec2{(r.x + 0.5f + fraction.x * (r.width - 1)) / active.width,

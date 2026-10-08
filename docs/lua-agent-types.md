@@ -29,8 +29,11 @@ return {
             stair_ascent_speed = 0.35,
             stair_descent_speed = 0.45,
             poses = {
-                standing = {}, sitting = { height_ratio = 0.6 }, lying = {},
-                crouching = { height_ratio = 0.6 }, crawling = { height_ratio = 0.3 },
+                standing = { image_tile = "human-standing" },
+                sitting = { image_tile = "human-sitting", height_ratio = 0.6 },
+                lying = { image_tile = "human-lying", height_ratio = 26 / 72, width_ratio = 72 / 26 },
+                crouching = { image_tile = "human-crouching", height_ratio = 0.6 },
+                crawling = { image_tile = "human-crawling", height_ratio = 0.3 },
             },
             automatic_poses = {
                 room_movement = {
@@ -75,22 +78,38 @@ Human defaults. A constructor error publishes no partial Agent.
 All fields must be actual Lua numbers, finite and representable as positive
 simulation floats. Numeric strings, NaN, infinities, zero, negatives, float
 overflow/underflow, and out-of-range ratios are refused with field diagnostics.
-Lying retains the existing policy of exchanging effective Standing height and
-width. Individual physical modifiers and persisted Agent tag samples still
+Pose envelopes use declared height and width ratios rather than exchanging
+Standing dimensions for Lying. Individual physical modifiers and persisted Agent tag samples still
 apply, with individual-over-tag precedence. Permissions, route preferences, shared-resource slot geometry and Escalator belt
 policies have not moved into type scripts.
 
 ## Required pose declarations and v1 migration
 
 `poses` contains only supported canonical keys: `standing`, `sitting`, `lying`,
-`crouching`, `crawling`. Standing is mandatory. Standing and Lying have empty
-parameter tables; Lying's vertical extent is bodily width. Sitting, Crouching and
-Crawling require exactly `height_ratio`, an actual finite Lua number that converts
-to a finite positive simulation float. Sitting allows `(0, 1]`; Crouching and
+`crouching`, `crawling`. Standing is mandatory. Every supported pose requires
+`image_tile`: an ObjectAtlas image name, a nonempty actual Lua string of at most
+128 bytes with no NUL or control characters. Standing allows only this field
+and uses the type's base dimensions. All other supported poses, including Lying,
+require `height_ratio`, an actual finite Lua number that converts
+to a finite positive simulation float. Sitting and Lying allow `(0, 1]`; Crouching and
 Crawling require `(0, 1)`, and Crawling must be strictly lower than Crouching when
 both are supported. Equality after float conversion is also rejected. Their vertical extent is
-that ratio times effective Standing height. Width and rendering orientation retain
-existing policy. Unsupported poses have no envelope or default ratio.
+that ratio times effective Standing height. Non-Standing poses may also declare
+`width_ratio`, defaulting to 1. It must be a finite positive simulation float
+and produce a finite positive bodily width; values greater than 1 are allowed.
+Width is the base type width times this ratio. Human's Lying ratios are `26/72`
+and `72/26`, matching its 72x26 Lying versus 26x72 Standing tiles.
+Unsupported poses have no envelope, default ratio or tile.
+Tile names are frozen for each lifetime, like height ratios; the renderer selects
+the current pose's tile as authored, with no pose-specific rotation, mirroring or
+squashing. Tile dimensions relative to the type's Standing tile determine artwork
+size; ordinary Height scaling, tint and Furniture offsets remain. Height ratios
+are physical, not rendering transforms. Human has five dedicated `human-*`
+tiles, with lowered/horizontal stances baked into the atlas by
+`scripts/pack_human_pose_tiles.py`. Other types may share artwork, but must
+supply already-posed images for distinct appearances. If artwork is unavailable,
+the existing glyph fallback remains; core validation does not resolve the atlas.
+Existing API-v2 definitions must add `image_tile` to every supported pose.
 
 `automatic_poses` requires exactly `room_movement` and `door_crossing`. Each is a
 nonempty dense ordered array beginning with Standing, without duplicates, naming
@@ -112,7 +131,7 @@ example above preserves historical geometry, Room order/speeds and half-speed
 Crawling Door crossings. A Standing-only type needs only:
 
 ```lua
-poses = { standing = {} },
+poses = { standing = { image_tile = "agent" } },
 automatic_poses = {
     room_movement = {{ pose = "standing", speed_ratio = 1 }},
     door_crossing = {{ pose = "standing", speed_ratio = 1 }},

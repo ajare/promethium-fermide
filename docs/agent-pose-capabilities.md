@@ -28,11 +28,11 @@ complete runnable Agent resource:
 
 ```lua
 poses = {
-    standing = {},
-    sitting = { height_ratio = 0.6 },
-    lying = {},
-    crouching = { height_ratio = 0.6 },
-    crawling = { height_ratio = 0.3 },
+    standing = { image_tile = "human-standing" },
+    sitting = { image_tile = "human-sitting", height_ratio = 0.6 },
+    lying = { image_tile = "human-lying", height_ratio = 26 / 72, width_ratio = 72 / 26 },
+    crouching = { image_tile = "human-crouching", height_ratio = 0.6 },
+    crawling = { image_tile = "human-crawling", height_ratio = 0.3 },
 },
 automatic_poses = {
     room_movement = {
@@ -51,7 +51,7 @@ automatic_poses = {
 A standing-only robot's corresponding declarations are:
 
 ```lua
-poses = { standing = {} },
+poses = { standing = { image_tile = "agent" } },
 automatic_poses = {
     room_movement = {{ pose = "standing", speed_ratio = 1.0 }},
     door_crossing = {{ pose = "standing", speed_ratio = 1.0 }},
@@ -62,12 +62,24 @@ automatic_poses = {
 
 - The canonical vocabulary remains `standing`, `sitting`, `lying`, `crouching`,
   and `crawling`; no custom identities are introduced. Standing is required.
-- Only supported poses are present. Sitting, Crouching, and Crawling require a
-  finite positive `height_ratio`. Sitting permits `(0, 1]`; Crouching and Crawling
+- Every supported pose requires `image_tile`, a nonempty ObjectAtlas image name
+  of at most 128 bytes with no NUL or control characters. It is frozen for the
+  lifetime and selected by the renderer for the current pose. Artwork supplies
+  the stance; the renderer does not rotate, mirror or squash it based on Pose.
+  Human uses dedicated `human-*` tiles with transforms baked into the atlas.
+  Native tile dimensions relative to Standing determine visual size, with
+  ordinary Height scaling, tint, Furniture offsets and glyph fallback retained.
+  Missing or invalid tile declarations are
+  diagnosed; core does not resolve graphics resources. Existing v2 scripts must
+  add this field to every supported pose.
+- Only supported poses are present. Sitting, Lying, Crouching, and Crawling
+  require a finite positive `height_ratio`. Sitting and Lying permit `(0, 1]`; Crouching and Crawling
   require `(0, 1)`, with Crawling strictly lower than Crouching when both are
-  supported, including after simulation-float conversion. Standing and Lying use
-  canonical geometry, not configurable height ratios. A standing-only type
-  supplies no lowered ratios.
+  supported, including after simulation-float conversion. Standing uses the
+  base dimensions without configurable ratios. Other poses may also supply
+  `width_ratio` (default 1), finite and positive, including values above 1; the
+  resulting base-width product must remain finite and positive. A standing-only
+  type supplies no dimension ratios.
 - Both automatic context lists are required, nonempty ordered dense arrays,
   start with Standing, have no duplicate poses, and reference only supported
   locomotion poses: Standing, Crouching, or Crawling. Supporting a pose does not
@@ -103,16 +115,18 @@ The physical inputs are:
 | --- | --- |
 | Effective Standing height | Frozen base Standing height with existing effective Height modifier |
 | Bodily width | Existing type-derived width |
-| Pose envelope | Standing height; lowered height ratio; or Lying's width-derived vertical extent |
+| Pose envelope | Effective Standing height times the pose height ratio, and base bodily width times its width ratio |
 | Support elevation | Real support above the Floor/Walkway, not an artwork offset |
 | Vertical clearance | Available ceiling/opening height relative to the approach Floor/Walkway |
 | Opening width | Available physical aperture width where existing rules constrain it |
 | Selection context | Room movement or Door crossing |
 
-Standing's vertical extent is effective Standing height. Sitting/Crouching/
-Crawling use their declared ratio times that height. Lying's vertical extent is
-bodily width. Preserve canonical rendering orientation and existing width
-behavior; Crawling clearance must not accidentally use Lying's width.
+Standing's vertical extent is effective Standing height. All other poses use
+that height times their declared height ratio. Physical width uses base type
+width times the pose width ratio. Human Lying declares height `26/72` and width
+`72/26` from its baked artwork dimensions; no hardcoded rotated envelope remains.
+Bounds, vertical clearance and applicable opening-width checks use these
+physical dimensions. Height modifiers scale Lying's height like other poses.
 
 Physical fit uses the existing `0.00001` World-unit tolerance. Automatic thresholds
 are derived from these dimensions and available space, not separately duplicated

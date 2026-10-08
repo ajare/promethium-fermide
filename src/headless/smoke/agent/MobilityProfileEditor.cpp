@@ -100,7 +100,7 @@ namespace
 			width = 0.4, standing_height = 0.45, reach = 0.25,
 			walk_speed = 0.5, climb_speed = 0.25,
 			stair_ascent_speed = 0.35, stair_descent_speed = 0.45,
-			poses = { standing = {}, sitting = {height_ratio=0.6}, lying = {}, crouching = {height_ratio=0.6}, crawling = {height_ratio=0.3} },
+			poses = { standing = {image_tile='agent'}, sitting = {image_tile='agent',height_ratio=0.6}, lying = {image_tile='agent',height_ratio=26/72,width_ratio=72/26}, crouching = {image_tile='agent',height_ratio=0.6}, crawling = {image_tile='agent',height_ratio=0.3} },
 			automatic_poses = {
 				room_movement = {{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=1},{pose='crawling',speed_ratio=1}},
 				door_crossing = {{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=0.5}},

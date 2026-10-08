@@ -311,8 +311,9 @@ namespace
 		agent_smoke::requireDoorRoute(*world, casualty, back, true);
 		// Change the resolved revision before the ordinary edit, not only replay.
 		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
-		replace(definition.source, "lying = {},", "");
+		replace(definition.source, "lying = { image_tile = \"human-lying\", height_ratio = 26 / 72, width_ratio = 72 / 26 },", "");
 		replace(definition.source, "height_ratio = 0.3", "height_ratio = 0.4");
+		replace(definition.source, "image_tile = \"human-standing\"", "image_tile = \"marker\"");
 		DocumentHistory history;
 		auto before = captureDocumentSnapshot(world, history);
 		require(before.has_value(), "Could not capture a structural history entry");
@@ -342,7 +343,8 @@ namespace
 				"History reconstructed or changed a surviving Agent");
 			require(agent->supportsPose(core::Pose::Lying)
 				&& agent->getPoseEnvelope(core::Pose::Crawling)->y == agent->getStandingHeight() * 0.3f
-				&& agent->getPhysicalBaseline().doorCrossing.size() == 3,
+				&& agent->getPhysicalBaseline().doorCrossing.size() == 3
+				&& agent->getPoseImageTile() == "human-standing",
 				"History replaced a survivor's frozen pose declarations");
 			require(!agent->getIndividualMobilityProfile()
 				&& agent->getEffectiveMobilityProfile().value.get(core::TraversalKind::Door)
@@ -391,13 +393,15 @@ namespace
 		verifySurvivor();
 		definition.source = initialSource;
 		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
-		replace(definition.source, "lying = {},", "");
+		replace(definition.source, "lying = { image_tile = \"human-lying\", height_ratio = 26 / 72, width_ratio = 72 / 26 },", "");
 		replace(definition.source, "height_ratio = 0.3", "height_ratio = 0.4");
+		replace(definition.source, "image_tile = \"human-standing\"", "image_tile = \"marker\"");
 		replace(definition.source, "width = 0.4", "width = 0.7");
 		require(history.undo(captureDocumentSnapshot(world, history), restore),
 			"Deletion undo did not recover after constructor failure");
 		verifySurvivor();
-		require(world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f,
+		require(world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f
+			&& world->lookupAgent(casualty).entity->getPoseImageTile() == "marker",
 			"Deletion undo did not use a fresh constructor from the resolved resource");
 		auto const* restored = world->lookupAgent(casualty).entity;
 		require(!restored->supportsPose(core::Pose::Lying)

@@ -57,6 +57,11 @@ Resources:
               - { name: "booth-window-shutter", x: "267", y: "501", width: "42", height: "38" }
               - { name: "booth-window-closed", x: "262", y: "496", width: "52", height: "48" }
               - { name: "agent", x: "83", y: "248", width: "26", height: "72" }
+              - { name: "human-standing", x: "0", y: "888", width: "26", height: "72" }
+              - { name: "human-sitting", x: "32", y: "917", width: "26", height: "43" }
+              - { name: "human-lying", x: "64", y: "934", width: "72", height: "26" }
+              - { name: "human-crouching", x: "144", y: "917", width: "26", height: "43" }
+              - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
               - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
               - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
               - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
@@ -122,6 +127,9 @@ Resources:
     - type: "AgentType"
       name: "human.agent.lua"
       location: "test-worlds/human.agent.lua"
+    - type: "AgentType"
+      name: "robot.agent.lua"
+      location: "test-worlds/robot.agent.lua"
     - type: "AgentType"
       name: "scout.agent.lua"
       location: "test-worlds/scout.agent.lua"
