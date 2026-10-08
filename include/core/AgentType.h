@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -57,6 +58,11 @@ namespace core
 	// source, which is read and preflighted directly. The preflight runs in an
 	// isolated scratch sandbox: no World is mutated and no Agent is created.
 	// Returns nullopt when the resource is unknown, unreadable, or invalid.
+	// Dynamic external Resource references are single names encoding the canonical
+	// source path. They need no mutable manifest/sidecar and can resolve after restart.
+	std::string externalAgentTypeResourceName(std::filesystem::path const& path);
+	std::filesystem::path externalAgentTypeResourcePath(std::string const& name);
+
 	std::optional<AgentTypeDefinition> resolveAgentTypeResource(
 		std::string const& resourceName);
 

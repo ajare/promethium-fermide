@@ -4,7 +4,14 @@
 // through the public World construction path, refusing atomically when the
 // resource is unavailable or mismatched.
 
+#include <fstream>
 #include <memory>
+#include <willpower/common/Logger.h>
+#include <willpower/application/resourcesystem/ResourceManager.h>
+#include "ApplicationAgentTypes.h"
+#include "ApplicationResources.h"
+#include "core/AgentTagRegistryDocument.h"
+#include "core/SerializationException.h"
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -311,6 +318,218 @@ namespace
 			"Reset incorrectly preserved a surviving instance from structural history");
 	}
 
+	std::string externalSource(std::string const& id)
+	{
+		auto source = core::bundledHumanAgentType().source;
+		auto at = source.find("type_id = \"Human\"");
+		source.replace(at, std::string("type_id = \"Human\"").size(), "type_id = '" + id + "'");
+		return source;
+	}
+
+	void writeSource(std::filesystem::path const& path, std::string const& source)
+	{
+		std::ofstream out(path, std::ios::binary);
+		out << source;
+		require(bool(out), "Could not write an external Agent fixture");
+	}
+
+	struct ResourceFixture
+	{
+		wp::Logger logger;
+		wp::application::resourcesystem::ResourceManager manager{ nullptr, nullptr, nullptr, &logger };
+		std::unique_ptr<ApplicationAgentTypes> types;
+		explicit ResourceFixture(std::filesystem::path const& root)
+		{
+			logger.open((root / "agent-resource-log.html").string());
+			auto const human = root / "human.agent.lua";
+			writeSource(human, core::bundledHumanAgentType().source);
+			manager.addResource(std::make_shared<AgentTypeResource>("human.agent.lua", "",
+				human.string(), std::map<std::string, std::string>{}, nullptr));
+			types = std::make_unique<ApplicationAgentTypes>(manager);
+		}
+	};
+
+	void externalImportPlacesAndReopens(smoke::Context const& context)
+	{
+		auto const root = context.temporaryRoot();
+		auto const external = root / "outside world with spaces";
+		auto const documents = root / "documents";
+		std::filesystem::create_directories(external);
+		std::filesystem::create_directories(documents);
+		auto const path = external / "visitor.agent.lua";
+		auto source = externalSource("Visitor");
+		auto at = source.find("width = 0.4");
+		source.replace(at, std::string("width = 0.4").size(), "width = 0.7");
+		writeSource(path, source);
+		writeSource(external / "unrequested.agent.lua", externalSource("Unrequested"));
+		ApplicationAgentType selected;
+		core::AgentId placed{};
+		{
+			ResourceFixture resources(root);
+			AgentTypeLoaderScope scope{ [&resources](auto const& name) { return resources.types->resolve(name); } };
+			std::string diagnostic;
+			require(resources.types->importFile(path, selected, diagnostic), diagnostic);
+			require(selected.typeId == "Visitor" && selected.displayName == "Human",
+				"Import did not retain independent type ID and display name");
+			auto const inventory = resources.types->types();
+			require(inventory.size() == 2 && resources.manager.getResourcesByType("AgentType").size() == 2,
+				"Import scanned unrequested files or did not publish to Willpower and the selector");
+			auto fixture = buildWorld("Imported Visitor");
+			auto payload = humanPayload("Visitor instance");
+			payload.type = selected.typeId;
+			payload.resource = selected.resourceName;
+			auto const preview = agentClipboardPlacementDimensions(payload);
+			require(agentCount(*fixture.world) == 0 && preview.x == 0.7f,
+				"Import preview created an Agent or used Human dimensions");
+			require(commitAgentPlacement(fixture.world, payload,
+				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic), diagnostic);
+			auto const* agent = fixture.world->lookupAgent(placed).entity;
+			require(agent && agent->getTypeId() == selected.typeId
+				&& agent->getTypeResourceName() == selected.resourceName
+				&& agent->getPhysicalBaseline().width == preview.x,
+				"Placement disagreed with the imported identity or preview");
+			for (auto const* suffix : { "imported.world.yaml", "imported.world" })
+				fixture.world->saveTo((documents / suffix).string());
+			// Reimport is idempotent, not hot reload, and leaves existing physical
+			// identity unchanged even if the author edits the file.
+			writeSource(path, "invalid revised source");
+			ApplicationAgentType repeated;
+			require(resources.types->importFile(path, repeated, diagnostic)
+				&& repeated.resourceName == selected.resourceName && resources.types->types().size() == 2,
+				"Repeat import reloaded the script or registered another identity");
+			require(fixture.world->lookupAgent(placed).entity->getPhysicalBaseline().width == 0.7f,
+				"On-disk edits changed an existing frozen baseline");
+			writeSource(path, source);
+		}
+		// New application session: the Resource name resolves the declared
+		// external file without a rewritten manifest or process-local path cache.
+		{
+			ResourceFixture resources(root);
+			AgentTypeLoaderScope scope{ [&resources](auto const& name) { return resources.types->resolve(name); } };
+			for (auto const* suffix : { "imported.world.yaml", "imported.world" })
+			{
+				auto loaded = core::loadWorldDocument(documents / suffix);
+				auto const* agent = loaded->lookupAgent(placed).entity;
+				require(agent && agent->getTypeId() == selected.typeId
+					&& agent->getTypeResourceName() == selected.resourceName
+					&& agent->getPhysicalBaseline().width == 0.7f,
+					"Reopen did not reconstruct the external Agent");
+			}
+			require(resources.types->types().size() == 2, "Reopen did not register its managed dependency");
+		}
+		// GPU-less public document loading uses the same resource-reference seam.
+		auto loaded = core::loadWorldDocument(documents / "imported.world.yaml");
+		require(loaded->lookupAgent(placed).entity->getTypeId() == "Visitor", "Headless reopen failed");
+		writeSource(path, "malformed revised source");
+		{
+			ResourceFixture resources(root);
+			AgentTypeLoaderScope scope{ [&resources](auto const& name) { return resources.types->resolve(name); } };
+			bool refused = false;
+			try { (void)core::loadWorldDocument(documents / "imported.world.yaml"); }
+			catch (std::exception const& error)
+			{
+				refused = true;
+				require(std::string(error.what()).find(path.string()) != std::string::npos,
+					"Invalid external dependency diagnostic omitted its source path");
+			}
+			require(refused && resources.types->types().size() == 1
+				&& resources.manager.getResourcesByType("AgentType").size() == 1,
+				"Refused reopen left a partial imported resource");
+		}
+		require(loaded->lookupAgent(placed).entity->getPhysicalBaseline().width == 0.7f,
+			"Refused reopen mutated the previously loaded World");
+		std::filesystem::remove(path);
+		try { (void)core::loadWorldDocument(documents / "imported.world.yaml");
+			throw std::runtime_error("Missing external dependency was accepted"); }
+		catch (core::SerializationException const& error)
+		{ require(std::string(error.what()).find(selected.resourceName) != std::string::npos,
+			"Missing import diagnostic did not identify the resource"); }
+	}
+
+	void externalImportRefusesWithoutRegistration(smoke::Context const& context)
+	{
+		auto const root = context.temporaryRoot();
+		ResourceFixture resources(root);
+		ApplicationAgentType selected;
+		std::string diagnostic;
+		auto invalidBaseline = externalSource("BadBaseline");
+		auto const width = invalidBaseline.find("width = 0.4");
+		invalidBaseline.replace(width, std::string("width = 0.4").size(), "width = -1");
+		auto missingBaseline = externalSource("MissingBaseline");
+		auto const reach = missingBaseline.find("reach = 0.25,");
+		missingBaseline.erase(reach, std::string("reach = 0.25,").size());
+		std::vector<std::pair<std::string, std::string>> cases{
+			{ invalidBaseline, "width" },
+			{ missingBaseline, "reach" },
+			{ "not lua", "" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad' }", "constructor" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() return 7 end }", "instance table" },
+			{ "return { type_id='Bad', display_name='Bad', new=function() return {} end }", "" },
+			{ externalSource("Human"), "Duplicate" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() return io.open('unsafe') end }", "" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() while true do end end }", "" },
+			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() error('constructor refused') end }", "constructor refused" },
+		};
+		for (std::size_t i = 0; i < cases.size(); ++i)
+		{
+			auto const path = root / ("bad-" + std::to_string(i) + ".agent.lua");
+			writeSource(path, cases[i].first);
+			require(!resources.types->importFile(path, selected, diagnostic)
+				&& !diagnostic.empty() && selected.resourceName.empty(), "Invalid import was accepted or undiagnosed");
+			require(diagnostic.find(path.string()) != std::string::npos
+				&& diagnostic.find(cases[i].second) != std::string::npos, "Import diagnostic was not actionable: " + diagnostic);
+			require(resources.types->types().size() == 1
+				&& resources.manager.getResourcesByType("AgentType").size() == 1,
+				"Failed import left partial registration");
+			std::ifstream input(path);
+			std::string actual{ std::istreambuf_iterator<char>(input), {} };
+			require(actual == cases[i].first, "Import overwrote the source");
+		}
+		auto const path = root / "repaired.agent.lua";
+		writeSource(path, "not lua");
+		require(!resources.types->importFile(path, selected, diagnostic), "Malformed source accepted");
+		writeSource(path, externalSource("Repaired"));
+		require(resources.types->importFile(path, selected, diagnostic), "Failed import prevented a corrected retry: " + diagnostic);
+		require(!resources.types->importFile(root / "absent.agent.lua", selected, diagnostic)
+			&& !diagnostic.empty(), "Missing import source was accepted or undiagnosed");
+		writeSource(root / "wrong.lua", externalSource("Wrong"));
+		require(!resources.types->importFile(root / "wrong.lua", selected, diagnostic), "Wrong file suffix accepted");
+	}
+
+	void externalPlacementRollsBackRegistration(smoke::Context const& context)
+	{
+		auto const root = context.temporaryRoot();
+		auto const path = root / "placement.agent.lua";
+		writeSource(path, externalSource("Placement"));
+		ResourceFixture resources(root);
+		AgentTypeLoaderScope scope{ [&resources](auto const& name) { return resources.types->resolve(name); } };
+		ApplicationAgentType selected;
+		std::string diagnostic;
+		require(resources.types->importFile(path, selected, diagnostic), diagnostic);
+		core::AgentTypeRuntimeLimits limits;
+		limits.instructionsPerCall = 1;
+		auto world = std::make_shared<core::World>("Refused placement", 10, 2,
+			core::AgentBehaviourRuntimeLimits{}, limits);
+		auto corridor = world->addCorridor(0, 0, 10);
+		world->finishBuild();
+		auto payload = humanPayload("Refused");
+		payload.type = selected.typeId;
+		payload.resource = selected.resourceName;
+		auto const before = captureDocumentSnapshot(world);
+		core::AgentId placed{};
+		require(!commitAgentPlacement(world, payload, world->getSector(corridor), 0, 1.0f, placed, diagnostic)
+			&& !placed && !diagnostic.empty(), "Failing constructor published an Agent");
+		require(!world->hasAgentType(selected.typeId) && agentCount(*world) == 0
+			&& captureDocumentSnapshot(world)->yaml == before->yaml,
+			"Failed placement left registration or authored mutation");
+		require(world->attachAgentType("competing.agent.lua", externalSource("Placement"), &diagnostic), diagnostic);
+		require(!commitAgentPlacement(world, payload, world->getSector(corridor), 0, 1.0f, placed, diagnostic)
+			&& diagnostic.find("competing resources") != std::string::npos,
+			"Placement silently used a competing definition");
+		require(world->agentTypeResourceName(selected.typeId) == "competing.agent.lua" && agentCount(*world) == 0,
+			"Duplicate refusal changed the original definition");
+	}
+
 	void editorCopiedFixturePreservesTypeIdentity(smoke::Context const&)
 	{
 		auto fixture = buildWorld("Editor Scout copy");
@@ -331,6 +550,9 @@ namespace
 
 void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "agentTypesExternalImportPlacesAndReopens", externalImportPlacesAndReopens });
+	checks.push_back({ "agentTypesExternalImportRefusesWithoutRegistration", externalImportRefusesWithoutRegistration });
+	checks.push_back({ "agentTypesExternalPlacementRollsBackRegistration", externalPlacementRollsBackRegistration });
 	checks.push_back({ "agentTypesEditorPlacementCreatesScriptedHuman",
 		editorPlacementCreatesScriptedHuman });
 	checks.push_back({ "agentTypesEditorPlacementFailureIsAtomic",

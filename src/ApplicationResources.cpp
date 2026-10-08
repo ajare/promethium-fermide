@@ -11,8 +11,6 @@
 
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentTagRegistry.h"
-#include "core/AgentType.h"
-#include "core/AgentTypeRuntime.h"
 #include "core/SerializationException.h"
 #include "core/SerializationWorkData.h"
 #include "core/World.h"
@@ -64,35 +62,6 @@ void LuaScriptResource::create(resources::DataStreamPtr data,
 void LuaScriptResource::destroy()
 {
 	mText.clear();
-}
-
-AgentTypeResource::AgentTypeResource(std::string const& name,
-	std::string const& namesp, std::string const& source,
-	std::map<std::string, std::string> const& tags,
-	resources::ResourceLocation* location)
-	: Resource(name, namesp, "AgentType", source, tags, location)
-{
-}
-
-void AgentTypeResource::create(resources::DataStreamPtr data,
-	resources::ResourceManager*)
-{
-	if (!data) throw resources::ResourceException(this, "has no Agent type source");
-	mSource.assign(reinterpret_cast<char const*>(data->getData()), data->getSize());
-	auto preflight = core::AgentTypeRuntimeAdapter::preflightType(getName(), mSource);
-	if (!preflight.loaded || !core::agentTypeIdIsValid(preflight.typeId)
-		|| !core::agentTypeDisplayNameIsValid(preflight.displayName))
-		throw resources::ResourceException(this,
-			preflight.loaded ? "Agent type is invalid" : preflight.diagnostic);
-	mTypeId = std::move(preflight.typeId);
-	mDisplayName = std::move(preflight.displayName);
-}
-
-void AgentTypeResource::destroy()
-{
-	mSource.clear();
-	mTypeId.clear();
-	mDisplayName.clear();
 }
 
 AgentTagRegistryResource::AgentTagRegistryResource(std::string const& name,

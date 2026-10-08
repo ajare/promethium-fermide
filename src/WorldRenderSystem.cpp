@@ -247,42 +247,12 @@ namespace
 			mObjectSet = requireImageSet("ObjectAtlas");
 			installAtlasDefinitions();
 
-			// Load every manifest-registered Agent type as a managed Resource
-			// (ADR 0010/0019). The loader reads the already-validated loaded
-			// resources, never the filesystem, so startup neither scans
-			// directories nor writes scripts. Invalid resources are excluded
-			// from selection and fail clearly when a document references them.
-			for (auto const& resource : mResources->getResourcesByType("AgentType"))
-			{
-				if (!resource) continue;
-				try
-				{
-					auto loaded = acquireAgentType(resource);
-					mAgentTypeResources.emplace(resource->getName(), std::move(loaded));
-				}
-				catch (std::exception const&)
-				{
-					// Excluded from the creation selector; a document that
-					// references it is refused with a clear diagnostic.
-				}
-			}
-			if (!mAgentTypeResources.contains("human.agent.lua"))
-				throw std::runtime_error(
-					"The bundled Human Agent type resource could not be loaded");
+			mAgentTypes = std::make_unique<ApplicationAgentTypes>(*mResources);
+			if (!mAgentTypes->resolve("human.agent.lua"))
+				throw std::runtime_error("The bundled Human Agent type could not be loaded");
 			core::setAgentTypeResourceLoader([this](std::string const& name)
-				-> std::optional<core::AgentTypeDefinition>
 			{
-				auto found = mAgentTypeResources.find(name);
-				if (found == mAgentTypeResources.end()) return std::nullopt;
-				auto resource = std::dynamic_pointer_cast<AgentTypeResource>(
-					found->second);
-				if (!resource) return std::nullopt;
-				core::AgentTypeDefinition definition;
-				definition.typeId = resource->typeId();
-				definition.displayName = resource->displayName();
-				definition.resourceName = resource->getName();
-				definition.source = resource->source();
-				return definition;
+				return mAgentTypes->resolve(name);
 			});
 
 			mScene = mRenderSystem->createScene("Default");
@@ -326,12 +296,7 @@ namespace
 			mFontAtlas.reset();
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
-			for (auto& [name, resource] : mAgentTypeResources)
-			{
-				(void)name;
-				if (resource) mResources->releaseResource(resource);
-			}
-			mAgentTypeResources.clear();
+			mAgentTypes.reset();
 			clearSectorTileset();
 			clearObjectTileset();
 			mResources.reset();
@@ -409,24 +374,6 @@ namespace
 			return resource;
 		}
 
-		resources::ResourcePtr acquireAgentType(resources::ResourcePtr resource)
-		{
-			mResources->acquireResource(resource);
-			try
-			{
-				mResources->createResource(resource);
-				mResources->loadResource(resource);
-			}
-			catch (...)
-			{
-				mResources->releaseResource(resource);
-				throw;
-			}
-			if (!std::dynamic_pointer_cast<AgentTypeResource>(resource))
-				throw std::runtime_error(resource->getName() + " is not an AgentType resource");
-			return resource;
-		}
-
 		void installAtlasDefinitions()
 		{
 			auto sector = std::dynamic_pointer_cast<resources::ImageSetResource>(mSectorSet);
@@ -472,29 +419,18 @@ namespace
 			return names;
 		}
 
-		std::vector<ApplicationAgentType> agentTypes()
+		std::vector<ApplicationAgentType> agentTypes() { return mAgentTypes->types(); }
+
+		bool importAgentType(std::filesystem::path const& path,
+			ApplicationAgentType& imported, std::string& diagnostic)
 		{
-			std::vector<ApplicationAgentType> result;
-			for (auto const& [name, resource] : mAgentTypeResources)
-			{
-				auto typed = std::dynamic_pointer_cast<AgentTypeResource>(resource);
-				if (!typed) continue;
-				result.push_back({ name, typed->typeId(), typed->displayName() });
-			}
-			std::sort(result.begin(), result.end(),
-				[](ApplicationAgentType const& left, ApplicationAgentType const& right)
-				{
-					if (left.displayName != right.displayName)
-						return left.displayName < right.displayName;
-					return left.resourceName < right.resourceName;
-				});
-			return result;
+			return mAgentTypes->importFile(path, imported, diagnostic);
 		}
 
 		std::filesystem::path resourceSource(std::string const& type,
 			std::string const& name)
 		{
-			return mCatalogResolver->catalogSource(type, name);
+			return core::resolveCatalogSource(type, name);
 		}
 
 	private:
@@ -709,7 +645,7 @@ namespace
 		// Every valid, loaded Agent type Resource, keyed by Resource name. The
 		// bundled Human and all manifest-registered types are loaded at startup
 		// so the creation selector and document loading can resolve them.
-		std::map<std::string, resources::ResourcePtr> mAgentTypeResources;
+		std::unique_ptr<ApplicationAgentTypes> mAgentTypes;
 		// The ResourceManager owns registered resources; this index prevents
 		// repeated World loads from registering another resource for one file.
 		std::map<std::filesystem::path, std::shared_ptr<FurnitureCatalogueResource>>
@@ -773,4 +709,15 @@ std::optional<std::filesystem::path> applicationResourceSource(
 	auto source = gSystem->resourceSource(type, name);
 	if (source.empty()) return std::nullopt;
 	return source;
+}
+
+bool importApplicationAgentType(std::filesystem::path const& path,
+	ApplicationAgentType& imported, std::string& diagnostic)
+{
+	if (!gSystem)
+	{
+		diagnostic = "Application resources are unavailable";
+		return false;
+	}
+	return gSystem->importAgentType(path, imported, diagnostic);
 }

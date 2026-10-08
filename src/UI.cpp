@@ -1648,6 +1648,18 @@ namespace
 		ImGui::SetNextWindowPos(ImVec2(canvasPos.x + 8.0f, canvasPos.y + 96.0f), ImGuiCond_FirstUseEver);
 		if (ImGui::Begin("Agent creation settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 		{
+			static char importPath[4096]{};
+			static std::string importDiagnostic;
+			ImGui::InputText("External .agent.lua file", importPath, sizeof(importPath));
+			ImGui::SameLine();
+			if (ImGui::Button("Import Agent type"))
+			{
+				ApplicationAgentType imported;
+				if (importApplicationAgentType(importPath, imported, importDiagnostic))
+					gAgentTypeDraft = std::move(imported);
+			}
+			if (!importDiagnostic.empty())
+				ImGui::TextWrapped("%s", importDiagnostic.c_str());
 			auto types = applicationAgentTypes();
 			if (types.empty())
 			{

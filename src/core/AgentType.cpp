@@ -107,21 +107,69 @@ return {
 		return true;
 	}
 
+	std::string externalAgentTypeResourceName(std::filesystem::path const& path)
+	{
+		auto const source = std::filesystem::canonical(path).generic_string();
+		constexpr char hex[] = "0123456789abcdef";
+		std::string name = "external-agent-";
+		for (unsigned char byte : source)
+		{
+			name += hex[byte >> 4];
+			name += hex[byte & 15];
+		}
+		return name;
+	}
+
+	std::filesystem::path externalAgentTypeResourcePath(std::string const& name)
+	{
+		constexpr std::string_view prefix = "external-agent-";
+		if (!name.starts_with(prefix)) return {};
+		auto const encoded = std::string_view(name).substr(prefix.size());
+		if (encoded.empty() || encoded.size() % 2 || encoded.size() > 32768) return {};
+		auto digit = [](char c) -> int {
+			if (c >= '0' && c <= '9') return c - '0';
+			if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+			return -1;
+		};
+		std::string decoded;
+		for (std::size_t i = 0; i < encoded.size(); i += 2)
+		{
+			auto const high = digit(encoded[i]), low = digit(encoded[i + 1]);
+			if (high < 0 || low < 0 || (high == 0 && low == 0)) return {};
+			decoded += static_cast<char>((high << 4) | low);
+		}
+		std::filesystem::path path(decoded);
+		if (!path.is_absolute() || path.lexically_normal() != path
+			|| !decoded.ends_with(".agent.lua")) return {};
+		return path;
+	}
+
 	std::optional<AgentTypeDefinition> resolveAgentTypeResource(
 		std::string const& resourceName)
 	{
 		if (gAgentTypeResourceLoader) return gAgentTypeResourceLoader(resourceName);
 		auto const path = resolveCatalogSource("AgentType", resourceName);
 		if (path.empty()) return std::nullopt;
+		auto const external = !externalAgentTypeResourcePath(resourceName).empty();
+		auto refuse = [&](std::string const& reason) -> std::optional<AgentTypeDefinition>
+		{
+			if (external) throw SerializationException("Agent type resource '" + resourceName
+				+ "' (" + path.string() + "): " + reason);
+			return std::nullopt;
+		};
+		std::error_code error;
+		auto const size = std::filesystem::file_size(path, error);
+		if (error) return refuse("Source file is unavailable");
+		if (size > 1024u * 1024u) return refuse("Source exceeds 1 MiB");
 		std::ifstream input(path, std::ios::binary);
-		if (!input) return std::nullopt;
+		if (!input) return refuse("Could not read source file");
 		std::string source{
 			std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
-		if (!input.good() && !input.eof()) return std::nullopt;
+		if (!input.good() && !input.eof()) return refuse("Could not read source file");
 		auto preflight = AgentTypeRuntimeAdapter::preflightType(resourceName, source);
 		if (!preflight.loaded || !agentTypeIdIsValid(preflight.typeId)
 			|| !agentTypeDisplayNameIsValid(preflight.displayName))
-			return std::nullopt;
+			return refuse(preflight.loaded ? "Agent type identity is invalid" : preflight.diagnostic);
 		AgentTypeDefinition definition;
 		definition.typeId = std::move(preflight.typeId);
 		definition.displayName = std::move(preflight.displayName);

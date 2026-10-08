@@ -1,6 +1,7 @@
 #include "core/WorldDocument.h"
 
 #include "core/SerializationException.h"
+#include "core/AgentType.h"
 
 namespace core
 {
@@ -23,8 +24,16 @@ namespace core
 	std::filesystem::path resolveCatalogSource(std::string const& type,
 		std::string const& resourceName)
 	{
-		if (!gCatalogResourceResolver || resourceName.empty()) return {};
-		return gCatalogResourceResolver->catalogSource(type, resourceName);
+		if (resourceName.empty()) return {};
+		if (gCatalogResourceResolver)
+		{
+			auto source = gCatalogResourceResolver->catalogSource(type, resourceName);
+			if (!source.empty()) return source;
+		}
+		// Explicit dynamic Agent resources retain a recoverable source in their
+		// Resource name, including sources outside the World directory.
+		return type == "AgentType" ? externalAgentTypeResourcePath(resourceName)
+			: std::filesystem::path{};
 	}
 
 	namespace

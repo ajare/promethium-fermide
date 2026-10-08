@@ -416,6 +416,18 @@ foreach(target IN ITEMS pf-render pf-headless-render-support)
     pf_apply_high_analysis(${target})
 endforeach()
 
+# Managed Agent resources have a CPU-only import seam shared with headless editor checks.
+add_library(pf-agent-resources STATIC src/ApplicationAgentTypes.cpp)
+target_link_libraries(pf-agent-resources PUBLIC promethium-fermide-core Willpower.Application)
+target_compile_features(pf-agent-resources PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(pf-agent-resources PRIVATE
+        "$<$<NOT:$<BOOL:${PF_HIGH_ANALYSIS}>>:/W3>" /permissive-)
+else()
+    target_compile_options(pf-agent-resources PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+pf_apply_high_analysis(pf-agent-resources)
+
 # Production Agent and permission editing seams, shared by the GUI, legacy
 # checks, and headless editor tiers. No platform backend or dialogs.
 add_library(pf-agent-editing STATIC
@@ -557,7 +569,7 @@ if(PF_BUILD_GUI)
         target_compile_options(editor PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     target_link_libraries(editor PRIVATE
-        pf-render pf-metrics pf-agent-editing libglew_static nfd::nfd
+        pf-render pf-metrics pf-agent-editing pf-agent-resources libglew_static nfd::nfd
         spdlog::spdlog SDL2::SDL2-static OpenGL::GL
         Willpower.Application ext::mpp-helper
     )

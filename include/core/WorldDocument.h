@@ -19,7 +19,9 @@ namespace core
 
 	// Maps an external catalogue Resource name (ADR 0010) to the manifest source
 	// it was declared with. World documents store Resource names, never file
-	// paths; `core` resolves them through this seam so it stays independent of
+	// paths; imported Agent-type names encode their canonical source so they
+	// remain resolvable without changing the manifest. `core` resolves them
+	// through this seam so it stays independent of
 	// the application resource system. When no resolver is installed,
 	// loadWorldDocument falls back to a file beside the World, which keeps
 	// GPU-less tools and hand-authored fixtures working.
@@ -41,8 +43,8 @@ namespace core
 		std::shared_ptr<CatalogResourceResolver> resolver);
 	std::shared_ptr<CatalogResourceResolver> catalogResourceResolver();
 
-	// Returns the manifest source for a catalogue Resource, or an empty path
-	// when no resolver is installed or the Resource is unknown.
+	// Returns the declared source for a catalogue Resource, including an explicit
+	// imported Agent-type reference, or an empty path when it is unknown.
 	std::filesystem::path resolveCatalogSource(std::string const& type,
 		std::string const& resourceName);
 

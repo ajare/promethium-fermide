@@ -8632,6 +8632,23 @@ namespace core
 		return mAgentTypes.contains(std::string(typeId));
 	}
 
+	std::string World::agentTypeResourceName(std::string_view typeId) const
+	{
+		auto found = mAgentTypes.find(std::string(typeId));
+		return found == mAgentTypes.end() ? std::string{} : found->second->resourceName;
+	}
+
+	bool World::detachUnusedAgentType(std::string_view typeId)
+	{
+		if (typeId == "Human") return false;
+		for (auto const& [id, agent] : mAgents.entries())
+		{
+			(void)id;
+			if (agent->getTypeId() == typeId) return false;
+		}
+		return mAgentTypes.erase(std::string(typeId)) != 0;
+	}
+
 	std::string World::agentTypeDisplayName(std::string_view typeId) const
 	{
 		auto found = mAgentTypes.find(std::string(typeId));

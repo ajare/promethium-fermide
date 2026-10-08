@@ -546,8 +546,12 @@ core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& pay
 	}
 	else
 	{
-		auto const definition = core::resolveAgentTypeResource(payload.resource);
-		if (definition) baseline = core::agentTypeDefinitionBaseline(*definition);
+		try
+		{
+			auto const definition = core::resolveAgentTypeResource(payload.resource);
+			if (definition) baseline = core::agentTypeDefinitionBaseline(*definition);
+		}
+		catch (std::exception const&) { /* Placement reports the dependency diagnostic. */ }
 	}
 	if (!baseline)
 		return core::Agent::placementDimensions("Human", heightModifier);
@@ -1490,7 +1494,13 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		}
 		resourceName = "human.agent.lua";
 	}
-	auto const resolved = core::resolveAgentTypeResource(resourceName);
+	std::optional<core::AgentTypeDefinition> resolved;
+	try { resolved = core::resolveAgentTypeResource(resourceName); }
+	catch (std::exception const& error)
+	{
+		diagnostic = error.what();
+		return false;
+	}
 	if (!resolved)
 	{
 		diagnostic = "The Agent type resource '" + resourceName + "' is unavailable";
@@ -1503,6 +1513,29 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 			+ "' but the placement requested '" + payload.type + "'";
 		return false;
 	}
+	if (world->hasAgentType(resolved->typeId)
+		&& world->agentTypeResourceName(resolved->typeId) != resolved->resourceName)
+	{
+		diagnostic = "Agent type ID '" + resolved->typeId
+			+ "' is declared by competing resources in this World";
+		return false;
+	}
+
+	// Snapshot precedes registration too. Guard the new definition through
+	// every placement refusal, including a constructor exhausting the World budget.
+	auto const undo = captureDocumentSnapshot(world);
+	if (!undo)
+	{
+		diagnostic = "Could not capture the editor state for the Agent placement";
+		return false;
+	}
+	struct RegistrationRollback
+	{
+		core::World& world;
+		std::string type;
+		bool attached{ false };
+		~RegistrationRollback() { if (attached) world.detachUnusedAgentType(type); }
+	} registration{ *world, resolved->typeId };
 	if (!world->hasAgentType(resolved->typeId))
 	{
 		std::string attachDiagnostic;
@@ -1513,16 +1546,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				+ "' could not be loaded: " + attachDiagnostic;
 			return false;
 		}
-	}
-
-	// Captured before the first write, so the undo entry holds the document
-	// exactly as it stood before the paste. Every refusal below drops it
-	// uncommitted: no entry, and nothing to undo.
-	auto const undo = captureDocumentSnapshot(world);
-	if (!undo)
-	{
-		diagnostic = "Could not capture the editor state for the Agent placement";
-		return false;
+		registration.attached = true;
 	}
 
 	core::AgentId agentId{};
@@ -1771,6 +1795,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	// Agent, Agent group and assignment land together, as one document edit:
 	// one undo entry covers all three, and undoing it takes all three away.
 	commitDocumentEdit(std::move(undo));
+	registration.attached = false;
 	placed = agentId;
 	diagnostic = std::move(authorizationWarning);
 	return true;

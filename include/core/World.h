@@ -2518,6 +2518,10 @@ namespace core
 
 		// The display name of a registered type, or empty when unknown.
 		std::string agentTypeDisplayName(std::string_view typeId) const;
+		std::string agentTypeResourceName(std::string_view typeId) const;
+		// Roll back an unused placement registration; never detach Human or a
+		// definition still owned by an Agent.
+		bool detachUnusedAgentType(std::string_view typeId);
 
 		// Initial authorization is validated before ownership, placement or ID allocation.
 		AgentId createAgent(std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
