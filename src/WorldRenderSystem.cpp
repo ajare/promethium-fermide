@@ -35,6 +35,7 @@
 
 #include "ApplicationResources.h"
 #include "ManifestCatalogResolver.h"
+#include "core/AgentType.h"
 #include "core/Furniture.h"
 #include "core/WorldDocument.h"
 #include "ObjectTileset.h"
@@ -246,6 +247,24 @@ namespace
 			mObjectSet = requireImageSet("ObjectAtlas");
 			installAtlasDefinitions();
 
+			// Load the bundled Human Agent type as a managed Resource (ADR 0010)
+			// and make it the authority the editor resolves when placing Humans.
+			// The loader reads the already-validated loaded resource, never the
+			// filesystem, so startup neither scans directories nor writes scripts.
+			mHumanAgentType = requireAgentType("human.agent.lua");
+			core::setAgentTypeResourceLoader([this](std::string const& name)
+				-> std::optional<core::AgentTypeDefinition>
+			{
+				auto resource = std::dynamic_pointer_cast<AgentTypeResource>(
+					mResources->getResource(name));
+				if (!resource) return std::nullopt;
+				core::AgentTypeDefinition definition;
+				definition.typeId = resource->typeId();
+				definition.displayName = resource->displayName();
+				definition.resourceName = resource->getName();
+				definition.source = resource->source();
+				return definition;
+			});
 
 			mScene = mRenderSystem->createScene("Default");
 			mScene->load();
@@ -273,6 +292,7 @@ namespace
 
 		~WorldRenderSystem()
 		{
+			core::setAgentTypeResourceLoader({});
 			core::FurnitureCatalogue::setResourceLoader({});
 			core::setCatalogResourceResolver({});
 			mCatalogResolver.reset();
@@ -287,6 +307,7 @@ namespace
 			mFontAtlas.reset();
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
+			if (mHumanAgentType) mResources->releaseResource(mHumanAgentType);
 			clearSectorTileset();
 			clearObjectTileset();
 			mResources.reset();
@@ -361,6 +382,24 @@ namespace
 			}
 			if (!std::dynamic_pointer_cast<resources::ImageSetResource>(resource))
 				throw std::runtime_error(name + " is not an ImageSet resource");
+			return resource;
+		}
+
+		resources::ResourcePtr requireAgentType(std::string const& name)
+		{
+			auto resource = mResources->acquireResource(name);
+			try
+			{
+				mResources->createResource(resource);
+				mResources->loadResource(resource);
+			}
+			catch (...)
+			{
+				mResources->releaseResource(resource);
+				throw;
+			}
+			if (!std::dynamic_pointer_cast<AgentTypeResource>(resource))
+				throw std::runtime_error(name + " is not an AgentType resource");
 			return resource;
 		}
 
@@ -624,6 +663,7 @@ namespace
 		std::shared_ptr<ManifestCatalogResolver> mCatalogResolver;
 		resources::ResourcePtr mSectorSet;
 		resources::ResourcePtr mObjectSet;
+		resources::ResourcePtr mHumanAgentType;
 		// The ResourceManager owns registered resources; this index prevents
 		// repeated World loads from registering another resource for one file.
 		std::map<std::filesystem::path, std::shared_ptr<FurnitureCatalogueResource>>

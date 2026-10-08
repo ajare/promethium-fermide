@@ -7543,7 +7543,9 @@ void renderSelectedAgentPanel(shared_ptr<core::World> world)
 	auto globalPosition = gSelectedAgent->getGlobalPosition();
 
 	ImGui::Text("Agent: %s", gSelectedAgent->getName().c_str());
-	ImGui::Text("Type: %s", gSelectedAgent->getTypeName());
+	ImGui::Text("Type ID: %s", gSelectedAgent->getTypeId().c_str());
+	ImGui::Text("Display name: %s", gSelectedAgent->getTypeName());
+	ImGui::Text("Type resource: %s", gSelectedAgent->getTypeResourceName().c_str());
 	ImGui::Text("ID: %llu", (unsigned long long)id.value);
 	ImGui::Text("Sector: %s", sector ? sector->getDescription().c_str() : "<none>");
 	if (sector) ImGui::Text("Layer: %u", sector->getLayerIndex());

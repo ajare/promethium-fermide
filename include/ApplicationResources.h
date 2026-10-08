@@ -35,6 +35,29 @@ private:
 	std::string mText;
 };
 
+// A managed `.agent.lua` Agent type definition (ADR 0019). create() validates
+// the source in an isolated scratch sandbox and retains the immutable text and
+// stable type identity; no World or live runtime is touched, and destroy()
+// releases only that text, never a live Lua object.
+class AgentTypeResource final : public wp::application::resourcesystem::Resource
+{
+public:
+	AgentTypeResource(std::string const& name, std::string const& namesp,
+		std::string const& source, std::map<std::string, std::string> const& tags,
+		wp::application::resourcesystem::ResourceLocation* location);
+	std::string const& source() const { return mSource; }
+	std::string const& typeId() const { return mTypeId; }
+	std::string const& displayName() const { return mDisplayName; }
+
+private:
+	void create(wp::application::resourcesystem::DataStreamPtr data,
+		wp::application::resourcesystem::ResourceManager* manager) override;
+	void destroy() override;
+	std::string mSource;
+	std::string mTypeId;
+	std::string mDisplayName;
+};
+
 class AgentTagRegistryResource final : public wp::application::resourcesystem::Resource
 {
 public:

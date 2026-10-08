@@ -9,6 +9,7 @@
 
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -365,6 +366,58 @@ namespace
 			&& agent->getPhysicalBaseline().width == before,
 			"Reset lost or changed the scripted Agent's frozen baseline");
 	}
+
+	void resolvedResourceIdentity(smoke::Context const&)
+	{
+		auto const definition = core::resolveAgentTypeResource("human.agent.lua");
+		require(definition.has_value(),
+			"The bundled Human Agent type resource did not resolve");
+		require(definition->typeId == "Human" && definition->displayName == "Human"
+			&& definition->resourceName == "human.agent.lua",
+			"The resolved bundled Human resource lost its identity");
+		require(definition->source == core::bundledHumanAgentType().source,
+			"The resolved bundled Human resource drifted from the embedded definition");
+	}
+
+	void resolvedResourceUnavailable(smoke::Context const&)
+	{
+		require(!core::resolveAgentTypeResource("no-such.agent.lua").has_value(),
+			"An unknown Agent type resource resolved");
+	}
+
+	void previewMatchesPlacement(smoke::Context const&)
+	{
+		core::World world("Preview agreement", 8, 2);
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		auto const id = world.createAgent("Human", "Placed", corridor, 0, 1.0f);
+		auto const* agent = world.lookupAgent(id).entity;
+		require(agent != nullptr, "The placed Human was not found");
+		auto const& baseline = agent->getPhysicalBaseline();
+		auto const preview = core::Agent::placementDimensions("Human");
+		require(preview.x == baseline.width && preview.y == baseline.standingHeight,
+			"The preview dimensions did not match the scripted placement baseline");
+		auto const modified = core::Agent::placementDimensions("Human", 1.5f);
+		require(modified.x == baseline.width
+			&& modified.y == baseline.standingHeight * 1.5f,
+			"The preview did not apply the height modifier to the scripted baseline");
+	}
+
+	void scriptedAuthorizationPlacement(smoke::Context const&)
+	{
+		core::World world("Authorization", 8, 2);
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		auto const id = world.createAgent("Human", "Granted", corridor, 0, 1.0f,
+			std::set<core::AccessPermissionId>{}, std::set<core::PermissionSetId>{});
+		auto const* agent = world.lookupAgent(id).entity;
+		require(agent && agent->getTypeId() == "Human"
+			&& agent->getTypeResourceName() == "human.agent.lua",
+			"The scripted authorization placement lost Human identity");
+		require(agent->getPhysicalBaseline().walkSpeed
+				== core::bundledHumanBaseline().walkSpeed,
+			"The scripted authorization placement did not use the scripted baseline");
+	}
 }
 
 void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
@@ -380,4 +433,8 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesLegacyAndScriptedLoading", legacyAndScriptedHumanLoading });
 	checks.push_back({ "agentTypesDuplicateTypeIdRejected", duplicateTypeIdIsRejected });
 	checks.push_back({ "agentTypesResetReconstructsScriptedInstances", resetReconstructsScriptedInstances });
+	checks.push_back({ "agentTypesResolvedResourceIdentity", resolvedResourceIdentity });
+	checks.push_back({ "agentTypesResolvedResourceUnavailable", resolvedResourceUnavailable });
+	checks.push_back({ "agentTypesPreviewMatchesPlacement", previewMatchesPlacement });
+	checks.push_back({ "agentTypesScriptedAuthorizationPlacement", scriptedAuthorizationPlacement });
 }

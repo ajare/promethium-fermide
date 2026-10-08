@@ -28,9 +28,9 @@ namespace core
 	public:
 		virtual ~CatalogResourceResolver() = default;
 
-		// `type` is "FurnitureCatalogue", "AgentTagRegistry", or
-		// "AgentBehaviourRegistry". Returns an empty path when the Resource is
-		// unknown.
+		// `type` is "FurnitureCatalogue", "AgentTagRegistry",
+		// "AgentBehaviourRegistry", or "AgentType". Returns an empty path when
+		// the Resource is unknown.
 		virtual std::filesystem::path catalogSource(
 			std::string const& type, std::string const& resourceName) const = 0;
 	};

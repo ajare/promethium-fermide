@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -41,4 +43,21 @@ namespace core
 	// True when `name` is an acceptable type display name (non-empty, bounded,
 	// no control characters).
 	bool agentTypeDisplayNameIsValid(std::string_view name);
+
+	// Resolves a manifest-registered `.agent.lua` application Resource by its
+	// resource name (ADR 0010). When a resource-managed loader is installed it
+	// is authoritative; otherwise the installed catalog resolver locates the
+	// source, which is read and preflighted directly. The preflight runs in an
+	// isolated scratch sandbox: no World is mutated and no Agent is created.
+	// Returns nullopt when the resource is unknown, unreadable, or invalid.
+	std::optional<AgentTypeDefinition> resolveAgentTypeResource(
+		std::string const& resourceName);
+
+	// The rendering service installs its resource-managed loader so the editor
+	// resolves the loaded managed resource; headless tools omit it and resolve
+	// the manifest source directly. Passing an empty loader restores file
+	// resolution.
+	using AgentTypeResourceLoader =
+		std::function<std::optional<AgentTypeDefinition>(std::string const&)>;
+	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader);
 }

@@ -455,6 +455,7 @@ pf_add_smoke_module(pf-smoke-editor
         agent/GroupIdAllocationEditor.cpp
         agent/GroupTopologyEditor.cpp
         agent/GroupClipboardEditor.cpp
+        agent/AgentTypeEditor.cpp
         agent/ColourEditor.cpp
         agent/WalkSpeedEditor.cpp
         agent/HeightEditor.cpp

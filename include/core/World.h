@@ -704,6 +704,12 @@ namespace core
 		// for the named type. Throws (leaving no partial Agent) on any failure.
 		std::unique_ptr<Agent> makeScriptAgent(std::string const& typeId,
 			std::string const& name);
+		// Constructs a script-backed Agent and applies its direct Access
+		// permission grants and Permission set assignments before placement.
+		// Throws (leaving no partial Agent) on any failure.
+		std::unique_ptr<Agent> makeScriptAgentForPlacement(std::string const& typeId,
+			std::string const& name, std::set<AccessPermissionId> const& grants,
+			std::set<PermissionSetId> const& sets);
 
 		bool validateAgentBehaviourAssignmentAgainst(
 			AgentBehaviourRegistry const& registry, AgentBehaviourId behaviour,
@@ -2476,6 +2482,14 @@ namespace core
 		// baseline, and publishes the Agent only after the constructor succeeds.
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset);
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId);
+
+		// Script-backed creation with initial authorization, used by editor
+		// placement: the same fresh live Lua instance and frozen baseline as the
+		// plain overloads, plus direct grants and Permission set assignments.
+		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
+		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId,
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
 
 		// Registers a `.agent.lua` type definition under `resourceName`. The
 		// source is validated (type ID, display name, new()) before it is

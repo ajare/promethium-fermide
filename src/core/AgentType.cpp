@@ -1,11 +1,17 @@
 #include "core/AgentType.h"
 #include "core/AgentTypeRuntime.h"
 #include "core/SerializationException.h"
+#include "core/WorldDocument.h"
+
+#include <fstream>
+#include <iterator>
 
 namespace core
 {
 	namespace
 	{
+		AgentTypeResourceLoader gAgentTypeResourceLoader;
+
 		// The bundled Human Agent type. This source is the single authority for
 		// Human physical outcomes in this slice; resources/test-worlds/human.agent.lua
 		// must remain byte-for-byte identical (a smoke check asserts this).
@@ -84,5 +90,33 @@ return {
 				return false;
 		}
 		return true;
+	}
+
+	std::optional<AgentTypeDefinition> resolveAgentTypeResource(
+		std::string const& resourceName)
+	{
+		if (gAgentTypeResourceLoader) return gAgentTypeResourceLoader(resourceName);
+		auto const path = resolveCatalogSource("AgentType", resourceName);
+		if (path.empty()) return std::nullopt;
+		std::ifstream input(path, std::ios::binary);
+		if (!input) return std::nullopt;
+		std::string source{
+			std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
+		if (!input.good() && !input.eof()) return std::nullopt;
+		auto preflight = AgentTypeRuntimeAdapter::preflightType(resourceName, source);
+		if (!preflight.loaded || !agentTypeIdIsValid(preflight.typeId)
+			|| !agentTypeDisplayNameIsValid(preflight.displayName))
+			return std::nullopt;
+		AgentTypeDefinition definition;
+		definition.typeId = std::move(preflight.typeId);
+		definition.displayName = std::move(preflight.displayName);
+		definition.resourceName = resourceName;
+		definition.source = std::move(source);
+		return definition;
+	}
+
+	void setAgentTypeResourceLoader(AgentTypeResourceLoader loader)
+	{
+		gAgentTypeResourceLoader = std::move(loader);
 	}
 }

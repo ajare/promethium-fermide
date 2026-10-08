@@ -34,6 +34,7 @@
 #include "core/AgentGroup.h"
 #include "core/AgentTagRegistry.h"
 #include "core/AgentBehaviourRegistry.h"
+#include "core/AgentType.h"
 #include "core/World.h"
 #include "core/Marker.h"
 #include "core/Exceptions.h"
@@ -1443,6 +1444,32 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	if (!world->canPlaceAgentInLocation(sector->getIndex(), payload.directAccessGrants,
 		payload.permissionSets, &diagnostic)) return false;
 
+	// Resolve the managed Agent type resource (ADR 0010/0019) and use its
+	// stable type ID for the script-backed World construction path. A missing,
+	// unreadable, or mismatched resource refuses placement before any write.
+	auto const resolved = core::resolveAgentTypeResource("human.agent.lua");
+	if (!resolved)
+	{
+		diagnostic = "The bundled Human Agent type resource is unavailable";
+		return false;
+	}
+	if (resolved->typeId != payload.type)
+	{
+		diagnostic = "The bundled Human Agent type resource declares an unexpected type ID";
+		return false;
+	}
+	if (!world->hasAgentType(resolved->typeId))
+	{
+		std::string attachDiagnostic;
+		if (!world->attachAgentType(resolved->resourceName, resolved->source,
+			&attachDiagnostic))
+		{
+			diagnostic = "The bundled Human Agent type resource could not be loaded: "
+				+ attachDiagnostic;
+			return false;
+		}
+	}
+
 	// Captured before the first write, so the undo entry holds the document
 	// exactly as it stood before the paste. Every refusal below drops it
 	// uncommitted: no entry, and nothing to undo.
@@ -1481,7 +1508,8 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 	{
 		// The Agent is created first: if that is refused, no group has been
 		// made yet, so the common failure leaves nothing behind at all.
-		agentId = world->createAgent(payload.name, sector->getIndex(), levelOffset, localX,
+		agentId = world->createAgent(resolved->typeId, payload.name,
+			sector->getIndex(), levelOffset, localX,
 			payload.directAccessGrants, payload.permissionSets);
 		auto const created = world->lookupAgent(agentId).entity;
 		if (!created)

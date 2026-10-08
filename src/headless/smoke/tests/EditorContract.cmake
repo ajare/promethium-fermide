@@ -76,6 +76,9 @@ set(editor_names
     agent/cuttingAGroupedAgentLeavesItsSourceGroupDefined
     agent/authorizationIsPreservedOnlyInTheOriginatingWorld
     agent/anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
+    agentTypesEditorPlacementCreatesScriptedHuman
+    agentTypesEditorPlacementFailureIsAtomic
+    agentTypesEditorPlacementMismatchIsRefused
     agent/assignmentAndPropertyAdditionConflictsAreAtomic
     agent/editorCommitsRevisionedColourAndUndoRedoExactly
     agent/conflictingColourRedoIsRefusedAtomically

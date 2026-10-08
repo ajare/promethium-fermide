@@ -8557,6 +8557,26 @@ namespace core
 		return agent;
 	}
 
+	std::unique_ptr<Agent> World::makeScriptAgentForPlacement(std::string const& typeId,
+		std::string const& name, set<AccessPermissionId> const& grants,
+		set<PermissionSetId> const& sets)
+	{
+		auto agent = makeScriptAgent(typeId, name);
+		for (auto permission : grants)
+		{
+			auto found = lookupAccessPermission(permission);
+			if (!found) throw invalid_argument(found.diagnostic);
+			agent->mDirectAccessGrants.set(permission.value - 1);
+		}
+		for (auto permissionSet : sets)
+		{
+			auto found = lookupPermissionSet(permissionSet);
+			if (!found) throw invalid_argument(found.diagnostic);
+		}
+		agent->mPermissionSets = sets;
+		return agent;
+	}
+
 	bool World::attachAgentType(std::string resourceName, std::string source,
 		std::string* diagnostic)
 	{
@@ -8686,6 +8706,22 @@ namespace core
 	{
 		invalidateSimulationSnapshot();
 		return mSimulationCoordinator.createAgent(std::move(typeId), name, sectorId);
+	}
+
+	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
+		uint32_t levelOffset, float xOffset, set<AccessPermissionId> const& grants,
+		set<PermissionSetId> const& sets)
+	{
+		return addOwnedAgentToSector(
+			makeScriptAgentForPlacement(typeId, name, grants, sets),
+			sectorId, levelOffset, xOffset);
+	}
+
+	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
+		set<AccessPermissionId> const& grants, set<PermissionSetId> const& sets)
+	{
+		return addOwnedAgentToSector(
+			makeScriptAgentForPlacement(typeId, name, grants, sets), sectorId);
 	}
 
 	void World::wakeAllAgents()
