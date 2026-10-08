@@ -3,7 +3,7 @@
 -- It needs no C++ subtype or factory change: the host validates and freezes
 -- this baseline and every simulation consumer reads the frozen values.
 return {
-    api_version = 1,
+    api_version = 2,
     type_id = "Scout",
     display_name = "Scout",
     new = function()
@@ -15,10 +15,21 @@ return {
             climb_speed = 0.5,
             stair_ascent_speed = 0.6,
             stair_descent_speed = 0.7,
-            sitting_height_ratio = 0.5,
-            crouching_height_ratio = 0.5,
-            crawling_height_ratio = 0.25,
-            crawling_speed_ratio = 0.75,
+            poses = {
+                standing = {}, sitting = { height_ratio = 0.5 }, lying = {},
+                crouching = { height_ratio = 0.5 }, crawling = { height_ratio = 0.25 },
+            },
+            automatic_poses = {
+                room_movement = {
+                    { pose = "standing", speed_ratio = 1 },
+                    { pose = "crouching", speed_ratio = 1 },
+                    { pose = "crawling", speed_ratio = 1 },
+                },
+                door_crossing = {
+                    { pose = "standing", speed_ratio = 1 },
+                    { pose = "crawling", speed_ratio = 0.75 },
+                },
+            },
             mobility_profile = {
                 staircase = "can_use", escalator = "can_use", stairwell = "can_use",
                 ladder = "can_use", lift = "can_use", platform_lift = "can_use",

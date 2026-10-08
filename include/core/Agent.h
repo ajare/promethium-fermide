@@ -10,6 +10,7 @@
 #include <map>
 #include "core/DeviceCondition.h"
 #include <utility>
+#include <vector>
 
 #include "core/SectorPosition.h"
 #include "core/Shape.h"
@@ -203,10 +204,17 @@ namespace core
 
 	// Type-owned physical defaults, before shared authored modifiers. Resource
 	// slot spacing and environmental dimensions are not Agent baselines.
-	// crawlingSpeedRatio divides threshold motion durations (Crawling runs at
-	// ratio x ordinary speed, so its duration is the ordinary duration / ratio).
 	// reach is the interaction distance for which the type's geometry is
 	// authoritative; it is validated and frozen like every other baseline field.
+	struct AutomaticPoseChoice
+	{
+		Pose pose;
+		float speedRatio;
+		bool operator==(AutomaticPoseChoice const&) const = default;
+	};
+
+	enum class AutomaticPoseContext { RoomMovement, DoorCrossing };
+
 	struct AgentPhysicalBaseline
 	{
 		float width;
@@ -216,10 +224,23 @@ namespace core
 		float climbSpeed;
 		float stairAscentSpeed;
 		float stairDescentSpeed;
-		float sittingHeightRatio;
-		float crouchingHeightRatio;
-		float crawlingHeightRatio;
-		float crawlingSpeedRatio;
+		// Only declared poses exist. Standing/Lying have canonical geometry;
+		// lowered poses carry their validated height ratio.
+		std::map<Pose, float> poses;
+		std::vector<AutomaticPoseChoice> roomMovement;
+		std::vector<AutomaticPoseChoice> doorCrossing;
+
+		bool supportsPose(Pose pose) const { return poses.contains(pose); }
+		std::vector<AutomaticPoseChoice> const& automaticPoses(AutomaticPoseContext context) const
+		{
+			return context == AutomaticPoseContext::RoomMovement ? roomMovement : doorCrossing;
+		}
+		std::optional<float> automaticSpeedRatio(AutomaticPoseContext context, Pose pose) const
+		{
+			for (auto const& choice : automaticPoses(context))
+				if (choice.pose == pose) return choice.speedRatio;
+			return std::nullopt;
+		}
 	};
 
 	class Agent : public Serializable
@@ -821,15 +842,25 @@ namespace core
 
 		float getWidth() const;
 
+		bool supportsPose(Pose pose) const { return getPhysicalBaseline().supportsPose(pose); }
+		// Capability observation, not a context fit/selection query. Unsupported
+		// poses have no envelope, rather than inheriting Human geometry.
+		std::optional<Vector2> getPoseEnvelope(Pose pose) const
+		{
+			auto const& physical = getPhysicalBaseline();
+			if (!physical.supportsPose(pose)) return std::nullopt;
+			if (pose == Pose::Lying) return Vector2{ getStandingHeight(), getWidth() };
+			return Vector2{ getWidth(), getStandingHeight() * physical.poses.at(pose) };
+		}
 		Pose getPose() const { return mPose; }
 		float getPoseHeightScale() const
 		{
 			auto const& physical = getPhysicalBaseline();
 			switch (mPose)
 			{
-			case Pose::Sitting: return physical.sittingHeightRatio;
-			case Pose::Crouching: return physical.crouchingHeightRatio;
-			case Pose::Crawling: return physical.crawlingHeightRatio;
+			case Pose::Sitting:
+			case Pose::Crouching:
+			case Pose::Crawling: return physical.poses.at(mPose);
 			default: return 1.0f;
 			}
 		}
@@ -852,7 +883,9 @@ namespace core
 		// than retaining a lowered Action pose at the threshold.
 		bool admitsAutomaticDoorCrawling(bool beginningMovement) const
 		{
-			return beginningMovement || mFurnitureUse || mPose == Pose::Standing;
+			return supportsPose(Pose::Crawling)
+				&& getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling)
+				&& (beginningMovement || mFurnitureUse || mPose == Pose::Standing);
 		}
 		// Top of the Crawling envelope above the supporting Floor, mirroring the
 		// departure prediction of getTraversalDoorClearanceExtent for the

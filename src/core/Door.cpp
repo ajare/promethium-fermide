@@ -124,8 +124,9 @@ namespace core
 			auto const available = getPosition().y + openFraction * fullHeight - approachFloorY;
 			if (agent.getTraversalDoorClearanceExtent(beginningMovement)
 				<= available + ClearanceTolerance) return DoorCrossingMode::Standing;
-			if (agent.getTraversalCrawlingDoorClearanceExtent(beginningMovement)
-				<= available + ClearanceTolerance) return DoorCrossingMode::Crawling;
+			if (agent.getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling)
+				&& agent.getTraversalCrawlingDoorClearanceExtent(beginningMovement)
+					<= available + ClearanceTolerance) return DoorCrossingMode::Crawling;
 			return DoorCrossingMode::None;
 		}
 		// Horizontal openings keep their full height; the frozen fraction narrows

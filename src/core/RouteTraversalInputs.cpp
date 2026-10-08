@@ -143,9 +143,9 @@ namespace core
 		case EdgeType::Door: case EdgeType::BulkheadDoor:
 		{
 			c.motionSeconds = type == EdgeType::Door
-				? (crawling ? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().crawlingSpeedRatio
+				? (crawling ? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value()
 					: 6.0f / 60.0f)
-				: walking() / (crawling ? context.agent->getPhysicalBaseline().crawlingSpeedRatio : 1.0f);
+				: walking() / (crawling ? context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value() : 1.0f);
 			facts.optimisticLowerBoundSeconds = c.motionSeconds;
 			if (securityScanner)
 			{

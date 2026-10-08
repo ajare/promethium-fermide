@@ -57,7 +57,7 @@ namespace
 		std::string const& newBody)
 	{
 		return "return {\n"
-			"    api_version = 1,\n"
+			"    api_version = 2,\n"
 			"    type_id = \"" + typeId + "\",\n"
 			"    display_name = \"" + displayName + "\",\n"
 			"    new = function()\n" + newBody + "\n"
@@ -75,10 +75,8 @@ namespace
 			"            climb_speed = 0.2,\n"
 			"            stair_ascent_speed = 0.3,\n"
 			"            stair_descent_speed = 0.35,\n"
-			"            sitting_height_ratio = 0.5,\n"
-			"            crouching_height_ratio = 0.6,\n"
-			"            crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5,\n"
+			"            poses = { standing = {}, sitting = {height_ratio=0.5}, lying = {}, crouching = {height_ratio=0.6}, crawling = {height_ratio=0.4} },\n"
+			"            automatic_poses = { room_movement = {{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=1},{pose='crawling',speed_ratio=1}}, door_crossing = {{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=0.5}} },\n"
 			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' },\n" + overrides
 			+ "        }\n";
 	}
@@ -101,9 +99,9 @@ namespace
 		require(physical.width == 0.4f && physical.standingHeight == 0.45f
 			&& physical.reach == 0.25f && physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f && physical.stairAscentSpeed == 0.35f
-			&& physical.stairDescentSpeed == 0.45f && physical.sittingHeightRatio == 0.6f
-			&& physical.crouchingHeightRatio == 0.6f && physical.crawlingHeightRatio == 0.3f
-			&& physical.crawlingSpeedRatio == 0.5f,
+			&& physical.stairDescentSpeed == 0.45f && physical.poses.at(core::Pose::Sitting) == 0.6f
+			&& physical.poses.at(core::Pose::Crouching) == 0.6f && physical.poses.at(core::Pose::Crawling) == 0.3f
+			&& physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.5f,
 			"Scripted Human baseline did not match the bundled definition");
 	}
 
@@ -152,10 +150,10 @@ namespace
 			&& world.getSimulationSnapshot().agents.size() == 1,
 			"Resource-backed query factory refused an arbitrary type or published an Agent");
 		require(world.attachAgentType("unit.agent.lua", typeSource("Unit", "Unit",
-			validBaseline("sitting_height_ratio=1, crouching_height_ratio=1,\n"
-				"crawling_height_ratio=1, crawling_speed_ratio=1,\n")), &diagnostic), diagnostic);
+			validBaseline("poses={standing={},sitting={height_ratio=1},crouching={height_ratio=1},crawling={height_ratio=1}},\n"
+				"automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=1}}},\n")), &diagnostic), diagnostic);
 		auto unit = world.lookupAgent(world.createAgent("Unit", "Unit", corridor, 0, 4.f)).entity;
-		require(unit->getPhysicalBaseline().crawlingSpeedRatio == 1.f
+		require(unit->getPhysicalBaseline().automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 1.f
 			&& unit->getTraversalCrawlingDoorClearanceExtent(true) == unit->getStandingHeight(),
 			"The inclusive ratio upper boundary was refused or changed");
 	}
@@ -168,12 +166,12 @@ namespace
 		std::vector<AttachCase> attachCases;
 		attachCases.push_back({ "malformed Lua", "this is not valid lua" });
 		attachCases.push_back({ "missing constructor",
-			"return { api_version = 1, type_id = \"NoCtor\", display_name = \"No Ctor\" }\n" });
+			"return { api_version = 2, type_id = \"NoCtor\", display_name = \"No Ctor\" }\n" });
 		attachCases.push_back({ "invalid constructor",
-			"return { api_version = 1, type_id = 'NoCtor', display_name = 'No Ctor', new = 42 }" });
+			"return { api_version = 2, type_id = 'NoCtor', display_name = 'No Ctor', new = 42 }" });
 		attachCases.push_back({ "module exception", "error('module refused')" });
 		attachCases.push_back({ "invalid type id",
-			"return { api_version = 1, type_id = \"bad id!\", display_name = \"Bad\", new = function() return {} end }\n" });
+			"return { api_version = 2, type_id = \"bad id!\", display_name = \"Bad\", new = function() return {} end }\n" });
 		for (auto const& test : attachCases)
 		{
 			core::World world("Reject", 4, 2);
@@ -189,9 +187,7 @@ namespace
 		std::vector<ConstructCase> constructCases;
 		// Every field is tested, and every failure names the offending field.
 		for (auto const* field : { "width", "standing_height", "reach", "walk_speed",
-			"climb_speed", "stair_ascent_speed", "stair_descent_speed",
-			"sitting_height_ratio", "crouching_height_ratio", "crawling_height_ratio",
-			"crawling_speed_ratio" })
+			"climb_speed", "stair_ascent_speed", "stair_descent_speed" })
 		{
 			for (auto const* value : { "nil", "0", "-1", "0/0", "math.huge",
 				"-math.huge", "false", "'0.5'", "{}", "1e-300" })
@@ -238,6 +234,141 @@ namespace
 			require(world.getSimulationSnapshot().agents.empty()
 				&& world.getSector(corridor)->getAgents().empty(),
 				("Invalid baseline left a partial Agent: " + test.name).c_str());
+		}
+	}
+
+	void poseDeclarations(smoke::Context const& context)
+	{
+		auto const robot = readFile(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
+		core::World world("Pose declarations", 8, 2);
+		auto const corridor = world.addCorridor(0, 0, 8);
+		world.finishBuild();
+		std::string diagnostic;
+		require(world.attachAgentType("standing-robot.agent.lua", robot, &diagnostic), diagnostic);
+		auto const id = world.createAgent("StandingRobot", "Robot", corridor, 0, 1.f);
+		auto const* agent = world.lookupAgent(id).entity;
+		require(agent && agent->supportsPose(core::Pose::Standing)
+			&& agent->getPoseEnvelope(core::Pose::Standing)->y == 0.4f,
+			"Standing-only resource did not construct its canonical envelope");
+		for (auto pose : { core::Pose::Sitting, core::Pose::Lying, core::Pose::Crouching, core::Pose::Crawling })
+			require(!agent->supportsPose(pose) && !agent->getPoseEnvelope(pose),
+				"A Standing-only type acquired an unsupported envelope");
+		world.pauseSimulation();
+		require(world.setAgentIndividualHeightModifier(id, 0.8f), "Could not modify Robot Height");
+		require(agent->getPoseEnvelope(core::Pose::Standing)->y == 0.4f * 0.8f
+			&& !agent->getPoseEnvelope(core::Pose::Crawling), "Height changed capabilities");
+		for (bool binary : { false, true })
+		{
+			core::World restored("Robot roundtrip", 2, 2);
+			require(loadWorld(serializeWorld(world, binary), binary, restored), "Robot document failed to load");
+			auto const* loaded = restored.lookupAgent(id).entity;
+			require(loaded && loaded->getTypeId() == "StandingRobot"
+				&& loaded->getTypeResourceName() == "standing-robot.agent.lua"
+				&& !loaded->supportsPose(core::Pose::Crawling), "Robot capability/identity roundtrip changed");
+		}
+		auto const yaml = serializeWorld(world, false);
+		require(yaml.find("automatic_poses") == std::string::npos && yaml.find("poses:") == std::string::npos,
+			"Document persisted frozen pose definitions");
+
+		// Supporting a pose does not require automatic selection in either list.
+		auto source = typeSource("Explicit", "Explicit", validBaseline(
+			"automatic_poses={room_movement={{pose='standing',speed_ratio=0.8}},door_crossing={{pose='standing',speed_ratio=0.9}}},\n"));
+		require(world.attachAgentType("explicit.agent.lua", source, &diagnostic), diagnostic);
+		auto const* explicitAgent = world.lookupAgent(world.createAgent("Explicit", "Explicit", corridor, 0, 3.f)).entity;
+		require(explicitAgent->supportsPose(core::Pose::Crawling)
+			&& !explicitAgent->getPhysicalBaseline().automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling)
+			&& explicitAgent->getPoseEnvelope(core::Pose::Crawling)->y == 0.6f * 0.4f
+			&& explicitAgent->getPoseEnvelope(core::Pose::Lying)->y == 0.5f,
+			"Supported-but-not-automatic poses lost their canonical envelopes");
+		auto const& human = core::bundledHumanBaseline();
+		require(human.roomMovement == std::vector<core::AutomaticPoseChoice>{
+			{core::Pose::Standing, 1.f}, {core::Pose::Crouching, 1.f}, {core::Pose::Crawling, 1.f}}
+			&& human.doorCrossing == std::vector<core::AutomaticPoseChoice>{
+			{core::Pose::Standing, 1.f}, {core::Pose::Crawling, 0.5f}}, "Human context orders/speeds changed");
+	}
+
+	void invalidPoseDeclarations(smoke::Context const&)
+	{
+		std::vector<std::pair<std::string, std::string>> cases{
+			{"poses=nil,", "poses"}, {"poses=42,", "poses"},
+			{"poses={},", "poses.standing"}, {"poses={standing=false},", "poses.standing"},
+			{"poses={standing={},sitting=42},", "poses.sitting"},
+			{"poses={standing={},flying={}},", "poses.flying"},
+			{"poses={standing={},[1]={}},", "poses"},
+			{"poses={standing={height_ratio=1}},", "poses.standing.height_ratio"},
+			{"poses={standing={},lying={height_ratio=1}},", "poses.lying.height_ratio"},
+			{"poses={standing={},sitting={ratio=0.5}},", "poses.sitting.ratio"},
+			{"automatic_poses=nil,", "automatic_poses"},
+			{"automatic_poses={room_movement={},door_crossing={}},", "room_movement"},
+			{"automatic_poses={unknown={}},", "automatic_poses.unknown"},
+			{"sitting_height_ratio=0.5,", "sitting_height_ratio"},
+		};
+		for (auto pose : { "sitting", "crouching", "crawling" })
+			for (auto value : { "nil", "'0.5'", "0/0", "math.huge", "-math.huge", "0", "-1", "1.01", "1e-300", "1e300", "false", "{}" })
+				cases.emplace_back(std::string("poses={standing={},") + pose + "={height_ratio=" + value + "}},", std::string("poses.") + pose + ".height_ratio");
+		for (auto key : { "room_movement", "door_crossing" })
+		{
+			auto contract = [&](std::string const& list) {
+				return std::string("automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=1}},") + key + "=" + list + "},";
+			};
+			for (auto list : { "nil", "false", "{}", "{[2]={pose='standing',speed_ratio=1}}",
+				"{[1]={pose='standing',speed_ratio=1},[3]={pose='crawling',speed_ratio=1}}",
+				"{foo={pose='standing',speed_ratio=1}}", "{{pose='standing',speed_ratio=1},{pose='standing',speed_ratio=1}}",
+				"{{pose='crawling',speed_ratio=1}}", "{{pose='standing',speed_ratio=1},{pose='sitting',speed_ratio=1}}",
+				"{{pose='standing',speed_ratio=1},{pose='flying',speed_ratio=1}}",
+				"{{pose='standing',speed_ratio=1},{pose='lying',speed_ratio=1}}",
+				"{{pose='standing',speed_ratio=1},false}",
+				"{{speed_ratio=1}}", "{{pose=7,speed_ratio=1}}", "{{pose='standing',speed_ratio=1,extra=1}}" })
+				cases.emplace_back(contract(list), key);
+			for (auto value : { "nil", "'0.5'", "0/0", "math.huge", "-math.huge", "0", "-1", "1.01", "1e-300", "1e300", "false", "{}" })
+				cases.emplace_back(contract(std::string("{{pose='standing',speed_ratio=") + value + "}}"), std::string(key) + "[1].speed_ratio");
+			cases.emplace_back("poses={standing={}}," + contract("{{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=1}}"), key);
+		}
+		for (auto const& [overrides, expected] : cases)
+		{
+			core::World world("Invalid pose", 4, 2);
+			auto const corridor = world.addCorridor(0, 0, 4);
+			world.finishBuild();
+			auto const source = typeSource("Invalid", "Invalid", validBaseline(overrides));
+			std::string diagnostic;
+			require(world.attachAgentType("invalid-pose.agent.lua", source, &diagnostic), diagnostic);
+			// Production preview and placement use independent constructors with
+			// the same refusal contract, without partially publishing an Agent.
+			core::AgentTypeDefinition definition{"Invalid", "Invalid", "invalid-pose.agent.lua", source};
+			{
+				struct LoaderReset { ~LoaderReset() { core::setAgentTypeResourceLoader({}); } } reset;
+				core::setAgentTypeResourceLoader([definition](std::string const& name) -> std::optional<core::AgentTypeDefinition> {
+					if (name == definition.resourceName) return definition;
+					return std::nullopt;
+				});
+				require(!core::agentTypeResourcePreview(definition.resourceName, diagnostic)
+					&& diagnostic.find(definition.resourceName) != std::string::npos
+					&& diagnostic.find(expected) != std::string::npos,
+					"Malformed pose preview was accepted or undiagnosed: " + overrides + " " + diagnostic);
+			}
+			auto const before = serializeWorld(world, false);
+			bool refused = false;
+			try { world.createAgent("Invalid", "Invalid", corridor, 0, 1.f); }
+			catch (std::exception const& error) { diagnostic = error.what(); refused = true; }
+			require(refused && diagnostic.find("invalid-pose.agent.lua") != std::string::npos
+				&& diagnostic.find(expected) != std::string::npos,
+				"Pose declaration was accepted or poorly diagnosed: " + overrides + " " + diagnostic);
+			require(world.getSimulationSnapshot().agents.empty() && world.getSector(corridor)->getAgents().empty()
+				&& serializeWorld(world, false) == before, "Malformed poses partially mutated World");
+		}
+		for (auto version : { "1", "3", "nil", "'2'", "2.5" })
+		{
+			auto source = typeSource("Version", "Version", validBaseline());
+			agent_smoke::replaceSource(source, "api_version = 2", std::string("api_version = ") + version);
+			core::World world("Version refusal", 4, 2);
+			std::string diagnostic;
+			require(!world.attachAgentType("version.agent.lua", source, &diagnostic)
+				&& !world.hasAgentType("Version") && diagnostic.find("api_version = 2") != std::string::npos
+				&& diagnostic.find("migrate") != std::string::npos && diagnostic.find("automatic_poses") != std::string::npos,
+				"Version refusal lacked explicit v1 migration guidance");
+			core::AgentTypeRuntimeAdapter runtime;
+			require(!runtime.construct("Version", source, "Version").succeeded,
+				"Direct construction bypassed API version validation");
 		}
 	}
 
@@ -419,15 +550,7 @@ namespace
 		// A module-level counter proves isolation: each new() must start from a
 		// fresh environment, so every instance observes width == 1.0 rather than
 		// a shared, incrementing counter.
-		std::string const counter = "        count = count + 1\n"
-			"        return {\n"
-			"            width = count,\n"
-			"            standing_height = 0.6, reach = 0.3, walk_speed = 0.4,\n"
-			"            climb_speed = 0.2, stair_ascent_speed = 0.3,\n"
-			"            stair_descent_speed = 0.35, sitting_height_ratio = 0.5,\n"
-			"            crouching_height_ratio = 0.6, crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5,\n"
-			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' } }\n";
+		std::string const counter = "count = count + 1\n" + validBaseline("width = count,\n");
 		std::string diagnostic;
 		require(world.attachAgentType("counter.agent.lua",
 			"local count = 0\n" + typeSource("Counter", "Counter", counter), &diagnostic), diagnostic.c_str());
@@ -516,6 +639,9 @@ namespace
 				"count = count + 1\n" + validBaseline(
 					"width = " + std::to_string(width) + " * count,\n"
 					"private_state = { count = count },\n"
+					+ std::string(width > 0.5f
+						? "poses={standing={},crouching={height_ratio=0.8},crawling={height_ratio=0.4}},automatic_poses={room_movement={{pose='standing',speed_ratio=0.9}},door_crossing={{pose='standing',speed_ratio=0.7},{pose='crawling',speed_ratio=0.6}}},\n"
+						: "") +
 					"mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = '"
 					+ std::string(width > 0.5f ? "can_use" : "cannot_use") + "', buttons = 'only_if_no_other_option' },\n"));
 			require(bool(out), "Could not write revision fixture");
@@ -570,6 +696,11 @@ namespace
 					&& agent->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door)
 						== (revised ? core::MobilityUse::CanUse : core::MobilityUse::CannotUse),
 					"Lifetime did not resolve the expected frozen script Mobility revision");
+				require(agent->supportsPose(core::Pose::Lying) == !revised
+					&& agent->supportsPose(core::Pose::Crawling)
+					&& agent->getPoseEnvelope(core::Pose::Crouching)->y == agent->getStandingHeight() * (revised ? 0.8f : 0.6f)
+					&& agent->getPhysicalBaseline().roomMovement.front().speedRatio == (revised ? 0.9f : 1.f),
+					"Lifetime changed or failed to reconstruct frozen pose capabilities/orders");
 			}
 			agent_smoke::requireDoorRoute(candidate, first, back, true); // last-resort second pass
 			agent_smoke::requireDoorRoute(candidate, second, back, revised);
@@ -616,7 +747,8 @@ namespace
 			"Reset changed authored document data, pause or dirty state");
 		require(authored.find("private_state") == std::string::npos
 			&& authored.find("standing_height") == std::string::npos
-			&& authored.find("mobility_profile") == std::string::npos,
+			&& authored.find("mobility_profile") == std::string::npos
+			&& authored.find("automatic_poses") == std::string::npos && authored.find("poses:") == std::string::npos,
 			"Document serialized private state or script defaults");
 		require(world.setAgentIndividualMobilityProfile(first, std::nullopt, &diagnostic), diagnostic);
 		agent_smoke::requireDoorRoute(world, first, back, false); // tag replaces the complete default
@@ -659,6 +791,8 @@ namespace
 			std::string("invalid Lua"),
 			typeSource("Failure", "Failure", "error('Reset constructor refused')"),
 			typeSource("Failure", "Failure", validBaseline("width = 0,\n")),
+			typeSource("Failure", "Failure", validBaseline("poses={standing={},crawling={height_ratio='0.3'}},\n")),
+			typeSource("Failure", "Failure", validBaseline("automatic_poses={},\n")),
 			typeSource("Failure", "Failure", validBaseline("mobility_profile = nil,\n")),
 			typeSource("Failure", "Failure", validBaseline("mobility_profile = { door = 'bad' },\n")),
 			typeSource("WrongIdentity", "Wrong", validBaseline()),
@@ -688,6 +822,24 @@ namespace
 			agent_smoke::requireDoorRoute(world, first, 1, true);
 			agent_smoke::requireDoorRoute(world, second, 1, false);
 			agent_smoke::requireDoorRoute(world, third, 1, false);
+		}
+		// Fresh load validates declarations too, and must leave an existing
+		// target World intact when the currently resolved definition is invalid.
+		write(valid);
+		for (auto const* filename : { "invalid-poses.world.yaml", "invalid-poses.world" })
+			world.saveTo((context.temporaryRoot() / filename).string());
+		write(typeSource("Failure", "Failure", validBaseline("automatic_poses={},\n")));
+		for (auto const* filename : { "invalid-poses.world.yaml", "invalid-poses.world" })
+		{
+			bool refused = false;
+			try { (void)core::loadWorldDocument(context.temporaryRoot() / filename); }
+			catch (std::exception const& error) {
+				auto const message = std::string(error.what());
+				refused = message.find(resource) != std::string::npos && message.find("automatic_poses") != std::string::npos;
+			}
+			require(refused && world.lookupAgent(first).entity == originalFirst
+				&& world.lookupAgent(second).entity == originalSecond && serializeWorld(world, false) == authored,
+				"Malformed pose document load changed the live World or lacked diagnostics");
 		}
 		write(valid);
 		world.resetSimulation();
@@ -821,9 +973,9 @@ namespace
 		require(physical.width == 0.3f && physical.standingHeight == 0.35f
 			&& physical.reach == 0.4f && physical.walkSpeed == 0.9f
 			&& physical.climbSpeed == 0.5f && physical.stairAscentSpeed == 0.6f
-			&& physical.stairDescentSpeed == 0.7f && physical.sittingHeightRatio == 0.5f
-			&& physical.crouchingHeightRatio == 0.5f && physical.crawlingHeightRatio == 0.25f
-			&& physical.crawlingSpeedRatio == 0.75f,
+			&& physical.stairDescentSpeed == 0.7f && physical.poses.at(core::Pose::Sitting) == 0.5f
+			&& physical.poses.at(core::Pose::Crouching) == 0.5f && physical.poses.at(core::Pose::Crawling) == 0.25f
+			&& physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.75f,
 			"Scout's frozen baseline did not match the fixture");
 		require(physical.width != human.width && physical.standingHeight != human.standingHeight
 			&& physical.reach != human.reach && physical.walkSpeed != human.walkSpeed,
@@ -841,7 +993,7 @@ namespace
 		require(near(bounds.x, physical.width) && near(bounds.y, physical.standingHeight),
 			"Scout bounds did not use its frozen baseline");
 		require(agent->getTraversalCrawlingDoorClearanceExtent(true)
-				== physical.standingHeight * physical.crawlingHeightRatio,
+				== physical.standingHeight * physical.poses.at(core::Pose::Crawling),
 			"Scout Crawling clearance did not use its frozen baseline");
 	}
 
@@ -1108,15 +1260,7 @@ namespace
 		// a document or across load: loading reconstructs from source, so the
 		// reloaded World's instance observes width == 1 rather than a persisted
 		// count.
-		std::string const counter = "        count = count + 1\n"
-			"        return {\n"
-			"            width = count,\n"
-			"            standing_height = 0.6, reach = 0.3, walk_speed = 0.4,\n"
-			"            climb_speed = 0.2, stair_ascent_speed = 0.3,\n"
-			"            stair_descent_speed = 0.35, sitting_height_ratio = 0.5,\n"
-			"            crouching_height_ratio = 0.6, crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5,\n"
-			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' } }\n";
+		std::string const counter = "count = count + 1\n" + validBaseline("width = count,\n");
 		core::AgentTypeDefinition counterType;
 		counterType.typeId = "Counter";
 		counterType.displayName = "Counter";
@@ -1153,6 +1297,8 @@ namespace
 
 void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "agentTypesPoseDeclarations", poseDeclarations });
+	checks.push_back({ "agentTypesInvalidPoseDeclarations", invalidPoseDeclarations });
 	checks.push_back({ "agentTypesScriptedHumanIdentity", scriptedHumanIdentity });
 	checks.push_back({ "agentTypesBundledDefinitionMatchesResource", bundledDefinitionMatchesResource });
 	checks.push_back({ "agentTypesGenericScriptBackedType", genericScriptBackedType });

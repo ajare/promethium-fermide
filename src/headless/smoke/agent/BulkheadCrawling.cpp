@@ -83,7 +83,7 @@ void runBulkheadCrawlingJourneys(smoke::Context const&)
 			if (fits)
 			{
 				auto motion = edge->getLength() / agent->getWalkSpeed()
-					/ (crawls ? agent->getPhysicalBaseline().crawlingSpeedRatio : 1.0f);
+					/ (crawls ? agent->getPhysicalBaseline().automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() : 1.0f);
 				require(std::abs(direct.components.motionSeconds - motion) < .00001f
 					&& std::abs(captured.components.motionSeconds - motion) < .00001f,
 					"Bulkhead crawling cost is not type-ratio-slowed motion");

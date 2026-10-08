@@ -76,6 +76,8 @@ set(editor_names
     agent/cuttingAGroupedAgentLeavesItsSourceGroupDefined
     agent/authorizationIsPreservedOnlyInTheOriginatingWorld
     agent/anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
+    agentTypesPreviewQueriesReuseValidatedResource
+    agentTypesManagedPreviewIsReadOnly
     agentTypesScriptedClipboardAndDeletionHistory
     agentTypesScriptedClipboardRefusalAndLegacy
     agentTypesExternalImportPlacesAndReopens
@@ -98,6 +100,7 @@ set(editor_names
     agent/walkSpeedSelectionReportsSampleAndSource
     agent/heightRangeEditsAreSingleExactTransactions
     agent/heightChangesOnlyBoundsAndRendering
+    agent/mobilityProfileEditorSnapshotsCurrentEffectiveProfile
     agent/selectionShowsCurrentPose
     tags/savedWorldCreatesAndReopensAdjacentRegistry
     tags/selectionEnforcesBasenameExtensionAndDirectory

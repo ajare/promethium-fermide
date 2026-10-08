@@ -1131,8 +1131,9 @@ namespace core
 
 	float Agent::getTraversalCrawlingDoorClearanceExtent(bool beginningMovement) const
 	{
-		auto const crawlingHeight = getStandingHeight()
-			* getPhysicalBaseline().crawlingHeightRatio;
+		auto const envelope = getPoseEnvelope(Pose::Crawling);
+		if (!envelope) return std::numeric_limits<float>::infinity();
+		auto const crawlingHeight = envelope->y;
 		return (beginningMovement || mFurnitureUse)
 			? crawlingHeight
 			: getSupportElevation() + crawlingHeight;
@@ -1150,12 +1151,12 @@ namespace core
 		auto const ceiling = sector.getEffectiveTopLevelHeight();
 		if (standing <= ceiling + Door::ClearanceTolerance) return Pose::Standing;
 		auto const& physical = getPhysicalBaseline();
-		if (standing * physical.crouchingHeightRatio <= ceiling + Door::ClearanceTolerance)
+		if (supportsPose(Pose::Crouching)
+			&& standing * physical.poses.at(Pose::Crouching) <= ceiling + Door::ClearanceTolerance)
 			return Pose::Crouching;
-		// The authored floor of the height scale (0.2 x the standard height) still
-		// clears the Crawling envelope of the tallest possible Agent, so Crawling
-		// is the effective floor rather than an unreachable "no fit" state.
-		return Pose::Crawling;
+		// Preserve existing Human selection in this declaration slice. Full
+		// context selection and no-fit refusal are delivered by #522.
+		return supportsPose(Pose::Crawling) ? Pose::Crawling : Pose::Standing;
 	}
 
 	void Agent::syncPoseToSector()
@@ -1929,7 +1930,7 @@ namespace core
 			}
 			mTraversalTask->traversalTicksRemaining =
 				doorCrossing ? (mTraversalTask->crawling
-					? static_cast<uint64_t>(6.0f / getPhysicalBaseline().crawlingSpeedRatio)
+					? static_cast<uint64_t>(6.0f / getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value())
 					: 6) : 0;
 			if (mTraversalTask->edge->getType() == EdgeType::Staircase
 				&& mTraversalTask->edge->getTraversalSpeed(nullptr) > 0.0f)

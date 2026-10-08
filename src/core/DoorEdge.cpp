@@ -81,7 +81,7 @@ namespace core
 		// Agent type's crawling speed ratio (0.5 for a Human doubles it).
 		auto const crossingSeconds = context.agent
 			&& mode == Door::DoorCrossingMode::Crawling
-			? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().crawlingSpeedRatio
+			? (6.0f / 60.0f) / context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value()
 			: 6.0f / 60.0f;
 		auto facts = thresholdRouteFacts(*this, *mDoor, target, context,
 			crossingSeconds, CORE_DOOR_OPEN_CLOSE_TIME);

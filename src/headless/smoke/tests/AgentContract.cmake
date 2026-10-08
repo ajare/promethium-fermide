@@ -84,10 +84,13 @@ set(agent_checks
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist
+    agentTypesPoseDeclarations
+    agentTypesInvalidPoseDeclarations
     agentTypesScriptedHumanIdentity
     agentTypesBundledDefinitionMatchesResource
     agentTypesGenericScriptBackedType
     agentTypesInvalidBaselinesRejected
+    agentTypesScriptedMobilityProfiles
     agentTypesConstructorFailureLeavesNoPartialAgent
     agentTypesExecutionBudgetEnforced
     agentTypesAllocationBudgetEnforced

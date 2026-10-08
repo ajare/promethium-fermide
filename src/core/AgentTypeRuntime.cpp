@@ -76,9 +76,9 @@ namespace core
 			auto const apiVersion = lua_isinteger(state, -1)
 				? lua_tointeger(state, -1) : 0;
 			lua_pop(state, 1);
-			if (apiVersion != 1)
+			if (apiVersion != 2)
 			{
-				call.diagnostic = "Agent type requires api_version = 1";
+				call.diagnostic = "Agent type requires api_version = 2; migrate API v1 flat pose ratios to poses and automatic_poses";
 				pushConversionError(state, call.diagnostic);
 				return lua_error(state);
 			}
@@ -121,6 +121,145 @@ namespace core
 			return 0;
 		}
 
+		[[noreturn]] void poseError(std::string const& field, std::string const& reason)
+		{
+			throw SerializationException("Agent type pose field '" + field + "' " + reason);
+		}
+
+		void requireTable(lua_State* state, int index, std::string const& field)
+		{
+			if (!lua_istable(state, index)) poseError(field, "must be a table");
+		}
+
+		void checkKeys(lua_State* state, int index, std::string const& field,
+			std::initializer_list<std::string_view> allowed)
+		{
+			index = lua_absindex(state, index);
+			lua_pushnil(state);
+			while (lua_next(state, index))
+			{
+				if (lua_type(state, -2) != LUA_TSTRING) poseError(field, "contains a non-string field");
+				size_t length;
+				auto text = lua_tolstring(state, -2, &length);
+				auto key = std::string_view(text, length);
+				bool known = false;
+				for (auto candidate : allowed) known = known || candidate == key;
+				if (!known) poseError(field + "." + std::string(key), "is unknown");
+				lua_pop(state, 1);
+			}
+		}
+
+		float readRatio(lua_State* state, int index, char const* key, std::string const& field)
+		{
+			lua_pushstring(state, key);
+			lua_rawget(state, index);
+			auto const isNumber = lua_type(state, -1) == LUA_TNUMBER;
+			auto const value = lua_tonumber(state, -1);
+			lua_pop(state, 1);
+			if (!isNumber || !std::isfinite(value) || value <= 0 || value > 1)
+				poseError(field, "must be a finite number within (0, 1]");
+			auto const frozen = static_cast<float>(value);
+			if (!std::isfinite(frozen) || frozen <= 0 || frozen > 1)
+				poseError(field, "must be representable as a finite positive simulation ratio");
+			return frozen;
+		}
+
+		void readPoseContract(lua_State* state, int instance, AgentPhysicalBaseline& baseline)
+		{
+			// Private instance data is allowed; retired physical fields are not.
+			for (auto key : { "sitting_height_ratio", "crouching_height_ratio", "crawling_height_ratio", "crawling_speed_ratio" })
+			{
+				lua_pushstring(state, key);
+				lua_rawget(state, instance);
+				auto present = !lua_isnil(state, -1);
+				lua_pop(state, 1);
+				if (present) poseError(key, "is retired; migrate to poses and automatic_poses (API v2)");
+			}
+			lua_pushliteral(state, "poses");
+			lua_rawget(state, instance);
+			requireTable(state, -1, "poses");
+			auto const poses = lua_gettop(state);
+			checkKeys(state, poses, "poses", { "standing", "sitting", "lying", "crouching", "crawling" });
+			struct Entry { char const* name; Pose pose; bool lowered; };
+			static constexpr Entry entries[] = {
+				{ "standing", Pose::Standing, false }, { "sitting", Pose::Sitting, true },
+				{ "lying", Pose::Lying, false }, { "crouching", Pose::Crouching, true },
+				{ "crawling", Pose::Crawling, true }
+			};
+			for (auto const& entry : entries)
+			{
+				lua_pushstring(state, entry.name);
+				lua_rawget(state, poses);
+				if (!lua_isnil(state, -1))
+				{
+					auto const field = std::string("poses.") + entry.name;
+					requireTable(state, -1, field);
+					auto const definition = lua_gettop(state);
+					checkKeys(state, definition, field, entry.lowered
+						? std::initializer_list<std::string_view>{ "height_ratio" }
+						: std::initializer_list<std::string_view>{});
+					baseline.poses.emplace(entry.pose, entry.lowered
+						? readRatio(state, definition, "height_ratio", field + ".height_ratio") : 1.f);
+				}
+				lua_pop(state, 1);
+			}
+			lua_pop(state, 1);
+			if (!baseline.supportsPose(Pose::Standing)) poseError("poses.standing", "is required");
+
+			lua_pushliteral(state, "automatic_poses");
+			lua_rawget(state, instance);
+			requireTable(state, -1, "automatic_poses");
+			auto const automatic = lua_gettop(state);
+			checkKeys(state, automatic, "automatic_poses", { "room_movement", "door_crossing" });
+			for (auto context : { AutomaticPoseContext::RoomMovement, AutomaticPoseContext::DoorCrossing })
+			{
+				auto key = context == AutomaticPoseContext::RoomMovement ? "room_movement" : "door_crossing";
+				auto const field = std::string("automatic_poses.") + key;
+				lua_pushstring(state, key);
+				lua_rawget(state, automatic);
+				requireTable(state, -1, field);
+				auto const choices = lua_gettop(state);
+				// At most three locomotion poses; count keys, not Lua's ambiguous
+				// length operator for sparse arrays.
+				size_t count = 0;
+				lua_pushnil(state);
+				while (lua_next(state, choices))
+				{
+					if (!lua_isinteger(state, -2) || lua_tointeger(state, -2) < 1 || lua_tointeger(state, -2) > 3)
+						poseError(field, "must be a dense ordered choice array (at most three poses)");
+					++count;
+					lua_pop(state, 1);
+				}
+				if (!count) poseError(field, "must be nonempty");
+				auto& result = context == AutomaticPoseContext::RoomMovement ? baseline.roomMovement : baseline.doorCrossing;
+				for (size_t i = 1; i <= count; ++i)
+				{
+					auto const choiceField = field + "[" + std::to_string(i) + "]";
+					lua_rawgeti(state, choices, i);
+					requireTable(state, -1, choiceField);
+					auto const choice = lua_gettop(state);
+					checkKeys(state, choice, choiceField, { "pose", "speed_ratio" });
+					lua_pushliteral(state, "pose");
+					lua_rawget(state, choice);
+					std::string name;
+					if (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 16, name))
+						poseError(choiceField + ".pose", "must name a supported locomotion pose");
+					lua_pop(state, 1);
+					std::optional<Pose> pose;
+					for (auto const& entry : entries)
+						if (name == entry.name && (entry.pose == Pose::Standing || entry.pose == Pose::Crouching || entry.pose == Pose::Crawling)) pose = entry.pose;
+					if (!pose || !baseline.supportsPose(*pose)) poseError(choiceField + ".pose", "is not a declared supported locomotion pose");
+					if (i == 1 && *pose != Pose::Standing) poseError(choiceField + ".pose", "must start with standing");
+					for (auto const& previous : result)
+						if (previous.pose == *pose) poseError(choiceField + ".pose", "duplicates a pose");
+					result.push_back({ *pose, readRatio(state, choice, "speed_ratio", choiceField + ".speed_ratio") });
+					lua_pop(state, 1);
+				}
+				lua_pop(state, 1);
+			}
+			lua_pop(state, 1);
+		}
+
 		// Shared, validated baseline extraction from the instance table returned
 		// by new(). Throws SerializationException with the offending field named.
 		AgentPhysicalBaseline readBaseline(lua_State* state, int instance)
@@ -141,10 +280,6 @@ namespace core
 				{ "climb_speed", &AgentPhysicalBaseline::climbSpeed, false },
 				{ "stair_ascent_speed", &AgentPhysicalBaseline::stairAscentSpeed, false },
 				{ "stair_descent_speed", &AgentPhysicalBaseline::stairDescentSpeed, false },
-				{ "sitting_height_ratio", &AgentPhysicalBaseline::sittingHeightRatio, true },
-				{ "crouching_height_ratio", &AgentPhysicalBaseline::crouchingHeightRatio, true },
-				{ "crawling_height_ratio", &AgentPhysicalBaseline::crawlingHeightRatio, true },
-				{ "crawling_speed_ratio", &AgentPhysicalBaseline::crawlingSpeedRatio, true },
 			};
 			for (auto const& field : fields)
 			{
@@ -172,6 +307,7 @@ namespace core
 						+ field.key + "' " + reason);
 				baseline.*field.destination = frozen;
 			}
+			readPoseContract(state, instance, baseline);
 			return baseline;
 		}
 
@@ -321,6 +457,12 @@ namespace core
 					return result;
 				}
 				auto const typeTable = lua_gettop(lua);
+				lua_pushliteral(lua, "api_version");
+				lua_rawget(lua, typeTable);
+				auto const versionOk = lua_isinteger(lua, -1) && lua_tointeger(lua, -1) == 2;
+				lua_pop(lua, 1);
+				if (!versionOk)
+					throw SerializationException("Agent type requires api_version = 2; migrate API v1 flat pose ratios to poses and automatic_poses");
 
 				// Verify the declared type ID matches the resolved definition. A
 				// mismatched source must never silently publish another type.

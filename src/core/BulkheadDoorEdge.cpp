@@ -106,7 +106,7 @@ namespace core
 		return thresholdRouteFacts(*this, *mDoor, target, context,
 			(distance == 0.0f ? CORE_GRAPH_EDGE_MIN_TRAVERSAL_TIME : distance / context.walkSpeed)
 				/ (context.agent && mode == Door::DoorCrossingMode::Crawling
-					? context.agent->getPhysicalBaseline().crawlingSpeedRatio : 1.0f),
+					? context.agent->getPhysicalBaseline().automaticSpeedRatio(AutomaticPoseContext::DoorCrossing, Pose::Crawling).value() : 1.0f),
 			CORE_BULKHEAD_DOOR_OPEN_CLOSE_TIME);
 	}
 

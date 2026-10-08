@@ -141,9 +141,9 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		{
 			switch (test.pose)
 			{
-			case core::Pose::Sitting: return physical.sittingHeightRatio;
-			case core::Pose::Crouching: return physical.crouchingHeightRatio;
-			case core::Pose::Crawling: return physical.crawlingHeightRatio;
+			case core::Pose::Sitting: return physical.poses.at(core::Pose::Sitting);
+			case core::Pose::Crouching: return physical.poses.at(core::Pose::Crouching);
+			case core::Pose::Crawling: return physical.poses.at(core::Pose::Crawling);
 			default: return 1.0f;
 			}
 		}();
@@ -482,7 +482,7 @@ void runAutomaticCrawlingJourneys(smoke::Context const&)
 				false, 0, 0, {}, 0, false};
 			auto direct = edge->getDirectedTraversalFacts(target, context);
 			auto captured = core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context);
-			auto const expected = (6.0f / 60.0f) / agent->getPhysicalBaseline().crawlingSpeedRatio;
+			auto const expected = (6.0f / 60.0f) / agent->getPhysicalBaseline().automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value();
 			require(std::abs(direct.components.motionSeconds - expected) < .00001f
 				&& std::abs(captured.components.motionSeconds - expected) < .00001f,
 				std::string(test.label) + ": Crawling estimate ignored the type speed ratio");

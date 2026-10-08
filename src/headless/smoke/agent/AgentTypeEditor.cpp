@@ -311,6 +311,8 @@ namespace
 		agent_smoke::requireDoorRoute(*world, casualty, back, true);
 		// Change the resolved revision before the ordinary edit, not only replay.
 		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
+		replace(definition.source, "lying = {},", "");
+		replace(definition.source, "height_ratio = 0.3", "height_ratio = 0.4");
 		DocumentHistory history;
 		auto before = captureDocumentSnapshot(world, history);
 		require(before.has_value(), "Could not capture a structural history entry");
@@ -319,7 +321,7 @@ namespace
 		world->applyLocationEdit(resize);
 		agent_smoke::requireDoorRoute(*world, survivor, back, false);
 		commitDocumentEdit(std::move(before), history);
-		definition.source = "return { api_version = 1, type_id = 'HistoryFixture', "
+		definition.source = "return { api_version = 2, type_id = 'HistoryFixture', "
 			"display_name = 'Changed display', new = function() error('fresh constructor') end }";
 		auto restore = [&](DocumentSnapshot const& target) {
 			try
@@ -338,6 +340,10 @@ namespace
 				&& agent->getPhysicalBaseline().width == 0.4f
 				&& agent->getIndividualWalkSpeedModifier() == 1.2f,
 				"History reconstructed or changed a surviving Agent");
+			require(agent->supportsPose(core::Pose::Lying)
+				&& agent->getPoseEnvelope(core::Pose::Crawling)->y == agent->getStandingHeight() * 0.3f
+				&& agent->getPhysicalBaseline().doorCrossing.size() == 2,
+				"History replaced a survivor's frozen pose declarations");
 			require(!agent->getIndividualMobilityProfile()
 				&& agent->getEffectiveMobilityProfile().value.get(core::TraversalKind::Door)
 					== core::MobilityUse::CannotUse,
@@ -376,7 +382,17 @@ namespace
 		verifySurvivor();
 
 		definition.source = initialSource;
+		replace(definition.source, "height_ratio = 0.3", "height_ratio = '0.3'");
+		require(!history.undo(captureDocumentSnapshot(world, history), restore)
+			&& diagnostic.find("poses.crawling.height_ratio") != std::string::npos
+			&& history.undoCount() == undoCount && !history.canRedo()
+			&& captureDocumentSnapshot(world, history)->yaml == deletedYaml,
+			"Invalid pose restoration changed World/history or lacked a field diagnostic");
+		verifySurvivor();
+		definition.source = initialSource;
 		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
+		replace(definition.source, "lying = {},", "");
+		replace(definition.source, "height_ratio = 0.3", "height_ratio = 0.4");
 		replace(definition.source, "width = 0.4", "width = 0.7");
 		require(history.undo(captureDocumentSnapshot(world, history), restore),
 			"Deletion undo did not recover after constructor failure");
@@ -384,6 +400,9 @@ namespace
 		require(world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f,
 			"Deletion undo did not use a fresh constructor from the resolved resource");
 		auto const* restored = world->lookupAgent(casualty).entity;
+		require(!restored->supportsPose(core::Pose::Lying)
+			&& restored->getPoseEnvelope(core::Pose::Crawling)->y == restored->getStandingHeight() * 0.4f,
+			"Deleted-Agent restoration reused frozen pose definitions");
 		require(restored->getIndividualMobilityProfile() == override
 			&& restored->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door) == core::MobilityUse::CanUse,
 			"Deleted-Agent restoration lost authored Mobility or reused its frozen default");
@@ -736,19 +755,25 @@ namespace
 		auto missingBaseline = externalSource("MissingBaseline");
 		auto const reach = missingBaseline.find("reach = 0.25,");
 		missingBaseline.erase(reach, std::string("reach = 0.25,").size());
+		auto invalidPose = externalSource("InvalidPose");
+		agent_smoke::replaceSource(invalidPose, "height_ratio = 0.3", "height_ratio = '0.3'");
+		auto v1 = externalSource("OldVersion");
+		agent_smoke::replaceSource(v1, "api_version = 2", "api_version = 1");
 		std::vector<std::pair<std::string, std::string>> cases{
+			{ invalidPose, "poses.crawling.height_ratio" },
+			{ v1, "migrate" },
 			{ invalidBaseline, "width" },
 			{ missingBaseline, "reach" },
 			{ "not lua", "" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=7 }", "constructor" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() local blob=string.rep('x',128*1024*1024) end }", "" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad' }", "constructor" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() return 7 end }", "instance table" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=7 }", "constructor" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=function() local blob=string.rep('x',128*1024*1024) end }", "" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad' }", "constructor" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=function() return 7 end }", "instance table" },
 			{ "return { type_id='Bad', display_name='Bad', new=function() return {} end }", "" },
 			{ externalSource("Human"), "Duplicate" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() return io.open('unsafe') end }", "" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() while true do end end }", "" },
-			{ "return { api_version=1, type_id='Bad', display_name='Bad', new=function() error('constructor refused') end }", "constructor refused" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=function() return io.open('unsafe') end }", "" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=function() while true do end end }", "" },
+			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=function() error('constructor refused') end }", "constructor refused" },
 		};
 		for (std::size_t i = 0; i < cases.size(); ++i)
 		{
@@ -910,7 +935,7 @@ namespace
 		require(pasteUndone, "Paste undo failed: " + diagnostic);
 		require(!world->lookupAgent(pasted).entity && agentCount(*world) == 1,
 			"Paste undo kept the pasted Agent or removed its source");
-		definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('redo constructor') end }";
+		definition.source = "return { api_version=2, type_id='Scout', display_name='Scout', new=function() error('redo constructor') end }";
 		auto const undone = captureDocumentSnapshot(world);
 		auto const redoCount = gWorldDocumentHistory.redoCount();
 		require(!gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
@@ -934,7 +959,7 @@ namespace
 		{
 			if (failure == 0) definition.resourceName = "missing.agent.lua";
 			if (failure == 1) definition.typeId = "Mismatched";
-			if (failure == 2) definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('fresh lifetime') end }";
+			if (failure == 2) definition.source = "return { api_version=2, type_id='Scout', display_name='Scout', new=function() error('fresh lifetime') end }";
 			if (failure == 3) agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"bad\"");
 			require(!undo(), "Deletion undo accepted an invalid dependency or reused the deleted instance");
 			require(captureDocumentSnapshot(world)->yaml == deleted->yaml
@@ -1005,7 +1030,7 @@ namespace
 			if (failure == 0) payload.resource = "absent.agent.lua";
 			if (failure == 1) payload.type = "NotScout";
 			if (failure == 2) payload.resource.clear();
-			if (failure == 3) definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('preview constructor') end }";
+			if (failure == 3) definition.source = "return { api_version=2, type_id='Scout', display_name='Scout', new=function() error('preview constructor') end }";
 			if (failure == 4) payload.individualHeightModifier = -1.f;
 			// Each case is a newly selected/validated resource session, not an
 			// implicit hot reload of an already accepted preview snapshot.

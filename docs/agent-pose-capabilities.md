@@ -1,9 +1,11 @@
 # Script-defined Agent poses and Furniture pose requirements
 
-Status: approved design; implementation pending. This document specifies the
-agreed refactor, not the currently supported script format or completed tests.
+Status: approved design; API v2 declarations/frozen capabilities implemented in
+#521. Shared selection, Furniture and lifecycle integration remain pending in
+#522–#524. This document specifies the complete agreed refactor, not completed
+integration semantics.
 See [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
-The current authoring contracts remain documented in [Lua Agent types](lua-agent-types.md)
+The current authoring contracts are documented in [Lua Agent types](lua-agent-types.md)
 and [Lua Furniture catalogues](lua-furniture-catalogues.md).
 
 ## Purpose
@@ -21,7 +23,7 @@ its existing non-pose physical fields and complete default Mobility profile.
 The host validates and freezes the resulting declarations for the Agent lifetime,
 just like its physical baseline. They are not queried from live Lua each tick.
 
-The following is the approved pose portion of Human's v2 instance; it is not a
+The following is the implemented pose portion of Human's v2 instance; it is not a
 complete runnable Agent resource:
 
 ```lua
@@ -284,7 +286,11 @@ Implementation is split into four dependent issues:
 4. [#524 — Lifecycle, edit safety, and integrated verification](https://github.com/ajare/promethium-fermide/issues/524), blocked by #521, #522, and #523.
 
 Each issue ships focused external-behavior coverage; the final issue checks their
-composition. These links track planned implementation, not completed validation.
+composition. #521 supplies the validated/frozen declaration contract and capability
+and envelope observations. Its Agent/Editor coverage includes Human and Standing-only
+resources, malformed contracts, preview/import refusal, persistence, revised fresh
+lifetimes and surviving topology/history carry. The remaining links track planned
+integration, not completed validation.
 
 Out of scope: custom pose identities/shapes, independent per-pose widths, new
 fatigue/damage/task systems, live Lua selectors, tag-granted capabilities,

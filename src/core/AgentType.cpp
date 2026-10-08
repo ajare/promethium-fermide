@@ -183,10 +183,16 @@ namespace core
 				auto definition = resolveAgentTypeResource(resourceName);
 				if (!definition)
 					result.diagnostic = "The Agent type resource '" + resourceName + "' is unavailable";
-				else if (auto baseline = agentTypeDefinitionBaseline(*definition))
-					result.preview = AgentTypePreview{ definition->typeId, *baseline };
 				else
-					result.diagnostic = "The Agent type resource '" + resourceName + "' constructor failed during preview";
+				{
+					AgentTypeRuntimeAdapter runtime;
+					auto constructed = runtime.construct(definition->typeId, definition->source, definition->displayName);
+					if (constructed.succeeded)
+						result.preview = AgentTypePreview{ definition->typeId, std::move(constructed.baseline) };
+					else
+						result.diagnostic = "The Agent type resource '" + resourceName
+							+ "' constructor failed during preview: " + constructed.diagnostic;
+				}
 			}
 			catch (std::exception const& error) { result.diagnostic = error.what(); }
 		}
