@@ -1,6 +1,6 @@
 # Script-backed Agent types with live instances and frozen baselines
 
-Status: accepted
+Status: accepted (amended)
 
 Each Agent type is defined by one bundled or imported `.agent.lua` resource: a type object carrying a stable type ID, a display name, and a `new()` constructor that returns a fresh instance with a complete physical baseline. The host validates and freezes that baseline before publishing the Agent, while the Agent retains an isolated live Lua instance for its private state and methods. Human uses this script-backed path; there is no compiled Human subtype, physical definition, or Human-only factory/lookup adapter. Headless creation and legacy migration embed the bundled resource at build time directly from its authored source, rather than maintaining a second definition.
 
@@ -11,6 +11,22 @@ Each Agent type is defined by one bundled or imported `.agent.lua` resource: a t
 - **Copy the baseline back into Lua and re-read it every tick.** Rejected because simulation consumers need stable physical observations; a live mutation could invalidate ongoing movement or clearance mid-run.
 - **Serialize the live Lua instance or its private state.** Rejected: closures, userdata, cycles, and implementation-version details are unsafe and unstable. Load, Reset, and restoration of a deleted Agent run `new()` again from the resolved source. Ordinary paused topology replay and document undo/redo preserve the live object of each surviving Agent; this is not serialization of private state.
 - **Expose a cross-script method API or automatic callbacks on the instance.** Deferred. This slice retains the live instance only for private state and methods; no general invocation API is added, so ADR 0008's behaviour-instance semantics are not silently changed.
+
+## Script-default Mobility (#512, #513, #515)
+
+The constructor also supplies a required complete `mobility_profile`. Its nine
+entries and three permitted uses are validated and frozen before publication
+alongside the physical baseline. Effective Mobility is complete replacement in
+the order individual Agent property → inherited Agent tag property → frozen
+script default, never entry-wise merging or a live Lua query (ADR 0011).
+
+The same lifetime boundaries apply to both defaults: surviving Agents preserve
+them across paused structural edits and history replay; Load, Reset and deleted-
+Agent restoration resolve and validate fresh defaults, including when masked by
+an override. Ordinary creation/paste uses the World-registered source. Documents,
+clipboard and history carry authored overrides and tag assignments, not script
+Mobility snapshots materialised as individual properties. Failed fresh validation
+leaves the current World and applicable history unchanged.
 
 ## Consequences
 

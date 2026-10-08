@@ -22,7 +22,8 @@ History snapshots contain authored documents only. Undoing a paste deletes its
 instance; redoing it constructs a fresh one. Cut/delete ends the Agent lifetime,
 and undo restoration uses the currently resolved resource and constructor.
 Restoration failure leaves the current World and undo/redo stacks unchanged.
-Surviving Agents retain their live instances and frozen baselines through the
+Surviving Agents retain their live instances, frozen physical baselines and
+complete script-default Mobility profiles through the
 existing #509 document-history seam, including when a failed candidate World is
 discarded. Neither clipboard nor history stores arbitrary Lua tables, closures,
 VM state, or embedded baseline snapshots.
@@ -34,5 +35,15 @@ survivor preservation, and restoration failure atomicity.
 `agentTypesScriptedClipboardRefusalAndLegacy` proves missing/mismatched identity,
 constructor and individual-property refusal, duplicate definition conflicts,
 legacy Human compatibility, and absence of partial paste/history mutation.
+#515 extends these scenarios and
+`agentTypesHistoryPreservesSurvivorsAndReconstructsDeletedAgents` with differing
+script Mobility revisions. Real Door route searches distinguish a frozen survivor
+from a fresh restored/copied Agent, and prove that authored individual profiles
+remain complete overrides. Removing an override reveals the lifetime's actual
+script default; it does not reveal an old default encoded in the clipboard.
+Invalid Mobility reconstruction reports its dependency/field and leaves both
+World data and undo/redo stacks unchanged. The copy scenario copies a restored,
+placed Agent into a new World through the editor placement seam.
+
 These run under the public `smoke-editor` CTest owner, alongside existing editor,
 resource, tag, and history checks. No dialog, GPU, or private VM test API is used.

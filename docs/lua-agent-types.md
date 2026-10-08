@@ -132,7 +132,7 @@ in a resolved revision without changing identity or invalidating old documents.
 Legacy Human records with omitted identity/resource resolve bundled Human;
 explicit missing, invalid or mismatched dependencies fail, never become Human.
 
-| Operation | Instance and baseline |
+| Operation | Instance, physical baseline and default Mobility |
 | --- | --- |
 | Ordinary creation | Fresh constructor from the World-registered source |
 | Preview | Independent scratch constructor; no World publication |
@@ -143,8 +143,24 @@ explicit missing, invalid or mismatched dependencies fail, never become Human.
 | Delete/cut | Ends that instance lifetime; history stores authored data only |
 | Undo deletion or redo placement | Fresh constructor from the currently resolved revision |
 
-Reset preserves authored properties, tags, samples and identity. Failed Reset or
-history reconstruction leaves the current World/history unchanged. Surviving
+The frozen-default policy applies equally to the physical baseline and the complete
+script Mobility profile. An on-disk revision cannot change a surviving Agent's
+traversal constraints, including through a paused edit or structural undo/redo.
+Fresh lifetimes validate and freeze the currently resolved definition's Mobility
+profile even when an individual or tag profile masks it. Ordinary creation/paste
+into a World with the type already registered uses that World's registered source;
+copying into a new World resolves its dependency before fresh construction.
+
+Reset preserves authored properties, tags, samples and identity. YAML and binary
+save/load, clipboard and history carry authored individual profiles and tag
+assignments, not script defaults materialised as overrides. Removing an override
+therefore reveals the applicable tag or the current lifetime's frozen default,
+not a persisted default from an earlier lifetime. Bundled Human and Scout retain
+all–Can use defaults, including legacy Human documents.
+
+Failed Reset or history reconstruction (including invalid `mobility_profile`)
+leaves the current World/history unchanged and reports the resource and offending
+field. An override does not exempt a fresh constructor from validation. Surviving
 Agent-type lifetime preservation is explicitly different from Agent **behaviour**
 reconstruction under ADR 0008. Opaque instance handles retain their owning runtime
 safely across World replacement and application resource teardown (ADR 0019).

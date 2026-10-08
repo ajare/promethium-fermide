@@ -1,4 +1,5 @@
 #include "Checks.h"
+#include "MobilityLifecycle.h"
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/AgentType.h"
@@ -244,6 +245,8 @@ namespace
 	{
 		core::World world("Script defaults", 6, 2);
 		auto const corridor = world.addCorridor(0, 0, 6);
+		world.addCorridor(1, 0, 0, 6, 1);
+		auto const door = world.addSectorDoor(0, 0, 2);
 		world.finishBuild();
 		std::string diagnostic;
 		std::string scriptProfile = "{ staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'cannot_use', buttons = 'only_if_no_other_option' }";
@@ -257,13 +260,32 @@ namespace
 			== core::MobilityUse::CannotUse && agent->getEffectiveMobilityProfile().value
 			== agent->getScriptDefaultMobilityProfile(),
 			"A script Mobility default was not frozen or used without a tag registry");
+		agent_smoke::requireDoorRoute(world, id, 1, false);
 		world.pauseSimulation();
 		core::MobilityProfile individual;
 		individual.set(core::TraversalKind::Lift, core::MobilityUse::CannotUse);
 		require(world.setAgentIndividualMobilityProfile(id, individual, &diagnostic)
 			&& agent->getEffectiveMobilityProfile().value == individual, diagnostic);
+		agent_smoke::requireDoorRoute(world, id, 1, true);
 		require(world.setAgentIndividualMobilityProfile(id, std::nullopt, &diagnostic)
 			&& agent->getEffectiveMobilityProfile().value == agent->getScriptDefaultMobilityProfile(), diagnostic);
+		agent_smoke::requireDoorRoute(world, id, 1, false);
+
+		// Use the same authored passage with a real remote control to prove
+		// script-default Buttons composition and the last-resort second pass.
+		world.addSectorDoorButton(door.door.sector->getIndex(), door.door.index);
+		auto fallbackProfile = scriptProfile;
+		agent_smoke::replaceSource(fallbackProfile, "door = 'cannot_use'", "door = 'can_use'");
+		require(world.attachAgentType("fallback.agent.lua", typeSource("Fallback", "Fallback",
+			validBaseline("mobility_profile = " + fallbackProfile + ",\n")), &diagnostic), diagnostic);
+		auto fallback = world.createAgent("Fallback", "Fallback", corridor, 0, 3.f);
+		agent_smoke::requireDoorRoute(world, fallback, 1, true);
+		auto forbiddenProfile = fallbackProfile;
+		agent_smoke::replaceSource(forbiddenProfile, "buttons = 'only_if_no_other_option'", "buttons = 'cannot_use'");
+		require(world.attachAgentType("no-buttons.agent.lua", typeSource("NoButtons", "No Buttons",
+			validBaseline("mobility_profile = " + forbiddenProfile + ",\n")), &diagnostic), diagnostic);
+		auto noButtons = world.createAgent("NoButtons", "No Buttons", corridor, 0, 4.f);
+		agent_smoke::requireDoorRoute(world, noButtons, 1, false);
 
 		uint32_t invalidIndex = 0;
 		for (auto const& invalid : std::vector<std::pair<std::string, std::string>>{
@@ -493,13 +515,18 @@ namespace
 				width > 0.5f ? "Revised display" : "Original display",
 				"count = count + 1\n" + validBaseline(
 					"width = " + std::to_string(width) + " * count,\n"
-					"private_state = { count = count },\n"));
+					"private_state = { count = count },\n"
+					"mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = '"
+					+ std::string(width > 0.5f ? "can_use" : "cannot_use") + "', buttons = 'only_if_no_other_option' },\n"));
 			require(bool(out), "Could not write revision fixture");
 		};
 		write(0.5f);
 		auto const resource = core::externalAgentTypeResourceName(path);
 		core::World world("Revision", 8, 2);
 		auto const corridor = world.addCorridor(0, 0, 8);
+		constexpr uint32_t back = 1; // Layer identity survives structural reindexing.
+		world.addCorridor(back, 0, 0, 8, 1);
+		world.addSectorDoor(0, 0, 2);
 		world.finishBuild();
 		world.pauseSimulation();
 		auto definition = core::resolveAgentTypeResource(resource);
@@ -507,14 +534,48 @@ namespace
 		require(definition && world.attachAgentType(resource, definition->source, &diagnostic), diagnostic);
 		auto first = world.createAgent("Revision", "First", corridor, 0, 1.f);
 		auto second = world.createAgent("Revision", "Second", corridor, 0, 3.f);
+		auto third = world.createAgent("Revision", "Tagged", corridor, 0, 5.f);
 		auto registry = core::AgentTagRegistry::create();
 		auto tag = registry->addAgentTag("physical");
 		require(registry->addAgentTagHeightModifier(tag, &diagnostic), diagnostic);
 		require(registry->setAgentTagHeightModifier(tag, { 0.7f, 0.9f }, &diagnostic), diagnostic);
+		core::MobilityProfile tagProfile;
+		tagProfile.set(core::TraversalKind::Door, core::MobilityUse::CannotUse);
+		tagProfile.set(core::TraversalKind::Ladder, core::MobilityUse::OnlyIfNoOtherOption);
+		require(registry->addAgentTagMobilityProfile(tag, &diagnostic)
+			&& registry->setAgentTagMobilityProfile(tag, tagProfile, &diagnostic), diagnostic);
 		auto const registryPath = root / "revision.tags.yaml";
 		registry->saveTo(registryPath.string());
 		world.attachAgentTagRegistry(registryPath.filename().string(), registry);
-		require(world.assignAgentTag(first, tag, &diagnostic), diagnostic);
+		require(world.assignAgentTag(first, tag, &diagnostic)
+			&& world.assignAgentTag(third, tag, &diagnostic), diagnostic);
+		core::MobilityProfile individual;
+		individual.set(core::TraversalKind::Door, core::MobilityUse::OnlyIfNoOtherOption);
+		individual.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+		require(world.setAgentIndividualMobilityProfile(first, individual, &diagnostic), diagnostic);
+		auto verifyMobility = [&](core::World const& candidate, bool revised) {
+			auto a = candidate.lookupAgent(first).entity;
+			auto b = candidate.lookupAgent(second).entity;
+			auto c = candidate.lookupAgent(third).entity;
+			require(a && b && c && a->getIndividualMobilityProfile() == individual
+				&& a->getEffectiveMobilityProfile().value == individual
+				&& !b->getIndividualMobilityProfile() && b->getAgentTagIds().empty()
+				&& !c->getIndividualMobilityProfile() && c->getAgentTagIds().contains(tag)
+				&& c->getEffectiveMobilityProfile().value == tagProfile,
+				"Lifetime reconstruction lost Mobility overrides/tags or materialised defaults");
+			for (auto id : { first, second, third })
+			{
+				auto const* agent = candidate.lookupAgent(id).entity;
+				require(agent->getTypeId() == "Revision" && agent->getTypeResourceName() == resource
+					&& agent->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door)
+						== (revised ? core::MobilityUse::CanUse : core::MobilityUse::CannotUse),
+					"Lifetime did not resolve the expected frozen script Mobility revision");
+			}
+			agent_smoke::requireDoorRoute(candidate, first, back, true); // last-resort second pass
+			agent_smoke::requireDoorRoute(candidate, second, back, revised);
+			agent_smoke::requireDoorRoute(candidate, third, back, false);
+		};
+		verifyMobility(world, false);
 		require(world.setAgentIndividualWalkSpeedModifier(first, 1.2f), "Could not author speed");
 		require(world.setAgentIndividualHeightModifier(first, 0.95f), "Could not author height");
 		auto const sample = world.lookupAgent(first).entity->getHeightModifierSample();
@@ -525,16 +586,19 @@ namespace
 		require(world.lookupAgent(first).entity->getPhysicalBaseline().width == 0.5f
 			&& world.lookupAgent(second).entity->getPhysicalBaseline().width == 0.5f,
 			"On-disk edits changed a live frozen baseline");
+		verifyMobility(world, false);
 		for (auto const* filename : { "revision.world.yaml", "revision.world" })
 		{
 			auto loaded = core::loadWorldDocument(root / filename);
+			verifyMobility(*loaded, true);
 			require(loaded->lookupAgent(first).entity->getPhysicalBaseline().width == 0.75f
 				&& loaded->lookupAgent(second).entity->getPhysicalBaseline().width == 0.75f
 				&& std::string(loaded->lookupAgent(first).entity->getTypeName()) == "Revised display",
 				"Load reused a baseline snapshot, refused revised display, or shared mutable module state");
 		}
 		world.resetSimulation();
-		for (auto id : { first, second })
+		verifyMobility(world, true);
+		for (auto id : { first, second, third })
 		{
 			auto const* agent = world.lookupAgent(id).entity;
 			require(agent && agent->getTypeId() == "Revision"
@@ -551,14 +615,20 @@ namespace
 			&& serializeWorld(world, false) == authored,
 			"Reset changed authored document data, pause or dirty state");
 		require(authored.find("private_state") == std::string::npos
-			&& authored.find("standing_height") == std::string::npos,
-			"Document serialized private state or a baseline snapshot");
+			&& authored.find("standing_height") == std::string::npos
+			&& authored.find("mobility_profile") == std::string::npos,
+			"Document serialized private state or script defaults");
+		require(world.setAgentIndividualMobilityProfile(first, std::nullopt, &diagnostic), diagnostic);
+		agent_smoke::requireDoorRoute(world, first, back, false); // tag replaces the complete default
+		require(world.removeAgentTag(first, tag, &diagnostic), diagnostic);
+		agent_smoke::requireDoorRoute(world, first, back, true); // revised script exposed
 	}
 
 	void resetFailureIsAtomic(smoke::Context const& context)
 	{
 		auto const path = context.temporaryRoot() / "failure.agent.lua";
-		auto const valid = typeSource("Failure", "Failure", validBaseline());
+		auto const valid = typeSource("Failure", "Failure", validBaseline(
+			"mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'cannot_use', buttons = 'can_use' },\n"));
 		auto write = [&](std::string const& source) {
 			std::ofstream out(path); out << source;
 			require(bool(out), "Could not write failure fixture");
@@ -568,6 +638,8 @@ namespace
 		core::World world("Atomic reset", 8, 2, {},
 			core::AgentTypeRuntimeLimits{ 2u * 1024u * 1024u, 100'000u });
 		auto const corridor = world.addCorridor(0, 0, 8);
+		world.addCorridor(1, 0, 0, 8, 1);
+		world.addSectorDoor(0, 0, 2);
 		world.finishBuild();
 		// Human preconstruction succeeds before the second type is refused.
 		auto const first = world.createAgent("First", corridor, 0, 1.f);
@@ -587,6 +659,8 @@ namespace
 			std::string("invalid Lua"),
 			typeSource("Failure", "Failure", "error('Reset constructor refused')"),
 			typeSource("Failure", "Failure", validBaseline("width = 0,\n")),
+			typeSource("Failure", "Failure", validBaseline("mobility_profile = nil,\n")),
+			typeSource("Failure", "Failure", validBaseline("mobility_profile = { door = 'bad' },\n")),
 			typeSource("WrongIdentity", "Wrong", validBaseline()),
 			typeSource("Failure", "Failure", "while true do end"),
 			typeSource("Failure", "Failure", validBaseline("private_blob = string.rep('x', 128 * 1024 * 1024),\n")),
@@ -611,6 +685,9 @@ namespace
 				&& world.isSimulationPaused() == paused && world.isModified() == modified
 				&& serializeWorld(world, false) == authored,
 				"A refused Reset partially reconstructed or rewound the World");
+			agent_smoke::requireDoorRoute(world, first, 1, true);
+			agent_smoke::requireDoorRoute(world, second, 1, false);
+			agent_smoke::requireDoorRoute(world, third, 1, false);
 		}
 		write(valid);
 		world.resetSimulation();
@@ -930,6 +1007,9 @@ namespace
 	{
 		core::World original("Legacy identity", 6, 2);
 		auto const sector = original.addCorridor(0, 0, 6);
+		constexpr uint32_t back = 1;
+		original.addCorridor(back, 0, 0, 6, 1);
+		original.addSectorDoor(0, 0, 2);
 		original.finishBuild();
 		original.pauseSimulation();
 		auto const id = original.createAgent("Saved human", sector, 0, 1.0f);
@@ -955,6 +1035,10 @@ namespace
 		require(agent->getIndividualWalkSpeedModifier()
 			&& *agent->getIndividualWalkSpeedModifier() == 1.2f,
 			"The legacy Human lost an authored individual property");
+		require(!agent->getIndividualMobilityProfile()
+			&& agent->getEffectiveMobilityProfile().value == core::MobilityProfile{},
+			"Legacy Human did not retain the migrated all–Can use default");
+		agent_smoke::requireDoorRoute(restored, core::AgentId{ 1 }, back, true);
 	}
 
 	void topologyReplayPreservesLiveInstances(smoke::Context const&)

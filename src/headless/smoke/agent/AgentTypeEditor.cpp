@@ -28,6 +28,7 @@
 #include "core/World.h"
 
 #include "Checks.h"
+#include "MobilityLifecycle.h"
 
 namespace
 {
@@ -114,7 +115,9 @@ namespace
 				-> std::optional<core::AgentTypeDefinition> { return std::nullopt; } };
 			core::AgentId placed{};
 			std::string diagnostic;
-			require(!commitAgentPlacement(fixture.world, humanPayload("Broken"),
+			// Human is already World-registered; placement uses that frozen source.
+			// Refusal must exercise an unresolved selected resource instead.
+			require(!commitAgentPlacement(fixture.world, scoutPayload("Broken"),
 				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
 				"Placement with an unavailable resource was accepted");
 			require(!placed, "Failed placement named an Agent");
@@ -141,7 +144,7 @@ namespace
 			} };
 			core::AgentId placed{};
 			std::string diagnostic;
-			require(!commitAgentPlacement(fixture.world, humanPayload("Broken"),
+			require(!commitAgentPlacement(fixture.world, scoutPayload("Broken"),
 				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
 				"Placement with a mismatched type ID was accepted");
 			require(diagnostic.find("type ID") != std::string::npos,
@@ -278,6 +281,7 @@ namespace
 		replace(definition.source, "type_id = \"Human\"", "type_id = \"HistoryFixture\"");
 		replace(definition.source, "display_name = \"Human\"",
 			"display_name = \"History fixture display\"");
+		replace(definition.source, "door = \"can_use\"", "door = \"cannot_use\"");
 		auto const initialSource = definition.source;
 		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
 			-> std::optional<core::AgentTypeDefinition> {
@@ -288,6 +292,10 @@ namespace
 		auto world = std::make_shared<core::World>("History survival", 12, 2);
 		auto const first = world->addRoom("Survivor room", 0, 0, 0, 5, 1);
 		auto const second = world->addRoom("Removed room", 0, 0, 6, 4, 1);
+		constexpr uint32_t back = 1; // Layer identity survives structural reindexing.
+		world->addCorridor(back, 0, 0, 12, 1);
+		world->addSectorDoor(0, 0, 2);
+		world->addSectorDoor(0, 0, 8);
 		world->finishBuild();
 		world->pauseSimulation();
 		std::string diagnostic;
@@ -296,12 +304,20 @@ namespace
 		auto const casualty = world->createAgent(definition.typeId, "Deleted", second, 0, 2.0f);
 		require(world->setAgentIndividualWalkSpeedModifier(survivor, 1.2f),
 			"Could not author the survivor's property");
+		core::MobilityProfile override;
+		override.set(core::TraversalKind::Door, core::MobilityUse::OnlyIfNoOtherOption);
+		require(world->setAgentIndividualMobilityProfile(casualty, override, &diagnostic), diagnostic);
+		agent_smoke::requireDoorRoute(*world, survivor, back, false);
+		agent_smoke::requireDoorRoute(*world, casualty, back, true);
+		// Change the resolved revision before the ordinary edit, not only replay.
+		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
 		DocumentHistory history;
 		auto before = captureDocumentSnapshot(world, history);
 		require(before.has_value(), "Could not capture a structural history entry");
 		auto resize = world->planResizeLocation(first, 0, 0, 6, 1);
 		require(resize.valid, "History fixture resize was not valid");
 		world->applyLocationEdit(resize);
+		agent_smoke::requireDoorRoute(*world, survivor, back, false);
 		commitDocumentEdit(std::move(before), history);
 		definition.source = "return { api_version = 1, type_id = 'HistoryFixture', "
 			"display_name = 'Changed display', new = function() error('fresh constructor') end }";
@@ -313,7 +329,7 @@ namespace
 				world = std::move(loaded); // destroys old World, but not survivor Lua state
 				return true;
 			}
-			catch (std::exception const&) { return false; }
+			catch (std::exception const& error) { diagnostic = error.what(); return false; }
 		};
 		auto verifySurvivor = [&] {
 			auto const* agent = world->lookupAgent(survivor).entity;
@@ -322,6 +338,11 @@ namespace
 				&& agent->getPhysicalBaseline().width == 0.4f
 				&& agent->getIndividualWalkSpeedModifier() == 1.2f,
 				"History reconstructed or changed a surviving Agent");
+			require(!agent->getIndividualMobilityProfile()
+				&& agent->getEffectiveMobilityProfile().value.get(core::TraversalKind::Door)
+					== core::MobilityUse::CannotUse,
+				"Structural history changed frozen Mobility or authored an override");
+			agent_smoke::requireDoorRoute(*world, survivor, back, false);
 		};
 		require(history.undo(captureDocumentSnapshot(world, history), restore),
 			"Structural undo ran a surviving Agent's throwing constructor");
@@ -343,14 +364,30 @@ namespace
 			&& !world->lookupAgent(casualty).entity,
 			"Failed reconstruction changed the live World or document history");
 		verifySurvivor(); // failed candidate released borrowed references safely
+		definition.source = initialSource;
+		replace(definition.source, "door = \"cannot_use\"", "door = \"bad\"");
+		auto const deletedYaml = captureDocumentSnapshot(world, history)->yaml;
+		require(!history.undo(captureDocumentSnapshot(world, history), restore)
+			&& diagnostic.find(definition.resourceName) != std::string::npos
+			&& diagnostic.find("door") != std::string::npos
+			&& history.undoCount() == undoCount && !history.canRedo()
+			&& captureDocumentSnapshot(world, history)->yaml == deletedYaml,
+			"Invalid fresh Mobility restoration mutated World/history or lacked dependency diagnostics");
+		verifySurvivor();
 
 		definition.source = initialSource;
+		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
 		replace(definition.source, "width = 0.4", "width = 0.7");
 		require(history.undo(captureDocumentSnapshot(world, history), restore),
 			"Deletion undo did not recover after constructor failure");
 		verifySurvivor();
 		require(world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f,
 			"Deletion undo did not use a fresh constructor from the resolved resource");
+		auto const* restored = world->lookupAgent(casualty).entity;
+		require(restored->getIndividualMobilityProfile() == override
+			&& restored->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door) == core::MobilityUse::CanUse,
+			"Deleted-Agent restoration lost authored Mobility or reused its frozen default");
+		agent_smoke::requireDoorRoute(*world, casualty, back, true);
 		require(history.redo(captureDocumentSnapshot(world, history), restore),
 			"Deletion redo failed");
 		verifySurvivor();
@@ -363,9 +400,13 @@ namespace
 		auto loaded = deserializeDocumentSnapshot(*snapshot, {}, {});
 		require(loaded && loaded->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
 			"An ordinary document load incorrectly preserved the old baseline");
+		agent_smoke::requireDoorRoute(*loaded, survivor, back, true);
+		require(!loaded->lookupAgent(survivor).entity->getIndividualMobilityProfile(),
+			"Load materialised script Mobility as an authored override");
 		world->resetSimulation();
 		require(world->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
 			"Reset incorrectly preserved a surviving instance from structural history");
+		agent_smoke::requireDoorRoute(*world, survivor, back, true);
 	}
 
 	std::string externalSource(std::string const& id)
@@ -773,6 +814,7 @@ namespace
 	{
 		gWorldDocumentHistory.clear();
 		auto definition = *core::resolveAgentTypeResource("scout.agent.lua");
+		agent_smoke::replaceSource(definition.source, "door = \"can_use\"", "door = \"cannot_use\"");
 		auto const initialSource = definition.source;
 		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
 			-> std::optional<core::AgentTypeDefinition> {
@@ -783,6 +825,10 @@ namespace
 		auto fixture = buildWorld("Scripted clipboard history");
 		auto& world = fixture.world;
 		world->pauseSimulation();
+		constexpr uint32_t back = 1;
+		world->addCorridor(back, 0, 0, 10, 1);
+		world->addSectorDoor(0, 0, 2);
+		world->finishBuild();
 		auto registry = core::AgentTagRegistry::create();
 		auto const tag = registry->addAgentTag("physical");
 		std::string diagnostic;
@@ -832,9 +878,21 @@ namespace
 		require(captureDocumentSnapshot(world)->yaml == before->yaml, "Arming mutated the World");
 		core::AgentId pasted;
 		require(commitPendingAgentPlacement(pending, world, pasted, diagnostic), diagnostic);
-		auto verify = [&] {
+		auto verify = [&](bool fresh = false) {
 			require(makeAgentClipboardText(makeAgentClipboardPayload(*world, pasted, "Copy"), false) == text,
 				"Paste/history lost identity, individual properties, tags, samples or group");
+			auto const* agent = world->lookupAgent(pasted).entity;
+			require(agent->getIndividualMobilityProfile() == mobility
+				&& agent->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door)
+					== (fresh ? core::MobilityUse::CanUse : core::MobilityUse::CannotUse),
+				"Paste/restoration lost authored Mobility or reconstructed the wrong revision");
+			agent_smoke::requireDoorRoute(*world, pasted, back, true);
+			agent_smoke::requireDoorRoute(*world, original, back, false);
+			// Revealing the default proves it was reconstructed even when masked.
+			world->pauseSimulation();
+			require(world->setAgentIndividualMobilityProfile(pasted, std::nullopt, &diagnostic), diagnostic);
+			agent_smoke::requireDoorRoute(*world, pasted, back, fresh);
+			require(world->setAgentIndividualMobilityProfile(pasted, mobility, &diagnostic), diagnostic);
 		};
 		verify();
 		require(world->lookupAgent(pasted).entity->getStandingHeight() == preview.y,
@@ -872,30 +930,57 @@ namespace
 		auto const count = gWorldDocumentHistory.undoCount();
 		require(count == 1, "Cut was not captured as one history edit");
 		auto const undo = [&] { return gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore); };
-		for (int failure = 0; failure != 3; ++failure)
+		for (int failure = 0; failure != 4; ++failure)
 		{
 			if (failure == 0) definition.resourceName = "missing.agent.lua";
 			if (failure == 1) definition.typeId = "Mismatched";
 			if (failure == 2) definition.source = "return { api_version=1, type_id='Scout', display_name='Scout', new=function() error('fresh lifetime') end }";
+			if (failure == 3) agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"bad\"");
 			require(!undo(), "Deletion undo accepted an invalid dependency or reused the deleted instance");
 			require(captureDocumentSnapshot(world)->yaml == deleted->yaml
 				&& gWorldDocumentHistory.undoCount() == count && !gWorldDocumentHistory.canRedo(),
 				"Failed deletion restoration changed the World/history");
+			if (failure == 3) require(diagnostic.find("scout.agent.lua") != std::string::npos
+				&& diagnostic.find("door") != std::string::npos, "Invalid Mobility restoration lacked field/resource diagnostics");
+			agent_smoke::requireDoorRoute(*world, original, back, false);
 			definition = { "Scout", "Scout", "scout.agent.lua", initialSource };
 		}
 		auto const at = definition.source.find("width = 0.3");
 		require(at != std::string::npos, "Scout fixture width not found");
 		definition.source.replace(at, std::string("width = 0.3").size(), "width = 0.5");
+		agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
 		auto const deletionUndone = undo();
 		require(deletionUndone, "Deleted-Agent undo did not recover: " + diagnostic);
-		verify();
+		verify(true);
 		require(world->lookupAgent(pasted).entity->getWidth() == 0.5f
 			&& world->lookupAgent(original).entity->getWidth() == 0.3f,
 			"Deletion restoration was not fresh or discarded the surviving instance");
 		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Deletion redo failed");
 		require(!world->lookupAgent(pasted).entity, "Deletion redo retained its Agent");
 		require(undo(), "Repeated deletion undo failed");
-		verify();
+		verify(true);
+		gWorldDocumentHistory.clear();
+		// Copy the restored, placed Agent through the public editor seam into a
+		// new World. This exercises an actual copy, not just payload encoding.
+		auto copyFixture = buildWorld("Fresh copied lifetime");
+		copyFixture.world->pauseSimulation();
+		constexpr uint32_t copyBack = 1;
+		copyFixture.world->addCorridor(copyBack, 0, 0, 10, 1);
+		copyFixture.world->addSectorDoor(0, 0, 2);
+		copyFixture.world->finishBuild();
+		copyFixture.world->attachAgentTagRegistry(registryPath.filename().string(), registry);
+		auto copiedPayload = makeAgentClipboardPayload(*world, pasted, "Copy");
+		core::AgentId copied;
+		require(commitAgentPlacement(copyFixture.world, copiedPayload,
+			copyFixture.world->getSector(copyFixture.corridor), 0, 4.f, copied, diagnostic), diagnostic);
+		auto const* copy = copyFixture.world->lookupAgent(copied).entity;
+		require(copy->getIndividualMobilityProfile() == mobility && copy->getAgentTagIds().contains(tag)
+			&& copy->getTypeId() == "Scout" && copy->getTypeResourceName() == "scout.agent.lua"
+			&& copy->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door) == core::MobilityUse::CanUse,
+			"Copied Agent did not retain overrides/identity with fresh script defaults");
+		agent_smoke::requireDoorRoute(*copyFixture.world, copied, copyBack, true);
+		require(copyFixture.world->setAgentIndividualMobilityProfile(copied, std::nullopt, &diagnostic), diagnostic);
+		agent_smoke::requireDoorRoute(*copyFixture.world, copied, copyBack, true);
 		gWorldDocumentHistory.clear();
 	}
 
