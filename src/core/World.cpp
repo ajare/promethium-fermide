@@ -8665,6 +8665,32 @@ namespace core
 		return found == mAgentTypes.end() ? std::string{} : found->second->resourceName;
 	}
 
+	optional<AgentTypeDefinition> World::registeredAgentTypeDefinition(
+		string_view typeId, string_view resourceName) const
+	{
+		auto found = mAgentTypes.find(string(typeId));
+		if (found == mAgentTypes.end() || found->second->resourceName != resourceName)
+			return nullopt;
+		return *found->second;
+	}
+
+	optional<AgentPhysicalBaseline> World::registeredAgentTypeBaseline(
+		string_view typeId, string_view resourceName) const
+	{
+		auto const definition = registeredAgentTypeDefinition(typeId, resourceName);
+		if (!definition) return nullopt;
+		auto found = mAgentTypePreviewBaselines.find(string(typeId));
+		if (found == mAgentTypePreviewBaselines.end()
+			|| found->second.first != definition->source)
+		{
+			auto baseline = agentTypeDefinitionBaseline(*definition);
+			if (!baseline) return nullopt;
+			found = mAgentTypePreviewBaselines.insert_or_assign(string(typeId),
+				make_pair(definition->source, *baseline)).first;
+		}
+		return found->second.second;
+	}
+
 	bool World::detachUnusedAgentType(std::string_view typeId)
 	{
 		if (typeId == "Human") return false;

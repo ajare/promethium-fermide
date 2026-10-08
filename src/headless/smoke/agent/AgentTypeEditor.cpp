@@ -498,6 +498,19 @@ namespace
 			writeSource(path, source);
 			require(world->lookupAgent(id).entity->getPhysicalBaseline().width == 0.4f,
 				"A managed resource edit hot-reloaded an existing Agent");
+			// Placement and every preview of this already registered type must use
+			// the World's frozen source, not the edited managed-resource revision.
+			require(agentClipboardPlacementDimensions(payload, *world).x == 0.4f,
+				"World-bound placement preview used the edited resource revision");
+			PendingAgentPlacement pending;
+			require(armAgentPlacement(pending, *world, payload,
+				world->getSector(fixture.corridor), 0, 2.f, diagnostic), diagnostic);
+			require(agentClipboardPlacementDimensions(pending).x == 0.4f,
+				"Armed placement preview used the edited resource revision");
+			core::AgentId repeated;
+			require(commitPendingAgentPlacement(pending, world, repeated, diagnostic), diagnostic);
+			require(world->lookupAgent(repeated).entity->getPhysicalBaseline().width == 0.4f,
+				"Placement used the edited resource revision instead of the registered definition");
 			for (auto const* filename : { "revision.world.yaml", "revision.world" })
 			{
 				auto loaded = core::loadWorldDocument(root / filename);

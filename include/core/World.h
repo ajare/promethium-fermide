@@ -690,6 +690,10 @@ namespace core
 		// through the public attachAgentType workflow. The source is shared and
 		// immutable; executed instance state lives in mAgentTypeRuntime.
 		std::map<std::string, std::shared_ptr<const AgentTypeDefinition>> mAgentTypes;
+		// Cached by source text, so a documented reconstruction revision replaces
+		// the preview without making rendering re-execute Lua every frame.
+		mutable std::map<std::string, std::pair<std::string, AgentPhysicalBaseline>>
+			mAgentTypePreviewBaselines;
 
 		// Registers the bundled Human type so ordinary World creation, legacy
 		// document loading, and candidate Worlds can resolve Human without an
@@ -2521,6 +2525,13 @@ namespace core
 		// The display name of a registered type, or empty when unknown.
 		std::string agentTypeDisplayName(std::string_view typeId) const;
 		std::string agentTypeResourceName(std::string_view typeId) const;
+		// Reads the World-owned immutable definition and its cached construction
+		// baseline. Editor placement previews use these rather than resolving a
+		// newer on-disk resource revision.
+		std::optional<AgentTypeDefinition> registeredAgentTypeDefinition(
+			std::string_view typeId, std::string_view resourceName) const;
+		std::optional<AgentPhysicalBaseline> registeredAgentTypeBaseline(
+			std::string_view typeId, std::string_view resourceName) const;
 		// Roll back an unused placement registration; never detach Human or a
 		// definition still owned by an Agent.
 		bool detachUnusedAgentType(std::string_view typeId);

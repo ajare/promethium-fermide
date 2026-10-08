@@ -554,6 +554,16 @@ namespace
 			return std::nullopt;
 		}
 		auto const resource = payload.resource.empty() ? "human.agent.lua" : payload.resource;
+		// Placement is not a reconstruction boundary: retain the definition this
+		// World already registered rather than re-reading its source file.
+		if (world && world->hasAgentType(payload.type))
+		{
+			auto registered = world->registeredAgentTypeDefinition(payload.type, resource);
+			if (registered) return registered;
+			diagnostic = "Agent type ID '" + payload.type
+				+ "' is declared by competing resources in this World";
+			return std::nullopt;
+		}
 		std::optional<core::AgentTypeDefinition> resolved;
 		try { resolved = core::resolveAgentTypeResource(resource); }
 		catch (std::exception const& error) { diagnostic = error.what(); return std::nullopt; }
@@ -562,10 +572,6 @@ namespace
 		else if (resolved->typeId != payload.type)
 			diagnostic = "The Agent type resource '" + resource + "' declares type ID '"
 				+ resolved->typeId + "' but the placement requested '" + payload.type + "'";
-		else if (world && world->hasAgentType(resolved->typeId)
-			&& world->agentTypeResourceName(resolved->typeId) != resolved->resourceName)
-			diagnostic = "Agent type ID '" + resolved->typeId
-				+ "' is declared by competing resources in this World";
 		else return resolved;
 		return std::nullopt;
 	}
@@ -597,6 +603,36 @@ core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& pay
 	if (diagnostic) *diagnostic = failure;
 	if (!preview || !failure.empty()) return {};
 	return { preview->baseline.width, preview->baseline.standingHeight * heightModifier };
+}
+
+core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload,
+	core::World const& world, string* diagnostic)
+{
+	auto const resource = payload.resource.empty() ? "human.agent.lua" : payload.resource;
+	if (world.hasAgentType(payload.type))
+	{
+		auto const baseline = world.registeredAgentTypeBaseline(payload.type, resource);
+		if (!baseline)
+		{
+			if (diagnostic) *diagnostic = "The Agent type resource '" + resource
+				+ "' is not registered by this World";
+			return {};
+		}
+		auto const heightModifier = payload.individualHeightModifier.value_or(
+			payload.heightModifierSample ? payload.heightModifierSample->value : 1.0f);
+		if (diagnostic) diagnostic->clear();
+		return { baseline->width, baseline->standingHeight * heightModifier };
+	}
+	return agentClipboardPlacementDimensions(payload, diagnostic);
+}
+
+core::Vector2 agentClipboardPlacementDimensions(PendingAgentPlacement const& pending)
+{
+	if (!pending.previewBaseline) return {};
+	auto const heightModifier = pending.payload.individualHeightModifier.value_or(
+		pending.payload.heightModifierSample ? pending.payload.heightModifierSample->value : 1.0f);
+	return { pending.previewBaseline->width,
+		pending.previewBaseline->standingHeight * heightModifier };
 }
 
 AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
@@ -1513,13 +1549,17 @@ bool armAgentPlacement(PendingAgentPlacement& pending,
 		payload.permissionSets, &diagnostic)) return false;
 	auto const definition = clipboardAgentType(payload, &world, diagnostic);
 	if (!definition) return false;
-	if (!core::agentTypeDefinitionBaseline(*definition))
+	auto baseline = world.registeredAgentTypeBaseline(definition->typeId,
+		definition->resourceName);
+	if (!baseline) baseline = core::agentTypeDefinitionBaseline(*definition);
+	if (!baseline)
 	{
 		diagnostic = "The Agent type resource '" + definition->resourceName + "' constructor failed during preview";
 		return false;
 	}
 
 	pending.payload = payload;
+	pending.previewBaseline = *baseline;
 	pending.sector = sector;
 	pending.levelOffset = levelOffset;
 	pending.localX = localX;

@@ -165,6 +165,10 @@ struct AgentClipboardPayload
 // Human fallback; callers may request the dependency diagnostic.
 core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload,
 	std::string* diagnostic = nullptr);
+// Uses the destination World's registered definition when it already owns this
+// type, so the palette cannot preview a newer resource revision than lands.
+core::Vector2 agentClipboardPlacementDimensions(AgentClipboardPayload const& payload,
+	core::World const& world, std::string* diagnostic = nullptr);
 
 // The payload a copy of `agent` carries. `name` is the name the copy will
 // use - the caller owns name uniqueness, the payload owns the
@@ -200,6 +204,9 @@ struct PendingAgentPlacement
 	std::shared_ptr<const core::Sector> sector;
 	std::uint32_t levelOffset{ 0 };
 	float localX{ 0.0f };
+	// Captured at arming from the exact definition commit will use. The falling
+	// preview must remain independent of later resource-file edits.
+	std::optional<core::AgentPhysicalBaseline> previewBaseline;
 
 	bool armed() const { return sector != nullptr; }
 
@@ -207,6 +214,9 @@ struct PendingAgentPlacement
 	// the payload goes, and there is nothing left to land.
 	void cancel() { *this = PendingAgentPlacement{}; }
 };
+
+// Dimensions for an armed falling placement, using its captured definition.
+core::Vector2 agentClipboardPlacementDimensions(PendingAgentPlacement const& pending);
 
 // Accept `payload` for deferred placement at `sector`/`levelOffset`/`localX`.
 // The Agent group and complete Agent tag state are judged here - before

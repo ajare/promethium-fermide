@@ -218,12 +218,12 @@ namespace
 	// so the preview agrees with what lands.
 	ApplicationAgentType gAgentTypeDraft{ "human.agent.lua", "Human", "Human" };
 
-	core::Vector2 agentTypeDraftPlacementDimensions()
+	core::Vector2 agentTypeDraftPlacementDimensions(core::World const& world)
 	{
 		AgentClipboardPayload payload;
 		payload.type = gAgentTypeDraft.typeId;
 		payload.resource = gAgentTypeDraft.resourceName;
-		return agentClipboardPlacementDimensions(payload);
+		return agentClipboardPlacementDimensions(payload, world);
 	}
 
 	// Palette tray placement (ticket #41). The tray is dragged by any part of
@@ -527,7 +527,7 @@ namespace
 	{
 		if (!pointInRect(feet, canvasPos, canvasPos + canvasSize)) return {};
 		return pegmanAgentTargetAtWorld(world, screenToWorld(feet),
-			agentTypeDraftPlacementDimensions().x);
+			agentTypeDraftPlacementDimensions(*world).x);
 	}
 
 	PegmanTarget getMarkerTarget(shared_ptr<const core::World> const& world,
@@ -2329,7 +2329,7 @@ namespace
 			else
 			{
 				auto const previewScale = target ? gUISettings.worldZoom : 1.0f;
-				auto const dimensions = agentTypeDraftPlacementDimensions();
+				auto const dimensions = agentTypeDraftPlacementDimensions(*world);
 				drawPegman(drawList, io.MousePos,
 					dimensions.x * CORE_CELL_WIDTH_PIXELS * previewScale,
 					dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * previewScale,
@@ -2342,8 +2342,8 @@ namespace
 		{
 			auto globalX = gPegman.sector->getPosition().x + gPegman.localX;
 			auto const dimensions = gPegman.pastedAgent.armed()
-				? agentClipboardPlacementDimensions(gPegman.pastedAgent.payload)
-				: agentTypeDraftPlacementDimensions();
+				? agentClipboardPlacementDimensions(gPegman.pastedAgent)
+				: agentTypeDraftPlacementDimensions(*world);
 			drawPegman(drawList, worldToScreen({ globalX, gPegman.feetY }),
 				dimensions.x * CORE_CELL_WIDTH_PIXELS * gUISettings.worldZoom,
 				dimensions.y * CORE_LEVEL_HEIGHT_PIXELS * gUISettings.worldZoom,
