@@ -120,8 +120,8 @@ namespace
 				+ ",door_crossing={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=.5}}},")), &diagnostic), diagnostic);
 			auto id = world.createAgent("Ordered", "Ordered", low, 0, .5f);
 			auto* agent = world.lookupAgent(id).entity;
-			auto expected = crawlFirst ? core::Pose::Crawling : core::Pose::Crouching;
-			require(agent->getPose() == expected, "Room did not honour frozen supported order");
+			auto expected = core::Pose::Crouching;
+			require(agent->getPose() == expected, "Room did not select the tallest fitting pose");
 			bool estimated = false;
 			for (auto const& edge : world.getGraph()->getEdges())
 				if (edge->getType() == core::EdgeType::Location
@@ -131,7 +131,7 @@ namespace
 					core::RouteDecisionContext context{agent, {}, world.getGraph()->getRouteChoicePolicy(), agent->getSector(), agent->getWalkSpeed(), &world};
 					auto direct = edge->getDirectedTraversalFacts(edge->getVertex(1), context);
 					auto captured = core::RouteTraversalInputs::capture(*edge, edge->getVertex(1), context).evaluate(context);
-					auto seconds = edge->getLength() / (agent->getWalkSpeed() * (crawlFirst ? .25f : .5f));
+					auto seconds = edge->getLength() / (agent->getWalkSpeed() * .5f);
 					require(direct.feasible && captured.feasible && std::abs(direct.components.motionSeconds - seconds) < .00001f
 						&& direct.components.motionSeconds == captured.components.motionSeconds, "Room direct/captured motion ignored context ratio");
 					estimated = true;
@@ -149,7 +149,7 @@ namespace
 				require(agent->getPose() == expected, "Room movement changed supported order");
 				if (moving && agent->getState() == core::Agent::State::Idle) break;
 			}
-			auto ratio = crawlFirst ? .25f : .5f;
+			auto ratio = .5f;
 			require(moving && agent->getState() == core::Agent::State::Idle
 				&& std::abs(motionTicks * world.getFixedTimestep() - moved / (agent->getWalkSpeed() * ratio)) < .04f,
 				"Room context ratio disagreed with actual duration");
@@ -337,7 +337,7 @@ namespace
 			if (broken) { require(world.setDoorBroken(made.traversalResource, true), "Broken mode refused"); require(world.setDoorBrokenOpenPercentage(made.traversalResource, lowered ? .6f : 1.f), "Broken aperture refused"); }
 			std::string diagnostic;
 			require(world.attachAgentType("crouching.agent.lua", typeSource("Croucher", "Croucher", validBaseline(
-				"standing_height=.45, automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=.8},{pose='crouching',speed_ratio=.25},{pose='crawling',speed_ratio=.5}}},")), &diagnostic), diagnostic);
+				"standing_height=.45, automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=.8},{pose='crawling',speed_ratio=.5},{pose='crouching',speed_ratio=.25}}},")), &diagnostic), diagnostic);
 			auto id = world.createAgent("Croucher", "Croucher", reverse ? b : a, 0, 2.5f);
 			auto* agent = world.lookupAgent(id).entity;
 			for (auto const& edge : world.getGraph()->getEdges())
@@ -438,12 +438,13 @@ namespace
 			&& world.getSimulationSnapshot().agents.size() == 1,
 			"Resource-backed query factory refused an arbitrary type or published an Agent");
 		require(world.attachAgentType("unit.agent.lua", typeSource("Unit", "Unit",
-			validBaseline("poses={standing={},sitting={height_ratio=1},crouching={height_ratio=1},crawling={height_ratio=1}},\n"
+			validBaseline("poses={standing={},sitting={height_ratio=1},crouching={height_ratio=.8},crawling={height_ratio=.4}},\n"
 				"automatic_poses={room_movement={{pose='standing',speed_ratio=1}},door_crossing={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=1}}},\n")), &diagnostic), diagnostic);
 		auto unit = world.lookupAgent(world.createAgent("Unit", "Unit", corridor, 0, 4.f)).entity;
 		require(unit->getPhysicalBaseline().automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 1.f
-			&& unit->getTraversalCrawlingDoorClearanceExtent(true) == unit->getStandingHeight(),
-			"The inclusive ratio upper boundary was refused or changed");
+			&& unit->getPhysicalBaseline().poses.at(core::Pose::Sitting) == 1.f
+			&& unit->getTraversalCrawlingDoorClearanceExtent(true) == unit->getStandingHeight() * .4f,
+			"The inclusive Sitting height/speed ratio upper boundary was refused or changed");
 	}
 
 	void invalidBaselinesAreRejected(smoke::Context const&)
@@ -572,7 +573,30 @@ namespace
 		require(human.roomMovement == std::vector<core::AutomaticPoseChoice>{
 			{core::Pose::Standing, 1.f}, {core::Pose::Crouching, 1.f}, {core::Pose::Crawling, 1.f}}
 			&& human.doorCrossing == std::vector<core::AutomaticPoseChoice>{
-			{core::Pose::Standing, 1.f}, {core::Pose::Crawling, 0.5f}}, "Human context orders/speeds changed");
+			{core::Pose::Standing, 1.f}, {core::Pose::Crouching, 1.f}, {core::Pose::Crawling, 0.5f}}, "Human context choices/speeds changed");
+
+		// Script ordering never overrides tallest-fit selection, even if Crawling
+		// is faster. Both contexts share fit but keep their own speed ratios.
+		auto query = core::Agent::create(core::AgentTypeDefinition{"Tallest", "Tallest", "tallest.agent.lua",
+			typeSource("Tallest", "Tallest", validBaseline(
+				"automatic_poses={room_movement={{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=.75},{pose='crouching',speed_ratio=.25}},door_crossing={{pose='standing',speed_ratio=.9},{pose='crawling',speed_ratio=.5},{pose='crouching',speed_ratio=.3}}},"))}, "Query");
+		for (auto context : {core::AutomaticPoseContext::RoomMovement, core::AutomaticPoseContext::DoorCrossing})
+		{
+			for (auto const& [clearance, pose] : std::vector<std::pair<float, core::Pose>>{
+				{.6f, core::Pose::Standing}, {.4f, core::Pose::Crouching}, {.3f, core::Pose::Crawling}})
+			{
+				auto selected = query->selectAutomaticPose(context, clearance);
+				require(selected && selected->pose == pose
+					&& selected->speedRatio == query->getPhysicalBaseline().automaticSpeedRatio(context, pose),
+					"Movement context did not select the tallest fitting allowed pose and its speed");
+			}
+			require(!query->selectAutomaticPose(context, .2f)
+				&& !query->selectAutomaticPose(context, .6f, 0.f, .4f)
+				&& !explicitAgent->selectAutomaticPose(context, .3f),
+				"No-fit or context-excluded pose was admitted");
+			auto supported = query->selectAutomaticPose(context, .4f, .1f);
+			require(supported && supported->pose == core::Pose::Crawling, "Tallest selection ignored support elevation");
+		}
 	}
 
 	void invalidPoseDeclarations(smoke::Context const&)
@@ -590,6 +614,13 @@ namespace
 			{"automatic_poses={room_movement={},door_crossing={}},", "room_movement"},
 			{"automatic_poses={unknown={}},", "automatic_poses.unknown"},
 			{"sitting_height_ratio=0.5,", "sitting_height_ratio"},
+			{"poses={standing={},crouching={height_ratio=1}},", "poses.crouching.height_ratio"},
+			{"poses={standing={},crawling={height_ratio=1}},", "poses.crawling.height_ratio"},
+			{"poses={standing={},crouching={height_ratio=.6},crawling={height_ratio=.6}},", "poses.crawling.height_ratio"},
+			{"poses={standing={},crouching={height_ratio=.6},crawling={height_ratio=.7}},", "poses.crawling.height_ratio"},
+			{"poses={standing={},crouching={height_ratio=.6},crawling={height_ratio=.600000001}},", "poses.crawling.height_ratio"},
+			{"poses={standing={},crouching={height_ratio=.999999999}},", "poses.crouching.height_ratio"},
+			{"poses={standing={},crawling={height_ratio=.999999999}},", "poses.crawling.height_ratio"},
 		};
 		for (auto pose : { "sitting", "crouching", "crawling" })
 			for (auto value : { "nil", "'0.5'", "0/0", "math.huge", "-math.huge", "0", "-1", "1.01", "1e-300", "1e300", "false", "{}" })

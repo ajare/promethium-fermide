@@ -1,7 +1,7 @@
 # Lua Agent-type authoring and integrated migration (#510)
 
 > **API v2 declarations (#521) and shared fit/selection/movement (#522) are implemented.**
-> Supported poses and ordered automatic choices are validated and frozen per lifetime.
+> Supported poses and automatic choices are validated and frozen per lifetime; movement always prefers the tallest fitting allowed pose.
 > Room/Door motion, placement, routing and admission consume the shared fit result.
 > Furniture eligibility and lifecycle/edit enforcement are integrated (#523–#524).
 > See [selection validation](agent-pose-selection-validation.md) and
@@ -40,6 +40,7 @@ return {
                 },
                 door_crossing = {
                     { pose = "standing", speed_ratio = 1 },
+                    { pose = "crouching", speed_ratio = 1 },
                     { pose = "crawling", speed_ratio = 0.5 },
                 },
             },
@@ -84,17 +85,21 @@ policies have not moved into type scripts.
 `poses` contains only supported canonical keys: `standing`, `sitting`, `lying`,
 `crouching`, `crawling`. Standing is mandatory. Standing and Lying have empty
 parameter tables; Lying's vertical extent is bodily width. Sitting, Crouching and
-Crawling require exactly `height_ratio`, an actual finite Lua number in `(0, 1]`
-that converts to a finite positive simulation float. Their vertical extent is
+Crawling require exactly `height_ratio`, an actual finite Lua number that converts
+to a finite positive simulation float. Sitting allows `(0, 1]`; Crouching and
+Crawling require `(0, 1)`, and Crawling must be strictly lower than Crouching when
+both are supported. Equality after float conversion is also rejected. Their vertical extent is
 that ratio times effective Standing height. Width and rendering orientation retain
 existing policy. Unsupported poses have no envelope or default ratio.
 
 `automatic_poses` requires exactly `room_movement` and `door_crossing`. Each is a
 nonempty dense ordered array beginning with Standing, without duplicates, naming
 only declared Standing/Crouching/Crawling poses. Each entry has exactly `pose`
-and `speed_ratio`; speed ratios follow the same numeric validation as height
-ratios. Supporting a pose does not require listing it in either context.
-Capabilities, ratios and orders cannot be replaced by properties or tags; Height
+and `speed_ratio`; speed ratios must be finite positive simulation floats in
+`(0, 1]`. Both contexts try Standing, then Crouching, then Crawling, selecting the
+tallest allowed pose that fits, regardless of array order or speed. Supporting a
+pose does not require listing it in either context.
+Capabilities, ratios and context choices cannot be replaced by properties or tags; Height
 still modifies effective dimensions. Surrounding private instance fields remain
 allowed; unknown fields within the pose contract are rejected.
 

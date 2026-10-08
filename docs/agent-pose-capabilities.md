@@ -42,6 +42,7 @@ automatic_poses = {
     },
     door_crossing = {
         { pose = "standing", speed_ratio = 1.0 },
+        { pose = "crouching", speed_ratio = 1.0 },
         { pose = "crawling", speed_ratio = 0.5 },
     },
 },
@@ -62,8 +63,11 @@ automatic_poses = {
 - The canonical vocabulary remains `standing`, `sitting`, `lying`, `crouching`,
   and `crawling`; no custom identities are introduced. Standing is required.
 - Only supported poses are present. Sitting, Crouching, and Crawling require a
-  finite `height_ratio` in `(0, 1]`. Standing and Lying use canonical geometry,
-  not configurable height ratios. A standing-only type supplies no lowered ratios.
+  finite positive `height_ratio`. Sitting permits `(0, 1]`; Crouching and Crawling
+  require `(0, 1)`, with Crawling strictly lower than Crouching when both are
+  supported, including after simulation-float conversion. Standing and Lying use
+  canonical geometry, not configurable height ratios. A standing-only type
+  supplies no lowered ratios.
 - Both automatic context lists are required, nonempty ordered dense arrays,
   start with Standing, have no duplicate poses, and reference only supported
   locomotion poses: Standing, Crouching, or Crawling. Supporting a pose does not
@@ -79,14 +83,16 @@ automatic_poses = {
   by silently granting every pose. Legacy World records still resolve bundled
   Human through the existing legacy resource rule.
 
-Capability, envelope parameters, and context orders cannot be overridden by
+Capability, envelope parameters, and context choices cannot be overridden by
 individual Agent properties or Agent tags. Effective Height modifiers still
 change physical fit using existing individual-over-tag precedence.
 
 ## Fit and automatic selection
 
-For an applicable context, select the first supported candidate whose entire
-applicable physical envelope fits. Selection returns a pose and speed ratio, or
+Both Room movement and Door crossing try Standing, Crouching, then Crawling,
+skipping poses not allowed in the context and selecting the tallest whose entire
+applicable physical envelope fits. Script array order and movement speed do not
+change this priority. Selection returns a pose and context speed ratio, or
 an explicit no-fit result. Routing, captured route facts, remaining-Path
 validation, request/queue gates, permit adoption, actual movement, and duration
 estimates must agree on that result.
@@ -113,10 +119,11 @@ are derived from these dimensions and available space, not separately duplicated
 absolute heights. No arbitrary World expressions, anticipatory preferences,
 hysteresis, preparation delays, or recovery delays are introduced.
 
-Human initially preserves Room Standing/Crouching/Crawling and Door
-Standing/Crawling orders, with existing Room speed and half-speed Crawling Door
-crossings. Scripts can list a different supported locomotion order after the
-required Standing entry. Sitting/Lying remain explicit uses or Actions rather
+Human and Scout allow Standing/Crouching/Crawling in both contexts. Human keeps
+ordinary Room speed and ordinary threshold speed for Standing/Crouching, with
+half-speed Crawling Door crossings. Scripts may declare choices in another order
+after the required Standing entry, but selection always prefers the tallest
+allowed fitting pose. Sitting/Lying remain explicit uses or Actions rather
 than automatic locomotion. Ratios affect the relevant movement component, not
 Lift/Shuttle ride speed, device opening/cycle time, or unrelated modifiers.
 

@@ -205,6 +205,13 @@ namespace core
 			}
 			lua_pop(state, 1);
 			if (!baseline.supportsPose(Pose::Standing)) poseError("poses.standing", "is required");
+			for (auto pose : { Pose::Crouching, Pose::Crawling })
+				if (baseline.supportsPose(pose) && baseline.poses.at(pose) >= 1.f)
+					poseError(pose == Pose::Crouching ? "poses.crouching.height_ratio" : "poses.crawling.height_ratio",
+						"must be strictly less than standing (1)");
+			if (baseline.supportsPose(Pose::Crouching) && baseline.supportsPose(Pose::Crawling)
+				&& baseline.poses.at(Pose::Crawling) >= baseline.poses.at(Pose::Crouching))
+				poseError("poses.crawling.height_ratio", "must be strictly less than poses.crouching.height_ratio");
 
 			lua_pushliteral(state, "automatic_poses");
 			lua_rawget(state, instance);

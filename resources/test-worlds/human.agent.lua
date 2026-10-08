@@ -27,6 +27,7 @@ return {
                 },
                 door_crossing = {
                     { pose = "standing", speed_ratio = 1 },
+                    { pose = "crouching", speed_ratio = 1 },
                     { pose = "crawling", speed_ratio = 0.5 },
                 },
             },

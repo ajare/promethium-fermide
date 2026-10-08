@@ -202,7 +202,7 @@ add_test(NAME pose-lifecycle-editor-history COMMAND pf-smoke-editor --check room
 set_tests_properties(pose-lifecycle-editor-history PROPERTIES
     LABELS "editor;functional;smoke;validation-fast;pose-selection" TIMEOUT 60)
 
-foreach(check IN ITEMS agentPosesSupportedRooms agentPosesSupportedBridge agentPosesSupportedDoors agentPosesCrouchingDoor agentPosesApertureBoundaries)
+foreach(check IN ITEMS agentTypesPoseDeclarations agentTypesInvalidPoseDeclarations agentPosesSupportedRooms agentPosesSupportedBridge agentPosesSupportedDoors agentPosesCrouchingDoor agentPosesApertureBoundaries)
     add_test(NAME pose-selection-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(pose-selection-${check} PROPERTIES
         LABELS "core;functional;smoke;validation-fast;pose-selection" TIMEOUT 60)

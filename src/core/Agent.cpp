@@ -1154,9 +1154,12 @@ namespace core
 	std::optional<PoseSelection> Agent::selectAutomaticPose(AutomaticPoseContext context,
 		float clearance, float support, float openingWidth) const
 	{
-		for (auto const& choice : getPhysicalBaseline().automaticPoses(context))
-			if (poseFits(choice.pose, clearance, support, openingWidth))
-				return PoseSelection{choice.pose, choice.speedRatio};
+		// Both movement contexts prefer the tallest allowed fitting stance,
+		// irrespective of the order in which the script declares its choices.
+		for (auto pose : { Pose::Standing, Pose::Crouching, Pose::Crawling })
+			if (auto speed = getPhysicalBaseline().automaticSpeedRatio(context, pose);
+				speed && poseFits(pose, clearance, support, openingWidth))
+				return PoseSelection{pose, *speed};
 		return std::nullopt;
 	}
 

@@ -342,7 +342,7 @@ namespace
 				"History reconstructed or changed a surviving Agent");
 			require(agent->supportsPose(core::Pose::Lying)
 				&& agent->getPoseEnvelope(core::Pose::Crawling)->y == agent->getStandingHeight() * 0.3f
-				&& agent->getPhysicalBaseline().doorCrossing.size() == 2,
+				&& agent->getPhysicalBaseline().doorCrossing.size() == 3,
 				"History replaced a survivor's frozen pose declarations");
 			require(!agent->getIndividualMobilityProfile()
 				&& agent->getEffectiveMobilityProfile().value.get(core::TraversalKind::Door)

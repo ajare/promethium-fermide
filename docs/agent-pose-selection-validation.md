@@ -6,8 +6,11 @@ Height, bodily width, real support and `PoseFitTolerance` (0.00001 World units).
 Lying's vertical extent is bodily width; Crawling uses its declared height ratio.
 Decorative offsets never enter fit.
 
-`selectAutomaticPose` returns the first fitting context choice and its speed
-ratio, or no result. Room selection uses clearance above the approach Floor or
+`selectAutomaticPose` tries Standing, Crouching, then Crawling in both contexts,
+returning the tallest allowed fitting pose and its context speed ratio, or no
+result. Script array order and relative speed do not override this priority.
+Crouching/Crawling height ratios are strictly below 1, and Crawling is strictly
+below Crouching when both are supported. Room selection uses clearance above the approach Floor or
 Walkway, and preserves the non-Room Standing policy. Ordinary movement derives
 its pose from the physical Sector under the Agent rather than lagging logical
 membership. Unsupported or impossible creation and relocation are refused before
@@ -18,8 +21,8 @@ route capture and permit adoption. This includes ordinary manual, automatic and
 remote Doors, standalone Bulkheads, Airlocks, both Chamber subtypes and Lift and
 Shuttle thresholds. Broken vertical apertures scale clearance; Broken horizontal
 apertures retain the existing bodily-width rule. Windows and BoothWindows gain no
-passenger behavior. Human preserves Room Standing/Crouching/Crawling and Door
-Standing/Crawling orders. A supported Crouching Door choice is usable; a
+passenger behavior. Human and Scout allow Standing/Crouching/Crawling for both
+Room movement and Door crossing. A supported Crouching Door choice is usable; a
 Standing-only robot cannot obtain Crawling through Mobility or permissions.
 
 Direct Room and Door route facts delegate to the same captured-input evaluator.
@@ -38,7 +41,11 @@ transport rides, queues, lanes, capacity, permissions and Mobility are unchanged
 
 Focused CTests use the `pose-selection` label:
 
-- `agentPosesSupportedRooms`: actual Lua-supported orders, impossible robot
+- `agentTypesPoseDeclarations`: both-context tallest-fit selection regardless of
+  declaration order or speed, support/width/no-fit and context exclusions.
+- `agentTypesInvalidPoseDeclarations`: contextual diagnostics and atomic refusal
+  for invalid ratios, including equality and simulation-float rounding.
+- `agentPosesSupportedRooms`: Lua-supported tallest-fit selection, impossible robot
   placement/relocation, Marker Route loss, context walking duration, direct/captured
   Room motion facts and physical-boundary recovery.
 - `agentPosesSupportedBridge`: supported Crouching on an upper Walkway and
@@ -66,7 +73,13 @@ Agent, Simulation, Routing, Persistence, Render, Editor, World, Transports,
 Permissions, Behaviours and Agent-tag suites and their contracts. No submodule
 tests were run. `git diff --check` passed.
 
-This records the #522 validation boundary. Furniture requirements/eligibility
+This records the original #522 validation boundary. The later unified
+Standing/Crouching/Crawling priority and strict locomotion-ratio validation passed
+one incremental Release build of the Agent and Editor smoke targets and eight
+focused CTests (the seven Agent selection/declaration checks above plus
+`agent-type-history-lifetime`). No full-suite rerun was performed.
+
+Furniture requirements/eligibility
 subsequently shipped in #523; ownership, edit protection and exact accepted-exit
 recording are integrated in #524. See [lifecycle validation](agent-pose-lifecycle-validation.md).
 Neither slice adds runtime pose persistence.
