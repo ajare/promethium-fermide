@@ -256,7 +256,7 @@ _Avoid_: Lift, when distinguishing the open room object from an enclosed lift tr
 A simulated intelligent entity with a position, destination Path, and current movement state.
 
 **Agent type**:
-An Agent's immutable physical identity, with a stable type ID, a presentation display name, and a complete physical baseline shared in meaning by Agents of that type. An instance's physical baseline is fixed for its lifetime; individual Agent properties and Agent tags modify its effective observations without changing its type.
+An Agent's immutable physical identity, with a stable type ID, a presentation display name, a complete physical baseline, and a complete default Mobility profile shared in meaning by Agents of that type. An instance freezes both defaults for its lifetime; individual Agent properties and Agent tags modify its effective observations without changing its type.
 _Avoid_: Agent tag, which supplies shared Agent properties
 
 **Agent type ID**:

@@ -2490,7 +2490,8 @@ namespace core
 				// fresh instance. Neither stores handles in serialized data.
 				agent.reset(new Agent(""));
 				agent->setTypeIdentity(survivor->mTypeId, survivor->mDisplayName,
-					survivor->mTypeResourceName, survivor->mPhysicalBaseline);
+					survivor->mTypeResourceName, survivor->mPhysicalBaseline,
+					survivor->mScriptDefaultMobilityProfile);
 				agent->mLuaInstance = survivor->mLuaInstance;
 			}
 			else agent = makeScriptAgent(definition->typeId, "");
@@ -3520,7 +3521,7 @@ namespace core
 				agent->mFurnitureUse ? agent->mFurnitureUse->definition : std::string{},
 				agent->mFurnitureUse ? agent->mFurnitureUse->catalogue : nullptr,
 				agent->mDisplayName, agent->mTypeResourceName, agent->mPhysicalBaseline,
-				agent->mLuaInstance });
+				agent->mScriptDefaultMobilityProfile, agent->mLuaInstance });
 		}
 		return carried;
 	}
@@ -3541,7 +3542,8 @@ namespace core
 					&& !mLayers[saved.layer]->getCellDefinition(cellX, cellY).isTraversableOnFoot()) continue;
 			}
 			auto agent = std::unique_ptr<Agent>(new Agent(saved.name));
-			agent->setTypeIdentity(saved.type, saved.displayName, saved.typeResource, saved.baseline);
+			agent->setTypeIdentity(saved.type, saved.displayName, saved.typeResource, saved.baseline,
+			saved.defaultMobilityProfile);
 			agent->mLuaInstance = saved.luaInstance;
 			agent->setFlags(saved.flags);
 			agent->setActive(saved.active);

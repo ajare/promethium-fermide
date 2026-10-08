@@ -143,7 +143,7 @@ namespace core
 				+ "' resource '" + definition.resourceName + "': " + result.diagnostic);
 		auto agent = std::unique_ptr<Agent>(new Agent(name));
 		agent->setTypeIdentity(definition.typeId, definition.displayName,
-			definition.resourceName, result.baseline);
+			definition.resourceName, result.baseline, result.defaultMobilityProfile);
 		agent->mLuaInstance = std::move(result.instance);
 		return agent;
 	}
@@ -1036,6 +1036,7 @@ namespace core
 	EffectiveAgentMobilityProfile Agent::getEffectiveMobilityProfile() const
 	{
 		EffectiveAgentMobilityProfile effective;
+		effective.value = mScriptDefaultMobilityProfile;
 		if (mIndividualMobilityProfile)
 		{
 			effective.value = *mIndividualMobilityProfile;

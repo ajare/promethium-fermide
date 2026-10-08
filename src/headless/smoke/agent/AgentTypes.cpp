@@ -77,7 +77,8 @@ namespace
 			"            sitting_height_ratio = 0.5,\n"
 			"            crouching_height_ratio = 0.6,\n"
 			"            crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5,\n" + overrides
+			"            crawling_speed_ratio = 0.5,\n"
+			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' },\n" + overrides
 			+ "        }\n";
 	}
 
@@ -239,6 +240,51 @@ namespace
 		}
 	}
 
+	void scriptedMobilityProfiles(smoke::Context const&)
+	{
+		core::World world("Script defaults", 6, 2);
+		auto const corridor = world.addCorridor(0, 0, 6);
+		world.finishBuild();
+		std::string diagnostic;
+		std::string scriptProfile = "{ staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'cannot_use', buttons = 'only_if_no_other_option' }";
+		require(world.attachAgentType("limited.agent.lua", typeSource("Limited", "Limited",
+			validBaseline("mobility_profile = " + scriptProfile + ",\n")), &diagnostic), diagnostic);
+		core::AgentId id;
+		try { id = world.createAgent("Limited", "Limited", corridor, 0, 1.f); }
+		catch (std::exception const& error) { require(false, error.what()); }
+		auto* agent = world.lookupAgent(id).entity;
+		require(agent && agent->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door)
+			== core::MobilityUse::CannotUse && agent->getEffectiveMobilityProfile().value
+			== agent->getScriptDefaultMobilityProfile(),
+			"A script Mobility default was not frozen or used without a tag registry");
+		world.pauseSimulation();
+		core::MobilityProfile individual;
+		individual.set(core::TraversalKind::Lift, core::MobilityUse::CannotUse);
+		require(world.setAgentIndividualMobilityProfile(id, individual, &diagnostic)
+			&& agent->getEffectiveMobilityProfile().value == individual, diagnostic);
+		require(world.setAgentIndividualMobilityProfile(id, std::nullopt, &diagnostic)
+			&& agent->getEffectiveMobilityProfile().value == agent->getScriptDefaultMobilityProfile(), diagnostic);
+
+		uint32_t invalidIndex = 0;
+		for (auto const& invalid : std::vector<std::pair<std::string, std::string>>{
+			{ "missing", "nil" }, { "malformed", "42" },
+			{ "unknown", "{ staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use', jetpack = 'can_use' }" },
+			{ "invalid-use", "{ staircase = 'bad', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' }" } })
+		{
+			auto const typeId = "Bad" + std::to_string(++invalidIndex);
+			core::World rejected("Reject profile", 4, 2);
+			auto const location = rejected.addCorridor(0, 0, 4);
+			rejected.finishBuild();
+			require(rejected.attachAgentType(invalid.first + ".agent.lua", typeSource(typeId,
+				"Bad", validBaseline("mobility_profile = " + invalid.second + ",\n")), &diagnostic), diagnostic);
+			bool threw = false;
+			try { (void)rejected.createAgent(typeId, "Bad", location, 0, 1.f); }
+			catch (std::exception const& error) { threw = std::string(error.what()).find(invalid.first + ".agent.lua") != std::string::npos; }
+			require(threw && rejected.getSimulationSnapshot().agents.empty(),
+				"Invalid script Mobility profile was published or lacked resource diagnostics");
+		}
+	}
+
 	void constructorFailureLeavesNoPartialAgent(smoke::Context const&)
 	{
 		core::World world("Constructor failure", 8, 2);
@@ -358,7 +404,8 @@ namespace
 			"            climb_speed = 0.2, stair_ascent_speed = 0.3,\n"
 			"            stair_descent_speed = 0.35, sitting_height_ratio = 0.5,\n"
 			"            crouching_height_ratio = 0.6, crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5 }\n";
+			"            crawling_speed_ratio = 0.5,\n"
+			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' } }\n";
 		std::string diagnostic;
 		require(world.attachAgentType("counter.agent.lua",
 			"local count = 0\n" + typeSource("Counter", "Counter", counter), &diagnostic), diagnostic.c_str());
@@ -984,7 +1031,8 @@ namespace
 			"            climb_speed = 0.2, stair_ascent_speed = 0.3,\n"
 			"            stair_descent_speed = 0.35, sitting_height_ratio = 0.5,\n"
 			"            crouching_height_ratio = 0.6, crawling_height_ratio = 0.4,\n"
-			"            crawling_speed_ratio = 0.5 }\n";
+			"            crawling_speed_ratio = 0.5,\n"
+			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' } }\n";
 		core::AgentTypeDefinition counterType;
 		counterType.typeId = "Counter";
 		counterType.displayName = "Counter";
@@ -1025,6 +1073,7 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesBundledDefinitionMatchesResource", bundledDefinitionMatchesResource });
 	checks.push_back({ "agentTypesGenericScriptBackedType", genericScriptBackedType });
 	checks.push_back({ "agentTypesInvalidBaselinesRejected", invalidBaselinesAreRejected });
+	checks.push_back({ "agentTypesScriptedMobilityProfiles", scriptedMobilityProfiles });
 	checks.push_back({ "agentTypesConstructorFailureLeavesNoPartialAgent", constructorFailureLeavesNoPartialAgent });
 	checks.push_back({ "agentTypesExecutionBudgetEnforced", executionBudgetIsEnforced });
 	checks.push_back({ "agentTypesAllocationBudgetEnforced", allocationBudgetIsEnforced });

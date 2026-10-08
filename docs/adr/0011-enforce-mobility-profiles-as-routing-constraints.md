@@ -14,6 +14,6 @@ The Buttons entry describes interaction-point use rather than a traversal kind. 
 - Routing uses at most two searches: one without last-resort traversals and, only if that fails, one with them.
 - Runtime traversal gates refuse Cannot use but permit a last-resort traversal already selected in a Path.
 - Both transit mount and body edges apply the same classification.
-- Mobility profiles may be supplied by an Agent tag or authored directly on an Agent under ADR 0012.
-- An absent profile, or one whose entries are all Can use, preserves ordinary routing exactly.
+- Mobility profiles may be supplied by an Agent tag, authored directly on an Agent under ADR 0012, or frozen from the Agent type script at construction.
+- An absent individual and tag profile exposes the complete frozen script default; a profile whose entries are all Can use preserves ordinary routing exactly.
 - Runtime traversal refusal protects Paths created before an effective profile changed, but coordination does not reinterpret or override the profile.

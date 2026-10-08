@@ -1283,6 +1283,7 @@ namespace core
 			std::string displayName;
 			std::string typeResource;
 			AgentPhysicalBaseline baseline{};
+			MobilityProfile defaultMobilityProfile{};
 			std::shared_ptr<void> luaInstance;
 		};
 

@@ -266,7 +266,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
-				agent, enabled ? optional<core::MobilityProfile>{ core::MobilityProfile{} } : nullopt, out); });
+				agent, enabled ? optional<core::MobilityProfile>{ target->getEffectiveMobilityProfile().value } : nullopt, out); });
 		ImGui::EndCombo();
 	}
 
@@ -836,7 +836,7 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	else if (mobility.sourceTag && world->hasAttachedAgentTagRegistry())
 		ImGui::Text("Mobility profile: %s from #%s", mobilitySummary.c_str(),
 			world->getAgentTagRegistry()->getAgentTagName(mobility.sourceTag).c_str());
-	else ImGui::TextUnformatted("Mobility profile: can use everything (default)");
+	else ImGui::Text("Mobility profile: %s (type default)", mobilitySummary.c_str());
 }
 
 void renderAgentTagAssignmentChecklist(shared_ptr<core::World> const& world,

@@ -38,6 +38,7 @@ namespace core
 	{
 		bool succeeded{ false };
 		AgentPhysicalBaseline baseline{};
+		MobilityProfile defaultMobilityProfile{};
 		std::shared_ptr<void> instance;
 		ScriptExecutionFailure failure{ ScriptExecutionFailure::None };
 		std::string diagnostic;
@@ -72,8 +73,8 @@ namespace core
 
 		// Constructs a live instance for the given (already preflighted) source.
 		// Executes new() in a fresh private environment, validates and freezes the
-		// eleven baseline fields, and returns the baseline plus an opaque handle
-		// to the retained live instance.
+		// eleven baseline fields and complete default Mobility profile, and returns
+		// frozen copies plus an opaque handle to the retained live instance.
 		AgentTypeConstructResult construct(std::string_view typeId,
 			std::string_view source, std::string_view name);
 

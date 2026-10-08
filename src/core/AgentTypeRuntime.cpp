@@ -174,6 +174,65 @@ namespace core
 			}
 			return baseline;
 		}
+
+		MobilityProfile readDefaultMobilityProfile(lua_State* state, int instance)
+		{
+			instance = lua_absindex(state, instance);
+			lua_pushliteral(state, "mobility_profile");
+			lua_rawget(state, instance);
+			if (!lua_istable(state, -1))
+			{
+				lua_pop(state, 1);
+				throw SerializationException("Agent type Mobility profile field 'mobility_profile' must be a table");
+			}
+			auto const profile = lua_gettop(state);
+			struct Entry { char const* key; TraversalKind kind; };
+			static constexpr Entry entries[] = {
+				{ "staircase", TraversalKind::Staircase }, { "escalator", TraversalKind::Escalator },
+				{ "stairwell", TraversalKind::Stairwell }, { "ladder", TraversalKind::Ladder },
+				{ "lift", TraversalKind::Lift }, { "platform_lift", TraversalKind::PlatformLift },
+				{ "shuttle", TraversalKind::Shuttle }, { "door", TraversalKind::Door },
+				{ "buttons", TraversalKind::Buttons },
+			};
+			MobilityProfile result;
+			for (auto const& entry : entries)
+			{
+				lua_pushstring(state, entry.key);
+				lua_rawget(state, profile);
+				auto const value = lua_tostring(state, -1);
+				auto const isString = lua_type(state, -1) == LUA_TSTRING;
+				lua_pop(state, 1);
+				if (!isString)
+					throw SerializationException(std::string("Agent type Mobility profile entry '")
+						+ entry.key + "' is missing or must be a string");
+				if (std::string_view(value) == "can_use") result.set(entry.kind, MobilityUse::CanUse);
+				else if (std::string_view(value) == "cannot_use") result.set(entry.kind, MobilityUse::CannotUse);
+				else if (std::string_view(value) == "only_if_no_other_option")
+					result.set(entry.kind, MobilityUse::OnlyIfNoOtherOption);
+				else throw SerializationException(std::string("Agent type Mobility profile entry '")
+					+ entry.key + "' has invalid use '" + value + "'");
+			}
+			lua_pushnil(state);
+			while (lua_next(state, profile))
+			{
+				if (lua_type(state, -2) != LUA_TSTRING)
+				{
+					lua_pop(state, 2);
+					throw SerializationException("Agent type Mobility profile contains an unknown non-string entry");
+				}
+				auto const key = std::string_view(lua_tostring(state, -2));
+				bool known = false;
+				for (auto const& entry : entries) known = known || key == entry.key;
+				lua_pop(state, 1);
+				if (!known)
+				{
+					lua_pop(state, 1);
+					throw SerializationException("Agent type Mobility profile contains unknown entry '" + std::string(key) + "'");
+				}
+			}
+			lua_pop(state, 1);
+			return result;
+		}
 	}
 
 	struct AgentTypeRuntimeAdapter::Impl : std::enable_shared_from_this<Impl>
@@ -311,6 +370,7 @@ namespace core
 				try
 				{
 					result.baseline = readBaseline(lua, -1);
+					result.defaultMobilityProfile = readDefaultMobilityProfile(lua, -1);
 				}
 				catch (SerializationException const& error)
 				{

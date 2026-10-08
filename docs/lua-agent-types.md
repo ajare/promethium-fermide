@@ -24,6 +24,11 @@ return {
             crouching_height_ratio = 0.6,
             crawling_height_ratio = 0.3,
             crawling_speed_ratio = 0.5,
+            mobility_profile = {
+                staircase = "can_use", escalator = "can_use", stairwell = "can_use",
+                ladder = "can_use", lift = "can_use", platform_lift = "can_use",
+                shuttle = "can_use", door = "can_use", buttons = "can_use",
+            },
             private_state = {}, -- retained privately, never persisted
         }
     end,
@@ -56,9 +61,26 @@ simulation floats. Numeric strings, NaN, infinities, zero, negatives, float
 overflow/underflow, and out-of-range ratios are refused with field diagnostics.
 Lying retains the existing policy of exchanging effective Standing height and
 width. Individual physical modifiers and persisted Agent tag samples still
-apply, with individual-over-tag precedence. Mobility, permissions, route
-preferences, shared-resource slot geometry and Escalator belt policies have not
-moved into type scripts.
+apply, with individual-over-tag precedence. Permissions, route preferences, shared-resource slot geometry and Escalator belt
+policies have not moved into type scripts.
+
+## Required default Mobility profile
+
+`mobility_profile` is a required complete table on the instance returned by
+`new()`. It must contain exactly the nine entries shown above: `staircase`,
+`escalator`, `stairwell`, `ladder`, `lift`, `platform_lift`, `shuttle`, `door`,
+and `buttons`. Each value is exactly `"can_use"`, `"cannot_use"`, or
+`"only_if_no_other_option"`. Missing, unknown, malformed, or invalid entries
+refuse construction with the resource and entry in the diagnostic.
+
+The host copies and freezes this complete profile with the physical baseline
+before publishing the Agent. It is the fallback when neither an individual
+Mobility profile nor an inherited tag profile applies; individual → tag → script
+default is complete replacement, not per-entry merging. The script default is
+not persisted as an individual property or queried from Lua after construction.
+Removing an override exposes the next source. New tag profiles continue to begin
+with every entry `can_use`; adding an individual profile in the editor snapshots
+the Agent's current effective profile.
 
 ## Live object versus frozen baseline
 

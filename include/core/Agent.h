@@ -385,6 +385,9 @@ namespace core
 		// Agent type runtime; only the validated baseline is copied here, so a
 		// later Lua mutation cannot change ongoing simulation.
 		AgentPhysicalBaseline mPhysicalBaseline{};
+		// Complete, validated type default copied out of the constructor with the
+		// physical baseline. It is not authored Agent state or a live Lua query.
+		MobilityProfile mScriptDefaultMobilityProfile{};
 		std::string mTypeId;
 		std::string mDisplayName;
 		std::string mTypeResourceName;
@@ -631,18 +634,22 @@ namespace core
 		// Applies an immutable type identity and a frozen physical baseline once,
 		// from a factory or a document-load path. Later mutation is not exposed.
 		void setTypeIdentity(std::string typeId, std::string displayName,
-			std::string resourceName, AgentPhysicalBaseline baseline)
+			std::string resourceName, AgentPhysicalBaseline baseline,
+			MobilityProfile defaultMobilityProfile)
 		{
 			mTypeId = std::move(typeId);
 			mDisplayName = std::move(displayName);
 			mTypeResourceName = std::move(resourceName);
 			mPhysicalBaseline = baseline;
+			mScriptDefaultMobilityProfile = defaultMobilityProfile;
 		}
 
 	public:
 		// Stable wire identity and physical observations are immutable type data.
 		char const* getTypeName() const { return mDisplayName.c_str(); }
 		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
+		MobilityProfile const& getScriptDefaultMobilityProfile() const
+		{ return mScriptDefaultMobilityProfile; }
 		// Stable type ID, independent of the presentation display name.
 		std::string const& getTypeId() const { return mTypeId; }
 		// Application Resource name the type resolved from (including legacy Human).

@@ -19,6 +19,11 @@ return {
             crouching_height_ratio = 0.5,
             crawling_height_ratio = 0.25,
             crawling_speed_ratio = 0.75,
+            mobility_profile = {
+                staircase = "can_use", escalator = "can_use", stairwell = "can_use",
+                ladder = "can_use", lift = "can_use", platform_lift = "can_use",
+                shuttle = "can_use", door = "can_use", buttons = "can_use",
+            },
         }
     end,
 }
