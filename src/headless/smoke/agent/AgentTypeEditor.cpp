@@ -639,6 +639,27 @@ namespace
 		require(loaded->lookupAgent(placed).entity->getPhysicalBaseline().width == 0.7f,
 			"Refused reopen mutated the previously loaded World");
 		std::filesystem::remove(path);
+		// The application loader must diagnose the missing external dependency
+		// before canonicalizing it, just as the headless resolver does.
+		{
+			ResourceFixture resources(root);
+			AgentTypeLoaderScope scope{ [&resources](auto const& name) {
+				return resources.types->resolve(name);
+			} };
+			try { (void)core::loadWorldDocument(documents / "imported.world.yaml");
+				throw std::runtime_error("Editor accepted a missing external dependency"); }
+			catch (core::SerializationException const& error)
+			{
+				auto const diagnostic = std::string(error.what());
+				require(diagnostic.find("Agent type resource '" + selected.resourceName + "'")
+					!= std::string::npos && diagnostic.find(path.string()) != std::string::npos
+					&& diagnostic.find("Source file is unavailable") != std::string::npos,
+					"Editor missing import diagnostic was not actionable: " + diagnostic);
+			}
+			require(resources.types->types().size() == 1
+				&& resources.manager.getResourcesByType("AgentType").size() == 1,
+				"Missing editor dependency left a partial imported resource");
+		}
 		try { (void)core::loadWorldDocument(documents / "imported.world.yaml");
 			throw std::runtime_error("Missing external dependency was accepted"); }
 		catch (core::SerializationException const& error)

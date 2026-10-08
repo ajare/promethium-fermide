@@ -1,12 +1,14 @@
 #include "ApplicationAgentTypes.h"
 #include "ApplicationResources.h"
 #include "core/AgentTypeRuntime.h"
+#include "core/SerializationException.h"
 #include "core/WorldDocument.h"
 
 #include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <system_error>
 #include <willpower/application/resourcesystem/DataStream.h>
 #include <willpower/application/resourcesystem/ResourceExceptions.h>
 #include <willpower/application/resourcesystem/ResourceManager.h>
@@ -25,7 +27,10 @@ void AgentTypeResource::create(resources::DataStreamPtr data, resources::Resourc
 	{
 		// Like other programmatic document resources, an explicit external
 		// Resource has no manifest ResourceLocation. Read only its declared file.
-		if (std::filesystem::file_size(getSource()) > 1024u * 1024u)
+		std::error_code error;
+		auto const size = std::filesystem::file_size(getSource(), error);
+		if (error) throw resources::ResourceException(this, "Agent type source is unavailable");
+		if (size > 1024u * 1024u)
 			throw resources::ResourceException(this, "Agent type source exceeds 1 MiB");
 		std::ifstream input(getSource(), std::ios::binary);
 		if (!input) throw resources::ResourceException(this, "Could not read Agent type source");
@@ -159,6 +164,10 @@ std::optional<core::AgentTypeDefinition> ApplicationAgentTypes::resolve(std::str
 	{
 		auto const path = core::externalAgentTypeResourcePath(name);
 		if (path.empty()) return std::nullopt;
+		std::error_code error;
+		if (!std::filesystem::is_regular_file(path, error))
+			throw core::SerializationException("Agent type resource '" + name
+				+ "' (" + path.string() + "): Source file is unavailable");
 		if (core::externalAgentTypeResourceName(path) != name)
 			throw std::runtime_error("Agent type source identity changed: " + path.string());
 		ApplicationAgentType imported;
