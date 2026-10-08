@@ -1123,7 +1123,7 @@ namespace core
 			record.a = serializer.readUint32("y"); record.b = serializer.readUint32("x");
 			record.c = readRenamedUint32("levelsHigh", "decksHigh"); record.p = serializer.readBool("extensible");
 			record.q = serializer.readBool("startExtended");
-			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
+			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_SLOT_SPACING);
 			record.d = serializer.readUint32("directionalBatchLimit");
 			readControlRequirement(0, "lowControlPermissionRequirement", true);
 			readControlRequirement(1, "highControlPermissionRequirement", true); break;
@@ -1416,7 +1416,7 @@ namespace core
 			record.a = serializer.readUint32("sectorIndex"); record.b = readRenamedUint32("levelIndex", "deckIndex");
 			record.c = serializer.readUint32("xOffset"); record.d = readRenamedUint32("levelsHigh", "decksHigh");
 			record.p = serializer.readBool("extensible"); record.q = serializer.readBool("startExtended");
-			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_AGENT_SPACING);
+			(void)serializer.readFloat("agentSpacing", true, CORE_LADDER_SLOT_SPACING);
 			record.e = serializer.readUint32("directionalBatchLimit");
 			readControlRequirement(0, "lowControlPermissionRequirement", true);
 			readControlRequirement(1, "highControlPermissionRequirement", true); break;
@@ -5053,7 +5053,7 @@ namespace core
 		if (!upper.isTraversableOnFoot())
 		{ plan.diagnostic = format("The floor at {},{} on the Layer in front is not traversable", x, upperY); return plan; }
 		auto crossedLevels = (float)(options.levelsHigh - 1);
-		auto agentSpacing = CORE_LADDER_AGENT_SPACING / CORE_CELL_YX_RENDER_RATIO;
+		auto agentSpacing = CORE_LADDER_SLOT_SPACING / CORE_CELL_YX_RENDER_RATIO;
 		auto capacity = max(1u, (uint32_t)floor(crossedLevels / agentSpacing));
 		if (ladder->getAgents().size() > capacity)
 		{ plan.diagnostic = "Ladder capacity is below its current occupancy"; return plan; }

@@ -47,7 +47,7 @@ namespace core
 	vector<float> DoorSectorObject::calculateDoorQueueStopOffsets(World const* world, shared_ptr<Vertex> vertex, uint32_t x, uint32_t y, uint32_t doorWidth) const
 	{
 		vector<float> stops;
-		const float stopWidth = CORE_DOOR_QUEUE_STOP_WIDTH;
+		const float stopWidth = CORE_RESOURCE_QUEUE_SLOT_PITCH;
 
 		auto sector = vertex->getSector();
 		auto layer = world->getLayer(sector->getLayerIndex());

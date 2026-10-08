@@ -55,7 +55,7 @@ namespace core
 
 	float Ladder::getUsableLength() const
 	{
-		return (float)(mLevelsHigh - 1) + CORE_LADDER_HEIGHT_AT_TOP
+		return (float)(mLevelsHigh - 1) + CORE_LADDER_TOP_SLOT_HEIGHT
 			- CORE_LADDER_HEIGHT_OFF_GROUND;
 	}
 
@@ -85,7 +85,7 @@ namespace core
 		// as when fully extended.
 		auto height = (float)getLevelsHigh();
 
-		auto retractedHeight = min(CORE_LADDER_HEIGHT_AT_TOP - CORE_LADDER_HEIGHT_OFF_GROUND, CORE_LADDER_HEIGHT_AT_TOP);
+		auto retractedHeight = min(CORE_LADDER_TOP_SLOT_HEIGHT - CORE_LADDER_HEIGHT_OFF_GROUND, CORE_LADDER_TOP_SLOT_HEIGHT);
 		return retractedHeight / height;
 	}
 

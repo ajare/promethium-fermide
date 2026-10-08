@@ -77,6 +77,8 @@ Passengers are attached to the moving vehicle while onboard. Each Platform Lift 
 
 Cancellation, disablement, and device failure drain ownership and direct passengers to a safe exit or terminal failure state rather than leaving reservations behind.
 
+Queue pitch, transport standing slots, and Ladder spacing are fixed shared-resource layout constraints. They retain the established Human-compatible dimensions and capacities, but do not observe or pack an individual Agent's dimensions. Mixed-size shared-resource occupancy, variable-size capacity, and dynamic packing remain deferred.
+
 ## Shuttles and carriages
 
 A shuttle is one scheduled vehicle that may contain multiple capacity-owning carriages. Carriages move together but maintain independent occupancy and door state. Access zones separate disconnected waiting approaches, and a boarding assignment binds an agent to a specific carriage.

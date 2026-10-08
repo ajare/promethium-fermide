@@ -184,7 +184,7 @@ void renderSelectedQueues(shared_ptr<const core::World> const& world, int layer,
 	const ImColor laneColour(0, 210, 255, 210);
 	const ImColor occupiedColour(255, 170, 0, 230);
 	const float slotRadius = max(5.0f,
-		CORE_AGENT_MAX_WIDTH * CORE_CELL_WIDTH_PIXELS * 0.35f)
+		CORE_RESOURCE_SLOT_WIDTH * CORE_CELL_WIDTH_PIXELS * 0.35f)
 		* gUISettings.worldZoom;
 
 	// Door queue geometry belongs to one approach layer, so only show the visible

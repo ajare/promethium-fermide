@@ -64,7 +64,7 @@ namespace core
 		mWorld.invalidateSimulationSnapshot();
 		if (!resource.mShuttle) return;
 		auto const carriageWidth = (float)resource.mShuttle->getCarWidth();
-		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 
 		for (auto& carriage : resource.mShuttleCarriages)
 		{
@@ -170,7 +170,7 @@ namespace core
 				if (last < first) first = last = selectedDoor->carriagePosition;
 
 				auto const targets = packOccupants(passengers.size(), groupReservations[doorId],
-					{ first, last }, CORE_AGENT_MAX_WIDTH, CORE_SHUTTLE_AGENT_BUFFER,
+					{ first, last }, CORE_RESOURCE_SLOT_WIDTH, CORE_SHUTTLE_OCCUPANT_CLEARANCE,
 					carriage.packingDirection == TraversalDirection::Descending
 						? OccupantPackingOrder::Forward : OccupantPackingOrder::Reverse,
 					OccupantPackingLayout::Buffered);

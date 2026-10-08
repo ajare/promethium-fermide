@@ -475,7 +475,7 @@ namespace
 				for (size_t i = 0; i < corridorQueueTargets.size(); ++i)
 					for (size_t j = i + 1; j < corridorQueueTargets.size(); ++j)
 						if (corridorQueueTargets[i].distanceTo(corridorQueueTargets[j])
-							< CORE_DOOR_QUEUE_STOP_WIDTH - 0.001f) return false;
+							< CORE_RESOURCE_QUEUE_SLOT_PITCH - 0.001f) return false;
 				sawDistinctCorridorQueuePositions = true;
 			}
 			auto lift = std::find_if(snapshot.traversalResources.begin(), snapshot.traversalResources.end(),

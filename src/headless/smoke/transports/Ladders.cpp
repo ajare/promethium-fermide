@@ -143,7 +143,7 @@ namespace
 				[&](auto const& value) { return value.id == created.traversalResource; });
 			if (resource == snapshot.traversalResources.end() || !resource->isLadder
 				|| std::abs(resource->agentSpacing
-					- CORE_LADDER_AGENT_SPACING / CORE_CELL_YX_RENDER_RATIO) > 0.001f
+					- CORE_LADDER_SLOT_SPACING / CORE_CELL_YX_RENDER_RATIO) > 0.001f
 				|| resource->capacity != 1 || resource->queueLanes.size() != 2
 				|| resource->occupantCount + resource->admissionReservationCount > resource->capacity
 				|| resource->capacityPositions.size() != resource->capacity)
@@ -338,7 +338,7 @@ namespace
 				break;
 		}
 		return observedConcurrentClimbers
-			&& minimumSeparation >= CORE_AGENT_MAX_HEIGHT - 0.001f
+			&& minimumSeparation >= CORE_RESOURCE_SLOT_STANDING_HEIGHT - 0.001f
 			&& std::all_of(ids.begin(), ids.end(), [&](auto id)
 				{ return world.lookupAgent(id).entity->getState() == core::Agent::State::Idle; });
 	}

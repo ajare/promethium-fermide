@@ -151,7 +151,7 @@ namespace
 				for (auto right = std::next(left); right != currentCarriageX.end(); ++right)
 					violatedPassengerBuffer = violatedPassengerBuffer
 						|| std::abs(left->second - right->second) + 0.001f
-							< CORE_AGENT_MAX_WIDTH + CORE_SHUTTLE_AGENT_BUFFER;
+							< CORE_RESOURCE_SLOT_WIDTH + CORE_SHUTTLE_OCCUPANT_CLEARANCE;
 
 			if (carriage.occupantCount == 2 && !thirdJourneyStarted
 				&& currentCarriageX.size() == 2)
@@ -159,9 +159,9 @@ namespace
 				std::vector<float> positions;
 				for (auto const& [id, x] : currentCarriageX) positions.push_back(x);
 				std::sort(positions.begin(), positions.end());
-				auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
-				auto const first = CORE_SHUTTLE_AGENT_BUFFER + halfWidth;
-				auto const last = options.carWidth - CORE_SHUTTLE_AGENT_BUFFER - halfWidth;
+				auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+				auto const first = CORE_SHUTTLE_OCCUPANT_CLEARANCE + halfWidth;
+				auto const last = options.carWidth - CORE_SHUTTLE_OCCUPANT_CLEARANCE - halfWidth;
 				if (std::abs(positions.front() - first) < 0.02f
 					&& std::abs(positions.back() - last) < 0.02f)
 				{
@@ -189,9 +189,9 @@ namespace
 				std::sort(positions.begin(), positions.end());
 				if (positions.size() == 3)
 				{
-					auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
-					auto const first = CORE_SHUTTLE_AGENT_BUFFER + halfWidth;
-					auto const last = options.carWidth - CORE_SHUTTLE_AGENT_BUFFER - halfWidth;
+					auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+					auto const first = CORE_SHUTTLE_OCCUPANT_CLEARANCE + halfWidth;
+					auto const last = options.carWidth - CORE_SHUTTLE_OCCUPANT_CLEARANCE - halfWidth;
 					reachedSpacedPositions = reachedSpacedPositions
 						|| (std::abs(positions.front() - first) < 0.02f
 							&& std::abs(positions[1] - options.carWidth * 0.5f) < 0.02f

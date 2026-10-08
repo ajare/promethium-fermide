@@ -65,13 +65,20 @@ namespace core
 //
 // Agents
 //
-// Temporary compatibility constants for consumers migrated after #494.
-// Human owns the physical baseline; fixed resource sizing remains unchanged.
+// Temporary compatibility constants for consumers migrated after #494. Agent
+// types own physical baselines; these remain only for compatibility callers.
 #define CORE_AGENT_BASE_WALK_SPEED					0.5f
 #define CORE_AGENT_BASE_CLIMB_SPEED					0.25f
 #define CORE_AGENT_MAX_HEIGHT						(CORE_DOOR_HEIGHT - 0.05f)
 #define CORE_AGENT_MAX_WIDTH						0.4f
 #define CORE_AGENT_REACH_DIST						0.25f
+
+// Fixed shared-resource compatibility geometry. These retain the historical
+// Human-sized slots, but are resource layout constraints, not observations of
+// an individual Agent. Mixed-size queue and transport packing is deferred.
+#define CORE_RESOURCE_SLOT_STANDING_HEIGHT			(CORE_DOOR_HEIGHT - 0.05f)
+#define CORE_RESOURCE_SLOT_WIDTH					0.4f
+#define CORE_RESOURCE_QUEUE_ADVANCE_THRESHOLD			0.25f
 
 // Flags
 
@@ -85,16 +92,16 @@ namespace core
 // landing Doors, Corridor Doors and Facade Doors always use the regular height.
 #define CORE_DOOR_TALL_HEIGHT					0.9f
 #define CORE_DOOR_X_INSET							0.1f
-#define CORE_DOOR_QUEUE_STOP_WIDTH					(CORE_AGENT_MAX_WIDTH + 0.1f)
+#define CORE_RESOURCE_QUEUE_SLOT_PITCH					(CORE_RESOURCE_SLOT_WIDTH + 0.1f)
 // Crossing half-width about a Door vertex's x position (ticket #97): the
 // physical doorway width (cell width minus the door's x insets) minus the
-// agent's width, halved. A 1-cell door yields +/-0.2; a 3-cell door +/-1.2.
+// fixed resource slot width, halved. A 1-cell door yields +/-0.2; a 3-cell door +/-1.2.
 #define CORE_DOOR_CROSSING_HALF_WIDTH(cellsWide)		\
-	(((float)(cellsWide) - 2.0f * CORE_DOOR_X_INSET - CORE_AGENT_MAX_WIDTH) * 0.5f)
+	(((float)(cellsWide) - 2.0f * CORE_DOOR_X_INSET - CORE_RESOURCE_SLOT_WIDTH) * 0.5f)
 // An open Platform Lift has no doorway insets. Its single crossing lane spans
-// every centre position at which the maximum-width Agent remains fully aboard.
+// every centre position at which a fixed resource slot remains fully aboard.
 #define CORE_PLATFORM_LIFT_CROSSING_HALF_WIDTH(cellsWide)	\
-	(((float)(cellsWide) - CORE_AGENT_MAX_WIDTH) * 0.5f)
+	(((float)(cellsWide) - CORE_RESOURCE_SLOT_WIDTH) * 0.5f)
 
 //
 // Bulkhead doors
@@ -115,9 +122,9 @@ namespace core
 // Ladders
 //
 #define CORE_LADDER_WIDTH							0.4f
-#define CORE_LADDER_AGENT_SPACING					(CORE_AGENT_MAX_HEIGHT + 0.9f)
+#define CORE_LADDER_SLOT_SPACING					(CORE_RESOURCE_SLOT_STANDING_HEIGHT + 0.9f)
 #define CORE_LADDER_HEIGHT_OFF_GROUND				(0.3f / CORE_CELL_YX_RENDER_RATIO)
-#define CORE_LADDER_HEIGHT_AT_TOP					(CORE_AGENT_MAX_HEIGHT * 0.75f)
+#define CORE_LADDER_TOP_SLOT_HEIGHT					(CORE_RESOURCE_SLOT_STANDING_HEIGHT * 0.75f)
 #define CORE_LADDER_MIN_RETRACTED_LENGTH			0.2f
 #define CORE_LADDER_EXTEND_RETRACT_TIME				1.2f
 
@@ -142,15 +149,15 @@ namespace core
 #define CORE_SHUTTLE_CAR_WIDTH						2.0f
 #define CORE_SHUTTLE_CAR_HEIGHT						(CORE_SHUTTLE_DOORWAY_HEIGHT + 0.05f)
 #define CORE_SHUTTLE_SPEED							0.5f
-#define CORE_SHUTTLE_AGENT_BUFFER					0.1f
+#define CORE_SHUTTLE_OCCUPANT_CLEARANCE					0.1f
 
 namespace core
 {
 	inline constexpr uint32_t maximumShuttleCarriageCapacity(uint32_t cellsWide)
 	{
 		return cellsWide == 0 ? 0 : static_cast<uint32_t>(
-			((float)cellsWide - CORE_SHUTTLE_AGENT_BUFFER)
-			/ (CORE_AGENT_MAX_WIDTH + CORE_SHUTTLE_AGENT_BUFFER));
+			((float)cellsWide - CORE_SHUTTLE_OCCUPANT_CLEARANCE)
+			/ (CORE_RESOURCE_SLOT_WIDTH + CORE_SHUTTLE_OCCUPANT_CLEARANCE));
 	}
 
 	// Every authored or API-supplied duration shares one contract: it must be
@@ -183,7 +190,7 @@ namespace core
 //
 // Stairwells
 //
-#define CORE_STAIRWELL_DOORWAY_WIDTH				(0.4f + CORE_AGENT_MAX_WIDTH)
+#define CORE_STAIRWELL_PASSAGE_WIDTH				(0.4f + CORE_RESOURCE_SLOT_WIDTH)
 #define CORE_STAIRWELL_DOORWAY_HEIGHT				CORE_DOOR_HEIGHT
 
 //
@@ -240,5 +247,5 @@ namespace core
 	(float)(cx + 0.5f - (CORE_LADDER_WIDTH * 0.5f)), \
 	cy + CORE_LADDER_HEIGHT_OFF_GROUND, \
 	CORE_LADDER_WIDTH, \
-	(float)(dh - 1) + CORE_LADDER_HEIGHT_AT_TOP - CORE_LADDER_HEIGHT_OFF_GROUND
+	(float)(dh - 1) + CORE_LADDER_TOP_SLOT_HEIGHT - CORE_LADDER_HEIGHT_OFF_GROUND
 	

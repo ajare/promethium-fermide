@@ -122,7 +122,7 @@ flowchart TD
 4. `World::refreshQueuePositions()` assigns scarce physical positions nearest the Ladder first, then nearest the waiting Agent. A request can retain its logical place without owning a physical position.
 5. While pending, `Agent::update()` walks toward `mTraversalLocalGoal`. Admission requires the Agent to have reached that queue position. An Agent already exactly at the source endpoint may be admitted directly when it did not approach through an early queue side.
 6. `World::tryGrantLadderAdmissions()` admits only the active direction. Opposite-direction demand stops the current batch at `mDirectionalBatchLimit`; direction changes only after reservations/occupancy drain.
-7. `World::ladderEntryHasClearedSpacing()` staggers entry: every climber moves at the same climb speed, so a new climber is admitted only once all in-flight climbers (occupants and granted reservations still walking to the mount point) have cleared the entry altitude by a full `CORE_LADDER_AGENT_SPACING`. Without this, simultaneously admitted Agents would catch up and overlap on the span.
+7. `World::ladderEntryHasClearedSpacing()` staggers entry: every climber moves at the same climb speed, so a new climber is admitted only once all in-flight climbers (occupants and granted reservations still walking to the mount point) have cleared the entry altitude by a full `CORE_LADDER_SLOT_SPACING`. Without this, simultaneously admitted Agents would catch up and overlap on the span.
 8. Cancellation, denial, timeout, or completion calls `World::releaseLadderAdmission()`, then queue positions are refreshed so waiting Agents advance.
 
 ## Capacity lifecycle for a Sector Ladder

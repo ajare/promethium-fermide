@@ -21,25 +21,25 @@ int main()
 		// Compare exactly, not within a tolerance: these coordinates feed snapshots
 		// and deterministic simulation. Include translated authored Lift extents.
 		for (unsigned width = 1; width <= 16; ++width)
-			for (unsigned count = 1; count * CORE_AGENT_MAX_WIDTH <= width; ++count)
+			for (unsigned count = 1; count * CORE_RESOURCE_SLOT_WIDTH <= width; ++count)
 				for (unsigned origin = 0; origin <= 64; ++origin)
 				{
-					auto const start = origin + (width - count * CORE_AGENT_MAX_WIDTH) * 0.5f
-						+ CORE_AGENT_MAX_WIDTH * 0.5f - (float)origin;
+					auto const start = origin + (width - count * CORE_RESOURCE_SLOT_WIDTH) * 0.5f
+						+ CORE_RESOURCE_SLOT_WIDTH * 0.5f - (float)origin;
 					auto targets = packOccupants(count, 0,
-						{ start, start + CORE_AGENT_MAX_WIDTH * (count - 1) },
-						CORE_AGENT_MAX_WIDTH, 0.0f, OccupantPackingOrder::Forward,
+						{ start, start + CORE_RESOURCE_SLOT_WIDTH * (count - 1) },
+						CORE_RESOURCE_SLOT_WIDTH, 0.0f, OccupantPackingOrder::Forward,
 						OccupantPackingLayout::Compact);
 					require(targets.size() == count);
 					for (unsigned rank = 0; rank < count; ++rank)
-						require(targets[rank] == start + CORE_AGENT_MAX_WIDTH * rank);
+						require(targets[rank] == start + CORE_RESOURCE_SLOT_WIDTH * rank);
 				}
 
 		// Lift compact packing uses the configured adjacent-occupant clearance when
 		// the authored car is wide enough, while remaining centred in the car.
 		{
 			auto targets = packOccupants(3, 0, { 0.2f, 1.8f },
-				CORE_AGENT_MAX_WIDTH, 0.1f, OccupantPackingOrder::Forward,
+				CORE_RESOURCE_SLOT_WIDTH, 0.1f, OccupantPackingOrder::Forward,
 				OccupantPackingLayout::Compact);
 			require(targets.size() == 3);
 			require(std::abs(targets[0] - 0.5f) < 0.000001f);
@@ -53,15 +53,15 @@ int main()
 		for (auto const width : { 1.2f, 1.35f })
 		{
 			auto targets = packOccupants(3, 0,
-				{ CORE_AGENT_MAX_WIDTH * 0.5f, width - CORE_AGENT_MAX_WIDTH * 0.5f },
-				CORE_AGENT_MAX_WIDTH, 0.1f, OccupantPackingOrder::Forward,
+				{ CORE_RESOURCE_SLOT_WIDTH * 0.5f, width - CORE_RESOURCE_SLOT_WIDTH * 0.5f },
+				CORE_RESOURCE_SLOT_WIDTH, 0.1f, OccupantPackingOrder::Forward,
 				OccupantPackingLayout::Compact);
 			require(targets.size() == 3);
-			require(std::abs(targets.front() - CORE_AGENT_MAX_WIDTH * 0.5f) < 0.000001f);
-			require(std::abs(targets.back() - (width - CORE_AGENT_MAX_WIDTH * 0.5f)) < 0.000001f);
-			auto const expectedGap = (width - 3.0f * CORE_AGENT_MAX_WIDTH) * 0.5f;
+			require(std::abs(targets.front() - CORE_RESOURCE_SLOT_WIDTH * 0.5f) < 0.000001f);
+			require(std::abs(targets.back() - (width - CORE_RESOURCE_SLOT_WIDTH * 0.5f)) < 0.000001f);
+			auto const expectedGap = (width - 3.0f * CORE_RESOURCE_SLOT_WIDTH) * 0.5f;
 			require(std::abs(targets[1] - targets[0]
-				- CORE_AGENT_MAX_WIDTH - expectedGap) < 0.000001f);
+				- CORE_RESOURCE_SLOT_WIDTH - expectedGap) < 0.000001f);
 		}
 
 		// Shuttle boarding order is retained externally; targets follow its ranks.
@@ -73,14 +73,14 @@ int main()
 						for (auto order : { OccupantPackingOrder::Forward, OccupantPackingOrder::Reverse })
 						{
 							auto const start = carriage * (width + 1.0f);
-							auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
-							auto const left = start + halfWidth + CORE_SHUTTLE_AGENT_BUFFER;
-							auto const right = start + width - halfWidth - CORE_SHUTTLE_AGENT_BUFFER;
+							auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+							auto const left = start + halfWidth + CORE_SHUTTLE_OCCUPANT_CLEARANCE;
+							auto const right = start + width - halfWidth - CORE_SHUTTLE_OCCUPANT_CLEARANCE;
 							auto const leading = order == OccupantPackingOrder::Forward ? left : right;
 							auto const trailing = order == OccupantPackingOrder::Forward ? right : left;
 							auto targets = packOccupants(count, reserved,
-								{ start + halfWidth, start + width - halfWidth }, CORE_AGENT_MAX_WIDTH,
-								CORE_SHUTTLE_AGENT_BUFFER, order, OccupantPackingLayout::Buffered);
+								{ start + halfWidth, start + width - halfWidth }, CORE_RESOURCE_SLOT_WIDTH,
+								CORE_SHUTTLE_OCCUPANT_CLEARANCE, order, OccupantPackingLayout::Buffered);
 							require(targets.size() == count);
 							for (unsigned rank = 0; rank < count; ++rank)
 							{

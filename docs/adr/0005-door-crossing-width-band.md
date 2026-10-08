@@ -14,7 +14,7 @@ the vertex's x position, derived from the physical doorway and never
 serialized:
 
 ```
-crossingWidth = (cellsWide - 2 * CORE_DOOR_X_INSET - CORE_AGENT_MAX_WIDTH) / 2
+crossingWidth = (cellsWide - 2 * CORE_DOOR_X_INSET - CORE_RESOURCE_SLOT_WIDTH) / 2
 ```
 
 A 1-cell door yields +/-0.2; a 3-cell door +/-1.2. The lane grant's

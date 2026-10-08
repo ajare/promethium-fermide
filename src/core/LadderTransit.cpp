@@ -18,7 +18,7 @@ namespace core
 			1.0f, (float)levelsHigh,
 			1, levelsHigh,
 			CORE_CORRIDOR_HEIGHT,
-			(uint32_t)((float)((levelsHigh - 1.0f) + CORE_CORRIDOR_HEIGHT) / CORE_AGENT_MAX_HEIGHT),
+			(uint32_t)((float)((levelsHigh - 1.0f) + CORE_CORRIDOR_HEIGHT) / CORE_RESOURCE_SLOT_STANDING_HEIGHT),
 			stops)
 		, VerticalEdgeCreator()
 	{

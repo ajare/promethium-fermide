@@ -824,10 +824,10 @@ inline std::vector<TransitAperture> transitApertures(
 				// cell, so the aperture carries no Location of its own.
 				apertures.push_back({
 					{ (float)stairwell->getCellX() + 1.0f
-						- CORE_STAIRWELL_DOORWAY_WIDTH * 0.5f,
+						- CORE_STAIRWELL_PASSAGE_WIDTH * 0.5f,
 						(float)stairwell->getCellY() + (float)level },
 					{ (float)stairwell->getCellX() + 1.0f
-						+ CORE_STAIRWELL_DOORWAY_WIDTH * 0.5f,
+						+ CORE_STAIRWELL_PASSAGE_WIDTH * 0.5f,
 						(float)stairwell->getCellY() + (float)level + CORE_STAIRWELL_DOORWAY_HEIGHT },
 					level < stairwell->getNumStops() ? stairwell->getStop(level).sector : nullptr });
 			}

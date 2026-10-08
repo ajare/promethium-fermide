@@ -109,10 +109,10 @@ namespace
 		core::World untouched("Default traversal geometry", 2, 1);
 
 		auto const& defaults = untouched.getTraversalGeometryPolicy();
-		if (defaults.minimumQueueSeparation != CORE_DOOR_QUEUE_STOP_WIDTH
-			|| defaults.advanceStepThreshold != CORE_AGENT_REACH_DIST
-			|| defaults.overflowTailSeparation != CORE_DOOR_QUEUE_STOP_WIDTH
-			|| defaults.occupantClearance != CORE_SHUTTLE_AGENT_BUFFER)
+		if (defaults.minimumQueueSeparation != CORE_RESOURCE_QUEUE_SLOT_PITCH
+			|| defaults.advanceStepThreshold != CORE_RESOURCE_QUEUE_ADVANCE_THRESHOLD
+			|| defaults.overflowTailSeparation != CORE_RESOURCE_QUEUE_SLOT_PITCH
+			|| defaults.occupantClearance != CORE_SHUTTLE_OCCUPANT_CLEARANCE)
 		{
 			return false;
 		}
@@ -130,10 +130,10 @@ namespace
 			&& roundTripped.advanceStepThreshold == 0.2f
 			&& roundTripped.overflowTailSeparation == 0.8f
 			&& roundTripped.occupantClearance == 0.15f
-			&& stillDefault.minimumQueueSeparation == CORE_DOOR_QUEUE_STOP_WIDTH
-			&& stillDefault.advanceStepThreshold == CORE_AGENT_REACH_DIST
-			&& stillDefault.overflowTailSeparation == CORE_DOOR_QUEUE_STOP_WIDTH
-			&& stillDefault.occupantClearance == CORE_SHUTTLE_AGENT_BUFFER;
+			&& stillDefault.minimumQueueSeparation == CORE_RESOURCE_QUEUE_SLOT_PITCH
+			&& stillDefault.advanceStepThreshold == CORE_RESOURCE_QUEUE_ADVANCE_THRESHOLD
+			&& stillDefault.overflowTailSeparation == CORE_RESOURCE_QUEUE_SLOT_PITCH
+			&& stillDefault.occupantClearance == CORE_SHUTTLE_OCCUPANT_CLEARANCE;
 	}
 }
 

@@ -209,8 +209,8 @@ namespace
 				boardingStayedAtWalkSpeed = passenger->getGlobalPosition().distanceTo(previousPosition)
 					<= passenger->getWalkSpeed() * world.getFixedTimestep() + 0.001f;
 				auto const centerX = passenger->getGlobalPosition().x;
-				fullyInsideWhenRegistered = centerX - CORE_AGENT_MAX_WIDTH * 0.5f >= 2.0f - 0.001f
-					&& centerX + CORE_AGENT_MAX_WIDTH * 0.5f <= 3.0f + 0.001f;
+				fullyInsideWhenRegistered = centerX - CORE_RESOURCE_SLOT_WIDTH * 0.5f >= 2.0f - 0.001f
+					&& centerX + CORE_RESOURCE_SLOT_WIDTH * 0.5f <= 3.0f + 0.001f;
 				registeredAtAssignedPosition = std::abs(centerX - assignedX) < 0.01f;
 			}
 			if (onboard)
@@ -283,7 +283,7 @@ namespace
 		}
 
 		if (std::abs(CORE_PLATFORM_LIFT_CROSSING_HALF_WIDTH(options.cellsWide) * 2.0f
-			- ((float)options.cellsWide - CORE_AGENT_MAX_WIDTH)) > 0.001f) return false;
+			- ((float)options.cellsWide - CORE_RESOURCE_SLOT_WIDTH)) > 0.001f) return false;
 		bool sawTwoPassengersSpread = false;
 		for (uint32_t tick = 0; tick < MaximumSimulationTicks * 12; ++tick)
 		{

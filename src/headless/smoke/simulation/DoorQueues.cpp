@@ -68,7 +68,7 @@ namespace
 					}
 					for (auto const& other : occupied)
 					{
-						if (position.position.distanceTo(other) < CORE_DOOR_QUEUE_STOP_WIDTH - 0.001f)
+						if (position.position.distanceTo(other) < CORE_RESOURCE_QUEUE_SLOT_PITCH - 0.001f)
 						{
 							return false;
 						}
@@ -259,7 +259,7 @@ namespace
 		}
 
 		world.advanceTicks(2);
-		auto const floorBoundary = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const floorBoundary = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		bool sawClampedTail = false;
 		for (uint32_t tick = 0; tick < 8; ++tick)
 		{
@@ -566,15 +566,15 @@ void registerDoorQueues(std::vector<smoke::Check>& checks)
 	checks.push_back({ "queueChainsFollowWithoutCompressingDefaultLeft", [](smoke::Context const&)
 		{
 			std::vector<uint32_t> first, repeated;
-			smoke::require(queueChainsFollowWithoutCompressing((float)CORE_DOOR_QUEUE_STOP_WIDTH, -1, first)
-				&& queueChainsFollowWithoutCompressing((float)CORE_DOOR_QUEUE_STOP_WIDTH, -1, repeated)
+			smoke::require(queueChainsFollowWithoutCompressing((float)CORE_RESOURCE_QUEUE_SLOT_PITCH, -1, first)
+				&& queueChainsFollowWithoutCompressing((float)CORE_RESOURCE_QUEUE_SLOT_PITCH, -1, repeated)
 				&& first == repeated, "queue chain spacing, staggered advancement or determinism");
 		} });
 	checks.push_back({ "queueChainsFollowWithoutCompressingDefaultRight", [](smoke::Context const&)
 		{
 			std::vector<uint32_t> first, repeated;
-			smoke::require(queueChainsFollowWithoutCompressing((float)CORE_DOOR_QUEUE_STOP_WIDTH, 1, first)
-				&& queueChainsFollowWithoutCompressing((float)CORE_DOOR_QUEUE_STOP_WIDTH, 1, repeated)
+			smoke::require(queueChainsFollowWithoutCompressing((float)CORE_RESOURCE_QUEUE_SLOT_PITCH, 1, first)
+				&& queueChainsFollowWithoutCompressing((float)CORE_RESOURCE_QUEUE_SLOT_PITCH, 1, repeated)
 				&& first == repeated, "queue chain spacing, staggered advancement or determinism");
 		} });
 	checks.push_back({ "queueChainsFollowWithoutCompressingWideLeft", [](smoke::Context const&)

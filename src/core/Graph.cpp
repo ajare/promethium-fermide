@@ -1649,7 +1649,7 @@ namespace core
 					auto sector = mwWorld->_getSector(cellDef.sectorIndex);
 
 					// SectorObjectVertex takes an offset within the Sector
-					float xOffset = (float)(x - sector->getCellX()) + CORE_AGENT_MAX_WIDTH * 0.5f;
+					float xOffset = (float)(x - sector->getCellX()) + CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 					float yOffset = (float)(y - sector->getCellY());
 
 					appendRowVertex(row, x, SlotGapLeft, make_shared<SectorMarkerVertex>(sector, xOffset, yOffset));
@@ -1763,7 +1763,7 @@ namespace core
 					auto sector = mwWorld->_getSector(cellDef.sectorIndex);
 
 					// SectorObjectVertex takes an offset within the Sector
-					float xOffset = (float)(x - sector->getCellX()) + (1.0f - CORE_AGENT_MAX_WIDTH * 0.5f);
+					float xOffset = (float)(x - sector->getCellX()) + (1.0f - CORE_RESOURCE_SLOT_WIDTH * 0.5f);
 					float yOffset = (float)(y - sector->getCellY());
 
 					appendRowVertex(row, x, SlotGapRight, make_shared<SectorMarkerVertex>(sector, xOffset, yOffset));

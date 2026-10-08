@@ -238,7 +238,7 @@ namespace
 				"A three-level Stairwell does not expose one aperture per level");
 			for (auto const& aperture : apertures)
 				require(std::abs((aperture.max.x - aperture.min.x)
-						- CORE_STAIRWELL_DOORWAY_WIDTH) < 0.0001f
+						- CORE_STAIRWELL_PASSAGE_WIDTH) < 0.0001f
 						&& std::abs((aperture.max.y - aperture.min.y)
 							- CORE_STAIRWELL_DOORWAY_HEIGHT) < 0.0001f,
 					"A Stairwell level aperture is not the shaft doorway size");

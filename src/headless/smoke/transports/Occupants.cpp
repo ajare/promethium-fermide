@@ -40,7 +40,7 @@ namespace
 		for (size_t i = 1; i < lift->capacityPositions.size(); ++i)
 			if (std::abs(lift->capacityPositions[i].position.x
 				- lift->capacityPositions[i - 1].position.x
-				- CORE_AGENT_MAX_WIDTH - policy.occupantClearance) > 0.000001f) return false;
+				- CORE_RESOURCE_SLOT_WIDTH - policy.occupantClearance) > 0.000001f) return false;
 
 		// More requested clearance than the car can provide uses its full body-safe
 		// extent without changing the authored capacity.
@@ -53,10 +53,10 @@ namespace
 		return lift != snapshot.traversalResources.end()
 			&& lift->capacity == options.capacity
 			&& std::abs(lift->capacityPositions.front().position.x
-				- CORE_AGENT_MAX_WIDTH * 0.5f) < 0.000001f
+				- CORE_RESOURCE_SLOT_WIDTH * 0.5f) < 0.000001f
 			&& std::abs(lift->capacityPositions.back().position.x
 				- (options.cellsWide - 2.0f * CORE_LIFT_CAR_BORDER
-					- CORE_AGENT_MAX_WIDTH * 0.5f)) < 0.000001f;
+					- CORE_RESOURCE_SLOT_WIDTH * 0.5f)) < 0.000001f;
 	}
 
 	bool liftOccupantsAreOrderedByBoardingAndDestination()

@@ -212,7 +212,7 @@ namespace core
 		// capacity ownership, leaving room for the passenger walking to the Doors.
 		auto const targets = packOccupants(passengers.size(), 0,
 			{ resource.mCapacityPositions.front().x, resource.mCapacityPositions.back().x },
-			CORE_AGENT_MAX_WIDTH, mWorld.mTraversalGeometryPolicy.occupantClearance,
+			CORE_RESOURCE_SLOT_WIDTH, mWorld.mTraversalGeometryPolicy.occupantClearance,
 			OccupantPackingOrder::Forward, OccupantPackingLayout::Compact);
 		for (size_t rank = 0; rank < passengers.size(); ++rank)
 			resource.mLiftPassengerTargets[passengers[rank]] = {

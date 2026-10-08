@@ -556,13 +556,13 @@ namespace core
 	struct TraversalGeometryPolicy
 	{
 		// The authored queue lane pitch remains the minimum clearance guarantee.
-		float minimumQueueSeparation{ CORE_DOOR_QUEUE_STOP_WIDTH };
+		float minimumQueueSeparation{ CORE_RESOURCE_QUEUE_SLOT_PITCH };
 		// Require a meaningful forward step before replacing a waiting target.
-		float advanceStepThreshold{ CORE_AGENT_REACH_DIST };
+		float advanceStepThreshold{ CORE_RESOURCE_QUEUE_ADVANCE_THRESHOLD };
 		// Continue an overflowing queue at the authored lane pitch.
-		float overflowTailSeparation{ CORE_DOOR_QUEUE_STOP_WIDTH };
+		float overflowTailSeparation{ CORE_RESOURCE_QUEUE_SLOT_PITCH };
 		// Match the clearance already used to pack Shuttle occupants.
-		float occupantClearance{ CORE_SHUTTLE_AGENT_BUFFER };
+		float occupantClearance{ CORE_SHUTTLE_OCCUPANT_CLEARANCE };
 	};
 
 	class TraversalRequest

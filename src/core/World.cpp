@@ -2649,7 +2649,7 @@ namespace core
 		{
 			throw WorldException(this, format("{} - Lift initial stop is out of range.", caller));
 		}
-		auto representablePositions = (uint32_t)floor((float)options.cellsWide / CORE_AGENT_MAX_WIDTH);
+		auto representablePositions = (uint32_t)floor((float)options.cellsWide / CORE_RESOURCE_SLOT_WIDTH);
 		if (options.capacity > representablePositions)
 		{
 			throw WorldException(this, format("{} - Lift capacity {} exceeds {} representable interior standing positions.",
@@ -4175,9 +4175,9 @@ namespace core
 		// Pack every authored capacity slot inside the car. The World's desired
 		// clearance is used where it fits; compact packing reduces only the gap when
 		// the authored width is tighter, without reducing capacity or leaving the car.
-		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		auto const occupantTargets = packOccupants(options.capacity, 0,
-			{ halfAgentWidth, lift->getSize().x - halfAgentWidth }, CORE_AGENT_MAX_WIDTH,
+			{ halfAgentWidth, lift->getSize().x - halfAgentWidth }, CORE_RESOURCE_SLOT_WIDTH,
 			mTraversalGeometryPolicy.occupantClearance, OccupantPackingOrder::Forward,
 			OccupantPackingLayout::Compact);
 		for (uint32_t i = 0; i < options.capacity; ++i)
@@ -5935,7 +5935,7 @@ namespace core
 			command.desiredState = true;
 			command.traversalResource = door->getTraversalResourceId();
 			auto point = createPhysicalControlInteractionPoint("Door button", control,
-				(float)doorObject->getCellY(), CORE_AGENT_MAX_HEIGHT * 0.4f,
+				(float)doorObject->getCellY(), CORE_RESOURCE_SLOT_STANDING_HEIGHT * 0.4f,
 				getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
 			auto interaction = mInteractionPoints.find(point);
 			for (auto permission : source->values)
@@ -6205,7 +6205,7 @@ namespace core
 		// Each side owns an independent centre-first queue. Expand left and right
 		// until that direction reaches either the Sector boundary or a floor gap.
 		auto queueResource = mTraversalResources.find(traversalResource);
-		auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		for (auto& lane : queueResource->mQueueLanes)
 		{
 			auto sector = mSectors[(size_t)lane.sector.value - 1];
@@ -6214,7 +6214,7 @@ namespace core
 				if (positionX - halfWidth < sector->getCellX0() - 0.001f
 					|| positionX + halfWidth > sector->getCellX1() + 1.0f + 0.001f
 					|| threshold.y < sector->getCellY0() - 0.001f
-					|| threshold.y + CORE_AGENT_MAX_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
+					|| threshold.y + CORE_RESOURCE_SLOT_STANDING_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
 					return false;
 				auto const cellX = min(sector->getCellX1(), (uint32_t)floor(positionX));
 				auto const cellY = min(sector->getCellY1(), (uint32_t)floor(threshold.y));
@@ -6226,7 +6226,7 @@ namespace core
 			bool scanLeft = true, scanRight = true;
 			for (uint32_t step = 1; scanLeft || scanRight; ++step)
 			{
-				auto const distance = step * (float)CORE_DOOR_QUEUE_STOP_WIDTH;
+				auto const distance = step * (float)CORE_RESOURCE_QUEUE_SLOT_PITCH;
 				auto const left = threshold.x - distance;
 				auto const right = threshold.x + distance;
 				if (scanLeft)
@@ -6282,7 +6282,7 @@ namespace core
 					command.desiredState = true;
 					command.traversalResource = traversalResource;
 					auto point = createPhysicalControlInteractionPoint("Door button",
-						createdControls[i], (float)y, CORE_AGENT_MAX_HEIGHT * 0.4f,
+						createdControls[i], (float)y, CORE_RESOURCE_SLOT_STANDING_HEIGHT * 0.4f,
 						getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
 					auto interaction = mInteractionPoints.find(point);
 					for (auto permission : options.controlPermissionRequirements[i])
@@ -6708,14 +6708,14 @@ namespace core
 		// Same-layer geometry gets explicit approaches on opposite sides of the
 		// threshold; no Y/layer heuristic participates in authorization.
 		auto threshold = Vector2{ (float)cx1, (float)y };
-		auto leftOrigin = threshold - Vector2::UNIT_X * CORE_DOOR_QUEUE_STOP_WIDTH;
-		auto rightOrigin = threshold + Vector2::UNIT_X * CORE_DOOR_QUEUE_STOP_WIDTH;
+		auto leftOrigin = threshold - Vector2::UNIT_X * CORE_RESOURCE_QUEUE_SLOT_PITCH;
+		auto rightOrigin = threshold + Vector2::UNIT_X * CORE_RESOURCE_QUEUE_SLOT_PITCH;
 		configureDoorQueueLane(traversalResource, SectorId{ (uint64_t)sector0->getIndex() + 1 },
 			leftOrigin, Vector2::NEGATIVE_UNIT_X,
-			max(0.0f, leftOrigin.x - (sector0->getCellX0() + CORE_AGENT_MAX_WIDTH * 0.5f)));
+			max(0.0f, leftOrigin.x - (sector0->getCellX0() + CORE_RESOURCE_SLOT_WIDTH * 0.5f)));
 		configureDoorQueueLane(traversalResource, SectorId{ (uint64_t)sector1->getIndex() + 1 },
 			rightOrigin, Vector2::UNIT_X,
-			max(0.0f, (sector1->getCellX1() + 1.0f - CORE_AGENT_MAX_WIDTH * 0.5f) - rightOrigin.x));
+			max(0.0f, (sector1->getCellX1() + 1.0f - CORE_RESOURCE_SLOT_WIDTH * 0.5f) - rightOrigin.x));
 
 		CreateObjectResult createdControls[2];
 
@@ -7364,7 +7364,7 @@ namespace core
 		auto traversalResource = createForceBridgeTraversalResource("Force bridge", forceBridge);
 		forceBridge->configureTraversal(traversalResource);
 		forceBridge->mInitiallyBroken = forceBridge->mBroken = options.extensible && options.initiallyBroken;
-		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		configureForceBridgeQueueLanes(traversalResource,
 			SectorId{ (uint64_t)sector->getIndex() + 1 },
 			{ Vector2{ (float)x - halfAgentWidth, (float)y },
@@ -7387,7 +7387,7 @@ namespace core
 				createdControls[0] = _createForceBridgeButton(fbObject.sector, x, y, options.width, options.fromSide, 0);
 				DeviceCommand command{ DeviceCommandType::SetExtendedState, {}, true, traversalResource };
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
-					createdControls[0], (float)y, CORE_AGENT_MAX_WIDTH * 0.5f + 0.001f,
+					createdControls[0], (float)y, CORE_RESOURCE_SLOT_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
 				if (auto interaction = mInteractionPoints.find(point))
 					for (auto permission : options.controlPermissionRequirements[options.fromSide])
@@ -7399,7 +7399,7 @@ namespace core
 				createdControls[1] = _createForceBridgeButton(fbObject.sector, x, y, options.width, 1 - options.fromSide, 0);
 				DeviceCommand command{ DeviceCommandType::SetExtendedState, {}, true, traversalResource };
 				auto point = createPhysicalControlInteractionPoint("Force bridge extension control",
-					createdControls[1], (float)y, CORE_AGENT_MAX_WIDTH * 0.5f + 0.001f,
+					createdControls[1], (float)y, CORE_RESOURCE_SLOT_WIDTH * 0.5f + 0.001f,
 					getFixedTimestep(), { { command, InteractionBindingRequirement::Required } });
 				if (auto interaction = mInteractionPoints.find(point))
 					for (auto permission : options.controlPermissionRequirements[1 - options.fromSide])
@@ -7829,7 +7829,7 @@ namespace core
 		// Lifts, and Ladders.
 		resource->mQueueLanes.clear();
 		resource->mQueueLanes.resize(stops.size());
-		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		for (uint32_t stop = 0; stop < stops.size(); ++stop)
 		{
 			// Queue support is authored and independent at each Stop, not inherited
@@ -7847,7 +7847,7 @@ namespace core
 			lane.direction = Vector2::UNIT_X * queueDirection;
 			for (uint32_t step = 0; ; ++step)
 			{
-				auto distance = halfAgentWidth + step * (float)CORE_DOOR_QUEUE_STOP_WIDTH;
+				auto distance = halfAgentWidth + step * (float)CORE_RESOURCE_QUEUE_SLOT_PITCH;
 				auto position = lane.origin + lane.direction * distance;
 				if (position.x - halfAgentWidth < sector->getCellX0() - 0.001f
 					|| position.x + halfAgentWidth > sector->getCellX1() + 1.0f + 0.001f)
@@ -7862,11 +7862,11 @@ namespace core
 				: lane.origin.distanceTo(lane.positions.back());
 		}
 
-		auto standingWidth = CORE_AGENT_MAX_WIDTH * options.capacity;
+		auto standingWidth = CORE_RESOURCE_SLOT_WIDTH * options.capacity;
 		auto standingStart = x + (options.cellsWide - standingWidth) * 0.5f
-			+ CORE_AGENT_MAX_WIDTH * 0.5f - sector->getPosition().x;
+			+ CORE_RESOURCE_SLOT_WIDTH * 0.5f - sector->getPosition().x;
 		for (uint32_t i = 0; i < options.capacity; ++i)
-			resource->mCapacityPositions[i] = { standingStart + CORE_AGENT_MAX_WIDTH * i, 0.0f };
+			resource->mCapacityPositions[i] = { standingStart + CORE_RESOURCE_SLOT_WIDTH * i, 0.0f };
 
 		for (uint32_t i = 0; i < liftRes.buttons.size(); ++i)
 		{
@@ -8075,10 +8075,10 @@ namespace core
 					auto sector = mSectors[(size_t)lane.sector.value - 1];
 					for (auto const& position : lane.positions)
 						require(isfinite(position.x) && isfinite(position.y)
-							&& position.x - CORE_AGENT_MAX_WIDTH * 0.5f >= sector->getCellX0() - 0.001f
-							&& position.x + CORE_AGENT_MAX_WIDTH * 0.5f <= sector->getCellX1() + 1.001f
+							&& position.x - CORE_RESOURCE_SLOT_WIDTH * 0.5f >= sector->getCellX0() - 0.001f
+							&& position.x + CORE_RESOURCE_SLOT_WIDTH * 0.5f <= sector->getCellX1() + 1.001f
 							&& position.y >= sector->getCellY0() - 0.001f
-							&& position.y + CORE_AGENT_MAX_HEIGHT <= sector->getCellY1() + 1.001f,
+							&& position.y + CORE_RESOURCE_SLOT_STANDING_HEIGHT <= sector->getCellY1() + 1.001f,
 							format("Queued crossing resource {} has a queue position outside its approach sector", id.value));
 				}
 			}
@@ -8098,9 +8098,9 @@ namespace core
 					for (auto const& position : lane.positions)
 						require(isfinite(position.x) && isfinite(position.y)
 							&& abs(position.y - resource.mLiftStops[stop].globalPosition) <= 0.001f
-							&& position.x - CORE_AGENT_MAX_WIDTH * 0.5f
+							&& position.x - CORE_RESOURCE_SLOT_WIDTH * 0.5f
 								>= sector->getCellX0() - 0.001f
-							&& position.x + CORE_AGENT_MAX_WIDTH * 0.5f
+							&& position.x + CORE_RESOURCE_SLOT_WIDTH * 0.5f
 								<= sector->getCellX1() + 1.001f,
 							format("Platform-lift resource {} has an invalid queue position at stop {}",
 								id.value, stop));
@@ -11888,10 +11888,10 @@ namespace core
 			throw invalid_argument("A ladder traversal resource requires a Ladder, sector, and positive batch limit");
 		}
 		// Capacity is a physical property of the usable vertical span: each slot keeps
-		// neighbouring Agents at least CORE_LADDER_AGENT_SPACING apart in render space.
+		// neighbouring Agents at least CORE_LADDER_SLOT_SPACING apart in render space.
 		// Even a short valid Ladder admits one Agent.
 		auto crossedLevels = (float)(ladder->getLevelsHigh() - 1);
-		auto agentSpacing = CORE_LADDER_AGENT_SPACING / CORE_CELL_YX_RENDER_RATIO;
+		auto agentSpacing = CORE_LADDER_SLOT_SPACING / CORE_CELL_YX_RENDER_RATIO;
 		auto capacity = max(1u, (uint32_t)floor(crossedLevels / agentSpacing));
 		vector<Vector2> positions;
 		positions.reserve(capacity);
@@ -11947,12 +11947,12 @@ namespace core
 				throw invalid_argument(format("Lift stop {} is not strictly above the previous stop", i));
 		}
 		auto usableWidth = lift->getSize().x;
-		if (capacity > (uint32_t)floor(usableWidth / CORE_AGENT_MAX_WIDTH))
+		if (capacity > (uint32_t)floor(usableWidth / CORE_RESOURCE_SLOT_WIDTH))
 			throw invalid_argument("Declared lift capacity cannot be represented by separated interior positions");
 		vector<Vector2> positions(capacity);
-		auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		auto const occupantTargets = packOccupants(capacity, 0,
-			{ halfAgentWidth, usableWidth - halfAgentWidth }, CORE_AGENT_MAX_WIDTH,
+			{ halfAgentWidth, usableWidth - halfAgentWidth }, CORE_RESOURCE_SLOT_WIDTH,
 			mTraversalGeometryPolicy.occupantClearance, OccupantPackingOrder::Forward,
 			OccupantPackingLayout::Compact);
 		for (uint32_t i = 0; i < capacity; ++i)
@@ -11992,13 +11992,13 @@ namespace core
 				|| (i > 0 && stops[i].globalPosition <= stops[i - 1].globalPosition))
 				throw invalid_argument(format("Platform lift stop {} has invalid virtual-boundary geometry", i));
 		}
-		if (capacity > (uint32_t)floor(lift->getSize().x / CORE_AGENT_MAX_WIDTH))
+		if (capacity > (uint32_t)floor(lift->getSize().x / CORE_RESOURCE_SLOT_WIDTH))
 			throw invalid_argument("Declared platform lift capacity cannot be represented by separated standing positions");
 		vector<Vector2> positions(capacity);
-		auto start = (lift->getSize().x - capacity * CORE_AGENT_MAX_WIDTH) * 0.5f
-			+ CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto start = (lift->getSize().x - capacity * CORE_RESOURCE_SLOT_WIDTH) * 0.5f
+			+ CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		for (uint32_t i = 0; i < capacity; ++i)
-			positions[i] = { start + i * CORE_AGENT_MAX_WIDTH, 0.0f };
+			positions[i] = { start + i * CORE_RESOURCE_SLOT_WIDTH, 0.0f };
 		auto stopDurationTicks = secondsToTicks(stopDurationSeconds, getFixedTimestep());
 		auto id = mTraversalResources.add(unique_ptr<TraversalResource>(new TraversalResource(name,
 			std::move(lift), locationSector, std::move(stops), capacity,
@@ -12047,9 +12047,9 @@ namespace core
 			throw invalid_argument("Declared shuttle capacity cannot be represented by buffered carriage standing positions");
 		vector<Vector2> positions;
 		positions.reserve(capacity * shuttle->getNumCars());
-		auto const first = CORE_AGENT_MAX_WIDTH * 0.5f + CORE_SHUTTLE_AGENT_BUFFER;
-		auto const last = usableWidth - CORE_AGENT_MAX_WIDTH * 0.5f
-			- CORE_SHUTTLE_AGENT_BUFFER;
+		auto const first = CORE_RESOURCE_SLOT_WIDTH * 0.5f + CORE_SHUTTLE_OCCUPANT_CLEARANCE;
+		auto const last = usableWidth - CORE_RESOURCE_SLOT_WIDTH * 0.5f
+			- CORE_SHUTTLE_OCCUPANT_CLEARANCE;
 		for (uint32_t carriage = 0; carriage < shuttle->getNumCars(); ++carriage)
 			for (uint32_t i = 0; i < capacity; ++i)
 			{
@@ -12135,8 +12135,8 @@ namespace core
 		if (!resource || !resource->mForceBridge || !sectorId || sectorId.value > mSectors.size())
 			throw invalid_argument("Force Bridge queue lanes require a Force Bridge and source sector");
 		auto sector = mSectors[(size_t)sectorId.value - 1];
-		auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
-		auto const spacing = (float)CORE_DOOR_QUEUE_STOP_WIDTH;
+		auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+		auto const spacing = (float)CORE_RESOURCE_QUEUE_SLOT_PITCH;
 		for (uint32_t approach = 0; approach < resource->mQueueLanes.size(); ++approach)
 		{
 			auto const direction = approach == 0 ? Vector2::NEGATIVE_UNIT_X : Vector2::UNIT_X;
@@ -12175,8 +12175,8 @@ namespace core
 		if (!resource || !resource->mLadder)
 			throw invalid_argument("Ladder queue lanes require a Ladder traversal resource");
 
-		auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
-		auto const spacing = (float)CORE_DOOR_QUEUE_STOP_WIDTH;
+		auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
+		auto const spacing = (float)CORE_RESOURCE_QUEUE_SLOT_PITCH;
 		for (uint32_t approach = 0; approach < resource->mQueueLanes.size(); ++approach)
 		{
 			if (!sectors[approach] || sectors[approach].value > mSectors.size())
@@ -12188,7 +12188,7 @@ namespace core
 				if (positionX - halfWidth < sector->getCellX0() - 0.001f
 					|| positionX + halfWidth > sector->getCellX1() + 1.0f + 0.001f
 					|| endpoint.y < sector->getCellY0() - 0.001f
-					|| endpoint.y + CORE_AGENT_MAX_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
+					|| endpoint.y + CORE_RESOURCE_SLOT_STANDING_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
 					return false;
 				auto const cellX = min(sector->getCellX1(), (uint32_t)floor(positionX));
 				auto const cellY = min(sector->getCellY1(), (uint32_t)floor(endpoint.y));
@@ -12243,13 +12243,13 @@ namespace core
 		}
 		direction.normalise();
 		auto sector = mSectors[(size_t)sectorId.value - 1];
-		auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+		auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		auto positionFits = [&](Vector2 const& position)
 		{
 			if (position.x - halfWidth < sector->getCellX0() - 0.001f
 				|| position.x + halfWidth > sector->getCellX1() + 1.0f + 0.001f
 				|| position.y < sector->getCellY0() - 0.001f
-				|| position.y + CORE_AGENT_MAX_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
+				|| position.y + CORE_RESOURCE_SLOT_STANDING_HEIGHT > sector->getCellY1() + 1.0f + 0.001f)
 			{
 				return false;
 			}
@@ -12289,7 +12289,7 @@ namespace core
 		lane->extent = extent;
 		lane->positions.clear();
 		lane->positionOwners.clear();
-		auto const spacing = (float)CORE_DOOR_QUEUE_STOP_WIDTH;
+		auto const spacing = (float)CORE_RESOURCE_QUEUE_SLOT_PITCH;
 		for (float distance = 0.0f; distance <= extent + 0.001f; distance += spacing)
 		{
 			auto position = origin + direction * distance;
@@ -12528,7 +12528,7 @@ namespace core
 			|| !isfinite(policy.advanceStepThreshold)
 			|| !isfinite(policy.overflowTailSeparation)
 			|| !isfinite(policy.occupantClearance)
-			|| policy.minimumQueueSeparation < CORE_DOOR_QUEUE_STOP_WIDTH
+			|| policy.minimumQueueSeparation < CORE_RESOURCE_QUEUE_SLOT_PITCH
 			|| policy.advanceStepThreshold < 0.0f
 			|| policy.overflowTailSeparation < 0.0f
 			|| policy.occupantClearance < 0.0f)
@@ -12546,10 +12546,10 @@ namespace core
 			auto& resource = *entry.second;
 			if (!resource.mLift || resource.mOpenPlatformLift || resource.mShuttle
 				|| resource.mCapacityPositions.empty()) continue;
-			auto const halfAgentWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+			auto const halfAgentWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 			auto const usableWidth = resource.mLift->getSize().x;
 			auto const targets = packOccupants(resource.mCapacityPositions.size(), 0,
-				{ halfAgentWidth, usableWidth - halfAgentWidth }, CORE_AGENT_MAX_WIDTH,
+				{ halfAgentWidth, usableWidth - halfAgentWidth }, CORE_RESOURCE_SLOT_WIDTH,
 				policy.occupantClearance, OccupantPackingOrder::Forward,
 				OccupantPackingLayout::Compact);
 			for (size_t i = 0; i < targets.size(); ++i)

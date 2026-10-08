@@ -67,11 +67,11 @@ namespace core
 
 		if (side == CORE_SIDE_LEFT)
 		{
-			xOffset = (float)(getCellX() - sector->getCellX()) - CORE_AGENT_MAX_WIDTH * 0.5f;
+			xOffset = (float)(getCellX() - sector->getCellX()) - CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		}
 		else
 		{
-			xOffset = (float)(getCellX() - sector->getCellX()) + getForceBridge()->getSize().x + CORE_AGENT_MAX_WIDTH * 0.5f;
+			xOffset = (float)(getCellX() - sector->getCellX()) + getForceBridge()->getSize().x + CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 		}
 
 		auto vertex = make_shared<SectorObjectVertex>(

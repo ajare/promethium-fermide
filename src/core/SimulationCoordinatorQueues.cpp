@@ -185,7 +185,7 @@ namespace core
 		// its body/standing target, not inside the gap it has yet to close.
 		if (hasOccupiedPosition)
 		{
-			auto const separation = max((float)CORE_DOOR_QUEUE_STOP_WIDTH,
+			auto const separation = max((float)CORE_RESOURCE_QUEUE_SLOT_PITCH,
 				mWorld.mTraversalGeometryPolicy.minimumQueueSeparation);
 			for (auto requestId : lane->queue)
 			{
@@ -336,7 +336,7 @@ namespace core
 		// target follows the predecessor, using a pre-movement sample so Agent
 		// iteration order cannot make an advance ripple through the whole line.
 		auto const& policy = mWorld.mTraversalGeometryPolicy;
-		auto const separation = max((float)CORE_DOOR_QUEUE_STOP_WIDTH,
+		auto const separation = max((float)CORE_RESOURCE_QUEUE_SLOT_PITCH,
 			policy.minimumQueueSeparation);
 		for (auto const& [id, resource] : mWorld.mTraversalResources.entries())
 		{
@@ -363,7 +363,7 @@ namespace core
 					auto sector = lane.sector && lane.sector.value <= mWorld.mSectors.size()
 						? mWorld.mSectors[(size_t)lane.sector.value - 1].get() : nullptr;
 					if (!sector || side == 0) return lane.origin.x;
-					auto const halfWidth = CORE_AGENT_MAX_WIDTH * 0.5f;
+					auto const halfWidth = CORE_RESOURCE_SLOT_WIDTH * 0.5f;
 					auto const y = lane.origin.y;
 					auto const cellY = (uint32_t)floor(y);
 					int cellX = (int)floor(lane.origin.x - (side < 0 ? 0.001f : 0.0f));
