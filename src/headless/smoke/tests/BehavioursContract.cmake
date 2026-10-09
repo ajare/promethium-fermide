@@ -61,6 +61,7 @@ set(core_names
     coroutineSleepFreezesWhenInactive
     coroutineSleepBudgets
     coroutineSleepEventOrdering
+    coroutinePreStartActivationNetState
     scriptedActionOutcomes
     scriptedActionScriptFailure
     scriptedActionCancellations

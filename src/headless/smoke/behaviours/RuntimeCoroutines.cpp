@@ -297,6 +297,44 @@ end end}
 		}
 	}
 
+	void coroutinePreStartActivationNetState(smoke::Context const& context)
+	{
+		(void)core::consumeLogMessages();
+		core::AgentBehaviourRuntimeLimits limits;
+		// A two-event queue makes any retained activation history overflow
+		// immediately; the runtime must retain net state instead (#545).
+		limits.pendingEventsPerInstance = 2;
+		Fixture fixture(context, R"lua(
+return {api_version=3, factory=function() return function(ctx)
+  local activation = wait()
+  assert(activation.type == 'activated', 'net activation missing: ' .. activation.type)
+  ctx.log('net activation delivered')
+  while true do wait() end
+end end}
+)lua", limits);
+		// Every toggle pair is a valid paused-only editor operation before the
+		// first boundary has constructed the assigned instance.
+		for (int i = 0; i < 10; ++i)
+		{
+			fixture.world.pauseSimulation();
+			require(fixture.world.setAgentActive(fixture.agent, false),
+				"Could not deactivate Agent");
+			require(fixture.world.setAgentActive(fixture.agent, true),
+				"Could not reactivate Agent");
+			require(fixture.world.resumeSimulation(), "Could not resume");
+		}
+		require(fixture.world.advanceTick(),
+			"Pre-start activation toggling failed the instance on its first tick");
+		require(fixture.world.getAgentBehaviourRuntimeDiagnostics().empty()
+				&& !fixture.world.isSimulationPaused(),
+			"Pre-start activation history produced a diagnostic or pause");
+		require(fixture.world.advanceTicks(2), "Net-state instance did not run");
+		auto const logs = core::consumeLogMessages();
+		require(std::count_if(logs.begin(), logs.end(), [](auto const& log)
+			{ return log.msg == "net activation delivered"; }) == 1,
+			"The net activation was not delivered exactly once");
+	}
+
 	void coroutineQueuesAndActivation(smoke::Context const& context)
 	{
 		core::AgentBehaviourRuntimeLimits limits;
@@ -352,4 +390,5 @@ void behaviour_smoke::registerRuntimeCoroutines(std::vector<smoke::Check>& check
 	checks.push_back({ "coroutineSleepFreezesWhenInactive", coroutineSleepFreezesWhenInactive });
 	checks.push_back({ "coroutineSleepBudgets", coroutineSleepBudgets });
 	checks.push_back({ "coroutineSleepEventOrdering", coroutineSleepEventOrdering });
+	checks.push_back({ "coroutinePreStartActivationNetState", coroutinePreStartActivationNetState });
 }

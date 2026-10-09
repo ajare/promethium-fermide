@@ -1942,9 +1942,15 @@ namespace core
 			auto found = installedBehaviours.find(agent);
 			if (found == installedBehaviours.end())
 			{
-				// The Agent holds the default no-op: the transition is retained
-				// for the instance a later assignment installs.
-				pendingLifecycleOutcomes[agent].push_back(std::move(outcome));
+				// The Agent holds the default no-op: retain the NET activation state
+				// for the instance a later assignment installs. Each transition
+				// replaces the record — a deactivation cancels any earlier pending
+				// activation — so an arbitrarily long sequence of paused-only toggles
+				// cannot accumulate unbounded history and the install drain feeds the
+				// bounded pending queue at most one Activated event (#545).
+				auto& pending = pendingLifecycleOutcomes[agent];
+				pending.clear();
+				pending.push_back(std::move(outcome));
 				return;
 			}
 			auto& instance = found->second.instance;
