@@ -184,10 +184,10 @@ namespace
 		auto unsupportedRegistry = core::AgentTagRegistry::create();
 		unsupportedRegistry->saveTo(malformedRegistryPath.string());
 		auto unsupportedYaml = readText(malformedRegistryPath);
-		auto const version = unsupportedYaml.find("version: 14");
+		auto const version = unsupportedYaml.find("version: 15");
 		require(version != std::string::npos,
 			"The registry fixture did not contain the current schema version");
-		unsupportedYaml.replace(version, std::string("version: 14").size(), "version: 15");
+		unsupportedYaml.replace(version, std::string("version: 15").size(), "version: 16");
 		writeText(malformedRegistryPath, unsupportedYaml);
 		bool unsupportedRefused{ false };
 		try

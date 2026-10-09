@@ -192,7 +192,7 @@ add_test(NAME agent-type-reserved-behaviour COMMAND pf-smoke-agent
     --check agentTypesReservedBehaviourMember)
 set_tests_properties(agent-type-reserved-behaviour PROPERTIES LABELS "core;functional;smoke;validation-fast")
 
-foreach(check agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
+foreach(check agentTypesInheritedObjectUsage agentTypesInheritedObjectUsageRoutes agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
     add_test(NAME object-usage-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(object-usage-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 endforeach()
@@ -210,6 +210,8 @@ add_test(NAME agent-type-topology-lifetime COMMAND pf-smoke-agent
     --check agentTypesTopologyReplayPreservesLiveInstances)
 add_test(NAME object-usage-overrides-panel COMMAND pf-smoke-editor --check agentObjectUsagePanelEdits)
 set_tests_properties(object-usage-overrides-panel PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
+add_test(NAME object-usage-inherited-history COMMAND pf-smoke-editor --check agentTypesInheritedObjectUsageWorkflows)
+set_tests_properties(object-usage-inherited-history PROPERTIES LABELS "agent;agent-tags;editor;functional;validation-fast" TIMEOUT 60)
 add_test(NAME object-usage-overrides-history COMMAND pf-smoke-editor --check agentTypesObjectUsageOverrideWorkflows)
 set_tests_properties(object-usage-overrides-history PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 add_test(NAME object-usage-none-history COMMAND pf-smoke-editor --check agentTypesNoneClipboardAndHistory)

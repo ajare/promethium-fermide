@@ -1724,7 +1724,8 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		// made yet, so the common failure leaves nothing behind at all.
 		agentId = world->createAgent(resolved->typeId, payload.name,
 			sector->getIndex(), levelOffset, localX,
-			payload.directAccessGrants, payload.permissionSets, payload.individualObjectUsage, payload.individualObjectUsageDistance);
+			payload.directAccessGrants, payload.permissionSets, payload.individualObjectUsage, payload.individualObjectUsageDistance,
+			payload.agentTags);
 		auto const created = world->lookupAgent(agentId).entity;
 		if (!created)
 		{

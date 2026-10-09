@@ -131,6 +131,8 @@ namespace core
 				tag->setMinimumRoutePlanningTime(*minimumPlanningTime);
 			if (auto const* maximumPlanningTime = sourceTag->getMaximumRoutePlanningTime())
 				tag->setMaximumRoutePlanningTime(*maximumPlanningTime);
+			if (auto const* property = sourceTag->getObjectUsage()) tag->setObjectUsage(*property);
+			if (auto const* property = sourceTag->getObjectUsageDistance()) tag->setObjectUsageDistance(*property);
 			if (auto const* adherence = sourceTag->getPermissionAdherence())
 				tag->setPermissionAdherence(*adherence);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
@@ -186,6 +188,8 @@ namespace core
 					candidate->getMinimumRoutePlanningTime())
 				|| !optionalPropertyMatches(tag->getMaximumRoutePlanningTime(),
 					candidate->getMaximumRoutePlanningTime())
+				|| !optionalPropertyMatches(tag->getObjectUsage(), candidate->getObjectUsage())
+				|| !optionalPropertyMatches(tag->getObjectUsageDistance(), candidate->getObjectUsageDistance())
 				|| !optionalPropertyMatches(tag->getPermissionAdherence(),
 					candidate->getPermissionAdherence())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
@@ -1202,6 +1206,16 @@ namespace core
 		for (auto* world : mLoadedWorlds)
 			if (world && !world->canApplyAgentTagHeightModifier(id, std::nullopt, diagnostic)) return false;
 
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				auto tags = agent->getAgentTagIds(); tags.erase(id);
+				if (!agent->objectUsageConfigurationIsValid(this, tags, agent->getIndividualObjectUsage(),
+					agent->getIndividualObjectUsageDistance(), diagnostic)) return false;
+			}
+
 		// Every loaded assignment goes before the definition. From the first
 		// write onward no loaded World can be left with a stale reference, and
 		// no later step can refuse after the complete preflight above.
@@ -1909,6 +1923,74 @@ namespace core
 		return true;
 	}
 
+	AgentObjectUsageProperty const* AgentTagRegistry::getAgentTagObjectUsage(AgentTagId id) const
+	{ auto const* tag = lookupAgentTag(id); return tag ? tag->getObjectUsage() : nullptr; }
+	AgentObjectUsageDistanceProperty const* AgentTagRegistry::getAgentTagObjectUsageDistance(AgentTagId id) const
+	{ auto const* tag = lookupAgentTag(id); return tag ? tag->getObjectUsageDistance() : nullptr; }
+
+	bool AgentTagRegistry::editObjectUsageProperty(AgentTagId id, bool distanceProperty,
+		ObjectUsagePropertyEdit operation, ObjectUsage mode, float distance, std::string* diagnostic)
+	{
+		auto reject = [&](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject("Agent tag is not defined in this registry");
+		bool present = distanceProperty ? tag->getObjectUsageDistance() != nullptr : tag->getObjectUsage() != nullptr;
+		if ((operation == ObjectUsagePropertyEdit::Add && present)
+			|| (operation != ObjectUsagePropertyEdit::Add && !present))
+			return reject("Object usage property is already present or absent");
+		if (!distanceProperty && mode != ObjectUsage::Arms && mode != ObjectUsage::None)
+			return reject("Object usage must be Arms or None");
+		if (operation == ObjectUsagePropertyEdit::Set && (distanceProperty ? tag->getObjectUsageDistance()->value == distance
+			: tag->getObjectUsage()->value == mode)) return reject("Object usage property is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		// Validate a separate prospective definition set, including masked conflicts
+		// and effective configurations in every loaded World, before allocating a revision.
+		auto prospective = copyWithNewUuid(*this);
+		auto apply = [&](AgentTag& target, uint64_t revision)
+		{
+			if (distanceProperty)
+			{
+				if (operation == ObjectUsagePropertyEdit::Remove) target.removeObjectUsageDistance();
+				else target.setObjectUsageDistance({ distance, revision });
+			}
+			else
+			{
+				if (operation == ObjectUsagePropertyEdit::Remove) target.removeObjectUsage();
+				else target.setObjectUsage({ mode, revision });
+			}
+		};
+		apply(*prospective->mTags.find(id), mNextPropertyRevision);
+		if (!loadedWorldAssignmentsAreValid(*prospective, diagnostic)) return false;
+		struct Change { World* world; AgentId agent; ObjectUsage mode; float distance; };
+		std::vector<Change> changes;
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id))
+					changes.push_back({ world, agentId, agent->getObjectUsage(), agent->getObjectUsageDistance() });
+		uint64_t revision{ 0 };
+		try { if (operation != ObjectUsagePropertyEdit::Remove) revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		apply(*tag, revision);
+		for (auto const& change : changes)
+			change.world->agentObjectUsageChanged(change.agent, change.mode, change.distance);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::addAgentTagObjectUsage(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, false, ObjectUsagePropertyEdit::Add, ObjectUsage::Arms, .25f, out); }
+	bool AgentTagRegistry::setAgentTagObjectUsage(AgentTagId id, ObjectUsage value, std::string* out)
+	{ return editObjectUsageProperty(id, false, ObjectUsagePropertyEdit::Set, value, .25f, out); }
+	bool AgentTagRegistry::removeAgentTagObjectUsage(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, false, ObjectUsagePropertyEdit::Remove, ObjectUsage::Arms, .25f, out); }
+	bool AgentTagRegistry::addAgentTagObjectUsageDistance(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, true, ObjectUsagePropertyEdit::Add, ObjectUsage::Arms, .25f, out); }
+	bool AgentTagRegistry::setAgentTagObjectUsageDistance(AgentTagId id, float value, std::string* out)
+	{ return editObjectUsageProperty(id, true, ObjectUsagePropertyEdit::Set, ObjectUsage::Arms, value, out); }
+	bool AgentTagRegistry::removeAgentTagObjectUsageDistance(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, true, ObjectUsagePropertyEdit::Remove, ObjectUsage::Arms, .25f, out); }
+
 	bool AgentTagRegistry::addAgentTagPermissionAdherence(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -2380,7 +2462,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 14);
+		serializer.writeUint32("version", 15);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -2412,9 +2494,11 @@ namespace core
 			auto const* minimumPlanningTime = tag->getMinimumRoutePlanningTime();
 			auto const* maximumPlanningTime = tag->getMaximumRoutePlanningTime();
 			auto const* chance = tag->getEscalatorWalkingChance();
+			auto const* usage = tag->getObjectUsage();
+			auto const* distance = tag->getObjectUsageDistance();
 			auto const* adherence = tag->getPermissionAdherence();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || adherence || mobility)
+			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || usage || distance || adherence || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -2458,6 +2542,22 @@ namespace core
 				if (persistence) writeModifier("routePersistence", *persistence);
 				if (minimumPlanningTime) writeModifier("minimumRoutePlanningTime", *minimumPlanningTime);
 				if (maximumPlanningTime) writeModifier("maximumRoutePlanningTime", *maximumPlanningTime);
+				if (usage)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "objectUsage");
+					serializer.writeUint64("revision", usage->revision);
+					serializer.writeString("value", usage->value == ObjectUsage::Arms ? "arms" : "none");
+					serializer.endMap();
+				}
+				if (distance)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "objectUsageDistance");
+					serializer.writeUint64("revision", distance->revision);
+					serializer.writeFloat("value", distance->value);
+					serializer.endMap();
+				}
 				if (adherence)
 				{
 					serializer.beginMap("");
@@ -2486,7 +2586,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 14)
+		if (version < 1 || version > 15)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -2565,7 +2665,8 @@ namespace core
 						&& !(version >= 12 && type == "routePersistence")
 						&& !(version >= 13 && type == "minimumRoutePlanningTime")
 						&& !(version >= 13 && type == "maximumRoutePlanningTime")
-						&& !(version >= 14 && type == "permissionAdherence"))
+						&& !(version >= 14 && type == "permissionAdherence")
+						&& !(version >= 15 && (type == "objectUsage" || type == "objectUsageDistance")))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -2640,6 +2741,18 @@ namespace core
 							serializer.readUint8("b") };
 						tag->setColour({ colour, revision });
 						hasColour = true;
+					}
+					else if (type == "objectUsage")
+					{
+						auto value = serializer.readString("value");
+						if (tag->getObjectUsage() || (value != "arms" && value != "none"))
+							throw SerializationException("Duplicate or invalid Object usage");
+						tag->setObjectUsage({ value == "arms" ? ObjectUsage::Arms : ObjectUsage::None, revision });
+					}
+					else if (type == "objectUsageDistance")
+					{
+						if (tag->getObjectUsageDistance()) throw SerializationException("Duplicate Object usage distance");
+						tag->setObjectUsageDistance({ serializer.readFloat("value"), revision });
 					}
 					else if (type == "permissionAdherence")
 					{

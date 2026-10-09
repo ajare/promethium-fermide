@@ -109,8 +109,14 @@ is rejected, even with equal values, in either mode. Missing both is an error fo
 with 0.25 units; Cleaning Bot uses Arms with 0.1 units. Android demonstrates the
 compatible legacy declaration.
 
+These are frozen defaults, not compulsory effective values. Object usage and its
+concrete distance can be inherited independently from Agent tags or overridden
+individually (#537, #538), using individual → tag → frozen default precedence.
+Removing a property reveals the underlying source without changing the other field;
+shared edits preflight all loaded affected Agents. See [Agent properties](agent-properties.md).
+
 Physical eligibility is shared through World: the operator must be within both
-its frozen arm length and the Interaction point's authored reach. Point geometry
+its effective arm length and the Interaction point's authored reach. Point geometry
 is unchanged and zero reach remains valid (requiring coincident positions).
 Ordinary requests still walk to a physical control when outside range; owned
 BoothWindow shutters and Dumbwaiter buttons still require range at request time.

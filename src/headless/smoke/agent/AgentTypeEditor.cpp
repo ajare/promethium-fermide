@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "AgentClipboard.h"
+#include "TagsPanel.h"
 #include "AgentDropTargets.h"
 #include "DocumentEdit.h"
 #include "DocumentHistory.h"
@@ -848,6 +849,135 @@ namespace
 			"Duplicate refusal changed the original definition");
 	}
 
+	void inheritedObjectUsageWorkflows(smoke::Context const& context)
+	{
+		gWorldDocumentHistory.clear();
+		auto human = core::bundledHumanAgentType();
+		auto none = human;
+		none.typeId = "TagNone"; none.resourceName = "tag-none.agent.lua";
+		agent_smoke::replaceSource(none.source, "type_id = \"Human\"", "type_id = 'TagNone'");
+		agent_smoke::replaceSource(none.source, "object_usage = \"arms\"", "object_usage = 'none'");
+		agent_smoke::replaceSource(none.source, "object_usage_distance = 0.25,", "");
+		AgentTypeLoaderScope loader{[&](std::string const& name) -> std::optional<core::AgentTypeDefinition> {
+			if (name == human.resourceName) return human;
+			if (name == none.resourceName) return none;
+			return std::nullopt;
+		}};
+		auto fixture = buildWorld("Inherited workflows"); auto& world = fixture.world;
+		world->pauseSimulation(); require(world->attachAgentType(none.resourceName, none.source), "Attach None failed");
+		auto registry = core::AgentTagRegistry::create();
+		auto registryPath = context.temporaryRoot() / "inherited.tags.yaml";
+		world->attachAgentTagRegistry("inherited.tags.yaml", registry);
+		auto id = world->createAgent(none.typeId, "Inherited", fixture.corridor, 0, 1.f);
+		std::string diagnostic;
+		auto tag = commitAgentTagAdd(registry, "operator", diagnostic);
+		require(tag && commitAgentTagObjectUsageDistanceAdd(registry, tag, diagnostic)
+			&& commitAgentTagObjectUsageDistanceEdit(registry, tag, .6f, diagnostic)
+			&& world->assignAgentTag(id, tag)
+			&& commitAgentTagObjectUsageAdd(registry, tag, diagnostic), diagnostic);
+		unsigned checkNumber = 0;
+		auto check = [&](core::World const& current, core::AgentId agentId) {
+			++checkNumber;
+			auto agent = current.lookupAgent(agentId).entity;
+			require(agent && agent->getObjectUsage() == core::ObjectUsage::Arms && agent->getObjectUsageDistance() == .6f
+				&& agent->getEffectiveObjectUsage().sourceTag == tag && agent->getEffectiveObjectUsageDistance().sourceTag == tag
+				&& agent->getPhysicalBaseline().objectUsage == core::ObjectUsage::None, "Workflow lost independent inherited values or frozen default at check " + std::to_string(checkNumber)
+				+ " mode=" + std::to_string(agent ? int(agent->getObjectUsage()) : -1)
+				+ " distance=" + std::to_string(agent ? agent->getObjectUsageDistance() : -1)
+				+ " source=" + std::to_string(agent ? agent->getEffectiveObjectUsage().sourceTag.value : 0));
+		};
+		check(*world, id);
+		auto undoCount = agentTagRegistryDocumentHistory(registry).undoCount();
+		auto revision = registry->getNextPropertyRevision(); auto before = captureDocumentSnapshot(world);
+		require(!commitAgentTagObjectUsageDistanceEdit(registry, tag, 0.f, diagnostic)
+			&& !commitAgentTagObjectUsageDistanceRemove(registry, tag, diagnostic)
+			&& agentTagRegistryDocumentHistory(registry).undoCount() == undoCount
+			&& registry->getNextPropertyRevision() == revision
+			&& captureDocumentSnapshot(world)->yaml == before->yaml, "Refused editor edit changed history/state");
+		require(commitAgentTagObjectUsageEdit(registry, tag, core::ObjectUsage::None, diagnostic), diagnostic);
+		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic), diagnostic); check(*world, id);
+		require(restoreAgentTagRegistrySnapshot(registry, true, &diagnostic)
+			&& world->lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::None, diagnostic);
+		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic), diagnostic); check(*world, id);
+		require(saveAgentTagRegistry(registry, registryPath.string(), &diagnostic), diagnostic);
+		auto reopened = core::AgentTagRegistry::loadFrom(registryPath.string());
+		require(reopened->getAgentTagObjectUsage(tag)->value == core::ObjectUsage::Arms
+			&& reopened->getAgentTagObjectUsageDistance(tag)->value == .6f
+			&& reopened->hasEquivalentDefinitions(*registry), "Registry save/reopen lost concrete properties");
+		for (auto filename : {"inherited.world.yaml", "inherited.world"})
+		{
+			auto path = context.temporaryRoot() / filename; world->saveTo(path.string());
+			auto loaded = core::loadWorldDocument(path); check(*loaded, id);
+		}
+		world->resetSimulation(); world->pauseSimulation(); check(*world, id); world->addLevel(); check(*world, id);
+		auto payload = makeAgentClipboardPayload(*world, id, "Copied");
+		auto text = makeAgentClipboardText(payload, false);
+		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"], payload, diagnostic), diagnostic);
+		auto other = buildWorld("Inherited paste"); other.world->pauseSimulation();
+		other.world->attachAgentTagRegistry("inherited.tags.yaml", registry);
+		core::AgentId pasted;
+		require(commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 3.f, pasted, diagnostic), diagnostic);
+		check(*other.world, pasted);
+		// A mode-only individual override can rely on tag distance even when the
+		// frozen script distance is zero; creation must validate after inheritance.
+		payload.name = "ModeOnly"; payload.individualObjectUsage = core::ObjectUsage::Arms;
+		require(commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 5.f, pasted, diagnostic), diagnostic);
+		require(other.world->lookupAgent(pasted).entity->getEffectiveObjectUsage().individual
+			&& other.world->lookupAgent(pasted).entity->getObjectUsageDistance() == .6f, "Mode-only paste ignored inherited distance");
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			try {
+				auto candidate = deserializeDocumentSnapshot(snapshot, world, {});
+				if (!candidate) return false;
+				candidate->resolveAgentTagRegistry(registry);
+				world = std::move(candidate); return true;
+			}
+			catch (std::exception const& error) { diagnostic = error.what(); return false; }
+		};
+		gWorldDocumentHistory.clear(); before = captureDocumentSnapshot(world);
+		require(world->setAgentIndividualObjectUsageDistance(id, .8f), "Individual distance edit failed"); commitDocumentEdit(before);
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check(*world, id);
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), diagnostic);
+		world->pauseSimulation(); require(world->setAgentIndividualObjectUsageDistance(id, std::nullopt), "Removal failed"); check(*world, id);
+		gWorldDocumentHistory.clear(); before = captureDocumentSnapshot(world);
+		require(cutAgent(world, id, diagnostic), diagnostic); commitDocumentEdit(before);
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check(*world, id);
+		world->pauseSimulation();
+		// Reload accepted definitions propagates immediately; an invalid effective
+		// Arms combination refuses without changing the shared registry/history.
+		auto disk = core::AgentTagRegistry::loadFrom(registryPath.string());
+		require(disk->setAgentTagObjectUsageDistance(tag, .7f), "Disk edit failed"); disk->saveTo(registryPath.string());
+		require(core::reloadAgentTagRegistryDocument(registry, registryPath, &diagnostic), diagnostic);
+		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .7f, "Reload did not update inherited distance");
+		disk = core::AgentTagRegistry::loadFrom(registryPath.string());
+		require(disk->setAgentTagObjectUsageDistance(tag, 0.f), "Unattached prospective distance refused"); disk->saveTo(registryPath.string());
+		undoCount = agentTagRegistryDocumentHistory(registry).undoCount(); revision = registry->getNextPropertyRevision();
+		require(!core::reloadAgentTagRegistryDocument(registry, registryPath, &diagnostic)
+			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .7f
+			&& registry->getAgentTagObjectUsageDistance(tag)->value == .7f
+			&& registry->getNextPropertyRevision() == revision
+			&& agentTagRegistryDocumentHistory(registry).undoCount() == undoCount, "Invalid reload was not atomic");
+		auto valid = YAML::LoadFile(registryPath.string());
+		for (auto property : valid["agentTagRegistry"]["tags"][0]["properties"])
+			if (property["type"].as<std::string>() == "objectUsageDistance") property["value"] = .7f;
+		for (bool duplicate : {false, true})
+		{
+			auto malformed = YAML::Clone(valid);
+			auto properties = malformed["agentTagRegistry"]["tags"][0]["properties"];
+			if (duplicate)
+			{
+				auto copy = YAML::Clone(properties[0]); copy["revision"] = 999;
+				properties.push_back(copy); malformed["agentTagRegistry"]["nextPropertyRevision"] = 1000;
+			}
+			else for (auto property : properties)
+				if (property["type"].as<std::string>() == "objectUsage") property["value"] = "remote-control";
+			{ std::ofstream out(registryPath); out << malformed; require(bool(out), "Cannot write malformed registry"); }
+			require(!core::reloadAgentTagRegistryDocument(registry, registryPath, &diagnostic)
+				&& registry->getAgentTagObjectUsageDistance(tag)->value == .7f
+				&& agentTagRegistryDocumentHistory(registry).undoCount() == undoCount, "Malformed registry mutated shared state/history");
+		}
+		forgetAgentTagRegistryDocument(registry); gWorldDocumentHistory.clear();
+	}
+
 	void objectUsageOverrideWorkflows(smoke::Context const& context)
 	{
 		gWorldDocumentHistory.clear();
@@ -1302,6 +1432,7 @@ void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "agentTypesPreviewQueriesReuseValidatedResource", previewQueriesReuseValidatedResource });
 	checks.push_back({ "agentTypesManagedPreviewIsReadOnly", managedPreviewIsReadOnly });
+	checks.push_back({ "agentTypesInheritedObjectUsageWorkflows", inheritedObjectUsageWorkflows });
 	checks.push_back({ "agentTypesObjectUsageOverrideWorkflows", objectUsageOverrideWorkflows });
 	checks.push_back({ "agentTypesNoneClipboardAndHistory", noneClipboardAndHistory });
 	checks.push_back({ "agentTypesScriptedClipboardAndDeletionHistory", scriptedClipboardAndDeletionHistory });

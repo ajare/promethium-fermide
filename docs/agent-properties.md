@@ -2,7 +2,7 @@
 
 This is the complete reference for the **19 editable Agent properties** declared
 by `AgentPropertyType` in `include/core/AgentTag.h`. Each can be authored directly
-on an Agent; all except Object usage and Object usage distance can also be supplied by an Agent tag. They are distinct from the physical
+on an Agent or supplied by an Agent tag. They are distinct from the physical
 baseline declared by an [Agent-type script](create-agent-script.md), and from
 runtime state such as Pose, destination and movement progress.
 
@@ -14,8 +14,8 @@ Tags panel. The effective value follows this order:
 
 1. Individual Agent property.
 2. Inherited Agent tag property (or its persisted sample).
-3. Default shown below. Mobility instead falls back to the Agent type's frozen
-   script-default profile.
+3. Default shown below. Mobility, Object usage and Object usage distance instead
+   fall back to their independently frozen Agent-type script defaults.
 
 Removing an individual override reveals the inherited value without removing
 the tag or discarding its sample. Two assigned tags cannot supply the same
@@ -28,8 +28,7 @@ unlabelled group; all other properties are in **Pathing**.
 
 ### Values versus tag ranges
 
-Individual numeric properties are concrete values. For the 13 numeric properties
-other than Escalator walking chance, tags specify a minimum/maximum range. Both
+Individual numeric properties are concrete values. For the 13 numeric modifier/planning properties, tags specify a minimum/maximum range. Both
 endpoints must be finite, within the property's allowed bounds, and ordered
 minimum ≤ maximum. Equal endpoints produce a fixed value.
 
@@ -39,7 +38,8 @@ ordinary load and Reset do not repeatedly draw a new value. Assigning a tag or
 changing its range creates the relevant new samples. An individual override
 hides, rather than replaces, the underlying tag sample.
 
-Colour, Escalator walking chance, Permission adherence and Mobility profile are
+Colour, Escalator walking chance, Object usage, Object usage distance,
+Permission adherence and Mobility profile are
 shared values on tags, not sampled ranges. A tag's intrinsic pastel **display
 Colour** colours its UI chip; it is separate from the optional Colour property
 that colours its Agents.
@@ -52,8 +52,8 @@ an editor widget when adding an override. Numeric values must be finite except a
 
 | Property | Serialized `type` | Type / allowed values | Default | Effect |
 | --- | --- | --- | --- | --- |
-| Object usage | `objectUsage` | Arms or None; individual only | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
-| Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms; individual only | Frozen script distance | Physical arm length, narrowed by Interaction point geometry; ignored under None |
+| Object usage | `objectUsage` | Arms or None | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
+| Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms | Frozen script distance | Physical arm length, narrowed by Interaction point geometry; ignored under None |
 | Colour | `colour` | RGB bytes, each 0–255; no alpha | RGB (179, 77, 77), `#B34D4D` | Ordinary Agent rendering tint; no simulation effect |
 | Walk speed modifier | `walkSpeedModifier` | Number, 0.8–1.2 | 1 | Multiplies the Agent type's walking speed |
 | Height modifier | `heightModifier` | Number, 0.7–1 | 1 | Multiplies Standing height and derived pose heights; affects appearance and physical fit |
@@ -77,10 +77,11 @@ property; that is an explicit override, not the absent-property default of 0.15.
 Adding an individual Mobility profile snapshots the current effective profile;
 a newly added tag profile starts with all entries **Can use**.
 
-## Independent Object usage overrides (#537)
+## Independent Object usage inheritance (#537, #538)
 
-Mode and distance resolve independently: individual override → frozen script default.
-Neither inherits from tags. The Selection panel shows both effective values and their
+Mode and distance resolve independently: individual override → inherited tag value →
+frozen script default. Different tags may supply mode and distance, but two assigned
+tags cannot supply the same field, even when masked by an individual override. The Selection panel shows both effective values and their
 sources, and labels distance as ignored under None. Only Arms and None are exposed;
 Remote control is not implemented. Adding an override starts from its current effective
 value, not a sampled range. Removal leaves the other override and script baseline intact.
@@ -89,7 +90,32 @@ Every edit and removal is paused-only and undoable. Arms requires the resulting 
 distance to be finite and strictly positive, even when removing an override or changing
 back from None. None ignores distance, including zero or negative authored values. A
 script-default None Agent has canonical zero frozen distance, so enabling Arms requires
-an independent positive distance override first. Refused edits are atomic.
+an independent positive distance property first, either individual or inherited.
+Shared tag additions, edits, removals and reloads preflight every affected Agent in every
+loaded dependent World. All those Worlds must be paused. A refusal preserves definitions,
+revisions, assignments, Worlds and history; removing a property must also leave a valid
+effective configuration. Refused edits are atomic.
+
+Tag Object usage distance is concrete and deterministic, never a range or sample. The
+Tags panel inserts Arms and 0.25 for new fields, not each Agent's script default. For
+example, a tag can supply `objectUsage: none` while a second supplies distance 0; adding
+Arms to an affected Agent then refuses until its effective distance becomes positive.
+A mode-only tag or individual override never silently chooses a different distance.
+
+Registry schema 15 persists these fields as ordinary revision-bearing properties:
+
+```yaml
+properties:
+  - type: objectUsage
+    revision: 1
+    value: arms
+  - type: objectUsageDistance
+    revision: 2
+    value: 0.6
+```
+
+Removing the distance property reveals each Agent's independently frozen distance;
+removing mode reveals its frozen mode. Individual overrides keep taking precedence.
 
 Capability changes cancel now-ineligible pending operations and reconsider Paths through
 the existing planning rules; admitted crossings and accepted journeys finish safely.
@@ -97,7 +123,7 @@ Arms remains physical: short arms approach controls and never activate them remo
 
 World schema 62 (YAML and binary), clipboard and history carry only optional authored
 overrides, never snapshots of live Lua defaults. Reset, load, deletion restoration and
-cross-World paste validate fresh script defaults plus the overrides; ordinary structural
+cross-World paste validate fresh script defaults plus the overrides and inherited fields; ordinary structural
 and surviving history replay retain the Agent's frozen defaults. Legacy Agents without
 overrides continue to use their script defaults.
 

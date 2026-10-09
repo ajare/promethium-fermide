@@ -83,7 +83,7 @@ namespace
 			"A new registry did not start both non-reused allocators at one");
 
 		auto const registryYaml = readText(registryPath);
-		require(registryYaml.find("version: 14") != std::string::npos
+		require(registryYaml.find("version: 15") != std::string::npos
 			&& registryYaml.find("uuid: " + registry->getUuid()) != std::string::npos
 			&& registryYaml.find("nextAgentTagId: 1") != std::string::npos
 			&& registryYaml.find("nextPropertyRevision: 1") != std::string::npos

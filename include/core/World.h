@@ -751,6 +751,9 @@ namespace core
 		struct AgentTagReconciliation
 		{
 			AgentId agent{};
+			ObjectUsage objectUsageBefore{ ObjectUsage::Arms };
+			float objectUsageDistanceBefore{ 0.f };
+			bool objectUsageChanged{ false };
 			AgentTagSampleRepairAction walkSpeedAction{ AgentTagSampleRepairAction::None };
 			AgentTagId walkSpeedSource{};
 			AgentWalkSpeedModifierProperty walkSpeedProperty{};
@@ -801,11 +804,13 @@ namespace core
 			std::string* diagnostic = nullptr) const;
 		bool agentTagAssignmentsAreValid(AgentTagRegistry const& registry,
 			std::string* diagnostic = nullptr) const;
+		void agentObjectUsageChanged(AgentId id, ObjectUsage beforeMode, float beforeDistance);
 		void applyAgentTagReconciliations(
 			std::vector<AgentTagReconciliation> const& repairs);
 		void reconcileAgentTagAssignments(AgentTagRegistry const& registry);
 		uint32_t countAgentTagAssignments(AgentTagId id) const;
 		void clearAgentTagAssignments(AgentTagId id);
+		bool allAgentTagAssignmentsCanBeCleared(std::string* diagnostic) const;
 		void clearAllAgentTagAssignmentsAndSamples();
 		void addAgentTagWalkSpeedModifierSamples(AgentTagId id,
 			AgentWalkSpeedModifierProperty const& property);
@@ -2534,7 +2539,8 @@ namespace core
 		// plain overloads, plus direct grants and Permission set assignments.
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
 			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets,
-			std::optional<ObjectUsage> objectUsage = std::nullopt, std::optional<float> objectUsageDistance = std::nullopt);
+			std::optional<ObjectUsage> objectUsage = std::nullopt, std::optional<float> objectUsageDistance = std::nullopt,
+			std::set<AgentTagId> const& tags = {});
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId,
 			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
 

@@ -872,12 +872,18 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	planningTime("Minimum route planning time", minimumPlanningTime);
 	planningTime("Maximum route planning time", maximumPlanningTime);
 
-	ImGui::Text("Object usage: %s (%s)",
-		lookup.entity->getObjectUsage() == core::ObjectUsage::Arms ? "Arms" : "None",
-		lookup.entity->getIndividualObjectUsage() ? "individual" : "script default");
-	ImGui::Text("Object usage distance: %.3f (%s)%s", double(lookup.entity->getObjectUsageDistance()),
-		lookup.entity->getIndividualObjectUsageDistance() ? "individual" : "script default",
-		lookup.entity->getObjectUsage() == core::ObjectUsage::None ? " (ignored)" : "");
+	auto sourceName = [&](auto const& property)
+	{
+		if (property.individual) return string("individual");
+		if (property.sourceTag) return string("from #") + world->getAgentTagRegistry()->getAgentTagName(property.sourceTag);
+		return string("script default");
+	};
+	auto const usage = lookup.entity->getEffectiveObjectUsage();
+	auto const usageDistance = lookup.entity->getEffectiveObjectUsageDistance();
+	ImGui::Text("Object usage: %s (%s)", usage.value == core::ObjectUsage::Arms ? "Arms" : "None",
+		sourceName(usage).c_str());
+	ImGui::Text("Object usage distance: %.3f (%s)%s", double(usageDistance.value),
+		sourceName(usageDistance).c_str(), usage.value == core::ObjectUsage::None ? " (ignored)" : "");
 	auto const adherence = lookup.entity->getEffectivePermissionAdherence();
 	if (adherence.individual)
 		ImGui::Text("Permission adherence: %s (individual)", adherence.value ? "true" : "false");

@@ -12,3 +12,10 @@ Individual Walk speed and Height modifiers are concrete authored values rather t
 - Individual properties are World-owned authored data, persisted with the Agent and editable only while simulation is paused.
 - Direct Mobility profiles use the same per-traversal Mobility uses and routing enforcement as tag-supplied profiles.
 - Removing an individual property is non-destructive to its underlying tag property and sample.
+- Object usage and Object usage distance follow this order independently, with frozen
+  script defaults as their final fallback. Tag distance is concrete, not sampled.
+  Shared definition edits and property removals preflight each affected effective
+  configuration across all loaded dependent Worlds; Arms requires finite positive
+  effective distance, while None ignores it. Individual overrides never hide a
+  duplicate inherited source conflict. Invalid edits leave all documents and history
+  unchanged.

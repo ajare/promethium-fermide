@@ -213,6 +213,19 @@ bool commitAgentTagMaximumRoutePlanningTimeEdit(
 bool commitAgentTagMaximumRoutePlanningTimeRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
+bool commitAgentTagObjectUsageAdd(std::shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, std::string& diagnostic);
+bool commitAgentTagObjectUsageEdit(std::shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::ObjectUsage value, std::string& diagnostic);
+bool commitAgentTagObjectUsageRemove(std::shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, std::string& diagnostic);
+bool commitAgentTagObjectUsageDistanceAdd(std::shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, std::string& diagnostic);
+bool commitAgentTagObjectUsageDistanceEdit(std::shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, float value, std::string& diagnostic);
+bool commitAgentTagObjectUsageDistanceRemove(std::shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, std::string& diagnostic);
+
 bool commitAgentTagPermissionAdherenceAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);

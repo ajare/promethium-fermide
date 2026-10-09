@@ -81,6 +81,9 @@ namespace core
 			std::string* diagnostic) const;
 		bool permissionAdherenceAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		enum class ObjectUsagePropertyEdit { Add, Set, Remove };
+		bool editObjectUsageProperty(AgentTagId id, bool distanceProperty, ObjectUsagePropertyEdit operation,
+			ObjectUsage mode, float distance, std::string* diagnostic);
 		bool mobilityProfileAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
 		void registerWorld(World& world);
@@ -277,6 +280,15 @@ namespace core
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagMaximumRoutePlanningTime(AgentTagId id,
 			std::string* diagnostic = nullptr);
+
+		AgentObjectUsageProperty const* getAgentTagObjectUsage(AgentTagId id) const;
+		AgentObjectUsageDistanceProperty const* getAgentTagObjectUsageDistance(AgentTagId id) const;
+		bool addAgentTagObjectUsage(AgentTagId id, std::string* diagnostic = nullptr);
+		bool setAgentTagObjectUsage(AgentTagId id, ObjectUsage value, std::string* diagnostic = nullptr);
+		bool removeAgentTagObjectUsage(AgentTagId id, std::string* diagnostic = nullptr);
+		bool addAgentTagObjectUsageDistance(AgentTagId id, std::string* diagnostic = nullptr);
+		bool setAgentTagObjectUsageDistance(AgentTagId id, float value, std::string* diagnostic = nullptr);
+		bool removeAgentTagObjectUsageDistance(AgentTagId id, std::string* diagnostic = nullptr);
 
 		bool addAgentTagPermissionAdherence(AgentTagId id,
 			std::string* diagnostic = nullptr);

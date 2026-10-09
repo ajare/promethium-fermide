@@ -360,10 +360,50 @@ namespace core
 
 	bool Agent::objectUsageOverridesAreValid(std::optional<ObjectUsage> mode, std::optional<float> distance) const
 	{
-		if (mode && *mode != ObjectUsage::Arms && *mode != ObjectUsage::None) return false;
-		auto const effectiveMode = mode.value_or(mPhysicalBaseline.objectUsage);
-		auto const effectiveDistance = distance.value_or(mPhysicalBaseline.objectUsageDistance);
-		return effectiveMode == ObjectUsage::None || (std::isfinite(effectiveDistance) && effectiveDistance > 0);
+		return objectUsageConfigurationIsValid(mWorld ? mWorld->getAgentTagRegistry().get() : nullptr,
+			mAgentTags, mode, distance);
+	}
+
+	std::pair<ObjectUsage, float> Agent::resolveObjectUsage(AgentTagRegistry const* registry,
+		std::set<AgentTagId> const& tags, optional<ObjectUsage> mode, optional<float> distance) const
+	{
+		if (registry) for (auto tag : tags)
+			if (auto const* definition = registry->lookupAgentTag(tag))
+			{
+				if (!mode && definition->getObjectUsage()) mode = definition->getObjectUsage()->value;
+				if (!distance && definition->getObjectUsageDistance()) distance = definition->getObjectUsageDistance()->value;
+			}
+		return { mode.value_or(mPhysicalBaseline.objectUsage), distance.value_or(mPhysicalBaseline.objectUsageDistance) };
+	}
+
+	bool Agent::objectUsageConfigurationIsValid(AgentTagRegistry const* registry,
+		std::set<AgentTagId> const& tags, optional<ObjectUsage> mode, optional<float> distance,
+		string* diagnostic) const
+	{
+		AgentTagId modeSource{}, distanceSource{};
+		if (registry) for (auto tag : tags)
+			if (auto const* definition = registry->lookupAgentTag(tag))
+			{
+				auto conflict = [&](char const* property, AgentTagId source)
+				{
+					if (diagnostic) *diagnostic = std::format("{} is inherited from both #{} and #{}",
+						property, registry->getAgentTagName(source), definition->getName());
+					return false;
+				};
+				if (definition->getObjectUsage() && modeSource) return conflict("Object usage", modeSource);
+				if (definition->getObjectUsageDistance() && distanceSource) return conflict("Object usage distance", distanceSource);
+				if (definition->getObjectUsage()) modeSource = tag;
+				if (definition->getObjectUsageDistance()) distanceSource = tag;
+			}
+		auto [effectiveMode, effectiveDistance] = resolveObjectUsage(registry, tags, mode, distance);
+		if ((effectiveMode != ObjectUsage::Arms && effectiveMode != ObjectUsage::None)
+			|| (effectiveMode == ObjectUsage::Arms && (!std::isfinite(effectiveDistance) || effectiveDistance <= 0)))
+		{
+			if (diagnostic) *diagnostic = "Object usage must be Arms or None; effective Arms distance must be finite and positive";
+			return false;
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
 	}
 
 	bool Agent::deserializeImpl(Serializer& serializer, SerializationWorkData&)
@@ -588,7 +628,8 @@ namespace core
 			}
 			serializer.endArray();
 		}
-		if (!objectUsageOverridesAreValid(mIndividualObjectUsage, mIndividualObjectUsageDistance))
+		// Tagged configurations are validated after the registry dependency resolves.
+		if (mAgentTags.empty() && !objectUsageOverridesAreValid(mIndividualObjectUsage, mIndividualObjectUsageDistance))
 			throw SerializationException("Invalid effective Arms Object usage distance");
 		mWalkSpeedModifierSample.reset();
 		mHeightModifierSample.reset();
@@ -801,6 +842,26 @@ namespace core
 						return { property->value, tag };
 			}
 		return {};
+	}
+
+	EffectiveAgentObjectUsage Agent::getEffectiveObjectUsage() const
+	{
+		if (mIndividualObjectUsage) return { *mIndividualObjectUsage, {}, 0, true };
+		if (mWorld && mWorld->getAgentTagRegistry()) for (auto tag : mAgentTags)
+			if (auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag))
+				if (auto const* property = definition->getObjectUsage())
+					return { property->value, tag, property->revision, false };
+		return { mPhysicalBaseline.objectUsage };
+	}
+
+	EffectiveAgentObjectUsageDistance Agent::getEffectiveObjectUsageDistance() const
+	{
+		if (mIndividualObjectUsageDistance) return { *mIndividualObjectUsageDistance, {}, 0, true };
+		if (mWorld && mWorld->getAgentTagRegistry()) for (auto tag : mAgentTags)
+			if (auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag))
+				if (auto const* property = definition->getObjectUsageDistance())
+					return { property->value, tag, property->revision, false };
+		return { mPhysicalBaseline.objectUsageDistance };
 	}
 
 	EffectiveAgentPermissionAdherence Agent::getEffectivePermissionAdherence() const

@@ -364,6 +364,8 @@ namespace core
 			&& mAgentTagRegistryReference->expectedUuid == registry->getUuid()
 			&& mAgentTagRegistry == registry) return;
 
+		string diagnostic;
+		if (!allAgentTagAssignmentsCanBeCleared(&diagnostic)) throw invalid_argument(diagnostic);
 		// Construct and register the replacement before changing any authored state.
 		// Everything after registration is non-refusing, so clearing assignments,
 		// clearing samples, and changing namespace commit as one operation.
@@ -1342,8 +1344,16 @@ namespace core
 				}
 			}
 
+			if (!agent->objectUsageConfigurationIsValid(&registry, agent->getAgentTagIds(),
+				agent->getIndividualObjectUsage(), agent->getIndividualObjectUsageDistance(), diagnostic)) return false;
 			AgentTagReconciliation repair;
 			repair.agent = agentId;
+			repair.objectUsageBefore = agent->getObjectUsage();
+			repair.objectUsageDistanceBefore = agent->getObjectUsageDistance();
+			auto const prospectiveUsage = agent->resolveObjectUsage(&registry, agent->getAgentTagIds(),
+				agent->getIndividualObjectUsage(), agent->getIndividualObjectUsageDistance());
+			repair.objectUsageChanged = prospectiveUsage.first != repair.objectUsageBefore
+				|| (prospectiveUsage.first == ObjectUsage::Arms && prospectiveUsage.second != repair.objectUsageDistanceBefore);
 			auto inspectSample = [&](char const* name, SampledAgentPropertyType type,
 				AgentTagId source, AgentModifierRange const* range, uint64_t revision,
 				optional<AgentPropertySample> const& sample,
@@ -1542,7 +1552,7 @@ namespace core
 				&& !agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(
 					repair.heightAction == AgentTagSampleRepairAction::Resample ? repair.heightProperty.range.maximum : 1.f),
 					diagnostic)) return false;
-			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
+			if (repairs && (repair.objectUsageChanged || repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.ladderSpeedAction != AgentTagSampleRepairAction::None
@@ -1577,6 +1587,8 @@ namespace core
 		for (auto const& repair : repairs)
 		{
 			auto* agent = mAgents.find(repair.agent);
+			if (repair.objectUsageChanged)
+				agentObjectUsageChanged(repair.agent, repair.objectUsageBefore, repair.objectUsageDistanceBefore);
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Clear)
 				agent->clearWalkSpeedModifierSample();
 			else if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
@@ -1727,7 +1739,10 @@ namespace core
 		{
 			if (!agent || !agent->hasAgentTag(id)) continue;
 			auto const adherenceBefore = agent->getEffectivePermissionAdherence().value;
+			auto const usageBefore = agent->getObjectUsage();
+			auto const distanceBefore = agent->getObjectUsageDistance();
 			agent->removeAgentTag(id);
+			agentObjectUsageChanged(agentId, usageBefore, distanceBefore);
 			if (agent->getWalkSpeedModifierSample()
 				&& agent->getWalkSpeedModifierSample()->sourceTag == id)
 				agent->clearWalkSpeedModifierSample();
@@ -1778,21 +1793,32 @@ namespace core
 		if (changed) modify();
 	}
 
-	void World::clearAllAgentTagAssignmentsAndSamples()
+	bool World::allAgentTagAssignmentsCanBeCleared(string* diagnostic) const
 	{
 		for (auto const& [id, agent] : mAgents.entries())
 		{
 			(void)id;
-			std::string diagnostic;
-			if (agent && !agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(1.f), &diagnostic))
-				throw invalid_argument(diagnostic);
+			if (agent && (!agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(1.f), diagnostic)
+				|| !agent->objectUsageConfigurationIsValid(nullptr, {}, agent->getIndividualObjectUsage(),
+					agent->getIndividualObjectUsageDistance(), diagnostic))) return false;
 		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	void World::clearAllAgentTagAssignmentsAndSamples()
+	{
+		string diagnostic;
+		if (!allAgentTagAssignmentsCanBeCleared(&diagnostic)) throw invalid_argument(diagnostic);
 		invalidateSimulationSnapshot();
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
 			if (!agent) continue;
 			auto const adherenceBefore = agent->getEffectivePermissionAdherence().value;
+			auto const usageBefore = agent->getObjectUsage();
+			auto const distanceBefore = agent->getObjectUsageDistance();
 			agent->setAgentTags({});
+			agentObjectUsageChanged(agentId, usageBefore, distanceBefore);
 			agent->clearWalkSpeedModifierSample();
 			agent->clearHeightModifierSample();
 			agent->clearStairSpeedModifierSample();
@@ -8847,15 +8873,19 @@ namespace core
 
 	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
 		uint32_t levelOffset, float xOffset, set<AccessPermissionId> const& grants,
-		set<PermissionSetId> const& sets, optional<ObjectUsage> objectUsage, optional<float> objectUsageDistance)
+		set<PermissionSetId> const& sets, optional<ObjectUsage> objectUsage, optional<float> objectUsageDistance,
+		set<AgentTagId> const& tags)
 	{
-		if ((objectUsage || objectUsageDistance) && !mSimulationPaused)
-			throw SerializationException("Pause the simulation before authoring Object usage overrides");
+		if ((objectUsage || objectUsageDistance || !tags.empty()) && !mSimulationPaused)
+			throw SerializationException("Pause the simulation before authoring Object usage overrides or Agent tags");
 		auto agent = makeScriptAgentForPlacement(typeId, name, grants, sets);
-		if (!agent->objectUsageOverridesAreValid(objectUsage, objectUsageDistance))
+		for (auto tag : tags) if (!mAgentTagRegistry || !mAgentTagRegistry->lookupAgentTag(tag))
+			throw SerializationException("Agent tag is not defined in the attached registry");
+		if (!agent->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), tags, objectUsage, objectUsageDistance))
 			throw SerializationException("Invalid Object usage overrides: effective Arms distance must be finite and positive");
 		agent->setIndividualObjectUsage(objectUsage);
 		agent->setIndividualObjectUsageDistance(objectUsageDistance);
+		agent->setAgentTags(tags);
 		return addOwnedAgentToSector(std::move(agent), sectorId, levelOffset, xOffset);
 	}
 
@@ -9556,18 +9586,25 @@ namespace core
 		auto const beforeDistance = agent->getObjectUsageDistance();
 		agent->setIndividualObjectUsage(mode);
 		agent->setIndividualObjectUsageDistance(distance);
-		if (beforeMode != agent->getObjectUsage()
-			|| (agent->getObjectUsage() == ObjectUsage::Arms && beforeDistance != agent->getObjectUsageDistance()))
-		{
-			mSimulationCoordinator.agentObjectUsageChanged(id);
-			if (agent->getObjectUsage() == ObjectUsage::None || agent->getObjectUsageDistance() < beforeDistance)
-				replanAgentAfterAuthorizationRefusal(id);
-			else beginVoluntaryRoutePlanning(id);
-		}
+		agentObjectUsageChanged(id, beforeMode, beforeDistance);
 		invalidateSimulationSnapshot();
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
+	}
+
+	void World::agentObjectUsageChanged(AgentId id, ObjectUsage beforeMode, float beforeDistance)
+	{
+		auto* agent = mAgents.find(id);
+		if (!agent) return;
+		invalidateSimulationSnapshot();
+		if (beforeMode == agent->getObjectUsage()
+			&& (agent->getObjectUsage() == ObjectUsage::None || beforeDistance == agent->getObjectUsageDistance())) return;
+		mSimulationCoordinator.agentObjectUsageChanged(id);
+		if (agent->getObjectUsage() == ObjectUsage::None || agent->getObjectUsageDistance() < beforeDistance)
+			replanAgentAfterAuthorizationRefusal(id);
+		else beginVoluntaryRoutePlanning(id);
+		modify();
 	}
 
 	bool World::setAgentIndividualPermissionAdherence(AgentId id,
@@ -10008,7 +10045,10 @@ namespace core
 					source->getName()));
 			}
 		}
-		return true;
+		auto prospectiveTags = agentLookup.entity->getAgentTagIds();
+		prospectiveTags.insert(tag);
+		return agentLookup.entity->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), prospectiveTags,
+			agentLookup.entity->getIndividualObjectUsage(), agentLookup.entity->getIndividualObjectUsageDistance(), diagnostic);
 	}
 
 	bool World::assignAgentTag(AgentId agent, AgentTagId tag,
@@ -10112,7 +10152,10 @@ namespace core
 		if (heightSample && !agentHeightStateFits(*target,
 			target->getIndividualHeightModifier().value_or(heightSample->value), diagnostic)) return false;
 		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
+		auto const usageBefore = target->getObjectUsage();
+		auto const distanceBefore = target->getObjectUsageDistance();
 		target->assignAgentTag(tag);
+		agentObjectUsageChanged(agent, usageBefore, distanceBefore);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
 		if (stairSpeedSample) target->setStairSpeedModifierSample(*stairSpeedSample);
@@ -10160,7 +10203,10 @@ namespace core
 		auto const* target = agentLookup.entity;
 		if (target->getHeightModifierSample() && target->getHeightModifierSample()->sourceTag == tag
 			&& !agentHeightStateFits(*target, target->getIndividualHeightModifier().value_or(1.0f), diagnostic)) return false;
-		return true;
+		auto prospectiveTags = target->getAgentTagIds();
+		prospectiveTags.erase(tag);
+		return target->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), prospectiveTags,
+			target->getIndividualObjectUsage(), target->getIndividualObjectUsageDistance(), diagnostic);
 	}
 
 	bool World::removeAgentTag(AgentId agent, AgentTagId tag,
@@ -10170,7 +10216,10 @@ namespace core
 		if (!canRemoveAgentTag(agent, tag, diagnostic)) return false;
 		auto* target = mAgents.find(agent);
 		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
+		auto const usageBefore = target->getObjectUsage();
+		auto const distanceBefore = target->getObjectUsageDistance();
 		target->removeAgentTag(tag);
+		agentObjectUsageChanged(agent, usageBefore, distanceBefore);
 		if (target->getWalkSpeedModifierSample()
 			&& target->getWalkSpeedModifierSample()->sourceTag == tag)
 			target->clearWalkSpeedModifierSample();
@@ -10271,6 +10320,7 @@ namespace core
 		AgentTagId minimumRoutePlanningTimeSource{};
 		AgentTagId maximumRoutePlanningTimeSource{};
 		AgentTagId permissionAdherenceSource{};
+		AgentTagId objectUsageSource{}, objectUsageDistanceSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -10410,6 +10460,16 @@ namespace core
 						mAgentTagRegistry->getAgentTagName(maximumRoutePlanningTimeSource), definition->getName()));
 				maximumRoutePlanningTimeSource = tag;
 				maximumRoutePlanningTimeProperty = property;
+			}
+			if (definition->getObjectUsage())
+			{
+				if (objectUsageSource) return reject("Object usage is inherited from more than one Agent tag");
+				objectUsageSource = tag;
+			}
+			if (definition->getObjectUsageDistance())
+			{
+				if (objectUsageDistanceSource) return reject("Object usage distance is inherited from more than one Agent tag");
+				objectUsageDistanceSource = tag;
 			}
 			if (definition->getPermissionAdherence())
 			{
@@ -10568,7 +10628,12 @@ namespace core
 
 		if (!agentHeightStateFits(*target, target->getIndividualHeightModifier().value_or(
 			heightSample ? heightSample->value : 1.0f), diagnostic)) return false;
+		if (!target->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), tags,
+			target->getIndividualObjectUsage(), target->getIndividualObjectUsageDistance(), diagnostic)) return false;
+		auto const usageBefore = target->getObjectUsage();
+		auto const distanceBefore = target->getObjectUsageDistance();
 		target->setAgentTags(tags);
+		agentObjectUsageChanged(agent, usageBefore, distanceBefore);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		else target->clearWalkSpeedModifierSample();
 		if (heightSample) target->setHeightModifierSample(*heightSample);

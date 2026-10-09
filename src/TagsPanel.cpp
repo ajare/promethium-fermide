@@ -615,6 +615,34 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
+		if (auto const* usage = registry->getAgentTagObjectUsage(id))
+		{
+			string diagnostic;
+			auto const mode = usage->value;
+			if (ImGui::BeginCombo("Object usage", mode == core::ObjectUsage::Arms ? "Arms" : "None"))
+			{
+				for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None})
+					if (ImGui::Selectable(choice == core::ObjectUsage::Arms ? "Arms" : "None", choice == mode))
+						commitAgentTagObjectUsageEdit(registry, id, choice, diagnostic);
+				ImGui::EndCombo();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeObjectUsage"))
+				commitAgentTagObjectUsageRemove(registry, id, diagnostic);
+			if (!diagnostic.empty()) core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+		}
+		if (auto const* distance = registry->getAgentTagObjectUsageDistance(id))
+		{
+			string diagnostic;
+			auto value = distance->value;
+			if (ImGui::InputFloat("Object usage distance", &value, 0.f, 0.f, "%.3f", ImGuiInputTextFlags_EnterReturnsTrue))
+				commitAgentTagObjectUsageDistanceEdit(registry, id, value, diagnostic);
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeObjectUsageDistance"))
+				commitAgentTagObjectUsageDistanceRemove(registry, id, diagnostic);
+			if (!diagnostic.empty()) core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+		}
+
 		auto const* stairSpeed = registry->getAgentTagStairSpeedModifier(id);
 		auto const* ladderSpeed = registry->getAgentTagLadderSpeedModifier(id);
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
@@ -1174,7 +1202,8 @@ namespace
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
 			|| !crowd || !risk || !familiarity || !persistence
-			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility;
+			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility
+			|| !registry->getAgentTagObjectUsage(id) || !registry->getAgentTagObjectUsageDistance(id);
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -1201,6 +1230,20 @@ namespace
 				if (!commitAgentTagHeightModifierAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				else gTagHeightEdits.erase(id.value);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!registry->getAgentTagObjectUsage(id) && ImGui::Selectable("Object usage"))
+			{
+				string diagnostic;
+				if (!commitAgentTagObjectUsageAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!registry->getAgentTagObjectUsageDistance(id) && ImGui::Selectable("Object usage distance"))
+			{
+				string diagnostic;
+				if (!commitAgentTagObjectUsageDistanceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				ImGui::CloseCurrentPopup();
 			}
 			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility)
@@ -2650,6 +2693,43 @@ bool commitAgentTagMaximumRoutePlanningTimeRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Maximum route planning time",
 		[id](auto& target, string* out) { return target.removeAgentTagMaximumRoutePlanningTime(id, out); });
+}
+
+bool commitAgentTagObjectUsageAdd(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Object usage",
+		[id](auto& target, string* out) { return target.addAgentTagObjectUsage(id, out); });
+}
+bool commitAgentTagObjectUsageEdit(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::ObjectUsage value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Object usage",
+		[id, value](auto& target, string* out) { return target.setAgentTagObjectUsage(id, value, out); });
+}
+bool commitAgentTagObjectUsageRemove(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Object usage",
+		[id](auto& target, string* out) { return target.removeAgentTagObjectUsage(id, out); });
+}
+bool commitAgentTagObjectUsageDistanceAdd(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Object usage distance",
+		[id](auto& target, string* out) { return target.addAgentTagObjectUsageDistance(id, out); });
+}
+bool commitAgentTagObjectUsageDistanceEdit(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, float value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Object usage distance",
+		[id, value](auto& target, string* out) { return target.setAgentTagObjectUsageDistance(id, value, out); });
+}
+bool commitAgentTagObjectUsageDistanceRemove(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Object usage distance",
+		[id](auto& target, string* out) { return target.removeAgentTagObjectUsageDistance(id, out); });
 }
 
 bool commitAgentTagPermissionAdherenceAdd(

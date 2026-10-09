@@ -5,6 +5,7 @@
 #include "core/AirlockTransit.h"
 #include "core/DoorSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
+#include "core/AgentTagRegistry.h"
 #include <fstream>
 #include <cmath>
 #include <limits>
@@ -105,6 +106,133 @@ namespace
 			&& world.getSector(room)->areLightsOn(), "Short distance did not require approach");
 		world.advanceTicks(150);
 		require(!world.getSector(room)->areLightsOn(), "Restored Arms did not operate control");
+	}
+
+	void inheritedUsage(smoke::Context const&)
+	{
+		core::World world("Inherited usage", 10, 2), other("Shared usage", 10, 2);
+		auto room = world.addCorridor(0, 0, 10), otherRoom = other.addCorridor(0, 0, 10);
+		world.finishBuild(); other.finishBuild(); attach(world);
+		world.pauseSimulation(); other.pauseSimulation();
+		auto registry = core::AgentTagRegistry::create();
+		world.attachAgentTagRegistry("usage.tags.yaml", registry); other.attachAgentTagRegistry("usage.tags.yaml", registry);
+		auto mode = registry->addAgentTag("mode"), distance = registry->addAgentTag("distance");
+		auto id = world.createAgent("Operator", room, 0, 2.f);
+		auto peer = other.createAgent("Peer", otherRoom, 0, 2.f);
+		auto none = world.createAgent("NoneFixture", "ScriptNone", room, 0, 4.f);
+		require(registry->addAgentTagObjectUsage(mode) && registry->addAgentTagObjectUsageDistance(distance), "Tag property addition failed");
+		require(world.assignAgentTag(id, mode) && world.assignAgentTag(id, distance)
+			&& other.assignAgentTag(peer, mode) && other.assignAgentTag(peer, distance), "Independent tag assignment failed");
+		require(world.assignAgentTag(none, distance) && world.assignAgentTag(none, mode), "Inherited distance did not enable frozen None Agent's Arms");
+		auto agent = world.lookupAgent(id).entity;
+		require(agent->getEffectiveObjectUsage().sourceTag == mode
+			&& agent->getEffectiveObjectUsageDistance().sourceTag == distance
+			&& world.lookupAgent(none).entity->getPhysicalBaseline().objectUsage == core::ObjectUsage::None,
+			"Sources or frozen defaults were lost");
+		require(registry->setAgentTagObjectUsageDistance(distance, .6f), "Shared distance edit failed");
+		require(world.setAgentIndividualObjectUsageDistance(id, .1f), "Individual distance failed");
+		require(registry->setAgentTagObjectUsage(mode, core::ObjectUsage::None), "Shared mode edit failed");
+		require(agent->getObjectUsage() == core::ObjectUsage::None && agent->getObjectUsageDistance() == .1f
+			&& agent->getEffectiveObjectUsageDistance().individual, "Properties were resolved as an atomic profile");
+		require(world.setAgentIndividualObjectUsageDistance(id, std::nullopt)
+			&& agent->getObjectUsageDistance() == .6f && agent->getEffectiveObjectUsageDistance().sourceTag == distance,
+			"Removing individual distance did not reveal tag");
+		require(registry->setAgentTagObjectUsageDistance(distance, 0.f), "None rejected ignored tag distance");
+		world.markSaved(); other.markSaved(); registry->markUnmodified();
+		auto revision = registry->getNextPropertyRevision();
+		for (float invalid : {-1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+		{
+			require(registry->setAgentTagObjectUsageDistance(distance, invalid), "None refused ignored inherited distance");
+			auto currentRevision = registry->getNextPropertyRevision();
+			require(!registry->setAgentTagObjectUsage(mode, core::ObjectUsage::Arms)
+				&& registry->getNextPropertyRevision() == currentRevision, "Invalid inherited usable distance admitted Arms");
+		}
+		require(registry->setAgentTagObjectUsageDistance(distance, 0.f), "Restore ignored zero failed");
+		world.markSaved(); other.markSaved(); registry->markUnmodified(); revision = registry->getNextPropertyRevision();
+		require(!registry->setAgentTagObjectUsage(mode, static_cast<core::ObjectUsage>(99))
+			&& !registry->setAgentTagObjectUsage(mode, core::ObjectUsage::Arms)
+			&& !registry->removeAgentTagObjectUsage(mode) && !registry->deleteAgentTag(mode)
+			&& !world.removeAgentTag(id, mode) && !world.setAgentIndividualObjectUsage(id, core::ObjectUsage::Arms)
+			&& !world.isModified() && !other.isModified() && !registry->isModified()
+			&& registry->getNextPropertyRevision() == revision, "Invalid shared combination was not atomic");
+		require(world.setAgentIndividualObjectUsageDistance(id, 0.f), "None ignored individual distance failed");
+		auto replacement = core::AgentTagRegistry::create();
+		bool refused = false;
+		try { world.attachAgentTagRegistryAndClearAssignments("replacement.tags.yaml", replacement); }
+		catch (std::exception const&) { refused = true; }
+		require(refused && world.getAgentTagRegistry() == registry && !replacement->hasLoadedWorlds()
+			&& world.lookupAgent(id).entity->getAgentTagIds().contains(mode), "Destructive switch exposed invalid fallback or registered a refused World");
+		require(world.setAgentIndividualObjectUsageDistance(id, .5f), "Masked valid distance failed");
+		require(!registry->setAgentTagObjectUsage(mode, core::ObjectUsage::Arms), "One masked Agent hid another World's invalid configuration");
+		require(other.setAgentIndividualObjectUsageDistance(peer, .5f)
+			&& world.setAgentIndividualObjectUsageDistance(none, .5f)
+			&& registry->setAgentTagObjectUsage(mode, core::ObjectUsage::Arms), "Valid masked combinations refused");
+		require(!world.setAgentIndividualObjectUsageDistance(id, std::nullopt), "Removal revealed invalid inherited distance");
+		auto conflict = registry->addAgentTag("conflict");
+		require(world.assignAgentTag(id, conflict), "Empty tag assignment failed");
+		revision = registry->getNextPropertyRevision();
+		require(!registry->addAgentTagObjectUsageDistance(conflict) && !registry->addAgentTagObjectUsage(conflict)
+			&& registry->getNextPropertyRevision() == revision, "Individual override masked tag-source conflict");
+		require(registry->setAgentTagObjectUsageDistance(distance, .25f)
+			&& world.setAgentIndividualObjectUsageDistance(id, std::nullopt), "Restore inherited distance failed");
+		core::DeviceCommand command; command.type = core::DeviceCommandType::SetSectorLights;
+		command.target = core::SectorId{room + 1}; command.desiredState = false;
+		auto point = world.createInteractionPoint("Tag control", core::SectorId{room + 1}, {2.2f, 0.f}, .5f, 1.f,
+			{{command, core::InteractionBindingRequirement::Required}});
+		world.resumeSimulation();
+		require(!registry->setAgentTagObjectUsage(mode, core::ObjectUsage::None), "Shared edit accepted while a World ran");
+		auto request = world.requestInteraction(point, id); require(bool(request), "Inherited Arms did not request control");
+		world.pauseSimulation();
+		require(registry->setAgentTagObjectUsage(mode, core::ObjectUsage::None), "Paused None edit failed");
+		bool cancelled = false;
+		for (auto const& event : world.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::InteractionRequestChanged && event.interactionRequest.id == request
+				&& event.interactionRequest.result == core::InteractionResult::Cancelled) cancelled = true;
+		require(cancelled, "Shared edit did not publish pending-operation cancellation");
+		world.resumeSimulation(); world.advanceTicks(150);
+		require(world.getSector(room)->areLightsOn(), "Cancelled inherited operation executed");
+		world.pauseSimulation();
+		require(registry->setAgentTagObjectUsage(mode, core::ObjectUsage::Arms), "Restored Arms failed");
+		world.resumeSimulation(); require(bool(world.requestInteraction(point, id)), "Restored inherited operation refused");
+		world.advanceTicks(150); require(!world.getSector(room)->areLightsOn(), "Restored inherited Arms did not operate");
+		world.pauseSimulation();
+		require(registry->removeAgentTagObjectUsage(mode), "Mode removal failed");
+		require(agent->getObjectUsage() == core::ObjectUsage::Arms && !agent->getEffectiveObjectUsage().sourceTag
+			&& agent->getObjectUsageDistance() == .25f && world.lookupAgent(none).entity->getObjectUsage() == core::ObjectUsage::None,
+			"Mode removal destroyed distance or frozen fallback");
+		require(registry->removeAgentTagObjectUsageDistance(distance), "Distance removal failed");
+		require(agent->getObjectUsageDistance() == .25f && !agent->getEffectiveObjectUsageDistance().sourceTag
+			&& agent->getAgentTagIds().contains(distance) && world.lookupAgent(none).entity->getIndividualObjectUsageDistance() == .5f,
+			"Distance removal changed assignments, other overrides or frozen defaults");
+	}
+
+	void inheritedRoutes(smoke::Context const&)
+	{
+		core::World world("Inherited routes", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1), back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		core::World::CreateDoorOptions options; options.activationMode = core::DoorActivationMode::Manual;
+		world.addSectorDoor(0, 0, 3, options); world.addSectorMarker(back, 0, 3.5f, "Goal"); world.finishBuild();
+		world.pauseSimulation(); auto registry = core::AgentTagRegistry::create();
+		world.attachAgentTagRegistry("routes.tags.yaml", registry);
+		auto tag = registry->addAgentTag("operator"); require(registry->addAgentTagObjectUsage(tag), "Tag addition failed");
+		auto id = world.createAgent("Walker", front, 0, 1.f); require(world.assignAgentTag(id, tag), "Assignment failed");
+		quickPlanning(world, id); require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Route intent failed");
+		world.pauseSimulation(); require(registry->setAgentTagObjectUsage(tag, core::ObjectUsage::None), "None tag edit failed");
+		world.resumeSimulation(); world.advanceTicks(180);
+		require(lost(world, id) && world.lookupAgent(id).entity->getSector()->getIndex() == front,
+			"Tag None did not reconsider self-operation route");
+		world.pauseSimulation(); require(registry->setAgentTagObjectUsage(tag, core::ObjectUsage::Arms), "Arms tag edit failed");
+		world.resumeSimulation(); require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Restored route intent failed");
+		bool admitted = false;
+		for (unsigned tick = 0; tick < 900 && !admitted; ++tick)
+		{
+			world.advanceTick();
+			for (auto const& permit : world.getSimulationSnapshot().traversalPermits) admitted = admitted || permit.owner == id;
+		}
+		require(admitted, "Inherited Arms did not admit manual crossing");
+		world.pauseSimulation(); require(registry->setAgentTagObjectUsage(tag, core::ObjectUsage::None), "Committed None edit failed");
+		world.resumeSimulation(); world.advanceTicks(300);
+		require(world.lookupAgent(id).entity->getSector()->getIndex() == back, "Shared edit revoked admitted crossing");
 	}
 
 	void overrideCommittedCrossing(smoke::Context const&)
@@ -476,6 +604,8 @@ namespace
 }
 void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"agentTypesInheritedObjectUsage", inheritedUsage});
+	checks.push_back({"agentTypesInheritedObjectUsageRoutes", inheritedRoutes});
 	checks.push_back({"agentTypesObjectUsageOverrides", individualOverrides});
 	checks.push_back({"agentTypesObjectUsageCommittedCrossing", overrideCommittedCrossing});
 	checks.push_back({"agentTypesNoneDeclarations", declarations});

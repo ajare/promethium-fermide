@@ -26,6 +26,7 @@
 
 namespace core
 {
+	class AgentTagRegistry;
 	class World;
 	class Sector;
 	class FurnitureCatalogue;
@@ -184,6 +185,22 @@ namespace core
 	struct EffectiveAgentMaximumRoutePlanningTime
 	{
 		float value{ 3.0f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentObjectUsage
+	{
+		ObjectUsage value{ ObjectUsage::Arms };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentObjectUsageDistance
+	{
+		float value{ 0.25f };
 		AgentTagId sourceTag{};
 		uint64_t propertyRevision{ 0 };
 		bool individual{ false };
@@ -695,8 +712,16 @@ namespace core
 		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
 		std::optional<ObjectUsage> const& getIndividualObjectUsage() const { return mIndividualObjectUsage; }
 		std::optional<float> const& getIndividualObjectUsageDistance() const { return mIndividualObjectUsageDistance; }
-		ObjectUsage getObjectUsage() const { return mIndividualObjectUsage.value_or(mPhysicalBaseline.objectUsage); }
-		float getObjectUsageDistance() const { return mIndividualObjectUsageDistance.value_or(mPhysicalBaseline.objectUsageDistance); }
+		EffectiveAgentObjectUsage getEffectiveObjectUsage() const;
+		EffectiveAgentObjectUsageDistance getEffectiveObjectUsageDistance() const;
+		ObjectUsage getObjectUsage() const { return getEffectiveObjectUsage().value; }
+		float getObjectUsageDistance() const { return getEffectiveObjectUsageDistance().value; }
+		std::pair<ObjectUsage, float> resolveObjectUsage(AgentTagRegistry const* registry,
+			std::set<AgentTagId> const& tags, std::optional<ObjectUsage> mode,
+			std::optional<float> distance) const;
+		bool objectUsageConfigurationIsValid(AgentTagRegistry const* registry,
+			std::set<AgentTagId> const& tags, std::optional<ObjectUsage> mode,
+			std::optional<float> distance, std::string* diagnostic = nullptr) const;
 		bool objectUsageOverridesAreValid(std::optional<ObjectUsage> mode, std::optional<float> distance) const;
 		MobilityProfile const& getScriptDefaultMobilityProfile() const
 		{ return mScriptDefaultMobilityProfile; }

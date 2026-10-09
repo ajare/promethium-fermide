@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include "core/ObjectUsage.h"
 
 namespace core
 {
@@ -322,6 +323,20 @@ namespace core
 		return true;
 	}
 
+	struct AgentObjectUsageProperty
+	{
+		ObjectUsage value{ ObjectUsage::Arms };
+		uint64_t revision{ 0 };
+		bool operator==(AgentObjectUsageProperty const&) const = default;
+	};
+
+	struct AgentObjectUsageDistanceProperty
+	{
+		float value{ 0.25f };
+		uint64_t revision{ 0 };
+		bool operator==(AgentObjectUsageDistanceProperty const&) const = default;
+	};
+
 	struct AgentPermissionAdherenceProperty
 	{
 		bool value{ true };
@@ -400,6 +415,12 @@ namespace core
 		std::optional<AgentRoutePersistenceProperty> mRoutePersistence;
 		std::optional<AgentMinimumRoutePlanningTimeProperty> mMinimumRoutePlanningTime;
 		std::optional<AgentMaximumRoutePlanningTimeProperty> mMaximumRoutePlanningTime;
+		std::optional<AgentObjectUsageProperty> mObjectUsage;
+		std::optional<AgentObjectUsageDistanceProperty> mObjectUsageDistance;
+		void setObjectUsage(AgentObjectUsageProperty value) { mObjectUsage = value; }
+		void removeObjectUsage() { mObjectUsage.reset(); }
+		void setObjectUsageDistance(AgentObjectUsageDistanceProperty value) { mObjectUsageDistance = value; }
+		void removeObjectUsageDistance() { mObjectUsageDistance.reset(); }
 		std::optional<AgentPermissionAdherenceProperty> mPermissionAdherence;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
@@ -552,6 +573,10 @@ namespace core
 		{
 			return mMaximumRoutePlanningTime ? &*mMaximumRoutePlanningTime : nullptr;
 		}
+		AgentObjectUsageProperty const* getObjectUsage() const
+		{ return mObjectUsage ? &*mObjectUsage : nullptr; }
+		AgentObjectUsageDistanceProperty const* getObjectUsageDistance() const
+		{ return mObjectUsageDistance ? &*mObjectUsageDistance : nullptr; }
 		AgentPermissionAdherenceProperty const* getPermissionAdherence() const
 		{
 			return mPermissionAdherence ? &*mPermissionAdherence : nullptr;
