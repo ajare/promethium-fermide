@@ -57,6 +57,10 @@ set(core_names
     coroutineMovementAndCompletion
     coroutineFailuresAreContained
     coroutineQueuesAndActivation
+    coroutineTimerEvents
+    coroutineTimersFreezeWhenInactive
+    coroutineTimerBudgets
+    coroutineOutcomePrecedesTimer
     scriptedActionOutcomes
     scriptedActionScriptFailure
     scriptedActionCancellations

@@ -41,6 +41,22 @@ expansion the existing `callbacksPerBoundary`, `commandsPerCallback` and
 suspended threads with Lua 5.4 close semantics under an instruction budget;
 it does not resume their bodies.
 
+## Temporary timer bridge for #528
+
+V3 coroutines can temporarily retain `context.set_timer(name, ticks)` and
+`context.cancel_timer(name)`. Expiry resumes `wait()` with an immutable event:
+`{ type = "timer_expired", name = name, tick = expiryBoundary, sequence = sequence }`.
+Use `event.tick`, not the retained startup context's `tick`, for expiry time.
+
+Semantic outcomes are delivered before due timers, allowing an outcome resume
+to cancel or replace a timer before expiry is collected. Due timers form a
+lexically ordered, one-shot batch; all names are removed before its first
+resume. Cancelling a timer already in that batch is a no-op; re-arming its name
+schedules a new expiry no earlier than the next boundary. Deactivation freezes
+remaining timer durations. Timer events use the World event sequence and obey
+pending-event and per-boundary resume budgets, including normal failure
+containment. Completed and unassigned coroutines receive no further expiry.
+
 `sleep(ticks)`, removal of callback/timer APIs, bundled-resource migration and
 the final ADR/authoring documentation belong to later issues, not #527.
 

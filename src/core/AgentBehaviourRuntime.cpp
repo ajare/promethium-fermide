@@ -1021,7 +1021,8 @@ namespace core
 			InteractionCompleted,
 			InteractionFailed,
 			Activated,
-			Deactivated
+			Deactivated,
+			TimerExpired
 		};
 
 		struct PendingOutcome
@@ -1038,6 +1039,7 @@ namespace core
 				MovementCancellationReason::None };
 			InteractionRequestId interaction;
 			std::string interactionName;
+			std::string timerName;
 			InteractionResult interactionResult{ InteractionResult::Pending };
 		};
 
@@ -2034,6 +2036,7 @@ namespace core
 			case OutcomeType::Activated: type = "activated"; break;
 			case OutcomeType::Deactivated: type = "deactivated"; break;
 			case OutcomeType::RouteLost: type = "route_lost"; break;
+			case OutcomeType::TimerExpired: type = "timer_expired"; break;
 			}
 			lua_pushlstring(lua, type.data(), type.size());
 			lua_setfield(lua, backing, "type");
@@ -2099,6 +2102,11 @@ namespace core
 				lua_setfield(lua, backing,
 					outcome.type == OutcomeType::InteractionCompleted
 						? "result" : "reason");
+			}
+			else if (outcome.type == OutcomeType::TimerExpired)
+			{
+				lua_pushlstring(lua, outcome.timerName.data(), outcome.timerName.size());
+				lua_setfield(lua, backing, "name");
 			}
 			pushImmutableProxy(lua);
 		}
@@ -2279,6 +2287,28 @@ namespace core
 			lua_settop(lua, base);
 		}
 
+		std::vector<std::string> takeDueTimers(Instance& instance, uint64_t tick)
+		{
+			std::vector<std::string> names;
+			// std::map gives lexical ordering. Remove the entire immutable batch
+			// before delivery, so resumes can safely re-arm a due timer's name.
+			for (auto const& [name, dueTick] : instance.timers)
+				if (dueTick <= tick) names.push_back(name);
+			for (auto const& name : names) instance.timers.erase(name);
+			return names;
+		}
+
+		void failQueueOverflow(Instance& instance)
+		{
+			if (!instance.queueOverflow) return;
+			ProtectedCallResult failure;
+			failure.failure = AgentBehaviourRuntimeFailure::ConversionError;
+			failure.diagnostic = "Agent behaviour pending event queue overflow";
+			failure.traceback = failure.diagnostic;
+			record(instance, AgentBehaviourRuntimeStage::Callback, "resume", failure);
+			instance.disabled = true;
+		}
+
 		void runBoundaryCallbacks(World& world)
 		{
 			callbackCount = 0;
@@ -2296,15 +2326,7 @@ namespace core
 
 				if (instance.coroutine)
 				{
-					if (instance.queueOverflow)
-					{
-						ProtectedCallResult failure;
-						failure.failure = AgentBehaviourRuntimeFailure::ConversionError;
-						failure.diagnostic = "Agent behaviour pending event queue overflow";
-						failure.traceback = failure.diagnostic;
-						record(instance, AgentBehaviourRuntimeStage::Callback, "resume", failure);
-						instance.disabled = true;
-					}
+					failQueueOverflow(instance);
 					if (!instance.disabled && !instance.suspended && agent->isActive())
 					{
 						if (!instance.started)
@@ -2317,6 +2339,28 @@ namespace core
 							resumeCoroutine(world, instance, &event, commands, authorizationCommands);
 						}
 						instance.outcomes.clear();
+						if (!instance.disabled && !instance.completed)
+						{
+							// Semantic outcomes precede timers, as in the callback contract.
+							// This temporary bridge lets v3 fixtures retain named timers
+							// until the later sleep/timer-removal migration.
+							for (auto& name : takeDueTimers(instance, world.mSimulationTick))
+							{
+								PendingOutcome expiry;
+								expiry.type = OutcomeType::TimerExpired;
+								expiry.tick = world.mSimulationTick;
+								expiry.sequence = world.mNextEventSequence++;
+								expiry.timerName = std::move(name);
+								enqueue(instance, std::move(expiry));
+							}
+							failQueueOverflow(instance);
+							for (auto const& event : instance.outcomes)
+							{
+								if (instance.disabled || instance.completed) break;
+								resumeCoroutine(world, instance, &event, commands, authorizationCommands);
+							}
+							instance.outcomes.clear();
+						}
 					}
 					if (instance.disabled)
 					{
@@ -2386,12 +2430,7 @@ namespace core
 
 				if (!instance.disabled && !instance.suspended && agent->isActive())
 				{
-					std::vector<std::string> dueTimers;
-					for (auto const& [name, dueTick] : instance.timers)
-						if (dueTick <= world.mSimulationTick) dueTimers.push_back(name);
-					// Due timers form this boundary's immutable callback batch. Erasing all
-					// before the first callback preserves one-shot semantics.
-					for (auto const& name : dueTimers) instance.timers.erase(name);
+					auto const dueTimers = takeDueTimers(instance, world.mSimulationTick);
 					for (auto const& name : dueTimers)
 					{
 						auto const base = lua_gettop(lua);

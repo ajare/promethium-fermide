@@ -2,12 +2,14 @@
 #include "Checks.h"
 #include "RuntimeFixtures.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 
 #include "core/AgentBehaviourRegistry.h"
 #include "core/AgentBehaviourRuntime.h"
 #include "core/World.h"
+#include "core/Log.h"
 
 namespace
 {
@@ -157,6 +159,139 @@ end end}
 			"Coroutine boundary resume cap was not enforced");
 	}
 
+	void coroutineTimerEvents(smoke::Context const& context)
+	{
+		(void)core::consumeLogMessages();
+		Fixture fixture(context, R"lua(
+return {api_version=3, factory=function() return function(ctx)
+  assert(ctx.set_timer('cancelled', 1).accepted)
+  assert(ctx.cancel_timer('cancelled').accepted)
+  assert(ctx.cancel_timer('missing').status == 'no_op')
+  assert(ctx.set_timer('z', 10).accepted)
+  assert(ctx.set_timer('z', 1).accepted)
+  assert(ctx.set_timer('a', 1).accepted)
+  local a = wait()
+  assert(a.type == 'timer_expired' and a.name == 'a' and a.tick == 1)
+  assert(a.destination == nil and a.action == nil and a.result == nil)
+  assert(type(a.sequence) == 'number')
+  assert(not pcall(function() a.name = 'changed' end))
+  -- Due timers are an immutable batch: cancelling z cannot retract its event.
+  assert(ctx.cancel_timer('z').status == 'no_op')
+  assert(ctx.set_timer('a', 1).accepted)
+  local z = ctx.wait()
+  assert(z.type == 'timer_expired' and z.name == 'z' and z.tick == 1)
+  assert(z.sequence > a.sequence)
+  local again = wait()
+  assert(again.type == 'timer_expired' and again.name == 'a' and again.tick == 2)
+  assert(again.sequence > z.sequence)
+  assert(ctx.move_to('Far').accepted)
+  local arrival = wait()
+  assert(arrival.type == 'destination_reached' and arrival.sequence > again.sequence)
+  ctx.log('timer journey complete')
+  while true do
+    local event = wait()
+    assert(event.type ~= 'timer_expired', 'one-shot timer repeated')
+  end
+end end}
+)lua");
+		auto const advanced = fixture.world.advanceTicks(1600);
+		require(advanced, "Coroutine timer journey failed: "
+			+ (fixture.world.getAgentBehaviourRuntimeDiagnostics().empty() ? std::string("no diagnostic")
+				: fixture.world.getAgentBehaviourRuntimeDiagnostics().front().diagnostic));
+		auto logs = core::consumeLogMessages();
+		require(std::count_if(logs.begin(), logs.end(), [](auto const& log)
+			{ return log.msg == "timer journey complete"; }) == 1,
+			"Named timer expiry did not resume the coroutine through arrival");
+		require(fixture.world.getAgentBehaviourRuntimeDiagnostics().empty(),
+			"Coroutine timer payload, ordering or one-shot semantics failed");
+	}
+
+	void coroutineTimersFreezeWhenInactive(smoke::Context const& context)
+	{
+		(void)core::consumeLogMessages();
+		Fixture fixture(context, R"lua(
+return {api_version=3, factory=function() return function(ctx)
+  assert(ctx.set_timer('frozen', 3).accepted)
+  local activation = wait()
+  assert(activation.type == 'activated' and activation.tick == 6)
+  local timer = wait()
+  assert(timer.type == 'timer_expired' and timer.name == 'frozen' and timer.tick == 8)
+  assert(timer.sequence > activation.sequence)
+  ctx.log('frozen timer resumed')
+end end}
+)lua");
+		require(fixture.world.advanceTick(), "Frozen timer startup failed");
+		fixture.world.pauseSimulation();
+		require(fixture.world.setAgentActive(fixture.agent, false), "Could not deactivate timer Agent");
+		require(fixture.world.resumeSimulation() && fixture.world.advanceTicks(5),
+			"Inactive coroutine timer failed");
+		require(core::consumeLogMessages().empty(),
+			"Inactive timer resumed the coroutine");
+		fixture.world.pauseSimulation();
+		require(fixture.world.setAgentActive(fixture.agent, true), "Could not reactivate timer Agent");
+		require(fixture.world.resumeSimulation() && fixture.world.advanceTicks(2),
+			"Reactivated coroutine failed");
+		require(core::consumeLogMessages().empty(),
+			"Timer counted inactive ticks");
+		require(fixture.world.advanceTick(), "Frozen timer expiry failed");
+		auto logs = core::consumeLogMessages();
+		require(logs.size() == 1 && logs.front().msg == "frozen timer resumed",
+			"Timer did not preserve its remaining duration on reactivation");
+	}
+
+	void coroutineOutcomePrecedesTimer(smoke::Context const& context)
+	{
+		Fixture fixture(context, R"lua(
+return {api_version=3, factory=function() return function(ctx)
+  ctx.set_timer('cancel-on-activation', 1)
+  local activation = wait()
+  assert(activation.type == 'activated' and activation.tick == 4)
+  assert(ctx.cancel_timer('cancel-on-activation').accepted)
+  ctx.set_timer('finish', 1)
+  local timer = wait()
+  assert(timer.type == 'timer_expired' and timer.name == 'finish' and timer.tick == 5)
+  assert(timer.sequence > activation.sequence)
+end end}
+)lua");
+		require(fixture.world.advanceTick(), "Outcome-order timer startup failed");
+		fixture.world.pauseSimulation();
+		require(fixture.world.setAgentActive(fixture.agent, false), "Could not suspend due timer");
+		require(fixture.world.resumeSimulation() && fixture.world.advanceTicks(3),
+			"Suspended due timer failed");
+		fixture.world.pauseSimulation();
+		require(fixture.world.setAgentActive(fixture.agent, true), "Could not reactivate due timer");
+		require(fixture.world.resumeSimulation() && fixture.world.advanceTicks(3)
+			&& !fixture.world.agentBehaviourOwnsMovement(fixture.agent)
+			&& fixture.world.getAgentBehaviourRuntimeDiagnostics().empty(),
+			"Semantic outcome could not cancel a timer due at the same boundary");
+	}
+
+	void coroutineTimerBudgets(smoke::Context const& context)
+	{
+		for (bool queueLimit : { false, true })
+		{
+			core::AgentBehaviourRuntimeLimits limits;
+			if (queueLimit) limits.pendingEventsPerInstance = 1;
+			else limits.callbacksPerBoundary = 1;
+			Fixture fixture(context, R"lua(
+return {api_version=3, factory=function() return function(ctx)
+  ctx.set_timer('a', 1)
+  ctx.set_timer('b', 1)
+  while true do wait() end
+end end}
+)lua", limits);
+			require(fixture.world.advanceTick(), "Timer budget startup failed");
+			require(!fixture.world.advanceTick() && fixture.world.isSimulationPaused(),
+				"Timer expiry bypassed the coroutine queue or resume budget");
+			auto diagnostics = fixture.world.getAgentBehaviourRuntimeDiagnostics();
+			require(!diagnostics.empty() && diagnostics.front().callback == "resume"
+				&& (!queueLimit || diagnostics.front().diagnostic.find("queue overflow") != std::string::npos),
+				"Timer budget failure lacked a structured coroutine diagnostic");
+			require(fixture.world.resumeSimulation() && fixture.world.advanceTicks(3),
+				"Failed timer coroutine was not replaced by the default");
+		}
+	}
+
 	void coroutineQueuesAndActivation(smoke::Context const& context)
 	{
 		core::AgentBehaviourRuntimeLimits limits;
@@ -208,4 +343,8 @@ void behaviour_smoke::registerRuntimeCoroutines(std::vector<smoke::Check>& check
 	checks.push_back({ "coroutineMovementAndCompletion", coroutineMovementAndCompletion });
 	checks.push_back({ "coroutineFailuresAreContained", coroutineFailuresAreContained });
 	checks.push_back({ "coroutineQueuesAndActivation", coroutineQueuesAndActivation });
+	checks.push_back({ "coroutineTimerEvents", coroutineTimerEvents });
+	checks.push_back({ "coroutineTimersFreezeWhenInactive", coroutineTimersFreezeWhenInactive });
+	checks.push_back({ "coroutineTimerBudgets", coroutineTimerBudgets });
+	checks.push_back({ "coroutineOutcomePrecedesTimer", coroutineOutcomePrecedesTimer });
 }
