@@ -320,6 +320,20 @@ namespace core
 			|| actor.getSector() != mSectors[point->mSector.value - 1].get()) return false;
 		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
+			if (point->mAccessPanelOwner)
+			{
+				// Only the panel's generated, applicable command qualifies. A generic
+				// point bound to a panel command cannot acquire remote eligibility.
+				auto panel = lookupAccessPanel(point->mAccessPanelOwner);
+				return panel && !point->mBindings.empty()
+					&& all_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
+					{
+						auto action = binding.command.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
+						return binding.command.type == DeviceCommandType::SetAccessPanelState
+							&& binding.command.accessPanel == panel->getId() && panel->getControl(action) == pointId
+							&& canRequestAccessPanel(panel->getId(), action, getAgentId(&actor));
+					});
+			}
 			auto centre = physicalButtonCentre(pointId);
 			if (!centre)
 			{
@@ -542,6 +556,7 @@ namespace core
 
 	void SimulationCoordinator::agentObjectUsageChanged(AgentId id)
 	{
+		mWorld.invalidateSimulationSnapshot();
 		auto actor = mWorld.mAgents.find(id);
 		if (!actor) return;
 		actor->mRemoteButtonApproachTarget.reset();
@@ -1522,7 +1537,7 @@ namespace core
 							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
 							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
 							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
-								&& mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(control->getPosition()), control->getReach());
+								&& mWorld.agentCanOperateInteraction(panel->getControl(action), *actor, true);
 							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
 							if (eligible)
 							{

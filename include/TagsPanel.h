@@ -229,10 +229,19 @@ bool commitAgentTagObjectUsageDistanceRemove(std::shared_ptr<core::AgentTagRegis
 bool commitAgentTagPermissionAdherenceAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
+bool commitAgentTagRemoteAccessPanelsAdd(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
 bool commitAgentTagPermissionAdherenceEdit(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	bool value, std::string& diagnostic);
+bool commitAgentTagRemoteAccessPanelsEdit(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	bool value, std::string& diagnostic);
 bool commitAgentTagPermissionAdherenceRemove(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
+bool commitAgentTagRemoteAccessPanelsRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
 bool commitAgentTagMobilityProfileAdd(

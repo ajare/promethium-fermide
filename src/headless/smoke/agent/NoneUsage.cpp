@@ -57,6 +57,159 @@ namespace
 			&& world.setAgentIndividualObjectUsageDistance(id, range), "Remote override refused");
 		world.resumeSimulation();
 	}
+	void remoteAccessPanels(smoke::Context const&)
+	{
+		using Panel = core::AccessPanel;
+		for (unsigned kind = 0; kind < 3; ++kind)
+		for (unsigned variant = 0; variant < 11; ++variant)
+		{
+			core::World world("Remote panel geometry", 10, 3);
+			auto room = kind == 0 ? world.addRoom("Room", 0, 0, 0, 9, 2)
+				: kind == 1 ? world.addCorridor(0, 0, 0, 9, 2) : world.addFacade(0, 0, 0, 9, 2);
+			auto other = world.addRoom("Other", 1, 0, 0, 9, 2);
+			world.addSectorWalkway(room, 1, 4);
+			auto made = world.addAccessPanel(room, 0, 4, { .5f, .25f, .75f });
+			auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(made.sector->getObject(made.index))->getPanel();
+			world.finishBuild();
+			auto centre = panel->getPosition() + panel->getSize() * .5f;
+			auto id = world.createAgent("Operator", variant == 4 ? other : room, variant == 3 ? 1 : 0, centre.x);
+			auto actor = world.lookupAgent(id).entity;
+			auto position = actor->getGlobalPosition();
+			auto range = position.distanceTo(centre);
+			if (variant == 1) range += .0001f;
+			if (variant == 2) range -= .0001f;
+			remote(world, id, range);
+			world.pauseSimulation();
+			if (variant == 5 || variant == 6) require(world.setAgentIndividualRemoteAccessPanels(id, false), "Boolean edit failed");
+			if (variant == 6) require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::Arms), "Arms edit failed");
+			if (variant == 7 || variant == 10) require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "None edit failed");
+			if (variant == 10) require(world.setAgentIndividualRemoteAccessPanels(id, false), "None boolean edit failed");
+			if (variant == 8)
+			{
+				core::MobilityProfile profile; profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+				require(world.setAgentIndividualMobilityProfile(id, profile), "Mobility edit failed");
+			}
+			if (variant == 9) require(world.setAgentActive(id, false), "Deactivate failed");
+			world.resumeSimulation();
+			require(!world.requestAccessPanel(panel->getId(), Panel::Action::Close, id), "Range granted unavailable Close");
+			auto request = world.requestAccessPanel(panel->getId(), Panel::Action::Open, id);
+			bool eligible = variant != 2 && variant != 4 && variant != 5 && variant != 7 && variant != 8 && variant != 9 && variant != 10;
+			require(bool(request) == eligible, "Panel eligibility mismatch " + std::to_string(variant));
+			world.advanceTick();
+			if (eligible) require(panel->getState() == Panel::State::Opening && panel->getProgress() == 0, "Open duration bypassed");
+			world.advanceTicks(120);
+			require(panel->getState() == (eligible ? Panel::State::Open : Panel::State::Closed)
+				&& actor->getGlobalPosition() == position, "Panel outcome or remote movement mismatch");
+			if (eligible)
+			{
+				require(simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Succeeded,
+					"Missing open success");
+				require(!world.requestInteraction(panel->getControl(Panel::Action::Open), id), "Range bypassed action eligibility");
+				auto close = world.requestAccessPanel(panel->getId(), Panel::Action::Close, id);
+				require(bool(close), "Remote Close refused"); world.advanceTick();
+				require(panel->getState() == Panel::State::Closing && panel->getProgress() == 1, "Close duration bypassed");
+				world.advanceTicks(120);
+				require(panel->getState() == Panel::State::Closed && actor->getGlobalPosition() == position
+					&& simulation_smoke::observedInteractionResult(world, close) == core::InteractionResult::Succeeded, "Close did not finish");
+			}
+			// Owned panel controls remain permission-ineligible. A generic point
+			// cannot borrow panel ownership or bypass authorization by range.
+			auto control = panel->getControl(Panel::Action::Open);
+			world.pauseSimulation(); auto permission = world.addAccessPermission("Control");
+			require(!world.isInteractionPointPermissionEligible(control)
+				&& !world.setInteractionPointPermissionRequirement(control, {permission}), "Remote changed owned permission policy");
+			core::DeviceCommand command; command.type = core::DeviceCommandType::SetAccessPanelState;
+			command.accessPanel = panel->getId(); command.desiredState = true;
+			auto generic = world.createInteractionPoint("Generic", core::SectorId{room + 1}, position, 1, 0,
+				{{command, core::InteractionBindingRequirement::Required}});
+			if (variant != 6) require(!world.requestInteraction(generic, id), "Generic point acquired remote panel capability");
+		}
+	}
+
+	void remotePanelProperties(smoke::Context const&)
+	{
+		using Panel = core::AccessPanel;
+		core::World world("Panel properties", 10, 2);
+		auto room = world.addCorridor(0, 0, 10);
+		auto made = world.addAccessPanel(room, 0, 4);
+		world.addSectorMarker(room, 0, 8.5f, "Panel walk goal"); world.finishBuild();
+		auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(made.sector->getObject(made.index))->getPanel();
+		auto text = core::bundledHumanAgentType().source;
+		agent_smoke::replaceSource(text, "type_id = \"Human\"", "type_id = 'PanelsOff'");
+		agent_smoke::replaceSource(text, "object_usage = \"arms\"", "object_usage = 'remote_control', remote_access_panels = false");
+		require(world.attachAgentType("panels.agent.lua", text), "Panel script attachment failed");
+		auto id = world.createAgent("PanelsOff", "Remote", room, 0, 4.5f); remote(world, id, 2.f);
+		auto actor = world.lookupAgent(id).entity;
+		require(!actor->getEffectiveRemoteAccessPanels().value && !actor->getIndividualRemoteAccessPanels(), "Frozen false default lost");
+		world.pauseSimulation();
+		auto registry = core::AgentTagRegistry::create(); world.attachAgentTagRegistry("panels.tags.yaml", registry);
+		auto tag = registry->addAgentTag("panels"), conflict = registry->addAgentTag("conflict");
+		require(registry->addAgentTagRemoteAccessPanels(tag) && world.assignAgentTag(id, tag), "Inherited true failed");
+		require(actor->getEffectiveRemoteAccessPanels().value && actor->getEffectiveRemoteAccessPanels().sourceTag == tag, "Tag precedence lost");
+		require(world.setAgentIndividualRemoteAccessPanels(id, false) && !actor->getEffectiveRemoteAccessPanels().value
+			&& actor->getEffectiveRemoteAccessPanels().individual, "Individual precedence lost");
+		require(world.assignAgentTag(id, conflict), "Empty tag assignment failed");
+		auto revision = registry->getNextPropertyRevision(); registry->markUnmodified(); world.markSaved();
+		require(!registry->addAgentTagRemoteAccessPanels(conflict) && registry->getNextPropertyRevision() == revision
+			&& !registry->isModified() && !world.isModified(), "Override hid duplicate inherited source");
+		require(world.setAgentIndividualRemoteAccessPanels(id, std::nullopt), "Override removal failed");
+		world.resumeSimulation();
+		require(!world.setAgentIndividualRemoteAccessPanels(id, false) && !registry->setAgentTagRemoteAccessPanels(tag, false), "Running authoring accepted");
+		auto request = world.requestAccessPanel(panel->getId(), Panel::Action::Open, id); require(bool(request), "Inherited operation refused");
+		world.pauseSimulation(); require(registry->setAgentTagRemoteAccessPanels(tag, false), "Paused tag edit failed");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled
+			&& simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Cancelled, "Paused tag edit did not publish cancellation");
+		world.resumeSimulation(); world.advanceTicks(120); require(panel->getState() == Panel::State::Closed, "Cancelled panel opened");
+		world.pauseSimulation(); require(world.setAgentIndividualRemoteAccessPanels(id, true), "Individual true failed"); world.resumeSimulation();
+		request = world.requestAccessPanel(panel->getId(), Panel::Action::Open, id); require(bool(request), "Individual operation refused");
+		world.pauseSimulation(); require(world.setAgentIndividualRemoteAccessPanels(id, std::nullopt), "Removal failed");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Removing override did not cancel");
+		require(registry->removeAgentTagRemoteAccessPanels(tag) && !actor->getEffectiveRemoteAccessPanels().value
+			&& !actor->getEffectiveRemoteAccessPanels().sourceTag, "Removal did not reveal frozen false");
+		require(world.removeAgentTag(id, conflict) && registry->addAgentTagRemoteAccessPanels(conflict)
+			&& registry->addAgentTagRemoteAccessPanels(tag), "Conflicting definitions setup failed");
+		world.markSaved();
+		require(!world.assignAgentTag(id, conflict) && !world.isModified()
+			&& !actor->getAgentTagIds().contains(conflict), "Duplicate assignment mutated state");
+		world.resumeSimulation(); request = world.requestAccessPanel(panel->getId(), Panel::Action::Open, id);
+		require(bool(request), "Restored inherited request failed"); world.pauseSimulation();
+		require(world.removeAgentTag(id, tag)
+			&& world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Removing tag did not revalidate");
+		require(world.setAgentIndividualRemoteAccessPanels(id, true), "Range setup failed"); world.resumeSimulation();
+		request = world.requestAccessPanel(panel->getId(), Panel::Action::Open, id); require(bool(request), "Range request failed");
+		world.pauseSimulation(); require(world.setAgentIndividualObjectUsageDistance(id, .01f), "Range edit failed");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Range edit did not cancel panel work");
+		world.resumeSimulation(); world.advanceTicks(120); require(panel->getState() == Panel::State::Closed, "Cancelled range work executed");
+		world.pauseSimulation(); require(world.setAgentIndividualObjectUsageDistance(id, 100.f), "Walking range edit failed");
+		quickPlanning(world, id); require(world.moveAgentToNamedMarker(id, "Panel walk goal").accepted(), "Walking intent refused");
+		world.advanceTicks(15); auto position = actor->getGlobalPosition();
+		require(position.x > 4.5f, "Agent was not walking");
+		request = world.requestAccessPanel(panel->getId(), Panel::Action::Open, id); require(bool(request), "Walking remote panel request refused");
+		world.advanceTick(); require(panel->getState() == Panel::State::Opening && actor->getGlobalPosition() == position,
+			"Walking request required physical approach or bypassed scheduling");
+		world.advanceTicks(120); require(panel->getState() == Panel::State::Open
+			&& simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Succeeded, "Walking operation failed");
+	}
+
+	void remotePanelDeclarations(smoke::Context const&)
+	{
+		for (auto const* value : {"true", "false", "nil", "0", "'true'", "{}"})
+		{
+			core::World world("Panel declaration", 6, 2); auto room = world.addCorridor(0, 0, 6); world.finishBuild();
+			auto text = core::bundledHumanAgentType().source;
+			agent_smoke::replaceSource(text, "type_id = \"Human\"", "type_id = 'PanelDeclaration'");
+			agent_smoke::replaceSource(text, "object_usage = \"arms\",", std::string("object_usage = 'arms', remote_access_panels = ") + value + ",");
+			require(world.attachAgentType("panel-declaration.agent.lua", text), "Attach declaration failed");
+			bool valid = std::string(value) == "true" || std::string(value) == "false" || std::string(value) == "nil";
+			core::AgentId id; bool refused = false;
+			try { id = world.createAgent("PanelDeclaration", "Operator", room, 0, 1.f); }
+			catch (std::exception const& error) { refused = true; require(std::string(error.what()).find("remote_access_panels") != std::string::npos, error.what()); }
+			require(refused != valid, "Invalid panel declaration published Agent");
+			if (valid) require(world.lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value == (std::string(value) != "false"), "Script boolean/default lost");
+			else require(world.getSimulationSnapshot().agents.empty(), "Failed fresh validation not atomic");
+		}
+	}
+
 	void remoteDeclarations(smoke::Context const&)
 	{
 		for (auto const& distance : {std::string{}, std::string{"object_usage_distance = 2,"}})
@@ -1146,6 +1299,9 @@ void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 	checks.push_back({"agentTypesRemoteOnboardJourneys", remoteOnboardJourneys});
 	checks.push_back({"agentTypesRemoteOrdinaryDoors", remoteOrdinaryDoors});
 	checks.push_back({"agentTypesRemoteDoorGates", remoteDoorGates});
+	checks.push_back({"agentTypesRemoteAccessPanels", remoteAccessPanels});
+	checks.push_back({"agentTypesRemotePanelProperties", remotePanelProperties});
+	checks.push_back({"agentTypesRemotePanelDeclarations", remotePanelDeclarations});
 	checks.push_back({"agentTypesRemoteDeclarations", remoteDeclarations});
 	checks.push_back({"agentTypesRemoteGeometry", remoteGeometry});
 	checks.push_back({"agentTypesRemoteJourneys", remoteJourneys});

@@ -1,6 +1,6 @@
 # Agent properties
 
-This is the complete reference for the **19 editable Agent properties** declared
+This is the complete reference for the **20 editable Agent properties** declared
 by `AgentPropertyType` in `include/core/AgentTag.h`. Each can be authored directly
 on an Agent or supplied by an Agent tag. They are distinct from the physical
 baseline declared by an [Agent-type script](create-agent-script.md), and from
@@ -14,7 +14,7 @@ Tags panel. The effective value follows this order:
 
 1. Individual Agent property.
 2. Inherited Agent tag property (or its persisted sample).
-3. Default shown below. Mobility, Object usage and Object usage distance instead
+3. Default shown below. Mobility, Object usage, Object usage distance and Remote Access panels instead
    fall back to their independently frozen Agent-type script defaults.
 
 Removing an individual override reveals the inherited value without removing
@@ -39,7 +39,7 @@ changing its range creates the relevant new samples. An individual override
 hides, rather than replaces, the underlying tag sample.
 
 Colour, Escalator walking chance, Object usage, Object usage distance,
-Permission adherence and Mobility profile are
+Permission adherence, Remote Access panels and Mobility profile are
 shared values on tags, not sampled ranges. A tag's intrinsic pastel **display
 Colour** colours its UI chip; it is separate from the optional Colour property
 that colours its Agents.
@@ -69,6 +69,7 @@ an editor widget when adding an override. Numeric values must be finite except a
 | Route persistence | `routePersistence` | Number, 0–1 | 0.15 | Sets the proportional improvement needed to replace a still-valid Path voluntarily |
 | Minimum route planning time | `minimumRoutePlanningTime` | Seconds, 0.1–10 | 1 second | Lower endpoint for a Route planning episode's duration |
 | Maximum route planning time | `maximumRoutePlanningTime` | Seconds, 0.1–10 | 3 seconds | Upper endpoint for a Route planning episode's duration |
+| Remote Access panels | `remoteAccessPanels` | Boolean | Frozen script boolean (`true` if omitted) | Enables applicable same-Sector panel commands for Remote control; Arms and None ignore it |
 | Permission adherence | `permissionAdherence` | Boolean | `true` | Willingness to decline usable resources whose applicable operation permissions are unsatisfied |
 | Mobility profile | `mobilityProfile` | Complete nine-entry profile; see below | Frozen Agent-type script profile | Hard traversal constraints and last-resort routing rules |
 
@@ -125,11 +126,26 @@ see [Remote operation](remote-button-operation.md). Mode and distance remain
 independent: switching Human's mode alone keeps 0.25 units, not the remote script
 omission default of 1. There is no physical Arms fallback.
 
-World schema 62 (YAML and binary), clipboard and history carry only optional authored
+World schema 63 (YAML and binary), clipboard and history carry only optional authored
 overrides, never snapshots of live Lua defaults. Reset, load, deletion restoration and
 cross-World paste validate fresh script defaults plus the overrides and inherited fields; ordinary structural
 and surviving history replay retain the Agent's frozen defaults. Legacy Agents without
 overrides continue to use their script defaults.
+
+## Remote Access panels (#542)
+
+Remote Access panels resolves independently of Object usage and distance: individual
+→ tag → frozen script `remote_access_panels` (omitted means true). It is a concrete
+boolean, never sampled. Paused Individual properties and Tags controls add, edit,
+and remove it; Effective properties identifies individual, tag or script default.
+Removing an override reveals inheritance. Duplicate inherited sources are refused
+even when masked. Registry schema 16 and World schema 63 persist only authored
+`remoteAccessPanels` values, not frozen/effective snapshots. Clipboard, history,
+Reset and fresh/surviving Agent lifetimes follow the existing property workflows.
+
+False disables only remote panel commands, without an Arms fallback. Arms retains
+physical panel operation regardless of the boolean; None never operates panels.
+See [Access panels](access-panels.md) for centre geometry and operation eligibility.
 
 ## Appearance and physical movement
 

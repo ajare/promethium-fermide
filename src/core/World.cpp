@@ -1145,6 +1145,7 @@ namespace core
 			AgentTagId minimumRoutePlanningTimeSource{};
 			AgentTagId maximumRoutePlanningTimeSource{};
 			AgentTagId permissionAdherenceSource{};
+			AgentTagId remoteAccessPanelsSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -1332,6 +1333,15 @@ namespace core
 							agent->getName(), registry.getAgentTagName(permissionAdherenceSource),
 							definition->getName()));
 					permissionAdherenceSource = tag;
+				}
+				if (definition->getRemoteAccessPanels())
+				{
+					if (remoteAccessPanelsSource)
+						return reject(format(
+							"Agent '{}' inherits Remote Access panels from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(remoteAccessPanelsSource),
+							definition->getName()));
+					remoteAccessPanelsSource = tag;
 				}
 				if (definition->getMobilityProfile())
 				{
@@ -1589,6 +1599,7 @@ namespace core
 			auto* agent = mAgents.find(repair.agent);
 			if (repair.objectUsageChanged)
 				agentObjectUsageChanged(repair.agent, repair.objectUsageBefore, repair.objectUsageDistanceBefore);
+			else mSimulationCoordinator.agentObjectUsageChanged(repair.agent);
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Clear)
 				agent->clearWalkSpeedModifierSample();
 			else if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
@@ -9598,9 +9609,9 @@ namespace core
 		auto* agent = mAgents.find(id);
 		if (!agent) return;
 		invalidateSimulationSnapshot();
+		mSimulationCoordinator.agentObjectUsageChanged(id);
 		if (beforeMode == agent->getObjectUsage()
 			&& (agent->getObjectUsage() == ObjectUsage::None || beforeDistance == agent->getObjectUsageDistance())) return;
-		mSimulationCoordinator.agentObjectUsageChanged(id);
 		if (agent->getObjectUsage() == ObjectUsage::None || agent->getObjectUsageDistance() < beforeDistance)
 			replanAgentAfterAuthorizationRefusal(id);
 		else beginVoluntaryRoutePlanning(id);
@@ -9631,6 +9642,28 @@ namespace core
 			if (after) replanAgentAfterAuthorizationRefusal(id);
 			else beginVoluntaryRoutePlanning(id);
 		}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool World::setAgentIndividualRemoteAccessPanels(AgentId id,
+		optional<bool> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualRemoteAccessPanels() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Remote Access panels is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualRemoteAccessPanels(value);
+		mSimulationCoordinator.agentObjectUsageChanged(id);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -10037,6 +10070,12 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Permission adherence is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getRemoteAccessPanels() && source->getRemoteAccessPanels())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Remote Access panels is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -10320,6 +10359,7 @@ namespace core
 		AgentTagId minimumRoutePlanningTimeSource{};
 		AgentTagId maximumRoutePlanningTimeSource{};
 		AgentTagId permissionAdherenceSource{};
+		AgentTagId remoteAccessPanelsSource{};
 		AgentTagId objectUsageSource{}, objectUsageDistanceSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
@@ -10477,6 +10517,13 @@ namespace core
 					return reject(format("Permission adherence is inherited from both #{} and #{}",
 						mAgentTagRegistry->getAgentTagName(permissionAdherenceSource), definition->getName()));
 				permissionAdherenceSource = tag;
+			}
+			if (definition->getRemoteAccessPanels())
+			{
+				if (remoteAccessPanelsSource)
+					return reject(format("Agent inherits Remote Access panels from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(remoteAccessPanelsSource), definition->getName()));
+				remoteAccessPanelsSource = tag;
 			}
 			if (definition->getMobilityProfile())
 			{

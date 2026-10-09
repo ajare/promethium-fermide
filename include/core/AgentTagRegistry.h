@@ -81,6 +81,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool permissionAdherenceAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool remoteAccessPanelsAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		enum class ObjectUsagePropertyEdit { Add, Set, Remove };
 		bool editObjectUsageProperty(AgentTagId id, bool distanceProperty, ObjectUsagePropertyEdit operation,
 			ObjectUsage mode, float distance, std::string* diagnostic);
@@ -140,6 +142,8 @@ namespace core
 		AgentMaximumRoutePlanningTimeProperty const* getAgentTagMaximumRoutePlanningTime(
 			AgentTagId id) const;
 		AgentPermissionAdherenceProperty const* getAgentTagPermissionAdherence(
+			AgentTagId id) const;
+		AgentRemoteAccessPanelsProperty const* getAgentTagRemoteAccessPanels(
 			AgentTagId id) const;
 		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
@@ -292,9 +296,15 @@ namespace core
 
 		bool addAgentTagPermissionAdherence(AgentTagId id,
 			std::string* diagnostic = nullptr);
+		bool addAgentTagRemoteAccessPanels(AgentTagId id,
+			std::string* diagnostic = nullptr);
 		bool setAgentTagPermissionAdherence(AgentTagId id, bool value,
 			std::string* diagnostic = nullptr);
+		bool setAgentTagRemoteAccessPanels(AgentTagId id, bool value,
+			std::string* diagnostic = nullptr);
 		bool removeAgentTagPermissionAdherence(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagRemoteAccessPanels(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagMobilityProfile(AgentTagId id,

@@ -876,11 +876,15 @@ namespace
 			&& world->assignAgentTag(id, tag)
 			&& commitAgentTagObjectUsageAdd(registry, tag, diagnostic)
 			&& (mode == core::ObjectUsage::Arms || commitAgentTagObjectUsageEdit(registry, tag, mode, diagnostic)), diagnostic);
+		require(commitAgentTagRemoteAccessPanelsAdd(registry, tag, diagnostic)
+			&& commitAgentTagRemoteAccessPanelsEdit(registry, tag, false, diagnostic), diagnostic);
 		unsigned checkNumber = 0;
 		auto check = [&](core::World const& current, core::AgentId agentId) {
 			++checkNumber;
 			auto agent = current.lookupAgent(agentId).entity;
-			require(agent && agent->getObjectUsage() == mode && agent->getObjectUsageDistance() == .6f
+			require(agent && !agent->getEffectiveRemoteAccessPanels().value
+				&& agent->getEffectiveRemoteAccessPanels().sourceTag == tag && !agent->getIndividualRemoteAccessPanels()
+				&& agent->getObjectUsage() == mode && agent->getObjectUsageDistance() == .6f
 				&& agent->getEffectiveObjectUsage().sourceTag == tag && agent->getEffectiveObjectUsageDistance().sourceTag == tag
 				&& agent->getPhysicalBaseline().objectUsage == core::ObjectUsage::None, "Workflow lost independent inherited values or frozen default at check " + std::to_string(checkNumber)
 				+ " mode=" + std::to_string(agent ? int(agent->getObjectUsage()) : -1)
@@ -904,6 +908,7 @@ namespace
 		auto reopened = core::AgentTagRegistry::loadFrom(registryPath.string());
 		require(reopened->getAgentTagObjectUsage(tag)->value == mode
 			&& reopened->getAgentTagObjectUsageDistance(tag)->value == .6f
+			&& !reopened->getAgentTagRemoteAccessPanels(tag)->value
 			&& reopened->hasEquivalentDefinitions(*registry), "Registry save/reopen lost concrete properties");
 		for (auto filename : {"inherited.world.yaml", "inherited.world"})
 		{
@@ -960,22 +965,32 @@ namespace
 		auto valid = YAML::LoadFile(registryPath.string());
 		for (auto property : valid["agentTagRegistry"]["tags"][0]["properties"])
 			if (property["type"].as<std::string>() == "objectUsageDistance") property["value"] = .7f;
-		for (bool duplicate : {false, true})
+		for (unsigned malformedKind = 0; malformedKind < 4; ++malformedKind)
 		{
 			auto malformed = YAML::Clone(valid);
 			auto properties = malformed["agentTagRegistry"]["tags"][0]["properties"];
-			if (duplicate)
+			if (malformedKind == 1 || malformedKind == 3)
 			{
-				auto copy = YAML::Clone(properties[0]); copy["revision"] = 999;
+				auto copy = YAML::Clone(properties[0]);
+				if (malformedKind == 3) for (auto property : properties)
+					if (property["type"].as<std::string>() == "remoteAccessPanels") copy = YAML::Clone(property);
+				copy["revision"] = 999;
 				properties.push_back(copy); malformed["agentTagRegistry"]["nextPropertyRevision"] = 1000;
 			}
 			else for (auto property : properties)
-				if (property["type"].as<std::string>() == "objectUsage") property["value"] = "remote-control";
+			{
+				if (malformedKind == 0 && property["type"].as<std::string>() == "objectUsage") property["value"] = "remote-control";
+				if (malformedKind == 2 && property["type"].as<std::string>() == "remoteAccessPanels") property["value"] = "invalid";
+			}
 			{ std::ofstream out(registryPath); out << malformed; require(bool(out), "Cannot write malformed registry"); }
 			require(!core::reloadAgentTagRegistryDocument(registry, registryPath, &diagnostic)
 				&& registry->getAgentTagObjectUsageDistance(tag)->value == .7f
 				&& agentTagRegistryDocumentHistory(registry).undoCount() == undoCount, "Malformed registry mutated shared state/history");
 		}
+		require(commitAgentTagRemoteAccessPanelsRemove(registry, tag, diagnostic)
+			&& world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value, diagnostic);
+		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic)
+			&& !world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value, diagnostic);
 		forgetAgentTagRegistryDocument(registry); gWorldDocumentHistory.clear();
 	}
 
@@ -989,6 +1004,7 @@ namespace
 	{
 		gWorldDocumentHistory.clear();
 		auto human = core::bundledHumanAgentType();
+		agent_smoke::replaceSource(human.source, "object_usage = \"arms\",", "object_usage = 'arms', remote_access_panels = true,");
 		AgentTypeLoaderScope loader{[&](std::string const& name) -> std::optional<core::AgentTypeDefinition> {
 			if (name == "human.agent.lua") return human;
 			return std::nullopt;
@@ -1005,9 +1021,12 @@ namespace
 		};
 		require(edit([&] { return world->setAgentIndividualObjectUsageDistance(id, .6f); }), "Distance edit failed");
 		require(edit([&] { return world->setAgentIndividualObjectUsage(id, mode); }), "Mode edit failed");
+		require(edit([&] { return world->setAgentIndividualRemoteAccessPanels(id, false); }), "Panel override failed");
 		auto check = [&] {
 			auto agent = world->lookupAgent(id).entity;
-			require(agent && agent->getObjectUsage() == mode
+			require(agent && agent->getIndividualRemoteAccessPanels() == false
+				&& agent->getEffectiveRemoteAccessPanels().individual && agent->getPhysicalBaseline().remoteAccessPanels
+				&& agent->getObjectUsage() == mode
 				&& agent->getIndividualObjectUsageDistance() == .6f, "Workflow lost independent overrides");
 		};
 		check();
@@ -1016,7 +1035,8 @@ namespace
 			auto path = context.temporaryRoot() / filename; world->saveTo(path.string());
 			auto loaded = core::loadWorldDocument(path);
 			require(loaded->lookupAgent(id).entity->getIndividualObjectUsage() == mode
-				&& loaded->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f, "Usage round-trip failed");
+				&& loaded->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f
+				&& loaded->lookupAgent(id).entity->getIndividualRemoteAccessPanels() == false, "Usage round-trip failed");
 		}
 		if (mode == core::ObjectUsage::None) for (float ignored : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
 		{
@@ -1038,12 +1058,23 @@ namespace
 		core::AgentId pasted;
 		require(commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 3.f, pasted, diagnostic), diagnostic);
 		require(other.world->lookupAgent(pasted).entity->getObjectUsage() == mode
-			&& other.world->lookupAgent(pasted).entity->getIndividualObjectUsageDistance() == .6f, "Cross-World paste lost overrides");
+			&& other.world->lookupAgent(pasted).entity->getIndividualObjectUsageDistance() == .6f
+			&& other.world->lookupAgent(pasted).entity->getIndividualRemoteAccessPanels() == false, "Cross-World paste lost overrides");
+		core::AgentId sameWorld;
+		require(commitAgentPlacement(world, payload, world->getSector(fixture.corridor), 0, 7.f, sameWorld, diagnostic)
+			&& world->lookupAgent(sameWorld).entity->getIndividualRemoteAccessPanels() == false, "Same-World paste lost panel override");
 		gWorldDocumentHistory.clear();
 		auto restore = [&](DocumentSnapshot const& snapshot) {
 			try { auto candidate = deserializeDocumentSnapshot(snapshot, world, {}); if (!candidate) return false; world = std::move(candidate); return true; }
 			catch (std::exception const& error) { diagnostic = error.what(); return false; }
 		};
+		require(edit([&] { return world->setAgentIndividualRemoteAccessPanels(id, std::nullopt); }), "Panel removal failed");
+		require(world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value, "Removal did not reveal script boolean");
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check();
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
+			&& world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value, diagnostic);
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check();
+		world->pauseSimulation();
 		require(edit([&] { return world->setAgentIndividualObjectUsage(id, std::nullopt); }), "Mode removal failed");
 		require(world->lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::Arms
 			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Mode removal destroyed distance/default");
@@ -1065,6 +1096,14 @@ namespace
 		malformed.yaml.replace(offset, end - offset, "value: 0");
 		require(!restore(malformed) && captureDocumentSnapshot(world)->yaml == before->yaml
 			&& gWorldDocumentHistory.undoCount() == undoCount, "Malformed document partially restored");
+		auto invalidBoolean = *before;
+		auto booleanOffset = invalidBoolean.yaml.find("type: remoteAccessPanels");
+		require(booleanOffset != std::string::npos, "Missing authored panel property");
+		booleanOffset = invalidBoolean.yaml.find("value:", booleanOffset);
+		auto booleanEnd = invalidBoolean.yaml.find('\n', booleanOffset);
+		invalidBoolean.yaml.replace(booleanOffset, booleanEnd - booleanOffset, "value: invalid");
+		require(!restore(invalidBoolean) && captureDocumentSnapshot(world)->yaml == before->yaml,
+			"Invalid boolean load was not atomic");
 		payload.individualObjectUsage = core::ObjectUsage::Arms; payload.individualObjectUsageDistance = 0.f;
 		other.world->consumeSimulationEvents(); auto otherBefore = captureDocumentSnapshot(other.world);
 		core::AgentId refused;
@@ -1098,12 +1137,17 @@ namespace
 		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
 		require(world->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f, "Deletion restoration lost override");
 		world->pauseSimulation();
+		agent_smoke::replaceSource(human.source, "remote_access_panels = true", "remote_access_panels = false");
+		world->addLevel();
+		require(world->setAgentIndividualRemoteAccessPanels(id, std::nullopt)
+			&& world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value, "Survivor hot-reloaded boolean");
 		agent_smoke::replaceSource(human.source, "object_usage_distance = 0.25", "object_usage_distance = 0.75");
 		world->addLevel();
 		require(world->setAgentIndividualObjectUsageDistance(id, std::nullopt)
 			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .25f, "Survivor hot-reloaded its frozen distance");
 		world->resetSimulation(); world->pauseSimulation();
-		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .75f, "Reset did not reveal fresh default");
+		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .75f
+			&& !world->lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value, "Reset did not reveal fresh default");
 		require(world->setAgentIndividualObjectUsageDistance(id, .6f), "Fresh override refused");
 		auto stable = captureDocumentSnapshot(world)->yaml;
 		agent_smoke::replaceSource(human.source, "object_usage_distance = 0.75", "object_usage_distance = 0");
@@ -1111,6 +1155,12 @@ namespace
 		try { world->resetSimulation(); } catch (std::exception const&) { resetRefused = true; }
 		require(resetRefused && captureDocumentSnapshot(world)->yaml == stable
 			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Override masked invalid fresh script default");
+		agent_smoke::replaceSource(human.source, "object_usage_distance = 0", "object_usage_distance = 0.75");
+		agent_smoke::replaceSource(human.source, "remote_access_panels = false", "remote_access_panels = 'invalid'");
+		require(world->setAgentIndividualRemoteAccessPanels(id, true), "Masking override failed");
+		stable = captureDocumentSnapshot(world)->yaml; resetRefused = false;
+		try { world->resetSimulation(); } catch (std::exception const&) { resetRefused = true; }
+		require(resetRefused && captureDocumentSnapshot(world)->yaml == stable, "Override masked invalid fresh boolean");
 		gWorldDocumentHistory.clear();
 	}
 

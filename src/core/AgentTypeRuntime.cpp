@@ -295,6 +295,15 @@ namespace core
 		{
 			instance = lua_absindex(state, instance);
 			AgentPhysicalBaseline baseline{};
+			lua_pushliteral(state, "remote_access_panels");
+			lua_rawget(state, instance);
+			if (!lua_isnil(state, -1))
+			{
+				if (lua_type(state, -1) != LUA_TBOOLEAN)
+					throw SerializationException("Agent type baseline field 'remote_access_panels' must be a boolean");
+				baseline.remoteAccessPanels = lua_toboolean(state, -1);
+			}
+			lua_pop(state, 1);
 			lua_pushliteral(state, "object_usage");
 			lua_rawget(state, instance);
 			std::string usage;

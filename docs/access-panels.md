@@ -1,4 +1,4 @@
-# Access panels (#451, #452, #453, #454)
+# Access panels (#451, #452, #453, #454, #542)
 
 Access panels are cell-owned objects on the visible back surface of Rooms,
 Corridors, and Facades. They do not occupy the aperture slot, add walls,
@@ -52,7 +52,9 @@ only.
 Agent Selection lists the panels in the Agent's Location. Closed panels offer
 **Open**; Open delegates exposed actions to the type, and Empty offers only
 **Close**, with no internal controls. Disabled actions reflect current activation,
-effective Buttons Mobility, Location, Level, and stationary interaction eligibility.
+effective Buttons Mobility and Object usage eligibility. Arms requires the same
+Location, floor Level and stationary interaction eligibility; Remote control uses
+the same Sector and physical-centre range rules below.
 The public seams are `canRequestAccessPanel` and `requestAccessPanel`; the owned
 Interaction points also enforce these rules through `requestInteraction`.
 
@@ -78,6 +80,46 @@ interior and an inset cross, including on Facades and wireframe/zero-area indica
 Runtime actions do not dirty the World or add history entries. Removing a panel
 cancels its pending requests and removes controls/device references; panel/control
 IDs are not reused on replacement, reset, or editor history reconstruction.
+
+## Configurable remote operation (#542)
+
+An Agent-type instance may declare `remote_access_panels = true` or `false`;
+omission freezes true. Non-boolean declarations fail fresh validation even when
+masked by an override. In paused Agent Selection → Individual properties or Tags,
+author **Remote Access panels**, independently of **Object usage** and **Object
+usage distance**. Effective properties shows its individual, tag or frozen script
+source. Resolution is individual → tag → frozen script default; removing an
+override reveals inheritance without changing other fields or assignments.
+
+With `object_usage = "remote_control"`, an applicable Open/Close command operates
+within inclusive straight-line range of `panel position + panel size / 2`, including
+vertical separation and another Level in the **same Sector**. Local depth and line
+of sight do not affect range. This is the physical authored centre, not the floor
+approach or the animated leaf's position. Direct out-of-range requests refuse
+without walking. Remote operation never requires arrival at the physical approach,
+and can be requested during pathing. Only an owned, currently available panel
+command qualifies; generic Interaction points gain no remote eligibility.
+
+False refuses remote-only Agents even at the physical approach, with no Arms
+fallback. Arms retains its existing physical operation regardless of the boolean;
+None refuses regardless of it. Activation, Buttons Mobility, command/type
+availability, owned-control permission policy, interaction scheduling, panel speed,
+reversal and safety remain authoritative. Paused accepted property/tag edits and
+removals revalidate pending work and publish cancellation when it becomes ineligible.
+
+World schema 63 and tag-registry schema 16 persist only authored boolean values and
+tag data. Runtime Open, effective values and frozen script defaults are not authored
+properties. YAML/binary, clipboard, history and structural replay preserve authored
+overrides. Surviving Agents retain frozen defaults; load, Reset, paste and deleted
+Agent restoration validate fresh defaults atomically.
+
+Release checks `agentTypesRemoteAccessPanels`, `agentTypesRemotePanelProperties`
+and `agentTypesRemotePanelDeclarations` cover geometry, commands/outcomes, all usage
+modes, boolean precedence, activation/Mobility and paused eligibility changes through
+real World ticks. `agentTypesObjectUsageOverrideWorkflows` and
+`agentTypesInheritedObjectUsageWorkflows` additionally verify both-format persistence,
+registry history, clipboard, Reset, replay, deletion, frozen/fresh lifetimes and
+atomic malformed boolean rejection through existing editor/document seams.
 
 ## Persistence and scope
 
@@ -177,6 +219,16 @@ GUI-enabled Release and Debug default builds and unfiltered final CTest passed:
 
 - Release final CTest: `4643047b25ce411ebe60d83089768e6a`.
 - Debug final CTest: `578bae11a06543c083213082f10302b0`.
+
+## #542 verification
+
+Final Linux validation reused the GUI-enabled `build-linux` Release tree:
+`cmake --build build-linux --config Release -j4` passed, followed by display-unset
+`ctest --test-dir build-linux -C Release -E '^willpower_' -j4 --output-on-failure`.
+All 125 project-owned tests passed, including exhaustive module contracts,
+headless editor/history/clipboard, both-format persistence, lifetimes and Startup.
+`git diff --check` passed. Debug and unmodified submodule tests were excluded per
+`AGENTS.md`; no Windows validation is claimed.
 
 ## #454 verification
 

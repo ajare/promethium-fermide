@@ -101,7 +101,14 @@ policies have not moved into type scripts.
 `object_usage` accepts the actual Lua strings `"arms"`, `"none"` and `"remote_control"`; omission defaults to
 Arms for compatibility. See [Remote operation](remote-button-operation.md) for physical Buttons, ordinary
 manual Doors and onboard Lift/Platform lift destination selection, including
-World authoring examples. Onboard Shuttle selectors remain unsupported.
+World authoring examples. [Access panel commands](access-panels.md) additionally
+qualify when independently resolved `remote_access_panels` is true (#542).
+This optional instance field must be an actual Lua boolean; omission freezes true.
+It follows individual → tag → frozen script default precedence independently of
+mode and distance. False disables only remote panels, never Arms operation or
+None's refusal. Fresh lifetime validation rejects a non-boolean even when masked
+by authored overrides; surviving instances never re-read the live Lua field.
+Onboard Shuttle selectors and generic Interaction points remain unsupported.
 In Arms mode, `object_usage_distance` is independently frozen and observed, not
 inferred from the usage mode. It must be a concrete finite, strictly positive
 simulation float; None's unused observation is described below.

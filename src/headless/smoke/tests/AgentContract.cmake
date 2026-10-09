@@ -126,6 +126,9 @@ set(agent_checks
     agentTypesRemoteOnboardJourneys
     agentTypesRemoteOrdinaryDoors
     agentTypesRemoteDoorGates
+    agentTypesRemoteAccessPanels
+    agentTypesRemotePanelProperties
+    agentTypesRemotePanelDeclarations
     agentTypesRemoteDeclarations
     agentTypesRemoteGeometry
     agentTypesRemoteJourneys

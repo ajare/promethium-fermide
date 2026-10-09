@@ -655,6 +655,7 @@ namespace
 		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
 		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
 		auto const* adherence = registry->getAgentTagPermissionAdherence(id);
+		auto const* remotePanels = registry->getAgentTagRemoteAccessPanels(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		if (chance)
@@ -721,7 +722,7 @@ namespace
 		}
 
 		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk
-			|| minimumPlanningTime || maximumPlanningTime || adherence || pathingMobility)
+			|| minimumPlanningTime || maximumPlanningTime || adherence || remotePanels || pathingMobility)
 			renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 		if (stairSpeed)
 		{
@@ -1112,6 +1113,24 @@ namespace
 				else adherence = nullptr;
 			}
 		}
+		if (remotePanels)
+		{
+			auto value = remotePanels->value;
+			if (ImGui::Checkbox(propertyName(core::AgentPropertyType::RemoteAccessPanels), &value))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteAccessPanelsEdit(registry, id, value, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeRemoteAccessPanels"))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteAccessPanelsRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else remotePanels = nullptr;
+			}
+		}
 
 		auto const* mobility = pathingMobility;
 		if (mobility)
@@ -1198,11 +1217,12 @@ namespace
 		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
 		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
 		auto const* adherence = registry->getAgentTagPermissionAdherence(id);
+		auto const* remotePanels = registry->getAgentTagRemoteAccessPanels(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
 			|| !crowd || !risk || !familiarity || !persistence
-			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility
+			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !remotePanels || !mobility
 			|| !registry->getAgentTagObjectUsage(id) || !registry->getAgentTagObjectUsageDistance(id);
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
@@ -1246,7 +1266,7 @@ namespace
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility)
+			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !adherence || !remotePanels || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
@@ -1348,6 +1368,13 @@ namespace
 			{
 				string diagnostic;
 				if (!commitAgentTagPermissionAdherenceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!remotePanels && ImGui::Selectable(propertyName(core::AgentPropertyType::RemoteAccessPanels)))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteAccessPanelsAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				ImGui::CloseCurrentPopup();
 			}
@@ -2739,6 +2766,13 @@ bool commitAgentTagPermissionAdherenceAdd(
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Permission adherence",
 		[id](auto& target, string* out) { return target.addAgentTagPermissionAdherence(id, out); });
 }
+bool commitAgentTagRemoteAccessPanelsAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Remote Access panels",
+		[id](auto& target, string* out) { return target.addAgentTagRemoteAccessPanels(id, out); });
+}
 
 bool commitAgentTagPermissionAdherenceEdit(
 	shared_ptr<core::AgentTagRegistry> const& registry,
@@ -2747,6 +2781,13 @@ bool commitAgentTagPermissionAdherenceEdit(
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Permission adherence",
 		[id, value](auto& target, string* out) { return target.setAgentTagPermissionAdherence(id, value, out); });
 }
+bool commitAgentTagRemoteAccessPanelsEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, bool value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Remote Access panels",
+		[id, value](auto& target, string* out) { return target.setAgentTagRemoteAccessPanels(id, value, out); });
+}
 
 bool commitAgentTagPermissionAdherenceRemove(
 	shared_ptr<core::AgentTagRegistry> const& registry,
@@ -2754,6 +2795,13 @@ bool commitAgentTagPermissionAdherenceRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Permission adherence",
 		[id](auto& target, string* out) { return target.removeAgentTagPermissionAdherence(id, out); });
+}
+bool commitAgentTagRemoteAccessPanelsRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Remote Access panels",
+		[id](auto& target, string* out) { return target.removeAgentTagRemoteAccessPanels(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

@@ -219,6 +219,7 @@ namespace core
 			|| mIndividualMaximumRoutePlanningTime
 			|| mIndividualObjectUsage.has_value() || mIndividualObjectUsageDistance.has_value()
 			|| mIndividualPermissionAdherence.has_value()
+			|| mIndividualRemoteAccessPanels.has_value()
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -281,6 +282,12 @@ namespace core
 			{
 				beginProperty("permissionAdherence");
 				serializer.writeBool("value", *mIndividualPermissionAdherence);
+				serializer.endMap();
+			}
+			if (mIndividualRemoteAccessPanels)
+			{
+				beginProperty("remoteAccessPanels");
+				serializer.writeBool("value", *mIndividualRemoteAccessPanels);
 				serializer.endMap();
 			}
 			if (mIndividualMobilityProfile)
@@ -457,6 +464,7 @@ namespace core
 		mIndividualObjectUsage.reset();
 		mIndividualObjectUsageDistance.reset();
 		mIndividualPermissionAdherence.reset();
+		mIndividualRemoteAccessPanels.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -616,6 +624,12 @@ namespace core
 					if (mIndividualPermissionAdherence)
 						throw SerializationException("Serialized Agent contains more than one individual Permission adherence");
 					mIndividualPermissionAdherence = serializer.readBool("value");
+				}
+				else if (type == "remoteAccessPanels")
+				{
+					if (mIndividualRemoteAccessPanels)
+						throw SerializationException("Serialized Agent contains more than one individual Remote Access panels");
+					mIndividualRemoteAccessPanels = serializer.readBool("value");
 				}
 				else if (type == "mobilityProfile")
 				{
@@ -878,6 +892,20 @@ namespace core
 						return { property->value, tag, property->revision, false };
 			}
 		return {};
+	}
+	EffectiveAgentRemoteAccessPanels Agent::getEffectiveRemoteAccessPanels() const
+	{
+		if (mIndividualRemoteAccessPanels)
+			return { *mIndividualRemoteAccessPanels, {}, 0, true };
+		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
+			for (auto const tag : mAgentTags)
+			{
+				auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag);
+				if (definition)
+					if (auto const* property = definition->getRemoteAccessPanels())
+						return { property->value, tag, property->revision, false };
+			}
+		return { mPhysicalBaseline.remoteAccessPanels };
 	}
 
 	EffectiveAgentColour Agent::getEffectiveColour() const

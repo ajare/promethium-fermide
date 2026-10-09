@@ -1250,6 +1250,7 @@ namespace core
 			std::optional<ObjectUsage> individualObjectUsage;
 			std::optional<float> individualObjectUsageDistance;
 			std::optional<bool> individualPermissionAdherence;
+			std::optional<bool> individualRemoteAccessPanels;
 			std::optional<MobilityProfile> individualMobilityProfile;
 			std::optional<AgentPropertySample> interactionAversionSample;
 			std::optional<AgentPropertySample> effortAversionSample;
@@ -2638,6 +2639,8 @@ namespace core
 		bool setAgentObjectUsageOverrides(AgentId agent, std::optional<ObjectUsage> mode,
 			std::optional<float> distance, std::string* diagnostic = nullptr);
 		bool setAgentIndividualPermissionAdherence(AgentId agent,
+			std::optional<bool> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualRemoteAccessPanels(AgentId agent,
 			std::optional<bool> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
 			std::optional<MobilityProfile> value, std::string* diagnostic = nullptr);

@@ -148,6 +148,7 @@ struct AgentClipboardPayload
 	std::optional<core::ObjectUsage> individualObjectUsage;
 	std::optional<float> individualObjectUsageDistance;
 	std::optional<bool> individualPermissionAdherence;
+	std::optional<bool> individualRemoteAccessPanels;
 
 	// Behaviour IDs are meaningful only under this assignment's registry UUID.
 	// Marker configuration values have already been replaced by names.

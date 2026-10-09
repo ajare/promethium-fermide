@@ -681,6 +681,7 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualObjectUsage = lookup.entity->getIndividualObjectUsage();
 	payload.individualObjectUsageDistance = lookup.entity->getIndividualObjectUsageDistance();
 	payload.individualPermissionAdherence = lookup.entity->getIndividualPermissionAdherence();
+	payload.individualRemoteAccessPanels = lookup.entity->getIndividualRemoteAccessPanels();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -821,6 +822,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualPermissionAdherence)
 		output << YAML::Key << "permissionAdherence" << YAML::Value
 			<< *payload.individualPermissionAdherence;
+	if (payload.individualRemoteAccessPanels)
+		output << YAML::Key << "remoteAccessPanels" << YAML::Value
+			<< *payload.individualRemoteAccessPanels;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -1203,6 +1207,15 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		catch (exception const&)
 		{
 			diagnostic = "Clipboard Permission adherence must be a boolean";
+			return false;
+		}
+	}
+	if (object["remoteAccessPanels"])
+	{
+		try { payload.individualRemoteAccessPanels = object["remoteAccessPanels"].as<bool>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Remote Access panels must be a boolean";
 			return false;
 		}
 	}
@@ -1642,7 +1655,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		|| payload.individualWaitingAversion || payload.individualCrowdAversion
 		|| payload.individualRiskAversion || payload.individualRouteFamiliarity
 		|| payload.individualRoutePersistence || payload.individualMinimumRoutePlanningTime
-		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence
+		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence || payload.individualRemoteAccessPanels
 		|| payload.individualObjectUsage || payload.individualObjectUsageDistance)
 		&& !world->isSimulationPaused())
 	{
@@ -1891,6 +1904,17 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				payload.individualPermissionAdherence, &propertyDiagnostic))
 			{
 				diagnostic = "The pasted Agent's Permission adherence could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+		if (payload.individualRemoteAccessPanels)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualRemoteAccessPanels(agentId,
+				payload.individualRemoteAccessPanels, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Remote Access panels could not be restored: "
 					+ propertyDiagnostic + rollBack();
 				return false;
 			}

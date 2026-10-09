@@ -271,6 +271,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			target->getIndividualPermissionAdherence().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualPermissionAdherence(
 				agent, enabled ? optional<bool>{ true } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::RemoteAccessPanels),
+			target->getIndividualRemoteAccessPanels().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualRemoteAccessPanels(
+				agent, enabled ? optional<bool>{ true } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::MobilityProfile),
 			target->getIndividualMobilityProfile().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualMobilityProfile(
@@ -399,6 +403,7 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		|| target->getIndividualCrowdAversion() || target->getIndividualMinimumRoutePlanningTime()
 		|| target->getIndividualCrowdAversion() || target->getIndividualMaximumRoutePlanningTime()
 		|| target->getIndividualPermissionAdherence().has_value()
+		|| target->getIndividualRemoteAccessPanels().has_value()
 		|| target->getIndividualMobilityProfile())
 		renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 	if (target->getIndividualEscalatorWalkingChance())
@@ -683,6 +688,25 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 			warn(diagnostic);
 		}
 	}
+	if (target->getIndividualRemoteAccessPanels())
+	{
+		auto value = *target->getIndividualRemoteAccessPanels();
+		if (ImGui::Checkbox("Remote Access panels##individual", &value))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRemoteAccessPanels(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualRemoteAccessPanels"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualRemoteAccessPanels(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualMobilityProfile())
 	{
 		auto const authored = *target->getIndividualMobilityProfile();
@@ -884,6 +908,8 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 		sourceName(usage).c_str());
 	ImGui::Text("Object usage distance: %.3f (%s)%s", double(usageDistance.value),
 		sourceName(usageDistance).c_str(), usage.value == core::ObjectUsage::None ? " (ignored)" : "");
+	auto const remotePanels = lookup.entity->getEffectiveRemoteAccessPanels();
+	ImGui::Text("Remote Access panels: %s (%s)", remotePanels.value ? "true" : "false", sourceName(remotePanels).c_str());
 	auto const adherence = lookup.entity->getEffectivePermissionAdherence();
 	if (adherence.individual)
 		ImGui::Text("Permission adherence: %s (individual)", adherence.value ? "true" : "false");

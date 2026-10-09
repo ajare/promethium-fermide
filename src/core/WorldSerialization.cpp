@@ -701,7 +701,8 @@ namespace core
 		// Resource reference; pre-61 records resolve the type by the legacy
 		// presentation name only.
 		// Version 62 adds independent individual Object usage overrides.
-		serializer.writeUint32("version", 62);
+		// Version 63 adds independently inherited Remote Access panels overrides.
+		serializer.writeUint32("version", 63);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1584,7 +1585,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 62)
+		if (version < 1 || version > 63)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3505,7 +3506,7 @@ namespace core
 				agent->mIndividualCrowdAversion, agent->mIndividualRiskAversion,
 				agent->mIndividualRouteFamiliarity, agent->mIndividualRoutePersistence,
 				agent->mIndividualObjectUsage, agent->mIndividualObjectUsageDistance,
-				agent->mIndividualPermissionAdherence, agent->mIndividualMobilityProfile,
+				agent->mIndividualPermissionAdherence, agent->mIndividualRemoteAccessPanels, agent->mIndividualMobilityProfile,
 				agent->mInteractionAversionSample, agent->mEffortAversionSample,
 				agent->mWaitingAversionSample, agent->mCrowdAversionSample,
 				agent->mRiskAversionSample, agent->mRouteFamiliaritySample,
@@ -3597,6 +3598,7 @@ namespace core
 			raw->setIndividualObjectUsage(saved.individualObjectUsage);
 			raw->setIndividualObjectUsageDistance(saved.individualObjectUsageDistance);
 			raw->setIndividualPermissionAdherence(saved.individualPermissionAdherence);
+			raw->setIndividualRemoteAccessPanels(saved.individualRemoteAccessPanels);
 			raw->setIndividualMobilityProfile(saved.individualMobilityProfile);
 			if (saved.interactionAversionSample)
 				raw->setInteractionAversionSample(*saved.interactionAversionSample);
