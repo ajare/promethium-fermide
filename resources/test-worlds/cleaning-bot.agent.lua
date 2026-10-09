@@ -8,7 +8,8 @@ return {
         return {
             width = 0.4,
             standing_height = 0.15,
-            reach = 0.1,
+            object_usage = "arms",
+            object_usage_distance = 0.1,
             walk_speed = 0.3,
             -- Required positive baselines; the Mobility profile forbids climbing.
             climb_speed = 0.1,

@@ -295,16 +295,35 @@ namespace core
 		{
 			instance = lua_absindex(state, instance);
 			AgentPhysicalBaseline baseline{};
+			lua_pushliteral(state, "object_usage");
+			lua_rawget(state, instance);
+			std::string usage;
+			if (!lua_isnil(state, -1)
+				&& (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 4, usage) || usage != "arms"))
+				throw SerializationException("Agent type baseline field 'object_usage' must be 'arms'");
+			lua_pop(state, 1);
+			// Legacy reach is an input alias only, never a second frozen authority.
+			// Reject dual declarations even when equal, so migration is unambiguous.
+			lua_pushliteral(state, "object_usage_distance");
+			lua_rawget(state, instance);
+			bool const hasDistance = !lua_isnil(state, -1);
+			lua_pop(state, 1);
+			lua_pushliteral(state, "reach");
+			lua_rawget(state, instance);
+			bool const hasReach = !lua_isnil(state, -1);
+			lua_pop(state, 1);
+			if (hasDistance && hasReach)
+				throw SerializationException("Agent type baseline fields 'reach' and 'object_usage_distance' are mutually exclusive");
 			struct Field
 			{
 				char const* key;
 				float AgentPhysicalBaseline::* destination;
 				bool ratio;
 			};
-			static constexpr Field fields[] = {
+			Field const fields[] = {
 				{ "width", &AgentPhysicalBaseline::width, false },
 				{ "standing_height", &AgentPhysicalBaseline::standingHeight, false },
-				{ "reach", &AgentPhysicalBaseline::reach, false },
+				{ hasReach ? "reach" : "object_usage_distance", &AgentPhysicalBaseline::objectUsageDistance, false },
 				{ "walk_speed", &AgentPhysicalBaseline::walkSpeed, false },
 				{ "climb_speed", &AgentPhysicalBaseline::climbSpeed, false },
 				{ "stair_ascent_speed", &AgentPhysicalBaseline::stairAscentSpeed, false },

@@ -10,7 +10,8 @@ return {
         return {
             width = 0.4,
             standing_height = (0.7 - 0.2) - 0.05,
-            reach = 0.25,
+            object_usage = "arms",
+            object_usage_distance = 0.25,
             walk_speed = 0.5,
             climb_speed = 0.25,
             stair_ascent_speed = 0.35,

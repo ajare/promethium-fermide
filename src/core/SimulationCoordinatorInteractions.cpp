@@ -246,6 +246,13 @@ namespace core
 		return id;
 	}
 
+	bool World::agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const
+	{
+		return actor.getObjectUsage() == ObjectUsage::Arms
+			&& std::isfinite(distance) && distance >= 0.f
+			&& distance <= std::min(actor.getObjectUsageDistance(), geometryReach);
+	}
+
 	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId, bool requireReach) const
 	{
 		auto point = mInteractionPoints.find(pointId);
@@ -262,7 +269,7 @@ namespace core
 			&& (finishing || actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal)
 			&& actor->getSector() == mSectors[(size_t)point->mSector.value - 1].get()
 			&& (!(requireReach || point->requiresReachAtRequest())
-				|| actor->getGlobalPosition().distanceTo(point->mPosition) <= point->mReach);
+				|| agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach));
 	}
 
 	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId)
@@ -1067,7 +1074,7 @@ namespace core
 				});
 			if (!preparesThreshold) continue;
 			auto distance = distanceToSegment(point->mPosition);
-			if (distance > point->mReach) continue;
+			if (!mWorld.agentCanPhysicallyOperate(agent, distance, point->mReach)) continue;
 			if (!selected || distance < selectedDistance - 0.001f
 				|| (abs(distance - selectedDistance) <= 0.001f && pointId < selected))
 			{
@@ -1119,7 +1126,7 @@ namespace core
 				if (!actor || !actor->isActive() || agentForbidsButtons(actor)
 					|| (point->requiresReachAtRequest()
 						&& (actor->getSector() != mWorld.mSectors[point->mSector.value - 1].get()
-							|| actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach)))
+							|| !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -1193,7 +1200,7 @@ namespace core
 			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
 				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
 				|| (point->requiresReachAtRequest()
-					&& actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach))
+					&& !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach)))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must
@@ -1205,7 +1212,7 @@ namespace core
 			// Initial Route planning is stationary even if an earlier independent
 			// interaction request is still waiting to be performed.
 			if (actor->getState() == Agent::State::RoutePlanning) continue;
-			if (actor->getGlobalPosition().distanceTo(point->mPosition) > point->mReach)
+			if (!mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))
 			{
 				actor->moveToPosition(point->mPosition, frameTime);
 				continue;
@@ -1234,7 +1241,7 @@ namespace core
 							auto action = operation->mCommand.desiredState ? AccessPanel::Action::Open : AccessPanel::Action::Close;
 							auto control = panel ? mWorld.mInteractionPoints.find(panel->getControl(action)) : nullptr;
 							bool eligible = panel && control && mWorld.canRequestAccessPanel(panel->getId(), action, request->mActor)
-								&& actor->getGlobalPosition().distanceTo(control->getPosition()) <= control->getReach();
+								&& mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(control->getPosition()), control->getReach());
 							operation->mState = eligible ? DeviceOperationState::Running : DeviceOperationState::Rejected;
 							if (eligible)
 							{

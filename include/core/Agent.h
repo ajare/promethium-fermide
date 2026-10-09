@@ -16,6 +16,7 @@
 #include "core/SectorPosition.h"
 #include "core/Shape.h"
 #include "core/Pose.h"
+#include "core/ObjectUsage.h"
 #include "core/Path.h"
 #include "core/AgentTag.h"
 #include "core/AgentBehaviour.h"
@@ -206,8 +207,8 @@ namespace core
 
 	// Type-owned physical defaults, before shared authored modifiers. Resource
 	// slot spacing and environmental dimensions are not Agent baselines.
-	// reach is the interaction distance for which the type's geometry is
-	// authoritative; it is validated and frozen like every other baseline field.
+	// Object usage and its distance are frozen independently; Interaction point
+	// reach remains device geometry, not an Agent capability.
 	struct AutomaticPoseChoice
 	{
 		Pose pose;
@@ -229,7 +230,7 @@ namespace core
 	{
 		float width;
 		float standingHeight;
-		float reach;
+		float objectUsageDistance;
 		float walkSpeed;
 		float climbSpeed;
 		float stairAscentSpeed;
@@ -240,6 +241,7 @@ namespace core
 		std::map<Pose, AgentPoseDefinition> poses;
 		std::vector<AutomaticPoseChoice> roomMovement;
 		std::vector<AutomaticPoseChoice> doorCrossing;
+		ObjectUsage objectUsage{ ObjectUsage::Arms };
 
 		bool supportsPose(Pose pose) const { return poses.contains(pose); }
 		std::vector<AutomaticPoseChoice> const& automaticPoses(AutomaticPoseContext context) const
@@ -685,6 +687,8 @@ namespace core
 		// Stable wire identity and physical observations are immutable type data.
 		char const* getTypeName() const { return mDisplayName.c_str(); }
 		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
+		ObjectUsage getObjectUsage() const { return mPhysicalBaseline.objectUsage; }
+		float getObjectUsageDistance() const { return mPhysicalBaseline.objectUsageDistance; }
 		MobilityProfile const& getScriptDefaultMobilityProfile() const
 		{ return mScriptDefaultMobilityProfile; }
 		// Stable type ID, independent of the presentation display name.

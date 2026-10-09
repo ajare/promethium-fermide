@@ -288,6 +288,11 @@ namespace core
 			{
 				return;
 			}
+			if (request->mEdgeType == EdgeType::Door
+				&& resource->mDoorActivationMode == DoorActivationMode::Manual
+				&& (!actor || !mWorld.agentCanPhysicallyOperate(*actor,
+					actor->getGlobalPosition().distanceTo(request->mSourceEndpoint),
+					std::numeric_limits<float>::max()))) return;
 			if (!request->mPreparationRequested)
 			{
 				request->mPreparationRequested = true;

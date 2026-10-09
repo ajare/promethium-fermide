@@ -1586,6 +1586,10 @@ namespace core
 
 		void updateInteractionResults();
 
+		// Shared physical capability/range policy. Callers retain their existing
+		// Sector, authorization, Mobility, state and admission checks. Geometry
+		// reach may be zero and can only narrow the Agent's frozen arm length.
+		bool agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const;
 		bool interactionRequestEligible(InteractionPointId point, AgentId actor, bool requireReach = false) const;
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 

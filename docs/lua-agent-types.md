@@ -35,7 +35,8 @@ return {
         return {
             width = 0.4,
             standing_height = 0.45,
-            reach = 0.25,
+            object_usage = "arms",
+            object_usage_distance = 0.25,
             walk_speed = 0.5,
             climb_speed = 0.25,
             stair_ascent_speed = 0.35,
@@ -81,7 +82,7 @@ Human defaults. A constructor error publishes no partial Agent.
 | --- | --- | --- |
 | `width` | Bodily width, World units; bounds and placement | Finite, positive |
 | `standing_height` | Standing height, World units | Finite, positive |
-| `reach` | Interaction reach, World units | Finite, positive |
+| `object_usage_distance` | Arm length, World units | Finite, positive |
 | `walk_speed` | Walking speed, World units/second | Finite, positive |
 | `climb_speed` | Ladder speed, World units/second | Finite, positive |
 | `stair_ascent_speed` | Stationary stair ascent, World units/second | Finite, positive |
@@ -94,6 +95,48 @@ Pose envelopes use declared height and width ratios rather than exchanging
 Standing dimensions for Lying. Individual physical modifiers and persisted Agent tag samples still
 apply, with individual-over-tag precedence. Permissions, route preferences, shared-resource slot geometry and Escalator belt
 policies have not moved into type scripts.
+
+## Object usage and arm length (#535)
+
+`object_usage` accepts only the actual Lua string `"arms"`; omission defaults to
+Arms for compatibility. Remote control and None are not exposed in this slice.
+`object_usage_distance` is independently frozen and observed, not inferred from
+the usage mode. It must be a concrete finite, strictly positive simulation float.
+The legacy `reach` field is an input alias for this distance and also defaults to
+Arms. Declare exactly one of `reach` and `object_usage_distance`: declaring both
+is rejected, even with equal values. Missing both is an error. Human uses Arms
+with 0.25 units; Cleaning Bot uses Arms with 0.1 units. Android demonstrates the
+compatible legacy declaration.
+
+Physical eligibility is shared through World: the operator must be within both
+its frozen arm length and the Interaction point's authored reach. Point geometry
+is unchanged and zero reach remains valid (requiring coincident positions).
+Ordinary requests still walk to a physical control when outside range; owned
+BoothWindow shutters and Dumbwaiter buttons still require range at request time.
+Physical Buttons, onboard selectors, Access panels and shutter operations retain
+Location/side, height, activation, Mobility, Access permission and Broken checks,
+press durations and queues. Onboard selectors retain their passenger-local
+placement. Manual ordinary Door opening also requires arm length at the source
+threshold; a short-armed queue head approaches it without changing FIFO order,
+crossing bands, reservations or admission. Already-open Doors require no arm
+operation, and automatic presence sensing is unaffected.
+
+Both observations have the existing frozen-baseline lifetime policy: creation,
+paste, reopen, Reset and deleted-Agent restoration validate fresh defaults;
+surviving structural edits and history replay retain them. Live Lua mutations
+cannot replace the copied defaults. Documents, clipboard and history do not
+serialize private Lua state or materialize defaults as individual properties.
+
+### Verification
+
+Release CTest `object-usage-*` checks use public World operations and real ticks
+for legacy/new declarations, independent snapshots, short/long arm lengths,
+unchanged point geometry (including zero reach), owned shutters and Access
+panels, manual Door queue approach, and onboard Lift selection. Invalid usage,
+competing aliases and invalid distances extend `agentTypesInvalidBaselinesRejected`,
+including no partial Agent, events or document changes. Existing revision/load/
+Reset and editor structural-history/clipboard/deleted-Agent checks now assert
+frozen Arms observations and fresh distances at their lifetime boundaries.
 
 ## Required pose declarations and v1 migration
 

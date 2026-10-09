@@ -23,7 +23,8 @@ return {
         return {
             width = 0.3,
             standing_height = 0.35,
-            reach = 0.4,
+            object_usage = "arms",
+            object_usage_distance = 0.4,
             walk_speed = 0.9,
             climb_speed = 0.5,
             stair_ascent_speed = 0.6,
@@ -67,7 +68,11 @@ return {
 - `display_name`: presentation label, nonempty, at most 128 bytes, with no control
   characters. It may differ from the type ID.
 - `new()`: returns a fresh instance table. No missing field inherits Human defaults.
-- `width`, `standing_height`, `reach`: dimensions/distances in World units.
+- `width`, `standing_height`, `object_usage_distance`: dimensions/distances in World units.
+- `object_usage`: `"arms"` (also the compatibility default when omitted).
+  Distance is required, finite and strictly positive. Legacy `reach` remains an
+  alias, but declaring it together with `object_usage_distance` is rejected even
+  when equal. See [Object usage and arm length](lua-agent-types.md#object-usage-and-arm-length-535).
 - `walk_speed`, `climb_speed`, `stair_ascent_speed`, `stair_descent_speed`:
   speeds in World units per second. All seven physical numbers must be finite
   and positive, including after conversion to simulation floats.

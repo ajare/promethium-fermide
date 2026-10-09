@@ -101,7 +101,7 @@ namespace
 		auto const expected = core::bundledHumanBaseline();
 		require(physical.width == expected.width
 			&& physical.standingHeight == expected.standingHeight
-			&& physical.reach == expected.reach
+			&& physical.objectUsageDistance == expected.objectUsageDistance
 			&& physical.walkSpeed == expected.walkSpeed,
 			"Editor Human placement baseline did not match the scripted baseline");
 	}
@@ -310,6 +310,7 @@ namespace
 		agent_smoke::requireDoorRoute(*world, survivor, back, false);
 		agent_smoke::requireDoorRoute(*world, casualty, back, true);
 		// Change the resolved revision before the ordinary edit, not only replay.
+		replace(definition.source, "object_usage_distance = 0.25", "object_usage_distance = 0.75");
 		replace(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
 		replace(definition.source, "lying = { image_tile = \"human-lying\", height_ratio = 26 / 72, width_ratio = 72 / 26 },", "");
 		replace(definition.source, "height_ratio = 0.3", "height_ratio = 0.4");
@@ -339,6 +340,8 @@ namespace
 			require(agent && agent->getTypeId() == definition.typeId
 				&& std::string(agent->getTypeName()) == "History fixture display"
 				&& agent->getPhysicalBaseline().width == 0.4f
+				&& agent->getObjectUsage() == core::ObjectUsage::Arms
+				&& agent->getObjectUsageDistance() == 0.25f
 				&& agent->getIndividualWalkSpeedModifier() == 1.2f,
 				"History reconstructed or changed a surviving Agent");
 			require(agent->supportsPose(core::Pose::Lying)
@@ -397,10 +400,12 @@ namespace
 		replace(definition.source, "height_ratio = 0.3", "height_ratio = 0.4");
 		replace(definition.source, "image_tile = \"human-standing\"", "image_tile = \"marker\"");
 		replace(definition.source, "width = 0.4", "width = 0.7");
+		replace(definition.source, "object_usage_distance = 0.25", "object_usage_distance = 0.75");
 		require(history.undo(captureDocumentSnapshot(world, history), restore),
 			"Deletion undo did not recover after constructor failure");
 		verifySurvivor();
-		require(world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f
+		require(world->lookupAgent(casualty).entity->getObjectUsageDistance() == 0.75f
+			&& world->lookupAgent(casualty).entity->getPhysicalBaseline().width == 0.7f
 			&& world->lookupAgent(casualty).entity->getPoseImageTile() == "marker",
 			"Deletion undo did not use a fresh constructor from the resolved resource");
 		auto const* restored = world->lookupAgent(casualty).entity;
@@ -421,13 +426,15 @@ namespace
 		// Loading without a current World remains a fresh lifetime boundary.
 		auto const snapshot = captureDocumentSnapshot(world, history);
 		auto loaded = deserializeDocumentSnapshot(*snapshot, {}, {});
-		require(loaded && loaded->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
+		require(loaded && loaded->lookupAgent(survivor).entity->getObjectUsageDistance() == 0.75f
+			&& loaded->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
 			"An ordinary document load incorrectly preserved the old baseline");
 		agent_smoke::requireDoorRoute(*loaded, survivor, back, true);
 		require(!loaded->lookupAgent(survivor).entity->getIndividualMobilityProfile(),
 			"Load materialised script Mobility as an authored override");
 		world->resetSimulation();
-		require(world->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
+		require(world->lookupAgent(survivor).entity->getObjectUsageDistance() == 0.75f
+			&& world->lookupAgent(survivor).entity->getPhysicalBaseline().width == 0.7f,
 			"Reset incorrectly preserved a surviving instance from structural history");
 		agent_smoke::requireDoorRoute(*world, survivor, back, true);
 	}
@@ -757,8 +764,8 @@ namespace
 		auto const width = invalidBaseline.find("width = 0.4");
 		invalidBaseline.replace(width, std::string("width = 0.4").size(), "width = -1");
 		auto missingBaseline = externalSource("MissingBaseline");
-		auto const reach = missingBaseline.find("reach = 0.25,");
-		missingBaseline.erase(reach, std::string("reach = 0.25,").size());
+		auto const distance = missingBaseline.find("object_usage_distance = 0.25,");
+		missingBaseline.erase(distance, std::string("object_usage_distance = 0.25,").size());
 		auto invalidPose = externalSource("InvalidPose");
 		agent_smoke::replaceSource(invalidPose, "height_ratio = 0.3", "height_ratio = '0.3'");
 		auto v1 = externalSource("OldVersion");
@@ -767,7 +774,7 @@ namespace
 			{ invalidPose, "poses.crawling.height_ratio" },
 			{ v1, "migrate" },
 			{ invalidBaseline, "width" },
-			{ missingBaseline, "reach" },
+			{ missingBaseline, "object_usage_distance" },
 			{ "not lua", "" },
 			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=7 }", "constructor" },
 			{ "return { api_version=2, type_id='Bad', display_name='Bad', new=function() local blob=string.rep('x',128*1024*1024) end }", "" },
@@ -911,6 +918,11 @@ namespace
 			require(makeAgentClipboardText(makeAgentClipboardPayload(*world, pasted, "Copy"), false) == text,
 				"Paste/history lost identity, individual properties, tags, samples or group");
 			auto const* agent = world->lookupAgent(pasted).entity;
+			require(agent->getObjectUsage() == core::ObjectUsage::Arms
+				&& agent->getObjectUsageDistance() == (fresh ? 0.75f : 0.25f)
+				&& world->lookupAgent(original).entity->getObjectUsageDistance() == 0.25f
+				&& text.find("object_usage") == std::string::npos,
+				"Clipboard/history lost frozen Arms defaults or materialised them as overrides");
 			require(agent->getIndividualMobilityProfile() == mobility
 				&& agent->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door)
 					== (fresh ? core::MobilityUse::CanUse : core::MobilityUse::CannotUse),
@@ -959,18 +971,21 @@ namespace
 		auto const count = gWorldDocumentHistory.undoCount();
 		require(count == 1, "Cut was not captured as one history edit");
 		auto const undo = [&] { return gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore); };
-		for (int failure = 0; failure != 4; ++failure)
+		for (int failure = 0; failure != 5; ++failure)
 		{
 			if (failure == 0) definition.resourceName = "missing.agent.lua";
 			if (failure == 1) definition.typeId = "Mismatched";
 			if (failure == 2) definition.source = "return { api_version=2, type_id='Android', display_name='Android', new=function() error('fresh lifetime') end }";
 			if (failure == 3) agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"bad\"");
+			if (failure == 4) agent_smoke::replaceSource(definition.source, "reach = 0.25", "object_usage = 'arms', object_usage_distance = 0");
 			require(!undo(), "Deletion undo accepted an invalid dependency or reused the deleted instance");
 			require(captureDocumentSnapshot(world)->yaml == deleted->yaml
 				&& gWorldDocumentHistory.undoCount() == count && !gWorldDocumentHistory.canRedo(),
 				"Failed deletion restoration changed the World/history");
 			if (failure == 3) require(diagnostic.find("android.agent.lua") != std::string::npos
 				&& diagnostic.find("door") != std::string::npos, "Invalid Mobility restoration lacked field/resource diagnostics");
+			if (failure == 4) require(diagnostic.find("android.agent.lua") != std::string::npos
+				&& diagnostic.find("object_usage_distance") != std::string::npos, "Invalid Arms restoration lacked field/resource diagnostics");
 			agent_smoke::requireDoorRoute(*world, original, back, false);
 			definition = { "Android", "Android", "android.agent.lua", initialSource };
 		}
@@ -978,6 +993,7 @@ namespace
 		require(at != std::string::npos, "Android fixture width not found");
 		definition.source.replace(at, std::string("width = 0.4").size(), "width = 0.5");
 		agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
+		agent_smoke::replaceSource(definition.source, "reach = 0.25", "object_usage = 'arms', object_usage_distance = 0.75");
 		auto const deletionUndone = undo();
 		require(deletionUndone, "Deleted-Agent undo did not recover: " + diagnostic);
 		verify(true);
@@ -1005,6 +1021,7 @@ namespace
 		auto const* copy = copyFixture.world->lookupAgent(copied).entity;
 		require(copy->getIndividualMobilityProfile() == mobility && copy->getAgentTagIds().contains(tag)
 			&& copy->getTypeId() == "Android" && copy->getTypeResourceName() == "android.agent.lua"
+			&& copy->getObjectUsage() == core::ObjectUsage::Arms && copy->getObjectUsageDistance() == 0.75f
 			&& copy->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door) == core::MobilityUse::CanUse,
 			"Copied Agent did not retain overrides/identity with fresh script defaults");
 		agent_smoke::requireDoorRoute(*copyFixture.world, copied, copyBack, true);
