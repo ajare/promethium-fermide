@@ -1,5 +1,8 @@
 # Lua Agent-type authoring and integrated migration (#510)
 
+For the completed mode/distance migration contract, mixed-object demonstration
+and lifecycle evidence, see [Object usage](object-usage.md).
+
 > **API v2 declarations (#521) and shared fit/selection/movement (#522) are implemented.**
 > Supported poses and automatic choices are validated and frozen per lifetime; movement always prefers the tallest fitting allowed pose.
 > Room/Door motion, placement, routing and admission consume the shared fit result.

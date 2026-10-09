@@ -48,8 +48,7 @@ declarations resolve to Arms with that distance. `reach` is an input alias only:
 declaring both distance fields is rejected even if equal. This avoids competing
 physical authorities while retaining old reach-only resources. Distance is a
 concrete finite, strictly positive simulation float, independently frozen and
-observed alongside usage. #536 adds the working None mode below; Remote control
-remains deferred.
+observed alongside usage. #536 adds the working None mode below; the subsequent Remote control slices are now complete.
 
 Shared World-facing physical-operation eligibility uses arm length, narrowed by
 Interaction point geometry (including valid zero reach), without replacing
@@ -64,9 +63,8 @@ Onboard selectors retain their existing passenger-local physical placement.
 Usage and distance follow the same frozen lifetime and authored-only persistence
 rules as other baselines: surviving structural replay/history retain them;
 creation, paste, load, Reset and deleted-Agent restoration validate fresh ones.
-The host never re-reads them from live Lua. This working slice establishes the
-shared physical policy; remote activation is deliberately deferred to later
-slices of #534.
+The host never re-reads them from live Lua. This initial slice established the
+shared physical policy subsequently extended by #539–#543 below.
 
 ## None usage and operation-free routing (#536)
 
@@ -135,6 +133,33 @@ boarding positions; actual operation rechecks occupancy, range, Mobility and
 Access permissions without adding control-only walking or changing durations.
 Accepted journeys and safe committed exits retain their existing guarantees.
 Property precedence, frozen defaults and fresh-lifetime boundaries are unchanged.
+
+## Completed Object usage contract (#542–#544)
+
+Access panels and standalone BoothWindow shutters complete the eligible categories.
+They use inclusive straight-line distance to the physical panel/shutter centre,
+including vertical separation, in the applicable current Sector (the shutter's
+controlling back side). The independently resolved script/tag/individual booleans
+`remote_access_panels` and `remote_booth_window_shutters` default true; false refuses
+that remote category without physical fallback. They have no effect in Arms or None.
+Dumbwaiter-owned shutters remain unit-controlled through their physical Buttons.
+
+There are no separate Door, Button or Lift booleans: a single exclusive mode and
+single independently resolved distance avoid overlapping capabilities and hidden
+fallback. Local depth is preference, not distance; range uses neither it nor line
+of sight. Another Level inside the current Sector is eligible; another Sector is
+not. Generic Interaction points, direct Bulkhead/transport landing Doors and onboard
+Shuttle selectors remain excluded. Physical Buttons bound to those devices remain
+eligible independently of the receiving device category.
+
+The normative authoring/migration summary and runnable mixed-object example are in
+[Object usage](../object-usage.md); the geometry/runtime details are in
+[Remote operation](../remote-button-operation.md). The glossary defines concepts,
+not additional operation or migration policy. #544's integration fixes make range-entry
+movement representably inside the strict range gate and align enclosed Lift passengers
+vertically with the car's exact arrival Stop without changing their buffered horizontal
+position, device timing or admission. YAML/binary/history continue to carry authored
+references and overrides only, never live Lua state.
 
 ## Consequences
 

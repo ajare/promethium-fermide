@@ -1241,7 +1241,18 @@ namespace core
 				limit = std::min(1., enter + .00001);
 			}
 		}
-		return start + delta * float(limit);
+		if (limit == 1.) return end;
+		auto result = start + delta * float(limit);
+		if (limit < 1.)
+		{
+			// The fractional inset can be smaller than one position ULP (for
+			// example after a Door crossing near a distant Lift landing Button).
+			// Ensure actual movement enters range instead of rounding repeatedly
+			// to the same outside point. Eligibility itself remains strictly inclusive.
+			result.x = std::nextafter(result.x, end.x);
+			result.y = std::nextafter(result.y, end.y);
+		}
+		return result;
 	}
 
 	void SimulationCoordinator::tryPressUpcomingDoorButton(Agent& agent,

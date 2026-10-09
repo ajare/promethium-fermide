@@ -268,20 +268,20 @@ An Agent's resolved mode for operating objects: Arms permits physical operation,
 _Avoid_: Mobility use, which governs traversal kinds
 
 **Object usage distance**:
-An independently resolved distance in World units, finite and strictly positive for Arms and Remote control: arm length for Arms, maximum straight-line activation range for Remote control. None ignores it; physical operation also satisfies Interaction point geometry and physical eligibility.
+An independently resolved distance in World units: arm length for Arms, maximum straight-line activation range for Remote control. None ignores it. It describes Agent capability, not an Interaction point's geometry.
 _Avoid_: Interaction point reach, which is object geometry and may be zero
 
 **Arms**:
 The Object usage mode that operates objects through physical approach within arm length. It does not provide remote activation or bypass Location, side, height, Mobility, Access permission or Broken conditions.
 
 **Remote control object usage**:
-The Object usage mode that operates eligible objects within maximum range without an Arms fallback. Physical Buttons qualify in the Agent's own Sector, using distance to the Button centre including vertical separation, independently of Local depth and line of sight. Ordinary manual Doors required by the current Path qualify from either approach Sector, using their physical centre and inclusive maximum range; direct Bulkhead and transport landing Door operation is excluded. Onboard Lift and Platform lift destination controls qualify only in the Agent's actual occupied vehicle and applicable Sector, using inclusive range to that vehicle's physical centre; onboard Shuttle selectors and generic Interaction points do not qualify. Access panel commands qualify in the Agent's own Sector when Remote Access panels is enabled, using inclusive range to the physical panel centre including vertical separation. BoothWindow shutter controls qualify only from the controlling back-side Sector when Remote BoothWindow shutters is enabled, using inclusive range to the physical shutter centre. Activation never replaces physical crossing or traversal admission.
+The exclusive Object usage mode for distance-limited operation of eligible objects in the Agent's current Sector. It does not include Arms operation and does not replace physical passage or traversal admission.
 
 **Remote Access panels**:
-An independently inherited boolean Agent property, defaulting to true, that enables applicable Access panel commands for Remote control within range of the physical panel centre in the same Sector. It changes neither Arms operation nor None's inability to operate, and grants no additional commands or permissions.
+An independently inherited boolean Agent property enabling Access panel operation in Remote control mode. It does not govern Arms or None and confers no authorization.
 
 **Remote BoothWindow shutters**:
-An independently inherited boolean Agent property, defaulting to true, that enables Remote control operation of eligible BoothWindow shutters from the controlling Sector within range of the physical shutter centre. It is independent of Remote Access panels, changes neither Arms nor None, and grants no additional control ownership or permissions.
+An independently inherited boolean Agent property enabling BoothWindow shutter operation in Remote control mode. It is independent of Remote Access panels, does not govern Arms or None, and confers no control ownership or authorization.
 
 **None object usage**:
 The Object usage mode in which an Agent cannot operate objects but may pass through already usable resources or join another Agent's accepted journey when existing rules permit. It is neither a Mobility restriction nor a revocation of admitted crossings or committed passenger exits.

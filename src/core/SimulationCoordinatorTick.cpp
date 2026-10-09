@@ -394,9 +394,20 @@ namespace core
 							passenger->setPosition({ transit, local }, false);
 							passenger->mTraversalLocalGoal.reset();
 						}
-						else if (passenger->getGlobalPosition().distanceTo(target) > 0.001f)
-							passenger->mTraversalLocalGoal = target;
-						else passenger->mTraversalLocalGoal.reset();
+						else
+						{
+							// The car snaps exactly to its Stop on arrival. Carry its
+							// passenger to that same vertical position, preserving the
+							// buffered horizontal standing position. A sub-tolerance
+							// residual below the landing Floor otherwise makes a chained
+							// Room journey observe the Room on the Level below.
+							auto aligned = passenger->getLocalPosition();
+							aligned.y = local.y;
+							passenger->setPosition({ transit, aligned }, false);
+							if (passenger->getGlobalPosition().distanceTo(target) > 0.001f)
+								passenger->mTraversalLocalGoal = target;
+							else passenger->mTraversalLocalGoal.reset();
+						}
 					}
 				}
 		}

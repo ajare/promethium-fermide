@@ -69,16 +69,20 @@ return {
   characters. It may differ from the type ID.
 - `new()`: returns a fresh instance table. No missing field inherits Human defaults.
 - `width`, `standing_height`, `object_usage_distance`: dimensions/distances in World units.
-- `object_usage`: `"arms"` (the compatibility default when omitted) or `"none"`.
-  Arms distance is required, finite and strictly positive. None cannot operate
-  objects and ignores distance, so omit it; all other physical fields remain
-  required. None can still use automatic/already usable resources and accepted
-  shared journeys under the existing permission, Mobility and admission rules. Legacy `reach` remains an
-  alias, but declaring it together with `object_usage_distance` is rejected even
-  when equal. See [Object usage and arm length](lua-agent-types.md#object-usage-and-arm-length-535).
+- `object_usage`: `"arms"` (the compatibility default when omitted),
+  `"remote_control"`, or `"none"`. Arms requires positive finite distance;
+  a Remote control declaration may omit distance to freeze 1 World unit.
+  None ignores distance and cannot operate, but may use already usable resources
+  under existing admission rules. A mode-only Human override retains 0.25 units.
+  `remote_access_panels` and `remote_booth_window_shutters` are independent
+  optional booleans, default true, relevant only in Remote control mode.
+  Legacy `reach` is an Arms input alias, never a second physical authority;
+  declaring both distance fields is rejected even when equal. See the
+  [Object usage authoring and migration contract](object-usage.md).
 - `walk_speed`, `climb_speed`, `stair_ascent_speed`, `stair_descent_speed`:
-  speeds in World units per second. All seven physical numbers must be finite
-  and positive, including after conversion to simulation floats.
+  speeds in World units per second. These four speeds and both dimensions must
+  be finite and positive after conversion to simulation floats; usable Object
+  usage distance follows the mode-specific rules above.
 - `poses`: supported canonical poses. Standing is mandatory; other choices are
   Sitting, Lying, Crouching and Crawling, using lowercase Lua keys. Every declared
   pose requires an `image_tile` string naming an ObjectAtlas image.

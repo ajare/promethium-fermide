@@ -175,6 +175,7 @@ pf_add_smoke_module(pf-smoke-agent
         agent/IndividualProperties.cpp
         agent/AgentTypes.cpp
         agent/NoneUsage.cpp
+        agent/RemoteIntegration.cpp
     LIBRARIES promethium-fermide-core
     LABELS core
     TIMEOUT 30
@@ -192,7 +193,7 @@ add_test(NAME agent-type-reserved-behaviour COMMAND pf-smoke-agent
     --check agentTypesReservedBehaviourMember)
 set_tests_properties(agent-type-reserved-behaviour PROPERTIES LABELS "core;functional;smoke;validation-fast")
 
-foreach(check agentTypesRemoteBoothWindowShutters agentTypesRemoteShutterProperties agentTypesRemoteShutterDeclarations agentTypesRemoteAccessPanels agentTypesRemotePanelProperties agentTypesRemotePanelDeclarations agentTypesRemoteOnboardJourneys agentTypesRemoteOrdinaryDoors agentTypesRemoteDoorGates agentTypesRemoteTightDoor agentTypesRemoteDeclarations agentTypesRemoteGeometry agentTypesRemoteJourneys agentTypesRemotePendingEdits agentTypesRemoteLandingButtons agentTypesInheritedObjectUsage agentTypesInheritedObjectUsageRoutes agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
+foreach(check remoteMixedWorld remoteMixedControls remoteMixedCosts agentTypesRemoteBoothWindowShutters agentTypesRemoteShutterProperties agentTypesRemoteShutterDeclarations agentTypesRemoteAccessPanels agentTypesRemotePanelProperties agentTypesRemotePanelDeclarations agentTypesRemoteOnboardJourneys agentTypesRemoteOrdinaryDoors agentTypesRemoteDoorGates agentTypesRemoteTightDoor agentTypesRemoteDeclarations agentTypesRemoteGeometry agentTypesRemoteJourneys agentTypesRemotePendingEdits agentTypesRemoteLandingButtons agentTypesInheritedObjectUsage agentTypesInheritedObjectUsageRoutes agentTypesObjectUsageOverrides agentTypesObjectUsageCommittedCrossing agentTypesNoneDeclarations agentTypesNoneInvalidDeclarations agentTypesNoneDirectRefusals agentTypesNoneDoors agentTypesNoneOtherResources agentTypesNoneSharedAirlock agentTypesNoneLifetimes agentTypesNoneSharedJourneys)
     add_test(NAME object-usage-${check} COMMAND pf-smoke-agent --check ${check})
     set_tests_properties(object-usage-${check} PROPERTIES LABELS "agent;functional;validation-fast" TIMEOUT 60)
 endforeach()

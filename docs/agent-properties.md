@@ -79,6 +79,9 @@ property; that is an explicit override, not the absent-property default of 0.15.
 Adding an individual Mobility profile snapshots the current effective profile;
 a newly added tag profile starts with all entries **Can use**.
 
+See [Object usage authoring and migration](object-usage.md) for the complete
+capability contract and runnable mixed-object World.
+
 ## Independent Object usage inheritance (#537, #538)
 
 Mode and distance resolve independently: individual override → inherited tag value →

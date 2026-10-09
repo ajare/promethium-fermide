@@ -19,3 +19,8 @@ Individual Walk speed and Height modifiers are concrete authored values rather t
   effective distance, while None ignores it. Individual overrides never hide a
   duplicate inherited source conflict. Invalid edits leave all documents and history
   unchanged.
+- Remote Access panels and Remote BoothWindow shutters use the same precedence
+  independently of mode, distance and each other. Their script defaults are true;
+  they gate only Remote control, not Arms or None. A mode-only Human override
+  therefore keeps its separately resolved 0.25-unit distance rather than adopting
+  the 1-unit default of a distance-omitting Remote control script declaration.

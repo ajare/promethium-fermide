@@ -150,6 +150,9 @@ set(agent_checks
     agentTypesNoneSharedAirlock
     agentTypesNoneLifetimes
     agentTypesNoneSharedJourneys
+    remoteMixedWorld
+    remoteMixedControls
+    remoteMixedCosts
 )
 
 function(invoke status expected)

@@ -1,4 +1,7 @@
-# Remote Button operation (#539)
+# Remote object operation (#539–#544)
+
+[Object usage authoring and migration](object-usage.md) provides the complete
+capability summary, runnable laboratory and cross-object/lifecycle evidence map.
 
 Agent-type API v2 accepts `object_usage = "remote_control"`:
 
