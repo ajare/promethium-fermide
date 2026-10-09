@@ -849,7 +849,7 @@ namespace
 			"Duplicate refusal changed the original definition");
 	}
 
-	void inheritedObjectUsageWorkflows(smoke::Context const& context)
+	void inheritedObjectUsageWorkflow(smoke::Context const& context, core::ObjectUsage mode)
 	{
 		gWorldDocumentHistory.clear();
 		auto human = core::bundledHumanAgentType();
@@ -874,12 +874,13 @@ namespace
 		require(tag && commitAgentTagObjectUsageDistanceAdd(registry, tag, diagnostic)
 			&& commitAgentTagObjectUsageDistanceEdit(registry, tag, .6f, diagnostic)
 			&& world->assignAgentTag(id, tag)
-			&& commitAgentTagObjectUsageAdd(registry, tag, diagnostic), diagnostic);
+			&& commitAgentTagObjectUsageAdd(registry, tag, diagnostic)
+			&& (mode == core::ObjectUsage::Arms || commitAgentTagObjectUsageEdit(registry, tag, mode, diagnostic)), diagnostic);
 		unsigned checkNumber = 0;
 		auto check = [&](core::World const& current, core::AgentId agentId) {
 			++checkNumber;
 			auto agent = current.lookupAgent(agentId).entity;
-			require(agent && agent->getObjectUsage() == core::ObjectUsage::Arms && agent->getObjectUsageDistance() == .6f
+			require(agent && agent->getObjectUsage() == mode && agent->getObjectUsageDistance() == .6f
 				&& agent->getEffectiveObjectUsage().sourceTag == tag && agent->getEffectiveObjectUsageDistance().sourceTag == tag
 				&& agent->getPhysicalBaseline().objectUsage == core::ObjectUsage::None, "Workflow lost independent inherited values or frozen default at check " + std::to_string(checkNumber)
 				+ " mode=" + std::to_string(agent ? int(agent->getObjectUsage()) : -1)
@@ -901,7 +902,7 @@ namespace
 		require(restoreAgentTagRegistrySnapshot(registry, false, &diagnostic), diagnostic); check(*world, id);
 		require(saveAgentTagRegistry(registry, registryPath.string(), &diagnostic), diagnostic);
 		auto reopened = core::AgentTagRegistry::loadFrom(registryPath.string());
-		require(reopened->getAgentTagObjectUsage(tag)->value == core::ObjectUsage::Arms
+		require(reopened->getAgentTagObjectUsage(tag)->value == mode
 			&& reopened->getAgentTagObjectUsageDistance(tag)->value == .6f
 			&& reopened->hasEquivalentDefinitions(*registry), "Registry save/reopen lost concrete properties");
 		for (auto filename : {"inherited.world.yaml", "inherited.world"})
@@ -920,7 +921,7 @@ namespace
 		check(*other.world, pasted);
 		// A mode-only individual override can rely on tag distance even when the
 		// frozen script distance is zero; creation must validate after inheritance.
-		payload.name = "ModeOnly"; payload.individualObjectUsage = core::ObjectUsage::Arms;
+		payload.name = "ModeOnly"; payload.individualObjectUsage = mode;
 		require(commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 5.f, pasted, diagnostic), diagnostic);
 		require(other.world->lookupAgent(pasted).entity->getEffectiveObjectUsage().individual
 			&& other.world->lookupAgent(pasted).entity->getObjectUsageDistance() == .6f, "Mode-only paste ignored inherited distance");
@@ -978,7 +979,13 @@ namespace
 		forgetAgentTagRegistryDocument(registry); gWorldDocumentHistory.clear();
 	}
 
-	void objectUsageOverrideWorkflows(smoke::Context const& context)
+	void inheritedObjectUsageWorkflows(smoke::Context const& context)
+	{
+		inheritedObjectUsageWorkflow(context, core::ObjectUsage::Arms);
+		inheritedObjectUsageWorkflow(context, core::ObjectUsage::RemoteControl);
+	}
+
+	void objectUsageOverrideWorkflow(smoke::Context const& context, core::ObjectUsage mode)
 	{
 		gWorldDocumentHistory.clear();
 		auto human = core::bundledHumanAgentType();
@@ -997,10 +1004,10 @@ namespace
 			return accepted;
 		};
 		require(edit([&] { return world->setAgentIndividualObjectUsageDistance(id, .6f); }), "Distance edit failed");
-		require(edit([&] { return world->setAgentIndividualObjectUsage(id, core::ObjectUsage::None); }), "Mode edit failed");
+		require(edit([&] { return world->setAgentIndividualObjectUsage(id, mode); }), "Mode edit failed");
 		auto check = [&] {
 			auto agent = world->lookupAgent(id).entity;
-			require(agent && agent->getObjectUsage() == core::ObjectUsage::None
+			require(agent && agent->getObjectUsage() == mode
 				&& agent->getIndividualObjectUsageDistance() == .6f, "Workflow lost independent overrides");
 		};
 		check();
@@ -1008,10 +1015,10 @@ namespace
 		{
 			auto path = context.temporaryRoot() / filename; world->saveTo(path.string());
 			auto loaded = core::loadWorldDocument(path);
-			require(loaded->lookupAgent(id).entity->getIndividualObjectUsage() == core::ObjectUsage::None
+			require(loaded->lookupAgent(id).entity->getIndividualObjectUsage() == mode
 				&& loaded->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f, "Usage round-trip failed");
 		}
-		for (float ignored : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+		if (mode == core::ObjectUsage::None) for (float ignored : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
 		{
 			require(world->setAgentIndividualObjectUsageDistance(id, ignored), "None ignored edit refused");
 			for (auto const* filename : {"ignored.world.yaml", "ignored.world"})
@@ -1022,7 +1029,7 @@ namespace
 				require(value && (std::isnan(ignored) ? std::isnan(*value) : *value == ignored), "Ignored distance did not persist");
 			}
 		}
-		require(world->setAgentIndividualObjectUsageDistance(id, .6f), "Restore concrete distance failed");
+		if (mode == core::ObjectUsage::None) require(world->setAgentIndividualObjectUsageDistance(id, .6f), "Restore concrete distance failed");
 		world->resetSimulation(); world->pauseSimulation(); check(); world->addLevel(); check();
 		auto text = makeAgentClipboardText(makeAgentClipboardPayload(*world, id, "Copied"), false);
 		AgentClipboardPayload payload;
@@ -1030,7 +1037,7 @@ namespace
 		auto other = buildWorld("Other usage World"); other.world->pauseSimulation();
 		core::AgentId pasted;
 		require(commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 3.f, pasted, diagnostic), diagnostic);
-		require(other.world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::None
+		require(other.world->lookupAgent(pasted).entity->getObjectUsage() == mode
 			&& other.world->lookupAgent(pasted).entity->getIndividualObjectUsageDistance() == .6f, "Cross-World paste lost overrides");
 		gWorldDocumentHistory.clear();
 		auto restore = [&](DocumentSnapshot const& snapshot) {
@@ -1083,6 +1090,12 @@ namespace
 		require(resetRefused && captureDocumentSnapshot(world)->yaml == stable
 			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Override masked invalid fresh script default");
 		gWorldDocumentHistory.clear();
+	}
+
+	void objectUsageOverrideWorkflows(smoke::Context const& context)
+	{
+		objectUsageOverrideWorkflow(context, core::ObjectUsage::None);
+		objectUsageOverrideWorkflow(context, core::ObjectUsage::RemoteControl);
 	}
 
 	void noneClipboardAndHistory(smoke::Context const&)

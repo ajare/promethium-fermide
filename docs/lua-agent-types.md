@@ -82,7 +82,7 @@ Human defaults. A constructor error publishes no partial Agent.
 | --- | --- | --- |
 | `width` | Bodily width, World units; bounds and placement | Finite, positive |
 | `standing_height` | Standing height, World units | Finite, positive |
-| `object_usage_distance` | Arm length, World units; ignored for None | Finite, positive for Arms; optional for None |
+| `object_usage_distance` | Arm length or maximum remote range, World units; ignored for None | Finite, positive for Arms/Remote control; Remote control omission defaults to 1 |
 | `walk_speed` | Walking speed, World units/second | Finite, positive |
 | `climb_speed` | Ladder speed, World units/second | Finite, positive |
 | `stair_ascent_speed` | Stationary stair ascent, World units/second | Finite, positive |
@@ -98,14 +98,14 @@ policies have not moved into type scripts.
 
 ## Object usage and arm length (#535)
 
-`object_usage` accepts the actual Lua strings `"arms"` and `"none"`; omission defaults to
-Arms for compatibility. Remote control is not exposed yet.
+`object_usage` accepts the actual Lua strings `"arms"`, `"none"` and `"remote_control"`; omission defaults to
+Arms for compatibility. See [Remote Button operation](remote-button-operation.md) for #539's supported scope.
 In Arms mode, `object_usage_distance` is independently frozen and observed, not
 inferred from the usage mode. It must be a concrete finite, strictly positive
 simulation float; None's unused observation is described below.
 The legacy `reach` field is an input alias for this distance and also defaults to
 Arms. Declare at most one of `reach` and `object_usage_distance`: declaring both
-is rejected, even with equal values, in either mode. Missing both is an error for Arms. Human uses Arms
+is rejected, even with equal values. Remote control refuses legacy `reach`; use `object_usage_distance` or omit it for the 1-unit remote script default. Missing both is an error for Arms. Human uses Arms
 with 0.25 units; Cleaning Bot uses Arms with 0.1 units. Android demonstrates the
 compatible legacy declaration.
 

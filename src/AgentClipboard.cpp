@@ -815,7 +815,7 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 			<< *payload.individualMaximumRoutePlanningTime;
 	if (payload.individualObjectUsage)
 		output << YAML::Key << "objectUsage" << YAML::Value
-			<< (*payload.individualObjectUsage == core::ObjectUsage::Arms ? "arms" : "none");
+			<< core::objectUsageWireName(*payload.individualObjectUsage);
 	if (payload.individualObjectUsageDistance)
 		output << YAML::Key << "objectUsageDistance" << YAML::Value << *payload.individualObjectUsageDistance;
 	if (payload.individualPermissionAdherence)
@@ -1186,8 +1186,9 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		try
 		{
 			auto value = object["objectUsage"].as<std::string>();
-			if (value != "arms" && value != "none") throw std::runtime_error("Invalid Object usage");
-			payload.individualObjectUsage = value == "arms" ? core::ObjectUsage::Arms : core::ObjectUsage::None;
+			core::ObjectUsage mode;
+			if (!core::parseObjectUsage(value, mode)) throw std::runtime_error("Invalid Object usage");
+			payload.individualObjectUsage = mode;
 		}
 		catch (...) { diagnostic = "Invalid clipboard Object usage"; return false; }
 	}

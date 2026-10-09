@@ -131,7 +131,7 @@ namespace core
 				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
 				return;
 			}
-			if (actor && !mWorld.agentCanOperateObjects(*actor)
+			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
 				&& !mWorld.canAgentUseLiftJourney(request->mResource, request->mSourceEndpoint,
 					request->mDestinationEndpoint, request->mOwner))
 			{
@@ -261,7 +261,7 @@ namespace core
 				return;
 			}
 			auto actor = mWorld.mAgents.find(request->mOwner);
-			if (actor && !mWorld.agentCanOperateObjects(*actor))
+			if (actor && actor->getObjectUsage() != ObjectUsage::Arms)
 			{
 				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);

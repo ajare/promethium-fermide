@@ -52,8 +52,8 @@ an editor widget when adding an override. Numeric values must be finite except a
 
 | Property | Serialized `type` | Type / allowed values | Default | Effect |
 | --- | --- | --- | --- | --- |
-| Object usage | `objectUsage` | Arms or None | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
-| Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms | Frozen script distance | Physical arm length, narrowed by Interaction point geometry; ignored under None |
+| Object usage | `objectUsage` | Arms, None or Remote control | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
+| Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms/Remote control | Frozen script distance | Physical arm length or maximum remote range; ignored under None |
 | Colour | `colour` | RGB bytes, each 0–255; no alpha | RGB (179, 77, 77), `#B34D4D` | Ordinary Agent rendering tint; no simulation effect |
 | Walk speed modifier | `walkSpeedModifier` | Number, 0.8–1.2 | 1 | Multiplies the Agent type's walking speed |
 | Height modifier | `heightModifier` | Number, 0.7–1 | 1 | Multiplies Standing height and derived pose heights; affects appearance and physical fit |
@@ -82,14 +82,13 @@ a newly added tag profile starts with all entries **Can use**.
 Mode and distance resolve independently: individual override → inherited tag value →
 frozen script default. Different tags may supply mode and distance, but two assigned
 tags cannot supply the same field, even when masked by an individual override. The Selection panel shows both effective values and their
-sources, and labels distance as ignored under None. Only Arms and None are exposed;
-Remote control is not implemented. Adding an override starts from its current effective
+sources, and labels distance as ignored under None. Arms, None and Remote control are exposed. Adding an override starts from its current effective
 value, not a sampled range. Removal leaves the other override and script baseline intact.
 
-Every edit and removal is paused-only and undoable. Arms requires the resulting effective
+Every edit and removal is paused-only and undoable. Arms and Remote control require the resulting effective
 distance to be finite and strictly positive, even when removing an override or changing
 back from None. None ignores distance, including zero or negative authored values. A
-script-default None Agent has canonical zero frozen distance, so enabling Arms requires
+script-default None Agent has canonical zero frozen distance, so enabling Arms or Remote control requires
 an independent positive distance property first, either individual or inherited.
 Shared tag additions, edits, removals and reloads preflight every affected Agent in every
 loaded dependent World. All those Worlds must be paused. A refusal preserves definitions,
@@ -120,6 +119,10 @@ removing mode reveals its frozen mode. Individual overrides keep taking preceden
 Capability changes cancel now-ineligible pending operations and reconsider Paths through
 the existing planning rules; admitted crossings and accepted journeys finish safely.
 Arms remains physical: short arms approach controls and never activate them remotely.
+Remote control (`remote_control` on the wire) operates physical Buttons only in #539;
+see [Remote Button operation](remote-button-operation.md). Mode and distance remain
+independent: switching Human's mode alone keeps 0.25 units, not the remote script
+omission default of 1. There is no physical Arms fallback.
 
 World schema 62 (YAML and binary), clipboard and history carry only optional authored
 overrides, never snapshots of live Lua defaults. Reset, load, deletion restoration and

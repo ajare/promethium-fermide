@@ -151,7 +151,9 @@ namespace core
 		auto control = mInteractionPoints.find(chamber.getControl(side));
 		if (!control) return false;
 		bool const authorized = missingInteractionPermissions(*control, *actor).empty();
-		if (agentCanOperateObjects(*actor) && authorized) return true;
+		if (authorized && (actor->getObjectUsage() == ObjectUsage::Arms
+			|| remoteButtonApproachDistance(chamber.getControl(side), approach,
+				resource->mQueueLanes[side].origin, agentId))) return true;
 		// None needs a locally usable entrance, not a button assignment. Keep
 		// authorization/adherence independent of the ability to operate.
 		return locallyObserved && (authorized || !actor->getEffectivePermissionAdherence().value)

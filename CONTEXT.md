@@ -264,15 +264,18 @@ The stable identifier of an Agent type, independent of its presentation display 
 _Avoid_: Agent type, display name
 
 **Object usage**:
-An Agent type's frozen mode for operating objects: Arms permits physical operation, while None permits no Agent-operated commands. Capability does not grant Access permission or traversal admission.
+An Agent's resolved mode for operating objects: Arms permits physical operation, Remote control permits distance-limited operation of eligible objects, and None permits no Agent-operated commands. Capability does not grant Access permission or traversal admission.
 _Avoid_: Mobility use, which governs traversal kinds
 
 **Object usage distance**:
-An independently observed Agent type baseline in World units, finite and strictly positive for Arms, whose distance is arm length. None ignores it; physical operation must also satisfy the object's Interaction point geometry and existing physical eligibility.
+An independently resolved distance in World units, finite and strictly positive for Arms and Remote control: arm length for Arms, maximum straight-line activation range for Remote control. None ignores it; physical operation also satisfies Interaction point geometry and physical eligibility.
 _Avoid_: Interaction point reach, which is object geometry and may be zero
 
 **Arms**:
 The Object usage mode that operates objects through physical approach within arm length. It does not provide remote activation or bypass Location, side, height, Mobility, Access permission or Broken conditions.
+
+**Remote control object usage**:
+The Object usage mode that operates eligible objects within maximum range without an Arms fallback. Physical Buttons qualify in the Agent's own Sector, using distance to the Button centre including vertical separation, independently of Local depth and line of sight.
 
 **None object usage**:
 The Object usage mode in which an Agent cannot operate objects but may pass through already usable resources or join another Agent's accepted journey when existing rules permit. It is neither a Mobility restriction nor a revocation of admitted crossings or committed passenger exits.

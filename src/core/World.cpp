@@ -1353,7 +1353,7 @@ namespace core
 			auto const prospectiveUsage = agent->resolveObjectUsage(&registry, agent->getAgentTagIds(),
 				agent->getIndividualObjectUsage(), agent->getIndividualObjectUsageDistance());
 			repair.objectUsageChanged = prospectiveUsage.first != repair.objectUsageBefore
-				|| (prospectiveUsage.first == ObjectUsage::Arms && prospectiveUsage.second != repair.objectUsageDistanceBefore);
+				|| (prospectiveUsage.first != ObjectUsage::None && prospectiveUsage.second != repair.objectUsageDistanceBefore);
 			auto inspectSample = [&](char const* name, SampledAgentPropertyType type,
 				AgentTagId source, AgentModifierRange const* range, uint64_t revision,
 				optional<AgentPropertySample> const& sample,
@@ -9574,7 +9574,7 @@ namespace core
 		auto* agent = lookup.entity;
 		if (!agent->objectUsageOverridesAreValid(mode, distance))
 		{
-			if (diagnostic) *diagnostic = "Object usage must be Arms or None; effective Arms distance must be finite and positive";
+			if (diagnostic) *diagnostic = "Object usage must be Arms, None or Remote control; usable distance must be finite and positive";
 			return false;
 		}
 		if (agent->getIndividualObjectUsage() == mode && agent->getIndividualObjectUsageDistance() == distance)
@@ -11671,7 +11671,7 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
-		return resource && resource->mDoor && agent && agentCanOperateObjects(*agent)
+		return resource && resource->mDoor && agent && agent->getObjectUsage() == ObjectUsage::Arms
 			&& agentSatisfiesDoorPermission(*resource->mDoor, *agent);
 	}
 
@@ -11685,6 +11685,8 @@ namespace core
 		{
 			auto point = mInteractionPoints.find(pointId);
 			if (point && point->mSector == approach
+				&& (agent->getObjectUsage() == ObjectUsage::Arms
+					|| remoteButtonApproachDistance(pointId, approach, point->mPosition, agentId))
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
@@ -11753,6 +11755,8 @@ namespace core
 		{
 			auto point = mInteractionPoints.find(pointId);
 			if (point && applicable(*point)
+				&& (agent->getObjectUsage() == ObjectUsage::Arms
+					|| remoteButtonApproachDistance(pointId, approach, approachPosition, agentId))
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
@@ -11835,13 +11839,13 @@ namespace core
 		command.traversalResource = resourceId;
 		command.stopIndex = stop;
 		auto agent = mAgents.find(agentId);
-		if (agent && agentCanOperateObjects(*agent)
+		if (agent && agent->getObjectUsage() == ObjectUsage::Arms
 			&& missingLiftDestinationPermissions(command, agentId).empty()) return true;
 		if (!agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end();
 		if (!agentAdheresToLiftDestinationPermission(resourceId, stop, agentId)) return false;
-		if (local && agentCanOperateObjects(*agent)) return true;
+		if (local && agent->getObjectUsage() == ObjectUsage::Arms) return true;
 		if (local)
 		{
 			// None may finish an accepted journey, but occupancy alone cannot
@@ -11905,8 +11909,20 @@ namespace core
 		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
 	{
 		auto agent = mAgents.find(agentId);
-		return agent && agentCanOperateObjects(*agent)
-			&& agentSatisfiesTransportLandingPermission(resourceId, approach, endpoint, agentId);
+		if (!agent || !agentCanOperateObjects(*agent)
+			|| !agentSatisfiesTransportLandingPermission(resourceId, approach, endpoint, agentId)) return false;
+		if (agent->getObjectUsage() == ObjectUsage::Arms) return true;
+		auto resource = mTraversalResources.find(resourceId);
+		if (!resource) return false;
+		if (resource->mLiftCoordinator)
+		{
+			for (auto control : resource->mControls)
+				if (remoteButtonApproachDistance(control, approach, endpoint, agentId)) return true;
+			return false;
+		}
+		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
+		return stop < resource->mLiftStops.size()
+			&& remoteButtonApproachDistance(resource->mLiftStops[stop].callControl, approach, endpoint, agentId).has_value();
 	}
 
 	bool World::agentSatisfiesTransportLandingPermission(TraversalResourceId resourceId,

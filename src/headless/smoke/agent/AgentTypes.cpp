@@ -671,7 +671,7 @@ namespace
 		}
 		for (auto const* value : { "nil", "0", "-1", "0/0", "math.huge", "-math.huge", "false", "'0.5'", "{}", "1e-300", "1e300" })
 			constructCases.push_back({std::string("Arms distance ") + value, armsBaseline(value), "object_usage_distance"});
-		for (auto const* value : {"'remote_control'", "'None'", "'Arms'", "'arms\\0suffix'", "''", "false", "42", "{}"})
+		for (auto const* value : {"'unsupported'", "'None'", "'Arms'", "'arms\\0suffix'", "''", "false", "42", "{}"})
 		{
 			auto body = armsBaseline(".25");
 			body.replace(body.find("object_usage = 'arms'"), std::string("object_usage = 'arms'").size(), std::string("object_usage = ") + value);

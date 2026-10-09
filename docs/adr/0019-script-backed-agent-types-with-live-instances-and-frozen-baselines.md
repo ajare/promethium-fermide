@@ -98,9 +98,22 @@ None shares the Arms lifetime policy, including fresh validation on paste,
 reopen, Reset and deleted-Agent restoration, and retained defaults for surviving
 structural/history replay. Documents and clipboard contain authored data only.
 
+## Remote physical Buttons (#539)
+
+The follow-on Remote control mode (`remote_control`) operates physical Buttons in
+its own Sector within inclusive straight-line distance of the Button centre,
+including vertical separation. Its omitted script distance freezes 1 unit; explicit
+usable distances are finite and positive. Legacy `reach` remains Arms-only.
+Mode and distance still resolve independently, so a mode-only Human override keeps
+0.25 units. There is no Arms fallback or blanket eligibility for generic Interaction
+points, direct Doors, Access panels or onboard selectors. Device control remains
+separate from traversal admission (ADR 0001). See
+[Remote Button operation](../remote-button-operation.md) for the runtime/verification scope.
+The earlier deferral statements above describe the #535/#536 slices, not this extension.
+
 ## Consequences
 
-An Agent owns two deliberately separated things: its authored type identity (stable ID, display name, resolved resource reference) and its frozen physical baseline, which simulation consumers read; and an opaque live-instance handle owned by the World's Agent-type runtime, whose destructor releases the Lua instance when the Agent dies. The baseline is validated field-by-field (six non-pose numeric fields always required, plus positive Object usage distance for Arms; dimensions and speeds finite and positive after conversion to simulation floats; explicit supported poses and ordered Room/Door choices under API v2, with applicable height and speed ratios finite and in `(0, 1]`) and copied out of Lua, so later mutations of the instance cannot change ongoing simulation. The World owns one sandboxed Lua state per the ADR 0008 isolation and budget model, with the same forbidden-capability restrictions and no filesystem, process, native-module, debug, or shared-mutable-module access.
+An Agent owns two deliberately separated things: its authored type identity (stable ID, display name, resolved resource reference) and its frozen physical baseline, which simulation consumers read; and an opaque live-instance handle owned by the World's Agent-type runtime, whose destructor releases the Lua instance when the Agent dies. The baseline is validated field-by-field (six non-pose numeric fields always required, plus positive Object usage distance for Arms and Remote control; dimensions and speeds finite and positive after conversion to simulation floats; explicit supported poses and ordered Room/Door choices under API v2, with applicable height and speed ratios finite and in `(0, 1]`) and copied out of Lua, so later mutations of the instance cannot change ongoing simulation. The World owns one sandboxed Lua state per the ADR 0008 isolation and budget model, with the same forbidden-capability restrictions and no filesystem, process, native-module, debug, or shared-mutable-module access.
 
 Legacy Human records without a resource reference resolve to the bundled `human.agent.lua`; an explicit missing, invalid, or mismatched resource reference fails clearly and never falls back to Human. Type identity is immutable after creation; there is no conversion or hot reload. Display names are presentation, not stable identity: a revised display name is accepted on reconstruction. The historical `type` wire slot now also writes the stable ID, and readers still accept older records containing a display name there when `typeId` supplies identity. Persisted documents record the stable type ID and resource reference without embedding Lua state, and Reset/load/deleted-Agent restoration construct fresh instances from the currently resolved source while surviving instances retain their frozen baselines.
 

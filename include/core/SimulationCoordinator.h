@@ -224,6 +224,8 @@ namespace core
 		// An Agent walking towards a regular, Lift, or Shuttle Door presses an
 		// applicable control early - while still moving, and only once per door -
 		// so it does not reach the threshold and double back to the control.
+		std::vector<InteractionPointId> upcomingRemoteButtons(Agent const& agent, TraversalResourceId& resource) const;
+		Vector2 limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const;
 		void tryPressUpcomingDoorButton(Agent& agent, Vector2 const& movementStart,
 			Vector2 const& movementEnd);
 

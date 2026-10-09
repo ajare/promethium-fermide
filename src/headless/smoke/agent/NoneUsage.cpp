@@ -1,6 +1,8 @@
 #include "Checks.h"
 #include "MobilityLifecycle.h"
+#include "../simulation/InteractionResults.h"
 #include "core/AgentType.h"
+#include "core/Button.h"
 #include "core/AccessPanel.h"
 #include "core/AirlockTransit.h"
 #include "core/DoorSectorObject.h"
@@ -46,6 +48,273 @@ namespace
 		require(snapshot.interactionRequests.empty() && snapshot.deviceOperations.empty()
 			&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(), "None leaked coordination work");
 	}
+	void remote(core::World& world, core::AgentId id, float range)
+	{
+		world.pauseSimulation();
+		require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::RemoteControl)
+			&& world.setAgentIndividualObjectUsageDistance(id, range), "Remote override refused");
+		world.resumeSimulation();
+	}
+	void remoteDeclarations(smoke::Context const&)
+	{
+		for (auto const& distance : {std::string{}, std::string{"object_usage_distance = 2,"}})
+		{
+			core::World world("Remote declarations", 6, 2);
+			auto room = world.addCorridor(0, 0, 6); world.finishBuild();
+			auto text = source(distance);
+			agent_smoke::replaceSource(text, "object_usage = 'none'", "object_usage = 'remote_control'");
+			require(world.attachAgentType("remote.agent.lua", text), "Remote declaration refused");
+			auto id = world.createAgent("NoneFixture", "Remote", room, 0, 1.f);
+			auto agent = world.lookupAgent(id).entity;
+			require(agent->getObjectUsage() == core::ObjectUsage::RemoteControl
+				&& agent->getObjectUsageDistance() == (distance.empty() ? 1.f : 2.f), "Remote script default incorrect");
+		}
+		for (auto const* distance : {"0", "-1", "0/0", "math.huge", "1e100", "1e-100", "'1'", "false"})
+		{
+			core::World world("Invalid remote", 6, 2);
+			auto room = world.addCorridor(0, 0, 6); world.finishBuild();
+			auto text = source(std::string("object_usage_distance = ") + distance + ",");
+			agent_smoke::replaceSource(text, "object_usage = 'none'", "object_usage = 'remote_control'");
+			std::string diagnostic;
+			require(world.attachAgentType("remote.agent.lua", text, &diagnostic), diagnostic);
+			bool refused = false;
+			try { world.createAgent("NoneFixture", "Invalid", room, 0, 1.f); }
+			catch (std::exception const& error) { refused = true; diagnostic = error.what(); }
+			require(refused && diagnostic.find("object_usage_distance") != std::string::npos
+				&& world.getSimulationSnapshot().agents.empty(), std::string("Invalid remote declaration was not atomic: ") + distance + " / " + diagnostic);
+		}
+		core::World world("Independent remote", 6, 2);
+		auto room = world.addCorridor(0, 0, 6); world.finishBuild();
+		auto id = world.createAgent("Human", room, 0, 1.f); world.pauseSimulation();
+		require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::RemoteControl)
+			&& world.lookupAgent(id).entity->getObjectUsageDistance() == .25f, "Mode override replaced Human distance");
+	}
+	void remoteGeometry(smoke::Context const&)
+	{
+		for (unsigned variant = 0; variant < 9; ++variant)
+		{
+			core::World world("Remote geometry", 10, 3);
+			auto room = world.addRoom("Room", 0, 0, 2, 8, 2);
+			auto other = world.addRoom("Other", 1, 0, 2, 8, 2);
+			world.addSectorWalkway(room, 1, 2);
+			auto made = world.addSectorLightSwitch(room, 2);
+			auto unrelated = world.addSectorLightSwitch(other, 2);
+			world.finishBuild();
+			auto button = std::dynamic_pointer_cast<const core::Button>(made.sector->getObject(made.index)->_getObject());
+			require(bool(button), "Light switch not a Button");
+			auto centre = button->getPosition() + button->getSize() * .5f;
+			auto id = world.createAgent("Remote", variant == 4 ? other : room, variant == 3 ? 1 : 0, centre.x - 2.f);
+			auto agent = world.lookupAgent(id).entity;
+			auto range = std::abs(centre.y - agent->getGlobalPosition().y);
+			if (variant == 1) range += .0001f;
+			if (variant == 2) range -= .0001f;
+			if (variant >= 5) range = 2.f;
+			remote(world, id, range);
+			world.pauseSimulation();
+			if (variant == 5)
+			{
+				core::MobilityProfile profile; profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+				require(world.setAgentIndividualMobilityProfile(id, profile), "Buttons edit refused");
+			}
+			if (variant == 6)
+			{
+				auto key = world.addAccessPermission("Key");
+				require(world.setInteractionPointPermissionRequirement(made.interactionPoint, {key}), "Permission edit refused");
+			}
+			if (variant == 7) require(world.setAgentIndividualObjectUsageDistance(id, 3.f), "Range edit refused");
+			world.resumeSimulation();
+			auto position = agent->getGlobalPosition();
+			auto request = world.requestInteraction(made.interactionPoint, id);
+			bool eligible = variant != 2 && variant != 4 && variant != 5;
+			require(bool(request) == eligible, "Remote geometry request mismatch " + std::to_string(variant));
+			world.advanceTicks(120);
+			require(world.getSector(room)->areLightsOn() == (!eligible || variant == 6), "Remote geometry outcome mismatch " + std::to_string(variant));
+			require(world.getSector(other)->areLightsOn() && agent->getGlobalPosition().distanceTo(position) == 0,
+				"Remote operation moved Agent or activated unrelated switch");
+			(void)unrelated;
+		}
+		core::World world("Remote generic refusal", 8, 2);
+		auto room = world.addCorridor(0, 0, 8); world.finishBuild();
+		auto id = world.createAgent("Remote", room, 0, 2.f); remote(world, id, 100.f);
+		core::DeviceCommand command{core::DeviceCommandType::SetSectorLights, core::SectorId{room + 1}, false};
+		auto point = world.createInteractionPoint("Not a Button", core::SectorId{room + 1}, {2.f, 0.f}, 1.f, 0.f,
+			{{command, core::InteractionBindingRequirement::Required}});
+		require(!world.requestInteraction(point, id), "Generic point gained remote eligibility");
+		world.advanceTicks(100); require(world.getSector(room)->areLightsOn(), "Generic operation occurred");
+	}
+
+	void remoteTightDoor(smoke::Context const&)
+	{
+		for (unsigned variant = 0; variant < 4; ++variant)
+		{
+			core::World world("Remote tight Door", 12, 2);
+			auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+			auto made = world.addSectorDoor(0, 0, 6, core::World::RemoteControlledDoor1Options);
+			world.addSectorMarker(back, 0, 8.f, "Goal"); world.finishBuild();
+			auto control = made.controls[0];
+			auto button = std::dynamic_pointer_cast<const core::Button>(control.sector->getObject(control.index)->_getObject());
+			auto centre = button->getPosition() + button->getSize() * .5f;
+			auto id = world.createAgent("Remote", front, 0, 3.f);
+			remote(world, id, centre.y + (variant == 0 ? -.0001f : variant == 1 ? 0.f : .0001f));
+			quickPlanning(world, id);
+			if (variant == 3)
+			{
+				world.pauseSimulation(); core::MobilityProfile profile;
+				profile.set(core::TraversalKind::Buttons, core::MobilityUse::OnlyIfNoOtherOption);
+				require(world.setAgentIndividualMobilityProfile(id, profile), "Fallback edit refused"); world.resumeSimulation();
+			}
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Tight Door intent refused");
+			world.advanceTicks(1500);
+			require((world.lookupAgent(id).entity->getSector()->getIndex() == back) == (variant != 0),
+				"Tight/equal remote range or fallback Door journey failed, variant " + std::to_string(variant)
+				+ " x=" + std::to_string(world.lookupAgent(id).entity->getGlobalPosition().x)
+				+ " centre=" + std::to_string(centre.x) + "," + std::to_string(centre.y)
+				+ " state=" + std::to_string(int(world.lookupAgent(id).entity->getState()))
+				+ " interactions=" + std::to_string(world.getSimulationSnapshot().interactionRequests.size()));
+			if (variant == 0) require(lost(world, id), "Vertically unreachable Button did not exclude route");
+			clean(world);
+		}
+	}
+
+	void remoteLandingButtons(smoke::Context const&)
+	{
+		for (unsigned kind = 0; kind < 3; ++kind)
+		{
+			core::World world("Remote landing Buttons", 40, 3);
+			bool platform = kind == 2, shuttle = kind == 1;
+			auto ground = platform ? world.addRoom("Platform", 0, 0, 0, 16, 2) : world.addCorridor(0, 0, 16);
+			if (platform) for (unsigned x = 0; x < 16; ++x) world.addSectorWalkway(ground, 1, x);
+			else world.addCorridor(shuttle ? 0 : 1, shuttle ? 24 : 0, 16);
+			world.finishBuild(); world.pauseSimulation();
+			core::InteractionPointId landing;
+			core::TraversalResourceId vehicle;
+			if (shuttle)
+			{
+				auto made = world.addShuttle(1, 0, 4, 36, {1, 4, {0, 24}, 0});
+				vehicle = made.traversalResource; landing = made.doors.front().controls[0].interactionPoint;
+			}
+			else
+			{
+				core::World::CreateLiftOptions options; options.cellsWide = platform ? 1 : 2; options.stopOffsets = {0, 1};
+				if (platform) { auto made = world.addSectorPlatformLift(ground, 0, 8, options); vehicle = made.traversalResource; landing = made.buttons.front().interactionPoint; }
+				else { auto made = world.addLift(1, 0, 8, options); vehicle = made.traversalResource; landing = made.doors.front().controls[0].interactionPoint; }
+			}
+			world.finishBuild();
+			auto point = world.lookupInteractionPoint(landing).entity;
+			auto id = world.createAgent("Remote", ground, 0, point->getPosition().x - 1.f);
+			remote(world, id, 2.f);
+			auto position = world.lookupAgent(id).entity->getGlobalPosition();
+			auto request = world.requestInteraction(landing, id);
+			require(bool(request), "Physical transport landing Button refused, kind " + std::to_string(kind));
+			world.advanceTicks(600);
+			require(simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Succeeded
+				&& world.lookupAgent(id).entity->getGlobalPosition().distanceTo(position) == 0,
+				"Remote landing call did not finish without approach, kind " + std::to_string(kind));
+			auto destination = position; if (shuttle) destination.x += 24; else destination.y += 1;
+			require(!world.canAgentUseLiftJourney(vehicle, position, destination, id), "Landing Button granted unsupported onboard operation");
+		}
+	}
+
+	void remotePendingEdits(smoke::Context const&)
+	{
+		core::World world("Remote pending edits", 10, 2);
+		auto room = world.addCorridor(0, 0, 10);
+		auto button = world.addSectorLightSwitch(room, 4);
+		world.addSectorMarker(room, 0, 8.f, "Goal"); world.finishBuild();
+		auto id = world.createAgent("Remote", room, 0, 3.f); remote(world, id, 2.f);
+		world.pauseSimulation();
+		auto registry = core::AgentTagRegistry::create(); world.attachAgentTagRegistry("remote.tags.yaml", registry);
+		auto tag = registry->addAgentTag("range");
+		require(registry->addAgentTagObjectUsageDistance(tag) && registry->setAgentTagObjectUsageDistance(tag, 2.f)
+			&& world.assignAgentTag(id, tag) && world.setAgentIndividualObjectUsageDistance(id, std::nullopt), "Range inheritance failed");
+		world.resumeSimulation();
+		auto request = world.requestInteraction(button.interactionPoint, id); require(bool(request), "Remote request refused");
+		world.pauseSimulation(); require(registry->setAgentTagObjectUsageDistance(tag, .1f), "Pending range edit refused");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Pending range edit did not cancel");
+		world.resumeSimulation(); world.advanceTicks(120); require(world.getSector(room)->areLightsOn(), "Cancelled remote Button activated");
+		world.pauseSimulation(); require(registry->setAgentTagObjectUsageDistance(tag, 2.f), "Restore range failed");
+		world.resumeSimulation(); quickPlanning(world, id);
+		require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Passing intent refused");
+		world.advanceTicks(15);
+		auto position = world.lookupAgent(id).entity->getGlobalPosition();
+		require(bool(world.requestInteraction(button.interactionPoint, id)), "Direct press while pathing refused");
+		world.advanceTicks(120);
+		require(!world.getSector(room)->areLightsOn() && world.lookupAgent(id).entity->getGlobalPosition().x >= position.x,
+			"Direct press during pathing failed or caused approach detour");
+	}
+
+	void remoteJourneys(smoke::Context const&)
+	{
+		for (unsigned kind = 0; kind < 4; ++kind)
+		{
+			core::World world("Remote Button journey", 12, 3);
+			uint32_t origin, destination;
+			if (kind == 0)
+			{
+				origin = world.addRoom("Front", 0, 0, 0, 12, 1);
+				destination = world.addRoom("Back", 1, 0, 0, 12, 1);
+				world.addSectorDoor(0, 0, 6, core::World::RemoteControlledDoor1Options);
+			}
+			else if (kind == 1)
+			{
+				origin = world.addRoom("Left", 0, 0, 0, 6, 1);
+				destination = world.addRoom("Right", 0, 0, 6, 6, 1);
+				core::World::CreateBulkheadDoorOptions options;
+				world.addSectorBulkheadDoor(0, 0, 6, CORE_SIDE_LEFT, options);
+			}
+			else if (kind == 2)
+			{
+				origin = world.addRoom("Left", 0, 0, 0, 6, 1);
+				destination = world.addRoom("Right", 0, 0, 8, 4, 1);
+				world.addAirlock(0, 0, 6, 2, 1);
+			}
+			else
+			{
+				origin = destination = world.addRoom("Bridge", 0, 0, 0, 12, 2);
+				world.addSectorWalkway(origin, 1, 0); world.addSectorWalkway(origin, 1, 3);
+				world.addSectorForceBridge(origin, 1, 1, {2, CORE_SIDE_LEFT, true, false, 2});
+			}
+			auto level = kind == 3 ? 1u : 0u;
+			auto goal = kind == 0 ? 8.f : kind == 3 ? 3.5f : 1.f;
+			world.addSectorMarker(destination, level, goal, "Goal");
+			auto unrelated = world.addSectorLightSwitch(origin, kind == 3 ? 0 : 2);
+			world.finishBuild();
+			auto id = world.createAgent("Remote", origin, level, kind == 3 ? .5f : 3.f);
+			remote(world, id, 8.f); quickPlanning(world, id);
+			world.consumeSimulationEvents();
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Remote journey intent refused");
+			bool pressed = false, early = false, arrived = false;
+			for (unsigned tick = 0; tick < 4000; ++tick)
+			{
+				world.advanceTick();
+				auto agent = world.lookupAgent(id).entity;
+				for (auto const& event : world.consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::InteractionRequestAdded && event.interactionRequest.actor == id)
+					{
+						pressed = true;
+						require(event.interactionRequest.point != unrelated.interactionPoint, "Unrelated Button activated by Path");
+						early = early || agent->getGlobalPosition().x < (kind == 3 ? 1.f : 5.f);
+					}
+				if (agent->getSector()->getIndex() == destination && agent->getState() == core::Agent::State::Idle
+					&& !agent->getPath() && std::abs(agent->getGlobalPosition().x - (world.getSector(destination)->getPosition().x + goal)) < .01f)
+				{
+					arrived = true; break;
+				}
+			}
+			require(pressed && arrived, "Remote Button journey failed, kind " + std::to_string(kind));
+			if (kind != 3) require(early, "Remote Button waited for threshold, kind " + std::to_string(kind));
+			require(world.getSector(origin)->areLightsOn(), "Path changed unrelated lights");
+			world.advanceTicks(120);
+			auto snapshot = world.getSimulationSnapshot();
+			require(snapshot.interactionRequests.empty() && snapshot.deviceOperations.empty()
+				&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(),
+				"Remote journey leaked coordination, kind " + std::to_string(kind)
+				+ " interactions=" + std::to_string(snapshot.interactionRequests.size())
+				+ " devices=" + std::to_string(snapshot.deviceOperations.size()));
+		}
+	}
+
 	void individualOverrides(smoke::Context const&)
 	{
 		core::World world("Individual usage", 10, 2);
@@ -484,11 +753,14 @@ namespace
 		clean(world);
 	}
 
-	void lifetimes(smoke::Context const& context)
+	void usageLifetime(smoke::Context const& context, core::ObjectUsage mode)
 	{
 		auto path = context.temporaryRoot() / "none-lifetime.agent.lua";
 		auto write = [&](std::string const& text) { std::ofstream out(path); out << text; require(bool(out), "Cannot write None lifetime resource"); };
-		write(source());
+		auto initial = source();
+		if (mode == core::ObjectUsage::RemoteControl)
+			agent_smoke::replaceSource(initial, "object_usage = 'none'", "object_usage = 'remote_control'");
+		write(initial);
 		auto resource = core::externalAgentTypeResourceName(path);
 		core::World world("None lifetimes", 10, 2);
 		auto room = world.addCorridor(0, 0, 8); world.finishBuild(); world.pauseSimulation();
@@ -498,11 +770,11 @@ namespace
 		world.saveTo((context.temporaryRoot() / "none.world.yaml").string());
 		world.saveTo((context.temporaryRoot() / "none.world").string());
 		for (auto const* filename : {"none.world.yaml", "none.world"})
-			require(core::loadWorldDocument(context.temporaryRoot() / filename)->lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::None, "None did not round-trip");
+			require(core::loadWorldDocument(context.temporaryRoot() / filename)->lookupAgent(id).entity->getObjectUsage() == mode, "Usage did not round-trip");
 		auto revised = source("object_usage_distance = .25,");
 		agent_smoke::replaceSource(revised, "object_usage = 'none'", "object_usage = 'arms'"); write(revised);
 		world.addLevel();
-		require(world.lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::None, "Structural replay hot-reloaded None");
+		require(world.lookupAgent(id).entity->getObjectUsage() == mode, "Structural replay hot-reloaded usage");
 		for (auto const* filename : {"none.world.yaml", "none.world"})
 			require(core::loadWorldDocument(context.temporaryRoot() / filename)->lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::Arms, "Reopen did not construct fresh usage");
 		world.resetSimulation();
@@ -512,6 +784,11 @@ namespace
 		bool refused = false; try { world.resetSimulation(); } catch (std::exception const&) { refused = true; }
 		require(refused && world.lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::Arms
 			&& world.consumeSimulationEvents().empty(), "Invalid fresh usable mode partially replaced None lifetime");
+	}
+	void lifetimes(smoke::Context const& context)
+	{
+		usageLifetime(context, core::ObjectUsage::None);
+		usageLifetime(context, core::ObjectUsage::RemoteControl);
 	}
 	void sharedJourneys(smoke::Context const&)
 	{
@@ -604,6 +881,12 @@ namespace
 }
 void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"agentTypesRemoteDeclarations", remoteDeclarations});
+	checks.push_back({"agentTypesRemoteGeometry", remoteGeometry});
+	checks.push_back({"agentTypesRemoteJourneys", remoteJourneys});
+	checks.push_back({"agentTypesRemotePendingEdits", remotePendingEdits});
+	checks.push_back({"agentTypesRemoteLandingButtons", remoteLandingButtons});
+	checks.push_back({"agentTypesRemoteTightDoor", remoteTightDoor});
 	checks.push_back({"agentTypesInheritedObjectUsage", inheritedUsage});
 	checks.push_back({"agentTypesInheritedObjectUsageRoutes", inheritedRoutes});
 	checks.push_back({"agentTypesObjectUsageOverrides", individualOverrides});

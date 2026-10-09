@@ -78,6 +78,8 @@ set(editor_names
     agent/anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
     agentTypesPreviewQueriesReuseValidatedResource
     agentTypesManagedPreviewIsReadOnly
+    agentTypesInheritedObjectUsageWorkflows
+    agentTypesObjectUsageOverrideWorkflows
     agentTypesNoneClipboardAndHistory
     agentTypesScriptedClipboardAndDeletionHistory
     agentTypesScriptedClipboardRefusalAndLegacy
@@ -101,6 +103,7 @@ set(editor_names
     agent/walkSpeedSelectionReportsSampleAndSource
     agent/heightRangeEditsAreSingleExactTransactions
     agent/heightChangesOnlyBoundsAndRendering
+    agentObjectUsagePanelEdits
     agent/mobilityProfileEditorSnapshotsCurrentEffectiveProfile
     agent/selectionShowsCurrentPose
     tags/savedWorldCreatesAndReopensAdjacentRegistry

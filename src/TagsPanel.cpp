@@ -619,10 +619,10 @@ namespace
 		{
 			string diagnostic;
 			auto const mode = usage->value;
-			if (ImGui::BeginCombo("Object usage", mode == core::ObjectUsage::Arms ? "Arms" : "None"))
+			if (ImGui::BeginCombo("Object usage", core::objectUsageName(mode)))
 			{
-				for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None})
-					if (ImGui::Selectable(choice == core::ObjectUsage::Arms ? "Arms" : "None", choice == mode))
+				for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None, core::ObjectUsage::RemoteControl})
+					if (ImGui::Selectable(core::objectUsageName(choice), choice == mode))
 						commitAgentTagObjectUsageEdit(registry, id, choice, diagnostic);
 				ImGui::EndCombo();
 			}

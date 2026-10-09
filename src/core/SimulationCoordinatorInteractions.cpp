@@ -258,6 +258,46 @@ namespace core
 			&& distance <= std::min(actor.getObjectUsageDistance(), geometryReach);
 	}
 
+	optional<Vector2> World::physicalButtonCentre(InteractionPointId pointId) const
+	{
+		auto placement = physicalControlPlacement(pointId);
+		if (!placement) return nullopt;
+		auto button = dynamic_pointer_cast<Button>(mSectors[placement->sectorIndex]->getObject(placement->objectIndex)->_getObject());
+		if (!button) return nullopt;
+		return button->getPosition() + button->getSize() * .5f;
+	}
+
+	optional<float> World::remoteButtonApproachDistance(InteractionPointId pointId, SectorId approach,
+		Vector2 const& position, AgentId agentId) const
+	{
+		auto actor = mAgents.find(agentId);
+		auto point = mInteractionPoints.find(pointId);
+		auto centre = physicalButtonCentre(pointId);
+		if (!actor || actor->getObjectUsage() != ObjectUsage::RemoteControl || !point || !centre
+			|| point->mSector != approach) return nullopt;
+		double range = actor->getObjectUsageDistance();
+		double vertical = double(centre->y) - position.y;
+		if (std::abs(vertical) > range) return nullopt;
+		auto horizontal = std::sqrt(std::max(0., range * range - vertical * vertical));
+		return float(std::max(0., std::abs(double(centre->x) - position.x) - horizontal));
+	}
+
+	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor, bool requireReach) const
+	{
+		auto point = mInteractionPoints.find(pointId);
+		if (!point || !point->mSector || !actor.isActive() || agentForbidsButtons(&actor)
+			|| actor.getSector() != mSectors[point->mSector.value - 1].get()) return false;
+		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
+		{
+			auto centre = physicalButtonCentre(pointId);
+			auto position = actor.getGlobalPosition();
+			return centre && std::hypot(double(position.x) - centre->x, double(position.y) - centre->y) <= actor.getObjectUsageDistance();
+		}
+		return actor.getObjectUsage() == ObjectUsage::Arms
+			&& (!(requireReach || point->requiresReachAtRequest())
+				|| agentCanPhysicallyOperate(actor, actor.getGlobalPosition().distanceTo(point->mPosition), point->mReach));
+	}
+
 	bool World::interactionRequestEligible(InteractionPointId pointId, AgentId actorId, bool requireReach) const
 	{
 		auto point = mInteractionPoints.find(pointId);
@@ -270,12 +310,9 @@ namespace core
 		// its movement state. Judge that one staged device request from the
 		// physical position rather than rejecting it merely because departure began.
 		bool const finishing = actorId == mFinishingFurnitureUseAgent;
-		return point && actor && actor->isActive() && agentCanOperateObjects(*actor)
-			&& !agentForbidsButtons(actor) && point->mSector
-			&& (finishing || actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal)
-			&& actor->getSector() == mSectors[(size_t)point->mSector.value - 1].get()
-			&& (!(requireReach || point->requiresReachAtRequest())
-				|| agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach));
+		return point && actor && agentCanOperateInteraction(pointId, *actor, requireReach)
+			&& (actor->getObjectUsage() == ObjectUsage::RemoteControl || finishing
+				|| actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal);
 	}
 
 	InteractionRequestId SimulationCoordinator::requestInteraction(InteractionPointId pointId, AgentId actorId)
@@ -339,6 +376,27 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto agent = mWorld.mAgents.find(actor);
+		// A route may need a Button beyond the current range. Approach only as
+		// far as the inclusive range boundary, never the physical control point.
+		if (agent && agent->getObjectUsage() == ObjectUsage::RemoteControl
+			&& !mWorld.agentCanOperateInteraction(point, *agent, true))
+		{
+			auto control = mWorld.mInteractionPoints.find(point);
+			auto centre = mWorld.physicalButtonCentre(point);
+			if (!control || !centre || !control->mSector
+				|| agent->getSector() != mWorld.mSectors[control->mSector.value - 1].get()
+				|| agentForbidsButtons(agent) || !mWorld.missingInteractionPermissions(*control, *agent).empty()) return {};
+			auto position = agent->getGlobalPosition();
+			auto range = agent->getObjectUsageDistance();
+			auto vertical = centre->y - position.y;
+			if (std::abs(vertical) > range) return {};
+			auto horizontal = std::sqrt(std::max(0., double(range) * range - double(vertical) * vertical));
+			// Aim just inside to avoid float round-off repeatedly refusing equality.
+			auto x = float(centre->x + (position.x < centre->x ? -1.f : 1.f) * horizontal * .999999f);
+			agent->mRemoteButtonApproachTarget = Vector2{x, position.y};
+			return {};
+		}
+		if (agent) agent->mRemoteButtonApproachTarget.reset();
 		if (agent && agent->mEarlyDoorPressInteraction)
 		{
 			auto const earlyId = agent->mEarlyDoorPressInteraction;
@@ -354,6 +412,9 @@ namespace core
 	{
 		mWorld.invalidateSimulationSnapshot();
 		auto point = mWorld.mInteractionPoints.find(pointId);
+		auto remoteActor = mWorld.mAgents.find(actorId);
+		if (remoteActor && remoteActor->getObjectUsage() == ObjectUsage::RemoteControl)
+			return requestInteraction(pointId, actorId);
 		if (point && point->requiresReachAtRequest()) return requestInteraction(pointId, actorId);
 		auto actor = mWorld.mAgents.find(actorId);
 		// Even the press a moving Agent makes in passing is physical work, so a
@@ -440,14 +501,13 @@ namespace core
 	{
 		auto actor = mWorld.mAgents.find(id);
 		if (!actor) return;
+		actor->mRemoteButtonApproachTarget.reset();
 		std::vector<InteractionRequestId> cancelled;
 		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
 		{
 			if (request->mActor != id || request->mResult != InteractionResult::Pending) continue;
 			auto point = mWorld.mInteractionPoints.find(request->mPoint);
-			if (!point || !mWorld.agentCanOperateObjects(*actor)
-				|| (point->requiresReachAtRequest() && !mWorld.agentCanPhysicallyOperate(*actor,
-					actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach)))
+			if (!point || !mWorld.agentCanOperateInteraction(request->mPoint, *actor, false))
 				cancelled.push_back(requestId);
 		}
 		for (auto request : cancelled) cancelInteraction(request);
@@ -995,6 +1055,100 @@ namespace core
 		}
 	}
 
+	vector<InteractionPointId> SimulationCoordinator::upcomingRemoteButtons(Agent const& agent, TraversalResourceId& upcoming) const
+	{
+		// Authored Path intent, not proximity, identifies the operation. Stop at
+		// the first action-bearing edge; never inspect another Sector's controls.
+		auto const& path = agent.mPath.path;
+		if (!path || !agent.getSector()) return {};
+		shared_ptr<const Vertex> source;
+		for (uint32_t i = agent.mPath.targetNode + 1; i < path->nodes.size(); ++i)
+		{
+			auto const& node = path->nodes[i];
+			source = path->nodes[i - 1].targetVertex;
+			if (!node.edge || !node.targetVertex || !source || source->getSector().get() != agent.getSector()) return {};
+			if (node.edge->getType() != EdgeType::Location)
+			{
+				upcoming = node.edge->getTraversalResourceId();
+				break;
+			}
+			if (node.targetVertex->getSector().get() != agent.getSector()) return {};
+		}
+		auto resource = mWorld.mTraversalResources.find(upcoming);
+		if (!source || !resource || !resource->mEnabled || agentForbidsButtons(&agent)) return {};
+		auto controls = resource->mControls;
+		if (resource->mOpenPlatformLift)
+		{
+			auto stop = findLiftStop(*resource, source->getPosition());
+			if (stop < resource->mLiftStops.size()) controls.push_back(resource->mLiftStops[stop].callControl);
+		}
+		vector<InteractionPointId> result;
+		auto sector = SectorId{uint64_t(agent.getSector()->getIndex()) + 1};
+		for (auto pointId : controls)
+		{
+			auto point = mWorld.mInteractionPoints.find(pointId);
+			if (!point || point->mSector != sector || !mWorld.physicalButtonCentre(pointId)
+				|| !mWorld.missingInteractionPermissions(*point, agent).empty()) continue;
+			bool needed = any_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
+			{
+				auto const& command = binding.command;
+				if (command.type == DeviceCommandType::OpenDoor)
+					return command.desiredState && resource->mDoor && !resource->mDoor->isOpen()
+						&& command.traversalResource == upcoming;
+				if (command.type == DeviceCommandType::SetExtendedState)
+				{
+					// Endpoint controls remain independent even within one Room.
+					bool nearest = none_of(controls.begin(), controls.end(), [&](auto otherId)
+					{
+						auto other = mWorld.mInteractionPoints.find(otherId);
+						return other && other->mSector == sector
+							&& other->mPosition.distanceTo(source->getPosition()) + .001f < point->mPosition.distanceTo(source->getPosition());
+					});
+					return nearest && command.desiredState && resource->mExtensible && !resource->mExtensible->admitsNewTraversals()
+						&& command.traversalResource == upcoming;
+				}
+				if (command.type == DeviceCommandType::RequestAirlock)
+					return resource->mAirlock && command.traversalResource == upcoming;
+				if (command.type == DeviceCommandType::CallLift || command.type == DeviceCommandType::CallShuttle)
+					return bool(resource->mLiftCoordinator) || resource->mOpenPlatformLift;
+				return false;
+			});
+			if (needed) result.push_back(pointId);
+		}
+		return result;
+	}
+
+	Vector2 SimulationCoordinator::limitRemoteButtonMovement(Agent const& agent, Vector2 const& start, Vector2 const& end) const
+	{
+		if (agent.getObjectUsage() != ObjectUsage::RemoteControl || agent.mEarlyDoorPressAttempted) return end;
+		TraversalResourceId upcoming;
+		auto controls = upcomingRemoteButtons(agent, upcoming);
+		auto delta = end - start;
+		double a = double(delta.x) * delta.x + double(delta.y) * delta.y;
+		if (a == 0) return end;
+		double limit = 1.;
+		for (auto point : controls)
+		{
+			auto centre = *mWorld.physicalButtonCentre(point);
+			double x = double(start.x) - centre.x, y = double(start.y) - centre.y;
+			double range = agent.getObjectUsageDistance();
+			double c = x * x + y * y - range * range;
+			if (c <= 0) continue;
+			double b = x * delta.x + y * delta.y;
+			double discriminant = b * b - a * c;
+			if (discriminant < 0) continue;
+			auto enter = (-b - std::sqrt(discriminant)) / a;
+			if (enter >= 0 && enter < limit)
+			{
+				// A horizontal tangent at exact vertical range has one eligible
+				// point, not an interval into which an epsilon may be added.
+				if (discriminant == 0 && delta.y == 0) return {centre.x, start.y};
+				limit = std::min(1., enter + .00001);
+			}
+		}
+		return start + delta * float(limit);
+	}
+
 	void SimulationCoordinator::tryPressUpcomingDoorButton(Agent& agent,
 		Vector2 const& movementStart, Vector2 const& movementEnd)
 	{
@@ -1006,6 +1160,31 @@ namespace core
 			agent.mEarlyDoorPressResource = {};
 			agent.mEarlyDoorPressInteraction = {};
 			agent.mEarlyDoorPressAttempted = false;
+			return;
+		}
+
+		if (agent.getObjectUsage() == ObjectUsage::RemoteControl)
+		{
+			TraversalResourceId upcoming;
+			auto controls = upcomingRemoteButtons(agent, upcoming);
+			if (agent.mEarlyDoorPressResource != upcoming)
+			{
+				agent.mEarlyDoorPressResource = upcoming;
+				agent.mEarlyDoorPressInteraction = {};
+				agent.mEarlyDoorPressAttempted = false;
+			}
+			if (agent.mEarlyDoorPressAttempted) return;
+			auto actor = getAgentId(&agent);
+			for (auto pointId : controls)
+			{
+				if (!mWorld.agentCanOperateInteraction(pointId, agent, true)) continue;
+				if (auto request = requestInteraction(pointId, actor))
+				{
+					agent.mEarlyDoorPressInteraction = request;
+					agent.mEarlyDoorPressAttempted = true;
+					break;
+				}
+			}
 			return;
 		}
 
@@ -1146,10 +1325,7 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !actor->isActive() || !mWorld.agentCanOperateObjects(*actor) || agentForbidsButtons(actor)
-					|| (point->requiresReachAtRequest()
-						&& (actor->getSector() != mWorld.mSectors[point->mSector.value - 1].get()
-							|| !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))))
+				if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false))
 				{
 					cancelInteraction(requestId);
 					continue;
@@ -1220,10 +1396,7 @@ namespace core
 				cancelInteraction(point->mActiveRequest);
 				continue;
 			}
-			if (!actor || !actor->isActive() || !mWorld.agentCanOperateObjects(*actor) || agentForbidsButtons(actor)
-				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
-				|| (point->requiresReachAtRequest()
-					&& !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach)))
+			if (!actor || !mWorld.agentCanOperateInteraction(pointId, *actor, false))
 			{
 				// A deactivated Agent must not walk to the point or press it, and a
 				// Buttons-forbidden Agent must not press it either; the point must
@@ -1235,7 +1408,8 @@ namespace core
 			// Initial Route planning is stationary even if an earlier independent
 			// interaction request is still waiting to be performed.
 			if (actor->getState() == Agent::State::RoutePlanning) continue;
-			if (!mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))
+			if (actor->getObjectUsage() != ObjectUsage::RemoteControl
+				&& !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))
 			{
 				actor->moveToPosition(point->mPosition, frameTime);
 				continue;

@@ -1598,6 +1598,8 @@ namespace core
 		// reach may be zero and can only narrow the Agent's frozen arm length.
 		bool agentCanOperateObjects(Agent const& actor) const;
 		bool agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const;
+		std::optional<Vector2> physicalButtonCentre(InteractionPointId point) const;
+		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor, bool requireReach) const;
 		// Authorization-only policy for Permission adherence to usable transport.
 		bool agentSatisfiesTransportLandingPermission(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
@@ -2910,6 +2912,10 @@ namespace core
 		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
 			TraversalResourceId door) const;
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+		// Walking required solely to bring a physical Button within Remote control range.
+		// nullopt means the Button cannot be operated from this approach Sector/row.
+		std::optional<float> remoteButtonApproachDistance(InteractionPointId point, SectorId approach,
+			Vector2 const& position, AgentId agent) const;
 		bool canAgentOperateDoorControl(TraversalResourceId door, SectorId approach,
 			AgentId agent) const;
 		// Permission adherence is willingness, not authorization: this checks only

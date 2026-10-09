@@ -272,7 +272,7 @@ namespace core
 			if (mIndividualObjectUsage)
 			{
 				beginProperty("objectUsage");
-				serializer.writeString("value", *mIndividualObjectUsage == ObjectUsage::Arms ? "arms" : "none");
+				serializer.writeString("value", objectUsageWireName(*mIndividualObjectUsage));
 				serializer.endMap();
 			}
 			if (mIndividualObjectUsageDistance)
@@ -396,10 +396,10 @@ namespace core
 				if (definition->getObjectUsageDistance()) distanceSource = tag;
 			}
 		auto [effectiveMode, effectiveDistance] = resolveObjectUsage(registry, tags, mode, distance);
-		if ((effectiveMode != ObjectUsage::Arms && effectiveMode != ObjectUsage::None)
-			|| (effectiveMode == ObjectUsage::Arms && (!std::isfinite(effectiveDistance) || effectiveDistance <= 0)))
+		if (!isValidObjectUsage(effectiveMode)
+			|| (effectiveMode != ObjectUsage::None && (!std::isfinite(effectiveDistance) || effectiveDistance <= 0)))
 		{
-			if (diagnostic) *diagnostic = "Object usage must be Arms or None; effective Arms distance must be finite and positive";
+			if (diagnostic) *diagnostic = "Object usage must be Arms, None or Remote control; usable distance must be finite and positive";
 			return false;
 		}
 		if (diagnostic) diagnostic->clear();
@@ -602,8 +602,9 @@ namespace core
 				{
 					if (mIndividualObjectUsage) throw SerializationException("Duplicate individual Object usage");
 					auto const value = serializer.readString("value");
-					if (value != "arms" && value != "none") throw SerializationException("Invalid individual Object usage");
-					mIndividualObjectUsage = value == "arms" ? ObjectUsage::Arms : ObjectUsage::None;
+					ObjectUsage mode;
+					if (!parseObjectUsage(value, mode)) throw SerializationException("Invalid individual Object usage");
+					mIndividualObjectUsage = mode;
 				}
 				else if (type == "objectUsageDistance")
 				{
@@ -1757,6 +1758,9 @@ namespace core
 			mPath.path = nullptr;
 			mPath.targetNode = 0;
 			mRouteJourneyDestinationVertexId = 0;
+			mEarlyDoorPressResource = {};
+			mEarlyDoorPressInteraction = {};
+			mEarlyDoorPressAttempted = false;
 			addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started idling"));
 			return true;
 		}
@@ -1795,6 +1799,18 @@ namespace core
 		auto reachedPos = moveDist >= posDist;
 		auto moveAmt = reachedPos ? moveDelta : moveDelta.normalisedCopy() * moveDist;
 
+		if (mWorld && getObjectUsage() == ObjectUsage::RemoteControl
+			&& (mState == State::MovingToVertex || (mState == State::TraversingEdge
+				&& mTraversalTask && mTraversalTask->edge->getType() == EdgeType::Location)))
+		{
+			auto end = agentPos + moveAmt;
+			auto limited = mWorld->mSimulationCoordinator.limitRemoteButtonMovement(*this, agentPos, end);
+			if (limited.x != end.x || limited.y != end.y)
+			{
+				moveAmt = limited - agentPos;
+				reachedPos = false;
+			}
+		}
 		setPosition({ mPosition.sector(), mPosition.local() + moveAmt }, false);
 
 		return reachedPos;
@@ -1822,7 +1838,8 @@ namespace core
 				&& mPath.path->nodes[vertexA].targetVertex->getSector()->getType() == SectorType::Chamber)) return vertexA;
 		auto const& nodeA = mPath.path->nodes[vertexA];
 		if (!nodeA.targetVertex
-			|| nodeA.targetVertex->getSubType() == VertexSubType::Interactable) return vertexA;
+			|| (nodeA.targetVertex->getSubType() == VertexSubType::Interactable
+				&& getObjectUsage() != ObjectUsage::RemoteControl)) return vertexA;
 		auto const positionA = nodeA.targetVertex->getPosition();
 
 		auto requiresActionAtSource = [&](shared_ptr<const Edge> const& edge)
@@ -2249,6 +2266,7 @@ namespace core
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
+		mRemoteButtonApproachTarget.reset();
 	}
 
 	bool Agent::moveToVertexOffset(int dim, float offset, float frameTime)
@@ -2368,7 +2386,11 @@ namespace core
 			break;
 
 		case State::WaitingForTraversal:
-			if (mTraversalLocalGoal)
+			if (mRemoteButtonApproachTarget && getObjectUsage() == ObjectUsage::RemoteControl)
+			{
+				moveToPosition(*mRemoteButtonApproachTarget, frameTime, getWalkSpeed());
+			}
+			else if (mTraversalLocalGoal)
 			{
 				moveToPosition(*mTraversalLocalGoal, frameTime, getWalkSpeed());
 			}

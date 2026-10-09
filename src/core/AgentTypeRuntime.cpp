@@ -299,9 +299,8 @@ namespace core
 			lua_rawget(state, instance);
 			std::string usage;
 			if (!lua_isnil(state, -1)
-				&& (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 4, usage) || (usage != "arms" && usage != "none")))
-				throw SerializationException("Agent type baseline field 'object_usage' must be 'arms' or 'none'");
-			baseline.objectUsage = usage == "none" ? ObjectUsage::None : ObjectUsage::Arms;
+				&& (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 14, usage) || !parseObjectUsage(usage, baseline.objectUsage)))
+				throw SerializationException("Agent type baseline field 'object_usage' must be 'arms', 'none' or 'remote_control'");
 			lua_pop(state, 1);
 			// Legacy reach is an input alias only, never a second frozen authority.
 			// Reject dual declarations even when equal, so migration is unambiguous.
@@ -313,6 +312,8 @@ namespace core
 			lua_rawget(state, instance);
 			bool const hasReach = !lua_isnil(state, -1);
 			lua_pop(state, 1);
+			if (baseline.objectUsage == ObjectUsage::RemoteControl && hasReach)
+				throw SerializationException("Remote control requires 'object_usage_distance', not legacy 'reach'");
 			if (hasDistance && hasReach)
 				throw SerializationException("Agent type baseline fields 'reach' and 'object_usage_distance' are mutually exclusive");
 			struct Field
@@ -334,8 +335,15 @@ namespace core
 			{
 				// None has no usable range. Ignore the distance input and freeze a
 				// canonical zero; all other physical fields remain required.
-				if (baseline.objectUsage == ObjectUsage::None
-					&& field.destination == &AgentPhysicalBaseline::objectUsageDistance) continue;
+				if (field.destination == &AgentPhysicalBaseline::objectUsageDistance)
+				{
+					if (baseline.objectUsage == ObjectUsage::None) continue;
+					if (baseline.objectUsage == ObjectUsage::RemoteControl && !hasDistance)
+					{
+						baseline.objectUsageDistance = 1.f;
+						continue;
+					}
+				}
 				lua_pushstring(state, field.key);
 				lua_rawget(state, instance);
 				auto const missing = lua_isnil(state, -1);

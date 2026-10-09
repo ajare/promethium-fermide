@@ -15,7 +15,7 @@ Individual Walk speed and Height modifiers are concrete authored values rather t
 - Object usage and Object usage distance follow this order independently, with frozen
   script defaults as their final fallback. Tag distance is concrete, not sampled.
   Shared definition edits and property removals preflight each affected effective
-  configuration across all loaded dependent Worlds; Arms requires finite positive
+  configuration across all loaded dependent Worlds; Arms and Remote control require finite positive
   effective distance, while None ignores it. Individual overrides never hide a
   duplicate inherited source conflict. Invalid edits leave all documents and history
   unchanged.

@@ -1938,8 +1938,8 @@ namespace core
 		if ((operation == ObjectUsagePropertyEdit::Add && present)
 			|| (operation != ObjectUsagePropertyEdit::Add && !present))
 			return reject("Object usage property is already present or absent");
-		if (!distanceProperty && mode != ObjectUsage::Arms && mode != ObjectUsage::None)
-			return reject("Object usage must be Arms or None");
+		if (!distanceProperty && !isValidObjectUsage(mode))
+			return reject("Object usage must be Arms, None or Remote control");
 		if (operation == ObjectUsagePropertyEdit::Set && (distanceProperty ? tag->getObjectUsageDistance()->value == distance
 			: tag->getObjectUsage()->value == mode)) return reject("Object usage property is unchanged");
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
@@ -2547,7 +2547,7 @@ namespace core
 					serializer.beginMap("");
 					serializer.writeString("type", "objectUsage");
 					serializer.writeUint64("revision", usage->revision);
-					serializer.writeString("value", usage->value == ObjectUsage::Arms ? "arms" : "none");
+					serializer.writeString("value", objectUsageWireName(usage->value));
 					serializer.endMap();
 				}
 				if (distance)
@@ -2745,9 +2745,10 @@ namespace core
 					else if (type == "objectUsage")
 					{
 						auto value = serializer.readString("value");
-						if (tag->getObjectUsage() || (value != "arms" && value != "none"))
+						ObjectUsage mode;
+						if (tag->getObjectUsage() || !parseObjectUsage(value, mode))
 							throw SerializationException("Duplicate or invalid Object usage");
-						tag->setObjectUsage({ value == "arms" ? ObjectUsage::Arms : ObjectUsage::None, revision });
+						tag->setObjectUsage({ mode, revision });
 					}
 					else if (type == "objectUsageDistance")
 					{

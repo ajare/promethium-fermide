@@ -123,6 +123,16 @@ set(agent_checks
     agentTypesLegacyHumanWithoutResource
     agentTypesLoadingConstructsFreshInstances
     agentTypesTopologyReplayPreservesLiveInstances
+    agentTypesRemoteDeclarations
+    agentTypesRemoteGeometry
+    agentTypesRemoteJourneys
+    agentTypesRemotePendingEdits
+    agentTypesRemoteLandingButtons
+    agentTypesRemoteTightDoor
+    agentTypesInheritedObjectUsage
+    agentTypesInheritedObjectUsageRoutes
+    agentTypesObjectUsageOverrides
+    agentTypesObjectUsageCommittedCrossing
     agentTypesNoneDeclarations
     agentTypesNoneInvalidDeclarations
     agentTypesNoneDirectRefusals

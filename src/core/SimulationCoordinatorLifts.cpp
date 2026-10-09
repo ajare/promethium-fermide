@@ -737,7 +737,7 @@ namespace core
 		}
 		// None can board only a locally available, already accepted journey.
 		// Recheck before admission so an expired shared request cannot strand it.
-		if (actor && !mWorld.agentCanOperateObjects(*actor))
+		if (actor && actor->getObjectUsage() != ObjectUsage::Arms)
 		{
 			auto destination = request->mSourceEndpoint;
 			if (coordinator.mShuttle) destination.x = coordinator.mLiftStops[desiredStop].globalPosition;
@@ -1067,7 +1067,7 @@ namespace core
 					? TraversalRequestId{} : coordinator.mLiftConfirmationQueue.front();
 			return;
 		}
-		if (actor && !mWorld.agentCanOperateObjects(*actor))
+		if (actor && actor->getObjectUsage() != ObjectUsage::Arms)
 		{
 			requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);

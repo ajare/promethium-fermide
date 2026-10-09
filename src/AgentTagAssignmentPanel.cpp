@@ -281,10 +281,10 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 	if (target->getIndividualObjectUsage())
 	{
 		auto mode = *target->getIndividualObjectUsage();
-		if (ImGui::BeginCombo("Object usage##individual", mode == core::ObjectUsage::Arms ? "Arms" : "None"))
+		if (ImGui::BeginCombo("Object usage##individual", core::objectUsageName(mode)))
 		{
-			for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None})
-				if (ImGui::Selectable(choice == core::ObjectUsage::Arms ? "Arms" : "None", mode == choice))
+			for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None, core::ObjectUsage::RemoteControl})
+				if (ImGui::Selectable(core::objectUsageName(choice), mode == choice))
 				{
 					string diagnostic;
 					commitIndividualPropertyEdit(world, [&](string* out)
@@ -880,7 +880,7 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	};
 	auto const usage = lookup.entity->getEffectiveObjectUsage();
 	auto const usageDistance = lookup.entity->getEffectiveObjectUsageDistance();
-	ImGui::Text("Object usage: %s (%s)", usage.value == core::ObjectUsage::Arms ? "Arms" : "None",
+	ImGui::Text("Object usage: %s (%s)", core::objectUsageName(usage.value),
 		sourceName(usage).c_str());
 	ImGui::Text("Object usage distance: %.3f (%s)%s", double(usageDistance.value),
 		sourceName(usageDistance).c_str(), usage.value == core::ObjectUsage::None ? " (ignored)" : "");

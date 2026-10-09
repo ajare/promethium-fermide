@@ -491,6 +491,7 @@ namespace core
 		// Traversal resources assign local goals; the Agent remains the sole owner
 		// of walking and advances itself during the movement phase.
 		std::optional<Vector2> mTraversalLocalGoal;
+		std::optional<Vector2> mRemoteButtonApproachTarget;
 
 		// Prevent repeated opportunistic presses while following the same immediate
 		// Door edge. The saved interaction lets traversal preparation reuse a press
