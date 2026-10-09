@@ -277,6 +277,14 @@ namespace core
 			return;
 		}
 
+		auto actor = mWorld.mAgents.find(request->mOwner);
+		if (!resource.mDoor->isOpen() && (!actor || !mWorld.agentCanOperateObjects(*actor)))
+		{
+			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+			return;
+		}
+
 		auto applicableControl = [&](TraversalRequest const& candidate) -> InteractionPointId
 		{
 			for (auto pointId : resource.mControls)
@@ -504,7 +512,7 @@ namespace core
 		}
 		auto actor = mWorld.mAgents.find(request->mOwner);
 		auto point = mWorld.mInteractionPoints.find(requestControl);
-		if (!actor || !point || !mWorld.missingInteractionPermissions(*point, *actor).empty())
+		if (!actor || !mWorld.agentCanOperateObjects(*actor) || !point || !mWorld.missingInteractionPermissions(*point, *actor).empty())
 		{
 			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 			mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);

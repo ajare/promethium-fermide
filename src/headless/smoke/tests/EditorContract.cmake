@@ -78,6 +78,7 @@ set(editor_names
     agent/anAgentCopiedBetweenWorldsJoinsTheDestinationGroup
     agentTypesPreviewQueriesReuseValidatedResource
     agentTypesManagedPreviewIsReadOnly
+    agentTypesNoneClipboardAndHistory
     agentTypesScriptedClipboardAndDeletionHistory
     agentTypesScriptedClipboardRefusalAndLegacy
     agentTypesExternalImportPlacesAndReopens

@@ -69,8 +69,11 @@ return {
   characters. It may differ from the type ID.
 - `new()`: returns a fresh instance table. No missing field inherits Human defaults.
 - `width`, `standing_height`, `object_usage_distance`: dimensions/distances in World units.
-- `object_usage`: `"arms"` (also the compatibility default when omitted).
-  Distance is required, finite and strictly positive. Legacy `reach` remains an
+- `object_usage`: `"arms"` (the compatibility default when omitted) or `"none"`.
+  Arms distance is required, finite and strictly positive. None cannot operate
+  objects and ignores distance, so omit it; all other physical fields remain
+  required. None can still use automatic/already usable resources and accepted
+  shared journeys under the existing permission, Mobility and admission rules. Legacy `reach` remains an
   alias, but declaring it together with `object_usage_distance` is rejected even
   when equal. See [Object usage and arm length](lua-agent-types.md#object-usage-and-arm-length-535).
 - `walk_speed`, `climb_speed`, `stair_ascent_speed`, `stair_descent_speed`:

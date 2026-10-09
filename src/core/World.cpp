@@ -11548,7 +11548,7 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
-		return resource && resource->mDoor && agent
+		return resource && resource->mDoor && agent && agentCanOperateObjects(*agent)
 			&& agentSatisfiesDoorPermission(*resource->mDoor, *agent);
 	}
 
@@ -11557,7 +11557,7 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
-		if (!resource || !resource->mDoor || !agent) return false;
+		if (!resource || !resource->mDoor || !agent || !agentCanOperateObjects(*agent)) return false;
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
@@ -11601,7 +11601,7 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
-		if (!resource || !resource->mExtensible || !agent) return false;
+		if (!resource || !resource->mExtensible || !agent || !agentCanOperateObjects(*agent)) return false;
 		auto applicable = [&](InteractionPoint const& point)
 		{
 			if (point.mSector != approach) return false;
@@ -11711,13 +11711,22 @@ namespace core
 		command.type = DeviceCommandType::SelectLiftDestination;
 		command.traversalResource = resourceId;
 		command.stopIndex = stop;
-		if (missingLiftDestinationPermissions(command, agentId).empty()) return true;
 		auto agent = mAgents.find(agentId);
+		if (agent && agentCanOperateObjects(*agent)
+			&& missingLiftDestinationPermissions(command, agentId).empty()) return true;
 		if (!agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end();
 		if (!agentAdheresToLiftDestinationPermission(resourceId, stop, agentId)) return false;
-		if (local) return true;
+		if (local && agentCanOperateObjects(*agent)) return true;
+		if (local)
+		{
+			// None may finish an accepted journey, but occupancy alone cannot
+			// authorize a new destination selection.
+			auto committed = resource->mLiftPassengerDestinations.find(agentId);
+			if ((committed != resource->mLiftPassengerDestinations.end() && committed->second == stop)
+				|| (!resource->mLiftMoving && resource->mLiftCurrentStop == stop)) return true;
+		}
 		// Only an open, boardable car at this Agent's landing reveals a usable
 		// shared journey. Never consult a remote car's live destination requests.
 		if (!local && resource->mShuttle)
@@ -11772,6 +11781,14 @@ namespace core
 	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,
 		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
 	{
+		auto agent = mAgents.find(agentId);
+		return agent && agentCanOperateObjects(*agent)
+			&& agentSatisfiesTransportLandingPermission(resourceId, approach, endpoint, agentId);
+	}
+
+	bool World::agentSatisfiesTransportLandingPermission(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
+	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !agent) return false;
@@ -11798,7 +11815,7 @@ namespace core
 	{
 		auto agent = mAgents.find(agentId);
 		return agent && (!agent->getEffectivePermissionAdherence().value
-			|| canAgentOperateTransportLandingControl(resourceId, approach, endpoint, agentId));
+			|| agentSatisfiesTransportLandingPermission(resourceId, approach, endpoint, agentId));
 	}
 
 	bool World::isAgentTransportOccupant(TraversalResourceId resourceId, AgentId agentId) const

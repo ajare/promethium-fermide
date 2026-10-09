@@ -264,15 +264,19 @@ The stable identifier of an Agent type, independent of its presentation display 
 _Avoid_: Agent type, display name
 
 **Object usage**:
-An Agent type's frozen mode for physically operating objects. Arms is currently the only supported mode; capability does not grant Access permission or traversal admission.
+An Agent type's frozen mode for operating objects: Arms permits physical operation, while None permits no Agent-operated commands. Capability does not grant Access permission or traversal admission.
 _Avoid_: Mobility use, which governs traversal kinds
 
 **Object usage distance**:
-An independently observed, finite, strictly positive Agent type baseline in World units. For Arms it is the Agent's arm length; physical operation must also satisfy the object's Interaction point geometry and existing physical eligibility. Legacy script `reach` is an input alias, not a second authority.
+An independently observed Agent type baseline in World units, finite and strictly positive for Arms, whose distance is arm length. None ignores it; physical operation must also satisfy the object's Interaction point geometry and existing physical eligibility.
 _Avoid_: Interaction point reach, which is object geometry and may be zero
 
 **Arms**:
 The Object usage mode that operates objects through physical approach within arm length. It does not provide remote activation or bypass Location, side, height, Mobility, Access permission or Broken conditions.
+
+**None object usage**:
+The Object usage mode in which an Agent cannot operate objects but may pass through already usable resources or join another Agent's accepted journey when existing rules permit. It is neither a Mobility restriction nor a revocation of admitted crossings or committed passenger exits.
+_Avoid_: Deactivation, which stops participation in the simulation
 
 **Agent instance**:
 One living Agent of an Agent type, with its own private state and fixed physical baseline. A surviving Agent retains its instance across ordinary structural edits; load, Reset, and restoration after deletion start a fresh lifetime.

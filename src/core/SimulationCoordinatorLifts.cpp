@@ -735,6 +735,21 @@ namespace core
 			denyTraversalRequest(requestId);
 			return;
 		}
+		// None can board only a locally available, already accepted journey.
+		// Recheck before admission so an expired shared request cannot strand it.
+		if (actor && !mWorld.agentCanOperateObjects(*actor))
+		{
+			auto destination = request->mSourceEndpoint;
+			if (coordinator.mShuttle) destination.x = coordinator.mLiftStops[desiredStop].globalPosition;
+			else destination.y = coordinator.mLiftStops[desiredStop].globalPosition;
+			if (!mWorld.canAgentUseLiftJourney(request->mResource, request->mSourceEndpoint,
+				destination, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+				return;
+			}
+		}
 		// Recheck destination willingness immediately before joining the boarding
 		// queue. This deliberately uses the journey resource (not this origin
 		// landing resource), so every car and boarding origin observes the one
@@ -1050,6 +1065,12 @@ namespace core
 			if (coordinator.mLiftActiveConfirmation == requestId)
 				coordinator.mLiftActiveConfirmation = coordinator.mLiftConfirmationQueue.empty()
 					? TraversalRequestId{} : coordinator.mLiftConfirmationQueue.front();
+			return;
+		}
+		if (actor && !mWorld.agentCanOperateObjects(*actor))
+		{
+			requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
+			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 			return;
 		}
 		if (find(coordinator.mLiftConfirmationQueue.begin(), coordinator.mLiftConfirmationQueue.end(), requestId)

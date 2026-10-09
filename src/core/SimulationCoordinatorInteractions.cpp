@@ -246,6 +246,11 @@ namespace core
 		return id;
 	}
 
+	bool World::agentCanOperateObjects(Agent const& actor) const
+	{
+		return actor.getObjectUsage() != ObjectUsage::None;
+	}
+
 	bool World::agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const
 	{
 		return actor.getObjectUsage() == ObjectUsage::Arms
@@ -265,7 +270,8 @@ namespace core
 		// its movement state. Judge that one staged device request from the
 		// physical position rather than rejecting it merely because departure began.
 		bool const finishing = actorId == mFinishingFurnitureUseAgent;
-		return point && actor && actor->isActive() && !agentForbidsButtons(actor) && point->mSector
+		return point && actor && actor->isActive() && agentCanOperateObjects(*actor)
+			&& !agentForbidsButtons(actor) && point->mSector
 			&& (finishing || actor->getState() == Agent::State::Idle || actor->getState() == Agent::State::WaitingForTraversal)
 			&& actor->getSector() == mSectors[(size_t)point->mSector.value - 1].get()
 			&& (!(requireReach || point->requiresReachAtRequest())
@@ -353,7 +359,7 @@ namespace core
 		// Even the press a moving Agent makes in passing is physical work, so a
 		// deactivated Agent may not start one (#118, #192), and a
 		// Buttons-forbidden Agent may not operate a control at all (#193).
-		if (!point || !actor || !actor->isActive() || agentForbidsButtons(actor)
+		if (!point || !actor || !actor->isActive() || !mWorld.agentCanOperateObjects(*actor) || agentForbidsButtons(actor)
 			|| !point->mSector
 			|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get())
 		{
@@ -1123,7 +1129,7 @@ namespace core
 				// not be overridden by earlier work, and cancellation must not resume
 				// that work later.
 				auto actor = mWorld.mAgents.find(request->mActor);
-				if (!actor || !actor->isActive() || agentForbidsButtons(actor)
+				if (!actor || !actor->isActive() || !mWorld.agentCanOperateObjects(*actor) || agentForbidsButtons(actor)
 					|| (point->requiresReachAtRequest()
 						&& (actor->getSector() != mWorld.mSectors[point->mSector.value - 1].get()
 							|| !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach))))
@@ -1197,7 +1203,7 @@ namespace core
 				cancelInteraction(point->mActiveRequest);
 				continue;
 			}
-			if (!actor || !actor->isActive() || agentForbidsButtons(actor)
+			if (!actor || !actor->isActive() || !mWorld.agentCanOperateObjects(*actor) || agentForbidsButtons(actor)
 				|| actor->getSector() != mWorld.mSectors[(size_t)point->mSector.value - 1].get()
 				|| (point->requiresReachAtRequest()
 					&& !mWorld.agentCanPhysicallyOperate(*actor, actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach)))

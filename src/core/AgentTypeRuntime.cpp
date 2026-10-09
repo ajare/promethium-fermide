@@ -299,8 +299,9 @@ namespace core
 			lua_rawget(state, instance);
 			std::string usage;
 			if (!lua_isnil(state, -1)
-				&& (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 4, usage) || usage != "arms"))
-				throw SerializationException("Agent type baseline field 'object_usage' must be 'arms'");
+				&& (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 4, usage) || (usage != "arms" && usage != "none")))
+				throw SerializationException("Agent type baseline field 'object_usage' must be 'arms' or 'none'");
+			baseline.objectUsage = usage == "none" ? ObjectUsage::None : ObjectUsage::Arms;
 			lua_pop(state, 1);
 			// Legacy reach is an input alias only, never a second frozen authority.
 			// Reject dual declarations even when equal, so migration is unambiguous.
@@ -331,6 +332,10 @@ namespace core
 			};
 			for (auto const& field : fields)
 			{
+				// None has no usable range. Ignore the distance input and freeze a
+				// canonical zero; all other physical fields remain required.
+				if (baseline.objectUsage == ObjectUsage::None
+					&& field.destination == &AgentPhysicalBaseline::objectUsageDistance) continue;
 				lua_pushstring(state, field.key);
 				lua_rawget(state, instance);
 				auto const missing = lua_isnil(state, -1);

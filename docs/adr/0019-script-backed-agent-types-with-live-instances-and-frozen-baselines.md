@@ -48,8 +48,8 @@ declarations resolve to Arms with that distance. `reach` is an input alias only:
 declaring both distance fields is rejected even if equal. This avoids competing
 physical authorities while retaining old reach-only resources. Distance is a
 concrete finite, strictly positive simulation float, independently frozen and
-observed alongside usage. Unsupported modes are rejected; no nonfunctional
-Remote control or None option is published.
+observed alongside usage. #536 adds the working None mode below; Remote control
+remains deferred.
 
 Shared World-facing physical-operation eligibility uses arm length, narrowed by
 Interaction point geometry (including valid zero reach), without replacing
@@ -68,9 +68,39 @@ The host never re-reads them from live Lua. This working slice establishes the
 shared physical policy; remote activation is deliberately deferred to later
 slices of #534.
 
+## None usage and operation-free routing (#536)
+
+Agent-type API v2 accepts `object_usage = "none"` as a frozen lifetime default.
+None ignores distance, which may be omitted; its unused frozen observation is
+canonical zero. The dual-alias rejection remains in both modes. Other physical,
+pose and Mobility defaults remain fully validated, and omission of usage still
+means Arms with a required positive distance. No persistence schema or live Lua
+query is added.
+
+The shared World ability gate refuses Agent-operated requests and preparation,
+while route feasibility hard-excludes operation-dependent Paths. We deliberately
+do not encode None as Buttons Mobility or a permission denial: those would
+incorrectly forbid automatic devices or change Permission adherence for
+already usable resources. Landing authorization and operation capability are
+separate queries; adherence continues to test only authorization.
+
+A None passenger can observe and join an already accepted locally boardable
+transport journey but cannot presume remote assistance, call a closed transport,
+or supply a missing destination selection. Runtime admission rechecks shared
+availability; if selection is impossible after admission, the existing safe-exit
+path is used instead of leaving the passenger pending at a selector. Accepted
+passenger destinations, admitted crossings and chamber exits are not revoked.
+Ordinary automatic Doors, Bulkhead presence sensors and automated Chambers
+remain device-owned behavior, not None Agent operations. Existing permissions,
+Mobility, queues, capacity, reservations and Broken policies stay authoritative.
+
+None shares the Arms lifetime policy, including fresh validation on paste,
+reopen, Reset and deleted-Agent restoration, and retained defaults for surviving
+structural/history replay. Documents and clipboard contain authored data only.
+
 ## Consequences
 
-An Agent owns two deliberately separated things: its authored type identity (stable ID, display name, resolved resource reference) and its frozen physical baseline, which simulation consumers read; and an opaque live-instance handle owned by the World's Agent-type runtime, whose destructor releases the Lua instance when the Agent dies. The baseline is validated field-by-field (seven non-pose numeric fields required; dimensions, Object usage distance, and speeds finite and positive after conversion to simulation floats; explicit supported poses and ordered Room/Door choices under API v2, with applicable height and speed ratios finite and in `(0, 1]`) and copied out of Lua, so later mutations of the instance cannot change ongoing simulation. The World owns one sandboxed Lua state per the ADR 0008 isolation and budget model, with the same forbidden-capability restrictions and no filesystem, process, native-module, debug, or shared-mutable-module access.
+An Agent owns two deliberately separated things: its authored type identity (stable ID, display name, resolved resource reference) and its frozen physical baseline, which simulation consumers read; and an opaque live-instance handle owned by the World's Agent-type runtime, whose destructor releases the Lua instance when the Agent dies. The baseline is validated field-by-field (six non-pose numeric fields always required, plus positive Object usage distance for Arms; dimensions and speeds finite and positive after conversion to simulation floats; explicit supported poses and ordered Room/Door choices under API v2, with applicable height and speed ratios finite and in `(0, 1]`) and copied out of Lua, so later mutations of the instance cannot change ongoing simulation. The World owns one sandboxed Lua state per the ADR 0008 isolation and budget model, with the same forbidden-capability restrictions and no filesystem, process, native-module, debug, or shared-mutable-module access.
 
 Legacy Human records without a resource reference resolve to the bundled `human.agent.lua`; an explicit missing, invalid, or mismatched resource reference fails clearly and never falls back to Human. Type identity is immutable after creation; there is no conversion or hot reload. Display names are presentation, not stable identity: a revised display name is accepted on reconstruction. The historical `type` wire slot now also writes the stable ID, and readers still accept older records containing a display name there when `typeId` supplies identity. Persisted documents record the stable type ID and resource reference without embedding Lua state, and Reset/load/deleted-Agent restoration construct fresh instances from the currently resolved source while surviving instances retain their frozen baselines.
 

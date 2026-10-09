@@ -76,19 +76,19 @@ is non-empty, at most 128 bytes, and contains no control characters. `new` must
 be a Lua function returning an instance table; missing fields never inherit
 Human defaults. A constructor error publishes no partial Agent.
 
-## The seven required non-pose physical fields
+## Non-pose physical fields
 
 | Lua field | Meaning | Validation |
 | --- | --- | --- |
 | `width` | Bodily width, World units; bounds and placement | Finite, positive |
 | `standing_height` | Standing height, World units | Finite, positive |
-| `object_usage_distance` | Arm length, World units | Finite, positive |
+| `object_usage_distance` | Arm length, World units; ignored for None | Finite, positive for Arms; optional for None |
 | `walk_speed` | Walking speed, World units/second | Finite, positive |
 | `climb_speed` | Ladder speed, World units/second | Finite, positive |
 | `stair_ascent_speed` | Stationary stair ascent, World units/second | Finite, positive |
 | `stair_descent_speed` | Stationary stair descent, World units/second | Finite, positive |
 
-All fields must be actual Lua numbers, finite and representable as positive
+All required numeric fields must be actual Lua numbers, finite and representable as positive
 simulation floats. Numeric strings, NaN, infinities, zero, negatives, float
 overflow/underflow, and out-of-range ratios are refused with field diagnostics.
 Pose envelopes use declared height and width ratios rather than exchanging
@@ -98,13 +98,14 @@ policies have not moved into type scripts.
 
 ## Object usage and arm length (#535)
 
-`object_usage` accepts only the actual Lua string `"arms"`; omission defaults to
-Arms for compatibility. Remote control and None are not exposed in this slice.
-`object_usage_distance` is independently frozen and observed, not inferred from
-the usage mode. It must be a concrete finite, strictly positive simulation float.
+`object_usage` accepts the actual Lua strings `"arms"` and `"none"`; omission defaults to
+Arms for compatibility. Remote control is not exposed yet.
+In Arms mode, `object_usage_distance` is independently frozen and observed, not
+inferred from the usage mode. It must be a concrete finite, strictly positive
+simulation float; None's unused observation is described below.
 The legacy `reach` field is an input alias for this distance and also defaults to
-Arms. Declare exactly one of `reach` and `object_usage_distance`: declaring both
-is rejected, even with equal values. Missing both is an error. Human uses Arms
+Arms. Declare at most one of `reach` and `object_usage_distance`: declaring both
+is rejected, even with equal values, in either mode. Missing both is an error for Arms. Human uses Arms
 with 0.25 units; Cleaning Bot uses Arms with 0.1 units. Android demonstrates the
 compatible legacy declaration.
 
@@ -127,9 +128,59 @@ surviving structural edits and history replay retain them. Live Lua mutations
 cannot replace the copied defaults. Documents, clipboard and history do not
 serialize private Lua state or materialize defaults as individual properties.
 
+### None usage (#536)
+
+A type can replace the usage/distance entries in the complete example with:
+
+```lua
+object_usage = "none",
+-- No object_usage_distance or reach is needed.
+```
+
+None ignores the distance field (including any supplied value); the host freezes
+its unused distance observation as zero. Other physical fields and the complete
+Mobility/pose declarations remain required. Usage is validated before publication;
+unknown spellings, wrong types and embedded NULs are rejected atomically. Omitted
+usage still means Arms and needs a positive distance; there is no implicit None
+fallback for incomplete legacy resources.
+
+None refuses ordinary manual Door opening, every physical Button/Interaction
+request, transport landing calls and onboard selections, Access panels and
+BoothWindow shutters. It cannot press a passing Button or become a traversal's
+preparation operator. Routes requiring its own operation are hard exclusions,
+not expensive choices or waits at impossible controls. Ordinary automatic Doors,
+automatic Bulkhead Door presence sensors and automated Chambers remain usable.
+Administrative/device-internal commands are not Agent operations.
+
+Operation-free passage is separate from inability to operate. A locally observed
+open Door or extended Force Bridge/Ladder may be used under existing permissions,
+Permission adherence, Mobility, clearance and admission rules. A None passenger
+may join a locally boardable Lift, Platform lift or Shuttle only when the desired
+journey was already accepted; remote live requests are not revealed. Boarding
+rechecks this condition, and None never creates the missing selection. Expired
+or incompatible assistance produces normal replanning/Route loss rather than
+stranded pending work. Accepted destinations, admitted crossings, Airlock exits
+and committed transport exits retain their existing completion guarantees.
+Permission adherence tests authorization, not whether the Agent has arms; None
+receives no authorization exception and cannot bypass Buttons Mobility.
+
+None follows the same fresh/surviving lifetime policy as Arms. Switching a script
+back to Arms requires its complete valid distance before constructing a new
+lifetime; it does not alter a surviving Agent or persist a runtime default as an
+override.
+
 ### Verification
 
-Release CTest `object-usage-*` checks use public World operations and real ticks
+Release CTest `object-usage-*` checks use public World operations and real ticks.
+`agentTypesNone*` covers distance omission/ignoring, direct refusals, route loss
+and automatic alternatives, open-Door authorization/adherence/Mobility and
+admitted-crossing completion, extended/retracted bridges, automatic Bulkhead
+Doors and Chambers, shared Airlocks and all three transport kinds, coordination
+cleanup, fresh YAML/binary reopen and Reset, and structural/history/clipboard/
+deleted-Agent lifetime boundaries. Existing invalid-baseline checks retain atomic
+validation and legacy omission coverage.
+
+The Arms checks use the same seams
 for legacy/new declarations, independent snapshots, short/long arm lengths,
 unchanged point geometry (including zero reach), owned shutters and Access
 panels, manual Door queue approach, and onboard Lift selection. Invalid usage,

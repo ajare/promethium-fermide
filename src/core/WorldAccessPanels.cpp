@@ -27,7 +27,7 @@ namespace core
 	{
 		auto panel = lookupAccessPanel(id);
 		auto actor = mAgents.find(actorId);
-		if (!panel || !actor || !actor->isActive() || agentForbidsButtons(actor)) return false;
+		if (!panel || !actor || !actor->isActive() || !agentCanOperateObjects(*actor) || agentForbidsButtons(actor)) return false;
 		auto actions = panel->getActions();
 		if (std::find(actions.begin(), actions.end(), action) == actions.end()) return false;
 		auto point = mInteractionPoints.find(panel->getControl(action));

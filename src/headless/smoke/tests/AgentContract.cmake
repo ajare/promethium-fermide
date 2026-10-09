@@ -123,6 +123,14 @@ set(agent_checks
     agentTypesLegacyHumanWithoutResource
     agentTypesLoadingConstructsFreshInstances
     agentTypesTopologyReplayPreservesLiveInstances
+    agentTypesNoneDeclarations
+    agentTypesNoneInvalidDeclarations
+    agentTypesNoneDirectRefusals
+    agentTypesNoneDoors
+    agentTypesNoneOtherResources
+    agentTypesNoneSharedAirlock
+    agentTypesNoneLifetimes
+    agentTypesNoneSharedJourneys
 )
 
 function(invoke status expected)

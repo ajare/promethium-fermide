@@ -846,6 +846,69 @@ namespace
 			"Duplicate refusal changed the original definition");
 	}
 
+	void noneClipboardAndHistory(smoke::Context const&)
+	{
+		gWorldDocumentHistory.clear();
+		core::AgentTypeDefinition definition{"NoneHistory", "None history", "none-history.agent.lua", externalSource("NoneHistory")};
+		agent_smoke::replaceSource(definition.source, "object_usage = \"arms\"", "object_usage = 'none'");
+		agent_smoke::replaceSource(definition.source, "object_usage_distance = 0.25,", "");
+		AgentTypeLoaderScope scope{[&](std::string const& name) -> std::optional<core::AgentTypeDefinition> {
+			if (name == definition.resourceName) return definition;
+			if (name == "human.agent.lua") return core::bundledHumanAgentType();
+			return std::nullopt;
+		}};
+		auto fixture = buildWorld("None clipboard/history");
+		auto& world = fixture.world; world->pauseSimulation();
+		require(world->attachAgentType(definition.resourceName, definition.source), "None history resource refused");
+		auto survivor = world->createAgent(definition.typeId, "Survivor", fixture.corridor, 0, 1.f);
+		auto payload = makeAgentClipboardPayload(*world, survivor, "Copy");
+		auto text = makeAgentClipboardText(payload, false);
+		require(text.find("object_usage") == std::string::npos, "Clipboard materialised None defaults");
+		std::string diagnostic;
+		AgentClipboardPayload decoded;
+		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"], decoded, diagnostic), diagnostic);
+		core::AgentId pasted;
+		require(commitAgentPlacement(world, decoded, world->getSector(fixture.corridor), 0, 4.f, pasted, diagnostic), diagnostic);
+		require(world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::None, "Paste lost None");
+		definition.source = externalSource("NoneHistory"); // fresh Arms lifetime
+		world->addLevel();
+		require(world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::None
+			&& world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::None, "Structural replay reconstructed None survivors");
+		gWorldDocumentHistory.clear();
+		auto before = captureDocumentSnapshot(world);
+		require(cutAgent(world, pasted, diagnostic), diagnostic); commitDocumentEdit(before);
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			try { auto candidate = deserializeDocumentSnapshot(snapshot, world, {}); if (!candidate) return false; world = std::move(candidate); return true; }
+			catch (std::exception const& error) { diagnostic = error.what(); return false; }
+		};
+		auto const deleted = captureDocumentSnapshot(world)->yaml;
+		agent_smoke::replaceSource(definition.source, "object_usage = \"arms\"", "object_usage = 'None'");
+		require(!gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore)
+			&& captureDocumentSnapshot(world)->yaml == deleted && gWorldDocumentHistory.undoCount() == 1
+			&& world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::None,
+			"Invalid fresh mode mutated the World/history or reused a deleted instance");
+		definition.source = externalSource("NoneHistory");
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::Arms
+			&& world->lookupAgent(pasted).entity->getObjectUsageDistance() == .25f
+			&& world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::None,
+			"Deletion undo failed fresh/surviving mode distinction");
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "None deletion redo failed");
+		require(!world->lookupAgent(pasted).entity, "Redo retained restored Agent");
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), "Repeated None history undo failed");
+		auto copied = makeAgentClipboardPayload(*world, survivor, "Copy");
+		auto other = buildWorld("Fresh copied None"); other.world->pauseSimulation();
+		core::AgentId copy;
+		require(commitAgentPlacement(other.world, copied, other.world->getSector(other.corridor), 0, 2.f, copy, diagnostic), diagnostic);
+		require(other.world->lookupAgent(copy).entity->getObjectUsage() == core::ObjectUsage::Arms,
+			"Cross-World clipboard serialised a survivor's frozen None mode");
+		auto authored = captureDocumentSnapshot(world)->yaml;
+		world->resetSimulation();
+		require(world->lookupAgent(survivor).entity->getObjectUsage() == core::ObjectUsage::Arms
+			&& captureDocumentSnapshot(world)->yaml == authored, "Reset reused None or materialised defaults");
+		gWorldDocumentHistory.clear();
+	}
+
 	void scriptedClipboardAndDeletionHistory(smoke::Context const& context)
 	{
 		gWorldDocumentHistory.clear();
@@ -1130,6 +1193,7 @@ void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "agentTypesPreviewQueriesReuseValidatedResource", previewQueriesReuseValidatedResource });
 	checks.push_back({ "agentTypesManagedPreviewIsReadOnly", managedPreviewIsReadOnly });
+	checks.push_back({ "agentTypesNoneClipboardAndHistory", noneClipboardAndHistory });
 	checks.push_back({ "agentTypesScriptedClipboardAndDeletionHistory", scriptedClipboardAndDeletionHistory });
 	checks.push_back({ "agentTypesScriptedClipboardRefusalAndLegacy", scriptedClipboardRefusalAndLegacy });
 	checks.push_back({ "agentTypesExternalImportPlacesAndReopens", externalImportPlacesAndReopens });
