@@ -220,6 +220,7 @@ namespace core
 			|| mIndividualObjectUsage.has_value() || mIndividualObjectUsageDistance.has_value()
 			|| mIndividualPermissionAdherence.has_value()
 			|| mIndividualRemoteAccessPanels.has_value()
+			|| mIndividualRemoteBoothWindowShutters.has_value()
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -288,6 +289,12 @@ namespace core
 			{
 				beginProperty("remoteAccessPanels");
 				serializer.writeBool("value", *mIndividualRemoteAccessPanels);
+				serializer.endMap();
+			}
+			if (mIndividualRemoteBoothWindowShutters)
+			{
+				beginProperty("remoteBoothWindowShutters");
+				serializer.writeBool("value", *mIndividualRemoteBoothWindowShutters);
 				serializer.endMap();
 			}
 			if (mIndividualMobilityProfile)
@@ -465,6 +472,7 @@ namespace core
 		mIndividualObjectUsageDistance.reset();
 		mIndividualPermissionAdherence.reset();
 		mIndividualRemoteAccessPanels.reset();
+		mIndividualRemoteBoothWindowShutters.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -630,6 +638,12 @@ namespace core
 					if (mIndividualRemoteAccessPanels)
 						throw SerializationException("Serialized Agent contains more than one individual Remote Access panels");
 					mIndividualRemoteAccessPanels = serializer.readBool("value");
+				}
+				else if (type == "remoteBoothWindowShutters")
+				{
+					if (mIndividualRemoteBoothWindowShutters)
+						throw SerializationException("Serialized Agent contains more than one individual Remote BoothWindow shutters");
+					mIndividualRemoteBoothWindowShutters = serializer.readBool("value");
 				}
 				else if (type == "mobilityProfile")
 				{
@@ -906,6 +920,20 @@ namespace core
 						return { property->value, tag, property->revision, false };
 			}
 		return { mPhysicalBaseline.remoteAccessPanels };
+	}
+	EffectiveAgentRemoteBoothWindowShutters Agent::getEffectiveRemoteBoothWindowShutters() const
+	{
+		if (mIndividualRemoteBoothWindowShutters)
+			return { *mIndividualRemoteBoothWindowShutters, {}, 0, true };
+		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
+			for (auto const tag : mAgentTags)
+			{
+				auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag);
+				if (definition)
+					if (auto const* property = definition->getRemoteBoothWindowShutters())
+						return { property->value, tag, property->revision, false };
+			}
+		return { mPhysicalBaseline.remoteBoothWindowShutters };
 	}
 
 	EffectiveAgentColour Agent::getEffectiveColour() const

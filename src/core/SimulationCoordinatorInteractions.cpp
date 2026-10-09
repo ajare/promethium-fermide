@@ -320,6 +320,18 @@ namespace core
 			|| actor.getSector() != mSectors[point->mSector.value - 1].get()) return false;
 		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
+			if (point->mBoothWindowOwner)
+			{
+				// The owned back-side control is the authority; proximity to an
+				// aperture or an arbitrary binding must not grant another control.
+				auto booth = lookupBoothWindow(point->mBoothWindowOwner);
+				if (!booth || booth->getDumbwaiterOwner() || booth->getPanel() != pointId
+					|| !actor.getEffectiveRemoteBoothWindowShutters().value) return false;
+				auto centre = booth->getPosition() + booth->getSize() * .5f;
+				auto position = actor.getGlobalPosition();
+				return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
+					<= actor.getObjectUsageDistance();
+			}
 			if (point->mAccessPanelOwner)
 			{
 				// Only the panel's generated, applicable command qualifies. A generic

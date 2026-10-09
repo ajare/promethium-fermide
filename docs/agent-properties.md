@@ -14,7 +14,7 @@ Tags panel. The effective value follows this order:
 
 1. Individual Agent property.
 2. Inherited Agent tag property (or its persisted sample).
-3. Default shown below. Mobility, Object usage, Object usage distance and Remote Access panels instead
+3. Default shown below. Mobility, Object usage, Object usage distance, Remote Access panels and Remote BoothWindow shutters instead
    fall back to their independently frozen Agent-type script defaults.
 
 Removing an individual override reveals the inherited value without removing
@@ -39,7 +39,7 @@ changing its range creates the relevant new samples. An individual override
 hides, rather than replaces, the underlying tag sample.
 
 Colour, Escalator walking chance, Object usage, Object usage distance,
-Permission adherence, Remote Access panels and Mobility profile are
+Permission adherence, Remote Access panels, Remote BoothWindow shutters and Mobility profile are
 shared values on tags, not sampled ranges. A tag's intrinsic pastel **display
 Colour** colours its UI chip; it is separate from the optional Colour property
 that colours its Agents.
@@ -70,6 +70,7 @@ an editor widget when adding an override. Numeric values must be finite except a
 | Minimum route planning time | `minimumRoutePlanningTime` | Seconds, 0.1–10 | 1 second | Lower endpoint for a Route planning episode's duration |
 | Maximum route planning time | `maximumRoutePlanningTime` | Seconds, 0.1–10 | 3 seconds | Upper endpoint for a Route planning episode's duration |
 | Remote Access panels | `remoteAccessPanels` | Boolean | Frozen script boolean (`true` if omitted) | Enables applicable same-Sector panel commands for Remote control; Arms and None ignore it |
+| Remote BoothWindow shutters | `remoteBoothWindowShutters` | Boolean | Frozen script boolean (`true` if omitted) | Enables owned shutter control from the controlling Sector for Remote control; independent of Remote Access panels |
 | Permission adherence | `permissionAdherence` | Boolean | `true` | Willingness to decline usable resources whose applicable operation permissions are unsatisfied |
 | Mobility profile | `mobilityProfile` | Complete nine-entry profile; see below | Frozen Agent-type script profile | Hard traversal constraints and last-resort routing rules |
 
@@ -126,7 +127,7 @@ see [Remote operation](remote-button-operation.md). Mode and distance remain
 independent: switching Human's mode alone keeps 0.25 units, not the remote script
 omission default of 1. There is no physical Arms fallback.
 
-World schema 63 (YAML and binary), clipboard and history carry only optional authored
+World schema 64 (YAML and binary), clipboard and history carry only optional authored
 overrides, never snapshots of live Lua defaults. Reset, load, deletion restoration and
 cross-World paste validate fresh script defaults plus the overrides and inherited fields; ordinary structural
 and surviving history replay retain the Agent's frozen defaults. Legacy Agents without
@@ -146,6 +147,22 @@ Reset and fresh/surviving Agent lifetimes follow the existing property workflows
 False disables only remote panel commands, without an Arms fallback. Arms retains
 physical panel operation regardless of the boolean; None never operates panels.
 See [Access panels](access-panels.md) for centre geometry and operation eligibility.
+
+## Remote BoothWindow shutters (#543)
+
+Remote BoothWindow shutters resolves independently: individual → tag → frozen script
+`remote_booth_window_shutters` (omitted means true). It is a concrete boolean in the
+Pathing namespace. Paused Individual properties and Tags controls add, edit and
+remove it; Effective properties shows its source. Duplicate inherited sources are
+refused even behind an individual override. Registry schema 17 and World schema 64
+persist authored `remoteBoothWindowShutters` values only. Registry reopen, YAML/binary
+Worlds, clipboard (including cross-World tag resolution), history, Reset and
+structural replay follow the same authored-only and frozen-lifetime rules as other
+properties. Invalid fresh script defaults fail even behind overrides.
+
+False refuses remote-only shutter commands, never falling back to Arms; Arms retains
+physical operation and None refuses. Remote Access panels remains independent.
+See [BoothWindows](booth-windows.md) for centre geometry, side and ownership rules.
 
 ## Appearance and physical movement
 

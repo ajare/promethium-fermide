@@ -702,7 +702,8 @@ namespace core
 		// presentation name only.
 		// Version 62 adds independent individual Object usage overrides.
 		// Version 63 adds independently inherited Remote Access panels overrides.
-		serializer.writeUint32("version", 63);
+		// Version 64 adds independently inherited Remote BoothWindow shutters overrides.
+		serializer.writeUint32("version", 64);
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1585,7 +1586,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 63)
+		if (version < 1 || version > 64)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -3506,7 +3507,7 @@ namespace core
 				agent->mIndividualCrowdAversion, agent->mIndividualRiskAversion,
 				agent->mIndividualRouteFamiliarity, agent->mIndividualRoutePersistence,
 				agent->mIndividualObjectUsage, agent->mIndividualObjectUsageDistance,
-				agent->mIndividualPermissionAdherence, agent->mIndividualRemoteAccessPanels, agent->mIndividualMobilityProfile,
+				agent->mIndividualPermissionAdherence, agent->mIndividualRemoteAccessPanels, agent->mIndividualRemoteBoothWindowShutters, agent->mIndividualMobilityProfile,
 				agent->mInteractionAversionSample, agent->mEffortAversionSample,
 				agent->mWaitingAversionSample, agent->mCrowdAversionSample,
 				agent->mRiskAversionSample, agent->mRouteFamiliaritySample,
@@ -3599,6 +3600,7 @@ namespace core
 			raw->setIndividualObjectUsageDistance(saved.individualObjectUsageDistance);
 			raw->setIndividualPermissionAdherence(saved.individualPermissionAdherence);
 			raw->setIndividualRemoteAccessPanels(saved.individualRemoteAccessPanels);
+			raw->setIndividualRemoteBoothWindowShutters(saved.individualRemoteBoothWindowShutters);
 			raw->setIndividualMobilityProfile(saved.individualMobilityProfile);
 			if (saved.interactionAversionSample)
 				raw->setInteractionAversionSample(*saved.interactionAversionSample);

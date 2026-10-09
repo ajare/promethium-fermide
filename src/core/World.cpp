@@ -1146,6 +1146,7 @@ namespace core
 			AgentTagId maximumRoutePlanningTimeSource{};
 			AgentTagId permissionAdherenceSource{};
 			AgentTagId remoteAccessPanelsSource{};
+			AgentTagId remoteBoothWindowShuttersSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -1342,6 +1343,15 @@ namespace core
 							agent->getName(), registry.getAgentTagName(remoteAccessPanelsSource),
 							definition->getName()));
 					remoteAccessPanelsSource = tag;
+				}
+				if (definition->getRemoteBoothWindowShutters())
+				{
+					if (remoteBoothWindowShuttersSource)
+						return reject(format(
+							"Agent '{}' inherits Remote BoothWindow shutters from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(remoteBoothWindowShuttersSource),
+							definition->getName()));
+					remoteBoothWindowShuttersSource = tag;
 				}
 				if (definition->getMobilityProfile())
 				{
@@ -9668,6 +9678,28 @@ namespace core
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
+	bool World::setAgentIndividualRemoteBoothWindowShutters(AgentId id,
+		optional<bool> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualRemoteBoothWindowShutters() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Remote BoothWindow shutters is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualRemoteBoothWindowShutters(value);
+		mSimulationCoordinator.agentObjectUsageChanged(id);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
 
 	bool World::setAgentIndividualMobilityProfile(AgentId id,
 		optional<MobilityProfile> value, string* diagnostic)
@@ -10076,6 +10108,12 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Remote Access panels is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getRemoteBoothWindowShutters() && source->getRemoteBoothWindowShutters())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Remote BoothWindow shutters is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -10360,6 +10398,7 @@ namespace core
 		AgentTagId maximumRoutePlanningTimeSource{};
 		AgentTagId permissionAdherenceSource{};
 		AgentTagId remoteAccessPanelsSource{};
+		AgentTagId remoteBoothWindowShuttersSource{};
 		AgentTagId objectUsageSource{}, objectUsageDistanceSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
@@ -10524,6 +10563,13 @@ namespace core
 					return reject(format("Agent inherits Remote Access panels from both #{} and #{}",
 						mAgentTagRegistry->getAgentTagName(remoteAccessPanelsSource), definition->getName()));
 				remoteAccessPanelsSource = tag;
+			}
+			if (definition->getRemoteBoothWindowShutters())
+			{
+				if (remoteBoothWindowShuttersSource)
+					return reject(format("Agent inherits Remote BoothWindow shutters from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(remoteBoothWindowShuttersSource), definition->getName()));
+				remoteBoothWindowShuttersSource = tag;
 			}
 			if (definition->getMobilityProfile())
 			{

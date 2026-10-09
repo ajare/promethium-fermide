@@ -304,6 +304,15 @@ namespace core
 				baseline.remoteAccessPanels = lua_toboolean(state, -1);
 			}
 			lua_pop(state, 1);
+			lua_pushliteral(state, "remote_booth_window_shutters");
+			lua_rawget(state, instance);
+			if (!lua_isnil(state, -1))
+			{
+				if (lua_type(state, -1) != LUA_TBOOLEAN)
+					throw SerializationException("Agent type baseline field 'remote_booth_window_shutters' must be a boolean");
+				baseline.remoteBoothWindowShutters = lua_toboolean(state, -1);
+			}
+			lua_pop(state, 1);
 			lua_pushliteral(state, "object_usage");
 			lua_rawget(state, instance);
 			std::string usage;

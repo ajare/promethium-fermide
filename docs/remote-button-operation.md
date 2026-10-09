@@ -28,8 +28,11 @@ replay retains frozen defaults. Unsupported modes/documents reject atomically.
 Every **physical Button** qualifies, including light switches, stacked controls,
 extensible-device controls, Airlock controls, and transport landing Buttons. The
 Button identity and physical centre are authoritative, not its Interaction point
-approach or the receiving device's centre/type. Generic Interaction points and
-BoothWindow shutter panels do not acquire remote capability. Access panel commands
+approach or the receiving device's centre/type. Generic Interaction points do not
+acquire remote capability. Owned BoothWindow shutter controls additionally qualify
+under #543 when **Remote BoothWindow shutters** is enabled, from the controlling
+back-side Sector and measured to the physical shutter centre; see
+[BoothWindows](booth-windows.md). Access panel commands
 additionally qualify under #542 when **Remote Access panels** is enabled; see
 [Access panels](access-panels.md). Ordinary manual Doors additionally qualify under #540 (below), and
 generated onboard Lift and Platform lift selectors under #541. Onboard Shuttle

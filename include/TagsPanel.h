@@ -232,16 +232,25 @@ bool commitAgentTagPermissionAdherenceAdd(
 bool commitAgentTagRemoteAccessPanelsAdd(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
+bool commitAgentTagRemoteBoothWindowShuttersAdd(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
 bool commitAgentTagPermissionAdherenceEdit(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	bool value, std::string& diagnostic);
 bool commitAgentTagRemoteAccessPanelsEdit(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	bool value, std::string& diagnostic);
+bool commitAgentTagRemoteBoothWindowShuttersEdit(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	bool value, std::string& diagnostic);
 bool commitAgentTagPermissionAdherenceRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
 bool commitAgentTagRemoteAccessPanelsRemove(
+	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
+	std::string& diagnostic);
+bool commitAgentTagRemoteBoothWindowShuttersRemove(
 	std::shared_ptr<core::AgentTagRegistry> const& registry, core::AgentTagId id,
 	std::string& diagnostic);
 bool commitAgentTagMobilityProfileAdd(

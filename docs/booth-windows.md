@@ -56,7 +56,7 @@ binding is a required typed `ToggleBoothWindow`, not a traversal command or perm
 An accepted press resolves the current target only at activation; competing presses
 use the normal FIFO point queue, never coalesce, and reverse moving shutters smoothly.
 
-The Agent must be active, in the back-side Location, within reach, and permitted to
+For Arms operation, the Agent must be active, in the back-side Location, within reach, and permitted to
 use Buttons under the normal effective Mobility profile and global interaction-state
 constraints. Exact vertex arrival and crossing intent are unnecessary. Front-side,
 wrong-Location, inactive, Buttons-forbidden, and out-of-reach requests return the
@@ -92,6 +92,43 @@ Clipboard carries the originating World identity and permission IDs/names. In th
 same World IDs survive rename; between Worlds names remap to destination identities.
 Unknown, duplicate, or malformed requirements refuse before placement rather than
 silently discarding protection. No permissions are implicitly created.
+
+## Remote shutter operation (#543)
+
+**Remote BoothWindow shutters** is an independently inherited Agent boolean,
+default true: individual → tag → frozen script `remote_booth_window_shutters`.
+Paused Individual properties and Tags controls add/edit/remove it; Effective
+properties displays its source. It is independent of **Remote Access panels**.
+
+Remote control operates only the existing owned back-side shutter Interaction point.
+The Agent must be active in its controlling Sector, with Buttons Mobility and all
+required Access permissions. Inclusive straight-line range is measured to the
+physical shutter centre (x+0.5, Level+0.35), not its floor-Level approach. Vertical
+separation counts; other Levels in that same Sector are allowed, without Local-depth
+or line-of-sight restrictions. A different Sector or the front side is not authorized
+by proximity. An out-of-range request refuses, without walking or an Arms fallback.
+False disables remote-only operation; Arms retains physical operation regardless
+of the boolean, and None always refuses.
+
+The existing typed Toggle, FIFO scheduling, one-tick activation, target-at-activation,
+0.8-second travel, state eligibility and reversal rules remain authoritative. Range
+and capability are rechecked for queued work, including cancellation when paused
+property edits remove eligibility. A press already activated retains its operation.
+No independent remote point or traversal permission is created. Generic Interaction
+points cannot borrow this capability; Dumbwaiter-owned shutters remain controlled
+by the unit and its landing Buttons and interlocks. BoothWindows have no authored
+Broken condition, and this feature introduces none.
+
+World schema 64 and registry schema 17 add authored `remoteBoothWindowShutters`
+values. YAML/binary Worlds, registry reopen, Reset, structural replay, clipboard
+(including cross-World tag resolution) and undo/redo preserve authored values only.
+Surviving Agents keep frozen defaults; creation, paste, load, Reset and restoration
+after deletion validate fresh defaults, even when hidden by authored overrides.
+
+Focused Release checks: `agentTypesRemoteBoothWindowShutters`,
+`agentTypesRemoteShutterProperties`, `agentTypesRemoteShutterDeclarations`,
+`agentTypesInheritedObjectUsageWorkflows` and `agentTypesObjectUsageOverrideWorkflows`.
+All use public World/editor seams, real ticks and published outcomes, headlessly.
 
 ## Persistence
 

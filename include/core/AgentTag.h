@@ -31,6 +31,7 @@ namespace core
 		MaximumRoutePlanningTime,
 		PermissionAdherence,
 		RemoteAccessPanels,
+		RemoteBoothWindowShutters,
 		ObjectUsage,
 		ObjectUsageDistance,
 		MobilityProfile
@@ -68,6 +69,7 @@ namespace core
 		case AgentPropertyType::ObjectUsageDistance: return { "Object usage distance", std::nullopt };
 		case AgentPropertyType::PermissionAdherence: return { "Permission adherence", "Pathing" };
 		case AgentPropertyType::RemoteAccessPanels: return { "Remote Access panels", "Pathing" };
+		case AgentPropertyType::RemoteBoothWindowShutters: return { "Remote BoothWindow shutters", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -351,6 +353,12 @@ namespace core
 		uint64_t revision{ 0 };
 		bool operator==(AgentRemoteAccessPanelsProperty const&) const = default;
 	};
+	struct AgentRemoteBoothWindowShuttersProperty
+	{
+		bool value{ true };
+		uint64_t revision{ 0 };
+		bool operator==(AgentRemoteBoothWindowShuttersProperty const&) const = default;
+	};
 
 	struct AgentMobilityProfileProperty
 	{
@@ -431,6 +439,7 @@ namespace core
 		void removeObjectUsageDistance() { mObjectUsageDistance.reset(); }
 		std::optional<AgentPermissionAdherenceProperty> mPermissionAdherence;
 		std::optional<AgentRemoteAccessPanelsProperty> mRemoteAccessPanels;
+		std::optional<AgentRemoteBoothWindowShuttersProperty> mRemoteBoothWindowShutters;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -513,6 +522,9 @@ namespace core
 		void setRemoteAccessPanels(AgentRemoteAccessPanelsProperty property)
 		{ mRemoteAccessPanels = property; }
 		void removeRemoteAccessPanels() { mRemoteAccessPanels.reset(); }
+		void setRemoteBoothWindowShutters(AgentRemoteBoothWindowShuttersProperty property)
+		{ mRemoteBoothWindowShutters = property; }
+		void removeRemoteBoothWindowShutters() { mRemoteBoothWindowShutters.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -596,6 +608,10 @@ namespace core
 		AgentRemoteAccessPanelsProperty const* getRemoteAccessPanels() const
 		{
 			return mRemoteAccessPanels ? &*mRemoteAccessPanels : nullptr;
+		}
+		AgentRemoteBoothWindowShuttersProperty const* getRemoteBoothWindowShutters() const
+		{
+			return mRemoteBoothWindowShutters ? &*mRemoteBoothWindowShutters : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

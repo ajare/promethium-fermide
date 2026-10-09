@@ -49,9 +49,9 @@ namespace
 	{
 		core::World source("Legacy", 4, 2);
 		auto yaml = serializeWorld(source);
-		auto const version = yaml.find("version: 63");
+		auto const version = yaml.find("version: 64");
 		require(version != std::string::npos, "The current World schema version was missing");
-		yaml.replace(version, std::string("version: 63").size(), "version: 9");
+		yaml.replace(version, std::string("version: 64").size(), "version: 9");
 
 		auto loaded = std::make_shared<core::World>("Loading", 1, 1);
 		auto reader = core::YamlSerializer::fromString(yaml);
@@ -184,10 +184,10 @@ namespace
 		auto unsupportedRegistry = core::AgentTagRegistry::create();
 		unsupportedRegistry->saveTo(malformedRegistryPath.string());
 		auto unsupportedYaml = readText(malformedRegistryPath);
-		auto const version = unsupportedYaml.find("version: 16");
+		auto const version = unsupportedYaml.find("version: 17");
 		require(version != std::string::npos,
 			"The registry fixture did not contain the current schema version");
-		unsupportedYaml.replace(version, std::string("version: 16").size(), "version: 17");
+		unsupportedYaml.replace(version, std::string("version: 17").size(), "version: 18");
 		writeText(malformedRegistryPath, unsupportedYaml);
 		bool unsupportedRefused{ false };
 		try

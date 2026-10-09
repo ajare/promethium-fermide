@@ -56,7 +56,7 @@ namespace
 		require(registry->getAgentTagMobilityProfile(tag)->value == profile,
 			"A ternary Mobility profile did not round-trip in memory");
 		auto const serialized = serialize(*registry);
-		require(serialized.find("version: 16") != std::string::npos
+		require(serialized.find("version: 17") != std::string::npos
 			&& serialized.find("onlyIfNoOtherOption") != std::string::npos,
 			"A ternary Mobility profile was not serialized explicitly");
 

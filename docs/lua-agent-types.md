@@ -108,6 +108,14 @@ It follows individual → tag → frozen script default precedence independently
 mode and distance. False disables only remote panels, never Arms operation or
 None's refusal. Fresh lifetime validation rejects a non-boolean even when masked
 by authored overrides; surviving instances never re-read the live Lua field.
+BoothWindow shutter commands additionally qualify through the owned back-side
+control when independently resolved `remote_booth_window_shutters` is true (#543).
+This optional instance field is an actual Lua boolean, default true, with the same
+individual → tag → frozen script precedence and lifetime validation as
+`remote_access_panels`. The two booleans are independent; false refuses remote-only
+shutter operation without an Arms fallback. Same-Sector range uses the physical
+shutter centre, not the floor-Level approach; cross-Level operation is allowed.
+Dumbwaiter-owned apertures remain under their unit's landing-button interlocks.
 Onboard Shuttle selectors and generic Interaction points remain unsupported.
 In Arms mode, `object_usage_distance` is independently frozen and observed, not
 inferred from the usage mode. It must be a concrete finite, strictly positive

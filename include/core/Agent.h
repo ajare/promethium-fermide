@@ -220,6 +220,13 @@ namespace core
 		uint64_t propertyRevision{ 0 };
 		bool individual{ false };
 	};
+	struct EffectiveAgentRemoteBoothWindowShutters
+	{
+		bool value{ true };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
 
 	struct EffectiveAgentMobilityProfile
 	{
@@ -267,6 +274,7 @@ namespace core
 		std::vector<AutomaticPoseChoice> doorCrossing;
 		ObjectUsage objectUsage{ ObjectUsage::Arms };
 		bool remoteAccessPanels{ true };
+		bool remoteBoothWindowShutters{ true };
 
 		bool supportsPose(Pose pose) const { return poses.contains(pose); }
 		std::vector<AutomaticPoseChoice> const& automaticPoses(AutomaticPoseContext context) const
@@ -415,6 +423,7 @@ namespace core
 		std::optional<float> mIndividualObjectUsageDistance;
 		std::optional<bool> mIndividualPermissionAdherence;
 		std::optional<bool> mIndividualRemoteAccessPanels;
+		std::optional<bool> mIndividualRemoteBoothWindowShutters;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -641,6 +650,8 @@ namespace core
 		{ mIndividualPermissionAdherence = value; modify(); }
 		void setIndividualRemoteAccessPanels(std::optional<bool> value)
 		{ mIndividualRemoteAccessPanels = value; modify(); }
+		void setIndividualRemoteBoothWindowShutters(std::optional<bool> value)
+		{ mIndividualRemoteBoothWindowShutters = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -801,6 +812,8 @@ namespace core
 		{ return mIndividualPermissionAdherence; }
 		std::optional<bool> const& getIndividualRemoteAccessPanels() const
 		{ return mIndividualRemoteAccessPanels; }
+		std::optional<bool> const& getIndividualRemoteBoothWindowShutters() const
+		{ return mIndividualRemoteBoothWindowShutters; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -834,6 +847,7 @@ namespace core
 		EffectiveAgentMaximumRoutePlanningTime getEffectiveMaximumRoutePlanningTime() const;
 		EffectiveAgentPermissionAdherence getEffectivePermissionAdherence() const;
 		EffectiveAgentRemoteAccessPanels getEffectiveRemoteAccessPanels() const;
+		EffectiveAgentRemoteBoothWindowShutters getEffectiveRemoteBoothWindowShutters() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		uint64_t getRouteJourneyIdentity(Vertex const* destination) const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const

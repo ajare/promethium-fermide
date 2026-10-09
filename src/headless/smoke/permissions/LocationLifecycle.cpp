@@ -154,7 +154,7 @@ namespace
 			}
 		// Version 31 predates Location requirements; the other value must stay
 		// one past the current schema so the document is refused as future.
-		for (auto version : { 31u, 64u })
+		for (auto version : { 31u, 65u })
 		{
 			auto root = YAML::Load(before); root["version"] = version; reject(root);
 		}

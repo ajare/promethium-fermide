@@ -83,7 +83,7 @@ namespace
 			"A new registry did not start both non-reused allocators at one");
 
 		auto const registryYaml = readText(registryPath);
-		require(registryYaml.find("version: 16") != std::string::npos
+		require(registryYaml.find("version: 17") != std::string::npos
 			&& registryYaml.find("uuid: " + registry->getUuid()) != std::string::npos
 			&& registryYaml.find("nextAgentTagId: 1") != std::string::npos
 			&& registryYaml.find("nextPropertyRevision: 1") != std::string::npos
@@ -94,7 +94,7 @@ namespace
 		// through the same core workflow used by the GUI.
 		world->saveTo(worldPath.string());
 		auto const worldYaml = readText(worldPath);
-		require(worldYaml.find("version: 63") != std::string::npos
+		require(worldYaml.find("version: 64") != std::string::npos
 			&& worldYaml.find("resource: station.tags.yaml") != std::string::npos
 			&& worldYaml.find("expectedUuid: " + registry->getUuid()) != std::string::npos,
 			"The World did not persist its version-10 registry reference");

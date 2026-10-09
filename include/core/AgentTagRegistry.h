@@ -83,6 +83,8 @@ namespace core
 			std::string* diagnostic) const;
 		bool remoteAccessPanelsAdditionIsValid(AgentTagId id,
 			std::string* diagnostic) const;
+		bool remoteBoothWindowShuttersAdditionIsValid(AgentTagId id,
+			std::string* diagnostic) const;
 		enum class ObjectUsagePropertyEdit { Add, Set, Remove };
 		bool editObjectUsageProperty(AgentTagId id, bool distanceProperty, ObjectUsagePropertyEdit operation,
 			ObjectUsage mode, float distance, std::string* diagnostic);
@@ -144,6 +146,8 @@ namespace core
 		AgentPermissionAdherenceProperty const* getAgentTagPermissionAdherence(
 			AgentTagId id) const;
 		AgentRemoteAccessPanelsProperty const* getAgentTagRemoteAccessPanels(
+			AgentTagId id) const;
+		AgentRemoteBoothWindowShuttersProperty const* getAgentTagRemoteBoothWindowShutters(
 			AgentTagId id) const;
 		AgentMobilityProfileProperty const* getAgentTagMobilityProfile(
 			AgentTagId id) const;
@@ -298,13 +302,19 @@ namespace core
 			std::string* diagnostic = nullptr);
 		bool addAgentTagRemoteAccessPanels(AgentTagId id,
 			std::string* diagnostic = nullptr);
+		bool addAgentTagRemoteBoothWindowShutters(AgentTagId id,
+			std::string* diagnostic = nullptr);
 		bool setAgentTagPermissionAdherence(AgentTagId id, bool value,
 			std::string* diagnostic = nullptr);
 		bool setAgentTagRemoteAccessPanels(AgentTagId id, bool value,
 			std::string* diagnostic = nullptr);
+		bool setAgentTagRemoteBoothWindowShutters(AgentTagId id, bool value,
+			std::string* diagnostic = nullptr);
 		bool removeAgentTagPermissionAdherence(AgentTagId id,
 			std::string* diagnostic = nullptr);
 		bool removeAgentTagRemoteAccessPanels(AgentTagId id,
+			std::string* diagnostic = nullptr);
+		bool removeAgentTagRemoteBoothWindowShutters(AgentTagId id,
 			std::string* diagnostic = nullptr);
 
 		bool addAgentTagMobilityProfile(AgentTagId id,

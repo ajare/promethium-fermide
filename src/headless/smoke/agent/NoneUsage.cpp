@@ -6,6 +6,8 @@
 #include "core/Lift.h"
 #include "core/LiftTransit.h"
 #include "core/AccessPanel.h"
+#include "core/Window.h"
+#include "core/Dumbwaiter.h"
 #include "core/AirlockTransit.h"
 #include "core/DoorSectorObject.h"
 #include "core/AgentTagRegistryDocument.h"
@@ -57,6 +59,97 @@ namespace
 			&& world.setAgentIndividualObjectUsageDistance(id, range), "Remote override refused");
 		world.resumeSimulation();
 	}
+	void remoteBoothWindowShutters(smoke::Context const&)
+	{
+		for (unsigned variant = 0; variant < 17; ++variant)
+		{
+			core::World world("Remote shutter geometry", 10, 3);
+			auto front = world.addRoom("Front", 0, 0, 0, 9, 2);
+			auto back = world.addRoom("Back", 1, 0, 0, 9, 2);
+			auto other = world.addRoom("Other", 1, 0, 9, 1, 2);
+			world.addSectorWalkway(back, 1, 4);
+			auto booth = std::static_pointer_cast<const core::BoothWindow>(world.addBoothWindow(0, 0, 4).object);
+			world.finishBuild();
+			auto centre = booth->getPosition() + booth->getSize() * .5f;
+			auto id = world.createAgent("Operator", variant == 4 ? front : variant == 5 ? other : back,
+				variant == 3 ? 1 : 0, variant == 5 ? 9.5f : variant >= 15 ? 1.5f : centre.x);
+			auto actor = world.lookupAgent(id).entity;
+			auto position = actor->getGlobalPosition();
+			float range = std::abs(centre.y - position.y);
+			if (variant == 1 || variant == 3) range = std::nextafter(range, std::numeric_limits<float>::infinity());
+			if (variant == 2) range = std::nextafter(range, 0.f);
+			if (variant == 5) range = 100.f;
+			if (variant == 12) range = .1f; // At the approach, outside range to the shutter centre.
+			if (variant >= 15)
+			{
+				auto distance = std::hypot(double(position.x) - centre.x, double(position.y) - centre.y);
+				range = std::nextafter(float(distance), variant == 15 ? std::numeric_limits<float>::infinity() : 0.f);
+			}
+			remote(world, id, range);
+			world.pauseSimulation();
+			if (variant == 6 || variant == 7) require(world.setAgentIndividualRemoteBoothWindowShutters(id, false), "Shutter boolean edit failed");
+			if (variant == 7) require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::Arms), "Arms edit failed");
+			if (variant == 8) require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "None edit failed");
+			if (variant == 9 || variant == 14)
+			{
+				core::MobilityProfile profile;
+				profile.set(core::TraversalKind::Buttons, variant == 9 ? core::MobilityUse::CannotUse : core::MobilityUse::OnlyIfNoOtherOption);
+				require(world.setAgentIndividualMobilityProfile(id, profile), "Mobility edit failed");
+			}
+			if (variant == 10) require(world.setAgentActive(id, false), "Deactivate failed");
+			if (variant == 11 || variant == 13)
+			{
+				auto permission = world.addAccessPermission("Shutter control");
+				require(world.setInteractionPointPermissionRequirement(booth->getPanel(), {permission}), "Permission requirement failed");
+				if (variant == 13) require(world.grantAgentAccessPermission(id, permission), "Permission grant failed");
+			}
+			// The panel and shutter flags must not influence one another.
+			require(world.setAgentIndividualRemoteAccessPanels(id, false), "Independent panel flag edit failed");
+			world.resumeSimulation();
+			auto request = world.requestInteraction(booth->getPanel(), id);
+			bool eligible = variant == 0 || variant == 1 || variant == 3 || variant == 7 || variant == 13 || variant == 14 || variant == 15;
+			if (variant == 11)
+			{
+				require(bool(request), "Permission refusal should publish an outcome");
+				world.advanceTicks(120);
+				require(simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Rejected,
+					"Missing permission rejection");
+			}
+			else
+			{
+				require(bool(request) == eligible, "Shutter eligibility mismatch " + std::to_string(variant));
+				world.advanceTick();
+				require(!booth->getTargetOpen(), "Shutter duration bypassed");
+				world.advanceTicks(120);
+			}
+			require(booth->getState() == (eligible ? core::Window::State::Open : core::Window::State::Closed)
+				&& actor->getGlobalPosition() == position, "Shutter outcome or stationary operation mismatch");
+			if (eligible)
+			{
+				require(simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Succeeded, "Missing shutter success");
+				auto close = world.requestInteraction(booth->getPanel(), id); require(bool(close), "Remote shutter Close refused");
+				world.advanceTicks(120);
+				require(booth->getState() == core::Window::State::Closed
+					&& simulation_smoke::observedInteractionResult(world, close) == core::InteractionResult::Succeeded, "Remote shutter Close failed");
+			}
+			world.pauseSimulation();
+			core::DeviceCommand command; command.type = core::DeviceCommandType::ToggleBoothWindow; command.boothWindow = booth->getDeviceId();
+			auto generic = world.createInteractionPoint("Generic shutter binding", core::SectorId{back + 1}, position, 1, 0,
+				{{command, core::InteractionBindingRequirement::Required}});
+			if (variant != 7) require(!world.requestInteraction(generic, id), "Generic point borrowed shutter remote capability");
+		}
+		// Dumbwaiter shutters remain controlled solely by the unit and landing Buttons.
+		core::World owned("Owned shutter", 10, 3);
+		auto landing = owned.addRoom("Landing", 0, 0, 0, 10, 2);
+		owned.addSectorWalkway(landing, 1, 4);
+		auto unit = owned.addDumbwaiter(1, 0, 4);
+		require(bool(unit), "Dumbwaiter fixture failed"); owned.finishBuild();
+		auto id = owned.createAgent("Operator", landing, 0, 4.5f); remote(owned, id, 100.f);
+		core::DeviceCommand command; command.type = core::DeviceCommandType::ToggleBoothWindow;
+		command.boothWindow = owned.lookupDumbwaiter(unit)->getAperture(0)->getDeviceId();
+		require(!owned.submitDeviceCommand(command), "Remote bypassed Dumbwaiter shutter ownership");
+	}
+
 	void remoteAccessPanels(smoke::Context const&)
 	{
 		using Panel = core::AccessPanel;
@@ -206,6 +299,92 @@ namespace
 			catch (std::exception const& error) { refused = true; require(std::string(error.what()).find("remote_access_panels") != std::string::npos, error.what()); }
 			require(refused != valid, "Invalid panel declaration published Agent");
 			if (valid) require(world.lookupAgent(id).entity->getEffectiveRemoteAccessPanels().value == (std::string(value) != "false"), "Script boolean/default lost");
+			else require(world.getSimulationSnapshot().agents.empty(), "Failed fresh validation not atomic");
+		}
+	}
+
+	void remoteShutterProperties(smoke::Context const&)
+	{
+		using Panel = core::Window;
+		core::World world("Panel properties", 10, 2);
+		world.addCorridor(0, 0, 0, 10, 1);
+		auto room = world.addCorridor(1, 0, 0, 10, 1);
+		auto made = world.addBoothWindow(0, 0, 4);
+		world.addSectorMarker(room, 0, 8.5f, "Panel walk goal"); world.finishBuild();
+		auto panel = std::static_pointer_cast<const core::BoothWindow>(made.object);
+		auto text = core::bundledHumanAgentType().source;
+		agent_smoke::replaceSource(text, "type_id = \"Human\"", "type_id = 'PanelsOff'");
+		agent_smoke::replaceSource(text, "object_usage = \"arms\"", "object_usage = 'remote_control', remote_booth_window_shutters = false");
+		require(world.attachAgentType("panels.agent.lua", text), "Panel script attachment failed");
+		auto id = world.createAgent("PanelsOff", "Remote", room, 0, 4.5f); remote(world, id, 2.f);
+		auto actor = world.lookupAgent(id).entity;
+		require(!actor->getEffectiveRemoteBoothWindowShutters().value && !actor->getIndividualRemoteBoothWindowShutters(), "Frozen false default lost");
+		world.pauseSimulation();
+		auto registry = core::AgentTagRegistry::create(); world.attachAgentTagRegistry("panels.tags.yaml", registry);
+		auto tag = registry->addAgentTag("panels"), conflict = registry->addAgentTag("conflict");
+		require(registry->addAgentTagRemoteBoothWindowShutters(tag) && world.assignAgentTag(id, tag), "Inherited true failed");
+		require(actor->getEffectiveRemoteBoothWindowShutters().value && actor->getEffectiveRemoteBoothWindowShutters().sourceTag == tag, "Tag precedence lost");
+		require(world.setAgentIndividualRemoteBoothWindowShutters(id, false) && !actor->getEffectiveRemoteBoothWindowShutters().value
+			&& actor->getEffectiveRemoteBoothWindowShutters().individual, "Individual precedence lost");
+		require(world.assignAgentTag(id, conflict), "Empty tag assignment failed");
+		auto revision = registry->getNextPropertyRevision(); registry->markUnmodified(); world.markSaved();
+		require(!registry->addAgentTagRemoteBoothWindowShutters(conflict) && registry->getNextPropertyRevision() == revision
+			&& !registry->isModified() && !world.isModified(), "Override hid duplicate inherited source");
+		require(world.setAgentIndividualRemoteBoothWindowShutters(id, std::nullopt), "Override removal failed");
+		world.resumeSimulation();
+		require(!world.setAgentIndividualRemoteBoothWindowShutters(id, false) && !registry->setAgentTagRemoteBoothWindowShutters(tag, false), "Running authoring accepted");
+		auto request = world.requestInteraction(panel->getPanel(), id); require(bool(request), "Inherited operation refused");
+		world.pauseSimulation(); require(registry->setAgentTagRemoteBoothWindowShutters(tag, false), "Paused tag edit failed");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled
+			&& simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Cancelled, "Paused tag edit did not publish cancellation");
+		world.resumeSimulation(); world.advanceTicks(120); require(panel->getState() == Panel::State::Closed, "Cancelled panel opened");
+		world.pauseSimulation(); require(world.setAgentIndividualRemoteBoothWindowShutters(id, true), "Individual true failed"); world.resumeSimulation();
+		request = world.requestInteraction(panel->getPanel(), id); require(bool(request), "Individual operation refused");
+		world.pauseSimulation(); require(world.setAgentIndividualRemoteBoothWindowShutters(id, std::nullopt), "Removal failed");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Removing override did not cancel");
+		require(registry->removeAgentTagRemoteBoothWindowShutters(tag) && !actor->getEffectiveRemoteBoothWindowShutters().value
+			&& !actor->getEffectiveRemoteBoothWindowShutters().sourceTag, "Removal did not reveal frozen false");
+		require(world.removeAgentTag(id, conflict) && registry->addAgentTagRemoteBoothWindowShutters(conflict)
+			&& registry->addAgentTagRemoteBoothWindowShutters(tag), "Conflicting definitions setup failed");
+		world.markSaved();
+		require(!world.assignAgentTag(id, conflict) && !world.isModified()
+			&& !actor->getAgentTagIds().contains(conflict), "Duplicate assignment mutated state");
+		world.resumeSimulation(); request = world.requestInteraction(panel->getPanel(), id);
+		require(bool(request), "Restored inherited request failed"); world.pauseSimulation();
+		require(world.removeAgentTag(id, tag)
+			&& world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Removing tag did not revalidate");
+		require(world.setAgentIndividualRemoteBoothWindowShutters(id, true), "Range setup failed"); world.resumeSimulation();
+		request = world.requestInteraction(panel->getPanel(), id); require(bool(request), "Range request failed");
+		world.pauseSimulation(); require(world.setAgentIndividualObjectUsageDistance(id, .01f), "Range edit failed");
+		require(world.lookupInteractionRequest(request).entity->getResult() == core::InteractionResult::Cancelled, "Range edit did not cancel panel work");
+		world.resumeSimulation(); world.advanceTicks(120); require(panel->getState() == Panel::State::Closed, "Cancelled range work executed");
+		world.pauseSimulation(); require(world.setAgentIndividualObjectUsageDistance(id, 100.f), "Walking range edit failed");
+		quickPlanning(world, id); require(world.moveAgentToNamedMarker(id, "Panel walk goal").accepted(), "Walking intent refused");
+		world.advanceTicks(15); auto position = actor->getGlobalPosition();
+		require(position.x > 4.5f, "Agent was not walking");
+		request = world.requestInteraction(panel->getPanel(), id); require(bool(request), "Walking remote panel request refused");
+		world.advanceTick(); require(actor->getGlobalPosition() == position && !panel->getTargetOpen(),
+			"Walking request required physical approach or bypassed scheduling");
+		world.advanceTick(); require(panel->getState() == Panel::State::Opening, "Walking shutter did not activate");
+		world.advanceTicks(120); require(panel->getState() == Panel::State::Open
+			&& simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Succeeded, "Walking operation failed");
+	}
+
+	void remoteShutterDeclarations(smoke::Context const&)
+	{
+		for (auto const* value : {"true", "false", "nil", "0", "'true'", "{}"})
+		{
+			core::World world("Panel declaration", 6, 2); auto room = world.addCorridor(0, 0, 6); world.finishBuild();
+			auto text = core::bundledHumanAgentType().source;
+			agent_smoke::replaceSource(text, "type_id = \"Human\"", "type_id = 'PanelDeclaration'");
+			agent_smoke::replaceSource(text, "object_usage = \"arms\",", std::string("object_usage = 'arms', remote_booth_window_shutters = ") + value + ",");
+			require(world.attachAgentType("panel-declaration.agent.lua", text), "Attach declaration failed");
+			bool valid = std::string(value) == "true" || std::string(value) == "false" || std::string(value) == "nil";
+			core::AgentId id; bool refused = false;
+			try { id = world.createAgent("PanelDeclaration", "Operator", room, 0, 1.f); }
+			catch (std::exception const& error) { refused = true; require(std::string(error.what()).find("remote_booth_window_shutters") != std::string::npos, error.what()); }
+			require(refused != valid, "Invalid panel declaration published Agent");
+			if (valid) require(world.lookupAgent(id).entity->getEffectiveRemoteBoothWindowShutters().value == (std::string(value) != "false"), "Script boolean/default lost");
 			else require(world.getSimulationSnapshot().agents.empty(), "Failed fresh validation not atomic");
 		}
 	}
@@ -1299,6 +1478,9 @@ void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 	checks.push_back({"agentTypesRemoteOnboardJourneys", remoteOnboardJourneys});
 	checks.push_back({"agentTypesRemoteOrdinaryDoors", remoteOrdinaryDoors});
 	checks.push_back({"agentTypesRemoteDoorGates", remoteDoorGates});
+	checks.push_back({"agentTypesRemoteBoothWindowShutters", remoteBoothWindowShutters});
+	checks.push_back({"agentTypesRemoteShutterProperties", remoteShutterProperties});
+	checks.push_back({"agentTypesRemoteShutterDeclarations", remoteShutterDeclarations});
 	checks.push_back({"agentTypesRemoteAccessPanels", remoteAccessPanels});
 	checks.push_back({"agentTypesRemotePanelProperties", remotePanelProperties});
 	checks.push_back({"agentTypesRemotePanelDeclarations", remotePanelDeclarations});

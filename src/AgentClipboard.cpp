@@ -682,6 +682,7 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualObjectUsageDistance = lookup.entity->getIndividualObjectUsageDistance();
 	payload.individualPermissionAdherence = lookup.entity->getIndividualPermissionAdherence();
 	payload.individualRemoteAccessPanels = lookup.entity->getIndividualRemoteAccessPanels();
+	payload.individualRemoteBoothWindowShutters = lookup.entity->getIndividualRemoteBoothWindowShutters();
 	if (!payload.agentTags.empty())
 	{
 		if (!world.hasAgentTagRegistryReference())
@@ -825,6 +826,9 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualRemoteAccessPanels)
 		output << YAML::Key << "remoteAccessPanels" << YAML::Value
 			<< *payload.individualRemoteAccessPanels;
+	if (payload.individualRemoteBoothWindowShutters)
+		output << YAML::Key << "remoteBoothWindowShutters" << YAML::Value
+			<< *payload.individualRemoteBoothWindowShutters;
 	if (payload.behaviour)
 	{
 		output << YAML::Key << "behaviour" << YAML::Value << YAML::BeginMap
@@ -1216,6 +1220,15 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		catch (exception const&)
 		{
 			diagnostic = "Clipboard Remote Access panels must be a boolean";
+			return false;
+		}
+	}
+	if (object["remoteBoothWindowShutters"])
+	{
+		try { payload.individualRemoteBoothWindowShutters = object["remoteBoothWindowShutters"].as<bool>(); }
+		catch (exception const&)
+		{
+			diagnostic = "Clipboard Remote BoothWindow shutters must be a boolean";
 			return false;
 		}
 	}
@@ -1655,7 +1668,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		|| payload.individualWaitingAversion || payload.individualCrowdAversion
 		|| payload.individualRiskAversion || payload.individualRouteFamiliarity
 		|| payload.individualRoutePersistence || payload.individualMinimumRoutePlanningTime
-		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence || payload.individualRemoteAccessPanels
+		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence || payload.individualRemoteAccessPanels || payload.individualRemoteBoothWindowShutters
 		|| payload.individualObjectUsage || payload.individualObjectUsageDistance)
 		&& !world->isSimulationPaused())
 	{
@@ -1915,6 +1928,17 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 				payload.individualRemoteAccessPanels, &propertyDiagnostic))
 			{
 				diagnostic = "The pasted Agent's Remote Access panels could not be restored: "
+					+ propertyDiagnostic + rollBack();
+				return false;
+			}
+		}
+		if (payload.individualRemoteBoothWindowShutters)
+		{
+			string propertyDiagnostic;
+			if (!world->setAgentIndividualRemoteBoothWindowShutters(agentId,
+				payload.individualRemoteBoothWindowShutters, &propertyDiagnostic))
+			{
+				diagnostic = "The pasted Agent's Remote BoothWindow shutters could not be restored: "
 					+ propertyDiagnostic + rollBack();
 				return false;
 			}
