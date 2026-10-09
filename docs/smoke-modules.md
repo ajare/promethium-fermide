@@ -593,7 +593,7 @@ Route-loss API versions have explicit selectors. The editor tier is unchanged.
 | `RuntimeAuthorization.cpp` | 2 | Transient Permission grants and renamed-name diagnostics |
 
 ```sh
-build-linux/bin/x64/Release/pf-smoke-behaviours --check routeLossAndTopologyLifecycleV2
+build-linux/bin/x64/Release/pf-smoke-behaviours --check routeLossAndTopologyLifecycleReplay
 build-linux/bin/x64/Release/pf-smoke-behaviours --check steadyStateBoundariesReuseSharedSources
 ```
 

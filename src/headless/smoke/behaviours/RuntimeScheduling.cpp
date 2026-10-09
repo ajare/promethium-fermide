@@ -28,7 +28,7 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "timers.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -59,7 +59,7 @@ return {
         error("initial semantic movement state is incorrect")
       end
       for _, prohibited in ipairs({ "path", "vertex", "traversal_resource",
-          "request", "permit", "queue", "snapshot", "userdata" }) do
+        "request", "permit", "queue", "snapshot", "userdata" }) do
         if state[prohibited] ~= nil then error("exposed " .. prohibited) end
       end
       if pcall(function() state.name = "changed" end)
@@ -68,15 +68,13 @@ return {
         error("semantic Agent state was mutable")
       end
     end
-    return {
-      on_start = function(context)
-        check_state(context, false)
-        if configuration.overflow then
-          context.set_timer("one", 1)
-          context.set_timer("two", 1)
-          context.set_timer("three", 1)
-          return
-        end
+    return function(context)
+      check_state(context, false)
+      if configuration.overflow then
+        context.set_timer("one", 1)
+        context.set_timer("two", 1)
+        context.set_timer("three", 1)
+      else
         context.set_timer("cancelled", 1)
         local cancelled = context.cancel_timer("cancelled")
         local replaced = context.set_timer("z", 3)
@@ -88,27 +86,33 @@ return {
             or cancelled.status ~= "accepted" then
           error("timer command result was incorrect")
         end
-      end,
-      on_timer = function(name, context)
-        fired[#fired + 1] = name .. ":" .. context.tick
-        if #fired == 1 then
-          if fired[1] ~= "a:1" then error("first timer was not lexical a:1") end
-        elseif #fired == 2 then
-          if fired[2] ~= "z:1" then error("replacement or lexical order failed") end
-          context.set_timer("finish", 1)
-        elseif #fired == 3 then
-          if fired[3] ~= "finish:2" then error("one-tick timer did not fire after tick N+1") end
-          local moved = context.move_to(configuration.destination)
-          if moved.status ~= "accepted" then error(moved.status) end
-          context.set_timer("inspect", 1)
-        elseif #fired == 4 then
-          if fired[4] ~= "inspect:3" then error("timer callback sequence changed") end
-          check_state(context, true)
-        else
-          error("one-shot timer fired more than once")
+      end
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          fired[#fired + 1] = name .. ":" .. event.tick
+          if #fired == 1 then
+            if fired[1] ~= "a:1" then error("first timer was not lexical a:1") end
+          elseif #fired == 2 then
+            if fired[2] ~= "z:1" then error("replacement or lexical order failed") end
+            context.set_timer("finish", 1)
+          elseif #fired == 3 then
+            if fired[3] ~= "finish:2" then error("one-tick timer did not fire after tick N+1") end
+            local moved = context.move_to(configuration.destination)
+            if moved.status ~= "accepted" then error(moved.status) end
+            context.set_timer("inspect", 1)
+          elseif #fired == 4 then
+            if fired[4] ~= "inspect:3" then error("timer callback sequence changed") end
+            -- The retained context is an immutable startup snapshot.
+            check_state(context, false)
+            if event.tick <= context.tick then error("expiry did not advance time") end
+          else
+            error("one-shot timer fired more than once")
+          end
         end
       end
-    }
+    end
   end
 }
 )lua");
@@ -118,24 +122,26 @@ return {
 			{ "overflow", core::AgentBehaviourSchemaType::Boolean }
 		});
 		writeRuntimeText(package / "timer-order.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function()
     local trace = ""
-    return {
-      on_start = function(context)
-        context.set_timer("b", 1)
-        context.set_timer("a", 1)
-      end,
-      on_timer = function(name)
-        trace = trace .. name
-        if name == "b" then
-          if trace ~= "ab" then error("nonlexical:" .. trace) end
-          error("ordered:" .. trace)
+    return function(context)
+      context.set_timer("b", 1)
+      context.set_timer("a", 1)
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          trace = trace .. name
+          if name == "b" then
+            if trace ~= "ab" then error("nonlexical:" .. trace) end
+            error("ordered:" .. trace)
+          end
         end
       end
-    }
+    end
   end
 }
 )lua");
@@ -223,15 +229,17 @@ return {
 			consume();
 		}
 		auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
-		require(diagnostics.size() == 3 && diagnostics[0].agent == overflow
-			&& diagnostics[0].callback == "on_start"
+		require(diagnostics.size() == 6
+			&& diagnostics[1].callback == "close" && diagnostics[3].callback == "close"
+			&& diagnostics[5].callback == "close" && diagnostics[0].agent == overflow
+			&& diagnostics[0].callback == "resume"
 			&& diagnostics[0].diagnostic.find("timer limit of 2") != std::string::npos
-			&& diagnostics[1].agent == orderFirst
-			&& diagnostics[1].callback == "on_timer"
-			&& diagnostics[1].diagnostic.find("ordered:ab") != std::string::npos
-			&& diagnostics[2].agent == orderSecond
-			&& diagnostics[2].callback == "on_timer"
-			&& diagnostics[2].diagnostic.find("ordered:ab") != std::string::npos,
+			&& diagnostics[2].agent == orderFirst
+			&& diagnostics[2].callback == "resume"
+			&& diagnostics[2].diagnostic.find("ordered:ab") != std::string::npos
+			&& diagnostics[4].agent == orderSecond
+			&& diagnostics[4].callback == "resume"
+			&& diagnostics[4].diagnostic.find("ordered:ab") != std::string::npos,
 			"Timer names were not lexical, callbacks were not in Agent-ID order, or the timer limit had the wrong scope");
 		require(!world.agentBehaviourOwnsMovement(overflow)
 			&& world.agentBehaviourOwnsMovement(first)
@@ -279,7 +287,7 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "schedule.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
@@ -289,30 +297,32 @@ return {
       local result = context.move_to(configuration.schedule[index].destination)
       if not result.accepted then error(result.status) end
     end
-    return {
-      on_start = function(context)
-        local integer = context.random_integer(-7, 11)
-        local number = context.random_number()
-        if type(integer) ~= "number" or integer < -7 or integer > 11
-            or type(number) ~= "number" or number < 0 or number >= 1 then
-          error("deterministic random operation returned an invalid range")
-        end
-        move(context)
-      end,
-      on_event = function(event, context)
-        if event.type ~= "destination_reached" then return end
-        reached = reached + 1
-        local jitter = context.random_integer(0, 3)
-        local sample = context.random_number()
-        if sample < 0 or sample >= 1 then error("invalid random number") end
-        context.set_timer("advance", configuration.schedule[index].duration + jitter)
-      end,
-      on_timer = function(name, context)
-        if name ~= "advance" then error("unexpected schedule timer") end
-        index = index == 1 and 2 or 1
-        move(context)
+    return function(context)
+      local integer = context.random_integer(-7, 11)
+      local number = context.random_number()
+      if type(integer) ~= "number" or integer < -7 or integer > 11
+          or type(number) ~= "number" or number < 0 or number >= 1 then
+        error("deterministic random operation returned an invalid range")
       end
-    }
+      move(context)
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          if name ~= "advance" then error("unexpected schedule timer") end
+          index = index == 1 and 2 or 1
+          move(context)
+        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+          if event.type ~= "destination_reached" then goto next_event end
+          reached = reached + 1
+          local jitter = context.random_integer(0, 3)
+          local sample = context.random_number()
+          if sample < 0 or sample >= 1 then error("invalid random number") end
+          context.set_timer("advance", configuration.schedule[index].duration + jitter)
+        end
+        ::next_event::
+      end
+    end
   end
 }
 )lua");

@@ -33,71 +33,86 @@ namespace
 			return registry->addAgentBehaviour(name, file, {});
 		};
 		auto const callbackStorm = add("Callback storm", "callbacks.lua", R"lua(
-return { api_version = 1, factory = function()
-  return {
-    on_start = function(context)
+return { api_version = 3, factory = function()
+    return function(context)
       for i = 1, 4 do context.set_timer(string.format("%02d", i), 1) end
-    end,
-    on_timer = function() end
-  }
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+        end
+      end
+    end
 end }
 )lua");
 		auto const commandStorm = add("Command storm", "commands.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    for i = 1, 33 do context.set_timer("timer-" .. i, 10) end
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      for i = 1, 33 do context.set_timer("timer-" .. i, 10) end
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const safe = add("Safe", "safe-storm.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context) context.set_timer("safe", 20) end }
+return { api_version = 3, factory = function()
+    return function(context)
+      context.set_timer("safe", 20)
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const loadFailure = add("Load failure", "load-storm.lua", R"lua(
 local total = 0
 for i = 1, 5000 do total = total + i end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		auto const logging = add("Logging", "logging.lua", R"lua(
-return { api_version = 1, factory = function()
-  return {
-    on_start = function(context)
+return { api_version = 3, factory = function()
+    return function(context)
       for i = 1, 105 do context.log("message-" .. i, "info") end
       context.set_timer("next-window", 600)
-    end,
-    on_timer = function(_, context) context.log("new-window", "warning") end
-  }
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          context.log("new-window", "warning")
+        end
+      end
+    end
 end }
 )lua");
 		auto const oversizedLogging = add("Oversized logging", "oversized-logging.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    local message = string.rep("x", 1024 * 1024)
-    for i = 1, 300 do context.log(message) end
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      local message = string.rep("x", 1024 * 1024)
+      for i = 1, 300 do context.log(message) end
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const exactLogging = add("Exact logging", "exact-logging.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    for i = 1, 100 do context.log("line-" .. i) end
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      for i = 1, 100 do context.log("line-" .. i) end
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const failingLogging = add("Failing logging", "failing-logging.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    context.log("before-failure")
-    error("logged then failed")
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      context.log("before-failure")
+      error("logged then failed")
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const multibyteLogging = add("Multibyte logging", "multibyte-logging.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    context.log(string.rep("\xc3\xa9", 50))
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      context.log(string.rep("\xc3\xa9", 50))
+      while true do wait() end
+    end
 end }
 )lua");
 
@@ -126,7 +141,7 @@ end }
 				&& diagnostics[0].behaviour == callbackStorm
 				&& diagnostics[0].agentName == "Storm"
 				&& diagnostics[0].behaviourName == "Callback storm"
-				&& diagnostics[0].callback == "on_timer" && diagnostics[0].tick == 1
+				&& diagnostics[0].callback == "resume" && diagnostics[0].tick == 1
 				&& diagnostics[0].diagnostic.find("limit of 3") != std::string::npos
 				&& !diagnostics[0].traceback.empty()
 				&& !world.agentBehaviourOwnsMovement(storm)
@@ -164,8 +179,9 @@ end }
 			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
 			auto const commandDetail = diagnostics.empty() ? std::string("no diagnostic")
 				: diagnostics[0].diagnostic;
-			require(diagnostics.size() == 1 && diagnostics[0].agent == storm
-				&& diagnostics[0].callback == "on_start"
+			require(diagnostics.size() == 2 && diagnostics[1].callback == "close"
+				&& diagnostics[0].agent == storm
+				&& diagnostics[0].callback == "resume"
 				&& diagnostics[0].diagnostic.find("limit of 32") != std::string::npos
 				&& !world.agentBehaviourOwnsMovement(storm)
 				&& world.agentBehaviourOwnsMovement(unaffected),
@@ -302,8 +318,8 @@ end }
 				"A failed callback did not stop the run before its tick");
 			auto messages = core::consumeLogMessages();
 			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
-			require(messages.empty() && diagnostics.size() == 1
-				&& diagnostics[0].callback == "on_start"
+			require(messages.empty() && diagnostics.size() == 2 && diagnostics[1].callback == "close"
+				&& diagnostics[0].callback == "resume"
 				&& diagnostics[0].stage == core::AgentBehaviourRuntimeStage::Callback,
 				"Logs from a failed callback were published or the failure was not diagnosed");
 			digest << "faillogs:" << messages.size() << ':' << diagnostics.size() << '|';

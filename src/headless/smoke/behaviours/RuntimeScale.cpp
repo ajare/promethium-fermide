@@ -34,13 +34,13 @@ namespace
 		writeRuntimeText(package / "bulk-helper.lua",
 			"--[[" + comment + "]]\nreturn { value = 7 }\n");
 		writeRuntimeText(package / "trivial.lua",
-			"return { api_version = 1, factory = function() return {} end }\n");
+			"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n");
 		writeRuntimeText(package / "bulky.lua",
 			"--[[" + comment + "]]\n"
-			"local host = require(\"promethium.v1\")\n"
+			"local host = require(\"promethium.v3\")\n"
 			"local helper = require(\"helpers.bulk\")\n"
 			"if helper.value ~= 7 then error(\"helper missing\") end\n"
-			"return { api_version = host.api_version, factory = function() return {} end }\n");
+			"return { api_version = host.api_version, factory = function() return function(context) while true do wait() end end end }\n");
 		writeRuntimeText(manifest, ""
 			"version: 1\n"
 			"uuid: 123e4567-e89b-42d3-a456-426614174189\n"

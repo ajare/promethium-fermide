@@ -191,7 +191,7 @@ namespace
 		auto registry = core::createAndAttachAgentBehaviourRegistry(*world, worldPath);
 		auto package = core::defaultAgentBehaviourRegistryPackagePath(worldPath);
 		writeFile(package / "modules" / "schedule.lua",
-			"return { api_version = 1, factory = function(configuration) return {} end }\n");
+			"return { api_version = 3, factory = function(configuration) return function(context) while true do wait() end end end }\n");
 		auto behaviour = registry->addAgentBehaviour("Schedule",
 			"modules/schedule.lua", { { "destination", core::AgentBehaviourSchemaType::Marker } });
 		world->pauseSimulation();

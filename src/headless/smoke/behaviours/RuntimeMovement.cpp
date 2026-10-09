@@ -90,7 +90,7 @@ namespace
 		}
 		require(arrivals[0] >= 4 && arrivals[1] >= 4
 			&& world.getAgentBehaviourRuntimeDiagnostics().empty(),
-			"Bundled v2 workflows did not complete repeated trips");
+			"Bundled coroutine workflows did not complete repeated trips");
 	}
 
 	void scriptedActionOutcomes(smoke::Context const& context, bool scriptFailure = false)
@@ -101,52 +101,54 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "actions.lua", R"lua(
-return {api_version=2, factory=function(configuration)
-  local stage = 0
-  local sequence = 0
-  return {
-    on_start=function(context)
+return {api_version = 3, factory=function(configuration)
+    local stage = 0
+    local sequence = 0
+    return function(context)
       assert(context.move_to(configuration.first, 'missing').status == 'unavailable_action')
       context.set_timer('start', 1)
-    end,
-    on_timer=function(name, context)
-      assert(context.move_to(configuration.first, configuration.action).accepted)
-    end,
-    on_event=function(event, context)
-      if event.type ~= 'destination_reached' and event.type ~= 'action_failed' then return end
-      assert(event.sequence > sequence and event.destination ~= nil)
-      sequence = event.sequence
-      assert(not pcall(function() event.action='idle' end))
-      if stage == 0 then
-        assert(event.type == 'destination_reached' and event.result == 'succeeded')
-        assert(event.destination == configuration.first and event.action == configuration.action)
-        assert(context.move_to(configuration.second, configuration.action).status == 'unavailable_action')
-        context.set_timer('next', 1)
-        stage = 1
-      elseif stage == 1 then
-        -- No autonomous Idle scheduling: this request comes only from this callback.
-        assert(event.action == configuration.action)
-        assert(context.move_to(configuration.first, configuration.refusal).accepted)
-        stage = 2
-      elseif stage == 2 then
-        assert(event.type == 'action_failed' and event.result == 'failed')
-        assert(event.action == configuration.refusal and event.reason == configuration.failure_reason)
-        assert(#event.diagnostic > 0)
-        assert(event.script_failure == (event.reason == 'refused' and 'none' or 'lua_error'))
-        assert(context.move_to(configuration.second).accepted)
-        stage = 3
-      elseif stage == 3 then
-        assert(event.destination == configuration.second)
-        assert(event.action == 'idle' and event.result == 'succeeded')
-        assert(context.move_to(configuration.first, configuration.action).accepted)
-        stage = 4
-      else
-        assert(stage == 4 and event.action == configuration.action)
-        context.log('completed action chain')
-        stage = 5
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          assert(context.move_to(configuration.first, configuration.action).accepted)
+        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+          if event.type ~= 'destination_reached' and event.type ~= 'action_failed' then goto next_event end
+          assert(event.sequence > sequence and event.destination ~= nil)
+          sequence = event.sequence
+          assert(not pcall(function() event.action='idle' end))
+          if stage == 0 then
+            assert(event.type == 'destination_reached' and event.result == 'succeeded')
+            assert(event.destination == configuration.first and event.action == configuration.action)
+            assert(context.move_to(configuration.second, configuration.action).status == 'unavailable_action')
+            context.set_timer('next', 1)
+            stage = 1
+          elseif stage == 1 then
+            -- No autonomous Idle scheduling: this request comes only from this callback.
+            assert(event.action == configuration.action)
+            assert(context.move_to(configuration.first, configuration.refusal).accepted)
+            stage = 2
+          elseif stage == 2 then
+            assert(event.type == 'action_failed' and event.result == 'failed')
+            assert(event.action == configuration.refusal and event.reason == configuration.failure_reason)
+            assert(#event.diagnostic > 0)
+            assert(event.script_failure == (event.reason == 'refused' and 'none' or 'lua_error'))
+            assert(context.move_to(configuration.second).accepted)
+            stage = 3
+          elseif stage == 3 then
+            assert(event.destination == configuration.second)
+            assert(event.action == 'idle' and event.result == 'succeeded')
+            assert(context.move_to(configuration.first, configuration.action).accepted)
+            stage = 4
+          else
+            assert(stage == 4 and event.action == configuration.action)
+            context.log('completed action chain')
+            stage = 5
+          end
+        end
+        ::next_event::
       end
     end
-  }
 end}
 )lua");
 		auto behaviour = registry->addAgentBehaviour("Action chain", "actions.lua", {
@@ -211,39 +213,40 @@ end}
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "choose.lua", R"lua(
-return {api_version=2, factory=function(configuration)
-  local failed, completed = false, false
-  local function choose(context)
-    assert(not failed)
-    failed = true
-    assert(context.move_to(configuration.alternative, 'use-furniture').accepted)
-  end
-  return {
-    on_start=function(context)
+return {api_version = 3, factory=function(configuration)
+    local failed, completed = false, false
+    local function choose(context)
+      assert(not failed)
+      failed = true
+      assert(context.move_to(configuration.alternative, 'use-furniture').accepted)
+    end
+    return function(context)
       assert(not context.move_to(configuration.occupied, 'use-furniture').accepted)
       context.set_timer('alternative', 1)
-    end,
-    on_timer=function(name, context)
-      assert(name == 'alternative')
-      choose(context)
-    end,
-    on_route_lost=function(destination, reason, context, outcome)
-      assert(destination == configuration.occupied and outcome.result == 'failed')
-      assert(outcome.action == 'use-furniture')
-      choose(context)
-    end,
-    on_event=function(event, context)
-      if event.type == 'action_failed' then
-        assert(event.destination == configuration.occupied and event.action == 'use-furniture')
-        assert(event.result == 'failed' and event.script_failure == 'none')
-        choose(context)
-      elseif event.type == 'destination_reached' then
-        assert(failed and not completed and event.destination == configuration.alternative)
-        assert(event.result == 'succeeded' and event.action == 'use-furniture')
-        completed = true
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          assert(name == 'alternative')
+          choose(context)
+        elseif event.type == "route_lost" then
+          local destination, reason, outcome = event.destination, event.reason, event
+          assert(destination == configuration.occupied and outcome.result == 'failed')
+          assert(outcome.action == 'use-furniture')
+          choose(context)
+        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+          if event.type == 'action_failed' then
+            assert(event.destination == configuration.occupied and event.action == 'use-furniture')
+            assert(event.result == 'failed' and event.script_failure == 'none')
+            choose(context)
+          elseif event.type == 'destination_reached' then
+            assert(failed and not completed and event.destination == configuration.alternative)
+            assert(event.result == 'succeeded' and event.action == 'use-furniture')
+            completed = true
+          end
+        end
       end
     end
-  }
 end}
 )lua");
 		auto behaviour = registry->addAgentBehaviour("Choose another seat", "choose.lua", {
@@ -316,29 +319,31 @@ end}
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "cancel.lua", R"lua(
-return {api_version=2, factory=function(configuration)
-  return {
-    on_start=function(context)
+return {api_version = 3, factory=function(configuration)
+    return function(context)
       assert(context.move_to(configuration.destination, configuration.action).accepted)
       if configuration.reason == 'explicit' or configuration.reason == 'superseded' then
         context.set_timer('cancel', 1)
       end
-    end,
-    on_timer=function(name, context)
-      if configuration.reason == 'explicit' then
-        assert(context.cancel_movement().accepted)
-      else
-        -- Same Marker, different Action is a replacement, not a NoOp.
-        assert(context.move_to(configuration.destination).status == 'superseded')
+      while true do
+        local event = wait()
+        if event.type == "timer_expired" then
+          local name = event.name
+          if configuration.reason == 'explicit' then
+            assert(context.cancel_movement().accepted)
+          else
+            -- Same Marker, different Action is a replacement, not a NoOp.
+            assert(context.move_to(configuration.destination).status == 'superseded')
+          end
+        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+          if event.type ~= 'movement_cancelled' or event.action == 'idle' then goto next_event end
+          assert(event.destination ~= nil and event.action == configuration.action)
+          assert(event.result == 'cancelled' and event.reason == configuration.reason)
+          assert(context.move_to(configuration.fallback).accepted)
+        end
+        ::next_event::
       end
-    end,
-    on_event=function(event, context)
-      if event.type ~= 'movement_cancelled' or event.action == 'idle' then return end
-      assert(event.destination ~= nil and event.action == configuration.action)
-      assert(event.result == 'cancelled' and event.reason == configuration.reason)
-      assert(context.move_to(configuration.fallback).accepted)
     end
-  }
 end}
 )lua");
 		auto behaviour = registry->addAgentBehaviour("Cancellation", "cancel.lua", {
@@ -404,49 +409,50 @@ end}
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		std::string const source = R"lua(
-assert(require("promethium.v1").api_version == 1)
-assert(require("promethium.v2").api_version == 2)
-return {
-  api_version = version,
-  factory = function(configuration)
-    local cancellations = 0
-    return {
-      on_start = function(context)
-        assert(context.move_to(configuration.first).status == "accepted")
-        context.set_timer("duplicate", 1)
-      end,
-      on_timer = function(name, context)
-        assert(context.agent.movement_state == (version == 1 and "idle" or "route_planning"))
-        assert(context.agent.route_planning_remaining_ticks == nil)
-        assert(context.agent.route_planning_total_ticks == nil)
-        assert(context.agent.random_state == nil and context.random_state == nil)
-        if name == "duplicate" then
-          local duplicate = context.move_to(configuration.first)
-          assert(duplicate.accepted and duplicate.status == "no_op")
-          context.set_timer("replace", 1)
-        elseif name == "replace" then
-          local replacement = context.move_to(configuration.second)
-          assert(replacement.accepted == (version == 2))
-          assert(replacement.status == (version == 2 and "superseded" or "agent_busy"))
-          context.set_timer("cancel", 2)
-        else
-          assert(context.cancel_movement().accepted)
-        end
-      end,
-      on_event = function(event, context)
-        if event.type == "movement_cancelled" then
+local host = require("promethium.v3")
+assert(host.api_version == 3)
+return { api_version = host.api_version, factory = function(configuration)
+    return function(context)
+      local cancellations = 0
+      local function next_timer(name)
+        while true do
+          local event = wait()
+          if event.type == "timer_expired" then
+            assert(event.name == name)
+            return
+          end
+          assert(event.type == "movement_cancelled")
           cancellations = cancellations + 1
-          assert(event.reason == (version == 2 and cancellations == 1 and "superseded" or "explicit"))
-          assert(cancellations <= (version == 2 and 2 or 1))
+          assert(event.reason == (cancellations == 1 and "superseded" or "explicit"))
+          assert(cancellations <= 2)
         end
       end
-    }
-  end
-}
+      assert(context.agent.movement_state == "idle") -- immutable startup snapshot
+      assert(context.agent.route_planning_remaining_ticks == nil)
+      assert(context.agent.route_planning_total_ticks == nil)
+      assert(context.agent.random_state == nil and context.random_state == nil)
+      assert(context.move_to(configuration.first).status == "accepted")
+      context.set_timer("duplicate", 1)
+      next_timer("duplicate")
+      local duplicate = context.move_to(configuration.first)
+      assert(duplicate.accepted and duplicate.status == "no_op")
+      context.set_timer("replace", 1)
+      next_timer("replace")
+      local replacement = context.move_to(configuration.second)
+      assert(replacement.accepted and replacement.status == "superseded")
+      context.set_timer("cancel", 2)
+      next_timer("cancel")
+      assert(cancellations == 1)
+      assert(context.cancel_movement().accepted)
+      local cancelled = wait()
+      assert(cancelled.type == "movement_cancelled" and cancelled.reason == "explicit")
+      while true do wait() end
+    end
+end }
 )lua";
-		writeRuntimeText(package / "planning.lua", "local version = 2\n" + source);
-		writeRuntimeText(package / "legacy.lua", "local version = 1\n" + source);
-		auto legacy = registry->addAgentBehaviour("Legacy", "legacy.lua", {
+		writeRuntimeText(package / "planning.lua", source);
+		writeRuntimeText(package / "second.lua", source);
+		auto second = registry->addAgentBehaviour("Second", "second.lua", {
 			{ "first", core::AgentBehaviourSchemaType::Marker },
 			{ "second", core::AgentBehaviourSchemaType::Marker }
 		});
@@ -460,7 +466,7 @@ return {
 		world.addSectorMarker(room, 0, 6.5f, "Second");
 		world.finishBuild();
 		auto id = world.createAgent("Planner", room, 0, 1.5f);
-		auto legacyId = world.createAgent("Legacy planner", room, 0, 2.5f);
+		auto secondId = world.createAgent("Second planner", room, 0, 2.5f);
 		auto markers = world.getMarkerIds();
 		world.pauseSimulation();
 		world.attachAgentBehaviourRegistry("planning.behaviours", registry);
@@ -468,10 +474,10 @@ return {
 			registry->lookupAgentBehaviour(behaviour)->getRevision(), {
 				{ "first", markers[0] }, { "second", markers[1] }
 			}), "Could not assign planning behaviour");
-		require(world.setAgentBehaviourAssignment(legacyId, legacy,
-			registry->lookupAgentBehaviour(legacy)->getRevision(), {
+		require(world.setAgentBehaviourAssignment(secondId, second,
+			registry->lookupAgentBehaviour(second)->getRevision(), {
 				{ "first", markers[0] }, { "second", markers[1] }
-			}), "Could not assign legacy planning behaviour");
+			}), "Could not assign second planning behaviour");
 		registry->saveTo((package / "behaviours.yaml").string());
 		for (unsigned run = 0; run < 2; ++run)
 		{
@@ -480,21 +486,22 @@ return {
 				world.pauseSimulation();
 				std::string diagnostic;
 				require(core::reloadAgentBehaviourRegistryDocument(registry, package, &diagnostic),
-					"Could not reload mixed-version registry: " + diagnostic);
+					"Could not reload coroutine registry: " + diagnostic);
 			}
 			require(world.resumeSimulation(), "Could not resume planning behaviour");
 			world.advanceTicks(10);
 			unsigned cancellations = 0;
-			unsigned legacyCancellations = 0;
+			unsigned secondCancellations = 0;
 			for (auto const& event : world.consumeSimulationEvents())
 				if (event.type == core::SimulationEventType::MovementCancelled)
 				{
-					if (event.agent.id == legacyId)
+					if (event.agent.id == secondId)
 					{
-						require(event.destinationMarker == markers[0]
-							&& event.movementCancellationReason == core::MovementCancellationReason::Explicit,
-							"Legacy behaviour exposed supersession");
-						++legacyCancellations;
+						require(secondCancellations < 2 && event.destinationMarker == markers[secondCancellations]
+							&& event.movementCancellationReason == (secondCancellations == 0
+								? core::MovementCancellationReason::Superseded : core::MovementCancellationReason::Explicit),
+							"Second coroutine exposed an incorrect cancellation");
+						++secondCancellations;
 						continue;
 					}
 					require(cancellations < 2 && event.destinationMarker == markers[cancellations]
@@ -503,43 +510,45 @@ return {
 						"Behaviour cancellation payload incorrect");
 					++cancellations;
 				}
-			require(cancellations == 2 && legacyCancellations == 1,
-				"Mixed-version planning replacement/cancellation did not execute");
+			require(cancellations == 2 && secondCancellations == 2,
+				"Per-Agent coroutine planning replacement/cancellation did not execute");
 			require(world.getAgentBehaviourRuntimeDiagnostics().empty(),
 				"Behaviour planning semantic assertions failed");
 		}
 	}
 
-	void routeLossAndTopologyLifecycle(smoke::Context const& context, int version)
+	void routeLossAndTopologyLifecycle(smoke::Context const& context, bool replay)
 	{
 		TemporaryDirectory temporary{ context };
 		auto const package = temporary.path / "lifecycle.behaviours";
 		std::filesystem::create_directories(package);
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
-		writeRuntimeText(package / "lifecycle.lua", "local version = " + std::to_string(version) + R"lua(
-local host = require("promethium.v" .. version)
+		writeRuntimeText(package / "lifecycle.lua", R"lua(
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
     local losses = 0
-    return {
-      on_start = function(context)
-        local result = context.move_to(configuration.destination)
-        if not result.accepted or result.status ~= "accepted" then error(result.status) end
-      end,
-      on_route_lost = function(destination, reason, context, outcome)
-        assert(outcome.destination == destination and outcome.reason == reason)
-        assert(outcome.action == 'idle' and outcome.result == 'failed')
-        losses = losses + 1
-        if losses ~= 1 or destination ~= configuration.destination
-            or reason ~= configuration.expected_reason then
-          error("incorrect or duplicate route-loss callback")
+    return function(context)
+      local result = context.move_to(configuration.destination)
+      if not result.accepted or result.status ~= "accepted" then error(result.status) end
+      while true do
+        local event = wait()
+        if event.type == "route_lost" then
+          local destination, reason, outcome = event.destination, event.reason, event
+          assert(outcome.destination == destination and outcome.reason == reason)
+          assert(outcome.action == 'idle' and outcome.result == 'failed')
+          losses = losses + 1
+          if losses ~= 1 or destination ~= configuration.destination
+              or reason ~= configuration.expected_reason then
+            error("incorrect or duplicate route-loss callback")
+          end
+          local result = context.move_to(configuration.fallback)
+          if not result.accepted or result.status ~= "accepted" then error(result.status) end
         end
-        local result = context.move_to(configuration.fallback)
-        if not result.accepted or result.status ~= "accepted" then error(result.status) end
       end
-    }
+    end
   end
 }
 )lua");
@@ -616,6 +625,11 @@ return {
 		};
 		runTopology(false);
 		runTopology(true);
+		if (replay)
+		{
+			runTopology(false);
+			runTopology(true);
+		}
 
 		core::World unreachable("Initial route loss", 12, 2);
 		auto const origin = unreachable.addRoom("Origin", 0, 0, 0, 6, 1);
@@ -669,12 +683,12 @@ void behaviour_smoke::registerRuntimeMovement(std::vector<smoke::Check>& checks)
 	{
 		planningIntentReplacement(context);
 	} });
-	checks.push_back({ "routeLossAndTopologyLifecycleV1", [](smoke::Context const& context)
+	checks.push_back({ "routeLossAndTopologyLifecycle", [](smoke::Context const& context)
 	{
-		routeLossAndTopologyLifecycle(context, 1);
+		routeLossAndTopologyLifecycle(context, false);
 	} });
-	checks.push_back({ "routeLossAndTopologyLifecycleV2", [](smoke::Context const& context)
+	checks.push_back({ "routeLossAndTopologyLifecycleReplay", [](smoke::Context const& context)
 	{
-		routeLossAndTopologyLifecycle(context, 2);
+		routeLossAndTopologyLifecycle(context, true);
 	} });
 }

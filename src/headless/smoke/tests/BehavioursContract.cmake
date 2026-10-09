@@ -44,14 +44,14 @@ set(core_names
     unsavedWorldDocumentRefusesManagedOperations
     validationAndPausedGateAreAtomic
     completeWorkflowReplaysIdentically
-    validHostContractDoesNotRunCallbacks
+    validHostContractDoesNotResumeBody
     textAndContractFailuresCarryLocationAndTraceback
     prohibitedHostSurfacesAreAbsent
     customLoaderIsReservedAndImmutable
     registryRetainsLoadedAndErrorStatus
     scratchExecutionIsBudgeted
     insufficientMemoryBudgetsAreRejectedOrContained
-    liveLoadsFactoriesAndCallbacksAreContained
+    liveLoadsFactoriesAndResumesAreContained
     independentStartupInstancesMoveDeterministically
     manifestHelpersHavePrivatePerAgentGraphs
     coroutineMovementAndCompletion
@@ -67,12 +67,12 @@ set(core_names
     furnitureUseOutcomes
     bundledMovementWorkflows
     planningIntentReplacement
-    routeLossAndTopologyLifecycleV1
-    routeLossAndTopologyLifecycleV2
+    routeLossAndTopologyLifecycle
+    routeLossAndTopologyLifecycleReplay
     programmingErrorDisablesMovementOwnership
     activationSuspendsStateAndFreezesTimers
     interactionOutcomesAreImmutableSemanticValues
-    teardownIsReadOnlyAndBestEffort
+    teardownClosesSuspendedInstances
     deterministicTimersExposeOnlySemanticState
     configuredSchedulesAndRandomStreamsReplay
     boundedStormsAndFailuresReplayDeterministically

@@ -118,7 +118,7 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo(manifest.string());
 		writeRuntimeText(package / "startup.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 local factories_in_this_environment = 0
 return {
   api_version = host.api_version,
@@ -128,48 +128,48 @@ return {
       error("module environment was shared between Agents")
     end
     local instance = { starts = 0 }
-    return {
-      on_start = function(context, callback_configuration)
-        instance.starts = instance.starts + 1
-        if instance.starts ~= 1 then error("instance state was shared or restarted") end
-        if callback_configuration ~= configuration
-            or context.configuration ~= configuration then
-          error("callback did not receive its immutable configuration")
-        end
-        if type(configuration.destination) ~= "userdata"
-            or tonumber(configuration.destination) ~= nil then
-          error("Marker was not an opaque handle")
-        end
-        if pcall(function() configuration.destination = false end) then
-          error("configuration was mutable")
-        end
-        local result = context.move_to(configuration.destination)
-        if not result.accepted or result.status ~= "accepted" then
-          error("move_to did not return a semantic accepted result")
-        end
-        if pcall(function() result.status = "changed" end) then
-          error("command result was mutable")
-        end
-        instance.retained_context = context
-      end,
-      on_event = function(event, context)
-        instance.events = (instance.events or 0) + 1
-        if instance.events ~= 1
-            or event.type ~= "destination_reached"
-            or type(event.tick) ~= "number"
-            or type(event.sequence) ~= "number"
-            or event.destination ~= configuration.destination then
-          error("destination_reached payload was missing, mutable, or duplicated")
-        end
-        if pcall(function() event.type = "changed" end) then
-          error("semantic movement event was mutable")
-        end
-        local cancellation = context.cancel_movement()
-        if not cancellation.accepted or cancellation.status ~= "no_op" then
-          error("idle cancellation did not return semantic no_op")
+    return function(context)
+      instance.starts = instance.starts + 1
+      if instance.starts ~= 1 then error("instance state was shared or restarted") end
+      if context.configuration ~= configuration then
+        error("callback did not receive its immutable configuration")
+      end
+      if type(configuration.destination) ~= "userdata"
+          or tonumber(configuration.destination) ~= nil then
+        error("Marker was not an opaque handle")
+      end
+      if pcall(function() configuration.destination = false end) then
+        error("configuration was mutable")
+      end
+      local result = context.move_to(configuration.destination)
+      if not result.accepted or result.status ~= "accepted" then
+        error("move_to did not return a semantic accepted result")
+      end
+      if pcall(function() result.status = "changed" end) then
+        error("command result was mutable")
+      end
+      instance.retained_context = context
+      while true do
+        local event = wait()
+        if event.type ~= "timer_expired" and event.type ~= "route_lost" then
+          instance.events = (instance.events or 0) + 1
+          if instance.events ~= 1
+              or event.type ~= "destination_reached"
+              or type(event.tick) ~= "number"
+              or type(event.sequence) ~= "number"
+              or event.destination ~= configuration.destination then
+            error("destination_reached payload was missing, mutable, or duplicated")
+          end
+          if pcall(function() event.type = "changed" end) then
+            error("semantic movement event was mutable")
+          end
+          local cancellation = context.cancel_movement()
+          if not cancellation.accepted or cancellation.status ~= "no_op" then
+            error("idle cancellation did not return semantic no_op")
+          end
         end
       end
-    }
+    end
   end
 }
 )lua");
@@ -204,7 +204,7 @@ return {
 )lua";
 		writeRuntimeText(package / "counter.lua", helperSource);
 		writeRuntimeText(package / "private.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 local counter = require("helpers.counter")
 local cached = require("helpers.counter")
 if counter ~= cached then error("helper cache was not instance-local") end
@@ -218,12 +218,11 @@ return {
     if counter.increment() ~= 1 then
       error("helper upvalues leaked between Agent instances")
     end
-    return {
-      on_start = function(context)
-        local result = context.move_to(configuration.destination)
-        if not result.accepted then error(result.status) end
-      end
-    }
+    return function(context)
+      local result = context.move_to(configuration.destination)
+      if not result.accepted then error(result.status) end
+      while true do wait() end
+    end
   end
 }
 )lua");

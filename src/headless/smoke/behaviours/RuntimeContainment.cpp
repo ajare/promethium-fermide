@@ -39,7 +39,7 @@ namespace
 
 		auto excessiveAllocation = preflight(R"lua(
 local excessive = string.rep("x", 70 * 1024 * 1024)
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(!excessiveAllocation.loaded
 			&& excessiveAllocation.failure
@@ -52,7 +52,7 @@ return { api_version = 1, factory = function() return {} end }
 		// terminal even when the Lua code reports success.
 		auto caughtRunaway = preflight(R"lua(
 pcall(function() while true do end end)
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(!caughtRunaway.loaded
 			&& caughtRunaway.failure
@@ -63,7 +63,7 @@ return { api_version = 1, factory = function() return {} end }
 pcall(function()
   pcall(function() while true do end end)
 end)
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(!nestedCaughtRunaway.loaded
 			&& nestedCaughtRunaway.failure
@@ -85,7 +85,7 @@ end
 
 		auto caughtAllocation = preflight(R"lua(
 pcall(function() local excessive = string.rep("x", 70 * 1024 * 1024) end)
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(!caughtAllocation.loaded
 			&& caughtAllocation.failure
@@ -102,7 +102,7 @@ end
 if xpcall(function() error("boom") end, function(text) return text end) then
   error("ordinary xpcall semantics changed")
 end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(ordinaryCatch.loaded,
 			"Ordinary application errors stopped being catchable with pcall/xpcall");
@@ -111,7 +111,7 @@ return { api_version = 1, factory = function() return {} end }
 			"headless.behaviours", "configured.lua", R"lua(
 local total = 0
 for i = 1, 1000 do total = total + i end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua", {}, { 2u * 1024u * 1024u, 100u });
 		require(!configured.loaded
 			&& configured.failure
@@ -119,7 +119,7 @@ return { api_version = 1, factory = function() return {} end }
 			"The application-configured scratch instruction budget was ignored");
 
 		auto recovered = preflight(
-			"return { api_version = 1, factory = function() return {} end }\n");
+			"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n");
 		require(recovered.loaded,
 			"A refused scratch allocation corrupted later Lua state creation");
 	}
@@ -131,7 +131,7 @@ return { api_version = 1, factory = function() return {} end }
 	void insufficientMemoryBudgetsAreRejectedOrContained(smoke::Context const& context)
 	{
 		auto const validSource =
-			"return { api_version = 1, factory = function() return {} end }\n";
+			"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n";
 		core::AgentBehaviourRuntimeLimits tiny;
 		tiny.memoryBytes = 8192;
 		auto rejected = core::AgentBehaviourRuntimeAdapter::preflightModule(
@@ -176,7 +176,7 @@ return { api_version = 1, factory = function() return {} end }
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "trivial.lua",
-			"return { api_version = 1, factory = function() return { on_start = function() end } end }\n");
+			"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n");
 		auto const behaviour = registry->addAgentBehaviour("Trivial", "trivial.lua", {});
 		require(registry->lookupAgentBehaviour(behaviour)->getModuleStatus()
 				== core::AgentBehaviourModuleStatus::Loaded,
@@ -220,7 +220,7 @@ return { api_version = 1, factory = function() return {} end }
 			"Configuration allocation failure lacked a structured memory diagnostic");
 	}
 
-	void liveLoadsFactoriesAndCallbacksAreContained(smoke::Context const& context)
+	void liveLoadsFactoriesAndResumesAreContained(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
 		auto const package = temporary.path / "abuse.behaviours";
@@ -240,55 +240,65 @@ return { api_version = 1, factory = function() return {} end }
 		auto const loadBudget = add("Load budget", "load-budget.lua", R"lua(
 local total = 0
 for i = 1, 5000 do total = total + i end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		auto const factoryBudget = add("Factory budget", "factory-budget.lua", R"lua(
-return { api_version = 1, factory = function()
-  local total = 0
-  for i = 1, 5000 do total = total + i end
-  return {}
+return { api_version = 3, factory = function()
+    local total = 0
+    for i = 1, 5000 do total = total + i end
+    return function(context) while true do wait() end end
 end }
 )lua");
 		auto const callbackBudget = add("Callback budget", "callback-budget.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function() while true do end end }
+return { api_version = 3, factory = function()
+    return function(context)
+      while true do end
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const caughtCallbackBudget = add("Caught callback budget",
 			"caught-callback-budget.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function()
-    pcall(function() while true do end end)
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      pcall(function() while true do end end)
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const caughtCallbackAllocation = add("Caught callback allocation",
 			"caught-callback-allocation.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function()
-    pcall(function() local excessive = string.rep("x", 70 * 1024 * 1024) end)
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      pcall(function() local excessive = string.rep("x", 70 * 1024 * 1024) end)
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const memoryBudget = add("Memory budget", "memory-budget.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function()
-    local excessive = string.rep("x", 70 * 1024 * 1024)
-    if #excessive == 0 then error("unreachable") end
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      local excessive = string.rep("x", 70 * 1024 * 1024)
+      if #excessive == 0 then error("unreachable") end
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const luaError = add("Lua error", "lua-error.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function() error("contained callback error") end }
+return { api_version = 3, factory = function()
+    return function(context)
+      error("contained callback error")
+      while true do wait() end
+    end
 end }
 )lua");
 		auto const safe = add("Safe", "safe.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    local result = context.cancel_movement()
-    if not result.accepted or result.status ~= "no_op" then error(result.status) end
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      local result = context.cancel_movement()
+      if not result.accepted or result.status ~= "no_op" then error(result.status) end
+      while true do wait() end
+    end
 end }
 )lua");
 
@@ -313,7 +323,8 @@ end }
 				"Could not resume a budget abuse fixture");
 			world.advanceTick();
 			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
-			require(diagnostics.size() == 1
+			require(diagnostics.size() == (expectedStage == core::AgentBehaviourRuntimeStage::Callback ? 2u : 1u)
+				&& (diagnostics.size() == 1 || diagnostics[1].callback == "close")
 				&& diagnostics[0].failure == expectedFailure
 				&& diagnostics[0].stage == expectedStage
 				&& diagnostics[0].agent == agent
@@ -355,11 +366,11 @@ end }
 				"Could not resume the live allocator fixture");
 			world.advanceTick();
 			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
-			require(diagnostics.size() == 1
+			require(diagnostics.size() == 2 && diagnostics[1].callback == "close"
 				&& diagnostics[0].failure
 					== core::AgentBehaviourRuntimeFailure::MemoryBudgetExceeded
 				&& diagnostics[0].stage == core::AgentBehaviourRuntimeStage::Callback
-				&& diagnostics[0].callback == "on_start"
+				&& diagnostics[0].callback == "resume"
 				&& diagnostics[0].agent == abusive
 				&& !world.agentBehaviourOwnsMovement(abusive)
 				&& world.agentBehaviourOwnsMovement(healthy),
@@ -393,7 +404,7 @@ end }
 				"Could not resume the protected Lua error fixture");
 			world.advanceTick();
 			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
-			require(diagnostics.size() == 1
+			require(diagnostics.size() == 2 && diagnostics[1].callback == "close"
 				&& diagnostics[0].failure == core::AgentBehaviourRuntimeFailure::LuaError
 				&& diagnostics[0].traceback.find("contained callback error")
 					!= std::string::npos,
@@ -412,8 +423,8 @@ void behaviour_smoke::registerRuntimeContainment(std::vector<smoke::Check>& chec
 	{
 		insufficientMemoryBudgetsAreRejectedOrContained(context);
 	} });
-	checks.push_back({ "liveLoadsFactoriesAndCallbacksAreContained", [](smoke::Context const& context)
+	checks.push_back({ "liveLoadsFactoriesAndResumesAreContained", [](smoke::Context const& context)
 	{
-		liveLoadsFactoriesAndCallbacksAreContained(context);
+		liveLoadsFactoriesAndResumesAreContained(context);
 	} });
 }

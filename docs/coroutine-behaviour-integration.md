@@ -57,8 +57,28 @@ remaining timer durations. Timer events use the World event sequence and obey
 pending-event and per-boundary resume budgets, including normal failure
 containment. Completed and unassigned coroutines receive no further expiry.
 
-`sleep(ticks)`, removal of callback/timer APIs, bundled-resource migration and
-the final ADR/authoring documentation belong to later issues, not #527.
+## Fixture and resource migration (#528)
+
+Executable behaviour fixtures and the bundled marker patrol and random wander
+resources now use v3 coroutine factories. Old callback tables remain only as
+explicitly malformed contract inputs. Timer-driven fixtures consume
+`timer_expired` events through `wait()`; patrol and wander express their journey
+and arrival-delay loops sequentially.
+
+Regression expectations follow the coroutine contract: deactivated Agents
+publish public transitions but receive no resumes; startup context snapshots
+remain immutable; event ticks describe subsequent resumes; failed threads may
+publish both `resume` and `close` diagnostics. Teardown checks assert suspended
+work is not resumed after failure, unassignment, reload or World close, rather
+than expecting the removed `on_stop` callback. The former v1/v2 route-loss
+selectors are now `routeLossAndTopologyLifecycle` and
+`routeLossAndTopologyLifecycleReplay`; planning replacement checks exercise
+independent v3 Agents rather than legacy version-dependent movement semantics.
+
+This migration changes fixtures, resources and test expectations only, not the
+engine or preflight implementations. The branch still accepts callback modules
+until #529's hard contract cut. `sleep(ticks)`, removal of callback/timer APIs,
+and final ADR/authoring documentation remain later slices.
 
 Validation: Release `pf-smoke-behaviours` and the behaviours CTest functional,
 CLI and concurrency contracts. The new `RuntimeCoroutines.cpp` checks cover
