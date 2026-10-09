@@ -143,6 +143,143 @@ namespace
 		world.advanceTicks(100); require(world.getSector(room)->areLightsOn(), "Generic operation occurred");
 	}
 
+	void remoteOrdinaryDoors(smoke::Context const& context)
+	{
+		for (unsigned side = 0; side < 2; ++side)
+		for (unsigned variant = 0; variant < 6; ++variant)
+		{
+			core::World world("Remote ordinary Door", 12, 2);
+			auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+			auto options = core::World::ManualDoor1Options;
+			if (variant == 3) options.heightScale = .4f;
+			auto made = world.addSectorDoor(0, 0, 6, options);
+			auto door = std::dynamic_pointer_cast<const core::Door>(made.door.sector->getObject(made.door.index)->_getObject());
+			auto centre = door->getPosition() + door->getSize() * .5f;
+			auto origin = side ? back : front, destination = side ? front : back;
+			world.addSectorMarker(destination, 0, 8.f, "Goal"); world.finishBuild();
+			auto id = world.createAgent("Remote", origin, 0, 3.f);
+			float range = variant == 0 ? centre.y - .0001f : variant == 1 ? centre.y : 2.f;
+			remote(world, id, range); quickPlanning(world, id);
+			if (variant == 2)
+			{
+				world.pauseSimulation(); world.addLevel();
+				world.saveTo((context.temporaryRoot() / "remote-door.world.yaml").string());
+				world.saveTo((context.temporaryRoot() / "remote-door.world").string());
+				for (auto filename : {"remote-door.world.yaml", "remote-door.world"})
+				{
+					auto loaded = core::loadWorldDocument(context.temporaryRoot() / filename);
+					loaded->resumeSimulation();
+					require(loaded->moveAgentToNamedMarker(id, "Goal").accepted(), "Restored Door intent refused");
+					loaded->advanceTicks(1500);
+					require(loaded->lookupAgent(id).entity->getSector()->getIndex() == destination, "Restored remote Door failed");
+				}
+				world.resetSimulation(); world.resumeSimulation();
+				door = std::dynamic_pointer_cast<const core::Door>(world.getSector(front)->getObject(made.door.index)->_getObject());
+			}
+			core::AgentId follower;
+			if (variant == 4)
+			{
+				world.pauseSimulation(); follower = world.createAgent("Piggyback", origin, 0, 3.f);
+				require(world.setAgentIndividualObjectUsage(follower, core::ObjectUsage::None), "Piggyback None edit refused");
+				world.resumeSimulation(); quickPlanning(world, follower);
+			}
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Ordinary Door intent refused");
+			bool early = false, crossed = false, edited = false, activated = false;
+			for (unsigned tick = 0; tick < 1500; ++tick)
+			{
+				world.advanceTick();
+				auto agent = world.lookupAgent(id).entity;
+				auto position = agent->getGlobalPosition();
+				if (!activated && !world.getSimulationSnapshot().deviceOperations.empty())
+				{
+					activated = true;
+					require(position.distanceTo(centre) <= range + .00001f, "Remote Door activated outside centre range");
+					if (variant >= 2) require(position.distanceTo(centre) >= range - .01f, "Remote Door waited past maximum range");
+					if (variant == 5)
+					{
+						world.pauseSimulation();
+						require(world.setAgentIndividualObjectUsageDistance(id, .1f), "Pending Door range edit refused");
+						world.resumeSimulation();
+					}
+				}
+				if (door->isOpening() && std::abs(position.x - centre.x) > .3f) early = true;
+				if (agent->getSector()->getIndex() == destination && !crossed)
+				{
+					require(std::abs(position.x - centre.x) <= .201f, "Remote activation changed crossing alignment");
+					crossed = true;
+				}
+				if (variant == 4 && early && door->isOpen() && !edited)
+				{
+					edited = true;
+					world.pauseSimulation();
+					require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Paused usage edit refused");
+					world.resumeSimulation();
+					require(world.moveAgentToNamedMarker(follower, "Goal").accepted(), "Piggyback intent refused");
+				}
+			}
+			if (follower) require(world.lookupAgent(follower).entity->getSector()->getIndex() == destination, "None could not piggyback a remotely opened Door");
+			if (variant == 0 || variant == 5) require(!crossed && (variant == 5 || lost(world, id)) && !door->isOpen(), "Out-of-range or edited centre did not exclude Door side=" + std::to_string(side) + " variant=" + std::to_string(variant) + " crossed=" + std::to_string(crossed) + " open=" + std::to_string(door->getOpenPercentage()));
+			else require(crossed, "Remote ordinary crossing failed side=" + std::to_string(side) + " variant=" + std::to_string(variant));
+			if (variant >= 2 && variant != 5) require(early, "Ordinary Door was not activated at range");
+			if (variant == 5) require(activated && !early, "Pending range edit failed to cancel early operation");
+			clean(world);
+		}
+	}
+
+	void remoteDoorGates(smoke::Context const&)
+	{
+		{
+			core::World world("Excluded direct Doors", 16, 3);
+			auto left = world.addRoom("Left", 0, 0, 0, 8, 1);
+			world.addRoom("Right", 0, 0, 8, 8, 1);
+			core::World::CreateBulkheadDoorOptions options;
+			auto bulkhead = world.addSectorBulkheadDoor(0, 0, 8, CORE_SIDE_LEFT, options);
+			world.addCorridor(1, 0, 16);
+			auto lift = world.addLift(1, 0, 4, {2, {0, 1}});
+			world.finishBuild();
+			auto id = world.createAgent("Remote", left, 0, 4.f); remote(world, id, 10.f);
+			for (auto object : {bulkhead.door, lift.doors.front().door})
+			{
+				auto door = std::dynamic_pointer_cast<const core::Door>(object.sector->getObject(object.index)->_getObject());
+				require(!world.canAgentOpenManualDoor(door->getTraversalResourceId(), id), "Excluded Door gained direct remote capability");
+			}
+			world.advanceTicks(120);
+		}
+		for (unsigned variant = 0; variant < 5; ++variant)
+		{
+			core::World world("Remote Door gates", 12, 2);
+			world.addLayer();
+			auto front = world.addRoom("Front", 0, 0, 0, 12, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 12, 1);
+			auto other = world.addRoom("Other", 2, 0, 0, 12, 1);
+			auto options = core::World::ManualDoor1Options;
+			if (variant == 1) options.initiallyBroken = true;
+			auto made = world.addSectorDoor(0, 0, 6, options);
+			auto door = std::dynamic_pointer_cast<const core::Door>(made.door.sector->getObject(made.door.index)->_getObject());
+			world.addSectorMarker(variant == 2 ? other : back, 0, 8.f, "Goal"); world.finishBuild();
+			auto id = world.createAgent("Remote", variant == 2 ? other : front, 0, 6.5f);
+			remote(world, id, 10.f); quickPlanning(world, id);
+			world.pauseSimulation();
+			if (variant == 0)
+			{
+				auto key = world.addAccessPermission("Door key");
+				require(world.setManualDoorPermissionRequirement(door->getTraversalResourceId(), {key}), "Door requirement refused");
+			}
+			if (variant == 3)
+			{
+				core::MobilityProfile profile; profile.set(core::TraversalKind::Door, core::MobilityUse::CannotUse);
+				require(world.setAgentIndividualMobilityProfile(id, profile), "Door Mobility refused");
+			}
+			if (variant == 4) require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "None edit refused");
+			world.resumeSimulation();
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Gate intent refused"); world.advanceTicks(1500);
+			require(door->getOpenPercentage() == 0.f && world.getSimulationSnapshot().deviceOperations.empty(), "Refused or unrelated Door activated");
+			if (variant != 2) require(lost(world, id), "Door gate failed to exclude route");
+			clean(world);
+		}
+	}
+
 	void remoteTightDoor(smoke::Context const&)
 	{
 		for (unsigned variant = 0; variant < 4; ++variant)
@@ -881,6 +1018,8 @@ namespace
 }
 void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"agentTypesRemoteOrdinaryDoors", remoteOrdinaryDoors});
+	checks.push_back({"agentTypesRemoteDoorGates", remoteDoorGates});
 	checks.push_back({"agentTypesRemoteDeclarations", remoteDeclarations});
 	checks.push_back({"agentTypesRemoteGeometry", remoteGeometry});
 	checks.push_back({"agentTypesRemoteJourneys", remoteJourneys});

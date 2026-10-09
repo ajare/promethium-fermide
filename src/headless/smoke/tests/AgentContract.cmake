@@ -123,6 +123,8 @@ set(agent_checks
     agentTypesLegacyHumanWithoutResource
     agentTypesLoadingConstructsFreshInstances
     agentTypesTopologyReplayPreservesLiveInstances
+    agentTypesRemoteOrdinaryDoors
+    agentTypesRemoteDoorGates
     agentTypesRemoteDeclarations
     agentTypesRemoteGeometry
     agentTypesRemoteJourneys

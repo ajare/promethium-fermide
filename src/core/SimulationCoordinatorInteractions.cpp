@@ -511,6 +511,18 @@ namespace core
 				cancelled.push_back(requestId);
 		}
 		for (auto request : cancelled) cancelInteraction(request);
+		// Implicit manual Door commands have no physical Interaction point.
+		// Cancel only pending control work, never an accepted opening in flight.
+		vector<DeviceOperationId> operations;
+		for (auto const& [operationId, operation] : mWorld.mDeviceOperations.entries())
+			if (operation->mState == DeviceOperationState::Pending
+				&& operation->mCommand.type == DeviceCommandType::OpenDoor
+				&& mWorld.remoteOrdinaryDoorCentre(operation->mCommand.traversalResource)
+				&& operation->mRequesters.count(id)
+				&& !mWorld.agentCanOperateManualDoorHere(operation->mCommand.traversalResource, id))
+				operations.push_back(operationId);
+		for (auto operation : operations) cancelDeviceOperation(operation, id);
+		if (!operations.empty()) actor->mEarlyDoorPressAttempted = false;
 	}
 
 	bool SimulationCoordinator::cancelInteraction(InteractionRequestId id)
@@ -736,7 +748,13 @@ namespace core
 				else if (operation->mCommand.type == DeviceCommandType::OpenDoor)
 				{
 					auto resource = mWorld.mTraversalResources.find(operation->mCommand.traversalResource);
-					if (!resource || !resource->mDoor || !resource->mEnabled
+					bool eligible = true;
+					if (mWorld.remoteOrdinaryDoorCentre(operation->mCommand.traversalResource)
+						&& !operation->mRequesters.empty())
+						eligible = any_of(operation->mRequesters.begin(), operation->mRequesters.end(), [&](auto actor) {
+							return mWorld.agentCanOperateManualDoorHere(operation->mCommand.traversalResource, actor);
+						});
+					if (!resource || !resource->mDoor || !resource->mEnabled || !eligible
 						|| !(operation->mCommand.desiredState
 							? resource->mDoor->requestOpen() : resource->mDoor->requestClose()))
 					{
@@ -1127,9 +1145,16 @@ namespace core
 		double a = double(delta.x) * delta.x + double(delta.y) * delta.y;
 		if (a == 0) return end;
 		double limit = 1.;
-		for (auto point : controls)
+		vector<Vector2> centres;
+		for (auto point : controls) centres.push_back(*mWorld.physicalButtonCentre(point));
+		if (auto centre = mWorld.remoteOrdinaryDoorCentre(upcoming);
+			centre && mWorld.canAgentOpenManualDoor(upcoming, getAgentId(&agent)))
 		{
-			auto centre = *mWorld.physicalButtonCentre(point);
+			auto const& door = *mWorld.mTraversalResources.find(upcoming)->mDoor;
+			if (!door.isOpen() && !door.isOpening() && !door.isBroken()) centres.push_back(*centre);
+		}
+		for (auto centre : centres)
+		{
 			double x = double(start.x) - centre.x, y = double(start.y) - centre.y;
 			double range = agent.getObjectUsageDistance();
 			double c = x * x + y * y - range * range;
@@ -1175,6 +1200,22 @@ namespace core
 			}
 			if (agent.mEarlyDoorPressAttempted) return;
 			auto actor = getAgentId(&agent);
+			if (mWorld.agentCanOperateManualDoorHere(upcoming, actor))
+			{
+				auto resource = mWorld.mTraversalResources.find(upcoming);
+				auto const& door = *resource->mDoor;
+				if (resource->mEnabled && !door.isBroken() && !door.isOpen() && !door.isOpening()
+					&& (door.getFrontSector().get() == agent.getSector() || door.getBackSector().get() == agent.getSector()))
+				{
+					DeviceCommand command;
+					command.type = DeviceCommandType::OpenDoor;
+					command.desiredState = true;
+					command.traversalResource = upcoming;
+					auto operationId = findOrCreateDeviceOperation(command, actor);
+					if (auto operation = mWorld.mDeviceOperations.find(operationId)) operation->mActivated = true;
+					agent.mEarlyDoorPressAttempted = true;
+				}
+			}
 			for (auto pointId : controls)
 			{
 				if (!mWorld.agentCanOperateInteraction(pointId, agent, true)) continue;

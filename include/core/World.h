@@ -2912,6 +2912,10 @@ namespace core
 		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
 			TraversalResourceId door) const;
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+	private:
+		std::optional<Vector2> remoteOrdinaryDoorCentre(TraversalResourceId door) const;
+		bool agentCanOperateManualDoorHere(TraversalResourceId door, AgentId agent) const;
+	public:
 		// Walking required solely to bring a physical Button within Remote control range.
 		// nullopt means the Button cannot be operated from this approach Sector/row.
 		std::optional<float> remoteButtonApproachDistance(InteractionPointId point, SectorId approach,

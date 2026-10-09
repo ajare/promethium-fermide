@@ -29,9 +29,9 @@ Every **physical Button** qualifies, including light switches, stacked controls,
 extensible-device controls, Airlock controls, and transport landing Buttons. The
 Button identity and physical centre are authoritative, not its Interaction point
 approach or the receiving device's centre/type. Generic Interaction points,
-Access panels, BoothWindow shutter panels, direct manual Door operation and
-onboard selectors do not acquire remote capability in this slice. Later tickets
-#540–#543 extend other interactions; remote-only passengers cannot manufacture an
+Access panels, BoothWindow shutter panels and onboard selectors do not acquire
+remote capability. Ordinary manual Doors additionally qualify under #540 (below).
+Later tickets #541–#543 extend other interactions; remote-only passengers cannot manufacture an
 onboard Lift/Platform lift/Shuttle selection here, but may use accepted shared
 journeys under the existing rules.
 
@@ -59,6 +59,36 @@ cancel now-ineligible work without granting new traversal admission. An Airlock'
 control-only walking estimate uses the same range geometry, leaving preferences
 and the remaining objective traversal/interaction costs unchanged.
 
+## Ordinary Doors (#540)
+
+A Remote control Agent opens an ordinary manual Door between Locations when the
+next required threshold on its current Path enters range. Either approach Sector
+qualifies, including the back side opposite authoring ownership; another Sector
+never qualifies. Range is inclusive straight-line distance from Agent position to
+`Door position + Door size / 2`, including vertical separation, not to the approach
+vertex or a Button. Reduced-height Doors use their actual scaled centre.
+
+For example, use the Lua declaration above with a 1.5-unit range, author a manual
+ordinary Door between two Rooms, and direct the Agent to a Marker in the opposite
+Room. It begins opening before the Agent reaches the threshold. A range below half
+the Door's physical height cannot reach its centre from its floor approach and
+excludes that operation from routing. A 0.4 Height scale lowers the centre and
+may require a supported Crouching or Crawling Pose for the eventual crossing.
+
+There is no activation-only approach walk or press delay for the implicit manual
+Door command. The remaining Path, required Local-depth changes, crossing alignment,
+clearance, lanes, FIFO queue and traversal permit still govern movement. Remote
+operation is device control, not a permit or a teleport. Manual Door Access
+permissions, Permission adherence, Mobility, Broken state and opening duration
+remain authoritative; Arms and None retain their existing behavior. An already
+open Door can be shared under those existing rules.
+
+Automatic Doors retain automatic activation. A control-operated Door still uses
+its required physical Button and that Button's authorization and press duration;
+remote Object usage does not bypass its controls. Direct Bulkhead and transport
+landing Door operation is excluded, but their physical Buttons remain eligible
+under the all-Buttons rule. No onboard selection capability is added.
+
 ## Headless verification
 
 Release project-owned CTest checks `object-usage-agentTypesRemote*` exercise
@@ -70,3 +100,19 @@ journeys, published outcomes and coordination cleanup. Existing Agent lifetime
 and editor Object usage workflows additionally run with Remote control, covering
 registry and YAML/binary round trips, Reset, structural replay, clipboard,
 history, deletion restoration and atomic invalid authoring/reload.
+
+#540 adds `agentTypesRemoteOrdinaryDoors` and `agentTypesRemoteDoorGates`:
+real ticks verify both sides, scaled centre geometry, equality/unreachable range,
+maximum-range opening, unchanged crossing alignment, sharing an open Door,
+paused pending-command range cancellation, permission/Mobility/Broken/None
+refusals, unrelated-Sector refusal and excluded direct Door categories. YAML and
+binary reconstruction, Reset, structural edits, clipboard and Door authoring
+undo/redo exercise the same runtime behavior.
+
+Final #540 Linux validation reused the GUI-enabled Release tree: the default
+core/headless/editor inventory built successfully and all 121 project-owned
+CTests passed, including exhaustive module contracts and headless editor/Startup
+coverage. The Agent functional, CLI, concurrency and exhaustive contracts were
+rerun after the final piggyback assertion was added and passed. `git diff --check`
+passed. Unmodified submodule tests and Debug runs
+were excluded as required by `AGENTS.md`; no Windows validation is claimed.

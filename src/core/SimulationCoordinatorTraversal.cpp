@@ -290,9 +290,7 @@ namespace core
 			}
 			if (request->mEdgeType == EdgeType::Door
 				&& resource->mDoorActivationMode == DoorActivationMode::Manual
-				&& (!actor || !mWorld.agentCanPhysicallyOperate(*actor,
-					actor->getGlobalPosition().distanceTo(request->mSourceEndpoint),
-					std::numeric_limits<float>::max()))) return;
+				&& !mWorld.agentCanOperateManualDoorHere(request->mResource, request->mOwner)) return;
 			if (!request->mPreparationRequested)
 			{
 				request->mPreparationRequested = true;

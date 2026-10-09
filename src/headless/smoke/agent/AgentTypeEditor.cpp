@@ -1071,6 +1071,28 @@ namespace
 		require(!commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 5.f, refused, diagnostic)
 			&& !refused && captureDocumentSnapshot(other.world)->yaml == otherBefore->yaml
 			&& other.world->consumeSimulationEvents().empty(), "Malformed paste mutated state or coordination");
+		if (mode == core::ObjectUsage::RemoteControl)
+		{
+			// Exercise the pasted capability through authored Door/history seams,
+			// not just serialized property observations.
+			gWorldDocumentHistory.clear();
+			auto beforeDoor = captureDocumentSnapshot(other.world);
+			auto back = other.world->addRoom("Remote destination", 1, 0, 0, 10, 1);
+			other.world->addSectorDoor(0, 0, 6, core::World::ManualDoor1Options);
+			other.world->addSectorMarker(back, 0, 8.f, "Remote goal");
+			commitDocumentEdit(beforeDoor);
+			auto restoreOther = [&](DocumentSnapshot const& snapshot) {
+				auto candidate = deserializeDocumentSnapshot(snapshot, other.world, {});
+				if (!candidate) return false;
+				other.world = std::move(candidate); return true;
+			};
+			require(gWorldDocumentHistory.undo(captureDocumentSnapshot(other.world), restoreOther), "Door authoring undo failed");
+			require(gWorldDocumentHistory.redo(captureDocumentSnapshot(other.world), restoreOther), "Door authoring redo failed");
+			other.world->resumeSimulation();
+			require(other.world->moveAgentToNamedMarker(pasted, "Remote goal").accepted(), "Pasted remote Door intent refused");
+			other.world->advanceTicks(1500);
+			require(other.world->lookupAgent(pasted).entity->getSector()->getIndex() == back, "Clipboard/history remote Door journey failed");
+		}
 		gWorldDocumentHistory.clear();
 		require(edit([&] { return cutAgent(world, id, diagnostic); }), diagnostic);
 		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);

@@ -11667,12 +11667,48 @@ namespace core
 		return result;
 	}
 
+	optional<Vector2> World::remoteOrdinaryDoorCentre(TraversalResourceId doorId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		if (!resource || !resource->mDoor || typeid(*resource->mDoor) != typeid(Door)
+			|| resource->mLiftCoordinator || resource->mDoor->isLiftOwned() || resource->mDoor->isShuttleOwned()
+			|| resource->mDoorActivationMode != DoorActivationMode::Manual) return nullopt;
+		auto const& door = *resource->mDoor;
+		if (!door.getFrontSector() || !door.getBackSector()
+			|| !isLocationLike(door.getFrontSector()->getType())
+			|| !isLocationLike(door.getBackSector()->getType())) return nullopt;
+		return door.getPosition() + door.getSize() * .5f;
+	}
+
+	bool World::agentCanOperateManualDoorHere(TraversalResourceId doorId, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !agent || !agent->isActive() || !resource->mEnabled
+			|| !canAgentOpenManualDoor(doorId, agentId) || resource->mDoor->isBroken()) return false;
+		auto const& door = *resource->mDoor;
+		if (door.getFrontSector().get() != agent->getSector() && door.getBackSector().get() != agent->getSector()) return false;
+		if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
+		{
+			auto centre = remoteOrdinaryDoorCentre(doorId);
+			return centre && agent->getGlobalPosition().distanceTo(*centre) <= agent->getObjectUsageDistance();
+		}
+		auto endpoint = door.getPosition() + Vector2{door.getSize().x * .5f, 0.f};
+		return agentCanPhysicallyOperate(*agent, agent->getGlobalPosition().distanceTo(endpoint), numeric_limits<float>::max());
+	}
+
 	bool World::canAgentOpenManualDoor(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
-		return resource && resource->mDoor && agent && agent->getObjectUsage() == ObjectUsage::Arms
-			&& agentSatisfiesDoorPermission(*resource->mDoor, *agent);
+		if (!resource || !resource->mDoor || !agent
+			|| !agentSatisfiesDoorPermission(*resource->mDoor, *agent)) return false;
+		if (agent->getObjectUsage() == ObjectUsage::Arms) return true;
+		auto centre = remoteOrdinaryDoorCentre(doorId);
+		// Routing asks whether the ordinary floor approach can enter range, not
+		// whether the Agent's current remote position is already in range.
+		return centre && agent->getObjectUsage() == ObjectUsage::RemoteControl
+			&& centre->y - resource->mDoor->getPosition().y <= agent->getObjectUsageDistance();
 	}
 
 	bool World::canAgentOperateDoorControl(TraversalResourceId doorId, SectorId approach,

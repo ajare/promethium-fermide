@@ -119,8 +119,9 @@ removing mode reveals its frozen mode. Individual overrides keep taking preceden
 Capability changes cancel now-ineligible pending operations and reconsider Paths through
 the existing planning rules; admitted crossings and accepted journeys finish safely.
 Arms remains physical: short arms approach controls and never activate them remotely.
-Remote control (`remote_control` on the wire) operates physical Buttons only in #539;
-see [Remote Button operation](remote-button-operation.md). Mode and distance remain
+Remote control (`remote_control` on the wire) operates physical Buttons (#539)
+and ordinary manual Doors during pathing (#540);
+see [Remote operation](remote-button-operation.md). Mode and distance remain
 independent: switching Human's mode alone keeps 0.25 units, not the remote script
 omission default of 1. There is no physical Arms fallback.
 

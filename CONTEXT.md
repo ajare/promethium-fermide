@@ -275,7 +275,7 @@ _Avoid_: Interaction point reach, which is object geometry and may be zero
 The Object usage mode that operates objects through physical approach within arm length. It does not provide remote activation or bypass Location, side, height, Mobility, Access permission or Broken conditions.
 
 **Remote control object usage**:
-The Object usage mode that operates eligible objects within maximum range without an Arms fallback. Physical Buttons qualify in the Agent's own Sector, using distance to the Button centre including vertical separation, independently of Local depth and line of sight.
+The Object usage mode that operates eligible objects within maximum range without an Arms fallback. Physical Buttons qualify in the Agent's own Sector, using distance to the Button centre including vertical separation, independently of Local depth and line of sight. Ordinary manual Doors required by the current Path qualify from either approach Sector, using their physical centre and inclusive maximum range; direct Bulkhead and transport landing Door operation is excluded. Activation never replaces physical crossing or traversal admission.
 
 **None object usage**:
 The Object usage mode in which an Agent cannot operate objects but may pass through already usable resources or join another Agent's accepted journey when existing rules permit. It is neither a Mobility restriction nor a revocation of admitted crossings or committed passenger exits.

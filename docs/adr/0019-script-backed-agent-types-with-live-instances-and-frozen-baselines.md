@@ -111,6 +111,18 @@ separate from traversal admission (ADR 0001). See
 [Remote Button operation](../remote-button-operation.md) for the runtime/verification scope.
 The earlier deferral statements above describe the #535/#536 slices, not this extension.
 
+## Remote ordinary manual Doors (#540)
+
+Remote control additionally opens ordinary manual Doors required by the current
+Path from either approach Sector, using inclusive range to the physical Door
+centre, including reduced-height geometry. It neither grants traversal admission
+nor replaces required Local-depth movement or crossing alignment. Routing and
+runtime use the same capability decision; operation authorization remains on the
+manual Door, while automatic and Button-controlled activation keep their existing
+owners. Direct Bulkhead and transport landing Door operation, Access panels and
+onboard selectors are still excluded. Frozen defaults, property precedence and
+lifetime reconstruction remain unchanged.
+
 ## Consequences
 
 An Agent owns two deliberately separated things: its authored type identity (stable ID, display name, resolved resource reference) and its frozen physical baseline, which simulation consumers read; and an opaque live-instance handle owned by the World's Agent-type runtime, whose destructor releases the Lua instance when the Agent dies. The baseline is validated field-by-field (six non-pose numeric fields always required, plus positive Object usage distance for Arms and Remote control; dimensions and speeds finite and positive after conversion to simulation floats; explicit supported poses and ordered Room/Door choices under API v2, with applicable height and speed ratios finite and in `(0, 1]`) and copied out of Lua, so later mutations of the instance cannot change ongoing simulation. The World owns one sandboxed Lua state per the ADR 0008 isolation and budget model, with the same forbidden-capability restrictions and no filesystem, process, native-module, debug, or shared-mutable-module access.
