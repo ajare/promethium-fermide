@@ -1,5 +1,11 @@
 # Agent behaviour registry packages
 
+> Integration note (#532): `master` accepts only Host API v3 coroutine
+> factories with `wait()` and `sleep(ticks)`. Named timers are removed.
+> The callback/v1/v2 and timer authoring sections below describe the previous
+> contract; use [Coroutine behaviour integration](coroutine-behaviour-integration.md).
+> Full authoring-document migration is tracked by #533.
+
 A saved World can create or select an adjacent `*.behaviours` directory in
 **World → Behaviours**. Pause the World first. The package contains a
 `behaviours.yaml` manifest and ordinary Lua source files. The panel lists names,

@@ -708,7 +708,7 @@ namespace
 		auto registry = core::createAndAttachAgentBehaviourRegistry(*first, firstPath);
 		auto const packageDirectory = temporary.path / "first.behaviours";
 		writeText(packageDirectory / "schedule.lua",
-			"return { api_version = 1, factory = function() return {} end }\n");
+			"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n");
 
 		first->pauseSimulation();
 		(void)registry->addAgentBehaviour("Schedule", "schedule.lua", {});
@@ -725,7 +725,7 @@ namespace
 		// observe it only after the explicit managed reload.
 		auto const uuid = registry->getUuid();
 		writeText(packageDirectory / "wander.lua",
-			"return { api_version = 1, factory = function() return {} end }\n");
+			"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n");
 		writeText(manifestPath(packageDirectory), ""
 			"  version: 1\n"
 			"  uuid: " + uuid + "\n"

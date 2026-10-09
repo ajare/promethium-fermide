@@ -25,25 +25,26 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "authorization.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    local result = context.revoke_access_permission("Authored")
-    if not result.accepted or result.status ~= "accepted" then error("revoke failed") end
-    result = context.revoke_access_permission("Authored")
-    if not result.accepted or result.status ~= "no_op" then error("revoke was not idempotent") end
-    result = context.grant_access_permission("Runtime")
-    if not result.accepted or result.status ~= "accepted" then error("grant failed") end
-    result = context.grant_access_permission("Runtime")
-    if not result.accepted or result.status ~= "no_op" then error("grant was not idempotent") end
-    result = context.assign_permission_set("Shift")
-    if not result.accepted or result.status ~= "accepted" then error("assign failed") end
-    result = context.assign_permission_set("Shift")
-    if not result.accepted or result.status ~= "no_op" then error("assign was not idempotent") end
-    result = context.unassign_permission_set("Remove me")
-    if not result.accepted or result.status ~= "accepted" then error("unassign failed") end
-    result = context.unassign_permission_set("Remove me")
-    if not result.accepted or result.status ~= "no_op" then error("unassign was not idempotent") end
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      local result = context.revoke_access_permission("Authored")
+      if not result.accepted or result.status ~= "accepted" then error("revoke failed") end
+      result = context.revoke_access_permission("Authored")
+      if not result.accepted or result.status ~= "no_op" then error("revoke was not idempotent") end
+      result = context.grant_access_permission("Runtime")
+      if not result.accepted or result.status ~= "accepted" then error("grant failed") end
+      result = context.grant_access_permission("Runtime")
+      if not result.accepted or result.status ~= "no_op" then error("grant was not idempotent") end
+      result = context.assign_permission_set("Shift")
+      if not result.accepted or result.status ~= "accepted" then error("assign failed") end
+      result = context.assign_permission_set("Shift")
+      if not result.accepted or result.status ~= "no_op" then error("assign was not idempotent") end
+      result = context.unassign_permission_set("Remove me")
+      if not result.accepted or result.status ~= "accepted" then error("unassign failed") end
+      result = context.unassign_permission_set("Remove me")
+      if not result.accepted or result.status ~= "no_op" then error("unassign was not idempotent") end
+      while true do wait() end
+    end
 end }
 )lua");
 		auto behaviour = registry->addAgentBehaviour(
@@ -113,27 +114,25 @@ end }
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "caught.lua", R"lua(
-return { api_version = 2, factory = function()
-  return { on_start = function(context)
-    assert(context.set_timer("existing-timer-with-a-long-name", 10).accepted)
-    for i = 1, 4 do
-      local ok, diagnostic = pcall(context.set_timer, "rejected-timer-with-a-long-name", 10)
-      assert(not ok and string.find(diagnostic, "timer limit", 1, true), diagnostic)
-      for _, operation in ipairs({ context.grant_access_permission,
+return { api_version = 3, factory = function()
+    return function(context)
+      for i = 1, 4 do
+        local ok, diagnostic = pcall(sleep, -1)
+        assert(not ok and string.find(diagnostic, "whole-tick", 1, true), diagnostic)
+        for _, operation in ipairs({ context.grant_access_permission,
           context.revoke_access_permission, context.assign_permission_set,
           context.unassign_permission_set }) do
-        ok, diagnostic = pcall(operation, "unknown-authorization-with-a-long-name")
-        assert(not ok and string.find(diagnostic, "case-sensitive", 1, true), diagnostic)
+          ok, diagnostic = pcall(operation, "unknown-authorization-with-a-long-name")
+          assert(not ok and string.find(diagnostic, "case-sensitive", 1, true), diagnostic)
+        end
       end
+      sleep(20)
+      while true do wait() end
     end
-    assert(context.set_timer("existing-timer-with-a-long-name", 20).accepted)
-    assert(context.cancel_timer("existing-timer-with-a-long-name").accepted)
-  end }
 end }
 )lua");
 		auto const behaviour = registry->addAgentBehaviour("Caught errors", "caught.lua", {});
 		core::AgentBehaviourRuntimeLimits limits;
-		limits.timersPerInstance = 1;
 		core::World world("Caught errors", 4, 1, limits);
 		auto const room = world.addRoom("Room", 0, 0, 0, 4, 1);
 		world.finishBuild();
@@ -159,10 +158,11 @@ end }
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "renamed.lua", R"lua(
-return { api_version = 1, factory = function()
-  return { on_start = function(context)
-    context.grant_access_permission("Before rename")
-  end }
+return { api_version = 3, factory = function()
+    return function(context)
+      context.grant_access_permission("Before rename")
+      while true do wait() end
+    end
 end }
 )lua");
 		auto behaviour = registry->addAgentBehaviour("Renamed", "renamed.lua", {});
@@ -182,7 +182,8 @@ end }
 		require(world.resumeSimulation() && !world.advanceTick(),
 			"A renamed Lua authorization literal did not fail its boundary");
 		auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
-		require(diagnostics.size() == 1
+		require(diagnostics.size() == 2 && diagnostics[1].callback == "close"
+			&& diagnostics.front().callback == "resume"
 			&& diagnostics.front().diagnostic.find("Unknown Access permission 'Before rename'")
 				!= std::string::npos
 			&& diagnostics.front().diagnostic.find("case-sensitive") != std::string::npos,

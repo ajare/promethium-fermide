@@ -102,7 +102,7 @@ namespace
 		auto const manifest = package / "behaviours.yaml";
 		std::filesystem::create_directories(package);
 		writeText(package / "schedule.lua",
-			"return { api_version = 1, factory = function(configuration) return {} end }\n");
+			"return { api_version = 3, factory = function(configuration) return function(context) while true do wait() end end end }\n");
 		auto const uuid = std::string("123e4567-e89b-42d3-a456-426614174160");
 		YAML::Node root;
 		root["version"] = 1;

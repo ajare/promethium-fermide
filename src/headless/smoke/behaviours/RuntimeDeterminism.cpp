@@ -27,18 +27,17 @@ namespace
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "noise.lua", R"lua(
 return {
-  api_version = 2,
+  api_version = 3,
   factory = function(configuration)
-    return {
-      on_start = function(context) context.set_timer("noise", 1) end,
-      on_timer = function(name, context)
+    return function(context)
+      while true do
+        sleep(1)
         for i = 1, configuration.draws do
           context.random_integer(1, 1000)
           context.random_number()
         end
-        context.set_timer("noise", 1)
       end
-    }
+    end
   end
 }
 )lua");
@@ -88,82 +87,83 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "iteration.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
-    return {
-      on_start = function(context)
-        local choices = { a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8 }
-        local pairsOrder = ""
-        for key in pairs(choices) do pairsOrder = pairsOrder .. key end
-        context.log("pairs:" .. pairsOrder)
-        if pairsOrder ~= "abcdefgh" then error("unexpected pairs order: " .. pairsOrder) end
+    return function(context)
+      local choices = { a = 1, b = 2, c = 3, d = 4, e = 5, f = 6, g = 7, h = 8 }
+      local pairsOrder = ""
+      for key in pairs(choices) do pairsOrder = pairsOrder .. key end
+      context.log("pairs:" .. pairsOrder)
+      if pairsOrder ~= "abcdefgh" then error("unexpected pairs order: " .. pairsOrder) end
 
-        local nextOrder = ""
-        local key = next(choices)
-        while key ~= nil do
-          nextOrder = nextOrder .. key
-          key = next(choices, key)
-        end
-        context.log("next:" .. nextOrder)
-        if nextOrder ~= pairsOrder then error("pairs and next disagreed") end
+      local nextOrder = ""
+      local key = next(choices)
+      while key ~= nil do
+        nextOrder = nextOrder .. key
+        key = next(choices, key)
+      end
+      context.log("next:" .. nextOrder)
+      if nextOrder ~= pairsOrder then error("pairs and next disagreed") end
 
-        local mixed = { [true] = 1, [false] = 2, [2] = 3, [1] = 4,
-          ["b"] = 5, ["a"] = 6, [1.5] = 7 }
-        local mixedOrder = ""
-        for value in pairs(mixed) do mixedOrder = mixedOrder .. tostring(value) .. "," end
-        context.log("mixed:" .. mixedOrder)
-        if mixedOrder ~= "false,true,1,1.5,2,a,b," then
-          error("unexpected mixed key order: " .. mixedOrder)
-        end
+      local mixed = { [true] = 1, [false] = 2, [2] = 3, [1] = 4,
+        ["b"] = 5, ["a"] = 6, [1.5] = 7 }
+      local mixedOrder = ""
+      for value in pairs(mixed) do mixedOrder = mixedOrder .. tostring(value) .. "," end
+      context.log("mixed:" .. mixedOrder)
+      if mixedOrder ~= "false,true,1,1.5,2,a,b," then
+        error("unexpected mixed key order: " .. mixedOrder)
+      end
 
-        local list = { "x", "y", "z" }
-        local listOrder = ""
-        for index, value in ipairs(list) do listOrder = listOrder .. index .. value end
-        context.log("ipairs:" .. listOrder)
-        if listOrder ~= "1x2y3z" then error("list iteration changed") end
+      local list = { "x", "y", "z" }
+      local listOrder = ""
+      for index, value in ipairs(list) do listOrder = listOrder .. index .. value end
+      context.log("ipairs:" .. listOrder)
+      if listOrder ~= "1x2y3z" then error("list iteration changed") end
 
-        local firstIdentity = tostring({})
-        local secondIdentity = tostring({})
-        if firstIdentity ~= "table" or secondIdentity ~= "table"
-            or tostring(function() end) ~= "function"
-            or tostring(list) ~= "table" then
-          error("identity output was not a stable type label: " .. firstIdentity)
-        end
-        context.log("identity:" .. firstIdentity .. "|" .. secondIdentity
-          .. "|" .. tostring(function() end) .. "|" .. tostring(list))
-        local formatted = string.format("%s", choices)
-        if formatted ~= "table" or ("%s"):format(choices) ~= "table" then
-          error("string.format leaked an address: " .. formatted)
-        end
-        context.log("format:" .. formatted)
-        if pcall(string.format, "%p", choices)
-            or pcall(function() return ("%p"):format(choices) end) then
-          error("string.format accepted the nondeterministic %p conversion")
-        end
-        context.log("pointer-refused:" .. tostring(pcall(string.format, "%p", choices)))
-        local identityRefused = pcall(function()
-          local keyed = {}
-          keyed[{}] = 1
-          for _ in pairs(keyed) do end
-        end)
-        if identityRefused then error("identity-bearing keys were iterated") end
-        context.log("identity-key-refused:" .. tostring(identityRefused))
-        context.log("random:" .. context.random_integer(1, 1000))
+      local firstIdentity = tostring({})
+      local secondIdentity = tostring({})
+      if firstIdentity ~= "table" or secondIdentity ~= "table"
+          or tostring(function() end) ~= "function"
+          or tostring(list) ~= "table" then
+        error("identity output was not a stable type label: " .. firstIdentity)
+      end
+      context.log("identity:" .. firstIdentity .. "|" .. secondIdentity
+      .. "|" .. tostring(function() end) .. "|" .. tostring(list))
+      local formatted = string.format("%s", choices)
+      if formatted ~= "table" or ("%s"):format(choices) ~= "table" then
+        error("string.format leaked an address: " .. formatted)
+      end
+      context.log("format:" .. formatted)
+      if pcall(string.format, "%p", choices)
+          or pcall(function() return ("%p"):format(choices) end) then
+        error("string.format accepted the nondeterministic %p conversion")
+      end
+      context.log("pointer-refused:" .. tostring(pcall(string.format, "%p", choices)))
+      local identityRefused = pcall(function()
+        local keyed = {}
+        keyed[{}] = 1
+        for _ in pairs(keyed) do end
+    end)
+      if identityRefused then error("identity-bearing keys were iterated") end
+      context.log("identity-key-refused:" .. tostring(identityRefused))
+      context.log("random:" .. context.random_integer(1, 1000))
 
-        local destinations = { alpha = configuration.first, beta = configuration.second }
-        local chosen = next(destinations)
-        context.log("chosen:" .. chosen)
-        local result = context.move_to(destinations[chosen])
-        if not result.accepted then error(result.status) end
-      end,
-      on_event = function(event, context)
-        if event.type == "destination_reached" then
-          context.log("reached:" .. tostring(event.destination))
+      local destinations = { alpha = configuration.first, beta = configuration.second }
+      local chosen = next(destinations)
+      context.log("chosen:" .. chosen)
+      local result = context.move_to(destinations[chosen])
+      if not result.accepted then error(result.status) end
+      while true do
+        local event = wait()
+        if event.type ~= "route_lost" then
+          if event.type == "destination_reached" then
+            context.log("reached:" .. tostring(event.destination))
+          end
         end
       end
-    }
+    end
   end
 }
 )lua");

@@ -90,18 +90,16 @@ namespace
 		{
 			return "local helper = require('helpers.reload')\n"
 				"local source_revision = '" + sourceRevision + "'\n"
-				"return { api_version = " + (sourceRevision == "v1" ? "1" : "2") + ", factory = function(configuration)\n"
+				"return { api_version = 3, factory = function(configuration)\n"
 				"  if configuration.expected ~= helper.expected then error('wrong expected value') end\n"
-				"  return {\n"
-				"    on_start = function(context)\n"
-				"      context.log('start:' .. source_revision .. ':' .. helper.generation .. ':' .. context.random_integer(1, 1000000))\n"
-				"      context.set_timer('preserved', 3)\n"
-				"      local moved = context.move_to(configuration.destination)\n"
-				"      if not moved.accepted then error(moved.status) end\n"
-				"    end,\n"
-				"    on_timer = function(name, context) context.log('timer:' .. source_revision .. ':' .. helper.generation .. ':' .. name) end,\n"
-				"    on_stop = function(reason, context) context.log('stop:' .. source_revision .. ':' .. reason) end\n"
-				"  }\n"
+				"  return function(context)\n"
+				"    context.log('start:' .. source_revision .. ':' .. helper.generation .. ':' .. context.random_integer(1, 1000000))\n"
+				"    local moved = context.move_to(configuration.destination)\n"
+				"    if not moved.accepted then error(moved.status) end\n"
+				"    sleep(3)\n"
+				"    context.log('sleep:' .. source_revision .. ':' .. helper.generation .. ':preserved')\n"
+				"    while true do wait() end\n"
+				"  end\n"
 				"end }\n";
 		};
 		writeText(manifestPath(package), manifest);
@@ -198,10 +196,10 @@ namespace
 		auto const stopCount = std::count_if(stopMessages.begin(), stopMessages.end(),
 			[](core::LogMessage const& message)
 			{
-				return message.msg == "stop:v1:reload";
+				return message.msg.starts_with("start:v1:") || message.msg.starts_with("sleep:v1:");
 			});
-		require(stopCount == 3,
-			"Successful reload did not call read-only teardown on every old instance");
+		require(stopCount == 0,
+			"Successful reload resumed an old suspended coroutine");
 		for (auto agent : alpha.agents)
 			require(!alpha.world->lookupAgent(agent).entity->getPath(),
 				"Successful reload retained old behaviour movement");
@@ -228,9 +226,9 @@ namespace
 		{
 			writeText(package / "atomic.lua", candidate);
 			reloadDiagnostics.clear();
-			require(!core::reloadAgentBehaviourRegistryDocument(registry, package,
-					&diagnostic, &reloadDiagnostics)
-				&& !reloadDiagnostics.empty()
+			auto const reloaded = core::reloadAgentBehaviourRegistryDocument(registry, package,
+				&diagnostic, &reloadDiagnostics);
+			require(!reloaded && !reloadDiagnostics.empty()
 				&& reloadDiagnostics.front().scope == expectedScope
 				&& registry->lookupAgentBehaviour(behaviour)->getModuleStatus()
 					== core::AgentBehaviourModuleStatus::Loaded
@@ -241,11 +239,11 @@ namespace
 				&& gWorldDocumentHistory.redoCount() == redoCount,
 				"A failed reload changed live registry/runtime document state or history");
 		};
-		assertRollback("return { api_version = 1, factory = function( }\n",
+		assertRollback("return { api_version = 3, factory = function( }\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);
-		assertRollback("require('helpers.missing')\nreturn { api_version = 1, factory = function() return {} end }\n",
+		assertRollback("require('helpers.missing')\nreturn { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);
-		assertRollback("return { api_version = 3, factory = function() return {} end }\n",
+		assertRollback("return { api_version = 99, factory = function() return function(context) wait() end end }\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);
 		assertRollback("while true do end\n",
 			core::AgentBehaviourReloadDiagnosticScope::Module);
@@ -269,7 +267,7 @@ namespace
 			"return { expected = 7, generation = 'v2' }\n");
 
 		writeText(package / "atomic.lua", ""
-			"return { api_version = 1, factory = function(configuration)\n"
+			"return { api_version = 3, factory = function(configuration)\n"
 			"  error('factory rejected code ' .. configuration.code)\n"
 			"end }\n");
 		reloadDiagnostics.clear();
@@ -286,8 +284,8 @@ namespace
 			&& reloadDiagnostics[2].agent == zulu.agents[0],
 			"Per-configuration factory failures were not aggregated in stable World/Agent order");
 
-		// All failed attempts leave the v2 instances and their timers intact. A
-		// restart would emit start again and postpone these timers.
+		// All failed attempts leave the v2 instances and their sleep intact. A
+		// restart would emit start again and postpone sleep completion.
 		for (auto* fixture : { &alpha, &zulu })
 		{
 			require(fixture->world->resumeSimulation(),
@@ -297,17 +295,17 @@ namespace
 			fixture->world->pauseSimulation();
 		}
 		auto retainedMessages = core::consumeLogMessages();
-		auto retainedTimers = std::count_if(retainedMessages.begin(), retainedMessages.end(),
+		auto retainedSleeps = std::count_if(retainedMessages.begin(), retainedMessages.end(),
 			[](core::LogMessage const& message)
 			{
-				return message.msg == "timer:v2:v2:preserved";
+				return message.msg == "sleep:v2:v2:preserved";
 			});
 		auto repeatedStarts = std::count_if(retainedMessages.begin(), retainedMessages.end(),
 			[](core::LogMessage const& message)
 			{
 				return message.msg.starts_with("start:");
 			});
-		require(retainedTimers == 3 && repeatedStarts == 0,
+		require(retainedSleeps == 3 && repeatedStarts == 0,
 			"Failed reload did not preserve the previous live instance state");
 
 		// Re-adopting the same valid revision restarts deterministic random streams
@@ -334,7 +332,7 @@ namespace
 		auto registry = core::createAndAttachAgentBehaviourRegistry(*world, path);
 		auto const package = core::defaultAgentBehaviourRegistryPackagePath(path);
 		writeText(package / "nested" / "source.lua",
-			"return {api_version=1,factory=function() return {on_start=function() error('must never execute') end} end}\n");
+			"return {api_version=3,factory=function() return function(context) error('must never execute') end end}\n");
 		auto id = registry->addAgentBehaviour("  Schedule  ", "nested/source.lua", {});
 		require(registry->getBehaviourName(id) == "Schedule", "Authored names were not trimmed");
 		registry->saveTo(manifestPath(package).string());
@@ -363,7 +361,7 @@ namespace
 			std::filesystem::remove(package / "nested" / "source.lua");
 		}
 		writeText(package / "nested" / "source.lua",
-			"return {api_version=1,factory=function() return {} end}\n");
+			"return {api_version = 3,factory=function() return function(context) while true do wait() end end end}\n");
 		writeText(temporary.path / "outside.yaml", valid);
 		std::filesystem::remove(manifestPath(package));
 		error.clear();
@@ -428,7 +426,7 @@ namespace
 		auto registry = core::createAndAttachAgentBehaviourRegistry(
 			*world, worldPath);
 		writeText(package / "worker.lua",
-			"return {api_version=1,factory=function(config) return {} end}\n");
+			"return {api_version = 3,factory=function(config) return function(context) while true do wait() end end end}\n");
 		auto const behaviour = registry->addAgentBehaviour("Worker", "worker.lua", {});
 		registry->saveTo(manifestPath(package).string());
 		std::string diagnostic;
@@ -489,7 +487,7 @@ namespace
 		auto const beforeFailedRepair = serializeWorld(*unresolved);
 		auto const beforeFailedRepairModified = unresolved->isModified();
 		writeText(package / "worker.lua",
-			"return {api_version=1,factory=function(config) error('broken repair') end}\n");
+			"return {api_version=3,factory=function(config) error('broken repair') end}\n");
 		require(!commitAgentBehaviourRegistrySwitch(unresolved,
 			worldPath.string(), package.string(), diagnostic)
 			&& diagnostic.find("runtime preflight failed") != std::string::npos

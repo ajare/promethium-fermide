@@ -27,28 +27,30 @@ namespace
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "duplicate.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
-    return { on_start = function(context)
+    return function(context)
       context.move_to(configuration.destination)
       context.cancel_movement()
-    end }
+      while true do wait() end
+    end
   end
 }
 )lua");
 		auto const behaviour = registry->addAgentBehaviour("Duplicate", "duplicate.lua",
 			{ { "destination", core::AgentBehaviourSchemaType::Marker } });
 		writeRuntimeText(package / "moving.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
-    return { on_start = function(context)
+    return function(context)
       local result = context.move_to(configuration.destination)
       if not result.accepted then error(result.status) end
-    end }
+      while true do wait() end
+    end
   end
 }
 )lua");
@@ -131,7 +133,7 @@ return {
 			"Idle arrival disabled behaviour or scheduled autonomous work");
 	}
 
-	void activationSuspendsStateAndFreezesTimers(smoke::Context const& context)
+	void activationSuspendsStateAndFreezesSleep(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
 		auto const package = temporary.path / "activation.behaviours";
@@ -139,55 +141,38 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "activation.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
     local starts = 0
     local private_state = "secret_instance_155"
-    local deactivations = 0
     local activations = 0
-    return {
-      on_start = function(context)
-        starts = starts + 1
-        if starts ~= 1 then error("on_start repeated") end
-        context.set_timer("frozen_timer_155", 3)
-      end,
-      on_event = function(event, context)
-        if event.type == "deactivated" then
-          deactivations = deactivations + 1
-          private_state = private_state .. ":suspended"
-          if deactivations ~= 1 or event.destination ~= nil
-              or context.agent.active or not context.agent.suspended then
-            error("deactivation was missing or duplicated")
+    return function(context)
+      starts = starts + 1
+      if starts ~= 1 then error("on_start repeated") end
+      sleep(3)
+      while true do
+        local event = wait()
+        if event.type ~= "route_lost" then
+          if event.type == "activated" then
+            activations = activations + 1
+            if activations ~= 1 or starts ~= 1
+                or private_state ~= "secret_instance_155" then
+              error("reactivation replaced private state or restarted the coroutine")
+            end
+          else
+            error("unexpected lifecycle event " .. event.type)
           end
-          local command = context.move_to(configuration.destination)
-          if command.accepted or command.status ~= "inactive_agent" then
-            error("deactivated callback issued a command")
+          local moved = context.move_to(configuration.destination)
+          if not moved.accepted then error(moved.status) end
+          if type(event.tick) ~= "number" or type(event.sequence) ~= "number"
+              or pcall(function() event.type = "changed" end) then
+            error("mutable lifecycle event")
           end
-        elseif event.type == "activated" then
-          activations = activations + 1
-          if activations ~= 1 or starts ~= 1
-              or private_state ~= "secret_instance_155:suspended"
-              or not context.agent.active or context.agent.suspended then
-            error("reactivation replaced private state or reran on_start")
-          end
-        else
-          error("unexpected lifecycle event " .. event.type)
         end
-        if type(event.tick) ~= "number" or type(event.sequence) ~= "number"
-            or pcall(function() event.type = "changed" end) then
-          error("mutable lifecycle event")
-        end
-      end,
-      on_timer = function(name, context)
-        if name ~= "frozen_timer_155" or starts ~= 1 or activations ~= 1 then
-          error("timer state was not preserved")
-        end
-        local moved = context.move_to(configuration.destination)
-        if not moved.accepted then error(moved.status) end
       end
-    }
+    end
   end
 }
 )lua");
@@ -264,39 +249,44 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "interactions.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
     local completed = nil
-    return { on_event = function(event, context)
-      if event.type == "interaction_completed" then
-        if event.name ~= "Working control" or event.result ~= "succeeded"
-            or event.reason ~= nil or type(event.interaction) ~= "userdata" then
-          error("incorrect completed interaction payload")
+    return function(context)
+      while true do
+        local event = wait()
+        if event.type ~= "route_lost" then
+          if event.type == "interaction_completed" then
+            if event.name ~= "Working control" or event.result ~= "succeeded"
+                or event.reason ~= nil or type(event.interaction) ~= "userdata" then
+              error("incorrect completed interaction payload")
+            end
+            completed = event.interaction
+          elseif event.type == "interaction_failed" then
+            if event.name ~= "Broken control" or event.reason ~= "failed"
+                or event.result ~= nil or type(event.interaction) ~= "userdata"
+                or event.interaction == completed then
+              error("incorrect failed interaction payload")
+            end
+            local moved = context.move_to(configuration.destination)
+            if not moved.accepted then error(moved.status) end
+          else
+            error("unexpected interaction event")
+          end
+          for _, forbidden in ipairs({ "actor", "point", "operations", "request",
+            "snapshot", "device_operation", "destination" }) do
+            if event[forbidden] ~= nil then error("exposed " .. forbidden) end
+          end
+          if type(event.tick) ~= "number" or type(event.sequence) ~= "number"
+              or pcall(function() event.name = "changed" end)
+              or pcall(function() event.interaction.value = 1 end) then
+            error("mutable interaction event")
+          end
         end
-        completed = event.interaction
-      elseif event.type == "interaction_failed" then
-        if event.name ~= "Broken control" or event.reason ~= "failed"
-            or event.result ~= nil or type(event.interaction) ~= "userdata"
-            or event.interaction == completed then
-          error("incorrect failed interaction payload")
-        end
-        local moved = context.move_to(configuration.destination)
-        if not moved.accepted then error(moved.status) end
-      else
-        error("unexpected interaction event")
       end
-      for _, forbidden in ipairs({ "actor", "point", "operations", "request",
-          "snapshot", "device_operation", "destination" }) do
-        if event[forbidden] ~= nil then error("exposed " .. forbidden) end
-      end
-      if type(event.tick) ~= "number" or type(event.sequence) ~= "number"
-          or pcall(function() event.name = "changed" end)
-          or pcall(function() event.interaction.value = 1 end) then
-        error("mutable interaction event")
-      end
-    end }
+    end
   end
 }
 )lua");
@@ -349,7 +339,7 @@ return {
 			"Immutable semantic interaction outcomes were not delivered correctly");
 	}
 
-	void teardownIsReadOnlyAndBestEffort(smoke::Context const& context)
+	void teardownClosesSuspendedInstances(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
 		auto const package = temporary.path / "teardown.behaviours";
@@ -357,60 +347,36 @@ return {
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		writeRuntimeText(package / "failure.lua", R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function()
-    return {
-      on_start = function(context) context.set_timer("fail", 1) end,
-      on_timer = function() error("primary callback failure") end,
-      on_stop = function(reason, context)
-        if reason ~= "instance_failure" or context.move_to ~= nil
-            or context.cancel_movement ~= nil or context.set_timer ~= nil
-            or context.cancel_timer ~= nil or context.random_number ~= nil
-            or context.random_integer ~= nil or type(context.state.name) ~= "string"
-            or pcall(function() context.tick = 0 end) then
-          error("on_stop context was not read-only")
-        end
-        error("best-effort stop failure")
-      end
-    }
+    return function(context)
+      sleep(1)
+      error("primary callback failure")
+    end
   end
 }
 )lua");
 		auto const failureBehaviour = registry->addAgentBehaviour("Failure teardown",
 			"failure.lua", {});
 		writeRuntimeText(package / "unassignment.lua", R"lua(
-local host = require("promethium.v1")
-return {
-  api_version = host.api_version,
-  factory = function()
-    return { on_stop = function(reason, context)
-      if reason ~= "unassignment" or context.move_to ~= nil
-          or context.set_timer ~= nil or context.random_integer ~= nil then
-        error("wrong unassignment teardown")
-      end
-      error("unassignment stop observed")
-    end }
-  end
-}
+return { api_version = 3, factory = function()
+    return function(context)
+      sleep(1)
+      error("unassigned coroutine was resumed")
+    end
+end }
 )lua");
 		auto const unassignmentBehaviour = registry->addAgentBehaviour("Unassignment",
 			"unassignment.lua", {});
 		writeRuntimeText(package / "close.lua", R"lua(
-local host = require("promethium.v1")
-return {
-  api_version = host.api_version,
-  factory = function()
-    return { on_stop = function(reason, context)
-      if reason ~= "world_close" or context.cancel_movement ~= nil
-          or context.cancel_timer ~= nil or context.random_number ~= nil then
-        error("wrong World-close teardown")
-      end
-      error("close failure must not escape")
-    end }
-  end
-}
+return { api_version = 3, factory = function()
+    return function(context)
+      wait()
+      error("World-close teardown resumed the coroutine")
+    end
+end }
 )lua");
 		auto const closeBehaviour = registry->addAgentBehaviour("Close",
 			"close.lua", {});
@@ -439,20 +405,17 @@ return {
 			world->serialize(*writer, work);
 			writer->serialize();
 			require(writer->getSerializedString().find("primary callback failure")
-					== std::string::npos
-				&& writer->getSerializedString().find("best-effort stop failure")
 					== std::string::npos,
 				"Runtime diagnostics entered World persistence");
 			auto diagnostics = world->consumeAgentBehaviourRuntimeDiagnostics();
-			require(diagnostics.size() == 2
-				&& diagnostics[0].callback == "on_timer"
-				&& diagnostics[0].diagnostic.find("primary callback failure")
-					!= std::string::npos
-				&& diagnostics[1].callback == "on_stop"
-				&& diagnostics[1].diagnostic.find("best-effort stop failure")
-					!= std::string::npos
+			require(diagnostics.size() == 2 && diagnostics[1].callback == "close"
+				&& diagnostics[0].callback == "resume"
+				&& diagnostics[0].diagnostic.find("primary callback failure") != std::string::npos
 				&& !world->agentBehaviourOwnsMovement(agent),
-				"Instance failure did not complete best-effort teardown");
+				"Instance failure did not tear down the coroutine");
+			require(world->resumeSimulation() && world->advanceTicks(3)
+				&& world->consumeAgentBehaviourRuntimeDiagnostics().empty(),
+				"Failure teardown did not reinstall the inert default");
 		}
 
 		{
@@ -464,13 +427,11 @@ return {
 			world->advanceTick();
 			world->pauseSimulation();
 			require(world->clearAgentBehaviourAssignment(agent),
-				"A failing on_stop vetoed unassignment");
-			auto diagnostics = world->consumeAgentBehaviourRuntimeDiagnostics();
-			require(diagnostics.size() == 1 && diagnostics[0].callback == "on_stop"
-				&& diagnostics[0].diagnostic.find("unassignment stop observed")
-					!= std::string::npos
-				&& !world->agentBehaviourOwnsMovement(agent),
-				"Unassignment did not finish after on_stop failed");
+				"Could not unassign a suspended coroutine");
+			require(!world->agentBehaviourOwnsMovement(agent)
+				&& world->resumeSimulation() && world->advanceTicks(3)
+				&& world->consumeAgentBehaviourRuntimeDiagnostics().empty(),
+				"Unassignment resumed suspended work or retained a timer");
 		}
 
 		{
@@ -480,7 +441,7 @@ return {
 				"Could not assign World-close teardown fixture");
 			require(world->resumeSimulation(), "Could not start close fixture");
 			world->advanceTick();
-			world.reset(); // A failing on_stop must not block or escape close.
+			world.reset(); // Closing a suspended thread must not resume its body.
 		}
 	}
 }
@@ -491,16 +452,16 @@ void behaviour_smoke::registerRuntimeCallbacks(std::vector<smoke::Check>& checks
 	{
 		programmingErrorDisablesMovementOwnership(context);
 	} });
-	checks.push_back({ "activationSuspendsStateAndFreezesTimers", [](smoke::Context const& context)
+	checks.push_back({ "activationSuspendsStateAndFreezesSleep", [](smoke::Context const& context)
 	{
-		activationSuspendsStateAndFreezesTimers(context);
+		activationSuspendsStateAndFreezesSleep(context);
 	} });
 	checks.push_back({ "interactionOutcomesAreImmutableSemanticValues", [](smoke::Context const& context)
 	{
 		interactionOutcomesAreImmutableSemanticValues(context);
 	} });
-	checks.push_back({ "teardownIsReadOnlyAndBestEffort", [](smoke::Context const& context)
+	checks.push_back({ "teardownClosesSuspendedInstances", [](smoke::Context const& context)
 	{
-		teardownIsReadOnlyAndBestEffort(context);
+		teardownClosesSuspendedInstances(context);
 	} });
 }

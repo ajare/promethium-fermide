@@ -49,7 +49,7 @@ namespace
 		{
 			std::filesystem::create_directories(package);
 			write(package / "simple.lua",
-				"return { api_version = 1, factory = function(configuration) return {} end }\n");
+				"return { api_version = 3, factory = function(configuration) return function(context) while true do wait() end end end }\n");
 			write(package / "behaviours.yaml",
 				"version: 1\n"
 				"uuid: 123e4567-e89b-42d3-a456-426614174162\n"

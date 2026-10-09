@@ -209,9 +209,8 @@ namespace core
 
 	World::~World()
 	{
-		// Lua teardown needs the final World and Agent value views, so it runs
-		// before registries and domain storage begin destruction. on_stop is
-		// best-effort and cannot prevent the World from closing.
+		// Close behaviour coroutines before registries and domain storage begin
+		// destruction. Teardown is best-effort and cannot prevent World close.
 		mAgentBehaviourRuntime->teardownAll(*this,
 			AgentBehaviourTeardownReason::WorldClose);
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
@@ -1055,7 +1054,8 @@ namespace core
 	{
 		auto agent = mAgents.find(id);
 		if (!agent || !agent->getBehaviourAssignment()) return false;
-		if (!mAgentBehaviourRuntime->isInstanceDisabled(id)) return true;
+		if (!mAgentBehaviourRuntime->isInstanceDisabled(id)
+			&& !mAgentBehaviourRuntime->isInstanceCompleted(id)) return true;
 		// A failed instance stops issuing commands immediately, but an already
 		// committed crossing still drains through the ordinary safe-cancellation
 		// protocol before manual controls return.

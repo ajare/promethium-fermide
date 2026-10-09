@@ -25,7 +25,7 @@ namespace
 		auto const root = context.temporaryRoot();
 		auto const package = root / "configured.behaviours";
 		std::filesystem::create_directories(package);
-		std::ofstream(package / "request.lua") << "return {api_version=2,factory=function() return {} end}";
+		std::ofstream(package / "request.lua") << "return {api_version=3,factory=function() return function(context) while true do wait() end end end}";
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo((package / "behaviours.yaml").string());
 		auto behaviour = registry->addAgentBehaviour("Configured Action", "request.lua", {

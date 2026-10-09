@@ -44,29 +44,36 @@ set(core_names
     unsavedWorldDocumentRefusesManagedOperations
     validationAndPausedGateAreAtomic
     completeWorkflowReplaysIdentically
-    validHostContractDoesNotRunCallbacks
+    validHostContractDoesNotResumeBody
     textAndContractFailuresCarryLocationAndTraceback
     prohibitedHostSurfacesAreAbsent
     customLoaderIsReservedAndImmutable
     registryRetainsLoadedAndErrorStatus
     scratchExecutionIsBudgeted
     insufficientMemoryBudgetsAreRejectedOrContained
-    liveLoadsFactoriesAndCallbacksAreContained
+    liveLoadsFactoriesAndResumesAreContained
     independentStartupInstancesMoveDeterministically
     manifestHelpersHavePrivatePerAgentGraphs
+    coroutineMovementAndCompletion
+    coroutineFailuresAreContained
+    coroutineQueuesAndActivation
+    coroutineSleepEvents
+    coroutineSleepFreezesWhenInactive
+    coroutineSleepBudgets
+    coroutineSleepEventOrdering
     scriptedActionOutcomes
     scriptedActionScriptFailure
     scriptedActionCancellations
     furnitureUseOutcomes
     bundledMovementWorkflows
     planningIntentReplacement
-    routeLossAndTopologyLifecycleV1
-    routeLossAndTopologyLifecycleV2
+    routeLossAndTopologyLifecycle
+    routeLossAndTopologyLifecycleReplay
     programmingErrorDisablesMovementOwnership
-    activationSuspendsStateAndFreezesTimers
+    activationSuspendsStateAndFreezesSleep
     interactionOutcomesAreImmutableSemanticValues
-    teardownIsReadOnlyAndBestEffort
-    deterministicTimersExposeOnlySemanticState
+    teardownClosesSuspendedInstances
+    deterministicSleepsExposeOnlySemanticState
     configuredSchedulesAndRandomStreamsReplay
     boundedStormsAndFailuresReplayDeterministically
     planningIgnoresBehaviourRandomConsumption

@@ -53,56 +53,50 @@ namespace
 	}
 
 	std::string const ScheduleSource = R"lua(
-local host = require("promethium.v1")
+local host = require("promethium.v3")
 return {
   api_version = host.api_version,
   factory = function(configuration)
     local index = 1
-    local function callback(context, value)
-      context.log("CB:" .. configuration.code .. ":" .. value .. ":" .. context.tick)
+    local function trace_resume(context, value, tick)
+      context.log("CB:" .. configuration.code .. ":" .. value .. ":" .. (tick or context.tick))
     end
-    local function move(context, destination, label)
+    local function move(context, destination, label, tick)
       local result = context.move_to(destination)
-      context.log("CMD:" .. configuration.code .. ":" .. label .. ":" .. result.status .. ":" .. context.tick)
+      context.log("CMD:" .. configuration.code .. ":" .. label .. ":" .. result.status .. ":" .. (tick or context.tick))
       if not result.accepted then error("move " .. label .. ":" .. result.status) end
     end
-    return {
-      on_start = function(context)
-        callback(context, "start")
-        context.set_timer("depart", configuration.start_delay)
-      end,
-      on_timer = function(name, context)
-        callback(context, "timer-" .. name)
-        if name == "depart" then
-          move(context, configuration.schedule[index].destination, "depart")
-        elseif name == "cancel" then
-          local result = context.cancel_movement()
-          context.log("CMD:" .. configuration.code .. ":cancel:" .. result.status .. ":" .. context.tick)
-          if not result.accepted then error("cancel:" .. result.status) end
+    return function(context)
+      trace_resume(context, "start")
+      sleep(configuration.start_delay)
+      local elapsed = context.tick + configuration.start_delay
+      trace_resume(context, "sleep-depart", elapsed)
+      move(context, configuration.schedule[index].destination, "depart", elapsed)
+      while true do
+        local event = wait()
+        if event.type == "route_lost" then
+          local destination, reason, outcome = event.destination, event.reason, event
+          trace_resume(context, "route-" .. reason, event.tick)
+          move(context, configuration.fallback, "route-fallback", event.tick)
         else
-          error("unexpected timer " .. name)
+          trace_resume(context, "event-" .. event.type, event.tick)
+          if event.type == "destination_reached" and index < 2 then
+            index = index + 1
+            move(context, configuration.schedule[index].destination, "next", event.tick)
+            sleep(configuration.schedule[index].duration)
+            local tick = event.tick + configuration.schedule[index].duration
+            trace_resume(context, "sleep-cancel", tick)
+            local result = context.cancel_movement()
+            context.log("CMD:" .. configuration.code .. ":cancel:" .. result.status .. ":" .. tick)
+            if not result.accepted then error("cancel:" .. result.status) end
+          elseif event.type == "movement_cancelled" then
+            move(context, configuration.fallback, "after-cancel", event.tick)
+          elseif event.type == "interaction_failed" and configuration.fail_on_interaction then
+            error("expected interaction failure for " .. configuration.code)
+          end
         end
-      end,
-      on_event = function(event, context)
-        callback(context, "event-" .. event.type)
-        if event.type == "destination_reached" and index < 2 then
-          index = index + 1
-          move(context, configuration.schedule[index].destination, "next")
-          context.set_timer("cancel", configuration.schedule[index].duration)
-        elseif event.type == "movement_cancelled" then
-          move(context, configuration.fallback, "after-cancel")
-        elseif event.type == "interaction_failed" and configuration.fail_on_interaction then
-          error("expected interaction failure for " .. configuration.code)
-        end
-      end,
-      on_route_lost = function(destination, reason, context)
-        callback(context, "route-" .. reason)
-        move(context, configuration.fallback, "route-fallback")
-      end,
-      on_stop = function(reason, context)
-        context.log("CB:" .. configuration.code .. ":stop-" .. reason .. ":" .. context.tick)
       end
-    }
+    end
   end
 }
 )lua";
@@ -296,16 +290,16 @@ return {
 		world->pauseSimulation();
 		appendEvents(events, world->consumeSimulationEvents(), observed);
 		require(world->setAgentActive(first, false),
-			"Could not deactivate the timer-driven Agent");
+			"Could not deactivate the sleep-driven Agent");
 		appendEvents(events, world->consumeSimulationEvents(), observed);
 		require(world->resumeSimulation(), "Could not resume with a suspended Agent");
 		world->consumeSimulationEvents();
 		for (unsigned tick = 0; tick < 4; ++tick)
-			require(advance(), "A suspended timer stopped the workflow");
+			require(advance(), "A suspended sleep stopped the workflow");
 		world->pauseSimulation();
 		world->consumeSimulationEvents();
 		require(world->setAgentActive(first, true),
-			"Could not reactivate the timer-driven Agent");
+			"Could not reactivate the sleep-driven Agent");
 		appendEvents(events, world->consumeSimulationEvents(), observed);
 		require(world->resumeSimulation(), "Could not resume the reactivated Agent");
 		world->consumeSimulationEvents();
@@ -403,7 +397,7 @@ return {
 		require(world->resumeSimulation() && advance(),
 			"Reloaded schedules did not recreate and resume");
 
-		require(callbacks.str().find("CB:A:event-deactivated") != std::string::npos
+		require(callbacks.str().find("CB:A:event-deactivated") == std::string::npos
 			&& callbacks.str().find("CB:A:event-activated") != std::string::npos
 			&& callbacks.str().find("CB:B:route-unreachable") != std::string::npos
 			&& commands.str().find("CMD:A:cancel:accepted") != std::string::npos

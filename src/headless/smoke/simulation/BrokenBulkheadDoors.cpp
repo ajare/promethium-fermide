@@ -99,21 +99,21 @@ namespace
 				if (admitted)
 				{
 					scene.agent->setPath(scene.path(), true);
-					// A partially-open Broken aperture that only fits the Crawling
-					// envelope must lower the Agent to Crawling for the crossing.
-					bool const crawlExpected = scene.agent->getTraversalDoorClearanceExtent()
-						> aperture + core::Door::ClearanceTolerance;
-					bool crawled = false;
+					// The frozen half-open aperture fits Crouching, not Standing;
+					// automatic selection must prefer it over Crawling.
+					bool crouched = false, crawled = false;
 					for (uint32_t tick = 0; tick < 3600
 						&& scene.agent->getState() != core::Agent::State::Idle; ++tick)
 					{
 						scene.world.advanceTick();
+						crouched = crouched || scene.agent->getPose() == core::Pose::Crouching;
 						crawled = crawled || scene.agent->getPose() == core::Pose::Crawling;
 					}
 					require(scene.agent->getSector() == scene.world.getSector(scene.back).get()
 						&& scene.agent->getState() == core::Agent::State::Idle, "Broken-open crossing failed mode=" + std::to_string(static_cast<int>(mode))
 						+ " state=" + std::to_string(static_cast<int>(scene.agent->getState())));
-					require(crawled == crawlExpected, "Broken Bulkhead crossing pose disagreed with the frozen aperture");
+					require(crouched == (position == 0.5f) && !crawled,
+						"Broken Bulkhead crossing pose disagreed with the frozen aperture");
 				}
 				require(scene.world.setDoorBroken(scene.made.traversalResource, false), "Restore failed");
 				require(scene.door->getOpenPercentage() == position && scene.door->requestOpen(), "Restore reset position/refused request");

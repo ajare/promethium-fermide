@@ -15,6 +15,16 @@
 extern UISettings gUISettings;
 namespace
 {
+	bool spriteTriangle(WorldDrawList::Triangle const& triangle, ObjectSprite const& sprite,
+		int width, int height)
+	{
+		auto const& r = sprite.region;
+		return std::all_of(std::begin(triangle.texcoords), std::end(triangle.texcoords), [&](ImVec2 uv) {
+			return uv.x >= float(r.x) / width && uv.x <= float(r.x + r.width) / width
+				&& uv.y >= float(r.y) / height && uv.y <= float(r.y + r.height) / height;
+		});
+	}
+
 	void demoCommands(smoke::Context const& context)
 	{
 		using smoke::require;
@@ -44,6 +54,7 @@ namespace
 				require(found != tiles.sprites.end() && found->second.region.width == 64 && found->second.region.height == 160,
 					"Required sample artwork must resolve a full World tile");
 			}
+		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
 		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		RenderWorldScope scope(world);
 		for (auto style : {LayerRenderStyle::Solid, LayerRenderStyle::Aperture, LayerRenderStyle::Wireframe, LayerRenderStyle::Hidden})
@@ -58,12 +69,12 @@ namespace
 					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
 				{
 					auto uv = triangle->texcoords[0];
-					if (uv.y >= 480.f / 640)
+					if (uv.y >= 480.f / 640 && !spriteTriangle(*triangle, human, 320, 640))
 					{
 						if (uv.x >= 128.f / 320) { ++deskCount; deskFirst = std::min(deskFirst, i); deskLast = i; }
 						else ++sofaCount;
 					}
-					else if (uv.x >= 83.f / 320 && uv.x < 110.f / 320 && uv.y >= 248.f / 640)
+					else if (spriteTriangle(*triangle, human, 320, 640))
 					{
 						auto x = std::min({triangle->positions[0].x, triangle->positions[1].x, triangle->positions[2].x});
 						// Agent sprite's physical half-width is 0.2 World units.
@@ -105,6 +116,7 @@ namespace
 				for (auto image : resource["Definitions"]["Definition"]["Images"]["Image"])
 						tiles.sprites.emplace(image["name"].as<std::string>(), ObjectSprite{{image["x"].as<int>(), image["y"].as<int>(), image["width"].as<int>(), image["height"].as<int>()}, false});
 		require(tiles.sprites.contains("chair"), "Required chair Image-set artwork is missing");
+		auto const human = tiles.sprites.at(core::bundledHumanBaseline().poses.at(core::Pose::Standing).imageTile);
 		setObjectTileset(std::move(tiles), reinterpret_cast<ImTextureID>(1));
 		auto world = std::make_shared<core::World>("Chair rendering", 8, 2);
 		auto room = world->addRoom("Room", 0, 0, 0, 8, 1);
@@ -280,7 +292,7 @@ namespace
 							{ ++deskTriangles; deskFirst = std::min(deskFirst, i); deskLast = i; }
 							else { ++deepTriangles; deepLast = i; }
 						}
-						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+						else if (spriteTriangle(*triangle, human, 320, 480))
 						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
 						else continue;
 						require(triangle->clip.minimum.x == clip.minimum.x && triangle->clip.maximum.x == clip.maximum.x
@@ -322,7 +334,7 @@ namespace
 						triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
 					{
 						if (triangle->texcoords[0].x >= 256.f / 320) deskLast = i;
-						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+						else if (spriteTriangle(*triangle, human, 320, 480))
 							agentFirst = std::min(agentFirst, i);
 					}
 				require(agentFirst < drawing.commands().size() && deskLast < agentFirst,
@@ -342,7 +354,7 @@ namespace
 					triangle && triangle->texture == WorldDrawList::Texture::ObjectAtlas)
 				{
 					if (triangle->texcoords[0].x >= 256.f / 320) artworkLast = i;
-					else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+					else if (spriteTriangle(*triangle, human, 320, 480))
 						walkerFirst = std::min(walkerFirst, i);
 				}
 			require(walkerFirst < artworkLast, "Edited artwork did not render in front of retained deeper Agent");
@@ -394,7 +406,7 @@ namespace
 							{ ++chairTriangles; chairFirst = std::min(chairFirst, i); }
 							else { ++deskTriangles; deskLast = i; }
 						}
-						else if (triangle->texcoords[0].x >= 83.f / 320 && triangle->texcoords[0].x < 110.f / 320)
+						else if (spriteTriangle(*triangle, human, 320, 480))
 						{ ++agentTriangles; agentFirst = std::min(agentFirst, i); agentLast = i; }
 						else if (triangle->texcoords[0].x >= 152.f / 320 && triangle->texcoords[0].x < 169.f / 320
 							&& triangle->texcoords[0].y >= 282.f / 480 && triangle->texcoords[0].y < 305.f / 480)

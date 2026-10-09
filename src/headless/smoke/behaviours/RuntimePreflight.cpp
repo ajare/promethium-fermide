@@ -21,33 +21,28 @@ namespace
 			"headless.behaviours", "schedule.lua", source);
 	}
 
-	void validHostContractDoesNotRunCallbacks()
+	void validHostContractDoesNotResumeBody()
 	{
-		for (auto version : { 1, 2 })
-		{
-			auto result = preflight("local version = " + std::to_string(version) + R"lua(
-local host = require("promethium.v" .. version)
-if host.api_version ~= version then error("wrong host API") end
-assert(not pcall(function() host.api_version = 3 end))
+		auto result = preflight(R"lua(
+local host = require("promethium.v3")
+assert(host.api_version == 3, "wrong host API")
+assert(not pcall(function() host.api_version = 4 end))
 return {
   api_version = host.api_version,
   factory = function(configuration)
-    return {
-      on_start = function() error("preflight ran on_start") end,
-      on_event = function() error("preflight ran on_event") end
-    }
+    return function(context)
+      error("preflight resumed the coroutine body")
+    end
   end
 }
 )lua");
-			require(result.loaded && result.diagnostic.empty() && result.traceback.empty(),
-				"A valid versioned behaviour did not preflight, or an Agent callback ran: "
-					+ result.diagnostic);
-		}
+		require(result.loaded && result.diagnostic.empty() && result.traceback.empty(),
+			"A valid v3 behaviour did not preflight, or its coroutine body ran: " + result.diagnostic);
 	}
 
 	void textAndContractFailuresCarryLocationAndTraceback()
 	{
-		auto syntax = preflight("return {\n  api_version = 1,\n  factory = function(\n}\n");
+		auto syntax = preflight("return {\n  api_version = 3,\n  factory = function(\n}\n");
 		require(!syntax.loaded
 			&& syntax.diagnostic.find("headless.behaviours") != std::string::npos
 			&& syntax.diagnostic.find("schedule.lua") != std::string::npos
@@ -64,11 +59,11 @@ return {
 			"Precompiled bytecode was not refused as non-text input");
 
 		for (auto const& malformed : {
-			std::string("return { factory = function() return {} end }"),
-			std::string("return { api_version = 3, factory = function() return {} end }"),
-			std::string("return { api_version = 1 }"),
-			std::string("return { api_version = 1, factory = function() return false end }"),
-			std::string("return { api_version = 1, factory = function() return { on_start = 4 } end }") })
+			std::string("return { factory = function() return function(context) while true do wait() end end end }"),
+			std::string("return { api_version = 99, factory = function() return function(context) wait() end end }"),
+			std::string("return { api_version = 3 }"),
+			std::string("return { api_version = 3, factory = function() return false end }"),
+			std::string("return { api_version = 3, factory = function() return {} end }") })
 		{
 			auto result = preflight(malformed);
 			require(!result.loaded && result.diagnostic.find("line 1") != std::string::npos,
@@ -77,7 +72,7 @@ return {
 
 		auto factoryError = preflight(R"lua(
 return {
-  api_version = 1,
+  api_version = 3,
   factory = function()
     error("factory exploded")
   end
@@ -88,6 +83,35 @@ return {
 			&& factoryError.traceback.find("stack traceback") != std::string::npos
 			&& factoryError.traceback.find("factory exploded") != std::string::npos,
 			"A protected factory error lacked its source line and traceback");
+	}
+
+	void legacyContractsRequireCoroutineMigration()
+	{
+		require(core::AgentBehaviourRuntimeAdapter::HostApiVersion == 3,
+			"The published behaviour Host API version is not 3");
+		for (auto version : { 1, 2 })
+		{
+			auto result = preflight("return { api_version = " + std::to_string(version)
+				+ ", factory = function() return {} end }");
+			require(!result.loaded
+				&& result.diagnostic.find("api_version = 3") != std::string::npos
+				&& result.diagnostic.find("coroutine function") != std::string::npos,
+				"A legacy API contract was accepted or lacked a migration diagnostic");
+			auto import = preflight("require('promethium.v" + std::to_string(version) + "')");
+			require(!import.loaded && import.traceback.find("not available") != std::string::npos,
+				"A retired behaviour Host API import remains available");
+		}
+		for (auto const* table : { "{}", "{ on_start = function() end }",
+			"{ on_event = function() end, on_timer = function() end, "
+			"on_route_lost = function() end, on_stop = function() end }" })
+		{
+			auto result = preflight(std::string("return { api_version = 3, factory = function() return ")
+				+ table + " end }");
+			require(!result.loaded
+				&& result.diagnostic.find("coroutine function(context)") != std::string::npos
+				&& result.diagnostic.find("callback-table") != std::string::npos,
+				"A callback-table factory was accepted or lacked the required coroutine shape");
+		}
 	}
 
 	void prohibitedHostSurfacesAreAbsent()
@@ -113,10 +137,10 @@ if math.random ~= nil or math.randomseed ~= nil then
   error("nondeterministic entropy is available")
 end
 for _, module in ipairs({ "io", "os", "debug", "package", "coroutine",
-    "socket", "lfs", "native.so" }) do
+  "socket", "lfs", "native.so" }) do
   if pcall(require, module) then error("loaded prohibited module: " .. module) end
 end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(result.loaded,
 			"A prohibited host surface was visible, or a selected facility was absent: "
@@ -126,9 +150,9 @@ return { api_version = 1, factory = function() return {} end }
 	void customLoaderIsReservedAndImmutable()
 	{
 		auto immutable = preflight(R"lua(
-local host = require("promethium.v1")
-local changed = pcall(function() host.api_version = 2 end)
-if changed or host.api_version ~= 1 then error("mutable host module") end
+local host = require("promethium.v3")
+local changed = pcall(function() host.api_version = 3 end)
+if changed or host.api_version ~= 3 then error("mutable host module") end
 if pcall(function() math.pi = 0 end)
     or pcall(function() string.byte = false end)
     or pcall(function() table.insert = false end)
@@ -136,7 +160,7 @@ if pcall(function() math.pi = 0 end)
   error("mutable built-in library")
 end
 if package ~= nil then error("standard package library is enabled") end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua");
 		require(immutable.loaded,
 			"The reserved immutable host module was unavailable: " + immutable.diagnostic);
@@ -144,7 +168,7 @@ return { api_version = 1, factory = function() return {} end }
 		require(core::AgentBehaviourHelperModule::nameIsValid(
 			"helpers.values", &nameDiagnostic),
 			"A dotted helper import name was refused");
-		for (auto const& invalidName : { "", "promethium.v1", "promethium.v2", "/absolute",
+		for (auto const& invalidName : { "", "promethium.v1", "promethium.v2", "promethium.v3", "/absolute",
 			"../traversal", "helpers/file", "native.dll", "helpers..value" })
 			require(!core::AgentBehaviourHelperModule::nameIsValid(
 				invalidName, &nameDiagnostic),
@@ -156,7 +180,7 @@ return { api_version = 1, factory = function() return {} end }
 			auto undeclared = core::AgentBehaviourRuntimeAdapter::preflightModule(
 				"headless.behaviours", "schedule.lua",
 				"require(\"" + std::string(name) + "\")\n"
-				"return { api_version = 1, factory = function() return {} end }\n");
+				"return { api_version = 3, factory = function() return function(context) while true do wait() end end end }\n");
 			require(!undeclared.loaded
 				&& undeclared.traceback.find("not available") != std::string::npos,
 				"The custom loader admitted an undeclared, path-based, or native module");
@@ -180,7 +204,7 @@ if pcall(function() first.loads = 2 end)
     or pcall(function() first.nested.answer = 0 end) then
   error("helper exports were mutable")
 end
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua", helpers);
 		require(declared.loaded,
 			"A declared helper graph was unavailable or mutable: " + declared.diagnostic);
@@ -192,7 +216,7 @@ return { api_version = 1, factory = function() return {} end }
 		auto cyclic = core::AgentBehaviourRuntimeAdapter::preflightModule(
 			"headless.behaviours", "schedule.lua", R"lua(
 require("helpers.a")
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua", cycle);
 		require(!cyclic.loaded
 			&& cyclic.traceback.find(
@@ -218,14 +242,14 @@ for i = 1, 8 do
     { "helpers.syntax", "syntax-error-with-a-long-name.lua" },
     { "helpers.runtime", "helper exploded" },
     { "helpers.a", "schedule.lua -> helpers.a -> helpers.b -> helpers.a" }
-  }) do
+}) do
     local ok, diagnostic = pcall(require, failure[1])
     assert(not ok and string.find(diagnostic, failure[2], 1, true), diagnostic)
   end
 end
 assert(require("helpers.valid").answer == 42)
 assert(require("helpers.valid") == require("helpers.valid"))
-return { api_version = 1, factory = function() return {} end }
+return { api_version = 3, factory = function() return function(context) while true do wait() end end end }
 )lua", helpers);
 		require(result.loaded,
 			"Caught helper errors corrupted loader state or diagnostics: " + result.diagnostic);
@@ -242,8 +266,8 @@ return { api_version = 1, factory = function() return {} end }
 		auto registry = core::AgentBehaviourRegistry::create();
 		registry->saveTo(manifest.string());
 		writeRuntimeText(package / "valid.lua",
-			"local p=require('promethium.v1'); return {api_version=p.api_version, factory=function() return {} end}\n");
-		writeRuntimeText(package / "broken.lua", "return { api_version = 1, factory = function( }\n");
+			"local p=require('promethium.v3'); return {api_version=p.api_version, factory=function() return function(context) while true do wait() end end end}\n");
+		writeRuntimeText(package / "broken.lua", "return { api_version = 3, factory = function( }\n");
 		auto const valid = registry->addAgentBehaviour("Valid", "valid.lua", {});
 		auto const broken = registry->addAgentBehaviour("Broken", "broken.lua", {});
 		require(registry->lookupAgentBehaviour(valid)->getModuleStatus()
@@ -265,13 +289,14 @@ return { api_version = 1, factory = function() return {} end }
 
 void behaviour_smoke::registerRuntimePreflight(std::vector<smoke::Check>& checks)
 {
-	checks.push_back({ "validHostContractDoesNotRunCallbacks", [](smoke::Context const&)
+	checks.push_back({ "validHostContractDoesNotResumeBody", [](smoke::Context const&)
 	{
-		validHostContractDoesNotRunCallbacks();
+		validHostContractDoesNotResumeBody();
 	} });
 	checks.push_back({ "textAndContractFailuresCarryLocationAndTraceback", [](smoke::Context const&)
 	{
 		textAndContractFailuresCarryLocationAndTraceback();
+		legacyContractsRequireCoroutineMigration();
 	} });
 	checks.push_back({ "prohibitedHostSurfacesAreAbsent", [](smoke::Context const&)
 	{

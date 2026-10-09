@@ -341,7 +341,9 @@ namespace
 		for (unsigned count : {1u, 3u, 4u, 7u})
 		for (bool interrupted : {false, true})
 		{
-			Scene scene(.25f, .25f, forward);
+			// At the initial .8 Height modifier, .25 also fits Crouching.
+			// Keep this a Crawling-only commitment fixture after tallest-fit migration.
+			Scene scene(.20f, .20f, forward);
 			auto chamber = std::dynamic_pointer_cast<const core::ChamberTransit>(scene.world.getSector(scene.index));
 			std::vector<core::AgentId> agents;
 			for (unsigned i = 0; i < count; ++i)

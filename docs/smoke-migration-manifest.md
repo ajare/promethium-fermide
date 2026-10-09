@@ -73,6 +73,7 @@ contract/probe invocations are not new scenario owners. See
 | `smoke/behaviours/RuntimeAuthorization.cpp` | module-owned | `pf-smoke-behaviours` |
 | `smoke/behaviours/RuntimeCallbacks.cpp` | module-owned | `pf-smoke-behaviours` |
 | `smoke/behaviours/RuntimeContainment.cpp` | module-owned | `pf-smoke-behaviours` |
+| `smoke/behaviours/RuntimeCoroutines.cpp` | module-owned | `pf-smoke-behaviours` |
 | `smoke/behaviours/RuntimeDeterminism.cpp` | module-owned | `pf-smoke-behaviours` |
 | `smoke/behaviours/RuntimeFailures.cpp` | module-owned | `pf-smoke-behaviours` |
 | `smoke/behaviours/RuntimeInstances.cpp` | module-owned | `pf-smoke-behaviours` |
@@ -334,8 +335,10 @@ running unrelated checks.
 `AgentBehaviourRuntimeSmokeChecks.cpp` is split into ten responsibility-based
 translation units below, registering all 26 original invocations independently
 (38 core checks total). Route-loss versions are selectable as
-`routeLossAndTopologyLifecycleV1` and `routeLossAndTopologyLifecycleV2`; all other
-selectors retain the original scenario names. Determinism, callbacks, scheduling,
+`routeLossAndTopologyLifecycleV1` and `routeLossAndTopologyLifecycleV2` originally;
+#528's v3 fixture migration replaces these with `routeLossAndTopologyLifecycle`
+and `routeLossAndTopologyLifecycleReplay`. Preflight, containment and teardown
+selectors likewise use resume/close terminology after that migration. Determinism, callbacks, scheduling,
 failure containment, and scale assertions are retained. Runtime package files use
 Context-owned directories and bundled sources use Context fixture lookup. The old
 source, declaration, aggregate call, and dedicated call are removed. The empty

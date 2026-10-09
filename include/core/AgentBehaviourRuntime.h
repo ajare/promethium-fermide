@@ -25,7 +25,6 @@ namespace core
 	{
 		size_t memoryBytes{ 64u * 1024u * 1024u };
 		uint32_t instructionsPerCall{ 100'000u };
-		uint32_t timersPerInstance{ 256u };
 		uint32_t callbacksPerBoundary{ 10'000u };
 		uint32_t commandsPerCallback{ 32u };
 		uint32_t logMessagesPerWindow{ 100u };
@@ -35,6 +34,7 @@ namespace core
 		// bytes staged and published for the window, independently of the count.
 		size_t logBytesPerMessage{ 4u * 1024u };
 		size_t logBytesPerWindow{ 256u * 1024u };
+		uint32_t pendingEventsPerInstance{ 64u };
 	};
 
 	using AgentBehaviourRuntimeFailure = ScriptExecutionFailure;
@@ -46,7 +46,7 @@ namespace core
 		Callback
 	};
 
-	// Defined lifetime endpoints passed to the best-effort on_stop callback.
+	// Defined lifetime endpoints for best-effort coroutine close teardown.
 	// They are runtime values only and are never part of World persistence.
 	enum class AgentBehaviourTeardownReason
 	{
@@ -94,9 +94,9 @@ namespace core
 
 	// One live adapter is owned by each World. Its implementation owns that
 	// World's Lua state and private per-Agent module environments; Lua and sol2
-	// remain confined to private implementation files. Startup callbacks queue commands and the
-	// adapter applies them through the World facade only after every callback
-	// at the boundary has returned.
+	// remain confined to private implementation files. Coroutine resumes queue
+	// commands; the adapter applies them through the World facade only after
+	// every resume at the boundary has returned.
 	class AgentBehaviourRuntimeAdapter
 	{
 		friend class AgentBehaviourRegistry;
@@ -106,7 +106,7 @@ namespace core
 		std::unique_ptr<Impl> mImpl;
 
 		// Builds every assigned instance in a fresh per-World runtime without
-		// running callbacks or touching the live World. A successful candidate
+		// resuming coroutine bodies or touching the live World. A successful candidate
 		// can therefore be adopted only after all dependent Worlds preflight.
 		static bool prepareReload(World& world,
 			AgentBehaviourRegistry const& registry,
@@ -114,6 +114,7 @@ namespace core
 			std::vector<AgentBehaviourRuntimeDiagnostic>& diagnostics,
 			std::map<AgentId, AgentBehaviourAssignment> const* assignments = nullptr,
 			AgentBehaviourId excludedBehaviour = {});
+		bool isInstanceCompleted(AgentId agent) const;
 		void appendDiagnostics(
 			std::vector<AgentBehaviourRuntimeDiagnostic> diagnostics);
 		static AgentBehaviourModulePreflight preflightModule(
@@ -123,7 +124,7 @@ namespace core
 			AgentBehaviourRuntimeLimits limits, bool invokeFactory);
 
 	public:
-		static constexpr uint32_t HostApiVersion{ 2 };
+		static constexpr uint32_t HostApiVersion{ 3 };
 		static constexpr size_t DefaultMemoryBudgetBytes{ 64u * 1024u * 1024u };
 		// Floor below which a scratch or live Lua state cannot reliably build its
 		// deterministic sandbox (state, selected libraries, private environment,
@@ -133,7 +134,6 @@ namespace core
 		// by the protected setup and marshalling boundaries.
 		static constexpr size_t MinimumMemoryBudgetBytes{ 64u * 1024u };
 		static constexpr uint32_t DefaultInstructionBudget{ 100'000u };
-		static constexpr uint32_t DefaultTimersPerInstance{ 256u };
 		static constexpr uint32_t DefaultCallbacksPerBoundary{ 10'000u };
 		static constexpr uint32_t DefaultCommandsPerCallback{ 32u };
 		static constexpr uint32_t DefaultLogMessagesPerWindow{ 100u };

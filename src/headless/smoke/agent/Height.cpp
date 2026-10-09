@@ -244,15 +244,15 @@ namespace
 				require(standingFacts.feasible
 					&& core::RouteTraversalInputs::capture(*edge, target, context).evaluate(context).feasible,
 					"Tag short Agent or nonzero remote Floor rejected");
-				// A Standing refusal now falls back to automatic Crawling rather than
-				// being excluded; captured inputs record the doubled motion duration.
+				// The tallest lowered pose (Crouching) fits this aperture.
+				// Captured inputs retain its declared full threshold speed.
 				require(world.setAgentIndividualHeightModifier(id, 1.0f), "Individual Height failed");
-				auto crawl = core::RouteTraversalInputs::capture(*edge, target, context);
-				auto crawlFacts = crawl.evaluate(context);
-				require(crawlFacts.feasible && crawl.motionSpeedRatio == 0.5f
-					&& crawlFacts.components.motionSeconds > standingFacts.components.motionSeconds
+				auto crouch = core::RouteTraversalInputs::capture(*edge, target, context);
+				auto crouchFacts = crouch.evaluate(context);
+				require(crouchFacts.feasible && crouch.motionSpeedRatio == 1.0f
+					&& crouchFacts.components.motionSeconds == standingFacts.components.motionSeconds
 					&& edge->getDirectedTraversalFacts(target, context).feasible,
-					"Standing refusal did not fall back to Crawling");
+					"Standing refusal did not select full-speed Crouching");
 				// Too low even for Crawling remains a hard Clearance exclusion.
 				require(door->setHeightScale(0.2f), "Low scale refused");
 				auto impossible = core::RouteTraversalInputs::capture(*edge, target, context);
@@ -273,8 +273,8 @@ namespace
 			auto const runtimeFeet = world.lookupAgent(runtimeId).entity->getGlobalPosition().y;
 			require(door->setHeightScale(0.6f), "Runtime low scale refused");
 			require(door->classifyAgentCrossing(*world.lookupAgent(runtimeId).entity, runtimeFeet)
-					== core::Door::DoorCrossingMode::Crawling,
-				"Runtime Standing refusal did not fall back to Crawling");
+					== core::Door::DoorCrossingMode::Crouching,
+				"Runtime Standing refusal did not select Crouching");
 			require(door->setHeightScale(0.15f), "Runtime crawl refusal scale refused");
 			require(door->classifyAgentCrossing(*world.lookupAgent(runtimeId).entity, runtimeFeet)
 					== core::Door::DoorCrossingMode::None
@@ -418,7 +418,7 @@ namespace
 					}
 			}
 			else require(world.moveAgentToMarker(id, world.getMarkerIds().front()).accepted(), "Journey intent refused");
-			bool lost = false, crossedLow = false, crawled = false;
+			bool lost = false, crossedLow = false, crouched = false, crawled = false;
 			for (uint32_t tick = 0; tick != 6000; ++tick)
 			{
 				world.advanceTick();
@@ -431,15 +431,18 @@ namespace
 				for (auto const& permit : world.getSimulationSnapshot().traversalPermits)
 					for (auto const& request : world.getSimulationSnapshot().traversalRequests)
 						if (permit.request == request.id && request.resource == low.traversalResource) crossedLow = true;
-				if (agent->getState() == core::Agent::State::TraversingEdge
-					&& agent->getPose() == core::Pose::Crawling) crawled = true;
+				if (agent->getState() == core::Agent::State::TraversingEdge)
+				{
+					crouched = crouched || agent->getPose() == core::Pose::Crouching;
+					crawled = crawled || agent->getPose() == core::Pose::Crawling;
+				}
 				if (agent->getState() == core::Agent::State::Idle) break;
 			}
-			// Taller Agents no longer refuse the low Door: they cross it Crawling.
+			// Taller Agents use Crouching here; all these envelopes fit it.
 			bool const stands = modifier <= 0.8f;
 			require(agent->getState() == core::Agent::State::Idle
 				&& agent->getSector() == world.getSector(targetSector).get()
-				&& !lost && crossedLow && crawled == !stands,
+				&& !lost && crossedLow && crouched == !stands && !crawled,
 				"World journey failed: front=" + std::to_string(frontKind) + " back=" + std::to_string(backKind)
 				+ " reverse=" + std::to_string(reverse) + " alternate=" + std::to_string(alternate)
 				+ " modifier=" + std::to_string(modifier) + " external=" + std::to_string(external) + " mode=" + std::to_string(static_cast<int>(mode))

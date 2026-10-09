@@ -95,16 +95,15 @@ namespace
 			std::ofstream lua(package.path / "noise.lua");
 			lua << R"lua(
 return {
-  api_version = 1,
+  api_version = 3,
   factory = function(configuration)
-    return {
-      on_start = function(context)
-        for i = 1, 100 do
-          context.random_number()
-          context.random_integer(0, 1000)
-        end
+    return function(context)
+      for i = 1, 100 do
+        context.random_number()
+        context.random_integer(0, 1000)
       end
-    }
+      while true do wait() end
+    end
   end
 }
 )lua";

@@ -332,7 +332,7 @@ void runCommittedDoorEnvelope(smoke::Context const& context)
 		write(actions, "return {api_version=1,uuid='" + std::string(uuid) + "',actions={{"
 			"key='sit',name='Sit',run=function(a,w,m) w.set_pose('sitting') end},{"
 			"key='change',name='Change',run=function(a,w,m) w.set_pose('"
-			+ (change == 0 ? "lying" : "sitting") + "'); " + (change == 0 ? "" : "w.claim(); ") + "end}}}");
+			+ (change == 0 ? "standing" : "sitting") + "'); " + (change == 0 ? "" : "w.claim(); ") + "end}}}");
 		auto sit = std::string(uuid) + ":sit", changed = std::string(uuid) + ":change";
 		require(world.selectActionRegistry(actions) && world.setMarkerActions(marker, {sit, changed})
 			&& world.setMarkerActions(otherMarker, {sit, changed}), "Committed Action fixture failed");
