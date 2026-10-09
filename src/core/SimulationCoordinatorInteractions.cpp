@@ -282,6 +282,37 @@ namespace core
 		return float(std::max(0., std::abs(double(centre->x) - position.x) - horizontal));
 	}
 
+	bool World::agentCanRemotelySelectLiftDestination(TraversalResourceId resourceId,
+		Agent const& actor, bool requireOccupancy) const
+	{
+		auto resource = mTraversalResources.find(resourceId);
+		if (!resource || !resource->mLift || resource->mShuttle || !resource->mLiftSector
+			|| actor.getObjectUsage() != ObjectUsage::RemoteControl || agentForbidsButtons(&actor)) return false;
+		auto centre = resource->mLift->getPosition() + resource->mLift->getSize() * .5f;
+		auto occupied = find(resource->mOccupants.begin(), resource->mOccupants.end(), getAgentId(&actor))
+			!= resource->mOccupants.end();
+		if (occupied)
+		{
+			if (actor.getSector() != mSectors[resource->mLiftSector.value - 1].get()) return false;
+			auto position = actor.getGlobalPosition();
+			return std::hypot(double(position.x) - centre.x, double(position.y) - centre.y)
+				<= actor.getObjectUsageDistance();
+		}
+		if (requireOccupancy) return false;
+		// Planning may project boarding, never operate a selector. Enclosed cars
+		// centre a lone passenger; platforms retain authored capacity slots. Neither
+		// prediction exposes remote scheduling or occupancy. Allocation rechecks
+		// the actual passenger and car, including changes caused by other boarders.
+		if (!resource->mOpenPlatformLift)
+			return resource->mLift->getSize().y * .5f <= actor.getObjectUsageDistance();
+		auto sector = mSectors[resource->mLiftSector.value - 1]->getPosition();
+		return any_of(resource->mCapacityPositions.begin(), resource->mCapacityPositions.end(), [&](auto const& slot)
+		{
+			return std::hypot(double(sector.x + slot.x) - centre.x,
+				double(slot.y) - resource->mLift->getSize().y * .5f) <= actor.getObjectUsageDistance();
+		});
+	}
+
 	bool World::agentCanOperateInteraction(InteractionPointId pointId, Agent const& actor, bool requireReach) const
 	{
 		auto point = mInteractionPoints.find(pointId);
@@ -290,6 +321,18 @@ namespace core
 		if (actor.getObjectUsage() == ObjectUsage::RemoteControl)
 		{
 			auto centre = physicalButtonCentre(pointId);
+			if (!centre)
+			{
+				// Only the generated onboard selectors qualify, not arbitrary points
+				// bound to a transport command (nor Shuttle selectors).
+				return !point->mBindings.empty() && all_of(point->mBindings.begin(), point->mBindings.end(), [&](auto const& binding)
+				{
+					auto resource = mTraversalResources.find(binding.command.traversalResource);
+					return binding.command.type == DeviceCommandType::SelectLiftDestination && resource
+						&& find(resource->mControls.begin(), resource->mControls.end(), pointId) != resource->mControls.end()
+						&& agentCanRemotelySelectLiftDestination(binding.command.traversalResource, actor);
+				});
+			}
 			auto position = actor.getGlobalPosition();
 			return centre && std::hypot(double(position.x) - centre->x, double(position.y) - centre->y) <= actor.getObjectUsageDistance();
 		}

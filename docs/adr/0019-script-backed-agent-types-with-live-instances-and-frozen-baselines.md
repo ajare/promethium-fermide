@@ -123,6 +123,19 @@ owners. Direct Bulkhead and transport landing Door operation, Access panels and
 onboard selectors are still excluded. Frozen defaults, property precedence and
 lifetime reconstruction remain unchanged.
 
+## Remote onboard Lift destinations (#541)
+
+Generated Lift and Platform lift destination selectors additionally qualify for
+Remote control. Range is inclusive distance to the actual occupied vehicle's
+physical centre in its applicable Sector, not the selector's physical approach.
+Sharing a Transit or Room never permits controlling a different car. Generic
+Interaction points and onboard Shuttle selectors remain excluded; physical
+Shuttle Buttons retain their independent eligibility. Route feasibility projects
+boarding positions; actual operation rechecks occupancy, range, Mobility and
+Access permissions without adding control-only walking or changing durations.
+Accepted journeys and safe committed exits retain their existing guarantees.
+Property precedence, frozen defaults and fresh-lifetime boundaries are unchanged.
+
 ## Consequences
 
 An Agent owns two deliberately separated things: its authored type identity (stable ID, display name, resolved resource reference) and its frozen physical baseline, which simulation consumers read; and an opaque live-instance handle owned by the World's Agent-type runtime, whose destructor releases the Lua instance when the Agent dies. The baseline is validated field-by-field (six non-pose numeric fields always required, plus positive Object usage distance for Arms and Remote control; dimensions and speeds finite and positive after conversion to simulation floats; explicit supported poses and ordered Room/Door choices under API v2, with applicable height and speed ratios finite and in `(0, 1]`) and copied out of Lua, so later mutations of the instance cannot change ongoing simulation. The World owns one sandboxed Lua state per the ADR 0008 isolation and budget model, with the same forbidden-capability restrictions and no filesystem, process, native-module, debug, or shared-mutable-module access.

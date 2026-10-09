@@ -1600,6 +1600,8 @@ namespace core
 		bool agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const;
 		std::optional<Vector2> physicalButtonCentre(InteractionPointId point) const;
 		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor, bool requireReach) const;
+		bool agentCanRemotelySelectLiftDestination(TraversalResourceId resource, Agent const& actor,
+			bool requireOccupancy = true) const;
 		// Authorization-only policy for Permission adherence to usable transport.
 		bool agentSatisfiesTransportLandingPermission(TraversalResourceId resource,
 			SectorId approach, Vector2 const& endpoint, AgentId agent) const;

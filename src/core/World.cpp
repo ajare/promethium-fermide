@@ -11875,7 +11875,8 @@ namespace core
 		command.traversalResource = resourceId;
 		command.stopIndex = stop;
 		auto agent = mAgents.find(agentId);
-		if (agent && agent->getObjectUsage() == ObjectUsage::Arms
+		if (agent && (agent->getObjectUsage() == ObjectUsage::Arms
+			|| agentCanRemotelySelectLiftDestination(resourceId, *agent, false))
 			&& missingLiftDestinationPermissions(command, agentId).empty()) return true;
 		if (!agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)

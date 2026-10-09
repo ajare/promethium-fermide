@@ -29,11 +29,11 @@ Every **physical Button** qualifies, including light switches, stacked controls,
 extensible-device controls, Airlock controls, and transport landing Buttons. The
 Button identity and physical centre are authoritative, not its Interaction point
 approach or the receiving device's centre/type. Generic Interaction points,
-Access panels, BoothWindow shutter panels and onboard selectors do not acquire
-remote capability. Ordinary manual Doors additionally qualify under #540 (below).
-Later tickets #541–#543 extend other interactions; remote-only passengers cannot manufacture an
-onboard Lift/Platform lift/Shuttle selection here, but may use accepted shared
-journeys under the existing rules.
+Access panels and BoothWindow shutter panels do not acquire remote capability in
+this slice. Ordinary manual Doors additionally qualify under #540 (below), and
+generated onboard Lift and Platform lift selectors under #541. Onboard Shuttle
+selectors remain unsupported; their physical landing Buttons still qualify.
+Generic Interaction points cannot manufacture onboard remote support.
 
 Range is inclusive Euclidean distance from Agent position to Button centre,
 including vertical separation. Both must occupy the same Sector; another Level
@@ -87,7 +87,40 @@ Automatic Doors retain automatic activation. A control-operated Door still uses
 its required physical Button and that Button's authorization and press duration;
 remote Object usage does not bypass its controls. Direct Bulkhead and transport
 landing Door operation is excluded, but their physical Buttons remain eligible
-under the all-Buttons rule. No onboard selection capability is added.
+under the all-Buttons rule. Onboard Lift selection is a separate category below.
+
+## Onboard Lift and Platform lift destinations (#541)
+
+Remote passengers select destinations from their **actual occupied vehicle** in
+its applicable Sector. Sharing a Lift Transit or a Platform lift's Room is not
+occupancy of that car. Selection measures inclusive straight-line World-unit
+range from Agent position to `Lift position + Lift size / 2`, not to the generated
+selector's passenger-local physical approach. Local depth and line of sight do
+not affect range. Direct requests outside range refuse without walking.
+
+For example, use the Lua declaration above, place a Lift connecting two
+Corridors (or a Platform lift connecting a Room's ground Floor and Walkway), and
+send the Agent to a Marker at the upper Stop. A 1.5-unit range allows selection
+from its standing position. For a Human mode-only override, explicitly author
+Object usage distance if the retained 0.25-unit range cannot reach the car centre.
+There is no separate Lift capability boolean.
+
+Planning projects normal boarding/standing positions without inspecting remote
+schedules or manifests. Runtime rechecks actual occupancy, range and destination
+Access permissions. Selection uses the existing press duration and confirmation
+queue; it adds no walking solely to reach an onboard control. Landing Buttons,
+boarding, passenger positioning, riding, disembarking, Mobility, capacity and
+scheduling remain unchanged. Landing authorization and Permission adherence are
+still independent from destination-operation authorization. None or an
+unsupported remote passenger can share a locally observed accepted journey under
+the existing rules, but cannot supply missing selection. Accepted destinations
+and safe committed exits survive later mode, range or authorization changes;
+new or pending operation revalidates capability.
+
+Authored overrides and tags use the existing paused editor, history, clipboard
+and YAML/binary workflows. Surviving structural/history edits retain frozen type
+defaults; Reset, load, paste and deleted-Agent restoration validate fresh
+lifetimes. No schema, operation-duration or mutable Lua observation is added.
 
 ## Headless verification
 
@@ -108,6 +141,25 @@ paused pending-command range cancellation, permission/Mobility/Broken/None
 refusals, unrelated-Sector refusal and excluded direct Door categories. YAML and
 binary reconstruction, Reset, structural edits, clipboard and Door authoring
 undo/redo exercise the same runtime behavior.
+
+#541 adds `agentTypesRemoteOnboardJourneys`: complete Lift and Platform lift
+journeys, inclusive vehicle-centre and just-outside range, non-occupants,
+other-car isolation (including two Platform lifts in one Room), generic-point
+refusal, denied destination/landing permissions, Buttons Mobility, paused
+inherited-range cancellation with published outcomes, and completion after
+capability and authorization loss. `agentTypesNoneSharedJourneys` retains
+opportunistic/Permission-adherence coverage for both lift kinds and Shuttles;
+`agentTypesRemoteLandingButtons` verifies the separate Shuttle Button category.
+Existing Remote lifetime, persistence and editor/history/clipboard checks cover
+the unchanged authored capability and frozen-default workflows.
+
+Final #541 Linux validation reused `build-linux` (GUI-enabled Release):
+`cmake --build build-linux --config Release -j4` and display-unset
+`ctest --test-dir build-linux -C Release -E '^willpower_' -j4 --output-on-failure`
+passed all 122 project-owned tests, including exhaustive module contracts,
+editor/history/clipboard, both-format persistence, lifetime and Startup checks.
+`git diff --check` passed. Debug and unmodified submodule tests were excluded per
+`AGENTS.md`; no Windows validation is claimed.
 
 Final #540 Linux validation reused the GUI-enabled Release tree: the default
 core/headless/editor inventory built successfully and all 121 project-owned

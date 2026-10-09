@@ -261,7 +261,8 @@ namespace core
 				return;
 			}
 			auto actor = mWorld.mAgents.find(request->mOwner);
-			if (actor && actor->getObjectUsage() != ObjectUsage::Arms)
+			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
+				&& !mWorld.agentCanRemotelySelectLiftDestination(request->mResource, *actor))
 			{
 				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);

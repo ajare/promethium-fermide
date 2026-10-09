@@ -99,7 +99,9 @@ policies have not moved into type scripts.
 ## Object usage and arm length (#535)
 
 `object_usage` accepts the actual Lua strings `"arms"`, `"none"` and `"remote_control"`; omission defaults to
-Arms for compatibility. See [Remote Button operation](remote-button-operation.md) for #539's supported scope.
+Arms for compatibility. See [Remote operation](remote-button-operation.md) for physical Buttons, ordinary
+manual Doors and onboard Lift/Platform lift destination selection, including
+World authoring examples. Onboard Shuttle selectors remain unsupported.
 In Arms mode, `object_usage_distance` is independently frozen and observed, not
 inferred from the usage mode. It must be a concrete finite, strictly positive
 simulation float; None's unused observation is described below.

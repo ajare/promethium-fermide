@@ -1067,7 +1067,8 @@ namespace core
 					? TraversalRequestId{} : coordinator.mLiftConfirmationQueue.front();
 			return;
 		}
-		if (actor && actor->getObjectUsage() != ObjectUsage::Arms)
+		if (actor && actor->getObjectUsage() != ObjectUsage::Arms
+			&& (!coordinator.mLift || !mWorld.agentCanRemotelySelectLiftDestination(coordinator.mLift->getTraversalResourceId(), *actor)))
 		{
 			requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
 			denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);

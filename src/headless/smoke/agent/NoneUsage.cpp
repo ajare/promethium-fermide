@@ -3,6 +3,8 @@
 #include "../simulation/InteractionResults.h"
 #include "core/AgentType.h"
 #include "core/Button.h"
+#include "core/Lift.h"
+#include "core/LiftTransit.h"
 #include "core/AccessPanel.h"
 #include "core/AirlockTransit.h"
 #include "core/DoorSectorObject.h"
@@ -349,7 +351,130 @@ namespace
 				&& world.lookupAgent(id).entity->getGlobalPosition().distanceTo(position) == 0,
 				"Remote landing call did not finish without approach, kind " + std::to_string(kind));
 			auto destination = position; if (shuttle) destination.x += 24; else destination.y += 1;
-			require(!world.canAgentUseLiftJourney(vehicle, position, destination, id), "Landing Button granted unsupported onboard operation");
+			require(world.canAgentUseLiftJourney(vehicle, position, destination, id) == !shuttle,
+				"Remote onboard category feasibility mismatch");
+		}
+	}
+
+	void remoteOnboardJourneys(smoke::Context const&)
+	{
+		for (bool platform : {false, true})
+		for (unsigned variant = 0; variant < 6; ++variant)
+		{
+			core::World world("Remote onboard journeys", 20, 2);
+			auto ground = platform ? world.addRoom("Platform Room", 0, 0, 0, 20, 2) : world.addCorridor(0, 0, 20);
+			auto upper = platform ? ground : world.addCorridor(1, 0, 20);
+			if (platform) for (unsigned x = 0; x < 20; ++x) world.addSectorWalkway(ground, 1, x);
+			world.finishBuild(); world.pauseSimulation();
+			auto key = world.addAccessPermission("Destination key");
+			core::World::CreateLiftOptions options; options.cellsWide = platform ? 1 : 2; options.capacity = 1; options.stopOffsets = {0, 1};
+			if (variant == 4) options.landingControlPermissionRequirements = {{key}, {}};
+			core::TraversalResourceId vehicle;
+			core::InteractionPointId selector, otherSelector;
+			std::shared_ptr<core::Lift> lift;
+			uint32_t vehicleSector, object = ~0u;
+			if (platform)
+			{
+				auto made = world.addSectorPlatformLift(ground, 0, 8, options);
+				vehicle = made.traversalResource; selector = made.interiorSelector;
+				vehicleSector = ground; object = made.lift.index;
+				lift = std::dynamic_pointer_cast<core::Lift>(made.lift.sector->getObject(made.lift.index)->_getObject());
+				if (variant == 0) otherSelector = world.addSectorPlatformLift(ground, 0, 12, options).interiorSelector;
+			}
+			else
+			{
+				auto made = world.addLift(1, 0, 8, options);
+				vehicle = made.traversalResource; selector = made.interiorSelector;
+				vehicleSector = made.lift.sector->getIndex();
+				lift = std::dynamic_pointer_cast<core::LiftTransit>(made.lift.sector)->getLift();
+				if (variant == 0) otherSelector = world.addLift(1, 0, 12, options).interiorSelector;
+			}
+			world.addSectorMarker(upper, platform ? 1 : 0, 7.f, "Goal"); world.finishBuild(); world.pauseSimulation();
+			if (variant == 1 || variant == 2)
+				require(world.setLiftDestinationPermissionRequirement(vehicleSector, 1, {key}, nullptr, object), "Destination requirement refused");
+			auto id = world.createAgent("Remote passenger", ground, 0, 7.f);
+			remote(world, id, variant == 3 ? .01f : 10.f); quickPlanning(world, id);
+			if (variant == 5)
+			{
+				world.pauseSimulation(); auto profile = world.lookupAgent(id).entity->getEffectiveMobilityProfile().value;
+				profile.set(core::TraversalKind::Buttons, core::MobilityUse::CannotUse);
+				require(world.setAgentIndividualMobilityProfile(id, profile), "Buttons restriction refused"); world.resumeSimulation();
+			}
+			if (variant == 2) { world.pauseSimulation(); require(world.grantAgentAccessPermission(id, key), "Destination grant refused"); world.resumeSimulation(); }
+			require(!world.requestInteraction(selector, id), "Non-occupant remotely selected onboard destination");
+			core::DeviceCommand select; select.type = core::DeviceCommandType::SelectLiftDestination; select.traversalResource = vehicle; select.stopIndex = 1;
+			auto generic = world.createInteractionPoint("Not an onboard selector", core::SectorId{ground + 1}, {7.f, 0.f}, 100.f, 0,
+				{{select, core::InteractionBindingRequirement::Required}});
+			require(!world.requestInteraction(generic, id), "Generic Interaction point bypassed onboard classification");
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Remote journey intent refused");
+			bool onboard = false, selected = false, arrived = false, changed = false;
+			core::Vector2 selectionPosition;
+			for (unsigned tick = 0; tick < 4000; ++tick)
+			{
+				world.advanceTick();
+				auto agent = world.lookupAgent(id).entity;
+				if (!onboard && world.isAgentTransportOccupant(vehicle, id))
+				{
+					onboard = true;
+					world.pauseSimulation();
+					if (variant == 0)
+					{
+						auto centre = lift->getPosition() + lift->getSize() * .5f;
+						auto position = agent->getGlobalPosition();
+						require(position.x == centre.x, "Single passenger not centred by boarding");
+						double measured = std::hypot(double(position.x) - centre.x, double(position.y) - centre.y);
+						auto distance = float(measured);
+						if (double(distance) < measured) distance = std::nextafter(distance, std::numeric_limits<float>::infinity());
+						require(world.setAgentIndividualObjectUsageDistance(id, std::nextafter(distance, 0.f)), "Out-of-range edit refused");
+						require(!world.requestInteraction(selector, id), "Onboard out-of-range selector accepted");
+						require(world.setAgentIndividualObjectUsageDistance(id, distance), "Exact-range edit refused");
+						auto request = world.requestInteraction(selector, id);
+						require(bool(request), "Inclusive vehicle-centre range refused");
+						auto registry = core::AgentTagRegistry::create(); world.attachAgentTagRegistry("onboard.tags.yaml", registry);
+						auto tag = registry->addAgentTag("car-range");
+						require(registry->addAgentTagObjectUsageDistance(tag)
+							&& registry->setAgentTagObjectUsageDistance(tag, distance) && world.assignAgentTag(id, tag)
+							&& world.setAgentIndividualObjectUsageDistance(id, std::nullopt), "Onboard tag inheritance refused");
+						require(registry->setAgentTagObjectUsageDistance(tag, std::nextafter(distance, 0.f)), "Onboard tag range edit refused");
+						require(simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Cancelled,
+							"Paused onboard tag edit did not publish cancellation");
+						require(world.setAgentIndividualObjectUsageDistance(id, 100.f), "Ownership probe range refused");
+						require(!world.requestInteraction(otherSelector, id), "Passenger controlled another car in range");
+						require(world.setAgentIndividualObjectUsageDistance(id, 10.f), "Journey range restore refused");
+					}
+					world.resumeSimulation();
+				}
+				for (auto const& event : world.consumeSimulationEvents())
+					if (event.type == core::SimulationEventType::DeviceOperationChanged
+						&& event.deviceOperation.command.type == core::DeviceCommandType::SelectLiftDestination
+						&& event.deviceOperation.command.stopIndex == 1 && event.deviceOperation.requester == id
+						&& event.deviceOperation.state == core::DeviceOperationState::Succeeded)
+					{ selected = true; selectionPosition = agent->getGlobalPosition(); }
+				if (selected && variant == 2 && !changed)
+				{
+					changed = true; world.pauseSimulation();
+					require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None)
+						&& world.revokeAgentAccessPermission(id, key), "Committed capability/permission edit refused");
+					world.resumeSimulation();
+				}
+				if (agent->getSector()->getIndex() == upper && std::abs(agent->getGlobalPosition().y - 1.f) < .001f
+					&& agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+				if ((variant == 1 || variant >= 3) && tick > 100) break;
+			}
+			if (variant == 1 || variant >= 3) require(!onboard && !selected && !arrived, "Denied permission/Mobility or infeasible range admitted journey");
+			else require(onboard && selected && arrived && std::abs(selectionPosition.x - (platform ? 8.5f : 9.f)) <= .02f,
+				"Remote passenger failed full journey or approached control, platform=" + std::to_string(platform) + " variant=" + std::to_string(variant)
+				+ " onboard=" + std::to_string(onboard) + " selected=" + std::to_string(selected) + " arrived=" + std::to_string(arrived)
+				+ " selectionX=" + std::to_string(selectionPosition.x)
+				+ " state=" + std::to_string(int(world.lookupAgent(id).entity->getState())));
+			world.advanceTicks(600);
+			auto snapshot = world.getSimulationSnapshot();
+			require(snapshot.interactionRequests.empty() && snapshot.deviceOperations.empty()
+				&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(),
+				"Remote journey leaked work platform=" + std::to_string(platform) + " variant=" + std::to_string(variant)
+				+ " interactions=" + std::to_string(snapshot.interactionRequests.size())
+				+ " operations=" + std::to_string(snapshot.deviceOperations.size())
+				+ " traversals=" + std::to_string(snapshot.traversalRequests.size()));
 		}
 	}
 
@@ -1018,6 +1143,7 @@ namespace
 }
 void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"agentTypesRemoteOnboardJourneys", remoteOnboardJourneys});
 	checks.push_back({"agentTypesRemoteOrdinaryDoors", remoteOrdinaryDoors});
 	checks.push_back({"agentTypesRemoteDoorGates", remoteDoorGates});
 	checks.push_back({"agentTypesRemoteDeclarations", remoteDeclarations});
