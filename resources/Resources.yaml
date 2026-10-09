@@ -63,6 +63,7 @@ Resources:
               - { name: "human-crouching", x: "144", y: "917", width: "26", height: "43" }
               - { name: "human-crawling", x: "192", y: "952", width: "72", height: "8" }
               - { name: "robot-standing", x: "288", y: "888", width: "26", height: "72" }
+              - { name: "cleaning-bot-standing", x: "240", y: "912", width: "26", height: "24" }
               - { name: "marker", x: "152", y: "282", width: "16", height: "22" }
               - { name: "chair", x: "256", y: "160", width: "64", height: "160" }
               - { name: "sofa-left", x: "0", y: "480", width: "64", height: "160" }
@@ -129,14 +130,11 @@ Resources:
       name: "human.agent.lua"
       location: "test-worlds/human.agent.lua"
     - type: "AgentType"
-      name: "robot.agent.lua"
-      location: "test-worlds/robot.agent.lua"
+      name: "android.agent.lua"
+      location: "test-worlds/android.agent.lua"
     - type: "AgentType"
-      name: "scout.agent.lua"
-      location: "test-worlds/scout.agent.lua"
-    - type: "AgentType"
-      name: "standing-robot.agent.lua"
-      location: "test-worlds/standing-robot.agent.lua"
+      name: "cleaning-bot.agent.lua"
+      location: "test-worlds/cleaning-bot.agent.lua"
     - type: "AgentBehaviourRegistry"
       name: "DoorTestBehaviours"
       location: "test-worlds/door-test-1.behaviours/behaviours.yaml"

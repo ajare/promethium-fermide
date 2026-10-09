@@ -111,6 +111,7 @@ set(agent_checks
     agentTypesResolvedResourceUnavailable
     agentTypesPreviewMatchesPlacement
     agentTypesScriptedAuthorizationPlacement
+    agentTypesCleaningBot
     agentTypesFixturePhysicalOutcomes
     agentTypesFixturePersistenceRoundTrip
     agentTypesLoadingRefusesMismatchedOrMissingResource

@@ -348,7 +348,7 @@ namespace
 		{
 			Scene scene(lowExit ? .5f : .3f, lowExit ? .3f : .5f, forward);
 			pose_journeys::attachRobot(scene.world);
-			auto id = scene.world.createAgent("StandingRobot", "Robot", scene.entrySector(), 0, scene.entrySide == 0 ? 4.5f : .5f);
+			auto id = scene.world.createAgent("Android", "Robot", scene.entrySector(), 0, scene.entrySide == 0 ? 4.5f : .5f);
 			pose_journeys::refused(scene.world, id, scene.exitSide == 0 ? "Left goal" : "Right goal");
 		}
 	}

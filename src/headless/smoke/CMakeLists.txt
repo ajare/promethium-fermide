@@ -191,6 +191,10 @@ add_test(NAME agent-type-reserved-behaviour COMMAND pf-smoke-agent
     --check agentTypesReservedBehaviourMember)
 set_tests_properties(agent-type-reserved-behaviour PROPERTIES LABELS "core;functional;smoke;validation-fast")
 
+add_test(NAME agent-type-cleaning-bot COMMAND pf-smoke-agent --check agentTypesCleaningBot)
+set_tests_properties(agent-type-cleaning-bot PROPERTIES
+    LABELS "agent;functional;validation-fast" TIMEOUT 60)
+
 add_test(NAME agent-type-topology-lifetime COMMAND pf-smoke-agent
     --check agentTypesTopologyReplayPreservesLiveInstances)
 add_test(NAME agent-type-history-lifetime COMMAND pf-smoke-editor

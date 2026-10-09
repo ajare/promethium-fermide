@@ -9,8 +9,20 @@
 > See [Agent pose capabilities](agent-pose-capabilities.md) and [ADR 0020](adr/0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md).
 
 An Agent type is one managed `.agent.lua` resource returning a type table. Human
-is the only bundled production type; Scout and Standing Robot are regression
-fixtures, not additional production types. Human's physical authority is
+and Android are bundled alongside Cleaning Bot. Android supports only Standing,
+using `resources/test-worlds/android.agent.lua`. Cleaning Bot (`CleaningBot`,
+`cleaning-bot.agent.lua`) is a compact wheeled Agent with a 0.4-unit width,
+0.15-unit Standing height, 0.3-unit/s walking speed and its own
+`cleaning-bot-standing` tile. It supports only Standing in Rooms and Doors.
+Its default Mobility permits Door only: stairs, stairwells, escalators, ladders,
+lifts, platform lifts, shuttles and Buttons are forbidden. It can traverse regular
+manual/automatic Doors, but not button-operated Doors or Bulkhead Doors, and
+cannot operate Access panels. This uses the existing button-required gate, not a
+Door-subtype ban; a non-button Bulkhead Door follows ordinary Door eligibility.
+As with other script defaults, authored Mobility overrides retain their normal
+precedence. The type adds no autonomous cleaning behaviour.
+
+Human's physical authority is
 `resources/test-worlds/human.agent.lua`. The headless embed is generated from that
 file during the build; there is no compiled Human subtype or second definition.
 
@@ -243,7 +255,7 @@ Reset preserves authored properties, tags, samples and identity. YAML and binary
 save/load, clipboard and history carry authored individual profiles and tag
 assignments, not script defaults materialised as overrides. Removing an override
 therefore reveals the applicable tag or the current lifetime's frozen default,
-not a persisted default from an earlier lifetime. Bundled Human and Scout retain
+not a persisted default from an earlier lifetime. Bundled Human and Android retain
 all–Can use defaults, including legacy Human documents.
 
 Failed Reset or history reconstruction (including invalid `mobility_profile`)

@@ -116,7 +116,7 @@ Bundled catalogues (#465) and regression inputs/builders (#466) are native Lua;
 ### Declared poses and eligibility (#523)
 
 `markerActions/furniturePoseRequirements` covers malformed declarations, Human
-versus Standing-only Robot support, unsupported finish, remote target geometry,
+versus Standing-only Android support, unsupported finish, remote target geometry,
 use support and finish-release fit at exact/tolerance boundaries, stale arrival,
 host-declared non-Standing finish, metadata-only edit preflight, and atomic
 forbidden `set_pose` (including caught calls). Existing Furniture, Door-clearance,

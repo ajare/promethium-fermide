@@ -69,11 +69,11 @@ namespace
 		return AgentClipboardPayload{ name, 0, true, std::nullopt };
 	}
 
-	AgentClipboardPayload scoutPayload(std::string const& name)
+	AgentClipboardPayload androidPayload(std::string const& name)
 	{
 		AgentClipboardPayload payload{ name, 0, true, std::nullopt };
-		payload.type = "Scout";
-		payload.resource = "scout.agent.lua";
+		payload.type = "Android";
+		payload.resource = "android.agent.lua";
 		return payload;
 	}
 
@@ -117,7 +117,7 @@ namespace
 			std::string diagnostic;
 			// Human is already World-registered; placement uses that frozen source.
 			// Refusal must exercise an unresolved selected resource instead.
-			require(!commitAgentPlacement(fixture.world, scoutPayload("Broken"),
+			require(!commitAgentPlacement(fixture.world, androidPayload("Broken"),
 				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
 				"Placement with an unavailable resource was accepted");
 			require(!placed, "Failed placement named an Agent");
@@ -144,7 +144,7 @@ namespace
 			} };
 			core::AgentId placed{};
 			std::string diagnostic;
-			require(!commitAgentPlacement(fixture.world, scoutPayload("Broken"),
+			require(!commitAgentPlacement(fixture.world, androidPayload("Broken"),
 				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
 				"Placement with a mismatched type ID was accepted");
 			require(diagnostic.find("type ID") != std::string::npos,
@@ -156,37 +156,37 @@ namespace
 
 	void editorSelectionPlacesFixtureType(smoke::Context const&)
 	{
-		auto fixture = buildWorld("Editor Scout");
+		auto fixture = buildWorld("Editor Android");
 		core::AgentId placed{};
 		std::string diagnostic;
-		require(commitAgentPlacement(fixture.world, scoutPayload("Runner"),
+		require(commitAgentPlacement(fixture.world, androidPayload("Runner"),
 			fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
-			"Scout placement failed: " + diagnostic);
-		require(!!placed, "Scout placement reported success without naming an Agent");
+			"Android placement failed: " + diagnostic);
+		require(!!placed, "Android placement reported success without naming an Agent");
 		auto const* agent = fixture.world->lookupAgent(placed).entity;
-		require(agent != nullptr, "The placed Scout could not be found");
-		require(agent->getTypeId() == "Scout"
-			&& std::string(agent->getTypeName()) == "Scout"
-			&& agent->getTypeResourceName() == "scout.agent.lua",
-			"Editor Scout placement did not produce Scout identity");
-		require(agent->getPhysicalBaseline().walkSpeed == 0.9f
-			&& agent->getPhysicalBaseline().width == 0.3f,
-			"Editor Scout placement did not use the Scout baseline");
+		require(agent != nullptr, "The placed Android could not be found");
+		require(agent->getTypeId() == "Android"
+			&& std::string(agent->getTypeName()) == "Android"
+			&& agent->getTypeResourceName() == "android.agent.lua",
+			"Editor Android placement did not produce Android identity");
+		require(agent->getPhysicalBaseline().walkSpeed == 0.5f
+			&& agent->getPhysicalBaseline().width == 0.4f,
+			"Editor Android placement did not use the Android baseline");
 	}
 
 	void editorSelectionPreviewAgreesWithPlacement(smoke::Context const&)
 	{
-		auto fixture = buildWorld("Editor Scout preview");
-		auto const preview = agentClipboardPlacementDimensions(scoutPayload("Runner"));
+		auto fixture = buildWorld("Editor Android preview");
+		auto const preview = agentClipboardPlacementDimensions(androidPayload("Runner"));
 		core::AgentId placed{};
 		std::string diagnostic;
-		require(commitAgentPlacement(fixture.world, scoutPayload("Runner"),
+		require(commitAgentPlacement(fixture.world, androidPayload("Runner"),
 			fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
-			"Scout placement failed: " + diagnostic);
+			"Android placement failed: " + diagnostic);
 		auto const* agent = fixture.world->lookupAgent(placed).entity;
 		auto const& physical = agent->getPhysicalBaseline();
 		require(preview.x == physical.width && preview.y == physical.standingHeight,
-			"Scout preview dimensions did not agree with placement");
+			"Android preview dimensions did not agree with placement");
 	}
 
 	void previewQueriesReuseValidatedResource(smoke::Context const&)
@@ -237,31 +237,31 @@ namespace
 
 	void editorSelectionDependencyRefusedAtomically(smoke::Context const&)
 	{
-		auto fixture = buildWorld("Editor Scout refusal");
+		auto fixture = buildWorld("Editor Android refusal");
 		auto const before = agentCount(*fixture.world);
 		{
-			AgentClipboardPayload missing = scoutPayload("Broken");
+			AgentClipboardPayload missing = androidPayload("Broken");
 			missing.resource = "missing.agent.lua";
 			core::AgentId placed{};
 			std::string diagnostic;
 			require(!commitAgentPlacement(fixture.world, missing,
 				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
-				"Placement with a missing Scout resource was accepted");
+				"Placement with a missing Android resource was accepted");
 			require(!placed && !diagnostic.empty(),
-				"Failed Scout placement did not report or named an Agent");
+				"Failed Android placement did not report or named an Agent");
 		}
 		{
-			AgentClipboardPayload mismatched = scoutPayload("Broken");
-			mismatched.type = "NotScout";
+			AgentClipboardPayload mismatched = androidPayload("Broken");
+			mismatched.type = "NotAndroid";
 			core::AgentId placed{};
 			std::string diagnostic;
 			require(!commitAgentPlacement(fixture.world, mismatched,
 				fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
-				"Placement with a mismatched Scout type ID was accepted");
-			require(!placed, "Mismatched Scout placement named an Agent");
+				"Placement with a mismatched Android type ID was accepted");
+			require(!placed, "Mismatched Android placement named an Agent");
 		}
 		require(agentCount(*fixture.world) == before,
-			"Failed Scout placement left an Agent behind");
+			"Failed Android placement left an Agent behind");
 	}
 
 	void historyPreservesSurvivorsAndReconstructsDeletedAgents(smoke::Context const&)
@@ -842,7 +842,7 @@ namespace
 	void scriptedClipboardAndDeletionHistory(smoke::Context const& context)
 	{
 		gWorldDocumentHistory.clear();
-		auto definition = *core::resolveAgentTypeResource("scout.agent.lua");
+		auto definition = *core::resolveAgentTypeResource("android.agent.lua");
 		agent_smoke::replaceSource(definition.source, "door = \"can_use\"", "door = \"cannot_use\"");
 		auto const initialSource = definition.source;
 		AgentTypeLoaderScope scope{ [&definition](std::string const& name)
@@ -869,7 +869,7 @@ namespace
 		world->attachAgentTagRegistry(registryPath.filename().string(), registry);
 		world->saveTo((context.temporaryRoot() / "clipboard.world.yaml").string());
 		core::AgentId original;
-		require(commitAgentPlacement(world, scoutPayload("Original"), world->getSector(fixture.corridor),
+		require(commitAgentPlacement(world, androidPayload("Original"), world->getSector(fixture.corridor),
 			0, 1.f, original, diagnostic), diagnostic);
 		require(world->assignAgentTag(original, tag, &diagnostic), diagnostic);
 		auto authored = makeAgentClipboardPayload(*world, original, "Copy");
@@ -901,8 +901,8 @@ namespace
 		PendingAgentPlacement pending;
 		auto const before = captureDocumentSnapshot(world);
 		auto const preview = agentClipboardPlacementDimensions(read, &diagnostic);
-		require(diagnostic.empty() && preview.x == 0.3f && preview.y == 0.35f * 0.95f,
-			"Preview lost Scout identity or individual-over-tag Height precedence");
+		require(diagnostic.empty() && preview.x == 0.4f && preview.y == 0.45f * 0.95f,
+			"Preview lost Android identity or individual-over-tag Height precedence");
 		require(armAgentPlacement(pending, *world, read, world->getSector(fixture.corridor), 0, 4.f, diagnostic), diagnostic);
 		require(captureDocumentSnapshot(world)->yaml == before->yaml, "Arming mutated the World");
 		core::AgentId pasted;
@@ -939,7 +939,7 @@ namespace
 		require(pasteUndone, "Paste undo failed: " + diagnostic);
 		require(!world->lookupAgent(pasted).entity && agentCount(*world) == 1,
 			"Paste undo kept the pasted Agent or removed its source");
-		definition.source = "return { api_version=2, type_id='Scout', display_name='Scout', new=function() error('redo constructor') end }";
+		definition.source = "return { api_version=2, type_id='Android', display_name='Android', new=function() error('redo constructor') end }";
 		auto const undone = captureDocumentSnapshot(world);
 		auto const redoCount = gWorldDocumentHistory.redoCount();
 		require(!gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore)
@@ -963,26 +963,26 @@ namespace
 		{
 			if (failure == 0) definition.resourceName = "missing.agent.lua";
 			if (failure == 1) definition.typeId = "Mismatched";
-			if (failure == 2) definition.source = "return { api_version=2, type_id='Scout', display_name='Scout', new=function() error('fresh lifetime') end }";
+			if (failure == 2) definition.source = "return { api_version=2, type_id='Android', display_name='Android', new=function() error('fresh lifetime') end }";
 			if (failure == 3) agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"bad\"");
 			require(!undo(), "Deletion undo accepted an invalid dependency or reused the deleted instance");
 			require(captureDocumentSnapshot(world)->yaml == deleted->yaml
 				&& gWorldDocumentHistory.undoCount() == count && !gWorldDocumentHistory.canRedo(),
 				"Failed deletion restoration changed the World/history");
-			if (failure == 3) require(diagnostic.find("scout.agent.lua") != std::string::npos
+			if (failure == 3) require(diagnostic.find("android.agent.lua") != std::string::npos
 				&& diagnostic.find("door") != std::string::npos, "Invalid Mobility restoration lacked field/resource diagnostics");
 			agent_smoke::requireDoorRoute(*world, original, back, false);
-			definition = { "Scout", "Scout", "scout.agent.lua", initialSource };
+			definition = { "Android", "Android", "android.agent.lua", initialSource };
 		}
-		auto const at = definition.source.find("width = 0.3");
-		require(at != std::string::npos, "Scout fixture width not found");
-		definition.source.replace(at, std::string("width = 0.3").size(), "width = 0.5");
+		auto const at = definition.source.find("width = 0.4");
+		require(at != std::string::npos, "Android fixture width not found");
+		definition.source.replace(at, std::string("width = 0.4").size(), "width = 0.5");
 		agent_smoke::replaceSource(definition.source, "door = \"cannot_use\"", "door = \"can_use\"");
 		auto const deletionUndone = undo();
 		require(deletionUndone, "Deleted-Agent undo did not recover: " + diagnostic);
 		verify(true);
 		require(world->lookupAgent(pasted).entity->getWidth() == 0.5f
-			&& world->lookupAgent(original).entity->getWidth() == 0.3f,
+			&& world->lookupAgent(original).entity->getWidth() == 0.4f,
 			"Deletion restoration was not fresh or discarded the surviving instance");
 		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Deletion redo failed");
 		require(!world->lookupAgent(pasted).entity, "Deletion redo retained its Agent");
@@ -1004,7 +1004,7 @@ namespace
 			copyFixture.world->getSector(copyFixture.corridor), 0, 4.f, copied, diagnostic), diagnostic);
 		auto const* copy = copyFixture.world->lookupAgent(copied).entity;
 		require(copy->getIndividualMobilityProfile() == mobility && copy->getAgentTagIds().contains(tag)
-			&& copy->getTypeId() == "Scout" && copy->getTypeResourceName() == "scout.agent.lua"
+			&& copy->getTypeId() == "Android" && copy->getTypeResourceName() == "android.agent.lua"
 			&& copy->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door) == core::MobilityUse::CanUse,
 			"Copied Agent did not retain overrides/identity with fresh script defaults");
 		agent_smoke::requireDoorRoute(*copyFixture.world, copied, copyBack, true);
@@ -1017,11 +1017,11 @@ namespace
 	{
 		gWorldDocumentHistory.clear();
 		auto fixture = buildWorld("Clipboard refusals");
-		auto const validDefinition = *core::resolveAgentTypeResource("scout.agent.lua");
+		auto const validDefinition = *core::resolveAgentTypeResource("android.agent.lua");
 		auto definition = validDefinition;
 		auto loader = [&definition](std::string const& name)
 			-> std::optional<core::AgentTypeDefinition> {
-			if (name == "scout.agent.lua") return definition;
+			if (name == "android.agent.lua") return definition;
 			if (name == "human.agent.lua") return core::bundledHumanAgentType();
 			return std::nullopt;
 		};
@@ -1030,11 +1030,11 @@ namespace
 		auto const before = captureDocumentSnapshot(fixture.world);
 		for (int failure = 0; failure != 5; ++failure)
 		{
-			auto payload = scoutPayload("Refused");
+			auto payload = androidPayload("Refused");
 			if (failure == 0) payload.resource = "absent.agent.lua";
-			if (failure == 1) payload.type = "NotScout";
+			if (failure == 1) payload.type = "NotAndroid";
 			if (failure == 2) payload.resource.clear();
-			if (failure == 3) definition.source = "return { api_version=2, type_id='Scout', display_name='Scout', new=function() error('preview constructor') end }";
+			if (failure == 3) definition.source = "return { api_version=2, type_id='Android', display_name='Android', new=function() error('preview constructor') end }";
 			if (failure == 4) payload.individualHeightModifier = -1.f;
 			// Each case is a newly selected/validated resource session, not an
 			// implicit hot reload of an already accepted preview snapshot.
@@ -1059,12 +1059,12 @@ namespace
 		require(fixture.world->attachAgentType("competing.agent.lua", validDefinition.source, &diagnostic), diagnostic);
 		auto const conflictBefore = captureDocumentSnapshot(fixture.world);
 		PendingAgentPlacement conflict;
-		require(!armAgentPlacement(conflict, *fixture.world, scoutPayload("Conflict"),
+		require(!armAgentPlacement(conflict, *fixture.world, androidPayload("Conflict"),
 			fixture.world->getSector(fixture.corridor), 0, 1.f, diagnostic)
 			&& diagnostic.find("competing resources") != std::string::npos,
 			"Competing clipboard identity was armed");
 		core::AgentId refused;
-		require(!commitAgentPlacement(fixture.world, scoutPayload("Conflict"), fixture.world->getSector(fixture.corridor),
+		require(!commitAgentPlacement(fixture.world, androidPayload("Conflict"), fixture.world->getSector(fixture.corridor),
 			0, 1.f, refused, diagnostic) && !refused
 			&& captureDocumentSnapshot(fixture.world)->yaml == conflictBefore->yaml,
 			"Conflicting paste changed the World");
@@ -1093,19 +1093,19 @@ namespace
 
 	void editorCopiedFixturePreservesTypeIdentity(smoke::Context const&)
 	{
-		auto fixture = buildWorld("Editor Scout copy");
+		auto fixture = buildWorld("Editor Android copy");
 		core::AgentId placed{};
 		std::string diagnostic;
-		require(commitAgentPlacement(fixture.world, scoutPayload("Original"),
+		require(commitAgentPlacement(fixture.world, androidPayload("Original"),
 			fixture.world->getSector(fixture.corridor), 0, 1.0f, placed, diagnostic),
-			"Scout placement failed: " + diagnostic);
+			"Android placement failed: " + diagnostic);
 		// A copy carries the immutable type identity, never a changed type: the
 		// editor has no type-change control, so copying preserves what was placed.
 		auto const payload = makeAgentClipboardPayload(*fixture.world, placed, "Copy");
-		require(payload.type == "Scout" && payload.resource == "scout.agent.lua",
-			"A copied Scout did not carry its type ID and resource reference");
-		require(std::string(fixture.world->lookupAgent(placed).entity->getTypeId()) == "Scout",
-			"The placed Scout's type identity changed");
+		require(payload.type == "Android" && payload.resource == "android.agent.lua",
+			"A copied Android did not carry its type ID and resource reference");
+		require(std::string(fixture.world->lookupAgent(placed).entity->getTypeId()) == "Android",
+			"The placed Android's type identity changed");
 	}
 }
 

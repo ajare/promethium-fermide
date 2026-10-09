@@ -8,6 +8,8 @@
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/AgentType.h"
+#include "core/AccessPanel.h"
+#include "core/MobilityProfile.h"
 #include "core/AgentTypeRuntime.h"
 #include "core/SerializationException.h"
 #include "core/YamlSerializer.h"
@@ -103,10 +105,10 @@ namespace
 			world.removeLocationWall(low, 0, CORE_SIDE_LEFT); world.finishBuild();
 			pose_journeys::attachRobot(world);
 			bool rejected = false;
-			try { (void)world.createAgent("StandingRobot", "Impossible", low, 0, .5f); }
+			try { (void)world.createAgent("Android", "Impossible", low, 0, .5f); }
 			catch (std::invalid_argument const&) { rejected = true; }
 			require(rejected && world.getSimulationSnapshot().agents.empty(), "Impossible placement published an Agent");
-			auto robot = world.createAgent("StandingRobot", "Robot", high, 0, .5f);
+			auto robot = world.createAgent("Android", "Robot", high, 0, .5f);
 			auto* robotAgent = world.lookupAgent(robot).entity;
 			auto before = robotAgent->getGlobalPosition();
 			rejected = false;
@@ -238,7 +240,7 @@ namespace
 			if (alternate) world.addSectorDoor(0, 0, 9, {});
 			world.addSectorMarker(reverse ? a : b, 0, 3.5f, "Goal");
 			world.finishBuild(); pose_journeys::attachRobot(world);
-			auto id = world.createAgent("StandingRobot", "Robot", reverse ? b : a, 0, 1.5f);
+			auto id = world.createAgent("Android", "Robot", reverse ? b : a, 0, 1.5f);
 			if (!alternate) { pose_journeys::refused(world, id, "Goal"); continue; }
 			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Alternative intent refused");
 			bool arrived = false;
@@ -284,7 +286,7 @@ namespace
 				options.activationMode = mode;
 				options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
 				options.openStyle = style;
-				options.heightScale = widthConstrained ? 1.f : (.36f + gap) / CORE_DOOR_HEIGHT;
+				options.heightScale = widthConstrained ? 1.f : (.45f * .9f + gap) / CORE_DOOR_HEIGHT;
 				resource = world.addSectorDoor(0, 0, 2, options).traversalResource;
 			}
 			world.addSectorMarker(reverse ? a : b, 0, 2.5f, "Goal"); world.finishBuild();
@@ -297,15 +299,15 @@ namespace
 				}
 			require(bool(door), "Boundary threshold missing");
 			world.pauseSimulation();
-			if (bulkhead) static_cast<core::Shape&>(*door) = core::Shape(door->getPosition(), {door->getSize().x, .36f + gap});
+			if (bulkhead) static_cast<core::Shape&>(*door) = core::Shape(door->getPosition(), {door->getSize().x, .45f * .9f + gap});
 			if (broken)
 			{
 				require(world.setDoorBroken(resource, true), "Boundary Broken mode refused");
-				auto fraction = widthConstrained && !bulkhead ? (.3f + gap) / door->getSize().x : 1.f;
+				auto fraction = widthConstrained && !bulkhead ? (.4f + gap) / door->getSize().x : 1.f;
 				require(world.setDoorBrokenOpenPercentage(resource, fraction), "Boundary aperture refused");
 			}
 			pose_journeys::attachRobot(world);
-			auto id = world.createAgent("StandingRobot", "Robot", reverse ? b : a, 0, bulkhead ? (reverse ? .5f : 3.5f) : 2.5f);
+			auto id = world.createAgent("Android", "Robot", reverse ? b : a, 0, bulkhead ? (reverse ? .5f : 3.5f) : 2.5f);
 			require(world.setAgentIndividualHeightModifier(id, .9f), "Effective Height modifier refused");
 			world.resumeSimulation();
 			bool fits = gap >= -.00001f || (!bulkhead && widthConstrained && !broken);
@@ -566,32 +568,32 @@ namespace
 
 	void poseDeclarations(smoke::Context const& context)
 	{
-		auto const robot = readFile(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
+		auto const robot = readFile(context.fixture("resources/test-worlds/android.agent.lua"));
 		core::World world("Pose declarations", 8, 2);
 		auto const corridor = world.addCorridor(0, 0, 8);
 		world.finishBuild();
 		std::string diagnostic;
-		require(world.attachAgentType("standing-robot.agent.lua", robot, &diagnostic), diagnostic);
-		auto const id = world.createAgent("StandingRobot", "Robot", corridor, 0, 1.f);
+		require(world.attachAgentType("android.agent.lua", robot, &diagnostic), diagnostic);
+		auto const id = world.createAgent("Android", "Robot", corridor, 0, 1.f);
 		auto const* agent = world.lookupAgent(id).entity;
 		require(agent && agent->supportsPose(core::Pose::Standing)
-			&& agent->getPoseEnvelope(core::Pose::Standing)->y == 0.4f,
+			&& agent->getPoseEnvelope(core::Pose::Standing)->y == 0.45f,
 			"Standing-only resource did not construct its canonical envelope");
 		for (auto pose : { core::Pose::Sitting, core::Pose::Lying, core::Pose::Crouching, core::Pose::Crawling })
 			require(!agent->supportsPose(pose) && !agent->getPoseEnvelope(pose),
 				"A Standing-only type acquired an unsupported envelope");
 		world.pauseSimulation();
 		require(world.setAgentIndividualHeightModifier(id, 0.8f), "Could not modify Robot Height");
-		require(agent->getPoseEnvelope(core::Pose::Standing)->y == 0.4f * 0.8f
+		require(agent->getPoseEnvelope(core::Pose::Standing)->y == 0.45f * 0.8f
 			&& !agent->getPoseEnvelope(core::Pose::Crawling), "Height changed capabilities");
 		for (bool binary : { false, true })
 		{
 			core::World restored("Robot roundtrip", 2, 2);
 			require(loadWorld(serializeWorld(world, binary), binary, restored), "Robot document failed to load");
 			auto const* loaded = restored.lookupAgent(id).entity;
-			require(loaded && loaded->getTypeId() == "StandingRobot"
-				&& loaded->getTypeResourceName() == "standing-robot.agent.lua"
-				&& loaded->getPoseImageTile() == "agent"
+			require(loaded && loaded->getTypeId() == "Android"
+				&& loaded->getTypeResourceName() == "android.agent.lua"
+				&& loaded->getPoseImageTile() == "robot-standing"
 				&& loaded->getPhysicalBaseline().poses == agent->getPhysicalBaseline().poses
 				&& !loaded->supportsPose(core::Pose::Crawling), "Robot capability/identity roundtrip changed");
 		}
@@ -1332,103 +1334,195 @@ namespace
 	}
 
 	// Loads every valid manifest-registered Agent type resource and returns the
-	// Scout fixture definition the same way the editor does at startup.
-	std::optional<core::AgentTypeDefinition> scoutDefinition(
+	// Android fixture definition the same way the editor does at startup.
+	std::optional<core::AgentTypeDefinition> androidDefinition(
 		smoke::Context const& context)
 	{
-		auto const source = readFile(context.fixture("resources/test-worlds/scout.agent.lua"));
-		auto const resolved = core::resolveAgentTypeResource("scout.agent.lua");
-		if (!resolved || resolved->typeId != "Scout" || resolved->displayName != "Scout"
-			|| resolved->resourceName != "scout.agent.lua" || resolved->source != source)
+		require(!core::resolveAgentTypeResource("scout.agent.lua")
+			&& !core::resolveAgentTypeResource("standing-robot.agent.lua")
+			&& !core::resolveAgentTypeResource("robot.agent.lua"),
+			"A removed bundled Agent type is still registered");
+		auto const source = readFile(context.fixture("resources/test-worlds/android.agent.lua"));
+		auto const resolved = core::resolveAgentTypeResource("android.agent.lua");
+		if (!resolved || resolved->typeId != "Android" || resolved->displayName != "Android"
+			|| resolved->resourceName != "android.agent.lua" || resolved->source != source)
 			return std::nullopt;
 		return resolved;
 	}
 
+	void cleaningBot(smoke::Context const&)
+	{
+		auto const definition = core::resolveAgentTypeResource("cleaning-bot.agent.lua");
+		require(definition && definition->typeId == "CleaningBot"
+			&& definition->displayName == "Cleaning Bot", "CleaningBot resource did not resolve");
+		auto attach = [&](core::World& world) {
+			std::string diagnostic;
+			require(world.attachAgentType(definition->resourceName, definition->source, &diagnostic), diagnostic);
+		};
+		auto verify = [](core::Agent const* bot) {
+			require(bot && bot->getTypeId() == "CleaningBot"
+				&& bot->getTypeResourceName() == "cleaning-bot.agent.lua"
+				&& bot->getPoseImageTile() == "cleaning-bot-standing", "CleaningBot identity/artwork changed");
+			auto const& physical = bot->getPhysicalBaseline();
+			require(physical.width == .4f && physical.standingHeight == .15f
+				&& physical.walkSpeed == .3f && physical.poses.size() == 1
+				&& bot->supportsPose(core::Pose::Standing), "CleaningBot dimensions or poses changed");
+			for (auto context : {core::AutomaticPoseContext::RoomMovement, core::AutomaticPoseContext::DoorCrossing})
+				require(physical.automaticSpeedRatio(context, core::Pose::Standing) == 1.f
+					&& !physical.automaticSpeedRatio(context, core::Pose::Crawling), "CleaningBot automatic pose changed");
+			for (auto kind : {core::TraversalKind::Staircase, core::TraversalKind::Escalator,
+				core::TraversalKind::Stairwell, core::TraversalKind::Ladder, core::TraversalKind::Lift,
+				core::TraversalKind::PlatformLift, core::TraversalKind::Shuttle, core::TraversalKind::Buttons})
+				require(core::agentForbidsTraversal(bot, kind), "CleaningBot acquired forbidden Mobility");
+			require(!core::agentForbidsTraversal(bot, core::TraversalKind::Door)
+				&& bot->getEffectiveMobilityProfile().value == bot->getScriptDefaultMobilityProfile(),
+				"CleaningBot did not use its script-default Mobility");
+		};
+		core::World world("CleaningBot lifetime", 8, 2);
+		auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
+		auto made = world.addAccessPanel(room, 0, 4);
+		auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(made.sector->getObject(made.index))->getPanel();
+		world.finishBuild(); attach(world);
+		auto id = world.createAgent("CleaningBot", "Cleaner", room, 0, 4.5f);
+		verify(world.lookupAgent(id).entity);
+		using Action = core::AccessPanel::Action;
+		require(!world.canRequestAccessPanel(panel->getId(), Action::Open, id)
+			&& !world.requestAccessPanel(panel->getId(), Action::Open, id)
+			&& !world.requestInteraction(panel->getControl(Action::Open), id),
+			"CleaningBot operated an Access panel through a public request seam");
+		for (bool binary : {false, true})
+		{
+			core::World restored("Restored cleaner", 2, 2);
+			require(loadWorld(serializeWorld(world, binary), binary, restored), "CleaningBot document failed to load");
+			verify(restored.lookupAgent(id).entity);
+		}
+		world.resetSimulation(); verify(world.lookupAgent(id).entity);
+
+		// Regular manual/automatic Doors work; every button-operated threshold
+		// is excluded in route search and refuses a journey, including bulkheads.
+		for (bool bulkhead : {false, true})
+		for (bool reverse : {false, true})
+		for (auto mode : {core::DoorActivationMode::Manual, core::DoorActivationMode::Automatic,
+			core::DoorActivationMode::RemoteControlled})
+		{
+			if (bulkhead && mode != core::DoorActivationMode::RemoteControlled) continue;
+			core::World journey("CleaningBot doors", 8, 2);
+			auto a = journey.addRoom("A", 0, 0, 0, bulkhead ? 4 : 8, 1);
+			auto b = journey.addRoom("B", bulkhead ? 0 : 1, 0, bulkhead ? 4 : 0, bulkhead ? 4 : 8, 1);
+			if (bulkhead)
+			{
+				core::World::CreateBulkheadDoorOptions options;
+				options.activationMode = mode; options.controls[0] = options.controls[1] = true;
+				journey.addSectorBulkheadDoor(0, 0, 3, CORE_SIDE_RIGHT, options);
+			}
+			else
+			{
+				core::World::CreateDoorOptions options;
+				options.activationMode = mode;
+				options.controls[0] = options.controls[1] = mode == core::DoorActivationMode::RemoteControlled;
+				journey.addSectorDoor(0, 0, 2, options);
+			}
+			auto target = reverse ? a : b;
+			journey.addSectorMarker(target, 0, bulkhead ? 1.5f : 2.5f, "Goal");
+			journey.finishBuild(); attach(journey);
+			auto botId = journey.createAgent("CleaningBot", "Cleaner", reverse ? b : a, 0,
+				bulkhead ? (reverse ? 1.5f : 2.5f) : 1.5f);
+			if (mode == core::DoorActivationMode::RemoteControlled)
+			{
+				pose_journeys::refused(journey, botId, "Goal");
+				continue;
+			}
+			require(journey.moveAgentToNamedMarker(botId, "Goal").accepted(), "CleaningBot regular Door intent refused");
+			bool arrived = false;
+			for (unsigned tick = 0; tick < 1800 && !arrived; ++tick)
+			{
+				require(journey.advanceTick(), "CleaningBot journey tick refused");
+				auto* bot = journey.lookupAgent(botId).entity;
+				require(bot->getPose() == core::Pose::Standing, "CleaningBot invented a lowered pose");
+				arrived = bot->getSector() == journey.getSector(target).get() && bot->getState() == core::Agent::State::Idle;
+			}
+			require(arrived, "CleaningBot did not cross a regular non-button Door");
+		}
+	}
+
 	void fixtureTypePhysicalOutcomes(smoke::Context const& context)
 	{
-		auto const resolved = scoutDefinition(context);
-		require(resolved.has_value(), "The Scout Agent type resource did not resolve");
+		auto const resolved = androidDefinition(context);
+		require(resolved.has_value(), "The Android Agent type resource did not resolve");
 
-		core::World world("Scout physical", 8, 2);
+		core::World world("Android physical", 8, 2);
 		auto const corridor = world.addCorridor(0, 0, 8);
 		world.finishBuild();
 		std::string diagnostic;
-		require(world.attachAgentType("scout.agent.lua", resolved->source, &diagnostic),
+		require(world.attachAgentType("android.agent.lua", resolved->source, &diagnostic),
 			diagnostic.c_str());
-		require(world.hasAgentType("Scout")
-			&& world.agentTypeDisplayName("Scout") == "Scout",
-			"The Scout type identity did not resolve");
-		auto const id = world.createAgent("Scout", "Runner", corridor, 0, 1.0f);
+		require(world.hasAgentType("Android")
+			&& world.agentTypeDisplayName("Android") == "Android",
+			"The Android type identity did not resolve");
+		auto const id = world.createAgent("Android", "Runner", corridor, 0, 1.0f);
 		auto const* agent = world.lookupAgent(id).entity;
-		require(agent && agent->getTypeId() == "Scout"
-			&& std::string(agent->getTypeName()) == "Scout"
-			&& agent->getTypeResourceName() == "scout.agent.lua",
-			"The placed Scout identity did not resolve");
+		require(agent && agent->getTypeId() == "Android"
+			&& std::string(agent->getTypeName()) == "Android"
+			&& agent->getTypeResourceName() == "android.agent.lua",
+			"The placed Android identity did not resolve");
 
 		auto const& physical = agent->getPhysicalBaseline();
-		auto const& human = core::bundledHumanBaseline();
-		require(physical.width == 0.3f && physical.standingHeight == 0.35f
-			&& physical.reach == 0.4f && physical.walkSpeed == 0.9f
-			&& physical.climbSpeed == 0.5f && physical.stairAscentSpeed == 0.6f
-			&& physical.stairDescentSpeed == 0.7f && physical.poses.at(core::Pose::Sitting).heightRatio == 0.5f
-			&& physical.poses.at(core::Pose::Crouching).heightRatio == 0.5f && physical.poses.at(core::Pose::Crawling).heightRatio == 0.25f
-			&& physical.automaticSpeedRatio(core::AutomaticPoseContext::DoorCrossing, core::Pose::Crawling).value() == 0.75f,
-			"Scout's frozen baseline did not match the fixture");
-		require(physical.width != human.width && physical.standingHeight != human.standingHeight
-			&& physical.reach != human.reach && physical.walkSpeed != human.walkSpeed,
-			"Scout is not distinctly shaped and speeded from Human");
+		require(physical.width == 0.4f && physical.standingHeight == 0.45f
+			&& physical.reach == 0.25f && physical.walkSpeed == 0.5f
+			&& physical.climbSpeed == 0.25f && physical.stairAscentSpeed == 0.35f
+			&& physical.stairDescentSpeed == 0.45f && physical.poses.size() == 1,
+			"Android's frozen baseline did not match the resource");
 
 		// The highest available public consumers read the frozen baseline.
 		require(agent->getWalkSpeed() == physical.walkSpeed
 			&& agent->getClimbSpeed() == physical.climbSpeed,
-			"Scout movement did not use its frozen baseline");
+			"Android movement did not use its frozen baseline");
 		auto const bounds = agent->getBounds().getSize();
 		auto near = [](float left, float right)
 		{
 			return std::fabs(left - right) < 1e-5f;
 		};
 		require(near(bounds.x, physical.width) && near(bounds.y, physical.standingHeight),
-			"Scout bounds did not use its frozen baseline");
-		require(agent->getTraversalCrawlingDoorClearanceExtent(true)
-				== physical.standingHeight * physical.poses.at(core::Pose::Crawling).heightRatio,
-			"Scout Crawling clearance did not use its frozen baseline");
+			"Android bounds did not use its frozen baseline");
+		require(!agent->supportsPose(core::Pose::Crawling),
+			"Android acquired unsupported Crawling");
 	}
 
 	void fixturePersistenceRoundTrip(smoke::Context const& context)
 	{
-		auto const resolved = scoutDefinition(context);
-		require(resolved.has_value(), "The Scout Agent type resource did not resolve");
+		auto const resolved = androidDefinition(context);
+		require(resolved.has_value(), "The Android Agent type resource did not resolve");
 
-		core::World original("Scout document", 6, 2);
+		core::World original("Android document", 6, 2);
 		auto const sector = original.addCorridor(0, 0, 6);
 		original.finishBuild();
 		original.pauseSimulation();
 		std::string diagnostic;
-		require(original.attachAgentType("scout.agent.lua", resolved->source, &diagnostic),
+		require(original.attachAgentType("android.agent.lua", resolved->source, &diagnostic),
 			diagnostic.c_str());
-		auto const id = original.createAgent("Scout", "Saved scout", sector, 0, 1.0f);
+		auto const id = original.createAgent("Android", "Saved android", sector, 0, 1.0f);
 		(void)id;
 
 		for (bool binary : { false, true })
 		{
 			auto const text = serializeWorld(original, binary);
 			core::World restored("restored", 2, 2);
-			require(loadWorld(text, binary, restored), "Scout World did not load");
+			require(loadWorld(text, binary, restored), "Android World did not load");
 			auto const* agent = restored.lookupAgent(core::AgentId{ 1 }).entity;
-			require(agent && agent->getTypeId() == "Scout"
-				&& agent->getTypeResourceName() == "scout.agent.lua"
-				&& std::string(agent->getTypeName()) == "Scout",
-				"Scout type/resource identity was not preserved");
+			require(agent && agent->getTypeId() == "Android"
+				&& agent->getTypeResourceName() == "android.agent.lua"
+				&& std::string(agent->getTypeName()) == "Android",
+				"Android type/resource identity was not preserved");
 			auto const& physical = agent->getPhysicalBaseline();
-			require(physical.width == 0.3f && physical.walkSpeed == 0.9f
-				&& physical.reach == 0.4f,
-				"Scout's frozen baseline was not reconstructed on load");
+			require(physical.width == 0.4f && physical.walkSpeed == 0.5f
+				&& physical.reach == 0.25f,
+				"Android's frozen baseline was not reconstructed on load");
 		}
 
 		auto const yaml = serializeWorld(original, false);
-		require(yaml.find("typeId: Scout") != std::string::npos
-			&& yaml.find("resource: scout.agent.lua") != std::string::npos,
-			"The saved document omitted the Scout type ID or resource reference");
+		require(yaml.find("typeId: Android") != std::string::npos
+			&& yaml.find("resource: android.agent.lua") != std::string::npos,
+			"The saved document omitted the Android type ID or resource reference");
 		require(yaml.find("walk_speed") == std::string::npos
 			&& yaml.find("standing_height") == std::string::npos
 			&& yaml.find("crawling_height_ratio") == std::string::npos,
@@ -1437,25 +1531,25 @@ namespace
 
 	void loadingRefusesMismatchedOrMissingResource(smoke::Context const& context)
 	{
-		auto const resolved = scoutDefinition(context);
-		require(resolved.has_value(), "The Scout Agent type resource did not resolve");
+		auto const resolved = androidDefinition(context);
+		require(resolved.has_value(), "The Android Agent type resource did not resolve");
 
 		core::World original("Refusal document", 6, 2);
 		auto const sector = original.addCorridor(0, 0, 6);
 		original.finishBuild();
 		original.pauseSimulation();
 		std::string diagnostic;
-		require(original.attachAgentType("scout.agent.lua", resolved->source, &diagnostic),
+		require(original.attachAgentType("android.agent.lua", resolved->source, &diagnostic),
 			diagnostic.c_str());
-		(void)original.createAgent("Scout", "Scout", sector, 0, 1.0f);
+		(void)original.createAgent("Android", "Android", sector, 0, 1.0f);
 
 		auto const yaml = serializeWorld(original, false);
 
 		// A mismatched type ID is refused and publishes no partial Agent.
 		auto mismatched = yaml;
-		auto const typeIdAt = mismatched.find("typeId: Scout");
-		require(typeIdAt != std::string::npos, "Saved Scout omitted its type ID");
-		mismatched.replace(typeIdAt, std::string("typeId: Scout").size(), "typeId: NotScout");
+		auto const typeIdAt = mismatched.find("typeId: Android");
+		require(typeIdAt != std::string::npos, "Saved Android omitted its type ID");
+		mismatched.replace(typeIdAt, std::string("typeId: Android").size(), "typeId: NotAndroid");
 		core::World refusedType("refused type", 2, 2);
 		bool typeRejected = false;
 		try
@@ -1464,7 +1558,7 @@ namespace
 		}
 		catch (core::SerializationException const& error)
 		{
-			typeRejected = std::string(error.what()).find("NotScout") != std::string::npos;
+			typeRejected = std::string(error.what()).find("NotAndroid") != std::string::npos;
 		}
 		require(typeRejected, "A mismatched Agent type ID was not refused clearly");
 		require(refusedType.getSimulationSnapshot().agents.empty(),
@@ -1472,9 +1566,9 @@ namespace
 
 		// A missing resource reference is refused and publishes no partial Agent.
 		auto missing = yaml;
-		auto const resourceAt = missing.find("resource: scout.agent.lua");
-		require(resourceAt != std::string::npos, "Saved Scout omitted its resource reference");
-		missing.replace(resourceAt, std::string("resource: scout.agent.lua").size(),
+		auto const resourceAt = missing.find("resource: android.agent.lua");
+		require(resourceAt != std::string::npos, "Saved Android omitted its resource reference");
+		missing.replace(resourceAt, std::string("resource: android.agent.lua").size(),
 			"resource: missing.agent.lua");
 		core::World refusedResource("refused resource", 2, 2);
 		bool resourceRejected = false;
@@ -1493,41 +1587,41 @@ namespace
 
 	void competingTypeIdsRejectedOnLoad(smoke::Context const& context)
 	{
-		auto const scout = scoutDefinition(context);
-		require(scout.has_value(), "The Scout Agent type resource did not resolve");
+		auto const android = androidDefinition(context);
+		require(android.has_value(), "The Android Agent type resource did not resolve");
 
 		core::World original("Competing", 6, 2);
 		auto const sector = original.addCorridor(0, 0, 6);
 		original.finishBuild();
 		original.pauseSimulation();
 		std::string diagnostic;
-		require(original.attachAgentType("scout.agent.lua", scout->source, &diagnostic),
+		require(original.attachAgentType("android.agent.lua", android->source, &diagnostic),
 			diagnostic.c_str());
-		(void)original.createAgent("Scout", "First", sector, 0, 1.0f);
-		(void)original.createAgent("Scout", "Second", sector, 0, 2.0f);
+		(void)original.createAgent("Android", "First", sector, 0, 1.0f);
+		(void)original.createAgent("Android", "Second", sector, 0, 2.0f);
 
 		auto yaml = serializeWorld(original, false);
-		auto const needle = std::string("resource: scout.agent.lua");
+		auto const needle = std::string("resource: android.agent.lua");
 		auto const pos = yaml.rfind(needle);
-		require(pos != std::string::npos, "The second Scout omitted its resource reference");
+		require(pos != std::string::npos, "The second Android omitted its resource reference");
 		yaml.replace(pos, needle.size(), "resource: rival.agent.lua");
 
 		// A rival resource declaring the same type ID must be rejected when it
 		// would compete with the already-resolved resource inside one World.
-		core::AgentTypeDefinition rival = *scout;
+		core::AgentTypeDefinition rival = *android;
 		rival.resourceName = "rival.agent.lua";
-		rival.displayName = "Scout";
-		rival.source = scout->source;
+		rival.displayName = "Android";
+		rival.source = android->source;
 		struct LoaderScope
 		{
-			explicit LoaderScope(core::AgentTypeDefinition scoutDef,
+			explicit LoaderScope(core::AgentTypeDefinition androidDef,
 				core::AgentTypeDefinition rivalDef)
 			{
 				core::setAgentTypeResourceLoader(
-					[scoutDef = std::move(scoutDef), rivalDef = std::move(rivalDef)](
+					[androidDef = std::move(androidDef), rivalDef = std::move(rivalDef)](
 						std::string const& name) -> std::optional<core::AgentTypeDefinition>
 					{
-						if (name == "scout.agent.lua") return scoutDef;
+						if (name == "android.agent.lua") return androidDef;
 						if (name == "rival.agent.lua") return rivalDef;
 						return std::nullopt;
 					});
@@ -1538,7 +1632,7 @@ namespace
 		core::World restored("restored", 2, 2);
 		bool rejected = false;
 		{
-			LoaderScope scope{ *scout, rival };
+			LoaderScope scope{ *android, rival };
 			try
 			{
 				(void)loadWorld(yaml, false, restored);
@@ -1721,6 +1815,7 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesResolvedResourceUnavailable", resolvedResourceUnavailable });
 	checks.push_back({ "agentTypesPreviewMatchesPlacement", previewMatchesPlacement });
 	checks.push_back({ "agentTypesScriptedAuthorizationPlacement", scriptedAuthorizationPlacement });
+	checks.push_back({ "agentTypesCleaningBot", cleaningBot });
 	checks.push_back({ "agentTypesFixturePhysicalOutcomes", fixtureTypePhysicalOutcomes });
 	checks.push_back({ "agentTypesFixturePersistenceRoundTrip", fixturePersistenceRoundTrip });
 	checks.push_back({ "agentTypesLoadingRefusesMismatchedOrMissingResource", loadingRefusesMismatchedOrMissingResource });

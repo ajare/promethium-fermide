@@ -7,8 +7,11 @@
 #include <cmath>
 #include <cfloat>
 #include <limits>
+#include <fstream>
+#include <iterator>
 
 extern UISettings gUISettings;
+extern core::Agent* gSelectedAgent;
 namespace
 {
 	void bedRenderOffset(smoke::Context const& context)
@@ -240,6 +243,45 @@ namespace
 			require(near(hi.x - lo.x, standingSize.x * region.width / 26.f)
 				&& near(hi.y - lo.y, standingSize.y * region.height / 72.f),
 				"Human baked artwork was squashed or rotated again");
+		}
+		// A short non-Human Standing tile keeps its own proportions and UVs.
+		std::ifstream botInput(context.fixture("resources/test-worlds/cleaning-bot.agent.lua"));
+		std::string botSource{std::istreambuf_iterator<char>(botInput), {}};
+		require(world.attachAgentType("cleaning-bot.agent.lua", botSource, &diagnostic), diagnostic);
+		auto botId = world.createAgent("CleaningBot", "Cleaner", 0, 0, 5.5f);
+		auto const& botRegion = regions.at("cleaning-bot-standing").region;
+		auto* bot = world.lookupAgent(botId).entity;
+		struct SelectionScope {
+			core::Agent* previous{gSelectedAgent};
+			~SelectionScope() { gSelectedAgent = previous; }
+		} selectionScope;
+		gSelectedAgent = bot;
+		for (float zoom : {1.f, 2.f})
+		{
+			gUISettings.worldZoom = zoom;
+			WorldDrawList list(WorldDrawList::ClipRectangle{{-2000,-2000},{2000,2000}});
+			renderAgent(world.lookupAgent(botId).entity, &list);
+			require(list.commands().size() == 2, "CleaningBot did not draw its dedicated tile");
+			auto const& triangle = std::get<WorldDrawList::Triangle>(list.commands().front());
+			require(near(triangle.texcoords[0].x, (botRegion.x + .5f) / atlasWidth)
+				&& near(triangle.texcoords[0].y, (botRegion.y + .5f) / atlasHeight),
+				"CleaningBot drew another Agent's artwork");
+			ImVec2 lo{FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX};
+			for (auto const& command : list.commands())
+			{
+				auto const& body = std::get<WorldDrawList::Triangle>(command);
+				require(body.colour == IM_COL32(251, 188, 4, 255),
+					"Selected CleaningBot tile did not receive the yellow selection tint");
+				for (auto point : body.positions)
+				{
+					lo.x = std::min(lo.x, point.x); lo.y = std::min(lo.y, point.y);
+					hi.x = std::max(hi.x, point.x); hi.y = std::max(hi.y, point.y);
+				}
+			}
+			require(near((hi.x - lo.x) / (hi.y - lo.y), 26.f / 24.f)
+				&& hi.x - lo.x <= .4f * CORE_CELL_WIDTH_PIXELS * zoom + .01f
+				&& hi.y - lo.y <= .15f * CORE_LEVEL_HEIGHT_PIXELS * zoom + .01f,
+				"CleaningBot artwork inherited Human proportions or exceeded its baseline");
 		}
 		clearObjectTileset(); ImGui::EndFrame();
 	}

@@ -133,7 +133,8 @@ are derived from these dimensions and available space, not separately duplicated
 absolute heights. No arbitrary World expressions, anticipatory preferences,
 hysteresis, preparation delays, or recovery delays are introduced.
 
-Human and Scout allow Standing/Crouching/Crawling in both contexts. Human keeps
+Human allows Standing/Crouching/Crawling in both contexts; Android allows only
+Standing. Human keeps
 ordinary Room speed and ordinary threshold speed for Standing/Crouching, with
 half-speed Crawling Door crossings. Scripts may declare choices in another order
 after the required Standing entry, but selection always prefers the tallest

@@ -1669,15 +1669,17 @@ void renderAgent(core::Agent const* agent, WorldDrawList* drawList)
 		standardAvailableHeight / max(sourceBounds.y, 1.0f)) * heightModifier;
 	float fontSize = sourceSize * scale;
 	auto iconSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, ICON_FA_MALE);
-	// Artwork already contains the stance. Use its native dimensions relative
-	// to the type's Standing tile, never a pose-specific rotation or squash.
+	// Fit the declared artwork, not the Human fallback glyph. A low wheeled
+	// Agent must retain its own aspect ratio rather than become a tall icon.
+	// Other poses use native dimensions at the same Standing artwork scale.
 	auto const tileSize = objectSpriteSize(agent->getPoseImageTile().c_str());
 	auto const standingTileSize = objectSpriteSize(
 		agent->getPhysicalBaseline().poses.at(core::Pose::Standing).imageTile.c_str());
 	if (tileSize && standingTileSize)
 	{
-		iconSize.x *= tileSize->x / standingTileSize->x;
-		iconSize.y *= tileSize->y / standingTileSize->y;
+		auto const artworkScale = min(standardAvailableWidth / standingTileSize->x,
+			standardAvailableHeight / standingTileSize->y) * heightModifier;
+		iconSize = {tileSize->x * artworkScale, tileSize->y * artworkScale};
 	}
 	ImVec2 iconPosition{
 		(pos0.x + pos1.x - iconSize.x) * 0.5f,

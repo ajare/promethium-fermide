@@ -22,9 +22,9 @@ route capture and permit adoption. This includes ordinary manual, automatic and
 remote Doors, standalone Bulkheads, Airlocks, both Chamber subtypes and Lift and
 Shuttle thresholds. Broken vertical apertures scale clearance; Broken horizontal
 apertures retain the existing bodily-width rule. Windows and BoothWindows gain no
-passenger behavior. Human and Scout allow Standing/Crouching/Crawling for both
+passenger behavior. Human allows Standing/Crouching/Crawling for both
 Room movement and Door crossing. A supported Crouching Door choice is usable; a
-Standing-only robot cannot obtain Crawling through Mobility or permissions.
+Standing-only Android cannot obtain Crawling through Mobility or permissions.
 
 Direct Room and Door route facts delegate to the same captured-input evaluator.
 Capture records the selected motion ratio, not a second selection policy or a

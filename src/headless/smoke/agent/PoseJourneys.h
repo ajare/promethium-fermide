@@ -9,7 +9,7 @@ namespace pose_journeys
 {
 	inline void attachRobot(core::World& world)
 	{
-		auto definition = core::resolveAgentTypeResource("standing-robot.agent.lua");
+		auto definition = core::resolveAgentTypeResource("android.agent.lua");
 		smoke::require(bool(definition), "Standing-only Lua resource unavailable");
 		std::string diagnostic;
 		smoke::require(world.attachAgentType(definition->resourceName, definition->source, &diagnostic), diagnostic);

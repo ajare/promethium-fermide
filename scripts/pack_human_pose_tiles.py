@@ -27,6 +27,12 @@ def pack_human_poses(path: Path) -> None:
         if robot.size != (26, 72):
             raise ValueError("Expected a 26x72 Robot Standing tile")
         atlas.paste(robot, (288, 888))
+    cleaning_bot_path = path.with_name("cleaning-bot-standing.png")
+    if cleaning_bot_path.is_file():
+        cleaning_bot = Image.open(cleaning_bot_path).convert("RGBA")
+        if cleaning_bot.size != (26, 24):
+            raise ValueError("Expected a 26x24 CleaningBot Standing tile")
+        atlas.paste(cleaning_bot, (240, 912))
     atlas.save(path)
 
 

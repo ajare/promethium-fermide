@@ -223,11 +223,11 @@ namespace
 		require(world.placeFurniture(target, "chair", 2, 0, "Chair"), "Requirement chair placement failed");
 		world.finishBuild();
 		auto human = world.createAgent("Human", origin, 0, 1.5f);
-		std::ifstream robotInput(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
+		std::ifstream robotInput(context.fixture("resources/test-worlds/android.agent.lua"));
 		std::string robotSource{std::istreambuf_iterator<char>(robotInput), {}};
 		std::string diagnostic;
-		require(world.attachAgentType("standing-robot.agent.lua", robotSource, &diagnostic), diagnostic);
-		auto robot = world.createAgent("StandingRobot", "Robot", origin, 0, 2.5f);
+		require(world.attachAgentType("android.agent.lua", robotSource, &diagnostic), diagnostic);
+		auto robot = world.createAgent("Android", "Robot", origin, 0, 2.5f);
 		world.pauseSimulation();
 		auto seat = world.furniture()[0].marker;
 		require(world.furnitureUseEligible(human, seat, &diagnostic), diagnostic);
@@ -271,8 +271,8 @@ namespace
 		write(path, replace(replace(source, "use_pose = \"sitting\"", "use_pose = 'standing'"),
 			"finish_use_pose = \"standing\"", "finish_use_pose = 'sitting'"));
 		auto finishWorld = useFixture(path);
-		require(finishWorld->attachAgentType("standing-robot.agent.lua", robotSource, &diagnostic), diagnostic);
-		auto finishRobot = finishWorld->createAgent("StandingRobot", "Finish Robot", 0, 0, 1.5f);
+		require(finishWorld->attachAgentType("android.agent.lua", robotSource, &diagnostic), diagnostic);
+		auto finishRobot = finishWorld->createAgent("Android", "Finish Robot", 0, 0, 1.5f);
 		require(!finishWorld->furnitureUseEligible(finishRobot, finishWorld->furniture()[0].marker, &diagnostic)
 			&& diagnostic.find("sitting") != std::string::npos, "Unsupported finish capability ignored");
 		// Finish posture and release are host-owned, not inferred from callback effects.
@@ -730,10 +730,10 @@ end},{key='other',name='Other',run=function(a,w,m) w.log('other') end})lua"));
 			&& low->lookupAgent(id).entity->getPose() == core::Pose::Crouching, "Low departure did not arrive");
 
 		auto robots = useFixture(fixture);
-		std::ifstream robotFile(context.fixture("resources/test-worlds/standing-robot.agent.lua"));
+		std::ifstream robotFile(context.fixture("resources/test-worlds/android.agent.lua"));
 		std::string robotSource{std::istreambuf_iterator<char>(robotFile), {}};
-		require(robots->attachAgentType("standing-robot.agent.lua", robotSource, &reason), "Robot attachment refused");
-		auto robot = robots->createAgent("StandingRobot", "Robot", 0, 0, 3.5f);
+		require(robots->attachAgentType("android.agent.lua", robotSource, &reason), "Robot attachment refused");
+		auto robot = robots->createAgent("Android", "Robot", 0, 0, 3.5f);
 		seat = robots->furniture()[0].marker;
 		write(actions, package("{key='hello',name='Unsupported pose',run=function(a,w,m) w.claim(); w.set_pose('sitting'); w.log('robot leak') end}"));
 		require(robots->selectActionRegistry(actions) && robots->setMarkerActions(seat, {first}), "Robot Action setup refused");

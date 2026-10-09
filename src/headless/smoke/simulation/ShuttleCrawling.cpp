@@ -534,10 +534,10 @@ namespace
 		{
 			Scene scene(.35f, .35f);
 			pose_journeys::attachRobot(scene.world);
-			auto id = scene.world.createAgent("StandingRobot", "Committed Robot", reverse ? scene.destination : scene.origin, 0, 8.5f);
+			auto id = scene.world.createAgent("Android", "Committed Robot", reverse ? scene.destination : scene.origin, 0, 8.5f);
 			auto* agent = scene.world.lookupAgent(id).entity;
 			scene.world.pauseSimulation();
-			require(scene.world.setAgentIndividualHeightModifier(id, .8f) && scene.world.resumeSimulation(), "Robot initial Height refused");
+			require(scene.world.setAgentIndividualHeightModifier(id, .7f) && scene.world.resumeSimulation(), "Android initial Height refused");
 			require(scene.world.moveAgentToNamedMarker(id, reverse ? "Origin goal" : "Destination goal").accepted(), "Robot journey refused");
 			bool enlarged = false, exception = false, arrived = false;
 			for (unsigned tick = 0; tick < 8000 && !arrived; ++tick)
@@ -568,7 +568,7 @@ namespace
 		{
 			Scene scene(.3f, .3f);
 			pose_journeys::attachRobot(scene.world);
-			auto id = scene.world.createAgent("StandingRobot", "Robot", reverse ? scene.destination : scene.origin, 0, 8.5f);
+			auto id = scene.world.createAgent("Android", "Robot", reverse ? scene.destination : scene.origin, 0, 8.5f);
 			pose_journeys::refused(scene.world, id, reverse ? "Origin goal" : "Destination goal");
 		}
 	}

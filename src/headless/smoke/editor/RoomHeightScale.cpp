@@ -19,10 +19,10 @@ namespace
 		auto room = world->addRoom("Robot room", 0, 0, 0, 7, 1);
 		world->finishBuild();
 		world->pauseSimulation();
-		auto robot = core::resolveAgentTypeResource("standing-robot.agent.lua");
+		auto robot = core::resolveAgentTypeResource("android.agent.lua");
 		require(robot && world->attachAgentType(robot->resourceName, robot->source), "History robot resource refused");
-		auto id = world->createAgent("StandingRobot", "Robot", room, 0, 2.5f);
-		require(world->setRoomHeightScale(room, .4f), "Robot exact placement fit refused");
+		auto id = world->createAgent("Android", "Robot", room, 0, 2.5f);
+		require(world->setRoomHeightScale(room, .45f), "Robot exact placement fit refused");
 		world->saveTo((context.temporaryRoot() / "occupied-height.world.yaml").string());
 		gWorldDocumentHistory.clear();
 		auto before = captureDocumentSnapshot(world);

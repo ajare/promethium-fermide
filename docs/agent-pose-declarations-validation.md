@@ -3,8 +3,8 @@
 Implemented only the declaration/frozen-data slice of #520. API v2 requires
 supported canonical poses and dense ordered Room/Door choices with validated
 height/speed ratios. Human preserves all five poses, geometry, context orders
-and existing crossing speeds. Scout and inline builders are migrated; the
-manifest includes a Standing-only Robot regression resource. Unknown/retired
+and existing crossing speeds. Inline builders are migrated; the
+manifest includes the Standing-only Android resource. Unknown/retired
 pose fields and external v1 scripts are refused with migration diagnostics.
 
 The frozen baseline carries declarations across existing survivor replay/history

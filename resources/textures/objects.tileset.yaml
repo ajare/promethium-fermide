@@ -69,6 +69,10 @@ sprites:
     cell: [4, 5]
     content: [32, 88, 26, 72]
     tintable: true
+  cleaning-bot-standing:
+    cell: [3, 5]
+    content: [48, 112, 26, 24]
+    tintable: true
   marker:
     cell: [2, 1]
     content: [24, 122, 16, 22]
