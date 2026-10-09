@@ -179,6 +179,7 @@ namespace core
 		EntityLookup<InteractionRequest const> lookupInteractionRequest(InteractionRequestId id) const;
 
 		bool cancelInteraction(InteractionRequestId id);
+		void agentObjectUsageChanged(AgentId id);
 
 		// The counterpart of removeDeviceOperation for a request. A terminal
 		// request is normally retired automatically once nothing live still

@@ -216,7 +216,7 @@ namespace
 	{
 		auto const fixture = assignmentFixture();
 
-		require(fixture.yaml.find("version: 61") != std::string::npos,
+		require(fixture.yaml.find("version: 62") != std::string::npos,
 			"Agent group assignments were not written under the current World schema");
 		require(fixture.yaml.find("group: 1") != std::string::npos
 			&& fixture.yaml.find("group: 2") != std::string::npos,

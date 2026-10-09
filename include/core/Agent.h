@@ -386,6 +386,8 @@ namespace core
 		std::optional<float> mIndividualRoutePersistence;
 		std::optional<float> mIndividualMinimumRoutePlanningTime;
 		std::optional<float> mIndividualMaximumRoutePlanningTime;
+		std::optional<ObjectUsage> mIndividualObjectUsage;
+		std::optional<float> mIndividualObjectUsageDistance;
 		std::optional<bool> mIndividualPermissionAdherence;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
@@ -604,6 +606,10 @@ namespace core
 		{ mIndividualMinimumRoutePlanningTime = value; modify(); }
 		void setIndividualMaximumRoutePlanningTime(std::optional<float> value)
 		{ mIndividualMaximumRoutePlanningTime = value; modify(); }
+		void setIndividualObjectUsage(std::optional<ObjectUsage> value)
+		{ mIndividualObjectUsage = value; modify(); }
+		void setIndividualObjectUsageDistance(std::optional<float> value)
+		{ mIndividualObjectUsageDistance = value; modify(); }
 		void setIndividualPermissionAdherence(std::optional<bool> value)
 		{ mIndividualPermissionAdherence = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
@@ -687,8 +693,11 @@ namespace core
 		// Stable wire identity and physical observations are immutable type data.
 		char const* getTypeName() const { return mDisplayName.c_str(); }
 		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
-		ObjectUsage getObjectUsage() const { return mPhysicalBaseline.objectUsage; }
-		float getObjectUsageDistance() const { return mPhysicalBaseline.objectUsageDistance; }
+		std::optional<ObjectUsage> const& getIndividualObjectUsage() const { return mIndividualObjectUsage; }
+		std::optional<float> const& getIndividualObjectUsageDistance() const { return mIndividualObjectUsageDistance; }
+		ObjectUsage getObjectUsage() const { return mIndividualObjectUsage.value_or(mPhysicalBaseline.objectUsage); }
+		float getObjectUsageDistance() const { return mIndividualObjectUsageDistance.value_or(mPhysicalBaseline.objectUsageDistance); }
+		bool objectUsageOverridesAreValid(std::optional<ObjectUsage> mode, std::optional<float> distance) const;
 		MobilityProfile const& getScriptDefaultMobilityProfile() const
 		{ return mScriptDefaultMobilityProfile; }
 		// Stable type ID, independent of the presentation display name.

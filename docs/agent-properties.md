@@ -1,8 +1,8 @@
 # Agent properties
 
-This is the complete reference for the **17 editable Agent properties** declared
+This is the complete reference for the **19 editable Agent properties** declared
 by `AgentPropertyType` in `include/core/AgentTag.h`. Each can be authored directly
-on an Agent or supplied by an Agent tag. They are distinct from the physical
+on an Agent; all except Object usage and Object usage distance can also be supplied by an Agent tag. They are distinct from the physical
 baseline declared by an [Agent-type script](create-agent-script.md), and from
 runtime state such as Pose, destination and movement progress.
 
@@ -23,7 +23,7 @@ property, even if an individual override would hide the conflict. Adding a
 property to a tag also checks for conflicts among its assigned Agents.
 
 A property **namespace** is only an editor grouping, not part of its name or
-serialized key. Colour, Walk speed modifier and Height modifier are in the
+serialized key. Colour, Walk speed modifier, Height modifier, Object usage and Object usage distance are in the
 unlabelled group; all other properties are in **Pathing**.
 
 ### Values versus tag ranges
@@ -48,10 +48,12 @@ that colours its Agents.
 
 Ranges are inclusive. Defaults mean the effective fallback when no individual
 or inherited property supplies a value, not necessarily the value inserted by
-an editor widget when adding an override. Numeric values must be finite.
+an editor widget when adding an override. Numeric values must be finite except an ignored Object usage distance under None.
 
 | Property | Serialized `type` | Type / allowed values | Default | Effect |
 | --- | --- | --- | --- | --- |
+| Object usage | `objectUsage` | Arms or None; individual only | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
+| Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms; individual only | Frozen script distance | Physical arm length, narrowed by Interaction point geometry; ignored under None |
 | Colour | `colour` | RGB bytes, each 0–255; no alpha | RGB (179, 77, 77), `#B34D4D` | Ordinary Agent rendering tint; no simulation effect |
 | Walk speed modifier | `walkSpeedModifier` | Number, 0.8–1.2 | 1 | Multiplies the Agent type's walking speed |
 | Height modifier | `heightModifier` | Number, 0.7–1 | 1 | Multiplies Standing height and derived pose heights; affects appearance and physical fit |
@@ -74,6 +76,30 @@ The editor currently inserts **0.5** when adding an individual Route persistence
 property; that is an explicit override, not the absent-property default of 0.15.
 Adding an individual Mobility profile snapshots the current effective profile;
 a newly added tag profile starts with all entries **Can use**.
+
+## Independent Object usage overrides (#537)
+
+Mode and distance resolve independently: individual override → frozen script default.
+Neither inherits from tags. The Selection panel shows both effective values and their
+sources, and labels distance as ignored under None. Only Arms and None are exposed;
+Remote control is not implemented. Adding an override starts from its current effective
+value, not a sampled range. Removal leaves the other override and script baseline intact.
+
+Every edit and removal is paused-only and undoable. Arms requires the resulting effective
+distance to be finite and strictly positive, even when removing an override or changing
+back from None. None ignores distance, including zero or negative authored values. A
+script-default None Agent has canonical zero frozen distance, so enabling Arms requires
+an independent positive distance override first. Refused edits are atomic.
+
+Capability changes cancel now-ineligible pending operations and reconsider Paths through
+the existing planning rules; admitted crossings and accepted journeys finish safely.
+Arms remains physical: short arms approach controls and never activate them remotely.
+
+World schema 62 (YAML and binary), clipboard and history carry only optional authored
+overrides, never snapshots of live Lua defaults. Reset, load, deletion restoration and
+cross-World paste validate fresh script defaults plus the overrides; ordinary structural
+and surviving history replay retain the Agent's frozen defaults. Legacy Agents without
+overrides continue to use their script defaults.
 
 ## Appearance and physical movement
 

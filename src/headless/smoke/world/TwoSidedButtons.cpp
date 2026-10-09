@@ -2103,7 +2103,7 @@ namespace
 		// Historical authored records migrate through the current policy, never
 		// an old allocator. Schema 49 predates the consolidated document schema.
 		auto historical = YAML::Load(yaml); historical["version"] = 49;
-		auto oldBinary = binary; auto version = binaryField("version", uint32_t{61});
+		auto oldBinary = binary; auto version = binaryField("version", uint32_t{62});
 		auto at = oldBinary.find(version); require(at != std::string::npos, "Binary version field missing");
 		oldBinary.replace(at, version.size(), binaryField("version", uint32_t{49}));
 		for (bool binaryInput : {false, true})

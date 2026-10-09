@@ -198,6 +198,14 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 				[&](string* out) { return edit(checked, out); }, diagnostic);
 			warn(diagnostic);
 		};
+		propertyCheckbox(propertyName(core::AgentPropertyType::ObjectUsage),
+			target->getIndividualObjectUsage().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualObjectUsage(agent,
+				enabled ? optional<core::ObjectUsage>{ target->getObjectUsage() } : nullopt, out); });
+		propertyCheckbox(propertyName(core::AgentPropertyType::ObjectUsageDistance),
+			target->getIndividualObjectUsageDistance().has_value(),
+			[&](bool enabled, string* out) { return world->setAgentIndividualObjectUsageDistance(agent,
+				enabled ? optional<float>{ target->getObjectUsageDistance() } : nullopt, out); });
 		propertyCheckbox(propertyName(core::AgentPropertyType::Colour),
 			target->getIndividualColour().has_value(),
 			[&](bool enabled, string* out) { return world->setAgentIndividualColour(agent,
@@ -270,6 +278,49 @@ void renderAgentIndividualProperties(shared_ptr<core::World> const& world,
 		ImGui::EndCombo();
 	}
 
+	if (target->getIndividualObjectUsage())
+	{
+		auto mode = *target->getIndividualObjectUsage();
+		if (ImGui::BeginCombo("Object usage##individual", mode == core::ObjectUsage::Arms ? "Arms" : "None"))
+		{
+			for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None})
+				if (ImGui::Selectable(choice == core::ObjectUsage::Arms ? "Arms" : "None", mode == choice))
+				{
+					string diagnostic;
+					commitIndividualPropertyEdit(world, [&](string* out)
+						{ return world->setAgentIndividualObjectUsage(agent, choice, out); }, diagnostic);
+					warn(diagnostic);
+				}
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualObjectUsage"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualObjectUsage(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
+	if (target->getIndividualObjectUsageDistance())
+	{
+		auto value = *target->getIndividualObjectUsageDistance();
+		if (ImGui::InputFloat("Object usage distance##individual", &value))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualObjectUsageDistance(agent, value, out); }, diagnostic);
+			warn(diagnostic);
+		}
+		ImGui::SameLine();
+		if (ImGui::SmallButton(ICON_FA_TIMES "##removeIndividualObjectUsageDistance"))
+		{
+			string diagnostic;
+			commitIndividualPropertyEdit(world, [&](string* out)
+				{ return world->setAgentIndividualObjectUsageDistance(agent, nullopt, out); }, diagnostic);
+			warn(diagnostic);
+		}
+	}
 	if (target->getIndividualColour())
 	{
 		float rgb[3];
@@ -821,6 +872,12 @@ void renderAgentEffectiveProperties(shared_ptr<core::World> const& world,
 	planningTime("Minimum route planning time", minimumPlanningTime);
 	planningTime("Maximum route planning time", maximumPlanningTime);
 
+	ImGui::Text("Object usage: %s (%s)",
+		lookup.entity->getObjectUsage() == core::ObjectUsage::Arms ? "Arms" : "None",
+		lookup.entity->getIndividualObjectUsage() ? "individual" : "script default");
+	ImGui::Text("Object usage distance: %.3f (%s)%s", double(lookup.entity->getObjectUsageDistance()),
+		lookup.entity->getIndividualObjectUsageDistance() ? "individual" : "script default",
+		lookup.entity->getObjectUsage() == core::ObjectUsage::None ? " (ignored)" : "");
 	auto const adherence = lookup.entity->getEffectivePermissionAdherence();
 	if (adherence.individual)
 		ImGui::Text("Permission adherence: %s (individual)", adherence.value ? "true" : "false");

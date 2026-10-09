@@ -7,6 +7,7 @@
 #include "core/AgentTagRegistryDocument.h"
 #include <fstream>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -44,6 +45,112 @@ namespace
 		require(snapshot.interactionRequests.empty() && snapshot.deviceOperations.empty()
 			&& snapshot.traversalRequests.empty() && snapshot.traversalPermits.empty(), "None leaked coordination work");
 	}
+	void individualOverrides(smoke::Context const&)
+	{
+		core::World world("Individual usage", 10, 2);
+		auto room = world.addCorridor(0, 0, 10); world.finishBuild(); attach(world);
+		auto id = world.createAgent("Operator", room, 0, 2.f);
+		auto none = world.createAgent("NoneFixture", "None", room, 0, 4.f);
+		world.pauseSimulation();
+		std::string diagnostic;
+		require(world.setAgentIndividualObjectUsageDistance(id, .125f, &diagnostic), diagnostic);
+		require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Mode override refused");
+		require(world.lookupAgent(id).entity->getObjectUsageDistance() == .125f, "Mode changed distance");
+		require(world.setAgentIndividualObjectUsageDistance(id, 0.f), "None did not ignore distance");
+		world.markSaved(); world.consumeSimulationEvents();
+		require(!world.setAgentIndividualObjectUsage(id, core::ObjectUsage::Arms, &diagnostic)
+			&& !world.isModified() && world.consumeSimulationEvents().empty(), "Invalid combination mutated state");
+		require(!world.setAgentIndividualObjectUsage(id, std::nullopt), "Removing mode ignored invalid Arms distance");
+		require(world.setAgentIndividualObjectUsageDistance(id, std::nullopt), "Distance removal refused");
+		require(world.lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::None
+			&& world.lookupAgent(id).entity->getObjectUsageDistance() == .25f, "Distance removal removed mode or default");
+		require(world.setAgentIndividualObjectUsage(id, std::nullopt), "Mode removal refused");
+		for (float invalid : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+		{
+			world.markSaved(); world.consumeSimulationEvents();
+			require(!world.setAgentIndividualObjectUsageDistance(id, invalid)
+				&& !world.isModified() && world.consumeSimulationEvents().empty()
+				&& !world.lookupAgent(id).entity->getIndividualObjectUsageDistance(), "Invalid Arms distance was not atomic");
+			require(world.setAgentIndividualObjectUsageDistance(none, invalid), "None rejected ignored distance");
+			require(!world.setAgentIndividualObjectUsage(none, core::ObjectUsage::Arms), "Ignored invalid distance enabled Arms");
+		}
+		require(world.setAgentIndividualObjectUsageDistance(none, std::nullopt), "None removal refused");
+		require(!world.setAgentIndividualObjectUsage(none, core::ObjectUsage::Arms), "None's zero default admitted Arms");
+		require(world.setAgentIndividualObjectUsageDistance(none, .5f)
+			&& world.setAgentIndividualObjectUsage(none, core::ObjectUsage::Arms), "Independent distance did not enable Arms");
+		require(!world.setAgentIndividualObjectUsageDistance(none, std::nullopt), "Removing required distance was accepted");
+		core::DeviceCommand command; command.type = core::DeviceCommandType::SetSectorLights;
+		command.target = core::SectorId{room + 1}; command.desiredState = false;
+		auto point = world.createInteractionPoint("Reach control", core::SectorId{room + 1}, {2.2f, 0.f}, .5f, 1.f,
+			{{command, core::InteractionBindingRequirement::Required}});
+		world.resumeSimulation();
+		require(!world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Running edit accepted");
+		auto request = world.requestInteraction(point, id); require(bool(request), "Arms request refused");
+		world.pauseSimulation();
+		require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Pending mode change refused");
+		auto interaction = world.lookupInteractionRequest(request);
+		require(interaction && interaction.entity->getResult() == core::InteractionResult::Cancelled,
+			"None override did not cancel pending operation immediately");
+		world.resumeSimulation(); world.advanceTicks(150);
+		require(world.getSector(room)->areLightsOn(), "Cancelled operation activated");
+		world.pauseSimulation();
+		require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::Arms)
+			&& world.setAgentIndividualObjectUsageDistance(id, .01f), "Arms restoration refused");
+		world.resumeSimulation();
+		// Physical controls still approach rather than activating remotely.
+		auto origin = world.lookupAgent(id).entity->getGlobalPosition();
+		require(bool(world.requestInteraction(point, id)), "Short-armed approach request refused");
+		world.advanceTicks(1);
+		require(world.lookupAgent(id).entity->getGlobalPosition().x > origin.x
+			&& world.getSector(room)->areLightsOn(), "Short distance did not require approach");
+		world.advanceTicks(150);
+		require(!world.getSector(room)->areLightsOn(), "Restored Arms did not operate control");
+	}
+
+	void overrideCommittedCrossing(smoke::Context const&)
+	{
+		core::World world("Usage committed crossing", 8, 2);
+		auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+		auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+		core::World::CreateDoorOptions options; options.activationMode = core::DoorActivationMode::Manual;
+		world.addSectorDoor(0, 0, 3, options); world.addSectorMarker(back, 0, 3.5f, "Goal"); world.finishBuild();
+		auto id = world.createAgent("Walker", front, 0, 3.5f); quickPlanning(world, id);
+		require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Crossing intent refused");
+		bool admitted = false;
+		for (unsigned tick = 0; tick < 300 && !admitted; ++tick)
+		{
+			world.advanceTick();
+			for (auto const& permit : world.getSimulationSnapshot().traversalPermits) admitted = admitted || permit.owner == id;
+		}
+		require(admitted, "Manual crossing was not admitted");
+		world.pauseSimulation();
+		require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Committed mode edit refused");
+		world.resumeSimulation(); world.advanceTicks(600);
+		require(world.lookupAgent(id).entity->getSector()->getIndex() == back,
+			"None override revoked admitted crossing");
+		clean(world);
+		core::World routing("Usage Path reconsideration", 10, 2);
+		auto origin = routing.addRoom("Front", 0, 0, 0, 10, 1);
+		auto target = routing.addRoom("Back", 1, 0, 0, 10, 1);
+		routing.addSectorDoor(0, 0, 7, options); routing.addSectorMarker(target, 0, 7.5f, "Goal"); routing.finishBuild();
+		auto walker = routing.createAgent("Walker", origin, 0, 1.f); quickPlanning(routing, walker);
+		require(routing.moveAgentToNamedMarker(walker, "Goal").accepted(), "Reconsideration intent refused");
+		routing.advanceTicks(15);
+		require(bool(routing.lookupAgent(walker).entity->getPath()), "Initial Arms Path missing");
+		routing.pauseSimulation();
+		require(routing.setAgentIndividualObjectUsage(walker, core::ObjectUsage::None), "Path mode edit refused");
+		routing.resumeSimulation(); routing.advanceTicks(600);
+		require(routing.lookupAgent(walker).entity->getSector()->getIndex() == origin,
+			"None edit traversed operation-dependent Path");
+		bool routeLost = false;
+		for (auto const& event : routing.consumeSimulationEvents())
+			if (event.type == core::SimulationEventType::RouteLost && event.agent.id == walker)
+				routeLost = event.routeLossReason == core::RouteLossReason::TopologyChanged;
+		require(routeLost && !routing.lookupAgent(walker).entity->getPath(),
+			"None edit did not publish the existing paused-Path restoration failure");
+		clean(routing);
+	}
+
 	void declarations(smoke::Context const&)
 	{
 		for (auto const* distance : {"", "object_usage_distance = 0,", "object_usage_distance = -1,",
@@ -116,6 +223,7 @@ namespace
 	{
 		for (auto mode : {core::DoorActivationMode::Manual, core::DoorActivationMode::RemoteControlled, core::DoorActivationMode::Automatic})
 		for (bool alternate : {false, true})
+		for (bool scripted : {false, true})
 		{
 			core::World world("None routes", 10, 2);
 			auto front = world.addRoom("Front", 0, 0, 0, 10, 1);
@@ -124,7 +232,13 @@ namespace
 			world.addSectorDoor(0, 0, 2, options);
 			if (alternate) { options.activationMode = core::DoorActivationMode::Automatic; world.addSectorDoor(0, 0, 7, options); }
 			world.addSectorMarker(back, 0, 2.5f, "Goal"); world.finishBuild(); attach(world);
-			auto id = world.createAgent("NoneFixture", "Walker", front, 0, 1.f); quickPlanning(world, id);
+			auto id = world.createAgent(scripted ? "NoneFixture" : "Human", "Walker", front, 0, 1.f);
+			if (!scripted)
+			{
+				world.pauseSimulation();
+				require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "None override refused");
+			}
+			quickPlanning(world, id);
 			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "None movement intent refused");
 			world.advanceTicks(2000);
 			auto agent = world.lookupAgent(id).entity;
@@ -304,7 +418,8 @@ namespace
 			}
 			world.addSectorMarker(upper, platform ? 1 : 0, 7.f, "Goal"); world.finishBuild(); attach(world); world.pauseSimulation();
 			if (protectedJourney) require(world.setLiftDestinationPermissionRequirement(vehicleSector, 1, {key}, nullptr, object), "Destination requirement refused");
-			auto id = world.createAgent("NoneFixture", "Passenger", ground, 0, shuttle ? 5.5f : 8.5f);
+			auto id = world.createAgent("Human", "Passenger", ground, 0, shuttle ? 5.5f : 8.5f);
+			require(world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None), "Passenger None override refused");
 			auto operatorId = world.createAgent("Operator", ground, 0, 7.f);
 			require(world.grantAgentAccessPermission(operatorId, key), "Operator grant refused");
 			quickPlanning(world, id);
@@ -342,7 +457,12 @@ namespace
 				if (!onboard && world.isAgentTransportOccupant(vehicle, id))
 				{
 					onboard = true;
-					world.pauseSimulation(); require(world.setAgentIndividualPermissionAdherence(id, true), "Onboard adherence change refused"); world.resumeSimulation();
+					world.pauseSimulation();
+					require(world.setAgentIndividualPermissionAdherence(id, true), "Onboard adherence change refused");
+					require(world.setAgentIndividualObjectUsage(id, std::nullopt)
+						&& world.setAgentIndividualObjectUsage(id, core::ObjectUsage::None)
+						&& world.setAgentIndividualObjectUsageDistance(id, 0.f), "Onboard override edits refused");
+					world.resumeSimulation();
 				}
 				auto agent = world.lookupAgent(id).entity;
 				if (agent->getSector()->getIndex() == upper && std::abs(agent->getGlobalPosition().y - (shuttle ? 0.f : 1.f)) < .001f && agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
@@ -356,6 +476,8 @@ namespace
 }
 void agent_smoke::registerNoneUsage(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"agentTypesObjectUsageOverrides", individualOverrides});
+	checks.push_back({"agentTypesObjectUsageCommittedCrossing", overrideCommittedCrossing});
 	checks.push_back({"agentTypesNoneDeclarations", declarations});
 	checks.push_back({"agentTypesNoneInvalidDeclarations", invalidNoneDeclarations});
 	checks.push_back({"agentTypesNoneDirectRefusals", directRefusals});

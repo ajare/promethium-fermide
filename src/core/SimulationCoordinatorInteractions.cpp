@@ -436,6 +436,23 @@ namespace core
 		}
 	}
 
+	void SimulationCoordinator::agentObjectUsageChanged(AgentId id)
+	{
+		auto actor = mWorld.mAgents.find(id);
+		if (!actor) return;
+		std::vector<InteractionRequestId> cancelled;
+		for (auto const& [requestId, request] : mWorld.mInteractionRequests.entries())
+		{
+			if (request->mActor != id || request->mResult != InteractionResult::Pending) continue;
+			auto point = mWorld.mInteractionPoints.find(request->mPoint);
+			if (!point || !mWorld.agentCanOperateObjects(*actor)
+				|| (point->requiresReachAtRequest() && !mWorld.agentCanPhysicallyOperate(*actor,
+					actor->getGlobalPosition().distanceTo(point->mPosition), point->mReach)))
+				cancelled.push_back(requestId);
+		}
+		for (auto request : cancelled) cancelInteraction(request);
+	}
+
 	bool SimulationCoordinator::cancelInteraction(InteractionRequestId id)
 	{
 		auto request = mWorld.mInteractionRequests.find(id);

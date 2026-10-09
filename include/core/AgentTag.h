@@ -29,6 +29,8 @@ namespace core
 		MinimumRoutePlanningTime,
 		MaximumRoutePlanningTime,
 		PermissionAdherence,
+		ObjectUsage,
+		ObjectUsageDistance,
 		MobilityProfile
 	};
 
@@ -60,6 +62,8 @@ namespace core
 		case AgentPropertyType::RoutePersistence: return { "Route persistence", "Pathing" };
 		case AgentPropertyType::MinimumRoutePlanningTime: return { "Minimum route planning time", "Pathing" };
 		case AgentPropertyType::MaximumRoutePlanningTime: return { "Maximum route planning time", "Pathing" };
+		case AgentPropertyType::ObjectUsage: return { "Object usage", std::nullopt };
+		case AgentPropertyType::ObjectUsageDistance: return { "Object usage distance", std::nullopt };
 		case AgentPropertyType::PermissionAdherence: return { "Permission adherence", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}

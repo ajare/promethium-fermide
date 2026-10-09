@@ -1242,6 +1242,8 @@ namespace core
 			std::optional<float> individualRiskAversion;
 			std::optional<float> individualRouteFamiliarity;
 			std::optional<float> individualRoutePersistence;
+			std::optional<ObjectUsage> individualObjectUsage;
+			std::optional<float> individualObjectUsageDistance;
 			std::optional<bool> individualPermissionAdherence;
 			std::optional<MobilityProfile> individualMobilityProfile;
 			std::optional<AgentPropertySample> interactionAversionSample;
@@ -2531,7 +2533,8 @@ namespace core
 		// placement: the same fresh live Lua instance and frozen baseline as the
 		// plain overloads, plus direct grants and Permission set assignments.
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
-			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets,
+			std::optional<ObjectUsage> objectUsage = std::nullopt, std::optional<float> objectUsageDistance = std::nullopt);
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId,
 			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
 
@@ -2620,6 +2623,10 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMaximumRoutePlanningTime(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualObjectUsage(AgentId agent, std::optional<ObjectUsage> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualObjectUsageDistance(AgentId agent, std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentObjectUsageOverrides(AgentId agent, std::optional<ObjectUsage> mode,
+			std::optional<float> distance, std::string* diagnostic = nullptr);
 		bool setAgentIndividualPermissionAdherence(AgentId agent,
 			std::optional<bool> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,

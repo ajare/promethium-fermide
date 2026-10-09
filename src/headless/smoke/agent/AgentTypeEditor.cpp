@@ -5,6 +5,8 @@
 // resource is unavailable or mismatched.
 
 #include <fstream>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <willpower/common/Logger.h>
 #include <willpower/application/resourcesystem/ResourceManager.h>
@@ -846,6 +848,113 @@ namespace
 			"Duplicate refusal changed the original definition");
 	}
 
+	void objectUsageOverrideWorkflows(smoke::Context const& context)
+	{
+		gWorldDocumentHistory.clear();
+		auto human = core::bundledHumanAgentType();
+		AgentTypeLoaderScope loader{[&](std::string const& name) -> std::optional<core::AgentTypeDefinition> {
+			if (name == "human.agent.lua") return human;
+			return std::nullopt;
+		}};
+		auto fixture = buildWorld("Usage workflows"); auto& world = fixture.world;
+		world->pauseSimulation();
+		auto id = world->createAgent("Edited", fixture.corridor, 0, 1.f);
+		std::string diagnostic;
+		auto edit = [&](auto mutate) {
+			auto before = captureDocumentSnapshot(world);
+			auto accepted = mutate();
+			if (accepted) commitDocumentEdit(before);
+			return accepted;
+		};
+		require(edit([&] { return world->setAgentIndividualObjectUsageDistance(id, .6f); }), "Distance edit failed");
+		require(edit([&] { return world->setAgentIndividualObjectUsage(id, core::ObjectUsage::None); }), "Mode edit failed");
+		auto check = [&] {
+			auto agent = world->lookupAgent(id).entity;
+			require(agent && agent->getObjectUsage() == core::ObjectUsage::None
+				&& agent->getIndividualObjectUsageDistance() == .6f, "Workflow lost independent overrides");
+		};
+		check();
+		for (auto const* filename : {"usage.world.yaml", "usage.world"})
+		{
+			auto path = context.temporaryRoot() / filename; world->saveTo(path.string());
+			auto loaded = core::loadWorldDocument(path);
+			require(loaded->lookupAgent(id).entity->getIndividualObjectUsage() == core::ObjectUsage::None
+				&& loaded->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f, "Usage round-trip failed");
+		}
+		for (float ignored : {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+		{
+			require(world->setAgentIndividualObjectUsageDistance(id, ignored), "None ignored edit refused");
+			for (auto const* filename : {"ignored.world.yaml", "ignored.world"})
+			{
+				auto path = context.temporaryRoot() / filename; world->saveTo(path.string());
+				auto loaded = core::loadWorldDocument(path);
+				auto value = loaded->lookupAgent(id).entity->getIndividualObjectUsageDistance();
+				require(value && (std::isnan(ignored) ? std::isnan(*value) : *value == ignored), "Ignored distance did not persist");
+			}
+		}
+		require(world->setAgentIndividualObjectUsageDistance(id, .6f), "Restore concrete distance failed");
+		world->resetSimulation(); world->pauseSimulation(); check(); world->addLevel(); check();
+		auto text = makeAgentClipboardText(makeAgentClipboardPayload(*world, id, "Copied"), false);
+		AgentClipboardPayload payload;
+		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"], payload, diagnostic), diagnostic);
+		auto other = buildWorld("Other usage World"); other.world->pauseSimulation();
+		core::AgentId pasted;
+		require(commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 3.f, pasted, diagnostic), diagnostic);
+		require(other.world->lookupAgent(pasted).entity->getObjectUsage() == core::ObjectUsage::None
+			&& other.world->lookupAgent(pasted).entity->getIndividualObjectUsageDistance() == .6f, "Cross-World paste lost overrides");
+		gWorldDocumentHistory.clear();
+		auto restore = [&](DocumentSnapshot const& snapshot) {
+			try { auto candidate = deserializeDocumentSnapshot(snapshot, world, {}); if (!candidate) return false; world = std::move(candidate); return true; }
+			catch (std::exception const& error) { diagnostic = error.what(); return false; }
+		};
+		require(edit([&] { return world->setAgentIndividualObjectUsage(id, std::nullopt); }), "Mode removal failed");
+		require(world->lookupAgent(id).entity->getObjectUsage() == core::ObjectUsage::Arms
+			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Mode removal destroyed distance/default");
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic); check();
+		require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), diagnostic);
+		world->pauseSimulation();
+		require(edit([&] { return world->setAgentIndividualObjectUsageDistance(id, std::nullopt, &diagnostic); }), "Distance removal failed: " + diagnostic);
+		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .25f, "Removal did not reveal frozen default");
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Distance undo failed");
+		world->pauseSimulation();
+		world->markSaved(); auto before = captureDocumentSnapshot(world); auto undoCount = gWorldDocumentHistory.undoCount();
+		require(!edit([&] { return world->setAgentIndividualObjectUsageDistance(id, 0.f); })
+			&& captureDocumentSnapshot(world)->yaml == before->yaml && !world->isModified()
+			&& gWorldDocumentHistory.undoCount() == undoCount, "Refused edit changed authored state/history");
+		auto malformed = *before;
+		auto offset = malformed.yaml.find("value: 0.6"); require(offset != std::string::npos, "Missing authored distance");
+		auto end = malformed.yaml.find('\n', offset);
+		malformed.yaml.replace(offset, end - offset, "value: 0");
+		require(!restore(malformed) && captureDocumentSnapshot(world)->yaml == before->yaml
+			&& gWorldDocumentHistory.undoCount() == undoCount, "Malformed document partially restored");
+		payload.individualObjectUsage = core::ObjectUsage::Arms; payload.individualObjectUsageDistance = 0.f;
+		other.world->consumeSimulationEvents(); auto otherBefore = captureDocumentSnapshot(other.world);
+		core::AgentId refused;
+		require(!commitAgentPlacement(other.world, payload, other.world->getSector(other.corridor), 0, 5.f, refused, diagnostic)
+			&& !refused && captureDocumentSnapshot(other.world)->yaml == otherBefore->yaml
+			&& other.world->consumeSimulationEvents().empty(), "Malformed paste mutated state or coordination");
+		gWorldDocumentHistory.clear();
+		require(edit([&] { return cutAgent(world, id, diagnostic); }), diagnostic);
+		require(gWorldDocumentHistory.undo(captureDocumentSnapshot(world), restore), diagnostic);
+		require(world->lookupAgent(id).entity->getIndividualObjectUsageDistance() == .6f, "Deletion restoration lost override");
+		world->pauseSimulation();
+		agent_smoke::replaceSource(human.source, "object_usage_distance = 0.25", "object_usage_distance = 0.75");
+		world->addLevel();
+		require(world->setAgentIndividualObjectUsageDistance(id, std::nullopt)
+			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .25f, "Survivor hot-reloaded its frozen distance");
+		world->resetSimulation(); world->pauseSimulation();
+		require(world->lookupAgent(id).entity->getObjectUsageDistance() == .75f, "Reset did not reveal fresh default");
+		require(world->setAgentIndividualObjectUsageDistance(id, .6f), "Fresh override refused");
+		auto stable = captureDocumentSnapshot(world)->yaml;
+		agent_smoke::replaceSource(human.source, "object_usage_distance = 0.75", "object_usage_distance = 0");
+		bool resetRefused = false;
+		try { world->resetSimulation(); } catch (std::exception const&) { resetRefused = true; }
+		require(resetRefused && captureDocumentSnapshot(world)->yaml == stable
+			&& world->lookupAgent(id).entity->getObjectUsageDistance() == .6f, "Override masked invalid fresh script default");
+		gWorldDocumentHistory.clear();
+	}
+
 	void noneClipboardAndHistory(smoke::Context const&)
 	{
 		gWorldDocumentHistory.clear();
@@ -1193,6 +1302,7 @@ void agent_smoke::registerAgentTypeEditor(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({ "agentTypesPreviewQueriesReuseValidatedResource", previewQueriesReuseValidatedResource });
 	checks.push_back({ "agentTypesManagedPreviewIsReadOnly", managedPreviewIsReadOnly });
+	checks.push_back({ "agentTypesObjectUsageOverrideWorkflows", objectUsageOverrideWorkflows });
 	checks.push_back({ "agentTypesNoneClipboardAndHistory", noneClipboardAndHistory });
 	checks.push_back({ "agentTypesScriptedClipboardAndDeletionHistory", scriptedClipboardAndDeletionHistory });
 	checks.push_back({ "agentTypesScriptedClipboardRefusalAndLegacy", scriptedClipboardRefusalAndLegacy });

@@ -1,4 +1,6 @@
 #include "AgentTagAssignmentPanel.h"
+#include "DocumentHistory.h"
+#include "DocumentEdit.h"
 
 #include <memory>
 #include <stdexcept>
@@ -116,6 +118,47 @@ namespace
 })";
 	}
 
+	void objectUsagePanelEdits()
+	{
+		agent_smoke::EditorState state;
+		gWorldDocumentHistory.clear();
+		auto world = std::make_shared<core::World>("Usage panel", 6, 2);
+		auto corridor = world->addCorridor(0, 0, 6); world->finishBuild(); world->pauseSimulation();
+		auto agent = world->createAgent("Edited", corridor, 0, 1.f);
+		ImGuiGuard guard; ImRect last; ImRect combo;
+		auto frame = [&] {
+			ImGui::NewFrame(); ImGui::SetNextWindowPos({20,20}); ImGui::SetNextWindowSize({600,560});
+			ImGui::Begin("Selection"); renderAgentIndividualProperties(world, agent);
+			last = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+			ImGui::End(); ImGui::Render();
+		};
+		auto click = [&](ImVec2 point) {
+			auto& io = ImGui::GetIO(); io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); frame();
+			io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); frame();
+		};
+		auto key = [&](ImGuiKey code) {
+			auto& io = ImGui::GetIO(); io.AddKeyEvent(code, true); frame(); io.AddKeyEvent(code, false); frame();
+		};
+		frame(); combo = last;
+		auto& io = ImGui::GetIO(); io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+		click(combo.GetCenter()); key(ImGuiKey_Home); key(ImGuiKey_Space); key(ImGuiKey_Escape);
+		require(world->lookupAgent(agent).entity->getIndividualObjectUsage() == core::ObjectUsage::Arms
+			&& gWorldDocumentHistory.undoCount() == 1, "Panel failed to add mode override/history");
+		click(combo.GetCenter()); key(ImGuiKey_Home); key(ImGuiKey_DownArrow); key(ImGuiKey_Space); key(ImGuiKey_Escape);
+		require(world->lookupAgent(agent).entity->getIndividualObjectUsageDistance() == .25f
+			&& gWorldDocumentHistory.undoCount() == 2, "Panel failed to add concrete distance override");
+		frame(); click(last.GetCenter());
+		require(!world->lookupAgent(agent).entity->getIndividualObjectUsageDistance()
+			&& world->lookupAgent(agent).entity->getIndividualObjectUsage()
+			&& gWorldDocumentHistory.undoCount() == 3, "Panel distance removal destroyed mode or history");
+		frame(); click(last.GetCenter());
+		require(!world->lookupAgent(agent).entity->getIndividualObjectUsage()
+			&& world->lookupAgent(agent).entity->getObjectUsageDistance() == .25f
+			&& gWorldDocumentHistory.undoCount() == 4, "Panel mode removal lost default or history");
+		gWorldDocumentHistory.clear();
+	}
+
 	void editorSnapshotsEffectiveMobilityProfile()
 	{
 		std::string diagnostic;
@@ -179,6 +222,7 @@ namespace
 
 void agent_smoke::registerMobilityProfileEditor(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({"agentObjectUsagePanelEdits", [](smoke::Context const&) { objectUsagePanelEdits(); }});
 	checks.push_back({ "agent/mobilityProfileEditorSnapshotsCurrentEffectiveProfile",
 		[](smoke::Context const&)
 		{

@@ -8847,11 +8847,16 @@ namespace core
 
 	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
 		uint32_t levelOffset, float xOffset, set<AccessPermissionId> const& grants,
-		set<PermissionSetId> const& sets)
+		set<PermissionSetId> const& sets, optional<ObjectUsage> objectUsage, optional<float> objectUsageDistance)
 	{
-		return addOwnedAgentToSector(
-			makeScriptAgentForPlacement(typeId, name, grants, sets),
-			sectorId, levelOffset, xOffset);
+		if ((objectUsage || objectUsageDistance) && !mSimulationPaused)
+			throw SerializationException("Pause the simulation before authoring Object usage overrides");
+		auto agent = makeScriptAgentForPlacement(typeId, name, grants, sets);
+		if (!agent->objectUsageOverridesAreValid(objectUsage, objectUsageDistance))
+			throw SerializationException("Invalid Object usage overrides: effective Arms distance must be finite and positive");
+		agent->setIndividualObjectUsage(objectUsage);
+		agent->setIndividualObjectUsageDistance(objectUsageDistance);
+		return addOwnedAgentToSector(std::move(agent), sectorId, levelOffset, xOffset);
 	}
 
 	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
@@ -9507,6 +9512,59 @@ namespace core
 		}
 		invalidateSimulationSnapshot();
 		lookup.entity->setIndividualMaximumRoutePlanningTime(value);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool World::setAgentIndividualObjectUsage(AgentId id, optional<ObjectUsage> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		return setAgentObjectUsageOverrides(id, value, lookup.entity->getIndividualObjectUsageDistance(), diagnostic);
+	}
+
+	bool World::setAgentIndividualObjectUsageDistance(AgentId id, optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		return setAgentObjectUsageOverrides(id, lookup.entity->getIndividualObjectUsage(), value, diagnostic);
+	}
+
+	bool World::setAgentObjectUsageOverrides(AgentId id, optional<ObjectUsage> mode,
+		optional<float> distance, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		auto* agent = lookup.entity;
+		if (!agent->objectUsageOverridesAreValid(mode, distance))
+		{
+			if (diagnostic) *diagnostic = "Object usage must be Arms or None; effective Arms distance must be finite and positive";
+			return false;
+		}
+		if (agent->getIndividualObjectUsage() == mode && agent->getIndividualObjectUsageDistance() == distance)
+		{
+			if (diagnostic) *diagnostic = "The individual Object usage properties are unchanged";
+			return false;
+		}
+		auto const beforeMode = agent->getObjectUsage();
+		auto const beforeDistance = agent->getObjectUsageDistance();
+		agent->setIndividualObjectUsage(mode);
+		agent->setIndividualObjectUsageDistance(distance);
+		if (beforeMode != agent->getObjectUsage()
+			|| (agent->getObjectUsage() == ObjectUsage::Arms && beforeDistance != agent->getObjectUsageDistance()))
+		{
+			mSimulationCoordinator.agentObjectUsageChanged(id);
+			if (agent->getObjectUsage() == ObjectUsage::None || agent->getObjectUsageDistance() < beforeDistance)
+				replanAgentAfterAuthorizationRefusal(id);
+			else beginVoluntaryRoutePlanning(id);
+		}
+		invalidateSimulationSnapshot();
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;

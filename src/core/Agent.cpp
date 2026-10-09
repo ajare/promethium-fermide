@@ -217,6 +217,7 @@ namespace core
 			|| mIndividualRoutePersistence
 			|| mIndividualMinimumRoutePlanningTime
 			|| mIndividualMaximumRoutePlanningTime
+			|| mIndividualObjectUsage.has_value() || mIndividualObjectUsageDistance.has_value()
 			|| mIndividualPermissionAdherence.has_value()
 			|| mIndividualMobilityProfile)
 		{
@@ -268,6 +269,14 @@ namespace core
 				writeFloatProperty("minimumRoutePlanningTime", *mIndividualMinimumRoutePlanningTime);
 			if (mIndividualMaximumRoutePlanningTime)
 				writeFloatProperty("maximumRoutePlanningTime", *mIndividualMaximumRoutePlanningTime);
+			if (mIndividualObjectUsage)
+			{
+				beginProperty("objectUsage");
+				serializer.writeString("value", *mIndividualObjectUsage == ObjectUsage::Arms ? "arms" : "none");
+				serializer.endMap();
+			}
+			if (mIndividualObjectUsageDistance)
+				writeFloatProperty("objectUsageDistance", *mIndividualObjectUsageDistance);
 			if (mIndividualPermissionAdherence)
 			{
 				beginProperty("permissionAdherence");
@@ -349,6 +358,14 @@ namespace core
 		serializer.endMap();
 	}
 
+	bool Agent::objectUsageOverridesAreValid(std::optional<ObjectUsage> mode, std::optional<float> distance) const
+	{
+		if (mode && *mode != ObjectUsage::Arms && *mode != ObjectUsage::None) return false;
+		auto const effectiveMode = mode.value_or(mPhysicalBaseline.objectUsage);
+		auto const effectiveDistance = distance.value_or(mPhysicalBaseline.objectUsageDistance);
+		return effectiveMode == ObjectUsage::None || (std::isfinite(effectiveDistance) && effectiveDistance > 0);
+	}
+
 	bool Agent::deserializeImpl(Serializer& serializer, SerializationWorkData&)
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
@@ -397,6 +414,8 @@ namespace core
 		mIndividualRoutePersistence.reset();
 		mIndividualMinimumRoutePlanningTime.reset();
 		mIndividualMaximumRoutePlanningTime.reset();
+		mIndividualObjectUsage.reset();
+		mIndividualObjectUsageDistance.reset();
 		mIndividualPermissionAdherence.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
@@ -539,6 +558,18 @@ namespace core
 						throw SerializationException("Serialized individual Maximum route planning time is invalid");
 					mIndividualMaximumRoutePlanningTime = value;
 				}
+				else if (type == "objectUsage")
+				{
+					if (mIndividualObjectUsage) throw SerializationException("Duplicate individual Object usage");
+					auto const value = serializer.readString("value");
+					if (value != "arms" && value != "none") throw SerializationException("Invalid individual Object usage");
+					mIndividualObjectUsage = value == "arms" ? ObjectUsage::Arms : ObjectUsage::None;
+				}
+				else if (type == "objectUsageDistance")
+				{
+					if (mIndividualObjectUsageDistance) throw SerializationException("Duplicate individual Object usage distance");
+					mIndividualObjectUsageDistance = serializer.readFloat("value");
+				}
 				else if (type == "permissionAdherence")
 				{
 					if (mIndividualPermissionAdherence)
@@ -557,6 +588,8 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		if (!objectUsageOverridesAreValid(mIndividualObjectUsage, mIndividualObjectUsageDistance))
+			throw SerializationException("Invalid effective Arms Object usage distance");
 		mWalkSpeedModifierSample.reset();
 		mHeightModifierSample.reset();
 		mStairSpeedModifierSample.reset();

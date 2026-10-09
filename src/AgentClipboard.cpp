@@ -678,6 +678,8 @@ AgentClipboardPayload makeAgentClipboardPayload(core::World const& world,
 	payload.individualMinimumRoutePlanningTime = lookup.entity->getIndividualMinimumRoutePlanningTime();
 	payload.maximumRoutePlanningTimeSample = lookup.entity->getMaximumRoutePlanningTimeSample();
 	payload.individualMaximumRoutePlanningTime = lookup.entity->getIndividualMaximumRoutePlanningTime();
+	payload.individualObjectUsage = lookup.entity->getIndividualObjectUsage();
+	payload.individualObjectUsageDistance = lookup.entity->getIndividualObjectUsageDistance();
 	payload.individualPermissionAdherence = lookup.entity->getIndividualPermissionAdherence();
 	if (!payload.agentTags.empty())
 	{
@@ -811,6 +813,11 @@ string makeAgentClipboardText(AgentClipboardPayload const& payload, bool cut)
 	if (payload.individualMaximumRoutePlanningTime)
 		output << YAML::Key << "maximumRoutePlanningTime" << YAML::Value
 			<< *payload.individualMaximumRoutePlanningTime;
+	if (payload.individualObjectUsage)
+		output << YAML::Key << "objectUsage" << YAML::Value
+			<< (*payload.individualObjectUsage == core::ObjectUsage::Arms ? "arms" : "none");
+	if (payload.individualObjectUsageDistance)
+		output << YAML::Key << "objectUsageDistance" << YAML::Value << *payload.individualObjectUsageDistance;
 	if (payload.individualPermissionAdherence)
 		output << YAML::Key << "permissionAdherence" << YAML::Value
 			<< *payload.individualPermissionAdherence;
@@ -1174,6 +1181,21 @@ bool readAgentClipboardObject(YAML::Node const& object,
 		payload.individualMaximumRoutePlanningTime = value;
 	}
 
+	if (object["objectUsage"])
+	{
+		try
+		{
+			auto value = object["objectUsage"].as<std::string>();
+			if (value != "arms" && value != "none") throw std::runtime_error("Invalid Object usage");
+			payload.individualObjectUsage = value == "arms" ? core::ObjectUsage::Arms : core::ObjectUsage::None;
+		}
+		catch (...) { diagnostic = "Invalid clipboard Object usage"; return false; }
+	}
+	if (object["objectUsageDistance"])
+	{
+		try { payload.individualObjectUsageDistance = object["objectUsageDistance"].as<float>(); }
+		catch (...) { diagnostic = "Invalid clipboard Object usage distance"; return false; }
+	}
 	if (object["permissionAdherence"])
 	{
 		try { payload.individualPermissionAdherence = object["permissionAdherence"].as<bool>(); }
@@ -1619,7 +1641,8 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		|| payload.individualWaitingAversion || payload.individualCrowdAversion
 		|| payload.individualRiskAversion || payload.individualRouteFamiliarity
 		|| payload.individualRoutePersistence || payload.individualMinimumRoutePlanningTime
-		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence)
+		|| payload.individualMaximumRoutePlanningTime || payload.individualPermissionAdherence
+		|| payload.individualObjectUsage || payload.individualObjectUsageDistance)
 		&& !world->isSimulationPaused())
 	{
 		diagnostic = payload.authorizationWorldIdentity
@@ -1701,7 +1724,7 @@ bool commitAgentPlacement(shared_ptr<core::World> const& world,
 		// made yet, so the common failure leaves nothing behind at all.
 		agentId = world->createAgent(resolved->typeId, payload.name,
 			sector->getIndex(), levelOffset, localX,
-			payload.directAccessGrants, payload.permissionSets);
+			payload.directAccessGrants, payload.permissionSets, payload.individualObjectUsage, payload.individualObjectUsageDistance);
 		auto const created = world->lookupAgent(agentId).entity;
 		if (!created)
 		{
