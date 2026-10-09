@@ -1,9 +1,11 @@
 # Coroutine behaviour integration branch
 
-Issue #527 is the expansion slice of #525, on `feature/coroutine-behaviours`.
-Do not merge this dual-contract state into `master`: the hard migration and
-full integration are subsequent slices. Existing v1/v2 callback tables remain
-supported on this branch; v3 factories return a function, not a callback table.
+Issues #527–#529 implement coroutine execution, fixture migration and the
+Host API v3-only contract cut of #525 on `feature/coroutine-behaviours`.
+The branch now accepts only `api_version = 3` and `promethium.v3` imports.
+Factories must return a coroutine function(context), not a callback table;
+legacy versions and callback-table factories receive migration diagnostics.
+Full integration into `master` remains a subsequent slice.
 
 ```lua
 local host = require("promethium.v3")
@@ -35,8 +37,7 @@ authored assignment is retained but does not restart completed work.
 Deactivated instances are not resumed and retain no pending events; activation
 is delivered on reactivation. `pendingEventsPerInstance` defaults to 64. Queue
 overflow, instruction exhaustion, resume-cap exhaustion and Lua errors use the
-existing structured diagnostic / teardown / pre-tick pause policy. During this
-expansion the existing `callbacksPerBoundary`, `commandsPerCallback` and
+existing structured diagnostic / teardown / pre-tick pause policy. The existing `callbacksPerBoundary`, `commandsPerCallback` and
 `instructionsPerCall` limits also govern coroutine resumes. Teardown closes
 suspended threads with Lua 5.4 close semantics under an instruction budget;
 it does not resume their bodies.
@@ -76,9 +77,9 @@ selectors are now `routeLossAndTopologyLifecycle` and
 independent v3 Agents rather than legacy version-dependent movement semantics.
 
 This migration changes fixtures, resources and test expectations only, not the
-engine or preflight implementations. The branch still accepts callback modules
-until #529's hard contract cut. `sleep(ticks)`, removal of callback/timer APIs,
-and final ADR/authoring documentation remain later slices.
+engine or preflight implementations. #529 removes callback dispatch and legacy Host API acceptance.
+`sleep(ticks)` and named-timer removal (#530), plus final ADR/authoring
+documentation (#533), remain later slices.
 
 Validation: Release `pf-smoke-behaviours` and the behaviours CTest functional,
 CLI and concurrency contracts. The new `RuntimeCoroutines.cpp` checks cover

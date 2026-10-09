@@ -880,8 +880,8 @@ namespace core
 			sector->exitAgent(found.entity);
 		}
 		// Removing an assigned Agent is also the end of its private behaviour
-		// lifetime. Best-effort on_stop runs while the final read-only Agent state
-		// is still available and cannot veto removal.
+		// lifetime. Best-effort coroutine close runs before the Agent is removed
+		// and cannot veto removal.
 		mWorld.mAgentBehaviourRuntime->removeInstance(mWorld, id,
 			AgentBehaviourTeardownReason::Unassignment);
 		mWorld.mAgentIds.erase(found.entity);

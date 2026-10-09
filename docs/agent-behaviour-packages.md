@@ -1,5 +1,11 @@
 # Agent behaviour registry packages
 
+> Integration-branch note (#529): `feature/coroutine-behaviours` now accepts
+> only Host API v3 coroutine factories. The callback/v1/v2 authoring sections
+> below describe the previous contract; use
+> [Coroutine behaviour integration](coroutine-behaviour-integration.md) on this
+> branch. Full authoring-document migration is tracked by #533.
+
 A saved World can create or select an adjacent `*.behaviours` directory in
 **World → Behaviours**. Pause the World first. The package contains a
 `behaviours.yaml` manifest and ordinary Lua source files. The panel lists names,

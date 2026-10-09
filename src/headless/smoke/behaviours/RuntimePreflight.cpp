@@ -85,6 +85,35 @@ return {
 			"A protected factory error lacked its source line and traceback");
 	}
 
+	void legacyContractsRequireCoroutineMigration()
+	{
+		require(core::AgentBehaviourRuntimeAdapter::HostApiVersion == 3,
+			"The published behaviour Host API version is not 3");
+		for (auto version : { 1, 2 })
+		{
+			auto result = preflight("return { api_version = " + std::to_string(version)
+				+ ", factory = function() return {} end }");
+			require(!result.loaded
+				&& result.diagnostic.find("api_version = 3") != std::string::npos
+				&& result.diagnostic.find("coroutine function") != std::string::npos,
+				"A legacy API contract was accepted or lacked a migration diagnostic");
+			auto import = preflight("require('promethium.v" + std::to_string(version) + "')");
+			require(!import.loaded && import.traceback.find("not available") != std::string::npos,
+				"A retired behaviour Host API import remains available");
+		}
+		for (auto const* table : { "{}", "{ on_start = function() end }",
+			"{ on_event = function() end, on_timer = function() end, "
+			"on_route_lost = function() end, on_stop = function() end }" })
+		{
+			auto result = preflight(std::string("return { api_version = 3, factory = function() return ")
+				+ table + " end }");
+			require(!result.loaded
+				&& result.diagnostic.find("coroutine function(context)") != std::string::npos
+				&& result.diagnostic.find("callback-table") != std::string::npos,
+				"A callback-table factory was accepted or lacked the required coroutine shape");
+		}
+	}
+
 	void prohibitedHostSurfacesAreAbsent()
 	{
 		auto result = preflight(R"lua(
@@ -139,7 +168,7 @@ return { api_version = 3, factory = function() return function(context) while tr
 		require(core::AgentBehaviourHelperModule::nameIsValid(
 			"helpers.values", &nameDiagnostic),
 			"A dotted helper import name was refused");
-		for (auto const& invalidName : { "", "promethium.v1", "promethium.v2", "/absolute",
+		for (auto const& invalidName : { "", "promethium.v1", "promethium.v2", "promethium.v3", "/absolute",
 			"../traversal", "helpers/file", "native.dll", "helpers..value" })
 			require(!core::AgentBehaviourHelperModule::nameIsValid(
 				invalidName, &nameDiagnostic),
@@ -267,6 +296,7 @@ void behaviour_smoke::registerRuntimePreflight(std::vector<smoke::Check>& checks
 	checks.push_back({ "textAndContractFailuresCarryLocationAndTraceback", [](smoke::Context const&)
 	{
 		textAndContractFailuresCarryLocationAndTraceback();
+		legacyContractsRequireCoroutineMigration();
 	} });
 	checks.push_back({ "prohibitedHostSurfacesAreAbsent", [](smoke::Context const&)
 	{

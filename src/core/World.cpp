@@ -209,9 +209,8 @@ namespace core
 
 	World::~World()
 	{
-		// Lua teardown needs the final World and Agent value views, so it runs
-		// before registries and domain storage begin destruction. on_stop is
-		// best-effort and cannot prevent the World from closing.
+		// Close behaviour coroutines before registries and domain storage begin
+		// destruction. Teardown is best-effort and cannot prevent World close.
 		mAgentBehaviourRuntime->teardownAll(*this,
 			AgentBehaviourTeardownReason::WorldClose);
 		if (mAgentTagRegistry) mAgentTagRegistry->unregisterWorld(*this);
