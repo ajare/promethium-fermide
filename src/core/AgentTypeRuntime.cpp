@@ -14,6 +14,9 @@ namespace core
 	{
 		using namespace script;
 
+		constexpr char ReservedBehaviourDiagnostic[] =
+			"Agent type instance member 'behaviour' is reserved for the runtime-owned Installed behaviour";
+
 		// A C++-visible extraction of the type object returned by one `.agent.lua`
 		// source. Preflight fills this without constructing an instance.
 		struct TypeObjectView
@@ -533,6 +536,18 @@ namespace core
 					return result;
 				}
 
+				lua_pushliteral(lua, "behaviour");
+				lua_rawget(lua, -2);
+				auto const definesBehaviour = !lua_isnil(lua, -1);
+				lua_pop(lua, 1);
+				if (definesBehaviour)
+				{
+					result.failure = ScriptExecutionFailure::ConversionError;
+					result.diagnostic = ReservedBehaviourDiagnostic;
+					lua_settop(lua, base);
+					return result;
+				}
+
 				// Freeze the baseline before publishing: copy it out of Lua so
 				// later mutations of the live instance cannot change simulation.
 				try
@@ -629,6 +644,20 @@ namespace core
 			{
 				result.failure = callResult.failure;
 				result.diagnostic = callResult.diagnostic.substr(0, 2048);
+				return result;
+			}
+			// The reserved name belongs to the returned instance, not the type
+			// object. Probe new() in a separate bounded scratch runtime so neither
+			// private state nor budget exhaustion can affect the live runtime.
+			// Other constructor/baseline failures remain construction-time errors,
+			// as before; only the reserved-member contract changes preflight.
+			AgentTypeRuntimeAdapter probe({ 2u * 1024u * 1024u, 100'000u });
+			auto const instance = probe.construct(call.type.typeId, source, call.type.displayName);
+			if (instance.failure == ScriptExecutionFailure::ConversionError
+				&& instance.diagnostic == ReservedBehaviourDiagnostic)
+			{
+				result.failure = instance.failure;
+				result.diagnostic = instance.diagnostic;
 				return result;
 			}
 			result.loaded = true;

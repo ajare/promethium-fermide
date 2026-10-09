@@ -449,6 +449,42 @@ namespace
 			"The inclusive Sitting height/speed ratio upper boundary was refused or changed");
 	}
 
+	void reservedBehaviourMember(smoke::Context const&)
+	{
+		for (auto const* value : { "function() end", "false", "0", "'private'", "{}" })
+		{
+			auto const source = typeSource("Reserved", "Reserved",
+				validBaseline(std::string("behaviour = ") + value + ",\n"));
+			auto const preflight = core::AgentTypeRuntimeAdapter::preflightType(
+				"reserved.agent.lua", source);
+			require(!preflight.loaded
+				&& preflight.failure == core::ScriptExecutionFailure::ConversionError
+				&& preflight.diagnostic.find("'behaviour'") != std::string::npos
+				&& preflight.diagnostic.find("reserved") != std::string::npos
+				&& preflight.diagnostic.find("runtime-owned") != std::string::npos,
+				"Reserved instance member passed preflight or lacked a clear diagnostic");
+			core::AgentTypeRuntimeAdapter runtime;
+			auto const constructed = runtime.construct("Reserved", source, "Reserved");
+			require(!constructed.succeeded && !constructed.instance
+				&& constructed.failure == preflight.failure
+				&& constructed.diagnostic == preflight.diagnostic,
+				"Direct construction bypassed the reserved-member contract");
+			core::World world("Reserved member", 4, 2);
+			std::string diagnostic;
+			require(!world.attachAgentType("reserved.agent.lua", source, &diagnostic)
+				&& !world.hasAgentType("Reserved")
+				&& world.getSimulationSnapshot().agents.empty()
+				&& diagnostic.find("behaviour") != std::string::npos,
+				"Reserved-member attachment partially published an Agent type");
+			// A failed probe/construction must not poison subsequent valid input.
+			auto const valid = typeSource("Valid", "Valid", validBaseline(
+				"behaviour = nil, private_behaviour = function() end,\n"));
+			require(core::AgentTypeRuntimeAdapter::preflightType("valid.agent.lua", valid).loaded
+				&& runtime.construct("Valid", valid, "Valid").succeeded,
+				"API v2 private data or an absent behaviour member was refused");
+		}
+	}
+
 	void invalidBaselinesAreRejected(smoke::Context const&)
 	{
 		// Sources refused at preflight (attach) time: the type object itself is
@@ -1668,6 +1704,7 @@ void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 	checks.push_back({ "agentTypesScriptedHumanIdentity", scriptedHumanIdentity });
 	checks.push_back({ "agentTypesBundledDefinitionMatchesResource", bundledDefinitionMatchesResource });
 	checks.push_back({ "agentTypesGenericScriptBackedType", genericScriptBackedType });
+	checks.push_back({ "agentTypesReservedBehaviourMember", reservedBehaviourMember });
 	checks.push_back({ "agentTypesInvalidBaselinesRejected", invalidBaselinesAreRejected });
 	checks.push_back({ "agentTypesScriptedMobilityProfiles", scriptedMobilityProfiles });
 	checks.push_back({ "agentTypesConstructorFailureLeavesNoPartialAgent", constructorFailureLeavesNoPartialAgent });

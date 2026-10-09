@@ -67,7 +67,9 @@ namespace core
 
 		// Validates a source without touching the live state: executes it in an
 		// isolated scratch sandbox and extracts the stable type ID, display name,
-		// and new() constructor contract.
+		// and new() constructor contract. A bounded scratch construction also
+		// checks the runtime-reserved behaviour instance member; unrelated
+		// constructor failures remain deferred until live construction.
 		static AgentTypePreflight preflightType(std::string resourceName,
 			std::string_view source);
 

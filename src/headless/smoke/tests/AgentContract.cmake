@@ -94,6 +94,7 @@ set(agent_checks
     agentTypesScriptedHumanIdentity
     agentTypesBundledDefinitionMatchesResource
     agentTypesGenericScriptBackedType
+    agentTypesReservedBehaviourMember
     agentTypesInvalidBaselinesRejected
     agentTypesScriptedMobilityProfiles
     agentTypesConstructorFailureLeavesNoPartialAgent
