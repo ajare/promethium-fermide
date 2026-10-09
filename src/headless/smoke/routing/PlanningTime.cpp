@@ -90,11 +90,11 @@ namespace
 				&& !f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { invalid, invalid }, &f.diagnostic)
 				&& serialize(*f.world) == before, "Invalid planning time was accepted or mutated the World");
 		}
-		require(!f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 5, 4 }, &f.diagnostic)
-			&& !f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 5, 4 }, &f.diagnostic),
+		require(!f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 5.0f, 4.0f }, &f.diagnostic)
+			&& !f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 5.0f, 4.0f }, &f.diagnostic),
 			"Reversed sampling range was accepted");
-		require(f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 0.1f, 10 }, &f.diagnostic), f.diagnostic);
-		require(f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 0.1f, 10 }, &f.diagnostic), f.diagnostic);
+		require(f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 0.1f, 10.0f }, &f.diagnostic), f.diagnostic);
+		require(f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 0.1f, 10.0f }, &f.diagnostic), f.diagnostic);
 		auto const minimum = f.agent()->getMinimumRoutePlanningTimeSample();
 		auto const maximum = f.agent()->getMaximumRoutePlanningTimeSample();
 		require(minimum && maximum && minimum->value >= 0.1f && minimum->value <= 10
@@ -103,7 +103,7 @@ namespace
 			&& minimum->propertyRevision == f.registry->getAgentTagMinimumRoutePlanningTime(f.tag)->revision
 			&& maximum->propertyRevision == f.registry->getAgentTagMaximumRoutePlanningTime(f.tag)->revision,
 			"Sampling lost bounds, source, or revision");
-		require(f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 10, &f.diagnostic), f.diagnostic);
+		require(f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 10.0f, &f.diagnostic), f.diagnostic);
 		require(f.agent()->getEffectiveMaximumRoutePlanningTime().value == 10
 			&& !f.agent()->getEffectiveMaximumRoutePlanningTime().individual
 			&& f.agent()->getMaximumRoutePlanningTimeSample() == maximum,
@@ -121,9 +121,9 @@ namespace
 			&& f.agent()->getMaximumRoutePlanningTimeSample() == maximum,
 			"Individual overrides changed underlying samples");
 		require(f.world->resumeSimulation(), "Planning time fixture could not resume");
-		require(!f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 2, &f.diagnostic)
-			&& !f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 4, &f.diagnostic)
-			&& !f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 2, 4 }, &f.diagnostic),
+		require(!f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 2.0f, &f.diagnostic)
+			&& !f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 4.0f, &f.diagnostic)
+			&& !f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 2.0f, 4.0f }, &f.diagnostic),
 			"Planning time edits were allowed during simulation");
 	}
 
@@ -146,8 +146,8 @@ namespace
 			"Legacy defaults dirtied the documents");
 
 		f.addProperties();
-		require(f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 4, 6 }, &f.diagnostic), f.diagnostic);
-		require(f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 1, 2 }, &f.diagnostic), f.diagnostic);
+		require(f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 4.0f, 6.0f }, &f.diagnostic), f.diagnostic);
+		require(f.registry->setAgentTagMaximumRoutePlanningTime(f.tag, { 1.0f, 2.0f }, &f.diagnostic), f.diagnostic);
 		require(f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 0.1f, &f.diagnostic), f.diagnostic);
 		auto const minimum = f.agent()->getMinimumRoutePlanningTimeSample();
 		auto const maximum = f.agent()->getMaximumRoutePlanningTimeSample();
@@ -163,7 +163,7 @@ namespace
 			"World/registry round trip changed planning time state");
 
 		// Reopen old samples against an evolved registry through the public resolver.
-		require(f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 7, 7 }, &f.diagnostic), f.diagnostic);
+		require(f.registry->setAgentTagMinimumRoutePlanningTime(f.tag, { 7.0f, 7.0f }, &f.diagnostic), f.diagnostic);
 		require(f.registry->removeAgentTagMaximumRoutePlanningTime(f.tag, &f.diagnostic), f.diagnostic);
 		deserialize(*loaded, yaml);
 		loaded->pauseSimulation();

@@ -86,8 +86,8 @@ namespace
 
 	void loadIntoBuffer(std::array<char, NameBufferSize>& buffer, string const& value)
 	{
-		strncpy(buffer.data(), value.c_str(), buffer.size() - 1);
-		buffer[buffer.size() - 1] = '\0';
+		buffer.fill('\0');
+		value.copy(buffer.data(), buffer.size() - 1);
 	}
 
 	// Inline rename for one group: committed on Enter or on focus loss, in the
@@ -536,7 +536,7 @@ void renderAgentGroupsPanel(shared_ptr<core::World> const& world)
 		for (auto const id : world->getAgentGroupIds())
 		{
 			ImGui::TableNextRow();
-			ImGui::PushID(id.value);
+			ImGui::PushID(to_string(id.value).c_str());
 			ImGui::TableSetColumnIndex(0);
 			renderAgentGroupNameEditor(world, id);
 

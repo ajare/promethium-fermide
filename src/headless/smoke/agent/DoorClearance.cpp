@@ -2,6 +2,7 @@
 #include "core/World.h"
 #include "core/Agent.h"
 #include "core/DoorEdge.h"
+#include "core/Environment.h"
 #include "core/RouteTraversalInputs.h"
 #include "core/AgentTagRegistry.h"
 #include "PathFixture.h"
@@ -206,7 +207,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 			+ " state=" + std::to_string(static_cast<int>(agent->getState())));
 		auto snapshot = world.getSimulationSnapshot();
 		require(snapshot.traversalPermits.empty() && snapshot.traversalRequests.empty(), "Diagnostic ownership leaked");
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] " << test.label << " direction=" << (reverse ? "back-front" : "front-back")
+		if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] " << test.label << " direction=" << (reverse ? "back-front" : "front-back")
 			<< " support=" << test.support << " decorative-y=" << decorativeOffset
 			<< " height-modifier=" << test.modifier << " top-above-floor=" << envelope << " opening=" << test.opening
 			<< " planning=" << (direct.feasible ? "fit" : "refused")
@@ -218,7 +219,7 @@ void runPoseDoorClearanceDiagnostics(smoke::Context const& context)
 		try { (void)core::FurnitureCatalogue::readFile(catalogue(context, 0.f, core::Pose::Standing, literal)); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, std::string("Invalid support elevation accepted: ") + literal);
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] invalid-support=" << literal << " outcome=refused\n";
+		if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] invalid-support=" << literal << " outcome=refused\n";
 	}
 }
 
@@ -299,7 +300,7 @@ void runLiveDoorClearance(smoke::Context const&)
 		require(planning && !crossedLow && lost == !alternate
 			&& (agent->getSector() == world.getSector(destination).get()) == alternate,
 			"Live clearance did not replan safely: change=" + std::to_string(change));
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] change=" << change
+		if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] change=" << change
 			<< " queued=" << queued << " reverse=" << reverse << " mode=" << int(mode) << " style=" << int(style)
 			<< " outcome=" << (alternate ? "alternate/arrived" : "route-loss") << '\n';
 	}
@@ -364,7 +365,7 @@ void runCommittedDoorEnvelope(smoke::Context const& context)
 		require(agent->getState() == core::Agent::State::RoutePlanning
 			&& world.getSimulationSnapshot().traversalPermits.empty(), "Subsequent oversized crossing was admitted");
 		agent->clearPath();
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] admitted-change=" << change
+		if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] admitted-change=" << change
 			<< " reverse=" << reverse << " outcome=completed/subsequent-refused\n";
 	}
 }
@@ -415,7 +416,7 @@ void runPoseDoorMovementReset(smoke::Context const& context)
 			+ " x=" + std::to_string(agent->getGlobalPosition().x));
 		require(agent->getPose() == core::Pose::Standing && world.usablePointOccupant(seat) != id,
 			"Departure lifecycle released too early or failed to release on departure");
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] movement-reset pose=" << (lying ? "lying" : "sitting")
+		if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[clearance] movement-reset pose=" << (lying ? "lying" : "sitting")
 			<< " outcome=crawled/arrived/released" << '\n';
 	}
 }
@@ -520,7 +521,7 @@ void runAutomaticCrawlingJourneys(smoke::Context const&)
 				std::string(test.label) + ": refusal did not Route-loss or alternate: lost=" + std::to_string(lost)
 				+ " alternate=" + std::to_string(alternate) + " reached=" + std::to_string(reachedDestination));
 		}
-		if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[crawling] " << test.label
+		if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[crawling] " << test.label
 			<< " reverse=" << reverse << " alternate=" << alternate
 			<< " outcome=" << (test.admits ? (test.crossing == core::Pose::Crawling ? "crawled" : "stood") : (alternate ? "alternate" : "route-loss"))
 			<< " crawlingTicks=" << crawlingTicks << '\n';

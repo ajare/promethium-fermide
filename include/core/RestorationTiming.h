@@ -2,7 +2,7 @@
 
 #include <chrono>
 #include <cstdio>
-#include <cstdlib>
+#include "Environment.h"
 
 namespace core
 {
@@ -16,7 +16,7 @@ namespace core
 		Clock::time_point mStart;
 	public:
 		explicit RestorationTiming(char const* phase)
-			: mPhase(phase), mEnabled(std::getenv("PF_RESTORATION_TIMING") != nullptr),
+			: mPhase(phase), mEnabled(hasEnvironmentVariable("PF_RESTORATION_TIMING")),
 			mStart(mEnabled ? Clock::now() : Clock::time_point{}) {}
 		~RestorationTiming()
 		{

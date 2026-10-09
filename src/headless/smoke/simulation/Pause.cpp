@@ -34,7 +34,7 @@ namespace
 			auto id = world.createAgent("Walker", room, 0, 2.25f);
 			auto agent = world.lookupAgent(id).entity;
 			world.pauseSimulation();
-			require(world.setAgentIndividualRoutePersistence(id, 1)
+			require(world.setAgentIndividualRoutePersistence(id, 1.0f)
 				&& world.setAgentIndividualMinimumRoutePlanningTime(id, 0.1f)
 				&& world.setAgentIndividualMaximumRoutePlanningTime(id, 0.1f), "Planning property setup failed");
 			require(world.resumeSimulation(), "Fixture resume failed");

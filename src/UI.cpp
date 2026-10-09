@@ -2507,8 +2507,8 @@ namespace
 		if (!edit.editing)
 		{
 			auto const& name = level ? world->getLevelName(layer) : world->getLayerName(layer);
-			std::strncpy(edit.text.data(), name.c_str(), edit.text.size() - 1);
-			edit.text[edit.text.size() - 1] = '\0';
+			edit.text.fill('\0');
+			name.copy(edit.text.data(), edit.text.size() - 1);
 		}
 
 		ImGui::SetNextItemWidth(-1.0f);
@@ -4890,7 +4890,7 @@ void handleWorldInteraction(shared_ptr<core::World> world,
 		{
 			setSelectionMode(UISettings::SelectionMode::Sector);
 			gSelectedSector = gHoveredSector;
-			gSelectedWorldLevel = static_cast<uint32_t>(std::max(0.0f,
+			gSelectedWorldLevel = static_cast<uint32_t>((std::max)(0.0f,
 				std::floor(screenToWorld(ImGui::GetIO().MousePos).y)));
 			gSelectedAgent = nullptr;
 			gSelectedVertex.reset();

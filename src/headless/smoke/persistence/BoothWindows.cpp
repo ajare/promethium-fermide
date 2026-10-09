@@ -60,7 +60,7 @@ namespace persistence
 					&& loaded.getInteractionPointPermissionRequirement(unit->getLandingButton(1)) == std::vector<core::AccessPermissionId>{upperPermission},
 					"Edited roundtrip lost coherent authored configuration");
 				auto actor = loaded.createAgent("Restored operator", unit->getStop(1).sector->getIndex(),
-					float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.0f);
+					unit->getCellY() + 1 - unit->getStop(1).sector->getCellY(), 0.0f);
 				loaded.grantAgentAccessPermission(actor, upperPermission);
 				require(bool(loaded.requestDumbwaiterLanding(deviceId, 1, actor)), "Restored Agent landing refused");
 				loaded.resumeSimulation(); require(loaded.advanceTicks(130), "Restored Agent operation failed");

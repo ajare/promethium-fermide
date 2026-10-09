@@ -420,7 +420,7 @@ namespace
 		ImGui::TableHeadersRow();
 
 		ImGui::TableNextRow();
-		ImGui::PushID(crew.value);
+		ImGui::PushID(std::to_string(crew.value).c_str());
 		ImGui::TableSetColumnIndex(1);
 
 		auto const depthOnEntry = GImGui->DisabledStackSize;

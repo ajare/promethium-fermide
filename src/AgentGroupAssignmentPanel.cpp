@@ -186,7 +186,7 @@ void renderAgentGroupAssignmentCell(shared_ptr<core::World> const& world,
 			// The ID is pushed rather than trusted to the label: a group named
 			// "Crew##A" must not collide with a group named "Crew##B", and
 			// neither name reaches the widget that would read it as its own.
-			ImGui::PushID(id.value);
+			ImGui::PushID(to_string(id.value).c_str());
 			if (renderGroupChoice("##agentGroupChoice", groupLookup.entity->getName(),
 				id == current, rowWidth))
 				apply(id);

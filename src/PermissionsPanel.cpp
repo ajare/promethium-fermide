@@ -38,6 +38,13 @@ namespace
 		return true;
 	}
 
+	template<size_t Size>
+	void loadIntoBuffer(array<char, Size>& buffer, string const& value)
+	{
+		buffer.fill('\0');
+		value.copy(buffer.data(), buffer.size() - 1);
+	}
+
 	set<core::AccessPermissionId> asSet(vector<core::AccessPermissionId> const& values)
 	{ return { values.begin(), values.end() }; }
 }
@@ -307,15 +314,14 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 			ImGui::PushID((int)id.value); ImGui::TableNextRow(); ImGui::TableNextColumn();
 			auto [entry, inserted] = editedNames.try_emplace(id.value);
 			auto& name = entry->second;
-			if (inserted) strncpy(name.data(), world->getAccessPermissionName(id).c_str(), name.size() - 1);
+			if (inserted) loadIntoBuffer(name, world->getAccessPermissionName(id));
 			ImGui::SetNextItemWidth(-1.0f);
 			if (ImGui::InputText("##name", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue))
 			{
 				string diagnostic;
 				if (!commitAccessPermissionRename(world, id, name.data(), diagnostic))
 				{
-					name.fill(0);
-					strncpy(name.data(), world->getAccessPermissionName(id).c_str(), name.size() - 1);
+					loadIntoBuffer(name, world->getAccessPermissionName(id));
 				}
 			}
 			auto usage = world->getAccessPermissionUsage(id);
@@ -361,13 +367,13 @@ void renderPermissionsPanel(shared_ptr<core::World> const& world)
 			ImGui::PushID(static_cast<int>(setId.value));
 			ImGui::TableNextRow(); ImGui::TableNextColumn();
 			auto [entry, inserted] = editedSetNames.try_emplace(setId.value); auto& name = entry->second;
-			if (inserted) strncpy(name.data(), world->getPermissionSetName(setId).c_str(), name.size() - 1);
+			if (inserted) loadIntoBuffer(name, world->getPermissionSetName(setId));
 			ImGui::SetNextItemWidth(-1.0f);
 			if (ImGui::InputText("##set-name", name.data(), name.size(), ImGuiInputTextFlags_EnterReturnsTrue))
 			{
 				string diagnostic;
 				if (!commitPermissionSetRename(world, setId, name.data(), diagnostic))
-				{ name.fill(0); strncpy(name.data(), world->getPermissionSetName(setId).c_str(), name.size() - 1); }
+				{ loadIntoBuffer(name, world->getPermissionSetName(setId)); }
 			}
 			ImGui::TableNextColumn(); ImGui::Text("%u", world->getPermissionSetUsageCount(setId));
 			ImGui::TableNextColumn();

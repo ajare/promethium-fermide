@@ -194,7 +194,8 @@ namespace
 		if (auto* stringValue = core::agentBehaviourConfigurationGetIf<string>(&value))
 		{
 			array<char, 512> buffer{};
-			strncpy(buffer.data(), stringValue->c_str(), buffer.size() - 1);
+			auto const copied = stringValue->copy(buffer.data(), buffer.size() - 1);
+			buffer[copied] = '\0';
 			if (!ImGui::InputText("##value", buffer.data(), buffer.size(),
 				ImGuiInputTextFlags_EnterReturnsTrue)) return false;
 			*stringValue = buffer.data();

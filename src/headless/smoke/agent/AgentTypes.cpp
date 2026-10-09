@@ -1337,7 +1337,7 @@ namespace
 		require(world.attachAgentType(resource, valid, &diagnostic), diagnostic);
 		auto const second = world.createAgent("Failure", "Second", corridor, 0, 3.f);
 		auto const third = world.createAgent("Failure", "Third", corridor, 0, 5.f);
-		world.update(0.1);
+		world.update(0.1f);
 		auto const* originalFirst = world.lookupAgent(first).entity;
 		auto const* originalSecond = world.lookupAgent(second).entity;
 		auto const* originalThird = world.lookupAgent(third).entity;

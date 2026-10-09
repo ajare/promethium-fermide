@@ -41,7 +41,7 @@ namespace
 			}
 			visited.erase(vertex.get());
 		};
-		visit(source, depth, { 0, 0 });
+		visit(source, depth, { 0.0f, uint64_t{ 0 } });
 		return best;
 	}
 
@@ -175,7 +175,7 @@ d.edges = {}
 			}
 			visited.erase(vertex.get());
 		};
-		visit(source, agent.getLocalDepth(), { 0, 0 });
+		visit(source, agent.getLocalDepth(), { 0.0f, uint64_t{ 0 } });
 		return best;
 	}
 

@@ -177,8 +177,8 @@ namespace
 
 	void loadIntoBuffer(array<char, NameBufferSize>& buffer, string const& value)
 	{
-		strncpy(buffer.data(), value.c_str(), buffer.size() - 1);
-		buffer[buffer.size() - 1] = '\0';
+		buffer.fill('\0');
+		value.copy(buffer.data(), buffer.size() - 1);
 	}
 
 	string serializeWorld(core::World const& world)
@@ -1442,7 +1442,7 @@ namespace
 	void renderTagSection(shared_ptr<core::AgentTagRegistry> const& registry,
 		core::AgentTagId id)
 	{
-		ImGui::PushID(id.value);
+		ImGui::PushID(to_string(id.value).c_str());
 		ImGui::SeparatorText(format("#{}", registry->getAgentTagName(id)).c_str());
 		renderTagNameEditor(registry, id);
 		ImGui::SameLine();

@@ -8319,7 +8319,7 @@ namespace core
 			for (auto const& binding : point->mBindings)
 				if (binding.command.type == DeviceCommandType::RequestAirlock)
 					require(validSector(binding.command.target)
-						&& getSector(binding.command.target.value - 1)->getType() == SectorType::Airlock
+						&& mSectors[binding.command.target.value - 1]->getType() == SectorType::Airlock
 						&& binding.command.stopIndex < 2,
 						format("Interaction point {} targets a removed Airlock or invalid entry side", pointId.value));
 				else if (binding.command.type == DeviceCommandType::ToggleBoothWindow

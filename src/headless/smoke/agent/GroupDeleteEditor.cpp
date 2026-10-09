@@ -833,7 +833,7 @@ namespace
 		for (auto const id : world->getAgentGroupIds())
 		{
 			ImGui::TableNextRow();
-			ImGui::PushID(id.value);
+			ImGui::PushID(std::to_string(id.value).c_str());
 			ImGui::TableSetColumnIndex(2);
 
 			auto const depthOnEntry = GImGui->DisabledStackSize;

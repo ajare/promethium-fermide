@@ -477,7 +477,7 @@ namespace
 			};
 			require(world.setAgentIndividualWaitingAversion(id, 0.5f), "Low waiting aversion refused");
 			bool low = choose();
-			require(world.setAgentIndividualWaitingAversion(id, 3), "High waiting aversion refused");
+			require(world.setAgentIndividualWaitingAversion(id, 3.0f), "High waiting aversion refused");
 			bool high = choose(); reversed = low && !high;
 			if (!reversed) continue;
 			// Observe the same entry edge with and without local knowledge while

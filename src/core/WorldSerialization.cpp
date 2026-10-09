@@ -3118,7 +3118,7 @@ namespace core
 			auto chamber = std::static_pointer_cast<AirlockTransit>(mSectors[index]);
 			chamber->mPreviousEnds = { record.p ? SectorEndType::None : SectorEndType::Wall,
 				record.q ? SectorEndType::None : SectorEndType::Wall };
-			for (size_t side = 0; side < 2; ++side)
+			for (uint32_t side = 0; side < 2; ++side)
 			{
 				auto point = mInteractionPoints.find(chamber->getControl(side));
 				for (auto permission : record.controlPermissionRequirements[side])

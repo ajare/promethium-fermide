@@ -112,7 +112,7 @@ namespace
 		ImVec4 const text = luminance > 0.5f ? ImVec4(0.0f, 0.0f, 0.0f, 1.0f)
 			: ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 
-		ImGui::PushID(tag.value);
+		ImGui::PushID(to_string(tag.value).c_str());
 		ImGui::PushStyleColor(ImGuiCol_Button, base);
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, scaleColour(base, 1.25f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonActive, scaleColour(base, 0.8f));
@@ -1036,7 +1036,7 @@ void renderAgentTagAssignmentChecklist(shared_ptr<core::World> const& world,
 			string assignmentDiagnostic;
 			bool const compatible
 				= world->canAssignAgentTag(agent, tag, &assignmentDiagnostic);
-			ImGui::PushID(tag.value);
+			ImGui::PushID(to_string(tag.value).c_str());
 			ImGui::BeginDisabled(!compatible);
 			bool const chosen = ImGui::Selectable(
 				("#" + registry->getAgentTagName(tag)).c_str());

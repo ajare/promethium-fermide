@@ -78,8 +78,8 @@ namespace
 		DocumentHistory history;
 		history.markSaved();
 		auto before = captureDocumentSnapshot(f.world, history);
-		require(f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 8, &f.diagnostic), f.diagnostic);
-		require(f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 2, &f.diagnostic), f.diagnostic);
+		require(f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 8.0f, &f.diagnostic), f.diagnostic);
+		require(f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 2.0f, &f.diagnostic), f.diagnostic);
 		commitDocumentEdit(std::move(before), history);
 		require(history.isModified() && f.world->isModified(), "Individual planning times did not dirty the World");
 		auto restore = [&](DocumentSnapshot const& snapshot)
@@ -126,8 +126,8 @@ namespace
 		require(f.agent()->getMinimumRoutePlanningTimeSample() == minimum
 			&& f.agent()->getMaximumRoutePlanningTimeSample() == maximum, "Redo rerolled planning time samples");
 
-		require(f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 9, &f.diagnostic), f.diagnostic);
-		require(f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 1, &f.diagnostic), f.diagnostic);
+		require(f.world->setAgentIndividualMinimumRoutePlanningTime(f.id, 9.0f, &f.diagnostic), f.diagnostic);
+		require(f.world->setAgentIndividualMaximumRoutePlanningTime(f.id, 1.0f, &f.diagnostic), f.diagnostic);
 		auto const text = makeAgentClipboardText(makeAgentClipboardPayload(*f.world, f.id, "Copy"), false);
 		AgentClipboardPayload payload;
 		require(readAgentClipboardObject(YAML::Load(text)["promethiumClipboard"]["object"], payload, f.diagnostic), f.diagnostic);

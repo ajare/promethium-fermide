@@ -5,6 +5,7 @@
 #include "core/YamlSerializer.h"
 #include "core/Agent.h"
 #include "core/DoorEdge.h"
+#include "core/Environment.h"
 #include <cstdlib>
 #include <iostream>
 namespace {
@@ -102,7 +103,7 @@ void crossingHistory(smoke::Context const&) {
     require(gWorldDocumentHistory.redo(captureDocumentSnapshot(world), restore), "Height edit redo failed");
     require(world->getSectorDoorOptions(0, 0, 2, 1, options) && options.heightScale == .85f, "Height redo lost geometry");
     require(clearance(), "Redo failed to restore enlarged clearance");
-    if (std::getenv("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] editor outcome=unpaused-refusal/paused-atomic-refusal/admitted-enlargement-completed/undo-redo\n";
+    if (core::hasEnvironmentVariable("PF_DOOR_CLEARANCE_TRACE")) std::cout << "[live-clearance] editor outcome=unpaused-refusal/paused-atomic-refusal/admitted-enlargement-completed/undo-redo\n";
 }
 }
 void editor_smoke::registerScaledDoors(std::vector<smoke::Check>& checks) {

@@ -909,7 +909,7 @@ end
 		auto point = [&](float x, float depth) { return ImVec2{viewport.x + 48 + x * (size.x - 60) / 8,
 			viewport.y + size.y - 28 - (depth + .5f) * (size.y - 36) / rows}; };
 		auto mouse = [&](ImVec2 p) { io.AddMousePosEvent(p.x, p.y); frame(); frame(); };
-		auto start = [&] { auto const& instance = world->furniture().front(); mouse(point(instance.x + .5f, instance.localDepth));
+		auto start = [&] { auto const& instance = world->furniture().front(); mouse(point(instance.x + .5f, static_cast<float>(instance.localDepth)));
 			io.AddMouseButtonEvent(0, true); frame(); };
 		auto release = [&] { io.AddMouseButtonEvent(0, false); frame(); frame(); };
 		start(); release();
@@ -969,7 +969,7 @@ end
 			&& reopened->furniture().front().localDepth == 2 && reopened->furniture().front().y == 1
 			&& std::abs(reopened->furniture().front().x - 3.375f) < .001f
 			&& reopened->lookupMarker(marker)->getName() == "Authored seat", "Moved Furniture did not survive save/reopen");
-		auto reject = [&](float x, int depth)
+		auto reject = [&](float x, float depth)
 		{
 			auto snapshot = captureDocumentSnapshot(world, history)->yaml; auto count = history.undoCount();
 			start(); mouse(point(x + .5f, depth));

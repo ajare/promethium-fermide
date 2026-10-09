@@ -598,12 +598,12 @@ namespace
 		world.pauseSimulation();
 		require(world.setAgentIndividualStairSpeedModifier(id, 1.5f)
 			&& world.setAgentIndividualLadderSpeedModifier(id, 1.5f)
-			&& world.setAgentIndividualInteractionAversion(id, 0)
-			&& world.setAgentIndividualEffortAversion(id, 0)
-			&& world.setAgentIndividualCrowdAversion(id, 0)
-			&& world.setAgentIndividualRiskAversion(id, 0)
+			&& world.setAgentIndividualInteractionAversion(id, 0.0f)
+			&& world.setAgentIndividualEffortAversion(id, 0.0f)
+			&& world.setAgentIndividualCrowdAversion(id, 0.0f)
+			&& world.setAgentIndividualRiskAversion(id, 0.0f)
 			&& world.setAgentIndividualWaitingAversion(id, 0.5f)
-			&& world.setAgentIndividualRouteFamiliarity(id, 1), "Could not set extreme routing profile");
+			&& world.setAgentIndividualRouteFamiliarity(id, 1.0f), "Could not set extreme routing profile");
 		core::PathfindingWorkspace workspace;
 		for (float speed : { core::AgentWalkSpeedModifierMinimum, 1.0f,
 			core::AgentWalkSpeedModifierMaximum })

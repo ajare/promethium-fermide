@@ -342,7 +342,7 @@ namespace
 			"A zero-high Facade was accepted");
 		require(!world.canAddFacade(0, 0, 0, 1, 1, CORE_ROOM_MAX_HEIGHT + 0.1f, &diagnostic),
 			"A Facade was accepted with a top level height above CORE_ROOM_MAX_HEIGHT");
-		require(!world.canAddFacade(0, 0, 0, 1, 1, CORE_ROOM_MIN_HEIGHT - 0.1f, &diagnostic),
+		require(!world.canAddFacade(0, 0, 0, 1, 1, static_cast<float>(CORE_ROOM_MIN_HEIGHT - 0.1f), &diagnostic),
 			"A Facade was accepted with a top level height below CORE_ROOM_MIN_HEIGHT");
 		require(!world.canAddFacade(0, 0, 11, 2, 1, CORE_ROOM_MAX_HEIGHT, &diagnostic),
 			"A Facade was accepted across the World bounds");

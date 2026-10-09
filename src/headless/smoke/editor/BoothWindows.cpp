@@ -52,7 +52,7 @@ namespace
 				require(world->getInteractionPointPermissionRequirement(unit->getLandingButton(stop)) == std::vector<core::AccessPermissionId>{stop == 0 ? lower : upper},
 					"Dependent deletion undo lost button requirements");
 			auto actor = world->createAgent("Restored", unit->getStop(1).sector->getIndex(),
-				float(unit->getCellY() + 1 - unit->getStop(1).sector->getCellY()), 0.0f);
+				unit->getCellY() + 1 - unit->getStop(1).sector->getCellY(), 0.0f);
 			world->grantAgentAccessPermission(actor, upper);
 			require(bool(world->requestDumbwaiterLanding(id, 1, actor)), "Undo-restored Agent control refused");
 			world->resumeSimulation(); require(world->advanceTicks(130) && !unit->isBusy() && unit->getCarPosition().y == 0, "Undo-restored Agent operation failed");

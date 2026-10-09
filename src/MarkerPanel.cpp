@@ -78,8 +78,8 @@ void renderMarkerEditorPanel(
 	if (editingId != marker->getId())
 	{
 		editingId = marker->getId();
-		std::strncpy(name.data(), marker->getName().c_str(), name.size() - 1);
-		name.back() = '\0';
+		name.fill('\0');
+		marker->getName().copy(name.data(), name.size() - 1);
 	}
 
 	ImGui::TextUnformatted("Marker");
@@ -101,8 +101,8 @@ void renderMarkerEditorPanel(
 				core::addLogMessage("Marker editor", 0,
 					core::LogLevel::Warning, diagnostic);
 		}
-		std::strncpy(name.data(), marker->getName().c_str(), name.size() - 1);
-		name.back() = '\0';
+		name.fill('\0');
+		marker->getName().copy(name.data(), name.size() - 1);
 	}
 
 	ImGui::Separator();

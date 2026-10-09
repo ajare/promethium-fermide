@@ -777,7 +777,7 @@ namespace core
 			uint64_t offset = scope->nextRandom();
 			if (span != 0)
 			{
-				auto const threshold = static_cast<uint64_t>(-span) % span;
+				auto const threshold = (uint64_t{ 0 } - span) % span;
 				while (offset < threshold) offset = scope->nextRandom();
 				offset %= span;
 			}

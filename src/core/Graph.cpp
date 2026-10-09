@@ -480,7 +480,8 @@ namespace core
 				else
 				{
 					auto sector = approach->getSector();
-					junction = make_shared<SectorMarkerVertex>(sector, nearestX - sector->getCellX(), y - sector->getCellY());
+					junction = make_shared<SectorMarkerVertex>(sector, nearestX - sector->getCellX(),
+						static_cast<float>(y - sector->getCellY()));
 					junction->mTopologyKey = selected->from->getTopologyKey() + ":panel-cut:" + approach->getTopologyKey();
 					selected->cuts.push_back(junction);
 					mVertices.push_back(junction); mSectorVertexLookup[sector.get()].push_back(junction);
@@ -591,7 +592,7 @@ namespace core
 					{
 						auto sector = left->getSector();
 						junction = make_shared<SectorMarkerVertex>(sector,
-							x - sector->getCellX(), y - sector->getCellY());
+							x - sector->getCellX(), static_cast<float>(y - sector->getCellY()));
 						junction->mTopologyKey = left->getTopologyKey() + ":cut:" + right->getTopologyKey();
 						route.cuts.push_back(junction);
 						mVertices.push_back(junction);

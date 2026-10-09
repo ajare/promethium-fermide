@@ -228,7 +228,7 @@ namespace
 					if (auto text = std::get_if<WorldDrawList::Text>(&command))
 						if (text->value == "Capacity: 1") capacity = true;
 				}
-				require(surface && doors == std::set<float>{ 2 * CORE_CELL_WIDTH_PIXELS, (2 + width) * CORE_CELL_WIDTH_PIXELS }
+				require(surface && doors == std::set<float>{ 2.0f * CORE_CELL_WIDTH_PIXELS, static_cast<float>(2 + width) * CORE_CELL_WIDTH_PIXELS }
 					&& buttons == 0 && arrows == 3 && capacity && selected,
 					"Scanner render omitted surface/Doors/direction/capacity/selection or added buttons");
 				auto id = world->createAgent("Traveller", ends[direction ? 0 : 1], 0, 1.0f);

@@ -95,7 +95,7 @@ namespace
 		for (uint32_t stop : {0u, 1u}) for (float x : {0.0f, 0.249f, 0.25f, 0.251f, 0.5f})
 		{
 			Fixture f;
-			auto actorId = f.world->createAgent("Operator", 0, float(stop), x);
+			auto actorId = f.world->createAgent("Operator", 0, stop, x);
 			auto actor = f.world->lookupAgent(actorId).entity;
 			auto position = actor->getGlobalPosition(); auto path = actor->getPath();
 			auto point = f.world->lookupInteractionPoint(f.unit->getLandingButton(stop)).entity;

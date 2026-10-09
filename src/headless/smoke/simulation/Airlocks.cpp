@@ -834,7 +834,7 @@ namespace
 			};
 			require(world.setAgentIndividualWaitingAversion(id, 0.5f), "Waiting preference refused");
 			bool low = chooseAirlock();
-			require(world.setAgentIndividualWaitingAversion(id, 3), "Waiting preference refused");
+			require(world.setAgentIndividualWaitingAversion(id, 3.0f), "Waiting preference refused");
 			bool high = chooseAirlock();
 			reversed = low && !high;
 			if (!low) continue;
