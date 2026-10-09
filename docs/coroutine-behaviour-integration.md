@@ -1,7 +1,7 @@
 # Coroutine behaviour integration branch
 
-Issues #527–#529 implement coroutine execution, fixture migration and the
-Host API v3-only contract cut of #525 on `feature/coroutine-behaviours`.
+Issues #527–#530 implement coroutine execution, fixture migration, the
+Host API v3-only contract cut and pure-time sleep of #525 on `feature/coroutine-behaviours`.
 The branch now accepts only `api_version = 3` and `promethium.v3` imports.
 Factories must return a coroutine function(context), not a callback table;
 legacy versions and callback-table factories receive migration diagnostics.
@@ -21,8 +21,9 @@ return {
 }
 ```
 
-The initial resume supplies the host context. Each subsequent resume supplies
-one immutable semantic event, returned by `wait()`. Context command proxies
+The initial resume supplies the host context. Event resumes supply
+one immutable semantic event, returned by `wait()`. Sleep completion resumes
+supply no event; `sleep(ticks)` returns no values. Context command proxies
 retain the per-instance host scope; their command validation is refreshed on
 each resume. Snapshot fields in a retained context are startup observations,
 not live mutable World objects. Event ticks describe subsequent outcomes.
@@ -42,29 +43,32 @@ existing structured diagnostic / teardown / pre-tick pause policy. The existing 
 suspended threads with Lua 5.4 close semantics under an instruction budget;
 it does not resume their bodies.
 
-## Temporary timer bridge for #528
+## Pure-time sleep (#530)
 
-V3 coroutines can temporarily retain `context.set_timer(name, ticks)` and
-`context.cancel_timer(name)`. Expiry resumes `wait()` with an immutable event:
-`{ type = "timer_expired", name = name, tick = expiryBoundary, sequence = sequence }`.
-Use `event.tick`, not the retained startup context's `tick`, for expiry time.
+`sleep(ticks)` (or `context.sleep(ticks)`) suspends for a positive integer number
+of simulation ticks. A sleep begun at boundary N completes at boundary N + ticks.
+Zero, negative, fractional, non-numeric and missing durations are refused.
+Events cannot interrupt sleep. They remain in the bounded pending-event queue,
+and subsequent `wait()` calls receive them exactly once in event-sequence order.
+Starting another sleep while draining a queue retains all undelivered events.
+Sleep completion itself consumes one resume from the per-boundary budget.
 
-Semantic outcomes are delivered before due timers, allowing an outcome resume
-to cancel or replace a timer before expiry is collected. Due timers form a
-lexically ordered, one-shot batch; all names are removed before its first
-resume. Cancelling a timer already in that batch is a no-op; re-arming its name
-schedules a new expiry no earlier than the next boundary. Deactivation freezes
-remaining timer durations. Timer events use the World event sequence and obey
-pending-event and per-boundary resume budgets, including normal failure
-containment. Completed and unassigned coroutines receive no further expiry.
+Pause freezes simulation time; deactivation freezes the remaining sleep duration
+and clears pending events. Inactive instances accumulate no events; reactivation
+queues an activation event without interrupting any remaining sleep. Returning,
+unassignment, Reset and reload discard sleeping runtime state as usual.
+
+The named-timer API (`set_timer` / `cancel_timer`), timer-expiry events,
+per-instance timer budget and staged-timer machinery are removed. There is no
+polling or timer bridge. Use `wait()` for events and `sleep(ticks)` for pure time.
 
 ## Fixture and resource migration (#528)
 
 Executable behaviour fixtures and the bundled marker patrol and random wander
 resources now use v3 coroutine factories. Old callback tables remain only as
-explicitly malformed contract inputs. Timer-driven fixtures consume
-`timer_expired` events through `wait()`; patrol and wander express their journey
-and arrival-delay loops sequentially.
+explicitly malformed contract inputs. Scheduling fixtures, patrol and wander
+express their journey and arrival-delay loops sequentially through `wait()`
+and `sleep(ticks)`.
 
 Regression expectations follow the coroutine contract: deactivated Agents
 publish public transitions but receive no resumes; startup context snapshots
@@ -76,10 +80,9 @@ selectors are now `routeLossAndTopologyLifecycle` and
 `routeLossAndTopologyLifecycleReplay`; planning replacement checks exercise
 independent v3 Agents rather than legacy version-dependent movement semantics.
 
-This migration changes fixtures, resources and test expectations only, not the
-engine or preflight implementations. #529 removes callback dispatch and legacy Host API acceptance.
-`sleep(ticks)` and named-timer removal (#530), plus final ADR/authoring
-documentation (#533), remain later slices.
+#528 migrated fixtures and resources; #529 removed callback dispatch and legacy
+Host API acceptance; #530 removed named timers and migrated dependent fixtures
+to sleep. Final ADR/authoring documentation (#533) remains a later slice.
 
 Validation: Release `pf-smoke-behaviours` and the behaviours CTest functional,
 CLI and concurrency contracts. The new `RuntimeCoroutines.cpp` checks cover

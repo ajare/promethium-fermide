@@ -151,7 +151,7 @@ return {
       instance.retained_context = context
       while true do
         local event = wait()
-        if event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        if event.type ~= "route_lost" then
           instance.events = (instance.events or 0) + 1
           if instance.events ~= 1
               or event.type ~= "destination_reached"

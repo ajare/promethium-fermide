@@ -30,16 +30,11 @@ return {
   api_version = 3,
   factory = function(configuration)
     return function(context)
-      context.set_timer("noise", 1)
       while true do
-        local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          for i = 1, configuration.draws do
-            context.random_integer(1, 1000)
-            context.random_number()
-          end
-          context.set_timer("noise", 1)
+        sleep(1)
+        for i = 1, configuration.draws do
+          context.random_integer(1, 1000)
+          context.random_number()
         end
       end
     end
@@ -162,7 +157,7 @@ return {
       if not result.accepted then error(result.status) end
       while true do
         local event = wait()
-        if event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        if event.type ~= "route_lost" then
           if event.type == "destination_reached" then
             context.log("reached:" .. tostring(event.destination))
           end

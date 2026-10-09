@@ -94,15 +94,11 @@ namespace
 				"  if configuration.expected ~= helper.expected then error('wrong expected value') end\n"
 				"  return function(context)\n"
 				"    context.log('start:' .. source_revision .. ':' .. helper.generation .. ':' .. context.random_integer(1, 1000000))\n"
-				"    context.set_timer('preserved', 3)\n"
 				"    local moved = context.move_to(configuration.destination)\n"
 				"    if not moved.accepted then error(moved.status) end\n"
-				"    while true do\n"
-				"      local event = wait()\n"
-				"      if event.type == 'timer_expired' then\n"
-				"        context.log('timer:' .. source_revision .. ':' .. helper.generation .. ':' .. event.name)\n"
-				"      end\n"
-				"    end\n"
+				"    sleep(3)\n"
+				"    context.log('sleep:' .. source_revision .. ':' .. helper.generation .. ':preserved')\n"
+				"    while true do wait() end\n"
 				"  end\n"
 				"end }\n";
 		};
@@ -200,7 +196,7 @@ namespace
 		auto const stopCount = std::count_if(stopMessages.begin(), stopMessages.end(),
 			[](core::LogMessage const& message)
 			{
-				return message.msg.starts_with("start:v1:") || message.msg.starts_with("timer:v1:");
+				return message.msg.starts_with("start:v1:") || message.msg.starts_with("sleep:v1:");
 			});
 		require(stopCount == 0,
 			"Successful reload resumed an old suspended coroutine");
@@ -288,8 +284,8 @@ namespace
 			&& reloadDiagnostics[2].agent == zulu.agents[0],
 			"Per-configuration factory failures were not aggregated in stable World/Agent order");
 
-		// All failed attempts leave the v2 instances and their timers intact. A
-		// restart would emit start again and postpone these timers.
+		// All failed attempts leave the v2 instances and their sleep intact. A
+		// restart would emit start again and postpone sleep completion.
 		for (auto* fixture : { &alpha, &zulu })
 		{
 			require(fixture->world->resumeSimulation(),
@@ -299,17 +295,17 @@ namespace
 			fixture->world->pauseSimulation();
 		}
 		auto retainedMessages = core::consumeLogMessages();
-		auto retainedTimers = std::count_if(retainedMessages.begin(), retainedMessages.end(),
+		auto retainedSleeps = std::count_if(retainedMessages.begin(), retainedMessages.end(),
 			[](core::LogMessage const& message)
 			{
-				return message.msg == "timer:v2:v2:preserved";
+				return message.msg == "sleep:v2:v2:preserved";
 			});
 		auto repeatedStarts = std::count_if(retainedMessages.begin(), retainedMessages.end(),
 			[](core::LogMessage const& message)
 			{
 				return message.msg.starts_with("start:");
 			});
-		require(retainedTimers == 3 && repeatedStarts == 0,
+		require(retainedSleeps == 3 && repeatedStarts == 0,
 			"Failed reload did not preserve the previous live instance state");
 
 		// Re-adopting the same valid revision restarts deterministic random streams

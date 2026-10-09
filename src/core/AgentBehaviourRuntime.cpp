@@ -40,13 +40,21 @@ namespace core
 		{
 			return limits.memoryBytes != 0 && limits.instructionsPerCall != 0
 				&& limits.pendingEventsPerInstance != 0
-				&& limits.timersPerInstance != 0 && limits.callbacksPerBoundary != 0
+				&& limits.callbacksPerBoundary != 0
 				&& limits.commandsPerCallback != 0
 				&& limits.logMessagesPerWindow != 0 && limits.logWindowTicks != 0
 				&& limits.logBytesPerMessage != 0 && limits.logBytesPerWindow != 0;
 		}
 
 		void ensureOpaqueMetatables(lua_State* state);
+
+		int sleepForTicks(lua_State* lua)
+		{
+			if (lua_gettop(lua) != 1 || !lua_isinteger(lua, 1)
+				|| lua_tointeger(lua, 1) < 1)
+				return luaL_error(lua, "sleep requires a positive whole-tick duration");
+			return lua_yieldk(lua, 1, 0, [](lua_State*, int, lua_KContext) { return 0; });
+		}
 
 		int waitForEvent(lua_State* lua)
 		{
@@ -167,6 +175,8 @@ namespace core
 			auto const environment = lua_gettop(state);
 			lua_pushcfunction(state, waitForEvent);
 			lua_setfield(state, environment, "wait");
+			lua_pushcfunction(state, sleepForTicks);
+			lua_setfield(state, environment, "sleep");
 			lua_pushlightuserdata(state, &loader);
 			lua_pushcclosure(state, requireDeclaredModule, 1);
 			lua_setfield(state, environment, "require");
@@ -387,12 +397,9 @@ namespace core
 			std::function<MarkerId(std::string_view)> resolveMarker;
 			std::function<MovementCommandResult(MarkerId, std::string_view)> inspectMove;
 			std::function<MovementCommandResult()> inspectCancel;
-			std::function<bool(std::string, uint64_t, std::string&)> setTimer;
-			std::function<bool(std::string const&)> cancelTimer;
 			std::function<uint64_t()> nextRandom;
 			std::function<bool(PendingAuthorizationCommandType,
 				std::string_view, std::string&)> changeAuthorization;
-			std::map<std::string, uint64_t> stagedTimers;
 			uint64_t stagedRandomState{ 0 };
 			std::vector<PendingMovementCommand> commands;
 			std::vector<PendingAuthorizationCommand> authorizationCommands;
@@ -659,7 +666,7 @@ namespace core
 			return 1;
 		}
 
-		ResumeScope* activeTimerScope(lua_State* state)
+		ResumeScope* activeResumeScope(lua_State* state)
 		{
 			auto* scope = static_cast<ResumeScope*>(
 				lua_touserdata(state, lua_upvalueindex(1)));
@@ -674,7 +681,7 @@ namespace core
 		int changeAuthorization(lua_State* state,
 			PendingAuthorizationCommandType type, char const* operation)
 		{
-			auto* scope = activeTimerScope(state);
+			auto* scope = activeResumeScope(state);
 			if (!scope) return 0;
 			countCommand(state, *scope);
 			int nameIndex = 0;
@@ -733,7 +740,7 @@ namespace core
 
 		int randomNumber(lua_State* state)
 		{
-			auto* scope = activeTimerScope(state);
+			auto* scope = activeResumeScope(state);
 			if (!scope) return 0;
 			// The high 53 bits map exactly onto the binary64 mantissa, yielding
 			// a deterministic value in [0, 1) without platform distributions.
@@ -745,7 +752,7 @@ namespace core
 
 		int randomInteger(lua_State* state)
 		{
-			auto* scope = activeTimerScope(state);
+			auto* scope = activeResumeScope(state);
 			if (!scope) return 0;
 			lua_Integer bounds[2]{};
 			int count = 0;
@@ -780,57 +787,9 @@ namespace core
 			return 1;
 		}
 
-		int setTimer(lua_State* state)
-		{
-			auto* scope = activeTimerScope(state);
-			if (!scope) return 0;
-			countCommand(state, *scope);
-			int nameIndex = 0;
-			for (int index = 1; index <= lua_gettop(state); ++index)
-				if (lua_type(state, index) == LUA_TSTRING) { nameIndex = index; break; }
-			if (nameIndex == 0 || nameIndex == lua_gettop(state)
-				|| !lua_isinteger(state, nameIndex + 1))
-				return luaL_error(state, "set_timer requires a name and whole-tick duration");
-			size_t nameLength = 0;
-			auto const* nameText = lua_tolstring(state, nameIndex, &nameLength);
-			auto const duration = lua_tointeger(state, nameIndex + 1);
-			if (nameLength == 0)
-				return luaL_error(state, "timer name must not be empty");
-			if (duration < 1)
-				return luaL_error(state, "timer duration must be at least one simulation tick");
-			bool accepted;
-			{
-				std::string diagnostic;
-				accepted = scope->setTimer(std::string(nameText, nameLength),
-					static_cast<uint64_t>(duration), diagnostic);
-				if (!accepted) pushBorrowedDiagnostic(state, diagnostic);
-			}
-			if (!accepted) return lua_error(state);
-			pushCommandResult(state, true, "accepted");
-			return 1;
-		}
-
-		int cancelTimer(lua_State* state)
-		{
-			auto* scope = activeTimerScope(state);
-			if (!scope) return 0;
-			countCommand(state, *scope);
-			for (int index = 1; index <= lua_gettop(state); ++index)
-			{
-				if (lua_type(state, index) != LUA_TSTRING) continue;
-				size_t length = 0;
-				auto const* text = lua_tolstring(state, index, &length);
-				if (length == 0) return luaL_error(state, "timer name must not be empty");
-				auto const removed = scope->cancelTimer(std::string(text, length));
-				pushCommandResult(state, true, removed ? "accepted" : "no_op");
-				return 1;
-			}
-			return luaL_error(state, "cancel_timer requires a name");
-		}
-
 		int logMessage(lua_State* state)
 		{
-			auto* scope = activeTimerScope(state);
+			auto* scope = activeResumeScope(state);
 			if (!scope) return 0;
 			// Only the message and an optional level are meaningful, so no string
 			// argument is copied before the staging budgets admit the message.
@@ -981,8 +940,7 @@ namespace core
 			InteractionCompleted,
 			InteractionFailed,
 			Activated,
-			Deactivated,
-			TimerExpired
+			Deactivated
 		};
 
 		struct PendingOutcome
@@ -999,7 +957,6 @@ namespace core
 				MovementCancellationReason::None };
 			InteractionRequestId interaction;
 			std::string interactionName;
-			std::string timerName;
 			InteractionResult interactionResult{ InteractionResult::Pending };
 		};
 
@@ -1068,9 +1025,9 @@ namespace core
 			bool suspended{ false };
 			uint64_t randomState{ 0 };
 			ResumeScope scope;
-			// Active instances store absolute due ticks. Suspended instances store
-			// remaining durations in the same map, frozen at deactivation.
-			std::map<std::string, uint64_t> timers;
+			// Sleep stores an absolute due tick, or remaining ticks while deactivated.
+			bool sleeping{ false };
+			uint64_t sleepTick{ 0 };
 			std::vector<PendingOutcome> outcomes;
 		};
 
@@ -1088,7 +1045,6 @@ namespace core
 		};
 
 		ScratchBudget budget;
-		uint32_t timerLimit{ AgentBehaviourRuntimeAdapter::DefaultTimersPerInstance };
 		uint32_t callbackLimit{ AgentBehaviourRuntimeAdapter::DefaultCallbacksPerBoundary };
 		uint32_t commandLimit{ AgentBehaviourRuntimeAdapter::DefaultCommandsPerCallback };
 		uint32_t logLimit{ AgentBehaviourRuntimeAdapter::DefaultLogMessagesPerWindow };
@@ -1129,7 +1085,6 @@ namespace core
 
 		explicit Impl(AgentBehaviourRuntimeLimits limits)
 			: budget(limits.memoryBytes, limits.instructionsPerCall)
-			, timerLimit(limits.timersPerInstance)
 			, callbackLimit(limits.callbacksPerBoundary)
 			, commandLimit(limits.commandsPerCallback)
 			, logLimit(limits.logMessagesPerWindow)
@@ -1387,6 +1342,8 @@ namespace core
 			auto const environment = lua_gettop(lua);
 			lua_pushcfunction(lua, waitForEvent);
 			lua_setfield(lua, environment, "wait");
+			lua_pushcfunction(lua, sleepForTicks);
+			lua_setfield(lua, environment, "sleep");
 			lua_pushvalue(lua, environment);
 			instance.environmentReference = luaL_ref(lua, LUA_REGISTRYINDEX);
 			instance.moduleLoader = std::make_unique<ModuleLoader>();
@@ -1644,12 +1601,8 @@ namespace core
 			lua_setfield(lua, backing, "cancel_movement");
 			lua_pushcfunction(lua, waitForEvent);
 			lua_setfield(lua, backing, "wait");
-			lua_pushlightuserdata(lua, &instance.scope);
-			lua_pushcclosure(lua, setTimer, 1);
-			lua_setfield(lua, backing, "set_timer");
-			lua_pushlightuserdata(lua, &instance.scope);
-			lua_pushcclosure(lua, cancelTimer, 1);
-			lua_setfield(lua, backing, "cancel_timer");
+			lua_pushcfunction(lua, sleepForTicks);
+			lua_setfield(lua, backing, "sleep");
 			lua_pushlightuserdata(lua, &instance.scope);
 			lua_pushcclosure(lua, randomNumber, 1);
 			lua_setfield(lua, backing, "random_number");
@@ -1708,7 +1661,6 @@ namespace core
 			instance.scope.logStagingByteLimit = logWindowBytes < logWindowByteLimit
 				? logWindowByteLimit - logWindowBytes : 0;
 			instance.scope.logMessageByteLimit = logMessageByteLimit;
-			instance.scope.stagedTimers = instance.timers;
 			instance.scope.stagedRandomState = instance.randomState;
 			instance.scope.resolveMarker = [&world](std::string_view name)
 			{
@@ -1738,32 +1690,6 @@ namespace core
 					return MovementCommandResult{ pending->type == PendingMovementCommandType::Cancel
 						? MovementCommandStatus::NoOp : MovementCommandStatus::AgentBusy };
 				return world.inspectBehaviourMovementCancellation(agentId);
-			};
-			instance.scope.setTimer = [&world, &instance, this](std::string name,
-				uint64_t duration, std::string& diagnostic)
-			{
-				auto& timers = instance.scope.stagedTimers;
-				if (!instance.suspended
-					&& duration > std::numeric_limits<uint64_t>::max()
-						- world.mSimulationTick)
-				{
-					diagnostic = "timer due tick exceeds the simulation tick range";
-					return false;
-				}
-				if (!timers.contains(name)
-					&& timers.size() >= timerLimit)
-				{
-					diagnostic = std::format(
-						"Agent behaviour timer limit of {} per instance exceeded", timerLimit);
-					return false;
-				}
-				timers[std::move(name)] = instance.suspended
-					? duration : world.mSimulationTick + duration;
-				return true;
-			};
-			instance.scope.cancelTimer = [&instance](std::string const& name)
-			{
-				return instance.scope.stagedTimers.erase(name) != 0;
 			};
 			instance.scope.nextRandom = [&instance]
 			{
@@ -1891,7 +1817,6 @@ namespace core
 			instance.scope.active = false;
 			if (result.succeeded)
 			{
-				instance.timers = std::move(instance.scope.stagedTimers);
 				instance.randomState = instance.scope.stagedRandomState;
 				commands.insert(commands.end(), instance.scope.commands.begin(),
 					instance.scope.commands.end());
@@ -1908,7 +1833,6 @@ namespace core
 			instance.scope.commands.clear();
 			instance.scope.authorizationCommands.clear();
 			instance.scope.logs.clear();
-			instance.scope.stagedTimers.clear();
 			return result.succeeded;
 		}
 
@@ -1928,7 +1852,6 @@ namespace core
 			case OutcomeType::Activated: type = "activated"; break;
 			case OutcomeType::Deactivated: type = "deactivated"; break;
 			case OutcomeType::RouteLost: type = "route_lost"; break;
-			case OutcomeType::TimerExpired: type = "timer_expired"; break;
 			}
 			lua_pushlstring(lua, type.data(), type.size());
 			lua_setfield(lua, backing, "type");
@@ -1995,11 +1918,6 @@ namespace core
 					outcome.type == OutcomeType::InteractionCompleted
 						? "result" : "reason");
 			}
-			else if (outcome.type == OutcomeType::TimerExpired)
-			{
-				lua_pushlstring(lua, outcome.timerName.data(), outcome.timerName.size());
-				lua_setfield(lua, backing, "name");
-			}
 			pushImmutableProxy(lua);
 		}
 
@@ -2012,7 +1930,7 @@ namespace core
 			(void)world;
 			(void)reason;
 			instance.outcomes.clear();
-			instance.timers.clear();
+			instance.sleeping = false;
 			release(instance);
 			instance.disabled = keepDisabled;
 			(void)lua_gc(lua, LUA_GCCOLLECT);
@@ -2031,27 +1949,15 @@ namespace core
 			}
 			auto& instance = found->second.instance;
 			if (found->second.defaultNoop) return;
-			if (active)
+			if (instance.sleeping && active == instance.suspended)
 			{
-				if (instance.suspended)
-					for (auto& [name, remaining] : instance.timers)
-					{
-						(void)name;
-						remaining = remaining > std::numeric_limits<uint64_t>::max() - tick
-							? std::numeric_limits<uint64_t>::max() : tick + remaining;
-					}
-				instance.suspended = false;
+				if (active)
+					instance.sleepTick = instance.sleepTick > std::numeric_limits<uint64_t>::max() - tick
+						? std::numeric_limits<uint64_t>::max() : tick + instance.sleepTick;
+				else
+					instance.sleepTick = instance.sleepTick > tick ? instance.sleepTick - tick : 0;
 			}
-			else
-			{
-				if (!instance.suspended)
-					for (auto& [name, dueTick] : instance.timers)
-					{
-						(void)name;
-						dueTick = dueTick > tick ? dueTick - tick : 0;
-					}
-				instance.suspended = true;
-			}
+			instance.suspended = !active;
 			if (!active)
 			{
 				instance.outcomes.clear();
@@ -2086,12 +1992,13 @@ namespace core
 			if (result.succeeded)
 			{
 				if (!instance.started) pushContext(world, instance);
-				else pushSemanticEvent(*event);
-				lua_xmove(lua, thread, 1);
+				else if (event) pushSemanticEvent(*event);
+				auto const arguments = !instance.started || event ? 1 : 0;
+				lua_xmove(lua, thread, arguments);
 				instance.started = true;
 				int results = 0;
 				beginInstructionBudget(thread, budget);
-				status = lua_resume(thread, lua, 1, &results);
+				status = lua_resume(thread, lua, arguments, &results);
 				endInstructionBudget(thread);
 				result.succeeded = (status == LUA_OK || status == LUA_YIELD)
 					&& !budgetExhausted(budget);
@@ -2105,22 +2012,29 @@ namespace core
 					luaL_traceback(lua, thread, result.diagnostic.c_str(), 1);
 					result.traceback = lua_tostring(lua, -1);
 				}
-				else lua_pop(thread, results);
+				else
+				{
+					// Only the host wait/sleep functions can yield in this sandbox:
+					// wait yields nothing, sleep yields its validated duration.
+					instance.sleeping = status == LUA_YIELD && results == 1;
+					if (instance.sleeping)
+					{
+						auto const duration = static_cast<uint64_t>(lua_tointeger(thread, -1));
+						if (duration > std::numeric_limits<uint64_t>::max() - world.mSimulationTick)
+						{
+							result.succeeded = false;
+							result.failure = AgentBehaviourRuntimeFailure::ConversionError;
+							result.diagnostic = "sleep due tick exceeds the simulation tick range";
+							result.traceback = result.diagnostic;
+						}
+						else instance.sleepTick = world.mSimulationTick + duration;
+					}
+					lua_pop(thread, results);
+				}
 			}
 			finishResume(instance, "resume", result, commands, authorizationCommands);
 			if (result.succeeded && status == LUA_OK) instance.completed = true;
 			lua_settop(lua, base);
-		}
-
-		std::vector<std::string> takeDueTimers(Instance& instance, uint64_t tick)
-		{
-			std::vector<std::string> names;
-			// std::map gives lexical ordering. Remove the entire immutable batch
-			// before delivery, so resumes can safely re-arm a due timer's name.
-			for (auto const& [name, dueTick] : instance.timers)
-				if (dueTick <= tick) names.push_back(name);
-			for (auto const& name : names) instance.timers.erase(name);
-			return names;
 		}
 
 		void failQueueOverflow(Instance& instance)
@@ -2152,36 +2066,23 @@ namespace core
 				{
 					if (!instance.started)
 						resumeCoroutine(world, instance, nullptr, commands, authorizationCommands);
+					// A wake is a budgeted resume with no event. It never consumes
+					// the pending queue, even if the resumed body sleeps again.
+					if (!instance.disabled && instance.sleeping
+						&& instance.sleepTick <= world.mSimulationTick)
+						resumeCoroutine(world, instance, nullptr, commands, authorizationCommands);
 					std::sort(instance.outcomes.begin(), instance.outcomes.end(),
 						[](auto const& lhs, auto const& rhs) { return lhs.sequence < rhs.sequence; });
-					for (auto const& event : instance.outcomes)
+					size_t delivered = 0;
+					while (delivered < instance.outcomes.size() && !instance.sleeping
+						&& !instance.disabled && !instance.completed)
 					{
-						if (instance.disabled || instance.completed) break;
-						resumeCoroutine(world, instance, &event, commands, authorizationCommands);
+						resumeCoroutine(world, instance, &instance.outcomes[delivered],
+							commands, authorizationCommands);
+						++delivered;
 					}
-					instance.outcomes.clear();
-					if (!instance.disabled && !instance.completed)
-					{
-						// Semantic outcomes precede timers, as in the callback contract.
-						// This temporary bridge lets v3 fixtures retain named timers
-						// until the later sleep/timer-removal migration.
-						for (auto& name : takeDueTimers(instance, world.mSimulationTick))
-						{
-							PendingOutcome expiry;
-							expiry.type = OutcomeType::TimerExpired;
-							expiry.tick = world.mSimulationTick;
-							expiry.sequence = world.mNextEventSequence++;
-							expiry.timerName = std::move(name);
-							enqueue(instance, std::move(expiry));
-						}
-						failQueueOverflow(instance);
-						for (auto const& event : instance.outcomes)
-						{
-							if (instance.disabled || instance.completed) break;
-							resumeCoroutine(world, instance, &event, commands, authorizationCommands);
-						}
-						instance.outcomes.clear();
-					}
+					instance.outcomes.erase(instance.outcomes.begin(),
+						instance.outcomes.begin() + delivered);
 				}
 				if (instance.disabled)
 				{
@@ -2590,7 +2491,7 @@ namespace core
 	AgentBehaviourRuntimeLimits AgentBehaviourRuntimeAdapter::getLimits() const
 	{
 		return { mImpl->budget.byteLimit, mImpl->budget.instructionLimit,
-			mImpl->timerLimit, mImpl->callbackLimit, mImpl->commandLimit,
+			mImpl->callbackLimit, mImpl->commandLimit,
 			mImpl->logLimit, mImpl->logWindowTicks, mImpl->logMessageByteLimit,
 			mImpl->logWindowByteLimit, mImpl->pendingEventLimit };
 	}

@@ -22,10 +22,7 @@ return {
         until event.type == "destination_reached"
 
         heading_to_first_marker = not heading_to_first_marker
-        context.set_timer("marker_wait", WAIT_TICKS)
-        repeat
-          event = wait()
-        until event.type == "timer_expired" and event.name == "marker_wait"
+        sleep(WAIT_TICKS)
       end
     end
   end,

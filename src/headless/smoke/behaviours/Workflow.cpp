@@ -68,31 +68,27 @@ return {
     end
     return function(context)
       trace_resume(context, "start")
-      context.set_timer("depart", configuration.start_delay)
+      sleep(configuration.start_delay)
+      local elapsed = context.tick + configuration.start_delay
+      trace_resume(context, "sleep-depart", elapsed)
+      move(context, configuration.schedule[index].destination, "depart", elapsed)
       while true do
         local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          trace_resume(context, "timer-" .. name, event.tick)
-          if name == "depart" then
-            move(context, configuration.schedule[index].destination, "depart", event.tick)
-          elseif name == "cancel" then
-            local result = context.cancel_movement()
-            context.log("CMD:" .. configuration.code .. ":cancel:" .. result.status .. ":" .. event.tick)
-            if not result.accepted then error("cancel:" .. result.status) end
-          else
-            error("unexpected timer " .. name)
-          end
-        elseif event.type == "route_lost" then
+        if event.type == "route_lost" then
           local destination, reason, outcome = event.destination, event.reason, event
           trace_resume(context, "route-" .. reason, event.tick)
           move(context, configuration.fallback, "route-fallback", event.tick)
-        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        else
           trace_resume(context, "event-" .. event.type, event.tick)
           if event.type == "destination_reached" and index < 2 then
             index = index + 1
             move(context, configuration.schedule[index].destination, "next", event.tick)
-            context.set_timer("cancel", configuration.schedule[index].duration)
+            sleep(configuration.schedule[index].duration)
+            local tick = event.tick + configuration.schedule[index].duration
+            trace_resume(context, "sleep-cancel", tick)
+            local result = context.cancel_movement()
+            context.log("CMD:" .. configuration.code .. ":cancel:" .. result.status .. ":" .. tick)
+            if not result.accepted then error("cancel:" .. result.status) end
           elseif event.type == "movement_cancelled" then
             move(context, configuration.fallback, "after-cancel", event.tick)
           elseif event.type == "interaction_failed" and configuration.fail_on_interaction then
@@ -294,16 +290,16 @@ return {
 		world->pauseSimulation();
 		appendEvents(events, world->consumeSimulationEvents(), observed);
 		require(world->setAgentActive(first, false),
-			"Could not deactivate the timer-driven Agent");
+			"Could not deactivate the sleep-driven Agent");
 		appendEvents(events, world->consumeSimulationEvents(), observed);
 		require(world->resumeSimulation(), "Could not resume with a suspended Agent");
 		world->consumeSimulationEvents();
 		for (unsigned tick = 0; tick < 4; ++tick)
-			require(advance(), "A suspended timer stopped the workflow");
+			require(advance(), "A suspended sleep stopped the workflow");
 		world->pauseSimulation();
 		world->consumeSimulationEvents();
 		require(world->setAgentActive(first, true),
-			"Could not reactivate the timer-driven Agent");
+			"Could not reactivate the sleep-driven Agent");
 		appendEvents(events, world->consumeSimulationEvents(), observed);
 		require(world->resumeSimulation(), "Could not resume the reactivated Agent");
 		world->consumeSimulationEvents();

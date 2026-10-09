@@ -35,20 +35,15 @@ namespace
 		auto const callbackStorm = add("Callback storm", "callbacks.lua", R"lua(
 return { api_version = 3, factory = function()
     return function(context)
-      for i = 1, 4 do context.set_timer(string.format("%02d", i), 1) end
-      while true do
-        local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-        end
-      end
+      sleep(1)
+      while true do wait() end
     end
 end }
 )lua");
 		auto const commandStorm = add("Command storm", "commands.lua", R"lua(
 return { api_version = 3, factory = function()
     return function(context)
-      for i = 1, 33 do context.set_timer("timer-" .. i, 10) end
+      for i = 1, 33 do context.grant_access_permission("Storm grant") end
       while true do wait() end
     end
 end }
@@ -56,7 +51,7 @@ end }
 		auto const safe = add("Safe", "safe-storm.lua", R"lua(
 return { api_version = 3, factory = function()
     return function(context)
-      context.set_timer("safe", 20)
+      sleep(20)
       while true do wait() end
     end
 end }
@@ -70,14 +65,9 @@ return { api_version = 3, factory = function() return function(context) while tr
 return { api_version = 3, factory = function()
     return function(context)
       for i = 1, 105 do context.log("message-" .. i, "info") end
-      context.set_timer("next-window", 600)
-      while true do
-        local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          context.log("new-window", "warning")
-        end
-      end
+      sleep(600)
+      context.log("new-window", "warning")
+      while true do wait() end
     end
 end }
 )lua");
@@ -119,7 +109,7 @@ end }
 		std::ostringstream digest;
 		{
 			core::World world("Callback storm", 8, 2,
-				{ 64u * 1024u * 1024u, 100'000u, 256u, 3u, 32u, 100u, 600u });
+				{ 64u * 1024u * 1024u, 100'000u, 3u, 32u, 100u, 600u });
 			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.finishBuild();
 			auto const storm = world.createAgent("Storm", room, 0, 0.5f);
@@ -133,19 +123,33 @@ end }
 				"Could not assign callback-storm fixtures");
 			require(world.resumeSimulation() && world.advanceTick(),
 				"Callback-storm startup did not complete");
-			require(!world.advanceTick() && world.isSimulationPaused()
-				&& world.getSimulationTick() == 1,
+			core::AgentBehaviourRuntimeLimits stormLimits;
+			stormLimits.callbacksPerBoundary = 3;
+			core::AgentBehaviourRuntimeAdapter adapter(stormLimits);
+			require(adapter.runBoundary(world), "Could not install storm adapter");
+			core::SimulationEvent event;
+			event.type = core::SimulationEventType::DestinationReached;
+			event.agent.id = storm;
+			for (unsigned i = 0; i < 4; ++i)
+			{
+				event.sequence = i + 1;
+				adapter.observeOutcome(event);
+			}
+			// Complete the one-tick sleep, then drain the queued storm.
+			require(world.advanceTick(), "Could not advance storm sleep");
+			require(!adapter.runBoundary(world) && world.isSimulationPaused()
+				&& world.getSimulationTick() == 2,
 				"Callback storm did not stop before the overflowing tick");
-			auto diagnostics = world.consumeAgentBehaviourRuntimeDiagnostics();
+			auto diagnostics = adapter.consumeDiagnostics();
 			require(diagnostics.size() == 1 && diagnostics[0].agent == storm
 				&& diagnostics[0].behaviour == callbackStorm
 				&& diagnostics[0].agentName == "Storm"
 				&& diagnostics[0].behaviourName == "Callback storm"
-				&& diagnostics[0].callback == "resume" && diagnostics[0].tick == 1
+				&& diagnostics[0].callback == "resume" && diagnostics[0].tick == 2
 				&& diagnostics[0].diagnostic.find("limit of 3") != std::string::npos
 				&& !diagnostics[0].traceback.empty()
-				&& !world.agentBehaviourOwnsMovement(storm)
-				&& world.agentBehaviourOwnsMovement(unaffected),
+				&& adapter.isInstanceDisabled(storm)
+				&& !adapter.isInstanceDisabled(unaffected),
 				"Callback-storm diagnostic, isolation, or ordering changed");
 			digest << diagnostics[0].agent.value << ':' << diagnostics[0].tick << ':'
 				<< diagnostics[0].diagnostic << '|';
@@ -156,7 +160,6 @@ end }
 			auto const defaults = world.getAgentBehaviourRuntimeLimits();
 			require(defaults.callbacksPerBoundary == 10'000u
 				&& defaults.commandsPerCallback == 32u
-				&& defaults.timersPerInstance == 256u
 				&& defaults.logMessagesPerWindow == 100u
 				&& defaults.logWindowTicks == 600u
 				&& defaults.logBytesPerMessage == 4u * 1024u
@@ -167,6 +170,7 @@ end }
 			auto const storm = world.createAgent("Commands", room, 0, 0.5f);
 			auto const unaffected = world.createAgent("Safe", room, 0, 1.5f);
 			world.pauseSimulation();
+			world.addAccessPermission("Storm grant");
 			world.attachAgentBehaviourRegistry("storms.behaviours", registry);
 			require(world.setAgentBehaviourAssignment(storm, commandStorm,
 				registry->lookupAgentBehaviour(commandStorm)->getRevision(), {})
@@ -251,7 +255,7 @@ end }
 
 		{
 			core::World world("Log bytes", 8, 2,
-				{ 64u * 1024u * 1024u, 100'000u, 256u, 10'000u, 32u, 100u, 600u, 64u, 256u });
+				{ 64u * 1024u * 1024u, 100'000u, 10'000u, 32u, 100u, 600u, 64u, 256u });
 			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.finishBuild();
 			auto const agent = world.createAgent("Oversized logger", room, 0, 0.5f);
@@ -327,7 +331,7 @@ end }
 
 		{
 			core::World world("Log truncation", 8, 2,
-				{ 64u * 1024u * 1024u, 100'000u, 256u, 10'000u, 32u, 100u, 600u, 31u, 1024u });
+				{ 64u * 1024u * 1024u, 100'000u, 10'000u, 32u, 100u, 600u, 31u, 1024u });
 			auto const room = world.addRoom("Room", 0, 0, 0, 8, 1);
 			world.finishBuild();
 			auto const agent = world.createAgent("Multibyte logger", room, 0, 0.5f);

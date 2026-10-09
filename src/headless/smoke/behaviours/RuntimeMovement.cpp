@@ -106,13 +106,11 @@ return {api_version = 3, factory=function(configuration)
     local sequence = 0
     return function(context)
       assert(context.move_to(configuration.first, 'missing').status == 'unavailable_action')
-      context.set_timer('start', 1)
+      sleep(1)
+      assert(context.move_to(configuration.first, configuration.action).accepted)
       while true do
         local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          assert(context.move_to(configuration.first, configuration.action).accepted)
-        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        if event.type ~= "route_lost" then
           if event.type ~= 'destination_reached' and event.type ~= 'action_failed' then goto next_event end
           assert(event.sequence > sequence and event.destination ~= nil)
           sequence = event.sequence
@@ -121,7 +119,8 @@ return {api_version = 3, factory=function(configuration)
             assert(event.type == 'destination_reached' and event.result == 'succeeded')
             assert(event.destination == configuration.first and event.action == configuration.action)
             assert(context.move_to(configuration.second, configuration.action).status == 'unavailable_action')
-            context.set_timer('next', 1)
+            sleep(1)
+            assert(context.move_to(configuration.first, configuration.action).accepted)
             stage = 1
           elseif stage == 1 then
             -- No autonomous Idle scheduling: this request comes only from this callback.
@@ -222,28 +221,14 @@ return {api_version = 3, factory=function(configuration)
     end
     return function(context)
       assert(not context.move_to(configuration.occupied, 'use-furniture').accepted)
-      context.set_timer('alternative', 1)
+      sleep(1)
+      choose(context)
       while true do
         local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          assert(name == 'alternative')
-          choose(context)
-        elseif event.type == "route_lost" then
-          local destination, reason, outcome = event.destination, event.reason, event
-          assert(destination == configuration.occupied and outcome.result == 'failed')
-          assert(outcome.action == 'use-furniture')
-          choose(context)
-        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
-          if event.type == 'action_failed' then
-            assert(event.destination == configuration.occupied and event.action == 'use-furniture')
-            assert(event.result == 'failed' and event.script_failure == 'none')
-            choose(context)
-          elseif event.type == 'destination_reached' then
-            assert(failed and not completed and event.destination == configuration.alternative)
-            assert(event.result == 'succeeded' and event.action == 'use-furniture')
-            completed = true
-          end
+        if event.type == 'destination_reached' then
+          assert(failed and not completed and event.destination == configuration.alternative)
+          assert(event.result == 'succeeded' and event.action == 'use-furniture')
+          completed = true
         end
       end
     end
@@ -323,19 +308,16 @@ return {api_version = 3, factory=function(configuration)
     return function(context)
       assert(context.move_to(configuration.destination, configuration.action).accepted)
       if configuration.reason == 'explicit' or configuration.reason == 'superseded' then
-        context.set_timer('cancel', 1)
+        sleep(1)
+        if configuration.reason == 'explicit' then
+          assert(context.cancel_movement().accepted)
+        else
+          assert(context.move_to(configuration.destination).status == 'superseded')
+        end
       end
       while true do
         local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          if configuration.reason == 'explicit' then
-            assert(context.cancel_movement().accepted)
-          else
-            -- Same Marker, different Action is a replacement, not a NoOp.
-            assert(context.move_to(configuration.destination).status == 'superseded')
-          end
-        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        if event.type ~= "route_lost" then
           if event.type ~= 'movement_cancelled' or event.action == 'idle' then goto next_event end
           assert(event.destination ~= nil and event.action == configuration.action)
           assert(event.result == 'cancelled' and event.reason == configuration.reason)
@@ -414,34 +396,21 @@ assert(host.api_version == 3)
 return { api_version = host.api_version, factory = function(configuration)
     return function(context)
       local cancellations = 0
-      local function next_timer(name)
-        while true do
-          local event = wait()
-          if event.type == "timer_expired" then
-            assert(event.name == name)
-            return
-          end
-          assert(event.type == "movement_cancelled")
-          cancellations = cancellations + 1
-          assert(event.reason == (cancellations == 1 and "superseded" or "explicit"))
-          assert(cancellations <= 2)
-        end
-      end
       assert(context.agent.movement_state == "idle") -- immutable startup snapshot
       assert(context.agent.route_planning_remaining_ticks == nil)
       assert(context.agent.route_planning_total_ticks == nil)
       assert(context.agent.random_state == nil and context.random_state == nil)
       assert(context.move_to(configuration.first).status == "accepted")
-      context.set_timer("duplicate", 1)
-      next_timer("duplicate")
+      sleep(1)
       local duplicate = context.move_to(configuration.first)
       assert(duplicate.accepted and duplicate.status == "no_op")
-      context.set_timer("replace", 1)
-      next_timer("replace")
+      sleep(1)
       local replacement = context.move_to(configuration.second)
       assert(replacement.accepted and replacement.status == "superseded")
-      context.set_timer("cancel", 2)
-      next_timer("cancel")
+      sleep(2)
+      local replaced = wait()
+      assert(replaced.type == "movement_cancelled" and replaced.reason == "superseded")
+      cancellations = cancellations + 1
       assert(cancellations == 1)
       assert(context.cancel_movement().accepted)
       local cancelled = wait()

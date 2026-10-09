@@ -1,7 +1,8 @@
 # Agent behaviour registry packages
 
-> Integration-branch note (#529): `feature/coroutine-behaviours` now accepts
-> only Host API v3 coroutine factories. The callback/v1/v2 authoring sections
+> Integration-branch note (#529–#530): `feature/coroutine-behaviours` now accepts
+> only Host API v3 coroutine factories with `wait()` and `sleep(ticks)`.
+> Named timers are removed. The callback/v1/v2 and timer authoring sections
 > below describe the previous contract; use
 > [Coroutine behaviour integration](coroutine-behaviour-integration.md) on this
 > branch. Full authoring-document migration is tracked by #533.

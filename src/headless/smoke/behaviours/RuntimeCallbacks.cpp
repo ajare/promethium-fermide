@@ -133,7 +133,7 @@ return {
 			"Idle arrival disabled behaviour or scheduled autonomous work");
 	}
 
-	void activationSuspendsStateAndFreezesTimers(smoke::Context const& context)
+	void activationSuspendsStateAndFreezesSleep(smoke::Context const& context)
 	{
 		TemporaryDirectory temporary{ context };
 		auto const package = temporary.path / "activation.behaviours";
@@ -151,17 +151,10 @@ return {
     return function(context)
       starts = starts + 1
       if starts ~= 1 then error("on_start repeated") end
-      context.set_timer("frozen_timer_155", 3)
+      sleep(3)
       while true do
         local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          if name ~= "frozen_timer_155" or starts ~= 1 or activations ~= 1 then
-            error("timer state was not preserved")
-          end
-          local moved = context.move_to(configuration.destination)
-          if not moved.accepted then error(moved.status) end
-        elseif event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        if event.type ~= "route_lost" then
           if event.type == "activated" then
             activations = activations + 1
             if activations ~= 1 or starts ~= 1
@@ -171,6 +164,8 @@ return {
           else
             error("unexpected lifecycle event " .. event.type)
           end
+          local moved = context.move_to(configuration.destination)
+          if not moved.accepted then error(moved.status) end
           if type(event.tick) ~= "number" or type(event.sequence) ~= "number"
               or pcall(function() event.type = "changed" end) then
             error("mutable lifecycle event")
@@ -262,7 +257,7 @@ return {
     return function(context)
       while true do
         local event = wait()
-        if event.type ~= "timer_expired" and event.type ~= "route_lost" then
+        if event.type ~= "route_lost" then
           if event.type == "interaction_completed" then
             if event.name ~= "Working control" or event.result ~= "succeeded"
                 or event.reason ~= nil or type(event.interaction) ~= "userdata" then
@@ -357,14 +352,8 @@ return {
   api_version = host.api_version,
   factory = function()
     return function(context)
-      context.set_timer("fail", 1)
-      while true do
-        local event = wait()
-        if event.type == "timer_expired" then
-          local name = event.name
-          error("primary callback failure")
-        end
-      end
+      sleep(1)
+      error("primary callback failure")
     end
   end
 }
@@ -374,8 +363,7 @@ return {
 		writeRuntimeText(package / "unassignment.lua", R"lua(
 return { api_version = 3, factory = function()
     return function(context)
-      context.set_timer("must-not-fire", 1)
-      wait()
+      sleep(1)
       error("unassigned coroutine was resumed")
     end
 end }
@@ -464,9 +452,9 @@ void behaviour_smoke::registerRuntimeCallbacks(std::vector<smoke::Check>& checks
 	{
 		programmingErrorDisablesMovementOwnership(context);
 	} });
-	checks.push_back({ "activationSuspendsStateAndFreezesTimers", [](smoke::Context const& context)
+	checks.push_back({ "activationSuspendsStateAndFreezesSleep", [](smoke::Context const& context)
 	{
-		activationSuspendsStateAndFreezesTimers(context);
+		activationSuspendsStateAndFreezesSleep(context);
 	} });
 	checks.push_back({ "interactionOutcomesAreImmutableSemanticValues", [](smoke::Context const& context)
 	{

@@ -57,10 +57,10 @@ set(core_names
     coroutineMovementAndCompletion
     coroutineFailuresAreContained
     coroutineQueuesAndActivation
-    coroutineTimerEvents
-    coroutineTimersFreezeWhenInactive
-    coroutineTimerBudgets
-    coroutineOutcomePrecedesTimer
+    coroutineSleepEvents
+    coroutineSleepFreezesWhenInactive
+    coroutineSleepBudgets
+    coroutineSleepEventOrdering
     scriptedActionOutcomes
     scriptedActionScriptFailure
     scriptedActionCancellations
@@ -70,10 +70,10 @@ set(core_names
     routeLossAndTopologyLifecycle
     routeLossAndTopologyLifecycleReplay
     programmingErrorDisablesMovementOwnership
-    activationSuspendsStateAndFreezesTimers
+    activationSuspendsStateAndFreezesSleep
     interactionOutcomesAreImmutableSemanticValues
     teardownClosesSuspendedInstances
-    deterministicTimersExposeOnlySemanticState
+    deterministicSleepsExposeOnlySemanticState
     configuredSchedulesAndRandomStreamsReplay
     boundedStormsAndFailuresReplayDeterministically
     planningIgnoresBehaviourRandomConsumption

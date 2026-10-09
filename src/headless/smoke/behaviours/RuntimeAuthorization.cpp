@@ -116,10 +116,9 @@ end }
 		writeRuntimeText(package / "caught.lua", R"lua(
 return { api_version = 3, factory = function()
     return function(context)
-      assert(context.set_timer("existing-timer-with-a-long-name", 10).accepted)
       for i = 1, 4 do
-        local ok, diagnostic = pcall(context.set_timer, "rejected-timer-with-a-long-name", 10)
-        assert(not ok and string.find(diagnostic, "timer limit", 1, true), diagnostic)
+        local ok, diagnostic = pcall(sleep, -1)
+        assert(not ok and string.find(diagnostic, "whole-tick", 1, true), diagnostic)
         for _, operation in ipairs({ context.grant_access_permission,
           context.revoke_access_permission, context.assign_permission_set,
           context.unassign_permission_set }) do
@@ -127,15 +126,13 @@ return { api_version = 3, factory = function()
           assert(not ok and string.find(diagnostic, "case-sensitive", 1, true), diagnostic)
         end
       end
-      assert(context.set_timer("existing-timer-with-a-long-name", 20).accepted)
-      assert(context.cancel_timer("existing-timer-with-a-long-name").accepted)
+      sleep(20)
       while true do wait() end
     end
 end }
 )lua");
 		auto const behaviour = registry->addAgentBehaviour("Caught errors", "caught.lua", {});
 		core::AgentBehaviourRuntimeLimits limits;
-		limits.timersPerInstance = 1;
 		core::World world("Caught errors", 4, 1, limits);
 		auto const room = world.addRoom("Room", 0, 0, 0, 4, 1);
 		world.finishBuild();

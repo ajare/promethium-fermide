@@ -25,7 +25,6 @@ namespace core
 	{
 		size_t memoryBytes{ 64u * 1024u * 1024u };
 		uint32_t instructionsPerCall{ 100'000u };
-		uint32_t timersPerInstance{ 256u };
 		uint32_t callbacksPerBoundary{ 10'000u };
 		uint32_t commandsPerCallback{ 32u };
 		uint32_t logMessagesPerWindow{ 100u };
@@ -135,7 +134,6 @@ namespace core
 		// by the protected setup and marshalling boundaries.
 		static constexpr size_t MinimumMemoryBudgetBytes{ 64u * 1024u };
 		static constexpr uint32_t DefaultInstructionBudget{ 100'000u };
-		static constexpr uint32_t DefaultTimersPerInstance{ 256u };
 		static constexpr uint32_t DefaultCallbacksPerBoundary{ 10'000u };
 		static constexpr uint32_t DefaultCommandsPerCallback{ 32u };
 		static constexpr uint32_t DefaultLogMessagesPerWindow{ 100u };
