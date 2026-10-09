@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include "core/ObjectUsage.h"
 
 namespace core
 {
@@ -29,6 +30,10 @@ namespace core
 		MinimumRoutePlanningTime,
 		MaximumRoutePlanningTime,
 		PermissionAdherence,
+		RemoteAccessPanels,
+		RemoteBoothWindowShutters,
+		ObjectUsage,
+		ObjectUsageDistance,
 		MobilityProfile
 	};
 
@@ -60,7 +65,11 @@ namespace core
 		case AgentPropertyType::RoutePersistence: return { "Route persistence", "Pathing" };
 		case AgentPropertyType::MinimumRoutePlanningTime: return { "Minimum route planning time", "Pathing" };
 		case AgentPropertyType::MaximumRoutePlanningTime: return { "Maximum route planning time", "Pathing" };
+		case AgentPropertyType::ObjectUsage: return { "Object usage", std::nullopt };
+		case AgentPropertyType::ObjectUsageDistance: return { "Object usage distance", std::nullopt };
 		case AgentPropertyType::PermissionAdherence: return { "Permission adherence", "Pathing" };
+		case AgentPropertyType::RemoteAccessPanels: return { "Remote Access panels", "Pathing" };
+		case AgentPropertyType::RemoteBoothWindowShutters: return { "Remote BoothWindow shutters", "Pathing" };
 		case AgentPropertyType::MobilityProfile: return { "Mobility profile", "Pathing" };
 		}
 		return { {}, std::nullopt };
@@ -318,11 +327,37 @@ namespace core
 		return true;
 	}
 
+	struct AgentObjectUsageProperty
+	{
+		ObjectUsage value{ ObjectUsage::Arms };
+		uint64_t revision{ 0 };
+		bool operator==(AgentObjectUsageProperty const&) const = default;
+	};
+
+	struct AgentObjectUsageDistanceProperty
+	{
+		float value{ 0.25f };
+		uint64_t revision{ 0 };
+		bool operator==(AgentObjectUsageDistanceProperty const&) const = default;
+	};
+
 	struct AgentPermissionAdherenceProperty
 	{
 		bool value{ true };
 		uint64_t revision{ 0 };
 		bool operator==(AgentPermissionAdherenceProperty const&) const = default;
+	};
+	struct AgentRemoteAccessPanelsProperty
+	{
+		bool value{ true };
+		uint64_t revision{ 0 };
+		bool operator==(AgentRemoteAccessPanelsProperty const&) const = default;
+	};
+	struct AgentRemoteBoothWindowShuttersProperty
+	{
+		bool value{ true };
+		uint64_t revision{ 0 };
+		bool operator==(AgentRemoteBoothWindowShuttersProperty const&) const = default;
 	};
 
 	struct AgentMobilityProfileProperty
@@ -396,7 +431,15 @@ namespace core
 		std::optional<AgentRoutePersistenceProperty> mRoutePersistence;
 		std::optional<AgentMinimumRoutePlanningTimeProperty> mMinimumRoutePlanningTime;
 		std::optional<AgentMaximumRoutePlanningTimeProperty> mMaximumRoutePlanningTime;
+		std::optional<AgentObjectUsageProperty> mObjectUsage;
+		std::optional<AgentObjectUsageDistanceProperty> mObjectUsageDistance;
+		void setObjectUsage(AgentObjectUsageProperty value) { mObjectUsage = value; }
+		void removeObjectUsage() { mObjectUsage.reset(); }
+		void setObjectUsageDistance(AgentObjectUsageDistanceProperty value) { mObjectUsageDistance = value; }
+		void removeObjectUsageDistance() { mObjectUsageDistance.reset(); }
 		std::optional<AgentPermissionAdherenceProperty> mPermissionAdherence;
+		std::optional<AgentRemoteAccessPanelsProperty> mRemoteAccessPanels;
+		std::optional<AgentRemoteBoothWindowShuttersProperty> mRemoteBoothWindowShutters;
 		std::optional<AgentMobilityProfileProperty> mMobilityProfile;
 
 		explicit AgentTag(std::string name)
@@ -476,6 +519,12 @@ namespace core
 		void setPermissionAdherence(AgentPermissionAdherenceProperty property)
 		{ mPermissionAdherence = property; }
 		void removePermissionAdherence() { mPermissionAdherence.reset(); }
+		void setRemoteAccessPanels(AgentRemoteAccessPanelsProperty property)
+		{ mRemoteAccessPanels = property; }
+		void removeRemoteAccessPanels() { mRemoteAccessPanels.reset(); }
+		void setRemoteBoothWindowShutters(AgentRemoteBoothWindowShuttersProperty property)
+		{ mRemoteBoothWindowShutters = property; }
+		void removeRemoteBoothWindowShutters() { mRemoteBoothWindowShutters.reset(); }
 		void setMobilityProfile(AgentMobilityProfileProperty property)
 		{
 			mMobilityProfile = property;
@@ -548,9 +597,21 @@ namespace core
 		{
 			return mMaximumRoutePlanningTime ? &*mMaximumRoutePlanningTime : nullptr;
 		}
+		AgentObjectUsageProperty const* getObjectUsage() const
+		{ return mObjectUsage ? &*mObjectUsage : nullptr; }
+		AgentObjectUsageDistanceProperty const* getObjectUsageDistance() const
+		{ return mObjectUsageDistance ? &*mObjectUsageDistance : nullptr; }
 		AgentPermissionAdherenceProperty const* getPermissionAdherence() const
 		{
 			return mPermissionAdherence ? &*mPermissionAdherence : nullptr;
+		}
+		AgentRemoteAccessPanelsProperty const* getRemoteAccessPanels() const
+		{
+			return mRemoteAccessPanels ? &*mRemoteAccessPanels : nullptr;
+		}
+		AgentRemoteBoothWindowShuttersProperty const* getRemoteBoothWindowShutters() const
+		{
+			return mRemoteBoothWindowShutters ? &*mRemoteBoothWindowShutters : nullptr;
 		}
 		AgentMobilityProfileProperty const* getMobilityProfile() const
 		{

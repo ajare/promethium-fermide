@@ -615,6 +615,34 @@ namespace
 					edit.diagnostic.c_str());
 		}
 
+		if (auto const* usage = registry->getAgentTagObjectUsage(id))
+		{
+			string diagnostic;
+			auto const mode = usage->value;
+			if (ImGui::BeginCombo("Object usage", core::objectUsageName(mode)))
+			{
+				for (auto choice : {core::ObjectUsage::Arms, core::ObjectUsage::None, core::ObjectUsage::RemoteControl})
+					if (ImGui::Selectable(core::objectUsageName(choice), choice == mode))
+						commitAgentTagObjectUsageEdit(registry, id, choice, diagnostic);
+				ImGui::EndCombo();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeObjectUsage"))
+				commitAgentTagObjectUsageRemove(registry, id, diagnostic);
+			if (!diagnostic.empty()) core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+		}
+		if (auto const* distance = registry->getAgentTagObjectUsageDistance(id))
+		{
+			string diagnostic;
+			auto value = distance->value;
+			if (ImGui::InputFloat("Object usage distance", &value, 0.f, 0.f, "%.3f", ImGuiInputTextFlags_EnterReturnsTrue))
+				commitAgentTagObjectUsageDistanceEdit(registry, id, value, diagnostic);
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeObjectUsageDistance"))
+				commitAgentTagObjectUsageDistanceRemove(registry, id, diagnostic);
+			if (!diagnostic.empty()) core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+		}
+
 		auto const* stairSpeed = registry->getAgentTagStairSpeedModifier(id);
 		auto const* ladderSpeed = registry->getAgentTagLadderSpeedModifier(id);
 		auto const* interaction = registry->getAgentTagInteractionAversion(id);
@@ -627,6 +655,8 @@ namespace
 		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
 		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
 		auto const* adherence = registry->getAgentTagPermissionAdherence(id);
+		auto const* remotePanels = registry->getAgentTagRemoteAccessPanels(id);
+		auto const* remoteShutters = registry->getAgentTagRemoteBoothWindowShutters(id);
 		auto const* pathingMobility = registry->getAgentTagMobilityProfile(id);
 		auto const* chance = registry->getAgentTagEscalatorWalkingChance(id);
 		if (chance)
@@ -693,7 +723,7 @@ namespace
 		}
 
 		if (chance || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk
-			|| minimumPlanningTime || maximumPlanningTime || adherence || pathingMobility)
+			|| minimumPlanningTime || maximumPlanningTime || adherence || remotePanels || remoteShutters || pathingMobility)
 			renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 		if (stairSpeed)
 		{
@@ -1084,6 +1114,42 @@ namespace
 				else adherence = nullptr;
 			}
 		}
+		if (remotePanels)
+		{
+			auto value = remotePanels->value;
+			if (ImGui::Checkbox(propertyName(core::AgentPropertyType::RemoteAccessPanels), &value))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteAccessPanelsEdit(registry, id, value, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeRemoteAccessPanels"))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteAccessPanelsRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else remotePanels = nullptr;
+			}
+		}
+		if (remoteShutters)
+		{
+			auto value = remoteShutters->value;
+			if (ImGui::Checkbox(propertyName(core::AgentPropertyType::RemoteBoothWindowShutters), &value))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteBoothWindowShuttersEdit(registry, id, value, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button(ICON_FA_TIMES "##removeRemoteBoothWindowShutters"))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteBoothWindowShuttersRemove(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				else remoteShutters = nullptr;
+			}
+		}
 
 		auto const* mobility = pathingMobility;
 		if (mobility)
@@ -1170,11 +1236,14 @@ namespace
 		auto const* minimumPlanningTime = registry->getAgentTagMinimumRoutePlanningTime(id);
 		auto const* maximumPlanningTime = registry->getAgentTagMaximumRoutePlanningTime(id);
 		auto const* adherence = registry->getAgentTagPermissionAdherence(id);
+		auto const* remotePanels = registry->getAgentTagRemoteAccessPanels(id);
+		auto const* remoteShutters = registry->getAgentTagRemoteBoothWindowShutters(id);
 		auto const* mobility = registry->getAgentTagMobilityProfile(id);
 		auto const anyMissing = !colour || !walkSpeed || !height || !chance
 			|| !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting
 			|| !crowd || !risk || !familiarity || !persistence
-			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility;
+			|| !minimumPlanningTime || !maximumPlanningTime || !adherence || !remotePanels || !remoteShutters || !mobility
+			|| !registry->getAgentTagObjectUsage(id) || !registry->getAgentTagObjectUsageDistance(id);
 		ImGui::BeginDisabled(!anyMissing);
 		ImGui::SetNextItemWidth(256.0f);
 		if (ImGui::BeginCombo("##addAgentTagProperty", ICON_FA_PLUS " Add property"))
@@ -1203,7 +1272,21 @@ namespace
 				else gTagHeightEdits.erase(id.value);
 				ImGui::CloseCurrentPopup();
 			}
-			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !adherence || !mobility)
+			if (!registry->getAgentTagObjectUsage(id) && ImGui::Selectable("Object usage"))
+			{
+				string diagnostic;
+				if (!commitAgentTagObjectUsageAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!registry->getAgentTagObjectUsageDistance(id) && ImGui::Selectable("Object usage distance"))
+			{
+				string diagnostic;
+				if (!commitAgentTagObjectUsageDistanceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!chance || !stairSpeed || !ladderSpeed || !interaction || !effort || !waiting || !crowd || !risk || !familiarity || !persistence || !minimumPlanningTime || !maximumPlanningTime || !adherence || !remotePanels || !remoteShutters || !mobility)
 				renderPropertyNamespace(core::AgentPropertyType::EscalatorWalkingChance);
 			if (!chance && ImGui::Selectable(propertyName(core::AgentPropertyType::EscalatorWalkingChance)))
 			{
@@ -1305,6 +1388,20 @@ namespace
 			{
 				string diagnostic;
 				if (!commitAgentTagPermissionAdherenceAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!remotePanels && ImGui::Selectable(propertyName(core::AgentPropertyType::RemoteAccessPanels)))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteAccessPanelsAdd(registry, id, diagnostic))
+					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
+				ImGui::CloseCurrentPopup();
+			}
+			if (!remoteShutters && ImGui::Selectable(propertyName(core::AgentPropertyType::RemoteBoothWindowShutters)))
+			{
+				string diagnostic;
+				if (!commitAgentTagRemoteBoothWindowShuttersAdd(registry, id, diagnostic))
 					core::addLogMessage("Tags", 0, core::LogLevel::Warning, diagnostic);
 				ImGui::CloseCurrentPopup();
 			}
@@ -2652,12 +2749,63 @@ bool commitAgentTagMaximumRoutePlanningTimeRemove(
 		[id](auto& target, string* out) { return target.removeAgentTagMaximumRoutePlanningTime(id, out); });
 }
 
+bool commitAgentTagObjectUsageAdd(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Object usage",
+		[id](auto& target, string* out) { return target.addAgentTagObjectUsage(id, out); });
+}
+bool commitAgentTagObjectUsageEdit(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, core::ObjectUsage value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Object usage",
+		[id, value](auto& target, string* out) { return target.setAgentTagObjectUsage(id, value, out); });
+}
+bool commitAgentTagObjectUsageRemove(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Object usage",
+		[id](auto& target, string* out) { return target.removeAgentTagObjectUsage(id, out); });
+}
+bool commitAgentTagObjectUsageDistanceAdd(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Object usage distance",
+		[id](auto& target, string* out) { return target.addAgentTagObjectUsageDistance(id, out); });
+}
+bool commitAgentTagObjectUsageDistanceEdit(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, float value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Object usage distance",
+		[id, value](auto& target, string* out) { return target.setAgentTagObjectUsageDistance(id, value, out); });
+}
+bool commitAgentTagObjectUsageDistanceRemove(shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Object usage distance",
+		[id](auto& target, string* out) { return target.removeAgentTagObjectUsageDistance(id, out); });
+}
+
 bool commitAgentTagPermissionAdherenceAdd(
 	shared_ptr<core::AgentTagRegistry> const& registry,
 	core::AgentTagId id, string& diagnostic)
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Permission adherence",
 		[id](auto& target, string* out) { return target.addAgentTagPermissionAdherence(id, out); });
+}
+bool commitAgentTagRemoteAccessPanelsAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Remote Access panels",
+		[id](auto& target, string* out) { return target.addAgentTagRemoteAccessPanels(id, out); });
+}
+bool commitAgentTagRemoteBoothWindowShuttersAdd(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "adding", "Remote BoothWindow shutters",
+		[id](auto& target, string* out) { return target.addAgentTagRemoteBoothWindowShutters(id, out); });
 }
 
 bool commitAgentTagPermissionAdherenceEdit(
@@ -2667,6 +2815,20 @@ bool commitAgentTagPermissionAdherenceEdit(
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Permission adherence",
 		[id, value](auto& target, string* out) { return target.setAgentTagPermissionAdherence(id, value, out); });
 }
+bool commitAgentTagRemoteAccessPanelsEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, bool value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Remote Access panels",
+		[id, value](auto& target, string* out) { return target.setAgentTagRemoteAccessPanels(id, value, out); });
+}
+bool commitAgentTagRemoteBoothWindowShuttersEdit(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, bool value, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "editing", "Remote BoothWindow shutters",
+		[id, value](auto& target, string* out) { return target.setAgentTagRemoteBoothWindowShutters(id, value, out); });
+}
 
 bool commitAgentTagPermissionAdherenceRemove(
 	shared_ptr<core::AgentTagRegistry> const& registry,
@@ -2674,6 +2836,20 @@ bool commitAgentTagPermissionAdherenceRemove(
 {
 	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Permission adherence",
 		[id](auto& target, string* out) { return target.removeAgentTagPermissionAdherence(id, out); });
+}
+bool commitAgentTagRemoteAccessPanelsRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Remote Access panels",
+		[id](auto& target, string* out) { return target.removeAgentTagRemoteAccessPanels(id, out); });
+}
+bool commitAgentTagRemoteBoothWindowShuttersRemove(
+	shared_ptr<core::AgentTagRegistry> const& registry,
+	core::AgentTagId id, string& diagnostic)
+{
+	return commitSampledPathingPropertyChange(registry, id, diagnostic, "removing", "Remote BoothWindow shutters",
+		[id](auto& target, string* out) { return target.removeAgentTagRemoteBoothWindowShutters(id, out); });
 }
 
 bool commitAgentTagMobilityProfileAdd(

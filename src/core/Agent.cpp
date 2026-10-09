@@ -217,7 +217,10 @@ namespace core
 			|| mIndividualRoutePersistence
 			|| mIndividualMinimumRoutePlanningTime
 			|| mIndividualMaximumRoutePlanningTime
+			|| mIndividualObjectUsage.has_value() || mIndividualObjectUsageDistance.has_value()
 			|| mIndividualPermissionAdherence.has_value()
+			|| mIndividualRemoteAccessPanels.has_value()
+			|| mIndividualRemoteBoothWindowShutters.has_value()
 			|| mIndividualMobilityProfile)
 		{
 			serializer.beginArray("individualProperties");
@@ -268,10 +271,30 @@ namespace core
 				writeFloatProperty("minimumRoutePlanningTime", *mIndividualMinimumRoutePlanningTime);
 			if (mIndividualMaximumRoutePlanningTime)
 				writeFloatProperty("maximumRoutePlanningTime", *mIndividualMaximumRoutePlanningTime);
+			if (mIndividualObjectUsage)
+			{
+				beginProperty("objectUsage");
+				serializer.writeString("value", objectUsageWireName(*mIndividualObjectUsage));
+				serializer.endMap();
+			}
+			if (mIndividualObjectUsageDistance)
+				writeFloatProperty("objectUsageDistance", *mIndividualObjectUsageDistance);
 			if (mIndividualPermissionAdherence)
 			{
 				beginProperty("permissionAdherence");
 				serializer.writeBool("value", *mIndividualPermissionAdherence);
+				serializer.endMap();
+			}
+			if (mIndividualRemoteAccessPanels)
+			{
+				beginProperty("remoteAccessPanels");
+				serializer.writeBool("value", *mIndividualRemoteAccessPanels);
+				serializer.endMap();
+			}
+			if (mIndividualRemoteBoothWindowShutters)
+			{
+				beginProperty("remoteBoothWindowShutters");
+				serializer.writeBool("value", *mIndividualRemoteBoothWindowShutters);
 				serializer.endMap();
 			}
 			if (mIndividualMobilityProfile)
@@ -349,6 +372,54 @@ namespace core
 		serializer.endMap();
 	}
 
+	bool Agent::objectUsageOverridesAreValid(std::optional<ObjectUsage> mode, std::optional<float> distance) const
+	{
+		return objectUsageConfigurationIsValid(mWorld ? mWorld->getAgentTagRegistry().get() : nullptr,
+			mAgentTags, mode, distance);
+	}
+
+	std::pair<ObjectUsage, float> Agent::resolveObjectUsage(AgentTagRegistry const* registry,
+		std::set<AgentTagId> const& tags, optional<ObjectUsage> mode, optional<float> distance) const
+	{
+		if (registry) for (auto tag : tags)
+			if (auto const* definition = registry->lookupAgentTag(tag))
+			{
+				if (!mode && definition->getObjectUsage()) mode = definition->getObjectUsage()->value;
+				if (!distance && definition->getObjectUsageDistance()) distance = definition->getObjectUsageDistance()->value;
+			}
+		return { mode.value_or(mPhysicalBaseline.objectUsage), distance.value_or(mPhysicalBaseline.objectUsageDistance) };
+	}
+
+	bool Agent::objectUsageConfigurationIsValid(AgentTagRegistry const* registry,
+		std::set<AgentTagId> const& tags, optional<ObjectUsage> mode, optional<float> distance,
+		string* diagnostic) const
+	{
+		AgentTagId modeSource{}, distanceSource{};
+		if (registry) for (auto tag : tags)
+			if (auto const* definition = registry->lookupAgentTag(tag))
+			{
+				auto conflict = [&](char const* property, AgentTagId source)
+				{
+					if (diagnostic) *diagnostic = std::format("{} is inherited from both #{} and #{}",
+						property, registry->getAgentTagName(source), definition->getName());
+					return false;
+				};
+				if (definition->getObjectUsage() && modeSource) return conflict("Object usage", modeSource);
+				if (definition->getObjectUsageDistance() && distanceSource) return conflict("Object usage distance", distanceSource);
+				if (definition->getObjectUsage()) modeSource = tag;
+				if (definition->getObjectUsageDistance()) distanceSource = tag;
+			}
+		auto [effectiveMode, effectiveDistance] = resolveObjectUsage(registry, tags, mode, distance);
+		if (!isValidObjectUsage(effectiveMode)
+			|| (effectiveMode != ObjectUsage::None && (!std::isfinite(effectiveDistance) || effectiveDistance <= 0)))
+		{
+			if (diagnostic) *diagnostic = "Object usage must be Arms, None or Remote control; usable distance must be finite and positive";
+			return false;
+		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
 	bool Agent::deserializeImpl(Serializer& serializer, SerializationWorkData&)
 	{
 		if (mWorld) mWorld->invalidateSimulationSnapshot();
@@ -397,7 +468,11 @@ namespace core
 		mIndividualRoutePersistence.reset();
 		mIndividualMinimumRoutePlanningTime.reset();
 		mIndividualMaximumRoutePlanningTime.reset();
+		mIndividualObjectUsage.reset();
+		mIndividualObjectUsageDistance.reset();
 		mIndividualPermissionAdherence.reset();
+		mIndividualRemoteAccessPanels.reset();
+		mIndividualRemoteBoothWindowShutters.reset();
 		mIndividualMobilityProfile.reset();
 		if (serializer.hasField("individualProperties"))
 		{
@@ -539,11 +614,36 @@ namespace core
 						throw SerializationException("Serialized individual Maximum route planning time is invalid");
 					mIndividualMaximumRoutePlanningTime = value;
 				}
+				else if (type == "objectUsage")
+				{
+					if (mIndividualObjectUsage) throw SerializationException("Duplicate individual Object usage");
+					auto const value = serializer.readString("value");
+					ObjectUsage mode;
+					if (!parseObjectUsage(value, mode)) throw SerializationException("Invalid individual Object usage");
+					mIndividualObjectUsage = mode;
+				}
+				else if (type == "objectUsageDistance")
+				{
+					if (mIndividualObjectUsageDistance) throw SerializationException("Duplicate individual Object usage distance");
+					mIndividualObjectUsageDistance = serializer.readFloat("value");
+				}
 				else if (type == "permissionAdherence")
 				{
 					if (mIndividualPermissionAdherence)
 						throw SerializationException("Serialized Agent contains more than one individual Permission adherence");
 					mIndividualPermissionAdherence = serializer.readBool("value");
+				}
+				else if (type == "remoteAccessPanels")
+				{
+					if (mIndividualRemoteAccessPanels)
+						throw SerializationException("Serialized Agent contains more than one individual Remote Access panels");
+					mIndividualRemoteAccessPanels = serializer.readBool("value");
+				}
+				else if (type == "remoteBoothWindowShutters")
+				{
+					if (mIndividualRemoteBoothWindowShutters)
+						throw SerializationException("Serialized Agent contains more than one individual Remote BoothWindow shutters");
+					mIndividualRemoteBoothWindowShutters = serializer.readBool("value");
 				}
 				else if (type == "mobilityProfile")
 				{
@@ -557,6 +657,9 @@ namespace core
 			}
 			serializer.endArray();
 		}
+		// Tagged configurations are validated after the registry dependency resolves.
+		if (mAgentTags.empty() && !objectUsageOverridesAreValid(mIndividualObjectUsage, mIndividualObjectUsageDistance))
+			throw SerializationException("Invalid effective Arms Object usage distance");
 		mWalkSpeedModifierSample.reset();
 		mHeightModifierSample.reset();
 		mStairSpeedModifierSample.reset();
@@ -770,6 +873,26 @@ namespace core
 		return {};
 	}
 
+	EffectiveAgentObjectUsage Agent::getEffectiveObjectUsage() const
+	{
+		if (mIndividualObjectUsage) return { *mIndividualObjectUsage, {}, 0, true };
+		if (mWorld && mWorld->getAgentTagRegistry()) for (auto tag : mAgentTags)
+			if (auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag))
+				if (auto const* property = definition->getObjectUsage())
+					return { property->value, tag, property->revision, false };
+		return { mPhysicalBaseline.objectUsage };
+	}
+
+	EffectiveAgentObjectUsageDistance Agent::getEffectiveObjectUsageDistance() const
+	{
+		if (mIndividualObjectUsageDistance) return { *mIndividualObjectUsageDistance, {}, 0, true };
+		if (mWorld && mWorld->getAgentTagRegistry()) for (auto tag : mAgentTags)
+			if (auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag))
+				if (auto const* property = definition->getObjectUsageDistance())
+					return { property->value, tag, property->revision, false };
+		return { mPhysicalBaseline.objectUsageDistance };
+	}
+
 	EffectiveAgentPermissionAdherence Agent::getEffectivePermissionAdherence() const
 	{
 		if (mIndividualPermissionAdherence)
@@ -783,6 +906,34 @@ namespace core
 						return { property->value, tag, property->revision, false };
 			}
 		return {};
+	}
+	EffectiveAgentRemoteAccessPanels Agent::getEffectiveRemoteAccessPanels() const
+	{
+		if (mIndividualRemoteAccessPanels)
+			return { *mIndividualRemoteAccessPanels, {}, 0, true };
+		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
+			for (auto const tag : mAgentTags)
+			{
+				auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag);
+				if (definition)
+					if (auto const* property = definition->getRemoteAccessPanels())
+						return { property->value, tag, property->revision, false };
+			}
+		return { mPhysicalBaseline.remoteAccessPanels };
+	}
+	EffectiveAgentRemoteBoothWindowShutters Agent::getEffectiveRemoteBoothWindowShutters() const
+	{
+		if (mIndividualRemoteBoothWindowShutters)
+			return { *mIndividualRemoteBoothWindowShutters, {}, 0, true };
+		if (mWorld && mWorld->hasAttachedAgentTagRegistry())
+			for (auto const tag : mAgentTags)
+			{
+				auto const* definition = mWorld->getAgentTagRegistry()->lookupAgentTag(tag);
+				if (definition)
+					if (auto const* property = definition->getRemoteBoothWindowShutters())
+						return { property->value, tag, property->revision, false };
+			}
+		return { mPhysicalBaseline.remoteBoothWindowShutters };
 	}
 
 	EffectiveAgentColour Agent::getEffectiveColour() const
@@ -1663,6 +1814,9 @@ namespace core
 			mPath.path = nullptr;
 			mPath.targetNode = 0;
 			mRouteJourneyDestinationVertexId = 0;
+			mEarlyDoorPressResource = {};
+			mEarlyDoorPressInteraction = {};
+			mEarlyDoorPressAttempted = false;
 			addLogMessage(getDescription(), 0, LogLevel::Debug, format("Started idling"));
 			return true;
 		}
@@ -1701,6 +1855,18 @@ namespace core
 		auto reachedPos = moveDist >= posDist;
 		auto moveAmt = reachedPos ? moveDelta : moveDelta.normalisedCopy() * moveDist;
 
+		if (mWorld && getObjectUsage() == ObjectUsage::RemoteControl
+			&& (mState == State::MovingToVertex || (mState == State::TraversingEdge
+				&& mTraversalTask && mTraversalTask->edge->getType() == EdgeType::Location)))
+		{
+			auto end = agentPos + moveAmt;
+			auto limited = mWorld->mSimulationCoordinator.limitRemoteButtonMovement(*this, agentPos, end);
+			if (limited.x != end.x || limited.y != end.y)
+			{
+				moveAmt = limited - agentPos;
+				reachedPos = false;
+			}
+		}
 		setPosition({ mPosition.sector(), mPosition.local() + moveAmt }, false);
 
 		return reachedPos;
@@ -1728,7 +1894,8 @@ namespace core
 				&& mPath.path->nodes[vertexA].targetVertex->getSector()->getType() == SectorType::Chamber)) return vertexA;
 		auto const& nodeA = mPath.path->nodes[vertexA];
 		if (!nodeA.targetVertex
-			|| nodeA.targetVertex->getSubType() == VertexSubType::Interactable) return vertexA;
+			|| (nodeA.targetVertex->getSubType() == VertexSubType::Interactable
+				&& getObjectUsage() != ObjectUsage::RemoteControl)) return vertexA;
 		auto const positionA = nodeA.targetVertex->getPosition();
 
 		auto requiresActionAtSource = [&](shared_ptr<const Edge> const& edge)
@@ -2155,6 +2322,7 @@ namespace core
 		syncStandingRouteObservation();
 		mQueuedTraversalTask.reset();
 		mTraversalLocalGoal.reset();
+		mRemoteButtonApproachTarget.reset();
 	}
 
 	bool Agent::moveToVertexOffset(int dim, float offset, float frameTime)
@@ -2274,7 +2442,11 @@ namespace core
 			break;
 
 		case State::WaitingForTraversal:
-			if (mTraversalLocalGoal)
+			if (mRemoteButtonApproachTarget && getObjectUsage() == ObjectUsage::RemoteControl)
+			{
+				moveToPosition(*mRemoteButtonApproachTarget, frameTime, getWalkSpeed());
+			}
+			else if (mTraversalLocalGoal)
 			{
 				moveToPosition(*mTraversalLocalGoal, frameTime, getWalkSpeed());
 			}

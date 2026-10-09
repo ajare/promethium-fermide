@@ -1,0 +1,336 @@
+version: 64
+nextDumbwaiterId: 1
+nextFurnitureId: 1
+name: Object usage laboratory
+randomSeed: 0
+cellsWide: 20
+levelsHigh: 3
+layers: 3
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+layerNames:
+  - Layer 0
+  - Layer 1
+  - Layer 2
+agentTagRegistry:
+  resource: RemoteActivationTags
+  expectedUuid: fe693f5d-f76b-45f1-8644-5ce7c0f36aa2
+agentBehaviourRegistry:
+  resource: RemoteActivationBehaviours
+  expectedUuid: 587994c8-b5ad-4bd8-9216-335c7b53317e
+construction:
+  - type: room
+    name: Door approach
+    layer: 0
+    y: 0
+    x: 4
+    cellsWide: 16
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: room
+    name: Automatic passage
+    layer: 0
+    y: 0
+    x: 0
+    cellsWide: 4
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: room
+    name: Controls and Lift landing
+    layer: 1
+    y: 0
+    x: 0
+    cellsWide: 20
+    levelsHigh: 1
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: room
+    name: Platform lift gallery
+    layer: 1
+    y: 1
+    x: 0
+    cellsWide: 20
+    levelsHigh: 2
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 0
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 1
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 2
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 3
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 4
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 5
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 6
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 7
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 8
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 9
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 10
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 11
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 12
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 13
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 14
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 15
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 16
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 17
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 18
+  - type: walkway
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 19
+  - type: door
+    layer: 0
+    y: 0
+    x: 8
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: door
+    layer: 0
+    y: 0
+    x: 1
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: automatic
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: boothWindow
+    layer: 0
+    y: 0
+    x: 5
+    cellsWide: 1
+    levelsHigh: 1
+    initialState: closed
+    panelPermissionRequirement:
+      []
+  - type: accessPanel
+    sectorIndex: 2
+    levelOffset: 0
+    xOffset: 4
+    panelType: empty
+    width: 0.5
+    height: 0.25
+    yOffset: 0.25
+    hasSpeedOverride: false
+  - type: lightSwitch
+    sectorIndex: 2
+    xOffset: 2
+  - type: lift
+    layer: 2
+    y: 0
+    x: 10
+    cellsWide: 2
+    levelsHigh: 2
+    stopOffsets: [0, 1]
+    capacity: 1
+    minimumDwellSeconds: 0.75
+    maximumBoardingSeconds: 5
+    initialStop: 0
+    destinationPermissionRequirements:
+      []
+  - type: platformLift
+    sectorIndex: 3
+    levelIndex: 0
+    xOffset: 14
+    cellsWide: 1
+    stopOffsets: [0, 1]
+    capacity: 1
+    stopDurationSeconds: 10
+    destinationPermissionRequirements:
+      []
+  - type: marker
+    sectorIndex: 3
+    levelIndex: 1
+    xOffset: 17
+    id: 1
+    name: Mixed journey goal
+    properties: 0
+  - type: marker
+    sectorIndex: 2
+    levelIndex: 0
+    xOffset: 2
+    id: 2
+    name: Observer goal
+    properties: 0
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 3
+nextAgentGroupId: 1
+agents:
+  - id: 1
+    agent:
+      type: RemoteOperator
+      typeId: RemoteOperator
+      resource: remote-operator.agent.lua
+      name: Script remote
+      flags: 0
+      behaviour:
+        id: 1
+        revision: 1
+        configuration:
+          - field: goal
+            type: marker
+            value: 1
+    sector: 0
+    localX: 0.5
+    localY: 0
+  - id: 2
+    agent:
+      type: Human
+      typeId: Human
+      resource: human.agent.lua
+      name: Tag remote
+      flags: 0
+      tags:
+        - 1
+      behaviour:
+        id: 1
+        revision: 1
+        configuration:
+          - field: goal
+            type: marker
+            value: 1
+    sector: 0
+    localX: 1
+    localY: 0
+  - id: 3
+    agent:
+      type: Human
+      typeId: Human
+      resource: human.agent.lua
+      name: Individual remote
+      flags: 0
+      individualProperties:
+        - type: objectUsage
+          value: remote_control
+        - type: objectUsageDistance
+          value: 3
+      behaviour:
+        id: 1
+        revision: 1
+        configuration:
+          - field: goal
+            type: marker
+            value: 1
+    sector: 0
+    localX: 1.5
+    localY: 0
+  - id: 4
+    agent:
+      type: Human
+      typeId: Human
+      resource: human.agent.lua
+      name: Arms operator
+      flags: 0
+      behaviour:
+        id: 1
+        revision: 1
+        configuration:
+          - field: goal
+            type: marker
+            value: 1
+    sector: 0
+    localX: 2
+    localY: 0
+  - id: 5
+    agent:
+      type: Human
+      typeId: Human
+      resource: human.agent.lua
+      name: None observer
+      flags: 0
+      individualProperties:
+        - type: objectUsage
+          value: none
+      behaviour:
+        id: 1
+        revision: 1
+        configuration:
+          - field: goal
+            type: marker
+            value: 2
+    sector: 1
+    localX: 0.5
+    localY: 0

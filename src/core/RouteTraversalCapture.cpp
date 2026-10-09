@@ -344,6 +344,13 @@ namespace core
 								result.interactionSeconds = point.entity->getDurationTicks() * World::getFixedTimestep();
 							}
 						result.controlApproachLength = 2 * std::abs(source->getPosition().x - buttonX);
+						if (context.world && context.agent && context.agent->getObjectUsage() == ObjectUsage::RemoteControl)
+						{
+							auto distance = context.world->remoteButtonApproachDistance(chamber->getControl(side),
+								sourceSector, source->getPosition(), context.world->getAgentId(context.agent));
+							if (!distance) result.exclusion = RouteExclusionReason::Permission;
+							else result.controlApproachLength = 2 * *distance;
+						}
 					}
 					if (result.boarding && result.observed && context.agent)
 					{

@@ -150,10 +150,13 @@ namespace core
 			|| !canAgentAccessLocation(*chamber.getStop(1 - side).sector, *actor)) return false;
 		auto control = mInteractionPoints.find(chamber.getControl(side));
 		if (!control) return false;
-		if (missingInteractionPermissions(*control, *actor).empty()) return true;
-		// Unauthorized operation is never allowed. Non-adhering Agents may use
-		// a locally usable entrance, but the allocator still owns every permit.
-		return locallyObserved && !actor->getEffectivePermissionAdherence().value
+		bool const authorized = missingInteractionPermissions(*control, *actor).empty();
+		if (authorized && (actor->getObjectUsage() == ObjectUsage::Arms
+			|| remoteButtonApproachDistance(chamber.getControl(side), approach,
+				resource->mQueueLanes[side].origin, agentId))) return true;
+		// None needs a locally usable entrance, not a button assignment. Keep
+		// authorization/adherence independent of the ability to operate.
+		return locallyObserved && (authorized || !actor->getEffectivePermissionAdherence().value)
 			&& chamber.mActiveSide == side && !chamber.mClosing
 			&& chamber.mDoors[side]->isOpen() && chamber.mDoors[1 - side]->isClosed()
 			&& chamber.isCycleComplete() && resource->mAirlockEntrySide == side;

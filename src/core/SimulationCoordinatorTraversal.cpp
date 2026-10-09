@@ -260,7 +260,7 @@ namespace core
 				&& !resource->mDoor->isOpen())
 			{
 				auto actor = mWorld.mAgents.find(request->mOwner);
-				if (!actor || !mWorld.agentSatisfiesDoorPermission(*resource->mDoor, *actor))
+				if (!actor || !mWorld.canAgentOpenManualDoor(request->mResource, request->mOwner))
 				{
 					denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 					return;
@@ -288,6 +288,9 @@ namespace core
 			{
 				return;
 			}
+			if (request->mEdgeType == EdgeType::Door
+				&& resource->mDoorActivationMode == DoorActivationMode::Manual
+				&& !mWorld.agentCanOperateManualDoorHere(request->mResource, request->mOwner)) return;
 			if (!request->mPreparationRequested)
 			{
 				request->mPreparationRequested = true;

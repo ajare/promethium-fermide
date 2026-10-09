@@ -295,16 +295,55 @@ namespace core
 		{
 			instance = lua_absindex(state, instance);
 			AgentPhysicalBaseline baseline{};
+			lua_pushliteral(state, "remote_access_panels");
+			lua_rawget(state, instance);
+			if (!lua_isnil(state, -1))
+			{
+				if (lua_type(state, -1) != LUA_TBOOLEAN)
+					throw SerializationException("Agent type baseline field 'remote_access_panels' must be a boolean");
+				baseline.remoteAccessPanels = lua_toboolean(state, -1);
+			}
+			lua_pop(state, 1);
+			lua_pushliteral(state, "remote_booth_window_shutters");
+			lua_rawget(state, instance);
+			if (!lua_isnil(state, -1))
+			{
+				if (lua_type(state, -1) != LUA_TBOOLEAN)
+					throw SerializationException("Agent type baseline field 'remote_booth_window_shutters' must be a boolean");
+				baseline.remoteBoothWindowShutters = lua_toboolean(state, -1);
+			}
+			lua_pop(state, 1);
+			lua_pushliteral(state, "object_usage");
+			lua_rawget(state, instance);
+			std::string usage;
+			if (!lua_isnil(state, -1)
+				&& (lua_type(state, -1) != LUA_TSTRING || !readStringField(state, -1, 14, usage) || !parseObjectUsage(usage, baseline.objectUsage)))
+				throw SerializationException("Agent type baseline field 'object_usage' must be 'arms', 'none' or 'remote_control'");
+			lua_pop(state, 1);
+			// Legacy reach is an input alias only, never a second frozen authority.
+			// Reject dual declarations even when equal, so migration is unambiguous.
+			lua_pushliteral(state, "object_usage_distance");
+			lua_rawget(state, instance);
+			bool const hasDistance = !lua_isnil(state, -1);
+			lua_pop(state, 1);
+			lua_pushliteral(state, "reach");
+			lua_rawget(state, instance);
+			bool const hasReach = !lua_isnil(state, -1);
+			lua_pop(state, 1);
+			if (baseline.objectUsage == ObjectUsage::RemoteControl && hasReach)
+				throw SerializationException("Remote control requires 'object_usage_distance', not legacy 'reach'");
+			if (hasDistance && hasReach)
+				throw SerializationException("Agent type baseline fields 'reach' and 'object_usage_distance' are mutually exclusive");
 			struct Field
 			{
 				char const* key;
 				float AgentPhysicalBaseline::* destination;
 				bool ratio;
 			};
-			static constexpr Field fields[] = {
+			Field const fields[] = {
 				{ "width", &AgentPhysicalBaseline::width, false },
 				{ "standing_height", &AgentPhysicalBaseline::standingHeight, false },
-				{ "reach", &AgentPhysicalBaseline::reach, false },
+				{ hasReach ? "reach" : "object_usage_distance", &AgentPhysicalBaseline::objectUsageDistance, false },
 				{ "walk_speed", &AgentPhysicalBaseline::walkSpeed, false },
 				{ "climb_speed", &AgentPhysicalBaseline::climbSpeed, false },
 				{ "stair_ascent_speed", &AgentPhysicalBaseline::stairAscentSpeed, false },
@@ -312,6 +351,17 @@ namespace core
 			};
 			for (auto const& field : fields)
 			{
+				// None has no usable range. Ignore the distance input and freeze a
+				// canonical zero; all other physical fields remain required.
+				if (field.destination == &AgentPhysicalBaseline::objectUsageDistance)
+				{
+					if (baseline.objectUsage == ObjectUsage::None) continue;
+					if (baseline.objectUsage == ObjectUsage::RemoteControl && !hasDistance)
+					{
+						baseline.objectUsageDistance = 1.f;
+						continue;
+					}
+				}
 				lua_pushstring(state, field.key);
 				lua_rawget(state, instance);
 				auto const missing = lua_isnil(state, -1);

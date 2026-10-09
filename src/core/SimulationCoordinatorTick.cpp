@@ -394,9 +394,20 @@ namespace core
 							passenger->setPosition({ transit, local }, false);
 							passenger->mTraversalLocalGoal.reset();
 						}
-						else if (passenger->getGlobalPosition().distanceTo(target) > 0.001f)
-							passenger->mTraversalLocalGoal = target;
-						else passenger->mTraversalLocalGoal.reset();
+						else
+						{
+							// The car snaps exactly to its Stop on arrival. Carry its
+							// passenger to that same vertical position, preserving the
+							// buffered horizontal standing position. A sub-tolerance
+							// residual below the landing Floor otherwise makes a chained
+							// Room journey observe the Room on the Level below.
+							auto aligned = passenger->getLocalPosition();
+							aligned.y = local.y;
+							passenger->setPosition({ transit, aligned }, false);
+							if (passenger->getGlobalPosition().distanceTo(target) > 0.001f)
+								passenger->mTraversalLocalGoal = target;
+							else passenger->mTraversalLocalGoal.reset();
+						}
 					}
 				}
 		}
@@ -525,7 +536,23 @@ namespace core
 					|| (agent->getState() == Agent::State::TraversingEdge && agent->mTraversalTask
 						&& agent->mTraversalTask->edge
 						&& agent->mTraversalTask->edge->getType() != EdgeType::Door);
-				agent->update(timestep);
+				if (approachingDoor && agent->getObjectUsage() == ObjectUsage::RemoteControl)
+					tryPressUpcomingDoorButton(*agent, movementStart, movementStart);
+				// A remote press retains the ordinary control queue and duration.
+				// Hold position during that physical operation, not during device travel.
+				bool pressingRemote = false;
+				if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
+					for (auto const& [pointId, point] : mWorld.mInteractionPoints.entries())
+					{
+						(void)pointId;
+						for (auto requestId : point->mQueue)
+						{
+							auto request = mWorld.mInteractionRequests.find(requestId);
+							if (request && request->mActor == id && request->mResult == InteractionResult::Pending)
+								pressingRemote = true;
+						}
+					}
+				if (!pressingRemote) agent->update(timestep);
 				if (approachingDoor)
 					tryPressUpcomingDoorButton(*agent, movementStart, agent->getGlobalPosition());
 			}

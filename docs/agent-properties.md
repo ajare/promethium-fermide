@@ -1,6 +1,6 @@
 # Agent properties
 
-This is the complete reference for the **17 editable Agent properties** declared
+This is the complete reference for the **20 editable Agent properties** declared
 by `AgentPropertyType` in `include/core/AgentTag.h`. Each can be authored directly
 on an Agent or supplied by an Agent tag. They are distinct from the physical
 baseline declared by an [Agent-type script](create-agent-script.md), and from
@@ -14,8 +14,8 @@ Tags panel. The effective value follows this order:
 
 1. Individual Agent property.
 2. Inherited Agent tag property (or its persisted sample).
-3. Default shown below. Mobility instead falls back to the Agent type's frozen
-   script-default profile.
+3. Default shown below. Mobility, Object usage, Object usage distance, Remote Access panels and Remote BoothWindow shutters instead
+   fall back to their independently frozen Agent-type script defaults.
 
 Removing an individual override reveals the inherited value without removing
 the tag or discarding its sample. Two assigned tags cannot supply the same
@@ -23,13 +23,12 @@ property, even if an individual override would hide the conflict. Adding a
 property to a tag also checks for conflicts among its assigned Agents.
 
 A property **namespace** is only an editor grouping, not part of its name or
-serialized key. Colour, Walk speed modifier and Height modifier are in the
+serialized key. Colour, Walk speed modifier, Height modifier, Object usage and Object usage distance are in the
 unlabelled group; all other properties are in **Pathing**.
 
 ### Values versus tag ranges
 
-Individual numeric properties are concrete values. For the 13 numeric properties
-other than Escalator walking chance, tags specify a minimum/maximum range. Both
+Individual numeric properties are concrete values. For the 13 numeric modifier/planning properties, tags specify a minimum/maximum range. Both
 endpoints must be finite, within the property's allowed bounds, and ordered
 minimum ≤ maximum. Equal endpoints produce a fixed value.
 
@@ -39,7 +38,8 @@ ordinary load and Reset do not repeatedly draw a new value. Assigning a tag or
 changing its range creates the relevant new samples. An individual override
 hides, rather than replaces, the underlying tag sample.
 
-Colour, Escalator walking chance, Permission adherence and Mobility profile are
+Colour, Escalator walking chance, Object usage, Object usage distance,
+Permission adherence, Remote Access panels, Remote BoothWindow shutters and Mobility profile are
 shared values on tags, not sampled ranges. A tag's intrinsic pastel **display
 Colour** colours its UI chip; it is separate from the optional Colour property
 that colours its Agents.
@@ -48,10 +48,12 @@ that colours its Agents.
 
 Ranges are inclusive. Defaults mean the effective fallback when no individual
 or inherited property supplies a value, not necessarily the value inserted by
-an editor widget when adding an override. Numeric values must be finite.
+an editor widget when adding an override. Numeric values must be finite except an ignored Object usage distance under None.
 
 | Property | Serialized `type` | Type / allowed values | Default | Effect |
 | --- | --- | --- | --- | --- |
+| Object usage | `objectUsage` | Arms, None or Remote control | Frozen script mode | Ability to operate objects, independent of Access permission and Mobility |
+| Object usage distance | `objectUsageDistance` | Concrete World-unit distance; finite and positive for effective Arms/Remote control | Frozen script distance | Physical arm length or maximum remote range; ignored under None |
 | Colour | `colour` | RGB bytes, each 0–255; no alpha | RGB (179, 77, 77), `#B34D4D` | Ordinary Agent rendering tint; no simulation effect |
 | Walk speed modifier | `walkSpeedModifier` | Number, 0.8–1.2 | 1 | Multiplies the Agent type's walking speed |
 | Height modifier | `heightModifier` | Number, 0.7–1 | 1 | Multiplies Standing height and derived pose heights; affects appearance and physical fit |
@@ -67,6 +69,8 @@ an editor widget when adding an override. Numeric values must be finite.
 | Route persistence | `routePersistence` | Number, 0–1 | 0.15 | Sets the proportional improvement needed to replace a still-valid Path voluntarily |
 | Minimum route planning time | `minimumRoutePlanningTime` | Seconds, 0.1–10 | 1 second | Lower endpoint for a Route planning episode's duration |
 | Maximum route planning time | `maximumRoutePlanningTime` | Seconds, 0.1–10 | 3 seconds | Upper endpoint for a Route planning episode's duration |
+| Remote Access panels | `remoteAccessPanels` | Boolean | Frozen script boolean (`true` if omitted) | Enables applicable same-Sector panel commands for Remote control; Arms and None ignore it |
+| Remote BoothWindow shutters | `remoteBoothWindowShutters` | Boolean | Frozen script boolean (`true` if omitted) | Enables owned shutter control from the controlling Sector for Remote control; independent of Remote Access panels |
 | Permission adherence | `permissionAdherence` | Boolean | `true` | Willingness to decline usable resources whose applicable operation permissions are unsatisfied |
 | Mobility profile | `mobilityProfile` | Complete nine-entry profile; see below | Frozen Agent-type script profile | Hard traversal constraints and last-resort routing rules |
 
@@ -74,6 +78,94 @@ The editor currently inserts **0.5** when adding an individual Route persistence
 property; that is an explicit override, not the absent-property default of 0.15.
 Adding an individual Mobility profile snapshots the current effective profile;
 a newly added tag profile starts with all entries **Can use**.
+
+See [Object usage authoring and migration](object-usage.md) for the complete
+capability contract and runnable mixed-object World.
+
+## Independent Object usage inheritance (#537, #538)
+
+Mode and distance resolve independently: individual override → inherited tag value →
+frozen script default. Different tags may supply mode and distance, but two assigned
+tags cannot supply the same field, even when masked by an individual override. The Selection panel shows both effective values and their
+sources, and labels distance as ignored under None. Arms, None and Remote control are exposed. Adding an override starts from its current effective
+value, not a sampled range. Removal leaves the other override and script baseline intact.
+
+Every edit and removal is paused-only and undoable. Arms and Remote control require the resulting effective
+distance to be finite and strictly positive, even when removing an override or changing
+back from None. None ignores distance, including zero or negative authored values. A
+script-default None Agent has canonical zero frozen distance, so enabling Arms or Remote control requires
+an independent positive distance property first, either individual or inherited.
+Shared tag additions, edits, removals and reloads preflight every affected Agent in every
+loaded dependent World. All those Worlds must be paused. A refusal preserves definitions,
+revisions, assignments, Worlds and history; removing a property must also leave a valid
+effective configuration. Refused edits are atomic.
+
+Tag Object usage distance is concrete and deterministic, never a range or sample. The
+Tags panel inserts Arms and 0.25 for new fields, not each Agent's script default. For
+example, a tag can supply `objectUsage: none` while a second supplies distance 0; adding
+Arms to an affected Agent then refuses until its effective distance becomes positive.
+A mode-only tag or individual override never silently chooses a different distance.
+
+Registry schema 15 persists these fields as ordinary revision-bearing properties:
+
+```yaml
+properties:
+  - type: objectUsage
+    revision: 1
+    value: arms
+  - type: objectUsageDistance
+    revision: 2
+    value: 0.6
+```
+
+Removing the distance property reveals each Agent's independently frozen distance;
+removing mode reveals its frozen mode. Individual overrides keep taking precedence.
+
+Capability changes cancel now-ineligible pending operations and reconsider Paths through
+the existing planning rules; admitted crossings and accepted journeys finish safely.
+Arms remains physical: short arms approach controls and never activate them remotely.
+Remote control (`remote_control` on the wire) operates physical Buttons (#539)
+and ordinary manual Doors during pathing (#540);
+see [Remote operation](remote-button-operation.md). Mode and distance remain
+independent: switching Human's mode alone keeps 0.25 units, not the remote script
+omission default of 1. There is no physical Arms fallback.
+
+World schema 64 (YAML and binary), clipboard and history carry only optional authored
+overrides, never snapshots of live Lua defaults. Reset, load, deletion restoration and
+cross-World paste validate fresh script defaults plus the overrides and inherited fields; ordinary structural
+and surviving history replay retain the Agent's frozen defaults. Legacy Agents without
+overrides continue to use their script defaults.
+
+## Remote Access panels (#542)
+
+Remote Access panels resolves independently of Object usage and distance: individual
+→ tag → frozen script `remote_access_panels` (omitted means true). It is a concrete
+boolean, never sampled. Paused Individual properties and Tags controls add, edit,
+and remove it; Effective properties identifies individual, tag or script default.
+Removing an override reveals inheritance. Duplicate inherited sources are refused
+even when masked. Registry schema 16 and World schema 63 persist only authored
+`remoteAccessPanels` values, not frozen/effective snapshots. Clipboard, history,
+Reset and fresh/surviving Agent lifetimes follow the existing property workflows.
+
+False disables only remote panel commands, without an Arms fallback. Arms retains
+physical panel operation regardless of the boolean; None never operates panels.
+See [Access panels](access-panels.md) for centre geometry and operation eligibility.
+
+## Remote BoothWindow shutters (#543)
+
+Remote BoothWindow shutters resolves independently: individual → tag → frozen script
+`remote_booth_window_shutters` (omitted means true). It is a concrete boolean in the
+Pathing namespace. Paused Individual properties and Tags controls add, edit and
+remove it; Effective properties shows its source. Duplicate inherited sources are
+refused even behind an individual override. Registry schema 17 and World schema 64
+persist authored `remoteBoothWindowShutters` values only. Registry reopen, YAML/binary
+Worlds, clipboard (including cross-World tag resolution), history, Reset and
+structural replay follow the same authored-only and frozen-lifetime rules as other
+properties. Invalid fresh script defaults fail even behind overrides.
+
+False refuses remote-only shutter commands, never falling back to Arms; Arms retains
+physical operation and None refuses. Remote Access panels remains independent.
+See [BoothWindows](booth-windows.md) for centre geometry, side and ownership rules.
 
 ## Appearance and physical movement
 

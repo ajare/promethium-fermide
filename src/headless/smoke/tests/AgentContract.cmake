@@ -84,6 +84,10 @@ set(agent_checks
     heightRangesAreBoundedRevisionedAndPersisted
     heightAssignmentPersistenceAndConflictsMatchOtherProperties
     individualPropertiesOverrideTagPropertiesAndPersist
+    agentTypesArmsDeclarations
+    agentTypesArmsPhysicalOperations
+    agentTypesArmsManualDoor
+    agentTypesArmsOnboardSelector
     agentPosesSupportedRooms
     agentPosesSupportedBridge
     agentPosesSupportedDoors
@@ -119,6 +123,36 @@ set(agent_checks
     agentTypesLegacyHumanWithoutResource
     agentTypesLoadingConstructsFreshInstances
     agentTypesTopologyReplayPreservesLiveInstances
+    agentTypesRemoteOnboardJourneys
+    agentTypesRemoteOrdinaryDoors
+    agentTypesRemoteDoorGates
+    agentTypesRemoteBoothWindowShutters
+    agentTypesRemoteShutterProperties
+    agentTypesRemoteShutterDeclarations
+    agentTypesRemoteAccessPanels
+    agentTypesRemotePanelProperties
+    agentTypesRemotePanelDeclarations
+    agentTypesRemoteDeclarations
+    agentTypesRemoteGeometry
+    agentTypesRemoteJourneys
+    agentTypesRemotePendingEdits
+    agentTypesRemoteLandingButtons
+    agentTypesRemoteTightDoor
+    agentTypesInheritedObjectUsage
+    agentTypesInheritedObjectUsageRoutes
+    agentTypesObjectUsageOverrides
+    agentTypesObjectUsageCommittedCrossing
+    agentTypesNoneDeclarations
+    agentTypesNoneInvalidDeclarations
+    agentTypesNoneDirectRefusals
+    agentTypesNoneDoors
+    agentTypesNoneOtherResources
+    agentTypesNoneSharedAirlock
+    agentTypesNoneLifetimes
+    agentTypesNoneSharedJourneys
+    remoteMixedWorld
+    remoteMixedControls
+    remoteMixedCosts
 )
 
 function(invoke status expected)

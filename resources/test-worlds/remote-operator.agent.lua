@@ -4,14 +4,14 @@
 -- the complete physical baseline.
 return {
     api_version = 2,
-    type_id = "Human",
-    display_name = "Human",
+    type_id = "RemoteOperator",
+    display_name = "Remote operator",
     new = function()
         return {
             width = 0.4,
             standing_height = (0.7 - 0.2) - 0.05,
-            object_usage = "arms",
-            object_usage_distance = 0.25,
+            object_usage = "remote_control",
+            object_usage_distance = 3,
             walk_speed = 0.5,
             climb_speed = 0.25,
             stair_ascent_speed = 0.35,

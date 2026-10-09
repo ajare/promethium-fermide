@@ -751,6 +751,9 @@ namespace core
 		struct AgentTagReconciliation
 		{
 			AgentId agent{};
+			ObjectUsage objectUsageBefore{ ObjectUsage::Arms };
+			float objectUsageDistanceBefore{ 0.f };
+			bool objectUsageChanged{ false };
 			AgentTagSampleRepairAction walkSpeedAction{ AgentTagSampleRepairAction::None };
 			AgentTagId walkSpeedSource{};
 			AgentWalkSpeedModifierProperty walkSpeedProperty{};
@@ -801,11 +804,13 @@ namespace core
 			std::string* diagnostic = nullptr) const;
 		bool agentTagAssignmentsAreValid(AgentTagRegistry const& registry,
 			std::string* diagnostic = nullptr) const;
+		void agentObjectUsageChanged(AgentId id, ObjectUsage beforeMode, float beforeDistance);
 		void applyAgentTagReconciliations(
 			std::vector<AgentTagReconciliation> const& repairs);
 		void reconcileAgentTagAssignments(AgentTagRegistry const& registry);
 		uint32_t countAgentTagAssignments(AgentTagId id) const;
 		void clearAgentTagAssignments(AgentTagId id);
+		bool allAgentTagAssignmentsCanBeCleared(std::string* diagnostic) const;
 		void clearAllAgentTagAssignmentsAndSamples();
 		void addAgentTagWalkSpeedModifierSamples(AgentTagId id,
 			AgentWalkSpeedModifierProperty const& property);
@@ -1242,7 +1247,11 @@ namespace core
 			std::optional<float> individualRiskAversion;
 			std::optional<float> individualRouteFamiliarity;
 			std::optional<float> individualRoutePersistence;
+			std::optional<ObjectUsage> individualObjectUsage;
+			std::optional<float> individualObjectUsageDistance;
 			std::optional<bool> individualPermissionAdherence;
+			std::optional<bool> individualRemoteAccessPanels;
+			std::optional<bool> individualRemoteBoothWindowShutters;
 			std::optional<MobilityProfile> individualMobilityProfile;
 			std::optional<AgentPropertySample> interactionAversionSample;
 			std::optional<AgentPropertySample> effortAversionSample;
@@ -1586,6 +1595,18 @@ namespace core
 
 		void updateInteractionResults();
 
+		// Shared physical capability/range policy. Callers retain their existing
+		// Sector, authorization, Mobility, state and admission checks. Geometry
+		// reach may be zero and can only narrow the Agent's frozen arm length.
+		bool agentCanOperateObjects(Agent const& actor) const;
+		bool agentCanPhysicallyOperate(Agent const& actor, float distance, float geometryReach) const;
+		std::optional<Vector2> physicalButtonCentre(InteractionPointId point) const;
+		bool agentCanOperateInteraction(InteractionPointId point, Agent const& actor, bool requireReach) const;
+		bool agentCanRemotelySelectLiftDestination(TraversalResourceId resource, Agent const& actor,
+			bool requireOccupancy = true) const;
+		// Authorization-only policy for Permission adherence to usable transport.
+		bool agentSatisfiesTransportLandingPermission(TraversalResourceId resource,
+			SectorId approach, Vector2 const& endpoint, AgentId agent) const;
 		bool interactionRequestEligible(InteractionPointId point, AgentId actor, bool requireReach = false) const;
 		InteractionRequestId requestInteractionForTraversal(InteractionPointId point, AgentId actor);
 
@@ -2523,7 +2544,9 @@ namespace core
 		// placement: the same fresh live Lua instance and frozen baseline as the
 		// plain overloads, plus direct grants and Permission set assignments.
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId, uint32_t levelOffset, float xOffset,
-			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
+			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets,
+			std::optional<ObjectUsage> objectUsage = std::nullopt, std::optional<float> objectUsageDistance = std::nullopt,
+			std::set<AgentTagId> const& tags = {});
 		AgentId createAgent(std::string typeId, std::string const& name, uint32_t sectorId,
 			std::set<AccessPermissionId> const& grants, std::set<PermissionSetId> const& sets);
 
@@ -2612,7 +2635,15 @@ namespace core
 			std::optional<float> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMaximumRoutePlanningTime(AgentId agent,
 			std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualObjectUsage(AgentId agent, std::optional<ObjectUsage> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualObjectUsageDistance(AgentId agent, std::optional<float> value, std::string* diagnostic = nullptr);
+		bool setAgentObjectUsageOverrides(AgentId agent, std::optional<ObjectUsage> mode,
+			std::optional<float> distance, std::string* diagnostic = nullptr);
 		bool setAgentIndividualPermissionAdherence(AgentId agent,
+			std::optional<bool> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualRemoteAccessPanels(AgentId agent,
+			std::optional<bool> value, std::string* diagnostic = nullptr);
+		bool setAgentIndividualRemoteBoothWindowShutters(AgentId agent,
 			std::optional<bool> value, std::string* diagnostic = nullptr);
 		bool setAgentIndividualMobilityProfile(AgentId agent,
 			std::optional<MobilityProfile> value, std::string* diagnostic = nullptr);
@@ -2889,6 +2920,14 @@ namespace core
 		std::vector<AccessPermissionId> getManualDoorPermissionRequirement(
 			TraversalResourceId door) const;
 		bool canAgentOpenManualDoor(TraversalResourceId door, AgentId agent) const;
+	private:
+		std::optional<Vector2> remoteOrdinaryDoorCentre(TraversalResourceId door) const;
+		bool agentCanOperateManualDoorHere(TraversalResourceId door, AgentId agent) const;
+	public:
+		// Walking required solely to bring a physical Button within Remote control range.
+		// nullopt means the Button cannot be operated from this approach Sector/row.
+		std::optional<float> remoteButtonApproachDistance(InteractionPointId point, SectorId approach,
+			Vector2 const& position, AgentId agent) const;
 		bool canAgentOperateDoorControl(TraversalResourceId door, SectorId approach,
 			AgentId agent) const;
 		// Permission adherence is willingness, not authorization: this checks only

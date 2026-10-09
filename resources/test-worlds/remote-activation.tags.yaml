@@ -1,0 +1,18 @@
+version: 17
+uuid: fe693f5d-f76b-45f1-8644-5ce7c0f36aa2
+nextAgentTagId: 2
+nextPropertyRevision: 5
+tags:
+  - id: 1
+    name: remote
+    displayColour:
+      r: 255
+      g: 179
+      b: 186
+    properties:
+      - type: objectUsage
+        revision: 2
+        value: remote_control
+      - type: objectUsageDistance
+        revision: 4
+        value: 3

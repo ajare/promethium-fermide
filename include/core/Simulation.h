@@ -9,6 +9,7 @@
 #include "core/Coordination.h"
 #include "core/Vector2.h"
 #include "core/Pose.h"
+#include "core/ObjectUsage.h"
 #include "core/AgentAction.h"
 #include "core/ScriptExecution.h"
 
@@ -34,6 +35,8 @@ namespace core
 		Vector2 globalPosition;
 		AgentPathState state{ AgentPathState::Idle };
 		Pose pose{ Pose::Standing };
+		ObjectUsage objectUsage{ ObjectUsage::Arms };
+		float objectUsageDistance{ 0.f };
 		// Exceptional completion under prior acceptance, not current-space fit.
 		bool grandfatheredCrossing{ false };
 		// Whether the Agent is simulated. Deactivated Agents keep their last

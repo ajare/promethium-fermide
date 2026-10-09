@@ -17,6 +17,7 @@
 #include "core/WorldDocument.h"
 #include "core/AgentTagRegistry.h"
 #include "core/AgentTagRegistryDocument.h"
+#include "../simulation/InteractionResults.h"
 
 #include <cmath>
 #include <fstream>
@@ -88,6 +89,145 @@ namespace
 			"            automatic_poses = { room_movement = {{pose='standing',speed_ratio=1},{pose='crouching',speed_ratio=1},{pose='crawling',speed_ratio=1}}, door_crossing = {{pose='standing',speed_ratio=1},{pose='crawling',speed_ratio=0.5}} },\n"
 			"            mobility_profile = { staircase = 'can_use', escalator = 'can_use', stairwell = 'can_use', ladder = 'can_use', lift = 'can_use', platform_lift = 'can_use', shuttle = 'can_use', door = 'can_use', buttons = 'can_use' },\n" + overrides
 			+ "        }\n";
+	}
+
+	std::string armsBaseline(std::string const& distance)
+	{
+		auto body = validBaseline();
+		body.replace(body.find("reach = 0.3"), std::string("reach = 0.3").size(),
+			"object_usage = 'arms', object_usage_distance = " + distance);
+		return body;
+	}
+
+	void armsDeclarations(smoke::Context const&)
+	{
+		for (auto const& body : {validBaseline(), armsBaseline("0.125")})
+		{
+			core::World world("Arms declarations", 6, 2);
+			auto room = world.addCorridor(0, 0, 6); world.finishBuild();
+			require(world.attachAgentType("arms.agent.lua", typeSource("Arms", "Arms", body)), "Arms attach failed");
+			auto id = world.createAgent("Arms", "Operator", room, 0, 1.f);
+			auto* agent = world.lookupAgent(id).entity;
+			auto expected = body.find("object_usage_distance") == std::string::npos ? .3f : .125f;
+			require(agent->getObjectUsage() == core::ObjectUsage::Arms && agent->getObjectUsageDistance() == expected,
+				"Legacy/new Arms defaults disagree");
+			auto snapshot = world.getSimulationSnapshot().agents.front();
+			require(snapshot.objectUsage == core::ObjectUsage::Arms && snapshot.objectUsageDistance == expected,
+				"Arms and arm length are not independently observed");
+		}
+	}
+
+	void armsPhysicalOperations(smoke::Context const&)
+	{
+		// Ordinary physical points approach when outside arm length; they do not
+		// acquire remote request geometry. Geometry still narrows even long arms.
+		for (auto const& [distance, geometry] : {std::pair{.125f, 1.f}, std::pair{.75f, 1.f}, std::pair{.75f, .125f}, std::pair{.75f, 0.f}})
+		{
+			core::World world("Physical Arms", 8, 2);
+			auto room = world.addCorridor(0, 0, 8); world.finishBuild();
+			require(world.attachAgentType("arms.agent.lua", typeSource("Arms", "Arms", armsBaseline(std::to_string(distance)))), "Arms attach failed");
+			auto id = world.createAgent("Arms", "Operator", room, 0, 2.f);
+			core::InteractionBinding binding;
+			binding.command = {core::DeviceCommandType::SetSectorLights, core::SectorId{room + 1}, false};
+			auto point = world.createInteractionPoint("Physical button", core::SectorId{room + 1}, {2.5f, 0.f}, geometry, 0.f, {binding});
+			auto request = world.requestInteraction(point, id);
+			require(bool(request), "Out-of-range ordinary physical request must approach, not be refused");
+			world.advanceTicks(4);
+			bool const fits = distance >= .5f && geometry >= .5f;
+			require(world.getSector(room)->areLightsOn() != fits, "Physical activation ignored arm length/geometry: " + std::to_string(distance) + "/" + std::to_string(geometry));
+			auto position = world.lookupAgent(id).entity->getGlobalPosition();
+			require(fits ? position.x == 2.f : position.x > 2.f, "Arms range changed approach semantics");
+			world.advanceTicks(300);
+			require(!world.getSector(room)->areLightsOn()
+				&& simulation_smoke::observedInteractionResult(world, request) == core::InteractionResult::Succeeded,
+				"Physical Button did not finish through real ticks");
+			position = world.lookupAgent(id).entity->getGlobalPosition();
+			require(position.distanceTo({2.5f, 0.f}) <= std::min(distance, geometry), "Button pressed outside physical eligibility");
+		}
+		for (float distance : {.0625f, .25f, .75f})
+		{
+			core::World world("Arms owned controls", 8, 2);
+			auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+			auto booth = std::static_pointer_cast<const core::BoothWindow>(world.addBoothWindow(0, 0, 3).object);
+			auto placed = world.addAccessPanel(back, 0, 5);
+			auto panel = std::static_pointer_cast<const core::AccessPanelSectorObject>(placed.sector->getObject(placed.index))->getPanel();
+			world.finishBuild();
+			require(world.attachAgentType("arms.agent.lua", typeSource("Arms", "Arms", armsBaseline(std::to_string(distance)))), "Arms attach failed");
+			auto point = world.lookupInteractionPoint(booth->getPanel()).entity;
+			auto id = world.createAgent("Arms", "Operator", back, 0, point->getPosition().x - .125f);
+			auto request = world.requestInteraction(booth->getPanel(), id);
+			require(bool(request) == (distance >= .125f), "Shutter request ignored frozen arm length");
+			world.advanceTicks(100);
+			require(booth->getState() == (distance >= .125f ? core::Window::State::Open : core::Window::State::Closed), "Shutter physical outcome incorrect");
+			auto panelRequest = world.requestAccessPanel(panel->getId(), core::AccessPanel::Action::Open, id);
+			require(bool(panelRequest), "Access panel should allow physical approach");
+			world.advanceTicks(600);
+			require(panel->getState() == core::AccessPanel::State::Open
+				&& simulation_smoke::observedInteractionResult(world, panelRequest) == core::InteractionResult::Succeeded,
+				"Short-armed Access panel operator did not approach and finish");
+			// Long arms never permit operating through a Layer/Location boundary.
+			auto wrong = world.createAgent("Arms", "Wrong side", front, 0, 3.5f);
+			require(!world.requestInteraction(booth->getPanel(), wrong), "Arm length relaxed Location eligibility");
+		}
+	}
+
+	void armsManualDoor(smoke::Context const&)
+	{
+		for (float distance : {.0625f, .25f, .75f})
+		{
+			core::World world("Manual Arms Door", 8, 2);
+			auto front = world.addRoom("Front", 0, 0, 0, 8, 1);
+			auto back = world.addRoom("Back", 1, 0, 0, 8, 1);
+			core::World::CreateDoorOptions options; options.activationMode = core::DoorActivationMode::Manual;
+			auto made = world.addSectorDoor(0, 0, 3, options);
+			auto door = std::static_pointer_cast<const core::DoorSectorObject>(made.door.sector->getObject(made.door.index))->getDoor();
+			world.addSectorMarker(back, 0, 6.f, "Goal"); world.finishBuild();
+			require(world.attachAgentType("arms.agent.lua", typeSource("Arms", "Arms", armsBaseline(std::to_string(distance)))), "Arms attach failed");
+			auto id = world.createAgent("Arms", "Operator", front, 0, 1.f);
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Manual Door route refused");
+			bool opened = false, arrived = false;
+			for (unsigned tick = 0; tick < 2400; ++tick)
+			{
+				auto before = world.lookupAgent(id).entity->getGlobalPosition();
+				world.advanceTick();
+				if (!opened && door->getState() != core::Door::State::Closed)
+				{
+					opened = true;
+					require(std::abs(before.x - 3.5f) <= distance + .01f, "Manual Door opened beyond arm length");
+				}
+				auto* agent = world.lookupAgent(id).entity;
+				if (agent->getSector() == world.getSector(back).get() && agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+			}
+			require(opened && arrived, "Short-armed manual operator stalled in Door queue");
+		}
+	}
+
+	void armsOnboardSelector(smoke::Context const&)
+	{
+		for (float distance : {.0625f, .75f})
+		{
+			core::World world("Arms onboard selector", 8, 4);
+			auto lower = world.addCorridor(0, 0, 7);
+			auto upper = world.addCorridor(2, 0, 7);
+			core::World::CreateLiftOptions options; options.cellsWide = 1; options.stopOffsets = {0, 2};
+			world.addLift(1, 0, 3, options);
+			world.addSectorMarker(upper, 0, 5.f, "Goal"); world.finishBuild();
+			require(world.attachAgentType("arms.agent.lua", typeSource("Arms", "Arms", armsBaseline(std::to_string(distance)))), "Arms attach failed");
+			auto id = world.createAgent("Arms", "Passenger", lower, 0, 1.f);
+			require(world.moveAgentToNamedMarker(id, "Goal").accepted(), "Lift intent refused");
+			bool selected = false, arrived = false;
+			for (unsigned tick = 0; tick < 4000; ++tick)
+			{
+				world.advanceTick();
+				for (auto const& operation : world.getSimulationSnapshot().deviceOperations)
+					if (operation.command.type == core::DeviceCommandType::SelectLiftDestination
+						&& operation.state == core::DeviceOperationState::Succeeded) selected = true;
+				auto* agent = world.lookupAgent(id).entity;
+				if (agent->getSector() == world.getSector(upper).get() && agent->getState() == core::Agent::State::Idle) { arrived = true; break; }
+			}
+			require(selected && arrived, "Frozen arm length broke passenger-local selector operation");
+		}
 	}
 
 	void supportedPoseRooms(smoke::Context const&)
@@ -389,7 +529,7 @@ namespace
 			"Scripted Human identity did not resolve");
 		auto const& physical = agent->getPhysicalBaseline();
 		require(physical.width == 0.4f && physical.standingHeight == 0.45f
-			&& physical.reach == 0.25f && physical.walkSpeed == 0.5f
+			&& physical.objectUsageDistance == 0.25f && physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f && physical.stairAscentSpeed == 0.35f
 			&& physical.stairDescentSpeed == 0.45f && physical.poses.at(core::Pose::Sitting).heightRatio == 0.6f
 			&& physical.poses.at(core::Pose::Crouching).heightRatio == 0.6f && physical.poses.at(core::Pose::Crawling).heightRatio == 0.3f
@@ -430,7 +570,7 @@ namespace
 			"The generic script-backed Agent identity did not round-trip");
 		auto const& physical = agent->getPhysicalBaseline();
 		require(physical.width == 0.5f && physical.standingHeight == 0.6f
-			&& physical.reach == 0.3f && physical.walkSpeed == 0.4f,
+			&& physical.objectUsageDistance == 0.3f && physical.walkSpeed == 0.4f,
 			"The generic type's frozen baseline was not applied");
 		// The former Human-only query factory now accepts any resolved resource,
 		// retains an isolated instance, and does not publish to the World.
@@ -521,12 +661,27 @@ namespace
 			for (auto const* value : { "nil", "0", "-1", "0/0", "math.huge",
 				"-math.huge", "false", "'0.5'", "{}", "1e-300" })
 				constructCases.push_back({ std::string(field) + " = " + value,
-					validBaseline(std::string(field) + " = " + value + ",\n"), field });
+					validBaseline(std::string(field) + " = " + value + ",\n"),
+					std::string(field) == "reach" && std::string(value) == "nil" ? "object_usage_distance" : field });
 			constructCases.push_back({ std::string(field) + " overflow",
 				validBaseline(std::string(field) + " = 1e300,\n"), field });
 			if (std::string_view(field).ends_with("ratio"))
 				constructCases.push_back({ std::string(field) + " above one",
 					validBaseline(std::string(field) + " = 1.01,\n"), field });
+		}
+		for (auto const* value : { "nil", "0", "-1", "0/0", "math.huge", "-math.huge", "false", "'0.5'", "{}", "1e-300", "1e300" })
+			constructCases.push_back({std::string("Arms distance ") + value, armsBaseline(value), "object_usage_distance"});
+		for (auto const* value : {"'unsupported'", "'None'", "'Arms'", "'arms\\0suffix'", "''", "false", "42", "{}"})
+		{
+			auto body = armsBaseline(".25");
+			body.replace(body.find("object_usage = 'arms'"), std::string("object_usage = 'arms'").size(), std::string("object_usage = ") + value);
+			constructCases.push_back({std::string("Invalid usage ") + value, body, "object_usage"});
+		}
+		for (auto const* value : {".25", ".75", "false"})
+		{
+			auto body = armsBaseline(".25");
+			body.insert(body.find("width ="), std::string("reach = ") + value + ", ");
+			constructCases.push_back({"Competing distance authorities", body, "mutually exclusive"});
 		}
 		for (auto const* value : { "42", "nil", "false", "function() end", "'instance'" })
 			constructCases.push_back({ std::string("non-table ") + value,
@@ -548,6 +703,8 @@ namespace
 			require(world.attachAgentType("invalid.agent.lua",
 				typeSource("Invalid", "Invalid", test.body), &diagnostic),
 				("Valid type object was refused at attach: " + test.name + " (" + diagnostic + ")").c_str());
+			auto const authoredBefore = serializeWorld(world, false);
+			world.consumeSimulationEvents();
 			bool threw = false;
 			try
 			{
@@ -563,6 +720,8 @@ namespace
 			require(world.getSimulationSnapshot().agents.empty()
 				&& world.getSector(corridor)->getAgents().empty(),
 				("Invalid baseline left a partial Agent: " + test.name).c_str());
+			require(world.consumeSimulationEvents().empty() && serializeWorld(world, false) == authoredBefore,
+				"Invalid baseline published events or mutated the document");
 		}
 	}
 
@@ -1033,6 +1192,7 @@ namespace
 				width > 0.5f ? "Revised display" : "Original display",
 				"count = count + 1\n" + validBaseline(
 					"width = " + std::to_string(width) + " * count,\n"
+					"reach = nil, object_usage = 'arms', object_usage_distance = " + std::to_string(width) + ",\n"
 					"private_state = { count = count },\n"
 					+ std::string(width > 0.5f
 						? "poses={standing={image_tile='agent'},crouching={image_tile='agent',height_ratio=0.8},crawling={image_tile='agent',height_ratio=0.4}},automatic_poses={room_movement={{pose='standing',speed_ratio=0.9}},door_crossing={{pose='standing',speed_ratio=0.7},{pose='crawling',speed_ratio=0.6}}},\n"
@@ -1088,6 +1248,8 @@ namespace
 			{
 				auto const* agent = candidate.lookupAgent(id).entity;
 				require(agent->getTypeId() == "Revision" && agent->getTypeResourceName() == resource
+					&& agent->getObjectUsage() == core::ObjectUsage::Arms
+					&& agent->getObjectUsageDistance() == (revised ? .75f : .5f)
 					&& agent->getScriptDefaultMobilityProfile().get(core::TraversalKind::Door)
 						== (revised ? core::MobilityUse::CanUse : core::MobilityUse::CannotUse),
 					"Lifetime did not resolve the expected frozen script Mobility revision");
@@ -1141,6 +1303,7 @@ namespace
 			&& serializeWorld(world, false) == authored,
 			"Reset changed authored document data, pause or dirty state");
 		require(authored.find("private_state") == std::string::npos
+			&& authored.find("object_usage") == std::string::npos
 			&& authored.find("standing_height") == std::string::npos
 			&& authored.find("mobility_profile") == std::string::npos
 			&& authored.find("automatic_poses") == std::string::npos && authored.find("poses:") == std::string::npos,
@@ -1468,7 +1631,7 @@ namespace
 
 		auto const& physical = agent->getPhysicalBaseline();
 		require(physical.width == 0.4f && physical.standingHeight == 0.45f
-			&& physical.reach == 0.25f && physical.walkSpeed == 0.5f
+			&& physical.objectUsageDistance == 0.25f && physical.walkSpeed == 0.5f
 			&& physical.climbSpeed == 0.25f && physical.stairAscentSpeed == 0.35f
 			&& physical.stairDescentSpeed == 0.45f && physical.poses.size() == 1,
 			"Android's frozen baseline did not match the resource");
@@ -1515,7 +1678,7 @@ namespace
 				"Android type/resource identity was not preserved");
 			auto const& physical = agent->getPhysicalBaseline();
 			require(physical.width == 0.4f && physical.walkSpeed == 0.5f
-				&& physical.reach == 0.25f,
+				&& physical.objectUsageDistance == 0.25f,
 				"Android's frozen baseline was not reconstructed on load");
 		}
 
@@ -1788,6 +1951,10 @@ namespace
 
 void agent_smoke::registerAgentTypes(std::vector<smoke::Check>& checks)
 {
+	checks.push_back({ "agentTypesArmsDeclarations", armsDeclarations });
+	checks.push_back({ "agentTypesArmsPhysicalOperations", armsPhysicalOperations });
+	checks.push_back({ "agentTypesArmsManualDoor", armsManualDoor });
+	checks.push_back({ "agentTypesArmsOnboardSelector", armsOnboardSelector });
 	checks.push_back({ "agentPosesSupportedRooms", supportedPoseRooms });
 	checks.push_back({ "agentPosesSupportedBridge", supportedPoseBridge });
 	checks.push_back({ "agentPosesSupportedDoors", supportedPoseDoors });

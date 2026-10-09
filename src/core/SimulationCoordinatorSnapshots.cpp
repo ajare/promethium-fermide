@@ -48,6 +48,8 @@ namespace core
 		result.globalPosition = agent->getGlobalPosition();
 		result.active = agent->isActive();
 		result.pose = agent->getPose();
+		result.objectUsage = agent->getObjectUsage();
+		result.objectUsageDistance = agent->getObjectUsageDistance();
 		result.grandfatheredCrossing = agent->mTraversalTask && agent->mTraversalTask->grandfatheredCrossing;
 		result.hasPath = (bool)agent->getPath();
 		if (auto goal = mWorld.mMovementGoals.find(result.id); goal != mWorld.mMovementGoals.end())

@@ -263,6 +263,30 @@ _Avoid_: Agent tag, which supplies shared Agent properties
 The stable identifier of an Agent type, independent of its presentation display name. A saved Agent records both its type ID and the Agent type resource it resolved from; legacy Human records lacking them resolve to the bundled Human definition.
 _Avoid_: Agent type, display name
 
+**Object usage**:
+An Agent's resolved mode for operating objects: Arms permits physical operation, Remote control permits distance-limited operation of eligible objects, and None permits no Agent-operated commands. Capability does not grant Access permission or traversal admission.
+_Avoid_: Mobility use, which governs traversal kinds
+
+**Object usage distance**:
+An independently resolved distance in World units: arm length for Arms, maximum straight-line activation range for Remote control. None ignores it. It describes Agent capability, not an Interaction point's geometry.
+_Avoid_: Interaction point reach, which is object geometry and may be zero
+
+**Arms**:
+The Object usage mode that operates objects through physical approach within arm length. It does not provide remote activation or bypass Location, side, height, Mobility, Access permission or Broken conditions.
+
+**Remote control object usage**:
+The exclusive Object usage mode for distance-limited operation of eligible objects in the Agent's current Sector. It does not include Arms operation and does not replace physical passage or traversal admission.
+
+**Remote Access panels**:
+An independently inherited boolean Agent property enabling Access panel operation in Remote control mode. It does not govern Arms or None and confers no authorization.
+
+**Remote BoothWindow shutters**:
+An independently inherited boolean Agent property enabling BoothWindow shutter operation in Remote control mode. It is independent of Remote Access panels, does not govern Arms or None, and confers no control ownership or authorization.
+
+**None object usage**:
+The Object usage mode in which an Agent cannot operate objects but may pass through already usable resources or join another Agent's accepted journey when existing rules permit. It is neither a Mobility restriction nor a revocation of admitted crossings or committed passenger exits.
+_Avoid_: Deactivation, which stops participation in the simulation
+
 **Agent instance**:
 One living Agent of an Agent type, with its own private state and fixed physical baseline. A surviving Agent retains its instance across ordinary structural edits; load, Reset, and restoration after deletion start a fresh lifetime.
 _Avoid_: Agent type, which defines identity rather than one living entity

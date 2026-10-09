@@ -1,0 +1,13 @@
+version: 1
+uuid: 587994c8-b5ad-4bd8-9216-335c7b53317e
+revision: 1
+modules: []
+nextBehaviourId: 2
+behaviours:
+  - id: 1
+    name: Laboratory journey
+    revision: 1
+    source: journey.lua
+    schema:
+      - name: goal
+        type: marker

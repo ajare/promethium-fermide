@@ -452,6 +452,16 @@ namespace core
 					}
 
 					auto predecessor = side < 0 ? left : side > 0 ? right : nullptr;
+					// A short-armed manual Door operator still approaches physically.
+					// Only the head advances: arm length grants no queue priority or
+					// crossing admission, and does not change the crossing band.
+					if (!predecessor && !overflow && resource->mDoor
+						&& request->mEdgeType == EdgeType::Door
+						&& resource->mDoorActivationMode == DoorActivationMode::Manual
+						&& !resource->mDoor->isOpen()
+						&& !mWorld.agentCanPhysicallyOperate(*agent,
+							target.distanceTo(request->mSourceEndpoint), std::numeric_limits<float>::max()))
+						target = request->mSourceEndpoint;
 					// A Lift boarder with reserved car capacity has already passed
 					// directional FIFO admission. Let it reach its exact queue position:
 					// an earlier waiter for the opposite direction must not hold it

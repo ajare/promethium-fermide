@@ -16,6 +16,7 @@
 #include "core/SectorPosition.h"
 #include "core/Shape.h"
 #include "core/Pose.h"
+#include "core/ObjectUsage.h"
 #include "core/Path.h"
 #include "core/AgentTag.h"
 #include "core/AgentBehaviour.h"
@@ -25,6 +26,7 @@
 
 namespace core
 {
+	class AgentTagRegistry;
 	class World;
 	class Sector;
 	class FurnitureCatalogue;
@@ -188,7 +190,37 @@ namespace core
 		bool individual{ false };
 	};
 
+	struct EffectiveAgentObjectUsage
+	{
+		ObjectUsage value{ ObjectUsage::Arms };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
+	struct EffectiveAgentObjectUsageDistance
+	{
+		float value{ 0.25f };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+
 	struct EffectiveAgentPermissionAdherence
+	{
+		bool value{ true };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+	struct EffectiveAgentRemoteAccessPanels
+	{
+		bool value{ true };
+		AgentTagId sourceTag{};
+		uint64_t propertyRevision{ 0 };
+		bool individual{ false };
+	};
+	struct EffectiveAgentRemoteBoothWindowShutters
 	{
 		bool value{ true };
 		AgentTagId sourceTag{};
@@ -206,8 +238,8 @@ namespace core
 
 	// Type-owned physical defaults, before shared authored modifiers. Resource
 	// slot spacing and environmental dimensions are not Agent baselines.
-	// reach is the interaction distance for which the type's geometry is
-	// authoritative; it is validated and frozen like every other baseline field.
+	// Object usage and its distance are frozen independently; Interaction point
+	// reach remains device geometry, not an Agent capability.
 	struct AutomaticPoseChoice
 	{
 		Pose pose;
@@ -229,7 +261,7 @@ namespace core
 	{
 		float width;
 		float standingHeight;
-		float reach;
+		float objectUsageDistance;
 		float walkSpeed;
 		float climbSpeed;
 		float stairAscentSpeed;
@@ -240,6 +272,9 @@ namespace core
 		std::map<Pose, AgentPoseDefinition> poses;
 		std::vector<AutomaticPoseChoice> roomMovement;
 		std::vector<AutomaticPoseChoice> doorCrossing;
+		ObjectUsage objectUsage{ ObjectUsage::Arms };
+		bool remoteAccessPanels{ true };
+		bool remoteBoothWindowShutters{ true };
 
 		bool supportsPose(Pose pose) const { return poses.contains(pose); }
 		std::vector<AutomaticPoseChoice> const& automaticPoses(AutomaticPoseContext context) const
@@ -384,7 +419,11 @@ namespace core
 		std::optional<float> mIndividualRoutePersistence;
 		std::optional<float> mIndividualMinimumRoutePlanningTime;
 		std::optional<float> mIndividualMaximumRoutePlanningTime;
+		std::optional<ObjectUsage> mIndividualObjectUsage;
+		std::optional<float> mIndividualObjectUsageDistance;
 		std::optional<bool> mIndividualPermissionAdherence;
+		std::optional<bool> mIndividualRemoteAccessPanels;
+		std::optional<bool> mIndividualRemoteBoothWindowShutters;
 		std::optional<MobilityProfile> mIndividualMobilityProfile;
 
 		// Modifier samples are authored per-Agent values rather than transient
@@ -470,6 +509,7 @@ namespace core
 		// Traversal resources assign local goals; the Agent remains the sole owner
 		// of walking and advances itself during the movement phase.
 		std::optional<Vector2> mTraversalLocalGoal;
+		std::optional<Vector2> mRemoteButtonApproachTarget;
 
 		// Prevent repeated opportunistic presses while following the same immediate
 		// Door edge. The saved interaction lets traversal preparation reuse a press
@@ -602,8 +642,16 @@ namespace core
 		{ mIndividualMinimumRoutePlanningTime = value; modify(); }
 		void setIndividualMaximumRoutePlanningTime(std::optional<float> value)
 		{ mIndividualMaximumRoutePlanningTime = value; modify(); }
+		void setIndividualObjectUsage(std::optional<ObjectUsage> value)
+		{ mIndividualObjectUsage = value; modify(); }
+		void setIndividualObjectUsageDistance(std::optional<float> value)
+		{ mIndividualObjectUsageDistance = value; modify(); }
 		void setIndividualPermissionAdherence(std::optional<bool> value)
 		{ mIndividualPermissionAdherence = value; modify(); }
+		void setIndividualRemoteAccessPanels(std::optional<bool> value)
+		{ mIndividualRemoteAccessPanels = value; modify(); }
+		void setIndividualRemoteBoothWindowShutters(std::optional<bool> value)
+		{ mIndividualRemoteBoothWindowShutters = value; modify(); }
 		void setIndividualMobilityProfile(std::optional<MobilityProfile> value)
 		{ mIndividualMobilityProfile = value; modify(); }
 		void setBehaviourAssignment(AgentBehaviourAssignment assignment)
@@ -685,6 +733,19 @@ namespace core
 		// Stable wire identity and physical observations are immutable type data.
 		char const* getTypeName() const { return mDisplayName.c_str(); }
 		AgentPhysicalBaseline const& getPhysicalBaseline() const { return mPhysicalBaseline; }
+		std::optional<ObjectUsage> const& getIndividualObjectUsage() const { return mIndividualObjectUsage; }
+		std::optional<float> const& getIndividualObjectUsageDistance() const { return mIndividualObjectUsageDistance; }
+		EffectiveAgentObjectUsage getEffectiveObjectUsage() const;
+		EffectiveAgentObjectUsageDistance getEffectiveObjectUsageDistance() const;
+		ObjectUsage getObjectUsage() const { return getEffectiveObjectUsage().value; }
+		float getObjectUsageDistance() const { return getEffectiveObjectUsageDistance().value; }
+		std::pair<ObjectUsage, float> resolveObjectUsage(AgentTagRegistry const* registry,
+			std::set<AgentTagId> const& tags, std::optional<ObjectUsage> mode,
+			std::optional<float> distance) const;
+		bool objectUsageConfigurationIsValid(AgentTagRegistry const* registry,
+			std::set<AgentTagId> const& tags, std::optional<ObjectUsage> mode,
+			std::optional<float> distance, std::string* diagnostic = nullptr) const;
+		bool objectUsageOverridesAreValid(std::optional<ObjectUsage> mode, std::optional<float> distance) const;
 		MobilityProfile const& getScriptDefaultMobilityProfile() const
 		{ return mScriptDefaultMobilityProfile; }
 		// Stable type ID, independent of the presentation display name.
@@ -749,6 +810,10 @@ namespace core
 		{ return mIndividualMaximumRoutePlanningTime; }
 		std::optional<bool> const& getIndividualPermissionAdherence() const
 		{ return mIndividualPermissionAdherence; }
+		std::optional<bool> const& getIndividualRemoteAccessPanels() const
+		{ return mIndividualRemoteAccessPanels; }
+		std::optional<bool> const& getIndividualRemoteBoothWindowShutters() const
+		{ return mIndividualRemoteBoothWindowShutters; }
 		std::optional<MobilityProfile> const& getIndividualMobilityProfile() const
 		{ return mIndividualMobilityProfile; }
 
@@ -781,6 +846,8 @@ namespace core
 		EffectiveAgentMinimumRoutePlanningTime getEffectiveMinimumRoutePlanningTime() const;
 		EffectiveAgentMaximumRoutePlanningTime getEffectiveMaximumRoutePlanningTime() const;
 		EffectiveAgentPermissionAdherence getEffectivePermissionAdherence() const;
+		EffectiveAgentRemoteAccessPanels getEffectiveRemoteAccessPanels() const;
+		EffectiveAgentRemoteBoothWindowShutters getEffectiveRemoteBoothWindowShutters() const;
 		EffectiveAgentMobilityProfile getEffectiveMobilityProfile() const;
 		uint64_t getRouteJourneyIdentity(Vertex const* destination) const;
 		std::optional<AgentPropertySample> const& getHeightModifierSample() const

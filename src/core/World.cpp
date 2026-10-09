@@ -364,6 +364,8 @@ namespace core
 			&& mAgentTagRegistryReference->expectedUuid == registry->getUuid()
 			&& mAgentTagRegistry == registry) return;
 
+		string diagnostic;
+		if (!allAgentTagAssignmentsCanBeCleared(&diagnostic)) throw invalid_argument(diagnostic);
 		// Construct and register the replacement before changing any authored state.
 		// Everything after registration is non-refusing, so clearing assignments,
 		// clearing samples, and changing namespace commit as one operation.
@@ -1143,6 +1145,8 @@ namespace core
 			AgentTagId minimumRoutePlanningTimeSource{};
 			AgentTagId maximumRoutePlanningTimeSource{};
 			AgentTagId permissionAdherenceSource{};
+			AgentTagId remoteAccessPanelsSource{};
+			AgentTagId remoteBoothWindowShuttersSource{};
 			AgentTagId mobilityProfileSource{};
 			AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 			AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -1331,6 +1335,24 @@ namespace core
 							definition->getName()));
 					permissionAdherenceSource = tag;
 				}
+				if (definition->getRemoteAccessPanels())
+				{
+					if (remoteAccessPanelsSource)
+						return reject(format(
+							"Agent '{}' inherits Remote Access panels from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(remoteAccessPanelsSource),
+							definition->getName()));
+					remoteAccessPanelsSource = tag;
+				}
+				if (definition->getRemoteBoothWindowShutters())
+				{
+					if (remoteBoothWindowShuttersSource)
+						return reject(format(
+							"Agent '{}' inherits Remote BoothWindow shutters from both #{} and #{}",
+							agent->getName(), registry.getAgentTagName(remoteBoothWindowShuttersSource),
+							definition->getName()));
+					remoteBoothWindowShuttersSource = tag;
+				}
 				if (definition->getMobilityProfile())
 				{
 					if (mobilityProfileSource)
@@ -1342,8 +1364,16 @@ namespace core
 				}
 			}
 
+			if (!agent->objectUsageConfigurationIsValid(&registry, agent->getAgentTagIds(),
+				agent->getIndividualObjectUsage(), agent->getIndividualObjectUsageDistance(), diagnostic)) return false;
 			AgentTagReconciliation repair;
 			repair.agent = agentId;
+			repair.objectUsageBefore = agent->getObjectUsage();
+			repair.objectUsageDistanceBefore = agent->getObjectUsageDistance();
+			auto const prospectiveUsage = agent->resolveObjectUsage(&registry, agent->getAgentTagIds(),
+				agent->getIndividualObjectUsage(), agent->getIndividualObjectUsageDistance());
+			repair.objectUsageChanged = prospectiveUsage.first != repair.objectUsageBefore
+				|| (prospectiveUsage.first != ObjectUsage::None && prospectiveUsage.second != repair.objectUsageDistanceBefore);
 			auto inspectSample = [&](char const* name, SampledAgentPropertyType type,
 				AgentTagId source, AgentModifierRange const* range, uint64_t revision,
 				optional<AgentPropertySample> const& sample,
@@ -1542,7 +1572,7 @@ namespace core
 				&& !agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(
 					repair.heightAction == AgentTagSampleRepairAction::Resample ? repair.heightProperty.range.maximum : 1.f),
 					diagnostic)) return false;
-			if (repairs && (repair.walkSpeedAction != AgentTagSampleRepairAction::None
+			if (repairs && (repair.objectUsageChanged || repair.walkSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.heightAction != AgentTagSampleRepairAction::None
 				|| repair.stairSpeedAction != AgentTagSampleRepairAction::None
 				|| repair.ladderSpeedAction != AgentTagSampleRepairAction::None
@@ -1577,6 +1607,9 @@ namespace core
 		for (auto const& repair : repairs)
 		{
 			auto* agent = mAgents.find(repair.agent);
+			if (repair.objectUsageChanged)
+				agentObjectUsageChanged(repair.agent, repair.objectUsageBefore, repair.objectUsageDistanceBefore);
+			else mSimulationCoordinator.agentObjectUsageChanged(repair.agent);
 			if (repair.walkSpeedAction == AgentTagSampleRepairAction::Clear)
 				agent->clearWalkSpeedModifierSample();
 			else if (repair.walkSpeedAction == AgentTagSampleRepairAction::Resample)
@@ -1727,7 +1760,10 @@ namespace core
 		{
 			if (!agent || !agent->hasAgentTag(id)) continue;
 			auto const adherenceBefore = agent->getEffectivePermissionAdherence().value;
+			auto const usageBefore = agent->getObjectUsage();
+			auto const distanceBefore = agent->getObjectUsageDistance();
 			agent->removeAgentTag(id);
+			agentObjectUsageChanged(agentId, usageBefore, distanceBefore);
 			if (agent->getWalkSpeedModifierSample()
 				&& agent->getWalkSpeedModifierSample()->sourceTag == id)
 				agent->clearWalkSpeedModifierSample();
@@ -1778,21 +1814,32 @@ namespace core
 		if (changed) modify();
 	}
 
-	void World::clearAllAgentTagAssignmentsAndSamples()
+	bool World::allAgentTagAssignmentsCanBeCleared(string* diagnostic) const
 	{
 		for (auto const& [id, agent] : mAgents.entries())
 		{
 			(void)id;
-			std::string diagnostic;
-			if (agent && !agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(1.f), &diagnostic))
-				throw invalid_argument(diagnostic);
+			if (agent && (!agentHeightStateFits(*agent, agent->getIndividualHeightModifier().value_or(1.f), diagnostic)
+				|| !agent->objectUsageConfigurationIsValid(nullptr, {}, agent->getIndividualObjectUsage(),
+					agent->getIndividualObjectUsageDistance(), diagnostic))) return false;
 		}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	void World::clearAllAgentTagAssignmentsAndSamples()
+	{
+		string diagnostic;
+		if (!allAgentTagAssignmentsCanBeCleared(&diagnostic)) throw invalid_argument(diagnostic);
 		invalidateSimulationSnapshot();
 		for (auto& [agentId, agent] : mAgents.entries())
 		{
 			if (!agent) continue;
 			auto const adherenceBefore = agent->getEffectivePermissionAdherence().value;
+			auto const usageBefore = agent->getObjectUsage();
+			auto const distanceBefore = agent->getObjectUsageDistance();
 			agent->setAgentTags({});
+			agentObjectUsageChanged(agentId, usageBefore, distanceBefore);
 			agent->clearWalkSpeedModifierSample();
 			agent->clearHeightModifierSample();
 			agent->clearStairSpeedModifierSample();
@@ -8847,11 +8894,20 @@ namespace core
 
 	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
 		uint32_t levelOffset, float xOffset, set<AccessPermissionId> const& grants,
-		set<PermissionSetId> const& sets)
+		set<PermissionSetId> const& sets, optional<ObjectUsage> objectUsage, optional<float> objectUsageDistance,
+		set<AgentTagId> const& tags)
 	{
-		return addOwnedAgentToSector(
-			makeScriptAgentForPlacement(typeId, name, grants, sets),
-			sectorId, levelOffset, xOffset);
+		if ((objectUsage || objectUsageDistance || !tags.empty()) && !mSimulationPaused)
+			throw SerializationException("Pause the simulation before authoring Object usage overrides or Agent tags");
+		auto agent = makeScriptAgentForPlacement(typeId, name, grants, sets);
+		for (auto tag : tags) if (!mAgentTagRegistry || !mAgentTagRegistry->lookupAgentTag(tag))
+			throw SerializationException("Agent tag is not defined in the attached registry");
+		if (!agent->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), tags, objectUsage, objectUsageDistance))
+			throw SerializationException("Invalid Object usage overrides: effective Arms distance must be finite and positive");
+		agent->setIndividualObjectUsage(objectUsage);
+		agent->setIndividualObjectUsageDistance(objectUsageDistance);
+		agent->setAgentTags(tags);
+		return addOwnedAgentToSector(std::move(agent), sectorId, levelOffset, xOffset);
 	}
 
 	AgentId World::createAgent(string typeId, string const& name, uint32_t sectorId,
@@ -9512,6 +9568,66 @@ namespace core
 		return true;
 	}
 
+	bool World::setAgentIndividualObjectUsage(AgentId id, optional<ObjectUsage> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		return setAgentObjectUsageOverrides(id, value, lookup.entity->getIndividualObjectUsageDistance(), diagnostic);
+	}
+
+	bool World::setAgentIndividualObjectUsageDistance(AgentId id, optional<float> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		return setAgentObjectUsageOverrides(id, lookup.entity->getIndividualObjectUsage(), value, diagnostic);
+	}
+
+	bool World::setAgentObjectUsageOverrides(AgentId id, optional<ObjectUsage> mode,
+		optional<float> distance, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		auto* agent = lookup.entity;
+		if (!agent->objectUsageOverridesAreValid(mode, distance))
+		{
+			if (diagnostic) *diagnostic = "Object usage must be Arms, None or Remote control; usable distance must be finite and positive";
+			return false;
+		}
+		if (agent->getIndividualObjectUsage() == mode && agent->getIndividualObjectUsageDistance() == distance)
+		{
+			if (diagnostic) *diagnostic = "The individual Object usage properties are unchanged";
+			return false;
+		}
+		auto const beforeMode = agent->getObjectUsage();
+		auto const beforeDistance = agent->getObjectUsageDistance();
+		agent->setIndividualObjectUsage(mode);
+		agent->setIndividualObjectUsageDistance(distance);
+		agentObjectUsageChanged(id, beforeMode, beforeDistance);
+		invalidateSimulationSnapshot();
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	void World::agentObjectUsageChanged(AgentId id, ObjectUsage beforeMode, float beforeDistance)
+	{
+		auto* agent = mAgents.find(id);
+		if (!agent) return;
+		invalidateSimulationSnapshot();
+		mSimulationCoordinator.agentObjectUsageChanged(id);
+		if (beforeMode == agent->getObjectUsage()
+			&& (agent->getObjectUsage() == ObjectUsage::None || beforeDistance == agent->getObjectUsageDistance())) return;
+		if (agent->getObjectUsage() == ObjectUsage::None || agent->getObjectUsageDistance() < beforeDistance)
+			replanAgentAfterAuthorizationRefusal(id);
+		else beginVoluntaryRoutePlanning(id);
+		modify();
+	}
+
 	bool World::setAgentIndividualPermissionAdherence(AgentId id,
 		optional<bool> value, string* diagnostic)
 	{
@@ -9536,6 +9652,50 @@ namespace core
 			if (after) replanAgentAfterAuthorizationRefusal(id);
 			else beginVoluntaryRoutePlanning(id);
 		}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool World::setAgentIndividualRemoteAccessPanels(AgentId id,
+		optional<bool> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualRemoteAccessPanels() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Remote Access panels is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualRemoteAccessPanels(value);
+		mSimulationCoordinator.agentObjectUsageChanged(id);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool World::setAgentIndividualRemoteBoothWindowShutters(AgentId id,
+		optional<bool> value, string* diagnostic)
+	{
+		auto lookup = lookupAgent(id);
+		if (!lookup) { if (diagnostic) *diagnostic = lookup.diagnostic; return false; }
+		if (!mSimulationPaused)
+		{
+			if (diagnostic) *diagnostic = "Pause the simulation before editing individual Agent properties";
+			return false;
+		}
+		if (lookup.entity->getIndividualRemoteBoothWindowShutters() == value)
+		{
+			if (diagnostic) *diagnostic = "The individual Remote BoothWindow shutters is unchanged";
+			return false;
+		}
+		invalidateSimulationSnapshot();
+		lookup.entity->setIndividualRemoteBoothWindowShutters(value);
+		mSimulationCoordinator.agentObjectUsageChanged(id);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -9942,6 +10102,18 @@ namespace core
 					"Agent '{}' cannot be assigned to #{} because Permission adherence is already inherited from #{}",
 					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
 			}
+			if (assignedDefinition->getRemoteAccessPanels() && source->getRemoteAccessPanels())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Remote Access panels is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
+			if (assignedDefinition->getRemoteBoothWindowShutters() && source->getRemoteBoothWindowShutters())
+			{
+				return reject(format(
+					"Agent '{}' cannot be assigned to #{} because Remote BoothWindow shutters is already inherited from #{}",
+					agentLookup.entity->getName(), assignedDefinition->getName(), source->getName()));
+			}
 			if (assignedDefinition->getMobilityProfile() && source->getMobilityProfile())
 			{
 				return reject(format(
@@ -9950,7 +10122,10 @@ namespace core
 					source->getName()));
 			}
 		}
-		return true;
+		auto prospectiveTags = agentLookup.entity->getAgentTagIds();
+		prospectiveTags.insert(tag);
+		return agentLookup.entity->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), prospectiveTags,
+			agentLookup.entity->getIndividualObjectUsage(), agentLookup.entity->getIndividualObjectUsageDistance(), diagnostic);
 	}
 
 	bool World::assignAgentTag(AgentId agent, AgentTagId tag,
@@ -10054,7 +10229,10 @@ namespace core
 		if (heightSample && !agentHeightStateFits(*target,
 			target->getIndividualHeightModifier().value_or(heightSample->value), diagnostic)) return false;
 		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
+		auto const usageBefore = target->getObjectUsage();
+		auto const distanceBefore = target->getObjectUsageDistance();
 		target->assignAgentTag(tag);
+		agentObjectUsageChanged(agent, usageBefore, distanceBefore);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		if (heightSample) target->setHeightModifierSample(*heightSample);
 		if (stairSpeedSample) target->setStairSpeedModifierSample(*stairSpeedSample);
@@ -10102,7 +10280,10 @@ namespace core
 		auto const* target = agentLookup.entity;
 		if (target->getHeightModifierSample() && target->getHeightModifierSample()->sourceTag == tag
 			&& !agentHeightStateFits(*target, target->getIndividualHeightModifier().value_or(1.0f), diagnostic)) return false;
-		return true;
+		auto prospectiveTags = target->getAgentTagIds();
+		prospectiveTags.erase(tag);
+		return target->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), prospectiveTags,
+			target->getIndividualObjectUsage(), target->getIndividualObjectUsageDistance(), diagnostic);
 	}
 
 	bool World::removeAgentTag(AgentId agent, AgentTagId tag,
@@ -10112,7 +10293,10 @@ namespace core
 		if (!canRemoveAgentTag(agent, tag, diagnostic)) return false;
 		auto* target = mAgents.find(agent);
 		auto const adherenceBefore = target->getEffectivePermissionAdherence().value;
+		auto const usageBefore = target->getObjectUsage();
+		auto const distanceBefore = target->getObjectUsageDistance();
 		target->removeAgentTag(tag);
+		agentObjectUsageChanged(agent, usageBefore, distanceBefore);
 		if (target->getWalkSpeedModifierSample()
 			&& target->getWalkSpeedModifierSample()->sourceTag == tag)
 			target->clearWalkSpeedModifierSample();
@@ -10213,6 +10397,9 @@ namespace core
 		AgentTagId minimumRoutePlanningTimeSource{};
 		AgentTagId maximumRoutePlanningTimeSource{};
 		AgentTagId permissionAdherenceSource{};
+		AgentTagId remoteAccessPanelsSource{};
+		AgentTagId remoteBoothWindowShuttersSource{};
+		AgentTagId objectUsageSource{}, objectUsageDistanceSource{};
 		AgentTagId mobilityProfileSource{};
 		AgentWalkSpeedModifierProperty const* walkSpeedProperty{ nullptr };
 		AgentHeightModifierProperty const* heightProperty{ nullptr };
@@ -10353,12 +10540,36 @@ namespace core
 				maximumRoutePlanningTimeSource = tag;
 				maximumRoutePlanningTimeProperty = property;
 			}
+			if (definition->getObjectUsage())
+			{
+				if (objectUsageSource) return reject("Object usage is inherited from more than one Agent tag");
+				objectUsageSource = tag;
+			}
+			if (definition->getObjectUsageDistance())
+			{
+				if (objectUsageDistanceSource) return reject("Object usage distance is inherited from more than one Agent tag");
+				objectUsageDistanceSource = tag;
+			}
 			if (definition->getPermissionAdherence())
 			{
 				if (permissionAdherenceSource)
 					return reject(format("Permission adherence is inherited from both #{} and #{}",
 						mAgentTagRegistry->getAgentTagName(permissionAdherenceSource), definition->getName()));
 				permissionAdherenceSource = tag;
+			}
+			if (definition->getRemoteAccessPanels())
+			{
+				if (remoteAccessPanelsSource)
+					return reject(format("Agent inherits Remote Access panels from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(remoteAccessPanelsSource), definition->getName()));
+				remoteAccessPanelsSource = tag;
+			}
+			if (definition->getRemoteBoothWindowShutters())
+			{
+				if (remoteBoothWindowShuttersSource)
+					return reject(format("Agent inherits Remote BoothWindow shutters from both #{} and #{}",
+						mAgentTagRegistry->getAgentTagName(remoteBoothWindowShuttersSource), definition->getName()));
+				remoteBoothWindowShuttersSource = tag;
 			}
 			if (definition->getMobilityProfile())
 			{
@@ -10510,7 +10721,12 @@ namespace core
 
 		if (!agentHeightStateFits(*target, target->getIndividualHeightModifier().value_or(
 			heightSample ? heightSample->value : 1.0f), diagnostic)) return false;
+		if (!target->objectUsageConfigurationIsValid(mAgentTagRegistry.get(), tags,
+			target->getIndividualObjectUsage(), target->getIndividualObjectUsageDistance(), diagnostic)) return false;
+		auto const usageBefore = target->getObjectUsage();
+		auto const distanceBefore = target->getObjectUsageDistance();
 		target->setAgentTags(tags);
+		agentObjectUsageChanged(agent, usageBefore, distanceBefore);
 		if (walkSpeedSample) target->setWalkSpeedModifierSample(*walkSpeedSample);
 		else target->clearWalkSpeedModifierSample();
 		if (heightSample) target->setHeightModifierSample(*heightSample);
@@ -11544,12 +11760,48 @@ namespace core
 		return result;
 	}
 
+	optional<Vector2> World::remoteOrdinaryDoorCentre(TraversalResourceId doorId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		if (!resource || !resource->mDoor || typeid(*resource->mDoor) != typeid(Door)
+			|| resource->mLiftCoordinator || resource->mDoor->isLiftOwned() || resource->mDoor->isShuttleOwned()
+			|| resource->mDoorActivationMode != DoorActivationMode::Manual) return nullopt;
+		auto const& door = *resource->mDoor;
+		if (!door.getFrontSector() || !door.getBackSector()
+			|| !isLocationLike(door.getFrontSector()->getType())
+			|| !isLocationLike(door.getBackSector()->getType())) return nullopt;
+		return door.getPosition() + door.getSize() * .5f;
+	}
+
+	bool World::agentCanOperateManualDoorHere(TraversalResourceId doorId, AgentId agentId) const
+	{
+		auto resource = mTraversalResources.find(doorId);
+		auto agent = mAgents.find(agentId);
+		if (!resource || !agent || !agent->isActive() || !resource->mEnabled
+			|| !canAgentOpenManualDoor(doorId, agentId) || resource->mDoor->isBroken()) return false;
+		auto const& door = *resource->mDoor;
+		if (door.getFrontSector().get() != agent->getSector() && door.getBackSector().get() != agent->getSector()) return false;
+		if (agent->getObjectUsage() == ObjectUsage::RemoteControl)
+		{
+			auto centre = remoteOrdinaryDoorCentre(doorId);
+			return centre && agent->getGlobalPosition().distanceTo(*centre) <= agent->getObjectUsageDistance();
+		}
+		auto endpoint = door.getPosition() + Vector2{door.getSize().x * .5f, 0.f};
+		return agentCanPhysicallyOperate(*agent, agent->getGlobalPosition().distanceTo(endpoint), numeric_limits<float>::max());
+	}
+
 	bool World::canAgentOpenManualDoor(TraversalResourceId doorId, AgentId agentId) const
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
-		return resource && resource->mDoor && agent
-			&& agentSatisfiesDoorPermission(*resource->mDoor, *agent);
+		if (!resource || !resource->mDoor || !agent
+			|| !agentSatisfiesDoorPermission(*resource->mDoor, *agent)) return false;
+		if (agent->getObjectUsage() == ObjectUsage::Arms) return true;
+		auto centre = remoteOrdinaryDoorCentre(doorId);
+		// Routing asks whether the ordinary floor approach can enter range, not
+		// whether the Agent's current remote position is already in range.
+		return centre && agent->getObjectUsage() == ObjectUsage::RemoteControl
+			&& centre->y - resource->mDoor->getPosition().y <= agent->getObjectUsageDistance();
 	}
 
 	bool World::canAgentOperateDoorControl(TraversalResourceId doorId, SectorId approach,
@@ -11557,11 +11809,13 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(doorId);
 		auto agent = mAgents.find(agentId);
-		if (!resource || !resource->mDoor || !agent) return false;
+		if (!resource || !resource->mDoor || !agent || !agentCanOperateObjects(*agent)) return false;
 		for (auto pointId : resource->mControls)
 		{
 			auto point = mInteractionPoints.find(pointId);
 			if (point && point->mSector == approach
+				&& (agent->getObjectUsage() == ObjectUsage::Arms
+					|| remoteButtonApproachDistance(pointId, approach, point->mPosition, agentId))
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
@@ -11601,7 +11855,7 @@ namespace core
 	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
-		if (!resource || !resource->mExtensible || !agent) return false;
+		if (!resource || !resource->mExtensible || !agent || !agentCanOperateObjects(*agent)) return false;
 		auto applicable = [&](InteractionPoint const& point)
 		{
 			if (point.mSector != approach) return false;
@@ -11630,6 +11884,8 @@ namespace core
 		{
 			auto point = mInteractionPoints.find(pointId);
 			if (point && applicable(*point)
+				&& (agent->getObjectUsage() == ObjectUsage::Arms
+					|| remoteButtonApproachDistance(pointId, approach, approachPosition, agentId))
 				&& missingInteractionPermissions(*point, *agent).empty()) return true;
 		}
 		return false;
@@ -11711,13 +11967,23 @@ namespace core
 		command.type = DeviceCommandType::SelectLiftDestination;
 		command.traversalResource = resourceId;
 		command.stopIndex = stop;
-		if (missingLiftDestinationPermissions(command, agentId).empty()) return true;
 		auto agent = mAgents.find(agentId);
+		if (agent && (agent->getObjectUsage() == ObjectUsage::Arms
+			|| agentCanRemotelySelectLiftDestination(resourceId, *agent, false))
+			&& missingLiftDestinationPermissions(command, agentId).empty()) return true;
 		if (!agent || !agent->getSector()) return false;
 		bool local = find(resource->mOccupants.begin(), resource->mOccupants.end(), agentId)
 			!= resource->mOccupants.end();
 		if (!agentAdheresToLiftDestinationPermission(resourceId, stop, agentId)) return false;
-		if (local) return true;
+		if (local && agent->getObjectUsage() == ObjectUsage::Arms) return true;
+		if (local)
+		{
+			// None may finish an accepted journey, but occupancy alone cannot
+			// authorize a new destination selection.
+			auto committed = resource->mLiftPassengerDestinations.find(agentId);
+			if ((committed != resource->mLiftPassengerDestinations.end() && committed->second == stop)
+				|| (!resource->mLiftMoving && resource->mLiftCurrentStop == stop)) return true;
+		}
 		// Only an open, boardable car at this Agent's landing reveals a usable
 		// shared journey. Never consult a remote car's live destination requests.
 		if (!local && resource->mShuttle)
@@ -11772,6 +12038,26 @@ namespace core
 	bool World::canAgentOperateTransportLandingControl(TraversalResourceId resourceId,
 		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
 	{
+		auto agent = mAgents.find(agentId);
+		if (!agent || !agentCanOperateObjects(*agent)
+			|| !agentSatisfiesTransportLandingPermission(resourceId, approach, endpoint, agentId)) return false;
+		if (agent->getObjectUsage() == ObjectUsage::Arms) return true;
+		auto resource = mTraversalResources.find(resourceId);
+		if (!resource) return false;
+		if (resource->mLiftCoordinator)
+		{
+			for (auto control : resource->mControls)
+				if (remoteButtonApproachDistance(control, approach, endpoint, agentId)) return true;
+			return false;
+		}
+		auto stop = mSimulationCoordinator.findLiftStop(*resource, endpoint);
+		return stop < resource->mLiftStops.size()
+			&& remoteButtonApproachDistance(resource->mLiftStops[stop].callControl, approach, endpoint, agentId).has_value();
+	}
+
+	bool World::agentSatisfiesTransportLandingPermission(TraversalResourceId resourceId,
+		SectorId approach, Vector2 const& endpoint, AgentId agentId) const
+	{
 		auto resource = mTraversalResources.find(resourceId);
 		auto agent = mAgents.find(agentId);
 		if (!resource || !agent) return false;
@@ -11798,7 +12084,7 @@ namespace core
 	{
 		auto agent = mAgents.find(agentId);
 		return agent && (!agent->getEffectivePermissionAdherence().value
-			|| canAgentOperateTransportLandingControl(resourceId, approach, endpoint, agentId));
+			|| agentSatisfiesTransportLandingPermission(resourceId, approach, endpoint, agentId));
 	}
 
 	bool World::isAgentTransportOccupant(TraversalResourceId resourceId, AgentId agentId) const

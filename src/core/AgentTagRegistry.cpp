@@ -131,8 +131,14 @@ namespace core
 				tag->setMinimumRoutePlanningTime(*minimumPlanningTime);
 			if (auto const* maximumPlanningTime = sourceTag->getMaximumRoutePlanningTime())
 				tag->setMaximumRoutePlanningTime(*maximumPlanningTime);
+			if (auto const* property = sourceTag->getObjectUsage()) tag->setObjectUsage(*property);
+			if (auto const* property = sourceTag->getObjectUsageDistance()) tag->setObjectUsageDistance(*property);
 			if (auto const* adherence = sourceTag->getPermissionAdherence())
 				tag->setPermissionAdherence(*adherence);
+			if (auto const* remotePanels = sourceTag->getRemoteAccessPanels())
+				tag->setRemoteAccessPanels(*remotePanels);
+			if (auto const* remoteShutters = sourceTag->getRemoteBoothWindowShutters())
+				tag->setRemoteBoothWindowShutters(*remoteShutters);
 			if (auto const* mobility = sourceTag->getMobilityProfile())
 				tag->setMobilityProfile(*mobility);
 			if (!copy->mTags.restore(id, std::move(tag)))
@@ -186,8 +192,14 @@ namespace core
 					candidate->getMinimumRoutePlanningTime())
 				|| !optionalPropertyMatches(tag->getMaximumRoutePlanningTime(),
 					candidate->getMaximumRoutePlanningTime())
+				|| !optionalPropertyMatches(tag->getObjectUsage(), candidate->getObjectUsage())
+				|| !optionalPropertyMatches(tag->getObjectUsageDistance(), candidate->getObjectUsageDistance())
 				|| !optionalPropertyMatches(tag->getPermissionAdherence(),
 					candidate->getPermissionAdherence())
+				|| !optionalPropertyMatches(tag->getRemoteAccessPanels(),
+					candidate->getRemoteAccessPanels())
+				|| !optionalPropertyMatches(tag->getRemoteBoothWindowShutters(),
+					candidate->getRemoteBoothWindowShutters())
 				|| !optionalPropertyMatches(tag->getMobilityProfile(),
 					candidate->getMobilityProfile())) return false;
 		}
@@ -452,6 +464,24 @@ namespace core
 			throw std::out_of_range(std::format(
 				"Agent tag {} is not defined in this registry", id.value));
 		return tag->getPermissionAdherence();
+	}
+	AgentRemoteAccessPanelsProperty const*
+	AgentTagRegistry::getAgentTagRemoteAccessPanels(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getRemoteAccessPanels();
+	}
+	AgentRemoteBoothWindowShuttersProperty const*
+	AgentTagRegistry::getAgentTagRemoteBoothWindowShutters(AgentTagId id) const
+	{
+		auto const* tag = mTags.find(id);
+		if (!tag)
+			throw std::out_of_range(std::format(
+				"Agent tag {} is not defined in this registry", id.value));
+		return tag->getRemoteBoothWindowShutters();
 	}
 
 	AgentMobilityProfileProperty const*
@@ -1069,6 +1099,52 @@ namespace core
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
+	bool AgentTagRegistry::remoteAccessPanelsAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (source && source->getRemoteAccessPanels()) return reject(std::format(
+						"Cannot add Remote Access panels to Agent tag #{}: Agent '{}' in World '{}' already inherits Remote Access panels from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool AgentTagRegistry::remoteBoothWindowShuttersAdditionIsValid(AgentTagId id,
+		std::string* diagnostic) const
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto const* target = mTags.find(id);
+		if (!target) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		for (auto const* world : mLoadedWorlds)
+			if (world) for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				for (auto const assigned : agent->getAgentTagIds())
+				{
+					if (assigned == id) continue;
+					auto const* source = mTags.find(assigned);
+					if (source && source->getRemoteBoothWindowShutters()) return reject(std::format(
+						"Cannot add Remote BoothWindow shutters to Agent tag #{}: Agent '{}' in World '{}' already inherits Remote BoothWindow shutters from #{}",
+						target->getName(), agent->getName(), world->getName(), source->getName()));
+				}
+			}
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
 
 	bool AgentTagRegistry::mobilityProfileAdditionIsValid(AgentTagId id,
 		std::string* diagnostic) const
@@ -1201,6 +1277,16 @@ namespace core
 
 		for (auto* world : mLoadedWorlds)
 			if (world && !world->canApplyAgentTagHeightModifier(id, std::nullopt, diagnostic)) return false;
+
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+			{
+				(void)agentId;
+				if (!agent || !agent->hasAgentTag(id)) continue;
+				auto tags = agent->getAgentTagIds(); tags.erase(id);
+				if (!agent->objectUsageConfigurationIsValid(this, tags, agent->getIndividualObjectUsage(),
+					agent->getIndividualObjectUsageDistance(), diagnostic)) return false;
+			}
 
 		// Every loaded assignment goes before the definition. From the first
 		// write onward no loaded World can be left with a stale reference, and
@@ -1909,6 +1995,74 @@ namespace core
 		return true;
 	}
 
+	AgentObjectUsageProperty const* AgentTagRegistry::getAgentTagObjectUsage(AgentTagId id) const
+	{ auto const* tag = lookupAgentTag(id); return tag ? tag->getObjectUsage() : nullptr; }
+	AgentObjectUsageDistanceProperty const* AgentTagRegistry::getAgentTagObjectUsageDistance(AgentTagId id) const
+	{ auto const* tag = lookupAgentTag(id); return tag ? tag->getObjectUsageDistance() : nullptr; }
+
+	bool AgentTagRegistry::editObjectUsageProperty(AgentTagId id, bool distanceProperty,
+		ObjectUsagePropertyEdit operation, ObjectUsage mode, float distance, std::string* diagnostic)
+	{
+		auto reject = [&](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject("Agent tag is not defined in this registry");
+		bool present = distanceProperty ? tag->getObjectUsageDistance() != nullptr : tag->getObjectUsage() != nullptr;
+		if ((operation == ObjectUsagePropertyEdit::Add && present)
+			|| (operation != ObjectUsagePropertyEdit::Add && !present))
+			return reject("Object usage property is already present or absent");
+		if (!distanceProperty && !isValidObjectUsage(mode))
+			return reject("Object usage must be Arms, None or Remote control");
+		if (operation == ObjectUsagePropertyEdit::Set && (distanceProperty ? tag->getObjectUsageDistance()->value == distance
+			: tag->getObjectUsage()->value == mode)) return reject("Object usage property is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		// Validate a separate prospective definition set, including masked conflicts
+		// and effective configurations in every loaded World, before allocating a revision.
+		auto prospective = copyWithNewUuid(*this);
+		auto apply = [&](AgentTag& target, uint64_t revision)
+		{
+			if (distanceProperty)
+			{
+				if (operation == ObjectUsagePropertyEdit::Remove) target.removeObjectUsageDistance();
+				else target.setObjectUsageDistance({ distance, revision });
+			}
+			else
+			{
+				if (operation == ObjectUsagePropertyEdit::Remove) target.removeObjectUsage();
+				else target.setObjectUsage({ mode, revision });
+			}
+		};
+		apply(*prospective->mTags.find(id), mNextPropertyRevision);
+		if (!loadedWorldAssignmentsAreValid(*prospective, diagnostic)) return false;
+		struct Change { World* world; AgentId agent; ObjectUsage mode; float distance; };
+		std::vector<Change> changes;
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id))
+					changes.push_back({ world, agentId, agent->getObjectUsage(), agent->getObjectUsageDistance() });
+		uint64_t revision{ 0 };
+		try { if (operation != ObjectUsagePropertyEdit::Remove) revision = allocatePropertyRevision(); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		apply(*tag, revision);
+		for (auto const& change : changes)
+			change.world->agentObjectUsageChanged(change.agent, change.mode, change.distance);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+
+	bool AgentTagRegistry::addAgentTagObjectUsage(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, false, ObjectUsagePropertyEdit::Add, ObjectUsage::Arms, .25f, out); }
+	bool AgentTagRegistry::setAgentTagObjectUsage(AgentTagId id, ObjectUsage value, std::string* out)
+	{ return editObjectUsageProperty(id, false, ObjectUsagePropertyEdit::Set, value, .25f, out); }
+	bool AgentTagRegistry::removeAgentTagObjectUsage(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, false, ObjectUsagePropertyEdit::Remove, ObjectUsage::Arms, .25f, out); }
+	bool AgentTagRegistry::addAgentTagObjectUsageDistance(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, true, ObjectUsagePropertyEdit::Add, ObjectUsage::Arms, .25f, out); }
+	bool AgentTagRegistry::setAgentTagObjectUsageDistance(AgentTagId id, float value, std::string* out)
+	{ return editObjectUsageProperty(id, true, ObjectUsagePropertyEdit::Set, ObjectUsage::Arms, value, out); }
+	bool AgentTagRegistry::removeAgentTagObjectUsageDistance(AgentTagId id, std::string* out)
+	{ return editObjectUsageProperty(id, true, ObjectUsagePropertyEdit::Remove, ObjectUsage::Arms, .25f, out); }
+
 	bool AgentTagRegistry::addAgentTagPermissionAdherence(AgentTagId id,
 		std::string* diagnostic)
 	{
@@ -1920,6 +2074,38 @@ namespace core
 		if (!definitionEditsAreAllowed(diagnostic)) return false;
 		if (!permissionAdherenceAdditionIsValid(id, diagnostic)) return false;
 		try { tag->setPermissionAdherence({ true, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool AgentTagRegistry::addAgentTagRemoteAccessPanels(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getRemoteAccessPanels()) return reject(std::format(
+			"Agent tag #{} already has Remote Access panels", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!remoteAccessPanelsAdditionIsValid(id, diagnostic)) return false;
+		try { tag->setRemoteAccessPanels({ true, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool AgentTagRegistry::addAgentTagRemoteBoothWindowShutters(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (tag->getRemoteBoothWindowShutters()) return reject(std::format(
+			"Agent tag #{} already has Remote BoothWindow shutters", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		if (!remoteBoothWindowShuttersAdditionIsValid(id, diagnostic)) return false;
+		try { tag->setRemoteBoothWindowShutters({ true, allocatePropertyRevision() }); }
 		catch (std::exception const& error) { return reject(error.what()); }
 		modify();
 		if (diagnostic) diagnostic->clear();
@@ -1949,6 +2135,50 @@ namespace core
 		if (diagnostic) diagnostic->clear();
 		return true;
 	}
+	bool AgentTagRegistry::setAgentTagRemoteAccessPanels(AgentTagId id, bool value,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getRemoteAccessPanels();
+		if (!current) return reject(std::format("Agent tag #{} has no Remote Access panels", tag->getName()));
+		if (current->value == value) return reject("The Agent Remote Access panels is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		try { tag->setRemoteAccessPanels({ value, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id) && !agent->getIndividualRemoteAccessPanels())
+				{
+					world->mSimulationCoordinator.agentObjectUsageChanged(agentId);
+				}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool AgentTagRegistry::setAgentTagRemoteBoothWindowShutters(AgentTagId id, bool value,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		auto const* current = tag->getRemoteBoothWindowShutters();
+		if (!current) return reject(std::format("Agent tag #{} has no Remote BoothWindow shutters", tag->getName()));
+		if (current->value == value) return reject("The Agent Remote BoothWindow shutters is unchanged");
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		try { tag->setRemoteBoothWindowShutters({ value, allocatePropertyRevision() }); }
+		catch (std::exception const& error) { return reject(error.what()); }
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id) && !agent->getIndividualRemoteBoothWindowShutters())
+				{
+					world->mSimulationCoordinator.agentObjectUsageChanged(agentId);
+				}
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
 
 	bool AgentTagRegistry::removeAgentTagPermissionAdherence(AgentTagId id,
 		std::string* diagnostic)
@@ -1966,6 +2196,42 @@ namespace core
 				for (auto const& [agentId, agent] : world->mAgents.entries())
 					if (agent && agent->hasAgentTag(id) && !agent->getIndividualPermissionAdherence())
 						world->replanAgentAfterAuthorizationRefusal(agentId);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool AgentTagRegistry::removeAgentTagRemoteAccessPanels(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getRemoteAccessPanels()) return reject(std::format(
+			"Agent tag #{} has no Remote Access panels", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		tag->removeRemoteAccessPanels();
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id) && !agent->getIndividualRemoteAccessPanels())
+					world->mSimulationCoordinator.agentObjectUsageChanged(agentId);
+		modify();
+		if (diagnostic) diagnostic->clear();
+		return true;
+	}
+	bool AgentTagRegistry::removeAgentTagRemoteBoothWindowShutters(AgentTagId id,
+		std::string* diagnostic)
+	{
+		auto reject = [diagnostic](std::string reason) { if (diagnostic) *diagnostic = std::move(reason); return false; };
+		auto* tag = mTags.find(id);
+		if (!tag) return reject(std::format("Agent tag {} is not defined in this registry", id.value));
+		if (!tag->getRemoteBoothWindowShutters()) return reject(std::format(
+			"Agent tag #{} has no Remote BoothWindow shutters", tag->getName()));
+		if (!definitionEditsAreAllowed(diagnostic)) return false;
+		tag->removeRemoteBoothWindowShutters();
+		for (auto* world : mLoadedWorlds) if (world)
+			for (auto const& [agentId, agent] : world->mAgents.entries())
+				if (agent && agent->hasAgentTag(id) && !agent->getIndividualRemoteBoothWindowShutters())
+					world->mSimulationCoordinator.agentObjectUsageChanged(agentId);
 		modify();
 		if (diagnostic) diagnostic->clear();
 		return true;
@@ -2380,7 +2646,7 @@ namespace core
 			throw SerializationException("Cannot serialize an Agent tag registry with an invalid UUID");
 		}
 		serializer.beginMap("agentTagRegistry");
-		serializer.writeUint32("version", 14);
+		serializer.writeUint32("version", 17);
 		serializer.writeString("uuid", mUuid);
 		serializer.writeUint64("nextAgentTagId", mTags.nextId());
 		serializer.writeUint64("nextPropertyRevision", mNextPropertyRevision);
@@ -2412,9 +2678,13 @@ namespace core
 			auto const* minimumPlanningTime = tag->getMinimumRoutePlanningTime();
 			auto const* maximumPlanningTime = tag->getMaximumRoutePlanningTime();
 			auto const* chance = tag->getEscalatorWalkingChance();
+			auto const* usage = tag->getObjectUsage();
+			auto const* distance = tag->getObjectUsageDistance();
 			auto const* adherence = tag->getPermissionAdherence();
+			auto const* remotePanels = tag->getRemoteAccessPanels();
+			auto const* remoteShutters = tag->getRemoteBoothWindowShutters();
 			auto const* mobility = tag->getMobilityProfile();
-			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || adherence || mobility)
+			if (colour || walkSpeed || height || stairSpeed || ladderSpeed || interaction || effort || waiting || crowd || risk || familiarity || persistence || minimumPlanningTime || maximumPlanningTime || chance || usage || distance || adherence || remotePanels || remoteShutters || mobility)
 			{
 				serializer.beginArray("properties");
 				if (chance)
@@ -2458,12 +2728,44 @@ namespace core
 				if (persistence) writeModifier("routePersistence", *persistence);
 				if (minimumPlanningTime) writeModifier("minimumRoutePlanningTime", *minimumPlanningTime);
 				if (maximumPlanningTime) writeModifier("maximumRoutePlanningTime", *maximumPlanningTime);
+				if (usage)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "objectUsage");
+					serializer.writeUint64("revision", usage->revision);
+					serializer.writeString("value", objectUsageWireName(usage->value));
+					serializer.endMap();
+				}
+				if (distance)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "objectUsageDistance");
+					serializer.writeUint64("revision", distance->revision);
+					serializer.writeFloat("value", distance->value);
+					serializer.endMap();
+				}
 				if (adherence)
 				{
 					serializer.beginMap("");
 					serializer.writeString("type", "permissionAdherence");
 					serializer.writeUint64("revision", adherence->revision);
 					serializer.writeBool("value", adherence->value);
+					serializer.endMap();
+				}
+				if (remotePanels)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "remoteAccessPanels");
+					serializer.writeUint64("revision", remotePanels->revision);
+					serializer.writeBool("value", remotePanels->value);
+					serializer.endMap();
+				}
+				if (remoteShutters)
+				{
+					serializer.beginMap("");
+					serializer.writeString("type", "remoteBoothWindowShutters");
+					serializer.writeUint64("revision", remoteShutters->revision);
+					serializer.writeBool("value", remoteShutters->value);
 					serializer.endMap();
 				}
 				if (mobility)
@@ -2486,7 +2788,7 @@ namespace core
 	{
 		serializer.beginMap("agentTagRegistry");
 		auto const version = serializer.readUint32("version");
-		if (version < 1 || version > 14)
+		if (version < 1 || version > 17)
 		{
 			throw SerializationException("Unsupported Agent tag registry serialization version");
 		}
@@ -2545,6 +2847,8 @@ namespace core
 				bool hasMinimumRoutePlanningTime{ false };
 				bool hasMaximumRoutePlanningTime{ false };
 				bool hasPermissionAdherence{ false };
+				bool hasRemoteAccessPanels{ false };
+				bool hasRemoteBoothWindowShutters{ false };
 				bool hasMobilityProfile{ false };
 				serializer.beginArray("properties");
 				while (serializer.nextArrayItem())
@@ -2565,7 +2869,10 @@ namespace core
 						&& !(version >= 12 && type == "routePersistence")
 						&& !(version >= 13 && type == "minimumRoutePlanningTime")
 						&& !(version >= 13 && type == "maximumRoutePlanningTime")
-						&& !(version >= 14 && type == "permissionAdherence"))
+						&& !(version >= 14 && type == "permissionAdherence")
+						&& !(version >= 16 && type == "remoteAccessPanels")
+						&& !(version >= 17 && type == "remoteBoothWindowShutters")
+						&& !(version >= 15 && (type == "objectUsage" || type == "objectUsageDistance")))
 					{
 						throw SerializationException(std::format(
 							"Unsupported Agent property type '{}'", type));
@@ -2617,6 +2924,12 @@ namespace core
 					if (type == "permissionAdherence" && hasPermissionAdherence)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Permission adherence", name));
+					if (type == "remoteAccessPanels" && hasRemoteAccessPanels)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Remote Access panels", name));
+					if (type == "remoteBoothWindowShutters" && hasRemoteBoothWindowShutters)
+						throw SerializationException(std::format(
+							"Serialized Agent tag #{} contains more than one Remote BoothWindow shutters", name));
 					if (type == "mobilityProfile" && hasMobilityProfile)
 						throw SerializationException(std::format(
 							"Serialized Agent tag #{} contains more than one Mobility profile",
@@ -2641,10 +2954,33 @@ namespace core
 						tag->setColour({ colour, revision });
 						hasColour = true;
 					}
+					else if (type == "objectUsage")
+					{
+						auto value = serializer.readString("value");
+						ObjectUsage mode;
+						if (tag->getObjectUsage() || !parseObjectUsage(value, mode))
+							throw SerializationException("Duplicate or invalid Object usage");
+						tag->setObjectUsage({ mode, revision });
+					}
+					else if (type == "objectUsageDistance")
+					{
+						if (tag->getObjectUsageDistance()) throw SerializationException("Duplicate Object usage distance");
+						tag->setObjectUsageDistance({ serializer.readFloat("value"), revision });
+					}
 					else if (type == "permissionAdherence")
 					{
 						tag->setPermissionAdherence({ serializer.readBool("value"), revision });
 						hasPermissionAdherence = true;
+					}
+					else if (type == "remoteAccessPanels")
+					{
+						tag->setRemoteAccessPanels({ serializer.readBool("value"), revision });
+						hasRemoteAccessPanels = true;
+					}
+					else if (type == "remoteBoothWindowShutters")
+					{
+						tag->setRemoteBoothWindowShutters({ serializer.readBool("value"), revision });
+						hasRemoteBoothWindowShutters = true;
 					}
 					else if (type == "mobilityProfile")
 					{

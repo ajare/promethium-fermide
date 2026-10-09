@@ -131,6 +131,14 @@ namespace core
 				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
 				return;
 			}
+			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
+				&& !mWorld.canAgentUseLiftJourney(request->mResource, request->mSourceEndpoint,
+					request->mDestinationEndpoint, request->mOwner))
+			{
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
+				mWorld.replanAgentAfterAuthorizationRefusal(request->mOwner);
+				return;
+			}
 			// Recheck destination willingness before joining the boarding queue. The
 			// shared Platform lift destination requirement applies at every origin,
 			// and a stale Path cannot bypass a grant, requirement, or effective-
@@ -250,6 +258,14 @@ namespace core
 			{
 				addLiftStopRequest(resource, destination, request->mOwner);
 				resource.mLiftPassengerDestinations[request->mOwner] = destination;
+				return;
+			}
+			auto actor = mWorld.mAgents.find(request->mOwner);
+			if (actor && actor->getObjectUsage() != ObjectUsage::Arms
+				&& !mWorld.agentCanRemotelySelectLiftDestination(request->mResource, *actor))
+			{
+				requestLiftPassengerSafeExit(request->mOwner, TraversalFailureReason::ControlRejected);
+				denyTraversalRequest(requestId, TraversalFailureReason::ControlRejected);
 				return;
 			}
 			if (!request->mPreparationRequested)

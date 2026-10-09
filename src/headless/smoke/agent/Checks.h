@@ -18,6 +18,8 @@ namespace agent_smoke
 	void registerHeight(std::vector<smoke::Check>& checks);
 	void registerIndividualProperties(std::vector<smoke::Check>& checks);
 	void registerAgentTypes(std::vector<smoke::Check>& checks);
+	void registerNoneUsage(std::vector<smoke::Check>& checks);
+	void registerRemoteIntegration(std::vector<smoke::Check>& checks);
 	void registerAgentTypeEditor(std::vector<smoke::Check>& checks);
 	void registerGroupEditor(std::vector<smoke::Check>& checks);
 	void registerGroupAssignmentEditor(std::vector<smoke::Check>& checks);

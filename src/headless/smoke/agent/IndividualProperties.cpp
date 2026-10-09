@@ -128,7 +128,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Waiting aversion");
 	require(registry->setAgentTagWaitingAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const registryYaml = serialize(*registry);
-	require(registryYaml.find("version: 14") != std::string::npos
+	require(registryYaml.find("version: 17") != std::string::npos
 		&& registryYaml.find("type: ladderSpeedModifier") != std::string::npos
 		&& registryYaml.find("type: waitingAversion") != std::string::npos
 		&& registryYaml.find("min: 2.5") != std::string::npos,
@@ -142,7 +142,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Crowd aversion");
 	require(registry->setAgentTagCrowdAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const crowdRegistryYaml = serialize(*registry);
-	require(crowdRegistryYaml.find("version: 14") != std::string::npos
+	require(crowdRegistryYaml.find("version: 17") != std::string::npos
 		&& crowdRegistryYaml.find("type: crowdAversion") != std::string::npos
 		&& crowdRegistryYaml.find("min: 2.5") != std::string::npos,
 		"The Agent tag Crowd aversion range was not persisted");
@@ -155,7 +155,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Risk aversion");
 	require(registry->setAgentTagRiskAversion(tag, { 2.5f, 2.5f }, &diagnostic), diagnostic);
 	auto const riskRegistryYaml = serialize(*registry);
-	require(riskRegistryYaml.find("version: 14") != std::string::npos
+	require(riskRegistryYaml.find("version: 17") != std::string::npos
 		&& riskRegistryYaml.find("type: riskAversion") != std::string::npos,
 		"The Agent tag Risk aversion range was not persisted");
 	require(registry->addAgentTagRouteFamiliarity(tag, &diagnostic), diagnostic);
@@ -167,7 +167,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		"Agent tag accepted an out-of-range Route familiarity");
 	require(registry->setAgentTagRouteFamiliarity(tag, { 0.75f, 0.75f }, &diagnostic), diagnostic);
 	auto const familiarityRegistryYaml = serialize(*registry);
-	require(familiarityRegistryYaml.find("version: 14") != std::string::npos
+	require(familiarityRegistryYaml.find("version: 17") != std::string::npos
 		&& familiarityRegistryYaml.find("type: routeFamiliarity") != std::string::npos,
 		"The Agent tag Route familiarity range was not persisted");
 	require(registry->addAgentTagRoutePersistence(tag, &diagnostic), diagnostic);
@@ -310,7 +310,7 @@ void individualPropertiesOverrideTagPropertiesAndPersist()
 		&& diagnostic.find("invalid Mobility use") != std::string::npos,
 		"An invalid individual Mobility use was accepted");
 	auto const yaml = serialize(*world);
-	require(yaml.find("version: 61") != std::string::npos
+	require(yaml.find("version: 64") != std::string::npos
 		&& yaml.find("individualProperties") != std::string::npos
 		&& yaml.find("stairSpeedModifier") != std::string::npos
 		&& yaml.find("ladderSpeedModifier") != std::string::npos
