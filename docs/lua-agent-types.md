@@ -171,6 +171,15 @@ fields, supported poses and automatic choices into the physical baseline used by
 estimates, rendering, bounds and placement. Later Lua changes cannot alter that
 baseline. Type ID/resource identity cannot be changed on an existing Agent.
 
+The instance returned by `new()` must not define a `behaviour` member, even a
+function or a non-function value. Preflight and live construction reject it as
+reserved for the runtime-owned Installed behaviour. This is a host-mediated
+association in the separate behaviour runtime, not a Lua closure stored on the
+type instance. The reservation does not bump the Agent-type API version; it does
+not let type scripts install default behaviours. See
+[ADR 0021](adr/0021-run-installed-agent-behaviours-as-coroutines.md) and the
+[Host API v3 behaviour guide](agent-behaviour-packages.md).
+
 There are no automatic callbacks, method calls from behaviours or Actions, or
 cross-script invocation API. Agent behaviours retain movement-intent ownership;
 Actions and Furniture use retain their existing responsibilities (ADRs 0008 and

@@ -2,6 +2,12 @@
 
 Status: accepted (amended)
 
+[ADR 0021](0021-run-installed-agent-behaviours-as-coroutines.md) adds the
+host-mediated Installed behaviour association in the separate behaviour runtime
+and reserves `behaviour` on Agent-type instances. It changes behaviour execution
+to Host API v3 coroutines without merging Lua states, bumping the Agent-type API
+or introducing the cross-script method API deferred here.
+
 Approved follow-on [ADR 0020](0020-declare-agent-pose-capabilities-and-furniture-pose-requirements.md)
 extends the frozen baseline to supported poses and automatic selection rules under
 Agent-type API v2. The declaration and frozen-data migration is implemented in

@@ -1,22 +1,20 @@
 # Agent behaviour registry packages
 
-> Integration note (#532): `master` accepts only Host API v3 coroutine
-> factories with `wait()` and `sleep(ticks)`. Named timers are removed.
-> The callback/v1/v2 and timer authoring sections below describe the previous
-> contract; use [Coroutine behaviour integration](coroutine-behaviour-integration.md).
-> Full authoring-document migration is tracked by #533.
-
 A saved World can create or select an adjacent `*.behaviours` directory in
 **World → Behaviours**. Pause the World first. The package contains a
-`behaviours.yaml` manifest and ordinary Lua source files. The panel lists names,
-revisions, source paths, and configuration schemas. Edit these files externally
+`behaviours.yaml` manifest and ordinary Lua source files. Edit these externally
 and use **Reload registry**; all loaded dependent Worlds must be paused.
 Loading and reload execute each module and its factory in a fresh budgeted scratch
-state to validate the contract. Agent callbacks are never run during preflight.
+state to validate the contract, but do not resume the returned behaviour body.
 
-For `station.world.yaml`, Create makes `station.behaviours/behaviours.yaml`. Creation
-refuses an occupied destination, including a dangling symlink. Detach changes
-only the World reference, not the package files.
+For `station.world.yaml`, Create makes `station.behaviours/behaviours.yaml`.
+Creation refuses an occupied destination, including a dangling symlink. Detach
+changes only the World reference, not the package files.
+
+The supported contract is **Host API v3 only**. The callback-table contract and
+Host APIs v1/v2 are rejected, not compatibility modes. The decision and its
+relationship to the earlier runtime design are recorded in
+[ADR 0021](adr/0021-run-installed-agent-behaviours-as-coroutines.md).
 
 ## Manifest version 1
 
@@ -72,235 +70,235 @@ Source paths use `/` separators and are relative to the package. Absolute paths,
 traversal, missing files, and symlinks escaping the package are refused. The
 manifest itself must also resolve inside the package. Sources must end in `.lua`.
 Helper import names are case-sensitive dotted Lua identifiers such as
-`schedule.clock`; path separators, `..`, extensions, and the reserved
-`promethium.v1` and `promethium.v2` names are invalid.
+`schedule.clock`; path separators, `..`, extensions, and reserved host-module
+names such as `promethium.v3` are invalid helper names.
 
 Schema types are `boolean`, `integer`, `number`, `string`, `duration` (simulation
-ticks), `marker`, `action`, `list`, and `record`. Lists have exactly one child; records
-have at least one child with unique field names. Scalars have no children.
+ticks), `marker`, `action`, `list`, and `record`. Lists have exactly one child;
+records have at least one child with unique field names. Scalars have no children.
 Nesting is limited to 16 levels and each configured List to 4,096 elements.
 Required and optional/default validation applies recursively and diagnostics use
-paths such as `schedule[2].destination`. Omit `schema` for no configuration
-fields. The generated editor presents Records as fields and Lists as ordered
-entries with add, remove, move, duration, and named Marker controls; IDs and raw
-YAML are not exposed.
+paths such as `schedule[2].destination`. Omit `schema` for no configuration fields.
+The generated editor presents Records as fields and Lists as ordered entries
+with add, remove, move, duration, and named Marker controls; IDs and raw YAML are
+not exposed.
 
-## Lua module contract
-
-Only text Lua source is accepted; precompiled bytecode is refused. The standard
-`package` library is not enabled. The custom `require` resolves exactly the
-immutable built-in `promethium.v1` and `promethium.v2` modules and logical helper
-names declared in this manifest; it never derives a filesystem path and cannot load native modules.
-Undeclared, absolute, traversal, and path-like imports are refused. I/O, OS,
-environment, filesystem, debug, coroutine, dynamic loading, entropy, and wall
-clock facilities are absent. Scripts receive only selected base operations and
-immutable `table`, `string`, `math`, and `utf8` libraries; `string.dump`,
-`math.random`, and `math.randomseed` are excluded. `pairs` and `next` iterate
-keys in a defined order — booleans (`false` before `true`), then numbers
-ascending, then strings in byte order — so the per-state string hash seed cannot
-reach behaviour decisions; identity-bearing keys are refused because no
-cross-process order exists for them. `pairs` drives that same `next`, so a key
-removed during a loop is simply no longer visited. `tostring` renders
-identity-bearing values as a stable type label (`table`, `function`, or
-`userdata`) instead of a process address, and `string.format` refuses the `%p`
-conversion and routes `%s` through that same representation, including through
-the `value:format(...)` method form. Import cycles are rejected
-during deterministic preflight with the complete dependency chain. A helper may
-return any Lua value; table exports (including nested tables) are immutable, and
-repeated imports within one Agent resolve through that Agent's private cache.
-
-Each World has a custom-allocated Lua heap with a configurable 64 MiB default.
-Every protected module load, factory, and callback receives a fresh configurable
-100,000-instruction default budget. Lua errors, conversion errors, and either
-budget being exhausted disable the affected live instance through the same
-protected boundary and produce a structured runtime diagnostic; a refused heap
-growth does not invalidate the World's Lua state.
-
-Agent logging is bounded independently of the Lua heap so a callback cannot
-stage unbounded host memory. Each message is capped at a configurable 4 KiB
-default and truncated on a text boundary with a marker, and each log window
-publishes at most a configurable 100 messages / 256 KiB default. Messages beyond
-the window allowance are never copied, and one bounded warning reports the
-suppression for the window. Logs staged by a callback that later fails are not
-published.
-
-Behaviour modules obtain the immutable versioned host boundary through
-`require("promethium.v2")` (API version 2) or the retained `promethium.v1`
-(API version 1), and must return this shape:
+## Coroutine module contract
 
 ```lua
-local promethium = require("promethium.v2")
+local host = require("promethium.v3")
 
 return {
-  api_version = promethium.api_version,
+  api_version = host.api_version,
   factory = function(configuration)
-    return {
-      -- All callbacks are optional. Preflight validates but does not call them.
-      -- Live instances receive the same immutable configuration as a second
-      -- argument; it is also available as context.configuration.
-      on_start = function(context, configuration)
-        local result = context.move_to(configuration.destination)
-        if not result.accepted then error(result.status) end
-      end,
-      on_event = function(event, context) end,
-      on_timer = function(name, context) end,
-      on_route_lost = function(destination, reason, context) end,
-      on_stop = function(reason, context) end,
-    }
+    -- Private state belongs to this Agent's factory closure and coroutine.
+    return function(context)
+      local request = context.move_to(configuration.destination)
+      if not request.accepted then
+        context.log(request.status)
+        return
+      end
+      while true do
+        local event = wait() -- context.wait() is equivalent
+        if event.type == "destination_reached" then
+          sleep(configuration.dwellTicks) -- positive whole simulation ticks
+          return
+        elseif event.type == "route_lost"
+            or event.type == "movement_cancelled"
+            or event.type == "action_failed" then
+          return
+        end
+      end
+    end
   end,
 }
 ```
 
-Preflight reports Loaded or Error per behaviour in the registry panel, including
-package/module/line diagnostics and protected-call tracebacks. Configuration
-assignment is authored separately. At the first simulation boundary, every
-assigned Agent executes the complete behaviour/helper graph in a private module
-environment with private closures, upvalues, exports, and import cache;
-`on_start` runs once in Agent-ID order. `context.move_to` accepts an opaque
-Marker handle from validated configuration. V2 also accepts a named Marker string
-and an optional second argument selecting a stable Action reference; omitted/nil
-Actions resolve to Idle. Names resolve once to stable Marker identities before
-commands are staged. Unknown/unoffered Actions return `unavailable_action` through
-the same World request validator as editor requests, never fall back to Idle.
-V1 retains its Marker-handle/omitted-Idle contract. `context.cancel_movement` requests
-cancellation at the next safe boundary. Both return an immutable semantic result
-with `accepted` and `status` fields. Repeating the current Marker and Action reports
-`no_op` without restarting Route planning. Changing the Action at the same Marker
-is a replacement, not a duplicate. In v2 an accepted replacement reports
-`superseded` and stages one `movement_cancelled` event with reason `superseded`
-for the previous destination; explicit cancellation uses reason `explicit`.
-A committed crossing or occupied-resource journey finishes safely before the
-replacement starts Route planning. Issuing more than one movement command in one
-callback disables that instance as a programming error without applying the
-callback's commands. Conflicting commands staged by separate callbacks at the
-same boundary still report `agent_busy`.
-Context capabilities expire when the callback returns, and queued movement is
-applied only after callbacks return. Each instance uses its module's declared
-`api_version`; a registry may mix versions and reload may migrate one module
-independently. V2 exposes `route_planning` in the semantic Agent movement state;
-v1 maps it to `idle`, rejects different-destination replacements with `agent_busy`,
-and never delivers a `superseded` cancellation. Explicit cancellation remains
-unchanged in both versions. Neither version exposes exact planning timers or
-internal deterministic random state. Both versions also expose
+The module returns `api_version = 3` and a `factory(configuration)` that returns
+a function taking the host context, **not a callback table**. Configuration is
+immutable and also available as `context.configuration`. Preflight validates
+this shape without running the returned function. It reports Loaded or Error in
+the registry panel with package/module/line diagnostics and protected tracebacks.
+
+At the first simulation boundary, each assigned Agent executes its module/helper
+graph in a private environment with independent closures, upvalues, exports and
+import cache. The initial resume supplies the context; `wait()` returns one
+immutable semantic event on a later resume. There is no automatic per-tick
+polling. Context command proxies remain usable across waits and are validated
+against the active resume. Snapshot fields in a retained context are startup
+observations, not live mutable World objects; event ticks describe later outcomes.
+
+### Wait and sleep
+
+- `wait()` / `context.wait()` suspends until the next semantic event and returns
+  that event. Events are delivered exactly once in event-sequence order, within
+  stable Agent-ID order at a boundary.
+- `sleep(ticks)` / `context.sleep(ticks)` suspends for pure time and returns no
+  values. A sleep begun at boundary N completes at N + ticks. The duration must
+  be a positive integer; missing, non-numeric, fractional, zero and negative
+  values are errors.
+- Events cannot interrupt sleep. They are retained in the bounded pending queue
+  and delivered by subsequent waits. Sleeping again retains undelivered events.
+  Sleep completion consumes a resume budget slot but consumes no event.
+- Pause freezes simulation time and preserves the coroutine and random stream.
+  Deactivation freezes remaining sleep, clears pending events, and prevents
+  resumes and event accumulation. Reactivation queues `activated` for the same
+  instance; it does not interrupt remaining sleep or restart the body.
+
+`set_timer`, `cancel_timer`, named timer events and timer budgets are removed.
+Use waits for events and sleeps for time, not callback or timer bookkeeping.
+
+### Commands and outcomes
+
+`context.move_to(marker, action)` accepts an opaque Marker handle from validated
+configuration or a case-sensitive named Marker string. Names resolve to stable
+identities before staging. The optional Action is a stable reference; omitted/nil
+means Idle. Unknown/unoffered Actions return `unavailable_action`, never silently
+fall back to Idle. `context.cancel_movement()` requests cancellation. Both return
+immutable results with `accepted` and `status` fields.
+
+Repeating the current Marker and Action reports `no_op` without restarting Route
+planning. An accepted replacement reports `superseded` and produces a
+`movement_cancelled` event with reason `superseded`; explicit cancellation uses
+`explicit`. A committed crossing or occupied-resource journey finishes safely
+before replacement Route planning begins. `route_planning` is a semantic movement
+state; exact planning timers and internal random state are not exposed.
+
+Issue **at most one movement intent per resume**, including cancellation. A second
+is a programming error and that resume's staged commands are discarded.
+Conflicting commands in separate resumes at the same boundary can report
+`agent_busy`. Successful command batches apply through the World facade after
+all boundary resumes, before intent collection; a staged result is not physical
+arrival or completion.
+
 `grant_access_permission(name)`, `revoke_access_permission(name)`,
-`assign_permission_set(name)`, and `unassign_permission_set(name)` for the
-behaviour's Agent. Names resolve case-sensitively at the callback boundary;
-unknown or renamed names fail the callback with a visible runtime diagnostic.
-Each operation returns the same immutable `accepted`/`status` result shape,
-using `accepted` for a change and `no_op` when the requested current state
-already holds. Successful changes are runtime overlays: they affect routing and
-control authorization after the callback batch, survive pause/resume, never
-dirty or enter the World document, and are discarded by Reset simulation.
-`context.random_integer(minimum, maximum)` returns an inclusive integer and
-`context.random_number()` returns a number in `[0, 1)`. Their private stream is
-derived from the authored World random seed,
-Agent ID, and behaviour ID. Pause/resume retains stream position; reset, document
-reload, and registry reload recreate it. Lua's `math.random` and
-`math.randomseed` remain unavailable.
+`assign_permission_set(name)`, and `unassign_permission_set(name)` affect this
+Agent only. Unknown/renamed names fail the resume. Results use `accepted` for a
+change and `no_op` when the state already holds. These runtime overlays affect
+routing and control authorization after the resume batch, survive pause/resume,
+never dirty or enter the document, and are discarded by Reset.
 
-`on_event` receives immutable `destination_reached` and `movement_cancelled`
-values in stable event-sequence order. Both carry `tick`, `sequence`, and an
-opaque `destination`; cancellation also carries the semantic reason `explicit`
-(or `superseded` in v2).
-It also receives `interaction_completed` with an opaque `interaction`, display
-`name`, and `result` (`succeeded` or `succeeded_with_best_effort_failure`), and
-`interaction_failed` with the same identity/name fields and a `reason` of
-`failed`, `rejected`, or `cancelled`. Request snapshots, actors, operations, and
-device internals are not exposed. `on_route_lost` receives the opaque destination
-and one of `unreachable`, `topology_changed`, or `destination_removed` after the
-engine has cleared the old goal. An additive fourth argument contains the immutable
-`route_lost` outcome (`destination`, `action`, `result = "failed"`, `reason`,
-`tick`, `sequence`); existing three-argument callbacks remain valid. Successful automatic same-destination replanning
-remains internal and does not call Lua.
+`context.random_integer(minimum, maximum)` returns an inclusive integer;
+`context.random_number()` returns a number in `[0, 1)`. The private stream derives
+from World random seed, Agent ID and behaviour ID. Reset, document reload and
+registry reload recreate it; Lua's `math.random` and `math.randomseed` are absent.
 
-Deactivating an assigned Agent freezes each timer at its remaining duration and
-queues one immutable `deactivated` event. Other events, timers, and commands stay
-suspended. Reactivation queues `activated`, restores those relative durations,
-and resumes the same private instance without rerunning `on_start`. Ordinary
-pause/resume does not alter instance state, timers, or random streams. Reset
-tears instances down and recreates them from authored configuration.
+Events returned by waits include:
 
-`on_stop` receives a reason and a read-only context containing only
-`configuration`, `tick`, and the final semantic Agent `state`/`agent` view. It has
-no movement, timer, or random capabilities. Reasons are `unassignment`, `reset`,
-`reload`, `world_close`, `instance_failure`, and `behaviour_deletion`.
-Teardown is best-effort: an `on_stop` error is diagnosed but cannot retain the
-instance or veto the lifecycle operation.
+- `destination_reached`: successful physical arrival and completion of the
+  selected synchronous Action, including Idle.
+- `movement_cancelled`: cancellation, with reasons including `explicit`,
+  `superseded`, `target_deleted` and `action_unavailable`.
+- `route_lost`: cleared goal with reason `unreachable`, `topology_changed` or
+  `destination_removed`. Successful same-destination replanning stays internal.
+- `action_failed`: host refusal (`reason = "refused"`) or Action script failure
+  (`reason = "script_error"`), with bounded `diagnostic` and `script_failure`.
+- `interaction_completed`: opaque `interaction`, display `name`, and `result`
+  (`succeeded` or `succeeded_with_best_effort_failure`).
+- `interaction_failed`: the same interaction identity/name and `reason`
+  (`failed`, `rejected` or `cancelled`).
+- `activated`: reactivation of the suspended instance. Inactive Agents receive
+  no resumes, including no deactivation callback.
 
-Headless compatibility coverage runs with `pf-smoke-behaviours` and
-`pf-smoke-behaviours-editor` (CTest `smoke-behaviours` and
-`smoke-behaviours-editor`). Use `--list` and `--check <name>` for individual
-scenarios; the legacy `--agent-behaviour-checks` selection is retired (#289).
-It covers mixed-version commands, events, preflight and reload, v1-to-v2 source
-migration, automatic replanning and Route loss in both versions, and repeated
-trips using the bundled patrol and random-wander sources.
+Movement outcomes carry opaque `destination`, stable `action`, `result`
+(`succeeded`, `failed`, `cancelled`), `tick` and `sequence`. No actors, request
+snapshots, device internals or traversal coordination data are exposed.
+`context.agent.selected_action` describes startup pending intent (Idle if none).
+Action script failures retain the pause/headless-failure policy; their queued
+outcome is delivered after public simulation resume. An ordinary host refusal
+is not a behaviour programming error.
 
-## Selecting Actions and observing activity outcomes (#460)
+## Selecting Actions
 
-An `action` schema field stores a stable built-in/registry reference, not its display
-name or Lua code. It is marshalled as an immutable Lua string. Declare an optional
-Idle default with `type: action`, `required: false`, `default: idle`. The generated
-configuration editor offers Idle and loaded Actions offered by World Markers,
-using display names; request validation still checks the actual selected target.
-Unknown references reject assignment without changing the document/history.
-YAML/binary documents, nested configuration and clipboard retain the typed identity.
-Registry removal/replacement refuses to invalidate authored Action configuration;
-clear/change the referencing configuration first. Removing a Marker's offer is
+An `action` schema field stores a stable built-in/registry reference, not its
+name or Lua code; Lua receives an immutable string. Declare an optional Idle
+with `type: action`, `required: false`, `default: idle`. The editor offers Idle
+and loaded Actions offered by World Markers; requests still validate the target.
+Unknown references reject assignment without changing document/history.
+Nested configuration, documents and clipboard retain typed identity. Registry
+removal/replacement refuses to invalidate authored Action configuration;
+clear/change referencing configuration first. Removing a Marker's offer is
 allowed and cancels pending activity with `action_unavailable`.
 
-```lua
-return {api_version = require('promethium.v2').api_version,
-  factory = function(configuration)
-    return {
-      on_start = function(context)
-        local request = context.move_to(configuration.destination, configuration.action)
-        if not request.accepted then context.set_timer('retry', 60) end
-      end,
-      on_event = function(event, context)
-        if event.type == 'destination_reached' and event.action == configuration.action then
-          context.move_to(configuration.next_destination) -- Idle; behaviour stays enabled
-        elseif event.type == 'action_failed' then
-          context.log(event.reason .. ': ' .. event.diagnostic)
-          context.move_to(configuration.next_destination)
-        end
-      end,
-      on_timer = function(name, context)
-        context.move_to(configuration.destination, configuration.action)
-      end
-    }
-  end}
-```
+To select an Action, replace the sample's request with
+`context.move_to(configuration.destination, configuration.action)` and handle
+`action_failed` alongside arrival, cancellation and Route loss in the wait loop.
+Idle schedules no activity and does not finish a coroutine by itself.
 
-Movement outcomes carry `destination` (opaque stable Marker), `action` (stable
-reference), `result` (`succeeded`, `failed`, `cancelled`), `tick` and `sequence`.
-`destination_reached` is successful physical arrival **and** completion of the
-selected synchronous Action, including Idle. `action_failed` reports ordinary
-host refusal as `reason = "refused"`, or script failure as `reason = "script_error"`,
-with a bounded `diagnostic` and `script_failure` (`none`, `lua_error`,
-`memory_budget_exceeded`, `instruction_budget_exceeded`, `conversion_error`).
-Cancellation reasons include `explicit`, `superseded`, `target_deleted` and
-`action_unavailable`. These outcomes are delivered in existing stable event order;
-route loss retains its existing callback. `context.agent.selected_action` describes
-pending intent (Idle when no request remains). No private coordination data is exposed.
+## Completion, teardown and type-script reservation
 
-Action exceptions/budget failures retain the pause/headless-failure policy. Their
-queued behaviour outcome is delivered after public simulation resume, without
-turning an ordinary host refusal into a behaviour programming error. Idle schedules
-nothing and never disables the assigned behaviour. Existing timer, deactivation,
-replacement and committed safe-exit rules remain unchanged.
+Returning from the body completes the Installed behaviour and reinstalls the
+host-recognized default no-op, which is never resumed. Commands from the final
+successful resume apply normally; already-issued movement continues
+**fire-and-forget**. The authored assignment remains unchanged but does not
+restart completed work. Behaviours cannot assign themselves successors;
+assignment and configuration remain paused-only authored operations.
 
-## World persistence
+Unassignment, Reset, load, reload, World close, instance failure and behaviour
+deletion discard runtime state as appropriate. Reset, load, reload and deleted-
+Agent restoration create fresh closures from authored configuration and start
+from the top. Teardown closes suspended threads with Lua 5.4 coroutine-close
+semantics, running scoped `<close>` / `__close` cleanup under an instruction
+budget without resuming the body. Cleanup failures are diagnosed and cannot
+retain the instance or veto teardown. There is no `on_stop` callback.
 
-World documents use the required `.world.yaml` filename suffix. World version **15** renames vertical-position fields from Deck to Level. Version 14 stores the authored deterministic random seed and nested
-List/Record configuration values. Version 13 introduced scalar per-Agent
-assignments, version 12 the package directory basename and expected UUID, and
-version 11 named Marker identity. Older versions continue to load with a zero
-seed and with only the behaviour data their version supports. UUID substitution
-and invalid packages refuse managed opening without replacing the current
-World. Live Lua state, timers, and random-stream position are never persisted.
+Agent-type `.agent.lua` instances must **not define a `behaviour` member**:
+preflight and construction reject it as reserved for the runtime-owned Installed
+behaviour. This is a host-mediated association in the separate behaviour runtime,
+not a closure stored on the type table or a cross-script invocation API. The
+Agent-type API version is unchanged by this reservation. See
+[Agent type authoring](lua-agent-types.md).
 
-Save As copies the complete managed package (manifest, behaviour sources, and
-helper modules) beside the copied World without clobbering an occupied
-destination. Clipboard portability and Save As verification are covered by #163;
-the complete release workflow and manual GUI checklist are recorded in
-`agent-behaviour-verification.md`.
+## Sandbox and containment
+
+Only text Lua is accepted; bytecode is refused. The custom `require` resolves
+only `promethium.v3` and manifest-declared helper names, never filesystem paths
+or native modules. I/O, OS, environment, filesystem, debug, direct `coroutine`,
+dynamic loading, entropy and wall clock facilities are absent. Selected base
+operations and immutable `table`, `string`, `math` and `utf8` libraries are
+available; `string.dump`, `math.random` and `math.randomseed` are excluded.
+
+`pairs` and `next` order boolean keys (`false`, then `true`), numbers ascending,
+then strings in byte order; identity-bearing keys are refused. Removed keys are
+not subsequently visited. `tostring` uses stable type labels for identity-bearing
+values; `string.format` refuses `%p` and uses the same representation for `%s`,
+including method-form formatting. Import cycles report the dependency chain.
+Helper tables, including nested exports, are immutable; imports use each Agent's
+private cache.
+
+The default per-World Lua heap is 64 MiB; protected module loads, factories and
+resumes have a 100,000-instruction default budget. Pending events are bounded
+by `pendingEventsPerInstance` (default 64). Existing limit fields
+`callbacksPerBoundary` and `commandsPerCallback` now govern resumes per boundary
+and commands per resume; `instructionsPerCall` governs execution. Queue overflow,
+resume-cap exhaustion, Lua/conversion errors and budget exhaustion publish
+structured diagnostics, tear down the instance, reinstall the default and pause
+interactive simulation before the next tick; headless execution fails. A refused
+heap growth does not invalidate the World's Lua state.
+
+Logging has independent bounds: default 4 KiB per message, truncated on a text
+boundary with a marker, and 100 messages / 256 KiB per window. Excess messages
+are not copied; one bounded warning reports suppression. Logs from a failed
+resume are not published.
+
+## Persistence and verification
+
+World documents use `.world.yaml`. Version 15 renamed Deck fields to Level;
+version 14 introduced the authored random seed and nested List/Record
+configuration; version 13 scalar assignments; version 12 package basename and
+expected UUID; version 11 Marker identity. Older documents retain their supported
+behaviour data and use a zero seed where absent. UUID substitution and invalid
+packages refuse opening without replacing the current World.
+
+Only authored assignment/configuration persists: no coroutine stack, live Lua
+state, pending events, sleep duration or random-stream position is serialized.
+Save As copies the complete managed package beside the World without clobbering
+an occupied destination.
+
+Release coverage uses `pf-smoke-behaviours` and `pf-smoke-behaviours-editor` via
+CTest. It covers independent instances, deterministic resume/event ordering,
+wait/sleep, completion, fire-and-forget movement, lifecycle, preflight rejection,
+budgets, failures and bundled patrol/wander trips. Integration history is in
+[Coroutine behaviour integration](coroutine-behaviour-integration.md); the public
+workflow and GUI checklist are in
+[Agent behaviour verification](agent-behaviour-verification.md).

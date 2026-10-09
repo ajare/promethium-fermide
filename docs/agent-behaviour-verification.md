@@ -1,5 +1,12 @@
 # Agent behaviour end-to-end verification
 
+The early ticket/coverage records below describe the original callback-era
+feature. Current behaviour authoring is Host API v3 coroutine-only; see
+[the authoring guide](agent-behaviour-packages.md) and
+[ADR 0021](adr/0021-run-installed-agent-behaviours-as-coroutines.md). Integrated
+Release validation is recorded in
+[Coroutine behaviour integration](coroutine-behaviour-integration.md).
+
 Ticket #164 closes the Agent behaviour feature with one public-facade workflow and
 an explicit prerequisite coverage map. The automated workflow is
 now split between `src/headless/smoke/behaviours/Workflow.cpp` and
@@ -110,10 +117,10 @@ Only value-only failure and source records are shared through
 `core/ScriptExecution.h`; Lua and sol2 do not enter domain interfaces.
 
 The behaviour adapter still owns the World runtime and per-Agent instances,
-behaviour contract/factory validation, capabilities, command/timer/random-state
-transactions, stable callback ordering, next-boundary command application and
-interactive/headless failure policy. Log staging is published only after a
-successful callback and discarded on failure, as before. There is no second
+behaviour contract/factory validation, capabilities, command/random-state
+transactions, coroutine waits/sleeps and pending events, stable resume ordering,
+boundary command application and interactive/headless failure policy. Log staging
+is published only after a successful resume and discarded on failure. There is no second
 unrestricted runtime and no Action, Furniture format, or editor change.
 
 Verification uses the existing public World/registry workflows and sandbox
@@ -169,9 +176,9 @@ second simulation implementation.
    path controls are disabled while appropriate. Pause and confirm authored
    controls return; remove/disable the behaviour and confirm manual movement
    returns.
-5. Trigger one behaviour callback failure. Confirm simulation pauses, the Agent
+5. Trigger one behaviour coroutine resume failure. Confirm simulation pauses, the Agent
    status changes, the structured diagnostic identifies World/behaviour/
-   Agent/callback/tick, traceback expansion works, and **Clear** removes the
+   Agent/resume/tick, traceback expansion works, and **Clear** removes the
    displayed diagnostic without changing authored data.
 6. Exercise used-behaviour deletion and used registry detach/switch. Read the
    complete consequence text, cancel once with no changes, then confirm once and

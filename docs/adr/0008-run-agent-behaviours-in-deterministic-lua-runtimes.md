@@ -1,6 +1,12 @@
 # Run Agent behaviours in deterministic per-World Lua runtimes
 
-Status: accepted
+Status: accepted (amended)
+
+[ADR 0021](0021-run-installed-agent-behaviours-as-coroutines.md) supersedes the
+callback-table and named-timer contract below with Host API v3 coroutines and
+`wait()` / `sleep(ticks)`. The isolation, determinism, containment and authored-only
+persistence decisions remain: rejecting serialization of coroutines does not
+reject running them.
 
 Agents may be assigned reusable Lua Agent behaviours from an external Agent behaviour registry, with typed per-Agent configuration and private per-Agent behaviour state. Each World owns one sandboxed Lua 5.4 runtime through a sol2 adapter; behaviour callbacks run synchronously in stable Agent and event order at fixed-tick boundaries, observe immutable semantic values, and enqueue validated commands through the World facade. Lua never receives mutable domain objects, paths, graph vertices, traversal coordination internals, filesystem or process access, and live Lua state is never persisted. This preserves deterministic simulation, keeps the scripting boundary versionable, and prevents scripts from bypassing World validation.
 

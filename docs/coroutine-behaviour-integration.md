@@ -1,8 +1,12 @@
-# Coroutine behaviour integration branch
+# Coroutine behaviour integration
+
+This is the migration and verification record. For current authoring, use
+[Agent behaviour registry packages](agent-behaviour-packages.md); the accepted
+contract decision is [ADR 0021](adr/0021-run-installed-agent-behaviours-as-coroutines.md).
 
 Issues #527–#530 implement coroutine execution, fixture migration, the
 Host API v3-only contract cut and pure-time sleep of #525 on `feature/coroutine-behaviours`.
-The branch now accepts only `api_version = 3` and `promethium.v3` imports.
+The integrated runtime accepts only `api_version = 3` and `promethium.v3` imports.
 Factories must return a coroutine function(context), not a callback table;
 legacy versions and callback-table factories receive migration diagnostics.
 #532 integrates that branch into `master` alongside #531's reserved Agent-type
@@ -84,7 +88,8 @@ independent v3 Agents rather than legacy version-dependent movement semantics.
 
 #528 migrated fixtures and resources; #529 removed callback dispatch and legacy
 Host API acceptance; #530 removed named timers and migrated dependent fixtures
-to sleep. Final ADR/authoring documentation (#533) remains a later slice.
+to sleep. #533 records the accepted ADR and replaces the obsolete authoring
+contract with the integrated Host API v3 guide.
 
 Validation: Release `pf-smoke-behaviours` and the behaviours CTest functional,
 CLI and concurrency contracts. The new `RuntimeCoroutines.cpp` checks cover
