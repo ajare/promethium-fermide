@@ -27,11 +27,3 @@ std::shared_ptr<const core::SectorObject> gHoveredSectorObject;
 std::shared_ptr<const core::SectorObject> gSelectedSectorObject;
 
 ImFont* gAgentIconFont{ nullptr };
-
-// The real implementation reads the mouse from the live viewport. Headless
-// there is no mouse; the renderer only consults this when
-// gUISettings.highlightNearestVertex is on, which the stub leaves off.
-core::Vector2 getMouseWorldPosition()
-{
-	return core::Vector2{ 0.0f, 0.0f };
-}

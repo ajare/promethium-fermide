@@ -397,6 +397,7 @@ target_include_directories(pf-imgui-cpu PUBLIC "${PF_INCLUDE_DIR}" "${PF_INCLUDE
 target_compile_features(pf-imgui-cpu PUBLIC cxx_std_20)
 
 add_library(pf-render STATIC
+    src/WorldViewportZoom.cpp
     src/Render.cpp
     src/WorldDrawList.cpp
     src/LocationPlanRender.cpp

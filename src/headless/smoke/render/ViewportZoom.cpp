@@ -30,6 +30,46 @@ void viewportZoom()
 {
 	auto const previousSettings = gUISettings;
 
+	// Exercise the same mouse conversion and World picking used by the canvas.
+	headless::ScopedImGuiContext imgui;
+	core::World picking("Zoom selection", 8, 4);
+	auto const room = picking.addRoom("Room", 0, 0, 0, 4, 1);
+	auto const corridor = picking.addCorridor(0, 2, 0, 4, 1);
+	picking.addRoom("Behind", 1, 0, 0, 4, 1);
+	auto const created = picking.addSectorDoor(0, 0, 2, {});
+	picking.finishBuild();
+	gUISettings = UISettings{};
+	gUISettings.worldViewportX = 73;
+	gUISettings.worldViewportY = 41;
+	gUISettings.worldViewportHeight = 700;
+	for (float zoom : { 1.0f, 0.25f, 0.5f, 2.0f, 4.0f })
+	{
+		gUISettings.worldZoom = zoom;
+		for (float pan : { 0.0f, -57.0f })
+		{
+			gUISettings.xOffset = pan;
+			gUISettings.yOffset = pan * 2;
+			auto mouseAt = [&](float x, float y) {
+				ImGui::GetIO().MousePos = {
+					gUISettings.worldViewportX + pan + x * CORE_CELL_WIDTH_PIXELS * zoom,
+					gUISettings.worldViewportY + gUISettings.worldViewportHeight
+						- gUISettings.yOffset - y * CORE_LEVEL_HEIGHT_PIXELS * zoom };
+				return getMouseWorldPosition();
+			};
+			for (auto const& [id, y] : { std::pair{ room, 0.5f }, std::pair{ corridor, 2.5f } })
+			{
+				auto position = mouseAt(1.5f, y);
+				require(picking.getSectorAtPosition(0, position.x, position.y) == picking.getSector(id),
+					"Canvas picked the wrong Room/Corridor at zoom " + std::to_string(zoom));
+			}
+			auto position = mouseAt(2.5f, 0.25f);
+			std::shared_ptr<const core::SectorObject> object;
+			picking.getObjectAtPosition(0, position.x, position.y, &object);
+			require(object == created.door.sector->getObject(created.door.index),
+				"Canvas picked the wrong object at zoom " + std::to_string(zoom));
+		}
+	}
+
 	// Zoom is a multiplier: zooming out can make the complete World fit.
 	auto zoomedOut = worldViewportLayout({ 500.0f, 400.0f },
 		{ 1000.0f, 800.0f }, 0.25f, 20.0f, 20.0f);

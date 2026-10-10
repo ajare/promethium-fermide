@@ -81,14 +81,3 @@ bool LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_wi
     IM_FREE(file_data);
     return ret;
 }
-
-
-core::Vector2 getMouseWorldPosition()
-{
-    auto mouseScreenPos = ImGui::GetMousePos();
-
-    return {
-        (mouseScreenPos.x - gUISettings.worldViewportX - gUISettings.xOffset) / CORE_CELL_WIDTH_PIXELS,
-        (gUISettings.worldViewportY + gUISettings.worldViewportHeight - mouseScreenPos.y - gUISettings.yOffset) / CORE_LEVEL_HEIGHT_PIXELS
-    };
-}

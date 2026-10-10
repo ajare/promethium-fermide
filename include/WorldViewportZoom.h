@@ -3,6 +3,9 @@
 #include <algorithm>
 
 #include "imgui/imgui.h"
+#include "core/Vector2.h"
+
+core::Vector2 getMouseWorldPosition();
 
 struct WorldViewportLayout
 {

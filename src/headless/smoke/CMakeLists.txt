@@ -488,6 +488,10 @@ pf_add_smoke_module(pf-smoke-render
     TIMEOUT 30
 )
 
+add_test(NAME viewport-zoom-selection COMMAND pf-smoke-render --check viewportZoom)
+set_tests_properties(viewport-zoom-selection PROPERTIES
+    LABELS "render;functional;smoke;validation-fast" TIMEOUT 30)
+
 add_test(NAME agent-pose-image-tiles COMMAND pf-smoke-render --check agentPoses)
 add_test(NAME agent-pose-bed-artwork COMMAND pf-smoke-render --check furniture/bedRenderOffset)
 set_tests_properties(agent-pose-image-tiles agent-pose-bed-artwork PROPERTIES
