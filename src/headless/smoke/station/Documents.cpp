@@ -214,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 67", "version: 64");
+		replaceAll(legacy, "version: 68", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -231,14 +231,14 @@ namespace
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 67", "version: 65");
+		replaceAll(staleStores, "version: 68", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
 		auto staleTransfers = withField;
-		replaceAll(staleTransfers, "version: 67", "version: 66");
+		replaceAll(staleTransfers, "version: 68", "version: 66");
 		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
 		writeFile(staleTransfersPath, staleTransfers);
 		refused = false;
@@ -246,7 +246,7 @@ namespace
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 67", "version: 64");
+		replaceAll(stale, "version: 68", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;
@@ -320,6 +320,91 @@ namespace
 		require(world.getStationSystemsSettings().enabled,
 			"reset lost the authored settings");
 	}
+	// #391: declared compositions and conversion rules travel through the
+	// real file seams as authored settings only; a reopened World replays the
+	// compound scenario identically, and pre-68 documents carrying the new
+	// fields are refused rather than silently dropped.
+	void compoundFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-compounds";
+		filesystem::create_directories(directory);
+		auto const food = core::ResourceCompositionSettings{0.8, 0.05, 0.0, 0.01, 0.02, 0.02, 17000.0};
+		auto const biomass = core::ResourceCompositionSettings{0.0, 0.04, 0.0, 0.005, 0.01, 0.005, 18000.0};
+		auto const waste = core::ResourceCompositionSettings{0.8, 0.08, 0.0, 0.02, 0.04, 0.04, 8000.0};
+		core::World original("Compound Round Trip", 2, 2);
+		enable(original, 2.0f,
+			{{"food", "kg", 100.0, 50.0, 0.0, 0.0, food},
+				{"biomass", "kg", 10.0, 1.0, 0.0, 0.0, biomass},
+				{"waste", "kg", 20.0, 0.0, 0.0, 0.0, waste}},
+			{});
+		auto settings = original.getStationSystemsSettings();
+		settings.conversions.push_back({
+			"harvest",
+			{{"food", 1.0}},
+			{{"biomass", 0.08}, {"waste", 0.4}},
+			0});
+		require(original.configureStationSystems(settings, true), "Compound settings edit failed");
+		original.resumeSimulation();
+		require(original.advanceTicks(60), "Compound original run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		require(expected.conversions.size() == 1
+			&& expected.constituentBalances.size() == 8,
+			"Compound scenario produced the wrong observable state");
+		for (auto const& entry : expected.constituentBalances)
+			require(std::abs(entry.residual)
+				<= expected.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
+				"Compound replay baseline exceeded constituent tolerance");
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("compound") + suffix);
+			original.saveTo(path.string());
+			auto const document = readFile(path);
+			require(document.find("composition") != std::string::npos
+				&& document.find("moisture") != std::string::npos
+				&& document.find("nutrientNitrogen") != std::string::npos
+				&& document.find("conversions") != std::string::npos
+				&& document.find("yieldPerSecond") != std::string::npos,
+				"authored compound fields missing from the document");
+			for (auto const* liveState : {"lastScale", "constituentLoss", "startingConstituents",
+				"currentQualified", "residual", "completedTicks", "elapsedSeconds"})
+				require(document.find(liveState) == std::string::npos,
+					std::string("live compound state leaked into the document: ") + liveState);
+			auto const reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"compound settings did not survive the file round trip");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(60), "Compound reopened run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"compound scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == original.getStationSystemsEvents(),
+				"compound event history is not reproducible from the document");
+		}
+		// A pre-68 document carrying the new fields is refused.
+		auto const withField = serializeYaml(original);
+		{
+			auto stale = withField;
+			replaceAll(stale, "version: 68", "version: 67");
+			auto const stalePath = directory / "stale-compounds.world.yaml";
+			writeFile(stalePath, stale);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(stalePath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a pre-68 document carrying compositions or conversions was silently accepted");
+		}
+		// A malformed composition in a file is rejected without creating
+		// material out of the reader's tolerance.
+		{
+			auto malformed = withField;
+			replaceAll(malformed, "moisture: 0.8", "moisture: 1.5");
+			auto const malformedPath = directory / "malformed-composition.world.yaml";
+			writeFile(malformedPath, malformed);
+			bool refused = false;
+			try { (void)core::loadWorldDocument(malformedPath); }
+			catch (std::exception const&) { refused = true; }
+			require(refused, "a malformed moisture fraction was accepted from a file");
+		}
+	}
 }
 
 void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
@@ -328,4 +413,5 @@ void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
 	checks.push_back({"writeFailure", writeFailure});
 	checks.push_back({"legacyFiles", legacyAndMalformedFiles});
 	checks.push_back({"structuralReplay", structuralReplay});
+	checks.push_back({"compoundFiles", compoundFiles});
 }

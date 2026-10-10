@@ -48,6 +48,7 @@ namespace core
 			char const* name;
 			std::vector<ResourceStoreSettings> const* stores;
 			std::vector<ResourceTransferSettings> const* transfers;
+			std::vector<ResourceConversionSettings> const* conversions;
 			int operator()(lua_State* state) const
 			{
 				script::pushPrivateEnvironment(state);
@@ -62,13 +63,26 @@ namespace core
 				for (size_t index = 0; index < stores->size(); ++index)
 				{
 					auto const& store = (*stores)[index];
-					lua_createtable(state, 0, 6);
+					lua_createtable(state, 0, store.composition ? 7 : 6);
 					lua_pushstring(state, store.id.c_str()); lua_setfield(state, -2, "id");
 					lua_pushstring(state, store.unit.c_str()); lua_setfield(state, -2, "unit");
 					lua_pushnumber(state, store.capacity); lua_setfield(state, -2, "capacity");
 					lua_pushnumber(state, store.startingQualified); lua_setfield(state, -2, "qualified");
 					lua_pushnumber(state, store.startingUnqualified); lua_setfield(state, -2, "unqualified");
 					lua_pushnumber(state, store.protectedReserve); lua_setfield(state, -2, "protectedReserve");
+					if (store.composition)
+					{
+						auto const& composition = *store.composition;
+						lua_createtable(state, 0, 7);
+						lua_pushnumber(state, composition.moisture); lua_setfield(state, -2, "moisture");
+						lua_pushnumber(state, composition.nutrientNitrogen); lua_setfield(state, -2, "nutrientNitrogen");
+						lua_pushnumber(state, composition.atmosphericNitrogen); lua_setfield(state, -2, "atmosphericNitrogen");
+						lua_pushnumber(state, composition.phosphorus); lua_setfield(state, -2, "phosphorus");
+						lua_pushnumber(state, composition.potassium); lua_setfield(state, -2, "potassium");
+						lua_pushnumber(state, composition.otherMinerals); lua_setfield(state, -2, "otherMinerals");
+						lua_pushnumber(state, composition.energyKJPerKgDry); lua_setfield(state, -2, "energyKJPerKgDry");
+						lua_setfield(state, -2, "composition");
+					}
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
 				// Authored transfer rules cross the same boundary as plain
@@ -86,7 +100,36 @@ namespace core
 					lua_pushinteger(state, transfer.priority); lua_setfield(state, -2, "priority");
 					lua_rawseti(state, -2, static_cast<int>(index) + 1);
 				}
-				lua_call(state, 3, 1);
+				// Authored conversion rules cross the same boundary as plain
+				// immutable descriptors; each sandbox mirrors and audits them.
+				lua_createtable(state, static_cast<int>(conversions->size()), 0);
+				for (size_t index = 0; index < conversions->size(); ++index)
+				{
+					auto const& conversion = (*conversions)[index];
+					lua_createtable(state, 0, 3);
+					lua_pushstring(state, conversion.id.c_str()); lua_setfield(state, -2, "id");
+					lua_pushinteger(state, conversion.priority); lua_setfield(state, -2, "priority");
+					lua_createtable(state, static_cast<int>(conversion.inputs.size()), 0);
+					for (size_t flow = 0; flow < conversion.inputs.size(); ++flow)
+					{
+						lua_createtable(state, 0, 2);
+						lua_pushstring(state, conversion.inputs[flow].storeId.c_str()); lua_setfield(state, -2, "store");
+						lua_pushnumber(state, conversion.inputs[flow].ratePerSecond); lua_setfield(state, -2, "rate");
+						lua_rawseti(state, -2, static_cast<int>(flow) + 1);
+					}
+					lua_setfield(state, -2, "inputs");
+					lua_createtable(state, static_cast<int>(conversion.outputs.size()), 0);
+					for (size_t flow = 0; flow < conversion.outputs.size(); ++flow)
+					{
+						lua_createtable(state, 0, 2);
+						lua_pushstring(state, conversion.outputs[flow].storeId.c_str()); lua_setfield(state, -2, "store");
+						lua_pushnumber(state, conversion.outputs[flow].yieldPerSecond); lua_setfield(state, -2, "yield");
+						lua_rawseti(state, -2, static_cast<int>(flow) + 1);
+					}
+					lua_setfield(state, -2, "outputs");
+					lua_rawseti(state, -2, static_cast<int>(index) + 1);
+				}
+				lua_call(state, 4, 1);
 				if (!lua_istable(state, -1)) return luaL_error(state, "Station factory must return an object");
 				object->reference = luaL_ref(state, LUA_REGISTRYINDEX);
 				return 0;
@@ -126,6 +169,50 @@ namespace core
 			}
 			return list;
 		}
+		// Compound Resource materials are mass-denominated (#391); their
+		// constituents are accounted in kg and the energy term in kJ.
+		bool isMassUnit(std::string const& unit)
+		{
+			return unit == "g" || unit == "kg";
+		}
+		double massToKg(std::string const& unit, double mass)
+		{
+			return unit == "g" ? mass * 0.001 : mass;
+		}
+		bool compositionsClose(ResourceCompositionSettings const& left,
+			ResourceCompositionSettings const& right)
+		{
+			auto const close = [](double a, double b)
+			{ return std::abs(a - b) <= StationBalanceTolerance; };
+			return close(left.moisture, right.moisture)
+				&& close(left.nutrientNitrogen, right.nutrientNitrogen)
+				&& close(left.atmosphericNitrogen, right.atmosphericNitrogen)
+				&& close(left.phosphorus, right.phosphorus)
+				&& close(left.potassium, right.potassium)
+				&& close(left.otherMinerals, right.otherMinerals)
+				&& close(left.energyKJPerKgDry, right.energyKJPerKgDry);
+		}
+		using ConstituentLedger = std::map<std::string, double>;
+		// Add the constituent amounts of a compound wet mass to a ledger.
+		// The seven mass constituents partition the wet mass exactly: water
+		// is the moisture term and dryOrganics is the dry-mass balance, so
+		// constituent accounting closes over the whole inventory. Energy is
+		// the declared chemical energy term, in kJ.
+		void addComposition(ConstituentLedger& ledger,
+			ResourceCompositionSettings const& composition, double wetMassKg, double sign)
+		{
+			auto const dry = wetMassKg * (1.0 - composition.moisture);
+			ledger["water"] += sign * wetMassKg * composition.moisture;
+			ledger["nutrientNitrogen"] += sign * dry * composition.nutrientNitrogen;
+			ledger["atmosphericNitrogen"] += sign * dry * composition.atmosphericNitrogen;
+			ledger["phosphorus"] += sign * dry * composition.phosphorus;
+			ledger["potassium"] += sign * dry * composition.potassium;
+			ledger["otherMinerals"] += sign * dry * composition.otherMinerals;
+			ledger["dryOrganics"] += sign * dry * (1.0 - (composition.nutrientNitrogen
+				+ composition.atmosphericNitrogen + composition.phosphorus
+				+ composition.potassium + composition.otherMinerals));
+			ledger["energy"] += sign * dry * composition.energyKJPerKgDry;
+		}
 	}
 	bool validateStationSystemsSettings(StationSystemsSettings const& settings, std::string& diagnostic)
 	{
@@ -161,6 +248,29 @@ namespace core
 				return refuse(where + " protected reserve must be finite and non-negative");
 			if (store.protectedReserve > store.startingQualified)
 				return refuse(where + " protected reserve exceeds starting usable inventory");
+			if (store.composition)
+			{
+				auto const& composition = *store.composition;
+				if (!isMassUnit(store.unit))
+					return refuse(where + " declares a composition but unit '" + store.unit
+						+ "' is not a mass unit; compound materials are mass-denominated (g or kg)");
+				if (!std::isfinite(composition.moisture)
+					|| composition.moisture < 0.0 || composition.moisture >= 1.0)
+					return refuse(where + " moisture fraction must be finite and from 0 up to but below 1");
+				auto const dryFractions = {composition.nutrientNitrogen,
+					composition.atmosphericNitrogen, composition.phosphorus,
+					composition.potassium, composition.otherMinerals};
+				for (auto const fraction : dryFractions)
+					if (!std::isfinite(fraction) || fraction < 0.0)
+						return refuse(where + " dry-mass fractions must all be finite and non-negative");
+				auto const drySum = composition.nutrientNitrogen + composition.atmosphericNitrogen
+					+ composition.phosphorus + composition.potassium + composition.otherMinerals;
+				if (drySum > 1.0)
+					return refuse(where + " dry-mass fractions sum to " + std::to_string(drySum)
+						+ ", exceeding the available dry mass");
+				if (!std::isfinite(composition.energyKJPerKgDry) || composition.energyKJPerKgDry < 0.0)
+					return refuse(where + " energy term must be finite and non-negative");
+			}
 		}
 		if (settings.transfers.size() > MaxStationResourceTransfers)
 			return refuse("Station resource transfers are limited to "
@@ -194,6 +304,74 @@ namespace core
 					+ "' does not match both stores ('" + source->unit + "' -> '" + destination->unit + "')");
 			if (!std::isfinite(transfer.ratePerSecond) || transfer.ratePerSecond <= 0.0)
 				return refuse(where + " rate must be finite and positive");
+			// Compound material only moves between identical declared
+			// compositions. Crossing a composition boundary — including bound
+			// nutrient nitrogen versus atmospheric nitrogen, which are never
+			// freely interchangeable — is conversion and requires an
+			// explicitly declared, constituent-balanced conversion process.
+			if (source->composition || destination->composition)
+			{
+				if (!source->composition || !destination->composition
+					|| !compositionsClose(*source->composition, *destination->composition))
+					return refuse(where + " crosses a compound-material boundary; transfers between stores with different declared compositions require an explicit conversion");
+			}
+		}
+		if (settings.conversions.size() > MaxStationResourceConversions)
+			return refuse("Station resource conversions are limited to "
+				+ std::to_string(MaxStationResourceConversions) + " entries");
+		std::set<std::string> conversionIds;
+		for (auto const& conversion : settings.conversions)
+		{
+			auto const where = "Station resource conversion '" + conversion.id + "'";
+			if (conversion.id.empty()) return refuse("Station resource conversion id must not be empty");
+			if (conversion.id.size() > MaxStationStoreIdLength)
+				return refuse("Station resource conversion id exceeds "
+					+ std::to_string(MaxStationStoreIdLength) + " characters");
+			if (!conversionIds.insert(conversion.id).second) return refuse(where + " id is duplicated");
+			if (conversion.inputs.empty() || conversion.inputs.size() > MaxStationConversionFlows)
+				return refuse(where + " needs between 1 and "
+					+ std::to_string(MaxStationConversionFlows) + " inputs");
+			if (conversion.outputs.empty() || conversion.outputs.size() > MaxStationConversionFlows)
+				return refuse(where + " needs between 1 and "
+					+ std::to_string(MaxStationConversionFlows) + " outputs");
+			std::set<std::string> endpoints;
+			ConstituentLedger inflow, outflow;
+			auto const addFlow = [&](std::string const& storeId, double rate, bool input)
+			{
+				auto const it = std::find_if(settings.stores.begin(), settings.stores.end(),
+						[&](ResourceStoreSettings const& store) { return store.id == storeId; });
+				if (it == settings.stores.end())
+					return refuse(where + " references unknown " + (input ? "input" : "output")
+						+ " store '" + storeId + "'");
+				if (!endpoints.insert(storeId).second)
+					return refuse(where + " uses store '" + storeId + "' more than once");
+				if (!it->composition)
+					return refuse(where + " " + (input ? "input" : "output") + " store '" + storeId
+						+ "' has no declared composition; conversions require compound stores");
+				if (!std::isfinite(rate) || rate <= 0.0)
+					return refuse(where + " " + (input ? "input rate" : "output yield")
+						+ " for store '" + storeId + "' must be finite and positive");
+				addComposition(input ? inflow : outflow, *it->composition,
+					massToKg(it->unit, rate), 1.0);
+				return true;
+			};
+			for (auto const& flow : conversion.inputs)
+				if (!addFlow(flow.storeId, flow.ratePerSecond, true)) return false;
+			for (auto const& flow : conversion.outputs)
+				if (!addFlow(flow.storeId, flow.yieldPerSecond, false)) return false;
+			// Constituent and energy balance at declared full throughput:
+			// an impossible configured yield that would create a tracked
+			// constituent is rejected here rather than allowed to create
+			// material at runtime. Losses below the input are legal and are
+			// reported as explicit losses by the runtime ledger.
+			for (auto const& [constituent, produced] : outflow)
+			{
+				auto const supplied = inflow.count(constituent) ? inflow.at(constituent) : 0.0;
+				if (produced > supplied + StationBalanceTolerance * std::max(1.0, std::abs(supplied)))
+					return refuse(where + " would create constituent '" + constituent
+						+ "': declared output " + std::to_string(produced)
+						+ " exceeds declared input " + std::to_string(supplied));
+			}
 		}
 		diagnostic.clear(); return true;
 	}
@@ -225,29 +403,69 @@ namespace core
 			double lastUnmet{0.0};
 			StationTransferStatus status{StationTransferStatus::Idle};
 		};
+		// The authoritative ledger of one authored conversion. Inputs are
+		// consumed and outputs produced at a common completed scale: the
+		// fraction of declared full throughput the tick could actually run,
+		// bounded by drawable input inventory and output store headroom.
+		// Results stage and commit atomically with the transfer ledger.
+		struct ConversionFlowState
+		{
+			size_t storeIndex{0};
+			double ratePerSecond{0.0};
+			double lastRequested{0.0};
+			double lastCompleted{0.0};
+		};
+		struct ConversionState
+		{
+			ResourceConversionSettings authored;
+			std::vector<ConversionFlowState> inputs;
+			std::vector<ConversionFlowState> outputs;
+			double lastScale{0.0};
+			StationTransferStatus status{StationTransferStatus::Idle};
+			std::string stallReason;
+		};
 		StationSystemsSettings settings;
 		std::vector<StoreState> stores;
 		std::vector<TransferState> transfers;
+		std::vector<ConversionState> conversions;
 		// Competing transfers are allocated in priority order (higher first),
 		// ties resolved by declaration order: a declared deterministic order.
 		std::vector<size_t> transferOrder;
-		// Per-unit totals at run start, the conservation boundary (#390).
+		// Conversions run after all transfers within the same tick, in the
+		// same declared deterministic order.
+		std::vector<size_t> conversionOrder;
+		// Per-unit totals at run start, the conservation boundary (#390),
+		// plus the cumulative per-unit mass removed by declared conversion
+		// losses (#391): each unit's ledger closes over its own consumed
+		// and produced amounts, even across mixed g/kg conversions.
 		std::map<std::string, double> startingTotals;
+		std::map<std::string, double> unitLoss;
+		// Per-constituent totals at run start and the cumulative declared
+		// conversion losses, the compound conservation boundary (#391):
+		// current + lost must equal starting within tolerance.
+		ConstituentLedger startingConstituents;
+		ConstituentLedger constituentLoss;
 		std::array<std::unique_ptr<ScriptObject>, 4> objects;
 		StationSystemsSnapshot snapshot;
 		std::vector<StationSystemsEvent> events;
 		std::vector<StationSystemsDiagnostic> diagnostics;
 
-		// Apply every authored transfer to a staged copy of the inventory in
-		// the declared deterministic order, audit the staged result against
-		// finite limits and the per-unit conservation boundary, and only then
-		// commit. A violation never clamps material into existence or out of
-		// it: it fails the whole tick through the integrated error path.
-		bool applyTransfers(uint64_t tick, float seconds, std::string& violation)
+		// Apply every authored transfer and conversion to a staged copy of
+		// the inventory in the declared deterministic order â transfers
+		// first, then conversions, each by priority descending and
+		// declaration order â audit the staged result against finite
+		// limits, the per-unit conservation boundary and the per-constituent
+		// compound boundary, and only then commit. A violation never clamps
+		// material into existence or out of it: it fails the whole tick
+		// through the integrated error path.
+		bool applyLedger(uint64_t tick, float seconds, std::string& violation)
 		{
 			std::vector<StationTransferStatus> previousStatus;
 			previousStatus.reserve(transfers.size());
 			for (auto const& transfer : transfers) previousStatus.push_back(transfer.status);
+			std::vector<StationTransferStatus> previousConversionStatus;
+			previousConversionStatus.reserve(conversions.size());
+			for (auto const& conversion : conversions) previousConversionStatus.push_back(conversion.status);
 			std::vector<double> qualified, unqualified;
 			qualified.reserve(stores.size());
 			unqualified.reserve(stores.size());
@@ -286,6 +504,97 @@ namespace core
 							: "source usable inventory is empty")
 						: (headroom <= 0.0 ? "destination store is at capacity" : "limited supply");
 			}
+			// Conversions run against the staged post-transfer inventory.
+			// The declared loss ledger is staged too: a failed tick never
+			// books losses it did not commit.
+			ConstituentLedger stagedLoss = constituentLoss;
+			std::map<std::string, double> stagedUnitLoss = unitLoss;
+			for (auto const index : conversionOrder)
+			{
+				auto& conversion = conversions[index];
+				double scale = 1.0;
+				std::string limiter;
+				for (auto const& flow : conversion.inputs)
+				{
+					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
+					auto const drawable = std::max(0.0, qualified[flow.storeIndex]
+						- stores[flow.storeIndex].authored.protectedReserve);
+					auto const ratio = drawable / requested;
+					if (ratio < scale)
+					{
+						scale = ratio;
+						limiter = stores[flow.storeIndex].authored.protectedReserve > 0.0
+							? "input store '" + stores[flow.storeIndex].authored.id
+								+ "' is at its protected reserve"
+							: "input store '" + stores[flow.storeIndex].authored.id + "' supply limits throughput";
+					}
+				}
+				for (auto const& flow : conversion.outputs)
+				{
+					auto const produced = flow.ratePerSecond * static_cast<double>(seconds);
+					auto const headroom = stores[flow.storeIndex].authored.capacity
+						- (qualified[flow.storeIndex] + unqualified[flow.storeIndex]);
+					auto const ratio = headroom / produced;
+					if (ratio < scale)
+					{
+						scale = ratio;
+						limiter = "output store '" + stores[flow.storeIndex].authored.id
+							+ "' headroom limits throughput";
+					}
+				}
+				if (!(scale > 0.0))
+				{
+					for (auto& flow : conversion.inputs)
+					{
+						flow.lastRequested = flow.ratePerSecond * static_cast<double>(seconds);
+						flow.lastCompleted = 0.0;
+					}
+					for (auto& flow : conversion.outputs)
+					{
+						flow.lastRequested = flow.ratePerSecond * static_cast<double>(seconds);
+						flow.lastCompleted = 0.0;
+					}
+					conversion.lastScale = 0.0;
+					conversion.status = StationTransferStatus::Rejected;
+					conversion.stallReason = limiter.empty()
+						? "no input available to run" : limiter;
+					continue;
+				}
+				ConstituentLedger netChange;
+				for (auto& flow : conversion.inputs)
+				{
+					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
+					auto const completed = requested * scale;
+					qualified[flow.storeIndex] -= completed;
+					flow.lastRequested = requested;
+					flow.lastCompleted = completed;
+					addComposition(netChange, *stores[flow.storeIndex].authored.composition,
+						massToKg(stores[flow.storeIndex].authored.unit, completed), -1.0);
+				}
+				for (auto& flow : conversion.outputs)
+				{
+					auto const requested = flow.ratePerSecond * static_cast<double>(seconds);
+					auto const completed = requested * scale;
+					qualified[flow.storeIndex] += completed;
+					flow.lastRequested = requested;
+					flow.lastCompleted = completed;
+					addComposition(netChange, *stores[flow.storeIndex].authored.composition,
+						massToKg(stores[flow.storeIndex].authored.unit, completed), 1.0);
+				}
+				// The declared conversion loss is what the outputs did not
+				// carry away; it stays accounted for instead of vanishing.
+				for (auto const& [constituent, change] : netChange)
+					stagedLoss[constituent] -= change;
+				for (auto const& flow : conversion.inputs)
+					stagedUnitLoss[stores[flow.storeIndex].authored.unit] += flow.lastCompleted;
+				for (auto const& flow : conversion.outputs)
+					stagedUnitLoss[stores[flow.storeIndex].authored.unit] -= flow.lastCompleted;
+				conversion.lastScale = scale;
+				conversion.status = scale >= 1.0 - 1e-12
+					? StationTransferStatus::Full : StationTransferStatus::Partial;
+				if (conversion.status == StationTransferStatus::Partial)
+					conversion.stallReason = limiter;
+			}
 			std::map<std::string, double> currentTotals;
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -299,11 +608,33 @@ namespace core
 			}
 			for (auto const& [unit, starting] : startingTotals)
 			{
-				auto const residual = currentTotals[unit] - starting;
+				auto const residual = currentTotals[unit] + stagedUnitLoss[unit] - starting;
 				if (!std::isfinite(residual)
 					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
 					return violation = "conservation residual " + std::to_string(residual)
 						+ " for unit '" + unit + "' exceeds tolerance " + std::to_string(StationBalanceTolerance), false;
+			}
+			// Compound conservation boundary (#391): every tracked
+			// constituent of the compound stores, plus the cumulative
+			// declared conversion losses, must account for the starting
+			// inventory. A residual beyond tolerance is a violation, never
+			// silent creation or deletion of material.
+			ConstituentLedger currentConstituents;
+			for (size_t index = 0; index < stores.size(); ++index)
+				if (stores[index].authored.composition)
+					addComposition(currentConstituents, *stores[index].authored.composition,
+						massToKg(stores[index].authored.unit,
+							qualified[index] + unqualified[index]), 1.0);
+			for (auto const& [constituent, starting] : startingConstituents)
+			{
+				auto const residual = (currentConstituents.count(constituent)
+						? currentConstituents.at(constituent) : 0.0)
+					+ stagedLoss[constituent] - starting;
+				if (!std::isfinite(residual)
+					|| std::abs(residual) > StationBalanceTolerance * std::max(1.0, std::abs(starting)))
+					return violation = "constituent conservation residual " + std::to_string(residual)
+						+ " for '" + constituent + "' exceeds tolerance "
+						+ std::to_string(StationBalanceTolerance), false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{
@@ -312,6 +643,8 @@ namespace core
 				stores[index].lastTickIn = flowIn[index];
 				stores[index].lastTickOut = flowOut[index];
 			}
+			constituentLoss = stagedLoss;
+			unitLoss = stagedUnitLoss;
 			// Rejections and partial completions are visible: announce each
 			// status transition (after the commit) so the event log records
 			// where material stalled without flooding every tick.
@@ -328,6 +661,21 @@ namespace core
 				auto const message = transfer.status == StationTransferStatus::Rejected
 					? std::string("Transfer '") + transfer.authored.id + "' rejected: " + reason
 					: std::string("Transfer '") + transfer.authored.id + "' partial: " + reason;
+				events.push_back({tick, message});
+			}
+			for (auto const index : conversionOrder)
+			{
+				auto const& conversion = conversions[index];
+				if (conversion.status == previousConversionStatus[index]) continue;
+				if (conversion.status == StationTransferStatus::Full)
+				{
+					events.push_back({tick, "Conversion '" + conversion.authored.id
+						+ "' running at full throughput"});
+					continue;
+				}
+				auto const message = conversion.status == StationTransferStatus::Rejected
+					? std::string("Conversion '") + conversion.authored.id + "' rejected: " + conversion.stallReason
+					: std::string("Conversion '") + conversion.authored.id + "' partial: " + conversion.stallReason;
 				events.push_back({tick, message});
 			}
 			return true;
@@ -353,13 +701,36 @@ namespace core
 		std::stable_sort(mImpl->transferOrder.begin(), mImpl->transferOrder.end(),
 			[&](size_t left, size_t right)
 			{ return mImpl->transfers[left].authored.priority > mImpl->transfers[right].authored.priority; });
+		for (auto const& conversion : settings.conversions)
+		{
+			Impl::ConversionState state;
+			state.authored = conversion;
+			for (auto const& flow : conversion.inputs)
+				state.inputs.push_back({storeIndex[flow.storeId], flow.ratePerSecond});
+			for (auto const& flow : conversion.outputs)
+				state.outputs.push_back({storeIndex[flow.storeId], flow.yieldPerSecond});
+			mImpl->conversions.push_back(std::move(state));
+		}
+		mImpl->conversionOrder.resize(mImpl->conversions.size());
+		std::iota(mImpl->conversionOrder.begin(), mImpl->conversionOrder.end(), size_t{0});
+		std::stable_sort(mImpl->conversionOrder.begin(), mImpl->conversionOrder.end(),
+			[&](size_t left, size_t right)
+			{ return mImpl->conversions[left].authored.priority > mImpl->conversions[right].authored.priority; });
+		// The compound conservation boundary is fixed at run start from the
+		// authored starting inventory of every compound store (#391).
+		for (auto const& store : mImpl->stores)
+			if (store.authored.composition)
+				addComposition(mImpl->startingConstituents, *store.authored.composition,
+					massToKg(store.authored.unit,
+						store.authored.startingQualified + store.authored.startingUnqualified), 1.0);
 		if (!settings.enabled) return;
 		auto const source = sourceLoader ? sourceLoader() : bundledStationSystemsSource();
 		if (source.empty() || source.size() > 64 * 1024) throw SerializationException("Invalid Station systems source size");
 		for (size_t i = 0; i < mImpl->objects.size(); ++i)
 		{
 			auto object = std::make_unique<ScriptObject>();
-			Construction construction{object.get(), &source, StationSystemNames[i], &settings.stores, &settings.transfers};
+			Construction construction{object.get(), &source, StationSystemNames[i],
+				&settings.stores, &settings.transfers, &settings.conversions};
 			script::beginInstructionBudget(object->state.get(), object->budget);
 			auto status = script::protectedLuaOperation(object->state.get(), construction, 0, 0);
 			script::endInstructionBudget(object->state.get());
@@ -373,8 +744,9 @@ namespace core
 			mImpl->objects[i] = std::move(object);
 		}
 		mImpl->events.push_back({0, "Station systems initialized with "
-			+ std::to_string(settings.stores.size()) + " resource store(s) and "
-			+ std::to_string(settings.transfers.size()) + " transfer(s)"});
+			+ std::to_string(settings.stores.size()) + " resource store(s), "
+			+ std::to_string(settings.transfers.size()) + " transfer(s) and "
+			+ std::to_string(settings.conversions.size()) + " conversion(s)"});
 	}
 	StationSystemsRuntime::~StationSystemsRuntime() = default;
 	bool StationSystemsRuntime::advance(uint64_t tick, float seconds)
@@ -423,10 +795,10 @@ namespace core
 		// conservation or limit violation never publishes a partial result
 		// and never clamps material. It fails the whole tick through the
 		// integrated error path instead.
-		if (!mImpl->transferOrder.empty())
+		if (!mImpl->transferOrder.empty() || !mImpl->conversionOrder.empty())
 		{
 			std::string violation;
-			if (!mImpl->applyTransfers(tick, seconds, violation))
+			if (!mImpl->applyLedger(tick, seconds, violation))
 			{
 				mImpl->snapshot.healthy = false;
 				mImpl->diagnostics.push_back({tick, "Resource transfer",
@@ -450,14 +822,19 @@ namespace core
 	{
 		auto result = mImpl->snapshot;
 		std::map<std::string, double> currentTotals;
+		ConstituentLedger currentConstituents;
 		for (auto const& store : mImpl->stores)
 		{
 			result.stores.push_back({store.authored.id, store.authored.unit,
 				store.authored.capacity, store.authored.startingQualified,
 				store.authored.startingUnqualified, store.authored.protectedReserve,
 				store.currentQualified, store.currentUnqualified,
-				store.lastTickIn, store.lastTickOut});
+				store.lastTickIn, store.lastTickOut, store.authored.composition});
 			currentTotals[store.authored.unit] += store.currentQualified + store.currentUnqualified;
+			if (store.authored.composition)
+				addComposition(currentConstituents, *store.authored.composition,
+					massToKg(store.authored.unit,
+						store.currentQualified + store.currentUnqualified), 1.0);
 		}
 		for (auto const index : mImpl->transferOrder)
 		{
@@ -467,8 +844,40 @@ namespace core
 				transfer.authored.ratePerSecond, transfer.authored.priority,
 				transfer.lastRequested, transfer.lastCompleted, transfer.lastUnmet, transfer.status});
 		}
+		for (auto const index : mImpl->conversionOrder)
+		{
+			auto const& conversion = mImpl->conversions[index];
+			StationConversionSnapshot conversionResult;
+			conversionResult.id = conversion.authored.id;
+			conversionResult.priority = conversion.authored.priority;
+			conversionResult.lastScale = conversion.lastScale;
+			conversionResult.status = conversion.status;
+			for (auto const& flow : conversion.inputs)
+				conversionResult.inputs.push_back({mImpl->stores[flow.storeIndex].authored.id,
+					mImpl->stores[flow.storeIndex].authored.unit,
+					flow.lastRequested, flow.lastCompleted});
+			for (auto const& flow : conversion.outputs)
+				conversionResult.outputs.push_back({mImpl->stores[flow.storeIndex].authored.id,
+					mImpl->stores[flow.storeIndex].authored.unit,
+					flow.lastRequested, flow.lastCompleted});
+			result.conversions.push_back(std::move(conversionResult));
+		}
 		for (auto const& [unit, starting] : mImpl->startingTotals)
-			result.balances.push_back({unit, starting, currentTotals[unit], currentTotals[unit] - starting});
+		{
+			auto const lost = mImpl->unitLoss.count(unit) ? mImpl->unitLoss.at(unit) : 0.0;
+			result.balances.push_back({unit, starting, currentTotals[unit], lost,
+				currentTotals[unit] + lost - starting});
+		}
+		for (auto const& [constituent, starting] : mImpl->startingConstituents)
+		{
+			auto const current = currentConstituents.count(constituent)
+				? currentConstituents.at(constituent) : 0.0;
+			auto const lost = mImpl->constituentLoss.count(constituent)
+				? mImpl->constituentLoss.at(constituent) : 0.0;
+			result.constituentBalances.push_back({constituent,
+				std::string(constituent == StationEnergyConstituent ? "kJ" : "kg"),
+				starting, current, lost, current + lost - starting});
+		}
 		result.balanceTolerance = StationBalanceTolerance;
 		return result;
 	}

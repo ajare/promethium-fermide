@@ -27,7 +27,7 @@ namespace
 		auto frame = [&]
 		{
 			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
-			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 850});
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
 			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
 		};
 		auto clickPoint = [&](ImVec2 point)
@@ -35,15 +35,24 @@ namespace
 			io.AddMousePosEvent(point.x, point.y); frame();
 			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
 		};
+		// The compound draft is taller than one viewport: reset the scroll
+		// and wheel down until the control comes into view.
 		auto point = [&](char const* label)
 		{
-			auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-			for (float y = 45; y < 850; y += 5)
-				for (float x = 18; x < 940; x += 15)
-				{
-					io.AddMousePosEvent(x, y); frame(); frame();
-					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-				}
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 975; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
 			throw std::runtime_error(std::string("Missing Station control: ") + label);
 		};
 		auto typeValue = [&](char const* label, char const* value)
@@ -227,7 +236,7 @@ namespace
 		auto frame = [&]
 		{
 			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
-			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1600});
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
 			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
 		};
 		auto clickPoint = [&](ImVec2 point)
@@ -235,15 +244,24 @@ namespace
 			io.AddMousePosEvent(point.x, point.y); frame();
 			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
 		};
+		// The compound draft is taller than one viewport: reset the scroll
+		// and wheel down until the control comes into view.
 		auto point = [&](char const* label)
 		{
-			auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
-			for (float y = 45; y < 1590; y += 5)
-				for (float x = 18; x < 940; x += 15)
-				{
-					io.AddMousePosEvent(x, y); frame(); frame();
-					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
-				}
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 975; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
 			throw std::runtime_error(std::string("Missing Station control: ") + label);
 		};
 		auto typeValue = [&](char const* label, char const* value)
@@ -266,7 +284,7 @@ namespace
 		world->pauseSimulation(); frame();
 		require(text.find("pump: src -> dst (kg) rejected | requested 1.000, completed 0.000, unmet 1.000 (rate 60.000/s, priority 0)")
 			!= std::string::npos, "Blocked transfer rejection not observable in the window");
-		require(text.find("Balance kg: starting 100.000, current 100.000, residual 0.000000000")
+		require(text.find("Balance kg: starting 100.000, current 100.000, lost 0.000, residual 0.000000000")
 			!= std::string::npos, "Boundary balance not observable in the window");
 		require(!world->isModified(), "Transfer ticking dirtied the authored document");
 		// Draft a second transfer through the real controls; an unknown
@@ -297,10 +315,167 @@ namespace
 		require(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 2,
 			"Transfer removal did not apply");
 	}
+	void compoundWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		auto world = std::make_shared<core::World>("Compound editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		auto const food = core::ResourceCompositionSettings{0.8, 0.05, 0.0, 0.01, 0.02, 0.02, 17000.0};
+		auto const biomass = core::ResourceCompositionSettings{0.0, 0.04, 0.0, 0.005, 0.01, 0.005, 18000.0};
+		auto const waste = core::ResourceCompositionSettings{0.8, 0.08, 0.0, 0.02, 0.04, 0.04, 8000.0};
+		std::string diagnostic;
+		require(world->configureStationSystems({true, 1.0f, {
+			{"food", "kg", 100.0, 50.0, 0.0, 0.0, food},
+			{"biomass", "kg", 10.0, 1.0, 0.0, 0.0, biomass},
+			{"waste", "kg", 20.0, 0.0, 0.0, 0.0, waste}}},
+			false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 980});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		// The compound draft is taller than one viewport: reset the scroll
+		// and wheel down until the control comes into view.
+		auto point = [&](char const* label)
+		{
+			io.AddMousePosEvent(400.0f, 400.0f);
+			io.AddMouseWheelEvent(0.0f, 1000.0f); frame();
+			for (int pass = 0; pass < 16; ++pass)
+			{
+				auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+				for (float y = 45; y < 975; y += 5)
+					for (float x = 18; x < 940; x += 15)
+					{
+						io.AddMousePosEvent(x, y); frame(); frame();
+						if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+					}
+				io.AddMousePosEvent(400.0f, 400.0f);
+				io.AddMouseWheelEvent(0.0f, -10.0f); frame();
+			}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		auto typeValue = [&](char const* label, char const* value)
+		{
+			clickPoint(point(label));
+			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+			io.AddInputCharactersUTF8(value); frame();
+			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		};
+		window.visible = true; frame(); frame();
+		// The live view shows the declared composition on the dry-mass
+		// basis and the constituent balance ledger.
+		require(text.find("food (kg): usable 50.000") != std::string::npos
+			&& text.find("compound (dry-mass basis): moisture 0.8000 | nutrient N 0.0500, atmospheric N 0.0000, P 0.0100, K 0.0200, other minerals 0.0200 | 17000.0 kJ/kg dry")
+				!= std::string::npos,
+			"Compound store display missing composition terms");
+		require(text.find("Constituent balances") != std::string::npos
+			&& text.find("Constituent nutrientNitrogen (kg): starting 0.540000") != std::string::npos,
+			"Constituent balance ledger missing from the window");
+		// Author a compound store through the real controls.
+		clickPoint(point("Add store"));
+		clickPoint(point("Store 3 declared composition"));
+		typeValue("Store 3 moisture fraction", "0.5");
+		typeValue("Store 3 nutrient nitrogen fraction", "0.1");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores.size() == 4
+			&& world->getStationSystemsSettings().stores[3].composition.has_value()
+			&& world->getStationSystemsSettings().stores[3].composition->moisture == 0.5
+			&& world->getStationSystemsSettings().stores[3].composition->nutrientNitrogen == 0.1
+			&& history.undoCount() == 1, "Authored composition did not apply");
+		// An impossible dry-mass total is refused with a visible diagnostic
+		// and no mutation.
+		typeValue("Store 3 phosphorus fraction", "0.95");
+		clickPoint(point("Apply settings")); frame();
+		require(text.find("dry-mass fractions sum to") != std::string::npos,
+			"Impossible dry-mass total diagnostic not shown");
+		require(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.0
+			&& history.undoCount() == 1, "Impossible composition mutated state");
+		typeValue("Store 3 phosphorus fraction", "0.05");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().stores[3].composition->phosphorus == 0.05
+			&& history.undoCount() == 2, "Recovery composition edit did not apply");
+		// Author the harvest conversion through the real controls.
+		clickPoint(point("Add conversion"));
+		typeValue("Conversion 0 id", "harvest");
+		typeValue("Conversion 0 input 0 store", "food");
+		typeValue("Conversion 0 input 0 rate", "60");
+		typeValue("Conversion 0 output 0 store", "biomass");
+		typeValue("Conversion 0 output 0 yield", "4.8");
+		clickPoint(point("Add output to conversion 0"));
+		typeValue("Conversion 0 output 1 store", "waste");
+		typeValue("Conversion 0 output 1 yield", "24");
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().conversions.size() == 1
+			&& world->getStationSystemsSettings().conversions[0].id == "harvest"
+			&& world->getStationSystemsSettings().conversions[0].outputs.size() == 2
+			&& history.undoCount() == 3, "Authored conversion did not apply");
+		// A yield that would create nutrient nitrogen is refused before the
+		// run, with the offending constituent named in the window.
+		typeValue("Conversion 0 output 1 yield", "50");
+		clickPoint(point("Apply settings")); frame();
+		require(text.find("would create constituent") != std::string::npos
+			&& text.find("exceeds declared input") != std::string::npos,
+			"Yield-creating conversion diagnostic not shown in the window");
+		require(world->getStationSystemsSettings().conversions[0].outputs[1].yieldPerSecond == 24.0
+			&& history.undoCount() == 3, "Impossible yield edit mutated state");
+		typeValue("Conversion 0 output 1 yield", "24");
+		frame();
+		require(text.find("Draft matches the authored start conditions") != std::string::npos
+			&& world->getStationSystemsSettings().conversions[0].outputs[1].yieldPerSecond == 24.0
+			&& history.undoCount() == 3, "Recovery edit did not restore the authored match");
+		// Run: the live view shows the full-throughput conversion and the
+		// closing constituent ledger, and ticking never dirties the document.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(30), "Compound editor run failed");
+		frame();
+		require(text.find("harvest: full (scale 1.000, priority 0)") != std::string::npos
+			&& text.find("consumes food (kg): requested 1.000, completed 1.000") != std::string::npos
+			&& text.find("produces waste (kg): requested 0.400, completed 0.400") != std::string::npos,
+			"Live conversion status not displayed");
+		require(!world->isModified(), "Compound ticking dirtied the authored document");
+		// Refusal is visible too: fill the biomass store and watch the
+		// conversion reject through the window.
+		world->pauseSimulation();
+		auto settings = world->getStationSystemsSettings();
+		settings.stores[1].capacity = 2.0;
+		settings.stores[1].startingQualified = 2.0;
+		require(world->configureStationSystems(settings, true), "Capacity edit failed");
+		world->resumeSimulation();
+		require(world->advanceTicks(5), "Blocked run failed");
+		frame();
+		require(text.find("harvest: rejected (scale 0.000, priority 0)") != std::string::npos
+			&& text.find("consumes food (kg): requested 1.000, completed 0.000") != std::string::npos,
+			"Conversion refusal not displayed");
+		bool sawRefusalReason = false;
+		for (auto const& event : world->getStationSystemsEvents())
+			if (event.message.find("Conversion 'harvest' rejected: output store 'biomass' headroom limits throughput")
+				!= std::string::npos) sawRefusalReason = true;
+		require(sawRefusalReason, "Conversion refusal reason missing from the event log");
+		for (auto const& entry : world->getStationSystemsSnapshot().constituentBalances)
+			require(std::abs(entry.residual)
+				<= world->getStationSystemsSnapshot().balanceTolerance
+					* std::max(1.0, std::abs(entry.starting)),
+				"Editor compound run exceeded constituent tolerance");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
 	checks.push_back({"station/transferWorkflow", transferWorkflow});
+	checks.push_back({"station/compoundWorkflow", compoundWorkflow});
 }

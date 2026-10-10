@@ -708,7 +708,10 @@ namespace core
 		// Version 66 adds authored finite Station Resource stores (#389).
 		// Version 67 adds store protected reserves and authored bounded Resource
 		// transfers (#390); pre-67 documents carrying them are refused.
-		serializer.writeUint32("version", 67);
+		// Version 68 adds declared compound-resource compositions and authored
+		// constituent-balanced conversions (#391); pre-68 documents carrying
+		// `composition` or `conversions` are refused rather than silently dropped.
+		serializer.writeUint32("version", 68);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -728,6 +731,20 @@ namespace core
 					serializer.writeDouble("startingQualified", store.startingQualified);
 					serializer.writeDouble("startingUnqualified", store.startingUnqualified);
 					serializer.writeDouble("protectedReserve", store.protectedReserve);
+					if (store.composition)
+					{
+						// Authored composition only; constituent ledgers and
+						// losses are runtime state reconstructed on load.
+						serializer.beginMap("composition");
+						serializer.writeDouble("moisture", store.composition->moisture);
+						serializer.writeDouble("nutrientNitrogen", store.composition->nutrientNitrogen);
+						serializer.writeDouble("atmosphericNitrogen", store.composition->atmosphericNitrogen);
+						serializer.writeDouble("phosphorus", store.composition->phosphorus);
+						serializer.writeDouble("potassium", store.composition->potassium);
+						serializer.writeDouble("otherMinerals", store.composition->otherMinerals);
+						serializer.writeDouble("energyKJPerKgDry", store.composition->energyKJPerKgDry);
+						serializer.endMap();
+					}
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -745,6 +762,38 @@ namespace core
 					serializer.writeString("unit", transfer.unit);
 					serializer.writeDouble("ratePerSecond", transfer.ratePerSecond);
 					serializer.writeInt32("priority", transfer.priority);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.conversions.empty())
+			{
+				// Authored conversion rules only; completed scales, flows and
+				// constituent losses are runtime state.
+				serializer.beginArray("conversions");
+				for (auto const& conversion : mStationSystemsSettings.conversions)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", conversion.id);
+					serializer.writeInt32("priority", conversion.priority);
+					serializer.beginArray("inputs");
+					for (auto const& flow : conversion.inputs)
+					{
+						serializer.beginMap("");
+						serializer.writeString("storeId", flow.storeId);
+						serializer.writeDouble("ratePerSecond", flow.ratePerSecond);
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.beginArray("outputs");
+					for (auto const& flow : conversion.outputs)
+					{
+						serializer.beginMap("");
+						serializer.writeString("storeId", flow.storeId);
+						serializer.writeDouble("yieldPerSecond", flow.yieldPerSecond);
+						serializer.endMap();
+					}
+					serializer.endArray();
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1633,7 +1682,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 67)
+		if (version < 1 || version > 68)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1663,6 +1712,22 @@ namespace core
 							"Station protected reserves require World schema 67");
 						store.protectedReserve = serializer.readDouble("protectedReserve");
 					}
+					if (serializer.hasField("composition"))
+					{
+						if (version < 68) throw SerializationException(
+							"Station resource compositions require World schema 68");
+						serializer.beginMap("composition");
+						ResourceCompositionSettings composition;
+						composition.moisture = serializer.readDouble("moisture");
+						composition.nutrientNitrogen = serializer.readDouble("nutrientNitrogen");
+						composition.atmosphericNitrogen = serializer.readDouble("atmosphericNitrogen");
+						composition.phosphorus = serializer.readDouble("phosphorus");
+						composition.potassium = serializer.readDouble("potassium");
+						composition.otherMinerals = serializer.readDouble("otherMinerals");
+						composition.energyKJPerKgDry = serializer.readDouble("energyKJPerKgDry");
+						serializer.endMap();
+						store.composition = composition;
+					}
 					stationSettings.stores.push_back(std::move(store));
 					serializer.endMap();
 				}
@@ -1684,6 +1749,44 @@ namespace core
 					transfer.ratePerSecond = serializer.readDouble("ratePerSecond");
 					transfer.priority = serializer.readInt32("priority");
 					stationSettings.transfers.push_back(std::move(transfer));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("conversions"))
+			{
+				if (version < 68) throw SerializationException(
+					"Station resource conversions require World schema 68");
+				serializer.beginArray("conversions");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ResourceConversionSettings conversion;
+					conversion.id = serializer.readString("id");
+					conversion.priority = serializer.readInt32("priority");
+					serializer.beginArray("inputs");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ResourceConversionInputSettings flow;
+						flow.storeId = serializer.readString("storeId");
+						flow.ratePerSecond = serializer.readDouble("ratePerSecond");
+						conversion.inputs.push_back(std::move(flow));
+						serializer.endMap();
+					}
+					serializer.endArray();
+					serializer.beginArray("outputs");
+					while (serializer.nextArrayItem())
+					{
+						serializer.beginMap("");
+						ResourceConversionOutputSettings flow;
+						flow.storeId = serializer.readString("storeId");
+						flow.yieldPerSecond = serializer.readDouble("yieldPerSecond");
+						conversion.outputs.push_back(std::move(flow));
+						serializer.endMap();
+					}
+					serializer.endArray();
+					stationSettings.conversions.push_back(std::move(conversion));
 					serializer.endMap();
 				}
 				serializer.endArray();

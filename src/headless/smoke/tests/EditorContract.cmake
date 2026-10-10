@@ -263,6 +263,7 @@ set(editor_names
     station/windowWorkflow
     station/storeWorkflow
     station/transferWorkflow
+    station/compoundWorkflow
 )
 
 if(DEFINED LANE)

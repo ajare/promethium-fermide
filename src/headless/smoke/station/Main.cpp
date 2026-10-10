@@ -84,7 +84,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 67"), 11, "version: 65");
+		text.replace(text.find("version: 68"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -446,6 +446,368 @@ namespace
 			"Reset did not reconstruct the violated store");
 		core::setStationSystemsSourceLoader({});
 	}
+	void compounds(smoke::Context const&)
+	{
+		// #391: compound Resource stores carry declared constituent
+		// compositions on a documented dry-mass basis; conversions are
+		// validated to never create a tracked constituent, and the runtime
+		// reports per-constituent boundary residuals that must stay within
+		// tolerance across transfers, conversions, shortages and refusals.
+		auto approx = [](double actual, double expected)
+		{ return std::abs(actual - expected) < 1e-3; };
+		auto store = [](std::string const& id, std::string const& unit, double capacity,
+			double qualified, double unqualified, double protectedReserve = 0.0,
+			std::optional<core::ResourceCompositionSettings> composition = std::nullopt)
+		{
+			return core::ResourceStoreSettings{id, unit, capacity, qualified, unqualified,
+				protectedReserve, composition};
+		};
+		// Food: 80% moisture; dry mass is 5% N, 1% P, 2% K, 2% other
+		// minerals and 90% dry organics, with a declared chemical energy.
+		auto const food = core::ResourceCompositionSettings{0.8, 0.05, 0.0, 0.01, 0.02, 0.02, 17000.0};
+		// Living biomass on the dry-mass basis: the store holds dry mass,
+		// so moisture is 0 and the declared fractions are per dry mass.
+		auto const biomass = core::ResourceCompositionSettings{0.0, 0.04, 0.0, 0.005, 0.01, 0.005, 18000.0};
+		// Wet organic waste: 80% moisture; the dry fraction is mineral-rich.
+		auto const waste = core::ResourceCompositionSettings{0.8, 0.08, 0.0, 0.02, 0.04, 0.04, 8000.0};
+		// Pure atmospheric nitrogen and a bound-nutrient store, for the
+		// non-interchangeability fixtures.
+		auto const air = core::ResourceCompositionSettings{0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0};
+		auto const nutrient = core::ResourceCompositionSettings{0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+		auto transfer = [](std::string const& id, std::string const& source, std::string const& destination,
+			std::string const& unit, double rate, int priority)
+		{
+			return core::ResourceTransferSettings{id, source, destination, unit, rate, priority};
+		};
+		auto consume = [](std::string const& id, double rate)
+		{ return core::ResourceConversionInputSettings{id, rate}; };
+		auto produce = [](std::string const& id, double yield)
+		{ return core::ResourceConversionOutputSettings{id, yield}; };
+		auto conversion = [](std::string const& id,
+			std::vector<core::ResourceConversionInputSettings> inputs,
+			std::vector<core::ResourceConversionOutputSettings> outputs, int priority)
+		{
+			return core::ResourceConversionSettings{id, std::move(inputs), std::move(outputs), priority};
+		};
+		auto configure = [](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::ResourceTransferSettings> transfers,
+			std::vector<core::ResourceConversionSettings> conversions)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.transfers = std::move(transfers);
+			settings.conversions = std::move(conversions);
+			return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+		};
+		auto const balance = [](core::StationSystemsSnapshot const& snapshot, std::string const& constituent)
+		{
+			for (auto const& entry : snapshot.constituentBalances)
+				if (entry.constituent == constituent) return entry;
+			return core::StationConstituentBalanceSnapshot{};
+		};
+		// Impossible or malformed configuration is refused before anything runs.
+		core::World refused("Refused", 2, 2); refused.pauseSimulation(); refused.finishBuild(); refused.markSaved();
+		std::vector<std::vector<core::ResourceStoreSettings>> badStores;
+		badStores.push_back({store("f", "kg", 100, 10, 0, 0,
+			core::ResourceCompositionSettings{1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0})});
+		badStores.push_back({store("f", "kg", 100, 10, 0, 0,
+			core::ResourceCompositionSettings{-0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0})});
+		badStores.push_back({store("f", "kg", 100, 10, 0, 0,
+			core::ResourceCompositionSettings{0.5, 0.5, 0.4, 0.2, 0.0, 0.0, 0.0})});
+		badStores.push_back({store("f", "kg", 100, 10, 0, 0,
+			core::ResourceCompositionSettings{0.5, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0})});
+		badStores.push_back({store("f", "kg", 100, 10, 0, 0,
+			core::ResourceCompositionSettings{0.5, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0})});
+		badStores.push_back({store("f", "L", 100, 10, 0, 0, food)});
+		for (auto const& bad : badStores)
+		{
+			auto const [ok, diagnostic] = configure(refused, bad, {}, {});
+			require(!ok && !diagnostic.empty(), "Invalid composition configuration accepted");
+			require(!refused.getStationSystemsSnapshot().enabled && !refused.isModified(),
+				"Rejected composition configuration mutated the World");
+		}
+		// A harvest conversion whose declared yields would create nutrient
+		// nitrogen is rejected rather than allowed to create material.
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("food", "kg", 100, 50, 0, 0, food),
+					store("biomass", "kg", 100, 1, 0, 0, biomass),
+					store("waste", "kg", 100, 0, 0, 0,
+						core::ResourceCompositionSettings{0.8, 0.5, 0.0, 0.02, 0.04, 0.04, 8000.0})},
+				{}, {conversion("harvest", {consume("food", 1.0)},
+					{produce("biomass", 0.1), produce("waste", 0.5)}, 0)});
+			require(!ok && diagnostic.find("nutrientNitrogen") != std::string::npos
+				&& diagnostic.find("would create constituent") != std::string::npos,
+				"Yield-creating conversion not rejected with its constituent");
+		}
+		// Atmospheric nitrogen cannot be conjured from a bound-matter feed.
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("food", "kg", 100, 50, 0, 0, food),
+					store("fixed", "kg", 100, 0, 0, 0,
+						core::ResourceCompositionSettings{0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0})},
+				{}, {conversion("fixation", {consume("food", 1.0)}, {produce("fixed", 0.05)}, 0)});
+			require(!ok && diagnostic.find("atmosphericNitrogen") != std::string::npos,
+				"Creating atmospheric nitrogen from bound matter not rejected");
+		}
+		// Energy may not be created either.
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("food", "kg", 100, 50, 0, 0, food),
+					store("biomass", "kg", 100, 1, 0, 0,
+						core::ResourceCompositionSettings{0.0, 0.04, 0.0, 0.005, 0.01, 0.005, 40000.0})},
+				{}, {conversion("growth", {consume("food", 1.0)}, {produce("biomass", 0.15)}, 0)});
+			require(!ok && diagnostic.find("energy") != std::string::npos,
+				"Energy-creating conversion not rejected");
+		}
+		// Conversions require compound endpoints and distinct stores.
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("plain", "kg", 100, 50, 0), store("food", "kg", 100, 50, 0, 0, food)},
+				{}, {conversion("bad", {consume("plain", 1.0)}, {produce("food", 0.1)}, 0)});
+			require(!ok && diagnostic.find("no declared composition") != std::string::npos,
+				"Conversion on a non-compound store accepted");
+		}
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("food", "kg", 100, 50, 0, 0, food)},
+				{}, {conversion("loop", {consume("food", 1.0)}, {produce("food", 0.1)}, 0)});
+			require(!ok && diagnostic.find("more than once") != std::string::npos,
+				"Conversion reusing a store accepted");
+		}
+		// A transfer across a composition boundary is refused: bound
+		// nutrient nitrogen and atmospheric nitrogen are not freely
+		// interchangeable, and different compounds never mix by pump.
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("air", "kg", 100, 50, 0, 0, air),
+					store("nutrient", "kg", 100, 10, 0, 0, nutrient)},
+				{transfer("pump", "air", "nutrient", "kg", 1.0, 0)}, {});
+			require(!ok && diagnostic.find("compound-material boundary") != std::string::npos,
+				"Cross-composition transfer accepted");
+		}
+		{
+			auto const [ok, diagnostic] = configure(refused,
+				{store("food", "kg", 100, 50, 0, 0, food),
+					store("biomass", "kg", 100, 10, 0, 0, biomass)},
+				{transfer("pump", "food", "biomass", "kg", 1.0, 0)}, {});
+			require(!ok, "Transfer between different compositions accepted");
+		}
+		// Balanced growth run: the declared harvest conserves every tracked
+		// constituent (all outputs are strictly below their inputs per
+		// species); the water not carried away is booked as a loss.
+		core::World growth("Growth", 2, 2);
+		growth.pauseSimulation(); growth.finishBuild();
+		require(configure(growth,
+			{store("food", "kg", 100, 50, 0, 0, food),
+				store("biomass", "kg", 10, 1, 0, 0, biomass),
+				store("waste", "kg", 20, 0, 0, 0, waste)},
+			{}, {conversion("harvest", {consume("food", 1.0)},
+				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)}).first,
+			"Balanced harvest scenario refused");
+		growth.resumeSimulation();
+		require(growth.advanceTicks(30), "Balanced harvest run failed");
+		{
+			auto const snap = growth.getStationSystemsSnapshot();
+			require(snap.conversions.size() == 1
+				&& snap.conversions[0].id == "harvest"
+				&& snap.conversions[0].status == core::StationTransferStatus::Full
+				&& approx(snap.conversions[0].lastScale, 1.0)
+				&& approx(snap.conversions[0].inputs[0].completed, 1.0 / 60.0)
+				&& approx(snap.conversions[0].outputs[1].completed, 0.4 / 60.0),
+				"Harvest throughput not published as full");
+			require(approx(snap.stores[1].currentQualified, 1.0 + 0.04)
+				&& approx(snap.stores[2].currentQualified, 0.2),
+				"Harvest products not reflected in stores");
+			// Constituent residuals stay within tolerance; the 0.48 kg/s of
+			// water not carried into the products is an explicit loss.
+			require(!snap.constituentBalances.empty(), "Constituent balances not published");
+			for (auto const& entry : snap.constituentBalances)
+				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
+					"Constituent residual exceeded tolerance during a balanced run");
+			require(approx(balance(snap, "water").starting, 50.0 * 0.8),
+				"Water constituent starting total wrong");
+			require(approx(balance(snap, "water").lost, 0.5 * 0.48),
+				"Conversion water loss not booked");
+			require(approx(balance(snap, "nutrientNitrogen").starting, 50.0 * 0.2 * 0.05
+				+ 1.0 * 0.04 + 0.0), "Nutrient nitrogen total wrong");
+			require(balance(snap, "energy").unit == "kJ"
+				&& balance(snap, "water").unit == "kg", "Constituent units wrong");
+			bool sawFull = false;
+			for (auto const& event : growth.getStationSystemsEvents())
+				if (event.message.find("Conversion 'harvest' running at full throughput")
+					!= std::string::npos) sawFull = true;
+			require(sawFull, "Conversion full-throughput transition missing from the event log");
+		}
+		// Partial throughput under a protected reserve: the conversion
+		// scales down, constituents remain conserved.
+		core::World partial("Partial", 2, 2);
+		partial.pauseSimulation(); partial.finishBuild();
+		require(configure(partial,
+			{store("food", "kg", 100, 0.02, 0, 0.01, food),
+				store("biomass", "kg", 10, 1, 0, 0, biomass),
+				store("waste", "kg", 20, 0, 0, 0, waste)},
+			{}, {conversion("harvest", {consume("food", 1.0)},
+				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)}).first,
+			"Partial protected-reserve scenario refused");
+		partial.resumeSimulation();
+		require(partial.advanceTicks(1), "Partial scenario run failed");
+		{
+			auto const snap = partial.getStationSystemsSnapshot();
+			require(snap.conversions[0].status == core::StationTransferStatus::Partial
+				&& approx(snap.conversions[0].lastScale, 0.6),
+				"Protected reserve did not scale the conversion to 0.6");
+			require(approx(snap.stores[0].currentQualified, 0.01),
+				"Conversion drew into the protected reserve");
+			for (auto const& entry : snap.constituentBalances)
+				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
+					"Partial conversion broke constituent conservation");
+		}
+		// A full output store refuses the whole conversion; nothing moves.
+		core::World blocked("Blocked", 2, 2);
+		blocked.pauseSimulation(); blocked.finishBuild();
+		require(configure(blocked,
+			{store("food", "kg", 100, 50, 0, 0, food),
+				store("waste", "kg", 5, 5, 0, 0, waste)},
+			{}, {conversion("harvest", {consume("food", 1.0)}, {produce("waste", 0.5)}, 0)}).first,
+			"Blocked-output scenario refused");
+		blocked.resumeSimulation();
+		require(blocked.advanceTicks(5), "Blocked-output run failed");
+		{
+			auto const snap = blocked.getStationSystemsSnapshot();
+			require(snap.conversions[0].status == core::StationTransferStatus::Rejected
+				&& snap.conversions[0].lastScale == 0.0
+				&& snap.conversions[0].inputs[0].completed == 0.0,
+				"Full output store did not refuse the conversion");
+			require(approx(snap.stores[0].currentQualified, 50.0),
+				"Refused conversion still consumed input material");
+			bool sawBlocked = false;
+			for (auto const& event : blocked.getStationSystemsEvents())
+				if (event.message.find("Conversion 'harvest' rejected: output store 'waste' headroom limits throughput")
+					!= std::string::npos) sawBlocked = true;
+			require(sawBlocked, "Conversion refusal reason missing from the event log");
+		}
+		// Competing conversions allocate by declared priority.
+		core::World competing("Competing", 2, 2);
+		competing.pauseSimulation(); competing.finishBuild();
+		require(configure(competing,
+			{store("food", "kg", 100, 0.03, 0, 0, food),
+				store("biomass", "kg", 10, 0, 0, 0, biomass),
+				store("waste", "kg", 20, 0, 0, 0, waste)},
+			{}, {conversion("low", {consume("food", 1.0)}, {produce("waste", 0.5)}, 0),
+				conversion("high", {consume("food", 1.0)}, {produce("biomass", 0.1)}, 5)}).first,
+			"Competing conversions scenario refused");
+		competing.resumeSimulation();
+		require(competing.advanceTicks(1), "Competing conversions run failed");
+		{
+			auto const snap = competing.getStationSystemsSnapshot();
+			require(snap.conversions[0].id == "high"
+				&& snap.conversions[0].status == core::StationTransferStatus::Full,
+				"Higher-priority conversion did not run fully");
+			require(snap.conversions[1].id == "low"
+				&& snap.conversions[1].status == core::StationTransferStatus::Partial
+				&& approx(snap.conversions[1].lastScale, 0.8),
+				"Lower-priority conversion did not take the exact remainder");
+			for (auto const& entry : snap.constituentBalances)
+				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
+					"Competing conversions broke constituent conservation");
+		}
+		// Compound transfers conserve constituents, including under a
+		// partial fill and a capacity refusal.
+		core::World pumped("Pumped", 2, 2);
+		pumped.pauseSimulation(); pumped.finishBuild();
+		require(configure(pumped,
+			{store("bulk", "kg", 100, 50, 0, 0, food),
+				store("day", "kg", 10, 0, 0, 0, food)},
+			{transfer("pump", "bulk", "day", "kg", 60.0, 0)}, {}).first,
+			"Compound transfer scenario refused");
+		pumped.resumeSimulation();
+		require(pumped.advanceTicks(16), "Compound transfer run failed");
+		{
+			auto const snap = pumped.getStationSystemsSnapshot();
+			require(approx(snap.stores[1].currentQualified, 10.0)
+				&& approx(snap.stores[0].currentQualified, 40.0),
+				"Compound transfer did not fill the day store");
+			require(snap.transfers[0].status == core::StationTransferStatus::Rejected,
+				"Full day store did not refuse the transfer");
+			// The day store holds exactly 10 kg of the same declared food:
+			// its constituents are conserved station-wide.
+			require(approx(balance(snap, "water").current, 50.0 * 0.8),
+				"Constituent totals drifted under compound transfer");
+			for (auto const& entry : snap.constituentBalances)
+				require(std::abs(entry.residual) <= snap.balanceTolerance * std::max(1.0, std::abs(entry.starting)),
+					"Compound transfer broke constituent conservation");
+		}
+		// Gram-denominated compound stores normalize to kilograms.
+		core::World grams("Grams", 2, 2);
+		grams.pauseSimulation(); grams.finishBuild();
+		require(configure(grams,
+			{store("meal", "g", 2000, 1000, 0, 0, food)}, {}, {}).first,
+			"Gram compound store refused");
+		{
+			auto const snap = grams.getStationSystemsSnapshot();
+			require(approx(balance(snap, "water").starting, 0.8)
+				&& approx(balance(snap, "dryOrganics").starting, 0.18)
+				&& approx(balance(snap, "energy").starting, 0.2 * 17000.0),
+				"Gram-denominated constituents not normalized to kg/kJ");
+		}
+		// Reset reproduces the whole compound outcome exactly.
+		{
+			growth.pauseSimulation();
+			auto const expected = growth.getStationSystemsSnapshot();
+			auto const expectedEvents = growth.getStationSystemsEvents();
+			growth.resetSimulation();
+			growth.resumeSimulation();
+			require(growth.advanceTicks(30), "Compound replay failed");
+			require(growth.getStationSystemsSnapshot() == expected
+				&& growth.getStationSystemsEvents() == expectedEvents,
+				"Compound conversion outcome not reproducible after reset");
+		}
+		// The bundled Lua model receives compositions and conversion rules
+		// intact and re-audits them every tick.
+		SourceScope scope;
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers, conversions) "
+				"assert(#conversions == 1); local c = conversions[1]; "
+				"assert(c.id == 'harvest' and #c.inputs == 1 and #c.outputs == 2); "
+				"assert(c.inputs[1].store == 'food' and c.inputs[1].rate == 1); "
+				"assert(c.outputs[2].store == 'waste' and c.outputs[2].yield == 0.4); "
+				"assert(stores[1].composition.moisture == 0.8); "
+				"assert(stores[1].composition.nutrientNitrogen == 0.05); "
+				"assert(stores[1].composition.energyKJPerKgDry == 17000); "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World boundary("Boundary", 2, 2);
+		boundary.pauseSimulation(); boundary.finishBuild();
+		require(configure(boundary,
+			{store("food", "kg", 100, 50, 0, 0, food),
+				store("biomass", "kg", 10, 1, 0, 0, biomass),
+				store("waste", "kg", 20, 0, 0, 0, waste)},
+			{}, {conversion("harvest", {consume("food", 1.0)},
+				{produce("biomass", 0.08), produce("waste", 0.4)}, 0)}).first,
+			"Compound descriptors did not cross the Lua boundary intact");
+		boundary.resumeSimulation(); require(boundary.advanceTicks(10), "Compound boundary fixture run failed");
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers, conversions) "
+				"assert(#conversions == 99, 'expected 99 conversions') "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World refusedLua("RefusedLua", 2, 2); refusedLua.pauseSimulation(); refusedLua.finishBuild();
+		std::string diagnostic;
+		require(!refusedLua.configureStationSystems({true, 1.0f,
+				{store("food", "kg", 100, 50, 0, 0, food),
+					store("biomass", "kg", 10, 1, 0, 0, biomass)},
+				{}, {conversion("harvest", {consume("food", 1.0)}, {produce("biomass", 0.1)}, 0)}},
+				false, &diagnostic)
+			&& diagnostic.find("expected 99 conversions") != std::string::npos
+			&& !refusedLua.getStationSystemsSnapshot().enabled,
+			"Lua conversion assertion failure not contained at construction");
+		core::setStationSystemsSourceLoader({});
+	}
 	void failures(smoke::Context const&)
 	{
 		SourceScope scope;
@@ -525,7 +887,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"compounds", compounds}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

@@ -25,11 +25,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 2b: authored finite Resource stores and bounded transfers; no production or consumption yet. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 2c: authored finite Resource stores, bounded transfers and compound-resource conversions. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Compound stores declare constituent compositions on a dry-mass basis; conversions are validated to never create tracked constituents. Within a tick, transfers apply first, then conversions. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s), %zu conversion(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
-		authored.stores.size(), authored.transfers.size());
+		authored.stores.size(), authored.transfers.size(), authored.conversions.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -54,6 +54,23 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove store " + row).c_str()))
 			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
+		bool compound = store.composition.has_value();
+		if (ImGui::Checkbox(("Store " + row + " declared composition").c_str(), &compound))
+		{
+			if (compound && !store.composition) store.composition = core::ResourceCompositionSettings{};
+			else if (!compound) store.composition.reset();
+		}
+		if (store.composition)
+		{
+			auto& composition = *store.composition;
+			ImGui::InputDouble(("Store " + row + " moisture fraction").c_str(), &composition.moisture, 0.0, 0.0, "%.4f");
+			ImGui::InputDouble(("Store " + row + " nutrient nitrogen fraction").c_str(), &composition.nutrientNitrogen, 0.0, 0.0, "%.4f");
+			ImGui::InputDouble(("Store " + row + " atmospheric nitrogen fraction").c_str(), &composition.atmosphericNitrogen, 0.0, 0.0, "%.4f");
+			ImGui::InputDouble(("Store " + row + " phosphorus fraction").c_str(), &composition.phosphorus, 0.0, 0.0, "%.4f");
+			ImGui::InputDouble(("Store " + row + " potassium fraction").c_str(), &composition.potassium, 0.0, 0.0, "%.4f");
+			ImGui::InputDouble(("Store " + row + " other minerals fraction").c_str(), &composition.otherMinerals, 0.0, 0.0, "%.4f");
+			ImGui::InputDouble(("Store " + row + " energy kJ per kg dry").c_str(), &composition.energyKJPerKgDry, 0.0, 0.0, "%.1f");
+		}
 		ImGui::PopItemWidth();
 	}
 	if (ImGui::Button("Add store"))
@@ -122,6 +139,73 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		}
 		mDraft.transfers.push_back(std::move(transfer));
 	}
+	ImGui::SeparatorText("Draft conversions (compound material; declared yields may lose but never create constituents)");
+	for (size_t index = 0; index < mDraft.conversions.size(); ++index)
+	{
+		auto& conversion = mDraft.conversions[index];
+		auto const row = std::to_string(index);
+		ImGui::PushItemWidth(220);
+		char conversionIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(conversionIdBuffer, conversion.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Conversion " + row + " id").c_str(), conversionIdBuffer, sizeof(conversionIdBuffer)))
+			conversion.id = conversionIdBuffer;
+		ImGui::InputInt(("Conversion " + row + " priority").c_str(), &conversion.priority);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove conversion " + row).c_str()))
+			mDraft.conversions.erase(mDraft.conversions.begin() + static_cast<std::ptrdiff_t>(index));
+		for (size_t flow = 0; flow < conversion.inputs.size(); ++flow)
+		{
+			auto& input = conversion.inputs[flow];
+			auto const flowRow = "Conversion " + row + " input " + std::to_string(flow);
+			char storeBuffer[core::MaxStationStoreIdLength + 1]{};
+			std::strncpy(storeBuffer, input.storeId.c_str(), core::MaxStationStoreIdLength);
+			if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
+				input.storeId = storeBuffer;
+			ImGui::SameLine();
+			ImGui::InputDouble((flowRow + " rate").c_str(), &input.ratePerSecond, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			if (ImGui::Button(("Remove " + flowRow).c_str()))
+				conversion.inputs.erase(conversion.inputs.begin() + static_cast<std::ptrdiff_t>(flow));
+		}
+		if (conversion.inputs.size() < core::MaxStationConversionFlows
+			&& ImGui::Button(("Add input to conversion " + row).c_str()))
+			conversion.inputs.push_back({});
+		for (size_t flow = 0; flow < conversion.outputs.size(); ++flow)
+		{
+			auto& output = conversion.outputs[flow];
+			auto const flowRow = "Conversion " + row + " output " + std::to_string(flow);
+			char storeBuffer[core::MaxStationStoreIdLength + 1]{};
+			std::strncpy(storeBuffer, output.storeId.c_str(), core::MaxStationStoreIdLength);
+			if (ImGui::InputText((flowRow + " store").c_str(), storeBuffer, sizeof(storeBuffer)))
+				output.storeId = storeBuffer;
+			ImGui::SameLine();
+			ImGui::InputDouble((flowRow + " yield").c_str(), &output.yieldPerSecond, 0.0, 0.0, "%.3f");
+			ImGui::SameLine();
+			if (ImGui::Button(("Remove " + flowRow).c_str()))
+				conversion.outputs.erase(conversion.outputs.begin() + static_cast<std::ptrdiff_t>(flow));
+		}
+		if (conversion.outputs.size() < core::MaxStationConversionFlows
+			&& ImGui::Button(("Add output to conversion " + row).c_str()))
+			conversion.outputs.push_back({});
+		ImGui::PopItemWidth();
+	}
+	if (mDraft.conversions.size() < core::MaxStationResourceConversions)
+	{
+		if (ImGui::Button("Add conversion"))
+		{
+			core::ResourceConversionSettings conversion;
+			for (size_t candidate = mDraft.conversions.size() + 1;; ++candidate)
+			{
+				conversion.id = "conversion" + std::to_string(candidate);
+				auto const taken = std::any_of(mDraft.conversions.begin(), mDraft.conversions.end(),
+					[&](core::ResourceConversionSettings const& existing) { return existing.id == conversion.id; });
+				if (!taken) break;
+			}
+			conversion.inputs.push_back({});
+			conversion.outputs.push_back({});
+			mDraft.conversions.push_back(std::move(conversion));
+		}
+	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
 		? "Draft differs from the authored start conditions."
@@ -167,10 +251,18 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::SeparatorText("Resource stores (live; current inventory is runtime state, not authored)");
 	if (snapshot.stores.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& store : snapshot.stores)
+	{
 		ImGui::Text("%s (%s): usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f | protected %.3f | last tick in %.3f, out %.3f",
 			store.id.c_str(), store.unit.c_str(), store.currentQualified, store.currentUnqualified,
 			store.capacity, store.startingQualified, store.startingUnqualified,
 			store.protectedReserve, store.lastTickIn, store.lastTickOut);
+		if (store.composition)
+			ImGui::Text("  compound (dry-mass basis): moisture %.4f | nutrient N %.4f, atmospheric N %.4f, P %.4f, K %.4f, other minerals %.4f | %.1f kJ/kg dry",
+				store.composition->moisture, store.composition->nutrientNitrogen,
+				store.composition->atmosphericNitrogen, store.composition->phosphorus,
+				store.composition->potassium, store.composition->otherMinerals,
+				store.composition->energyKJPerKgDry);
+	}
 	ImGui::SeparatorText("Transfers (live; competing requests allocate by priority, then declaration order)");
 	if (snapshot.transfers.empty()) ImGui::TextDisabled("No Resource transfers authored.");
 	for (auto const& transfer : snapshot.transfers)
@@ -188,12 +280,39 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			transfer.unit.c_str(), status, transfer.lastRequested, transfer.lastCompleted,
 			transfer.lastUnmet, transfer.ratePerSecond, transfer.priority);
 	}
+	ImGui::SeparatorText("Conversions (live; transfers apply first, then conversions, each by priority then declaration order)");
+	if (snapshot.conversions.empty()) ImGui::TextDisabled("No Resource conversions authored.");
+	for (auto const& conversion : snapshot.conversions)
+	{
+		char const* status = "idle";
+		switch (conversion.status)
+		{
+		case core::StationTransferStatus::Full: status = "full"; break;
+		case core::StationTransferStatus::Partial: status = "partial"; break;
+		case core::StationTransferStatus::Rejected: status = "rejected"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s: %s (scale %.3f, priority %d)",
+			conversion.id.c_str(), status, conversion.lastScale, conversion.priority);
+		for (auto const& flow : conversion.inputs)
+			ImGui::Text("  consumes %s (%s): requested %.3f, completed %.3f",
+				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed);
+		for (auto const& flow : conversion.outputs)
+			ImGui::Text("  produces %s (%s): requested %.3f, completed %.3f",
+				flow.storeId.c_str(), flow.unit.c_str(), flow.requested, flow.completed);
+	}
+	ImGui::SeparatorText("Constituent balances (current + lost must equal starting within tolerance; dry-mass basis)");
+	if (snapshot.constituentBalances.empty()) ImGui::TextDisabled("No compound Resource stores authored.");
+	for (auto const& balance : snapshot.constituentBalances)
+		ImGui::Text("Constituent %s (%s): starting %.6f, current %.6f, lost %.6f, residual %.9f (tolerance %.1e)",
+			balance.constituent.c_str(), balance.unit.c_str(), balance.starting,
+			balance.current, balance.lost, balance.residual, snapshot.balanceTolerance);
 	ImGui::SeparatorText("Boundary balances (residual must stay within tolerance)");
 	if (snapshot.balances.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& balance : snapshot.balances)
-		ImGui::Text("Balance %s: starting %.3f, current %.3f, residual %.9f (tolerance %.1e)",
+		ImGui::Text("Balance %s: starting %.3f, current %.3f, lost %.3f, residual %.9f (tolerance %.1e)",
 			balance.unit.c_str(), balance.totalStarting, balance.totalCurrent,
-			balance.residual, snapshot.balanceTolerance);
+			balance.lost, balance.residual, snapshot.balanceTolerance);
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
