@@ -65,12 +65,12 @@ endfunction()
 
 pf_add_smoke_module(pf-smoke-station
     NAME station
-    SOURCES station/Main.cpp
+    SOURCES station/Main.cpp station/Documents.cpp
     LIBRARIES promethium-fermide-core
     LABELS "core;station"
     TIMEOUT 60
 )
-foreach(check lifecycle batching persistence failures)
+foreach(check lifecycle batching persistence failures fileRoundTrip writeFailure legacyFiles structuralReplay)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()

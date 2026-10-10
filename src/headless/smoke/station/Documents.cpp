@@ -1,0 +1,281 @@
+// #387: authored Station settings travel through the real World document
+// seams. A saved document carries only validated settings - never a tick
+// count, event history or Lua state - so a reopened World reconstructs a
+// fresh runtime that reproduces the original scenario tick-for-tick.
+// Failed writes keep the document dirty and the previous file intact;
+// legacy documents load disabled; malformed ones are refused without
+// disturbing the caller's loaded World; and a paused structural rebuild
+// preserves the live station instead of silently restarting it.
+
+#include "Documents.h"
+
+#include "core/World.h"
+#include "core/AgentTagRegistryDocument.h"
+#include "core/BinarySerializer.h"
+#include "core/YamlSerializer.h"
+
+#include <array>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+namespace
+{
+	void require(bool condition, std::string const& message)
+	{
+		if (!condition) throw std::runtime_error(message);
+	}
+
+	std::string readFile(std::filesystem::path const& path)
+	{
+		std::ifstream in(path, std::ios::binary);
+		std::ostringstream text;
+		text << in.rdbuf();
+		return text.str();
+	}
+
+	void writeFile(std::filesystem::path const& path, std::string const& contents)
+	{
+		std::ofstream out(path, std::ios::binary);
+		out << contents;
+	}
+
+	std::string serializeYaml(core::World const& world)
+	{
+		auto writer = core::YamlSerializer::toString();
+		core::SerializationWorkData data;
+		world.serialize(*writer, data);
+		writer->serialize();
+		return writer->getSerializedString();
+	}
+
+	std::string serializeBinary(core::World const& world)
+	{
+		auto writer = core::BinarySerializer::toString();
+		core::SerializationWorkData data;
+		world.serialize(*writer, data);
+		writer->serialize();
+		return writer->getSerializedString();
+	}
+
+	void replaceAll(std::string& text, std::string const& from, std::string const& to)
+	{
+		for (auto at = text.find(from); at != std::string::npos; at = text.find(from, at + to.size()))
+			text.replace(at, from.size(), to);
+	}
+
+	void enable(core::World& world, float intervalSeconds)
+	{
+		world.pauseSimulation();
+		world.finishBuild();
+		std::string diagnostic;
+		require(world.configureStationSystems({true, intervalSeconds}, false, &diagnostic),
+			"Could not enable Station systems: " + diagnostic);
+	}
+
+	// Nothing but the authored settings may reach the document: no live tick
+	// counts, no elapsed time, no event history and no Lua source or state.
+	void requireSettingsOnly(std::string const& document)
+	{
+		require(document.find("stationSystems") != std::string::npos,
+			"authored Station settings missing from the document");
+		require(document.find("observationIntervalSeconds") != std::string::npos,
+			"observation interval missing from the document");
+		for (auto const* liveState : {"completedTicks", "elapsedSeconds", "healthy",
+			"lifecycle", "advance", "worldTick"})
+			require(document.find(liveState) == std::string::npos,
+				std::string("live station or Lua state leaked into the document: ") + liveState);
+	}
+
+	// Save through the real file seam and reopen: the document reconstructs a
+	// fresh runtime that reproduces the original run tick-for-tick.
+	void fileRoundTrip(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-files";
+		filesystem::create_directories(directory);
+
+		core::World original("Round Trip", 2, 2);
+		enable(original, 2.0f);
+		original.resumeSimulation();
+		require(original.advanceTicks(120), "original scenario run failed");
+		auto const expected = original.getStationSystemsSnapshot();
+		auto const expectedEvents = original.getStationSystemsEvents();
+		require(expected.worldTick == 120 && expectedEvents.size() == 2,
+			"original scenario produced the wrong observable history");
+
+		for (auto const* suffix : {".world.yaml", ".world"})
+		{
+			auto const path = directory / (std::string("station") + suffix);
+			original.saveTo(path.string());
+			requireSettingsOnly(readFile(path));
+
+			auto reopened = core::loadWorldDocument(path);
+			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
+				"authored settings did not survive the file round trip");
+			auto const fresh = reopened->getStationSystemsSnapshot();
+			require(fresh.enabled && fresh.worldTick == 0 && fresh.elapsedSeconds == 0.0
+				&& fresh.completedTicks == std::array<uint64_t, 4>{},
+				"reopen did not reconstruct a fresh station runtime");
+			reopened->resumeSimulation();
+			require(reopened->advanceTicks(120), "reopened scenario run failed");
+			require(reopened->getStationSystemsSnapshot() == expected,
+				"reopened scenario is not reproducible from the document");
+			require(reopened->getStationSystemsEvents() == expectedEvents,
+				"reopened event history is not reproducible from the document");
+		}
+	}
+
+	// A refused save leaves the document dirty, the previous file unchanged,
+	// no temporary behind, and the live World still running its new settings.
+	void writeFailure(smoke::Context const& context)
+	{
+#if defined(_WIN32)
+		(void)context;
+		throw smoke::OptionalCapabilityUnavailable("POSIX permission semantics unavailable");
+#else
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-write-failure";
+		filesystem::create_directories(directory);
+		auto const path = directory / "station.world.yaml";
+
+		core::World world("Write Failure", 2, 2);
+		enable(world, 2.0f);
+		world.saveTo(path.string());
+		require(!world.isModified(), "successful save did not clean the document");
+
+		world.resumeSimulation();
+		require(world.advanceTicks(60), "run before the failed save broke");
+		world.pauseSimulation();
+		require(world.configureStationSystems({true, 3.0f}, true), "confirmed settings edit failed");
+		require(world.getSimulationTick() == 0, "confirmed edit did not reset the World");
+
+		filesystem::permissions(directory,
+			filesystem::perms::owner_read | filesystem::perms::owner_exec,
+			filesystem::perm_options::replace);
+		bool refused = false;
+		try { world.saveTo(path.string()); }
+		catch (std::exception const&) { refused = true; }
+		filesystem::permissions(directory,
+			filesystem::perms::owner_read | filesystem::perms::owner_write | filesystem::perms::owner_exec,
+			filesystem::perm_options::replace);
+
+		require(refused, "save into a read-only directory wrongly succeeded");
+		require(world.isModified(), "a failed save cleared the document dirty state");
+		require(world.getStationSystemsSettings().observationIntervalSeconds == 3.0f,
+			"a failed save changed the live settings");
+		for (auto const& entry : filesystem::directory_iterator(directory))
+			require(entry.path() == path, "a failed save left a temporary file behind");
+
+		auto reloaded = core::loadWorldDocument(path);
+		require(reloaded->getStationSystemsSettings().observationIntervalSeconds == 2.0f,
+			"a failed save corrupted the previously saved document");
+
+		world.resumeSimulation();
+		require(world.advanceTicks(60)
+			&& world.getStationSystemsSnapshot().completedTicks[0] == 60,
+			"the live run did not continue after the failed save");
+#endif
+	}
+
+	// Old documents stay disabled, a new field under an old schema is refused
+	// rather than silently dropped, and malformed values never disturb the
+	// World the caller already has open.
+	void legacyAndMalformedFiles(smoke::Context const& context)
+	{
+		namespace filesystem = std::filesystem;
+		auto const directory = context.temporaryRoot() / "station-legacy";
+		filesystem::create_directories(directory);
+
+		core::World plain("Plain", 2, 2);
+		plain.pauseSimulation();
+		plain.finishBuild();
+		auto legacy = serializeYaml(plain);
+		require(legacy.find("stationSystems") == std::string::npos,
+			"default Station settings should not serialize a map");
+		replaceAll(legacy, "version: 65", "version: 64");
+		auto const legacyPath = directory / "legacy.world.yaml";
+		writeFile(legacyPath, legacy);
+		auto loaded = core::loadWorldDocument(legacyPath);
+		require(!loaded->getStationSystemsSettings().enabled
+			&& !loaded->getStationSystemsSnapshot().enabled,
+			"a legacy document enabled Station systems");
+
+		core::World station("Station", 2, 2);
+		enable(station, 2.0f);
+		auto const withField = serializeYaml(station);
+		auto stale = withField;
+		replaceAll(stale, "version: 65", "version: 64");
+		auto const stalePath = directory / "stale.world.yaml";
+		writeFile(stalePath, stale);
+		bool refused = false;
+		try { (void)core::loadWorldDocument(stalePath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a pre-65 document carrying Station data was silently accepted");
+
+		core::World loadedWorld("Loaded", 2, 2);
+		enable(loadedWorld, 2.0f);
+		loadedWorld.resumeSimulation();
+		require(loadedWorld.advanceTicks(30), "loaded World run failed");
+		loadedWorld.pauseSimulation();
+		auto const before = loadedWorld.getStationSystemsSnapshot();
+
+		auto malformed = withField;
+		replaceAll(malformed, "observationIntervalSeconds: 2", "observationIntervalSeconds: -1");
+		auto const malformedPath = directory / "malformed.world.yaml";
+		writeFile(malformedPath, malformed);
+		refused = false;
+		try { (void)core::loadWorldDocument(malformedPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a malformed Station interval was accepted from a file");
+		require(loadedWorld.getStationSystemsSnapshot() == before,
+			"a malformed file disturbed the loaded World");
+	}
+
+	// A paused structural rebuild keeps the live station and its settings;
+	// only a reset reconstructs the runtime from the authored conditions.
+	void structuralReplay(smoke::Context const& context)
+	{
+		(void)context;
+		core::World world("Replay", 10, 2);
+		world.pauseSimulation();
+		world.addRoom("Room A", 0, 0, 0, 4, 1);
+		world.finishBuild();
+		enable(world, 1.0f);
+		world.resumeSimulation();
+		require(world.advanceTicks(30), "initial run failed");
+		auto const live = world.getStationSystemsSnapshot();
+		require(live.completedTicks[3] == 30, "station did not run before the edit");
+
+		world.pauseSimulation();
+		world.addRoom("Room B", 0, 0, 5, 4, 1);
+		require(world.rebuildTraversalTopology(), "structural rebuild refused");
+		require(world.getStationSystemsSnapshot() == live,
+			"structural replay reset or changed the live station");
+		require(world.getStationSystemsSettings().enabled,
+			"structural replay lost the authored settings");
+
+		world.resumeSimulation();
+		require(world.advanceTicks(30), "run after the rebuild failed");
+		require(world.getStationSystemsSnapshot().completedTicks[0] == 60,
+			"station did not continue from its preserved state");
+
+		world.pauseSimulation();
+		world.resetSimulation();
+		require(world.getSimulationTick() == 0
+			&& world.getStationSystemsSnapshot().completedTicks[0] == 0,
+			"reset did not reconstruct the station runtime");
+		require(world.getStationSystemsSettings().enabled,
+			"reset lost the authored settings");
+	}
+}
+
+void registerStationDocumentChecks(std::vector<smoke::Check>& checks)
+{
+	checks.push_back({"fileRoundTrip", fileRoundTrip});
+	checks.push_back({"writeFailure", writeFailure});
+	checks.push_back({"legacyFiles", legacyAndMalformedFiles});
+	checks.push_back({"structuralReplay", structuralReplay});
+}

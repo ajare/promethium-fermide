@@ -29,6 +29,8 @@ namespace
 		window.visible = true; frame(); frame();
 		require(ImGui::FindWindowByName("Station Systems") != nullptr && text.find("Active World: Station editor") != std::string::npos,
 			"Separate top-level station window missing active World");
+		require(text.find("Draft matches the authored start conditions") != std::string::npos,
+			"Unchanged draft state not reported");
 		auto clickPoint = [&](ImVec2 point)
 		{
 			io.AddMousePosEvent(point.x, point.y); frame();
@@ -45,10 +47,16 @@ namespace
 				}
 			throw std::runtime_error(std::string("Missing Station control: ") + label);
 		};
-		clickPoint(point("Enable Station systems")); clickPoint(point("Apply settings"));
+		clickPoint(point("Enable Station systems"));
+		require(text.find("Draft differs from the authored start conditions") != std::string::npos,
+			"Draft change not reported");
+		clickPoint(point("Apply settings"));
 		require(world->getStationSystemsSettings().enabled && history.undoCount() == 1, "Enable did not commit document history");
+		require(text.find("Document: unsaved changes") != std::string::npos, "Dirty state not shown after applying settings");
+		world->markSaved(); frame();
+		require(text.find("Document: saved") != std::string::npos, "Saved state not shown after markSaved");
 		world->resumeSimulation(); require(world->advanceTicks(60), "Editor station did not tick"); frame();
-		require(text.find("Station systems: Enabled") != std::string::npos && text.find("60 completed ticks") != std::string::npos,
+		require(text.find("Live station state: Enabled") != std::string::npos && text.find("60 completed ticks") != std::string::npos,
 			"Station live results not observable");
 		auto before = world->getStationSystemsSnapshot();
 		// Close via the real top-level ImGui close control, not disablement.
@@ -75,7 +83,7 @@ namespace
 		require(world->getStationSystemsSnapshot().worldTick == 0, "History resurrected live station Lua");
 		require(history.redo(captureDocumentSnapshot(world, history), restore) && !world->getStationSystemsSettings().enabled, "Station redo failed");
 		world = std::make_shared<core::World>("Second World", 2, 2); world->pauseSimulation(); frame();
-		require(text.find("Active World: Second World") != std::string::npos && text.find("Station systems: Disabled") != std::string::npos,
+		require(text.find("Active World: Second World") != std::string::npos && text.find("Live station state: Disabled") != std::string::npos,
 			"Window leaked state across Worlds");
 		world.reset(); frame(); require(text.find("No World is open.") != std::string::npos, "No active World status missing");
 	}

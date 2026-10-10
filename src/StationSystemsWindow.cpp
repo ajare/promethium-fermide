@@ -22,10 +22,19 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::Text("World elapsed: %.3f seconds (tick %llu)",
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
+	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
 	ImGui::TextWrapped("Lifecycle slice only: no resource production, consumption or endurance model yet. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	auto const authored = world->getStationSystemsSettings();
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s",
+		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds);
+	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
 	ImGui::InputFloat("Observation interval (seconds)", &mDraft.observationIntervalSeconds, 0.1f, 1.0f, "%.2f");
+	bool const draftChanged = mDraft != authored;
+	ImGui::TextUnformatted(draftChanged
+		? "Draft differs from the authored start conditions."
+		: "Draft matches the authored start conditions; there is nothing to apply.");
 	auto apply = [&](bool confirm)
 	{
 		auto before = captureDocumentSnapshot(world, history);
@@ -36,11 +45,13 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			mConfirmReset = false;
 		}
 	};
+	ImGui::BeginDisabled(!draftChanged);
 	if (ImGui::Button("Apply settings"))
 	{
 		if (world->getSimulationTick() && mDraft != world->getStationSystemsSettings()) mConfirmReset = true;
 		else apply(false);
 	}
+	ImGui::EndDisabled();
 	ImGui::SameLine();
 	if (ImGui::Button("Cancel edits"))
 	{
@@ -57,7 +68,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	if (!mDiagnostic.empty()) ImGui::TextWrapped("%s", mDiagnostic.c_str());
 	auto const snapshot = world->getStationSystemsSnapshot();
 	ImGui::Separator();
-	ImGui::Text("Station systems: %s", snapshot.enabled ? (snapshot.healthy ? "Enabled" : "Failed") : "Disabled");
+	ImGui::Text("Live station state: %s", snapshot.enabled ? (snapshot.healthy ? "Enabled" : "Failed") : "Disabled");
 	ImGui::Text("Station elapsed: %.3f seconds", snapshot.elapsedSeconds);
 	for (size_t i = 0; i < core::StationSystemNames.size(); ++i)
 		ImGui::Text("%s: %llu completed ticks", core::StationSystemNames[i],

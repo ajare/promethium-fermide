@@ -1,4 +1,5 @@
 #include "Smoke.h"
+#include "Documents.h"
 #include "core/World.h"
 #include "core/YamlSerializer.h"
 #include "core/BinarySerializer.h"
@@ -126,5 +127,6 @@ namespace
 int main(int argc, char** argv)
 {
 	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"failures", failures}};
+	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }
