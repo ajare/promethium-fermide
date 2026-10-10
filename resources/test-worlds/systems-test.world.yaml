@@ -1,0 +1,82 @@
+version: 65
+nextDumbwaiterId: 1
+nextFurnitureId: 1
+name: systems-test
+randomSeed: 0
+cellsWide: 16
+levelsHigh: 3
+layers: 2
+levelNames:
+  - Level 0
+  - Level 1
+  - Level 2
+layerNames:
+  - Layer 0
+  - Layer 1
+construction:
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 2
+    cellsWide: 5
+    levelsHigh: 1
+  - type: corridor
+    layer: 0
+    y: 1
+    x: 10
+    cellsWide: 5
+    levelsHigh: 1
+  - type: room
+    name: Room 1
+    layer: 1
+    y: 1
+    x: 5
+    cellsWide: 7
+    levelsHigh: 2
+    topLevelHeight: 0.9
+    hasHeightScale: false
+  - type: door
+    layer: 0
+    y: 1
+    x: 6
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+  - type: door
+    layer: 0
+    y: 1
+    x: 10
+    width: 1
+    height: regular
+    foreControl: false
+    backControl: false
+    activationMode: manual
+    holdOpenSeconds: 5
+    crossingLanes: 0
+    openStyle: openUp
+    hasSpeedOverride: false
+    hasHeightScale: false
+agentGroups:
+  []
+accessPermissions:
+  []
+permissionSets:
+  []
+nextPermissionSetId: 1
+agentPermissionSetAssignments:
+  []
+accessPermissionGrants:
+  []
+interactionPermissionRequirements:
+  []
+nextMarkerId: 1
+nextAgentGroupId: 1
+agents:
+  []
