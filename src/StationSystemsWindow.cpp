@@ -73,9 +73,22 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	for (size_t i = 0; i < core::StationSystemNames.size(); ++i)
 		ImGui::Text("%s: %llu completed ticks", core::StationSystemNames[i],
 			static_cast<unsigned long long>(snapshot.completedTicks[i]));
+	if (snapshot.enabled && !snapshot.healthy)
+		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())
-		ImGui::TextWrapped("Software failure at tick %llu in %s: %s",
-			static_cast<unsigned long long>(diagnostic.worldTick), diagnostic.system.c_str(), diagnostic.message.c_str());
+	{
+		char const* kind = "Lua error";
+		switch (diagnostic.failure)
+		{
+		case core::ScriptExecutionFailure::MemoryBudgetExceeded: kind = "Memory budget exceeded"; break;
+		case core::ScriptExecutionFailure::InstructionBudgetExceeded: kind = "Instruction budget exceeded"; break;
+		case core::ScriptExecutionFailure::ConversionError: kind = "Invalid output/accounting"; break;
+		case core::ScriptExecutionFailure::None: kind = "Unspecified failure"; break;
+		case core::ScriptExecutionFailure::LuaError: break;
+		}
+		ImGui::TextWrapped("Software failure at tick %llu in %s [%s]: %s",
+			static_cast<unsigned long long>(diagnostic.worldTick), diagnostic.system.c_str(), kind, diagnostic.message.c_str());
+	}
 	if (ImGui::CollapsingHeader("Event history (last 256)"))
 		for (auto const& event : world->getStationSystemsEvents())
 			ImGui::TextWrapped("Tick %llu: %s", static_cast<unsigned long long>(event.worldTick), event.message.c_str());

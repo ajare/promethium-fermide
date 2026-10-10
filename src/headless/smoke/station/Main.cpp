@@ -102,24 +102,75 @@ namespace
 	{
 		SourceScope scope;
 		core::World unaffected("Unaffected", 2, 2); enable(unaffected);
-		for (auto body : {"error('failed')", "return 0/0", "while true do end", "return 999", "local t = {}; for i=1,1000000 do t[i]=i end; return 1"})
+		using Failure = core::ScriptExecutionFailure;
+		struct Fixture { char const* body; Failure failure; char const* message; };
+		for (auto const& fixture : {
+			Fixture{"error('failed')", Failure::LuaError, "failed"},
+			Fixture{"error({})", Failure::LuaError, "Station step failed"},
+			Fixture{"return 0/0", Failure::ConversionError, "non-finite"},
+			Fixture{"return math.huge", Failure::ConversionError, "non-finite"},
+			Fixture{"return '1'", Failure::ConversionError, "invalid completed ticks"},
+			Fixture{"return 999", Failure::ConversionError, "accounting mismatch"},
+			Fixture{"while true do end", Failure::InstructionBudgetExceeded, ""},
+			Fixture{"pcall(function() while true do end end); return tick", Failure::InstructionBudgetExceeded, ""},
+			Fixture{"local t = {}; for i=1,1000000 do t[i]=i end; return tick", Failure::MemoryBudgetExceeded, ""},
+			Fixture{"pcall(function() local t = {}; for i=1,1000000 do t[i]=i end end); return tick", Failure::MemoryBudgetExceeded, ""},
+			Fixture{"error(string.rep('x', 10000))", Failure::LuaError, "xxx"}})
 		{
-			std::string source = "return function(name) assert(os == nil and io == nil and debug == nil and package == nil and world == nil); return {advance=function(self,tick,seconds) if name ~= 'Monitoring/supervision' then return tick end; " + std::string(body) + " end} end";
+			// Commit a successful prefix, then mutate every object before failing
+			// in the last system. Only public committed results may survive.
+			std::string source = "return function(name) assert(os == nil and io == nil and debug == nil and package == nil and world == nil); return {advance=function(self,tick,seconds) self.attempted = tick; if tick <= 60 or name ~= 'Monitoring/supervision' then return tick end; " + std::string(fixture.body) + " end} end";
 			core::setStationSystemsSourceLoader([source] { return source; });
-			core::World failed("Failure", 2, 2); enable(failed); auto before = failed.getStationSystemsSnapshot();
-			failed.resumeSimulation(); require(!failed.advanceTick(), "Lua failure accepted");
+			core::World failed("Failure", 2, 2); enable(failed);
+			failed.resumeSimulation(); require(failed.advanceTicks(60), "Successful prefix failed");
+			auto before = failed.getStationSystemsSnapshot();
+			auto events = failed.getStationSystemsEvents();
+			auto settings = failed.getStationSystemsSettings();
+			require(!failed.advanceTick(), "Lua failure accepted");
 			auto result = failed.getStationSystemsSnapshot();
-			require(failed.isSimulationPaused() && failed.getSimulationTick() == 0 && !result.healthy,
+			require(failed.isSimulationPaused() && failed.getSimulationTick() == 60 && !result.healthy,
 				"Station failure not fail-visible and synchronized");
-			require(result.completedTicks == before.completedTicks && result.elapsedSeconds == 0, "Partial Lua step published");
+			before.healthy = false;
+			require(result == before && failed.getStationSystemsEvents() == events, "Partial Lua step or event published");
+			require(failed.getStationSystemsSettings() == settings, "Failure changed authored settings");
 			auto diagnostics = failed.getStationSystemsDiagnostics();
 			require(diagnostics.size() == 1 && diagnostics[0].system == "Monitoring/supervision" && !diagnostics[0].message.empty(), "Missing structured diagnostic");
-			if (std::string(body) == "while true do end") require(diagnostics[0].failure == core::ScriptExecutionFailure::InstructionBudgetExceeded, "Instruction failure misclassified");
-			failed.resumeSimulation(); require(!failed.advanceTick(), "Failed Lua objects retried");
+			require(diagnostics[0].worldTick == 61 && diagnostics[0].failure == fixture.failure, "Failure misclassified or misdated");
+			require(diagnostics[0].message.size() <= 2048 && diagnostics[0].message.find(fixture.message) != std::string::npos,
+				"Diagnostic missing context or unbounded");
+			failed.resumeSimulation(); require(!failed.advanceTicks(10), "Failed Lua objects retried");
+			require(failed.getStationSystemsDiagnostics().size() == 1 && failed.getStationSystemsSnapshot() == result,
+				"Retry changed failed state or duplicated diagnostic");
+			unaffected.resumeSimulation(); require(unaffected.advanceTick(), "Failure leaked to another World");
+			failed.resetSimulation();
+			require(failed.getSimulationTick() == 0 && failed.getStationSystemsSnapshot().healthy
+				&& failed.getStationSystemsDiagnostics().empty(), "Reset did not clear failure");
+			failed.resumeSimulation(); require(failed.advanceTicks(60), "Reset prefix failed");
+			before.healthy = true;
+			require(failed.getStationSystemsSnapshot() == before && failed.getStationSystemsEvents() == events,
+				"Successful replay after failure was not deterministic");
+			require(!failed.advanceTick() && failed.getStationSystemsSnapshot() == result, "Failed replay changed outcome");
 		}
-		core::setStationSystemsSourceLoader([] { return "while true do end"; });
-		core::World refused("Constructor", 2, 2); refused.pauseSimulation();
-		require(!refused.configureStationSystems({true, 1}) && !refused.getStationSystemsSettings().enabled, "Constructor failure mutated settings");
+		for (auto const* source : {"error('constructor failed')", "while true do end",
+			"pcall(function() while true do end end); return function() return {} end",
+			"local t = {}; for i=1,1000000 do t[i]=i end"})
+		{
+			core::setStationSystemsSourceLoader([source] { return std::string(source); });
+			core::World refused("Constructor", 2, 2); refused.pauseSimulation(); refused.finishBuild();
+			auto before = yaml(refused);
+			std::string diagnostic;
+			require(!refused.configureStationSystems({true, 1}, false, &diagnostic)
+				&& !diagnostic.empty() && yaml(refused) == before && !refused.getStationSystemsSnapshot().enabled,
+				"Constructor failure mutated authored settings or omitted diagnostic");
+		}
+		// Caught application errors are not resource exhaustion. A locally
+		// handled condition must be able to produce a valid successful step.
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name) return {advance=function(self,tick) local ok = pcall(function() error('handled condition') end); assert(not ok); return tick end} end";
+		});
+		core::World handled("Handled", 2, 2); enable(handled); handled.resumeSimulation();
+		require(handled.advanceTicks(120) && handled.getStationSystemsDiagnostics().empty()
+			&& handled.getStationSystemsSnapshot().healthy, "Caught application error triggered software pause");
 		core::setStationSystemsSourceLoader({});
 		unaffected.resumeSimulation(); require(unaffected.advanceTick() && unaffected.getStationSystemsSnapshot().healthy, "Failure leaked between Worlds");
 	}

@@ -85,6 +85,23 @@ namespace
 		world = std::make_shared<core::World>("Second World", 2, 2); world->pauseSimulation(); frame();
 		require(text.find("Active World: Second World") != std::string::npos && text.find("Live station state: Disabled") != std::string::npos,
 			"Window leaked state across Worlds");
+		struct SourceScope { ~SourceScope() { core::setStationSystemsSourceLoader({}); } } sourceScope;
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name) return {advance=function() return 0/0 end} end";
+		});
+		world->finishBuild();
+		require(world->configureStationSystems({true, 1}), "Could not configure failure fixture");
+		world->resumeSimulation(); require(!world->advanceTick() && !world->getStationSystemsSnapshot().healthy,
+			"Failure fixture did not reach station failure"); frame();
+		require(text.find("Live station state: Failed") != std::string::npos
+			&& text.find("World status: Paused") != std::string::npos
+			&& text.find("Invalid output/accounting") != std::string::npos
+			&& text.find("non-finite") != std::string::npos
+			&& text.find("Reset the World") != std::string::npos,
+			"Station window omitted failure category, pause, diagnostic or recovery");
+		core::setStationSystemsSourceLoader({}); world->resetSimulation(); frame();
+		require(text.find("Live station state: Enabled") != std::string::npos
+			&& text.find("Software failure at tick") == std::string::npos, "Window retained reset failure");
 		world.reset(); frame(); require(text.find("No World is open.") != std::string::npos, "No active World status missing");
 	}
 }

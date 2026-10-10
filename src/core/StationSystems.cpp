@@ -11,6 +11,16 @@ namespace core
 	{
 		StationSystemsSourceLoader sourceLoader;
 		constexpr size_t EventLimit = 256;
+		constexpr size_t DiagnosticByteLimit = 2048;
+		// Borrow the Lua error only long enough to copy a bounded string. Never
+		// coerce arbitrary error objects outside a protected allocation boundary.
+		std::string errorMessage(lua_State* state, char const* fallback)
+		{
+			if (lua_type(state, -1) != LUA_TSTRING) return fallback;
+			size_t length = 0;
+			auto const* text = lua_tolstring(state, -1, &length);
+			return std::string(text, std::min(length, DiagnosticByteLimit));
+		}
 		struct ScriptObject
 		{
 			script::ScratchBudget budget{512 * 1024, 100'000};
@@ -51,6 +61,7 @@ namespace core
 			uint64_t tick;
 			float seconds;
 			uint64_t completed{};
+			bool invalidOutput{false};
 			int operator()(lua_State* state)
 			{
 				lua_rawgeti(state, LUA_REGISTRYINDEX, object->reference);
@@ -58,7 +69,12 @@ namespace core
 				lua_pushinteger(state, static_cast<lua_Integer>(tick));
 				lua_pushnumber(state, seconds); lua_call(state, 3, 1);
 				if (!lua_isinteger(state, -1) || lua_tointeger(state, -1) < 0)
+				{
+					invalidOutput = true;
+					if (lua_type(state, -1) == LUA_TNUMBER && !std::isfinite(lua_tonumber(state, -1)))
+						return luaL_error(state, "Station lifecycle returned non-finite completed ticks");
 					return luaL_error(state, "Station lifecycle returned invalid completed ticks");
+				}
 				completed = static_cast<uint64_t>(lua_tointeger(state, -1));
 				return 0;
 			}
@@ -101,10 +117,9 @@ namespace core
 			script::endInstructionBudget(object->state.get());
 			if (status != LUA_OK || script::budgetExhausted(object->budget))
 			{
-				auto text = lua_tostring(object->state.get(), -1);
 				throw SerializationException(std::string(StationSystemNames[i]) + ": "
-					+ (script::budgetExhausted(object->budget) ? script::budgetDiagnostic(object->budget)
-						: text ? text : "Station constructor failed"));
+					+ (script::budgetExhausted(object->budget) ? std::string(script::budgetDiagnostic(object->budget))
+						: errorMessage(object->state.get(), "Station constructor failed")));
 			}
 			lua_settop(object->state.get(), 0);
 			mImpl->objects[i] = std::move(object);
@@ -128,20 +143,25 @@ namespace core
 				script::endInstructionBudget(object.state.get());
 				if (status != LUA_OK || script::budgetExhausted(object.budget))
 				{
-					auto text = lua_tostring(object.state.get(), -1);
 					throw std::runtime_error(script::budgetExhausted(object.budget)
-						? script::budgetDiagnostic(object.budget) : text ? text : "Station step failed");
+						? std::string(script::budgetDiagnostic(object.budget)) : errorMessage(object.state.get(), "Station step failed"));
 				}
 				if (step.completed != next.completedTicks[i] + 1)
+				{
+					step.invalidOutput = true;
 					throw std::runtime_error("Station lifecycle tick accounting mismatch");
+				}
 				next.completedTicks[i] = step.completed;
 				lua_settop(object.state.get(), 0);
 			}
 			catch (std::exception const& error)
 			{
+				script::endInstructionBudget(object.state.get());
 				mImpl->snapshot.healthy = false;
 				mImpl->diagnostics.push_back({tick, StationSystemNames[i],
-					script::failureKind(object.budget), std::string(error.what()).substr(0, 2048)});
+					script::failureKind(object.budget, step.invalidOutput
+						? ScriptExecutionFailure::ConversionError : ScriptExecutionFailure::LuaError),
+					std::string(error.what(), std::min(std::char_traits<char>::length(error.what()), DiagnosticByteLimit))});
 				// Retire all mutated objects. No failed step can be retried, and no
 				// partial result escapes into the public committed snapshot.
 				for (auto& owned : mImpl->objects) owned.reset();

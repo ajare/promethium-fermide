@@ -1,4 +1,4 @@
-# Station systems — lifecycle and authored scenarios (#386, #387)
+# Station systems — lifecycle, authored scenarios and containment (#386–#388)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -67,6 +67,30 @@ tick-accounting mismatch pauses the World before that tick advances. All four
 results are staged before publication; no partial station result or elapsed
 time is published. Mutated Lua objects are discarded, and resuming cannot
 retry the failed runtime. Reset reconstructs authored initial state.
+
+### Failure containment (#388)
+
+Diagnostics identify the attempted World tick, failing system, bounded message
+(up to 2048 bytes), and machine-readable `ScriptExecutionFailure`: Lua error,
+instruction budget exceeded, memory budget exceeded, or conversion error.
+Non-finite/non-integer/negative completed counts and tick-accounting mismatches
+are conversion errors, distinct from script exceptions. Error objects are not
+coerced outside protected Lua execution, and error strings are bounded before
+host copying. The window displays the category and explicit World-reset recovery
+guidance. Headless `advanceTick`/`advanceTicks` return false and the World pauses;
+repeated resume attempts neither duplicate diagnostics nor retry retired objects.
+
+All four results and observation events remain at the last committed tick even
+if earlier systems and the failing system already mutated their private Lua
+state. Reset clears diagnostics and rebuilds all four objects from authored
+settings. Budget exhaustion remains terminal even if Lua catches it with
+`pcall`; ordinary caught application errors can still yield a valid step.
+Construction errors refuse settings atomically with a diagnostic.
+
+Physical shortages are not software failures: this lifecycle slice has no
+physical inventories or shortage outputs to validate. Later physical slices must
+represent shortages as finite valid results, not throw software exceptions. No
+station demand is derived from Agents and no Agent behaviour semantics change.
 
 ## Explicit scope limit
 
