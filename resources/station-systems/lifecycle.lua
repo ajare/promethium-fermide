@@ -329,6 +329,7 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             lastLevel = 0,
             requested = 0,
             supplied = 0,
+            shortfall = '',
             unmetCritical = 0,
             deliveredFraction = 0,
             heatExported = 0,
@@ -543,7 +544,10 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
     -- supplied above its request. A load that requires a cooling service
     -- is never admitted in this slice: it draws nothing and its cooling
     -- need stays visible as unmet cooling rather than being silently
-    -- absorbed.
+    -- absorbed. A critical floor is protected only as far as the load can
+    -- actually run: the claim is the larger of the floor and the minimum
+    -- operable supply, and a pool that cannot reach that minimum funds
+    -- the load nothing at all, leaving its whole floor unmet (#549).
     local function batteryReserve(battery)
         return battery.nameplateKWh - battery.usableKWh
     end
@@ -559,6 +563,16 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         local byPower = battery.maxDischargeKW - battery.last_discharge
         return math.max(0, math.min(byPower,
             drawable * battery.dischargeEfficiency / dtHours))
+    end
+    -- What the whole bank could deliver this tick before any of it is
+    -- routed: the pool a protected critical claim is measured
+    -- against (#549).
+    local function batteryDeliverableKW(self, dtHours)
+        local total = 0
+        for _, battery in ipairs(self.batteries) do
+            total = total + deliverableKW(battery, dtHours)
+        end
+        return total
     end
     -- Route a power need through the batteries in declaration order and
     -- return what they actually delivered. dtHours is the crossing
@@ -609,16 +623,34 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             load.requested = load.demandKW * load.lastLevel
             load.admitted = load.cooling == 'exported'
             load.unmetCritical = 0
+            load.shortfall = ''
             supplied[index] = 0
             if load.admitted and load.requested > 0 then
                 local floor = math.min(load.criticalFloorKW, load.requested)
-                local fromGeneration = math.min(floor, generation)
-                generation = generation - fromGeneration
-                local stillNeeded = floor - fromGeneration
-                local fromBattery = drawBatteries(self, stillNeeded, fixed_hours)
-                supplied[index] = fromGeneration + fromBattery
-                batterySupplied = batterySupplied + fromBattery
-                load.unmetCritical = stillNeeded - fromBattery
+                if floor > 0 then
+                    local minOperating = load.requested * (1 - load.maxCurtailment)
+                    local claim = math.max(floor, minOperating)
+                    local reachable = math.min(claim,
+                        generation + batteryDeliverableKW(self, fixed_hours))
+                    if reachable + 1e-12 < minOperating then
+                        -- The pools cannot run this load at all: it is
+                        -- refused whole, spends no scarce energy, and
+                        -- every watt of its protected floor stays unmet
+                        -- rather than just the slice the pool happened to
+                        -- fall short of.
+                        load.unmetCritical = floor
+                        load.shortfall =
+                            'critical floor cannot reach the minimum operable supply level'
+                    else
+                        local fromGeneration = math.min(reachable, generation)
+                        generation = generation - fromGeneration
+                        local stillNeeded = reachable - fromGeneration
+                        local fromBattery = drawBatteries(self, stillNeeded, fixed_hours)
+                        supplied[index] = fromGeneration + fromBattery
+                        batterySupplied = batterySupplied + fromBattery
+                        load.unmetCritical = math.max(0, floor - supplied[index])
+                    end
+                end
             end
         end
         for _, index in ipairs(self.load_order) do
@@ -628,11 +660,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                 if remaining > 0 then
                     local fromGeneration = math.min(remaining, generation)
                     local afterGeneration = remaining - fromGeneration
-                    local batteryCapable = 0
-                    for _, battery in ipairs(self.batteries) do
-                        batteryCapable = batteryCapable + deliverableKW(battery, fixed_hours)
-                    end
-                    local batteryAsk = math.min(afterGeneration, batteryCapable)
+                    local batteryAsk = math.min(afterGeneration,
+                        batteryDeliverableKW(self, fixed_hours))
                     local minOperating = load.requested * (1 - load.maxCurtailment)
                     if supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating then
                         supplied[index] = supplied[index] + fromGeneration
@@ -644,6 +673,8 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
                         local drawn = drawBatteries(self, afterGeneration, fixed_hours)
                         supplied[index] = supplied[index] + drawn
                         batterySupplied = batterySupplied + drawn
+                    elseif load.shortfall == '' then
+                        load.shortfall = 'below the minimum operable supply level'
                     end
                 end
             end
@@ -730,6 +761,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
         for index = 1, #self.loads do
             assert((supplied[index] or 0) <= self.loads[index].requested + generationBound,
                 'load supplied above its requested service')
+        end
+        -- The minimum-operable audit (#549): a load is either off or at
+        -- least its minimum operable supply, requested * (1 - allowed
+        -- curtailment). A grant landing strictly between nothing and that
+        -- minimum buys a state the equipment cannot physically run in, so
+        -- it is a software failure rather than a shortage.
+        for index = 1, #self.loads do
+            local load = self.loads[index]
+            if load.admitted and load.requested > 0 then
+                local minOperating = load.requested * (1 - load.maxCurtailment)
+                local bound = BALANCE_TOLERANCE * math.max(1.0, load.requested)
+                local amount = supplied[index] or 0
+                assert(amount <= 1e-12 or amount + bound >= minOperating,
+                    'load supplied below its minimum operable supply level')
+            end
         end
         -- Battery energy audit: stored energy stays inside the nameplate,
         -- the ledger closes over charge and discharge, nothing is

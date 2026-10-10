@@ -276,12 +276,25 @@ ties) and in two passes: protected critical floors first — ahead of all
 discretionary demand — then discretionary demand. A load is never
 supplied below its minimum operable level, `demand × (1 − allowed
 curtailment)`: if the remaining pool cannot reach that level the load
-takes nothing and the pool stays available for loads that can use it. A
-critical floor the generation cannot meet remains explicit unmet
-critical demand; it is never silently reclassified as permissible
-curtailment. Eclipse and sunlight transitions, curtailment, refusals
-and unmet critical floors are announced in the event log on their status
-transitions.
+takes nothing and the pool stays available for loads that can use it.
+
+The critical floor and that minimum are read together (#549). The floor
+is a protected slice of the load's own service, not an independently
+operable sub-service, so protecting it means running the load — and the
+load cannot run below its minimum. The protected claim is therefore the
+larger of the floor and `demand × (1 − allowed curtailment)`, and it is
+granted only when generation plus available battery output can actually
+reach that minimum. A claim that cannot reach it is refused whole: the
+load takes no generation and no stored energy, exports no heat and runs
+no material exchange, and its **entire** floor stays explicit unmet
+critical demand rather than just the slice the pool happened to fall
+short of. A critical floor is never a way to bypass the load's minimum,
+and scarce energy is never spent on an operating state the equipment
+cannot physically hold. A floor the generation cannot meet remains
+explicit unmet critical demand; it is never silently reclassified as
+permissible curtailment. Eclipse and sunlight transitions, curtailment,
+refusals and unmet critical floors are announced in the event log on
+their status transitions.
 
 Missing cooling is never silently supplied. A load whose disposition is
 `coolingService` requires a cooling service of its declared thermal
@@ -352,10 +365,13 @@ energy disables the battery entirely — it stores nothing and delivers
 nothing.
 
 Battery discharge rides the same allocation pool as generation; it is
-never a second power budget. In the protected pass, a critical floor
+never a second power budget. In the protected pass, a critical claim
 generation cannot meet is offered to the batteries before it remains
-explicit unmet critical demand. In the discretionary pass, the demand
-generation leaves over is offered to the batteries under the same
+explicit unmet critical demand, and the claim is measured against the
+load's minimum operable level: if generation plus available battery
+output still cannot reach that minimum, the load is refused whole and
+neither the sun nor stored energy is spent on it (#549). In the
+discretionary pass, the demand generation leaves over is offered to the batteries under the same
 minimum-operable rule: if generation plus available battery output
 still cannot reach `demand x (1 - allowed curtailment)`, the load takes
 nothing. Generation is always taken before stored energy, so finite
@@ -436,8 +452,12 @@ surplus, zero-capacity source disablement, eclipse/sunrise transitions
 with explicit unmet demand and deterministic replay, priority allocation
 with the loser's unmet remainder visible, critical-floor protection
 ahead of higher-priority discretionary demand and explicit unmet
-critical shortfall under a starved source, curtailment-floor refusal
-leaving the pool for flexible loads, cooling-infeasible loads never
+critical shortfall under a starved source, minimum-operable admission of
+a positive critical floor (a floor below the load's minimum is protected
+at the minimum, and a pool that cannot reach the minimum refuses the
+load whole with the entire floor unmet, no heat and no material exchange,
+releasing both sun and stored energy to loads that can use them),
+curtailment-floor refusal leaving the pool for flexible loads, cooling-infeasible loads never
 admitted with unmet cooling visible, material exchanges scaled by the
 full-operation delivered fraction (profile level times delivered
 fraction, covering fractional profiles, added curtailment and zero

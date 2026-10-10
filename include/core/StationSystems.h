@@ -211,7 +211,14 @@ namespace core
 	// here again. The critical floor is protected ahead of all
 	// discretionary demand; allowed curtailment is the largest fraction
 	// of the request the load may be cut by, so the minimum operable
-	// supply is demand * (1 - maxCurtailment).
+	// supply is demand * (1 - maxCurtailment). The two are read together
+	// (#549): the floor protects a slice of this load's own service and
+	// is not independently operable, so the protected claim is the
+	// larger of the floor and that minimum, granted only when the pools
+	// can reach the minimum. A load that cannot reach its minimum is
+	// refused whole and spends no generation, no stored energy and no
+	// material, with its entire floor reported unmet — the floor is never
+	// a route around the minimum operable level.
 	struct EquipmentLoadSettings
 	{
 		std::string id;

@@ -667,6 +667,18 @@ namespace core
 		// that requires a cooling service is never admitted in this slice:
 		// it draws no power and its cooling need stays visible as unmet
 		// cooling rather than being silently supplied.
+		//
+		// The critical floor and the minimum operable level are read
+		// together (#549): the floor is a protected slice of this load's
+		// own service, not an independently operable sub-service, so
+		// protecting it means running the load — and the load cannot run
+		// below demand * (1 - allowed curtailment). The protected claim is
+		// therefore the larger of the floor and that minimum, and it is
+		// granted only when the pools can actually reach the minimum. A
+		// claim that cannot reach it is refused whole: the load takes no
+		// generation and no stored energy, produces no heat and no
+		// material exchange, and its whole floor stays explicit unmet
+		// critical demand.
 		struct LoadExchangeState
 		{
 			size_t storeIndex{0};
@@ -847,6 +859,15 @@ namespace core
 				auto const byPower = battery.authored.maxDischargeKW - battery.lastDischargeKW;
 				return std::max(0.0, std::min(byPower, byEnergy));
 			};
+			// What the whole bank could deliver this tick before any of it is
+			// routed: the pool a protected critical claim is measured
+			// against (#549).
+			auto const batteryDeliverableKW = [&]()
+			{
+				double total{0.0};
+				for (auto const& battery : batteries) total += deliverableKW(battery, hours);
+				return total;
+			};
 			for (auto& battery : batteries)
 			{
 				battery.lastChargeKW = 0.0;
@@ -888,7 +909,11 @@ namespace core
 			// discretionary request, in the declared priority order. A
 			// floor that generation cannot meet is offered to the batteries
 			// before it remains explicit unmet critical demand; it is never
-			// silently reclassified as permissible curtailment.
+			// silently reclassified as permissible curtailment. What is
+			// protected here is the larger of the floor and the load's
+			// minimum operable supply: a floor below that minimum would buy
+			// a state the equipment cannot physically run in, so a pool that
+			// cannot reach the minimum funds nothing at all (#549).
 			for (auto const index : loadOrder)
 			{
 				auto& load = loads[index];
@@ -902,15 +927,30 @@ namespace core
 				load.lastUnmetCriticalKW = 0.0;
 				if (!load.lastAdmitted || load.lastRequestedKW <= 0.0) continue;
 				auto const floor = std::min(load.authored.criticalFloorKW, load.lastRequestedKW);
-				auto const fromGeneration = std::min(floor, availableGeneration);
+				if (floor <= 0.0) continue;
+				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				auto const claim = std::max(floor, minOperating);
+				auto const reachable = std::min(claim, availableGeneration + batteryDeliverableKW());
+				if (reachable + 1e-12 < minOperating)
+				{
+					// The pools cannot run this load at all: it is refused
+					// whole, spends no scarce energy, and every watt of its
+					// protected floor stays unmet rather than just the slice
+					// the pool happened to fall short of.
+					load.lastUnmetCriticalKW = floor;
+					load.lastShortfallReason =
+						"critical floor cannot reach the minimum operable supply level";
+					continue;
+				}
+				auto const fromGeneration = std::min(reachable, availableGeneration);
 				supplied[index] += fromGeneration;
 				availableGeneration -= fromGeneration;
-				auto const stillNeeded = floor - fromGeneration;
+				auto const stillNeeded = reachable - fromGeneration;
 				auto const fromBattery = drawBatteries(stillNeeded);
 				supplied[index] += fromBattery;
 				batterySuppliedKW += fromBattery;
 				batteryShortfallKW += stillNeeded - fromBattery;
-				load.lastUnmetCriticalKW = stillNeeded - fromBattery;
+				load.lastUnmetCriticalKW = std::max(0.0, floor - supplied[index]);
 			}
 			// Pass 2: discretionary demand in the same declared order. A
 			// load is never supplied below its minimum operable level,
@@ -927,10 +967,7 @@ namespace core
 				if (remaining <= 0.0) continue;
 				auto const fromGeneration = std::min(remaining, availableGeneration);
 				auto const afterGeneration = remaining - fromGeneration;
-				double batteryCapableKW{0.0};
-				for (auto const& battery : batteries)
-					batteryCapableKW += deliverableKW(battery, hours);
-				auto const batteryAsk = std::min(afterGeneration, batteryCapableKW);
+				auto const batteryAsk = std::min(afterGeneration, batteryDeliverableKW());
 				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
 				if (supplied[index] + fromGeneration + batteryAsk + 1e-12 >= minOperating)
 				{
@@ -948,7 +985,7 @@ namespace core
 					// was asked of it after capping by capability.
 					batteryShortfallKW += afterGeneration - drawn;
 				}
-				else
+				else if (load.lastShortfallReason.empty())
 					load.lastShortfallReason = "below the minimum operable supply level";
 			}
 			for (size_t index = 0; index < loads.size(); ++index)
@@ -1268,6 +1305,20 @@ namespace core
 				auto const bound = StationBalanceTolerance * std::max(1.0, totalGeneration + totalDischarged);
 				if (totalSupplied > totalGeneration + totalDischarged + bound)
 					return violation = "total supplied power exceeds generation plus battery output", false;
+			}
+			// The minimum-operable audit (#549): a load is either off or at
+			// least its minimum operable supply, demand * (1 - allowed
+			// curtailment). A grant that lands strictly between nothing and
+			// that minimum buys a state the equipment cannot physically run
+			// in, so it is a software failure rather than a shortage.
+			for (auto const& load : loads)
+			{
+				if (load.lastRequestedKW <= 0.0 || !load.lastAdmitted) continue;
+				auto const minOperating = load.lastRequestedKW * (1.0 - load.authored.maxCurtailment);
+				auto const bound = StationBalanceTolerance * std::max(1.0, load.lastRequestedKW);
+				if (load.lastSuppliedKW > 1e-12 && load.lastSuppliedKW + bound < minOperating)
+					return violation = "load '" + load.authored.id
+						+ "' was supplied below its minimum operable supply level", false;
 			}
 			for (size_t index = 0; index < stores.size(); ++index)
 			{

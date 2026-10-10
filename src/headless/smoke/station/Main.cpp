@@ -1406,6 +1406,195 @@ namespace
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Bounded exchanges broke the boundary ledger");
 		}
+		// #549: a critical floor is a protected slice of the load's own
+		// service, never an independently operable sub-service. Protecting
+		// it means running the load, and the load cannot run below
+		// demand * (1 - allowed curtailment), so the protected claim is
+		// the larger of the floor and that minimum. A pool that cannot
+		// reach the minimum funds the load nothing at all: it spends no
+		// generation and no stored energy, emits no heat and no material
+		// exchange, and its whole floor stays explicit unmet critical
+		// demand rather than a physically impossible operating state.
+		{
+			auto battery = [](std::string const& id, double nameplateKWh, double usableKWh,
+				double startingStoredKWh, double maxChargeKW, double maxDischargeKW)
+			{
+				core::BatterySettings settings;
+				settings.id = id;
+				settings.nameplateKWh = nameplateKWh;
+				settings.usableKWh = usableKWh;
+				settings.startingStoredKWh = startingStoredKWh;
+				settings.maxChargeKW = maxChargeKW;
+				settings.maxDischargeKW = maxDischargeKW;
+				return settings;
+			};
+			auto configurePower = [](core::World& world,
+				std::vector<core::ResourceStoreSettings> stores,
+				std::vector<core::SolarArraySettings> solar,
+				std::vector<core::EquipmentLoadSettings> loads,
+				std::vector<core::BatterySettings> batteries)
+			{
+				std::string diagnostic;
+				core::StationSystemsSettings settings;
+				settings.enabled = true;
+				settings.observationIntervalSeconds = 1.0f;
+				settings.stores = std::move(stores);
+				settings.solarArrays = std::move(solar);
+				settings.equipmentLoads = std::move(loads);
+				settings.batteries = std::move(batteries);
+				return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+			};
+			// The ticket's exact reproduction: 2 kW of sun, a rigid load
+			// whose 1 kW critical floor sits far below its 10 kW minimum
+			// operable level, and a flexible load competing for the rest.
+			// The rigid load cannot run, so it must take nothing at all —
+			// not the 1 kW the old pass-1 grant handed it — and the whole
+			// sun reaches the load that can use it.
+			core::World impossible("Impossible", 2, 2);
+			impossible.pauseSimulation(); impossible.finishBuild();
+			{
+				auto rigid = load("rigid", 10.0, "low",
+					core::StationCoolingDisposition::Exported, 1.0, 1, 0.0);
+				rigid.heatOutputKW = 4.0;
+				rigid.materialExchanges.push_back({"water", 6.0, true});
+				auto flexible = load("flexible", 10.0, "moderate",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				require(configurePower(impossible, {{"water", "kg", 100.0, 50.0, 0.0}},
+					{array("field", 2.0, constantProfile(1.0))},
+					{rigid, flexible}, {}).first, "Infeasible-floor reproduction refused");
+				impossible.resumeSimulation();
+				require(impossible.advanceTicks(60), "Infeasible-floor reproduction run failed");
+				auto const snap = impossible.getStationSystemsSnapshot();
+				require(snap.power.loads[0].id == "rigid" && snap.power.loads[1].id == "flexible",
+					"Reproduction loads not in the declared allocation order");
+				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+					&& approx(snap.power.loads[0].suppliedKW, 0.0)
+					&& approx(snap.power.loads[0].unmetKW, 10.0),
+					"Infeasible rigid load was still supplied below its minimum operable level");
+				require(approx(snap.power.loads[0].unmetCriticalKW, 1.0)
+					&& approx(snap.power.unmetCriticalKW, 1.0),
+					"Whole critical floor not reported unmet when the load cannot run");
+				require(approx(snap.power.loads[0].heatExportedKW, 0.0)
+					&& approx(snap.power.exportedHeatKW, 0.0),
+					"Infeasible load emitted operating heat");
+				require(approx(snap.power.loads[0].materialExchanges[0].requested, 0.0)
+					&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.0)
+					&& approx(snap.stores[0].currentQualified, 50.0),
+					"Infeasible load moved material it never ran to move");
+				require(approx(snap.power.loads[1].suppliedKW, 2.0)
+					&& approx(snap.power.totalSuppliedKW, 2.0),
+					"Refused load kept scarce generation the flexible load could use");
+				require(sawEvent(impossible,
+					"Load 'rigid' rejected: critical floor cannot reach the minimum operable supply level"),
+					"Infeasible critical-floor refusal reason missing from the event log");
+				require(sawEvent(impossible, "Load 'rigid' critical floor unmet: short 1.000000 kW"),
+					"Whole-floor unmet transition missing for the infeasible critical load");
+			}
+			// The floor is protected at whatever level the load must run
+		// at: with a 5 kW minimum and only 5 kW of sun the load runs
+			// at its minimum, the 1 kW floor is met, and the sun is fully
+			// committed rather than wasted.
+			core::World reachable("Reachable", 2, 2);
+			reachable.pauseSimulation(); reachable.finishBuild();
+			require(configurePower(reachable, {},
+				{array("field", 5.0, constantProfile(1.0))},
+				{load("rigid", 10.0, "low",
+					core::StationCoolingDisposition::Exported, 1.0, 1, 0.5)}, {}).first,
+				"Minimum-reachable floor scenario refused");
+			reachable.resumeSimulation();
+			require(reachable.advanceTicks(60), "Minimum-reachable floor run failed");
+			{
+				auto const snap = reachable.getStationSystemsSnapshot();
+				require(snap.power.loads[0].status == core::StationTransferStatus::Partial
+					&& approx(snap.power.loads[0].suppliedKW, 5.0)
+					&& approx(snap.power.loads[0].unmetCriticalKW, 0.0),
+					"Floor not met when the pool could reach the load's minimum");
+				require(approx(snap.power.surplusKW, 0.0),
+					"Protected minimum did not commit the available sun");
+			}
+			// A shortage below the floor is still reported whole when the
+		// load cannot run: a 4 kW floor with a 5 kW minimum against
+		// 4 kW of sun leaves the load off, the full 4 kW unmet, and
+		// the sun available to nothing else rather than half-spent.
+			core::World shortfall("Shortfall", 2, 2);
+			shortfall.pauseSimulation(); shortfall.finishBuild();
+			{
+				auto rigid = load("rigid", 10.0, "low",
+					core::StationCoolingDisposition::Exported, 4.0, 5, 0.5);
+				rigid.heatOutputKW = 2.0;
+				auto flexible = load("flexible", 10.0, "moderate",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				require(configurePower(shortfall, {},
+					{array("field", 4.0, constantProfile(1.0))},
+					{rigid, flexible}, {}).first, "Below-floor scenario refused");
+				shortfall.resumeSimulation();
+				require(shortfall.advanceTicks(60), "Below-floor run failed");
+				auto const snap = shortfall.getStationSystemsSnapshot();
+				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+					&& approx(snap.power.loads[0].suppliedKW, 0.0)
+					&& approx(snap.power.loads[0].unmetCriticalKW, 4.0)
+					&& approx(snap.power.loads[0].heatExportedKW, 0.0),
+					"Below-floor shortage not reported as a whole-floor failure");
+				require(approx(snap.power.loads[1].suppliedKW, 4.0),
+					"Infeasible critical load held generation a flexible load could use");
+			}
+			// Batteries ride the same rule: a critical load whose minimum
+			// needs stored energy is funded from the bank, and the bank is
+			// never drained toward a level the equipment cannot run at.
+			core::World banked("Banked", 2, 2);
+			banked.pauseSimulation(); banked.finishBuild();
+			require(configurePower(banked, {},
+				{array("field", 2.0, constantProfile(1.0))},
+				{load("rigid", 10.0, "low",
+					core::StationCoolingDisposition::Exported, 3.0, 5, 0.5),
+					load("flexible", 10.0, "moderate",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)},
+				{battery("cell", 10.0, 10.0, 10.0, 0.0, 3.0)}).first,
+				"Bank-funded floor scenario refused");
+			banked.resumeSimulation();
+			require(banked.advanceTicks(60), "Bank-funded floor run failed");
+			{
+				auto const snap = banked.getStationSystemsSnapshot();
+				// The 5 kW minimum is 2 kW of sun plus exactly the 3 kW
+				// the discharge cap leaves the bank to cover.
+				require(snap.power.loads[0].status == core::StationTransferStatus::Partial
+					&& approx(snap.power.loads[0].suppliedKW, 5.0)
+					&& approx(snap.power.loads[0].unmetCriticalKW, 0.0),
+					"Critical minimum not funded from generation plus battery");
+				require(approx(snap.power.batteryDischargeKW, 3.0)
+					&& approx(snap.power.totalSuppliedKW, 5.0),
+					"Bank did not cover exactly the gap the sun left");
+			}
+			// And when generation plus the bank still cannot reach the
+			// minimum, neither pool is spent on the impossible state: the
+			// rigid load takes nothing and the flexible load takes it all.
+			core::World starved("Starved", 2, 2);
+			starved.pauseSimulation(); starved.finishBuild();
+			require(configurePower(starved, {},
+				{array("field", 1.0, constantProfile(1.0))},
+				{load("rigid", 10.0, "low",
+					core::StationCoolingDisposition::Exported, 3.0, 5, 0.5),
+					load("flexible", 10.0, "moderate",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0)},
+				{battery("cell", 10.0, 10.0, 10.0, 0.0, 2.0)}).first,
+				"Starved-floor battery scenario refused");
+			starved.resumeSimulation();
+			require(starved.advanceTicks(60), "Starved-floor battery run failed");
+			{
+				auto const snap = starved.getStationSystemsSnapshot();
+				require(snap.power.loads[0].status == core::StationTransferStatus::Rejected
+					&& approx(snap.power.loads[0].suppliedKW, 0.0)
+					&& approx(snap.power.loads[0].unmetCriticalKW, 3.0),
+					"Starved rigid load was supplied below its minimum");
+				require(approx(snap.power.loads[1].suppliedKW, 3.0)
+					&& approx(snap.power.batteryDischargeKW, 2.0)
+					&& approx(snap.power.totalSuppliedKW, 3.0),
+					"Pools not released to the load that could use them");
+				require(snap.power.totalSuppliedKW
+					<= snap.power.availableGenerationKW + snap.power.batteryDischargeKW + 1e-9,
+					"Starved floor allocation exceeded generation plus battery output");
+			}
+		}
 		// The bundled Lua model mirrors the allocation and its audits hold
 		// through the eclipse cycle (the runs above used it); descriptors
 		// cross the sandbox boundary intact and a mismatched model is
