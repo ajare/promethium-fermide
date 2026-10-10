@@ -1,4 +1,5 @@
 #pragma once
+#include "core/StationSystems.h"
 #include "core/ActionRegistry.h"
 
 #include <string>
@@ -571,6 +572,8 @@ namespace core
 		// caller, Agent included, reaches it; the coordinator owns no entities
 		// and reaches the registries below through this World.
 		SimulationCoordinator mSimulationCoordinator;
+		StationSystemsSettings mStationSystemsSettings;
+		std::unique_ptr<StationSystemsRuntime> mStationSystemsRuntime;
 
 		// Every World owns one sandboxed Lua runtime for its Agent types. It is
 		// declared before mAgents so Agent destruction (which releases live Lua
@@ -3114,6 +3117,14 @@ namespace core
 		// Restore authored Agent routes/positions and reconstruct all simulated
 		// objects in their configured initial state.
 		void resetSimulation();
+
+		StationSystemsSettings getStationSystemsSettings() const { return mStationSystemsSettings; }
+		// Paused-only. After ticking, confirmation resets the complete World.
+		bool configureStationSystems(StationSystemsSettings settings, bool confirmWorldReset = false,
+			std::string* diagnostic = nullptr);
+		StationSystemsSnapshot getStationSystemsSnapshot() const;
+		std::vector<StationSystemsEvent> getStationSystemsEvents() const;
+		std::vector<StationSystemsDiagnostic> getStationSystemsDiagnostics() const;
 
 		// Clear the modified state of the World and every Agent it owns, so
 		// isModified() reports clean.  Only call this once a save has fully

@@ -316,6 +316,12 @@ file(READ "${PF_HUMAN_SOURCE}" PF_HUMAN_AGENT_LUA)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledHumanSource.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledHumanSource.h" @ONLY)
 
+set(PF_STATION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/resources/station-systems/lifecycle.lua")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PF_STATION_SOURCE}")
+file(READ "${PF_STATION_SOURCE}" PF_STATION_SYSTEMS_LUA)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/core/BundledStationSystemsSource.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/BundledStationSystemsSource.h" @ONLY)
+
 file(GLOB PF_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp")
 file(GLOB PF_CORE_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/core/*.h")
 
@@ -456,6 +462,7 @@ add_library(pf-agent-editing STATIC
     src/AgentBehaviourAssignmentPanel.cpp
     src/MarkerPanel.cpp
     src/FurniturePanel.cpp
+    src/StationSystemsWindow.cpp
     src/LocationPlan.cpp
     src/PermissionsPanel.cpp
 )

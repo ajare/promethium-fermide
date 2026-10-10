@@ -1,4 +1,5 @@
 #include "core/World.h"
+#include "StationSystemsRuntime.h"
 #include "core/AirlockTransit.h"
 #include "core/ChamberTransit.h"
 #include "core/RestorationTiming.h"
@@ -703,7 +704,15 @@ namespace core
 		// Version 62 adds independent individual Object usage overrides.
 		// Version 63 adds independently inherited Remote Access panels overrides.
 		// Version 64 adds independently inherited Remote BoothWindow shutters overrides.
-		serializer.writeUint32("version", 64);
+		// Version 65 adds authored opt-in Station systems; never a Lua checkpoint.
+		serializer.writeUint32("version", 65);
+		if (mStationSystemsSettings != StationSystemsSettings{})
+		{
+			serializer.beginMap("stationSystems");
+			serializer.writeBool("enabled", mStationSystemsSettings.enabled);
+			serializer.writeFloat("observationIntervalSeconds", mStationSystemsSettings.observationIntervalSeconds);
+			serializer.endMap();
+		}
 		serializer.writeUint64("nextDumbwaiterId", mNextDumbwaiterId);
 		// Derived physical Buttons add landing object slots compared with the
 		// original Dumbwaiter layout. Remember that layout for stable-ID replay.
@@ -1586,10 +1595,24 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 64)
+		if (version < 1 || version > 65)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
+		StationSystemsSettings stationSettings;
+		if (serializer.hasField("stationSystems"))
+		{
+			if (version < 65) throw SerializationException("Station systems require World schema 65");
+			serializer.beginMap("stationSystems");
+			stationSettings.enabled = serializer.readBool("enabled");
+			stationSettings.observationIntervalSeconds = serializer.readFloat("observationIntervalSeconds");
+			serializer.endMap();
+			std::string diagnostic;
+			if (!validateStationSystemsSettings(stationSettings, diagnostic)) throw SerializationException(diagnostic);
+		}
+		// Preflight scripts before replacing any existing World or live state.
+		auto stationRuntime = stationSettings.enabled
+			? std::make_unique<StationSystemsRuntime>(stationSettings) : nullptr;
 		auto name = serializer.readString("name");
 		auto const randomSeed = version >= 14
 			? serializer.readUint64("randomSeed") : uint64_t{ 0 };
@@ -2368,6 +2391,8 @@ namespace core
 		mLevelNames = std::move(levelNames);
 		mLayerNames = std::move(layerNames);
 		resetForDeserialization(std::move(name), cellsWide, levelsHigh);
+		mStationSystemsSettings = stationSettings;
+		mStationSystemsRuntime = std::move(stationRuntime);
 		mRandomSeed = randomSeed;
 		mNextMarkerId = nextMarkerId;
 		mNextFurnitureId = nextFurnitureId;

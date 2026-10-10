@@ -10,6 +10,7 @@
 
 #include "core/Defines.h"
 #include "core/World.h"
+#include "StationSystemsRuntime.h"
 #include "core/ChamberTransit.h"
 #include "core/AirlockTransit.h"
 #include "core/RestorationTiming.h"

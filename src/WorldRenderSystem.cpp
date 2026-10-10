@@ -34,6 +34,7 @@
 #include <willpower/common/Logger.h>
 
 #include "ApplicationResources.h"
+#include "core/StationSystems.h"
 #include "ManifestCatalogResolver.h"
 #include "core/AgentType.h"
 #include "core/Furniture.h"
@@ -258,6 +259,21 @@ namespace
 				return mAgentTypes->preview(name);
 			});
 
+			mStationScript = mResources->acquireResource("StationSystemsLifecycle");
+			try
+			{
+				mResources->createResource(mStationScript);
+				mResources->loadResource(mStationScript);
+			}
+			catch (...)
+			{
+				mResources->releaseResource(mStationScript);
+				throw;
+			}
+			auto stationScript = std::dynamic_pointer_cast<LuaScriptResource>(mStationScript);
+			if (!stationScript) throw std::runtime_error("StationSystemsLifecycle is not a LuaScript resource");
+			core::setStationSystemsSourceLoader([stationScript] { return stationScript->text(); });
+
 			mScene = mRenderSystem->createScene("Default");
 			mScene->load();
 			mScene->setClearColour({ 0.08f, 0.08f, 0.08f, 1.0f });
@@ -284,6 +300,7 @@ namespace
 
 		~WorldRenderSystem()
 		{
+			core::setStationSystemsSourceLoader({});
 			core::setAgentTypeResourceLoader({});
 			core::FurnitureCatalogue::setResourceLoader({});
 			core::setCatalogResourceResolver({});
@@ -297,6 +314,7 @@ namespace
 			}
 			for (auto& target : mTargets) target.reset();
 			mFontAtlas.reset();
+			if (mStationScript) mResources->releaseResource(mStationScript);
 			if (mSectorSet) mResources->releaseResource(mSectorSet);
 			if (mObjectSet) mResources->releaseResource(mObjectSet);
 			mAgentTypes.reset();
@@ -645,6 +663,7 @@ namespace
 		std::unique_ptr<mpp::ResourceManager> mRenderResources;
 		std::unique_ptr<resources::ResourceManager> mResources;
 		std::shared_ptr<ManifestCatalogResolver> mCatalogResolver;
+		resources::ResourcePtr mStationScript;
 		resources::ResourcePtr mSectorSet;
 		resources::ResourcePtr mObjectSet;
 		// Every valid, loaded Agent type Resource, keyed by Resource name. The

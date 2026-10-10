@@ -260,6 +260,7 @@ set(editor_names
     scaled-doors/crossing-history
     roomHeightScale/history
     roomHeightScale/occupiedPoseHistory
+    station/windowWorkflow
 )
 
 if(DEFINED LANE)

@@ -38,6 +38,7 @@
 #include "AgentBehaviourAssignmentPanel.h"
 #include "TagsPanel.h"
 #include "BehavioursPanel.h"
+#include "StationSystemsWindow.h"
 #include "MarkerPanel.h"
 #include "FurniturePanel.h"
 #include "AgentClipboard.h"
@@ -115,6 +116,7 @@ using namespace std;
 
 
 static LocationPlan gLocationPlan;
+static StationSystemsWindow gStationSystemsWindow;
 static uint32_t gSelectedWorldLevel{};
 static bool gWorldHovered{ false };
 static bool gPegmanConsumesLeftMouse{ false };
@@ -5187,6 +5189,7 @@ void renderMenu(shared_ptr<core::World>& world)
 				}
 				ImGui::EndMenu();
 			}
+			ImGui::MenuItem("Station Systems", nullptr, &gStationSystemsWindow.visible);
 			ImGui::MenuItem("Grid", "G", &gUISettings.renderGrid);
 			ImGui::MenuItem("Show markers", nullptr, &gUISettings.renderMarkers);
 			ImGui::MenuItem("Show next layer wireframe", "F3", &gUISettings.renderNextLayerWireframe);
@@ -5270,6 +5273,8 @@ void renderDocumentToolbar(shared_ptr<core::World>& world)
 	imgui::ToggleButton("ToggleMarkers", "Show markers", &gUISettings.renderMarkers);
 	ImGui::SameLine();
 	imgui::ToggleButton("Agent Debug", "Agent debug", &gUISettings.renderAgentDebug);
+	ImGui::SameLine();
+	imgui::ToggleButton("Station Systems", "Station Systems", &gStationSystemsWindow.visible);
 
 	ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
 	ImGui::SetNextItemWidth(80.0f);
@@ -9675,6 +9680,7 @@ void renderUI(shared_ptr<core::World>& world, shared_ptr<core::Agent> pathingAge
 	renderDestinationActionPopup(world);
 	renderFilePopups(world);
 	renderDockSpace();
+	gStationSystemsWindow.render(world, gWorldDocumentHistory);
 
 	if (!world)
 	{

@@ -63,6 +63,18 @@ function(pf_add_smoke_module target)
         LABELS "smoke;functional;validation-fast;${MODULE_LABELS}" TIMEOUT ${MODULE_TIMEOUT})
 endfunction()
 
+pf_add_smoke_module(pf-smoke-station
+    NAME station
+    SOURCES station/Main.cpp
+    LIBRARIES promethium-fermide-core
+    LABELS "core;station"
+    TIMEOUT 60
+)
+foreach(check lifecycle batching persistence failures)
+    add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
+    set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
+endforeach()
+
 pf_add_smoke_module(pf-smoke-simulation
     NAME simulation
     SOURCES
@@ -516,7 +528,7 @@ set_tests_properties(smoke-harness-contract PROPERTIES LABELS "harness;core" TIM
 pf_add_smoke_module(pf-smoke-editor
     NAME editor
     SOURCES
-        editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
+        editor/StationSystems.cpp editor/ScaledDoors.cpp editor/RoomHeightScale.cpp editor/Main.cpp editor/MarkerActions.cpp editor/AccessPanels.cpp editor/Airlocks.cpp editor/Furniture.cpp editor/State.cpp editor/Isolation.cpp editor/SecurityScanners.cpp editor/BoothWindows.cpp
         agent/ActivationEditor.cpp
         agent/GroupEditor.cpp
         agent/GroupAssignmentEditor.cpp
@@ -569,6 +581,9 @@ pf_add_smoke_module(pf-smoke-editor
     LABELS editor
     TIMEOUT 60
 )
+
+add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/windowWorkflow)
+set_tests_properties(station-editor-window PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"
