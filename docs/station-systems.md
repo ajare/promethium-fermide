@@ -1,4 +1,4 @@
-# Station systems — lifecycle, authored scenarios, containment and resource stores (#386–#389)
+# Station systems — lifecycle, authored scenarios, containment, resource stores and transfers (#386–#390)
 
 Station systems are opt-in per World and disabled in existing documents. Open
 **View > Station Systems** or use the
@@ -22,7 +22,9 @@ completed ticks, bounded events and structured software diagnostics.
 - World schema 65 stores only settings, never ticks, events or Lua state.
   Schema 66 adds authored Resource stores inside the same `stationSystems`
   map; a pre-66 document carrying `stores` is refused rather than silently
-  dropped. Legacy documents default disabled; a pre-65 document carrying
+  dropped. Schema 67 adds store protected reserves and authored Resource
+  transfers; a pre-67 document carrying `protectedReserve` or `transfers`
+  is refused rather than silently dropped. Legacy documents default disabled; a pre-65 document carrying
   Station data is refused rather than silently dropped. YAML, binary, load,
   Reset and history use the existing World persistence seams. Load/Reset
   create fresh runtimes; plain pause/resume and paused structural rebuilds
@@ -123,25 +125,79 @@ plain immutable values at construction; the bundled lifecycle model
 initialises its own copy and re-checks the finite-capacity invariants every
 tick, so a corrupt crossing fails contained exactly like any other script
 failure. The separate Station Systems window edits the store set in the draft
-(add, remove, id, unit, capacity, starting usable/held), reports validation
-errors without mutating anything, and shows the live table with units, usable
-versus held inventory, capacity and initial versus current state. Ticking
-never dirties the authored document.
+(add, remove, id, unit, capacity, starting usable/held, protected reserve),
+reports validation errors without mutating anything, and shows the live table
+with units, usable versus held inventory, capacity and initial versus current
+state. Ticking never dirties the authored document.
+
+### Bounded Resource transfers (#390)
+
+Authors declare rate-limited transfers of qualified material between two
+same-unit Resource stores. Each transfer carries an identity, source and
+destination store ids, a declared unit, a positive finite rate in store
+units per simulated second, and an integer priority. Host validation
+refuses empty/duplicate/oversized ids, unknown source or destination
+stores, self-transfers, unit mismatches with either endpoint (cross-unit
+movement is conversion, deferred to later slices), non-finite or
+non-positive rates, and more than 32 transfers per World — all before any
+runtime construction or document mutation, through the same paused-only
+Apply/reset-confirmation flow. Each store also gains an authored
+`protectedReserve`: a finite, non-negative amount of usable inventory
+withheld from discretionary transfers, never exceeding the starting usable
+quantity.
+
+The authoritative ledger lives in the station runtime. Each World tick,
+competing transfers are applied in the declared deterministic order:
+priority descending, ties broken by declaration order. Every request is
+`rate × fixed tick duration`; what may actually move is bounded by the
+source's qualified inventory above its protected reserve and the
+destination's remaining total capacity. The whole tick's transfers are
+staged, audited and committed atomically: only qualified material moves,
+protected reserves are never drawn, destinations never overflow, and
+unmet material simply does not move — backpressure never deletes or
+creates material. Shortages are valid outcomes: each transfer publishes
+its last requested, completed and unmet amounts with a full/partial/
+rejected status, and status transitions are announced in the event log
+with the stall reason (source empty, protected reserve reached, or
+destination at capacity).
+
+Per-store last-tick flows and per-unit boundary balance residuals are
+published in the snapshot beside the explicit numerical tolerance
+(`StationBalanceTolerance`, 1e-9 relative to the unit's starting total).
+A residual beyond tolerance — or any negative or over-capacity staged
+quantity — is a conservation violation, not a shortage: it fails the
+whole tick through the integrated error mechanism (World paused,
+structured diagnostic, nothing partially committed), never silent
+clamping. The bundled Lua lifecycle model receives the transfer rules as
+plain immutable descriptors and mirrors the same deterministic ledger
+inside each private sandbox, re-auditing limits and conservation every
+tick so a corrupt crossing or model drift fails contained like any other
+script failure.
+
+Transfer results are runtime state: only the authored rules persist
+(schema 67), never requested/completed/unmet amounts or flows. Load and
+Reset reconstruct the ledger from the authored starting conditions, and
+replaying the same World tick sequence reproduces the outcomes exactly,
+including which competing request won the last kilogram.
 
 ## Explicit scope limit
 
-This slice implements lifecycle and authored finite store configuration.
-Completed tick counts are observability, not power, oxygen, heat or endurance
-estimates. It invents no process coefficients, production, consumption or
-conserved exchanges. Physical power/ECLSS/thermal models, transfers between
-stores, external crew/equipment inputs, alarms, trends and supervisory
-allocation belong to the subsequent #385 slices. Agent behaviour, movement,
-physiology and random streams are unchanged.
+This slice implements lifecycle, authored finite store configuration and
+bounded transfers between stores. Completed tick counts are
+observability, not power, oxygen, heat or endurance estimates. It
+invents no process coefficients, production or consumption. Physical
+power/ECLSS/thermal models, external crew/equipment inputs, alarms,
+trends and supervisory allocation belong to the subsequent #385 slices.
+Agent behaviour, movement, physiology and random streams are unchanged.
 
 Acceptance coverage uses World ticking/snapshots/events/diagnostics (including
-real script failure fixtures and store boundary fixtures: zero/empty/full
+real script failure fixtures, store boundary fixtures: zero/empty/full
 stores, malformed values, isolated Worlds and no runtime dirtying of authored
-documents), real file save/reopen round trips in YAML and binary, failed-write
-and legacy/malformed-file handling, paused structural rebuild preservation,
+documents, and transfer fixtures: full/partial/rejected outcomes,
+protected-reserve and capacity blocking, priority allocation among
+competing requests, conservation residuals within tolerance, and a
+contained protected-reserve violation), real file save/reopen round trips in
+YAML and binary, failed-write and legacy/malformed-file handling, paused
+structural rebuild preservation,
 and the existing CPU ImGui and document-history seams. Run `ctest -R
 '^station-'` in Release.

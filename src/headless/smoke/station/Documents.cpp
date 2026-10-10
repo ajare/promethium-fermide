@@ -15,6 +15,7 @@
 #include "core/YamlSerializer.h"
 
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -67,12 +68,14 @@ namespace
 	}
 
 	void enable(core::World& world, float intervalSeconds,
-		std::vector<core::ResourceStoreSettings> stores = {})
+		std::vector<core::ResourceStoreSettings> stores = {},
+		std::vector<core::ResourceTransferSettings> transfers = {})
 	{
 		world.pauseSimulation();
 		world.finishBuild();
 		std::string diagnostic;
-		require(world.configureStationSystems({true, intervalSeconds, std::move(stores)}, false, &diagnostic),
+		require(world.configureStationSystems({true, intervalSeconds, std::move(stores), std::move(transfers)},
+			false, &diagnostic),
 			"Could not enable Station systems: " + diagnostic);
 	}
 
@@ -84,8 +87,11 @@ namespace
 			"authored Station settings missing from the document");
 		require(document.find("observationIntervalSeconds") != std::string::npos,
 			"observation interval missing from the document");
+		require(document.find("ratePerSecond") != std::string::npos,
+			"authored transfer rate missing from the document");
 		for (auto const* liveState : {"completedTicks", "elapsedSeconds", "healthy",
-			"lifecycle", "advance", "worldTick", "currentQualified", "currentUnqualified"})
+			"lifecycle", "advance", "worldTick", "currentQualified", "currentUnqualified",
+			"lastRequested", "lastCompleted", "lastUnmet", "lastTickIn", "lastTickOut", "residual"})
 			require(document.find(liveState) == std::string::npos,
 				std::string("live station or Lua state leaked into the document: ") + liveState);
 	}
@@ -99,14 +105,20 @@ namespace
 		filesystem::create_directories(directory);
 
 		core::World original("Round Trip", 2, 2);
-		enable(original, 2.0f, {{"o2", "kg", 1000.0, 800.0, 100.0},
-			{"water", "L", 500.0, 0.0, 250.0}, {"ballast", "kg", 42.0, 42.0, 0.0}});
+		enable(original, 2.0f, {{"o2", "kg", 1000.0, 800.0, 100.0, 500.0},
+			{"water", "L", 500.0, 0.0, 250.0}, {"ballast", "kg", 42.0, 42.0, 0.0},
+			{"tank", "kg", 100.0, 0.0, 0.0}},
+			{{"pump", "o2", "tank", "kg", 60.0, 1}});
 		original.resumeSimulation();
 		require(original.advanceTicks(120), "original scenario run failed");
 		auto const expected = original.getStationSystemsSnapshot();
 		auto const expectedEvents = original.getStationSystemsEvents();
-		require(expected.worldTick == 120 && expectedEvents.size() == 2
-			&& expected.stores.size() == 3,
+		require(expected.worldTick == 120 && expectedEvents.size() == 5
+			&& expected.stores.size() == 4 && expected.transfers.size() == 1
+			&& expected.transfers[0].lastCompleted == 0.0
+			&& expected.transfers[0].status == core::StationTransferStatus::Rejected
+			&& std::abs(expected.stores[3].currentQualified - 100.0) < 1e-3
+			&& std::abs(expected.stores[0].currentQualified - 700.0) < 1e-3,
 			"original scenario produced the wrong observable history");
 
 		for (auto const* suffix : {".world.yaml", ".world"})
@@ -118,7 +130,9 @@ namespace
 			auto const reopened = core::loadWorldDocument(path);
 			require(reopened->getStationSystemsSettings() == original.getStationSystemsSettings(),
 				"authored settings did not survive the file round trip");
-			require(reopened->getStationSystemsSnapshot().stores == expected.stores,
+			require(reopened->getStationSystemsSnapshot().stores.size() == 4
+				&& reopened->getStationSystemsSnapshot().stores[0].currentQualified == 800.0
+				&& reopened->getStationSystemsSnapshot().stores[3].currentQualified == 0.0,
 				"reopened World did not reconstruct the authored stores");
 			auto const fresh = reopened->getStationSystemsSnapshot();
 			require(fresh.enabled && fresh.worldTick == 0 && fresh.elapsedSeconds == 0.0
@@ -200,7 +214,7 @@ namespace
 		auto legacy = serializeYaml(plain);
 		require(legacy.find("stationSystems") == std::string::npos,
 			"default Station settings should not serialize a map");
-		replaceAll(legacy, "version: 66", "version: 64");
+		replaceAll(legacy, "version: 67", "version: 64");
 		auto const legacyPath = directory / "legacy.world.yaml";
 		writeFile(legacyPath, legacy);
 		auto loaded = core::loadWorldDocument(legacyPath);
@@ -209,21 +223,30 @@ namespace
 			"a legacy document enabled Station systems");
 
 		core::World station("Station", 2, 2);
-		enable(station, 2.0f, {{"o2", "kg", 1000.0, 800.0, 100.0}});
+		enable(station, 2.0f, {{"o2", "kg", 1000.0, 800.0, 100.0}, {"tank", "kg", 100.0, 0.0, 0.0}},
+			{{"pump", "o2", "tank", "kg", 1.0, 0}});
 		auto const withField = serializeYaml(station);
 		require(withField.find("startingQualified") != std::string::npos
 			&& withField.find("currentQualified") == std::string::npos,
 			"authored store fields missing or live inventory leaked");
 		bool refused = false;
 		auto staleStores = withField;
-		replaceAll(staleStores, "version: 66", "version: 65");
+		replaceAll(staleStores, "version: 67", "version: 65");
 		auto const staleStoresPath = directory / "stale-stores.world.yaml";
 		writeFile(staleStoresPath, staleStores);
 		try { (void)core::loadWorldDocument(staleStoresPath); }
 		catch (std::exception const&) { refused = true; }
 		require(refused, "a pre-66 document carrying resource stores was silently accepted");
+		auto staleTransfers = withField;
+		replaceAll(staleTransfers, "version: 67", "version: 66");
+		auto const staleTransfersPath = directory / "stale-transfers.world.yaml";
+		writeFile(staleTransfersPath, staleTransfers);
+		refused = false;
+		try { (void)core::loadWorldDocument(staleTransfersPath); }
+		catch (std::exception const&) { refused = true; }
+		require(refused, "a pre-67 document carrying resource transfers was silently accepted");
 		auto stale = withField;
-		replaceAll(stale, "version: 66", "version: 64");
+		replaceAll(stale, "version: 67", "version: 64");
 		auto const stalePath = directory / "stale.world.yaml";
 		writeFile(stalePath, stale);
 		refused = false;

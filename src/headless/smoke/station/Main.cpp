@@ -84,7 +84,7 @@ namespace
 				"Persistence restored live Lua state");
 		}
 		core::World legacy("Legacy", 2, 2); auto text = yaml(legacy);
-		text.replace(text.find("version: 66"), 11, "version: 65");
+		text.replace(text.find("version: 67"), 11, "version: 65");
 		auto reader = core::YamlSerializer::fromString(text); reader->deserialize(); core::SerializationWorkData data;
 		world.deserialize(*reader, data); require(!world.getStationSystemsSnapshot().enabled, "Legacy document enabled station");
 		enable(world); world.resumeSimulation(); world.advanceTicks(5); world.pauseSimulation();
@@ -206,6 +206,246 @@ namespace
 			&& !refused.getStationSystemsSnapshot().enabled,
 			"Lua store assertion failure not contained at construction");
 	}
+	void transfers(smoke::Context const&)
+	{
+		// The fixed timestep is a float, so per-tick transfer amounts carry a
+		// tiny representation residual; observable quantities are compared
+		// with a tolerance far below any meaningful scenario difference.
+		auto approx = [](double actual, double expected)
+		{ return std::abs(actual - expected) < 1e-3; };
+		auto store = [](std::string const& id, std::string const& unit, double capacity,
+			double qualified, double unqualified, double protectedReserve = 0.0)
+		{
+			return core::ResourceStoreSettings{id, unit, capacity, qualified, unqualified, protectedReserve};
+		};
+		auto transfer = [](std::string const& id, std::string const& source, std::string const& destination,
+			std::string const& unit, double rate, int priority)
+		{
+			return core::ResourceTransferSettings{id, source, destination, unit, rate, priority};
+		};
+		auto configure = [](core::World& world,
+			std::vector<core::ResourceStoreSettings> stores,
+			std::vector<core::ResourceTransferSettings> transfers)
+		{
+			std::string diagnostic;
+			core::StationSystemsSettings settings;
+			settings.enabled = true;
+			settings.observationIntervalSeconds = 1.0f;
+			settings.stores = std::move(stores);
+			settings.transfers = std::move(transfers);
+			return std::pair(world.configureStationSystems(settings, true, &diagnostic), diagnostic);
+		};
+		// Invalid transfer or reserve configuration is refused before anything runs.
+		core::World refusedWorld("Refused", 2, 2); refusedWorld.pauseSimulation(); refusedWorld.finishBuild();
+		refusedWorld.markSaved();
+		std::vector<core::ResourceStoreSettings> baseStores
+		{ store("src", "kg", 100, 50, 0), store("dst", "kg", 100, 0, 0), store("other", "L", 10, 5, 0) };
+		std::vector<std::vector<core::ResourceTransferSettings>> badTransfers;
+		badTransfers.push_back({transfer("", "src", "dst", "kg", 1, 0)});
+		badTransfers.push_back({transfer(std::string(65, 'x'), "src", "dst", "kg", 1, 0)});
+		badTransfers.push_back({transfer("t", "src", "src", "kg", 1, 0)});
+		badTransfers.push_back({transfer("t", "missing", "dst", "kg", 1, 0)});
+		badTransfers.push_back({transfer("t", "src", "missing", "kg", 1, 0)});
+		badTransfers.push_back({transfer("t", "src", "dst", "L", 1, 0)});
+		badTransfers.push_back({transfer("t", "src", "other", "kg", 1, 0)});
+		badTransfers.push_back({transfer("t", "src", "dst", "kg", 0, 0)});
+		badTransfers.push_back({transfer("t", "src", "dst", "kg", -1, 0)});
+		badTransfers.push_back({transfer("t", "src", "dst", "kg", std::numeric_limits<double>::quiet_NaN(), 0)});
+		badTransfers.push_back({transfer("t", "src", "dst", "kg", std::numeric_limits<double>::infinity(), 0)});
+		badTransfers.push_back({transfer("dup", "src", "dst", "kg", 1, 0), transfer("dup", "dst", "src", "kg", 1, 0)});
+		{
+			std::vector<core::ResourceTransferSettings> tooMany;
+			for (size_t i = 0; i <= core::MaxStationResourceTransfers; ++i)
+				tooMany.push_back(transfer("t" + std::to_string(i), "src", "dst", "kg", 1, 0));
+			badTransfers.push_back(std::move(tooMany));
+		}
+		for (auto const& bad : badTransfers)
+		{
+			auto const [ok, diagnostic] = configure(refusedWorld, baseStores, bad);
+			require(!ok && !diagnostic.empty(), "Invalid transfer configuration accepted");
+			require(!refusedWorld.getStationSystemsSnapshot().enabled && !refusedWorld.isModified(),
+				"Rejected transfer configuration mutated the World");
+		}
+		for (auto const badReserve : {-1.0, 50.5, std::numeric_limits<double>::infinity()})
+		{
+			auto stores = baseStores;
+			stores[0].protectedReserve = badReserve;
+			require(!configure(refusedWorld, stores, {}).first, "Invalid protected reserve accepted");
+		}
+		// Scenario A: destination capacity backpressure. The pump stalls at a
+		// full destination; material is conserved and the rejection is visible.
+		core::World backpressure("Backpressure", 2, 2);
+		backpressure.pauseSimulation(); backpressure.finishBuild();
+		require(configure(backpressure, {store("src", "kg", 100, 100, 0), store("dst", "kg", 40, 0, 0)},
+			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Scenario A refused");
+		backpressure.resumeSimulation();
+		require(backpressure.advanceTicks(30), "Scenario A run failed");
+		{
+			auto const snap = backpressure.getStationSystemsSnapshot();
+			require(approx(snap.stores[0].currentQualified, 70.0) && approx(snap.stores[1].currentQualified, 30.0)
+				&& snap.transfers.size() == 1 && snap.transfers[0].status == core::StationTransferStatus::Full
+				&& approx(snap.transfers[0].lastCompleted, 1.0) && snap.transfers[0].lastUnmet == 0.0,
+				"Scenario A not flowing fully");
+			require(approx(snap.stores[0].lastTickOut, 1.0) && approx(snap.stores[1].lastTickIn, 1.0),
+				"Per-store flows not published");
+			require(snap.balances.size() == 1 && std::abs(snap.balances[0].residual) < 1e-12
+				&& snap.balances[0].totalStarting == 100.0 && snap.balances[0].totalCurrent == 100.0,
+				"Boundary balance not published with zero residual");
+			require(snap.balanceTolerance == core::StationBalanceTolerance, "Tolerance not published");
+		}
+		require(backpressure.advanceTicks(11), "Scenario A backpressure run failed");
+		{
+			auto const snap = backpressure.getStationSystemsSnapshot();
+			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 60.0),
+				"Backpressure deleted or created material");
+			require(snap.transfers[0].status == core::StationTransferStatus::Rejected
+				&& snap.transfers[0].lastCompleted == 0.0 && approx(snap.transfers[0].lastUnmet, 1.0),
+				"Blocked destination not visible as a rejection with unmet request");
+			require(std::abs(snap.balances[0].residual) < 1e-12, "Backpressure broke conservation");
+			auto const events = backpressure.getStationSystemsEvents();
+			bool sawFull = false, sawBlocked = false;
+			for (auto const& event : events)
+			{
+				if (event.message.find("Transfer 'pump' supplying fully") != std::string::npos) sawFull = true;
+				if (event.message.find("Transfer 'pump' rejected: destination store is at capacity")
+					!= std::string::npos) sawBlocked = true;
+			}
+			require(sawFull && sawBlocked, "Transfer status transitions missing from the event log");
+			// Reset reproduces the whole outcome.
+			backpressure.pauseSimulation();
+			auto const expected = backpressure.getStationSystemsSnapshot();
+			auto const expectedEvents = backpressure.getStationSystemsEvents();
+			backpressure.resetSimulation();
+			backpressure.resumeSimulation();
+			require(backpressure.advanceTicks(41), "Scenario A replay failed");
+			require(backpressure.getStationSystemsSnapshot() == expected
+				&& backpressure.getStationSystemsEvents() == expectedEvents,
+				"Transfer outcome not reproducible after reset");
+		}
+		// Scenario B: the protected reserve is never drawable and unqualified
+		// contents are never touched by a discretionary transfer.
+		core::World protectedRun("Protected", 2, 2);
+		protectedRun.pauseSimulation(); protectedRun.finishBuild();
+		require(configure(protectedRun, {store("src", "kg", 100, 90, 10, 80), store("dst", "kg", 500, 0, 0)},
+			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Scenario B refused");
+		protectedRun.resumeSimulation();
+		require(protectedRun.advanceTicks(30), "Scenario B run failed");
+		{
+			auto const snap = protectedRun.getStationSystemsSnapshot();
+			require(approx(snap.stores[0].currentQualified, 80.0) && snap.stores[0].currentUnqualified == 10.0
+				&& approx(snap.stores[1].currentQualified, 10.0),
+				"Transfer drew into the protected reserve or moved held material");
+			require(snap.transfers[0].status == core::StationTransferStatus::Rejected
+				&& approx(snap.transfers[0].lastUnmet, 1.0),
+				"Protected-reserve block not visible as a rejection");
+			bool sawProtected = false;
+			for (auto const& event : protectedRun.getStationSystemsEvents())
+				if (event.message.find("source usable inventory is at its protected reserve")
+					!= std::string::npos) sawProtected = true;
+			require(sawProtected, "Protected-reserve rejection reason missing from the event log");
+			require(std::abs(snap.balances[0].residual) < 1e-12, "Protected run broke conservation");
+		}
+		// Scenario C: a destination that fills mid-request shows a partial
+		// transfer with the exact unmet remainder, never silent clamping.
+		core::World partialRun("Partial", 2, 2);
+		partialRun.pauseSimulation(); partialRun.finishBuild();
+		require(configure(partialRun, {store("src", "kg", 200, 200, 0), store("dst", "kg", 40, 0, 0)},
+			{transfer("pump", "src", "dst", "kg", 90.0, 0)}).first, "Scenario C refused");
+		partialRun.resumeSimulation();
+		require(partialRun.advanceTicks(27), "Scenario C run failed");
+		{
+			auto const snap = partialRun.getStationSystemsSnapshot();
+			require(approx(snap.stores[1].currentQualified, 40.0) && approx(snap.stores[0].currentQualified, 160.0),
+				"Partial transfer did not conserve material");
+			require(snap.transfers[0].status == core::StationTransferStatus::Partial
+				&& approx(snap.transfers[0].lastRequested, 1.5) && approx(snap.transfers[0].lastCompleted, 1.0)
+				&& approx(snap.transfers[0].lastUnmet, 0.5),
+				"Partial transfer remainder not visible");
+		}
+		// Scenario D: simultaneous competing requests allocate by priority,
+		// then declaration order, and the loser's unmet request stays visible.
+		core::World competing("Competing", 2, 2);
+		competing.pauseSimulation(); competing.finishBuild();
+		require(configure(competing, {store("hub", "kg", 100, 25, 0),
+				store("a", "kg", 60, 0, 0), store("b", "kg", 60, 0, 0)},
+			{transfer("low", "hub", "a", "kg", 60.0, 0), transfer("high", "hub", "b", "kg", 60.0, 5)}).first,
+			"Scenario D refused");
+		competing.resumeSimulation();
+		require(competing.advanceTicks(13), "Scenario D run failed");
+		{
+			auto const snap = competing.getStationSystemsSnapshot();
+			// 25 kg against 2 kg/s total demand: the higher-priority transfer
+			// takes the last kilogram and the lower-priority one is rejected.
+			require(approx(snap.stores[1].currentQualified, 12.0) && approx(snap.stores[2].currentQualified, 13.0)
+				&& approx(snap.stores[0].currentQualified, 0.0),
+				"Competing allocation did not favour the declared priority");
+			require(snap.transfers[0].id == "high" && snap.transfers[0].status != core::StationTransferStatus::Rejected
+				&& snap.transfers[0].lastCompleted > 0.9
+				&& snap.transfers[1].id == "low" && snap.transfers[1].status == core::StationTransferStatus::Rejected
+				&& approx(snap.transfers[1].lastUnmet, 1.0),
+				"Competing request outcome not visible in priority order");
+			require(std::abs(snap.balances[0].residual) < 1e-12, "Competing run broke conservation");
+			competing.pauseSimulation();
+			auto const expected = competing.getStationSystemsSnapshot();
+			auto const expectedEvents = competing.getStationSystemsEvents();
+			competing.resetSimulation(); competing.resumeSimulation();
+			require(competing.advanceTicks(13), "Scenario D replay failed");
+			require(competing.getStationSystemsSnapshot() == expected
+				&& competing.getStationSystemsEvents() == expectedEvents,
+				"Competing allocation not reproducible after reset");
+		}
+		// The bundled Lua model receives the transfer rules intact.
+		SourceScope scope;
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers) "
+				"assert(#transfers == 1); local t = transfers[1]; "
+				"assert(t.id == 'pump' and t.source == 'src' and t.destination == 'dst'); "
+				"assert(t.unit == 'kg' and t.rate == 60 and t.priority == 3); "
+				"assert(stores[1].protectedReserve == 40); "
+				"return {advance=function(self, tick) return tick end} end";
+		});
+		core::World boundary("Boundary", 2, 2);
+		boundary.pauseSimulation(); boundary.finishBuild();
+		require(configure(boundary, {store("src", "kg", 100, 100, 0, 40), store("dst", "kg", 100, 0, 0)},
+			{transfer("pump", "src", "dst", "kg", 60.0, 3)}).first,
+			"Transfer descriptors did not cross the Lua boundary intact");
+		boundary.resumeSimulation(); require(boundary.advanceTicks(10), "Boundary fixture run failed");
+		// A model that violates the protected reserve fails through the
+		// integrated error mechanism: the tick is not committed, the World
+		// pauses with a structured diagnostic, and no material moved.
+		core::setStationSystemsSourceLoader([] {
+			return "return function(name, stores, transfers) local q = stores[1].qualified; "
+				"return {advance=function(self, tick, seconds) "
+				"q = q - transfers[1].rate * seconds * 10 "
+				"if q < stores[1].protectedReserve then error('transfer overdraw protected reserve') end "
+				"return tick end} end";
+		});
+		core::World violated("Violated", 2, 2);
+		violated.pauseSimulation(); violated.finishBuild();
+		require(configure(violated, {store("src", "kg", 100, 50, 0, 5), store("dst", "kg", 100, 0, 0)},
+			{transfer("pump", "src", "dst", "kg", 60.0, 0)}).first, "Violation fixture refused");
+		violated.resumeSimulation();
+		require(violated.advanceTicks(4), "Violation fixture prefix failed");
+		auto const beforeViolation = violated.getStationSystemsSnapshot();
+		require(!violated.advanceTick() && violated.isSimulationPaused(),
+			"Conservation violation did not pause the World");
+		auto const afterViolation = violated.getStationSystemsSnapshot();
+		require(afterViolation.stores == beforeViolation.stores
+			&& std::abs(afterViolation.balances[0].residual) < 1e-12,
+			"Violating tick partially committed inventory");
+		auto const diagnostics = violated.getStationSystemsDiagnostics();
+		require(diagnostics.size() == 1 && !diagnostics[0].message.empty()
+			&& diagnostics[0].message.find("protected reserve") != std::string::npos
+			&& diagnostics[0].worldTick == 5,
+			"Conservation violation diagnostic missing or misdated");
+		// The host ledger never clamps: the World stays paused until reset
+		// reconstructs the authored starting state.
+		violated.resetSimulation();
+		require(violated.getStationSystemsSnapshot().stores[0].currentQualified == 50.0
+			&& violated.getStationSystemsSnapshot().healthy,
+			"Reset did not reconstruct the violated store");
+		core::setStationSystemsSourceLoader({});
+	}
 	void failures(smoke::Context const&)
 	{
 		SourceScope scope;
@@ -285,7 +525,7 @@ namespace
 }
 int main(int argc, char** argv)
 {
-	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"failures", failures}};
+	std::vector<smoke::Check> checks{{"lifecycle", lifecycle}, {"batching", batching}, {"persistence", persistence}, {"stores", stores}, {"transfers", transfers}, {"failures", failures}};
 	registerStationDocumentChecks(checks);
 	return smoke::main("station", checks, argc, argv);
 }

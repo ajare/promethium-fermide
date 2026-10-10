@@ -21,7 +21,9 @@ namespace core
 	// A capacity-limited inventory of a declared material. Starting inventory
 	// is authored; current inventory is runtime state and never lives here.
 	// Qualified contents are usable; unqualified contents are held awaiting a
-	// treatment or clearance that later slices provide.
+	// treatment or clearance that later slices provide. The protected reserve
+	// is the portion of usable contents withheld from discretionary transfers
+	// (#390); it never restricts the authored starting inventory itself.
 	struct ResourceStoreSettings
 	{
 		std::string id;
@@ -29,23 +31,53 @@ namespace core
 		double capacity{0.0};
 		double startingQualified{0.0};
 		double startingUnqualified{0.0};
+		double protectedReserve{0.0};
 		bool operator==(ResourceStoreSettings const&) const = default;
 	};
 
-	// Slice 1a has no physical processes; slice 2a adds authored finite
-	// Resource stores but still no production, consumption or transfers.
+	// A rate-limited authored transfer of qualified material between two
+	// same-unit Resource stores. Competing transfers are allocated in priority
+	// order (higher first), ties resolved by declaration order (#390).
+	struct ResourceTransferSettings
+	{
+		std::string id;
+		std::string sourceId;
+		std::string destinationId;
+		std::string unit;
+		double ratePerSecond{0.0};
+		int priority{0};
+		bool operator==(ResourceTransferSettings const&) const = default;
+	};
+
+	inline constexpr size_t MaxStationResourceTransfers{32};
+	// Explicit numerical tolerance for boundary balance residuals: a per-unit
+	// residual may not exceed tolerance * max(1, |total starting|). Residuals
+	// beyond this are conservation violations, never silent clamping.
+	inline constexpr double StationBalanceTolerance{1e-9};
+
+	// Outcome of the most recent tick's request for one authored transfer.
+	enum class StationTransferStatus : std::uint8_t
+	{
+		Idle,      // no tick has completed with this transfer configured
+		Full,     // the whole request was supplied
+		Partial,  // some but not all of the request was supplied
+		Rejected, // nothing could be supplied
+	};
+
 	struct StationSystemsSettings
 	{
 		bool enabled{false};
 		float observationIntervalSeconds{1.0f}; // bounded event sampling, not a clock
 		std::vector<ResourceStoreSettings> stores;
+		std::vector<ResourceTransferSettings> transfers;
 		bool operator==(StationSystemsSettings const&) const = default;
 	};
 	bool validateStationSystemsSettings(StationSystemsSettings const&, std::string& diagnostic);
 	inline constexpr std::array<char const*, 4> StationSystemNames{
 		"Power", "ECLSS", "Thermal control", "Monitoring/supervision"};
-	// Read-only view of one Resource store: the authored capacity and starting
-	// inventory beside the runtime's current qualified/unqualified contents.
+	// Read-only view of one Resource store: the authored capacity, protected
+	// reserve and starting inventory beside the runtime's current
+	// qualified/unqualified contents and last-tick transfer flows.
 	struct StationSystemsStoreSnapshot
 	{
 		std::string id;
@@ -53,9 +85,41 @@ namespace core
 		double capacity{0.0};
 		double startingQualified{0.0};
 		double startingUnqualified{0.0};
+		double protectedReserve{0.0};
 		double currentQualified{0.0};
 		double currentUnqualified{0.0};
+		double lastTickIn{0.0};
+		double lastTickOut{0.0};
 		bool operator==(StationSystemsStoreSnapshot const&) const = default;
+	};
+
+	// Per-transfer observable outcome: what was requested, what moved, and the
+	// unmet remainder. Unmet material is never deleted; it simply did not move.
+	struct StationTransferSnapshot
+	{
+		std::string id;
+		std::string sourceId;
+		std::string destinationId;
+		std::string unit;
+		double ratePerSecond{0.0};
+		int priority{0};
+		double lastRequested{0.0};
+		double lastCompleted{0.0};
+		double lastUnmet{0.0};
+		StationTransferStatus status{StationTransferStatus::Idle};
+		bool operator==(StationTransferSnapshot const&) const = default;
+	};
+
+	// Per-unit boundary balance: everything of one unit that the station owns.
+	// With no external exchanges the residual must stay within tolerance;
+	// anything larger is a conservation violation, not a shortage.
+	struct StationBalanceSnapshot
+	{
+		std::string unit;
+		double totalStarting{0.0};
+		double totalCurrent{0.0};
+		double residual{0.0};
+		bool operator==(StationBalanceSnapshot const&) const = default;
 	};
 
 	struct StationSystemsSnapshot
@@ -66,6 +130,9 @@ namespace core
 		double elapsedSeconds{0};
 		std::array<uint64_t, 4> completedTicks{};
 		std::vector<StationSystemsStoreSnapshot> stores;
+		std::vector<StationTransferSnapshot> transfers;
+		std::vector<StationBalanceSnapshot> balances;
+		double balanceTolerance{StationBalanceTolerance};
 		bool operator==(StationSystemsSnapshot const&) const = default;
 	};
 	struct StationSystemsEvent

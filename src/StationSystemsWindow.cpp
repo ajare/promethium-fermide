@@ -25,11 +25,11 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		world->getSimulationTick() * static_cast<double>(core::World::getFixedTimestep()),
 		static_cast<unsigned long long>(world->getSimulationTick()));
 	ImGui::Text("Document: %s", world->isModified() ? "unsaved changes" : "saved");
-	ImGui::TextWrapped("Slice 2a: authored finite Resource stores only; no production, consumption or transfers yet. Observation interval is a provisional display/event setting, not a separate simulation clock.");
+	ImGui::TextWrapped("Slice 2b: authored finite Resource stores and bounded transfers; no production or consumption yet. Transfers move only qualified material above protected reserves, respect destination capacity, and allocate competing requests by priority then declaration order. Observation interval is a provisional display/event setting, not a separate simulation clock.");
 	auto const authored = world->getStationSystemsSettings();
-	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s)",
+	ImGui::Text("Authored start conditions: %s, observation interval %.2f s, %zu resource store(s), %zu transfer(s)",
 		authored.enabled ? "enabled" : "disabled", authored.observationIntervalSeconds,
-		authored.stores.size());
+		authored.stores.size(), authored.transfers.size());
 	ImGui::SeparatorText("Draft settings (seconds; provisional model assumptions)");
 	ImGui::BeginDisabled(!world->isSimulationPaused());
 	ImGui::Checkbox("Enable Station systems", &mDraft.enabled);
@@ -50,6 +50,7 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 		ImGui::InputDouble(("Store " + row + " capacity").c_str(), &store.capacity, 0.0, 0.0, "%.3f");
 		ImGui::InputDouble(("Store " + row + " starting usable").c_str(), &store.startingQualified, 0.0, 0.0, "%.3f");
 		ImGui::InputDouble(("Store " + row + " starting held").c_str(), &store.startingUnqualified, 0.0, 0.0, "%.3f");
+		ImGui::InputDouble(("Store " + row + " protected reserve").c_str(), &store.protectedReserve, 0.0, 0.0, "%.3f");
 		ImGui::SameLine();
 		if (ImGui::Button(("Remove store " + row).c_str()))
 			mDraft.stores.erase(mDraft.stores.begin() + static_cast<std::ptrdiff_t>(index));
@@ -69,6 +70,57 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 			if (!taken) break;
 		}
 		mDraft.stores.push_back(std::move(store));
+	}
+	ImGui::SeparatorText("Draft transfers (qualified material, same-unit stores)");
+	for (size_t index = 0; index < mDraft.transfers.size(); ++index)
+	{
+		auto& transfer = mDraft.transfers[index];
+		auto const row = std::to_string(index);
+		ImGui::PushItemWidth(220);
+		char transferIdBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(transferIdBuffer, transfer.id.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Transfer " + row + " id").c_str(), transferIdBuffer, sizeof(transferIdBuffer)))
+			transfer.id = transferIdBuffer;
+		char sourceBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(sourceBuffer, transfer.sourceId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Transfer " + row + " source").c_str(), sourceBuffer, sizeof(sourceBuffer)))
+			transfer.sourceId = sourceBuffer;
+		char destinationBuffer[core::MaxStationStoreIdLength + 1]{};
+		std::strncpy(destinationBuffer, transfer.destinationId.c_str(), core::MaxStationStoreIdLength);
+		if (ImGui::InputText(("Transfer " + row + " destination").c_str(), destinationBuffer, sizeof(destinationBuffer)))
+			transfer.destinationId = destinationBuffer;
+		char transferUnitBuffer[8]{};
+		std::strncpy(transferUnitBuffer, transfer.unit.c_str(), sizeof(transferUnitBuffer) - 1);
+		if (ImGui::InputText(("Transfer " + row + " unit").c_str(), transferUnitBuffer, sizeof(transferUnitBuffer)))
+			transfer.unit = transferUnitBuffer;
+		ImGui::InputDouble(("Transfer " + row + " rate per second").c_str(), &transfer.ratePerSecond, 0.0, 0.0, "%.3f");
+		ImGui::InputInt(("Transfer " + row + " priority").c_str(), &transfer.priority);
+		ImGui::SameLine();
+		if (ImGui::Button(("Remove transfer " + row).c_str()))
+			mDraft.transfers.erase(mDraft.transfers.begin() + static_cast<std::ptrdiff_t>(index));
+		ImGui::PopItemWidth();
+	}
+	if (ImGui::Button("Add transfer"))
+	{
+		core::ResourceTransferSettings transfer;
+		transfer.unit = "kg";
+		transfer.ratePerSecond = 1.0;
+		if (!mDraft.stores.empty())
+		{
+			transfer.sourceId = mDraft.stores.front().id;
+			transfer.unit = mDraft.stores.front().unit;
+			for (auto const& store : mDraft.stores)
+				if (store.id != transfer.sourceId && store.unit == transfer.unit)
+				{ transfer.destinationId = store.id; break; }
+		}
+		for (size_t candidate = mDraft.transfers.size() + 1;; ++candidate)
+		{
+			transfer.id = "transfer" + std::to_string(candidate);
+			auto const taken = std::any_of(mDraft.transfers.begin(), mDraft.transfers.end(),
+				[&](core::ResourceTransferSettings const& existing) { return existing.id == transfer.id; });
+			if (!taken) break;
+		}
+		mDraft.transfers.push_back(std::move(transfer));
 	}
 	bool const draftChanged = mDraft != authored;
 	ImGui::TextUnformatted(draftChanged
@@ -115,9 +167,33 @@ void StationSystemsWindow::render(std::shared_ptr<core::World> const& world, Doc
 	ImGui::SeparatorText("Resource stores (live; current inventory is runtime state, not authored)");
 	if (snapshot.stores.empty()) ImGui::TextDisabled("No Resource stores authored.");
 	for (auto const& store : snapshot.stores)
-		ImGui::Text("%s (%s): usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f",
+		ImGui::Text("%s (%s): usable %.3f, held %.3f of capacity %.3f | initial usable %.3f, initial held %.3f | protected %.3f | last tick in %.3f, out %.3f",
 			store.id.c_str(), store.unit.c_str(), store.currentQualified, store.currentUnqualified,
-			store.capacity, store.startingQualified, store.startingUnqualified);
+			store.capacity, store.startingQualified, store.startingUnqualified,
+			store.protectedReserve, store.lastTickIn, store.lastTickOut);
+	ImGui::SeparatorText("Transfers (live; competing requests allocate by priority, then declaration order)");
+	if (snapshot.transfers.empty()) ImGui::TextDisabled("No Resource transfers authored.");
+	for (auto const& transfer : snapshot.transfers)
+	{
+		char const* status = "idle";
+		switch (transfer.status)
+		{
+		case core::StationTransferStatus::Full: status = "full"; break;
+		case core::StationTransferStatus::Partial: status = "partial"; break;
+		case core::StationTransferStatus::Rejected: status = "rejected"; break;
+		case core::StationTransferStatus::Idle: break;
+		}
+		ImGui::Text("%s: %s -> %s (%s) %s | requested %.3f, completed %.3f, unmet %.3f (rate %.3f/s, priority %d)",
+			transfer.id.c_str(), transfer.sourceId.c_str(), transfer.destinationId.c_str(),
+			transfer.unit.c_str(), status, transfer.lastRequested, transfer.lastCompleted,
+			transfer.lastUnmet, transfer.ratePerSecond, transfer.priority);
+	}
+	ImGui::SeparatorText("Boundary balances (residual must stay within tolerance)");
+	if (snapshot.balances.empty()) ImGui::TextDisabled("No Resource stores authored.");
+	for (auto const& balance : snapshot.balances)
+		ImGui::Text("Balance %s: starting %.3f, current %.3f, residual %.9f (tolerance %.1e)",
+			balance.unit.c_str(), balance.totalStarting, balance.totalCurrent,
+			balance.residual, snapshot.balanceTolerance);
 	if (snapshot.enabled && !snapshot.healthy)
 		ImGui::TextWrapped("Station software failure: the World is paused. The failed tick was not committed. Reset the World to reconstruct Station systems; resume cannot retry failed scripts.");
 	for (auto const& diagnostic : world->getStationSystemsDiagnostics())

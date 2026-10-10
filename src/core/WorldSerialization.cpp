@@ -706,7 +706,9 @@ namespace core
 		// Version 64 adds independently inherited Remote BoothWindow shutters overrides.
 		// Version 65 adds authored opt-in Station systems; never a Lua checkpoint.
 		// Version 66 adds authored finite Station Resource stores (#389).
-		serializer.writeUint32("version", 66);
+		// Version 67 adds store protected reserves and authored bounded Resource
+		// transfers (#390); pre-67 documents carrying them are refused.
+		serializer.writeUint32("version", 67);
 		if (mStationSystemsSettings != StationSystemsSettings{})
 		{
 			serializer.beginMap("stationSystems");
@@ -725,6 +727,24 @@ namespace core
 					serializer.writeDouble("capacity", store.capacity);
 					serializer.writeDouble("startingQualified", store.startingQualified);
 					serializer.writeDouble("startingUnqualified", store.startingUnqualified);
+					serializer.writeDouble("protectedReserve", store.protectedReserve);
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (!mStationSystemsSettings.transfers.empty())
+			{
+				// Authored transfer rules only; per-tick results are runtime state.
+				serializer.beginArray("transfers");
+				for (auto const& transfer : mStationSystemsSettings.transfers)
+				{
+					serializer.beginMap("");
+					serializer.writeString("id", transfer.id);
+					serializer.writeString("sourceId", transfer.sourceId);
+					serializer.writeString("destinationId", transfer.destinationId);
+					serializer.writeString("unit", transfer.unit);
+					serializer.writeDouble("ratePerSecond", transfer.ratePerSecond);
+					serializer.writeInt32("priority", transfer.priority);
 					serializer.endMap();
 				}
 				serializer.endArray();
@@ -1613,7 +1633,7 @@ namespace core
 		// Version 30 adds authoring-only Lift destination requirements.
 		// Version 31 adds individual Permission adherence.
 		// Version 32 adds static Room/Corridor passage requirements (#273).
-		if (version < 1 || version > 66)
+		if (version < 1 || version > 67)
 		{
 			throw SerializationException("Unsupported World serialization version");
 		}
@@ -1637,7 +1657,33 @@ namespace core
 					store.capacity = serializer.readDouble("capacity");
 					store.startingQualified = serializer.readDouble("startingQualified");
 					store.startingUnqualified = serializer.readDouble("startingUnqualified");
+					if (serializer.hasField("protectedReserve"))
+					{
+						if (version < 67) throw SerializationException(
+							"Station protected reserves require World schema 67");
+						store.protectedReserve = serializer.readDouble("protectedReserve");
+					}
 					stationSettings.stores.push_back(std::move(store));
+					serializer.endMap();
+				}
+				serializer.endArray();
+			}
+			if (serializer.hasField("transfers"))
+			{
+				if (version < 67) throw SerializationException(
+					"Station resource transfers require World schema 67");
+				serializer.beginArray("transfers");
+				while (serializer.nextArrayItem())
+				{
+					serializer.beginMap("");
+					ResourceTransferSettings transfer;
+					transfer.id = serializer.readString("id");
+					transfer.sourceId = serializer.readString("sourceId");
+					transfer.destinationId = serializer.readString("destinationId");
+					transfer.unit = serializer.readString("unit");
+					transfer.ratePerSecond = serializer.readDouble("ratePerSecond");
+					transfer.priority = serializer.readInt32("priority");
+					stationSettings.transfers.push_back(std::move(transfer));
 					serializer.endMap();
 				}
 				serializer.endArray();

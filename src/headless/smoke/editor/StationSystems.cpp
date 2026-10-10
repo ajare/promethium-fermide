@@ -204,9 +204,103 @@ namespace
 			&& text.find("Software failure at tick") == std::string::npos, "Window retained reset failure");
 		world.reset(); frame(); require(text.find("No World is open.") != std::string::npos, "No active World status missing");
 	}
+	void transferWorkflow(smoke::Context const&)
+	{
+		using smoke::require;
+		headless::ScopedImGuiContext context;
+		auto& io = ImGui::GetIO(); io.DisplaySize = {1200, 1000};
+		io.Fonts->AddFontDefault(); io.Fonts->Build();
+		std::string text; io.ClipboardUserData = &text;
+		io.SetClipboardTextFn = [](void* data, char const* value) { *static_cast<std::string*>(data) = value; };
+		DocumentHistory history;
+		StationSystemsWindow window;
+		// The transfer draft extends past the default display height; ImGui
+		// clamps the mouse to the display, so give the headless test enough.
+		io.DisplaySize = {1200, 1700};
+		auto world = std::make_shared<core::World>("Transfer editor", 2, 2);
+		world->pauseSimulation(); world->finishBuild();
+		std::string diagnostic;
+		require(world->configureStationSystems({true, 1.0f,
+			{{"src", "kg", 100.0, 100.0, 0.0, 20.0}, {"dst", "kg", 40.0, 0.0, 0.0},
+			{"aux", "kg", 50.0, 0.0, 0.0}},
+			{{"pump", "src", "dst", "kg", 60.0, 0}}}, false, &diagnostic), diagnostic.c_str());
+		auto frame = [&]
+		{
+			ImGui::NewFrame(); text.clear(); ImGui::LogToClipboard();
+			ImGui::SetNextWindowPos({10, 10}); ImGui::SetNextWindowSize({950, 1600});
+			window.render(world, history); ImGui::LogFinish(); ImGui::Render();
+		};
+		auto clickPoint = [&](ImVec2 point)
+		{
+			io.AddMousePosEvent(point.x, point.y); frame();
+			io.AddMouseButtonEvent(0, true); frame(); io.AddMouseButtonEvent(0, false); frame();
+		};
+		auto point = [&](char const* label)
+		{
+			auto id = ImGui::FindWindowByName("Station Systems")->GetID(label);
+			for (float y = 45; y < 1590; y += 5)
+				for (float x = 18; x < 940; x += 15)
+				{
+					io.AddMousePosEvent(x, y); frame(); frame();
+					if (ImGui::GetHoveredID() == id) return ImVec2(x, y);
+				}
+			throw std::runtime_error(std::string("Missing Station control: ") + label);
+		};
+		auto typeValue = [&](char const* label, char const* value)
+		{
+			clickPoint(point(label));
+			io.AddKeyEvent(ImGuiMod_Ctrl, true); io.AddKeyEvent(ImGuiKey_A, true); frame();
+			io.AddKeyEvent(ImGuiKey_A, false); io.AddKeyEvent(ImGuiMod_Ctrl, false);
+			io.AddInputCharactersUTF8(value); frame();
+			io.AddKeyEvent(ImGuiKey_Enter, true); frame(); io.AddKeyEvent(ImGuiKey_Enter, false); frame();
+		};
+		window.visible = true; frame(); frame();
+		require(text.find("src (kg): usable 100.000, held 0.000 of capacity 100.000 | initial usable 100.000, initial held 0.000 | protected 20.000")
+			!= std::string::npos, "Protected reserve not shown in the live store table");
+		require(text.find("pump: src -> dst (kg) idle | requested 0.000, completed 0.000, unmet 0.000 (rate 60.000/s, priority 0)")
+			!= std::string::npos, "Authored transfer not shown in the live transfer table");
+		// Run until the destination fills: the window shows the rejection and
+		// the conserved boundary balance.
+		world->markSaved();
+		world->resumeSimulation(); require(world->advanceTicks(41), "Transfer editor run failed");
+		world->pauseSimulation(); frame();
+		require(text.find("pump: src -> dst (kg) rejected | requested 1.000, completed 0.000, unmet 1.000 (rate 60.000/s, priority 0)")
+			!= std::string::npos, "Blocked transfer rejection not observable in the window");
+		require(text.find("Balance kg: starting 100.000, current 100.000, residual 0.000000000")
+			!= std::string::npos, "Boundary balance not observable in the window");
+		require(!world->isModified(), "Transfer ticking dirtied the authored document");
+		// Draft a second transfer through the real controls; an unknown
+		// source is refused with a visible diagnostic and no mutation.
+		clickPoint(point("Add transfer"));
+		typeValue("Transfer 1 source", "nope");
+		clickPoint(point("Apply settings"));
+		clickPoint(point("Confirm World reset")); frame();
+		require(text.find("references unknown source store 'nope'") != std::string::npos,
+			"Invalid transfer source diagnostic not shown");
+		require(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 0
+			&& world->getSimulationTick() == 41,
+			"Invalid transfer draft mutated the authored settings");
+		// Repair the drafted source (the invalid 'nope') to the aux store and
+		// confirm again: the valid transfer applies with the required reset.
+		typeValue("Transfer 1 source", "aux");
+		clickPoint(point("Confirm World reset"));
+		require(world->getStationSystemsSettings().transfers.size() == 2 && history.undoCount() == 1
+			&& world->getSimulationTick() == 0,
+			"Repaired transfer draft did not apply through the reset-confirmed flow");
+		frame();
+		require(text.find("2 transfer(s)") != std::string::npos
+			&& text.find("aux -> dst (kg) idle") != std::string::npos,
+			"Applied transfer not reflected in the window");
+		// Remove the drafted transfer again (tick 0: no reset confirmation needed).
+		clickPoint(point("Remove transfer 1"));
+		clickPoint(point("Apply settings"));
+		require(world->getStationSystemsSettings().transfers.size() == 1 && history.undoCount() == 2,
+			"Transfer removal did not apply");
+	}
 }
 void editor_smoke::registerStationSystems(std::vector<smoke::Check>& checks)
 {
 	checks.push_back({"station/windowWorkflow", workflow});
 	checks.push_back({"station/storeWorkflow", storeWorkflow});
+	checks.push_back({"station/transferWorkflow", transferWorkflow});
 }

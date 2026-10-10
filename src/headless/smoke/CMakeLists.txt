@@ -70,7 +70,7 @@ pf_add_smoke_module(pf-smoke-station
     LABELS "core;station"
     TIMEOUT 60
 )
-foreach(check lifecycle batching persistence stores failures fileRoundTrip writeFailure legacyFiles structuralReplay)
+foreach(check lifecycle batching persistence stores transfers failures fileRoundTrip writeFailure legacyFiles structuralReplay)
     add_test(NAME station-${check} COMMAND pf-smoke-station --check ${check})
     set_tests_properties(station-${check} PROPERTIES LABELS "smoke;functional;validation-fast;core;station" TIMEOUT 60)
 endforeach()
@@ -586,6 +586,8 @@ add_test(NAME station-editor-window COMMAND pf-smoke-editor --check station/wind
 set_tests_properties(station-editor-window PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 add_test(NAME station-editor-stores COMMAND pf-smoke-editor --check station/storeWorkflow)
 set_tests_properties(station-editor-stores PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
+add_test(NAME station-editor-transfers COMMAND pf-smoke-editor --check station/transferWorkflow)
+set_tests_properties(station-editor-transfers PROPERTIES LABELS "smoke;functional;validation-fast;editor;station" TIMEOUT 60)
 
 pf_add_smoke_contract(NAME smoke-editor-contract COMMAND ${CMAKE_COMMAND}
     "-DEDITOR=$<TARGET_FILE:pf-smoke-editor>"
