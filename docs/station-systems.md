@@ -290,10 +290,13 @@ load is not admitted: it draws no power, produces no station heat, and
 its need stays visible as unmet cooling. Loads with the `exported`
 disposition declare that their heat leaves the station through an
 explicit export boundary — an accounted external exchange at the
-delivered power fraction, not a hidden infinite sink.
+full-operation delivered fraction (the operating-profile level times
+the delivered fraction of the profile-scaled request), not a hidden
+infinite sink.
 
-Declared material exchanges scale with the delivered power fraction:
-curtailed equipment consumes and delivers less. Draws take only
+Declared material exchanges are full-operation rates and scale by the
+same full-operation delivered fraction: duty-cycled or curtailed
+equipment consumes and delivers less. Draws take only
 qualified material above the store's protected reserve; deliveries are
 clamped at the destination's remaining capacity. Completed amounts book
 at the external boundary — draws are losses, deliveries are negative
@@ -436,7 +439,10 @@ ahead of higher-priority discretionary demand and explicit unmet
 critical shortfall under a starved source, curtailment-floor refusal
 leaving the pool for flexible loads, cooling-infeasible loads never
 admitted with unmet cooling visible, material exchanges scaled by the
-delivered fraction under protected-reserve and capacity clamps with
+full-operation delivered fraction (profile level times delivered
+fraction, covering fractional profiles, added curtailment and zero
+profile in host results and sandbox execution) under protected-reserve
+and capacity clamps with
 closed boundary ledgers, and intact Lua descriptor crossing with
 contained construction refusal; and battery fixtures: refused battery
 configurations, surplus charging with the untaken generation exactly

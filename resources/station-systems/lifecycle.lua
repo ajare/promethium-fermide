@@ -679,15 +679,21 @@ return function(name, stores, transfers, conversions, solar, loads, batteries)
             local amount = supplied[index] or 0
             load.supplied = amount
             load.deliveredFraction = load.requested > 0 and amount / load.requested or 0
-            load.heatExported = load.admitted and load.heatKW * load.deliveredFraction or 0
+            -- Authored heat is a full-operation rate: export scales by the
+            -- operating-profile level times the delivered fraction of the
+            -- profile-scaled request (#548).
+            load.heatExported = load.admitted and load.heatKW * load.lastLevel
+                * load.deliveredFraction or 0
             load.unmetCooling = load.admitted and 0 or load.heatKW * load.lastLevel
-            -- Declared material exchanges scale with the delivered power
-            -- fraction and book at the external boundary: draws are
-            -- losses, deliveries are negative losses, so the station
-            -- ledgers stay closed.
+            -- Declared material exchanges are full-operation rates and scale
+            -- by the full-operation delivered fraction (profile level times
+            -- the delivered fraction), booking at the external boundary:
+            -- draws are losses, deliveries are negative losses, so the
+            -- station ledgers stay closed (#548).
             for _, exchange in ipairs(load.exchanges) do
                 local store = exchange.store
-                local requested = exchange.rate * fixed_seconds * load.deliveredFraction
+                local requested = exchange.rate * fixed_seconds * load.lastLevel
+                    * load.deliveredFraction
                 local completed = 0
                 if exchange.consumes then
                     local drawable = math.max(0, store.qualified - store.protected_reserve)

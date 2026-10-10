@@ -1268,6 +1268,114 @@ namespace
 			require(std::abs(snap.balances[0].residual) < 1e-9,
 				"Scaled exchanges broke the boundary ledger");
 		}
+		// #548: operating-profile duty scales exported heat and material
+		// exchanges, not just the electrical request. The ticket's exact
+		// reproduction: 10 kW solar, one 10 kW load at constant level 0.25
+		// with 8 kW full-operation heat and a 4 kg/s consumption exchange,
+		// fully satisfied, exports 2 kW of heat and consumes one quarter
+		// of the full-operation rate, not the full rate.
+		core::World duty("Duty", 2, 2);
+		duty.pauseSimulation(); duty.finishBuild();
+		require(configure(duty, {{"water", "kg", 100.0, 50.0, 0.0}},
+			{array("field", 10.0, constantProfile(1.0))},
+			[&]
+			{
+				auto reactor = load("reactor", 10.0, "low",
+					core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+				reactor.operatingProfile = constantProfile(0.25);
+				reactor.heatOutputKW = 8.0;
+				reactor.materialExchanges.push_back({"water", 4.0, true});
+				return std::vector<core::EquipmentLoadSettings>{reactor};
+			}()).first, "Duty-cycle reproduction scenario refused");
+		duty.resumeSimulation();
+		require(duty.advanceTick(), "Duty-cycle reproduction run failed");
+		{
+			auto const snap = duty.getStationSystemsSnapshot();
+			require(snap.power.loads[0].status == core::StationTransferStatus::Full
+				&& approx(snap.power.loads[0].profileLevel, 0.25)
+				&& approx(snap.power.loads[0].requestedKW, 2.5)
+				&& approx(snap.power.loads[0].suppliedKW, 2.5)
+				&& approx(snap.power.loads[0].deliveredFraction, 1.0),
+				"Duty-cycle electrical service not profile-scaled and fully supplied");
+			require(approx(snap.power.loads[0].heatExportedKW, 2.0)
+				&& approx(snap.power.exportedHeatKW, 2.0),
+				"Exported heat did not scale with the operating-profile level");
+			// One tick (1/60 s) at the 4 kg/s full-operation rate, duty 0.25.
+			require(approx(snap.power.loads[0].materialExchanges[0].requested, 4.0 / 240.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 4.0 / 240.0)
+				&& approx(snap.stores[0].currentQualified, 50.0 - 4.0 / 240.0),
+				"Material consumption did not scale with the operating-profile level");
+			require(std::abs(snap.balances[0].residual) < 1e-9,
+				"Duty-cycle exchanges broke the boundary ledger");
+		}
+		// Fractional profile plus additional electrical curtailment and a
+		// zero profile in one world: heat and exchanges scale by the
+		// profile level times the delivered fraction of the profile-scaled
+		// request, and a zero-profile load runs nothing at all.
+		core::World mixed("Mixed", 2, 2);
+		mixed.pauseSimulation(); mixed.finishBuild();
+		{
+			auto dutyLoad = load("duty", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			dutyLoad.operatingProfile = constantProfile(0.25);
+			dutyLoad.heatOutputKW = 8.0;
+			dutyLoad.materialExchanges.push_back({"water", 6.0, true});
+			auto curtailed = load("curtailed", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			curtailed.operatingProfile = constantProfile(0.5);
+			curtailed.heatOutputKW = 8.0;
+			curtailed.materialExchanges.push_back({"water", 3.0, true});
+			auto off = load("off", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			off.operatingProfile = constantProfile(0.0);
+			off.heatOutputKW = 8.0;
+			off.materialExchanges.push_back({"water", 1.0, true});
+			// 5 kW generation: the 2.5 kW duty request is served fully, the
+			// 5 kW half-profile request is curtailed to the 2.5 kW remainder,
+			// and the zero-profile request never runs.
+			require(configure(mixed, {{"water", "kg", 100.0, 50.0, 0.0}},
+				{array("field", 5.0, constantProfile(1.0))},
+				{dutyLoad, curtailed, off}).first, "Mixed duty/curtailment scenario refused");
+			mixed.resumeSimulation();
+			require(mixed.advanceTick(), "Mixed duty/curtailment run failed");
+			auto const snap = mixed.getStationSystemsSnapshot();
+			require(snap.power.loads.size() == 3, "Mixed scenario loads missing");
+			// Duty load: full supply at level 0.25 -> heat 8*0.25*1.0 = 2.0,
+			// consumption 6 kg/s * (1/60) s * 0.25 * 1.0 = 0.025 kg.
+			require(snap.power.loads[0].id == "duty"
+				&& approx(snap.power.loads[0].requestedKW, 2.5)
+				&& approx(snap.power.loads[0].deliveredFraction, 1.0)
+				&& approx(snap.power.loads[0].heatExportedKW, 2.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].requested, 0.025)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.025),
+				"Duty load heat/exchanges did not scale with profile and delivery");
+			// Curtailed under a fractional profile: level 0.5, delivered 0.5
+			// -> heat 8*0.5*0.5 = 2.0, consumption 3*(1/60)*0.5*0.5 = 0.0125 kg.
+			require(snap.power.loads[1].id == "curtailed"
+				&& approx(snap.power.loads[1].profileLevel, 0.5)
+				&& approx(snap.power.loads[1].requestedKW, 5.0)
+				&& approx(snap.power.loads[1].suppliedKW, 2.5)
+				&& approx(snap.power.loads[1].deliveredFraction, 0.5)
+				&& snap.power.loads[1].status == core::StationTransferStatus::Partial
+				&& approx(snap.power.loads[1].heatExportedKW, 2.0)
+				&& approx(snap.power.loads[1].materialExchanges[0].requested, 0.0125)
+				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125),
+				"Curtailed fractional-profile heat/exchanges did not scale by level and delivery");
+			// Zero profile: nothing requested, nothing supplied, no heat,
+			// no material movement.
+			require(snap.power.loads[2].id == "off"
+				&& approx(snap.power.loads[2].profileLevel, 0.0)
+				&& approx(snap.power.loads[2].requestedKW, 0.0)
+				&& snap.power.loads[2].status == core::StationTransferStatus::Idle
+				&& approx(snap.power.loads[2].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[2].materialExchanges[0].requested, 0.0)
+				&& approx(snap.power.loads[2].materialExchanges[0].completed, 0.0),
+				"Zero-profile load still produced heat or material exchange");
+			require(approx(snap.power.exportedHeatKW, 4.0)
+				&& approx(snap.stores[0].currentQualified, 50.0 - 0.025 - 0.0125)
+				&& std::abs(snap.balances[0].residual) < 1e-9,
+				"Mixed duty/curtailment totals or boundary ledger wrong");
+		}
 		// A protected reserve is never drawn by an equipment exchange and a
 		// full destination store clamps delivery without overflow.
 		core::World bounded("Bounded", 2, 2);
@@ -1359,6 +1467,69 @@ namespace
 			&& diagnostic.find("expected 99 loads") != std::string::npos
 			&& !refusedLua.getStationSystemsSnapshot().enabled,
 			"Lua load assertion failure not contained at construction");
+		core::setStationSystemsSourceLoader({});
+		// The bundled Lua model itself scales exported heat and material
+		// exchanges by the operating-profile level times the delivered
+		// fraction (#548): wrap the bundled source and assert the model's
+		// own per-load results inside the sandbox for the fractional,
+		// curtailed and zero-profile cases.
+		auto const bundled = core::bundledStationSystemsSource();
+		core::setStationSystemsSourceLoader([bundled] {
+			return "local factory = (function()\n" + bundled + "\nend)()\n"
+				"return function(name, stores, transfers, conversions, solar, loads, batteries)\n"
+				"local model = factory(name, stores, transfers, conversions, solar, loads, batteries)\n"
+				"local original = model.advance\n"
+				"function model.advance(self, tick, seconds)\n"
+				"local result = original(self, tick, seconds)\n"
+				"local duty, curtailed, off = self.loads[1], self.loads[2], self.loads[3]\n"
+				"assert(math.abs(duty.lastLevel - 0.25) < 1e-12 and math.abs(duty.deliveredFraction - 1.0) < 1e-12)\n"
+				"assert(math.abs(duty.heatExported - 2.0) < 1e-6, 'sandbox heat did not scale with the operating profile')\n"
+				"assert(math.abs(duty.exchanges[1].lastCompleted - 6 * (1/60) * 0.25) < 1e-6, 'sandbox consumption did not scale with the operating profile')\n"
+				"assert(math.abs(curtailed.deliveredFraction - 0.5) < 1e-6)\n"
+				"assert(math.abs(curtailed.heatExported - 2.0) < 1e-6, 'sandbox heat did not scale with curtailment under a fractional profile')\n"
+				"assert(math.abs(curtailed.exchanges[1].lastCompleted - 3 * (1/60) * 0.5 * 0.5) < 1e-6, 'sandbox curtailed exchange did not scale by level and delivery')\n"
+				"assert(math.abs(off.heatExported) < 1e-12 and math.abs(off.exchanges[1].lastCompleted) < 1e-12, 'zero-profile load produced heat or exchange')\n"
+				"return result\n"
+				"end\n"
+				"return model\n"
+				"end";
+		});
+		core::World sandboxScaled("SandboxScaled", 2, 2);
+		sandboxScaled.pauseSimulation(); sandboxScaled.finishBuild();
+		{
+			auto dutyLoad = load("duty", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			dutyLoad.operatingProfile = constantProfile(0.25);
+			dutyLoad.heatOutputKW = 8.0;
+			dutyLoad.materialExchanges.push_back({"water", 6.0, true});
+			auto curtailed = load("curtailed", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			curtailed.operatingProfile = constantProfile(0.5);
+			curtailed.heatOutputKW = 8.0;
+			curtailed.materialExchanges.push_back({"water", 3.0, true});
+			auto off = load("off", 10.0, "low",
+				core::StationCoolingDisposition::Exported, 0.0, 0, 1.0);
+			off.operatingProfile = constantProfile(0.0);
+			off.heatOutputKW = 8.0;
+			off.materialExchanges.push_back({"water", 1.0, true});
+			require(configure(sandboxScaled, {{"water", "kg", 100.0, 50.0, 0.0}},
+				{array("field", 5.0, constantProfile(1.0))},
+				{dutyLoad, curtailed, off}).first,
+				"Sandbox profile-scaling scenario refused");
+			sandboxScaled.resumeSimulation();
+			require(sandboxScaled.advanceTicks(10),
+				"Bundled Lua profile scaling failed its in-sandbox assertions");
+			// The host ledger over the same scenario agrees with what the
+			// sandbox asserted: identical scaling on both sides.
+			auto const snap = sandboxScaled.getStationSystemsSnapshot();
+			require(approx(snap.power.loads[0].heatExportedKW, 2.0)
+				&& approx(snap.power.loads[1].heatExportedKW, 2.0)
+				&& approx(snap.power.loads[2].heatExportedKW, 0.0)
+				&& approx(snap.power.loads[0].materialExchanges[0].completed, 0.025)
+				&& approx(snap.power.loads[1].materialExchanges[0].completed, 0.0125)
+				&& approx(snap.power.loads[2].materialExchanges[0].completed, 0.0),
+				"Host and sandbox profile scaling disagree for the same scenario");
+		}
 		core::setStationSystemsSourceLoader({});
 	}
 	void batteries(smoke::Context const&)

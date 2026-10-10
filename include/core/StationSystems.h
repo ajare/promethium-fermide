@@ -386,8 +386,13 @@ namespace core
 	// it requested, what was actually supplied, the unmet remainder, the
 	// protected floor and any unmet critical shortfall, the delivered
 	// fraction, exported heat or unmet cooling, and its scaled material
-	// exchanges. A cooling-infeasible load is not admitted: it draws no
-	// power and its cooling need stays visible as unmet cooling.
+	// exchanges. Fraction semantics are explicit (#548): requestedKW is
+	// the profile-scaled request (demand * profileLevel), deliveredFraction
+	// is the fraction of that profile-scaled request actually supplied,
+	// and the full-operation heat and material exchange rates scale by the
+	// full-operation delivered fraction (profileLevel * deliveredFraction).
+	// A cooling-infeasible load is not admitted: it draws no power and its
+	// cooling need stays visible as unmet cooling.
 	struct StationEquipmentLoadSnapshot
 	{
 		std::string id;

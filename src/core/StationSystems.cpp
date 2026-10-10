@@ -959,11 +959,16 @@ namespace core
 				load.lastDeliveredFraction = load.lastRequestedKW > 0.0
 					? supplied[index] / load.lastRequestedKW : 0.0;
 				// Exported heat is an explicit external boundary exchange at
-				// the delivered fraction. A cooling-infeasible load never
-				// runs, so it produces no station heat; its cooling need is
-				// reported as unmet cooling instead of being absorbed.
+				// the full-operation delivered fraction: the authored heat is
+				// a full-operation rate, so it scales by both the operating-
+				// profile level and the fraction of that profile-scaled request
+				// the allocation satisfied (deliveredFraction). A cooling-
+				// infeasible load never runs, so it produces no station heat;
+				// its cooling need is reported as unmet cooling instead of
+				// being absorbed (#548).
 				load.lastHeatExportedKW = load.lastAdmitted
-					? load.authored.heatOutputKW * load.lastDeliveredFraction : 0.0;
+					? load.authored.heatOutputKW * load.lastProfileLevel
+					* load.lastDeliveredFraction : 0.0;
 				load.lastUnmetCoolingKW = load.lastAdmitted
 					? 0.0 : load.authored.heatOutputKW * load.lastProfileLevel;
 				load.lastCriticalUnmet = load.lastUnmetCriticalKW > 1e-12;
@@ -973,17 +978,20 @@ namespace core
 				else if (supplied[index] >= load.lastRequestedKW - 1e-12)
 					load.status = StationTransferStatus::Full;
 				else load.status = StationTransferStatus::Partial;
-				// Declared material exchanges scale with the delivered power
-				// fraction: curtailed equipment consumes and delivers less,
-				// never draws into a protected reserve and never overfills a
-				// destination. Completed amounts book at the external
-				// boundary — draws are losses, deliveries are negative
-				// losses — so the station ledgers stay closed.
+				// Declared material exchanges are full-operation rates and
+				// scale by the full-operation delivered fraction — the
+				// operating-profile level times the delivered fraction of the
+				// profile-scaled request: a duty-cycled or curtailed load
+				// consumes and delivers less, never draws into a protected
+				// reserve and never overfills a destination. Completed amounts
+				// book at the external boundary — draws are losses, deliveries
+				// are negative losses — so the station ledgers stay closed
+				// (#548).
 				for (auto& exchange : load.exchanges)
 				{
 					auto const& exchangeStore = stores[exchange.storeIndex].authored;
 					auto const requested = exchange.ratePerSecond * static_cast<double>(seconds)
-						* load.lastDeliveredFraction;
+						* load.lastProfileLevel * load.lastDeliveredFraction;
 					double completed = 0.0;
 					if (exchange.consumes)
 					{
